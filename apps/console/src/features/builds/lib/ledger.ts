@@ -98,7 +98,7 @@ export function ledgerStatus(
       // stay on that page — the row has no space for them and the ledger read
       // does not carry them.
       if (isAwaitingValues(build)) {
-        return { label: "Waiting for values", tone: "warning", live: false };
+        return { label: "Waiting for configuration", tone: "warning", live: false };
       }
       return { label: "Running · Coding agent", tone: "info", live: true };
     case "failed":

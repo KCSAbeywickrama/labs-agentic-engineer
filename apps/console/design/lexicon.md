@@ -240,27 +240,40 @@ The values an external dependency needs are no longer asked for in front of the
 Build button; they are supplied on a version's build page, as a section sitting
 directly under Tasks.
 
-The PAGE is version-scoped; the VALUES are not. They belong to the project and
-the environment, so every version's page shows the same answer, and a value
-supplied on one releases whichever run is parked on it. Copy here must not imply
-otherwise — "this version's credentials" would promise a per-version answer the
-platform does not have.
+The PAGE is version-scoped; the CONFIGURATION is not. It belongs to the project
+and the environment, so every version's page shows the same answer, and a
+dependency configured on one releases whichever run is parked on it. Copy here
+must not imply otherwise — "this version's credentials" would promise a
+per-version answer the platform does not have.
 
 | | |
 |---|---|
 | Section title | **External resources** |
 | Its chip, all supplied | **`3 of 3 configured`** |
-| Its chip, some outstanding | **`2 of 3 need values`** |
-| Body, all supplied | *Every external dependency has its development values.* |
-| Body, some outstanding | *The agent builds while you supply these. The version is not deployed until every one of them has its development values.* |
-| A row that has its values | **`Configured`** + **Update values** |
-| A row that does not | **`Needs values`** + **Configure** |
-| After a save | *Values saved — the deployment no longer waits on this one.* |
+| Its chip, some outstanding | **`2 of 3 need configuration`** |
+| Body, all supplied | *Every external dependency has its development configuration.* |
+| Body, some outstanding | *The agent builds while you supply these. The version is not deployed until every one of them has its development configuration.* |
+| A row that is configured | **`Configured`** + **Edit configuration** |
+| A row that is not | **`Needs configuration`** + **Configure now** |
+| A row's second line, no description | *2 settings outstanding* / *2 settings stored* |
+| After a save | *Configuration saved — the deployment no longer waits on this one.* |
 
-**`Needs values`, never *Unconfigured* or *Not ready*.** It names what the reader
-must do, not the state machine's word for the row. And *configured* is
+**`Needs configuration`, never *Unconfigured* or *Not ready*.** It names what the
+reader must do, not the state machine's word for the row. And *configured* is
 deliberately not *ready*: OpenChoreo reports these bindings `Ready` while every
 key is still empty, so the two words name different facts and must not merge.
+
+**One noun: *configuration*, never *values* or *credentials*.** The section used
+to say "values", which is the wire's word for what a binding holds, and the
+drawer before it said "credentials", which is only true of the subset that are
+secrets — a webhook URL is neither. *Configuration* covers every key the dialog
+collects and is the word the buttons already used. The individual keys are
+**settings** when they have to be counted.
+
+**The row's status is plain toned text, not a second pill.** The section header
+already carries a chip; a chip on every row competes with the button it is meant
+to lead the eye to. The outstanding row takes the section's one filled button
+(**Configure now**), a configured row the quiet outlined one.
 
 ### A version parked at the deploy gate
 
@@ -270,23 +283,61 @@ and they must agree.
 
 | | |
 |---|---|
-| The page's status pill | **`Waiting for values`** |
-| The summary card's notice, naming what it waits on | **`Waiting for values: stripe, sendgrid`** |
-| The same notice when the run named nothing | **`Waiting for external values`** |
-| Its body | *Everything built. This version is not deployed until every external resource holds its development values — add them under External resources below and the run resumes and deploys on its own, with nothing to restart.* |
-| Its button | **Supply values** |
-| The card's rollout line | ***v2** is built and waiting for its external values.* |
+| The page's status pill | **`Waiting for configuration`** |
+| The summary card's notice, naming what it waits on | **`Waiting for configuration: stripe, sendgrid`** |
+| The same notice when the run named nothing | **`Waiting for external configuration`** |
+| Its body | *Everything built. This version is not deployed until every external resource holds its development configuration — add it under External resources below and the run resumes and deploys on its own, with nothing to restart.* |
+| Its button | **Add configuration** |
+| The card's rollout line | ***v2** is built and waiting for its external configuration.* |
 
 **"with nothing to restart" is the load-bearing half.** Without it the reader
 goes looking for a Build or Retry button that would start a second run.
 
-**The ledger row says `Waiting for values` too, and it is the same words as the
-pill.** `BuildSummary` carries the waiting reason, which is what separates a
+**The ledger row says `Waiting for configuration` too, and it is the same words
+as the pill.** `BuildSummary` carries the waiting reason, which is what separates a
 parked version from a running one — both are `in_progress` — and it costs the
 ledger nothing: the run row it is built from already holds it. The row also goes
 QUIET, no tint and no pulse: those mean "the moving thing", and a park is the
 opposite. The dependency NAMES stay on the build page, where the run read that
 carries them is already being made and there is room to list them.
+
+### The build page's log sections
+
+Tasks, External resources, Coding agent log and Build logs are peers on one
+page, so they label and empty themselves the same way. Two things had drifted:
+one section's placeholder was a bare left-aligned paragraph beside another's
+centred `EmptyState`, and the agent log carried a status pill where Tasks
+carried plain text.
+
+| | |
+|---|---|
+| Header note, Tasks | *7 in this build · 7 done* |
+| Header note, agent log, streaming | *Streaming* + `AgentPulse` |
+| Header note, agent log, run over | *Run finished successfully* / *Run failed* / *Run cancelled* / *Run blocked* |
+| The same, state unknown or absent | *Run ended — `<state>`* / *Run finished* |
+| Any section with nothing to show | a centred `EmptyState compact` |
+| The agent log's stream health | *Attaching to the run feed…* / *Connection lost — reconnecting…* |
+
+**A header note is secondary caption text, never a pill.** The page header
+already carries the version's toned status chip; a second toned pill a few
+inches below competes with it for the same glance.
+
+**`Run finished successfully`, never `run settled — succeeded`.** *Settled* is
+the stream contract's word for the transition, not something a person watching a
+build says, and the state used to be pasted on raw in its lower-case wire
+spelling. It draws on the same vocabulary as the run status chip — *succeeded*
+becomes *finished successfully*, never *settled* — so a reader meets one word
+for one outcome, phrased for the slot it sits in.
+
+**How the run ENDED belongs in the header; how the STREAM is doing belongs in
+the body.** They answer different questions and come from different reads — the
+ending from the run list, which the streaming note beside it already reads, so
+the two halves of one label cannot contradict each other. Stream health is
+right-aligned under the log, away from where its content starts.
+
+**A run that is neither streaming nor terminal is labelled by neither.** A run
+parked at the deploy gate has not ended, and *Run finished* over its log would
+contradict the summary card telling the reader it is waiting on them.
 
 ## The project overview
 
@@ -550,8 +601,8 @@ three assumptions and one otherwise look identical and *how much* is what a glan
 
 | section | what the dialog lists | its fix |
 |---|---|---|
-| Requirements | *N open questions* | **Open the document**, where the settle controls already are |
-| Requirements | *N assumptions to challenge* | **Open the document** |
+| Requirements | *N questions only you can answer* | **Open the document**, where the settle controls already are |
+| Requirements | *N decisions marked assumed* | **Open the document** |
 | Design · Validation | *The requirements have changed since* | **Update the design** |
 
 **Ordered by how badly it hurts to ignore**, which is what makes the hover's pick meaningful rather
@@ -571,8 +622,17 @@ rail reports; Design stays clickable throughout.
 **But Generate design warns first when they stand.** The rail says the same thing at rest; the click
 is the moment it becomes consequential, because the design is derived from those guesses and
 overturning one afterwards means deriving again. So the dialog names what is unsettled and offers
-both ways: *Resolve issues* returns to the requirements document, where the settle controls already
-live on the flagged lines, and *Generate anyway* goes on.
+both ways: *Review them first* returns to the requirements document, where the controls already live
+on the flagged lines, and *Generate anyway* goes on.
+
+**In the user's words** ([#666](https://github.com/wso2/labs-agentic-engineer/issues/666)): the
+dialog is titled *Some decisions are still yours*, and its one paragraph says what the agent did
+(*made some decisions on your behalf — marked assumed in the document*), what happens next (*the
+design will be built on the requirements as they stand*) and what being wrong costs (*the design has
+to be generated again*). *Settled*, *derived*, *judgment* and *to challenge* were retired from it:
+they are how this file talks about the document, not how a user reads it. The rows say *N decisions
+marked assumed* — pointing at the pill they will find on the line — and *N questions only you can
+answer*, which is the fact that makes an open question different.
 
 This is where the dialog's two moods separate, and the distinction is the point:
 
@@ -1069,11 +1129,32 @@ renaming; it needed to stop being visible.
 | the user's intent | command | where it is offered |
 |---|---|---|
 | start from an idea | `/start with <idea>` | fired at project creation ([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)); the idea rides along, cropped, so the user can see the agent is working from **their** words rather than a bare command ([#528](https://github.com/wso2/labs-agentic-engineer/issues/528)) |
-| add a feature | `/feature <idea>` | code lens on the story list |
-| add an actor | `/actor <who>` | code lens on Actors |
+| add a feature | `/feature <idea>` | code lens on the story list — opens the aim box to collect the idea, and sends the command plus their words |
+| add an actor | `/actor <who>` | code lens on Actors — same collecting box |
 | go deeper on a feature | `/expand <story>` | code lens on the story, which carries itself as the subject |
-| settle an assumption or an open question | `/settle <the point>` | code lens on the flagged line |
+| answer an open question | `/settle <the point>` | code lens on the question |
 | take up the open questions | `/settle` over the section | code lens on **Open Questions** |
+| talk a line through | *Discuss* — no command; opens the aim box on the line, Enter sends Discuss | code lens on any bullet |
+
+**An `*assumed*` run offers verdicts, not a command**
+([#652](https://github.com/wso2/labs-agentic-engineer/issues/652)). An assumption is a decision
+the agent already made, and the user's response to it is a judgement, not a request — so the line
+carries **Agree · Discuss**. *Agree* is a **direct edit**: it strips the flag and keeps the decision —
+no agent turn, no model, one undo — and it stays live while an agent holds the turn, which is exactly
+when a reviewer is reading flagged lines. *Discuss* opens the aim box on the line. Two, deliberately:
+a line with four controls on it stops reading as a line. *Remove* and *Reopen* were built and cut for
+that reason — dropping or reopening a decision is a sentence away in Discuss, and the editor deletes a
+bullet as well as any control could. The word is **Agree**, not *Accept* — *Accept* is what the
+agent-suggestion review bar says, and this is a different act. `/settle` on a flagged line is retired;
+the marker leaving the document is itself the signal the agent reads.
+
+**An add-lens asks before it fires** ([#666](https://github.com/wso2/labs-agentic-engineer/issues/666)):
+`+ Actor` and `+ Feature` have a subject the document cannot supply, so the click opens the aim box
+with one question (*Who are they, and what do they do?* / *Describe the feature in your own words…*)
+and one button (*Add actor* / *Add feature*). The send is the command plus the user's words —
+`/feature manager should approve` — which is the same shape the per-line lenses compose from the
+entry they sit on. An empty send is the bare command, exactly what the lens did before it learned to
+ask; the agent then asks in chat instead.
 
 **A command names the user's intent, never the document operation.** `/feature` says what they
 came to do; `/amend Add a feature` said what the system does to a file.
@@ -1113,11 +1194,13 @@ of per-line is a control that is only there while the pointer is.
 **The lens is a control beside the line, not the line made clickable.** The PRD is a collaborative
 editor: a line that fires a command on click is a line the user can no longer put a caret in.
 
-**A lens goes inert, saying which, while an agent holds the turn** — the same two conditions that
-gate the header's launchers, since firing a command mid-interview supersedes the live question form
-for the whole room.
+**A lens that starts a turn goes inert, saying which, while an agent holds the turn** — the same
+two conditions that gate the header's launcher, since firing a command mid-interview supersedes
+the live question form for the whole room. Agree starts no turn and never
+goes inert: it is the document being edited, and the document is always the user's to edit.
 
-Shipped in [#579](https://github.com/wso2/labs-agentic-engineer/issues/579).
+Shipped in [#579](https://github.com/wso2/labs-agentic-engineer/issues/579); the verdicts in
+[#666](https://github.com/wso2/labs-agentic-engineer/issues/666).
 
 ## Navigation
 

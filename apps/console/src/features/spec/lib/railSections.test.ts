@@ -278,16 +278,16 @@ describe("railSections — the rail is the flow", () => {
       // nothing else in the system can move it along. An assumption already
       // has an answer standing.
       expect(of(sections, "requirements").reasons.map((r) => r.label)).toEqual([
-        "2 open questions",
-        "3 assumptions to challenge",
+        "2 questions only you can answer",
+        "3 decisions marked assumed",
       ]);
     });
 
     it("says one thing once", () => {
       const sections = railSections(input({ assumptions: 1, openQuestions: 1 }));
       expect(of(sections, "requirements").reasons.map((r) => r.label)).toEqual([
-        "1 open question",
-        "1 assumption to challenge",
+        "1 question only you can answer",
+        "1 decision marked assumed",
       ]);
     });
 
