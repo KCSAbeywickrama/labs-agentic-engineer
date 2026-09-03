@@ -108,25 +108,19 @@ No flow: story 1 (sign-in — platform SSO owns the page), story 9 (nightly
 export job, no view).
 ```
 
-One labelled line each, so nothing has to be inferred from punctuation:
+One labelled line each:
 
-- **`F1 ·` + the flow's name** — the number is a short handle, so "F2 is not
-  walkable" names one exact journey without quoting a whole title.
-- **The flow's `description`** from the DSL, straight under the title and
-  unlabelled because it is prose. It says what the journey is, so it comes
-  before the facts about it — and copying it saves every later reader from
-  opening the file to find out.
-- **`Persona:`** — the flow's `role` line. Say `Persona: any` for a
-  role-less journey rather than dropping the line.
+- **`F1 ·` + the flow's name**, numbered in the order the DSL declares them —
+  the number is how a reviewer names one exact journey.
+- **The flow's `description`** from the DSL, straight under the title,
+  unlabelled: it is prose, and it says what the journey is before the facts
+  about it.
+- **`Persona:`** — the flow's `role`. Write `Persona: any` for a role-less
+  journey rather than dropping the line.
 - **`Stories:`** — the story numbers this journey walks.
 - **`Walk:`** — the flow's screens in walkthrough order, entry screen first.
-  Deliberately not called `Screens:`: that word is taken above for the routes
-  to build, and this is the order someone walks them — the walk the PR has to
-  demonstrate. Names and arrows only, no commentary. A screen in two flows
-  appears in both; that is the DSL's shape, not a mistake.
-
-The **checkbox** makes the whole thing a contract the PR ticks back item by
-item.
+  Names and arrows only, no commentary. A screen in two flows appears in
+  both; that is the DSL's shape, not a mistake.
 
 **Leave every box unchecked.** The issue states what must be walked; the
 coding agent ticks the same list in its PR body. Re-planning rewrites this
