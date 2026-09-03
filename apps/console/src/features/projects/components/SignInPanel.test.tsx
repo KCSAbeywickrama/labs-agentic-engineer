@@ -98,7 +98,23 @@ describe("SignInPanel", () => {
     );
   });
 
-  it("reveal then hide cycles password visibility for one login", async () => {
+  it("keeps the masked password on screen, with both icons, before any reveal", () => {
+    renderPanel({
+      logins: [{ username: "test-viewer", role: "Viewer", coldStart: true }],
+    });
+
+    // The line is here from the start — the reader can see a password exists,
+    // and can copy it, without ever putting it on screen.
+    expect(screen.getByText("**********")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Reveal the password for test-viewer" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Copy the password for test-viewer" }),
+    ).toBeInTheDocument();
+  });
+
+  it("the eye toggles visibility, and reads the secret only once", async () => {
     const { revealPassword } = renderPanel({
       logins: [
         { username: "test-viewer", role: "Viewer", coldStart: true },
@@ -119,22 +135,49 @@ describe("SignInPanel", () => {
       "aria-live",
       "polite",
     );
-    expect(
-      screen.queryByRole("button", {
-        name: "Reveal the password for test-viewer",
-      }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Hide" }),
-    ).toBeInTheDocument();
+    expect(screen.queryByText("**********")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    // The same control hides it again — no separate Hide button.
+    const hide = screen.getByRole("button", {
+      name: "Hide the password for test-viewer",
+    });
+    fireEvent.click(hide);
     expect(screen.queryByText(MOCK_PASSWORD)).not.toBeInTheDocument();
-    expect(
+    expect(screen.getByText("**********")).toBeInTheDocument();
+
+    // Showing it again is a decision about this screen, not a reason to ask
+    // the sealed store for the secret a second time.
+    fireEvent.click(
       screen.getByRole("button", {
         name: "Reveal the password for test-viewer",
       }),
-    ).toBeInTheDocument();
+    );
+    await waitFor(() => {
+      expect(screen.getByText(MOCK_PASSWORD)).toBeInTheDocument();
+    });
+    expect(revealPassword).toHaveBeenCalledTimes(1);
+  });
+
+  it("copies a password that was never put on screen", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    renderPanel({
+      logins: [{ username: "test-viewer", role: "Viewer", coldStart: true }],
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy the password for test-viewer" }),
+    );
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(MOCK_PASSWORD);
+    });
+    // Copying does not reveal it.
+    expect(screen.queryByText(MOCK_PASSWORD)).not.toBeInTheDocument();
+    expect(screen.getByText("**********")).toBeInTheDocument();
   });
 
   it("revealing one of two logins does not reveal the other", async () => {
@@ -167,13 +210,15 @@ describe("SignInPanel", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", {
-        name: "Hide",
+      screen.getByRole("button", {
+        name: "Hide the password for test-viewer",
       }),
     ).toBeInTheDocument();
     expect(
       screen.queryAllByText(MOCK_PASSWORD),
     ).toHaveLength(1);
+    // The other row stays masked.
+    expect(screen.getAllByText("**********")).toHaveLength(1);
   });
 
   it("shows an error caption when revealPassword rejects", async () => {
