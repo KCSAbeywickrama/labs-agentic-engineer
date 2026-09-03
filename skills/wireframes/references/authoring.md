@@ -53,9 +53,7 @@ the product genuinely gives it no view:
 Every other uncovered story is a gap: add the screens it needs and put them in
 a flow.
 
-Then run the check backwards. A flow serving no story is a journey nobody
-asked for; a screen in no flow is one nobody can reach. Cut it, or find the
-story it belongs to — never invent a screen the requirements never asked for.
+Equally, don't invent screens the stories don't imply.
 
 ## What makes a wireframe good
 
