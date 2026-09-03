@@ -7,7 +7,8 @@
 # laptop, and no amd64 build of the runner image happened anywhere until the
 # release ran one.
 #
-# linux/amd64 for every image, because that is the half nothing else covers:
+# At least linux/amd64 for every image, because that is the half nothing else
+# covers:
 # arm64 is built by hand all day — `skaffold` and
 # `deployments/scripts/build-runner.sh` are plain host-arch `docker build`, so
 # every local bring-up on an Apple-silicon machine exercises it — while amd64 is
@@ -52,11 +53,14 @@ jobs:
   build:
     name: build changed images
     runs-on: ubuntu-latest
-    # remote-worker is the outlier — it compiles the `bal library` tool, installs
-    # a JDK and a chromium, smoke-tests the browser, and does half of that under
-    # emulation. The ceiling catches a wedged build rather than enforcing a
-    # budget.
-    timeout-minutes: 60
+    # A budget, not just a ceiling: the images build in sequence in one slot,
+    # and a shared-input change builds all seven. remote-worker is the outlier
+    # — it compiles the `bal library` tool, installs a JDK and a chromium,
+    # smoke-tests the browser, and does half of that under emulation; the
+    # release has measured its two-platform build at 28 min cold, and the other
+    # six follow it here rather than run beside it. Raise this rather than trim
+    # an image if a cold all-images run legitimately grows past it.
+    timeout-minutes: 90
     permissions:
       contents: read
       packages: read
@@ -126,6 +130,7 @@ jobs:
           built=0
           for row in "${IMAGES[@]}"; do
             IFS='|' read -r name context dockerfile contexts platforms <<<"$row"
+            platforms=${platforms:-linux/amd64}
 
             selected=$ALL
             while IFS= read -r f; do
@@ -133,11 +138,11 @@ jobs:
             done <<<"$CHANGED"
             [ "$selected" = true ] || continue
 
-            echo "::group::$name (${platforms:-linux/amd64})"
+            echo "::group::$name ($platforms)"
             # Seeded, never empty: expanding an empty array under `set -u` is an
             # error on bash before 4.4, and this list is read by more shells than
             # the runner's.
-            cmd=(docker buildx build --platform "${platforms:-linux/amd64}" --file "$dockerfile")
+            cmd=(docker buildx build --platform "$platforms" --file "$dockerfile")
             for c in $contexts; do cmd+=(--build-context "$c"); done
             # --output type=cacheonly: build it, keep nothing. No tag to name and
             # no image to garbage-collect.

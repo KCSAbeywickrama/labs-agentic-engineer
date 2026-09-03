@@ -264,10 +264,19 @@ RUN npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
     # chromium does not run there: the browser process dies at launch and the
     # CLI reports "CDP response channel closed". Nothing about that half of the
     # IMAGE is wrong — the same layer, built natively on an arm64 host, passes
-    # this test — so the launch is asserted wherever a chromium can start (the
-    # release's native half, every developer's host-arch `docker build`) and
-    # skipped where one cannot. The emulated half keeps everything above the
+    # this test — so the launch is asserted on every native build (the
+    # release's amd64 half, every developer's host-arch `docker build`) and
+    # skipped on any cross-platform one. The gate is the platform pair, not a
+    # probe for emulation, so a foreign-arch build that COULD launch (amd64
+    # under Rosetta on a Mac) skips it too; that costs nothing the native
+    # builds do not already cover. The skipped half keeps everything above the
     # `if`: the install, the symlink and the `test -x` need no browser process.
+    #
+    # The alternative is a release that builds its arm64 half on an arm64
+    # runner, where this test would run natively on both halves. That is a
+    # release-workflow change (per-platform jobs, a manifest merge) and is
+    # not what fixes this; the gate stays correct under it, since a native
+    # build takes the `then` branch.
     && if [ "$TARGETPLATFORM" = "$BUILDPLATFORM" ]; then \
         printf '<h1>agent-browser-ok</h1>' > /tmp/ab-smoke.html \
         && chmod a+r /tmp/ab-smoke.html \
