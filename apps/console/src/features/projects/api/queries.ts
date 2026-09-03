@@ -90,7 +90,11 @@ const STATUS_IDLE_POLL_MS = 30_000;
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 type Deployment = components["schemas"]["Deployment"];
 
-function statusIsMoving(status: ProjectStatus): boolean {
+/** Which states put the status poll on the fast cadence. Exported for its own
+ *  test: it is a pure predicate over one payload, and the cases that matter are
+ *  the ones that must NOT match — a project parked on the 5s interval forever
+ *  costs every route in the app, and nothing about rendering would show it. */
+export function statusIsMoving(status: ProjectStatus): boolean {
   return (
     // An agent writing the spec is the FIRST thing that moves on a new project
     // and the longest stretch a first-timer watches (#562): the kickoff fires
@@ -109,6 +113,27 @@ function statusIsMoving(status: ProjectStatus): boolean {
     (status.spec.agent === "" && !status.spec.exists) ||
     status.build.status === "running" ||
     status.deploy.status === "deploying" ||
+    // A validation CYCLE in flight, and the coding cycle repairing a failed one.
+    // Both end in a verdict this poll is the only thing watching for.
+    status.deploy.validation === "running" ||
+    status.deploy.validation === "awaiting-fix" ||
+    // Deployed and awaiting a verdict — the window where the page openly says it
+    // is waiting. Without it the console drops to the idle cadence at the exact
+    // moment the state is about to change, because `deploy.status` reads
+    // "deployed" the instant the last binding is Ready, before anything has
+    // judged the version. That put up to 30s on top of the wait (#649).
+    //
+    // Scoped by the BUILD, and it has to be, because `none` is two states wearing
+    // one name: a verdict is expected, or a validation run died and none is
+    // coming. Unscoped, the second population would hold every surface on the
+    // fast cadence forever — and this hook runs on every route, for the toolbar
+    // badge, fanning out to four backends. `build.status` is the newest DEV run's
+    // state, so `succeeded` excludes the versions whose delivery failed, was
+    // cancelled or was blocked. A validation run that died recording nothing
+    // still slips through; that residual goes when `none` itself is split.
+    (status.build.status === "succeeded" &&
+      status.deploy.status === "deployed" &&
+      status.deploy.validation === "none") ||
     status.repoStatus === "pending" ||
     status.repoStatus === "cloning"
   );

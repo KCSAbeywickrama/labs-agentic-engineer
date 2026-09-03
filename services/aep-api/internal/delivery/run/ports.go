@@ -384,3 +384,25 @@ type DeployIssueMinter interface {
 	MintDeployFixIssues(ctx context.Context, orgID, projectID string, milestoneNumber int,
 		failed []delivery.DeployTarget, reasons map[string]string) ([]int, error)
 }
+
+// MilestoneReconciler asks the event plane to re-examine ONE milestone now —
+// the same pass the reconcile sweep makes on its timer. Satisfied by the event
+// plane, reached through this port for the same reason WorkHalter is: the
+// supervisor observes and asks, the plane owns the decision and every write
+// behind it.
+//
+// The supervisor calls it on the one event no webhook can carry: its own run row
+// going terminal. Three hand-offs depend on it and all three are writes the
+// PLATFORM makes, so GitHub reports them back as echoes if it routes them at all
+// — a dev run filing the version's validation task, a failed verdict filing
+// repair issues, and a task run reopening the task. Each one becomes actionable
+// only once the run that wrote it is terminal, because the trigger predicate on
+// the other side requires no live run; before that instant there is nothing a
+// reconcile could do, and after it nothing but the sweep's timer was looking.
+//
+// What to start is NOT decided here and must not be: this says "something
+// changed, look again", and the plane's own routing answers with a run of the
+// right kind or with nothing at all.
+type MilestoneReconciler interface {
+	ReconcileMilestone(ctx context.Context, orgID, projectID string, number int, title string) error
+}

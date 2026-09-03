@@ -1371,6 +1371,12 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			// and stamped so the sweep does not restart the run the user just
 			// stopped, and so a rebuild of the same spec knows what to reopen.
 			Canceller: eventPlane,
+			// The hand-off: a run that settles asks the plane to re-examine its
+			// milestone at once, instead of the version waiting out a sweep tick for
+			// a write the platform made itself and no webhook reports (#649). Same
+			// plane again, and the same division — the supervisor says "something
+			// changed", the plane decides what that starts.
+			Reconciler: eventPlane,
 			// The planning phase. These are the same two collaborators the build
 			// click used to drive in a detached goroutine; behind an activity they
 			// are durable across a restart and retried on a blip.

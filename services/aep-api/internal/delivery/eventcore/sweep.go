@@ -44,9 +44,19 @@ import (
 // run that halted them is terminal by construction), so the hot poll is not
 // complicated for a state it cannot see.
 
-// defaultSweepInterval is the reconcile cadence. A backstop, not a driver:
-// everything it heals is something a webhook should have done, so it is slow
-// on purpose.
+// defaultSweepInterval is the reconcile cadence. A backstop, not a driver, so it
+// is slow on purpose: everything it heals is something that should already have
+// happened — a webhook that never arrived, or a hand-off whose settling run
+// reconciled its own milestone (ReconcileMilestone) and could not reach us.
+//
+// It was NOT a backstop for the platform's own hand-offs, and that is what this
+// interval used to cost. Nothing reports a write the platform makes itself: the
+// validation task a dev run files, the repair issues a failed verdict files and
+// the task a repair run reopens are all authored by the App bot, so their
+// deliveries are echoes, and `issues.opened` is not even routed. For those three
+// the timer was the only trigger there was, and a version sat unjudged for up to
+// a full interval after it deployed (#649). The settle-time nudge is what made
+// this a backstop in fact and not only in the comment.
 const defaultSweepInterval = 60 * time.Second
 
 // Sweep is the reconcile backstop AND the trigger router, and it has TWO
@@ -64,9 +74,14 @@ const defaultSweepInterval = 60 * time.Second
 // GitHub never made (or that failed past its retries) leaves a milestone with
 // work and nobody working it. And the adoption-versus-settle race — an issue
 // joining a milestone in the instant the supervisor decided it was empty —
-// leaves exactly the same footprint. It is also the ONLY thing that starts a
-// validation run without a human asking: a dev run settles having filed the
-// version's validation task, and this is what picks that task up.
+// leaves exactly the same footprint. This rule is also, apart from a human
+// asking, the ONLY thing that starts a validation run: a dev run settles having
+// filed the version's validation task, and this is what turns that task into a
+// run. It is reached from two places, though — the tick below, and the settling
+// run itself, which calls ReconcileMilestone for its own milestone rather than
+// leave the version unjudged until the next pass. In the ordinary case that has
+// already happened by the time a tick arrives and this pass finds nothing to do,
+// which is the division of labour a backstop is supposed to have.
 //
 // The second heals a failure mode the row model has: a live ROW is not a live
 // WORKFLOW. Nothing else notices a row whose execution is gone, and because a
@@ -133,8 +148,10 @@ func (s *Sweep) Run(ctx context.Context) {
 	}
 }
 
-// Once runs a single reconcile pass. Exported so the pass can be driven
-// directly — by a test, and by anything that wants to reconcile now.
+// Once runs a single reconcile pass over every repository. Exported so the pass
+// can be driven directly by a test; a caller that knows WHICH milestone changed
+// wants ReconcileMilestone instead, which is one GitHub read rather than one per
+// known milestone across every project.
 //
 // One repository's failure never stops the others: the sweep's whole purpose
 // is to be the thing that still runs when something else is broken.
@@ -164,68 +181,95 @@ func (s *Sweep) reconcileRepo(ctx context.Context, repo RepoRef) error {
 	if err != nil {
 		return err
 	}
+	// One milestone's failure never stops the others, for the same reason one
+	// repository's does not: the sweep is the thing that still runs when
+	// something else is broken.
 	var errs []error
 	for _, milestone := range milestones {
-		live, lerr := e.p.Runs.LiveRunForMilestone(ctx, repo.OrgID, repo.ProjectID, milestone.Number)
-		if lerr != nil {
-			errs = append(errs, lerr)
-			continue
-		}
-		if live != nil {
-			// A live ROW is not a live WORKFLOW. Re-offer it: StartRun is
-			// idempotent — an execution that is running answers AlreadyStarted,
-			// and the row is reused rather than re-admitted — so this costs one
-			// Temporal call and heals a row whose workflow is gone. Without it a
-			// non-terminal row answers LiveRunForMilestone forever, the sweep
-			// skips it forever, and the partial indexes refuse every later run on
-			// that project (the wedge migrate/milestone_runs.go:75-85 documents).
-			//
-			// EXCEPT a run still in its planning phase. Re-offering that one would
-			// start a fresh workflow with no Tag and no provision inputs — the
-			// caller's, not the row's — so it would skip planning entirely and
-			// settle an unplanned version as delivered. A planning row is the
-			// click's to resolve: it starts the workflow synchronously and settles
-			// the row when it cannot.
-			if live.State != delivery.RunStatePlanning {
-				if serr := e.startRun(ctx, repo.OrgID, repo.ProjectID, milestone); serr != nil {
-					errs = append(errs, serr)
-				}
-			}
-			continue
-		}
-		// A CANCELLED increment is abandoned, and the milestone is skipped whole —
-		// before the issue fetch, because there is no decision left for the issues
-		// to inform and this saves the round trip.
-		//
-		// It has to be a decision about the MILESTONE rather than about the issues,
-		// which is the difference from the halt: a closed milestone still accepts
-		// new ones, so an issue reopened (or freshly filed) inside a cancelled
-		// version carries no mark and would otherwise start a task run that builds
-		// and deploys against a version nobody is shipping.
-		//
-		// The rule clears itself: a rebuild admits a new row on the same milestone,
-		// so the newest run stops being the cancelled one the moment somebody
-		// decides to work the version again. That is why it reads the NEWEST run of
-		// any kind rather than looking for a cancel anywhere in the history.
-		cancelled, cerr := e.milestoneCancelled(ctx, repo.OrgID, repo.ProjectID, milestone.Number)
-		if cerr != nil {
-			errs = append(errs, cerr)
-			continue
-		}
-		if cancelled {
-			continue
-		}
-		issues, ierr := e.p.Issues.ListMilestoneIssues(ctx, repo.OrgID, repo.ProjectID,
-			milestoneOpenIssuesFilter(milestone.Number))
-		if ierr != nil {
-			errs = append(errs, ierr)
-			continue
-		}
-		if serr := e.offerRun(ctx, repo.OrgID, repo.ProjectID, milestone, issues); serr != nil {
-			errs = append(errs, serr)
+		if merr := e.ReconcileMilestone(ctx, repo.OrgID, repo.ProjectID,
+			milestone.Number, milestone.Title); merr != nil {
+			errs = append(errs, merr)
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// ReconcileMilestone makes the sweep's pass over ONE milestone: re-offer a live
+// row, skip a cancelled increment, otherwise route the milestone's open work to
+// a run of the right kind.
+//
+// It is the sweep's loop body, exported so a caller that KNOWS something just
+// changed can have the same pass made now instead of waiting for the tick. The
+// run supervisor is that caller: a run settling is the moment its milestone's
+// hand-off becomes actionable, and no webhook reports it (see
+// delivery.SettleHandsWorkOnward). One function rather than two spellings of the
+// rule is the whole point — every suppressor the sweep grew is a suppressor the
+// nudge inherits, and neither can drift from the other.
+//
+// It takes the milestone as NUMBER and TITLE rather than a MilestoneRef so the
+// supervisor can name this method in a port of its own: the two packages never
+// import each other, and a shared struct in the signature would force one of
+// them to.
+//
+// Milestone TITLE is only ever carried forward onto a run row it starts; nothing
+// here reads it, so a caller that has the number and not the name may pass "".
+func (e *Events) ReconcileMilestone(ctx context.Context, orgID, projectID string,
+	number int, title string) error {
+	if e.p.Runs == nil || e.p.Issues == nil {
+		return nil
+	}
+	milestone := MilestoneRef{Number: number, Title: title}
+	live, err := e.p.Runs.LiveRunForMilestone(ctx, orgID, projectID, milestone.Number)
+	if err != nil {
+		return err
+	}
+	if live != nil {
+		// A live ROW is not a live WORKFLOW. Re-offer it: StartRun is
+		// idempotent — an execution that is running answers AlreadyStarted,
+		// and the row is reused rather than re-admitted — so this costs one
+		// Temporal call and heals a row whose workflow is gone. Without it a
+		// non-terminal row answers LiveRunForMilestone forever, the sweep
+		// skips it forever, and the partial indexes refuse every later run on
+		// that project (the wedge migrate/milestone_runs.go:75-85 documents).
+		//
+		// EXCEPT a run still in its planning phase. Re-offering that one would
+		// start a fresh workflow with no Tag and no provision inputs — the
+		// caller's, not the row's — so it would skip planning entirely and
+		// settle an unplanned version as delivered. A planning row is the
+		// click's to resolve: it starts the workflow synchronously and settles
+		// the row when it cannot.
+		if live.State != delivery.RunStatePlanning {
+			return e.startRun(ctx, orgID, projectID, milestone)
+		}
+		return nil
+	}
+	// A CANCELLED increment is abandoned, and the milestone is skipped whole —
+	// before the issue fetch, because there is no decision left for the issues
+	// to inform and this saves the round trip.
+	//
+	// It has to be a decision about the MILESTONE rather than about the issues,
+	// which is the difference from the halt: a closed milestone still accepts
+	// new ones, so an issue reopened (or freshly filed) inside a cancelled
+	// version carries no mark and would otherwise start a task run that builds
+	// and deploys against a version nobody is shipping.
+	//
+	// The rule clears itself: a rebuild admits a new row on the same milestone,
+	// so the newest run stops being the cancelled one the moment somebody
+	// decides to work the version again. That is why it reads the NEWEST run of
+	// any kind rather than looking for a cancel anywhere in the history.
+	cancelled, err := e.milestoneCancelled(ctx, orgID, projectID, milestone.Number)
+	if err != nil {
+		return err
+	}
+	if cancelled {
+		return nil
+	}
+	issues, err := e.p.Issues.ListMilestoneIssues(ctx, orgID, projectID,
+		milestoneOpenIssuesFilter(milestone.Number))
+	if err != nil {
+		return err
+	}
+	return e.offerRun(ctx, orgID, projectID, milestone, issues)
 }
 
 // milestoneCancelled reports whether this milestone's NEWEST run settled
