@@ -98,14 +98,17 @@ Screens
 - [ ] NewRisk → /risks/new — "Register" select not built: no registers endpoint
 
 Flows
-- [x] "Approval queue" (Manager) — stories 2, 5 — RiskQueue → QueueRiskDetail
-      walks by clicking
-- [ ] "Log a risk" (Risk owner) — stories 1, 3 — MyRisks → NewRisk walks;
+- [x] F1 · "Approval queue" (Manager) — stories 2, 5 — RiskQueue →
+      QueueRiskDetail walks by clicking
+- [ ] F2 · "Log a risk" (Risk owner) — stories 1, 3 — MyRisks → NewRisk walks;
       NewRisk → RiskDetail blocked on the missing select
 ```
 
-Take each flow's name, role and story numbers from the Task's `Flows:` line —
-that is the mapping a reviewer will check you against.
+Copy the flow list from the Task's `Flows:` checklist — same numbers, same
+names, same story sets — and tick what you verified. Keeping `F1`/`F2` lets a
+reviewer say "F2 is not walkable" and mean one exact journey. A flow the Task
+lists must appear here even when you could not build it; dropping the line is
+how a missing journey goes unnoticed.
 
 A screen is ticked only when every element in its block was on the page and
 every arrow it carries navigated when clicked. A flow is ticked only when it was

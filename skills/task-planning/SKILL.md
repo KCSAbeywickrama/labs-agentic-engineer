@@ -86,23 +86,42 @@ into pages.
 **Map the stories to the flows, and check the mapping yourself.** You hold
 both the story list and the wireframe, so you are the one place the two can be
 compared — the designer's coverage pass is not one you inherit on trust. Read
-the `flow` blocks, and add a `Flows:` line under `## Scope` naming each flow,
-its role, and the stories it walks:
+the `flow` blocks and write a **`Flows:` checklist** under `## Scope` — one
+item per flow, numbered `F1`, `F2`, …, carrying the flow's name, its `role`,
+the stories it walks, and its `description` line from the DSL:
 
-```text
-Flows: "Submit an expense" (Employee) — stories 3, 4, 7
-       "Approve a claim" (Manager) — stories 5, 6
-       No flow: story 1 (sign-in — platform SSO owns the page), story 9
-       (nightly export job, no view)
+```markdown
+Flows:
+
+- [ ] **F1 · "Submit an expense"** (Employee) — stories 3, 4, 7
+  An employee files a claim and tracks its approval.
+- [ ] **F2 · "Approve a claim"** (Manager) — stories 5, 6
+  A manager works the pending queue and decides a claim.
+
+No flow: story 1 (sign-in — platform SSO owns the page), story 9 (nightly
+export job, no view).
 ```
 
-Every in-scope story lands on one of those lines. A story with no view is
-expected — sign-in and sign-out on a component with an auth dependency, a
-backend rule, a scheduled job, an endpoint another service calls — so put it
-on the `No flow:` line **with the reason**. A story that belongs on a screen
+Why each part earns its place: the **number** gives the coding agent and the
+reviewer a short handle, so "F2 is not walkable" says exactly which journey
+without quoting a whole name; the **description** is already written in the
+DSL, so copying it saves every later reader from opening the file to learn
+what the journey is for; and the **checkbox** makes it a contract the PR ticks
+back item by item.
+
+**Leave every box unchecked.** The issue states what must be walked; the
+coding agent ticks the same list in its PR body. Re-planning rewrites this
+body, so a tick recorded here would be wiped — the PR is where progress lives.
+
+Every in-scope story lands either on a flow item or the `No flow:` line. A
+story with no view is expected — sign-in and sign-out on a component with an
+auth dependency, a backend rule, a scheduled job, an endpoint another service
+calls — so put it there **with the reason**. A story that belongs on a screen
 and has no flow is a real gap: say so in the same place
 (`story 10 — no flow walks this`) rather than dropping it, so a human sees it
-before the work starts.
+before the work starts. When every story is walked, say so
+(`No flow: none — stories 1–9 are all walked above`) rather than omitting the
+line, so a reader can tell the question was asked.
 
 The coding agent ticks each flow off when it is walkable end to end, so this
 line is what lets a failing story be traced back to the journey that was meant
