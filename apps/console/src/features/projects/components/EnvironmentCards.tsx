@@ -51,7 +51,12 @@ function EnvironmentCard({
   return (
     <Card
       variant="outlined"
+      // Both cards fill the row's height, so the pair reads as one band
+      // whatever either of them has to say. Development is always the taller —
+      // it carries the verdict, the promotion and the test users — and letting
+      // Production stop short of it left the board looking half-drawn.
       sx={{
+        height: "100%",
         ...(tone !== "neutral" && {
           borderColor: (t) => alpha(t.palette[tone === "primary" ? "primary" : tone].main, 0.35),
         }),
@@ -147,7 +152,8 @@ export function EnvironmentCards({
       sx={{
         display: "grid",
         gap: 2,
-        alignItems: "start",
+        // stretch, not start: the two cards share a height (see EnvironmentCard).
+        alignItems: "stretch",
         gridTemplateColumns: { xs: "1fr", md: "repeat(2, minmax(0, 1fr))" },
       }}
     >

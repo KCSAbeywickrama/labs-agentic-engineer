@@ -923,8 +923,12 @@ describe("DeploymentsPage — Test users", () => {
     await waitFor(() => {
       expect(screen.getByText(MOCK_PASSWORD)).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Hide the password for test-viewer" }),
+    );
     expect(screen.queryByText(MOCK_PASSWORD)).not.toBeInTheDocument();
+    // Masked, not gone — the line holds its place on the card.
+    expect(screen.getByText("**********")).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
         name: "Reveal the password for test-viewer",

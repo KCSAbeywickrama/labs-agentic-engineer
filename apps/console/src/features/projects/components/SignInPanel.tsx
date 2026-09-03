@@ -19,7 +19,6 @@
 import { useState } from "react";
 import {
   Box,
-  Button,
   CircularProgress,
   IconButton,
   Link as MuiLink,
@@ -27,7 +26,7 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Copy, ExternalLink, Eye } from "@wso2/oxygen-ui-icons-react";
+import { Copy, ExternalLink, Eye, EyeOff } from "@wso2/oxygen-ui-icons-react";
 import { env } from "../../../config/env";
 import { thunderUsersConsoleHref } from "../../../config/thunderConsole";
 import {
@@ -46,6 +45,10 @@ function copyText(value: string): Promise<void> {
   return navigator.clipboard.writeText(value);
 }
 
+/** The password's placeholder while it is hidden. Fixed width, monospace, so
+ *  revealing swaps the characters without moving the icons beside them. */
+const MASK = "**********";
+
 function LoginRow({
   login,
   revealPassword,
@@ -54,88 +57,118 @@ function LoginRow({
   revealPassword: (username: string) => Promise<string>;
 }) {
   const [password, setPassword] = useState<string | null>(null);
+  const [shown, setShown] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const reveal = async () => {
+  /**
+   * The password itself, read once and kept for the row's life.
+   *
+   * The eye toggles VISIBILITY, not another read: hiding a revealed password
+   * and showing it again is a decision about this screen, not a reason to ask
+   * the sealed store for a secret a second time. Copy shares the same path, so
+   * a reader can copy a password they never put on screen.
+   */
+  const ensurePassword = async (): Promise<string | null> => {
+    if (password !== null) return password;
     setBusy(true);
     setError(null);
     try {
-      setPassword(await revealPassword(login.username));
+      const value = await revealPassword(login.username);
+      setPassword(value);
+      return value;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      return null;
     } finally {
       setBusy(false);
     }
   };
 
+  const toggle = async () => {
+    if (shown) {
+      setShown(false);
+      return;
+    }
+    if ((await ensurePassword()) !== null) setShown(true);
+  };
+
+  const copy = async () => {
+    const value = await ensurePassword();
+    if (value === null) return;
+    setError(null);
+    try {
+      await copyText(value);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   return (
     <Box>
-      <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-        <Tooltip
-          title={
-            login.coldStart ? `${login.role} · cold start` : login.role
-          }
+      <Tooltip title={login.coldStart ? `${login.role} · cold start` : login.role}>
+        <Typography
+          variant="body2"
+          sx={{ fontFamily: "monospace", minWidth: 0, width: "fit-content" }}
         >
-          <Typography
-            variant="body2"
-            sx={{ fontFamily: "monospace", flexGrow: 1, minWidth: 0 }}
-          >
-            {login.username}
-          </Typography>
-        </Tooltip>
-        {password === null ? (
-          <Tooltip title="Reveal password">
-            <span>
-              <IconButton
-                size="small"
-                disabled={busy}
-                aria-label={`Reveal the password for ${login.username}`}
-                onClick={() => void reveal()}
-              >
-                {busy ? (
-                  <CircularProgress size={12} color="inherit" />
-                ) : (
-                  <Eye size={14} />
-                )}
-              </IconButton>
-            </span>
-          </Tooltip>
-        ) : (
-          <Button size="small" color="inherit" onClick={() => setPassword(null)}>
-            Hide
-          </Button>
-        )}
-      </Stack>
-      {password !== null && (
-        <Stack
-          direction="row"
-          spacing={0.5}
-          sx={{ alignItems: "center", mt: 0.25 }}
+          {login.username}
+        </Typography>
+      </Tooltip>
+      {/* The password line is ALWAYS here, masked until asked for. It used to
+          appear only after a reveal, which made the card grow by a row at the
+          moment of the click and left a reader with no sign that a password
+          existed at all until they had already fetched it. */}
+      <Stack
+        direction="row"
+        spacing={0.5}
+        sx={{ alignItems: "center", mt: 0.25 }}
+      >
+        <Typography
+          variant="body2"
+          aria-live="polite"
+          // The mask is decoration: its ten asterisks would be read out one by
+          // one, and the eye's accessible name already says whether the
+          // password is showing.
+          {...(shown && password !== null ? {} : { "aria-hidden": true })}
+          sx={{ fontFamily: "monospace", color: "text.secondary" }}
         >
-          <Typography
-            variant="body2"
-            aria-live="polite"
-            sx={{ fontFamily: "monospace", color: "text.secondary" }}
-          >
-            {password}
-          </Typography>
-          <Tooltip title="Copy password">
+          {shown && password !== null ? password : MASK}
+        </Typography>
+        <Tooltip title={shown ? "Hide password" : "Reveal password"}>
+          <span>
             <IconButton
               size="small"
+              disabled={busy}
+              aria-label={
+                shown
+                  ? `Hide the password for ${login.username}`
+                  : `Reveal the password for ${login.username}`
+              }
+              onClick={() => void toggle()}
+            >
+              {busy ? (
+                <CircularProgress size={12} color="inherit" />
+              ) : shown ? (
+                <EyeOff size={14} />
+              ) : (
+                <Eye size={14} />
+              )}
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Tooltip title="Copy password">
+          <span>
+            <IconButton
+              size="small"
+              disabled={busy}
               aria-label={`Copy the password for ${login.username}`}
-              onClick={() => {
-                setError(null);
-                void copyText(password).catch((e) => {
-                  setError(e instanceof Error ? e.message : String(e));
-                });
-              }}
+              onClick={() => void copy()}
             >
               <Copy size={14} />
             </IconButton>
-          </Tooltip>
-        </Stack>
-      )}
+          </span>
+        </Tooltip>
+      </Stack>
       {error !== null && (
         <Typography variant="caption" color="error">
           {error}
