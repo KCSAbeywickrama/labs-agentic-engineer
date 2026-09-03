@@ -33,10 +33,11 @@ The user stories are **numbered**, so coverage is countable. Count it
 deliberately, before you write the file, while the requirements are in front
 of you:
 
-**Walk the numbered stories in order. For each one, name the flow that walks
-it.** Each flow will usually serve several stories, and a story may appear in
-more than one flow; what matters is that every story is accounted for — either
-walked, or knowingly set aside.
+**Walk the numbered stories in order. For each one, name the `flow` block that
+walks it** — the wireframe's own flows, not the `specs/design/flows/` files
+you read them from. Each usually serves several stories, and a story may
+appear in more than one; what matters is that every story is accounted for —
+either walked, or knowingly set aside.
 
 **Some stories have no screen, and that is correct.** Set a story aside when
 the product genuinely gives it no view:
@@ -57,8 +58,10 @@ asked for; a screen in no flow is one nobody can reach. Cut it, or find the
 story it belongs to — never invent a screen the requirements never asked for.
 
 **Report what you found in your closing message** — which stories each flow
-walks, and which you set aside with the reason. You do not write the task
-issue; the next turn does, from what you report here.
+walks, and which you set aside with the reason. That report is read by the
+human reviewing this turn; the planning turn re-derives the mapping from the
+committed DSL and requirements rather than inheriting yours, so the two are a
+check on each other.
 
 ## What makes a wireframe good
 

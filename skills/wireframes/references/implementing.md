@@ -104,13 +104,12 @@ Flows
       NewRisk → RiskDetail blocked on the missing select
 ```
 
-Copy the flow list from the Task's `Flows:` checklist — same numbers, same
-names, same story sets — and tick what you verified. Each Task flow carries a
-`Walk:` line: that is the order you click through, and where it breaks is what
-you report on the line. Keeping `F1`/`F2` lets a reviewer say "F2 is not
-walkable" and mean one exact journey. A flow the Task lists must appear here
-even when you could not build it; dropping the line is how a missing journey
-goes unnoticed.
+Carry every flow over from the Task's `Flows:` checklist, keeping its number,
+name and story set — one line each here, rather than the Task's labelled
+block — and tick what you verified. Each Task flow's `Walk:` line is the order
+you click through; where it breaks is what you report. A flow the Task lists
+appears here even when you could not build it: dropping the line is how a
+missing journey goes unnoticed.
 
 A screen is ticked only when every element in its block was on the page and
 every arrow it carries navigated when clicked. A flow is ticked only when it was

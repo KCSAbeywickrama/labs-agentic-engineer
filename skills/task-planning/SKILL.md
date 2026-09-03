@@ -136,10 +136,6 @@ before the work starts. When every story is walked, say so
 (`No flow: none — stories 1–9 are all walked above`) rather than omitting the
 line, so a reader can tell the question was asked.
 
-The coding agent ticks each flow off when it is walkable end to end, so this
-line is what lets a failing story be traced back to the journey that was meant
-to exercise it — or to the note saying no journey was ever expected.
-
 ## When a tool rejects you
 
 The result names the fix: UNKNOWN_COMPONENT lists the known components;
