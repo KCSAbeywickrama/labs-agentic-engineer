@@ -94,15 +94,15 @@ the stories it walks, and its `description` line from the DSL:
 Flows:
 
 - [ ] **F1 · Submit an expense**
+  An employee files a claim and tracks its approval.
   Persona: Employee
   Stories: 3, 4, 7
   Walk: MyClaims → NewClaim → ClaimDetail
-  An employee files a claim and tracks its approval.
 - [ ] **F2 · Approve a claim**
+  A manager works the pending queue and decides a claim.
   Persona: Manager
   Stories: 5, 6
   Walk: ApprovalQueue → ClaimReview
-  A manager works the pending queue and decides a claim.
 
 No flow: story 1 (sign-in — platform SSO owns the page), story 9 (nightly
 export job, no view).
@@ -112,6 +112,10 @@ One labelled line each, so nothing has to be inferred from punctuation:
 
 - **`F1 ·` + the flow's name** — the number is a short handle, so "F2 is not
   walkable" names one exact journey without quoting a whole title.
+- **The flow's `description`** from the DSL, straight under the title and
+  unlabelled because it is prose. It says what the journey is, so it comes
+  before the facts about it — and copying it saves every later reader from
+  opening the file to find out.
 - **`Persona:`** — the flow's `role` line. Say `Persona: any` for a
   role-less journey rather than dropping the line.
 - **`Stories:`** — the story numbers this journey walks.
@@ -120,9 +124,6 @@ One labelled line each, so nothing has to be inferred from punctuation:
   to build, and this is the order someone walks them — the walk the PR has to
   demonstrate. Names and arrows only, no commentary. A screen in two flows
   appears in both; that is the DSL's shape, not a mistake.
-- **The last line is the flow's `description`** from the DSL, unlabelled
-  because it is prose. Copying it saves every later reader from opening the
-  file to learn what the journey is for.
 
 The **checkbox** makes the whole thing a contract the PR ticks back item by
 item.
