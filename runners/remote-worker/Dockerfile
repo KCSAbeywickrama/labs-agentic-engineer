@@ -208,12 +208,24 @@ RUN groupadd -r aep \
 # Resolved FROM playwright through a fixed symlink rather than spelled out: the
 # revision is decided by PLAYWRIGHT_VERSION above, and a literal `chromium-1228`
 # here would be a second copy of that number to keep in step by hand.
+#
+# ASKED OF playwright, not assembled from an install location plus a guessed
+# directory name: the layout under a chromium revision is PER-ARCH, because
+# playwright ships Google's Chrome-for-Testing build on linux-x64
+# (`chrome-linux64/chrome`) and its own build on linux-arm64
+# (`chrome-linux/chrome`). Either name hardcoded here builds green on one half
+# of the release matrix and red on the other. `executablePath()` is the same
+# call playwright launches through, so it cannot drift from what it installed.
+# Resolved from @playwright/test's OWN playwright-core — playwright-cli nests a
+# second copy at a different revision, which is the drift the paragraph above
+# closes — and the SYMLINK IS THE DIRECTORY, so the binary keeps the resource
+# files (icudtl.dat, the .pak set, the crashpad handler) that sit beside it.
 ARG AGENT_BROWSER_VERSION=0.35.2
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/local/share/aep-chromium/chrome
 RUN npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
-    && ln -sfn \
-        "$(playwright install --dry-run chromium | awk '/Install location:/ {print $3; exit}')/chrome-linux" \
-        /usr/local/share/aep-chromium \
+    && CHROME="$(node -p "require(require.resolve('playwright-core', { paths: ['$(npm root -g)/@playwright/test'] })).chromium.executablePath()")" \
+    && ln -sfn "$(dirname "$CHROME")" /usr/local/share/aep-chromium \
+    && test -x "${AGENT_BROWSER_EXECUTABLE_PATH}" \
     # A smoke test, earning its line the way `bal library --help` does at the
     # bottom of this file: it drives a real page through the variable set
     # above, so a missing CLI, a symlink resolving to nothing, and a chromium
