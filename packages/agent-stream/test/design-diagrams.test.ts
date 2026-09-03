@@ -226,3 +226,10 @@ test("a PRD that names no actors leaves `actor` declarations unchecked, nodes st
   const bad = flow(`sequenceDiagram\n    actor Teammate\n    Teammate->>ghost-service: open\n`);
   assert.equal(checkDesignDiagram(FLOW, bad, legacy)?.code, "UNKNOWN_PARTICIPANT");
 });
+
+test("an unterminated mermaid fence is rejected at the line it opened", () => {
+  const bad = "# Flow\n\n```mermaid\nsequenceDiagram\n    actor Employee\n";
+  const p = checkDesignDiagram(FLOW, bad, bundle());
+  assert.equal(p?.code, "INVALID_DIAGRAM");
+  assert.match(p!.message, /fence opened at line 3 is never closed/);
+});

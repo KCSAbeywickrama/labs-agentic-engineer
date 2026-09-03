@@ -84,7 +84,10 @@ func TestParseCellFacts_SkipsLeadingFrontmatterAndKeepsLineNumbers(t *testing.T)
 	// The block is blanked, never cut: line N of the file is still line N of
 	// what the parser sees, so a diagnostic names the line the author sees.
 	fenced := "---\nsourceSpec: v1\n---\n" + cellFixture
-	stripped := stripCellFrontmatter(fenced)
+	stripped, serr := stripCellFrontmatter(fenced)
+	if serr != nil {
+		t.Fatalf("stripCellFrontmatter: %v", serr)
+	}
 	if strings.Count(stripped, "\n") != strings.Count(fenced, "\n") {
 		t.Fatalf("line count drifted: %d → %d", strings.Count(fenced, "\n"), strings.Count(stripped, "\n"))
 	}
@@ -92,7 +95,12 @@ func TestParseCellFacts_SkipsLeadingFrontmatterAndKeepsLineNumbers(t *testing.T)
 		t.Fatalf("want three blank lines then the cell verbatim, got %q", stripped[:40])
 	}
 	// No frontmatter: the source passes through untouched.
-	if got := stripCellFrontmatter(cellFixture); got != cellFixture {
-		t.Fatalf("unfenced source must be returned verbatim")
+	if got, err := stripCellFrontmatter(cellFixture); err != nil || got != cellFixture {
+		t.Fatalf("unfenced source must be returned verbatim, got err=%v", err)
+	}
+	// A MALFORMED (unterminated) block is an error, not a scan-through: the
+	// component line inside it must never become a fact.
+	if _, err := parseCellFacts("---\nsourceSpec: v1\ncomponent api service\n"); err == nil {
+		t.Fatal("unterminated frontmatter must fail fact extraction")
 	}
 }

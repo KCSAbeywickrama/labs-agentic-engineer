@@ -1568,6 +1568,9 @@ const prdOnlyFiles: MockSpecFile[] = [
 const settledSpecFiles: MockSpecFile[] = [
   { path: "specs/requirements/prd.md", content: seededPrd },
   { path: "specs/requirements/user-stories.md", content: userStories },
+  // The design root rides with the first design artifact — a domain model
+  // without its cell would claim a design state the platform never produces.
+  { path: "specs/design/design.cell", content: designCell },
   { path: "specs/design/domain-model.md", content: domainModelMd },
 ];
 
@@ -1581,7 +1584,6 @@ const collaborationFiles: MockSpecFile[] = [
 
 const fullFiles: MockSpecFile[] = [
   ...settledSpecFiles,
-  { path: "specs/design/design.cell", content: designCell },
   { path: "specs/design/flows/browse-and-check-out.md", content: flowBrowseAndCheckout },
   { path: "specs/design/flows/review-order-history.md", content: flowOrderHistory },
   { path: "specs/design/security.json", content: securityJson },

@@ -63,7 +63,7 @@ hello-api -> postgres
   "appPath": "hello-api",
   "entrypoint": "deployment/service",
   "exposure": "internet",
-  "connections": [],
+  "dependencies": [{ "kind": "platform-resource", "name": "postgres", "resourceType": "postgres" }],
   "description": "Implement a simple Go HTTP service on port 9090 using net/http. Expose GET /hello that returns {\\"message\\": \\"Hello, World!\\"} with Content-Type: application/json. Include GET /health returning 200 OK for liveness probes. This is a public API — no authentication required, no X-User-Id checks."
 }
 `,

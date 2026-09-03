@@ -76,8 +76,14 @@ interface MermaidBlock {
 // Fences
 // -------------------------------------------------------------------------
 
+interface MermaidScan {
+  blocks: MermaidBlock[];
+  /** Line of a ```mermaid fence that never closes, if any. */
+  unterminated: number | null;
+}
+
 /** Every ```mermaid … ``` block in a markdown document. */
-function mermaidBlocks(content: string): MermaidBlock[] {
+function mermaidBlocks(content: string): MermaidScan {
   const out: MermaidBlock[] = [];
   let open: MermaidBlock | null = null;
   let inOtherFence = false;
@@ -103,8 +109,7 @@ function mermaidBlocks(content: string): MermaidBlock[] {
       inOtherFence = true;
     }
   });
-  if (open) out.push(open); // unterminated — the shape check names it
-  return out;
+  return { blocks: out, unterminated: open === null ? null : (open as MermaidBlock).fenceLine };
 }
 
 // -------------------------------------------------------------------------
@@ -371,7 +376,14 @@ export function checkDesignDiagram(
   const kind = diagramKindFor(path);
   if (kind === null) return null;
 
-  const blocks = mermaidBlocks(content);
+  const { blocks, unterminated } = mermaidBlocks(content);
+  if (unterminated !== null) {
+    return reject(
+      path,
+      "INVALID_DIAGRAM",
+      `the \`\`\`mermaid fence opened at line ${unterminated} is never closed — close it with \`\`\` on its own line.`,
+    );
+  }
   if (blocks.length === 0) {
     return reject(path, "INVALID_DIAGRAM", `it holds no \`\`\`mermaid block — it must hold exactly one ${kind}.`);
   }

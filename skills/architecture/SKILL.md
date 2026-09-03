@@ -130,7 +130,7 @@ violations:
   "appPath": "expense-api",           // repo-relative source dir — the component name
   "entrypoint": "deployment/service", // deploy entry — PAIRS with `type`: "deployment/service" for a service, "deployment/web-application" for a web-application
   "exposure": "internet",             // "internet" (public) | "intranet" (internal only)
-  "dependencies": [ /* see below — every design.cell edge appears here */ ],
+  "dependencies": [ /* see below — every dependency edge touching this component appears here */ ],
   "description": "One paragraph: single responsibility, port/entrypoint expectations, and what it explicitly does NOT do.",
   "stories": [1, 2, 4],               // PRD story numbers THIS component serves — the build gate refuses the tag while any story is claimed by nobody
   "skillsPinned": ["openapi-conventions", "ballerina"], // the skills this component's build needs — see the field above
@@ -166,8 +166,11 @@ into `workload.yaml` and the managed-API gateway binds to. The port lives in
 
 ### dependencies — one entry per design.cell edge
 
-`dependencies` mirrors the edges of design.cell: every arrow appears here
-and vice versa — a mismatch is a defect. The platform enforces the membership
+`dependencies` mirrors the DEPENDENCY edges of design.cell: every arrow
+between this component and another node appears here and vice versa — a
+mismatch is a defect. The `north ->` / `west ->` gateway arrows are
+**exposure**, not dependencies: they live in this component's `exposure`
+field and never become entries here. The platform enforces the membership
 half as you write: a dependency whose `name` is not a node the cell declares
 is refused (`UNKNOWN_DEPENDENCY`) with the cell statement to add. A resource
 you discover here — a database, a cache — is a cell node too: `editFile`

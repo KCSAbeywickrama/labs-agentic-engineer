@@ -69,19 +69,24 @@ export interface EvalRunOutput {
 
 /** The artifact each section's judge reads, clipped defensively. */
 const CLIP = 80_000;
-const clip = (s: string): string => (s.length > CLIP ? `${s.slice(0, CLIP)}\n…(clipped)` : s);
+const clip = (s: string): string =>
+  s.length > CLIP ? `${s.slice(0, CLIP)}\n…(clipped at ${CLIP} characters — later files were NOT judged)` : s;
 
 function requirementsArtifact(projectDir: string): string {
   return readProjectFile(projectDir, "specs/requirements/prd.md");
 }
 
 function designArtifact(projectDir: string): string {
+  const labeled = (rel: string): string => {
+    const content = readProjectFile(projectDir, rel);
+    return content ? `--- ${rel} ---\n${content}` : "";
+  };
   const parts: string[] = [
-    readProjectFile(projectDir, "specs/design/design.cell"),
-    readProjectFile(projectDir, "specs/design/domain-model.md"),
+    labeled("specs/design/design.cell"),
+    labeled("specs/design/domain-model.md"),
   ];
   for (const f of listFlows(projectDir)) {
-    parts.push(readProjectFile(projectDir, `specs/design/flows/${f}`));
+    parts.push(labeled(`specs/design/flows/${f}`));
   }
   const componentsDir = join(projectDir, "specs/design/components");
   if (existsSync(componentsDir)) {

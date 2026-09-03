@@ -45,9 +45,16 @@ type CellFacts struct {
 // parseCellFacts extracts the platform-relevant facts from design.cell source.
 // A leading `---` YAML frontmatter block (the root's sourceSpec carrier — see
 // DesignRootFile) is skipped: it is AssembleDesign's business, not a cell fact.
+// A MALFORMED block (unterminated `---`) is an error, never scanned through —
+// component-looking lines inside it must not become facts the scaffold or the
+// build scope act on.
 func parseCellFacts(source string) (*CellFacts, error) {
+	body, err := stripCellFrontmatter(source)
+	if err != nil {
+		return nil, fmt.Errorf("design.cell frontmatter: %w", err)
+	}
 	facts := &CellFacts{}
-	for i, rawLine := range strings.Split(stripCellFrontmatter(source), "\n") {
+	for i, rawLine := range strings.Split(body, "\n") {
 		line := i + 1
 		statement := strings.TrimSpace(rawLine)
 		if statement == "" || strings.HasPrefix(statement, "#") || strings.HasPrefix(statement, "//") {
@@ -92,16 +99,15 @@ func parseCellComponent(statement string, line int) (CellComponent, error) {
 // stripCellFrontmatter blanks a leading `---` YAML frontmatter block so the
 // statements below it keep their line numbers in diagnostics — the same fence
 // rule the TS grammar's stripFrontmatter applies. A malformed (unterminated)
-// block is left in place — the grammar surfaces it as unknown statements
-// rather than this fact extractor guessing.
-func stripCellFrontmatter(source string) string {
+// block is the caller's error to surface, never scanned through.
+func stripCellFrontmatter(source string) (string, error) {
 	_, body, err := SplitFrontmatter(source)
 	if err != nil {
-		return source
+		return "", err
 	}
 	// Preserve line count: replace every frontmatter line with a blank one.
 	cut := len(source) - len(body)
-	return strings.Repeat("\n", strings.Count(source[:cut], "\n")) + body
+	return strings.Repeat("\n", strings.Count(source[:cut], "\n")) + body, nil
 }
 
 // tokenizeCellStatement splits on whitespace, keeping double-quoted runs as

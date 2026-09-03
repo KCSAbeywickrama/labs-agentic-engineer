@@ -166,8 +166,11 @@ FIRST and the rest of the design follows it:
    requested change without the diagram tearing down and rebuilding. Only
    when the change replaces MOST of the diagram (a restructure) rewrite it
    instead: ONE `editFile` whose `oldString` is the entire current file and
-   whose `newString` is the complete new diagram. design.cell is the design
-   root — a protected path — so `removeFile` on it is refused.
+   whose `newString` is the complete new diagram. When the file opens with
+   the platform's `---` frontmatter block, the `newString` starts with that
+   block unchanged, then the new diagram — the lineage is not yours to drop.
+   design.cell is the design root — a protected path — so `removeFile` on it
+   is refused.
 2. Update `specs/design/domain-model.md` and the affected
    `specs/design/flows/` files when the change moves entities or reshapes a
    flow — a flow's participants must stay component ids the cell declares.
