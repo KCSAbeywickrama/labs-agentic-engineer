@@ -33,19 +33,15 @@ jobs:
       packages: write
     strategy:
       fail-fast: false
-      # A CAP ON RUNNER SLOTS, not on the work. Seven images used to start at
-      # once; on a shared org runner pool that is seven slots held for the length
-      # of the longest build, and the release competes with every other repo in
-      # the org for them. Three at a time should cost little wall-clock: the
-      # critical path is remote-worker alone (~28 min), and the other six run two
-      # at a time beside it. Raise the cap if a release ever tails on the images.
-      max-parallel: 3
+      # No max-parallel: all seven start at once. GitHub already queues a job
+      # when the org's concurrency limit is reached, so a cap prevents no
+      # failure — it only stops the release using runners that are idle.
       matrix:
         include:
-          # DECLARED FIRST because this is the long pole and observed slot order
-          # follows declaration order — an ordering GitHub documents nowhere, so
-          # treat it as a hint, not a guarantee: the worst case is a longer run,
-          # never a wrong one.
+          # DECLARED FIRST so the long pole takes a slot in the first batch when
+          # the pool is short, rather than queueing behind six shorter builds.
+          # Slot order following declaration order is observed, not documented —
+          # a hint, so the worst case is a slower run, never a wrong one.
           #
           # One runner image serves both task kinds (implementation and
           # validation) — see runners/remote-worker/Dockerfile.
@@ -231,14 +227,11 @@ jobs:
           - \`ghcr.io/wso2/aep/thunder-app-operator:${{ inputs.version }}\`"
 
   # ─── CTL: build every binary, then cut the release ──────────────────────────
-  # ONE job for all five targets. aectl is pure Go built with CGO_ENABLED=0, so
-  # every target is a cross-compile from the same toolchain and the loop below
-  # needs one checkout and one Go setup where five matrix jobs each paid their
-  # own. The compile itself is not free — each GOOS/GOARCH gets its own build
-  # cache, so the five are ~22s apiece rather than one build plus four cheap
-  # ones (measured cold: 1m51s for the set) — but that is the same work the
-  # matrix did, minus four runners. Building in the job that also cuts the
-  # release removes the upload-artifact/download-artifact round trip, which
+  # ONE job for all five targets. aectl is pure Go with CGO_ENABLED=0, so every
+  # target cross-compiles from the same toolchain on one checkout and one Go
+  # setup. The compiles are not free — each GOOS/GOARCH has its own build cache,
+  # so it is ~22s apiece, 1m51s for the set measured cold — but that is the work
+  # the matrix did anyway, minus four runners and the artifact round trip that
   # existed only to hand the binaries to a sixth job.
   release-ctl:
     name: Build aectl + create CTL release
@@ -285,6 +278,10 @@ jobs:
           VERSION: ${{ inputs.version }}
           REPO: ${{ github.repository }}
         run: |
+          # Re-checked here, though the build step above already validated it:
+          # this is the step that cuts a public tag, and shellcheck cannot parse
+          # the multi-line --notes string as the script's opening command.
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]] || { echo "invalid version: $VERSION"; exit 1; }
           gh release create "ctl/v${VERSION}" \
             --title "AECTL v${VERSION}" \
             --notes "## AECTL v${VERSION}
