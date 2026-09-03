@@ -82,7 +82,10 @@ screen you cannot reach from its flow is a broken page, even if it renders.
 
 ## The evidence
 
-Fidelity is proven by a walk, not claimed from the code: once the build is
-clean, `mock-verification` opens the app in a browser and the lead carries its
-report into the PR. You write no checklist of your own — a screen you could not
-build as drawn is a gap you name in your report, and the walk records it.
+Presence and behaviour are proven by a walk, not claimed from the code: once
+the build is clean, `mock-verification` opens the app in a browser, reaches
+every screen, uses every drawn control and follows every arrow, and the lead
+carries its report into the PR. Layout and copy are outside that walk; they stay
+the reviewer's comparison of the rendered wireframe against the running page.
+You write no checklist of your own — a screen you could not build as drawn is a
+gap you name in your report, and the walk records it.

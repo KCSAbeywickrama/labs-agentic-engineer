@@ -71,7 +71,8 @@ browser config — they are pod env for nginx.
    dependencies behind your back.
 5. **Walk** — `mock-verification`, another agent's dispatch. Your job ends at
    a clean Verify with `mock/` in place.
-6. **PR** — only once the walk leaves no failure open.
+6. **PR** — the lead's, once the walk has reported; an open `[ ]` line rides in
+   its body (the component contract's **Walks**).
 
 ## Constraints
 

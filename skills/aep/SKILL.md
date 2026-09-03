@@ -342,10 +342,11 @@ wrote buys nothing and carries the whole set for the rest of the run.
 **You are the sole git writer.** When a subagent reports done, *you* stage those
 paths and commit them exactly as in step 4. **No worktrees** — one workspace.
 
-**A walk that leaves a failure open is not a failed wave.** Its report comes
-back with the fixes already in the tree (step 3): commit the component with the
-rest of that issue's work and carry the report's `[ ]` lines into **Finish the
-cycle** as the diagnostic, naming the screen and what happens on it.
+**A walk that leaves a failure open is not a failed wave** (the component
+contract's **Walks**). Its report comes back with the fixes already in the tree
+(step 3): commit the component with the rest of that issue's work and carry the
+report's `[ ]` lines into **Finish the cycle**, where the pull request body
+carries them verbatim.
 
 ## 3 · Finish the cycle
 
@@ -369,6 +370,10 @@ That list matters twice: the **auto-merge predicate** needs at least one
 is treated as somebody else's work and left alone), and GitHub closes each
 referenced issue **when the PR merges** — one you finished but didn't list gets
 worked again next cycle. **The platform merges the PR; no human reviews it.**
+
+**A walk left `[ ]` lines** → the same PR, ready for review, with those lines
+copied verbatim under an `## Open on screen` heading. They are defects on a
+committed component, not a red one (the component contract's **Walks**).
 
 **A component stayed red** → the same PR, but `--draft` and a `[build-failed]`
 title prefix. A draft is the platform's signal that you are not finished and is

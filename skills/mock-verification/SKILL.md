@@ -68,13 +68,15 @@ finer than obvious with it.
 
 ## 1 · Checklist
 
-Before the browser opens, write `/tmp/walk-<component>.md` from the DSL alone:
-one block per flow, one line per screen naming its controls and arrows, then one
-line each for Roles, Session, Probes and Console. It is your walk order, and
-filled in it is your report. A screen you never reach is then a line with no
-mark, where a list assembled as you go simply never mentions it.
+Before the browser opens, write `/tmp/walk-<component>.md` from your map alone
+(the DSL, or the app's routes when there is none): one block per flow, one block
+`screens in no flow` when the map has any, one line per screen naming its
+controls and arrows, then one line each for Roles, Session, Probes and Console.
+It is your walk order, and filled in it is your report. A screen you never reach
+is then a line with no mark, where a list assembled as you go simply never
+mentions it.
 
-**Done when:** every screen and every flow in the file has a line, and so does
+**Done when:** every screen and every flow in the map has a line, and so does
 each of Roles, Session, Probes and Console.
 
 ## 2 · Stand it up
@@ -140,6 +142,8 @@ flow "<name>" (<role>)
 - [x] <Screen>: FIXED <what was wrong>; <what you changed>. Re-walked: <what it does now>.
 - [ ] <Screen>: <what happens>. Tried <what>, 3 attempts. <what still happens>.
 - [~] <Screen>: <the truth that lives outside the app>.
+screens in no flow
+- [x] <Screen>: <reached at its route under <role>; what you did and what the page did back>
 - [x] Roles: <role> on <route> bounced to <route>; <role> reached <screen>.
 - [x] Session: ?auth=out ran the guard, signIn() returned to <screen>; Sign out left <screen>.
 - [x] Probes: the empty <form> <what it did>; <detail route> with an unknown id <what it rendered>.
