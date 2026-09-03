@@ -82,10 +82,44 @@ screen you cannot reach from its flow is a broken page, even if it renders.
 
 ## The evidence
 
-Presence and behaviour are proven by a walk, not claimed from the code: once
-the build is clean, `mock-verification` opens the app in a browser, reaches
-every screen, uses every drawn control and follows every arrow, and the lead
-carries its report into the PR. Layout and copy are outside that walk; they stay
-the reviewer's comparison of the rendered wireframe against the running page.
-You write no checklist of your own — a screen you could not build as drawn is a
-gap you name in your report, and the walk records it.
+Two lists, one pair. The **Task** carries a `Screens:` line and a `Flows:`
+checklist with every box unchecked — that is what must be built, and it is
+what you work from. The **PR body** carries the same two lists with the boxes
+earned ticked. You never tick the Task's copy; re-planning rewrites that body.
+
+The ticks are **evidence, not a claim**, and they come from the walk. Once the
+build is clean, `mock-verification` opens the app in a browser, reaches every
+screen, uses every drawn control and follows every arrow, and reports one line
+per flow and per screen; the lead ticks the PR's lists from that report when it
+opens the PR. You write no checklist of your own — a screen you could not build
+as drawn is a gap you name in your report to the lead, and the walk records it.
+
+```text
+Wireframe fidelity (specs/design/components/<name>/wireframes.dsl)
+
+Screens
+- [x] RiskQueue → /risk-queue
+- [x] MyRisks → /my-risks
+- [ ] NewRisk → /risks/new — "Register" select not built: no registers endpoint
+
+Flows
+- [x] F1 · Approval queue — stories 2, 5
+- [ ] F2 · Log a risk — stories 1, 3 — breaks at NewRisk → RiskDetail: the
+      "Register" select is not built
+```
+
+**Screens** come from the Task's `Screens:` line, one line each, naming the
+route built. A screen is ticked when the walk reached it, every drawn control
+acted and every arrow navigated.
+
+**Flows** carry over from the Task's `Flows:` checklist, keeping each one's
+number, name and story set — one line each here, not the Task's labelled
+block, since its persona and `Walk:` chain are recorded there. A flow is ticked
+when the walk went through its chain end to end by clicking, entry screen
+first; otherwise the line names the step it broke at. A flow the Task lists
+appears here even when it could not be built: dropping the line is how a
+missing journey goes unnoticed, and an unwalkable flow strands the stories it
+carries.
+
+Layout and copy are outside the walk. They stay the reviewer's comparison of
+the rendered wireframe against the running page.

@@ -371,9 +371,12 @@ is treated as somebody else's work and left alone), and GitHub closes each
 referenced issue **when the PR merges** — one you finished but didn't list gets
 worked again next cycle. **The platform merges the PR; no human reviews it.**
 
-**A walk left `[ ]` lines** → the same PR, ready for review, with those lines
-copied verbatim under an `## Open on screen` heading. They are defects on a
-committed component, not a red one (the component contract's **Walks**).
+**A web application in the cycle** → its Task's `Screens:` and `Flows:` lists
+go in the body, ticked from the walk's report: a screen when its line is green,
+a flow when every screen in its block is. An open `[ ]` line stays unticked with
+the report's line beside it (`wireframes`' `references/implementing.md` shows
+the shape). The PR stays ready for review — a defect on a committed component
+is not a red one (the component contract's **Walks**).
 
 **A component stayed red** → the same PR, but `--draft` and a `[build-failed]`
 title prefix. A draft is the platform's signal that you are not finished and is
