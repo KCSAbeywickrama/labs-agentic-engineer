@@ -184,6 +184,31 @@ records one deployed version per project, so every other completed version says
 title. This is the "stays discoverable on the Builds page" the build-confirm
 dialog's copy promises.
 
+### Deployments
+
+An environment's card and its ledger row say the same word about it
+(ADR-0027). Development's is the deploy aggregate's — the same fact the Builds
+ledger reads as *Deployed to development* — so the two ledgers never disagree
+about the version running in dev; production, which the aggregate never names,
+is read off its bindings.
+
+| Situation | Says |
+|---|---|
+| Every binding settled and serving | **`Deployed`** |
+| A binding still converging | **`Deploying`** |
+| A binding failed | **`Deploy failed`** |
+| Every binding intentionally undeployed | **`Undeployed`** |
+| Nothing bound | **`Nothing deployed`** |
+
+**The Validation cell is development's alone** — the check runs against the
+dev deployment, so production reads `—`. It says the counts once the join has
+them (`24 / 24 passed`), the shared verdict word otherwise (*validating*,
+*awaiting fix*, *validated\**), and **`Not run`** before anything has been asked.
+
+**A row is what the environment runs now.** The platform keeps no deployment
+record, so there is no *Superseded* row and no Duration cell — saying either
+would be a guess. The card's age (*2h ago*) is the newest binding's stamp.
+
 ### A task's row, on a build
 
 | Situation | Says |
