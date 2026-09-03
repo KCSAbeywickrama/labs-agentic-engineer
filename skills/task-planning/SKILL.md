@@ -93,29 +93,39 @@ the stories it walks, and its `description` line from the DSL:
 ```markdown
 Flows:
 
-- [ ] **F1 · "Submit an expense"** (Employee) — stories 3, 4, 7
-  MyClaims → NewClaim → ClaimDetail
+- [ ] **F1 · Submit an expense**
+  Persona: Employee
+  Stories: 3, 4, 7
+  Walk: MyClaims → NewClaim → ClaimDetail
   An employee files a claim and tracks its approval.
-- [ ] **F2 · "Approve a claim"** (Manager) — stories 5, 6
-  ApprovalQueue → ClaimReview
+- [ ] **F2 · Approve a claim**
+  Persona: Manager
+  Stories: 5, 6
+  Walk: ApprovalQueue → ClaimReview
   A manager works the pending queue and decides a claim.
 
 No flow: story 1 (sign-in — platform SSO owns the page), story 9 (nightly
 export job, no view).
 ```
 
-Why each part earns its place: the **number** gives the coding agent and the
-reviewer a short handle, so "F2 is not walkable" says exactly which journey
-without quoting a whole name; the **screen chain** is the flow's own screen
-list in walkthrough order, entry screen first — the `Screens:` line above says
-which routes to build, this says the order someone walks them, and it is the
-walk the PR has to demonstrate; the **description** is already written in the
-DSL, so copying it saves every later reader from opening the file to learn
-what the journey is for; and the **checkbox** makes it a contract the PR ticks
-back item by item.
+One labelled line each, so nothing has to be inferred from punctuation:
 
-Keep the chain to screen names and arrows — no commentary. A screen appearing
-in two flows is listed in both; that is the DSL's shape, not a mistake.
+- **`F1 ·` + the flow's name** — the number is a short handle, so "F2 is not
+  walkable" names one exact journey without quoting a whole title.
+- **`Persona:`** — the flow's `role` line. Say `Persona: any` for a
+  role-less journey rather than dropping the line.
+- **`Stories:`** — the story numbers this journey walks.
+- **`Walk:`** — the flow's screens in walkthrough order, entry screen first.
+  Deliberately not called `Screens:`: that word is taken above for the routes
+  to build, and this is the order someone walks them — the walk the PR has to
+  demonstrate. Names and arrows only, no commentary. A screen in two flows
+  appears in both; that is the DSL's shape, not a mistake.
+- **The last line is the flow's `description`** from the DSL, unlabelled
+  because it is prose. Copying it saves every later reader from opening the
+  file to learn what the journey is for.
+
+The **checkbox** makes the whole thing a contract the PR ticks back item by
+item.
 
 **Leave every box unchecked.** The issue states what must be walked; the
 coding agent ticks the same list in its PR body. Re-planning rewrites this
