@@ -114,12 +114,10 @@ stack skill pins the base image).
 
 **A `web-application` is green when it builds AND walks.** A screen that
 compiles can still render the wrong content, drop a navigation arrow its
-wireframe draws, or leave a button wired to nothing. So once its build is clean
-you stand the app up in mock mode — no cluster, no sibling service, no IDP —
-open every screen in a real browser and fix what does not work. Load
-`mock-verification`: it is that procedure end to end, and it belongs to whoever
-builds the component rather than to a reviewer of it. Stop the server you
-started.
+wireframe draws, or leave a button wired to nothing. The walk is
+`mock-verification`, dispatched by the lead once your build is clean: leave
+`mock/` and the `dev:mock` script working and hand off a clean build. A clean
+build alone is not green, so never report it as such.
 
 **If a component will not go green**, stop after a reasonable number of attempts
 at one root cause — three is plenty. Do not force something broken through.
