@@ -268,6 +268,9 @@ func TestClassifyComponentState(t *testing.T) {
 		deploy     delivery.ComponentDeploy
 		want       string
 		wantDesire string
+		// wantWithdrawn is the undeploy marker, which rides beside `serving` so
+		// the planner can tell "owes nothing" from "offers an address".
+		wantWithdrawn bool
 	}{
 		{
 			name: "no build at all — nothing to promote",
@@ -329,11 +332,13 @@ func TestClassifyComponentState(t *testing.T) {
 		},
 		{
 			// Withdrawn on purpose. Promoting over it would be the platform
-			// overruling the person who asked for it.
-			name:   "undeployed on purpose — nothing is owed",
-			runs:   []BuildRunInfo{green("aaa1", 0)},
-			deploy: delivery.ComponentDeploy{Undeploy: true, Ready: true},
-			want:   delivery.ComponentStateServing,
+			// overruling the person who asked for it — but it offers no address
+			// either, which is what the marker below is carried for.
+			name:          "undeployed on purpose — nothing is owed",
+			runs:          []BuildRunInfo{green("aaa1", 0)},
+			deploy:        delivery.ComponentDeploy{Undeploy: true, Ready: true},
+			want:          delivery.ComponentStateServing,
+			wantWithdrawn: true,
 		},
 		{
 			// A build of whatever the branch tip was names no commit, so it names
@@ -359,6 +364,15 @@ func TestClassifyComponentState(t *testing.T) {
 			}
 			if c.wantDesire != "" && got.DesiredRelease != at(c.wantDesire) {
 				t.Errorf("desired release = %q, want %q", got.DesiredRelease, at(c.wantDesire))
+			}
+			if got.Undeploy != c.wantWithdrawn {
+				t.Errorf("undeploy = %v, want %v", got.Undeploy, c.wantWithdrawn)
+			}
+			// The two questions a serving component is asked, and they differ for
+			// exactly one state: a withdrawn component owes the version nothing
+			// and offers a consumer nothing.
+			if want := c.want == delivery.ComponentStateServing && !c.wantWithdrawn; got.ServesConsumers() != want {
+				t.Errorf("ServesConsumers() = %v, want %v", got.ServesConsumers(), want)
 			}
 		})
 	}

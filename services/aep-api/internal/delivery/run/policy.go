@@ -299,7 +299,11 @@ func classifyComponentState(projectID, component string, runs []BuildRunInfo,
 		// deliberate undeploy would be the platform overruling the person who
 		// asked for it, and refusing to deliver the version would fail a run
 		// over the same decision.
-		st.State = delivery.ComponentStateServing
+		//
+		// The marker rides along because it does NOT make this component a
+		// satisfied hard provider — it has no active release, so it has no
+		// address (ComponentState.ServesConsumers).
+		st.State, st.Undeploy = delivery.ComponentStateServing, true
 		return st
 	}
 	st.DesiredSHA = newestGreenCommit(runs)

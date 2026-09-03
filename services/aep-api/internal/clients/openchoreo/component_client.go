@@ -1279,40 +1279,72 @@ func (c *componentClient) ListWorkflowRuns(ctx context.Context, orgName, project
 		fmt.Sprintf("%s=%s", string(LabelKeyComponent), scopedComp), limit, cursor)
 }
 
-// ListBuildRuns lists a component's WorkflowRuns with the commit each one
-// built. It takes the host's default page for the reason the re-trigger count
-// does: the runs a decision turns on are the newest a component has, and paging
-// a long-lived component's whole history on every poll would cost far more than
-// the handful of rows the answer needs.
+// ListBuildRuns lists a component's build WorkflowRuns with the commit each one
+// built, FOLLOWING PAGINATION to the end.
+//
+// Every page, not the first, and that is a correctness requirement rather than
+// thoroughness. The caller picks the newest SUCCEEDED run to decide which
+// release a component should be serving, and this list is paged with Kubernetes
+// continuation tokens: a page is a slice of the collection in the API server's
+// own order, so a newer green run can sit on a later page. Reading one page
+// would then name an older release as the desired one — and the deploy stage
+// would faithfully promote the component BACKWARDS onto it.
+//
+// The cost is bounded by the page size rather than by the component's history
+// being small: one round trip per buildRunPageSize runs, once per version-state
+// read. The re-trigger budget's own read (eventcore) is a different question —
+// it counts attempts at ONE commit, which are always among the newest runs — and
+// it is free to keep taking the first page.
 func (c *componentClient) ListBuildRuns(ctx context.Context, orgName, projectName, componentName string) ([]BuildRunSummary, error) {
 	scopedComp := ScopedComponentName(projectName, componentName)
 	sel := ocgen.LabelSelectorParam(fmt.Sprintf("%s=%s", string(LabelKeyComponent), scopedComp))
-	resp, err := c.oc.ListWorkflowRunsWithResponse(ctx, orgName, &ocgen.ListWorkflowRunsParams{LabelSelector: &sel})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list workflow runs: %w", err)
+	limit := ocgen.LimitParam(buildRunPageSize)
+	params := &ocgen.ListWorkflowRunsParams{LabelSelector: &sel, Limit: &limit}
+
+	var out []BuildRunSummary
+	for {
+		resp, err := c.oc.ListWorkflowRunsWithResponse(ctx, orgName, params)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list workflow runs: %w", err)
+		}
+		if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
+			return nil, handleErrorResponse(resp.StatusCode(), ErrorResponses{
+				JSON400: resp.JSON400,
+				JSON401: resp.JSON401,
+				JSON403: resp.JSON403,
+				JSON500: resp.JSON500,
+			})
+		}
+		for _, run := range resp.JSON200.Items {
+			model := workflowRunToModel(run)
+			out = append(out, BuildRunSummary{
+				Name:      model.Name,
+				Status:    model.Status,
+				Completed: model.Completed,
+				Succeeded: model.Status == ReasonWorkflowSucceeded,
+				CommitSHA: buildRunCommit(run),
+				StartedAt: derefTime(run.Metadata.CreationTimestamp),
+			})
+		}
+		next := resp.JSON200.Pagination.NextCursor
+		if next == nil || *next == "" {
+			return out, nil
+		}
+		// A non-advancing cursor would spin this loop forever — fail instead,
+		// exactly as the release-binding listing does.
+		if params.Cursor != nil && *next == string(*params.Cursor) {
+			return nil, fmt.Errorf("list workflow runs for %q: pagination did not advance (cursor %q)",
+				componentName, *next)
+		}
+		cur := ocgen.CursorParam(*next)
+		params.Cursor = &cur
 	}
-	if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
-		return nil, handleErrorResponse(resp.StatusCode(), ErrorResponses{
-			JSON400: resp.JSON400,
-			JSON401: resp.JSON401,
-			JSON403: resp.JSON403,
-			JSON500: resp.JSON500,
-		})
-	}
-	out := make([]BuildRunSummary, 0, len(resp.JSON200.Items))
-	for _, run := range resp.JSON200.Items {
-		model := workflowRunToModel(run)
-		out = append(out, BuildRunSummary{
-			Name:      model.Name,
-			Status:    model.Status,
-			Completed: model.Completed,
-			Succeeded: model.Status == ReasonWorkflowSucceeded,
-			CommitSHA: buildRunCommit(run),
-			StartedAt: derefTime(run.Metadata.CreationTimestamp),
-		})
-	}
-	return out, nil
 }
+
+// buildRunPageSize is how many WorkflowRuns one page of the build listing asks
+// for. Large enough that an ordinary component's whole history arrives in a
+// single round trip, small enough that one response stays a sensible size.
+const buildRunPageSize = 100
 
 // buildRunCommit reads back the commit the trigger pinned the run to —
 // `spec.workflow.parameters.repository.revision.commit`, the exact path

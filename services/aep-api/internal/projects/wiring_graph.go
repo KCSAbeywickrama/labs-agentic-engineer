@@ -110,8 +110,8 @@ func deploymentWaves(design *spec.DesignFile, state delivery.VersionState) (deli
 	if len(promotable) == 0 {
 		return plan, nil
 	}
-	// Only edges INSIDE the promoted set order anything. A provider that is
-	// serving already has an address, so waiting on it would be waiting on
+	// Only edges INSIDE the promoted set order anything. A provider that already
+	// serves its consumers has an address, so waiting on it would be waiting on
 	// something that has happened — and by the rule above, a provider that is
 	// neither serving nor promoted here means its consumer is held, not ordered.
 	promoting := make(map[string]struct{}, len(promotable))
@@ -173,7 +173,11 @@ func promotableSet(behind []string, providers map[string][]string,
 			}
 			var unmet []string
 			for _, p := range providers[name] {
-				if byName[p].State == delivery.ComponentStateServing {
+				// ServesConsumers, not `State == serving`: a component somebody
+				// UNDEPLOYED on purpose owes the version nothing and so reads as
+				// serving, but it has no active release and therefore no address
+				// for this component's start-up config to carry.
+				if byName[p].ServesConsumers() {
 					continue
 				}
 				if _, promoting := candidates[p]; promoting {

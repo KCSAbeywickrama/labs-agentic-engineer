@@ -88,6 +88,15 @@ type ComponentState struct {
 	// Pinned is the release the binding pins, "" when there is no binding.
 	Pinned string `json:"pinned,omitempty"`
 	Ready  bool   `json:"ready"`
+	// Undeploy is a binding somebody took out of the environment on purpose.
+	//
+	// Such a component reads as `serving` — nothing is owed, and promoting over a
+	// deliberate withdrawal would be the platform overruling the person who asked
+	// for it — but it is NOT a satisfied hard provider: it has no active release,
+	// so it has no address for a consumer's start-up config to carry. The two
+	// facts are separate for exactly that reason, and a planner that could not
+	// tell them apart would publish a web app against a backend nobody is running.
+	Undeploy bool `json:"undeploy,omitempty"`
 	// Reason is OpenChoreo's own Ready reason, verbatim. Carried for the log and
 	// the issue body; never branched on here.
 	Reason string `json:"reason,omitempty"`
@@ -134,6 +143,16 @@ func (v VersionState) NotServing() []ComponentState {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Component < out[j].Component })
 	return out
+}
+
+// ServesConsumers reports whether this component's address exists for a hard
+// consumer to be composed against: serving, and not deliberately withdrawn.
+//
+// Deliberately narrower than `State == serving`, which answers "does the version
+// owe this component anything". An undeployed component owes nothing and offers
+// nothing, and only the planner cares about the difference.
+func (c ComponentState) ServesConsumers() bool {
+	return c.State == ComponentStateServing && !c.Undeploy
 }
 
 // ServingCount is how many of the version's components are serving, out of how

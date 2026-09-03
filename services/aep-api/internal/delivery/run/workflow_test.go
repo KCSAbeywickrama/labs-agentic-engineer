@@ -1186,7 +1186,7 @@ func TestReconcile_AServingVersionWritesNothing(t *testing.T) {
 	h.env.AssertNotCalled(t, "PollDeployments", mock.Anything, mock.Anything)
 }
 
-// TestDeploy_PromotesWaveByWaveThenConverges pins the whole stage's shape.// TestDeploy_PromotesWaveByWaveThenConverges pins the whole stage's shape.
+// TestDeploy_PromotesWaveByWaveThenConverges pins the whole stage's shape.
 //
 // A web app reads its backend's address out of window._env_ at module load, and
 // that address exists only once the backend has a rendered binding — so the
@@ -1280,6 +1280,46 @@ func TestDeployOrderUnsatisfiable_SettlesAsADeployFailure(t *testing.T) {
 		"a cycle is nobody's individual fault — every component in it is named")
 	require.Contains(t, h.deployMints[0].Reasons["web-a"], "hard dependency cycle",
 		"the cause reaches the issue body rather than only the workflow history")
+}
+
+// A permanent plan failure must always NAME somebody, because the fix issue is
+// what stops the next boundary settling a version that is not running.
+//
+// The reachable hole this closes: a pass is entered when anything is behind OR
+// converging, so a version whose components are all converging can hit an
+// unsatisfiable order with an empty behind set. Attributed to the behind set
+// alone, the failure would name nobody, mint nothing, and settle the run on the
+// deploy budget with an empty milestone behind it — the exact wedge the stage
+// exists to stop producing.
+func TestDeployOrderPermanentlyUnsatisfiable_NamesEveryNonServingComponent(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
+	// Nothing behind: both components are converging towards the release they
+	// already pin, which is what makes the behind set empty.
+	h.versionIs(
+		delivery.ComponentState{
+			Component: "todo-api", State: delivery.ComponentStateConverging,
+			DesiredSHA: testMergeSHA, Pinned: "release-todo-api",
+		},
+		delivery.ComponentState{
+			Component: "todo-webapp", State: delivery.ComponentStateConverging,
+			DesiredSHA: testMergeSHA, Pinned: "release-todo-webapp",
+		},
+	)
+	h.wavesAre(nil, temporal.NewNonRetryableApplicationError(
+		"deployment: hard dependency cycle among components todo-api needs [todo-webapp]; todo-webapp needs [todo-api]",
+		errTypePermanentDeploy, nil))
+	h.deployMintsAre([]int{testRepairIssue})
+	h.merges(1)
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
+	require.Equal(t, 1, h.deployMintCount(), "a failure that names nobody files nothing and wedges the run")
+	require.ElementsMatch(t, []string{"todo-api", "todo-webapp"},
+		delivery.TargetNames(h.deployMints[0].Failed),
+		"with nothing behind, the attribution falls back to every component that is not serving")
 }
 
 // A plan that could not be READ is a blip, not an answer, and must keep the

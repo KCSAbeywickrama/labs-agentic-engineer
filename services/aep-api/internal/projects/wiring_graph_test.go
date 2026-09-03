@@ -68,6 +68,14 @@ func wiringServing(name string) delivery.ComponentState {
 	}
 }
 
+// wiringWithdrawn is a component somebody undeployed on purpose: it reads as
+// serving (the version owes it nothing) but offers no address.
+func wiringWithdrawn(name string) delivery.ComponentState {
+	st := wiringServing(name)
+	st.Undeploy = true
+	return st
+}
+
 func wiringUnbuilt(name string) delivery.ComponentState {
 	return delivery.ComponentState{Component: name, State: delivery.ComponentStateUnbuilt}
 }
@@ -197,6 +205,17 @@ func TestDeploymentWaves(t *testing.T) {
 		version:    versionOf(wiringConverging("api"), wiringBehind("web")),
 		wantHeld:   map[string][]string{"web": {"api"}},
 		wantWaited: []string{"api"},
+	}, {
+		// A provider somebody UNDEPLOYED is not a satisfied hard edge. It reads
+		// as serving — nothing is owed and nothing may promote over the decision
+		// — but it has no active release, so it has no address for the web app's
+		// start-up config to carry. Promoting the consumer anyway is the blank
+		// page, reached through the one state that says "serving" and means
+		// "nothing is running".
+		name:     "an undeployed provider does not satisfy its consumer",
+		design:   designWith(wiringWebApp("web", "api"), wiringService("api")),
+		version:  versionOf(wiringWithdrawn("api"), wiringBehind("web")),
+		wantHeld: map[string][]string{"web": {"api"}},
 	}, {
 		// The idempotence that lets this run on every cycle: nothing behind means
 		// nothing written and nothing waited on.

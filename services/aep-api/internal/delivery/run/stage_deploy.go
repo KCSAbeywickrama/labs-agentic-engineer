@@ -97,7 +97,19 @@ func (l *loop) reconcileVersion(ctx workflow.Context, version delivery.VersionSt
 		if !isPermanentDeploy(err) {
 			return cycleNone, err
 		}
-		l.failDeploy(behindNames(version), version, err)
+		// Attributed to what is BEHIND, and to every non-serving component when
+		// nothing is behind. The second half is not tidiness: a pass is entered
+		// when anything is behind OR converging, so a version whose components are
+		// all converging can reach a permanent plan failure with an empty behind
+		// set — and a failure attributed to nobody mints no issue, which settles
+		// the run on the deploy budget with no named component and nothing to work.
+		// That is exactly the wedge the paragraph above describes. An unsatisfiable
+		// order is nobody's individual fault either way (see reasonForAll).
+		failed := behindNames(version)
+		if len(failed) == 0 {
+			failed = notServingNames(version)
+		}
+		l.failDeploy(failed, version, err)
 		return cycleDeployFailed, nil
 	}
 	if len(plan.Held) > 0 {
@@ -177,15 +189,28 @@ func (l *loop) reconcileVersion(ctx workflow.Context, version delivery.VersionSt
 	return l.awaitDeployments(ctx, converge, version, deadline)
 }
 
-// behindNames is every component the version state says is behind — the
-// attribution for a failure of the PLAN, which is nobody's individual fault
-// (see reasonForAll).
+// behindNames is every component the version state says is behind — the first
+// choice of attribution for a failure of the PLAN, which is nobody's individual
+// fault (see reasonForAll).
 func behindNames(v delivery.VersionState) []string {
 	var out []string
 	for _, c := range v.Components {
 		if c.State == delivery.ComponentStateBehind {
 			out = append(out, c.Component)
 		}
+	}
+	return out
+}
+
+// notServingNames is every component that is not serving — the attribution of
+// last resort, so a stage-wide failure always names somebody and therefore
+// always files work. A failure nobody is filed against is a run that settles on
+// the deploy budget with an empty milestone behind it.
+func notServingNames(v delivery.VersionState) []string {
+	off := v.NotServing()
+	out := make([]string, 0, len(off))
+	for _, c := range off {
+		out = append(out, c.Component)
 	}
 	return out
 }
