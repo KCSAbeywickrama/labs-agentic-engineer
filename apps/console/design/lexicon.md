@@ -41,7 +41,7 @@ concept for *the agreed description of what we're building*.
 | Section | Artifacts | Repo |
 |---|---|---|
 | `REQUIREMENTS` | **Product requirements** | `specs/requirements/prd.md` |
-| `DESIGN` (not `DESIGNS` — one design, several files) | **Architecture** · **Design overview** · **Security** · then per-component | `specs/design/` |
+| `DESIGN` (not `DESIGNS` — one design, several files) | **Architecture** · **Domain model** · **Security** as rows, then the groups: **Flows**, then one per component | `specs/design/` |
 | `VALIDATION` | **Validation criteria** | `specs/validation/validation-criteria.json` |
 
 **Security** is one rail entry, one page:
@@ -50,7 +50,20 @@ concept for *the agreed description of what we're building*.
 |---|---|---|
 | **Security** | which Roles this project uses, what each may do within this project, its Test users, and the Thunder application client | `specs/design/security.json` |
 
-Agents, the runner's validation cycle and aep-api consume that repo path
+**Flows** is one collapsible group — one row per key flow, named by its
+slug — and each **component** is another, headed by the component's own name:
+
+| artifact | what it holds | repo path |
+|---|---|---|
+| a flow row | one key flow: a PRD actor's journey across the architecture, as a sequence diagram | `specs/design/flows/<slug>.md` |
+| **Design** | the component's authored design record — type, language, the stories it serves, dependencies, pinned skills | `specs/design/components/<name>/design.json` |
+| **API** | the component's OpenAPI contract | `specs/design/components/<name>/openapi.yaml` |
+| **Wireframe** | the component's screens | `specs/design/components/<name>/wireframes.dsl` |
+
+A label under a header adds the artifact, never the subject the header already
+names — *Design*, not *Design overview* (the retired root document's name).
+
+Agents, the runner's validation cycle and aep-api consume those repo paths
 internally. This table *is* the mapping — keep it, so nobody later "fixes" the
 inconsistency in the wrong direction. It holds only while the user never sees a
 path, which requires the agent to stop quoting them

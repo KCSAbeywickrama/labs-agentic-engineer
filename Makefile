@@ -86,7 +86,7 @@ cover:
 #   make eval EVAL=<file>     one eval file, e.g. EVAL=evals/requirements.eval.ts
 #   make eval-ui              run once + serve the local results UI
 eval:
-	$(PNPM) --filter @aep/spec-agent-evals eval $(if $(EVAL),-- $(EVAL),)
+	$(PNPM) --filter @aep/spec-agent-evals eval $(if $(EVAL),$(EVAL),)
 
 eval-ui:
 	$(PNPM) --filter @aep/spec-agent-evals eval:ui

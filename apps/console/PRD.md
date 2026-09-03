@@ -92,6 +92,17 @@ which is also what closes its issue. Newest first; links go to the feature's
 GitHub issue plus any ADRs it produced. Features still being built aren't
 here: they're the open `console` + `feature` issues.
 
+- Spec view — the design reads as its parts: the rail's **DESIGN** section
+  lists *Architecture · Domain model · Security* as documents, then a
+  collapsible **Flows** group — one row per key flow, a ghost row while the
+  turn is still planning it — and one group per component, every group header
+  carrying a glyph and every component holding *Design · API · Wireframe*.
+  Presents the bundle shape the platform now writes
+  ([ADR-0020, repo-wide](../../docs/decisions/ADR-0020-design-cell-is-the-design-root.md)):
+  the cell is the design root, the domain model and each key flow are one
+  diagram per file, and *Design overview* retires with the file it named —
+  [#686](https://github.com/wso2/labs-agentic-engineer/issues/686)
+  (no contract change)
 - Point at a passage, say what should change — **any** markdown spec document,
   not just the PRD's lensed lines. A drag snaps to whole blocks on release
   (a partial paragraph becomes the paragraph, a heading takes its section) and
