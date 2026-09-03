@@ -29,9 +29,9 @@ You have up to three sources in context; read them in this order of priority:
 
 ## Cover every story
 
-The user stories are **numbered**, so coverage is countable — and this is the
-only moment anyone can count it, while the requirements are in front of you.
-Do it deliberately, before you write the file:
+The user stories are **numbered**, so coverage is countable. Count it
+deliberately, before you write the file, while the requirements are in front
+of you:
 
 **Walk the numbered stories in order. For each one, name the flow that walks
 it.** Each flow will usually serve several stories, and a story may appear in
@@ -49,22 +49,16 @@ the product genuinely gives it no view:
   validation rule enforced in the API.
 - **Machine-facing stories** — an endpoint another service calls.
 
-Everything else is a gap: add the screens it needs and put them in a flow.
-The distinction to hold onto is *set aside knowingly* versus *missed* — write
-the set-aside list down (it goes in the task issue), so the next reader can
-tell which happened.
+Every other uncovered story is a gap: add the screens it needs and put them in
+a flow.
 
-Run it the other way too: a flow serving no story is a journey nobody asked
-for, and a screen in no flow is one nobody can reach. Both are noise — cut
-them, or find the story they belong to.
+Then run the check backwards. A flow serving no story is a journey nobody
+asked for; a screen in no flow is one nobody can reach. Cut it, or find the
+story it belongs to — never invent a screen the requirements never asked for.
 
-This is what makes the wireframe reviewable later. The task issue records
-which stories each flow walks, and the coding agent ticks the flow off when it
-is clickable end to end, so a story that fails validation can be traced to the
-flow that was supposed to exercise it. That chain only holds if the mapping is
-true here, at the start.
-
-Equally, don't invent screens the design doesn't imply.
+**Report what you found in your closing message** — which stories each flow
+walks, and which you set aside with the reason. You do not write the task
+issue; the next turn does, from what you report here.
 
 ## What makes a wireframe good
 
