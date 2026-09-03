@@ -82,12 +82,17 @@ screen you cannot reach from its flow is a broken page, even if it renders.
 
 ## The fidelity checklist
 
-The checklist is **evidence, not a claim**. A web application is opened and
-walked in a browser before its work is committed — mock mode, no cluster behind
-it, one verdict per story (`mock-verification`) — so a tick here means the screen
-was rendered and its arrows were clicked, never that the code looks as though it
-would. Write it once the walk has settled, and put it in the PR body — one
-line per screen, then one per `flow` — with any gap named beside it:
+Two lists, one pair. The **Task** carries a `Screens:` line and a `Flows:`
+checklist with every box unchecked — that is what must be built, and it is
+what you work from. The **PR body** carries this one: the same two lists, with
+the boxes you earned ticked. You never tick the Task's copy; re-planning
+rewrites that body.
+
+It is **evidence, not a claim**. A web application is opened and walked in a
+browser before its work is committed — mock mode, no cluster behind it, one
+verdict per story (`mock-verification`) — so a tick here means the screen was
+rendered and its arrows were clicked, never that the code looks as though it
+would. Write it once the walk has settled, with any gap named beside its line:
 
 ```text
 Wireframe fidelity (specs/design/components/<name>/wireframes.dsl)
@@ -103,13 +108,16 @@ Flows
       "Register" select is not built
 ```
 
-Carry every flow over from the Task's `Flows:` checklist, keeping its number,
-name and story set — one line each here, not the Task's labelled block, since
-its persona and `Walk:` chain are already recorded there. Walk each flow's
-`Walk:` chain in order and tick the ones that go through; on a flow that does
-not, name the step it breaks at instead of the tick. A flow the Task lists
-appears here even when you could not build it: dropping the line is how a
-missing journey goes unnoticed.
+**Screens** come from the Task's `Screens:` line, one line each, naming the
+route you built it at.
+
+**Flows** carry over from the Task's `Flows:` checklist, keeping each one's
+number, name and story set — one line each here, not the Task's labelled
+block, since its persona and `Walk:` chain are recorded there. Walk each
+flow's `Walk:` chain in order and tick the ones that go through; where one
+does not, name the step it breaks at instead of the tick. A flow the Task
+lists appears here even when you could not build it: dropping the line is how
+a missing journey goes unnoticed.
 
 A screen is ticked only when every element in its block was on the page and
 every arrow it carries navigated when clicked. A flow is ticked only when it was
