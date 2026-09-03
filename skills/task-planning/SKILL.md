@@ -94,8 +94,10 @@ the stories it walks, and its `description` line from the DSL:
 Flows:
 
 - [ ] **F1 · "Submit an expense"** (Employee) — stories 3, 4, 7
+  MyClaims → NewClaim → ClaimDetail
   An employee files a claim and tracks its approval.
 - [ ] **F2 · "Approve a claim"** (Manager) — stories 5, 6
+  ApprovalQueue → ClaimReview
   A manager works the pending queue and decides a claim.
 
 No flow: story 1 (sign-in — platform SSO owns the page), story 9 (nightly
@@ -104,10 +106,16 @@ export job, no view).
 
 Why each part earns its place: the **number** gives the coding agent and the
 reviewer a short handle, so "F2 is not walkable" says exactly which journey
-without quoting a whole name; the **description** is already written in the
+without quoting a whole name; the **screen chain** is the flow's own screen
+list in walkthrough order, entry screen first — the `Screens:` line above says
+which routes to build, this says the order someone walks them, and it is the
+walk the PR has to demonstrate; the **description** is already written in the
 DSL, so copying it saves every later reader from opening the file to learn
 what the journey is for; and the **checkbox** makes it a contract the PR ticks
 back item by item.
+
+Keep the chain to screen names and arrows — no commentary. A screen appearing
+in two flows is listed in both; that is the DSL's shape, not a mistake.
 
 **Leave every box unchecked.** The issue states what must be walked; the
 coding agent ticks the same list in its PR body. Re-planning rewrites this

@@ -105,10 +105,12 @@ Flows
 ```
 
 Copy the flow list from the Task's `Flows:` checklist — same numbers, same
-names, same story sets — and tick what you verified. Keeping `F1`/`F2` lets a
-reviewer say "F2 is not walkable" and mean one exact journey. A flow the Task
-lists must appear here even when you could not build it; dropping the line is
-how a missing journey goes unnoticed.
+names, same story sets — and tick what you verified. The Task gives each
+flow's screen chain in walkthrough order; that chain is what you walk, and
+where it breaks is what you report. Keeping `F1`/`F2` lets a reviewer say "F2
+is not walkable" and mean one exact journey. A flow the Task lists must appear
+here even when you could not build it; dropping the line is how a missing
+journey goes unnoticed.
 
 A screen is ticked only when every element in its block was on the page and
 every arrow it carries navigated when clicked. A flow is ticked only when it was
