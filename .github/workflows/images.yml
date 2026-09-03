@@ -7,10 +7,21 @@
 # laptop, and no amd64 build of the runner image happened anywhere until the
 # release ran one.
 #
-# linux/amd64 ONLY, which is the half nothing else covers. arm64 is built by
-# hand all day — `skaffold` and `deployments/scripts/build-runner.sh` are plain
-# host-arch `docker build`, so every local bring-up on an Apple-silicon machine
-# exercises it. amd64 is built by no developer, no script and no other job.
+# linux/amd64 for every image, because that is the half nothing else covers:
+# arm64 is built by hand all day — `skaffold` and
+# `deployments/scripts/build-runner.sh` are plain host-arch `docker build`, so
+# every local bring-up on an Apple-silicon machine exercises it — while amd64 is
+# built by no developer, no script and no other job.
+#
+# remote-worker is built for BOTH platforms, which on this amd64 runner puts its
+# arm64 half under QEMU exactly as the release does. That emulated build is a
+# third mode no native build stands in for: a step that runs the target's own
+# binaries can pass natively and die under emulation — chromium does — and the
+# very next release after the `chrome-linux` fix failed that way. Only
+# remote-worker pays for it, being the one Dockerfile that launches programs
+# beyond a compiler at build time; the release has measured it at 28 min cold,
+# less against its buildcache. The other images stay amd64-only. A row's last
+# column opts an image in.
 #
 # ONE JOB, however many images a change touches: this runs on a runner pool
 # shared with the rest of the org, so the images are built in sequence inside a
@@ -39,11 +50,12 @@ concurrency:
 
 jobs:
   build:
-    name: build changed images (linux/amd64)
+    name: build changed images
     runs-on: ubuntu-latest
     # remote-worker is the outlier — it compiles the `bal library` tool, installs
-    # a JDK and a chromium, and smoke-tests the browser. The ceiling catches a
-    # wedged build rather than enforcing a budget.
+    # a JDK and a chromium, smoke-tests the browser, and does half of that under
+    # emulation. The ceiling catches a wedged build rather than enforcing a
+    # budget.
     timeout-minutes: 60
     permissions:
       contents: read
@@ -75,17 +87,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          # name | context | dockerfile | named contexts. Mirrors release.yml's
-          # matrix; an image added there belongs here too. An image is selected
-          # when its own directory — the Dockerfile's — changed.
+          # name | context | dockerfile | named contexts | platforms (empty =
+          # linux/amd64). Mirrors release.yml's matrix; an image added there
+          # belongs here too. An image is selected when its own directory — the
+          # Dockerfile's — changed.
           IMAGES=(
-            "remote-worker|runners/remote-worker|runners/remote-worker/Dockerfile|skills=skills bal-library-tool=packages/bal-library-tool"
-            "aep-api|services/aep-api|services/aep-api/Dockerfile|skills=skills"
-            "agents|.|services/agents/Dockerfile|"
-            "collab|.|services/collab/Dockerfile|"
-            "aep-mcp-server|.|services/aep-mcp-server/Dockerfile|"
-            "console|.|apps/console/Dockerfile|"
-            "thunder-app-operator|deployments/single-cluster/resource-types/thunder-app/operator|deployments/single-cluster/resource-types/thunder-app/operator/Dockerfile|"
+            "remote-worker|runners/remote-worker|runners/remote-worker/Dockerfile|skills=skills bal-library-tool=packages/bal-library-tool|linux/amd64,linux/arm64"
+            "aep-api|services/aep-api|services/aep-api/Dockerfile|skills=skills|"
+            "agents|.|services/agents/Dockerfile||"
+            "collab|.|services/collab/Dockerfile||"
+            "aep-mcp-server|.|services/aep-mcp-server/Dockerfile||"
+            "console|.|apps/console/Dockerfile||"
+            "thunder-app-operator|deployments/single-cluster/resource-types/thunder-app/operator|deployments/single-cluster/resource-types/thunder-app/operator/Dockerfile||"
           )
 
           # Inputs no single image owns: the four root manifests and `packages/`
@@ -112,7 +125,7 @@ jobs:
 
           built=0
           for row in "${IMAGES[@]}"; do
-            IFS='|' read -r name context dockerfile contexts <<<"$row"
+            IFS='|' read -r name context dockerfile contexts platforms <<<"$row"
 
             selected=$ALL
             while IFS= read -r f; do
@@ -120,11 +133,11 @@ jobs:
             done <<<"$CHANGED"
             [ "$selected" = true ] || continue
 
-            echo "::group::$name"
+            echo "::group::$name (${platforms:-linux/amd64})"
             # Seeded, never empty: expanding an empty array under `set -u` is an
             # error on bash before 4.4, and this list is read by more shells than
             # the runner's.
-            cmd=(docker buildx build --platform linux/amd64 --file "$dockerfile")
+            cmd=(docker buildx build --platform "${platforms:-linux/amd64}" --file "$dockerfile")
             for c in $contexts; do cmd+=(--build-context "$c"); done
             # --output type=cacheonly: build it, keep nothing. No tag to name and
             # no image to garbage-collect.

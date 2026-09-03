@@ -222,6 +222,10 @@ RUN groupadd -r aep \
 # files (icudtl.dat, the .pak set, the crashpad handler) beside it.
 ARG AGENT_BROWSER_VERSION=0.35.2
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/local/share/aep-chromium/chrome
+# BuildKit predefines both; a stage has to redeclare them to read them in a RUN.
+# Equal on a native build, different on the emulated half of the release matrix.
+ARG BUILDPLATFORM
+ARG TARGETPLATFORM
 RUN npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
     && test -d "$(npm root -g)/@playwright/test" \
     && CHROME="$(node -p "require(require.resolve('playwright-core', { paths: ['$(npm root -g)/@playwright/test'] })).chromium.executablePath()")" \
@@ -254,16 +258,30 @@ RUN npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
     # root and not for an unprivileged user is the class of bug ADR-0007
     # records. `su` without `-` keeps the environment, so the variable set
     # above is the one under test.
-    && printf '<h1>agent-browser-ok</h1>' > /tmp/ab-smoke.html \
-    && chmod a+r /tmp/ab-smoke.html \
-    && su aep -s /bin/bash -c 'set -e; \
-        export AGENT_BROWSER_ARGS=--no-sandbox; \
-        agent-browser open file:///tmp/ab-smoke.html; \
-        agent-browser get text h1 | grep agent-browser-ok; \
-        agent-browser close --all' \
-    # The smoke test leaves a state directory behind; a socket and pid file
-    # baked into the image would be stale in every pod started from it.
-    && rm -rf /tmp/ab-smoke.html /home/aep/.agent-browser
+    #
+    # NATIVE BUILDS ONLY. The release builds both platforms on one amd64
+    # runner, so its arm64 half runs under QEMU user-mode emulation, and
+    # chromium does not run there: the browser process dies at launch and the
+    # CLI reports "CDP response channel closed". Nothing about that half of the
+    # IMAGE is wrong — the same layer, built natively on an arm64 host, passes
+    # this test — so the launch is asserted wherever a chromium can start (the
+    # release's native half, every developer's host-arch `docker build`) and
+    # skipped where one cannot. The emulated half keeps everything above the
+    # `if`: the install, the symlink and the `test -x` need no browser process.
+    && if [ "$TARGETPLATFORM" = "$BUILDPLATFORM" ]; then \
+        printf '<h1>agent-browser-ok</h1>' > /tmp/ab-smoke.html \
+        && chmod a+r /tmp/ab-smoke.html \
+        && su aep -s /bin/bash -c 'set -e; \
+            export AGENT_BROWSER_ARGS=--no-sandbox; \
+            agent-browser open file:///tmp/ab-smoke.html; \
+            agent-browser get text h1 | grep agent-browser-ok; \
+            agent-browser close --all' \
+        # The smoke test leaves a state directory behind; a socket and pid file
+        # baked into the image would be stale in every pod started from it.
+        && rm -rf /tmp/ab-smoke.html /home/aep/.agent-browser; \
+    else \
+        echo "agent-browser smoke test skipped: ${TARGETPLATFORM} is being built on ${BUILDPLATFORM}, and chromium does not run under emulation"; \
+    fi
 
 WORKDIR /app
 
