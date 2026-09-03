@@ -57,11 +57,11 @@ Then run the check backwards. A flow serving no story is a journey nobody
 asked for; a screen in no flow is one nobody can reach. Cut it, or find the
 story it belongs to — never invent a screen the requirements never asked for.
 
-**Report what you found in your closing message** — which stories each flow
-walks, and which you set aside with the reason. That report is read by the
-human reviewing this turn; the planning turn re-derives the mapping from the
-committed DSL and requirements rather than inheriting yours, so the two are a
-check on each other.
+The count is a check you run while writing, not a report you file: what it
+produces is the flow set itself. The planning turn re-derives the mapping from
+the committed DSL and the requirements and records it on the Task, so a story
+left unwalked here surfaces there — in front of a human, before any code is
+written.
 
 ## What makes a wireframe good
 
