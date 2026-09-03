@@ -129,7 +129,7 @@ ephemeral Component of this type in the **milestone's own project**, so OC
 renders the cycle's `batch/v1 Job` into the project's release NS and materialises
 its ExternalSecrets from the org's secret store (refs only; the BFF writes no
 secret material). The type pins the cost envelope: `backoffLimit: 0`,
-`activeDeadlineSeconds` (1h default, 2h for a validation cycle),
+`activeDeadlineSeconds` (3h for a coding cycle, 2h for a validation cycle),
 `ttlSecondsAfterFinished`, and schema-bounded CPU/memory requests and limits.
 The type name is also the key wso2cloud's entitlement gate reads
 (`job/coding-agent`, `coding-agent`): a create over the org's cap answers `402`,

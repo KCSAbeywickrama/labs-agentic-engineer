@@ -270,6 +270,15 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   routable fact, and ordering is the "Depends on #N" lines the AGENT honours. Dedupe on re-plan is the
   title slug against the milestone's own issues, which makes reconcile additive-only and a crash re-run a
   no-op.
+- **A cycle's own verification happens INSIDE the session, and this domain orchestrates none of it.** A
+  coding cycle no longer ends at "it compiles": before committing a `web-application` the agent stands it
+  up in mock mode, drives it through a browser against the component's stories and heals what that finds,
+  which the skill library owns end to end and the platform not at all. There is no activity, no store, no
+  callback and no status for those passes — the only trace they leave here is the SHAPE of what arrives (one pull
+  request carrying the build AND its fixes, so no extra branch, pull request or issue reaches the event
+  plane) and the cycle's `activeDeadlineSeconds`, which the dispatch now NAMES rather than inheriting the
+  ComponentType's default because the work runs longer (`codingagent/design/oc-job-dispatch.md`). Judging
+  a DEPLOYED version is a different job and the validation run owns it.
 - **Two label axes: an issue is ARMED or not, and has exactly one KIND** (`labels.go`). `aep` arms it —
   something may work it — and is also the human's adoption trigger; the kind (`development`, `bug`,
   `conflict`, `validation`, `provision`) says which loop, and a `bug` carries a `src/*` source saying who
