@@ -162,10 +162,14 @@ blocks (one role, its screens in walking order) and bounds each screen to three
 questions — reached by clicking, every control acts, a change leaves the page as
 the declared request — plus roles, session and two probes once each. Stories
 stay the product oracle that `aep-validation` judges; the walk's verdicts name
-screens, which is what a fix needs. The walk is framed as a smoke walk: breadth
-over depth, missing features and obvious breakage, not data, layout or wording. The lead's part became a literal dispatch
-prompt, and the walker posts the walk's own status lines. Everything else above
-stands.
+screens, which is what a fix needs. The walk is framed as a smoke walk:
+breadth over depth, missing features and obvious breakage, not data, layout or
+wording. The lead's part became a literal dispatch prompt, and the walker posts
+the walk's own status lines.
+
+That narrows decisions 3 and 4: the boundary is still the component rather than
+the issue, but the DSL alone draws it, and `specs/requirements/` is no longer a
+walk input or a checklist source. Everything else above stands.
 
 ## Consequences
 

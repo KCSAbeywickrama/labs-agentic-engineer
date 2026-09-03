@@ -36,15 +36,16 @@ jobs:
       # A CAP ON RUNNER SLOTS, not on the work. Seven images used to start at
       # once; on a shared org runner pool that is seven slots held for the length
       # of the longest build, and the release competes with every other repo in
-      # the org for them. Three at a time costs little wall-clock because the
-      # critical path is remote-worker alone (~28 min) and the other six together
-      # finish well inside it.
+      # the org for them. Three at a time should cost little wall-clock: the
+      # critical path is remote-worker alone (~28 min), and the other six run two
+      # at a time beside it. Raise the cap if a release ever tails on the images.
       max-parallel: 3
       matrix:
         include:
-          # DECLARED FIRST because GitHub fills matrix slots in declaration order
-          # and this is the long pole — starting it in the first wave keeps
-          # max-parallel from adding its ~28 min to the tail of the run.
+          # DECLARED FIRST because this is the long pole and observed slot order
+          # follows declaration order — an ordering GitHub documents nowhere, so
+          # treat it as a hint, not a guarantee: the worst case is a longer run,
+          # never a wrong one.
           #
           # One runner image serves both task kinds (implementation and
           # validation) — see runners/remote-worker/Dockerfile.
@@ -132,7 +133,9 @@ jobs:
   # ─── Platform: package + push charts, then cut the release ──────────────────
   # ONE job for both halves. They are strictly sequential, both are a couple of
   # minutes of shell, and both open with the same checkout — as separate jobs the
-  # second paid a whole runner slot to run `gh release create`.
+  # second paid a whole runner slot to run `gh release create`. The trade is
+  # least privilege: `contents: write` now spans the chart steps, which need only
+  # `packages: write`. Job granularity is as fine as permissions get.
   release-platform:
     name: Package charts + create platform release
     if: ${{ inputs.component == 'platform' || inputs.component == 'all' }}
@@ -267,7 +270,7 @@ jobs:
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
             export GOOS="${target%/*}" GOARCH="${target#*/}"
             ext=""
-            [[ "$GOOS" == "windows" ]] && ext=".exe"
+            if [[ "$GOOS" == "windows" ]]; then ext=".exe"; fi
 
             echo ">> building aectl-${GOOS}-${GOARCH}${ext}"
             go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \

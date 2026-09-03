@@ -82,9 +82,7 @@ screen you cannot reach from its flow is a broken page, even if it renders.
 
 ## The evidence
 
-Fidelity is proven by a walk, not claimed from the code. Once the build is
-clean, `mock-verification` opens the app in a browser and reports one line per
-flow and per screen — reached by clicking, every arrow followed, every control
-used — and the lead carries that report into the PR. You write no checklist of
-your own: a screen you could not build as drawn is a gap you name in the UI and
-in your report, and the walk records it.
+Fidelity is proven by a walk, not claimed from the code: once the build is
+clean, `mock-verification` opens the app in a browser and the lead carries its
+report into the PR. You write no checklist of your own — a screen you could not
+build as drawn is a gap you name in your report, and the walk records it.

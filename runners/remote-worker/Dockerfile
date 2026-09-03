@@ -214,15 +214,16 @@ RUN groupadd -r aep \
 # playwright ships Google's Chrome-for-Testing build on linux-x64
 # (`chrome-linux64/chrome`) and its own build on linux-arm64
 # (`chrome-linux/chrome`). Either name hardcoded here builds green on one half
-# of the release matrix and red on the other. `executablePath()` is the same
-# call playwright launches through, so it cannot drift from what it installed.
-# Resolved from @playwright/test's OWN playwright-core — playwright-cli nests a
-# second copy at a different revision, which is the drift the paragraph above
-# closes — and the SYMLINK IS THE DIRECTORY, so the binary keeps the resource
-# files (icudtl.dat, the .pak set, the crashpad handler) that sit beside it.
+# of the release matrix and red on the other, and `executablePath()` is the
+# same call playwright launches through. The `test -d` pins WHOSE core answers
+# — `require.resolve` walks up to the global root, so a renamed
+# @playwright/test would silently hand back another package's copy at another
+# revision — and the SYMLINK IS THE DIRECTORY, so the binary keeps the resource
+# files (icudtl.dat, the .pak set, the crashpad handler) beside it.
 ARG AGENT_BROWSER_VERSION=0.35.2
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/local/share/aep-chromium/chrome
 RUN npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
+    && test -d "$(npm root -g)/@playwright/test" \
     && CHROME="$(node -p "require(require.resolve('playwright-core', { paths: ['$(npm root -g)/@playwright/test'] })).chromium.executablePath()")" \
     && ln -sfn "$(dirname "$CHROME")" /usr/local/share/aep-chromium \
     && test -x "${AGENT_BROWSER_EXECUTABLE_PATH}" \

@@ -200,7 +200,7 @@ subagent you handed it to, keeps its status line current from start to done
    Walk <component> at <App Path> (issue #<N>). Load `mock-verification` and
    `agent-browser`; the first is the whole procedure. Edit/Write only inside
    <App Path>; never run `git`. Status line: <the gh issue comment command with #N filled in>.
-   Report back the block the skill ends with.
+   Report back the skill's report block.
    ```
 
    The walk lands before the commit, so what it fixes ships with what it
@@ -297,7 +297,8 @@ the progress feed and the person watching sees an empty section where a componen
 was built.
 
 **A subagent starts from its prompt and nothing else.** It does not have this
-skill. Name **exactly these**, and nothing else:
+skill. This list is a **build** dispatch — a walk's prompt is the literal one in
+step 3, and nothing else. Name **exactly these**, and nothing else:
 
 1. its issue — the number, and to read it in full;
 2. its App Paths — the only paths it may write;

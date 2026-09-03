@@ -43,7 +43,7 @@ are past the smoke.
 | **Act** | Does every drawn control change something visible when used? A create is in the next list, a filter narrows, a toggle flips a row. | the snapshot after the action |
 | **Request** | Did a change leave the page as the request the contract declares, with the status it declares? A row that flips and sends nothing is the one defect a build cannot see. | `agent-browser network requests` |
 
-Two guards and two probes, once each rather than per screen:
+Three guards and two probes, once each rather than per screen:
 
 - **Roles** (`mock/roles.ts` exists): each flow's entry screen under its own
   role, and once under a role the DSL gives no flow there. Both directions are
@@ -53,6 +53,9 @@ Two guards and two probes, once each rather than per screen:
   the navbar draws it: the app leaves the screen through `signOut()`. The mock
   signs the next load in again, so whether the session is gone is `[~]`; the
   click leaving the page is not.
+- **Console** (the CLI's own console verb, read before you stop): a page that
+  renders and throws is broken for whoever touches it next, and the error text
+  is the finding.
 - **Probes**: submit one form empty; open one detail route with an id that does
   not exist. The wireframe draws the happy path; these are the two states it
   implies.
@@ -71,7 +74,8 @@ line each for Roles, Session, Probes and Console. It is your walk order, and
 filled in it is your report. A screen you never reach is then a line with no
 mark, where a list assembled as you go simply never mentions it.
 
-**Done when:** every screen and every flow in the file has a line.
+**Done when:** every screen and every flow in the file has a line, and so does
+each of Roles, Session, Probes and Console.
 
 ## 2 · Stand it up
 
@@ -113,6 +117,9 @@ is the mock telling the truth, not the app. Spend full loads at the start of a
 block, where there is no state to lose: a role switch, `?auth=out`, an unknown
 id.
 
+**Roles, Session, Probes and Console are lines like any other** — walk them off
+the checklist, and spend their full loads at the start of a block.
+
 Restart the server after a change to `vite.config.ts`, `mock/` or a dependency;
 everything else hot-reloads. Post a status line when a line is fixed or given up
 (**Status line**).
@@ -133,9 +140,10 @@ flow "<name>" (<role>)
 - [x] <Screen>: FIXED <what was wrong>; <what you changed>. Re-walked: <what it does now>.
 - [ ] <Screen>: <what happens>. Tried <what>, 3 attempts. <what still happens>.
 - [~] <Screen>: <the truth that lives outside the app>.
-Roles: <role> on <route> bounced to <route>; <role> reached <screen>.
-Session: ?auth=out ran the guard, signIn() returned to <screen>; Sign out left <screen>.
-Console: clean | <error text>.
+- [x] Roles: <role> on <route> bounced to <route>; <role> reached <screen>.
+- [x] Session: ?auth=out ran the guard, signIn() returned to <screen>; Sign out left <screen>.
+- [x] Probes: the empty <form> <what it did>; <detail route> with an unknown id <what it rendered>.
+- [x] Console: clean | <error text>.
 ```
 
 A green line is one clause; only `FIXED`, `[ ]` and `[~]` lines carry more. An
