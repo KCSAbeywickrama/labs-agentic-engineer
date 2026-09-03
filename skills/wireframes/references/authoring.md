@@ -57,12 +57,6 @@ Then run the check backwards. A flow serving no story is a journey nobody
 asked for; a screen in no flow is one nobody can reach. Cut it, or find the
 story it belongs to — never invent a screen the requirements never asked for.
 
-The count is a check you run while writing, not a report you file: what it
-produces is the flow set itself. The planning turn re-derives the mapping from
-the committed DSL and the requirements and records it on the Task, so a story
-left unwalked here surfaces there — in front of a human, before any code is
-written.
-
 ## What makes a wireframe good
 
 A good wireframe reads like a real screen someone could use, and it explains

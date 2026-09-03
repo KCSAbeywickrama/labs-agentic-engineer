@@ -98,16 +98,16 @@ Screens
 - [ ] NewRisk → /risks/new — "Register" select not built: no registers endpoint
 
 Flows
-- [x] F1 · "Approval queue" (Manager) — stories 2, 5 — RiskQueue →
-      QueueRiskDetail walks by clicking
-- [ ] F2 · "Log a risk" (Risk owner) — stories 1, 3 — MyRisks → NewRisk walks;
-      NewRisk → RiskDetail blocked on the missing select
+- [x] F1 · Approval queue — stories 2, 5 — walked end to end
+- [ ] F2 · Log a risk — stories 1, 3 — breaks at NewRisk → RiskDetail: the
+      "Register" select is not built
 ```
 
 Carry every flow over from the Task's `Flows:` checklist, keeping its number,
-name and story set — one line each here, rather than the Task's labelled
-block — and tick what you verified. Each Task flow's `Walk:` line is the order
-you click through; where it breaks is what you report. A flow the Task lists
+name and story set — one line each here, not the Task's labelled block, since
+its persona and `Walk:` chain are already recorded there. Walk each flow's
+`Walk:` chain in order and tick the ones that go through; on a flow that does
+not, name the step it breaks at instead of the tick. A flow the Task lists
 appears here even when you could not build it: dropping the line is how a
 missing journey goes unnoticed.
 
