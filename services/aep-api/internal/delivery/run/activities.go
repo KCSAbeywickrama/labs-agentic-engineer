@@ -792,7 +792,7 @@ type ReconcileMilestoneInput struct {
 	OrgID           string `json:"orgId"`
 	ProjectID       string `json:"projectId"`
 	MilestoneNumber int    `json:"milestoneNumber"`
-	MilestoneTitle  string `json:"milestoneTitle,omitempty"`
+	MilestoneTitle  string `json:"milestoneTitle"`
 }
 
 // ReconcileMilestone asks the event plane to re-examine the milestone this run

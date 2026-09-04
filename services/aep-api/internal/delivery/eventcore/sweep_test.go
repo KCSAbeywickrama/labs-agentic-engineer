@@ -435,12 +435,8 @@ func TestSweep_ARebuildEndsTheCancelSkip(t *testing.T) {
 // The pass itself is the sweep's, verbatim — every test above drives it through
 // `Once`, which is what proves the two cannot diverge. What these pin is the
 // scoped DOOR: that a caller who knows which milestone changed gets the same
-// answers, and reaches no other milestone doing it.
-//
-// Its caller is the run supervisor's settle. Three hand-offs are writes the
-// platform makes to itself — a dev run filing the version's validation task, a
-// failed verdict filing repair issues, a task run reopening the task — and no
-// webhook reports any of them, so before this each waited out a sweep tick (#649).
+// answers, and reaches no other milestone doing it. Its caller is the run
+// supervisor's settle (delivery.SettleHandsWorkOnward).
 
 // H1 and H3: the version's validation task is open and nothing is judging it.
 // This is the dev run's hand-off, and the repair chain's second half, which are

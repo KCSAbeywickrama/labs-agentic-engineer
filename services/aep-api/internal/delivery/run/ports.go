@@ -391,18 +391,13 @@ type DeployIssueMinter interface {
 // supervisor observes and asks, the plane owns the decision and every write
 // behind it.
 //
-// The supervisor calls it on the one event no webhook can carry: its own run row
-// going terminal. Three hand-offs depend on it and all three are writes the
-// PLATFORM makes, so GitHub reports them back as echoes if it routes them at all
-// — a dev run filing the version's validation task, a failed verdict filing
-// repair issues, and a task run reopening the task. Each one becomes actionable
-// only once the run that wrote it is terminal, because the trigger predicate on
-// the other side requires no live run; before that instant there is nothing a
-// reconcile could do, and after it nothing but the sweep's timer was looking.
+// Which endings ask, and why the settle is where it happens, is
+// delivery.SettleHandsWorkOnward's to explain.
 //
 // What to start is NOT decided here and must not be: this says "something
 // changed, look again", and the plane's own routing answers with a run of the
-// right kind or with nothing at all.
+// right kind or with nothing at all. That is also what separates it from the
+// three ports above — they name a write, this names an inspection.
 type MilestoneReconciler interface {
 	ReconcileMilestone(ctx context.Context, orgID, projectID string, number int, title string) error
 }

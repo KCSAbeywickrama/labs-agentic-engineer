@@ -374,24 +374,24 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   round trip. The cycle-boundary poll keeps its COUNTS, because that read runs at every boundary and is
   the loop's hottest; `aep:halted` deliberately does not reach it, since a halted issue in a LIVE run's
   milestone is a contradiction — the run that halted them is terminal by construction.
-- **A SETTLING RUN reconciles its own milestone, so the sweep is a backstop rather than the driver.**
+- **A SETTLING RUN reconciles its own milestone; the sweep's timer catches only what that misses.**
   Three hand-offs are writes the PLATFORM makes — a dev run filing the version's validation task, a
   failed verdict filing repair issues, a task run reopening the task — and no webhook reports any of
   them: the App bot is the sender, so the delivery is an echo, and `issues.opened` is not routed at all.
-  For those three the sweep's timer was the only trigger there was, and a version sat unjudged for up to
-  a full interval after it deployed (#649). So `loop.settle` calls the SAME pass for its own milestone
-  (`ReconcileMilestone`), and it must be the settle rather than the write: the trigger predicate needs
-  the milestone to have no live run, and every one of those writes happens inside a live one moments
-  before it ends — a reconcile at the write would find that run and start nothing. The row going
-  terminal is the event, and it is a fact about the platform's own database that no delivery could
-  carry. Best-effort, and bounded to three attempts: the run has already settled, so a plane it cannot
-  reach costs the hand-off latency the sweep absorbs, where an unbounded retry would leave a finished
-  run's workflow executing over work that is no longer its own. Two endings hand NOTHING onward and are
-  excluded by `SettleHandsWorkOnward`, both because nudging them is worse than waiting: `blocked`
-  changed nothing about the milestone (the halt is failed-only, so the working set is untouched and a
-  replacement run meets the same quota refusal — a spin at workflow speed, entered exactly when the
-  org is already out of slots), and `cancelled` is a person saying stop, whose way back is the
-  revalidate button rather than a new run a second after the click.
+  So `loop.settle` calls the SAME pass for its own milestone (`ReconcileMilestone`), and it must be the
+  settle rather than the write: the trigger predicate needs the milestone to have no live run, and each
+  of those writes happens inside a live one moments before it ends — a reconcile at the write finds that
+  run and starts nothing. The row going terminal is the event, and it is a fact about the platform's own
+  database that no delivery could carry. Best-effort, and bounded to three attempts: the run has already
+  settled, so a plane it cannot reach costs the hand-off latency the sweep absorbs, where an unbounded
+  retry would leave a finished run's workflow executing over work that is no longer its own. Two endings
+  hand NOTHING onward (`SettleHandsWorkOnward`). `blocked` changed nothing about the milestone — the halt
+  is failed-only, so the working set is untouched and a replacement run meets the same quota refusal, a
+  spin at workflow speed entered exactly when the org is already out of slots; the timer is the only
+  thing bounding it. `cancelled` is a courtesy rather than a guarantee: a cancelled dev run's milestone
+  is skipped anyway, and a validation run cancelled before its first read leaves the task open for the
+  next pass to restart — what the exclusion buys is that the platform does not contradict the click
+  within the same second.
 - **A FAILED run HALTS the work it could not finish, or every budget is defeated.** On every failed
   settle the run comments the terminal reason on each working-set issue it could not finish — the recovery
   bugs it filed itself included, which are the newest things in the milestone and therefore the first a

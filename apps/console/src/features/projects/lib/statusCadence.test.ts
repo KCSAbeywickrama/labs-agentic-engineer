@@ -18,7 +18,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { components } from "../../../generated/aep-api";
-import { statusIsMoving } from "./queries";
+import { statusIsMoving } from "./statusCadence";
 
 type ProjectStatus = components["schemas"]["ProjectStatus"];
 type DeployStage = components["schemas"]["DeployStage"];
@@ -48,28 +48,21 @@ function settled(deploy: Partial<DeployStage> = {}, build = "succeeded"): Projec
 }
 
 describe("statusIsMoving", () => {
-  it("holds the fast cadence while a verdict is still expected", () => {
-    // The window this exists for. `deploy.status` reads "deployed" the instant
-    // the last binding is Ready — before anything has judged the version — so
-    // without this clause the poll drops to 30s at exactly the moment the state
-    // is about to change, and the page sits on "waiting" long after it stopped
-    // being true.
-    expect(statusIsMoving(settled({ validation: "none" }))).toBe(true);
-  });
-
   it("holds it through the validation cycle and the repair that follows one", () => {
     expect(statusIsMoving(settled({ validation: "running" }))).toBe(true);
     expect(statusIsMoving(settled({ validation: "awaiting-fix" }))).toBe(true);
   });
 
-  it("does not hold it on a version nothing will ever judge", () => {
-    // `none` is two states wearing one name, and this is the other one. A
-    // delivery that failed, was cancelled or was blocked leaves the validation
-    // state at "none" permanently — so an unscoped clause would park this
-    // project on the 5s poll for as long as a tab is open, on a hook that runs
-    // from every route for the toolbar badge.
-    expect(statusIsMoving(settled({ validation: "none" }, "failed"))).toBe(false);
-    expect(statusIsMoving(settled({ validation: "none" }, "cancelled"))).toBe(false);
+  it("never holds it on `none`, whatever the build says", () => {
+    // The regression this pins is a poll that never stops. `none` means both "a
+    // verdict is expected" and "none is coming": a validation run that settles
+    // without recording one closes the version's task on the way out, so nothing
+    // restarts it and the state is `none` for good. `build.status` cannot screen
+    // that off — it comes from the newest DEV run, which succeeded — so a clause
+    // keyed on `none` would fast-poll such a project on every route, forever.
+    for (const build of ["succeeded", "failed", "cancelled", "idle"]) {
+      expect(statusIsMoving(settled({ validation: "none" }, build))).toBe(false);
+    }
   });
 
   it("answers for every validation state a deployed version can be in", () => {
@@ -77,7 +70,7 @@ describe("statusIsMoving", () => {
     // rather than silently picking up whichever cadence the fall-through gives
     // it. Each entry is whether that state should hold the FAST poll.
     const moving: Record<NonNullable<DeployStage["validation"]>, boolean> = {
-      none: true, // a verdict is expected
+      none: false, // two states wearing one name — see the test above
       running: true, // a validation cycle is in flight
       "awaiting-fix": true, // the coding cycle repairing a failed one
       passed: false,
@@ -94,15 +87,16 @@ describe("statusIsMoving", () => {
     }
   });
 
-  it("does not hold it on a version that never deployed", () => {
-    // Nothing is coming: there is no deployment for validation to run against,
-    // and "none" here is the absence of a question rather than of an answer.
-    expect(statusIsMoving(settled({ status: "none", validation: "none" }))).toBe(false);
-    expect(statusIsMoving(settled({ status: "failed", validation: "none" }))).toBe(false);
-  });
-
   it("still holds it for the states it always did", () => {
     expect(statusIsMoving(settled({}, "running"))).toBe(true);
     expect(statusIsMoving(settled({ status: "deploying" }))).toBe(true);
+    // The repo rungs, which have nothing to do with validation and are the
+    // clauses a careless move of this predicate would silently drop.
+    expect(statusIsMoving({ ...settled(), repoStatus: "pending" })).toBe(true);
+    expect(statusIsMoving({ ...settled(), repoStatus: "cloning" })).toBe(true);
+    // And the spec-interview clauses.
+    expect(
+      statusIsMoving({ ...settled(), spec: { ...settled().spec, agent: "working" } }),
+    ).toBe(true);
   });
 });

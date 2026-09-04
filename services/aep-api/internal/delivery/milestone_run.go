@@ -655,29 +655,28 @@ func SettleClosesTheMilestone(runKind, state string, awaitingVerdict bool) bool 
 // milestone with work a DIFFERENT run should pick up — and is therefore worth
 // reconciling immediately, rather than at the reconcile sweep's next tick.
 //
-// It exists because the sweep is not a backstop for the platform's own
-// hand-offs, it is their DRIVER. A dev run files the version's validation task,
-// a failed verdict files repair issues, and a task run reopens the task; all
-// three are writes the platform makes itself, so no webhook reports them, and
-// nothing but the sweep's timer ever picks them up. Each therefore waited up to
-// a full sweep interval. The settle is the moment the hand-off becomes
-// actionable — before the row is terminal the milestone still has a live run and
-// no trigger can fire — so it is the settle that asks.
+// Three hand-offs need it, and all three are writes the PLATFORM makes to
+// itself: a dev run files the version's validation task, a failed verdict files
+// repair issues, a task run reopens the task. No webhook reports a write whose
+// sender is the platform's own bot, so the event plane learns of them only when
+// something asks it to look. The settle is when asking is useful — before the
+// row is terminal the milestone still has a live run and no trigger can fire.
 //
-// Two endings deliberately hand NOTHING onward, and both would be actively worse
-// for being nudged:
+// Two endings hand NOTHING onward, and the difference between them matters:
 //
 //	blocked     nothing about the milestone changed. The org has no agent slot,
 //	            the working set is untouched (the halt is failed-only) and a
 //	            replacement run meets the same refusal — so reconciling here is a
 //	            spin at workflow speed, entered exactly when the org is already
-//	            out of quota. The sweep's timer is what has always bounded it.
-//	cancelled   a person said stop. A cancelled dev run's increment is abandoned
-//	            and the sweep skips its milestone anyway; a validation run
-//	            cancelled before its first read deliberately leaves the version's
-//	            task open, and restarting the judging a second after the click
-//	            would overrule the person who stopped it. Asking again is the
-//	            revalidate button's job.
+//	            out of quota. The sweep's timer is the only thing bounding it.
+//	cancelled   a person said stop. This one is a COURTESY rather than a
+//	            guarantee, and saying so matters: a cancelled dev run's increment
+//	            is abandoned and the plane skips its milestone anyway, while a
+//	            validation run cancelled before its first read leaves the
+//	            version's task open, so the next sweep pass restarts the judging
+//	            regardless. What this buys is that the platform does not
+//	            contradict the click within the same second. The way back is the
+//	            revalidate button, not a tick.
 //
 // `failed` is IN, and not merely tolerated: it is how a failed verdict's repair
 // issues reach a task run. It is safe for the other two species because the halt

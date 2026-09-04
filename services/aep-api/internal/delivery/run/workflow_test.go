@@ -111,10 +111,9 @@ type harness struct {
 	// run and then pays for its replacement a minute later.
 	cancels []CloseCancelledWorkInput
 	// nudges records every settle-time reconcile the loop asked the event plane
-	// for. It is the LATENCY assertion surface, and the spin's: the plane starts a
-	// run off a hand-off nobody else reports, so an ending that nudged when it
-	// should not have is a run started at workflow speed rather than once a
-	// minute (see delivery.SettleHandsWorkOnward).
+	// for. It is the SPIN's assertion surface: the plane starts a run off what it
+	// finds, so an ending that nudged when it should not have is a run started at
+	// workflow speed rather than once a minute.
 	nudges []ReconcileMilestoneInput
 	closed int
 	// stateWrites keeps the full SetRunState payloads, so a test can assert on
@@ -3036,14 +3035,10 @@ func TestAgentDeath_WithNoCancelRecordedStillSpendsTheRedispatch(t *testing.T) {
 
 // ---- the settle-time nudge -------------------------------------------------
 //
-// Three hand-offs are writes the PLATFORM makes to itself — a dev run filing the
-// version's validation task, a failed verdict filing repair issues, a task run
-// reopening the task — and no webhook reports any of them. The reconcile sweep
-// was therefore not their backstop but their only trigger, on a 60-second timer,
-// so a version sat unjudged for up to a full interval after it deployed (#649).
-//
-// The settle is where the ask belongs: the plane's trigger needs the milestone to
-// have no live run, and every one of those writes happens inside a live one.
+// The three hand-offs, and which endings make one, are
+// delivery.SettleHandsWorkOnward's to explain. What these pin is that the loop
+// actually asks on the endings that hand work over, stays silent on the two that
+// do not, and never lets the ask affect the run's own outcome.
 
 // H1. A delivered version files its validation task and hands the milestone
 // straight back, instead of the version waiting out a tick to be judged.

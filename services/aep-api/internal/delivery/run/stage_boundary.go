@@ -1110,20 +1110,12 @@ func (l *loop) closeCancelledWork(ctx workflow.Context) error {
 }
 
 // nudgeReconcile asks the event plane to re-examine this milestone now that the
-// run has left it — the settle-time half of what the reconcile sweep does on its
-// timer.
-//
-// WHY THE SUPERVISOR IS THE ONE ASKING. Three hand-offs are writes the platform
-// makes itself: a dev run files the version's validation task, a failed verdict
-// files repair issues, a task run reopens the task. GitHub reports none of them
-// usefully — the platform's own bot is the sender, so the delivery is an echo,
-// and the one action that would carry it is not even routed. So for those three
-// the sweep was not a backstop, it was the only trigger there was, and each
-// waited up to a full sweep interval (#649).
+// run has left it. Which endings ask, and why the platform's own hand-offs need
+// asking at all, is delivery.SettleHandsWorkOnward's to explain.
 //
 // WHY HERE AND NOT AT THE WRITE. The plane's trigger requires that the milestone
-// have no live run, and every one of those writes happens inside a live one,
-// moments before it settles. Asking at the write would find this very run and do
+// have no live run, and each of those writes happens inside a live one, moments
+// before it settles. Asking at the write would find this very run and do
 // nothing. The row going terminal is the event, and it is a fact about the
 // platform's own database that no webhook could ever carry.
 //

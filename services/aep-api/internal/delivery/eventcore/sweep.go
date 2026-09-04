@@ -46,17 +46,16 @@ import (
 
 // defaultSweepInterval is the reconcile cadence. A backstop, not a driver, so it
 // is slow on purpose: everything it heals is something that should already have
-// happened — a webhook that never arrived, or a hand-off whose settling run
-// reconciled its own milestone (ReconcileMilestone) and could not reach us.
+// happened — a webhook that never arrived, or a settling run's own call to
+// ReconcileMilestone that could not get through.
 //
-// It was NOT a backstop for the platform's own hand-offs, and that is what this
-// interval used to cost. Nothing reports a write the platform makes itself: the
-// validation task a dev run files, the repair issues a failed verdict files and
-// the task a repair run reopens are all authored by the App bot, so their
-// deliveries are echoes, and `issues.opened` is not even routed. For those three
-// the timer was the only trigger there was, and a version sat unjudged for up to
-// a full interval after it deployed (#649). The settle-time nudge is what made
-// this a backstop in fact and not only in the comment.
+// The interval is therefore not what bounds how quickly a hand-off is picked up.
+// The platform's own writes — the validation task a dev run files, the repair
+// issues a failed verdict files, the task a repair run reopens — produce no
+// usable delivery, since the App bot is their sender and `issues.opened` is not
+// routed. Those are handed over at the settle instead
+// (delivery.SettleHandsWorkOnward), and this timer is what catches the pass that
+// did not land.
 const defaultSweepInterval = 60 * time.Second
 
 // Sweep is the reconcile backstop AND the trigger router, and it has TWO
@@ -174,7 +173,9 @@ func (s *Sweep) Once(ctx context.Context) error {
 
 func (s *Sweep) reconcileRepo(ctx context.Context, repo RepoRef) error {
 	e := s.events
-	if e.p.Runs == nil || e.p.Issues == nil {
+	// Only the milestone walk is guarded here; ReconcileMilestone re-checks what
+	// its own pass needs.
+	if e.p.Runs == nil {
 		return nil
 	}
 	milestones, err := e.p.Runs.KnownMilestones(ctx, repo.OrgID, repo.ProjectID)
@@ -206,13 +207,18 @@ func (s *Sweep) reconcileRepo(ctx context.Context, repo RepoRef) error {
 // rule is the whole point — every suppressor the sweep grew is a suppressor the
 // nudge inherits, and neither can drift from the other.
 //
-// It takes the milestone as NUMBER and TITLE rather than a MilestoneRef so the
-// supervisor can name this method in a port of its own: the two packages never
-// import each other, and a shared struct in the signature would force one of
-// them to.
+// The milestone arrives as NUMBER and TITLE rather than as a MilestoneRef, which
+// is the shape the supervisor's other three ports onto this package already take
+// (HaltUnfinishedWork, CloseCancelledWork, MintDeployFixIssues all pass the
+// milestone as an int). A shared struct is not impossible across the sibling
+// boundary — delivery.StartRunRequest is exactly that, a type at the domain ROOT
+// with a narrow port over it in each package — but it earns its place by
+// carrying a domain concept several callers compose. This call carries an
+// address, so it matches its siblings instead of minting a fourth spelling.
 //
-// Milestone TITLE is only ever carried forward onto a run row it starts; nothing
-// here reads it, so a caller that has the number and not the name may pass "".
+// The TITLE is carried, unlike in those three, because this can admit a NEW run
+// row: MilestoneRun.SpecTag falls back to the title when the row has no tag, so
+// dropping it would put a run in the ledger with no version to show for itself.
 func (e *Events) ReconcileMilestone(ctx context.Context, orgID, projectID string,
 	number int, title string) error {
 	if e.p.Runs == nil || e.p.Issues == nil {
