@@ -313,7 +313,7 @@ func (e *Events) milestoneCancelled(ctx context.Context, orgID, projectID string
 	if !delivery.CancelClosesTheMilestone(kind) {
 		return false, nil
 	}
-	slog.DebugContext(ctx, "eventcore: reconcile sweep skipping a cancelled increment",
+	slog.DebugContext(ctx, "eventcore: reconcile skipping a cancelled increment",
 		"project", projectID, "milestone", milestoneNumber, "run", newest.ID)
 	return true, nil
 }
@@ -360,14 +360,14 @@ func (e *Events) offerRun(ctx context.Context, orgID, projectID string, mileston
 	issues = notHalted(issues)
 	for _, iss := range issues {
 		if delivery.HasLabel(iss.Labels, delivery.LabelAgentWork) && delivery.IsValidationWork(iss.Labels) {
-			slog.InfoContext(ctx, "eventcore: reconcile sweep found an open validation task — judging the version",
+			slog.InfoContext(ctx, "eventcore: reconcile found an open validation task — judging the version",
 				"project", projectID, "milestone", milestone.Number, "validationIssue", iss.Number)
 			return e.startValidationRun(ctx, orgID, projectID, milestone)
 		}
 	}
 	for _, iss := range issues {
 		if delivery.InTaskWorkingSet(iss.Labels) {
-			slog.InfoContext(ctx, "eventcore: reconcile sweep found unworked defects — starting a run",
+			slog.InfoContext(ctx, "eventcore: reconcile found unworked defects — starting a run",
 				"project", projectID, "milestone", milestone.Number, "issue", iss.Number)
 			return e.startRun(ctx, orgID, projectID, milestone)
 		}
