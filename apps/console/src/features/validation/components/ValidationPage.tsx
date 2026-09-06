@@ -54,7 +54,7 @@ import {
   type StageTone,
 } from "../../projects/lib/pipeline";
 import { useTask } from "../../tasks/api/queries";
-import { statusLine } from "../../tasks/lib/statusLine";
+import { statusLine, type StatusLine } from "../../tasks/lib/statusLine";
 import { useValidationCriteria, useValidationReport } from "../api/queries";
 import {
   answeredRun,
@@ -316,11 +316,13 @@ export function ValidationPage({
   // and a GitHub-backed read must cost nothing when there is nothing to show.
   const issue = useTask(projectName, issueNumber, { live: validating });
   const issueUrl = issue.data?.issueUrl;
-  // The agent's own words — durable, so intact for a reader who joins an hour in,
-  // where the progress stream's replay window has dropped the early events.
-  // Gated here because a comment outlives its run: ungated, the closing summary
-  // sat under a settled verdict forever.
-  const agentLine = validating && issue.data ? statusLine(issue.data) : null;
+  // The issue's own words — durable, so intact for a reader who joins an hour in,
+  // where the progress stream's replay window has dropped the early events. Most
+  // of them are the PLATFORM's, posted from what it watched the run do; the
+  // agent's are the ends and its judgements. Gated here because a comment
+  // outlives its run: ungated, the closing summary sat under a settled verdict
+  // forever.
+  const postedLine = validating && issue.data ? statusLine(issue.data) : null;
 
   // The run reached an ANSWER — which is not the same as "everything passed", and
   // not the same as "there is a report". Hooks stay unconditional; `enabled` gates
@@ -452,17 +454,15 @@ export function ValidationPage({
   // that has not started, and the tile announced "Setting up the test harness…"
   // over a run that had finished or was doing something else entirely.
   //
-  // The agent's own line WINS when it has posted one. It is strictly better
-  // evidence: it comes from inside the run, it names what is happening rather than
-  // inferring it from which rows have moved, and it survives both a reload and the
-  // stream's replay window. The derived line stays as the fallback for the window
-  // before the first comment lands, and for a run whose agent posts nothing at all
-  // — the skill asks for the line, and an asked-for thing can be skipped.
-  const liveNote =
-    agentLine ??
-    (live.active
-      ? validationLiveLine(oracle, live.statuses, report.data !== undefined)
-      : "");
+  // A posted line WINS when there is one. It is strictly better evidence: it comes
+  // from inside the run, it names what is happening rather than inferring it from
+  // which rows have moved, and it survives both a reload and the stream's replay
+  // window. The derived line stays as the fallback for the window before the first
+  // comment lands, and for a run whose posts failed — a `gh` that could not reach
+  // GitHub costs the line, never the run.
+  const liveNote: StatusLine | string =
+    postedLine ??
+    (live.active ? validationLiveLine(oracle, live.statuses, report.data !== undefined) : "");
 
   // The tile stays visible in BOTH bodies — a verdict does not stop being true
   // because the reader switched to the log, and neither does an attempt still being

@@ -81,9 +81,10 @@ let mockNewerRuns: MilestoneRunView[] = [];
 // a GitHub read that failed is not the same state as "no issue yet", and the page
 // is required to treat them alike.
 let mockIssueUrl: string | undefined = "https://github.com/acme/demo/issues/30";
-// The validation issue's comment thread — the agent's status line lives in the
-// NEWEST one. Oldest first, matching the contract.
-let mockIssueComments: { id: string; body: string }[] = [];
+// The validation issue's comment thread — the status line lives in the NEWEST
+// one. Oldest first, matching the contract. `observed` marks a line the PLATFORM
+// posted from what it watched the run do, which is most of them.
+let mockIssueComments: { id: string; body: string; observed?: boolean }[] = [];
 // Whether the page asked get-task to poll. This read is GitHub-backed, so an
 // idle version must cost nothing and a live one must not go stale.
 let mockIssueLive: boolean | undefined;
@@ -1326,7 +1327,7 @@ describe("ValidationPage live per-criterion progress", () => {
     expect(screen.getByText("Setting up the test harness…")).toBeInTheDocument();
   });
 
-  it("stops narrating the run once the rows can speak for themselves", () => {
+  it("counts the answered criteria once the rows have started moving", () => {
     mockValidation = "running";
     mockRun = { ...run({ cycles: [validationCycle] }), state: "running" };
     mockCriteria.data = { content: CRITERIA };
@@ -1334,6 +1335,7 @@ describe("ValidationPage live per-criterion progress", () => {
     renderPage(undefined);
 
     expect(screen.queryByText("Setting up the test harness…")).not.toBeInTheDocument();
+    expect(screen.getByText(/Checking the criteria, 0 of \d+ answered…/)).toBeInTheDocument();
     expect(screen.getByText("Exploring…")).toBeInTheDocument();
     // Untouched auto criteria still read Pending; a manual one never will.
     expect(screen.getAllByText("Pending").length).toBe(1);
@@ -1525,6 +1527,36 @@ describe("ValidationPage agent status line", () => {
       screen.getByText("Healing AC-004-b — the login step raced the redirect."),
     ).toBeInTheDocument();
     expect(screen.queryByText(/^Starting validation/)).not.toBeInTheDocument();
+  });
+
+  it("shows the platform's observed line unlabelled — the pulse beside it says machine", () => {
+    // Most lines on a validation issue are this, and labelling the common case
+    // would spend the reader's attention where none is needed.
+    validating();
+    mockIssueComments = [
+      { id: "o1", body: "Running specs against the deployed system.", observed: true },
+    ];
+    renderPage(undefined);
+
+    expect(screen.getByText("Running specs against the deployed system.")).toBeInTheDocument();
+    expect(screen.queryByText(/The agent:/)).not.toBeInTheDocument();
+  });
+
+  it("labels the AGENT's line, which is the one carrying a judgement", () => {
+    // The platform reports tool calls; the agent speaks between them for what no
+    // command can show. That line is worth more than the one before it, and a
+    // reader who cannot tell them apart over-trusts the mechanical one.
+    validating();
+    mockIssueComments = [
+      { id: "o1", body: "Running specs against the deployed system.", observed: true },
+      { id: "c2", body: "AC-001-b blocked: the roles gate published no second login." },
+    ];
+    renderPage(undefined);
+
+    expect(screen.getByText(/The agent:/)).toBeInTheDocument();
+    expect(
+      screen.getByText("AC-001-b blocked: the roles gate published no second login."),
+    ).toBeInTheDocument();
   });
 
   it("renders one line of a multi-line comment", () => {
