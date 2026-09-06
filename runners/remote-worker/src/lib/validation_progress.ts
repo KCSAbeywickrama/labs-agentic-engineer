@@ -253,6 +253,14 @@ export interface ValidationProgressTracker {
   hook: HookCallback;
   /** Called by the SDK translator when a tool call settles. */
   settle(toolUseId: string, ok: boolean): void;
+  /**
+   * This run's per-criterion history, exposed so a second reader of the SAME
+   * derivation can share it — the issue's status line does
+   * (validation_status_line.ts). Two states would derive the same tool call
+   * twice and could answer differently, which is how a row ends up saying
+   * `healing` while the line beside it still says `authoring`.
+   */
+  state: ValidationProgressState;
 }
 
 /**
@@ -276,6 +284,8 @@ export function createValidationProgressTracker(
   };
 
   return {
+    state,
+
     hook: async (input) => {
       const hookInput = input as PreToolUseHookInput;
       if (hookInput?.hook_event_name !== "PreToolUse") return {};

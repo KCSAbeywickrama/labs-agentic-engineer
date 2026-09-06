@@ -1,0 +1,227 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { ValidationProgressState } from "./validation_progress.js";
+import {
+  LADDER,
+  LADDER_LINES,
+  Ladder,
+  MAX_POSTS,
+  OBSERVED_COMMENT_MARKER,
+  createValidationStatusLine,
+  ladderStateFor,
+  repoSlug,
+} from "./validation_status_line.js";
+
+const write = (file: string, content: string) => ({
+  toolName: "Write",
+  input: { file_path: file, content },
+});
+const bash = (command: string) => ({ toolName: "Bash", input: { command } });
+
+function stateFor(call: { toolName: string; input: unknown }, progress = new ValidationProgressState()) {
+  return ladderStateFor(call.toolName, call.input, progress);
+}
+
+// --- which calls announce which rung ---------------------------------------
+
+// The two ends are matched here because no per-criterion status describes them:
+// the harness is scaffolding, and the report is a verdict over every criterion
+// at once.
+test("ladderStateFor: the harness install and the report generator are the two ends", () => {
+  assert.equal(stateFor(bash("npm install --prefix tests/e2e")), "harness");
+  assert.equal(stateFor(bash("npm ci --prefix tests/e2e")), "harness");
+  assert.equal(
+    stateFor(bash('node "$AEP_SKILLS_DIR/aep-validation/scripts/generate-report.mjs" --issue 7')),
+    "reporting",
+  );
+});
+
+// The middle three ARE ProgressItemStatus values, read through the same
+// derivation the console's rows use. Pinned here so a change to that derivation
+// cannot silently take the issue's line with it.
+test("ladderStateFor: the middle rungs come from the per-criterion derivation", () => {
+  assert.equal(
+    stateFor(write("tests/e2e/specs/AC-001-a.spec.ts", "// spec: AC-001-a\n")),
+    "exploring",
+    "a header-only spec is the stub written BEFORE exploring",
+  );
+  assert.equal(
+    stateFor(write("tests/e2e/specs/AC-001-a.spec.ts", "// spec: AC-001-a\ntest('AC-001-a: x', async () => {});")),
+    "authoring",
+  );
+  assert.equal(stateFor(bash("npm test --prefix tests/e2e -- specs/AC-001-a.spec.ts")), "running");
+});
+
+// The rungs are about the RUN. A criterion status with no rung of its own must
+// not fall through to one that means something else — `planned` in particular,
+// which the test plan raises for every criterion at once.
+test("ladderStateFor: a call that announces no rung announces nothing", () => {
+  assert.equal(stateFor(write("tests/validation/test-plan.md", "## AC-001-a — a box\n")), undefined);
+  assert.equal(stateFor(bash("cat tests/e2e/specs/AC-001-a.spec.ts")), undefined);
+  assert.equal(stateFor(bash("git push --force-with-lease -u origin aep/m1-validation")), undefined);
+  assert.equal(stateFor(write("src/app.ts", "export const x = 1;")), undefined);
+});
+
+// `npm install` in some other package is a different run doing different work.
+test("ladderStateFor: only the e2e package's install is the harness", () => {
+  assert.equal(stateFor(bash("npm install --prefix apps/web")), undefined);
+});
+
+// --- the ratchet ------------------------------------------------------------
+
+// A criterion authored twelve times is one line. Twelve identical comments would
+// say nothing the first did not, and each one costs a slot in the window the
+// status line is read inside.
+test("Ladder: the state a run is already in is not news", () => {
+  const ladder = new Ladder();
+  assert.equal(ladder.admit("exploring"), true);
+  assert.equal(ladder.admit("exploring"), false);
+  assert.equal(ladder.admit("exploring"), false);
+});
+
+// Step 9's exit-2 sends a run back to authoring, and that is the ordinary path
+// rather than a fault. A strict first-occurrence ratchet would leave it under
+// "generating the report" for the rest of the run — silent AND wrong, which is
+// worse than the silence this exists to fix.
+test("Ladder: going backwards posts again and resets the high-water mark", () => {
+  const ladder = new Ladder();
+  for (const state of LADDER) assert.equal(ladder.admit(state), true, state);
+
+  assert.equal(ladder.admit("authoring"), true, "the loop back to authoring is news");
+  assert.equal(ladder.admit("authoring"), false, "…but only once");
+  assert.equal(ladder.admit("reporting"), true, "and reaching the report again is news too");
+});
+
+// The rollback rule has no natural bound. A run thrashing between authoring and
+// the generator could post on every lap, and past the read window the earlier
+// lines are gone anyway — so the ladder goes quiet and leaves the last one
+// standing, which is what a finished run looks like.
+test("Ladder: a thrashing run stops posting at the cap", () => {
+  const ladder = new Ladder();
+  let posted = 0;
+  for (let i = 0; i < MAX_POSTS * 3; i += 1) {
+    if (ladder.admit(i % 2 === 0 ? "authoring" : "reporting")) posted += 1;
+  }
+  assert.equal(posted, MAX_POSTS);
+});
+
+// --- the hook ---------------------------------------------------------------
+
+function hookInput(call: { toolName: string; input: unknown }) {
+  return {
+    hook_event_name: "PreToolUse",
+    tool_name: call.toolName,
+    tool_input: call.input,
+    tool_use_id: "tu_1",
+  };
+}
+
+test("the hook posts one branded line per rung", async () => {
+  const posted: string[] = [];
+  const hook = createValidationStatusLine(
+    new ValidationProgressState(),
+    async (body) => {
+      posted.push(body);
+    },
+    () => assert.fail("a successful post must not warn"),
+  );
+
+  await hook(hookInput(bash("npm ci --prefix tests/e2e")) as never, undefined, { signal: undefined } as never);
+  await hook(
+    hookInput(write("tests/e2e/specs/AC-001-a.spec.ts", "// spec: AC-001-a\n")) as never,
+    undefined,
+    { signal: undefined } as never,
+  );
+
+  assert.deepEqual(posted, [
+    `${OBSERVED_COMMENT_MARKER}\n${LADDER_LINES.harness}`,
+    `${OBSERVED_COMMENT_MARKER}\n${LADDER_LINES.exploring}`,
+  ]);
+});
+
+// The brand is what keeps these OUT of the platform's notes-to-the-agent class,
+// which the BFF drops on read. Unbranded they would be indistinguishable from
+// the agent's own words; branded as machine they would vanish entirely.
+test("every line carries the observed brand, first", async () => {
+  const posted: string[] = [];
+  const hook = createValidationStatusLine(new ValidationProgressState(), async (b) => void posted.push(b), () => {});
+  await hook(hookInput(bash("npm ci --prefix tests/e2e")) as never, undefined, { signal: undefined } as never);
+  assert.ok(posted[0]?.startsWith(OBSERVED_COMMENT_MARKER), posted[0]);
+});
+
+// The status line is the newest comment's FIRST non-empty line, so a rung's
+// sentence is the whole claim — there is no second line a reader will see.
+test("every rung's line is a single sentence on one line", () => {
+  for (const state of LADDER) {
+    const line = LADDER_LINES[state];
+    assert.ok(!line.includes("\n"), `${state} spans lines`);
+    assert.ok(line.length > 0 && line.length < 120, `${state} is not one readable line: ${line}`);
+  }
+});
+
+// A validation cycle is two hours of work and the status line is commentary on
+// it. Losing the commentary must never lose a criterion, so the failure is
+// reported on the run's own feed and swallowed.
+test("a failed post warns and never throws", async () => {
+  const warnings: string[] = [];
+  const hook = createValidationStatusLine(
+    new ValidationProgressState(),
+    async () => {
+      throw new Error("gh: 403 rate limited");
+    },
+    (reason) => warnings.push(reason),
+  );
+
+  const decision = await hook(hookInput(bash("npm ci --prefix tests/e2e")) as never, undefined, {
+    signal: undefined,
+  } as never);
+
+  assert.deepEqual(decision, {}, "the hook watches; it never decides");
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0] ?? "", /harness/);
+  assert.match(warnings[0] ?? "", /rate limited/);
+});
+
+// It watches the calls a run has to make. A hook that could refuse one would be
+// a far worse bargain than no status line.
+test("the hook never blocks a tool call", async () => {
+  const hook = createValidationStatusLine(new ValidationProgressState(), async () => {}, () => {});
+  for (const call of [bash("npm ci --prefix tests/e2e"), bash("ls"), write("x.ts", "y")]) {
+    const decision = await hook(hookInput(call) as never, undefined, { signal: undefined } as never);
+    assert.deepEqual(decision, {});
+  }
+});
+
+// --- addressing the issue ---------------------------------------------------
+
+// Naming the repository rather than letting `gh` infer it from a remote: the
+// clone URL is the one form every dispatch carries.
+test("repoSlug: owner/repo out of the clone URLs a dispatch can carry", () => {
+  for (const [url, want] of [
+    ["https://github.com/acme/widgets.git", "acme/widgets"],
+    ["https://github.com/acme/widgets", "acme/widgets"],
+    ["git@github.com:acme/widgets.git", "acme/widgets"],
+    ["https://ghe.example.com/acme/widgets.git", "acme/widgets"],
+  ] as const) {
+    assert.equal(repoSlug(url), want, url);
+  }
+});

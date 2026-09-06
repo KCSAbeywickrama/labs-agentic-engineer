@@ -684,6 +684,24 @@ test("aep-validation still names the force-push its push step needs", () => {
   );
 });
 
+// The `aep` skill is always-on for a validation run TOO, and its own status-line
+// section tells whoever works an issue to keep its line current. So the platform
+// taking that line over is only true if this skill says so: deleting the section
+// would leave the obligation standing with nothing to say the platform already
+// covers it, and the agent narrating on top of the ladder costs a reader the
+// line it replaces.
+test("aep-validation still says who writes the status line", () => {
+  const body = fs.readFileSync(path.join(LIBRARY, "aep-validation", "SKILL.md"), "utf8");
+  assert.ok(
+    /##\s+The status line/.test(body),
+    "aep-validation lost its status-line section, so aep's rule governs the middle again",
+  );
+  assert.ok(
+    body.includes("The platform writes this one, not you."),
+    "the section no longer overrides aep's keep-it-current rule",
+  );
+});
+
 test("re-mirroring the same workspace replaces the previous mode's body", async () => {
   await inTempDir(async (dir) => {
     const workspace = path.join(dir, "ws");

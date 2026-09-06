@@ -39,19 +39,16 @@ resolve from the repo root.
 
 ## The status line
 
-Keep your validation issue's status line current, per the `aep` skill — the
-issue in your prompt, and no other.
+**The platform writes this one, not you.** It watches your tool calls and posts
+a line on your validation issue as the run moves — the harness, the exploration,
+the specs running, the report — so the `aep` skill's rule about keeping an
+issue's line current does not apply to the middle of this workflow. Narrating
+your own progress on top of it costs a reader the line it replaces.
 
-Say what the criterion rows cannot. The console already draws a row per
-criterion and repaints it as you work, with the counts beside it; a line
-repeating those tells the reader what they are already looking at. Yours
-carries what nothing else can see — where you are in this workflow, and what
-you decided.
-
-Steps 1 and 10 already ask for the two ends — the opening comment and the
-closing summary, and the summary is the one that carries counts. Everything
-between them is this line. A line that sends you back a step is the ordinary
-path here, not a fault to explain.
+Steps 1 and 10 stay yours: the opening comment and the closing summary. Between
+them, comment only for what no command of yours can show — a criterion you
+cannot reach, a login the roles gate never published, a decision that changes
+what you are testing. Your issue in the prompt, and no other.
 
 ## Workflow
 

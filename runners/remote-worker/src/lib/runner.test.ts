@@ -27,11 +27,14 @@ import {
   alwaysOnSkills,
   buildMcpOptions,
   contractReferencePath,
+  createIssueStatusLineHook,
   debugQueryOptions,
   onDemandSkills,
   promptWithProjectRoot,
 } from "./runner.js";
 import { MissingWorkflowSkillError, requireWorkflowBodies } from "./skills_presence.js";
+import { createValidationProgressTracker } from "./validation_progress.js";
+import type { DispatchRequest } from "./types.js";
 
 // D9 secure search (Task 12) — WebSearch joins the base tool set (gated by
 // the PreToolUse DLP hook wired in runClaudeQuery; see websearch_dlp.ts).
@@ -117,6 +120,80 @@ test("buildMcpOptions: Bash stays in the base set alongside Agent", () => {
   const tools = buildMcpOptions(undefined, undefined).allowedTools;
   assert.ok(tools.includes("Bash"));
   assert.ok(tools.includes("Agent"));
+});
+
+// --- the issue status line: three ways to have none, all of them normal ------
+
+function validationDispatch(overrides: Partial<DispatchRequest> = {}): DispatchRequest {
+  return {
+    taskId: "11111111-1111-1111-1111-111111111111",
+    orgId: "acme",
+    projectId: "widgets",
+    componentName: "aep-validation",
+    repoUrl: "https://github.com/acme/widgets.git",
+    bearer: "",
+    identity: { name: "AEP", email: "aep@example.com" },
+    gitServiceUrl: "https://git.example.com",
+    prompt: "validation task",
+    taskKind: "validation",
+    validationIssue: 7,
+    ...overrides,
+  };
+}
+
+const progressTracker = () => createValidationProgressTracker(() => {});
+
+// A coding run has no validation issue to speak on, and registering the hook
+// anyway would put a GitHub round trip on the Write and Bash calls of every
+// build to derive nothing.
+test("createIssueStatusLineHook: a run with no per-criterion tracker keeps no line", async () => {
+  const hook = await createIssueStatusLineHook(
+    validationDispatch({ taskKind: "implementation", validationIssue: undefined }),
+    undefined,
+    () => assert.fail("a coding run must not warn about a status line it never wanted"),
+  );
+  assert.equal(hook, undefined);
+});
+
+// A validation dispatch that carried no issue number — an older BFF, or one that
+// could not resolve it — runs exactly as it did before, minus the line. Silent
+// is the old behaviour; failing here would trade two hours of work for the
+// commentary on it.
+test("createIssueStatusLineHook: a validation run with no issue number keeps no line", async () => {
+  const hook = await createIssueStatusLineHook(
+    validationDispatch({ validationIssue: undefined }),
+    progressTracker(),
+    () => assert.fail("an absent issue number is a normal dispatch, not a fault to report"),
+  );
+  assert.equal(hook, undefined);
+});
+
+// The whole point: a validation run that CAN name its issue gets the hook.
+test("createIssueStatusLineHook: a validation run that names its issue keeps a line", async () => {
+  const hook = await createIssueStatusLineHook(
+    validationDispatch(),
+    progressTracker(),
+    () => assert.fail("a wired run must not warn"),
+    async () => "/usr/bin/gh",
+  );
+  assert.equal(typeof hook, "function");
+});
+
+// The third absence: a pod that cannot resolve `gh` cannot post at all. It says
+// so once on the run's own feed and carries on — the run's work is the tests.
+test("createIssueStatusLineHook: an unresolvable gh costs the line, not the run", async () => {
+  const warnings: string[] = [];
+  const hook = await createIssueStatusLineHook(
+    validationDispatch(),
+    progressTracker(),
+    (reason) => warnings.push(reason),
+    async () => {
+      throw new Error("could not resolve an absolute path to `gh`");
+    },
+  );
+  assert.equal(hook, undefined);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0] ?? "", /no status line/);
 });
 
 // --- alwaysOnSkills: the run's own workflow is not the design's to choose ----

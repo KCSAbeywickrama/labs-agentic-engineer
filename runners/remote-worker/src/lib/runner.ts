@@ -18,7 +18,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { query, type McpServerConfig, type Query } from "@anthropic-ai/claude-agent-sdk";
+import { query, type HookCallback, type McpServerConfig, type Query } from "@anthropic-ai/claude-agent-sdk";
 import { debugQueryOptions, openDebugSinks, type DebugSinks, type TaskLog } from "./logger.js";
 // Re-exported from where they now live: `debugQueryOptions` is entirely about
 // the sinks, so it sits beside them in `logger.ts`. Still exported here because
@@ -38,6 +38,9 @@ import { createWebSearchDlpHook, stagedSecretValues } from "./websearch_dlp.js";
 import { createForegroundFanOutHook } from "./fanout_foreground.js";
 import { createWorkspaceWriteGuard } from "./workspace_guard.js";
 import { createValidationProgressTracker } from "./validation_progress.js";
+import type { ValidationProgressTracker } from "./validation_progress.js";
+import { createValidationStatusLine, ghCommentPoster } from "./validation_status_line.js";
+import { resolveRealGhPath } from "./gh_git_auth.js";
 import { startMcpAuthProxy } from "./mcp_auth_proxy.js";
 import { staticTokenSource, type AccessTokenSource } from "./auth_retry.js";
 import { createWebFetchGuardHook } from "./webfetch_guard.js";
@@ -311,6 +314,44 @@ export interface McpAuthOpts {
  * -triggered load is the right shape for mechanics a run may or may not need,
  * and paying for its body on every turn of every validation run is not.
  */
+/**
+ * The hook that keeps a validation issue's status line current, or undefined
+ * when this run cannot or should not keep one.
+ *
+ * Three conditions, and each absence is a NORMAL run rather than a fault:
+ * a coding run has no validation issue to speak on; a validation dispatch that
+ * carried no issue number (an older BFF, or one that could not resolve it) works
+ * exactly as it did before, minus the line; and a pod with no resolvable `gh`
+ * cannot post at all. Never throws for any of them — a status line is how a run
+ * is WATCHED, and failing a two-hour validation because it could not be watched
+ * would trade the work for the commentary.
+ *
+ * It shares the per-criterion tracker's state so both derive one run's history
+ * once — see ValidationProgressTracker.state.
+ *
+ * `resolveGh` is a parameter so the third condition is testable without a `gh`
+ * on the test machine's PATH: whether one exists is a property of the box, and
+ * a test that asserts differently on a developer's laptop and in CI asserts
+ * nothing on either.
+ */
+export async function createIssueStatusLineHook(
+  req: DispatchRequest,
+  progress: ValidationProgressTracker | undefined,
+  warn: (reason: string) => void,
+  resolveGh: () => Promise<string> = resolveRealGhPath,
+): Promise<HookCallback | undefined> {
+  const issue = req.validationIssue ?? 0;
+  if (!progress || issue <= 0) return undefined;
+  let gh: string;
+  try {
+    gh = await resolveGh();
+  } catch (err) {
+    warn(`no status line: ${err instanceof Error ? err.message : String(err)}`);
+    return undefined;
+  }
+  return createValidationStatusLine(progress.state, ghCommentPoster(gh, req.repoUrl, issue), warn);
+}
+
 export function alwaysOnSkills(taskKind: DispatchRequest["taskKind"]): string[] {
   return taskKind === "validation" ? ["aep", "aep-validation"] : ["aep"];
 }
@@ -502,6 +543,11 @@ export async function runClaudeQuery(
         })
       : undefined;
 
+  // The RUN's own line on its issue — see createIssueStatusLineHook below.
+  const validationStatusLine = await createIssueStatusLineHook(req, validationProgress, (reason) => {
+    emit({ kind: "log", level: "warn", summary: `[status] ${reason}` });
+  });
+
   // The SDK auto-discovers the bundled native binary — no
   // pathToClaudeCodeExecutable needed. See settingSources below for why the
   // project source — and only the project source — is admitted.
@@ -587,6 +633,19 @@ export async function runClaudeQuery(
                 { matcher: "Edit", hooks: [validationProgress.hook] },
                 { matcher: "NotebookEdit", hooks: [validationProgress.hook] },
                 { matcher: "Bash", hooks: [validationProgress.hook] },
+              ]
+            : []),
+          // One matcher per tool, same reasoning as every entry above, and
+          // registered AFTER the per-criterion hook so the rows move first —
+          // this one awaits a GitHub round trip, and a row is cheaper to be
+          // right about than a comment. No NotebookEdit: a rung is a phase of
+          // the validation workflow, and that workflow authors `.spec.ts`
+          // files, never notebooks.
+          ...(validationStatusLine
+            ? [
+                { matcher: "Write", hooks: [validationStatusLine] },
+                { matcher: "Edit", hooks: [validationStatusLine] },
+                { matcher: "Bash", hooks: [validationStatusLine] },
               ]
             : []),
         ],
