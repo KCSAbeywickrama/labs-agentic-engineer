@@ -19,7 +19,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { query, type McpServerConfig, type Query } from "@anthropic-ai/claude-agent-sdk";
-import { debugQueryOptions, openDebugSinks, type DebugSinks, type TaskLog } from "./logger.js";
+import { debugQueryOptions, openDebugSinks, type TaskLog } from "./logger.js";
 // Re-exported from where they now live: `debugQueryOptions` is entirely about
 // the sinks, so it sits beside them in `logger.ts`. Still exported here because
 // this is the module every existing caller and test imports it from, and
@@ -30,19 +30,22 @@ import type { DispatchRequest } from "./types.js";
 import type { WorkspaceLayout } from "./workspace.js";
 import { writeBearerFile } from "./workspace.js";
 import { emit, primeScrubber } from "./progress/emitter.js";
-import { createSdkTranslator } from "./progress/from-sdk.js";
+import { consumeRun, runDeadlineFromEnv, type RunResult } from "./run_loop.js";
+// Re-exported from where it now lives: the shape of a finished run belongs with
+// the loop that decides a run is finished, but this is the module every caller
+// and test already imports it from.
+export type { RunResult } from "./run_loop.js";
+import { createClaudeAdapter } from "./progress/claude_adapter.js";
 import { createRunWatchdog } from "./progress/watchdog.js";
-import { apiRetryLine, isStreamFrame, readApiRetry, readStallSignal } from "./progress/diagnostics.js";
 import { scrubber } from "./progress/scrubber.js";
 import { createWebSearchDlpHook, stagedSecretValues } from "./websearch_dlp.js";
-import { createForegroundFanOutHook } from "./fanout_foreground.js";
 import { createWorkspaceWriteGuard } from "./workspace_guard.js";
 import { createValidationProgressTracker } from "./validation_progress.js";
 import { startMcpAuthProxy } from "./mcp_auth_proxy.js";
 import { staticTokenSource, type AccessTokenSource } from "./auth_retry.js";
 import { createWebFetchGuardHook } from "./webfetch_guard.js";
-import { checkPreload, preloadWarning } from "./skills_preload_check.js";
 import { SKILLS_MIRROR_DIR, requireWorkflowBodies } from "./skills_presence.js";
+import { DEFAULT_RUNTIME, toolGlossary, type AgentRuntime } from "./tool_glossary.js";
 import { curlConfigHome, playwrightCliConfigPath } from "./endpoint_access.js";
 
 /**
@@ -102,18 +105,31 @@ const BASE_ALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "We
 // spend a turn on a dead end. File/shell/search tools are deliberately absent
 // from this list: `aep`'s deny-list governs those by path and command, and
 // blocking them wholesale would end the run.
+//
+// The whole task surface is now ALLOWED, and that took two corrections. The
+// WAIT tools went first: a lead that backgrounds work has to be able to wait on
+// it, and denying `TaskOutput`/`TaskStop` while the SDK's own default is to
+// background a fan-out left the lead reaching for `ScheduleWakeup` instead —
+// which is why that one is on this list. The task LIST tools followed. They
+// were denied as "a durable board's surface, and a one-shot pod has no board",
+// and that reasoning had the audience wrong: the board is not for a next
+// session, it is for the person watching this one. A lead's plan is the only
+// statement of intent a run produces, and v2 puts it on the feed as
+// `work_item {source: "plan"}` rows the console folds by item — so the plan
+// being true is worth more than the turn it costs. `TaskCreate`/`TaskUpdate`
+// are the writes the adapter reads; `TaskGet`/`TaskList` are the reads that let
+// a lead pick its plan back up after a compaction, and they emit nothing.
+//
+// What stays denied is the surface that assumes an interactive user, a
+// scheduler, a durable session or a peer to talk to: none of those exists in a
+// one-shot pod, and a reachable-but-useless tool is somewhere a run will spend
+// a turn.
 export const DISALLOWED_TOOLS = [
   "ScheduleWakeup",
   "Monitor",
   "CronCreate",
   "CronDelete",
   "CronList",
-  "TaskCreate",
-  "TaskUpdate",
-  "TaskGet",
-  "TaskList",
-  "TaskStop",
-  "TaskOutput",
   "Workflow",
   "Artifact",
   "AskUserQuestion",
@@ -248,9 +264,30 @@ export function buildMcpOptions(mcpUrl: string | undefined, mcpToken: string | u
  */
 export const AGENT_SETTING_SOURCES = ["project"] as const;
 
-export interface RunResult {
-  exitCode: number;
-  error?: string;
+/**
+ * The system prompt's appendix, in the order a session reads it.
+ *
+ * Three parts, and the order is the contract:
+ *
+ *   1. the run's WORKFLOW — the procedure everything else is read against;
+ *   2. the skills the design PINNED to this work, whose rules are read against
+ *      that procedure;
+ *   3. the tool GLOSSARY, which binds the workflow's roles ("the fan-out tool",
+ *      "the wait tool") to the names this runtime answers to.
+ *
+ * The glossary is last because the skill points at it there — "the tool glossary
+ * at the end of your instructions" — so nothing may be appended after it. It is
+ * also why the workflow can be written in roles at all: one authored library
+ * steers any runtime, and only this line knows which one is running.
+ *
+ * Exported so the order is a test rather than a comment.
+ */
+export function systemPromptAppend(
+  workflowBodies: string,
+  pinnedBodies: string,
+  runtime: AgentRuntime = DEFAULT_RUNTIME,
+): string {
+  return [workflowBodies, pinnedBodies, toolGlossary(runtime)].filter((s) => s !== "").join("\n\n");
 }
 
 export interface StartedRun {
@@ -451,7 +488,7 @@ export async function runClaudeQuery(
         primeScrubber([token]);
       },
       onFatal: (err) => {
-        emit({ kind: "result", status: "failure", error: `mcp auth: ${err.message}` });
+        emit({ kind: "run_settled", outcome: "failure", error: `mcp auth: ${err.message}` });
         setTimeout(() => process.exit(1), TERMINATE_FLUSH_MS);
       },
     });
@@ -473,22 +510,11 @@ export async function runClaudeQuery(
   // truth for "what's secret in this run".
   const webFetchGuardHook = createWebFetchGuardHook(stagedSecrets);
 
-  // Fan-out stays in the foreground — see fanout_foreground.ts. Backgrounding a
-  // subagent detaches it, and the SDK then forwards none of its messages, so the
-  // run's whole implementation phase reaches the feed as an empty section.
-  const foregroundFanOutHook = createForegroundFanOutHook((label) => {
-    emit({
-      kind: "log",
-      level: "info",
-      summary: `[fan-out] ${label} — running in the foreground so its steps stay on the feed`,
-    });
-  });
-
   // Authored files land in the project — see workspace_guard.ts. A run once built
   // a whole component into the run directory and finished green, so the skill's
   // "everything you produce goes inside it" needs an enforcer too.
   const workspaceWriteGuard = createWorkspaceWriteGuard(layout.workspace, (reason) => {
-    emit({ kind: "log", level: "warn", summary: `[workspace] ${reason}` });
+  emit({ kind: "notice", level: "warn", code: "workspace_guard", detail: `[workspace] ${reason}` });
   });
 
   // Per-criterion progress — see validation_progress.ts. Validation only: a
@@ -498,9 +524,22 @@ export async function runClaudeQuery(
   const validationProgress =
     req.taskKind === "validation"
       ? createValidationProgressTracker((update) => {
-          emit({ kind: "progress_item", itemId: update.itemId, status: update.status });
+          // A criterion is a `work_item` in v2, same statuses and the same
+          // inference (ADR-0009) in a new envelope. `source` is what tells a
+          // consumer these are the platform's criteria rather than the lead's
+          // own plan entries, which share the kind.
+          emit({ kind: "work_item", source: "criterion", itemId: update.itemId, itemStatus: update.status });
         })
       : undefined;
+
+  // One adapter per run — it carries this run's agent registry and in-flight
+  // tool calls (see createClaudeAdapter).
+  // The tracker settles a criterion from the SAME `ok` the feed reports, rather
+  // than re-deriving success from the tool result a second time.
+  const adapter = createClaudeAdapter({
+    taskKind: req.taskKind,
+    ...(validationProgress ? { onToolOutcome: validationProgress.settle } : {}),
+  });
 
   // The SDK auto-discovers the bundled native binary — no
   // pathToClaudeCodeExecutable needed. See settingSources below for why the
@@ -513,7 +552,8 @@ export async function runClaudeQuery(
   // harness's own tools and conventions work, and this is additional context, not
   // a different agent. The workflow goes FIRST: it is the procedure, and a pinned
   // stack skill's rules are read against it.
-  const appended = [workflowBodies, perTaskSkills?.pinnedBodies ?? ""].filter((s) => s !== "").join("\n\n");
+  // The glossary rides last — see systemPromptAppend.
+  const appended = systemPromptAppend(workflowBodies, perTaskSkills?.pinnedBodies ?? "");
 
   // Opened before the session so the sinks exist for its first byte, and closed
   // in the run loop's finally. Absent on a normal run, which is what keeps the
@@ -561,16 +601,26 @@ export async function runClaudeQuery(
       // earliest point to deny before any egress happens. See
       // webfetch_guard.ts.
       hooks: {
+        // A spawned agent's transcript is the one artefact this feed will never
+        // carry — narration is deliberately off the wire, and the file is far
+        // larger than a line. The hook records WHERE it is and nothing else:
+        // the design's storage decision is that transcripts stay on the local
+        // plane and are never uploaded from a pod, so this is the seam the
+        // runtime port's `artifacts()` reads, not a second channel.
+        SubagentStop: [
+          {
+            hooks: [
+              async (input): Promise<Record<string, never>> => {
+                const h = input as { agent_id?: string; agent_transcript_path?: string };
+                adapter.noteTranscript(h.agent_id ?? "", h.agent_transcript_path ?? "");
+                return {};
+              },
+            ],
+          },
+        ],
         PreToolUse: [
           { matcher: "WebSearch", hooks: [webSearchDlpHook] },
           { matcher: "WebFetch", hooks: [webFetchGuardHook] },
-          // Not a guard: this one rewrites the call rather than gating it. Two
-          // entries rather than one alternation, because the matcher's grammar
-          // is unspecified in the SDK's types and a pattern that silently failed
-          // to match would take the feed down with it. The hook re-checks the
-          // tool name itself, so a matcher that over-matches is harmless.
-          { matcher: "Agent", hooks: [foregroundFanOutHook] },
-          { matcher: "Task", hooks: [foregroundFanOutHook] },
           // One matcher per authoring tool, same reasoning as the pair above: the
           // matcher grammar is unspecified, and the hook re-checks the tool name
           // itself, so over-matching is harmless and a silent non-match is not.
@@ -598,13 +648,6 @@ export async function runClaudeQuery(
     throw err;
   }
 
-  // One translator per run — it carries this run's subagent labels and
-  // in-flight tool calls (see createSdkTranslator).
-  // The tracker settles a criterion from the SAME `ok` the feed reports, rather
-  // than re-deriving success from the tool result a second time.
-  const translate = createSdkTranslator(
-    validationProgress ? { onToolOutcome: validationProgress.settle } : undefined,
-  );
   // …and one watchdog, so a silent stretch says what it is waiting on rather
   // than looking identical to a dead run.
   const watchdog = createRunWatchdog();
@@ -617,7 +660,12 @@ export async function runClaudeQuery(
   // this MUST terminate: a handler that only logged would convert a kill into
   // the very hang it exists to diagnose.
   const onTerminate = (signal: NodeJS.Signals): void => {
-    emit({ kind: "log", level: "error", summary: `[watchdog] terminated by ${signal} — ${watchdog.describe()}` });
+    emit({
+      kind: "notice",
+      level: "error",
+      code: "terminated",
+      detail: `[watchdog] terminated by ${signal} — ${watchdog.describe()}`,
+    });
     stopWatchdog();
     // stdout is a PIPE here (a pod's log stream; the playground's child stdio),
     // and pipe writes are asynchronous on POSIX — exiting on this tick can
@@ -629,80 +677,35 @@ export async function runClaudeQuery(
   process.once("SIGTERM", onTerminate);
   process.once("SIGINT", onTerminate);
 
+  // Bounded from outside, when the caller says so — see runDeadlineFromEnv. A
+  // pod whose Job deadline passes is killed mid-sentence and explains nothing;
+  // this is what lets the run stop its own tasks and settle first. Unset by
+  // every caller today, and therefore inert: the dispatcher's Job spec is not
+  // this phase's to move.
+  const deadline = runDeadlineFromEnv(process.env);
+
   const completion = (async (): Promise<RunResult> => {
     try {
-      for await (const message of q) {
-        // Streaming frames arrive per token and are pure watchdog fuel: they
-        // reach neither the feed nor claude.log, because writing them to a
-        // JSON-per-message file would turn a diagnostic into the hang it exists
-        // to report. Only present under `debug` at all.
-        if (isStreamFrame(message)) {
-          watchdog.observeStream();
-          continue;
-        }
-        log.write(message);
-        // A retryable API failure is the answer to "waiting on the model" —
-        // see progress/diagnostics.ts. It is recorded and reported but NOT
-        // passed to observe(): a retry means the run failed to progress, and
-        // counting it as activity would suppress the very report it explains.
-        // The translator drops this message, so emitting here adds a line
-        // rather than duplicating one.
-        const retry = readApiRetry(message);
-        if (retry) {
-          watchdog.observeRetry(retry);
-          emit({ kind: "log", level: "warn", summary: apiRetryLine(retry) });
-          continue;
-        }
-        // The other system messages that explain a silence or an ending — a
-        // compaction, a refusal, a denied tool, a worker going away. Dropped
-        // with every other unrecognised subtype until now, which is how a run
-        // that was compacting and a run that was wedged looked identical.
-        // Deliberately NOT fed to the watchdog: none of them is the agent making
-        // progress, and firing the idle report slightly early is the safe
-        // direction for a diagnostic.
-        const signal = readStallSignal(message);
-        if (signal) {
-          emit({ kind: "log", level: signal.level, summary: signal.summary });
-          continue;
-        }
-        const events = translate(message);
-        watchdog.observe(events);
-        for (const event of events) {
-          emit(event);
-        }
-        // The SDK reports what it actually resolved; a preload that matched
-        // nothing is dropped in silence (see skills_preload_check.ts for the
-        // run this cost us). Warn rather than fail: the guidance is missing,
-        // not the build, and a run that can still produce something useful
-        // should — but it must not look clean while doing it.
-        if (message.type === "system" && message.subtype === "init") {
-          const { missing } = checkPreload(skills, message.skills ?? []);
-          if (missing.length > 0) {
-            emit({ kind: "log", level: "warn", summary: preloadWarning(missing) });
-          }
-        }
-        if (message.type === "result") {
-          if (message.subtype === "success") {
-            return { exitCode: 0 };
-          }
-          const errors =
-            "errors" in message && Array.isArray(message.errors)
-              ? (message.errors as string[])
-              : [];
-          return {
-            exitCode: 1,
-            error: `agent result ${message.subtype}${errors.length ? ": " + errors.join(", ") : ""}`,
-          };
-        }
-      }
-      emit({ kind: "log", level: "warn", summary: "agent stream ended without result" });
-      return { exitCode: 1, error: "agent stream ended without result" };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.write({ type: "worker_error", error: msg });
-      emit({ kind: "result", status: "failure", error: msg });
-      return { exitCode: 1, error: msg };
+      // The loop is its own module (run_loop.ts) because its rule is the whole
+      // point of it: the run settles when the STREAM closes, not on the first
+      // `result` — a lead can end its turn with background subagents still
+      // working, and returning there killed the pod with their work unread.
+      // Building the query and consuming it in one function meant that rule
+      // could only be exercised by starting a real session; it is now replayed
+      // against two recorded ones (test/fixtures/).
+      return await consumeRun(
+        { messages: q, stopTask: (taskId) => q.stopTask(taskId) },
+        {
+          translate: adapter.translate,
+          watchdog,
+          emit,
+          record: (m) => log.write(m),
+          requestedSkills: skills,
+          deadline,
+        },
+      );
     } finally {
+      deadline?.cancel();
       stopWatchdog();
       process.removeListener("SIGTERM", onTerminate);
       process.removeListener("SIGINT", onTerminate);

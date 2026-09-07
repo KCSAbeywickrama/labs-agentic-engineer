@@ -52,7 +52,34 @@
  */
 
 import type { HookCallback, PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
-import type { ProgressItemStatus } from "./progress/schema.js";
+import type { RunEvent } from "./progress/emitter.js";
+
+/**
+ * What a criterion's row may say, as the committed contract spells it.
+ *
+ * The contract's `itemStatus` is the UNION of two vocabularies — a validation
+ * criterion's, and the runtime task list's `pending | in_progress | completed |
+ * deleted` — and `source` says which half applies. This narrows it back to the
+ * criterion half, which is the only one this module produces, so a typo here is
+ * a compile error rather than a row a console cannot fold.
+ *
+ * The terminal two are report.json's OWN words (`pass`/`fail`, see
+ * aep-validation's generate-report.mjs), deliberately not `passed`/`failed`: the
+ * console overlays these live statuses onto the same rows it later fills from
+ * that report, and a second spelling for one fact would need a translation
+ * table between them. `not_run` is absent because only the report can conclude
+ * it — nothing observed DURING a run proves a criterion was never attempted.
+ *
+ * `healing` means a spec that once passed has broken, matching what
+ * aep-validation's healing.md scopes a heal to. An edit before an item's first
+ * pass is still `authoring`: authoring.md requires a spec to pass twice
+ * consecutively, so failing on the way there is the normal path, and calling it
+ * healing would make a healthy run read as a struggling one.
+ */
+export type ProgressItemStatus = Extract<
+  NonNullable<RunEvent["itemStatus"]>,
+  "planned" | "exploring" | "authoring" | "running" | "healing" | "pass" | "fail"
+>;
 
 /** One row's status changed. */
 export interface ProgressItemUpdate {

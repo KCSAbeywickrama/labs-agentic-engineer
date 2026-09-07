@@ -479,9 +479,24 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// come from OpenChoreo; a finished cycle's come from the observability
 	// plane while its component is retained; when neither can answer the reader
 	// says so rather than serving an empty stream.
+	// The run-feed RECORDING store, on the workspace volume aep-api already
+	// mounts and already sweeps. It is what makes a cycle's feed survive its pod:
+	// the recorder (below, driven by the cycle watcher) writes it once,
+	// server-side, and every viewer reads the file instead of re-deriving the
+	// pod's log per connection. Nil when there is no workspace volume (Fake()),
+	// and every feed then honestly reports `recording: none`.
+	codingLogSource := codingagent.NewOCLogSource(runtimeClient)
+	codingArchive := codingagent.NewObserverArchive(observClient, runtimeClient)
+	runRecordings := codingagent.NewRecordingStore(cfg.Workspace.Root, cfg.Workspace.RecordingMaxBytes)
+	// The archive is attached to the RECORDER, not to the reader, as its
+	// gap-backfill: it is no longer the ordinary post-mortem source for the run
+	// feed (the recording is), and its 200-event window went with that.
+	runRecorder := codingagent.NewCycleRecorder(codingLogSource, runRecordings).
+		WithArchive(codingArchive)
 	agentProgressReader := codingagent.NewAgentProgressReader(
-		codingagent.NewOCLogSource(runtimeClient), codingAgentLogRepo).
-		WithArchive(codingagent.NewObserverArchive(observClient, runtimeClient))
+		codingLogSource, codingAgentLogRepo).
+		WithArchive(codingArchive).
+		WithRecordings(runRecordings)
 	execProgressSvc.WithCodingProgress(agentProgressReader)
 	// The task-log SSE stream: one connection per open task-detail page carries
 	// the Task's whole live state (status + executions + unified timeline across
@@ -1094,8 +1109,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// The milestone run READ surface. Both readers are the root repositories
 	// (this is a read model — it writes nothing), and the log source is the same
 	// OC/archive reader the task-log stream uses.
-	runReads := runread.NewReads(milestoneRunRepo, runCycleRepo)
-	runProgress := runread.NewProgressService(milestoneRunRepo, runCycleRepo, agentProgressReader)
+	runReads := runread.NewReads(milestoneRunRepo, runCycleRepo).
+		WithRecordings(agentProgressReader)
+	runProgress := runread.NewProgressService(milestoneRunRepo, runCycleRepo, agentProgressReader).
+		WithRecordings(agentProgressReader)
 	// A cycle's builds are DERIVED from OpenChoreo on read, never stored, so
 	// this read is the one part of the run surface that touches the cluster —
 	// which is why it is its own endpoint rather than a field on the run read.
@@ -1115,7 +1132,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// Component, which is what actually stops the pod and frees the org's
 		// billing concurrency slot. Revalidate is the event plane's.
 		RunCommands: runread.NewCommands(milestoneRunRepo, milestoneRunRepo, runSupervisor, eventcoreRevalidator{events: eventPlane}).
-			WithCycleReaper(codingagent.NewCycleReaper(componentClient, runCycleRepo)),
+			WithCycleReaper(codingagent.NewCycleReaper(componentClient, runCycleRepo).
+				WithRecorder(runRecorder)),
 		RunCycleBuilds: runCycleBuilds,
 	}
 	// WritePublisher stamps secret_ref_name onto the org's IDP profile;
@@ -1338,7 +1356,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// died without a pull request, and banks the run's token spend. It writes no
 	// logs and deletes no components — history is the observability plane's and
 	// deletion is retention's. Always on (no longer gated on cluster-gateway-proxy).
-	watchers = append(watchers, codingagent.NewJobWatcher(runtimeClient, runCycleRepo, asServiceIdentity))
+	watchers = append(watchers, codingagent.NewJobWatcher(runtimeClient, runCycleRepo, asServiceIdentity).
+		WithRecorder(runRecorder))
 	slog.Info("codingagent.JobWatcher: enabled (OpenChoreo resource tree)")
 	// The milestone run supervisor's Temporal worker. Registered only when
 	// Temporal is configured (TEMPORAL_HOSTPORT set). The watcher dials in a

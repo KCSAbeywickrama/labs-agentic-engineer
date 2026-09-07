@@ -53,13 +53,14 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { stdout as output } from "node:process";
 import {
-  formatLine,
+  formatAgentStatus,
+  formatEvent,
   formatOutcome,
-  formatSubagentStatus,
-  groupBySubagent,
+  groupByAgent,
   mergeOutcomes,
-  type AttributedLine,
-  type ProgressLineView,
+  LEAD_AGENT_ID,
+  type AgentSection,
+  type RunEventView,
 } from "@aep/progress-view";
 import { REPO_ROOT } from "../paths.js";
 
@@ -239,14 +240,14 @@ export function hostToolAdvice(): string | undefined {
 // log/artifact story, not something to smuggle in through a dev harness.
 const IMAGE_AGENT_SESSION_DIR = "/home/aep/.claude/projects";
 
-/** One NDJSON line off the runner's feed, as this harness reads it. */
-export type ProgressEvent = ProgressLineView & AttributedLine;
+/** One NDJSON event off the runner's v2 feed, as this harness reads it. */
+export type ProgressEvent = RunEventView;
 
 // Attribution is a fixed-width tag so the glyphs stay in one column and a
 // fanned-out run still scans as a single timeline. The tag is a NUMBER, not the
-// subagent's label: labels run to a full sentence ("Implement todo-api
-// Ballerina service (issue #3)") and would push every line off the right edge.
-// The label is announced once, the first time that subagent appears.
+// agent's label: labels run to a full sentence ("Implement todo-api Ballerina
+// service (issue #3)") and would push every line off the right edge. The label
+// is announced once, by the agent's own `agent_started` row.
 const TAG_WIDTH = "[#1] ".length;
 
 export type TimelineRenderer = (e: ProgressEvent) => string[];
@@ -263,43 +264,67 @@ function annotateForLocalMode(e: ProgressEvent, text: string): string {
 }
 
 /**
- * Build the renderer for ONE run: it numbers subagents as they appear, so
- * concurrent fan-outs stay tellable apart across lines. Returns zero lines for
- * a silent event, one for a normal line, and two the first time a subagent
- * speaks (its announcement, then its line).
+ * Build the renderer for ONE run: it numbers agents as they appear, so
+ * concurrent fan-outs stay tellable apart across lines, and indents them by the
+ * depth the feed declares. Returns zero lines for a silent event, one for a
+ * normal row, and more when a settling agent brings its closing report with it.
  *
  * The WORDING of every line comes from @aep/progress-view, the same module the
  * console renders through — so what you iterate on here is what a cluster run
  * shows, and a wording defect cannot hide in one surface. Only the terminal
- * presentation (the tags, the column) is this harness's own.
+ * presentation (the tags, the column, the indent) is this harness's own.
+ *
+ * A terminal cannot go back and rewrite a row it printed, so this pass is
+ * honest about that: a section's header is its `agent_started` row where it
+ * appeared, and its report arrives later with its `agent_settled`. The merged
+ * pass below is the console-shaped rendering of the same events.
  */
 export function createTimelineRenderer(): TimelineRenderer {
   const tags = new Map<string, string>();
+  // An agent's label and depth are declared once, by its `agent_started`. A
+  // stream rendered event by event has to remember them: without this a settling
+  // agent reports under its opaque runtime id, which is not a name a reader can
+  // match to the section it just watched. The console's grouping holds the same
+  // memory in its section; here it is these two maps.
+  const labels = new Map<string, string>();
+  const depths = new Map<string, number>();
 
   return function render(e: ProgressEvent): string[] {
-    const text = annotateForLocalMode(e, formatLine(e).text);
-    if (!text) return [];
-
-    // One line at a time, so the grouping the console applies over a whole
-    // cycle degrades here to "is this line a subagent's, and which one".
-    const [row] = groupBySubagent([e]);
-    if (!row || row.kind !== "group") {
-      // A subagent line from a runner too old to stamp an id cannot be grouped,
-      // but it is still a subagent's — the console keeps its chip for exactly
-      // this case, and dropping the marker here would read as the main agent.
-      const tag = e.emitter === "subagent" ? "[sub]" : "";
-      return [`  ${tag.padEnd(TAG_WIDTH)}${text}`];
+    if (e.kind === "agent_started") {
+      if (e.depth) depths.set(e.agentId, e.depth);
+      if (e.label) labels.set(e.agentId, e.label);
     }
+    const named: ProgressEvent = e.label ? e : { ...e, label: labels.get(e.agentId) };
 
-    const { id, label } = row.group;
-    const announce: string[] = [];
-    let tag = tags.get(id);
-    if (!tag) {
-      tag = `[#${tags.size + 1}]`;
-      tags.set(id, tag);
-      if (label !== "subagent") announce.push(`  ${" ".repeat(TAG_WIDTH)}⑂ ${tag} ${label}`);
+    const { text, report } = formatEvent(named);
+    const body = annotateForLocalMode(named, text);
+    if (!body) return [];
+
+    // The lead is untagged: it is the overwhelming majority of a run's rows, and
+    // an unstamped row reading as "the lead" is what keeps the feed quiet.
+    let tag = "";
+    if (e.agentId !== LEAD_AGENT_ID) {
+      let known = tags.get(e.agentId);
+      if (!known) {
+        known = `[#${String(tags.size + 1)}]`;
+        tags.set(e.agentId, known);
+      }
+      tag = known;
     }
-    return [...announce, `  ${`${tag} `.padEnd(TAG_WIDTH)}${text}`];
+    // Depth 1 sits in the tag column; deeper agents step right, so a grandchild
+    // reads as nested rather than as another sibling of the lead.
+    const depth = e.agentId === LEAD_AGENT_ID ? 0 : (depths.get(e.agentId) ?? 1);
+    const nest = "  ".repeat(Math.max(0, depth - 1));
+    const gutter = tag ? `${tag} `.padEnd(TAG_WIDTH) : " ".repeat(TAG_WIDTH);
+
+    const out = [`  ${gutter}${nest}${body}`];
+    // The agent's own account of what it did. It is the ONLY copy — a spawned
+    // agent's transcript never reaches this feed — so it is printed in full
+    // rather than truncated onto the row above.
+    if (report) {
+      for (const line of report.split("\n")) out.push(`  ${" ".repeat(TAG_WIDTH)}${nest}  ${line}`);
+    }
+    return out;
   };
 }
 
@@ -310,7 +335,7 @@ const OUTCOME_COLUMN = 62;
 
 /**
  * The whole run again, once every event is in hand: one row per step with its
- * outcome attached, and each subagent's work gathered under its own report.
+ * outcome attached, and each agent's work gathered under its own report.
  *
  * This exists because a terminal cannot go back and rewrite a line it printed.
  * The live stream above is honest about that — an outcome follows as a
@@ -324,32 +349,42 @@ export function renderMergedTimeline(events: readonly ProgressEvent[]): string[]
     if (!text) return;
     out.push(outcome ? `${(indent + text).padEnd(OUTCOME_COLUMN)} ${outcome}` : `${indent}${text}`);
   };
+  const reportBlock = (indent: string, report: string | undefined): void => {
+    if (!report) return;
+    for (const line of report.split("\n")) out.push(`${indent}${line}`);
+  };
 
-  const rows = groupBySubagent(events);
-  // The main agent's lines are merged as ONE stream: its action and its outcome
-  // are routinely separated by a subagent section that spoke in between, so
-  // pairing has to survive the gap. Looked up per line afterwards, which keeps
-  // each section printed where its subagent first spoke.
-  const mainByLine = new Map(
-    mergeOutcomes(rows.flatMap((r) => (r.kind === "line" ? [r.line] : []))).map((m) => [m.line, m]),
-  );
-
-  for (const r of rows) {
-    if (r.kind === "group") {
-      out.push(`  ⑂ ${r.group.label} — ${formatSubagentStatus(r.group.report)}`);
-      for (const m of mergeOutcomes(r.group.lines)) {
-        const { text } = formatLine(m.line);
-        const { detail, duration } = formatOutcome(m.outcome);
-        row("    │ ", annotateForLocalMode(m.line, text), [detail, duration].filter(Boolean).join(" · "));
+  const walk = (section: AgentSection<ProgressEvent>, indent: string): void => {
+    // An agent's own events are merged as ONE stream: an action and its outcome
+    // are routinely separated by a nested section that spoke in between, so
+    // pairing has to survive the gap. Looked up per event afterwards, which
+    // keeps each section printed where its agent first spoke.
+    const merged = new Map(
+      mergeOutcomes(section.rows.flatMap((r) => (r.kind === "event" ? [r.event] : []))).map((m) => [
+        m.line,
+        m,
+      ]),
+    );
+    for (const r of section.rows) {
+      if (r.kind === "section") {
+        out.push(`${indent}⑂ ${r.section.agent.label} — ${formatAgentStatus(r.section.agent)}`);
+        reportBlock(`${indent}  `, r.section.agent.report);
+        walk(r.section, `${indent}│ `);
+        continue;
       }
-      continue;
+      const m = merged.get(r.event);
+      if (!m) continue; // folded into an earlier action's row
+      const { text } = formatEvent(r.event);
+      const { detail, duration } = formatOutcome(m.outcome);
+      row(indent, annotateForLocalMode(r.event, text), [detail, duration].filter(Boolean).join(" · "));
     }
-    const m = mainByLine.get(r.line);
-    if (!m) continue; // folded into an earlier action's row
-    const { text } = formatLine(r.line);
-    const { detail, duration } = formatOutcome(m.outcome);
-    row("  ", annotateForLocalMode(r.line, text), [detail, duration].filter(Boolean).join(" · "));
-  }
+  };
+
+  const lead = groupByAgent(events);
+  walk(lead, "  ");
+  // The lead's own closing report last, where the run ends — it is about the
+  // whole run rather than any one step of it.
+  reportBlock("  ", lead.agent.report);
   return out;
 }
 
@@ -555,12 +590,16 @@ export function dockerInvocation(opts: CodingRunOptions, runDir: string, contain
 }
 
 /**
- * A fan-out subagent that ended in failure — a stall, a crash, a killed task.
- * `Agent` is the SDK's fan-out tool; `ok === false` is how the runner's feed
- * reports a tool that did not succeed.
+ * A spawned agent that ended in failure — a stall, a crash, a killed task.
+ *
+ * v2 says so outright: `agent_settled` carries the runtime's own verdict, so
+ * this no longer has to infer a whole agent's fate from the outcome of the tool
+ * call that spawned it. `stopped` is deliberately NOT a failure — the work was
+ * taken away rather than going wrong, and snapshotting a cancelled agent's
+ * transcript as a failure would file a diagnostic for a defect that never was.
  */
-export function isFailedSubagent(e: ProgressEvent): boolean {
-  return e.kind === "tool_result" && e.ok === false && e.tool === "Agent";
+export function isFailedAgent(e: ProgressEvent): boolean {
+  return e.kind === "agent_settled" && e.status === "failed";
 }
 
 /**
@@ -678,7 +717,7 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
   return new Promise((resolvePromise) => {
     const child = spawn(command, args, { cwd: REPO_ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
 
-    // One renderer per run — it numbers this run's subagents (see above).
+    // One renderer per run — it numbers this run's agents (see above).
     const render = createTimelineRenderer();
     // Kept so the run can be re-rendered console-shaped once it ends. Bounded by
     // the run itself, same as the progress.ndjson beside it.
@@ -702,11 +741,11 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
           continue;
         }
         events.push(event);
-        // Fire-and-forget: the copy races the SDK's own cleanup of that
-        // subagent's files, so it starts now rather than after this batch of
-        // lines is rendered.
-        if (containerName && isFailedSubagent(event)) {
-          void snapshotAgentSessions(containerName, runDir, event.toolUseId ?? `seq-${events.length}`);
+        // Fire-and-forget: the copy races the runtime's own cleanup of that
+        // agent's files, so it starts now rather than after this batch of
+        // events is rendered.
+        if (containerName && isFailedAgent(event)) {
+          void snapshotAgentSessions(containerName, runDir, event.agentId || `seq-${String(events.length)}`);
         }
         if (opts.silent) continue;
         for (const rendered of render(event)) output.write(rendered + "\n");

@@ -159,6 +159,22 @@ type LiveLogSource interface {
 	Tail(ctx context.Context, orgName, projectName, componentName string, maxBytes int) (LiveTail, error)
 }
 
+// RecordingLogSource is the same pod log read for the RECORDER rather than for
+// a viewer, and the two differences are the whole point of a separate port.
+//
+// It reads with a TIME cursor (sinceSeconds; 0 = everything the platform still
+// holds) instead of a byte window, and it applies NO byte cut. LiveLogSource
+// keeps the newest 64KiB because a viewer wants fresh content and re-reads two
+// seconds later; that same cut silently DROPPED a burst larger than 64KiB
+// between two polls, which is one of the five losses the recording exists to
+// close. A recorder that cut bytes would write the loss into the file, where it
+// can never be recovered.
+//
+// Satisfied by *OCLogSource.
+type RecordingLogSource interface {
+	ReadSince(ctx context.Context, orgName, projectName, componentName string, sinceSeconds int64) (LiveTail, error)
+}
+
 // ArchiveScope names one cycle's archived log: its component, and the window
 // the cycle ran in. The window matters — the observer has no cursor, so the
 // only way to bound a read is to ask for the time the work happened.

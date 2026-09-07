@@ -196,8 +196,8 @@ export function RunStory({
   // as "step 7 of 5". Which session it is comes from the label above instead.
   const glance = buildGlance(stages);
   const issues = current ? sessionIssues(current, work) : undefined;
-  const lines = current
-    ? (progress.cycles.find((c) => c.cycle.id === current.id)?.lines ?? [])
+  const events = current
+    ? (progress.cycles.find((c) => c.cycle.id === current.id)?.events ?? [])
     : [];
 
   // Is there anything below the header worth ruling off? The strip and NOW when
@@ -376,7 +376,7 @@ export function RunStory({
                     {...(issues?.caption
                       ? { issuesCaption: issues.caption }
                       : {})}
-                    lines={lines}
+                    events={events}
                     logPhase={progress.phase}
                     showLog={showLog}
                     onOpenLog={() => setLogRequested(true)}

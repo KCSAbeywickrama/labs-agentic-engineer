@@ -280,9 +280,10 @@ is not the one being worked.
 
 ### Fan-out to subagents
 
-You have a fan-out tool, and **fanning out is the default, not the exception** —
-a provider and its consumer may be built at the same time, by different subagents
-(**Contract-first**). Two tests, and they are the only two:
+You have a **fan-out tool** and a **wait tool** — the tool glossary at the end of
+your instructions names them for this session. **Fanning out is the default, not
+the exception**: a provider and its consumer may be built at the same time, by
+different subagents (**Contract-first**). Two tests, and they are the only two:
 
 - **Disjoint App Paths** — no file and no module written by both. Overlap is the
   only reason to serialise; work those inline, in ascending order.
@@ -290,12 +291,34 @@ a provider and its consumer may be built at the same time, by different subagent
   small fix issue: work those inline. A subagent for small work costs more than it
   saves and makes the run harder to follow.
 
-**Issue every subagent for a wave in ONE turn, and wait for them.** Several
-fan-out calls in a single message is what makes them run at the same time, and
-short prompts are what make one message possible. Do not use `run_in_background`:
-it does not add concurrency — it detaches the subagent, so its steps stop reaching
-the progress feed and the person watching sees an empty section where a component
-was built.
+**Dispatch every builder of a wave in the background, in ONE turn.**
+Backgrounding is what lets you keep working while they build — resolve the next
+component's wiring, review one that has come back — instead of spending the whole
+wave inside one blocked tool call. Short prompts are what make one message
+possible.
+
+**Wait for every one of them with the wait tool before you stage or commit
+anything.** A subagent that has not reported is not done, whatever the tree looks
+like: the files it is still writing are already on disk, so a commit taken early
+ships half an issue.
+
+**Inside a subagent, every command runs in the foreground** — a subagent never
+backgrounds a shell call. A build left running in the background lets the
+subagent report "clean" while it is still compiling, and whatever is still
+running when the session ends is recorded as an orphan. Say so in every subagent
+prompt.
+
+**A subagent may fan out itself** when its own work meets the two tests above; it
+inherits every rule in this section.
+
+**Pick the model for the job.** A walk or a small fix runs well on the fast model,
+a build on the default one. Name the model on the fan-out call — the glossary
+lists the aliases this session accepts.
+
+**Keep your plan in the task list.** One entry per issue you work, moved to
+in_progress when you or a subagent starts it, and to completed when its work is
+committed. The person watching this run reads that list, so it is the one place
+your plan has to be true.
 
 **A subagent starts from its prompt and nothing else.** It does not have this
 skill. This list is a **build** dispatch — a walk's prompt is the literal one in
@@ -463,7 +486,6 @@ web search. The rest belongs to the run:
 - **Hold back or skip an issue because a component it depends on is not built
   yet.** Code against the contract.
 - Let a subagent run `git`, or any `gh` its prompt did not give it.
-- Fan out with `run_in_background` (**Fan-out to subagents**).
 
 ## Git and GitHub
 

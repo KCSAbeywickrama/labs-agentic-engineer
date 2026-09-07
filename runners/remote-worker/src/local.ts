@@ -63,6 +63,7 @@ import { openTaskLog } from "./lib/logger.js";
 import type { DispatchRequest } from "./lib/types.js";
 import type { WorkspaceLayout } from "./lib/workspace.js";
 import { emit, primeScrubber } from "./lib/progress/emitter.js";
+import { PROVISIONING, WORKSPACE_READY } from "./lib/progress/lifecycle.js";
 import { installConsoleScrubber } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
 import { listMirroredSkills, readSkillBodies, resolveSkillPresence } from "./lib/skills_presence.js";
@@ -150,17 +151,17 @@ async function main(): Promise<number> {
   // an API key), and priming only the one that happens to be unset would leave
   // the other unredacted in the progress feed. Unset entries are skipped.
   primeScrubber([process.env.ANTHROPIC_API_KEY, process.env.CLAUDE_CODE_OAUTH_TOKEN]);
-  emit({ kind: "phase", phase: "workspace_provisioning" });
+  emit(PROVISIONING);
 
   let layout: WorkspaceLayout;
   try {
     layout = localDirWorkspace(run);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    emit({ kind: "result", status: "failure", error: `workspace_provisioning: ${msg}` });
+    emit({ kind: "run_settled", outcome: "failure", error: `workspace_provisioning: ${msg}` });
     return 2;
   }
-  emit({ kind: "phase", phase: "workspace_ready" });
+  emit(WORKSPACE_READY);
 
   // The playground writes its own mirror, standing in for the BFF write that
   // production gets for free — into `.claude/skills/` in the project dir, the
@@ -247,7 +248,7 @@ async function main(): Promise<number> {
     // overlay is broken, which is exactly what a developer here wants told
     // plainly rather than discovered from a session that improvised.
     const msg = err instanceof Error ? err.message : String(err);
-    emit({ kind: "result", status: "failure", error: `skills: ${msg}` });
+    emit({ kind: "run_settled", outcome: "failure", error: `skills: ${msg}` });
     console.error(`[local] ${msg}`);
     return 2;
   }

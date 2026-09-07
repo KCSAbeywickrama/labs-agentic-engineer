@@ -30,7 +30,9 @@ import {
   debugQueryOptions,
   onDemandSkills,
   promptWithProjectRoot,
+  systemPromptAppend,
 } from "./runner.js";
+import { toolGlossary } from "./tool_glossary.js";
 import { MissingWorkflowSkillError, requireWorkflowBodies } from "./skills_presence.js";
 
 // D9 secure search (Task 12) — WebSearch joins the base tool set (gated by
@@ -274,6 +276,40 @@ test("promptWithProjectRoot: omitting the contract path leaves the prompt as it 
   const out = promptWithProjectRoot("Work the issues", "/workspace/project");
   assert.ok(!out.includes("component-contract.md"));
   assert.ok(out.endsWith("Work the issues"));
+});
+
+// --- systemPromptAppend: the workflow's roles, bound at startup -------------
+
+// The `aep` skill names ROLES — "the fan-out tool", "the wait tool" — because one
+// authored library steers every org and a body naming `Agent`/`TaskOutput` would
+// be a Claude Code document. The glossary is what resolves them, and the skill
+// points at it BY POSITION ("the tool glossary at the end of your instructions"),
+// so anything appended after it makes that pointer a lie.
+test("systemPromptAppend: workflow first, pins next, the glossary last", () => {
+  const appended = systemPromptAppend("WORKFLOW", "PINS");
+
+  assert.equal(appended, `WORKFLOW\n\nPINS\n\n${toolGlossary()}`);
+  assert.ok(appended.endsWith(toolGlossary()), "the glossary is not at the end of the instructions");
+});
+
+// A run with nothing pinned is the ordinary case, and it must not open a gap
+// where the pins would have been — the same reason readSkillBodies returns "".
+test("systemPromptAppend: an unpinned run still gets the glossary, with no empty gap", () => {
+  assert.equal(systemPromptAppend("WORKFLOW", ""), `WORKFLOW\n\n${toolGlossary()}`);
+});
+
+// Every role the workflow's prose defers to has to be bound here, or the agent
+// resolves it by guessing a tool name.
+test("systemPromptAppend: the glossary names the fan-out, wait and task-list tools", () => {
+  const glossary = toolGlossary();
+
+  assert.match(glossary, /fan-out tool.*`Agent`/);
+  assert.match(glossary, /`run_in_background: true`/);
+  assert.match(glossary, /wait tool.*`TaskOutput`/);
+  assert.match(glossary, /task list.*`TaskCreate`/);
+  // The skill says "the fast model" and "the default one" and leaves the aliases
+  // to this table; a lead that guesses one spends a turn on a schema error.
+  assert.match(glossary, /`haiku` \(the fast model\), `sonnet` \(the default\)/);
 });
 
 test("AGENT_SETTING_SOURCES admits the project source, and only that one", () => {

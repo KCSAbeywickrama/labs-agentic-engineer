@@ -38,6 +38,7 @@ import { openTaskLog } from "./lib/logger.js";
 import { isUUID, isSlug } from "./lib/uuid.js";
 import type { DispatchRequest } from "./lib/types.js";
 import { emit, primeScrubber } from "./lib/progress/emitter.js";
+import { PROVISIONING, WORKSPACE_READY } from "./lib/progress/lifecycle.js";
 import { installConsoleScrubber } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
 import { listMirroredSkills, readSkillBodies, resolveSkillPresence } from "./lib/skills_presence.js";
@@ -185,22 +186,19 @@ async function main(): Promise<number> {
     req.mcpToken,
   ]);
 
-  emit({
-    kind: "phase",
-    phase: "workspace_provisioning",
-  });
+  emit(PROVISIONING);
 
   let layout;
   try {
     layout = await provisionWorkspace(req);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    emit({ kind: "result", status: "failure", error: `workspace_provisioning: ${msg}` });
+    emit({ kind: "run_settled", outcome: "failure", error: `workspace_provisioning: ${msg}` });
     console.error("[oneshot] provisionWorkspace failed:", msg);
     return 2;
   }
 
-  emit({ kind: "phase", phase: "workspace_ready" });
+  emit(WORKSPACE_READY);
 
   // Per-task skills — read the design's pinned skill names from the project
   // clone (no network: `.claude/skills/` is already the BFF-mirrored, filtered
@@ -251,7 +249,7 @@ async function main(): Promise<number> {
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      emit({ kind: "result", status: "failure", error: `validation_context: ${msg}` });
+      emit({ kind: "run_settled", outcome: "failure", error: `validation_context: ${msg}` });
       console.error(`[oneshot] validation context unavailable — not starting the agent: ${msg}`);
       return 2;
     }
@@ -285,7 +283,7 @@ async function main(): Promise<number> {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      emit({ kind: "result", status: "failure", error: `endpoint_access: ${msg}` });
+      emit({ kind: "run_settled", outcome: "failure", error: `endpoint_access: ${msg}` });
       console.error(`[oneshot] cannot make the endpoints reachable — not starting the agent: ${msg}`);
       return 2;
     }
@@ -298,7 +296,7 @@ async function main(): Promise<number> {
     const unreachable = await probeEndpoints(endpoints);
     if (unreachable.length > 0) {
       const detail = unreachable.map((u) => `${u.component} (${u.url}): ${u.reason}`).join("; ");
-      emit({ kind: "result", status: "failure", error: `endpoint_unreachable: ${detail}` });
+      emit({ kind: "run_settled", outcome: "failure", error: `endpoint_unreachable: ${detail}` });
       console.error(`[oneshot] deployed endpoint(s) did not answer — not starting the agent: ${detail}`);
       return 2;
     }
@@ -358,7 +356,7 @@ async function main(): Promise<number> {
     // improvise one and report success — the mirror's writes are best-effort by
     // design, and this is the point where the cause is still obvious.
     const msg = err instanceof Error ? err.message : String(err);
-    emit({ kind: "result", status: "failure", error: `skills: ${msg}` });
+    emit({ kind: "run_settled", outcome: "failure", error: `skills: ${msg}` });
     console.error(`[oneshot] ${msg}`);
     return 2;
   }
