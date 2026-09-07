@@ -687,7 +687,7 @@ const STATUS_THREAD: Partial<Record<ValidationScenario, StatusPost[]>> = {
   ],
   passed: [
     { body: "Starting validation: 12 criteria, 9 need new specs." },
-    { body: "Generating the validation report from the results on disk…", observed: true },
+    { body: "Generating the validation report from the automated test results…", observed: true },
     { body: "All 12 covered and passing. Report committed, PR #14 open." },
   ],
   failed: [

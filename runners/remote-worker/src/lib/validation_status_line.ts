@@ -118,7 +118,7 @@ export const LADDER_LINES: Record<LineKey, string> = {
   exploring: "Exploring the deployed app to author automated tests…",
   authoring: "Authoring automated tests…",
   running: "Running automated tests against the deployed system…",
-  reporting: "Generating the validation report from the results on disk…",
+  reporting: "Generating the validation report from the automated test results…",
   repairing: "Fixing the test issues…",
 };
 

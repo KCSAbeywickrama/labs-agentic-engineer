@@ -962,7 +962,7 @@ That covers both writers. The derived fallbacks (*Setting up the test harness…
 *Writing the validation report…*) are the console's, now distant — the run posts
 its own line as it works, and they speak only before its first comment lands. The
 platform's rungs live in `validation_status_line.ts`, and two of them —
-*Generating the validation report from the results on disk…* and *Fixing the test
+*Generating the validation report from the automated test results…* and *Fixing the test
 issues…* — carry the same debt. `harness` is deliberately byte-identical to its
 fallback, so one phase reads the same sentence whichever source produced it.
 
