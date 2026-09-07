@@ -19,7 +19,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { debugQueryOptions } from "../../lib/logger.js";
-import { AGENT_SETTING_SOURCES, CLAUDE_CODE_DEFAULT_MODEL, createClaudeCodeRuntime } from "./runtime.js";
+import { AGENT_SETTING_SOURCES, CLAUDE_CODE_DEFAULT_MODEL, createClaudeCodeRuntime, openPromptStream } from "./runtime.js";
 import { BASE_ALLOWED_TOOLS, buildMcpOptions, deniedTools, namespacedMcpTool } from "./tools.js";
 import { DENIED_CAPABILITIES, type DeniedCapability } from "../port.js";
 
@@ -263,4 +263,27 @@ test("debugQueryOptions: the reasoning pair is on together, or not at all", () =
   });
   assert.deepEqual(opts.thinking, { type: "adaptive", display: "summarized" });
   assert.equal(opts.forwardSubagentText, true);
+});
+
+
+// --- the prompt stream ----------------------------------------------------------
+//
+// The SDK ends the CLI's stdin when a string prompt's first result arrives, and
+// stdin is the hook channel. Held open as a stream, it ends only when released.
+
+test("openPromptStream: yields the prompt once and stays open until released", async () => {
+  const { stream, release } = openPromptStream("build it");
+  const it = stream[Symbol.asyncIterator]();
+  const first = await it.next();
+  assert.equal(first.done, false);
+  assert.deepEqual(first.value, { type: "user", message: { role: "user", content: "build it" }, parent_tool_use_id: null, session_id: "" });
+
+  const pending = Symbol("pending");
+  const second = it.next();
+  const raced = await Promise.race([second, new Promise((r) => setTimeout(() => r(pending), 30))]);
+  assert.equal(raced, pending, "the second read must not settle on its own");
+
+  release();
+  release(); // idempotent
+  assert.equal((await second).done, true);
 });

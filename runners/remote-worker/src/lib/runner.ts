@@ -37,7 +37,13 @@ import type { DispatchRequest } from "./types.js";
 import type { WorkspaceLayout } from "./workspace.js";
 import { writeBearerFile } from "./workspace.js";
 import { emit, primeScrubber } from "./progress/emitter.js";
-import { consumeRun, runDeadlineFromEnv, type RunResult } from "./run_loop.js";
+import {
+  consumeRun,
+  createRunTerminator,
+  runDeadlineFromEnv,
+  type RunResult,
+  type RunTerminator,
+} from "./run_loop.js";
 // Re-exported from where it now lives: the shape of a finished run belongs with
 // the loop that decides a run is finished, but this is the module every caller
 // and test already imports it from.
@@ -346,6 +352,11 @@ export async function startCodingRun(
       : undefined;
 
   const deadline = runDeadlineFromEnv(process.env);
+  // The one way anything in this file ends a run early. It is handed to the MCP
+  // policy below and to the loop further down, and the loop is what acts on it
+  // — see RunTerminator, and `onFatal` for the settle that used to be written
+  // here instead.
+  const terminator = createRunTerminator();
 
   const policy: RuntimePolicy = {
     workspace: layout.workspace,
@@ -384,7 +395,7 @@ export async function startCodingRun(
         runtime.toolGlossary(),
       ),
     },
-    ...buildMcpPolicy(req, layout, mcpAuth),
+    ...buildMcpPolicy(req, layout, terminator, mcpAuth),
     ...(validationProgress
       ? {
           observe: {
@@ -445,6 +456,7 @@ export async function startCodingRun(
         record: (m) => log.write(m),
         requestedSkills: skills,
         deadline,
+        terminator,
       });
     } finally {
       deadline?.cancel();
@@ -468,9 +480,10 @@ export async function startCodingRun(
  * with the scrubber, end the run when it can no longer be renewed) while the
  * mechanism that keeps a static header fresh is the runtime's.
  */
-function buildMcpPolicy(
+export function buildMcpPolicy(
   req: DispatchRequest,
   layout: WorkspaceLayout,
+  terminator: RunTerminator,
   mcpAuth?: McpAuthOpts,
 ): Pick<RuntimePolicy, "mcp"> {
   if (!req.mcpUrl || !req.mcpToken) return {};
@@ -488,9 +501,28 @@ function buildMcpPolicy(
         lastBearer = await writeBearerFile(layout.bearerFile, token, lastBearer);
         primeScrubber([token]);
       },
+      // The run is over — but saying so is the LOOP's job, not this callback's.
+      // This used to emit its own `run_settled` while `consumeRun` was still
+      // reading, so a fatal put two settles on one run's feed: the loop wrote
+      // its own when the stream then closed, and every consumer treats the
+      // first as terminal (`buildCrew` in `@aep/progress-view` settles every
+      // agent it never heard close on one). Tripping the terminator states the
+      // reason and lets the loop do the ending — stop the subagents still
+      // running, name the cause in a `terminated` notice, write the single
+      // settle, and return the exit code that follows it.
+      //
+      // No `process.exit` here any more either. Both entrypoints already exit
+      // on the completion promise (`.then((code) => process.exit(code))`), so
+      // the loop returning IS the exit; and a hard exit from this callback
+      // could fire AFTER a healthy run had settled, because the proxy can fail
+      // a straggling request while the session is closing. Tripping a
+      // terminator nobody is racing any more is the right no-op there.
       onFatal: (err) => {
-        emit({ kind: "run_settled", outcome: "failure", error: `mcp auth: ${err.message}` });
-        setTimeout(() => process.exit(1), TERMINATE_FLUSH_MS);
+        terminator.terminate({
+          source: "mcp auth",
+          why: `this run's platform credential can no longer be renewed: ${err.message}`,
+          error: `mcp auth: ${err.message}`,
+        });
       },
     },
   };

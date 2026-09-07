@@ -129,3 +129,27 @@ export function formatOutcome(e: CallOutcome | undefined): OutcomeView {
     tone: "error",
   };
 }
+
+/**
+ * The dark zone: everything before the run's first model turn.
+ *
+ * Six are read off pod truth by the platform, two reported by the runner once it
+ * has a process but no session yet. They are the slowest stretch of a run, so
+ * they are also the part a reader is most likely to be staring at.
+ *
+ * They live HERE, in the vocabulary both envelopes share, because both render
+ * them: v1 carries them as a `phase` kind, v2 as a `notice` code. Two copies of
+ * one sentence is how a reader comes to see the wording change when nothing but
+ * the envelope did — which is the defect these strings were moved out of the
+ * producers to fix in the first place.
+ */
+export const LIFECYCLE_LABELS: Record<string, string> = {
+  runner_scheduling: "Waiting for a runner to be scheduled…",
+  runner_unschedulable: "No capacity to schedule the runner on the cluster…",
+  runner_pulling_image: "Pulling the agent image…",
+  runner_image_pull_backoff: "Still pulling the agent image (retrying)…",
+  runner_config_error: "Waiting on runner configuration and secrets…",
+  runner_starting: "Starting the agent…",
+  workspace_provisioning: "Setting up the workspace…",
+  workspace_ready: "Workspace ready",
+};

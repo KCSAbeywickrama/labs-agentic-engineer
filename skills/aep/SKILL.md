@@ -305,8 +305,9 @@ ships half an issue.
 **Inside a subagent, every command runs in the foreground** — a subagent never
 backgrounds a shell call. A build left running in the background lets the
 subagent report "clean" while it is still compiling, and whatever is still
-running when the session ends is recorded as an orphan. Say so in every subagent
-prompt.
+running when the session ends is recorded as an orphan. It is item 8 of the
+dispatch below, because a rule you do not pass on is a rule the subagent does
+not have.
 
 **A subagent may fan out itself** when its own work meets the two tests above; it
 inherits every rule in this section.
@@ -344,9 +345,13 @@ step 3, and nothing else. Name **exactly these**, and nothing else:
 7. **its write boundary** — `Edit`/`Write`, and only inside its App Paths.
    **It never runs `git`**: the branch, the commits and the pull request are
    yours;
-8. what to report back to you when it finishes: what it changed and whether the
+8. **that every command it runs stays in the foreground** — it never backgrounds
+   a shell call, however long the build takes. A command still running when its
+   session ends is recorded as an orphan, and it will otherwise report "clean"
+   while its build is still compiling;
+9. what to report back to you when it finishes: what it changed and whether the
    verify command passed.
-9. **its issue's status line** — the `gh issue comment` command above with **its**
+10. **its issue's status line** — the `gh issue comment` command above with **its**
    issue number filled in, and the rule that goes with it (**The status line**):
    one line, at both ends of its work and whenever the answer changes between
    them. That command is the only `gh` it may run, and its own issue is the only

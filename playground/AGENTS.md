@@ -224,23 +224,19 @@ row.
 
 The plan rows are the lead's own task list. It reaches the feed as
 `work_item {source: "plan"}`, which is a SILENT kind — a surface repaints one row
-rather than printing five — so nothing showed it locally until this block did,
-while the `aep` skill has been telling every run that "the person watching this
-run reads that list".
+rather than printing five — so the block is what makes the `aep` skill's promise
+to every run true here: "the person watching this run reads that list".
 
 EVERY fact on the block comes from `buildCrew` in `@aep/progress-view`, the same
 model the console's crew view renders: who is in the crew, how each member
 stands, its live sub-line in the runtime's own words, its two clocks, and its
 `plan`. This package adds glyphs, columns and colour and derives none of it — a
-second derivation is how two surfaces come to disagree about one run. The plan
-was briefly the exception, folded here in `engine/run-plan.ts` while the shared
-model did not carry it; the model does now and that file is gone. There is no
+second derivation is how two surfaces come to disagree about one run. There is no
 timeline: a time axis has no honest rendering in a terminal that scrolls.
 
 **When stdout is not a TTY the block is not drawn at all**, and the output is the
-tagged lines and nothing else — byte for byte what it was before the block
-existed. Playground transcripts are piped and archived, and a saved run has to
-stay comparable with the one before it. The seam is the `isTTY` argument to
+tagged lines and nothing else. Playground transcripts are piped and archived, and
+a saved run has to stay comparable with one recorded before the block existed. The seam is the `isTTY` argument to
 `openCrewPane`, passed in rather than read off the stream so both branches are
 driven by `test/crew-block.test.ts` rather than hoped about.
 

@@ -606,7 +606,6 @@ const (
 	RunEventCodeAPIRetry               RunEventCode = "api_retry"
 	RunEventCodeArtifactFailed         RunEventCode = "artifact_failed"
 	RunEventCodeCompaction             RunEventCode = "compaction"
-	RunEventCodeFanOutRewritten        RunEventCode = "fan_out_rewritten"
 	RunEventCodeGap                    RunEventCode = "gap"
 	RunEventCodePermissionDenied       RunEventCode = "permission_denied"
 	RunEventCodeRateLimit              RunEventCode = "rate_limit"
@@ -631,8 +630,6 @@ func (e RunEventCode) Valid() bool {
 	case RunEventCodeArtifactFailed:
 		return true
 	case RunEventCodeCompaction:
-		return true
-	case RunEventCodeFanOutRewritten:
 		return true
 	case RunEventCodeGap:
 		return true
@@ -2407,14 +2404,15 @@ type RunEvent struct {
 	// AgentID Which agent produced this event. `lead` is the session's top-level agent; any other value is the runtime's own stable id for a spawned agent, stable for that agent's whole life, which is what lets a consumer fold many concurrent agents into one row each. Every kind carries it — a tool call, a commit and a heartbeat all belong to somebody.
 	AgentID string `json:"agentId"`
 
-	// Background `agent_started` only: was this agent spawned detached from its parent's turn? Absence is not `false` — it means the runtime did not say. The platform forces fan-out into the foreground (a backgrounded subagent forwards none of its messages, so its whole section of the feed arrives empty), so an explicit `false` here is a positive confirmation that the forcing worked, and that is worth being able to tell apart from silence.
+	// Background `agent_started` only: was this agent spawned detached from its parent's turn? Absence is not `false` — it means the runtime did not say, and a consumer must not read silence as either answer.
+	// `true` is the ordinary case for a builder: the platform does NOT constrain the shape of fan-out, the skill does, and it tells a lead to dispatch a whole wave in the background and wait on it. `false` means the parent is blocked inside this agent's call until it returns, which is what lets a reader be shown the lead as *waiting on* a named child rather than idle. (An earlier platform forced every fan-out into the foreground because a backgrounded subagent forwarded none of its messages. That was measured on an older runtime and no longer holds; the forcing is gone.)
 	Background *bool `json:"background,omitempty"`
 
 	// Branch `git_push` and `gh_action`: the branch pushed to, or the branch the workflow run is on.
 	Branch string `json:"branch,omitempty"`
 
 	// Code `notice` only: WHICH condition, as a closed set. Closed on purpose, twice over — a consumer can react to one condition without parsing prose, and no free text (a prompt, a credential, a path) can ride a notice into a user-visible build log. It is also where the WORDING comes from: a surface renders a code's own sentence (`@aep/progress-view` owns those), so the same condition cannot read one way in the console and another in the playground, which is exactly what happened while each producer wrote its own prose.
-	// Ten conditions the RUN can hit. `api_retry` a retryable model failure the runtime is re-attempting; `compaction` the session's context being compacted; `refusal` the model declining to answer; `rate_limit` the provider throttling; `permission_denied` a tool call the harness refused; `terminated` the run being killed from outside; `workspace_guard` a write denied outside the workspace; `fan_out_rewritten` the platform rewriting a backgrounded fan-out call to run in the foreground; `gap` the feed itself losing events (which also shows up as RunCycleView.recording `gaps`); `artifact_failed` something the run produced that could not be stored.
+	// Nine conditions the RUN can hit. `api_retry` a retryable model failure the runtime is re-attempting; `compaction` the session's context being compacted; `refusal` the model declining to answer; `rate_limit` the provider throttling; `permission_denied` a tool call the harness refused; `terminated` the run being killed from outside; `workspace_guard` a write denied outside the workspace; `gap` the feed itself losing events (which also shows up as RunCycleView.recording `gaps`); `artifact_failed` something the run produced that could not be stored.
 	// Eight more describe the stretch BEFORE the first model turn — the dark zone, which is the slowest part of a run and used to show as a dead "waiting…". Six are the platform's reading of pod truth: `runner_scheduling` no runner has a node yet; `runner_unschedulable` the cluster has no room for one; `runner_pulling_image` the image is being fetched and the container prepared; `runner_image_pull_backoff` that fetch is failing and retrying; `runner_config_error` the container cannot start because its configuration or secrets are wrong; `runner_starting` the container is up and the agent is booting. Two are the runner's own, once it has a process but no session: `workspace_provisioning` it is cloning the repo, mirroring skills and installing credentials; `workspace_ready` that finished and the agent is about to start. They are notices rather than agent events for the same reason throughout: a pod that has not started is not an agent, and there is no session to report a phrase about.
 	Code RunEventCode `json:"code,omitempty"`
 
@@ -2546,7 +2544,7 @@ type RunEvent struct {
 }
 
 // RunEventCode `notice` only: WHICH condition, as a closed set. Closed on purpose, twice over — a consumer can react to one condition without parsing prose, and no free text (a prompt, a credential, a path) can ride a notice into a user-visible build log. It is also where the WORDING comes from: a surface renders a code's own sentence (`@aep/progress-view` owns those), so the same condition cannot read one way in the console and another in the playground, which is exactly what happened while each producer wrote its own prose.
-// Ten conditions the RUN can hit. `api_retry` a retryable model failure the runtime is re-attempting; `compaction` the session's context being compacted; `refusal` the model declining to answer; `rate_limit` the provider throttling; `permission_denied` a tool call the harness refused; `terminated` the run being killed from outside; `workspace_guard` a write denied outside the workspace; `fan_out_rewritten` the platform rewriting a backgrounded fan-out call to run in the foreground; `gap` the feed itself losing events (which also shows up as RunCycleView.recording `gaps`); `artifact_failed` something the run produced that could not be stored.
+// Nine conditions the RUN can hit. `api_retry` a retryable model failure the runtime is re-attempting; `compaction` the session's context being compacted; `refusal` the model declining to answer; `rate_limit` the provider throttling; `permission_denied` a tool call the harness refused; `terminated` the run being killed from outside; `workspace_guard` a write denied outside the workspace; `gap` the feed itself losing events (which also shows up as RunCycleView.recording `gaps`); `artifact_failed` something the run produced that could not be stored.
 // Eight more describe the stretch BEFORE the first model turn — the dark zone, which is the slowest part of a run and used to show as a dead "waiting…". Six are the platform's reading of pod truth: `runner_scheduling` no runner has a node yet; `runner_unschedulable` the cluster has no room for one; `runner_pulling_image` the image is being fetched and the container prepared; `runner_image_pull_backoff` that fetch is failing and retrying; `runner_config_error` the container cannot start because its configuration or secrets are wrong; `runner_starting` the container is up and the agent is booting. Two are the runner's own, once it has a process but no session: `workspace_provisioning` it is cloning the repo, mirroring skills and installing credentials; `workspace_ready` that finished and the agent is about to start. They are notices rather than agent events for the same reason throughout: a pod that has not started is not an agent, and there is no session to report a phrase about.
 type RunEventCode string
 

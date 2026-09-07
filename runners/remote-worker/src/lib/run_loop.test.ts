@@ -28,8 +28,10 @@ import fs from "node:fs";
 import {
   RUN_DEADLINE_ENV,
   consumeRun,
+  createRunTerminator,
   runDeadlineFromEnv,
   type RunDeadline,
+  type RunTermination,
 } from "./run_loop.js";
 import { createClaudeAdapter } from "./progress/claude_adapter.js";
 import { createRunWatchdog } from "./progress/watchdog.js";
@@ -471,6 +473,138 @@ test("consumeRun: the deadline stops only the tasks still running", async () => 
   assert.deepEqual(stopped, ["task-beta"]);
 });
 
+// --- the termination seam ----------------------------------------------------
+
+// The defect this seam removes: the MCP auth policy's `onFatal` emitted a
+// `run_settled` of its own while the loop was still reading, so a fatal put TWO
+// settles on one run's feed — and every consumer treats a settle as terminal
+// (`buildCrew` settles every agent it never heard close on one). The counts here
+// are the assertion, not the presence: one settle is what "exactly one" means.
+const FATAL: RunTermination = {
+  source: "mcp auth",
+  why: "this run's platform credential can no longer be renewed: token expired",
+  error: "mcp auth: token expired",
+};
+
+test("consumeRun: a fatal ends the run with exactly one settle, naming what ended it", async () => {
+  const terminator = createRunTerminator();
+  // A deadline is configured too and is never fired: with both arms present the
+  // fatal still has to be the one that ends the run, and still only once.
+  const deadline = manualDeadline(45 * 60_000);
+  const stopped: string[] = [];
+  const emitted: RunEventInput[] = [];
+  // Two subagents running when the credential dies, and a source that then goes
+  // quiet for ever — the shape a fatal actually has, since the CLI keeps waiting
+  // on a tool call the proxy will never answer.
+  async function* source(): AsyncGenerator<unknown> {
+    yield taskStarted("task-alpha");
+    yield taskStarted("task-beta");
+    terminator.terminate(FATAL);
+    await new Promise<void>(() => {});
+  }
+
+  const result = await consumeRun(
+    { messages: source(), stopTask: async (taskId) => void stopped.push(taskId) },
+    {
+      translate: createClaudeAdapter().translate,
+      watchdog: createRunWatchdog({ emit: () => {} }),
+      emit: (event) => emitted.push(event),
+      deadline,
+      terminator,
+    },
+  );
+
+  const settles = emitted.filter((e) => e.kind === "run_settled");
+  assert.equal(settles.length, 1, "one fatal, one settle — the defect was two");
+  assert.equal(settles[0].outcome, "failure");
+  assert.equal(settles[0].error, FATAL.error, "the settle carries the fatal's own reason");
+
+  // …and a line saying what happened, under the closed code the contract
+  // already carries for an ended run.
+  const errors = emitted.filter((e) => e.kind === "notice" && e.level === "error");
+  assert.equal(errors.length, 1, "one user-facing line naming the termination");
+  assert.equal(errors[0].code, "terminated");
+  assert.match(
+    String(errors[0].detail),
+    /^\[mcp auth] terminated — this run's platform credential can no longer be renewed: token expired, stopping 2 running task\(s\) — /,
+  );
+
+  // The same bounded stop phase a deadline gets: a fatal leaves the same
+  // subagents running, and a pod about to exit must not leave them working.
+  assert.deepEqual(stopped.sort(), ["task-alpha", "task-beta"]);
+  // The exit code follows the settle, as it does on every other ending.
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.error, FATAL.error);
+});
+
+// `runDeadlineFromEnv` returns undefined unless AEP_RUN_DEADLINE_SECONDS is set,
+// which is every playground run and every dispatch made before the dispatcher
+// stamped it. There was no race at all in that state, so a seam that only worked
+// beside a deadline would have left exactly those runs unable to end early —
+// which is the whole population the fatal path has to serve.
+test("consumeRun: a fatal ends the run with no deadline configured", async () => {
+  const terminator = createRunTerminator();
+  const emitted: RunEventInput[] = [];
+  async function* source(): AsyncGenerator<unknown> {
+    yield { type: "system", subtype: "init", skills: [] };
+    terminator.terminate(FATAL);
+    await new Promise<void>(() => {});
+  }
+
+  const result = await consumeRun(
+    { messages: source(), stopTask: async () => {} },
+    {
+      translate: createClaudeAdapter().translate,
+      watchdog: createRunWatchdog({ emit: () => {} }),
+      emit: (event) => emitted.push(event),
+      terminator,
+    },
+  );
+
+  const settles = emitted.filter((e) => e.kind === "run_settled");
+  assert.equal(settles.length, 1, "exactly one, with no deadline to have produced it");
+  assert.equal(settles[0].outcome, "failure");
+  assert.equal(settles[0].error, FATAL.error);
+  const errors = emitted.filter((e) => e.kind === "notice" && e.level === "error");
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].code, "terminated");
+  // Nothing was running, so the line says nothing about stopping anything.
+  assert.ok(!String(errors[0].detail).includes("stopping"));
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.error, FATAL.error);
+});
+
+// The MCP proxy can fail a last request while the session is closing, after the
+// loop has already settled a healthy run. The seam is a promise for this reason:
+// tripping one nobody is racing any more changes nothing, where the callback it
+// replaced would have written a failure over a run that had ended green.
+test("consumeRun: a fatal after the stream closed cannot re-settle the run", async () => {
+  const terminator = createRunTerminator();
+  const emitted: RunEventInput[] = [];
+  async function* source(): AsyncGenerator<unknown> {
+    yield { type: "system", subtype: "init", skills: [] };
+    yield { type: "result", subtype: "success" };
+  }
+
+  const result = await consumeRun(
+    { messages: source(), stopTask: async () => {} },
+    {
+      translate: createClaudeAdapter().translate,
+      watchdog: createRunWatchdog({ emit: () => {} }),
+      emit: (event) => emitted.push(event),
+      terminator,
+    },
+  );
+  terminator.terminate(FATAL);
+  // A tick, so a termination that WAS still being awaited would have run.
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const settles = emitted.filter((e) => e.kind === "run_settled");
+  assert.equal(settles.length, 1);
+  assert.equal(settles[0].outcome, "success");
+  assert.equal(result.exitCode, 0);
+});
+
 // --- the existing endings, unchanged ----------------------------------------
 
 test("consumeRun: a stream that closes without any result is still a failure", async () => {
@@ -601,4 +735,133 @@ test("runDeadlineFromEnv: a budget already spent fires at once", async () => {
     clearInterval(holdOpen);
     deadline.cancel();
   }
+});
+
+
+// --- the input rule: when the loop lets the CLI's stdin close -----------------
+//
+// Synthetic messages, because the recordings above were all made with a string
+// prompt — the SDK had already closed stdin at their first result, so nothing
+// in them can show the loop deciding. The shapes are the fixtures', trimmed to
+// the fields the adapter and the live-task tracker read.
+
+const INIT = { type: "system", subtype: "init", session_id: "s", tools: [], skills: [] };
+const RESULT = { type: "result", subtype: "success", is_error: false, num_turns: 1, usage: { input_tokens: 1, output_tokens: 1 } };
+const TASK_STARTED = {
+  type: "system", subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1",
+  description: "build a component", is_backgrounded: true, spawn_depth: 1, task_type: "local_agent",
+};
+const TASK_DONE = { type: "system", subtype: "task_notification", task_id: "t1", tool_use_id: "toolu_1", status: "completed", summary: "DONE" };
+const LEAD_SPEAKS = {
+  type: "assistant", uuid: "u-2", session_id: "s",
+  message: { id: "m-2", role: "assistant", model: "m", content: [{ type: "text", text: "the subagent is done" }] },
+};
+
+/**
+ * Like `replay`, but with an `endInput` spy, and — when `holdOpen` — a source
+ * that yields its last message and then stays open until input is ended, which
+ * is what a real CLI does: it exits, and the stream closes, only once stdin has.
+ */
+async function replayWithInput(
+  messages: unknown[],
+  opts: { holdOpen?: boolean; inputGraceMs?: number } = {},
+): Promise<{ exitCode: number; endedAt: Cursor[]; settledAt: Cursor | undefined }> {
+  let cursor: Cursor = 0;
+  let releaseSource!: () => void;
+  const released = new Promise<void>((resolve) => {
+    releaseSource = resolve;
+  });
+  const endedAt: Cursor[] = [];
+  async function* source(): AsyncGenerator<unknown> {
+    try {
+      for (let i = 0; i < messages.length; i++) {
+        cursor = i + 1;
+        yield messages[i];
+      }
+      if (opts.holdOpen) await released;
+    } finally {
+      cursor = "closed";
+    }
+  }
+  const emitted: Emitted[] = [];
+  const result = await consumeRun(
+    {
+      messages: source(),
+      stopTask: async () => {},
+      endInput: () => {
+        endedAt.push(cursor);
+        releaseSource();
+      },
+    },
+    {
+      translate: createClaudeAdapter({ taskKind: "implementation" }).translate,
+      watchdog: createRunWatchdog({ emit: () => {} }),
+      emit: (event) => emitted.push({ at: cursor, event }),
+      ...(opts.inputGraceMs !== undefined ? { inputGraceMs: opts.inputGraceMs } : {}),
+    },
+  );
+  return { exitCode: result.exitCode, endedAt, settledAt: settlesOf(emitted)[0]?.at };
+}
+
+test("consumeRun: a result with no task live ends input right there", async () => {
+  const { exitCode, endedAt } = await replayWithInput([INIT, RESULT]);
+  assert.deepEqual(endedAt, [2], "ended once, at the result");
+  assert.equal(exitCode, 0);
+});
+
+test("consumeRun: a result while a task is live keeps input open until the turn after it", async () => {
+  const { endedAt } = await replayWithInput([INIT, TASK_STARTED, RESULT, TASK_DONE, LEAD_SPEAKS, RESULT]);
+  assert.deepEqual(endedAt, [6], "not at the first result (message 3), only at the second");
+});
+
+test("consumeRun: the last task settling after a result ends input after the grace, when nothing wakes the lead", async () => {
+  const { exitCode, endedAt, settledAt } = await replayWithInput([INIT, TASK_STARTED, RESULT, TASK_DONE], {
+    holdOpen: true,
+    inputGraceMs: 20,
+  });
+  assert.deepEqual(endedAt, [4], "ended while still holding the last message — by the timer, not by a message");
+  assert.equal(settledAt, "closed", "and the run settled only once the source closed");
+  assert.equal(exitCode, 0);
+});
+
+test("consumeRun: a woken lead disarms the grace", async () => {
+  // The lead speaks 5 ms after the task settles; the grace is 40 ms. Input must
+  // end at the second result, not by the timer.
+  let cursor = 0;
+  const endedAt: number[] = [];
+  async function* source(): AsyncGenerator<unknown> {
+    for (const m of [INIT, TASK_STARTED, RESULT, TASK_DONE]) {
+      cursor++;
+      yield m;
+    }
+    await new Promise((r) => setTimeout(r, 5));
+    for (const m of [LEAD_SPEAKS, RESULT]) {
+      cursor++;
+      yield m;
+    }
+    await new Promise((r) => setTimeout(r, 60));
+  }
+  await consumeRun(
+    { messages: source(), stopTask: async () => {}, endInput: () => endedAt.push(cursor) },
+    {
+      translate: createClaudeAdapter({ taskKind: "implementation" }).translate,
+      watchdog: createRunWatchdog({ emit: () => {} }),
+      emit: () => {},
+      inputGraceMs: 40,
+    },
+  );
+  assert.deepEqual(endedAt, [6]);
+});
+
+test("consumeRun: on the probe 2 recording, input ends by the grace after the orphaned shell task is stopped", async () => {
+  // At the second result (message 37) the lead's backgrounded `sleep` is still
+  // live, so input stays open; it is reported stopped at message 40, and with
+  // nothing waking the lead the grace ends input while the source still holds.
+  const { endedAt, settledAt, exitCode } = await replayWithInput(fixture("probe2-lead-ends-early.jsonl"), {
+    holdOpen: true,
+    inputGraceMs: 20,
+  });
+  assert.deepEqual(endedAt, [40]);
+  assert.equal(settledAt, "closed");
+  assert.equal(exitCode, 0);
 });

@@ -267,7 +267,7 @@ test("validation-progress: a pass recorded through the tracker arms healing", ()
 
 test("validation-progress: a run nobody settles leaves the criterion running", () => {
   // What a SEVERED test command now produces. The translator withholds the
-  // outcome for a call that never finished (see from-sdk's incompleteCall), so
+  // outcome for a call that never finished (see the claude adapter's incompleteCall), so
   // no status arrives — and `running` is the honest resting place, because the
   // command was auto-backgrounded and may still be executing.
   //

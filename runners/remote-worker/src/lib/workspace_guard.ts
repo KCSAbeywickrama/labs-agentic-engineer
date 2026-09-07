@@ -35,8 +35,7 @@
  * reading outside the cwd. From there "the run's directory is the project root"
  * is a reasonable inference, and it is wrong.
  *
- * So this is the guarantee behind the prose, exactly as `fanout_foreground.ts` is
- * for fan-out. It gates the tools that AUTHOR files (`Write`/`Edit`/
+ * So this is the guarantee behind the prose. It gates the tools that AUTHOR files (`Write`/`Edit`/
  * `NotebookEdit`) and denies a path outside the workspace with a message naming
  * the root to use instead, which turns a silent 210s detour into one corrected
  * call.
@@ -163,7 +162,7 @@ export function createWorkspaceWriteGuard(
     if (!reason) return {};
 
     // Registered under one matcher per tool name, so the same call can reach this
-    // more than once — the same reason `fanout_foreground.ts` dedupes.
+    // more than once; the announcement is deduped so one denial is reported once.
     if (!announced.has(hookInput.tool_use_id)) {
       announced.add(hookInput.tool_use_id);
       onDeny?.(reason);

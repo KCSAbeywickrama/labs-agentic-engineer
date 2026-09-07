@@ -184,11 +184,12 @@ export function runCycleEvents(cycle: RunCycleView, startSeq: number): RunEvent[
     // Thought better of — a deleted entry is not work any more, so it is not a
     // row, and nothing below it may shift because of it.
     lead({ kind: "work_item", source: "plan", itemId: "p4", itemStatus: "deleted" }),
-    lead({ kind: "notice", level: "info", code: "fan_out_rewritten", detail: "2 backgrounded Agent calls rewritten to run in the foreground" }),
 
-    // Fan-out. `background: false` is the platform's forcing having WORKED, and
-    // is not printed; the webapp agent below carries `true`, which is.
-    lead({ kind: "tool_use", tool: "Agent", summary: "Implement the shortener API", toolUseId: "fan1" }),
+    // Fan-out. A fan-out call is NOT a tool_use on the feed — `agent_started` is
+    // its row, and it says more (label, role, depth, background) than a call
+    // ever could. Nothing emits one, so nothing fabricates one here either.
+    // `background: false` means the lead is blocked inside this agent until it
+    // returns; the webapp agent below carries `true`, the ordinary case.
     at(api, { kind: "agent_started", label: "Implement the shortener API (issue #3)", role: "coder", depth: 1, background: false }),
     at(web, { kind: "agent_started", label: "Implement the web front end (issue #4)", role: "coder", depth: 1, background: true }),
 
@@ -252,7 +253,6 @@ export function runCycleEvents(cycle: RunCycleView, startSeq: number): RunEvent[
       tokens: 188_500,
       report: "Scaffolded the front end but could not get `vite build` to pass: the generated client imports a type the contract does not export yet.",
     }),
-    lead({ kind: "tool_result", tool: "Agent", ok: true, durationMs: 209_158, toolUseId: "fan1" }),
     lead({ kind: "work_item", source: "plan", itemId: "p2", itemStatus: "completed", ownerAgentId: api }),
 
     lead({ kind: "task_started", taskId: "bg-build", summary: "pnpm build --filter web" }),

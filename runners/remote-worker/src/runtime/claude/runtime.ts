@@ -42,6 +42,8 @@
 //   policy.debug               → the SDK's own debug/stderr/streaming options
 //   policy.observe             → a watching PreToolUse hook, and the adapter's
 //                                own tool-outcome seam
+//   the prompt                 → a streaming input held open until the run loop
+//                                ends it (see openPromptStream)
 //
 // Three invariants are NOT policy fields, because there is no knob and nothing
 // to decide per run — they are conditions of running this platform's workload at
@@ -58,7 +60,7 @@
 //      — a one-shot pod has nobody to prompt. Which is exactly why the deny list
 //      and the hooks above are the boundary that actually holds.
 
-import { query, type HookCallback, type Query } from "@anthropic-ai/claude-agent-sdk";
+import { query, type HookCallback, type Query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { debugQueryOptions, openDebugSinks, type DebugSinks } from "../../lib/logger.js";
 import { startMcpAuthProxy } from "../../lib/mcp_auth_proxy.js";
 import type { AccessTokenSource } from "../../lib/auth_retry.js";
@@ -119,6 +121,33 @@ function watchHook(observe: NonNullable<RuntimePolicy["observe"]>["toolUse"]): H
     observe?.(hookInput.tool_name ?? "", hookInput.tool_input, hookInput.tool_use_id ?? "");
     return {};
   };
+}
+
+/**
+ * The prompt as a stream the SDK cannot close on its own.
+ *
+ * A plain string prompt is a "single user turn" to the SDK, and on the FIRST
+ * `result` it closes the CLI's stdin — the channel every SDK-side hook answers
+ * on. A lead that fans out in the background ends its turn early, so from that
+ * point the workspace guard and the egress guards are "cancelled (control
+ * stream closed)", which the CLI reports to the agent as a user denial: on
+ * 2026-09-07 both agents of a run stopped at their first Edit with a green
+ * result to show for it. Fed as a stream instead, stdin stays open until this
+ * generator returns — and it returns when `release()` is called, which is the
+ * run loop's decision (`RunStream.endInput`) or the session's `close()`.
+ *
+ * Exported for its test; nothing else builds one.
+ */
+export function openPromptStream(prompt: string): { stream: AsyncIterable<SDKUserMessage>; release: () => void } {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  async function* stream(): AsyncGenerator<SDKUserMessage, void, undefined> {
+    yield { type: "user", message: { role: "user", content: prompt }, parent_tool_use_id: null, session_id: "" };
+    await released;
+  }
+  return { stream: stream(), release };
 }
 
 /** The token source the loopback proxy drives, built from the port's two members. */
@@ -191,10 +220,11 @@ async function startClaudeCodeSession(prompt: string, policy: RuntimePolicy): Pr
     ...(policy.observe?.toolOutcome ? { onToolOutcome: policy.observe.toolOutcome } : {}),
   });
 
+  const input = openPromptStream(prompt);
   let q: Query;
   try {
     q = query({
-      prompt,
+      prompt: input.stream,
       options: {
         cwd: policy.workspace,
         // The whole appendix — workflow, pins, glossary — arrives assembled, and
@@ -275,6 +305,7 @@ async function startClaudeCodeSession(prompt: string, policy: RuntimePolicy): Pr
       },
     });
   } catch (err) {
+    input.release();
     await mcpProxy?.close();
     debugSinks?.close();
     throw err;
@@ -288,10 +319,13 @@ async function startClaudeCodeSession(prompt: string, policy: RuntimePolicy): Pr
     : [];
 
   return {
-    stream: { messages: q, stopTask: (taskId) => q.stopTask(taskId) },
+    stream: { messages: q, stopTask: (taskId) => q.stopTask(taskId), endInput: input.release },
     translate: adapter.translate,
     artifacts: async () => [...adapter.artifacts(), ...debugArtifacts],
     close: async () => {
+      // A closed session must not leave the prompt stream pending: the SDK
+      // would otherwise wait on a generator nothing will ever resume.
+      input.release();
       debugSinks?.close();
       await mcpProxy?.close();
     },

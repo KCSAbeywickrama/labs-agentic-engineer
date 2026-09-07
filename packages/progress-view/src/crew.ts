@@ -49,7 +49,6 @@
 import { LEAD_AGENT_ID, type AgentReport } from "./agent.js";
 import {
   formatHeartbeat,
-  isFanOutTool,
   noticeSentence,
   waitingPhrase,
   type RunEventView,
@@ -384,10 +383,11 @@ export function buildCrew<E extends RunEventView>(
         v.otherAt = at;
         return;
       case "tool_use":
-        // A fan-out call is not a call in any sense the stall rule cares about:
-        // it is a whole agent, whose own row explains the wait. Counting it would
-        // put an amber warning on every healthy fan-out after one minute.
-        if (event.toolUseId && !isFanOutTool(event.tool)) {
+        // Every tool_use here is a real call. A fan-out is not one — it has no
+        // tool row at all in v2 (its `agent_started` is the row), so the stall
+        // rule cannot mistake a healthy spawned agent for an unanswered command,
+        // and this does not have to know any runtime's tool names to be sure.
+        if (event.toolUseId) {
           v.inFlight.set(event.toolUseId, event.tool ?? "a tool call");
         }
         v.otherAt = at;

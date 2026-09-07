@@ -34,7 +34,12 @@
 // cluster run — the slowest possible place to notice it.
 
 import { formatAgentReport, type AgentReport } from "./agent.js";
-import { formatOutcome, type FormattedLine, type LineTone } from "./line.js";
+import {
+  LIFECYCLE_LABELS,
+  formatOutcome,
+  type FormattedLine,
+  type LineTone,
+} from "./line.js";
 
 /**
  * The subset of the runner's v1 progress envelope that rendering needs. Declared
@@ -70,16 +75,7 @@ export interface ProgressLineView {
 // pod scheduling / image pull / boot — the stretch before the runner writes its
 // first line. An unmapped phase falls back to its summary, then the raw id, so
 // nothing hides.
-const PHASE_LABELS: Record<string, string> = {
-  runner_scheduling: "Waiting for a runner to be scheduled…",
-  runner_unschedulable: "No capacity to schedule the runner on the cluster…",
-  runner_pulling_image: "Pulling the agent image…",
-  runner_image_pull_backoff: "Still pulling the agent image (retrying)…",
-  runner_config_error: "Waiting on runner configuration and secrets…",
-  runner_starting: "Starting the agent…",
-  workspace_provisioning: "Setting up the workspace…",
-  workspace_ready: "Workspace ready",
-};
+const PHASE_LABELS: Record<string, string> = LIFECYCLE_LABELS;
 
 // The SDK's fan-out tool, under both names it has shipped under (`Agent` now,
 // `Task` before). A tool_result naming one of these is not a step's outcome — it

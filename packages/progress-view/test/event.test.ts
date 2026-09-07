@@ -18,6 +18,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   formatAgentReport,
   formatAgentStatus,
@@ -51,9 +52,10 @@ test("every kind the contract declares renders — a blank row is the defect thi
     "turn_ended",
     "run_settled",
   ];
-  // Only the three STATE kinds may be silent, and `tool_use`/`tool_result` when
-  // they are a fan-out call (whose agent_started/agent_settled say it better) or
-  // a fast success. Everything else must earn its row from a bare payload.
+  // Only the three STATE kinds may be silent, plus `tool_result` on a fast
+  // success (an outcome speaks only when it carries something the action did
+  // not) and `turn_ended` on a turn that went fine. Everything else must earn
+  // its row from a bare payload.
   const mayBeSilent = new Set(["agent_progress", "work_item", "heartbeat", "tool_result", "turn_ended"]);
   for (const kind of kinds) {
     const { text } = formatEvent({ kind, agentId: "lead" });
@@ -93,15 +95,19 @@ test("agent_started is the section header, and names the agent the parent named 
   assert.equal(formatEvent({ ...LEAD, kind: "agent_started" }).text, "⑂ lead agent");
 });
 
-test("a BACKGROUND agent says so — the platform forces fan-out into the foreground", () => {
-  // A backgrounded subagent forwards none of its messages, so its whole section
-  // of the feed arrives empty. Saying so on the header is what tells an empty
-  // section apart from a stalled one.
+test("a BACKGROUND agent says so, because it changes what its parent is doing", () => {
+  // Background is the ordinary case for a builder — the skill tells a lead to
+  // dispatch a whole wave detached and wait on it — so the header says which
+  // agents the lead is NOT blocked inside. (The platform used to force every
+  // fan-out into the foreground because a backgrounded subagent forwarded none
+  // of its messages. Measured on an older runtime; no longer true.)
   assert.equal(
     formatEvent({ agentId: "ag_1", kind: "agent_started", label: "todo-api", background: true }).text,
     "⑂ todo-api · background",
   );
-  // An explicit false is the forcing having WORKED, which is not news.
+  // An explicit false means the parent is blocked inside this one until it
+  // returns — which its own row already shows as "waiting on", so the header
+  // does not repeat it.
   assert.equal(
     formatEvent({ agentId: "ag_1", kind: "agent_started", label: "todo-api", background: false }).text,
     "⑂ todo-api",
@@ -173,26 +179,36 @@ test("a heartbeat explains the silence for the ONE surface that shows it", () =>
   assert.equal(formatHeartbeat({ ...LEAD, kind: "heartbeat", waitingOn: "model" }), "waiting on the model");
 });
 
-test("a fan-out call says nothing its agent_started does not say better", () => {
-  // Two rows for one fact, and the weaker one goes: the call carries a truncated
-  // copy of the prompt, the started event carries the label, role and depth.
-  assert.equal(formatEvent({ ...LEAD, kind: "tool_use", tool: "Agent", summary: "todo-api" }).text, "");
-  assert.equal(
-    formatEvent({ ...LEAD, kind: "tool_result", tool: "Agent", ok: true, durationMs: 209_158, toolUseId: "a1" }).text,
-    "",
-  );
-  // …but a FAILED one still speaks: a settle event that never arrives would
-  // otherwise take the failure with it.
-  const dead = formatEvent({
-    agentId: "lead",
-    kind: "tool_result",
-    tool: "Agent",
-    label: "todo-webapp",
-    ok: false,
-    summary: "the agent was killed",
+test("a fan-out is an agent, not a tool call — and this renderer knows no tool names", () => {
+  // The contract's rule: "Runtime names never appear … no consumer branches on
+  // it: fan-out is `agent_started`, not a `tool_result` whose tool is called
+  // Agent." A spawn's whole representation is the started/settled pair, which
+  // carries the label, role, depth, background and the agent's own report — all
+  // of it absent from a tool call.
+  const started = formatEvent({
+    agentId: "a1",
+    kind: "agent_started",
+    label: "todo-api",
+    role: "coder",
+    depth: 1,
+    background: true,
   });
-  assert.equal(dead.text, "✗ todo-webapp failed · the agent was killed");
-  assert.equal(dead.tone, "error");
+  assert.match(started.text, /todo-api/);
+
+  // No producer emits a call for a spawn: the claude adapter emits none (the
+  // started event IS the row) and the v1 lift turns a fan-out result into
+  // `agent_settled`. So this module does not special-case one — an event whose
+  // tool happens to be named `Agent` is rendered as the ordinary call it claims
+  // to be, rather than being silently swallowed on the strength of its name.
+  assert.equal(
+    formatEvent({ ...LEAD, kind: "tool_use", tool: "Agent", summary: "todo-api" }).text,
+    "$ Agent todo-api",
+  );
+
+  // The structural half of the same rule, and the one that catches a
+  // reintroduction: a runtime's tool names have no business in this file.
+  const src = readFileSync(new URL("../src/event.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(src, /"Agent"|"Task"/);
 });
 
 test("tool_use and tool_result read exactly as they do on the v1 feed", () => {

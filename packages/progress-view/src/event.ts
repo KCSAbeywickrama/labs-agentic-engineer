@@ -31,6 +31,7 @@
 
 import { formatAgentReport, agentTone, type AgentReport, LEAD_AGENT_ID } from "./agent.js";
 import {
+  LIFECYCLE_LABELS,
   formatBytes,
   formatDuration,
   formatOutcome,
@@ -122,34 +123,27 @@ export function isSilentKind(kind: string): boolean {
   return SILENT_KINDS.has(kind);
 }
 
-// The runtime's fan-out tool. In v2 its call and its result say nothing an
-// `agent_started` / `agent_settled` pair does not say better, so they are not
-// rows — see the `tool_use` and `tool_result` cases.
-const FANOUT_TOOLS = new Set(["Agent", "Task"]);
-
-/**
- * Is this the runtime's fan-out tool?
- *
- * Exported because a fan-out call is not a call in any sense a reader cares
- * about: it is a whole agent, and the crew model has to tell "blocked inside a
- * spawned agent" (which the child's own row explains) apart from "a command has
- * not answered in a minute" (which nothing else explains).
- */
-export function isFanOutTool(tool: string | undefined): boolean {
-  return FANOUT_TOOLS.has(tool ?? "");
-}
+// A fan-out has NO tool row in v2, and this renderer does not look for one.
+//
+// The contract's rule: "Runtime names never appear. `tool` carries the runtime's
+// tool name for a step (that is what the row prints), but no consumer branches
+// on it: fan-out is `agent_started`, not a `tool_result` whose tool is called
+// Agent." This module used to hold exactly that forbidden branch, suppressing a
+// `tool_use`/`tool_result` whose tool was `Agent` or `Task`. Nothing produces
+// those: the claude adapter emits no call for a spawn (the `agent_started` IS
+// its row) and the v1 lift turns a fan-out result into `agent_settled`. The
+// branch was kept alive only by a mock fixture that invented the pair.
+// `format.ts` keeps its own copy, because that renders the V1 envelope, where a
+// fan-out result genuinely is the subagent's report.
 
 // `notice.code` is a closed set, so it gets sentences rather than snake_case.
 // An unmapped code still prints — as its raw code — because a condition the
 // platform bothered to raise must never render as an empty row.
 //
-// This table is the ONLY place the words live. A producer that shipped its own
-// sentence is how the console and the playground began describing one fact two
-// ways, and the eight dark-zone codes below are that defect being repaired: v1
-// carried them as a `phase` kind whose wording was here, v2 briefly baked the
-// English into the runner and the BFF instead. The wording of those eight is
-// therefore carried over VERBATIM — a reader must not see the copy change just
-// because the envelope did.
+// No producer ships its own sentence: that is how the console and the playground
+// began describing one fact two ways. The eight dark-zone codes come from
+// `LIFECYCLE_LABELS`, which v1's phase renderer reads too, so one envelope
+// cannot drift from the other.
 const NOTICE_LABELS: Record<string, string> = {
   api_retry: "retrying after a model error",
   compaction: "context compacted",
@@ -158,21 +152,9 @@ const NOTICE_LABELS: Record<string, string> = {
   permission_denied: "a tool call was denied",
   terminated: "the run was terminated from outside",
   workspace_guard: "a write outside the workspace was denied",
-  fan_out_rewritten: "fan-out rewritten to run in the foreground",
   gap: "events were lost from this feed",
   artifact_failed: "an artifact could not be stored",
-  // The dark zone — everything before the first model turn. Six read off pod
-  // truth by the platform, two reported by the runner once it has a process but
-  // no session. They are the slowest part of a run, so they are also the part a
-  // reader is most likely to be staring at.
-  runner_scheduling: "Waiting for a runner to be scheduled…",
-  runner_unschedulable: "No capacity to schedule the runner on the cluster…",
-  runner_pulling_image: "Pulling the agent image…",
-  runner_image_pull_backoff: "Still pulling the agent image (retrying)…",
-  runner_config_error: "Waiting on runner configuration and secrets…",
-  runner_starting: "Starting the agent…",
-  workspace_provisioning: "Setting up the workspace…",
-  workspace_ready: "Workspace ready",
+  ...LIFECYCLE_LABELS,
 };
 
 const NOTICE_GLYPHS: Record<string, string> = { info: "ℹ", warn: "⚠", error: "✗" };
@@ -275,11 +257,6 @@ export function formatEvent(e: RunEventView): FormattedLine {
     case "agent_settled":
       return settledLine(e);
     case "tool_use": {
-      // A fan-out CALL says nothing its `agent_started` does not say better —
-      // the started event carries the label, the role, the depth and the model,
-      // and the call carries a truncated copy of the prompt. Two rows for one
-      // fact, and the weaker one goes.
-      if (FANOUT_TOOLS.has(e.tool ?? "")) return { text: "", tone: "muted" };
       // A tool call carries a bare argument ("src/App.tsx"), meaningless without
       // the verb, so the tool name is printed. An EMPTY tool means the summary
       // is already a whole sentence containing its own verb.
@@ -291,14 +268,6 @@ export function formatEvent(e: RunEventView): FormattedLine {
       return { text: `$ ${tool} ${summary}`, tone: "muted" };
     }
     case "tool_result": {
-      // The fan-out call's outcome is its agent's `agent_settled`, which says
-      // vastly more. A FAILED one still speaks, because a settle event that
-      // never arrives would otherwise take the failure with it.
-      if (FANOUT_TOOLS.has(e.tool ?? "")) {
-        if (e.ok !== false) return { text: "", tone: "muted" };
-        const { detail } = formatOutcome(e);
-        return { text: `✗ ${agentName(e)} ${detail}`, tone: "error" };
-      }
       // The standalone form of an outcome, for a surface that cannot go back and
       // rewrite the action row it belongs to (a terminal). The console merges
       // the same OutcomeView onto that row instead; both read the same source,

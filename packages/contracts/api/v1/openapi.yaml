@@ -6044,11 +6044,17 @@ components:
           description: >-
             `agent_started` only: was this agent spawned detached from its
             parent's turn? Absence is not `false` — it means the runtime did not
-            say. The platform forces fan-out into the foreground (a backgrounded
-            subagent forwards none of its messages, so its whole section of the
-            feed arrives empty), so an explicit `false` here is a positive
-            confirmation that the forcing worked, and that is worth being able to
-            tell apart from silence.
+            say, and a consumer must not read silence as either answer.
+
+            `true` is the ordinary case for a builder: the platform does NOT
+            constrain the shape of fan-out, the skill does, and it tells a lead
+            to dispatch a whole wave in the background and wait on it. `false`
+            means the parent is blocked inside this agent's call until it
+            returns, which is what lets a reader be shown the lead as *waiting
+            on* a named child rather than idle. (An earlier platform forced every
+            fan-out into the foreground because a backgrounded subagent forwarded
+            none of its messages. That was measured on an older runtime and no
+            longer holds; the forcing is gone.)
           type: boolean
           x-go-type-skip-optional-pointer: false
         branch:
@@ -6066,17 +6072,15 @@ components:
             and another in the playground, which is exactly what happened while
             each producer wrote its own prose.
 
-            Ten conditions the RUN can hit. `api_retry` a retryable model failure
-            the runtime is re-attempting; `compaction` the session's context
-            being compacted; `refusal` the model declining to answer;
+            Nine conditions the RUN can hit. `api_retry` a retryable model
+            failure the runtime is re-attempting; `compaction` the session's
+            context being compacted; `refusal` the model declining to answer;
             `rate_limit` the provider throttling; `permission_denied` a tool call
             the harness refused; `terminated` the run being killed from outside;
-            `workspace_guard` a write denied outside the workspace;
-            `fan_out_rewritten` the platform rewriting a backgrounded fan-out
-            call to run in the foreground; `gap` the feed itself losing events
-            (which also shows up as RunCycleView.recording `gaps`);
-            `artifact_failed` something the run produced that could not be
-            stored.
+            `workspace_guard` a write denied outside the workspace; `gap` the
+            feed itself losing events (which also shows up as
+            RunCycleView.recording `gaps`); `artifact_failed` something the run
+            produced that could not be stored.
 
             Eight more describe the stretch BEFORE the first model turn — the
             dark zone, which is the slowest part of a run and used to show as a
@@ -6102,7 +6106,6 @@ components:
           - permission_denied
           - terminated
           - workspace_guard
-          - fan_out_rewritten
           - gap
           - artifact_failed
           - runner_scheduling
@@ -6122,7 +6125,6 @@ components:
           - RunEventCodePermissionDenied
           - RunEventCodeTerminated
           - RunEventCodeWorkspaceGuard
-          - RunEventCodeFanOutRewritten
           - RunEventCodeGap
           - RunEventCodeArtifactFailed
           - RunEventCodeRunnerScheduling

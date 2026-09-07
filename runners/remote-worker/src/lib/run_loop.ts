@@ -54,6 +54,30 @@
 // `turn_ended`'s usage IS the run's total, which is what makes carrying it
 // forward onto `run_settled` correct rather than convenient.
 //
+// **A run that ends EARLY settles exactly once too, and this loop is still what
+// writes it.** `RunTerminator` is the seam anything else ends a run through: the
+// deadline guard and a fatal MCP auth failure both hand it a REASON, the one
+// race below sees it, stops whatever is still running and writes the single
+// `run_settled`. The seam exists because the obvious alternative shipped — the
+// MCP policy's `onFatal` (`runner.ts`) emitted a settle of its own while this
+// loop was still reading, so one run's feed could carry two of them, and every
+// consumer treats a settle as terminal (`buildCrew` in `@aep/progress-view`
+// settles every agent it never heard close on one). A settle followed by more
+// of the run is a feed nobody can read back.
+//
+// **Input ends when the run is done, not when the first turn does.** The SDK
+// closes the CLI's stdin the moment the FIRST `result` arrives for a plain
+// string prompt, and stdin is also the channel every SDK-side hook answers on.
+// Measured on 2026-09-07 (`track-each-hire3141-b`): the lead fanned out in the
+// background, its turn ended, stdin closed, and the subagent's first Edit met a
+// cancelled workspace-guard hook — which the CLI reports to the agent as "the
+// user doesn't want to take this action", so both agents stopped with a green
+// result and seven files written. The runtime therefore feeds the prompt as a
+// stream it holds open, and THIS loop says when to let it go, through
+// `RunStream.endInput`: at a `result` with no task still live, or — when the
+// last live task settles after a `result` and nothing wakes the lead within a
+// grace period — then. Ending it is what lets the CLI exit and the source close.
+//
 // **A run that never ends is not a settle**, which is what the deadline guard
 // below is for: a pod is killed from outside when its Job's deadline passes, and
 // a killed pod explains nothing. See `createRunDeadline`.
@@ -70,9 +94,28 @@ import {
 import { emit as defaultEmit, LEAD_AGENT_ID, type RunEventInput } from "./progress/emitter.js";
 import type { RunWatchdog } from "./progress/watchdog.js";
 
-// The race's "time is up" arm. A unique symbol rather than a sentinel object so
-// it can never be confused with an IteratorResult.
-const DEADLINE: unique symbol = Symbol("run deadline");
+// The race's "this run is over" arm. A unique symbol key rather than a sentinel
+// object so an early end can never be confused with an IteratorResult — which is
+// a value the SDK controls and we do not.
+const TERMINATED: unique symbol = Symbol("run terminated");
+
+/** An early end, wrapped so it can travel through the race with its reason. */
+type EarlyEnd = { readonly [TERMINATED]: RunTermination };
+
+function earlyEnd(reason: RunTermination): EarlyEnd {
+  return { [TERMINATED]: reason };
+}
+
+/**
+ * Which arm of the race won.
+ *
+ * A type predicate rather than an equality check, so the compiler narrows the
+ * other arm to an IteratorResult on its own — the earlier symbol comparison
+ * needed an unreachable second branch to get there.
+ */
+function isEarlyEnd(step: IteratorResult<unknown> | EarlyEnd): step is EarlyEnd {
+  return TERMINATED in step;
+}
 
 /** One turn ending, held so its verdict and usage can become the run's settle. */
 type TurnEnded = RunEventInput & { kind: "turn_ended" };
@@ -101,7 +144,23 @@ export interface RunStream {
    * 'stopped' will be emitted."
    */
   stopTask(taskId: string): Promise<void>;
+  /**
+   * Let the CLI's input close. The runtime keeps the prompt stream open so the
+   * SDK's hook channel survives the lead's first turn (see the header); this is
+   * the loop telling it the run is over. Idempotent, and optional so a stream
+   * that has no input to end (a recording) needs no stub.
+   */
+  endInput?(): void;
 }
+
+/**
+ * How long, after the last live task settles following a `result`, the loop
+ * waits for the lead to be woken for another turn before ending input anyway.
+ * Measured: a completion wakes the lead within a second or two; the margin is
+ * for a slow model, not a design allowance. A run whose lead is never woken
+ * would otherwise hold the CLI open until the Job deadline.
+ */
+export const INPUT_GRACE_MS = 15_000;
 
 /**
  * The clock that bounds a run, so the runner ends it rather than being killed
@@ -143,8 +202,9 @@ export const RUN_DEADLINE_ENV = "AEP_RUN_DEADLINE_SECONDS";
  */
 export const DEADLINE_MARGIN_MS = 60_000;
 
-// A stop that never answers would turn the guard into the hang it exists to
-// prevent, so the whole stop phase is bounded. The run is ending either way;
+// A stop that never answers would turn an early ending into the hang it exists
+// to prevent, so the whole stop phase is bounded — for a fatal exactly as for a
+// deadline, since both go through the same termination path. The run is ending either way;
 // what matters is that the settle reaches the feed before the pod does not.
 const STOP_TASKS_TIMEOUT_MS = 5_000;
 
@@ -194,6 +254,62 @@ export function runDeadlineFromEnv(
   return createRunDeadline(Math.max(0, budgetMs - margin - elapsedMs), budgetMs);
 }
 
+/**
+ * Why a run is ending before its stream closed, in the words the feed will use.
+ *
+ * The reason travels WITH the termination rather than being derived at the end
+ * of it, because there is now more than one thing that can end a run early and
+ * a feed that said "terminated" without saying by what is the report a reader
+ * has to go and reconstruct from the pod's logs — which outlive nothing.
+ *
+ * The three parts are the three places the reason has to appear:
+ *   `source` — the bracketed origin every diagnostic line here carries
+ *              (`[deadline]`, `[watchdog]`, `[workspace]`);
+ *   `why`    — the sentence, in the feed's voice, minus anything only the loop
+ *              knows (how many tasks it had to stop);
+ *   `error`  — the settle's own `error`, which is also the process's exit
+ *              reason. Kept separate because a settle is read on its own, out
+ *              of the line's context.
+ */
+export interface RunTermination {
+  readonly source: string;
+  readonly why: string;
+  readonly error: string;
+}
+
+/**
+ * The seam anything outside this loop ends a run through.
+ *
+ * A promise rather than a callback, and that is the whole point: a callback
+ * would have to DO the ending where it was called — which is how the MCP auth
+ * policy came to emit a second `run_settled` while the loop was still reading.
+ * Tripping this only states the reason; the loop, which owns the settle, does
+ * the ending.
+ *
+ * Two consequences worth knowing before reshaping it:
+ *
+ *   - It is idempotent by construction. A promise resolves once, so a second
+ *     fatal (or a fatal racing the deadline) cannot settle the run twice.
+ *   - Tripping it after the loop has already returned is a no-op, which is the
+ *     correct behaviour for a straggling failure — the MCP proxy can fail a
+ *     last request while the session is closing, and a run that already ended
+ *     green must not be rewritten as a failure by it.
+ */
+export interface RunTerminator {
+  /** Resolves when someone ends the run early. Never rejects. */
+  readonly requested: Promise<RunTermination>;
+  /** End the run, with this reason. The first call wins; later ones are ignored. */
+  terminate(reason: RunTermination): void;
+}
+
+export function createRunTerminator(): RunTerminator {
+  let fire!: (reason: RunTermination) => void;
+  const requested = new Promise<RunTermination>((resolve) => {
+    fire = resolve;
+  });
+  return { requested, terminate: (reason) => fire(reason) };
+}
+
 export interface RunLoopOptions {
   /** This run's adapter — see createClaudeAdapter; never shared between runs. */
   translate: RunEventTranslator;
@@ -209,6 +325,14 @@ export interface RunLoopOptions {
    */
   requestedSkills?: readonly string[];
   deadline?: RunDeadline;
+  /**
+   * The seam an early ender trips — see RunTerminator. Optional because a
+   * replay has nobody to trip it, and because a run with neither this nor a
+   * deadline is exactly the run this loop read before either existed.
+   */
+  terminator?: RunTerminator;
+  /** Overrides INPUT_GRACE_MS; tests only. */
+  inputGraceMs?: number;
 }
 
 /**
@@ -228,29 +352,48 @@ export async function consumeRun(stream: RunStream, opts: RunLoopOptions): Promi
   // distinguishes "the run ended" from "the stream stopped".
   let lastTurn: TurnEnded | undefined;
 
+  // Ending input, once. The grace timer is cleared on every exit path below,
+  // which is what keeps a settled run from outliving it — deliberately NOT
+  // unref'd: with the CLI gone nothing else holds the event loop, and an unref'd
+  // timer then never fires at all.
+  let inputEnded = false;
+  let inputGrace: NodeJS.Timeout | undefined;
+  const endInput = (): void => {
+    if (inputEnded) return;
+    inputEnded = true;
+    clearTimeout(inputGrace);
+    stream.endInput?.();
+  };
+  const disarmInputGrace = (): void => {
+    clearTimeout(inputGrace);
+    inputGrace = undefined;
+  };
+  const armInputGrace = (): void => {
+    if (inputEnded || inputGrace) return;
+    inputGrace = setTimeout(endInput, opts.inputGraceMs ?? INPUT_GRACE_MS);
+  };
+
   const messages = stream.messages[Symbol.asyncIterator]();
+  // Every way this run can end before its source does, as ONE promise: the
+  // deadline expiring, and anyone who trips the terminator. Whichever arrives
+  // first carries its own reason, so there is a single termination path and a
+  // single settle however the run came to an end.
+  //
   // Built once, not per message: every `.then` on a pending promise is retained
   // until that promise settles, and a long run reads thousands of messages.
-  const guard = deadline
-    ? {
-        expired: deadline.expiry.then((): typeof DEADLINE => DEADLINE),
-        terminate: () => terminateOnDeadline(stream, deadline, live, watchdog, emit),
-      }
-    : undefined;
+  // Undefined when neither exists — and then there is no race at all, which is
+  // the shape every replay test and every pre-deadline caller runs in.
+  const ending = earliestEnding(deadline, opts.terminator);
 
   try {
     for (;;) {
-      const step = guard ? await Promise.race([messages.next(), guard.expired]) : await messages.next();
-      if (guard && step === DEADLINE) {
+      const step = ending ? await Promise.race([messages.next(), ending]) : await messages.next();
+      if (isEarlyEnd(step)) {
         // The held turn is deliberately dropped. Whatever the last turn
-        // reported, this run did not finish — it ran out of time with work
+        // reported, this run did not finish — it was ended with work
         // outstanding, and a success line here is the one thing nobody re-reads.
-        return await guard.terminate();
+        return await terminateRun(step[TERMINATED], stream, live, watchdog, emit);
       }
-      // Unreachable — only `guard.expired` ever resolves to this symbol. It is
-      // here so the compiler can narrow `step` to an IteratorResult below, which
-      // is cheaper than a cast that would go on being right by assumption.
-      if (step === DEADLINE) break;
       if (step.done) break;
       const message = step.value;
 
@@ -310,6 +453,19 @@ export async function consumeRun(stream: RunStream, opts: RunLoopOptions): Promi
         if (event.kind === "turn_ended") lastTurn = event as TurnEnded;
         emit(event);
       }
+      // The input rule (header). A `result` with nothing live: the run is over.
+      // A task settling after a `result`, leaving nothing live: the lead is
+      // normally woken for another turn — give it the grace, and let any
+      // message that is not task bookkeeping (the woken lead's own output)
+      // disarm it. A `result` while tasks are live keeps input open.
+      if (isResult(message)) {
+        disarmInputGrace();
+        if (live.ids().length === 0) endInput();
+      } else if (isTaskBookkeeping(message)) {
+        if (lastTurn && live.ids().length === 0) armInputGrace();
+      } else {
+        disarmInputGrace();
+      }
       // The SDK reports what it actually resolved; a preload that matched
       // nothing is dropped in silence (see skills_preload_check.ts for the
       // run this cost us). Warn rather than fail: the guidance is missing,
@@ -349,12 +505,49 @@ export async function consumeRun(stream: RunStream, opts: RunLoopOptions): Promi
     record({ type: "worker_error", error: msg });
     emit({ kind: "run_settled", agentId: LEAD_AGENT_ID, outcome: "failure", error: msg });
     return { exitCode: 1, error: msg };
+  } finally {
+    disarmInputGrace();
   }
 }
 
-async function terminateOnDeadline(
+/**
+ * The early ends, as the one promise the loop races the source against.
+ *
+ * A single arm is passed through rather than wrapped in a `Promise.race` of
+ * one, and no arms at all is `undefined` rather than a promise that never
+ * settles: a run configured with neither must take exactly the path it took
+ * before either existed.
+ */
+function earliestEnding(deadline?: RunDeadline, terminator?: RunTerminator): Promise<EarlyEnd> | undefined {
+  const arms: Promise<EarlyEnd>[] = [];
+  if (deadline) arms.push(deadline.expiry.then(() => earlyEnd(deadlineTermination(deadline))));
+  if (terminator) arms.push(terminator.requested.then(earlyEnd));
+  if (arms.length === 0) return undefined;
+  return arms.length === 1 ? arms[0] : Promise.race(arms);
+}
+
+/** The deadline's reason, built where the budget's wording lives. */
+function deadlineTermination(deadline: RunDeadline): RunTermination {
+  const budget = budgetText(deadline.budgetMs);
+  return {
+    source: "deadline",
+    why: `the run hit its ${budget} time budget`,
+    error: `run terminated after its ${budget} time budget`,
+  };
+}
+
+/**
+ * End a run that is still being read: say why, stop what is still running,
+ * settle once.
+ *
+ * The ONE place that happens, whatever ended the run. The stop phase is shared
+ * with it deliberately — a fatal leaves the same background subagents running
+ * that a deadline does, and a second ender that skipped it would leave them
+ * working inside a pod that is about to exit.
+ */
+async function terminateRun(
+  reason: RunTermination,
   stream: RunStream,
-  deadline: RunDeadline,
   live: LiveTasks,
   watchdog: RunWatchdog,
   emit: (event: RunEventInput) => void,
@@ -370,18 +563,18 @@ async function terminateOnDeadline(
     agentId: LEAD_AGENT_ID,
     level: "error",
     code: "terminated",
-    detail: `[deadline] terminated — the run hit its ${budgetText(deadline.budgetMs)} time budget${stopping} — ${watchdog.describe()}`,
+    detail: `[${reason.source}] terminated — ${reason.why}${stopping} — ${watchdog.describe()}`,
   });
   // In parallel and failure-tolerant: the tasks are independent, and a stop that
   // errors (the task already gone, the session shutting down) must not cost the
-  // settle that follows it.
+  // settle that follows it. Bounded for the same reason: a stop that never
+  // answers would turn the ending into the hang it exists to prevent.
   await withTimeout(
     Promise.all(ids.map((id) => stream.stopTask(id).catch(() => {}))),
     STOP_TASKS_TIMEOUT_MS,
   );
-  const error = `run terminated after its ${budgetText(deadline.budgetMs)} time budget`;
-  emit({ kind: "run_settled", agentId: LEAD_AGENT_ID, outcome: "failure", error });
-  return { exitCode: 1, error };
+  emit({ kind: "run_settled", agentId: LEAD_AGENT_ID, outcome: "failure", error: reason.error });
+  return { exitCode: 1, error: reason.error };
 }
 
 function withTimeout(work: Promise<unknown>, ms: number): Promise<unknown> {
@@ -396,6 +589,23 @@ function withTimeout(work: Promise<unknown>, ms: number): Promise<unknown> {
 /** A budget as a person set it: whole minutes above a minute, seconds below. */
 function budgetText(ms: number): string {
   return ms >= 60_000 ? `${Math.round(ms / 60_000)}m` : `${Math.round(ms / 1000)}s`;
+}
+
+function isResult(message: unknown): boolean {
+  return !!message && typeof message === "object" && (message as Record<string, unknown>).type === "result";
+}
+
+/**
+ * A task lifecycle message — the ones `createLiveTasks` reads, plus the
+ * background roster. None of them is the lead speaking, which is what the
+ * input rule needs to know.
+ */
+function isTaskBookkeeping(message: unknown): boolean {
+  if (!message || typeof message !== "object") return false;
+  const m = message as Record<string, unknown>;
+  if (m.type !== "system") return false;
+  const subtype = typeof m.subtype === "string" ? m.subtype : "";
+  return subtype.startsWith("task_") || subtype === "background_tasks_changed";
 }
 
 function isInit(message: unknown): boolean {

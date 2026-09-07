@@ -19,12 +19,12 @@
 // What a run reads about its OWN health, off the SDK messages the feed
 // translator drops.
 //
-// `from-sdk.ts` answers "what did the agent do". This answers "why is nothing
+// The claude adapter answers "what did the agent do". This answers "why is nothing
 // happening", which the watchdog could previously only guess at: it could say
 // the model turn was the slow half, never why.
 //
 // The why was already on the wire. The SDK emits a `system`/`api_retry` message
-// for every retryable API failure, and `from-sdk.ts` discards it with every
+// for every retryable API failure, and the translator discards it with every
 // other unrecognised system subtype — so a run stuck behind an overload storm
 // looked exactly like a run thinking hard. Measured against a dead endpoint: 8
 // retries in 69s on exponential backoff (0.2s, 0.6s, 1.2s, 2.3s, 4.2s, 9.7s,

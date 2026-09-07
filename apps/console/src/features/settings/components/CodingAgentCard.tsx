@@ -91,6 +91,23 @@ function isSelectable(runtime: AgentRuntime): boolean {
  * two fields are independently optional, so restating the other would let a
  * stale read overwrite it.
  */
+/**
+ * Who last changed the setting, and when — omitting the "when" when there isn't
+ * one rather than printing it wrong.
+ *
+ * `new Date(undefined ?? "")` is an Invalid Date, and `toLocaleString()` on one
+ * renders the literal words "Invalid Date" into the sentence. The timestamp is
+ * optional on the wire (a row can be written by a path that does not stamp it),
+ * so the missing case is reachable, and "Changed by admin" is honest where
+ * "Changed Invalid Date by admin" is not.
+ */
+function changedLine(updatedAt: string | null | undefined, updatedBy: string | null | undefined): string {
+  const who = updatedBy ? ` by ${updatedBy}` : "";
+  const at = updatedAt ? new Date(updatedAt) : undefined;
+  if (!at || Number.isNaN(at.getTime())) return `Changed${who}`;
+  return `Changed ${at.toLocaleString()}${who}`;
+}
+
 export function CodingAgentCard({
   codingAgent,
   codingLlm,
@@ -180,7 +197,7 @@ export function CodingAgentCard({
         <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
           {onPlatformDefaults
             ? "Nobody has changed this yet, so the organization runs on the platform's defaults."
-            : `Changed ${new Date(codingAgent.updatedAt ?? "").toLocaleString()} by ${codingAgent.updatedBy}`}
+            : changedLine(codingAgent.updatedAt, codingAgent.updatedBy)}
         </Typography>
 
         {save.isError && (

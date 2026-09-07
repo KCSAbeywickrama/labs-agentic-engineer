@@ -227,7 +227,8 @@ test("systemPromptAppend: the glossary names the fan-out, wait and task-list too
 // inspect.
 import { DENIED_CAPABILITIES, type Runtime, type RuntimePolicy } from "../runtime/port.js";
 import { allowsWriteOutsideProject } from "./workspace_guard.js";
-import { startCodingRun } from "./runner.js";
+import { buildMcpPolicy, startCodingRun } from "./runner.js";
+import { createRunTerminator } from "./run_loop.js";
 import type { TaskLog } from "./logger.js";
 import type { DispatchRequest } from "./types.js";
 import type { WorkspaceLayout } from "./workspace.js";
@@ -440,4 +441,43 @@ test("startCodingRun: MCP is stated only when both the url and a token arrived",
   // No publisher credentials were mounted, so there is nothing to remint — and
   // "can remint" is the same fact as "there is a stale token worth discarding".
   assert.equal(policy.mcp?.invalidate, undefined);
+});
+
+// --- the MCP policy's fatal: the loop settles, this callback does not --------
+
+// The defect, pinned where it lived. `onFatal` used to emit a `run_settled` of
+// its own and then hard-exit, while `consumeRun` was still reading — so one run
+// could carry two settles, and every consumer treats the first as terminal
+// (`buildCrew` settles every agent it never heard close on one). It now only
+// states the reason; the loop stops the live tasks and writes the single settle
+// (`run_loop.test.ts` counts them).
+test("buildMcpPolicy: a fatal auth failure trips the terminator and puts nothing on the feed", async () => {
+  const terminator = createRunTerminator();
+  const policy = buildMcpPolicy(
+    dispatch({ mcpUrl: "https://bff.example.com/internal/v1/mcp", mcpToken: "tok" }),
+    layoutFor("/workspace/project"),
+    terminator,
+  );
+
+  // `emit` writes straight to stdout, so this is how "emits nothing" is checked
+  // rather than asserted about a mock that could drift from the real emitter.
+  const lines: string[] = [];
+  const original = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
+    lines.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    policy.mcp?.onFatal?.(new Error("refresh failed: 401"));
+  } finally {
+    process.stdout.write = original;
+  }
+  assert.deepEqual(lines, [], "the fatal writes no event of its own");
+
+  const reason = await terminator.requested;
+  assert.equal(reason.source, "mcp auth", "so the feed line reads [mcp auth] terminated — …");
+  assert.match(reason.why, /can no longer be renewed: refresh failed: 401/);
+  // The wording the old settle carried, kept: it is what a console shows as the
+  // run's error, and it is now the LOOP that writes it there.
+  assert.equal(reason.error, "mcp auth: refresh failed: 401");
 });

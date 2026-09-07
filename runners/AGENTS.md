@@ -129,7 +129,22 @@ into the runner pod at `/app/skills` for live skill edits (see
   the feed where it happened — and the loop remembers the newest one so the
   settle can carry its outcome and its usage. So **do not emit a `run_settled`
   from anywhere else**: several would settle one run several times, and every
-  consumer treats a settle as terminal. Usage is NOT summable across turns —
+  consumer treats a settle as terminal — `buildCrew` in
+  `packages/progress-view/src/crew.ts` settles every agent it never heard close
+  on the run's settle, so a second one describes a run that had not ended.
+  Anything that has to end a RUNNING run early states its reason through the
+  loop's own seam instead (`createRunTerminator`, `run_loop.ts`): the deadline
+  and a fatal MCP auth failure both trip it, and the loop stops the tasks still
+  live, names the cause in a `terminated` notice and writes the one settle. It
+  shipped the other way once — the MCP policy's `onFatal` emitted its own settle
+  while the loop was still reading, so a fatal put two on one feed.
+  **The one carve-out is a failure BEFORE the loop exists**: `oneshot.ts` and
+  `local.ts` settle their own pre-flight failures (a workspace that would not
+  provision, a validation context that would not load, a mirror with no workflow
+  skill) and they may, because `consumeRun` is never reached on that path — the
+  run really did end there and there is no second settle to collide with. That
+  carve-out does not travel: copied anywhere the loop is already reading, it is
+  the double settle again. Usage is NOT summable across turns —
   the runtime reports it cumulatively, so the last turn's number IS the run's
   total. The loop takes its stream as an `AsyncIterable` exactly
   so a recording can be replayed through it: when a change turns on what the SDK

@@ -388,6 +388,39 @@ right-aligned under the log, away from where its content starts.
 parked at the deploy gate has not ended, and *Run finished* over its log would
 contradict the summary card telling the reader it is waiting on them.
 
+### The coding agent log
+
+A cycle's log is a **crew** — the agents the run is made of — with two views the
+reader switches between, never both at once. The words name what a reader wants
+to know, not the runtime's mechanics: nothing here says "subagent", "fan-out" or
+a tool's name.
+
+| | |
+|---|---|
+| The two views | **Crew** · **Timeline** |
+| Crew answers | who is doing what right now |
+| Timeline answers | where the time went, and what ran at once |
+| The run's own agent | **lead** |
+| A spawned agent | its **label** — the description the lead gave it, never an id |
+| The count beside the toggle | **`N agents · M running · last event Xs ago`** |
+
+An agent's state names its situation (naming rule 6):
+
+| Situation | Says |
+|---|---|
+| Events are arriving | **`working`** |
+| Blocked inside an agent it spawned | **`waiting on <label>`** |
+| A minute of silence with a call unanswered | **`stalled`**, with what it is waiting on |
+| It finished | **`completed`** and its own **report** |
+| The runtime reported a failure | **`failed`** |
+| It was stopped, or the run was cancelled | **`stopped`** / **`cancelled`** — never *failed* |
+
+**Silence is never a verdict.** A quiet agent reads as `working` with the age of
+its last event beside it; only the runtime saying so makes a row a failure.
+
+**Plan** is the lead's own task list, shown under the agent that owns each entry.
+It is what the run set out to do, beside what it did.
+
 ## The project overview
 
 ### Where project status lives
@@ -1293,6 +1326,18 @@ Endpoints · Alerts**. **Settings** stays in the footer in both contexts
 > this file; ADR-0010's decision (the sidebar swaps wholesale to project sections) still holds and
 > only its illustrative list is stale, so it is left for an explicit supersede rather than edited
 > in place.
+
+## The coding agent
+
+The organization's choice of what drives a coding run, on Settings. "Runtime" is
+the product word for the agent that writes the code; the user never sees an
+internal adapter or port name.
+
+| | |
+|---|---|
+| Card | **Coding agent** |
+| Fields | **Runtime** · **Model** |
+| A runtime the platform cannot run | shown, disabled, with the reason — never hidden, so the choice is honest |
 
 ## Resources
 
