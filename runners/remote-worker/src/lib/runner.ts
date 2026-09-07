@@ -316,8 +316,14 @@ export interface McpAuthOpts {
  * and paying for its body on every turn of every validation run is not.
  */
 /**
- * The hook that keeps a validation issue's status line current, or undefined
- * when this run cannot or should not keep one.
+ * The status line for THIS dispatch, or undefined when the run cannot or should
+ * not keep one.
+ *
+ * Validation-specific, and named for it: only a validation cycle is anchored to
+ * an issue, so only a validation cycle has a line to keep. It answers with the
+ * whole tracker rather than a hook — the report generator's OUTCOME is half the
+ * mechanism, and a caller handed only the hook would report the exit-2 loop as
+ * progress and back again.
  *
  * Three conditions, and each absence is a NORMAL run rather than a fault:
  * a coding run has no validation issue to speak on; a validation dispatch that
@@ -335,7 +341,7 @@ export interface McpAuthOpts {
  * a test that asserts differently on a developer's laptop and in CI asserts
  * nothing on either.
  */
-export async function createIssueStatusLineHook(
+export async function validationStatusLineFor(
   req: DispatchRequest,
   progress: ValidationProgressTracker | undefined,
   warn: (reason: string) => void,
@@ -544,8 +550,8 @@ export async function runClaudeQuery(
         })
       : undefined;
 
-  // The RUN's own line on its issue — see createIssueStatusLineHook below.
-  const validationStatusLine = await createIssueStatusLineHook(req, validationProgress, (reason) => {
+  // The RUN's own line on its issue — see validationStatusLineFor above.
+  const validationStatusLine = await validationStatusLineFor(req, validationProgress, (reason) => {
     emit({ kind: "log", level: "warn", summary: `[status] ${reason}` });
   });
 

@@ -27,7 +27,7 @@ import {
   alwaysOnSkills,
   buildMcpOptions,
   contractReferencePath,
-  createIssueStatusLineHook,
+  validationStatusLineFor,
   debugQueryOptions,
   onDemandSkills,
   promptWithProjectRoot,
@@ -146,8 +146,8 @@ const progressTracker = () => createValidationProgressTracker(() => {});
 // A coding run has no validation issue to speak on, and registering the hook
 // anyway would put a GitHub round trip on the Write and Bash calls of every
 // build to derive nothing.
-test("createIssueStatusLineHook: a run with no per-criterion tracker keeps no line", async () => {
-  const hook = await createIssueStatusLineHook(
+test("validationStatusLineFor: a run with no per-criterion tracker keeps no line", async () => {
+  const hook = await validationStatusLineFor(
     validationDispatch({ taskKind: "implementation", validationIssue: undefined }),
     undefined,
     () => assert.fail("a coding run must not warn about a status line it never wanted"),
@@ -159,8 +159,8 @@ test("createIssueStatusLineHook: a run with no per-criterion tracker keeps no li
 // could not resolve it — runs exactly as it did before, minus the line. Silent
 // is the old behaviour; failing here would trade two hours of work for the
 // commentary on it.
-test("createIssueStatusLineHook: a validation run with no issue number keeps no line", async () => {
-  const hook = await createIssueStatusLineHook(
+test("validationStatusLineFor: a validation run with no issue number keeps no line", async () => {
+  const hook = await validationStatusLineFor(
     validationDispatch({ validationIssue: undefined }),
     progressTracker(),
     () => assert.fail("an absent issue number is a normal dispatch, not a fault to report"),
@@ -169,8 +169,8 @@ test("createIssueStatusLineHook: a validation run with no issue number keeps no 
 });
 
 // The whole point: a validation run that CAN name its issue gets the hook.
-test("createIssueStatusLineHook: a validation run that names its issue keeps a line", async () => {
-  const hook = await createIssueStatusLineHook(
+test("validationStatusLineFor: a validation run that names its issue keeps a line", async () => {
+  const hook = await validationStatusLineFor(
     validationDispatch(),
     progressTracker(),
     () => assert.fail("a wired run must not warn"),
@@ -184,9 +184,9 @@ test("createIssueStatusLineHook: a validation run that names its issue keeps a l
 
 // The third absence: a pod that cannot resolve `gh` cannot post at all. It says
 // so once on the run's own feed and carries on — the run's work is the tests.
-test("createIssueStatusLineHook: an unresolvable gh costs the line, not the run", async () => {
+test("validationStatusLineFor: an unresolvable gh costs the line, not the run", async () => {
   const warnings: string[] = [];
-  const hook = await createIssueStatusLineHook(
+  const hook = await validationStatusLineFor(
     validationDispatch(),
     progressTracker(),
     (reason) => warnings.push(reason),
