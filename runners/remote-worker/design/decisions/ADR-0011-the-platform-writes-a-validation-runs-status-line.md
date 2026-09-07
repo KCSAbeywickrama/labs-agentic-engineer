@@ -94,13 +94,25 @@ only record of a run that survives the run.
    machine is working, while the agent's carries a judgement and is the one a
    reader must not mistake for mechanism.
 
-7. **The skill OVERRIDES rather than deletes.** `alwaysOnSkills("validation")` is
-   `["aep", "aep-validation"]` and both bodies ride the system prompt, so
-   removing `aep-validation`'s section would leave `aep`'s "keep an issue's line
-   current" in force with nothing saying the platform already does. The section
-   collapses to an override instead, in the same move the frontmatter already
-   makes for the workflow itself. Steps 1 and 10 keep their imperatives, and the
-   agent still owes a blocker.
+7. **The skill's status-line section is DELETED, and nothing replaces it.**
+
+   It shipped first as an override — `alwaysOnSkills("validation")` is
+   `["aep", "aep-validation"]`, both bodies ride the system prompt, so removing
+   the section leaves `aep`'s "keep an issue's line current" in force with
+   nothing saying the platform already does it. The override existed to stop the
+   agent narrating on top of the ladder.
+
+   That was 11 lines of prompt on every run to prevent a behaviour never once
+   observed. The agent SKIPPING its middle lines is the entire premise of this
+   ADR; over-posting them has no evidence behind it at all. And if it ever
+   happened, newest-wins means a judgement supersedes a mechanical line, which is
+   the precedence you would choose anyway.
+
+   The section's own words were "Everything between them is this line" — the
+   middle was its whole job, and the platform now has it. What a validation run
+   still says is what it always said, from the two places it always came from:
+   step 1's opening comment and step 10's closing summary, both step-anchored,
+   which is exactly why those two are the pair that reliably happen.
 
 ## Rejected
 
@@ -135,6 +147,14 @@ only record of a run that survives the run.
   through the long middle, on the reasoning that the rows carry it. They do, per
   criterion; the run-wide count is the thing no row can show, and a blank tile
   over a live run reads the same as a run that stopped.
+- **The agent's opening comment is not guaranteed, and was not before either.**
+  p44 posted none. That first looked like fallout from the override, and the
+  record says otherwise: p37 missed it under the ORIGINAL skill, while p40, p41
+  and p42 posted it. One miss in four before, one in one after — no attribution
+  either way, and the pod log that would settle it had already rotated. What is
+  lost when it is missed is now only the run's stated PLAN ("9 need new specs"),
+  for the minute before the first scaffold write; the console's own derived line
+  covers that window from the rows, so nothing on screen goes blank.
 - **The last rung stands stale at the end.** After `reporting` the run pushes and
   opens its pull request, and nothing posts again until the agent's closing
   summary. That is the same guarantee ADR-0010 already gave, on more lines.

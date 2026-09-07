@@ -684,21 +684,17 @@ test("aep-validation still names the force-push its push step needs", () => {
   );
 });
 
-// The `aep` skill is always-on for a validation run TOO, and its own status-line
-// section tells whoever works an issue to keep its line current. So the platform
-// taking that line over is only true if this skill says so: deleting the section
-// would leave the obligation standing with nothing to say the platform already
-// covers it, and the agent narrating on top of the ladder costs a reader the
-// line it replaces.
-test("aep-validation still says who writes the status line", () => {
+// The two comments a validation run has always posted are STEP-anchored, and
+// that is why they are the two that reliably happen — ADR-0010's own rule, that
+// an obligation stated beside a numbered sequence gets skipped while one inside
+// it lands. The platform now writes the middle, so nothing else is asked for;
+// lose either of these and the issue has no opening claim or no closing verdict.
+test("aep-validation keeps the two comments its steps ask for", () => {
   const body = fs.readFileSync(path.join(LIBRARY, "aep-validation", "SKILL.md"), "utf8");
+  assert.ok(body.includes("Post a brief opening comment"), "step 1 lost its opening comment");
   assert.ok(
-    /##\s+The status line/.test(body),
-    "aep-validation lost its status-line section, so aep's rule governs the middle again",
-  );
-  assert.ok(
-    body.includes("The platform writes this one, not you."),
-    "the section no longer overrides aep's keep-it-current rule",
+    body.includes("Post an issue comment with the summary counts"),
+    "step 10 lost its closing summary",
   );
 });
 
