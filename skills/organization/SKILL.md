@@ -28,7 +28,7 @@ Thunder is available as a dependency.
 
 ## UI design system
 
-`astryx-design-system`
+`oxygen-ui-design-system`
 
 That is the name of a skill in this library, and it is the single authority for
 this organization's web-app UI — components, layout, styling, theming, and the
