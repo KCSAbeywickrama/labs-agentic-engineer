@@ -20,6 +20,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ValidationProgressState } from "./validation_progress.js";
+import type { LadderState } from "./validation_status_line.js";
 import {
   LADDER,
   LADDER_LINES,
@@ -162,6 +163,42 @@ test("Ladder: the state a run is already in is not news", () => {
   assert.equal(ladder.admit("exploring"), false);
 });
 
+// The shape of a real middle: twelve criteria, each walking the same three
+// rungs. This is the case that decides whether the ladder is usable at all —
+// three lines per criterion would exhaust the cap around the fourth and leave
+// the rest of a two-hour run silent, which is the defect the ladder exists to
+// fix, returning at its worst possible moment.
+test("Ladder: working criteria one at a time posts each rung once, not once per criterion", () => {
+  const ladder = new Ladder();
+  const posted: LadderState[] = [];
+  const say = (s: LadderState) => {
+    if (ladder.admit(s)) posted.push(s);
+  };
+
+  say("harness");
+  for (let criterion = 0; criterion < 12; criterion += 1) {
+    say("exploring");
+    say("authoring");
+    say("running");
+  }
+  say("reporting");
+
+  assert.deepEqual(posted, ["harness", "exploring", "authoring", "running", "reporting"]);
+});
+
+// Step 8 heals by editing a spec and re-running it, over and over. At the run
+// altitude nothing has changed — it is still running tests against the deployed
+// system — and the console already says which criterion is healing, per row.
+test("Ladder: healing does not walk the line backwards", () => {
+  const ladder = new Ladder();
+  for (const s of ["harness", "exploring", "authoring", "running"] as const) ladder.admit(s);
+
+  for (let heal = 0; heal < 5; heal += 1) {
+    assert.equal(ladder.admit("authoring"), false, "a heal is not a regression");
+    assert.equal(ladder.admit("running"), false, "…and neither is re-running it");
+  }
+});
+
 // Step 9's exit-2 sends a run back to authoring, and that is the ordinary path
 // rather than a fault. A strict first-occurrence ratchet would leave it under
 // "generating the report" for the rest of the run — silent AND wrong, which is
@@ -201,7 +238,7 @@ function hookInput(call: { toolName: string; input: unknown }) {
 
 test("the hook posts one branded line per rung", async () => {
   const posted: string[] = [];
-  const hook = createValidationStatusLine(
+  const { hook } = createValidationStatusLine(
     new ValidationProgressState(),
     async (body) => {
       posted.push(body);
@@ -227,7 +264,7 @@ test("the hook posts one branded line per rung", async () => {
 // the agent's own words; branded as machine they would vanish entirely.
 test("every line carries the observed brand, first", async () => {
   const posted: string[] = [];
-  const hook = createValidationStatusLine(new ValidationProgressState(), async (b) => void posted.push(b), () => {});
+  const { hook } = createValidationStatusLine(new ValidationProgressState(), async (b) => void posted.push(b), () => {});
   await hook(hookInput(bash("npm ci --prefix tests/e2e")) as never, undefined, { signal: undefined } as never);
   assert.ok(posted[0]?.startsWith(OBSERVED_COMMENT_MARKER), posted[0]);
 });
@@ -247,7 +284,7 @@ test("every rung's line is a single sentence on one line", () => {
 // reported on the run's own feed and swallowed.
 test("a failed post warns and never throws", async () => {
   const warnings: string[] = [];
-  const hook = createValidationStatusLine(
+  const { hook } = createValidationStatusLine(
     new ValidationProgressState(),
     async () => {
       throw new Error("gh: 403 rate limited");
@@ -268,11 +305,120 @@ test("a failed post warns and never throws", async () => {
 // It watches the calls a run has to make. A hook that could refuse one would be
 // a far worse bargain than no status line.
 test("the hook never blocks a tool call", async () => {
-  const hook = createValidationStatusLine(new ValidationProgressState(), async () => {}, () => {});
+  const { hook } = createValidationStatusLine(new ValidationProgressState(), async () => {}, () => {});
   for (const call of [bash("npm ci --prefix tests/e2e"), bash("ls"), write("x.ts", "y")]) {
     const decision = await hook(hookInput(call) as never, undefined, { signal: undefined } as never);
     assert.deepEqual(decision, {});
   }
+});
+
+// --- the repair mode --------------------------------------------------------
+
+function reportCall(id = "tu_report") {
+  return {
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: 'node "$AEP_SKILLS_DIR/aep-validation/scripts/generate-report.mjs" --issue 7' },
+    tool_use_id: id,
+  };
+}
+
+async function fire(hook: ReturnType<typeof createValidationStatusLine>["hook"], input: unknown) {
+  return hook(input as never, undefined, { signal: undefined } as never);
+}
+
+// The whole reason this mode exists. Step 9's exit 2 is "the ordinary loop, not
+// a defect" — the generator names specs with no result, the run covers them and
+// regenerates, and it may lap several times. Narrating each lap as rungs put
+// three lines on the issue per lap and reached MAX_POSTS at the third.
+test("a lapping run says it is repairing ONCE, however many laps it takes", async () => {
+  const posted: string[] = [];
+  const line = createValidationStatusLine(new ValidationProgressState(), async (b) => void posted.push(b), () => {});
+
+  await fire(line.hook, hookInput(bash("npm ci --prefix tests/e2e")));
+  await fire(line.hook, hookInput(write("tests/e2e/specs/AC-001-a.spec.ts", "// spec: AC-001-a\n")));
+  await fire(line.hook, hookInput(write("tests/e2e/specs/AC-001-a.spec.ts", "// spec: AC-001-a\ntest('AC-001-a: x', () => {});")));
+  await fire(line.hook, hookInput(bash("npm test --prefix tests/e2e -- specs/AC-001-a.spec.ts")));
+
+  // Four laps: generate, refused, cover the gap, generate again…
+  for (let lap = 0; lap < 4; lap += 1) {
+    await fire(line.hook, reportCall(`tu_${lap}`));
+    line.settle(`tu_${lap}`, false);
+    await fire(line.hook, hookInput(bash("npm test --prefix tests/e2e -- specs/AC-001-b.spec.ts")));
+    await fire(line.hook, hookInput(write("tests/e2e/specs/AC-001-b.spec.ts", "test('AC-001-b: y', () => {});")));
+  }
+  // …and the fifth one lands.
+  await fire(line.hook, reportCall("tu_ok"));
+  line.settle("tu_ok", true);
+
+  const lines = posted.map((b) => b.split("\n")[1]);
+  assert.deepEqual(lines, [
+    LADDER_LINES.harness,
+    LADDER_LINES.exploring,
+    LADDER_LINES.authoring,
+    LADDER_LINES.running,
+    LADDER_LINES.reporting,
+    LADDER_LINES.repairing,
+  ]);
+  assert.ok(posted.length < MAX_POSTS, "four laps must not approach the cap");
+});
+
+// Only the generator's own outcome enters the mode. A failing `npm test` is
+// ordinary — a criterion failed, the rows say so, and step 8 heals it.
+test("a failing spec run is not a repair", async () => {
+  const posted: string[] = [];
+  const line = createValidationStatusLine(new ValidationProgressState(), async (b) => void posted.push(b), () => {});
+
+  await fire(line.hook, {
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "npm test --prefix tests/e2e -- specs/AC-001-a.spec.ts" },
+    tool_use_id: "tu_test",
+  });
+  line.settle("tu_test", false);
+
+  assert.deepEqual(posted.map((b) => b.split("\n")[1]), [LADDER_LINES.running]);
+});
+
+// Leaving the mode is silent: step 10's push, pull request and the agent's own
+// closing summary follow, and that summary says more than a rung could.
+test("the report landing says nothing — the closing summary is next", async () => {
+  const posted: string[] = [];
+  const line = createValidationStatusLine(new ValidationProgressState(), async (b) => void posted.push(b), () => {});
+
+  await fire(line.hook, reportCall("tu_1"));
+  line.settle("tu_1", false);
+  const afterRepair = posted.length;
+  await fire(line.hook, reportCall("tu_2"));
+  line.settle("tu_2", true);
+
+  assert.equal(posted.length, afterRepair, "landing the report posted a line of its own");
+});
+
+// The cap going quiet looks exactly like a run that finished, which is the
+// failure shape this whole mechanism exists to remove — so it says so once, on
+// the run's own feed, where it is diagnosable.
+test("reaching the cap warns once and then stops posting", async () => {
+  const posted: string[] = [];
+  const warnings: string[] = [];
+  const line = createValidationStatusLine(
+    new ValidationProgressState(),
+    async (b) => void posted.push(b),
+    (reason) => warnings.push(reason),
+  );
+
+  // Alternating the last rung with a fall from it is the one shape that can
+  // still climb without bound — a generator invoked, a spec edited, repeat —
+  // and it is why the backstop is still here now that the repair mode absorbs
+  // the ordinary loop.
+  for (let i = 0; i < MAX_POSTS * 2; i += 1) {
+    await fire(line.hook, i % 2 === 0 ? reportCall(`tu_${i}`) : hookInput(write("tests/e2e/specs/AC-001-a.spec.ts", "test('AC-001-a: x', () => {});")));
+  }
+
+  assert.equal(posted.length, MAX_POSTS, "the cap did not hold");
+  assert.equal(warnings.length, 1, "the cap must announce itself exactly once");
+  assert.match(warnings[0] ?? "", /capped at 12/);
+  assert.match(warnings[0] ?? "", /last line will stand/);
 });
 
 // --- addressing the issue ---------------------------------------------------

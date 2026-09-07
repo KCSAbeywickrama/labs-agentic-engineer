@@ -44,12 +44,13 @@
  *     inside step 6 while the run is still authoring, so "step 7 has begun"
  *     would be wrong for an hour. "Running automated tests against the deployed
  *     system" is true when posted and never false in hindsight.
- *   - IT IS A RATCHET THAT CAN ROLL BACK. Each state posts on first occurrence,
- *     so the twelve criteria after the first add nothing. But step 9's exit-2
- *     loop back to authoring is the ordinary path, and a run that returned there
- *     under a "generating the report" line would be silent-and-wrong rather than
- *     just silent — so a state EARLIER than the high-water mark posts again and
- *     resets it.
+ *   - IT IS A ONE-WAY RATCHET WITH ONE EXCEPTION. Forward is news; behind is
+ *     not, because the middle of the run oscillates by design — twelve criteria
+ *     each walk exploring → authoring → running, and every heal walks the last
+ *     two again. The exception is a fall from the LAST rung: step 9's exit-2
+ *     sends a finished run back to authoring, and a reader left under
+ *     "generating the report" would be silent-and-wrong rather than just
+ *     silent. See Ladder.admit.
  *
  * What this deliberately does NOT do:
  *
@@ -98,27 +99,41 @@ export const LADDER = ["harness", "exploring", "authoring", "running", "reportin
 export type LadderState = (typeof LADDER)[number];
 
 /**
+ * `repairing` is NOT a rung and deliberately has no rank.
+ *
+ * The rungs are places a run passes through in order. This is a MODE it is in:
+ * the report generator refused, and everything the run does until it stops
+ * refusing — re-running specs, editing one, generating again — is that repair.
+ * Ranking it would make the repair a place to fall from and climb back to,
+ * which is the oscillation it exists to absorb.
+ */
+export type LineKey = LadderState | "repairing";
+
+/**
  * What each state says. One line, present tense, naming the evidence.
  *
  * The first non-empty line of the newest comment IS the status line, so these
  * are the whole claim — there is no second line a reader will see.
  */
-export const LADDER_LINES: Record<LadderState, string> = {
+export const LADDER_LINES: Record<LineKey, string> = {
   harness: "Setting up the test harness…",
   exploring: "Exploring the deployed app to author automated tests…",
   authoring: "Authoring automated tests…",
   running: "Running automated tests against the deployed system…",
   reporting: "Generating the validation report from the results on disk…",
+  repairing: "Fixing the test issues…",
 };
 
 /**
  * A ceiling on how many lines one run may post, whatever it does.
  *
- * The rollback rule has no natural bound — a run thrashing between authoring and
- * the report generator could post on every lap — and the read window that serves
- * the status line holds only the newest handful of comments per issue. Past this
- * the ladder goes quiet and leaves the last line standing, which is the same
- * thing a finished run does.
+ * A BACKSTOP, not a working limit. The rungs are one-way and the repair mode
+ * absorbs the loop that used to thrash, so a run posts six lines at most however
+ * many times the report generator sends it back. This exists for the failure
+ * nobody predicted — the last one was a rung matching a `cp` — where the alarm
+ * is worth more than the lines it costs. Hitting it warns on the run's own feed
+ * rather than going quiet, because a ladder that stops looks exactly like a run
+ * that finished.
  */
 export const MAX_POSTS = 12;
 
@@ -176,22 +191,71 @@ function rank(state: LadderState): number {
 export class Ladder {
   private high = -1;
   private posts = 0;
+  private repairing = false;
 
   /**
    * Whether this state is news, and record it if so.
    *
-   * News means either "further than the run has been" or "behind where it was",
-   * and never "the state it is already in" — a criterion authored twelve times
-   * is one line, and twelve identical comments would say nothing the first did
-   * not.
+   * FORWARD is always news. BEHIND is news exactly once — when the run had
+   * reached the last rung and was sent back.
+   *
+   * That asymmetry is the whole rule, and it exists because the run oscillates
+   * by design. Step 6 takes a criterion at a time: write the stub, explore,
+   * write the body, run it. Twelve criteria walk exploring → authoring →
+   * running twelve times over, and step 8 walks authoring → running again for
+   * every heal. Treating each of those as news would post three lines per
+   * criterion, exhaust MAX_POSTS around the fourth, and leave the rest of a
+   * two-hour run in the silence this whole mechanism exists to end.
+   *
+   * None of that churn is a regression — it is what the middle of the run LOOKS
+   * like, and the console already draws it per criterion. What IS a regression
+   * is step 9's exit-2 sending a finished run back to authoring: the reader was
+   * told a report was being written, and it no longer is. So only a fall from
+   * the final rung speaks, and after it the mark resets and the climb back up is
+   * ordinary forward news again.
    */
   admit(state: LadderState): boolean {
+    // Everything a repairing run does IS the repair — re-running a spec,
+    // editing one, generating again. Narrating those rungs would report the
+    // repair as progress and back again, once per lap, which is the churn the
+    // mode exists to absorb.
+    if (this.repairing) return false;
     if (this.posts >= MAX_POSTS) return false;
     const at = rank(state);
-    if (at === this.high) return false;
+    const sentBack = this.high === LADDER.length - 1 && at < this.high;
+    if (at <= this.high && !sentBack) return false;
     this.high = at;
     this.posts += 1;
     return true;
+  }
+
+  /**
+   * The report generator refused. News exactly once, however many times it goes
+   * on refusing: the run is in one state until it stops, and re-announcing it
+   * per attempt would say nothing the first line did not.
+   *
+   * Refused, not "exited 2" — a crash reads the same here and means the same
+   * thing to a reader: no report yet, and the run has more to do.
+   */
+  enterRepair(): boolean {
+    if (this.repairing || this.posts >= MAX_POSTS) return false;
+    this.repairing = true;
+    this.posts += 1;
+    return true;
+  }
+
+  /**
+   * The report landed. Silent on purpose — what follows is step 10's push, pull
+   * request and the agent's own closing summary, which says more than a rung
+   * could and is the line a finished run should end on.
+   */
+  leaveRepair(): void {
+    this.repairing = false;
+  }
+
+  /** Whether the cap has just been reached, so it can be said once. */
+  atCap(): boolean {
+    return this.posts >= MAX_POSTS;
   }
 }
 
@@ -251,6 +315,19 @@ function readCommand(toolInput: unknown): string {
 export type PostComment = (body: string) => Promise<void>;
 
 /**
+ * The two halves of one run's status line: what its calls announce BEFORE they
+ * run, and what the report generator's outcome says afterwards. Shaped like
+ * ValidationProgressTracker next door, and wired to the same translator seam,
+ * because they are the same fact reaching two surfaces.
+ */
+export interface ValidationStatusLine {
+  /** PreToolUse hook: the rung a call announces before it runs. */
+  hook: HookCallback;
+  /** Called by the SDK translator when a tool call settles. */
+  settle(toolUseId: string, ok: boolean): void;
+}
+
+/**
  * `owner/repo` out of a clone URL, the argument `gh --repo` wants.
  *
  * Naming the repository rather than letting `gh` infer it from the workspace's
@@ -300,14 +377,31 @@ export function createValidationStatusLine(
   progress: ValidationProgressState,
   post: PostComment,
   onError: (reason: string) => void,
-): HookCallback {
+): ValidationStatusLine {
   const ladder = new Ladder();
+  // The generator call in flight, so its OUTCOME can be attributed. Keyed by
+  // tool id for the same reason ValidationProgressState.noteRun is: the outcome
+  // arrives with nothing but that id, and the command's text is long gone.
+  let reportCall: string | undefined;
+  let capAnnounced = false;
 
-  return async (input) => {
+  const say = (key: LineKey): Promise<void> =>
+    post(`${OBSERVED_COMMENT_MARKER}\n${LADDER_LINES[key]}`).catch((err) => {
+      onError(`status line not posted (${key}): ${err instanceof Error ? err.message : String(err)}`);
+    });
+
+  const warnIfCapped = (): void => {
+    if (capAnnounced || !ladder.atCap()) return;
+    capAnnounced = true;
+    onError(`status line capped at ${MAX_POSTS} posts for this cycle — the last line will stand`);
+  };
+
+  const hook: HookCallback = async (input) => {
     const hookInput = input as PreToolUseHookInput;
     if (hookInput?.hook_event_name !== "PreToolUse") return {};
 
     const state = ladderStateFor(hookInput.tool_name, hookInput.tool_input, progress);
+    if (state === "reporting") reportCall = hookInput.tool_use_id;
     if (state === undefined || !ladder.admit(state)) return {};
 
     // Awaited rather than detached, because the whole value of a PreToolUse hook
@@ -321,14 +415,32 @@ export function createValidationStatusLine(
     // stuck retrying. Whatever refused this call (a rate limit, a network) is
     // likely to refuse the next one too, and a hook that retried on every
     // matching call would turn one bad minute into a hundred.
-    try {
-      await post(`${OBSERVED_COMMENT_MARKER}\n${LADDER_LINES[state]}`);
-    } catch (err) {
-      onError(`status line not posted (${state}): ${err instanceof Error ? err.message : String(err)}`);
-    }
+    await say(state);
+    warnIfCapped();
 
     // Never a decision — see the header. This hook watches the calls the run
     // needs; it does not get to stop one.
     return {};
+  };
+
+  return {
+    hook,
+
+    settle: (toolUseId, ok) => {
+      if (toolUseId !== reportCall) return;
+      reportCall = undefined;
+      if (ok) {
+        ladder.leaveRepair();
+        return;
+      }
+      // Fire-and-forget, unlike the hook: the translator reports an outcome
+      // synchronously and has nothing to await. Acceptable here because this
+      // line does not race a silence — it follows a call that just finished,
+      // and the run's next tool call is moments away either way.
+      if (ladder.enterRepair()) {
+        void say("repairing");
+        warnIfCapped();
+      }
+    },
   };
 }

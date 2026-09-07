@@ -40,6 +40,7 @@ import { createWorkspaceWriteGuard } from "./workspace_guard.js";
 import { createValidationProgressTracker } from "./validation_progress.js";
 import type { ValidationProgressTracker } from "./validation_progress.js";
 import { createValidationStatusLine, ghCommentPoster } from "./validation_status_line.js";
+import type { ValidationStatusLine } from "./validation_status_line.js";
 import { resolveRealGhPath } from "./gh_git_auth.js";
 import { startMcpAuthProxy } from "./mcp_auth_proxy.js";
 import { staticTokenSource, type AccessTokenSource } from "./auth_retry.js";
@@ -339,7 +340,7 @@ export async function createIssueStatusLineHook(
   progress: ValidationProgressTracker | undefined,
   warn: (reason: string) => void,
   resolveGh: () => Promise<string> = resolveRealGhPath,
-): Promise<HookCallback | undefined> {
+): Promise<ValidationStatusLine | undefined> {
   const issue = req.validationIssue ?? 0;
   if (!progress || issue <= 0) return undefined;
   let gh: string;
@@ -643,9 +644,9 @@ export async function runClaudeQuery(
           // files, never notebooks.
           ...(validationStatusLine
             ? [
-                { matcher: "Write", hooks: [validationStatusLine] },
-                { matcher: "Edit", hooks: [validationStatusLine] },
-                { matcher: "Bash", hooks: [validationStatusLine] },
+                { matcher: "Write", hooks: [validationStatusLine.hook] },
+                { matcher: "Edit", hooks: [validationStatusLine.hook] },
+                { matcher: "Bash", hooks: [validationStatusLine.hook] },
               ]
             : []),
         ],
@@ -662,7 +663,17 @@ export async function runClaudeQuery(
   // The tracker settles a criterion from the SAME `ok` the feed reports, rather
   // than re-deriving success from the tool result a second time.
   const translate = createSdkTranslator(
-    validationProgress ? { onToolOutcome: validationProgress.settle } : undefined,
+    // One outcome, two readers: the per-criterion rows settle a spec run, and the
+    // status line settles the report generator. Fanned out here rather than
+    // chained inside either, so neither can swallow the other's call.
+    validationProgress || validationStatusLine
+      ? {
+          onToolOutcome: (toolUseId: string, ok: boolean) => {
+            validationProgress?.settle(toolUseId, ok);
+            validationStatusLine?.settle(toolUseId, ok);
+          },
+        }
+      : undefined,
   );
   // …and one watchdog, so a silent stretch says what it is waiting on rather
   // than looking identical to a dead run.

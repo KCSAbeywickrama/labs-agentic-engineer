@@ -69,12 +69,34 @@ only record of a run that survives the run.
    7 has begun" would be wrong for an hour; "Running automated tests against the
    deployed system" is true when posted and never false in hindsight.
 
-4. **A ratchet that can roll back, capped at 12.** Each rung posts on first
-   occurrence, so the eleven criteria after the first add nothing. But step 9's
-   exit-2 loop back to authoring is the ordinary path, and a run that returned
-   there under "generating the report" would be silent AND wrong — worse than the
-   silence this fixes. So a rung earlier than the high-water mark posts again and
-   resets it, and a cap stops a thrashing run flooding the read window.
+4. **A one-way ratchet, plus a repair MODE for the loop.** The middle of a run
+   oscillates by design, and the first rule shipped did not survive contact with
+   it: posting whenever the rung changed turned twelve criteria — each walking
+   exploring → authoring → running — into thirty-six lines, which exhausts the
+   cap around the fourth criterion and leaves the rest of a two-hour run in the
+   silence this ADR exists to end. Healing walks the last two rungs again for
+   every repair, so it compounds.
+
+   So rungs are one-way: forward is news, behind is not. Criterion churn and
+   healing cost nothing, and the console already draws both per criterion.
+
+   The one thing genuinely worth reporting behind the mark is step 9's exit 2 —
+   "the ordinary loop, not a defect", where the generator names specs with no
+   result and the run covers them and regenerates, possibly several times. That
+   is NOT a rung. It is a mode the run is in, entered on the generator's own
+   FAILED outcome (via the translator's tool-outcome seam, the same one the rows
+   settle on) and sticky until one succeeds. While it holds, every rung is
+   silent, because re-running a spec and generating again ARE the repair.
+
+   Ranking it as a sixth rung was the obvious alternative and is wrong: it would
+   make the repair a place to fall from and climb back to, which is precisely the
+   oscillation the mode absorbs.
+
+   The result is at most six lines per cycle however many times the generator
+   refuses. `MAX_POSTS` survives as a backstop for the failure nobody predicted —
+   the last one was a rung matching a `cp` — and it now WARNS on the run's feed
+   when reached, because a ladder that stops looks exactly like a run that
+   finished.
 
 5. **A third comment class, `<!-- aep:observed -->`.** `MachineCommentMarker`
    could not carry this: the surfaces built for people DROP machine comments,

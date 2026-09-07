@@ -176,7 +176,10 @@ test("createIssueStatusLineHook: a validation run that names its issue keeps a l
     () => assert.fail("a wired run must not warn"),
     async () => "/usr/bin/gh",
   );
-  assert.equal(typeof hook, "function");
+  // Both halves, because the report generator's OUTCOME is what the repair line
+  // keys on and a tracker missing `settle` would report the loop as progress.
+  assert.equal(typeof hook?.hook, "function");
+  assert.equal(typeof hook?.settle, "function");
 });
 
 // The third absence: a pod that cannot resolve `gh` cannot post at all. It says
