@@ -345,26 +345,52 @@ export function repoSlug(repoUrl: string): string {
 }
 
 /**
- * Post through the REAL `gh`, never the workspace's `.aep/gh` wrapper — the
- * wrapper exists to refresh git credentials and is not on this path.
- *
- * `execFile`, so there is no shell: the body carries an HTML comment whose
- * angle brackets a shell would have to be trusted to leave alone, and argv
- * removes the question. Nothing secret is passed here, which is why the body may
- * ride in argv at all — see git_clone.ts for why a credential never may.
+ * How to reach `gh` as the AGENT reaches it: the workspace's own wrapper and the
+ * environment that makes it work.
  */
-export function ghCommentPoster(realGhPath: string, repoUrl: string, issueNumber: number): PostComment {
+export interface GhInvocation {
+  /** The `.aep/gh` wrapper provisioned into the workspace, not the raw binary. */
+  path: string;
+  /** The child environment the agent's own `gh` calls run under. */
+  env: NodeJS.ProcessEnv;
+}
+
+/**
+ * How long a status post may take before it is abandoned.
+ *
+ * This call is awaited inside a PreToolUse hook, so it sits between the agent
+ * and its next tool call. A `gh` that hangs on a stalled connection would hold
+ * the whole run there — trading the work for the commentary on it, which is the
+ * one thing this feature must never do. Generous enough for a slow round trip
+ * and short enough that a reader would not notice the pause.
+ */
+export const POST_TIMEOUT_MS = 15_000;
+
+/**
+ * Post through the workspace's `.aep/gh` wrapper, under the agent's own child
+ * environment — the same way the run's own `gh issue comment` calls resolve.
+ *
+ * Not the raw binary, which was the first attempt and is wrong: the wrapper is
+ * what makes `gh` AUTHENTICATED in the mode where no token is mounted. It asks
+ * credhelper for a fresh one and rewrites `$GH_CONFIG_DIR/hosts.yml` before
+ * exec'ing the real thing (see credhelper.ts), so bypassing it posts as nobody —
+ * and `GH_CONFIG_DIR` lives only in that child environment, never in this
+ * process's own. Where a token IS mounted the wrapper is a passthrough, so this
+ * is the one form that is right in both.
+ *
+ * `execFile`, so there is no shell: the body carries an HTML comment whose angle
+ * brackets a shell would have to be trusted to leave alone, and argv removes the
+ * question. Nothing secret is passed here, which is why the body may ride in
+ * argv at all — see git_clone.ts for why a credential never may.
+ */
+export function ghCommentPoster(gh: GhInvocation, repoUrl: string, issueNumber: number): PostComment {
   const repo = repoSlug(repoUrl);
   return async (body) => {
-    await execFileAsync(realGhPath, [
-      "issue",
-      "comment",
-      String(issueNumber),
-      "--repo",
-      repo,
-      "--body",
-      body,
-    ]);
+    await execFileAsync(
+      gh.path,
+      ["issue", "comment", String(issueNumber), "--repo", repo, "--body", body],
+      { env: gh.env, timeout: POST_TIMEOUT_MS },
+    );
   };
 }
 

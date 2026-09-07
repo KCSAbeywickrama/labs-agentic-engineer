@@ -18,8 +18,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { query, type HookCallback, type McpServerConfig, type Query } from "@anthropic-ai/claude-agent-sdk";
-import { debugQueryOptions, openDebugSinks, type DebugSinks, type TaskLog } from "./logger.js";
+import { query, type McpServerConfig, type Query } from "@anthropic-ai/claude-agent-sdk";
+import { debugQueryOptions, openDebugSinks, type TaskLog } from "./logger.js";
 // Re-exported from where they now live: `debugQueryOptions` is entirely about
 // the sinks, so it sits beside them in `logger.ts`. Still exported here because
 // this is the module every existing caller and test imports it from, and
@@ -40,8 +40,7 @@ import { createWorkspaceWriteGuard } from "./workspace_guard.js";
 import { createValidationProgressTracker } from "./validation_progress.js";
 import type { ValidationProgressTracker } from "./validation_progress.js";
 import { createValidationStatusLine, ghCommentPoster } from "./validation_status_line.js";
-import type { ValidationStatusLine } from "./validation_status_line.js";
-import { resolveRealGhPath } from "./gh_git_auth.js";
+import type { GhInvocation, ValidationStatusLine } from "./validation_status_line.js";
 import { startMcpAuthProxy } from "./mcp_auth_proxy.js";
 import { staticTokenSource, type AccessTokenSource } from "./auth_retry.js";
 import { createWebFetchGuardHook } from "./webfetch_guard.js";
@@ -352,37 +351,30 @@ export function onDemandSkills(taskKind: DispatchRequest["taskKind"]): string[] 
  * mechanism, and a caller handed only the hook would report the exit-2 loop as
  * progress and back again.
  *
- * Three conditions, and each absence is a NORMAL run rather than a fault:
- * a coding run has no validation issue to speak on; a validation dispatch that
+ * Two conditions, and each absence is a NORMAL run rather than a fault: a coding
+ * run has no validation issue to speak on, and a validation dispatch that
  * carried no issue number (an older BFF, or one that could not resolve it) works
- * exactly as it did before, minus the line; and a pod with no resolvable `gh`
- * cannot post at all. Never throws for any of them — a status line is how a run
- * is WATCHED, and failing a two-hour validation because it could not be watched
- * would trade the work for the commentary.
+ * exactly as it did before, minus the line. Never throws for either — a status
+ * line is how a run is WATCHED, and failing a two-hour validation because it
+ * could not be watched would trade the work for the commentary.
  *
  * It shares the per-criterion tracker's state so both derive one run's history
  * once — see ValidationProgressTracker.state.
  *
- * `resolveGh` is a parameter so the third condition is testable without a `gh`
- * on the test machine's PATH: whether one exists is a property of the box, and
- * a test that asserts differently on a developer's laptop and in CI asserts
- * nothing on either.
+ * `gh` is passed rather than resolved here because the answer is the WORKSPACE's,
+ * not this machine's: the wrapper the run's own `gh` calls go through, and the
+ * child environment that makes it authenticate. Resolving a binary off PATH
+ * instead — the first attempt — posted as nobody in the mode where no token is
+ * mounted, and could not be tested without a `gh` on the test machine.
  */
-export async function validationStatusLineFor(
+export function validationStatusLineFor(
   req: DispatchRequest,
   progress: ValidationProgressTracker | undefined,
+  gh: GhInvocation,
   warn: (reason: string) => void,
-  resolveGh: () => Promise<string> = resolveRealGhPath,
-): Promise<ValidationStatusLine | undefined> {
+): ValidationStatusLine | undefined {
   const issue = req.validationIssue ?? 0;
   if (!progress || issue <= 0) return undefined;
-  let gh: string;
-  try {
-    gh = await resolveGh();
-  } catch (err) {
-    warn(`no status line: ${err instanceof Error ? err.message : String(err)}`);
-    return undefined;
-  }
   return createValidationStatusLine(progress.state, ghCommentPoster(gh, req.repoUrl, issue), warn);
 }
 
@@ -551,9 +543,16 @@ export async function runClaudeQuery(
       : undefined;
 
   // The RUN's own line on its issue — see validationStatusLineFor above.
-  const validationStatusLine = await validationStatusLineFor(req, validationProgress, (reason) => {
-    emit({ kind: "log", level: "warn", summary: `[status] ${reason}` });
-  });
+  const validationStatusLine = validationStatusLineFor(
+    req,
+    validationProgress,
+    // The wrapper and env the agent's own `gh` calls use — see ghCommentPoster
+    // for why the raw binary is not enough.
+    { path: layout.ghWrapper, env: childEnv },
+    (reason) => {
+      emit({ kind: "log", level: "warn", summary: `[status] ${reason}` });
+    },
+  );
 
   // The SDK auto-discovers the bundled native binary — no
   // pathToClaudeCodeExecutable needed. See settingSources below for why the

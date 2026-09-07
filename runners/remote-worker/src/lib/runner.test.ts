@@ -143,16 +143,20 @@ function validationDispatch(overrides: Partial<DispatchRequest> = {}): DispatchR
 
 const progressTracker = () => createValidationProgressTracker(() => {});
 
+// The workspace's own wrapper and child env, as provisionWorkspace leaves them.
+const gh = { path: "/ws/.aep/gh", env: { GH_CONFIG_DIR: "/ws/.gh-config" } };
+
 // A coding run has no validation issue to speak on, and registering the hook
 // anyway would put a GitHub round trip on the Write and Bash calls of every
 // build to derive nothing.
 test("validationStatusLineFor: a run with no per-criterion tracker keeps no line", async () => {
-  const hook = await validationStatusLineFor(
+  const line = validationStatusLineFor(
     validationDispatch({ taskKind: "implementation", validationIssue: undefined }),
     undefined,
+    gh,
     () => assert.fail("a coding run must not warn about a status line it never wanted"),
   );
-  assert.equal(hook, undefined);
+  assert.equal(line, undefined);
 });
 
 // A validation dispatch that carried no issue number — an older BFF, or one that
@@ -160,43 +164,27 @@ test("validationStatusLineFor: a run with no per-criterion tracker keeps no line
 // is the old behaviour; failing here would trade two hours of work for the
 // commentary on it.
 test("validationStatusLineFor: a validation run with no issue number keeps no line", async () => {
-  const hook = await validationStatusLineFor(
+  const line = validationStatusLineFor(
     validationDispatch({ validationIssue: undefined }),
     progressTracker(),
+    gh,
     () => assert.fail("an absent issue number is a normal dispatch, not a fault to report"),
   );
-  assert.equal(hook, undefined);
+  assert.equal(line, undefined);
 });
 
-// The whole point: a validation run that CAN name its issue gets the hook.
-test("validationStatusLineFor: a validation run that names its issue keeps a line", async () => {
-  const hook = await validationStatusLineFor(
+// The whole point: a validation run that CAN name its issue gets the line.
+test("validationStatusLineFor: a validation run that names its issue keeps a line", () => {
+  const line = validationStatusLineFor(
     validationDispatch(),
     progressTracker(),
+    gh,
     () => assert.fail("a wired run must not warn"),
-    async () => "/usr/bin/gh",
   );
   // Both halves, because the report generator's OUTCOME is what the repair line
   // keys on and a tracker missing `settle` would report the loop as progress.
-  assert.equal(typeof hook?.hook, "function");
-  assert.equal(typeof hook?.settle, "function");
-});
-
-// The third absence: a pod that cannot resolve `gh` cannot post at all. It says
-// so once on the run's own feed and carries on — the run's work is the tests.
-test("validationStatusLineFor: an unresolvable gh costs the line, not the run", async () => {
-  const warnings: string[] = [];
-  const hook = await validationStatusLineFor(
-    validationDispatch(),
-    progressTracker(),
-    (reason) => warnings.push(reason),
-    async () => {
-      throw new Error("could not resolve an absolute path to `gh`");
-    },
-  );
-  assert.equal(hook, undefined);
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0] ?? "", /no status line/);
+  assert.equal(typeof line?.hook, "function");
+  assert.equal(typeof line?.settle, "function");
 });
 
 // --- alwaysOnSkills: the run's own workflow is not the design's to choose ----

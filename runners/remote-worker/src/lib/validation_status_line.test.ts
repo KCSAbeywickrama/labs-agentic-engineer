@@ -17,6 +17,9 @@
  */
 
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import { ValidationProgressState } from "./validation_progress.js";
@@ -27,7 +30,9 @@ import {
   Ladder,
   MAX_POSTS,
   OBSERVED_COMMENT_MARKER,
+  POST_TIMEOUT_MS,
   createValidationStatusLine,
+  ghCommentPoster,
   ladderStateFor,
   repoSlug,
 } from "./validation_status_line.js";
@@ -432,6 +437,60 @@ test("reaching the cap warns once and then stops posting", async () => {
   assert.equal(warnings.length, 1, "the cap must announce itself exactly once");
   assert.match(warnings[0] ?? "", /capped at 12/);
   assert.match(warnings[0] ?? "", /last line will stand/);
+});
+
+// --- reaching gh the way the agent does -------------------------------------
+
+// The environment is not decoration. In the mode where no token is mounted,
+// `.aep/gh` refreshes $GH_CONFIG_DIR/hosts.yml before exec'ing the real binary,
+// and GH_CONFIG_DIR lives ONLY in the agent's child environment — never in this
+// process's own. A poster that inherited process.env posted as nobody, and said
+// so only as a warning.
+test("the poster runs the workspace's gh under the agent's own environment", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gh-poster-"));
+  const seen = path.join(dir, "seen.txt");
+  const fakeGh = path.join(dir, "gh");
+  fs.writeFileSync(fakeGh, `#!/usr/bin/env bash\nprintf '%s\\n' "$GH_CONFIG_DIR" "$@" > ${JSON.stringify(seen)}\n`);
+  fs.chmodSync(fakeGh, 0o755);
+
+  const post = ghCommentPoster(
+    { path: fakeGh, env: { ...process.env, GH_CONFIG_DIR: "/ws/.gh-config" } },
+    "https://github.com/acme/widgets.git",
+    7,
+  );
+  await post("hello");
+
+  const lines = fs.readFileSync(seen, "utf8").trim().split("\n");
+  assert.equal(lines[0], "/ws/.gh-config", "GH_CONFIG_DIR never reached gh");
+  assert.deepEqual(lines.slice(1), ["issue", "comment", "7", "--repo", "acme/widgets", "--body", "hello"]);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// Awaited inside a PreToolUse hook, so a hung `gh` sits between the agent and
+// its next tool call. Unbounded, one stalled connection would hold a two-hour
+// validation there — trading the work for the commentary on it.
+test("a hanging gh is abandoned rather than holding the run", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gh-hang-"));
+  const fakeGh = path.join(dir, "gh");
+  fs.writeFileSync(fakeGh, "#!/usr/bin/env bash\nsleep 30\n");
+  fs.chmodSync(fakeGh, 0o755);
+
+  const warnings: string[] = [];
+  const line = createValidationStatusLine(
+    new ValidationProgressState(),
+    ghCommentPoster({ path: fakeGh, env: process.env }, "https://github.com/acme/widgets.git", 7),
+    (reason) => warnings.push(reason),
+  );
+
+  const started = Date.now();
+  const decision = await Promise.race([
+    fire(line.hook, hookInput(bash("npm ci --prefix tests/e2e"))),
+    new Promise((r) => setTimeout(() => r("STILL BLOCKED"), POST_TIMEOUT_MS + 5_000)),
+  ]);
+  assert.notEqual(decision, "STILL BLOCKED", "the hook never came back");
+  assert.ok(Date.now() - started < POST_TIMEOUT_MS + 5_000);
+  assert.equal(warnings.length, 1, "an abandoned post must say so");
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // --- addressing the issue ---------------------------------------------------
