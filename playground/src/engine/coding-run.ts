@@ -62,6 +62,8 @@ import {
   type AgentSection,
   type RunEventView,
 } from "@aep/progress-view";
+import { createAgentTags, type AgentTags } from "./agent-tags.js";
+import { openCrewPane } from "./crew-pane.js";
 import { REPO_ROOT } from "../paths.js";
 
 const LOCAL_ENTRY = join(REPO_ROOT, "runners", "remote-worker", "src", "local.ts");
@@ -204,14 +206,14 @@ export function hostToolAdvice(): string | undefined {
     "re-run packages/bal-library-tool/install-local.sh to put this run on your changes"
   );
 }
-// The Agent SDK's project state inside the image, which is where a fanned-out
-// subagent's own transcript lives (`<slug>/<session>/subagents/agent-<taskId>.jsonl`).
-// That transcript is the ONLY record of what a subagent was doing beyond the
-// one-line summary on the feed. Under `--rm` it died with the container, exactly
-// when it mattered: two consecutive todo-api99 runs each lost a subagent to
-// `Agent stalled: no progress for 600s (stream watchdog did not recover)`, and the
-// evidence that would distinguish a dropped stream from a model that genuinely
-// emitted nothing was already gone.
+// The Agent SDK's project state inside the image: the lead's own transcript, a
+// fanned-out subagent's (`<slug>/<session>/subagents/agent-<taskId>.jsonl`), and
+// the output files its backgrounded tasks wrote. Those transcripts are the ONLY
+// record of what an agent was doing beyond the one-line summary on the feed.
+// They used to die with the container, exactly when it mattered: two consecutive
+// todo-api99 runs each lost a subagent to `Agent stalled: no progress for 600s
+// (stream watchdog did not recover)`, and the evidence that would distinguish a
+// dropped stream from a model that genuinely emitted nothing was already gone.
 //
 // NOT `/tmp/claude-<uid>`, which is where the failure event points: the files it
 // keeps under `tasks/` are symlinks into this directory, so copying that one out
@@ -221,12 +223,14 @@ export function hostToolAdvice(): string | undefined {
 // The lead's transcript is duplicated here (we already stream it to `.logs/`), a
 // few hundred KB per run and worth not having to special-case a session id.
 //
-// Snapshotted WHEN A SUBAGENT FAILS, not at the end, because the SDK deletes a
-// subagent's transcript the moment that subagent completes: probing a live
-// container found `subagents/agent-<id>.meta.json` mid-run and an empty directory
-// minutes later, which is also why the symlinks under `/tmp/claude-<uid>/tasks/`
-// are already broken by the time a run exits. A failure line on the feed is the
-// last moment the evidence is still on disk.
+// Copied at BOTH ends of a subagent's life, and the asymmetry is the SDK's: it
+// deletes a subagent's transcript the moment that subagent completes — probing a
+// live container found `subagents/agent-<id>.meta.json` mid-run and an empty
+// directory minutes later, which is also why the symlinks under
+// `/tmp/claude-<uid>/tasks/` are broken by the time a run exits. So a FAILED
+// subagent is snapshotted the instant its failure reaches the feed, which is the
+// last moment its file exists, while everything that survives to the end (the
+// lead, the task outputs) is taken once when the run settles.
 //
 // Neither mounting nor redirecting this path works, so don't retry them: the CLI
 // refuses a temp dir whose owner is not its own uid, and on macOS every path
@@ -279,8 +283,7 @@ function annotateForLocalMode(e: ProgressEvent, text: string): string {
  * appeared, and its report arrives later with its `agent_settled`. The merged
  * pass below is the console-shaped rendering of the same events.
  */
-export function createTimelineRenderer(): TimelineRenderer {
-  const tags = new Map<string, string>();
+export function createTimelineRenderer(tags: AgentTags = createAgentTags()): TimelineRenderer {
   // An agent's label and depth are declared once, by its `agent_started`. A
   // stream rendered event by event has to remember them: without this a settling
   // agent reports under its opaque runtime id, which is not a name a reader can
@@ -301,16 +304,11 @@ export function createTimelineRenderer(): TimelineRenderer {
     if (!body) return [];
 
     // The lead is untagged: it is the overwhelming majority of a run's rows, and
-    // an unstamped row reading as "the lead" is what keeps the feed quiet.
-    let tag = "";
-    if (e.agentId !== LEAD_AGENT_ID) {
-      let known = tags.get(e.agentId);
-      if (!known) {
-        known = `[#${String(tags.size + 1)}]`;
-        tags.set(e.agentId, known);
-      }
-      tag = known;
-    }
+    // an unstamped row reading as "the lead" is what keeps the feed quiet. The
+    // registry is SHARED with the crew block, so `[#2]` on a step line and `#2`
+    // on a crew row are the same agent — see `agent-tags.ts`.
+    const short = tags(e.agentId);
+    const tag = short ? `[${short}]` : "";
     // Depth 1 sits in the tag column; deeper agents step right, so a grandchild
     // reads as nested rather than as another sibling of the lead.
     const depth = e.agentId === LEAD_AGENT_ID ? 0 : (depths.get(e.agentId) ?? 1);
@@ -549,10 +547,17 @@ export function dockerInvocation(opts: CodingRunOptions, runDir: string, contain
   const toolJar = toolJarOverlay();
   const args = [
     "run",
-    "--rm",
-    // Named so a failed subagent's transcript can be copied out of the container
-    // while it is still running (see IMAGE_AGENT_SESSION_DIR).
+    // NOT `--rm`. The run's transcripts and its backgrounded tasks' output files
+    // live inside the container, and the end-of-run copy has to happen after the
+    // process that wrote them has exited — `--rm` deletes them at exactly that
+    // moment, which is the race this drops the flag to avoid (`docker cp` reads
+    // a stopped container happily; it cannot read a removed one). The harness
+    // removes the container itself once the copy is done, and reaps any left
+    // behind by a run that was killed outright (see `reapExitedRuns`).
     "--name",
+    // Named so the container can be copied out of and then removed — and so a
+    // FAILED subagent's transcript can be rescued mid-run, while it is still on
+    // disk (see IMAGE_AGENT_SESSION_DIR).
     containerName,
     "--entrypoint",
     "npx",
@@ -603,13 +608,31 @@ export function isFailedAgent(e: ProgressEvent): boolean {
 }
 
 /**
- * Copy the SDK's per-subagent transcripts out of the still-running container into
- * the run dir, one directory per failure (see IMAGE_AGENT_SESSION_DIR for why the
- * timing is what it is).
+ * Copy the runtime's own scratch — session transcripts and the output files its
+ * backgrounded tasks wrote — out of the container into the run dir.
  *
- * Best-effort and silent: a run in progress is not worth interrupting over
- * diagnostics, and the copy legitimately finds nothing when a failure lands before
- * the SDK has written anything.
+ * ONE mechanism, called at two moments, because the evidence has two different
+ * last-possible-instants:
+ *
+ *   `<agentId>` — when a SPAWNED agent fails, while the container is still
+ *     running. The SDK deletes a subagent's transcript the moment that subagent
+ *     completes, so a failure line on the feed is the last time the file exists
+ *     at all (see IMAGE_AGENT_SESSION_DIR).
+ *   `final` — when the run ends. The lead's transcript and every backgrounded
+ *     task's `output_file` live under the same tree and survive to the end; this
+ *     is what puts them beside the run's `progress.ndjson` and `.logs/`.
+ *
+ * LOCAL PLANE ONLY, per the storage decision: nothing here is uploaded and the
+ * console never shows it. A pod keeps this on its own ephemeral filesystem, and
+ * giving it a durable home there is a decision for the pod's artifact story
+ * rather than something to smuggle in through a dev harness.
+ *
+ * Docker mode only — a host run's transcripts are already in the developer's own
+ * `~/.claude`, which is theirs and not this harness's to copy around.
+ *
+ * Best-effort and silent: a run is not worth failing over diagnostics, and the
+ * copy legitimately finds nothing when a failure lands before the SDK has
+ * written anything.
  */
 async function snapshotAgentSessions(containerName: string, runDir: string, label: string): Promise<void> {
   const dest = join(runDir, "agent-sessions", label);
@@ -618,6 +641,35 @@ async function snapshotAgentSessions(containerName: string, runDir: string, labe
     await runProcess("docker", ["cp", `${containerName}:${IMAGE_AGENT_SESSION_DIR}/.`, dest], "ignore");
   } catch {
     // nothing to rescue, or docker refused — the run's own outcome is unaffected
+  }
+}
+
+/** Drop this run's container, once everything worth keeping is out of it. */
+async function removeContainer(containerName: string): Promise<void> {
+  try {
+    await runProcess("docker", ["rm", "-f", containerName], "ignore");
+  } catch {
+    // already gone, or docker is not answering — neither changes the run's result
+  }
+}
+
+/**
+ * Remove containers a previous run left behind.
+ *
+ * Dropping `--rm` moves cleanup into this process, and a process can be killed
+ * outright (`SIGKILL`, a closed terminal) between the container exiting and the
+ * removal. Filtered to EXITED ones so a playground run in another terminal is
+ * never touched: a running `aep-play-*` container is somebody's live run.
+ */
+async function reapExitedRuns(): Promise<void> {
+  try {
+    await runProcess(
+      "bash",
+      ["-c", 'ids=$(docker ps -aq --filter "name=^aep-play-" --filter status=exited); [ -n "$ids" ] && docker rm $ids || true'],
+      "ignore",
+    );
+  } catch {
+    // best effort — a stale container costs disk, not correctness
   }
 }
 
@@ -692,6 +744,7 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
       if (!opts.silent) output.write(`  ✗ ${err instanceof Error ? err.message : String(err)}\n`);
       return { exitCode: 2, runDir };
     }
+    await reapExitedRuns();
   }
 
   // Which `bal library` this run reads, when that is not simply "the one the
@@ -717,8 +770,15 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
   return new Promise((resolvePromise) => {
     const child = spawn(command, args, { cwd: REPO_ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
 
+    // ONE registry of agent tags for the whole run, so the streamed lines and the
+    // crew block name the same agent the same way.
+    const tags = createAgentTags();
     // One renderer per run — it numbers this run's agents (see above).
-    const render = createTimelineRenderer();
+    const render = createTimelineRenderer(tags);
+    // The crew, pinned under the stream. On anything that is not a terminal this
+    // is a plain printer and the output is byte-identical to what it always was
+    // — the playground's transcripts are piped and archived.
+    const pane = openCrewPane({ out: output, isTTY: !opts.silent && output.isTTY === true, tag: tags });
     // Kept so the run can be re-rendered console-shaped once it ends. Bounded by
     // the run itself, same as the progress.ndjson beside it.
     const events: ProgressEvent[] = [];
@@ -737,7 +797,7 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
           event = JSON.parse(line) as ProgressEvent;
         } catch {
           // non-NDJSON runner logging — pass through
-          if (!opts.silent) output.write(`  ${line}\n`);
+          if (!opts.silent) pane.line(`  ${line}`);
           continue;
         }
         events.push(event);
@@ -748,15 +808,44 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
           void snapshotAgentSessions(containerName, runDir, event.agentId || `seq-${String(events.length)}`);
         }
         if (opts.silent) continue;
-        for (const rendered of render(event)) output.write(rendered + "\n");
+        for (const rendered of render(event)) pane.line(rendered);
+        // Every event, every time: the throttle lives in the pane, which is the
+        // only thing that knows when it last drew.
+        pane.update(events);
       }
     });
+    // Line-buffered, so the child's diagnostics go through the pane like every
+    // other line rather than landing in the middle of the pinned block.
+    let errBuffer = "";
     child.stderr.on("data", (chunk: Buffer) => {
-      if (!opts.silent) output.write(chunk.toString("utf8"));
+      if (opts.silent) return;
+      errBuffer += chunk.toString("utf8");
+      for (;;) {
+        const nl = errBuffer.indexOf("\n");
+        if (nl < 0) break;
+        pane.line(errBuffer.slice(0, nl));
+        errBuffer = errBuffer.slice(nl + 1);
+      }
     });
 
-    const settle = (exitCode: number): void => {
+    // `error` and `close` can both fire for one child. Settling twice would run
+    // the end-of-run copy and the container removal a second time.
+    let settled = false;
+    const settle = async (exitCode: number): Promise<void> => {
+      if (settled) return;
+      settled = true;
       progressLog.end();
+      // A partial stderr line the child never terminated is still evidence.
+      if (!opts.silent && errBuffer) pane.line(errBuffer);
+      errBuffer = "";
+      pane.close();
+      // The container has exited but still exists, which is the whole reason
+      // `--rm` is not passed: this is the only moment the lead's transcript and
+      // the backgrounded tasks' output files can be taken out of it.
+      if (containerName) {
+        await snapshotAgentSessions(containerName, runDir, "final");
+        await removeContainer(containerName);
+      }
       if (!opts.silent && events.length > 0) {
         output.write("\n  ── the run, merged ──\n");
         for (const line of renderMergedTimeline(events)) output.write(line + "\n");
@@ -764,11 +853,11 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
       resolvePromise({ exitCode, runDir });
     };
     child.on("error", (err) => {
-      if (!opts.silent) output.write(`  ✗ spawn failed: ${err.message}\n`);
-      settle(2);
+      if (!opts.silent) pane.line(`  ✗ spawn failed: ${err.message}`);
+      void settle(2);
     });
     child.on("close", (code, signal) => {
-      settle(signal ? 130 : (code ?? 2));
+      void settle(signal ? 130 : (code ?? 2));
     });
 
     // Ctrl-C: kill the child.

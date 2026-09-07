@@ -60,6 +60,6 @@ function readMode(): AgentMode {
 const libraryDir = process.env.AEP_LIBRARY_DIR ?? path.resolve(__dirname, "../../../skills");
 // stdout carries what the agent is steered by and nothing else, so it pipes into
 // a diff or a pager. The glossary rides last here for the same reason it does in
-// `runClaudeQuery`: the skill's roles are unresolved without it, so a reader
+// `startCodingRun`: the skill's roles are unresolved without it, so a reader
 // checking "what does the agent actually receive?" has to see both.
 process.stdout.write(`${composeWorkflowSkill(libraryDir, readMode())}\n\n${toolGlossary()}\n`);

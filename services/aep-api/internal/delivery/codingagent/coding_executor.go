@@ -20,9 +20,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/organization"
+	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -63,6 +65,12 @@ type CodingExecutor struct {
 	anthropicKey CodingKeyResolver
 	githubCreds  organization.OrgCredentialRepository
 	idpProfiles  organization.IDPRepository
+
+	// codingAgent answers which runtime and model this org's runs use. Nil is
+	// the platform defaults, which is exactly what every dispatch carried before
+	// the setting existed — so an unwired resolver changes nothing rather than
+	// failing a build.
+	codingAgent CodingAgentSettings
 
 	// publisher is the Thunder publisher SecretReference resolver. Every
 	// dispatch mounts PUBLISHER_* from it (local and cloud). Nil fail-louds.
@@ -110,6 +118,14 @@ func NewCodingExecutor(
 // Returns the receiver for chained construction.
 func (e *CodingExecutor) WithOCDispatch(d *OCDispatcher) *CodingExecutor {
 	e.ocJobs = d
+	return e
+}
+
+// WithCodingAgentSettings enables the org's runtime/model setting. Nil (or not
+// calling this) leaves every run on the platform defaults. Returns the receiver
+// for chained construction.
+func (e *CodingExecutor) WithCodingAgentSettings(s CodingAgentSettings) *CodingExecutor {
+	e.codingAgent = s
 	return e
 }
 
@@ -256,7 +272,27 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		"AEP_CORRELATION_ID":  in.correlationID,
 		"AEP_TASK_KIND":       taskKindOrDefault(disp.taskKind),
 		"WORKSPACE_BASE_PATH": codingAgentWorkspacePath,
+		// The run's OWN deadline, so it can end itself rather than be ended.
+		// The same number this dispatch puts on the Job's activeDeadlineSeconds
+		// below: when that one passes, the pod is killed mid-sentence and
+		// explains nothing — no result line, no watchdog snapshot, and for a run
+		// with background subagents no way to tell "still working" from
+		// "wedged". Handing it to the runner is what buys the moment it needs to
+		// stop its tasks and say so on the feed. The runner subtracts its own
+		// margin (`runDeadlineFromEnv`); the margin is not this layer's to know,
+		// and duplicating it here would let the two drift apart silently.
+		"AEP_RUN_DEADLINE_SECONDS": strconv.FormatInt(disp.deadline, 10),
 	}
+	// The organization's coding-agent setting, copied onto THIS run. Copied, not
+	// referenced: a change applies from the next cycle, and a run that re-read
+	// the setting halfway through would produce a feed whose model names
+	// disagree with the tokens they were billed for.
+	runtimeName, model, err := e.codingAgentEnv(ctx, in.orgID)
+	if err != nil {
+		return "", err
+	}
+	env[envAgentRuntime] = runtimeName
+	env[envAgentModel] = model
 	secretEnv := []SecretEnvRef{
 		{Key: anthropicEnvVarOrDefault(anthropicSR.EnvVar), SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
 		{Key: envGitHubToken, SecretName: githubSR.SecretRefName, SecretKey: githubSR.Property},
@@ -376,6 +412,25 @@ func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID stri
 		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: %w", err)
 	}
 	return anthropicSR, githubSR, nil
+}
+
+// codingAgentEnv resolves the runtime and model this run is launched with.
+//
+// A missing resolver, or an org that never chose, both mean the platform
+// defaults — which is what every dispatch carried before the setting existed, so
+// nothing changes for an org that never opens the page. A resolver that ERRORS
+// is different and fails the dispatch: the org did choose something, we cannot
+// read what, and launching on the defaults would bill it for a model it moved
+// off without ever saying so.
+func (e *CodingExecutor) codingAgentEnv(ctx context.Context, orgID string) (string, string, error) {
+	if e.codingAgent == nil {
+		return orgconfig.DefaultAgentRuntime, orgconfig.DefaultCodingAgentModel, nil
+	}
+	proj, err := e.codingAgent.Effective(ctx, orgID)
+	if err != nil {
+		return "", "", fmt.Errorf("coding dispatch: coding-agent setting for org %q: %w", orgID, err)
+	}
+	return proj.Runtime, proj.Model, nil
 }
 
 // anthropicEnvVarOrDefault names the Job's Anthropic SecretEnv entry from

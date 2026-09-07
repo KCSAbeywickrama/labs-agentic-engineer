@@ -29,7 +29,7 @@
 // nothing but the project, and the `aep-local` skill discovers its own
 // working set from the issue files on disk (App-Path existence, not a stored
 // flag), orders them, and works as many as it can in one session. The same
-// runClaudeQuery drives the SDK session; the same NDJSON progress contract
+// startCodingRun drives the SDK session; the same NDJSON progress contract
 // streams on stdout; the same exit codes report the result:
 //
 //   0 — the session did what it could (some issues may remain open — normal)
@@ -58,7 +58,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runClaudeQuery } from "./lib/runner.js";
+import { startCodingRun } from "./lib/runner.js";
 import { openTaskLog } from "./lib/logger.js";
 import type { DispatchRequest } from "./lib/types.js";
 import type { WorkspaceLayout } from "./lib/workspace.js";
@@ -115,7 +115,7 @@ function readLocalRunFromEnv(): LocalRun {
 }
 
 // The workspace IS the project dir; the auth-flavored layout fields point at
-// empty scratch entries so runClaudeQuery's env composition stays untouched
+// empty scratch entries so startCodingRun's env composition stays untouched
 // (an unauthenticated GH_CONFIG_DIR, an empty bearer file, an empty PATH dir).
 function localDirWorkspace(run: LocalRun): WorkspaceLayout {
   const ghConfigDir = path.join(run.runDir, "gh-config");
@@ -181,7 +181,7 @@ async function main(): Promise<number> {
   //
   // A failure here is NOT recoverable: the mirror is where the workflow skill
   // comes from, so a run whose mirror never got written has no procedure to
-  // follow. runClaudeQuery refuses to start such a session (see
+  // follow. startCodingRun refuses to start such a session (see
   // requireWorkflowBodies), which is why this only warns — the fatal check is one
   // place, not two.
   let availableSkillNames: string[] = [];
@@ -241,7 +241,7 @@ async function main(): Promise<number> {
   const log = openTaskLog(run.runDir);
   let completion: Promise<{ exitCode: number }>;
   try {
-    ({ completion } = await runClaudeQuery(req, layout, log, { availableSkillNames, pinnedBodies }));
+    ({ completion } = await startCodingRun(req, layout, log, { availableSkillNames, pinnedBodies }));
   } catch (err) {
     // The mirror carries no workflow skill, so there is no procedure to run —
     // see requireWorkflowBodies. In the playground that means the library or the

@@ -16,6 +16,24 @@ const (
 	UserJWTScopes userJWTContextKey = "userJWT.Scopes"
 )
 
+// Defines values for AgentRuntime.
+const (
+	AgentRuntimeClaudeCode AgentRuntime = "claude-code"
+	AgentRuntimeOpencode   AgentRuntime = "opencode"
+)
+
+// Valid indicates whether the value is a known member of the AgentRuntime enum.
+func (e AgentRuntime) Valid() bool {
+	switch e {
+	case AgentRuntimeClaudeCode:
+		return true
+	case AgentRuntimeOpencode:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentStatus.
 const (
 	AgentStatusCompleted AgentStatus = "completed"
@@ -157,6 +175,24 @@ const (
 func (e BuildSummaryWaitingReason) Valid() bool {
 	switch e {
 	case BuildSummaryWaitingReasonExternalValues:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodingAgentModel.
+const (
+	CodingAgentModelClaudeHaiku45 CodingAgentModel = "claude-haiku-4-5"
+	CodingAgentModelClaudeSonnet5 CodingAgentModel = "claude-sonnet-5"
+)
+
+// Valid indicates whether the value is a known member of the CodingAgentModel enum.
+func (e CodingAgentModel) Valid() bool {
+	switch e {
+	case CodingAgentModelClaudeHaiku45:
+		return true
+	case CodingAgentModelClaudeSonnet5:
 		return true
 	default:
 		return false
@@ -1207,6 +1243,13 @@ type ActivityFeed struct {
 	NextBeforeID string `json:"nextBeforeId,omitempty"`
 }
 
+// AgentRuntime Which coding-agent runtime an organization's builds run on.
+//
+// The values are the same two RunEvent.runtime records, and deliberately so: what an org SELECTS and what a finished run REPORTS have to be the same vocabulary or a reader cannot line them up. The lifetimes differ — this is a setting that can change, that one is a fact about an attempt that cannot.
+//
+// `opencode` is in the enum because the design carries it and because a client should be able to render the choice; it is NOT selectable while the platform ships no adapter for it, and the API rejects it with a reason naming what is missing. Do not treat membership of this enum as availability.
+type AgentRuntime string
+
 // AgentStatus How an agent, or a backgrounded task an agent owns, ended — as the runtime itself reported it. `running` is the only non-terminal value and exists so a consumer can repaint a row without waiting for the end; `completed` is a clean finish; `failed` is one the runtime called an error; `stopped` is a cancellation or a kill from outside, which is NOT a failure — the work did not go wrong, it was taken away, and a run a user stopped must not be shown as broken.
 // Carried by RunEvent's `agent_settled` and `task_settled`, which are the only places a status is authoritative. A settle event that never arrives means the platform never learned how the agent ended; it does not mean the agent is still running.
 type AgentStatus string
@@ -1385,6 +1428,18 @@ type BuildSummaryWaitingReason string
 type ClientSecretOutputBody struct {
 	ClientSecret string `json:"clientSecret"`
 }
+
+// CodingAgentModel The model an organization's coding runs bill to.
+//
+// Narrower than the list any runtime can serve, and narrow for one reason: the platform stamps a run's cost from a per-model rate table, and that stamp is ALL-OR-NOTHING across a cycle's capture — one model with no rate blanks the cost of the whole cycle, not just its own share. So a model is offered here only once the platform can price it. Adding one is a rate row and a contract change together, never one without the other.
+type CodingAgentModel string
+
+// CodingAgentProjection The runtime and model an organization's coding runs use.
+//
+// ALWAYS present, unlike the credential sections: every org has an effective runtime and model whether or not anyone has ever opened the setting. `updatedAt`/`updatedBy` are null exactly when nobody has — which is what tells "the platform's defaults" apart from "somebody chose the same values".
+//
+// A change applies from the NEXT cycle. Dispatch copies these onto the run it starts, so a run already in flight keeps the runtime and model it was launched with; re-reading the setting mid-run would leave a feed whose model names disagree with the tokens they were billed for.
+type CodingAgentProjection = orgconfig.CodingAgentProjection
 
 // CollabSessionOutputBody defines model for CollabSessionOutputBody.
 type CollabSessionOutputBody struct {

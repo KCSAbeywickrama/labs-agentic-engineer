@@ -20,7 +20,7 @@
 //
 // OpenChoreo renders a batch/v1 Job from the coding-agent ComponentType,
 // passing the dispatch payload via AEP_* env vars (no HTTP, no token in body).
-// We reuse the same provisionWorkspace + runClaudeQuery code that the legacy
+// We reuse the same provisionWorkspace + startCodingRun code that the legacy
 // HTTP server used; only the wrapper changes shape.
 //
 // Exit codes:
@@ -33,7 +33,7 @@
 
 import { randomUUID } from "node:crypto";
 import { provisionWorkspace } from "./lib/workspace.js";
-import { onDemandSkills, runClaudeQuery, type McpAuthOpts } from "./lib/runner.js";
+import { onDemandSkills, startCodingRun, type McpAuthOpts } from "./lib/runner.js";
 import { openTaskLog } from "./lib/logger.js";
 import { isUUID, isSlug } from "./lib/uuid.js";
 import type { DispatchRequest } from "./lib/types.js";
@@ -349,7 +349,7 @@ async function main(): Promise<number> {
       : undefined;
   let completion: Promise<{ exitCode: number }>;
   try {
-    ({ completion } = await runClaudeQuery(req, layout, log, { availableSkillNames, pinnedBodies }, mcpAuth));
+    ({ completion } = await startCodingRun(req, layout, log, { availableSkillNames, pinnedBodies }, mcpAuth));
   } catch (err) {
     // The mirror carries no workflow skill (see requireWorkflowBodies), so this
     // run has no procedure to follow. Fail the build rather than let the agent

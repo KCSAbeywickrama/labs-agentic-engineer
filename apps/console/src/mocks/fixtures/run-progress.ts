@@ -33,7 +33,8 @@ type RunProgressLine = components["schemas"]["RunProgressLine"];
 //     envelope could not describe at all;
 //   - a REPORT on every settle, which no v1 surface could show;
 //   - the silent kinds (agent_progress, heartbeat, work_item), which must paint
-//     state and never a blank row.
+//     state and never a blank row — including the LEAD'S OWN PLAN, whose entries
+//     fold onto the agents that own them rather than printing five rows apiece.
 //
 // The version (build) feed below still replays the v1 RunProgressLine envelope:
 // it has not moved, and one fixture emitting both is what keeps that honest.
@@ -164,8 +165,25 @@ export function runCycleEvents(cycle: RunCycleView, startSeq: number): RunEvent[
   return [
     lead({ kind: "run_started", taskKind: "implementation", runtime: "claude-code", model: "claude-opus-4" }),
     lead({ kind: "agent_started", role: "lead", model: "claude-opus-4" }),
+
+    // The LEAD'S OWN PLAN, which reaches the feed as `work_item {source:
+    // "plan"}` rows the crew folds by item. Every shape the fold has to survive
+    // is here: an entry handed to an agent that has not been spawned yet, an
+    // update carrying a status and no title, and one the lead thought better of.
+    lead({ kind: "work_item", source: "plan", itemId: "p1", title: "Read the design and the contract", itemStatus: "in_progress" }),
+    lead({ kind: "work_item", source: "plan", itemId: "p2", title: "Implement the shortener API", itemStatus: "pending", ownerAgentId: api }),
+    lead({ kind: "work_item", source: "plan", itemId: "p3", title: "Implement the web front end", itemStatus: "pending", ownerAgentId: web }),
+    lead({ kind: "work_item", source: "plan", itemId: "p4", title: "Rewrite the deployment script", itemStatus: "pending" }),
+    lead({ kind: "work_item", source: "plan", itemId: "p5", title: "Open the pull request", itemStatus: "pending" }),
+
     lead({ kind: "tool_use", tool: "Bash", summary: "git status", toolUseId: "m1" }),
     lead({ kind: "tool_result", tool: "Bash", ok: true, durationMs: 240, toolUseId: "m1" }),
+    // A status-only update: the title has to stick, or the row blanks the moment
+    // the lead ticks it off.
+    lead({ kind: "work_item", source: "plan", itemId: "p1", itemStatus: "completed" }),
+    // Thought better of — a deleted entry is not work any more, so it is not a
+    // row, and nothing below it may shift because of it.
+    lead({ kind: "work_item", source: "plan", itemId: "p4", itemStatus: "deleted" }),
     lead({ kind: "notice", level: "info", code: "fan_out_rewritten", detail: "2 backgrounded Agent calls rewritten to run in the foreground" }),
 
     // Fan-out. `background: false` is the platform's forcing having WORKED, and
@@ -174,6 +192,8 @@ export function runCycleEvents(cycle: RunCycleView, startSeq: number): RunEvent[
     at(api, { kind: "agent_started", label: "Implement the shortener API (issue #3)", role: "coder", depth: 1, background: false }),
     at(web, { kind: "agent_started", label: "Implement the web front end (issue #4)", role: "coder", depth: 1, background: true }),
 
+    lead({ kind: "work_item", source: "plan", itemId: "p2", itemStatus: "in_progress", ownerAgentId: api }),
+    lead({ kind: "work_item", source: "plan", itemId: "p3", itemStatus: "in_progress", ownerAgentId: web }),
     at(api, { kind: "agent_progress", phrase: "Reading the existing handler" }),
     at(api, { kind: "tool_use", tool: "Write", summary: "src/api/shorten.ts", toolUseId: "a1" }),
     at(web, { kind: "tool_use", tool: "Write", summary: "src/ui/App.tsx", toolUseId: "w1" }),
@@ -233,6 +253,7 @@ export function runCycleEvents(cycle: RunCycleView, startSeq: number): RunEvent[
       report: "Scaffolded the front end but could not get `vite build` to pass: the generated client imports a type the contract does not export yet.",
     }),
     lead({ kind: "tool_result", tool: "Agent", ok: true, durationMs: 209_158, toolUseId: "fan1" }),
+    lead({ kind: "work_item", source: "plan", itemId: "p2", itemStatus: "completed", ownerAgentId: api }),
 
     lead({ kind: "task_started", taskId: "bg-build", summary: "pnpm build --filter web" }),
     lead({ kind: "task_settled", taskId: "bg-build", summary: "pnpm build --filter web", status: "completed", outputBytes: 20_480 }),
@@ -252,6 +273,7 @@ export function runCycleEvents(cycle: RunCycleView, startSeq: number): RunEvent[
       : []),
     ...(cycle.mergeSha
       ? [
+          lead({ kind: "work_item", source: "plan", itemId: "p5", itemStatus: "completed" }),
           lead({ kind: "git_commit", sha: cycle.mergeSha, files: 6, toolUseId: "m9" }),
           lead({ kind: "git_push", branch: cycle.branch ?? "" }),
           lead({ kind: "gh_action", summary: `pr create — #${String(cycle.prNumber ?? 0)}` }),

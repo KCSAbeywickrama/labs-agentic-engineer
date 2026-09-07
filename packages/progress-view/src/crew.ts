@@ -46,7 +46,7 @@
 // be driven to the exact instant a rule fires, which is the one thing its tests
 // need to do.
 
-import type { AgentReport } from "./agent.js";
+import { LEAD_AGENT_ID, type AgentReport } from "./agent.js";
 import {
   formatHeartbeat,
   isFanOutTool,
@@ -127,6 +127,39 @@ export interface CrewTask {
   outputBytes?: number | undefined;
 }
 
+/**
+ * One entry of an agent's OWN plan — the task list the runtime keeps for itself
+ * and repaints through `work_item`.
+ *
+ * No owner field: the entry sits on the member that owns it, so an item whose
+ * owner is in doubt has already been resolved by the time anything draws it.
+ */
+export interface CrewPlanItem {
+  id: string;
+  /** The entry's subject. Empty when only status updates were ever seen for it. */
+  title: string;
+  /** `pending | in_progress | completed` — the runtime's task-list vocabulary. */
+  status: string;
+}
+
+/**
+ * A plan entry's semantic weight, the same way `crewTone` weighs a state:
+ * semantic, never a theme token, because a TUI imports this package too.
+ *
+ * `pending` is muted on purpose — a list of things not started yet is context
+ * for the row it sits under, not news.
+ */
+export function planTone(status: string): LineTone {
+  switch (status) {
+    case "in_progress":
+      return "info";
+    case "completed":
+      return "success";
+    default:
+      return "muted";
+  }
+}
+
 /** One agent, as the crew view and the timeline both read it. */
 export interface CrewMember<E> {
   id: string;
@@ -166,6 +199,15 @@ export interface CrewMember<E> {
   steps: E[];
   /** Shell commands it backgrounded. */
   tasks: CrewTask[];
+  /**
+   * Its own plan, in the order the run first mentioned each entry.
+   *
+   * The entries THIS agent owns, not the ones it emitted: a lead that writes a
+   * list and hands an entry to an agent it spawned puts that entry on the
+   * spawned agent's row, because "what was this one sent to do" is the question
+   * a reader has when they click on it.
+   */
+  plan: CrewPlanItem[];
   /** Its lane on the run's axis, split into working and waiting stretches. */
   spans: LaneSpan[];
   children: CrewMember<E>[];
@@ -204,6 +246,25 @@ const SILENCE_CODES = new Set([
   "workspace_provisioning",
   "workspace_ready",
 ]);
+
+/**
+ * `RunEvent.source` for an agent's OWN plan entry.
+ *
+ * The kind carries two populations and only this one is a plan. A `criterion` is
+ * a unit of work the PLATFORM put in front of a validating run, with the
+ * validation method's own statuses (`planned | exploring | … | pass | fail`);
+ * folding one onto a member would paint acceptance criteria into an agent's
+ * to-do list, where `completed` and `pass` do not mean the same thing.
+ */
+const PLAN_SOURCE = "plan";
+
+/** A plan entry the agent removed. It is not work any more, so it is not a row. */
+const PLAN_DELETED = "deleted";
+
+/** A folded plan entry, before the crew is known well enough to place it. */
+interface OwnedPlanItem extends CrewPlanItem {
+  ownerAgentId: string;
+}
 
 /** What a `run_settled` outcome means for an agent that never settled itself. */
 function statusFromOutcome(outcome: string): string {
@@ -253,8 +314,10 @@ function newVitals(): Vitals {
  * Built ON TOP of `groupByAgent` rather than beside it: the declared tree, the
  * labels and the runtime's totals are already settled there, and a second walk
  * that re-derived them is how two surfaces come to disagree about which agent
- * spawned which. This walk adds only what a tree of rows has no place for —
- * clocks.
+ * spawned which. This walk adds only what a tree of rows has no place for: the
+ * clocks, and the repainting kinds the grouping drops — `work_item` among them,
+ * which is the agent's own plan and therefore belongs to the agent rather than
+ * to whichever surface happened to fold it first.
  */
 export function buildCrew<E extends RunEventView>(
   events: readonly E[],
@@ -273,6 +336,12 @@ export function buildCrew<E extends RunEventView>(
   // Which agent a heartbeat named, so "waiting on a spawned agent" can be shown
   // as the agent's own label — a reader can go and look at a name.
   const labels = new Map<string, string>();
+  // Every live plan entry of the whole run, keyed by `itemId` and held in the
+  // order the run FIRST mentioned it — a Map keeps an existing key's position
+  // when it is written again, so a row does not jump when it is ticked off.
+  // Run-level rather than per-agent because an entry's owner is a field on the
+  // event, not the agent that emitted it.
+  const planItems = new Map<string, OwnedPlanItem>();
   let outcome: string | undefined;
   let runSettledMs: number | undefined;
   let lastMs: number | undefined;
@@ -354,6 +423,30 @@ export function buildCrew<E extends RunEventView>(
         v.otherAt = at;
         return;
       }
+      case "work_item": {
+        // Still an event the agent produced, so it displaces a notice that was
+        // explaining the silence — the agent is plainly doing things again.
+        v.otherAt = at;
+        if (event.source !== PLAN_SOURCE) return;
+        // `itemId` is required of this kind by the contract. An event without
+        // one is a producer this build does not understand, and is skipped
+        // rather than folded into a row nothing can ever repaint.
+        if (!event.itemId) return;
+        const held = planItems.get(event.itemId);
+        // Last status wins, because the events arrive in the order the runner
+        // emitted them. The TITLE is sticky rather than overwritten by a later
+        // blank: only the creating event is guaranteed to carry one (an update
+        // sends a subject only when the agent renamed the entry), so taking the
+        // newest would blank the row the moment the agent ticked it off. Same
+        // for the owner, which a status-only update likewise omits.
+        planItems.set(event.itemId, {
+          id: event.itemId,
+          title: event.title || held?.title || "",
+          status: event.itemStatus || held?.status || "",
+          ownerAgentId: event.ownerAgentId || held?.ownerAgentId || LEAD_AGENT_ID,
+        });
+        return;
+      }
       case "run_settled":
         outcome = event.outcome ?? "success";
         runSettledMs = ms ?? runSettledMs;
@@ -405,6 +498,8 @@ export function buildCrew<E extends RunEventView>(
       elapsedMs: elapsedOf(agent, v, settledMs, now),
       steps,
       tasks: [...v.tasks.values()],
+      // Filled once the whole crew is known — see below.
+      plan: [],
       spans:
         v.firstMs === undefined || endMs === undefined
           ? []
@@ -421,6 +516,18 @@ export function buildCrew<E extends RunEventView>(
     m.children.forEach(flatten);
   };
   flatten(lead);
+
+  // The plan is placed LAST, because placing an entry needs the whole crew: an
+  // `ownerAgentId` naming an agent no event ever mentioned still belongs to
+  // somebody, and it falls to the lead rather than being dropped — the same
+  // reason the grouping hangs an undeclared agent off the lead. An orphaned
+  // entry that silently vanishes is the one a reader most needs to see.
+  const byId = new Map(members.map((m) => [m.id, m]));
+  for (const item of planItems.values()) {
+    if (item.status === PLAN_DELETED) continue;
+    const owner = byId.get(item.ownerAgentId) ?? lead;
+    owner.plan.push({ id: item.id, title: item.title, status: item.status });
+  }
 
   const startMs = Math.min(...members.map((m) => m.spans[0]?.startMs ?? Infinity));
   const endMs = Math.max(...members.map((m) => m.spans.at(-1)?.endMs ?? -Infinity));

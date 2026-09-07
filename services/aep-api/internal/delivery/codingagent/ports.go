@@ -36,6 +36,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/organization"
+	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -122,6 +123,21 @@ type SkillMirror interface {
 // (ADR-0016). Wired from organization.AnthropicCredentialService.
 type CodingKeyResolver interface {
 	ResolveCodingSecretRef(ctx context.Context, ocOrgID string) (organization.SecretRefTriplet, error)
+}
+
+// CodingAgentSettings answers which runtime and model this org's next cycle
+// runs on. The organization domain owns the choice — including the fact that an
+// org which never opened the setting is on the platform's defaults — so dispatch
+// asks for the EFFECTIVE values and never for a row, which is what keeps
+// "nobody chose" from being a state dispatch has to know how to interpret.
+//
+// The values are COPIED onto the run at launch, so a change applies from the
+// next cycle: re-reading mid-run would leave a feed whose model names disagree
+// with the tokens they were billed for. Wired from
+// organization.CodingAgentService; nil → the platform defaults, which is what
+// every dispatch made before this setting existed already carried.
+type CodingAgentSettings interface {
+	Effective(ctx context.Context, ocOrgID string) (orgconfig.CodingAgentProjection, error)
 }
 
 // ProjectRepos resolves a project's git repo row (RepoURL/RepoSlug). Wired from

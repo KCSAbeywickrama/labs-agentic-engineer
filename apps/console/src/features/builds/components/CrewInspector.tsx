@@ -24,6 +24,7 @@ import {
   type CrewMember,
 } from "@aep/progress-view";
 import { toneColor } from "../../../components/logTone";
+import { AgentPlan } from "./AgentPlan";
 import { AgentReportNote, AgentSteps } from "./AgentSteps";
 import type { StampedRunEvent } from "../hooks/useRunProgress";
 
@@ -88,6 +89,15 @@ export function CrewInspector({ member }: { member: CrewMember<StampedRunEvent> 
           <AgentReportNote report={member.agent.report} />
         </Box>
       )}
+
+      {/* What it SET OUT to do, above what it did. The tree carries the same
+          rows under this agent's row, and that repetition is deliberate — the
+          same way a settled agent's report is both its tree sub-line and the
+          note below. The tree answers "what is this run trying to do" at a
+          glance across every agent; this answers "did the one I picked get
+          there", and it is the ONLY place the plan appears on a cycle with a
+          single agent, where there is no tree at all. */}
+      <AgentPlan plan={member.plan} />
 
       <AgentSteps steps={member.steps} />
     </Box>

@@ -54,14 +54,28 @@ and how long it has been going. Background shell tasks (`task_started` /
 `task_settled`) are children of the agent that started them, so an orphaned
 `dev:mock` still holding a port has somebody's name on it.
 
+Under those sit the agent's **plan** entries — the lead's own task list, which
+reaches the feed as `work_item {source: "plan"}` and is folded onto its owner by
+`buildCrew`. An entry the lead handed to a spawned agent draws under *that*
+agent, because "what was this one sent to do" is the question a reader has about
+its row; an entry naming an agent no event ever declared falls back to the lead
+rather than vanishing. They stay on a settled agent: the list is what it set out
+to do and whether it got there, which only becomes a record once the run is over.
+Deliberately quiet — only the glyph carries the entry's weight, so a fifteen-entry
+list cannot outshout the one question this view exists to answer.
+
 **Inspector.** The selected agent's steps, with each outcome merged onto the
 action row it answers (the same `mergeOutcomes` rule the flat feed used, on the
 same `AgentSteps` component). Its header is the runtime's *own* totals —
 duration, tool count, lines written — because the runtime measured the agent's
 whole life including the parts that never reached this feed. Under it, the
 agent's closing report: a spawned agent's transcript dies with its pod, so this
-is the only copy. Nothing here is invented; there is no narration tab and no
-file list.
+is the only copy. Then its **plan**, above its steps — what it set out to do,
+above what it did. That repeats the tree's rows for the selected agent, the same
+way a settled agent's report is both its tree sub-line and the note here, and it
+is the *only* place the plan appears on a single-agent cycle, where there is no
+tree at all. Nothing here is invented; there is no narration tab and no file
+list.
 
 **Timeline.** One lane per agent on one axis, the cycle's first word to its last.
 A lane is coloured by its agent's state and split into **solid** (working) and
@@ -128,8 +142,9 @@ imports it too.
 | | |
 |---|---|
 | `components/RunCrew.tsx` | the toggle, the hint, the clock, the selection |
-| `components/CrewTree.tsx` | one row per agent, with its tasks |
-| `components/CrewInspector.tsx` | one agent's header, report and steps |
+| `components/CrewTree.tsx` | one row per agent, with its tasks and its plan |
+| `components/CrewInspector.tsx` | one agent's header, report, plan and steps |
+| `components/AgentPlan.tsx` | a plan entry's row, and the inspector's list |
 | `components/CrewTimeline.tsx` | one lane per agent |
 | `components/AgentSteps.tsx` | the shared row, report note and empty copy |
 | `hooks/useRunView.ts` | the remembered choice, shared across the page |

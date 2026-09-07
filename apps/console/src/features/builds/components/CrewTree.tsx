@@ -27,6 +27,7 @@ import {
   type CrewTask,
 } from "@aep/progress-view";
 import { toneColor } from "../../../components/logTone";
+import { PlanRow } from "./AgentPlan";
 import type { StampedRunEvent } from "../hooks/useRunProgress";
 
 // WHO IS DOING WHAT RIGHT NOW. One row per agent, nested as the runtime declared
@@ -218,6 +219,14 @@ function CrewRow({
       </ListItemButton>
       {member.tasks.map((task) => (
         <TaskRow key={task.id} task={task} depth={member.depth} />
+      ))}
+      {/* The agent's own plan, under the agent whose plan it is — including the
+          entries a LEAD wrote and handed to this one, since "what was this one
+          sent to do" is the question a reader has about its row. Shown on a
+          settled agent too: the list is what it set out to do and whether it got
+          there, which only becomes a record once the run is over. */}
+      {member.plan.map((item) => (
+        <PlanRow key={item.id} item={item} depth={member.depth} />
       ))}
     </>
   );

@@ -19,7 +19,7 @@
 // Reads one session's SDK message stream to its end and decides when the RUN is
 // over.
 //
-// It used to live inside `runClaudeQuery`, which built the query and consumed it
+// It used to live inside `startCodingRun`, which built the query and consumed it
 // in one function — so the only way to exercise the rule below was to start a
 // real session. It is its own module now because the rule is the whole reason
 // this code exists, and a rule nothing can replay is a rule nobody can check.

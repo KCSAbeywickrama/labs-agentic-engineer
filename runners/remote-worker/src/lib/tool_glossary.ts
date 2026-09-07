@@ -32,14 +32,17 @@
 // mid-prompt.
 //
 // A second runtime is a second entry in GLOSSARIES and nothing else. The runtime
-// PORT — one interface over spawning, translating and settling a session — is a
-// larger change and is not this; `progress/claude_adapter.ts` is the other half
-// of the same eventual seam.
+// PORT — `runtime/port.ts`, one interface over starting, translating and
+// settling a session — is the larger seam this sits inside: a `Runtime` answers
+// `toolGlossary()` out of this table, and `progress/claude_adapter.ts` is the
+// translation half of the same adapter.
+//
+// The table is keyed on the port's `RuntimeName`, which is also the wire value
+// of the organization's Runtime setting and of `AEP_AGENT_RUNTIME`. One spelling
+// across all three, so a runtime that reaches here with no glossary is a type
+// error rather than a session steered by role names nothing binds.
 
-/** The agent runtimes a coding run can be driven by. One, today. */
-export type AgentRuntime = "claude_code";
-
-export const DEFAULT_RUNTIME: AgentRuntime = "claude_code";
+import { DEFAULT_RUNTIME, type RuntimeName } from "../runtime/port.js";
 
 /**
  * One glossary per runtime, keyed by the runtime's own id.
@@ -49,15 +52,32 @@ export const DEFAULT_RUNTIME: AgentRuntime = "claude_code";
  * the workflow. The model aliases are listed because the skill tells the lead to
  * pick one ("the fast model", "the default one") and a lead that guesses an
  * alias spends a turn on a schema error.
+ *
+ * **Only models the platform can PRICE are offered.** `modelcost.SumCost` is
+ * all-or-nothing by design — one slice whose model has no `model_rates` row
+ * makes the WHOLE cycle's cost null, on the argument that a partial dollar
+ * figure under-reports spend more dangerously than an absent one. So a single
+ * subagent dispatched to an unpriced model blanks the cost of everything else
+ * in that cycle, and it does it silently. This list offered `opus` while only
+ * `claude-sonnet-5` and `claude-haiku-4-5` were seeded, which made the skill's
+ * own "pick the model for the job" the way to lose a cycle's cost. Keep this in
+ * step with `CodingAgentModel` in the contract, which is narrowed to the priced
+ * set for the same reason; adding an alias here means seeding its rate row
+ * first.
+ *
+ * PARTIAL on purpose: `RuntimeName` carries every runtime the org setting can
+ * name, and only the ones this build can actually run have an entry. A missing
+ * entry throws below rather than silently shipping a session whose workflow
+ * names roles nothing binds.
  */
-const GLOSSARIES: Record<AgentRuntime, string> = {
-  claude_code: [
+const GLOSSARIES: Partial<Record<RuntimeName, string>> = {
+  "claude-code": [
     "## Tool glossary (Claude Code)",
     "",
     "The roles your workflow names, and the tools that play them in this session:",
     "",
     "- **fan-out tool**: `Agent` — `run_in_background: true` for a builder;" +
-      " `model:` `haiku` (the fast model), `sonnet` (the default), `opus`",
+      " `model:` `haiku` (the fast model) or `sonnet` (the default)",
     "- **wait tool**: `TaskOutput` with `block: true` — one call per agent you dispatched",
     "- **stop tool**: `TaskStop`, for an agent that has run away",
     "- **task list**: `TaskCreate` and `TaskUpdate`",
@@ -68,10 +88,12 @@ const GLOSSARIES: Record<AgentRuntime, string> = {
 /**
  * The glossary block for a runtime, ready to append to a system prompt.
  *
- * Total, so a caller cannot start a session whose prose names roles nothing
- * binds — an unknown runtime is a programming error here, not a degraded run.
+ * Throws for a runtime with no entry, so a caller cannot start a session whose
+ * prose names roles nothing binds — that is a programming error here, not a
+ * degraded run. The org setting is validated at the API, so this is the second
+ * line, not the first.
  */
-export function toolGlossary(runtime: AgentRuntime = DEFAULT_RUNTIME): string {
+export function toolGlossary(runtime: RuntimeName = DEFAULT_RUNTIME): string {
   const glossary = GLOSSARIES[runtime];
   if (glossary === undefined) throw new Error(`no tool glossary for runtime ${JSON.stringify(runtime)}`);
   return glossary;

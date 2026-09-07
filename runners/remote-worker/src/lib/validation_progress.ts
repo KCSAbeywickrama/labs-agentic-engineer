@@ -51,7 +51,6 @@
  *     wrong repair issues.
  */
 
-import type { HookCallback, PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import type { RunEvent } from "./progress/emitter.js";
 
 /**
@@ -276,9 +275,20 @@ export function validationRunOutcome(itemIds: string[], ok: boolean): ProgressIt
 }
 
 export interface ValidationProgressTracker {
-  /** PreToolUse hook: the statuses a call announces before it runs. */
-  hook: HookCallback;
-  /** Called by the SDK translator when a tool call settles. */
+  /**
+   * A tool call, before it runs: the statuses it announces.
+   *
+   * A WATCHER, never a decision — it is wired onto `RuntimePolicy.observe`,
+   * whose contract says the return value is ignored. The tools it watches are
+   * the ones the run needs, and a progress feature that could block a write
+   * would be a worse bargain than no progress feature.
+   *
+   * Plain arguments rather than a runtime's hook shape: which mechanism
+   * delivers a call is the adapter's business, and this module has no reason to
+   * know one runtime's hook grammar.
+   */
+  observe(toolName: string, toolInput: unknown, toolUseId: string): void;
+  /** Called when a tool call settles, with the `ok` that reaches the feed. */
   settle(toolUseId: string, ok: boolean): void;
 }
 
@@ -303,28 +313,20 @@ export function createValidationProgressTracker(
   };
 
   return {
-    hook: async (input) => {
-      const hookInput = input as PreToolUseHookInput;
-      if (hookInput?.hook_event_name !== "PreToolUse") return {};
-
-      const updates = validationProgressUpdates(hookInput.tool_name, hookInput.tool_input, state);
-      if (updates.length === 0) return {};
+    observe: (toolName, toolInput, toolUseId) => {
+      const updates = validationProgressUpdates(toolName, toolInput, state);
+      if (updates.length === 0) return;
 
       // Remembered BEFORE publishing, and keyed by the tool call, because the
       // outcome arrives with nothing but that id — the command's text is long
       // gone by the time the result comes back.
       if (updates[0]?.status === "running") {
         state.noteRun(
-          hookInput.tool_use_id,
+          toolUseId,
           updates.map((u) => u.itemId),
         );
       }
       publish(updates);
-
-      // Never a decision. This hook observes; the tools it watches are the ones
-      // the run needs, and a progress feature that could block a write would be
-      // a worse bargain than no progress feature.
-      return {};
     },
 
     settle: (toolUseId, ok) => {

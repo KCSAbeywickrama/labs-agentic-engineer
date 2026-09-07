@@ -62,6 +62,7 @@
 // in-flight calls, the heartbeat clocks — describes ONE run, and two runs
 // sharing it would mislabel lines rather than merely lose detail.
 
+import type { RuntimeArtifact } from "../../runtime/port.js";
 import {
   LEAD_AGENT_ID,
   type AgentStatus,
@@ -560,13 +561,6 @@ export interface ClaudeAdapterOptions {
   heartbeatIntervalMs?: number;
 }
 
-/** One runtime-owned file worth keeping on the local plane. */
-export interface RuntimeArtifact {
-  agentId: string;
-  path: string;
-  kind: "transcript";
-}
-
 export interface ClaudeAdapter {
   /** One SDK message → zero, one, or many run events, in order. */
   translate(message: unknown): RunEventInput[];
@@ -581,7 +575,10 @@ export interface ClaudeAdapter {
    * being rediscovered by walking a session directory.
    */
   noteTranscript(agentId: string, path: string): void;
-  /** The transcripts this run produced, for the runtime port's `artifacts()`. */
+  /**
+   * The transcripts this run produced — the translation half of the runtime
+   * port's `artifacts()`, which adds the runtime's own developer files.
+   */
   artifacts(): RuntimeArtifact[];
 }
 

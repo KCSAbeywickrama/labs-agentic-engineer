@@ -54,9 +54,11 @@ export {
   crewStateLabel,
   crewTone,
   isCrewSettled,
+  planTone,
   STALL_MS,
   type Crew,
   type CrewMember,
+  type CrewPlanItem,
   type CrewState,
   type CrewTask,
 } from "./crew.js";

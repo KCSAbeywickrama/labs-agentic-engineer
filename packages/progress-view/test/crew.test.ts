@@ -31,6 +31,8 @@ import {
   buildCrew,
   crewTone,
   isCrewSettled,
+  LEAD_AGENT_ID,
+  planTone,
   STALL_MS,
   type Crew,
   type CrewMember,
@@ -494,4 +496,142 @@ test("crew: the real run's phrases are the runtime's own words, unimproved", () 
   // that prettified this would be inventing a sentence the run never said.
   const crew = buildCrew(RUN.slice(0, 1), Date.parse("2026-09-04T09:25:40Z"));
   assert.equal(crew.lead.caption, "workspace_provisioning");
+});
+
+// --- the agent's own plan ----------------------------------------------------
+//
+// The lead's task list reaches the feed as `work_item {source: "plan"}`, which
+// is a SILENT kind: one entry moving pending → in_progress → completed is one
+// row repainted, never three rows printed. Folding is the only way to show it at
+// all, and it folds HERE so the console's tree and the playground's block cannot
+// come to describe one list two ways.
+
+test("crew: the plan folds by item — last status wins, the title sticks, deleted rows go", () => {
+  const crew = buildCrew(
+    [
+      { kind: "agent_started", agentId: LEAD_AGENT_ID, label: "lead agent", depth: 0, ts: "2026-09-04T09:00:00Z" },
+      { kind: "work_item", agentId: LEAD_AGENT_ID, source: "plan", itemId: "a", title: "Scaffold", itemStatus: "pending", ts: "2026-09-04T09:00:01Z" },
+      { kind: "work_item", agentId: LEAD_AGENT_ID, source: "plan", itemId: "b", title: "Walk it", itemStatus: "pending", ts: "2026-09-04T09:00:02Z" },
+      // A later update carries only the status — taking the newest title
+      // blindly would blank the row the moment the agent ticked it off.
+      { kind: "work_item", agentId: LEAD_AGENT_ID, source: "plan", itemId: "a", itemStatus: "completed", ts: "2026-09-04T09:00:03Z" },
+      // Removed from the list: not work any more, so not a row.
+      { kind: "work_item", agentId: LEAD_AGENT_ID, source: "plan", itemId: "b", itemStatus: "deleted", ts: "2026-09-04T09:00:04Z" },
+    ],
+    Date.parse("2026-09-04T09:00:05Z"),
+  );
+  assert.deepEqual(crew.lead.plan, [{ id: "a", title: "Scaffold", status: "completed" }]);
+});
+
+test("crew: a criterion is not a plan entry, however much of the kind they share", () => {
+  // A criterion is the PLATFORM's unit of work in a validating run, with the
+  // validation method's own statuses. `completed` says a plan entry was ticked
+  // off; `pass` says a criterion was asserted and held. Folding one here would
+  // paint acceptance criteria onto an agent's to-do list.
+  const crew = buildCrew(
+    [
+      { kind: "agent_started", agentId: LEAD_AGENT_ID, label: "validator", depth: 0, ts: "2026-09-04T09:00:00Z" },
+      { kind: "work_item", agentId: LEAD_AGENT_ID, source: "criterion", itemId: "AC-001-a", itemStatus: "planned", ts: "2026-09-04T09:00:01Z" },
+      { kind: "work_item", agentId: LEAD_AGENT_ID, source: "criterion", itemId: "AC-001-a", itemStatus: "pass", ts: "2026-09-04T09:00:02Z" },
+      // No `source` at all is a producer this build does not understand. It is
+      // not assumed to be a plan: an unreadable entry on somebody's to-do list
+      // is worse than no entry.
+      { kind: "work_item", agentId: LEAD_AGENT_ID, itemId: "x", title: "Unsourced", itemStatus: "pending", ts: "2026-09-04T09:00:03Z" },
+    ],
+    Date.parse("2026-09-04T09:00:04Z"),
+  );
+  assert.deepEqual(crew.lead.plan, []);
+});
+
+test("crew: an entry belongs to the agent it names, and an unnamed one to the lead", () => {
+  const crew = buildCrew(
+    [
+      { kind: "agent_started", agentId: LEAD_AGENT_ID, label: "lead agent", depth: 0, ts: "2026-09-04T09:00:00Z" },
+      { kind: "agent_started", agentId: "a1", label: "webapp", parentAgentId: LEAD_AGENT_ID, depth: 1, ts: "2026-09-04T09:00:01Z" },
+      // No owner: the lead's own, because the lead is who keeps the list.
+      { kind: "work_item", agentId: LEAD_AGENT_ID, source: "plan", itemId: "p1", title: "Read the design", itemStatus: "completed", ts: "2026-09-04T09:00:02Z" },
+      // Handed to a spawned agent. It draws under that agent, because "what was
+      // this one sent to do" is the question a reader has about ITS row.
+      { kind: "work_item", agentId: LEAD_AGENT_ID, source: "plan", itemId: "p2", title: "Build the front end", itemStatus: "in_progress", ownerAgentId: "a1", ts: "2026-09-04T09:00:03Z" },
+      // An owner no event ever mentioned still belongs to somebody: it falls to
+      // the lead rather than vanishing, the same way the grouping hangs an
+      // undeclared agent off the lead.
+      { kind: "work_item", agentId: LEAD_AGENT_ID, source: "plan", itemId: "p3", title: "Orphaned entry", itemStatus: "pending", ownerAgentId: "ghost", ts: "2026-09-04T09:00:04Z" },
+    ],
+    Date.parse("2026-09-04T09:00:05Z"),
+  );
+  assert.deepEqual(
+    crew.lead.plan.map((p) => [p.id, p.title, p.status]),
+    [
+      ["p1", "Read the design", "completed"],
+      ["p3", "Orphaned entry", "pending"],
+    ],
+  );
+  assert.deepEqual(memberOf(crew, "a1").plan.map((p) => p.id), ["p2"]);
+});
+
+test("crew: an entry keeps its place when it is ticked off, and its owner sticks", () => {
+  // A row that jumps down the list the moment somebody starts it is a list
+  // nobody can read while it moves, so the order is the order the run FIRST
+  // mentioned each entry. The owner is sticky for the same reason the title is:
+  // a status-only update carries neither.
+  const crew = buildCrew(
+    [
+      { kind: "agent_started", agentId: LEAD_AGENT_ID, label: "lead agent", depth: 0, ts: "2026-09-04T09:00:00Z" },
+      { kind: "agent_started", agentId: "a1", label: "webapp", parentAgentId: LEAD_AGENT_ID, depth: 1, ts: "2026-09-04T09:00:01Z" },
+      { kind: "work_item", agentId: LEAD_AGENT_ID, source: "plan", itemId: "p1", title: "First", itemStatus: "pending", ts: "2026-09-04T09:00:02Z" },
+      { kind: "work_item", agentId: LEAD_AGENT_ID, source: "plan", itemId: "p2", title: "Second", itemStatus: "pending", ownerAgentId: "a1", ts: "2026-09-04T09:00:03Z" },
+      { kind: "work_item", agentId: LEAD_AGENT_ID, source: "plan", itemId: "p3", title: "Third", itemStatus: "pending", ts: "2026-09-04T09:00:04Z" },
+      { kind: "work_item", agentId: "a1", source: "plan", itemId: "p2", itemStatus: "completed", ts: "2026-09-04T09:00:05Z" },
+      { kind: "work_item", agentId: LEAD_AGENT_ID, source: "plan", itemId: "p1", itemStatus: "in_progress", ts: "2026-09-04T09:00:06Z" },
+    ],
+    Date.parse("2026-09-04T09:00:07Z"),
+  );
+  assert.deepEqual(
+    crew.lead.plan.map((p) => [p.id, p.status]),
+    [
+      ["p1", "in_progress"],
+      ["p3", "pending"],
+    ],
+  );
+  // The update came from the spawned agent itself and named no owner. It stays
+  // where it was put, rather than migrating to whoever last touched it.
+  assert.deepEqual(memberOf(crew, "a1").plan, [
+    { id: "p2", title: "Second", status: "completed" },
+  ]);
+});
+
+test("crew: a settled agent keeps its plan, and a plan weighs by where it stands", () => {
+  const crew = buildCrew(
+    [
+      { kind: "agent_started", agentId: LEAD_AGENT_ID, label: "lead agent", depth: 0, ts: "2026-09-04T09:00:00Z" },
+      { kind: "work_item", agentId: LEAD_AGENT_ID, source: "plan", itemId: "p1", title: "Ship it", itemStatus: "completed", ts: "2026-09-04T09:00:01Z" },
+      { kind: "agent_settled", agentId: LEAD_AGENT_ID, status: "completed", durationMs: 2_000, ts: "2026-09-04T09:00:02Z" },
+      { kind: "run_settled", agentId: LEAD_AGENT_ID, outcome: "success", ts: "2026-09-04T09:00:02Z" },
+    ],
+    Date.parse("2026-09-04T09:05:00Z"),
+  );
+  // The list is what the agent SET OUT to do and whether it got there. Dropping
+  // it on settle would delete the record just as it became a record — the same
+  // reason a settled agent keeps its closing report.
+  assert.ok(isCrewSettled(crew.lead.state));
+  assert.deepEqual(crew.lead.plan.map((p) => p.title), ["Ship it"]);
+
+  // Semantic weight, never a theme token: a TUI imports this package too.
+  assert.equal(planTone("pending"), "muted");
+  assert.equal(planTone("in_progress"), "info");
+  assert.equal(planTone("completed"), "success");
+  // A status this build has never heard of is quiet rather than loud.
+  assert.equal(planTone("whatever_comes_next"), "muted");
+});
+
+test("crew: an item with no id is skipped, not folded into a row nothing repaints", () => {
+  const crew = buildCrew(
+    [
+      { kind: "agent_started", agentId: LEAD_AGENT_ID, label: "lead agent", depth: 0, ts: "2026-09-04T09:00:00Z" },
+      { kind: "work_item", agentId: LEAD_AGENT_ID, source: "plan", title: "No id", itemStatus: "pending", ts: "2026-09-04T09:00:01Z" },
+    ],
+    Date.parse("2026-09-04T09:00:02Z"),
+  );
+  assert.deepEqual(crew.lead.plan, []);
 });

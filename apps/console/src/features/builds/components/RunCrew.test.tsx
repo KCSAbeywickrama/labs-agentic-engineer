@@ -71,6 +71,30 @@ function row(label: string): HTMLElement {
   return screen.getByRole("button", { name: new RegExp(`^${label}:`) });
 }
 
+/**
+ * A plan row, by its title and by WHICH surface drew it.
+ *
+ * A plan appears twice on a fan-out — once under its owner in the tree, once in
+ * the inspector for the agent the reader picked — so a query that did not say
+ * which would pass on either. `where` picks by the tree's list element: the tree
+ * is a `<ul>` of rows and the inspector is not.
+ *
+ * In the tree a plan row is a SIBLING of the owning agent's button rather than a
+ * child of it, the same way a backgrounded command's row is, so where it lands
+ * in the DOM is the proof it sits under the right agent.
+ */
+function planRow(title: string, where: "tree" | "inspector" = "tree"): HTMLElement {
+  const rows = screen
+    .getAllByText(title)
+    .map((el) => el.parentElement)
+    .filter((el): el is HTMLElement => el !== null)
+    .filter((el) => (where === "tree" ? el.closest("ul") !== null : el.closest("ul") === null));
+  if (rows.length !== 1) {
+    throw new Error(`expected one ${where} plan row titled ${title}, found ${String(rows.length)}`);
+  }
+  return rows[0]!;
+}
+
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   // The crew's clock is `Date.now()`, so every rendered age and state is decided
@@ -381,6 +405,94 @@ describe("RunCrew", () => {
     expect(screen.getByText("Checked 5 automated criteria.")).toBeInTheDocument();
     // …plus the one thing it could never show.
     expect(screen.getByText("1 agent · all settled")).toBeInTheDocument();
+  });
+
+  // --- the agent's own plan ---------------------------------------------------
+  //
+  // The `aep` skill tells a run that the platform shows its task list to the
+  // person watching, "so it is the one place your plan has to be true". These
+  // are the tests that make that sentence true of this surface.
+
+  it("draws the lead's plan under the lead, and a handed-off entry under its owner", () => {
+    seq = 0;
+    const events = [
+      ev(0, { kind: "agent_started", agentId: "lead", label: "lead agent", depth: 0 }),
+      ev(1, { kind: "agent_started", agentId: "a1", label: "todo-api", depth: 1 }),
+      ev(2, { kind: "work_item", agentId: "lead", source: "plan", itemId: "p1", title: "Read the design", itemStatus: "completed" }),
+      ev(3, { kind: "work_item", agentId: "lead", source: "plan", itemId: "p2", title: "Implement the API", itemStatus: "in_progress", ownerAgentId: "a1" }),
+    ];
+    render(<RunCrew events={events} />);
+
+    // Under the agent it NAMES, not under the lead that wrote it: "what was this
+    // one sent to do" is the question a reader has about the spawned row.
+    expect(planRow("Implement the API").previousElementSibling).toBe(row("todo-api"));
+    expect(planRow("Read the design").previousElementSibling).toBe(row("lead agent"));
+    // Indented under its owner, so a depth-1 agent's entry cannot read as the
+    // lead's own.
+    const indent = (el: HTMLElement) => parseFloat(getComputedStyle(el).paddingLeft);
+    expect(indent(planRow("Implement the API"))).toBeGreaterThan(indent(planRow("Read the design")));
+    // Colour is never the only signal: where an entry stands is a word too.
+    expect(within(planRow("Implement the API")).getByText("in progress")).toBeInTheDocument();
+  });
+
+  it("keeps a plan entry's title when a later update carries only its status", () => {
+    seq = 0;
+    const events = [
+      ev(0, { kind: "agent_started", agentId: "lead", label: "lead agent", depth: 0 }),
+      ev(1, { kind: "agent_started", agentId: "a1", label: "todo-api", depth: 1 }),
+      ev(2, { kind: "work_item", agentId: "lead", source: "plan", itemId: "p1", title: "Open the pull request", itemStatus: "pending" }),
+      // The runtime sends a subject only when the agent renamed the entry, so a
+      // tick-off carries none — and a row that blanked itself on completion is
+      // the failure this pins.
+      ev(3, { kind: "work_item", agentId: "lead", source: "plan", itemId: "p1", itemStatus: "completed" }),
+    ];
+    render(<RunCrew events={events} />);
+    expect(within(planRow("Open the pull request")).getByText("completed")).toBeInTheDocument();
+  });
+
+  it("draws no row for an entry the agent removed, nor for a validation criterion", () => {
+    seq = 0;
+    const events = [
+      ev(0, { kind: "agent_started", agentId: "lead", label: "lead agent", depth: 0 }),
+      ev(1, { kind: "agent_started", agentId: "a1", label: "todo-api", depth: 1 }),
+      ev(2, { kind: "work_item", agentId: "lead", source: "plan", itemId: "p1", title: "Rewrite the deploy script", itemStatus: "pending" }),
+      ev(3, { kind: "work_item", agentId: "lead", source: "plan", itemId: "p1", itemStatus: "deleted" }),
+      // A criterion shares the kind and nothing else: it is the PLATFORM's unit
+      // of work in a validating run, and folding one here would paint acceptance
+      // criteria onto an agent's to-do list.
+      ev(4, { kind: "work_item", agentId: "lead", source: "criterion", itemId: "AC-003-a", itemStatus: "fail" }),
+    ];
+    const { container } = render(<RunCrew events={events} />);
+    expect(container.textContent).not.toContain("Rewrite the deploy script");
+    expect(container.textContent).not.toContain("AC-003-a");
+  });
+
+  it("shows the plan on a cycle with one agent, where there is no tree to hang it on", () => {
+    seq = 0;
+    const events = [
+      ev(0, { kind: "run_started", agentId: "lead", taskKind: "implementation" }),
+      ev(1, { kind: "work_item", agentId: "lead", source: "plan", itemId: "p1", title: "Fix the redirect handler", itemStatus: "completed" }),
+      ev(2, { kind: "agent_settled", agentId: "lead", status: "completed", durationMs: 40_000, toolCount: 3, report: "Fixed it." }),
+      ev(3, { kind: "run_settled", agentId: "lead", outcome: "success" }),
+    ];
+    render(<RunCrew events={events} />);
+    // No tree at all on a crew of one, so the inspector is the only surface the
+    // list can reach — and the skill's promise has to hold on the commonest
+    // shape a run takes.
+    expect(screen.queryByRole("button", { name: "Crew" })).toBeNull();
+    expect(screen.getByText("Plan")).toBeInTheDocument();
+    // …and a settled agent KEEPS it: the list is what it set out to do and
+    // whether it got there, which only becomes a record once the run is over.
+    expect(
+      within(planRow("Fix the redirect handler", "inspector")).getByText("completed"),
+    ).toBeInTheDocument();
+  });
+
+  it("gives an agent that kept no list no plan section at all", () => {
+    render(<RunCrew events={fanOut()} />);
+    // An empty heading would report an absence as a section. Most agents keep
+    // no list, so this is the common case rather than the edge one.
+    expect(screen.queryByText("Plan")).toBeNull();
   });
 
   it("says so plainly when a cycle has produced nothing", () => {

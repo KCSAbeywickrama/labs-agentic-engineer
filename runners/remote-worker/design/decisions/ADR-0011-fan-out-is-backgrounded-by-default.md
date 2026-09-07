@@ -108,7 +108,7 @@ fail at startup the way a missing anchor does.
   every role it does name is bound by the glossary.
 - **The local overlay needed no edit.** Fan-out shape is mode-neutral — the
   playground drives the same runner entrypoint (`src/local.ts` →
-  `runClaudeQuery`), so it gets the same glossary — and the overlay owning a copy
+  `startCodingRun`), so it gets the same glossary — and the overlay owning a copy
   of any of it would be the duplication `skills/AGENTS.md` caps.
 - **Unmeasured on a real build.** The probes are recordings of the SDK's
   behaviour, not of a milestone run under the new prose. The first real run is

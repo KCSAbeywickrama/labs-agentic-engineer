@@ -85,8 +85,32 @@ into the runner pod at `/app/skills` for live skill edits (see
   changing what a line says, because several of its entries are corrections of
   the obvious-looking choice — and its v2 amendment records which of them the
   run-events cutover reverses.
-- **`lib/progress/claude_adapter.ts` is the ONLY module that knows which runtime
-  is running.** SDK messages in, run events v2 out. Runtime names must not reach
+- **`runtime/port.ts` is the WHOLE runtime-specific surface, and `lib/runner.ts`
+  depends on nothing else about a runtime.** A `Runtime` answers three things —
+  its name, its tool glossary, and `start(prompt, policy)` — and `RuntimePolicy`
+  states the platform's rules for a coding run in vocabulary no runtime owns:
+  where authored files may land, what a WebSearch query may contain, which skills
+  are reachable, which CAPABILITY CLASSES are denied, which model to bill. An
+  adapter enforces every clause through whatever mechanism its runtime has:
+  `runtime/claude/runtime.ts` turns the guards into `PreToolUse` hooks, the
+  capability classes into `disallowedTools` (`runtime/claude/tools.ts`), and the
+  MCP policy into an `http` server behind a loopback auth proxy, because this
+  SDK's MCP config only accepts a static header. The test for whether something
+  belongs in the port is whether a second runtime would write it the same way; if
+  it names a tool, a hook or an SDK option, it does not.
+  **There is exactly ONE adapter**, and `runtime/registry.ts` refuses `opencode`
+  by name with the reason — three spikes are owed (pre-dispatch tool/permission
+  parity, whether the stream declares an agent's id/depth/parent, and how usage
+  is reported for cost stamping) and each unanswered one fails SILENTLY: an
+  unenforced guard, an inferred tree, a blanked cost. A seam that says "not
+  implemented" is the deliverable; a stub would be a claim.
+  Every deviation from the design's sketch is recorded at its field in
+  `port.ts` and argued in
+  `remote-worker/design/decisions/ADR-0012-the-runtime-is-a-port-with-one-adapter.md`
+  — read it before reshaping the interface, because the largest one (the session
+  exposes `stream` + `translate`, not a flat `events()`) is a measured constraint
+  of the WATCHDOG's contract, not a preference.
+- **`lib/progress/claude_adapter.ts` is the TRANSLATION half of that adapter.** SDK messages in, run events v2 out. Runtime names must not reach
   a consumer's logic: `tool` carries the SDK's own tool name because that is what
   a row prints, but fan-out is `agent_started`, never "a `tool_result` whose tool
   is called `Agent`". It is a per-run factory — the agent registry, the in-flight
@@ -112,8 +136,11 @@ into the runner pod at `/app/skills` for live skill edits (see
   does, add a fixture rather than a hand-written mock — both probes in
   `remote-worker/test/fixtures/` are replayed through it in `run_loop.test.ts`.
   `AEP_RUN_DEADLINE_SECONDS` bounds a run that never ends — it stops the tasks
-  still live and settles as a failure, and unset means no guard, which is every
-  caller today.
+  still live and settles as a failure. The dispatcher stamps it with the SAME
+  number it puts on the Job's `activeDeadlineSeconds`, so the pod's own budget
+  and the cluster's backstop cannot disagree; the runner subtracts its own
+  margin, which is not the dispatcher's to know. Unset still means no guard,
+  which is what the playground runs under.
 - **API retries are on the feed for every run; the rest of the diagnostics are
   developer-only files.** A stalled model turn used to be reported as bare
   silence. The SDK emits `system`/`api_retry` for every retryable failure and
@@ -185,8 +212,13 @@ into the runner pod at `/app/skills` for live skill edits (see
   sandbox.
 - **`allowedTools` restricts nothing here.** `bypassPermissions` +
   `allowDangerouslySkipPermissions` allow every harness tool regardless, so
-  `BASE_ALLOWED_TOOLS` documents intent while `DISALLOWED_TOOLS` is the boundary
-  that holds. Keep the surface that assumes an interactive user, a scheduler, a
+  `BASE_ALLOWED_TOOLS` documents intent while the DENY list is the boundary
+  that holds. Both live in `runtime/claude/tools.ts`, and the deny list is
+  derived: the port states CAPABILITY CLASSES (`interactive_prompt`,
+  `scheduling`, `durable_session`, `peer_messaging`, `artifact_publishing`) and
+  that file maps each to this runtime's names. There are no runtime-neutral tool
+  names to write — a second runtime shares none of these sixteen — but the two
+  lists share the REASON each entry is on them, which is the sentence below. Keep the surface that assumes an interactive user, a scheduler, a
   durable session or a peer to talk to (schedulers, cron, prompts, worktrees,
   messaging) in the deny list: a one-shot pod has none of those, and a
   reachable-but-useless tool is somewhere a run will spend a turn.
@@ -204,7 +236,11 @@ into the runner pod at `/app/skills` for live skill edits (see
   console folds by item — so the plan being true is worth more than the turn it
   costs. Corollary: a typo in `BASE_ALLOWED_TOOLS` cannot fail loudly — it named
   `Task` for a whole SDK generation after the tool became `Agent`.
-- **`settingSources` is `["project"]`, and that is load-bearing.** The BFF
+- **`settingSources` is `["project"]`, and that is load-bearing.** It lives in
+  `runtime/claude/runtime.ts` now, with the other two invariants that are
+  conditions of running this platform's workload rather than policy anyone
+  decides per run (`strictMcpConfig`, and `bypassPermissions` +
+  `allowDangerouslySkipPermissions`). The BFF
   mirrors the org's coding-relevant skills into the project clone at
   `.claude/skills/`, and the SDK only discovers them if the project source is
   admitted — its `skills:` option is an ALLOWLIST over discovered skills, not a
@@ -212,7 +248,7 @@ into the runner pod at `/app/skills` for live skill edits (see
   the run reported success while the agent compensated by grepping `SKILL.md`
   out of the tree. `AGENT_SETTING_SOURCES` is exported and
   pinned by a test so a revert to `[]` fails there instead of in a build, and
-  `runClaudeQuery` warns when the `init` message's resolved list is missing
+  `startCodingRun` warns when the `init` message's resolved list is missing
   something we asked for (`skills_preload_check.ts`). 'user' and 'local' stay
   out — a developer's `~/.claude` has no place in a container run. The MCP
   isolation that `[]` used to give for free is now explicit: `strictMcpConfig`
@@ -233,6 +269,16 @@ into the runner pod at `/app/skills` for live skill edits (see
   claiming `skills:` "injects full bodies at startup" was wrong for as long as it
   existed, through the earlier `aep-task-skills` plugin too — an agent given a
   listed skill cannot state a codeword from its body until it calls the tool.
+- **The RUNTIME and the MODEL are an organization setting, and they arrive as
+  env.** `AEP_AGENT_RUNTIME` and `AEP_AGENT_MODEL` are stamped onto the Workload
+  by `delivery/codingagent`, copied from the org's `/config` `codingAgent`
+  section — copied, not referenced, so a change applies from the NEXT cycle and a
+  run in flight keeps the model its usage lines were billed against. Unset means
+  the platform defaults (`claude-code`, `claude-sonnet-5`), which is what every
+  dispatch carried before the setting existed and what the playground still runs
+  under. An unrecognised runtime is an error, never a silent fallback: running
+  the one we do have would bill an org for a runtime it did not choose. The model
+  is no longer a literal in `runner.ts`.
 - Self-contained: all agent and SDK-specific wiring lives here.
 - **The runner's contract types are GENERATED and DELIBERATELY NOT COMMITTED.**
   `pnpm --filter remote-worker gen` (wired into root `make gen` via turbo) runs
@@ -314,7 +360,7 @@ into the runner pod at `/app/skills` for live skill edits (see
   The mirror's writes are best-effort by design (they may not fail a creation,
   publish or dispatch), so this is where that becomes visible. **Do not add an
   image fallback**: two sources drift, and the fallback would silently discard an
-  org's own edit to the skill. The check sits in `runClaudeQuery`, so no new
+  org's own edit to the skill. The check sits in `startCodingRun`, so no new
   entrypoint can start a procedure-less session.
 - **Anything a skill must invoke by absolute path reads `$AEP_SKILLS_DIR`**, now
   `<workspace>/.claude/skills`. The runner stamps it (`lib/runner.ts`) because it
