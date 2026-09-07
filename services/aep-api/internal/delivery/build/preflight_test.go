@@ -269,13 +269,13 @@ func TestPreflight_ExternalNeedsInput_EmitsUnresolvedBlockerItem(t *testing.T) {
 	require.NotEmpty(t, item.Description)
 }
 
-// An unresolved external dependency with reason=needs-spec raises the
-// pre-existing "external-spec" kind — reborn, not reinvented.
-func TestPreflight_ExternalNeedsSpec_EmitsSpecBlockerItem(t *testing.T) {
+// An unresolved external dependency with reason=needs-contract raises the
+// pre-existing "external-spec" kind — the drawer's provide-a-document item.
+func TestPreflight_ExternalNeedsContract_EmitsSpecBlockerItem(t *testing.T) {
 	comps := []spec.DesignComponent{{Name: "orders", ComponentType: spec.ComponentTypeService,
 		Dependencies: []spec.Dependency{
 			{Kind: spec.DependencyKindExternal, Name: "partner-api",
-				Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsSpec},
+				Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsContract},
 		}}}
 	svc := NewPreflightService(PreflightDeps{Design: fakeDesign{comps: comps}, Status: fakeStatus{}})
 	pf, err := svc.Preflight(context.Background(), "acme", "shop")
@@ -414,9 +414,9 @@ func TestPreflight_ResolutionBlockers_SetNeedsResolution(t *testing.T) {
 			wantKind: "external-unresolved",
 		},
 		{
-			name: "external without a spec",
+			name: "external without a contract",
 			dep: spec.Dependency{Kind: spec.DependencyKindExternal, Name: "partner-api",
-				Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsSpec},
+				Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsContract},
 			wantKind: "external-spec",
 		},
 		{

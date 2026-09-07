@@ -309,8 +309,8 @@ func (s *Service) resolveDependenciesYAML(ctx context.Context, orgID, projectID 
 	// below — the spec is a static repo artifact from design save, not a runtime
 	// resolution, so it applies whether or not the connection is bound yet.
 	for _, d := range comp.Dependencies {
-		if d.Kind == spec.DependencyKindExternal && d.SpecPath != "" {
-			contractSections = append(contractSections, externalSpecContractSection(d.Name, d.SpecPath))
+		if d.Kind == spec.DependencyKindExternal && d.Contract != "" {
+			contractSections = append(contractSections, externalSpecContractSection(d.Name, spec.ContractPath(d.Name, d.Contract), d.Assumed != nil))
 		}
 	}
 
@@ -366,12 +366,23 @@ func localComponentContractSection(depName string) string {
 // file path. It is the authoritative contract when present; the coding agent
 // fetches it (URL) or reads it (file) and researches the API's own docs for
 // anything the contract doesn't cover.
-func externalSpecContractSection(depName, specPath string) string {
+func externalSpecContractSection(depName, contractPath string, assumed bool) string {
+	if assumed {
+		return fmt.Sprintf(
+			"External API contract for `%s`: `%s` — a file in your checked-out repo, written by the "+
+				"design agent from the provider's documentation and ACCEPTED AS AN ASSUMPTION by the user "+
+				"(no published document was available). Code against it as written, keep the integration "+
+				"behind one adapter so a corrected contract is a local change, and note in the PR what you "+
+				"could not verify against the provider.",
+			depName, contractPath,
+		)
+	}
 	return fmt.Sprintf(
-		"External API contract for `%s`: `%s` — if this is a URL, fetch it; if a path, "+
-			"it is a file in your checked-out repo. Use it as the source of truth for the "+
-			"API's operations, and research the provider's docs for anything it doesn't cover.",
-		depName, specPath,
+		"External API contract for `%s`: `%s` — a file in your checked-out repo, the committed "+
+			"source of truth for the API's operations (a slice of the provider's published document; "+
+			"its provenance is in the dependency's dependency.json beside it). Research the provider's "+
+			"docs for anything it doesn't cover.",
+		depName, contractPath,
 	)
 }
 

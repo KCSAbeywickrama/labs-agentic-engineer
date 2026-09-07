@@ -1232,11 +1232,17 @@ type DeleteOp struct {
 	Path    string `json:"path"`
 }
 
-// Dependency A component's unified, kind-discriminated dependency entry. status/reason are read-time computed by spec.ComputeDependencyStatus — never authored, never persisted (Design.json write-gate rejects them).
+// Dependency A component's unified, kind-discriminated dependency entry. status/reason/flags are read-time computed by spec.ComputeDependencyStatus — never authored, never persisted (Design.json write-gate rejects them). An external dependency's definition (source, provider, style, contract, sdk, package, provenance, candidates, config, assumed) is HYDRATED from its own file, specs/design/dependencies/<name>/dependency.json — one dependency, one definition, referenced by name from every component that uses it.
 type Dependency = contracts.Dependency
+
+// DependencyAssumption The user's permission to build against a contract the agent wrote from research — who accepted, when, and the agent's note of what it was unsure about.
+type DependencyAssumption = contracts.DependencyAssumption
 
 // DependencyCandidate One option in an ambiguous external dependency's resolution set.
 type DependencyCandidate = contracts.DependencyCandidate
+
+// DependencyProvenance Where a committed contract came from — the source document, its full-document hash, when it was read, and whether the committed file is a slice of it.
+type DependencyProvenance = contracts.DependencyProvenance
 
 // DependencyStatus defines model for DependencyStatus.
 type DependencyStatus struct {

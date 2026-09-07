@@ -129,13 +129,15 @@ const (
 // the Dependency.Status/Reason doc below) — never authored, never persisted.
 // ComputeDependencyStatus (dependency_status.go) is the single authority: for
 // kind=org-service, namespace-visible → Resolved, catalog-visible elsewhere →
-// Blocked/AccessRequired, absent → Unresolved/NotFound. For kind=external,
-// 2+ Candidates → Ambiguous (no reason); a registry-known name → Resolved; no
-// Style → Unresolved/NeedsInput; Style=rest-api with no SpecPath →
-// Unresolved/NeedsSpec; Style=sdk with no Package → Unresolved/NeedsInput;
-// otherwise Resolved. component/platform-resource are always Resolved here.
-// The design-save proceed-gate (design.ErrUnresolvedDependency) blocks on all
-// non-resolved states.
+// Blocked/AccessRequired, absent → Unresolved/NotFound. For kind=external the
+// state is read off the dependency's own file (hydrated onto the edge): 2+
+// Candidates → Ambiguous; a registered (org) or registry-known name →
+// Resolved+registered; no Provider and no Style → Unresolved/NeedsInput; a
+// Style with no Contract (an sdk without its manifest, a rest-api/graphql
+// without its document) → Unresolved/NeedsContract; otherwise Resolved, with
+// the "assumed" and "sdk-only" flags saying what kind of resolved.
+// component/platform-resource are always Resolved here. The build gate blocks
+// on every non-resolved state and on nothing else.
 const (
 	DependencyStatusResolved   = "resolved"
 	DependencyStatusBlocked    = "blocked"
@@ -144,15 +146,23 @@ const (
 
 	DependencyReasonAccessRequired = "access-required"
 	DependencyReasonNotFound       = "not-found"
-	// DependencyReasonNeedsSpec pairs with DependencyStatusUnresolved on an
-	// external `style: rest-api` dependency with no specPath yet — the
-	// contract-collection state (see ComputeDependencyStatus rule 4).
-	DependencyReasonNeedsSpec = "needs-spec"
+	// DependencyReasonNeedsContract pairs with DependencyStatusUnresolved on an
+	// external dependency whose provider is chosen but whose contract (or, for
+	// an sdk, its manifest) is not on disk yet.
+	DependencyReasonNeedsContract = "needs-contract"
 	// DependencyReasonNeedsInput pairs with DependencyStatusUnresolved on an
-	// external dependency the platform cannot resolve without more from the
-	// architect: no style at all, or an `sdk` style with no package yet (see
-	// ComputeDependencyStatus rules 3 and 5).
+	// external dependency the platform cannot place at all: no provider, no
+	// style, no candidates — the agent could not identify the system.
 	DependencyReasonNeedsInput = "needs-input"
+
+	// Flags qualify a RESOLVED external dependency (Dependency.Flags).
+	DependencyFlagRegistered = "registered"
+	DependencyFlagAssumed    = "assumed"
+	DependencyFlagSDKOnly    = "sdk-only"
+
+	// Dependency.Source / DependencyDefinition.Source values.
+	DependencySourceProject = "project"
+	DependencySourceOrg     = "org"
 )
 
 // DependencyStyle is the closed set of external dependency shapes (mirrors the
@@ -162,6 +172,7 @@ type DependencyStyle = contracts.DependencyStyle
 
 const (
 	DependencyStyleRestAPI DependencyStyle = "rest-api"
+	DependencyStyleGraphQL DependencyStyle = "graphql"
 	DependencyStyleSDK     DependencyStyle = "sdk"
 )
 
@@ -188,6 +199,19 @@ type EndpointWiring = contracts.EndpointWiring
 // ConfigKey is one env-var key a component reads at runtime. Wire shape in the
 // contracts leaf (re-exported here).
 type ConfigKey = contracts.ConfigKey
+
+// DependencyDefinition is the one definition of an external dependency — the
+// dependency.json in its own directory (see dependency_json.go). Wire shape in
+// the contracts leaf.
+type DependencyDefinition = contracts.DependencyDefinition
+
+// DependencyProvenance / DependencyAssumption / SdkManifest: wire shapes in the
+// contracts leaf, re-exported for the codec and the hydration.
+type (
+	DependencyProvenance = contracts.DependencyProvenance
+	DependencyAssumption = contracts.DependencyAssumption
+	SdkManifest          = contracts.SdkManifest
+)
 
 // ComponentDependsOn returns the names of this component's sibling-component
 // dependencies — the successor to the legacy DependsOn []string field. Used

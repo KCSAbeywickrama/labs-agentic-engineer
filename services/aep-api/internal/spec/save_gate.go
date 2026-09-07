@@ -120,6 +120,22 @@ func validateDesignBundle(files map[string]string) error {
 	// (every test user's role declared, coldStartRole declared or null). Same
 	// single definition the agent's write gate uses, so a document that passes
 	// one gate passes the other.
+	for _, name := range DependencyNamesIn(files) {
+		key := dependencyDesignKey(name)
+		content, ok := files[key]
+		if !ok {
+			continue
+		}
+		if err := designspec.ValidateDependencyDesignInDir([]byte(content), name); err != nil {
+			var ve *designspec.ValidationError
+			if errors.As(err, &ve) {
+				verrs = append(verrs, FileValidationError{Path: key, Code: ve.Code, Message: ve.Message})
+			} else {
+				verrs = append(verrs, FileValidationError{Path: key, Code: designspec.CodeSchemaViolation, Message: err.Error()})
+			}
+		}
+	}
+
 	if raw, ok := files[securityspec.BundleKey]; ok && strings.TrimSpace(raw) != "" {
 		if _, err := securityspec.Parse([]byte(raw)); err != nil {
 			var ve *securityspec.ValidationError

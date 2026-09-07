@@ -71,8 +71,8 @@ func dependencyBlocker(d spec.Dependency) (kind, description string, blocked boo
 		return kindExternalAmbiguous, "More than one candidate fits — resolve which one to use.", true
 	case spec.DependencyStatusUnresolved:
 		switch d.Reason {
-		case spec.DependencyReasonNeedsSpec:
-			return kindExternalSpec, "No API spec yet — provide one to continue.", true
+		case spec.DependencyReasonNeedsContract:
+			return kindExternalSpec, "No contract yet — provide the API document to continue.", true
 		case spec.DependencyReasonNeedsInput:
 			return kindExternalUnresolved, "Needs information only you can provide.", true
 		}

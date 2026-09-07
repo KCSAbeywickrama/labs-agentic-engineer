@@ -120,7 +120,7 @@ func TestCollectSpec_InvalidSpec(t *testing.T) {
 	}
 }
 
-func TestCollectSpec_CommitsSpecAndDesignEdit(t *testing.T) {
+func TestCollectSpec_CommitsContractDefinitionAndDesignEdit(t *testing.T) {
 	t.Parallel()
 	fc := &fakeCommitter{}
 	svc := collectSvc(t, `[{"kind":"external","name":"stripe","style":"rest-api"}]`, fc)
@@ -129,32 +129,42 @@ func TestCollectSpec_CommitsSpecAndDesignEdit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CollectSpec: unexpected error: %v", err)
 	}
-	if specPath != "dependencies/stripe.openapi.yaml" {
-		t.Fatalf("specPath = %q, want dependencies/stripe.openapi.yaml", specPath)
+	// The contract lands in the dependency's own directory, not the consumer's.
+	if specPath != "specs/design/dependencies/stripe/openapi.yaml" {
+		t.Fatalf("specPath = %q, want specs/design/dependencies/stripe/openapi.yaml", specPath)
 	}
-	if len(fc.writes) != 2 {
-		t.Fatalf("want a 2-file atomic commit (spec + design.json), got %d writes", len(fc.writes))
+	if len(fc.writes) != 3 {
+		t.Fatalf("want a 3-file atomic commit (contract + dependency.json + design.json), got %d writes", len(fc.writes))
 	}
-	var specW, designW *DesignFileWrite
+	var specW, defW, designW *DesignFileWrite
 	for i := range fc.writes {
-		switch {
-		case strings.HasSuffix(fc.writes[i].Path, "dependencies/stripe.openapi.yaml"):
+		switch fc.writes[i].Path {
+		case "specs/design/dependencies/stripe/openapi.yaml":
 			specW = &fc.writes[i]
-		case strings.HasSuffix(fc.writes[i].Path, "components/consumer/design.json"):
+		case "specs/design/dependencies/stripe/dependency.json":
+			defW = &fc.writes[i]
+		case "specs/design/components/consumer/design.json":
 			designW = &fc.writes[i]
 		}
 	}
 	if specW == nil {
-		t.Fatal("spec file not in the commit")
-	}
-	if specW.Path != "specs/design/components/consumer/dependencies/stripe.openapi.yaml" {
-		t.Fatalf("spec full path = %q", specW.Path)
+		t.Fatalf("contract file not in the commit: %+v", fc.writes)
 	}
 	if specW.BaseSHA != "" {
-		t.Fatalf("new spec file must be a create (empty BaseSHA), got %q", specW.BaseSHA)
+		t.Fatalf("new contract file must be a create (empty BaseSHA), got %q", specW.BaseSHA)
 	}
 	if !strings.Contains(specW.Content, "openapi:") {
-		t.Fatalf("spec content not normalized OpenAPI: %q", specW.Content)
+		t.Fatalf("contract content not normalized OpenAPI: %q", specW.Content)
+	}
+	if defW == nil {
+		t.Fatalf("dependency.json not in the commit: %+v", fc.writes)
+	}
+	// The definition records the contract file and where it came from; that
+	// is what clears the needs-contract gate on the next read.
+	for _, want := range []string{`"name": "stripe"`, `"style": "rest-api"`, `"contract": "openapi.yaml"`, `"sha256": "`} {
+		if !strings.Contains(defW.Content, want) {
+			t.Fatalf("dependency.json did not record %s:\n%s", want, defW.Content)
+		}
 	}
 	if designW == nil {
 		t.Fatal("design.json edit not in the commit")
@@ -162,9 +172,13 @@ func TestCollectSpec_CommitsSpecAndDesignEdit(t *testing.T) {
 	if designW.BaseSHA != "sha-design" {
 		t.Fatalf("design.json must CAS on its read sha, got %q", designW.BaseSHA)
 	}
-	// The specPath edit is what records the dependency's stored contract.
-	if !strings.Contains(designW.Content, `"specPath": "dependencies/stripe.openapi.yaml"`) {
-		t.Fatalf("design.json did not record specPath:\n%s", designW.Content)
+	// The consumer's re-rendered design.json is a bare reference — the legacy
+	// `style` it carried is gone (the migration rides this write).
+	if strings.Contains(designW.Content, `"style"`) || strings.Contains(designW.Content, `"specPath"`) {
+		t.Fatalf("design.json must not carry definition fields any more:\n%s", designW.Content)
+	}
+	if !strings.Contains(designW.Content, `"name": "stripe"`) {
+		t.Fatalf("design.json lost the reference:\n%s", designW.Content)
 	}
 }
 

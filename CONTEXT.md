@@ -153,14 +153,26 @@ _Avoid_: connection (in OpenChoreo that names a consumed endpoint — the
 opposite side of the wire).
 
 **External dependency**:
-**One component's** declared need for a third-party API or SDK — a `kind:
-external` entry in its `design.json` `dependencies[]` (`style: rest-api | sdk`),
-naming the config keys it reads and, for a REST API, an optional `specPath` (a
-URL or a committed spec file) the coding agent starts from (ADR-0010). Resolved
-at read time (ADR-0003), never a stored flag. It **resolves to** an External
-resource: a **Registered External resource**'s exact name when the catalog
-already has a fit, otherwise a new **Project External resource** name.
-_Avoid_: `needsSpec`, `specUrl`, `sources` — retired fields, rejected on parse.
+A project's need for a third-party API or SDK, defined **once** in its own
+directory, `specs/design/dependencies/<name>/` — `dependency.json` (the
+provider chosen, `style: rest-api | graphql | sdk`, the config keys every
+consumer codes against, open `candidates` while nothing is chosen) beside the
+committed **contract** it points at (an OpenAPI or GraphQL slice, an `sdk.json`
+manifest). A component **references** it by name only, as a `kind: external`
+entry in its `design.json` `dependencies[]`; the platform hydrates the
+reference from the file when it reads the design. Resolved when the contract
+is on disk (read-time, ADR-0003, never a stored flag); a Registered External
+resource is a platform-stamped `source: org` copy of the same shape.
+_Avoid_: `specPath` (a URL was never a contract), `needsSpec`, `specUrl`,
+`sources` — retired fields, rejected on write.
+
+**Assumed contract**:
+A dependency's contract the design agent wrote from the provider's
+documentation because no published document could be found or supplied. It
+counts as resolved only once a user has accepted it (the `assumed` record in
+`dependency.json`, written by the platform, never by the agent) and stays
+flagged wherever the dependency appears until a real contract replaces it.
+_Avoid_: stub, mock (those are code; this is a contract the code is built to).
 
 **External resource**:
 The org-level shared record of one third-party integration — name, description,

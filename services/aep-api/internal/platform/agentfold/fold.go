@@ -206,7 +206,7 @@ func (f *Fold) AddFile(ctx context.Context, path, content string) (OpResult, err
 		return opErr(path, op, ErrAlreadyExists,
 			path+" already exists — use editFile to change it, or removeFile then addFile to replace it wholesale."), nil
 	}
-	return f.commit(path, op, next, func(e string) string {
+	return f.commit(path, op, next, nil, func(e string) string {
 		return path + " would not be valid YAML: " + e
 	}), nil
 }
@@ -258,7 +258,7 @@ func (f *Fold) EditFile(ctx context.Context, path, oldString, newString string) 
 
 	idx := starts[0]
 	after := content[:idx] + newS + content[idx+len(oldS):]
-	return f.commit(path, op, after, func(e string) string {
+	return f.commit(path, op, after, &content, func(e string) string {
 		return "Edit rejected — result would not be valid YAML: " + e + ". The file is unchanged; fix the indentation of newString and retry."
 	}), nil
 }
@@ -283,11 +283,17 @@ func (f *Fold) RemoveFile(ctx context.Context, path string) (OpResult, error) {
 // commit applies content to path gated by the YAML reparse guard, the
 // component design.json schema gate, and the wireframes .dsl syntax gate;
 // a rejection leaves the fold byte-for-byte unchanged.
-func (f *Fold) commit(path string, op Op, content string, rejectMsg func(yamlErr string) string) OpResult {
+// commit runs every write-gate over the candidate content and, when all pass,
+// lands it in the overlay. `prior` is the file as it stood before this write
+// (nil for a create) — the dependency gate's assumed-is-echoed rule reads it.
+func (f *Fold) commit(path string, op Op, content string, prior *string, rejectMsg func(yamlErr string) string) OpResult {
 	if yamlErr := checkYAMLGuard(path, content); yamlErr != "" {
 		return opErr(path, op, ErrInvalidYAML, rejectMsg(yamlErr))
 	}
 	if code, msg := checkComponentDesignGuard(path, content); code != "" {
+		return opErr(path, op, code, msg)
+	}
+	if code, msg := checkDependencyDesignGuard(path, content, prior); code != "" {
 		return opErr(path, op, code, msg)
 	}
 	if code, msg := checkWireframeDslGuard(path, content); code != "" {

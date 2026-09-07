@@ -96,8 +96,9 @@ func TestDependency_JSONRoundTrip(t *testing.T) {
 		"external-rest": {
 			Kind:     DependencyKindExternal,
 			Name:     "stripe",
+			Provider: "Stripe",
 			Style:    DependencyStyleRestAPI,
-			SpecPath: "dependencies/stripe.openapi.yaml",
+			Contract: "openapi.yaml",
 			Config: []ConfigKey{
 				{Key: "STRIPE_API_KEY", Secret: true, Description: "Your Stripe secret API key"},
 				{Key: "STRIPE_REGION", Secret: false, DefaultValue: "us-east-1"},

@@ -4092,9 +4092,13 @@ components:
       - path
       type: object
     Dependency:
-      description: A component's unified, kind-discriminated dependency entry. status/reason
+      description: A component's unified, kind-discriminated dependency entry. status/reason/flags
         are read-time computed by spec.ComputeDependencyStatus — never authored,
-        never persisted (Design.json write-gate rejects them).
+        never persisted (Design.json write-gate rejects them). An external
+        dependency's definition (source, provider, style, contract, sdk, package,
+        provenance, candidates, config, assumed) is HYDRATED from its own file,
+        specs/design/dependencies/<name>/dependency.json — one dependency, one
+        definition, referenced by name from every component that uses it.
       x-go-type: contracts.Dependency
       x-go-type-import:
         path: github.com/wso2/aep/aep-api/internal/contracts
@@ -4110,12 +4114,34 @@ components:
           type: string
         reason:
           type: string
+        flags:
+          description: Read-time qualifiers on a resolved external dependency — registered, assumed, sdk-only.
+          items:
+            type: string
+          type: array
+          nullable: true
+        source:
+          description: project (agent-authored here) or org (a platform-stamped copy of a Registered External resource).
+          type: string
+        provider:
+          description: The concrete system chosen; absent while candidates are open.
+          type: string
         style:
+          description: rest-api | graphql | sdk
+          type: string
+        contract:
+          description: The contract file name in the dependency's directory, present only when the file is on disk.
+          type: string
+        sdk:
+          description: The SDK manifest file name (sdk.json), present only when it is on disk.
           type: string
         package:
+          description: For an sdk dependency, the package for this component's language, from the manifest.
           type: string
-        specPath:
-          type: string
+        provenance:
+          $ref: '#/components/schemas/DependencyProvenance'
+        assumed:
+          $ref: '#/components/schemas/DependencyAssumption'
         candidates:
           items:
             $ref: '#/components/schemas/DependencyCandidate'
@@ -4135,6 +4161,41 @@ components:
       required:
       - kind
       - name
+      type: object
+    DependencyProvenance:
+      description: Where a committed contract came from — the source document, its full-document
+        hash, when it was read, and whether the committed file is a slice of it.
+      x-go-type: contracts.DependencyProvenance
+      x-go-type-import:
+        path: github.com/wso2/aep/aep-api/internal/contracts
+      additionalProperties: false
+      properties:
+        sourceUrl:
+          type: string
+        sha256:
+          type: string
+        fetchedAt:
+          type: string
+        sliced:
+          type: boolean
+      type: object
+    DependencyAssumption:
+      description: The user's permission to build against a contract the agent wrote from research —
+        who accepted, when, and the agent's note of what it was unsure about.
+      x-go-type: contracts.DependencyAssumption
+      x-go-type-import:
+        path: github.com/wso2/aep/aep-api/internal/contracts
+      additionalProperties: false
+      properties:
+        by:
+          type: string
+        at:
+          type: string
+        note:
+          type: string
+      required:
+      - by
+      - at
       type: object
     DependencyCandidate:
       description: One option in an ambiguous external dependency's resolution set.

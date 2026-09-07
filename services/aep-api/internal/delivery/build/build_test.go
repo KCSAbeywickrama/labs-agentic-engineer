@@ -1035,13 +1035,13 @@ func TestBuild_DependencyGate_NeedsInput_Blocks(t *testing.T) {
 	}
 }
 
-// A doctored client sending no external-spec input for a needs-spec dependency
-// still gets gated: kind maps to the pre-existing "external-spec".
-func TestBuild_DependencyGate_NeedsSpec_NoDrawerInput_Blocks(t *testing.T) {
+// A doctored client sending no external-spec input for a needs-contract
+// dependency still gets gated: kind maps to the pre-existing "external-spec".
+func TestBuild_DependencyGate_NeedsContract_NoDrawerInput_Blocks(t *testing.T) {
 	design := &gateDesign{comps: []spec.DesignComponent{{Name: "o", ComponentType: spec.ComponentTypeService,
 		Dependencies: []spec.Dependency{
 			{Kind: spec.DependencyKindExternal, Name: "partner-api",
-				Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsSpec},
+				Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsContract},
 		}}}}
 	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1"}}
 	svc := build.NewService(build.Deps{
@@ -1065,11 +1065,11 @@ func TestBuild_DependencyGate_NeedsSpec_NoDrawerInput_Blocks(t *testing.T) {
 // pasted spec with THIS build request. ApplyPreTag commits it (CollectSpec)
 // BEFORE the gate re-reads — so the gate sees the now-resolved dependency and
 // the build proceeds. Proves the gate runs AFTER ApplyPreTag, not before.
-func TestBuild_DependencyGate_NeedsSpec_ResolvedByThisRequestsDrawerInput_Proceeds(t *testing.T) {
+func TestBuild_DependencyGate_NeedsContract_ResolvedByThisRequestsDrawerInput_Proceeds(t *testing.T) {
 	design := &gateDesign{comps: []spec.DesignComponent{{Name: "o", ComponentType: spec.ComponentTypeService,
 		Dependencies: []spec.Dependency{
 			{Kind: spec.DependencyKindExternal, Name: "partner-api",
-				Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsSpec},
+				Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsContract},
 		}}}}
 	spy := newPlanSpy()
 	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1"}}

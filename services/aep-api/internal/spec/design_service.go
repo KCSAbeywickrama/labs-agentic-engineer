@@ -18,10 +18,12 @@ package spec
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 )
 
 // ErrSpecNotApproved is the design-domain sentinel surfaced (as 409 by the
@@ -261,8 +263,8 @@ func (s *designService) CollectSpec(ctx context.Context, orgID, projectID, compo
 		rawSpec = fetched
 	}
 
-	// Validate + normalize; StoreConsumedSpec returns the component-relative
-	// specPath and the normalized blob to commit.
+	// Validate + normalize; StoreConsumedSpec returns the repo-relative contract
+	// path and the normalized blob to commit.
 	specPath, normalized, err := s.store.StoreConsumedSpec(ctx, orgID, projectID, component, depName, rawSpec)
 	if err != nil {
 		if errors.Is(err, ErrInvalidSpecContent) {
@@ -271,24 +273,42 @@ func (s *designService) CollectSpec(ctx context.Context, orgID, projectID, compo
 		return "", err
 	}
 
-	// Record specPath, then render ONLY this component's design.json through the
-	// canonical codec.
+	// The contract lands in the dependency's own directory and its definition
+	// records the file (one dependency, one definition). A design from before
+	// the directory existed has its definition lifted in memory by
+	// AssembleDesign, so this write also migrates it — and re-rendering the
+	// consumer's design.json drops the legacy fields from the component.
+	def, found := definitionByName(design.Dependencies, depName)
+	if !found {
+		def = DependencyDefinition{Name: depName, Description: design.Components[compIdx].Dependencies[depIdx].Description}
+	}
+	if def.Style == "" {
+		def.Style = DependencyStyleRestAPI
+	}
+	def.Contract = ConsumedContractFile
+	def.Provenance = &DependencyProvenance{
+		SourceURL: specURL,
+		SHA256:    fmt.Sprintf("%x", sha256.Sum256(rawSpec)),
+		FetchedAt: time.Now().UTC().Format(time.RFC3339),
+	}
 	comp := design.Components[compIdx]
-	comp.Dependencies[depIdx].SpecPath = specPath
-	rendered, rerr := SplitDesign(&DesignFile{Components: []DesignComponent{comp}})
+	rendered, rerr := SplitDesign(&DesignFile{Components: []DesignComponent{comp}, Dependencies: []DependencyDefinition{def}})
 	if rerr != nil {
-		return "", fmt.Errorf("render component %q design.json: %w", component, rerr)
+		return "", fmt.Errorf("render dependency %q and component %q: %w", depName, component, rerr)
 	}
 	designSub := "components/" + component + "/design.json" // relative to specs/design/
 	designContent, ok := rendered[designSub]
 	if !ok {
 		return "", fmt.Errorf("render component %q design.json: %q missing from split", component, designSub)
 	}
+	definitionSub := dependencyDesignKey(depName)
+	definitionContent := rendered[definitionSub]
 
-	// Full repo paths + CAS shas. design.json must exist; the spec file may not
-	// yet (a fresh collect creates it, a re-collect overwrites at its sha).
+	// Full repo paths + CAS shas. design.json must exist; the dependency file
+	// and the contract may not yet (a fresh collect creates them, a re-collect
+	// overwrites at their shas).
 	designFull := DesignDir + "/" + designSub
-	specFull := DesignDir + "/components/" + component + "/" + specPath
+	definitionFull := DesignDir + "/" + definitionSub
 	_, designSHA, designExists, rerr := s.fileCommitter.ReadFile(ctx, orgID, projectID, designFull)
 	if rerr != nil {
 		return "", fmt.Errorf("read design.json for CAS: %w", rerr)
@@ -296,22 +316,37 @@ func (s *designService) CollectSpec(ctx context.Context, orgID, projectID, compo
 	if !designExists {
 		return "", fmt.Errorf("%w: component %q design.json missing on disk", ErrDependencyNotFound, component)
 	}
-	_, specSHA, _, rerr := s.fileCommitter.ReadFile(ctx, orgID, projectID, specFull)
+	_, definitionSHA, _, rerr := s.fileCommitter.ReadFile(ctx, orgID, projectID, definitionFull)
 	if rerr != nil {
-		return "", fmt.Errorf("read spec file for CAS: %w", rerr)
+		return "", fmt.Errorf("read dependency.json for CAS: %w", rerr)
+	}
+	_, specSHA, _, rerr := s.fileCommitter.ReadFile(ctx, orgID, projectID, specPath)
+	if rerr != nil {
+		return "", fmt.Errorf("read contract file for CAS: %w", rerr)
 	}
 
 	writes := []DesignFileWrite{
-		{Path: specFull, Content: normalized, BaseSHA: specSHA}, // BaseSHA "" ⇒ create
+		{Path: specPath, Content: normalized, BaseSHA: specSHA},                    // BaseSHA "" ⇒ create
+		{Path: definitionFull, Content: definitionContent, BaseSHA: definitionSHA}, // "" ⇒ create
 		{Path: designFull, Content: designContent, BaseSHA: designSHA},
 	}
 	if err := s.fileCommitter.Commit(ctx, orgID, projectID, writes,
-		fmt.Sprintf("Collect OpenAPI spec for %s dependency %s", component, depName)); err != nil {
+		fmt.Sprintf("Collect OpenAPI contract for dependency %s", depName)); err != nil {
 		return "", err // ErrSpecCommitConflict (409) or infra (500)
 	}
-	slog.InfoContext(ctx, "collected consumed spec",
-		"org", orgID, "project", projectID, "component", component, "dependency", depName, "specPath", specPath)
+	slog.InfoContext(ctx, "collected dependency contract",
+		"org", orgID, "project", projectID, "component", component, "dependency", depName, "contract", specPath)
 	return specPath, nil
+}
+
+// definitionByName finds a dependency's definition in an assembled design.
+func definitionByName(defs []DependencyDefinition, name string) (DependencyDefinition, bool) {
+	for _, d := range defs {
+		if d.Name == name {
+			return d, true
+		}
+	}
+	return DependencyDefinition{}, false
 }
 
 // MarkOrgPublished commits the `exposesAPI.orgPublished` durability marker on a

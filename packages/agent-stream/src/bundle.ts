@@ -45,6 +45,7 @@ import { checkOpenapiSpec } from "./openapi-spec.js";
 import { checkWireframeLayout } from "./wireframe-layout.js";
 import { checkDesignDiagram } from "./design-diagrams.js";
 import { checkComponentDependencies } from "./component-dependencies.js";
+import { checkDependencyDesign } from "./dependency-design-schema.js";
 import type {
   Op,
   ErrCode,
@@ -229,6 +230,10 @@ export class FileBundle {
     const dependencyProblem = checkComponentDependencies(path, content, this);
     if (dependencyProblem) {
       return err(path, op, dependencyProblem.code, dependencyProblem.message);
+    }
+    const dependencyDesignProblem = checkDependencyDesign(path, content, this);
+    if (dependencyDesignProblem) {
+      return err(path, op, dependencyDesignProblem.code, dependencyDesignProblem.message);
     }
     // The security document is gated on the same terms: it is the ONE spec file
     // the platform acts on deterministically at build time (creating directory
