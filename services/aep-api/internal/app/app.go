@@ -908,6 +908,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		SkillMut:      skillMutationSvc,
 		SkillImport:   skillImportSvc,
 		CollabRepo:    repoService,
+		Design:        designService,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("assemble spec domain: %w", err)

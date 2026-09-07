@@ -37,8 +37,7 @@ import {
   consumePendingSeed,
   notifyTurnEnd,
   replaceMessages,
-  setPendingSeed,
-} from "../../agent-chat/chatStore";
+  setPendingSeed, peekPendingSeed } from "../../agent-chat/chatStore";
 import { SpecView, designWarningIntro, specTurnGate } from "./SpecView";
 import {
   clearPlan,
@@ -258,6 +257,10 @@ const mockUseSpecFileContent = vi.fn();
 const mockUseDesignDependencies = vi.fn();
 
 vi.mock("../api/queries", () => ({
+  // The dependency page's two writes: stubbed, since this file renders without a
+  // QueryClientProvider; DependencyPage's own behavior is its own test's.
+  useProvideDependencyContract: () => ({ mutate: vi.fn(), isPending: false, isError: false, isSuccess: false, error: null }),
+  useAcceptDependencyAssumption: () => ({ mutate: vi.fn(), isPending: false, isError: false, error: null }),
   useSpecFiles: (...args: unknown[]) => mockUseSpecFiles(...args),
   useSpecFileContent: (...args: unknown[]) => mockUseSpecFileContent(...args),
   useDesignDependencies: (...args: unknown[]) =>
@@ -295,26 +298,26 @@ vi.mock("./BuildDependencyDrawer", () => ({
     items,
     onClose,
     onContinue,
-    onResolveDependency,
+    onOpenDependency,
+    onResolveAll,
   }: {
     open: boolean;
     items: PreflightItem[];
     onClose: () => void;
     onContinue: (inputs: BuildInputItem[]) => void;
-    onResolveDependency?: (
-      item: PreflightItem,
-      intent: "resolve" | "reconsider",
-    ) => void;
+    onOpenDependency?: (name: string) => void;
+    onResolveAll?: () => void;
   }) =>
     open ? (
       <div data-testid="dependency-drawer">
         <button onClick={() => onContinue(STUB_INPUTS)}>Drawer Continue</button>
         <button onClick={onClose}>Drawer Cancel</button>
         {items[0] ? (
-          <button onClick={() => onResolveDependency?.(items[0]!, "resolve")}>
-            Resolve drawer item
+          <button onClick={() => onOpenDependency?.(items[0]!.dependency)}>
+            Open drawer item
           </button>
         ) : null}
+        {items[0] ? <button onClick={() => onResolveAll?.()}>Resolve all drawer</button> : null}
       </div>
     ) : null,
 }));
@@ -1158,7 +1161,7 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
     });
   });
 
-  it("resolves a drawer blocker item to its full Dependency entry and fires the seeded chat flow", async () => {
+  it("opens a dependency's page from a drawer row and closes the drawer, which would otherwise cover it", async () => {
     mockPreflightRefetch.mockResolvedValue({
       data: {
         needsInput: true,
@@ -1173,13 +1176,16 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
       expect(screen.getByTestId("dependency-drawer")).toBeInTheDocument(),
     );
 
-    fireEvent.click(screen.getByText("Resolve drawer item"));
+    fireEvent.click(screen.getByText("Open drawer item"));
 
-    // Same lookup precedent as "Resolve in chat" above: the FULL endpoint
-    // entry (status/reason included), never a hand-built partial object —
-    // looked up by (item.component, item.dependency), not the currently
-    // selected file's component (the drawer can span any component). The
-    // RESOLVE intent, since this is the blocker panel's chat button.
+    await waitFor(() =>
+      expect(screen.queryByTestId("dependency-drawer")).not.toBeInTheDocument(),
+    );
+    // The page is the selection now: its heading is the dependency's name,
+    // and its Resolve runs the guided flow through the same seeded-chat seam
+    // the design view's cards use, with the FULL endpoint entry.
+    expect(screen.getByRole("heading", { name: "stripe" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Resolve" }));
     expect(mockResolveViaChat).toHaveBeenCalledWith(
       "checkout-api",
       CHECKOUT_DEPS[0]!.dependencies![0],
@@ -1203,7 +1209,7 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
     render(<SpecView projectName="proj1" />);
     clickBuild();
     await waitFor(() =>
-      expect(screen.getByText("Resolve drawer item")).toBeInTheDocument(),
+      expect(screen.getByText("Open drawer item")).toBeInTheDocument(),
     );
     // PAINTED is not SUBSCRIBED. The drawer's items land in a commit, but the
     // effect that registers SpecView's turn-end listener is a passive effect
@@ -1227,7 +1233,7 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
     expect(mockFlush).toHaveBeenCalledTimes(flushesBeforeTurnEnd + 1);
 
     await waitFor(() =>
-      expect(screen.queryByText("Resolve drawer item")).not.toBeInTheDocument(),
+      expect(screen.queryByText("Open drawer item")).not.toBeInTheDocument(),
     );
     expect(mockPreflightRefetch).toHaveBeenCalledTimes(2);
   });
@@ -1241,11 +1247,11 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
     expect(mockFlush).not.toHaveBeenCalled();
   });
 
-  // #252 Task 15: the drawer is a MUI overlay — left open after "Resolve via
-  // chat" it covers the chat panel the seeded message just opened, so the
-  // user can't see what they're meant to respond to. Closing it is this
-  // handler's job, alongside firing the seeded chat flow.
-  it('closes the dependency drawer when "Resolve via chat" is clicked, so the seeded chat is visible', async () => {
+  // The drawer is a MUI overlay — left open after handing off to chat it
+  // covers the chat panel the seeded message just opened, so the user can't
+  // see what they're meant to respond to. "Resolve all" seeds the batch flow
+  // and closes it.
+  it('seeds the batch flow and closes the drawer on "Resolve all"', async () => {
     mockPreflightRefetch.mockResolvedValue({
       data: {
         needsInput: true,
@@ -1260,15 +1266,9 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
       expect(screen.getByTestId("dependency-drawer")).toBeInTheDocument(),
     );
 
-    fireEvent.click(screen.getByText("Resolve drawer item"));
+    fireEvent.click(screen.getByText("Resolve all drawer"));
 
-    // The seeded chat flow still fires (same lookup as the test above)...
-    expect(mockResolveViaChat).toHaveBeenCalledWith(
-      "checkout-api",
-      CHECKOUT_DEPS[0]!.dependencies![0],
-      "resolve",
-    );
-    // ...and the drawer closes so the chat panel it opens is actually visible.
+    expect(peekPendingSeed(chatKeyFor("acme", "proj1"))?.message).toBe("/resolve-dependencies");
     await waitFor(() =>
       expect(screen.queryByTestId("dependency-drawer")).not.toBeInTheDocument(),
     );

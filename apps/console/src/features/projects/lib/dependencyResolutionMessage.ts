@@ -52,6 +52,9 @@ type Dependency = components["schemas"]["Dependency"];
  */
 export type DependencyResolutionIntent = "resolve" | "reconsider";
 
+/** The batch flow: every open dependency, one at a time, ending back at Build. */
+export const RESOLVE_ALL_DEPENDENCIES_COMMAND = "/resolve-dependencies";
+
 /**
  * Build the seeded chat message for one dependency: names the component, the
  * dependency, and why the turn is being started. Nothing else — see the
@@ -63,7 +66,11 @@ export function buildDependencyResolutionMessage(
   dep: Dependency,
   intent: DependencyResolutionIntent,
 ): string {
+  // Resolving runs the guided flow (the `resolve-dependency` skill); a
+  // reconsider is a conversation about an already-resolved choice, so it
+  // stays prose. The component is context for the reconsider only — the
+  // dependency's definition is its own file, shared by every consumer.
   return intent === "reconsider"
     ? `Let's reconsider the "${dep.name}" dependency on "${componentName}" — I'd like to look at other options.`
-    : `Let's resolve the "${dep.name}" dependency on "${componentName}".`;
+    : `/resolve-dependency ${dep.name}`;
 }

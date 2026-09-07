@@ -808,6 +808,12 @@ func (e ListTasksParamsState) Valid() bool {
 	}
 }
 
+// AcceptAssumptionBody defines model for AcceptAssumptionBody.
+type AcceptAssumptionBody struct {
+	// Note Optional note recorded with the acceptance; defaults to the agent's own note of what it was unsure about.
+	Note string `json:"note,omitempty"`
+}
+
 // AccessRequest defines model for AccessRequest.
 type AccessRequest struct {
 	ConsumerComponentName string    `json:"consumerComponentName"`
@@ -1240,6 +1246,18 @@ type DependencyAssumption = contracts.DependencyAssumption
 
 // DependencyCandidate One option in an ambiguous external dependency's resolution set.
 type DependencyCandidate = contracts.DependencyCandidate
+
+// DependencyContractBody Exactly one of url (fetched by the platform, SSRF-hardened) or content (the document itself, pasted or uploaded).
+type DependencyContractBody struct {
+	Content string `json:"content,omitempty"`
+	URL     string `json:"url,omitempty"`
+}
+
+// DependencyContractResponse defines model for DependencyContractResponse.
+type DependencyContractResponse struct {
+	// Contract Repo-relative path of the committed contract file.
+	Contract string `json:"contract"`
+}
 
 // DependencyProvenance Where a committed contract came from — the source document, its full-document hash, when it was read, and whether the committed file is a slice of it.
 type DependencyProvenance = contracts.DependencyProvenance
@@ -2791,6 +2809,12 @@ type ProvisionPlatformResourceJSONRequestBody = ProvisionBody
 
 // CollectExternalResourceValuesJSONRequestBody defines body for CollectExternalResourceValues for application/json ContentType.
 type CollectExternalResourceValuesJSONRequestBody = SaveValuesBody
+
+// AcceptDependencyAssumptionJSONRequestBody defines body for AcceptDependencyAssumption for application/json ContentType.
+type AcceptDependencyAssumptionJSONRequestBody = AcceptAssumptionBody
+
+// ProvideDependencyContractJSONRequestBody defines body for ProvideDependencyContract for application/json ContentType.
+type ProvideDependencyContractJSONRequestBody = DependencyContractBody
 
 // ApplyFilesJSONRequestBody defines body for ApplyFiles for application/json ContentType.
 type ApplyFilesJSONRequestBody = ApplyRequest

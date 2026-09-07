@@ -23,7 +23,22 @@ export type SpecSelection =
   | { kind: "file"; path: string }
   | { kind: "cell-diagram" }
   | { kind: "security" }
-  | { kind: "wireframe"; component: string; dslPath: string };
+  | { kind: "wireframe"; component: string; dslPath: string }
+  /** An external dependency's page — its definition, contract and state. */
+  | { kind: "dependency"; name: string };
+
+/**
+ * One external dependency's directory, `specs/design/dependencies/<name>/`:
+ * the definition (dependency.json) plus whatever contract files sit beside it.
+ * One dependency, one definition — components only reference it by name.
+ */
+export interface DesignDependencyNode {
+  name: string;
+  /** The dependency.json path, when it exists. */
+  definitionPath: string | null;
+  /** Every other file in the directory — the contract, an sdk.json. */
+  files: SpecFileEntry[];
+}
 
 export interface DesignComponentNode {
   name: string;
@@ -44,6 +59,8 @@ export interface DesignSection {
   /** Whether specs/design/security.json exists (drives the Security rail entry). */
   hasSecurity: boolean;
   components: DesignComponentNode[];
+  /** The external dependencies with a directory, sorted by name. */
+  dependencies: DesignDependencyNode[];
 }
 
 /** The project-level cell-diagram DSL path (rendered via the Architecture tab, never as a file). */
@@ -76,6 +93,17 @@ export function componentOf(path: string): string | null {
   return COMPONENT_RE.exec(path)?.[1] ?? null;
 }
 
+const DEPENDENCY_RE = /^specs\/design\/dependencies\/([^/]+)\//;
+
+/** The dependency a path belongs to (`specs/design/dependencies/<name>/…`), or null. */
+export function dependencyOf(path: string): string | null {
+  return DEPENDENCY_RE.exec(path)?.[1] ?? null;
+}
+
+export function dependencyDefinitionPath(name: string): string {
+  return `specs/design/dependencies/${name}/dependency.json`;
+}
+
 function isDsl(path: string): boolean {
   return path.endsWith(".dsl");
 }
@@ -94,7 +122,13 @@ export function buildDesignSection(files: SpecFileEntry[]): DesignSection {
   // diagram), never as a raw text file. security.json is the Security rail
   // entry, not an overview row.
   const overview = design
-    .filter((f) => componentOf(f.path) === null && !isFlow(f.path) && !hideFromOverview(f.path))
+    .filter(
+      (f) =>
+        componentOf(f.path) === null &&
+        dependencyOf(f.path) === null &&
+        !isFlow(f.path) &&
+        !hideFromOverview(f.path),
+    )
     .sort((a, b) => a.path.localeCompare(b.path));
   const flows = design
     .filter((f) => isFlow(f.path))
@@ -118,6 +152,23 @@ export function buildDesignSection(files: SpecFileEntry[]): DesignSection {
   );
   for (const c of components) c.files.sort((a, b) => a.path.localeCompare(b.path));
 
+  const byDependency = new Map<string, DesignDependencyNode>();
+  for (const f of design) {
+    const name = dependencyOf(f.path);
+    if (name === null) continue;
+    let node = byDependency.get(name);
+    if (!node) {
+      node = { name, definitionPath: null, files: [] };
+      byDependency.set(name, node);
+    }
+    if (f.path === dependencyDefinitionPath(name)) node.definitionPath = f.path;
+    else node.files.push(f);
+  }
+  const dependencies = [...byDependency.values()].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+  for (const d of dependencies) d.files.sort((a, b) => a.path.localeCompare(b.path));
+
   return {
     overview,
     flows,
@@ -125,6 +176,7 @@ export function buildDesignSection(files: SpecFileEntry[]): DesignSection {
     hasCellDsl,
     hasSecurity,
     components,
+    dependencies,
   };
 }
 
@@ -143,6 +195,10 @@ export function followSelection(path: string): SpecSelection {
   if (component && isDsl(path)) {
     return { kind: "wireframe", component, dslPath: path };
   }
+  const dependency = dependencyOf(path);
+  if (dependency && path === dependencyDefinitionPath(dependency)) {
+    return { kind: "dependency", name: dependency };
+  }
   return { kind: "file", path };
 }
 
@@ -157,5 +213,7 @@ export function selectionKey(sel: SpecSelection): string {
       return "security";
     case "wireframe":
       return `wireframe:${sel.component}`;
+    case "dependency":
+      return `dependency:${sel.name}`;
   }
 }

@@ -56,6 +56,9 @@ func (f *fakeCommitter) ReadFile(_ context.Context, _, _, path string) (content,
 	if strings.HasSuffix(path, "design.json") || strings.HasSuffix(path, "design.cell") {
 		return "{}", "sha-design", true, nil
 	}
+	if strings.HasSuffix(path, "dependency.json") {
+		return "{}", "sha-dependency", true, nil
+	}
 	return "", "", false, nil // spec file is new
 }
 
@@ -199,5 +202,81 @@ func TestCollectSpec_NoCommitterWired(t *testing.T) {
 
 	if _, err := svc.CollectSpec(context.Background(), "acme", "web", "consumer", "stripe", []byte(validOpenAPI), ""); err == nil {
 		t.Fatal("want an error when no commit surface is wired, got nil")
+	}
+}
+
+// The dependency page's route: no consumer named, the definition file is the
+// target, and a user-provided document replaces an assumption outright.
+func TestCollectDependencyContract_WritesTheDirectoryWithoutAConsumer(t *testing.T) {
+	t.Parallel()
+	fc := &fakeCommitter{}
+	svc := collectSvc(t, `[{"kind":"external","name":"stripe"}]`, fc)
+
+	path, err := svc.CollectDependencyContract(context.Background(), "acme", "web", "stripe", []byte(validOpenAPI), "")
+	if err != nil {
+		t.Fatalf("CollectDependencyContract: %v", err)
+	}
+	if path != "specs/design/dependencies/stripe/openapi.yaml" {
+		t.Fatalf("path = %q", path)
+	}
+	var defW *DesignFileWrite
+	for i := range fc.writes {
+		if fc.writes[i].Path == "specs/design/dependencies/stripe/dependency.json" {
+			defW = &fc.writes[i]
+		}
+	}
+	if defW == nil || !strings.Contains(defW.Content, `"contract": "openapi.yaml"`) || strings.Contains(defW.Content, `"assumed"`) {
+		t.Fatalf("dependency.json = %+v", defW)
+	}
+	if _, err := svc.CollectDependencyContract(context.Background(), "acme", "web", "ghost", []byte(validOpenAPI), ""); !errors.Is(err, ErrDependencyNotFound) {
+		t.Fatalf("unreferenced dependency: want ErrDependencyNotFound, got %v", err)
+	}
+}
+
+// acceptFiles is a design whose stripe dependency carries an agent-written
+// contract (marked assumed) and no acceptance yet.
+func acceptFiles(marked bool) map[string]string {
+	files := designFilesWithDeps(`[{"kind":"external","name":"stripe"}]`)
+	files["dependencies/stripe/dependency.json"] = `{"name":"stripe","provider":"Stripe","style":"rest-api","contract":"openapi.yaml","provenance":{"sourceUrl":"https://stripe.com/docs"}}`
+	contract := "openapi: 3.0.3\ninfo: {title: Stripe, version: '1'}\npaths:\n  /charges:\n    get: {responses: {'200': {description: ok}}}\n"
+	if marked {
+		contract = "openapi: 3.0.3\nx-aep-assumed: true\n" + contract[len("openapi: 3.0.3\n"):]
+	}
+	files["dependencies/stripe/openapi.yaml"] = contract
+	return files
+}
+
+func TestAcceptDependencyAssumption_RecordsTheUsersPermission(t *testing.T) {
+	t.Parallel()
+	fc := &fakeCommitter{}
+	svc := newService(readsFor(t, acceptFiles(true)))
+	svc.fileCommitter = fc
+
+	if err := svc.AcceptDependencyAssumption(context.Background(), "acme", "web", "stripe", "admin", ""); err != nil {
+		t.Fatalf("AcceptDependencyAssumption: %v", err)
+	}
+	if len(fc.writes) != 1 || fc.writes[0].Path != "specs/design/dependencies/stripe/dependency.json" {
+		t.Fatalf("writes = %+v", fc.writes)
+	}
+	body := fc.writes[0].Content
+	for _, want := range []string{`"assumed": {`, `"by": "admin"`, `"at": "`, `"note": "Written by the design agent from https://stripe.com/docs"`, `"contract": "openapi.yaml"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("dependency.json missing %s:\n%s", want, body)
+		}
+	}
+	// fakeCommitter reads "design.json"/"design.cell" as existing; the
+	// dependency file is new to it, so the CAS is a create — fine for the
+	// fake, and the real committer sees the sha it read.
+}
+
+func TestAcceptDependencyAssumption_RefusesAContractNobodyAssumed(t *testing.T) {
+	t.Parallel()
+	svc := newService(readsFor(t, acceptFiles(false)))
+	svc.fileCommitter = &fakeCommitter{}
+	if err := svc.AcceptDependencyAssumption(context.Background(), "acme", "web", "stripe", "admin", ""); !errors.Is(err, ErrDependencyNotAssumed) {
+		t.Fatalf("want ErrDependencyNotAssumed, got %v", err)
+	}
+	if err := svc.AcceptDependencyAssumption(context.Background(), "acme", "web", "ghost", "admin", ""); !errors.Is(err, ErrDependencyNotFound) {
+		t.Fatalf("want ErrDependencyNotFound, got %v", err)
 	}
 }

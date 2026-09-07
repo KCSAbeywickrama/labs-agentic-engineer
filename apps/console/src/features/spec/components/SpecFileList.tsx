@@ -41,6 +41,7 @@ import {
   RefreshCw,
   Network,
   LayoutDashboard,
+  Plug,
   ShieldCheck,
   TriangleAlert,
   Workflow,
@@ -56,6 +57,7 @@ import {
   type SectionReason,
 } from "../lib/railSections";
 import { ProblemsDialog } from "./ProblemsDialog";
+import type { DependencyState } from "../lib/dependencyStates";
 import {
   buildDesignSection,
   selectionKey,
@@ -78,10 +80,17 @@ export function SpecFileList({
   sections,
   plan,
   onReason,
+  dependencyStates,
 }: {
   files: SpecFileEntry[];
   selection: SpecSelection | null;
   onSelect: (sel: SpecSelection) => void;
+  /**
+   * One state per external dependency (name → folded read model), so a row
+   * can say what the user must do without opening the page. Absent while the
+   * read model has not loaded; the rows then carry no chip.
+   */
+  dependencyStates?: Record<string, DependencyState> | undefined;
   /** Re-generate the design (#159) — shown in the Designs header once a design
    *  exists; fires the same design-generation room turn as the header CTA. */
   onRegenerateDesign: () => void;
@@ -156,6 +165,7 @@ export function SpecFileList({
   };
   // The Flows group collapses like a component group; both start open.
   const [flowsCollapsed, setFlowsCollapsed] = useState(false);
+  const [dependenciesCollapsed, setDependenciesCollapsed] = useState(false);
 
   // The design section has content to show (and a design to re-generate)
   // once any of its documents, flows or components exist.
@@ -454,6 +464,47 @@ export function SpecFileList({
                   {design.flows.map((f) =>
                     row(fileSel(f.path), fileLabel(f.path), <FileText size={16} />, true),
                   )}
+                </Collapse>
+              </Box>
+            )}
+            {/* The external dependencies — one definition each, in their own
+                directories. A row carries the one thing the user must do
+                about it, or the qualifier on a resolved one, so the rail says
+                where the build stands before the drawer does. */}
+            {design.dependencies.length > 0 && (
+              <Box sx={{ mt: 0.5 }}>
+                {groupHeader("Dependencies", <Plug size={14} />, dependenciesCollapsed, () =>
+                  setDependenciesCollapsed((v) => !v),
+                )}
+                <Collapse in={!dependenciesCollapsed} unmountOnExit>
+                  {design.dependencies.map((d) => {
+                    const state = dependencyStates?.[d.name];
+                    const sel: SpecSelection = { kind: "dependency", name: d.name };
+                    return (
+                      <ListItemButton
+                        key={selectionKey(sel)}
+                        selected={isSel(sel)}
+                        onClick={() => onSelect(sel)}
+                        sx={{ pl: 4, pr: 2 }}
+                      >
+                        <ListItemIcon sx={{ minWidth: 32 }}>
+                          <Plug size={16} />
+                        </ListItemIcon>
+                        <ListItemText primary={d.name} slotProps={{ primary: { noWrap: true } }} />
+                        {state?.blocking ? (
+                          <Tooltip title={state.todo}>
+                            <Box sx={{ display: "flex", flexShrink: 0, color: "warning.main" }} aria-label={`${d.name}: ${state.todo}`}>
+                              <TriangleAlert size={14} />
+                            </Box>
+                          </Tooltip>
+                        ) : state && state.flags.length > 0 ? (
+                          <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0, ml: 1 }}>
+                            {state.flags.join(", ")}
+                          </Typography>
+                        ) : null}
+                      </ListItemButton>
+                    );
+                  })}
                 </Collapse>
               </Box>
             )}

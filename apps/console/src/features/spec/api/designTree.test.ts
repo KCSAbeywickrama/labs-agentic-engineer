@@ -17,7 +17,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { buildDesignSection, componentOf, isFlow } from "./designTree";
+import { buildDesignSection, componentOf, dependencyOf, followSelection, isFlow, selectionKey } from "./designTree";
 import type { SpecFileEntry } from "./mapping";
 
 // Full repo-relative paths, mirroring mapping.ts's current scheme
@@ -151,5 +151,43 @@ describe("buildDesignSection", () => {
     expect(isFlow("specs/design/flows/checkout.json")).toBe(false);
     expect(isFlow("specs/design/flows/nested/checkout.md")).toBe(false);
     expect(isFlow("specs/design/domain-model.md")).toBe(false);
+  });
+});
+
+describe("dependencies — one directory, one definition", () => {
+  it("extracts the dependency name from a dependency path", () => {
+    expect(dependencyOf("specs/design/dependencies/stripe/dependency.json")).toBe("stripe");
+    expect(dependencyOf("specs/design/dependencies/stripe/openapi.yaml")).toBe("stripe");
+    expect(dependencyOf("specs/design/components/orders/design.json")).toBeNull();
+  });
+
+  it("groups a dependency's files under its node and keeps them out of the overview", () => {
+    const section = buildDesignSection([
+      e("specs/design/dependencies/stripe/dependency.json"),
+      e("specs/design/dependencies/stripe/openapi.yaml"),
+      e("specs/design/dependencies/sendgrid/dependency.json"),
+      e("specs/design/domain-model.md"),
+    ]);
+    expect(section.overview.map((f) => f.path)).toEqual(["specs/design/domain-model.md"]);
+    expect(section.dependencies.map((d) => d.name)).toEqual(["sendgrid", "stripe"]);
+    expect(section.dependencies[1]).toMatchObject({
+      name: "stripe",
+      definitionPath: "specs/design/dependencies/stripe/dependency.json",
+    });
+    expect(section.dependencies[1]!.files.map((f) => f.path)).toEqual([
+      "specs/design/dependencies/stripe/openapi.yaml",
+    ]);
+  });
+
+  it("follows a dependency.json to the dependency page, and a contract to the file", () => {
+    expect(followSelection("specs/design/dependencies/stripe/dependency.json")).toEqual({
+      kind: "dependency",
+      name: "stripe",
+    });
+    expect(followSelection("specs/design/dependencies/stripe/openapi.yaml")).toEqual({
+      kind: "file",
+      path: "specs/design/dependencies/stripe/openapi.yaml",
+    });
+    expect(selectionKey({ kind: "dependency", name: "stripe" })).toBe("dependency:stripe");
   });
 });

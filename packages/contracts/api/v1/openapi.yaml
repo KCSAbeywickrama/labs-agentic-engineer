@@ -1697,6 +1697,89 @@ paths:
       summary: Collect an external dependency's values and provision it
       tags:
       - Dependencies
+  /projects/{projectName}/dependencies/{depName}/contract:
+    post:
+      operationId: provide-dependency-contract
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      - description: External dependency name (its directory under specs/design/dependencies)
+        in: path
+        name: depName
+        required: true
+        schema:
+          description: External dependency name (its directory under specs/design/dependencies)
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DependencyContractBody'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DependencyContractResponse'
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Provide an external dependency's contract — a URL to fetch or the document itself — committed into the dependency's directory
+      tags:
+      - Dependencies
+  /projects/{projectName}/dependencies/{depName}/assumption:
+    post:
+      operationId: accept-dependency-assumption
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      - description: External dependency name (its directory under specs/design/dependencies)
+        in: path
+        name: depName
+        required: true
+        schema:
+          description: External dependency name (its directory under specs/design/dependencies)
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcceptAssumptionBody'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusMsg'
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Accept the contract the design agent wrote from research for this dependency — the user's permission to build against an assumption
+      tags:
+      - Dependencies
   /projects/{projectName}/design/dependencies:
     get:
       operationId: list-design-dependencies
@@ -4164,6 +4247,31 @@ components:
       required:
       - kind
       - name
+      type: object
+    DependencyContractBody:
+      additionalProperties: false
+      description: Exactly one of url (fetched by the platform, SSRF-hardened) or content (the document itself, pasted or uploaded).
+      properties:
+        url:
+          type: string
+        content:
+          type: string
+      type: object
+    DependencyContractResponse:
+      additionalProperties: false
+      properties:
+        contract:
+          description: Repo-relative path of the committed contract file.
+          type: string
+      required:
+      - contract
+      type: object
+    AcceptAssumptionBody:
+      additionalProperties: false
+      properties:
+        note:
+          description: Optional note recorded with the acceptance; defaults to the agent's own note of what it was unsure about.
+          type: string
       type: object
     DependencyProvenance:
       description: Where a committed contract came from — the source document, its full-document

@@ -379,3 +379,47 @@ describe("SpecFileList — the design reads as its parts (#686)", () => {
     expect(ghost!.hasAttribute("disabled") || ghost!.getAttribute("aria-disabled") === "true").toBe(true);
   });
 });
+
+describe("SpecFileList — the Dependencies group", () => {
+  it("lists each dependency directory once, with what the user must do", () => {
+    render(
+      <OxygenUIThemeProvider theme={OxygenTheme}>
+        <SpecFileList
+          files={designEntries(
+            "specs/design/design.cell",
+            "specs/design/dependencies/stripe/dependency.json",
+            "specs/design/dependencies/stripe/openapi.yaml",
+            "specs/design/dependencies/dhl/dependency.json",
+          )}
+          selection={null}
+          onSelect={() => {}}
+          onRegenerateDesign={() => {}}
+          sections={railSections(RAIL_INPUT)}
+          onReason={() => {}}
+          dependencyStates={{
+            dhl: {
+              dependency: { kind: "external", name: "dhl", status: "unresolved", reason: "needs-contract" },
+              usedBy: ["parcel-api"],
+              blocking: true,
+              todo: "Needs a contract",
+              flags: [],
+            },
+            stripe: {
+              dependency: { kind: "external", name: "stripe", status: "resolved", flags: ["assumed"] },
+              usedBy: ["parcel-api"],
+              blocking: false,
+              todo: "",
+              flags: ["Assumed"],
+            },
+          }}
+        />
+      </OxygenUIThemeProvider>,
+    );
+    expect(screen.getByText("Dependencies")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^dhl/ })).toBeInTheDocument();
+    expect(screen.getByLabelText("dhl: Needs a contract")).toBeInTheDocument();
+    expect(screen.getByText("Assumed")).toBeInTheDocument();
+    // The contract file is the page's, not a rail row of its own.
+    expect(screen.queryByText("openapi")).not.toBeInTheDocument();
+  });
+});

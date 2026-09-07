@@ -91,6 +91,9 @@ import type { DependencyResolutionIntent } from "../../projects/lib/dependencyRe
 import { usePlan } from "../../agent-chat/usePlan";
 import { approvalInputsFor } from "../lib/buildInputs";
 import { BuildDependencyDrawer } from "./BuildDependencyDrawer";
+import { DependencyPage } from "./DependencyPage";
+import { computeDependencyStates } from "../lib/dependencyStates";
+import { RESOLVE_ALL_DEPENDENCIES_COMMAND } from "../../projects/lib/dependencyResolutionMessage";
 import { SpecFileList } from "./SpecFileList";
 import { CellDiagramPanel } from "./CellDiagramPanel";
 import { WireframePanel } from "./WireframePanel";
@@ -98,7 +101,7 @@ import { OpenApiView } from "@aep/ui-openapi-view";
 import { DesignView } from "@aep/ui-design-view";
 import type { DependencyStatusInfo } from "@aep/ui-design-view";
 import { ValidationView } from "@aep/ui-validation-view";
-import { type SpecSelection } from "../api/designTree";
+import { type SpecSelection, buildDesignSection } from "../api/designTree";
 import { DESIGN_CELL_PATH, componentOf, followSelection } from "../api/designTree";
 import { useSession } from "../../../auth/SessionContext";
 
@@ -439,36 +442,28 @@ export function SpecView({ projectName }: { projectName: string }) {
     resolveDependencyViaChat(selectedComponentName, dep, intent);
   };
 
-  // #252 Task 10: the build dependency drawer's "Resolve via chat" — same
-  // seeded-message flow as handleResolveDependency above, but keyed off a
-  // PreflightItem (component/dependency name) rather than the currently
-  // selected component's design.json, since the drawer's items can span
-  // ANY of the project's service components, not just the one selected in
-  // the file tree. `intent` (#252 Task 17) is "resolve" from a blocker/
-  // external-spec panel's chat button, or "reconsider" from an
-  // external-config/platform-resource/org-service panel's hamburger.
-  //
-  // #252 Task 15: also closes the drawer, for BOTH intents. The drawer is a
-  // MUI overlay Drawer (unlike the side-by-side chat panel AppLayout mounts —
-  // see its own comment above `chatOpen`), so left open it covers the chat
-  // panel the seeded message just opened and the user can't see what they're
-  // supposed to respond to. Closing only happens here, on the explicit click —
-  // NOT on turn-end (the useEffect above deliberately leaves the drawer open
-  // and just refreshes its items; re-opening mid-resolution is out of scope,
-  // matching Task 10's "do not auto-reopen" decision). The design-view
-  // "Resolve in chat" cards (handleResolveDependency above) have no
-  // equivalent occlusion: they render in the main content pane, which the
-  // chat panel opens BESIDE (Collapse in AppLayout), never over.
-  const handleResolveDrawerDependency = (
-    item: PreflightItem,
-    intent: DependencyResolutionIntent,
-  ) => {
-    const dep = (
-      dependencies.data?.find((c) => c.componentName === item.component)
-        ?.dependencies ?? []
-    ).find((d) => d.name === item.dependency);
-    if (!dep) return;
-    resolveDependencyViaChat(item.component, dep, intent);
+  // One state per external dependency (its definition is one file, so its
+  // state is one answer): the rail's chips, the dependency page and the Build
+  // drawer all read this fold of the per-component read model.
+  const dependencyStates = useMemo(
+    () => computeDependencyStates(dependencies.data ?? []),
+    [dependencies.data],
+  );
+  const designSection = useMemo(() => buildDesignSection(files), [files]);
+  // The dependency page's Resolve / Reconsider. The component is context for
+  // the reconsider's prose only; the resolve is the skill command.
+  const handleResolveFromPage = (name: string, intent: DependencyResolutionIntent) => {
+    const state = dependencyStates[name];
+    resolveDependencyViaChat(state?.usedBy[0] ?? "", state?.dependency ?? { kind: "external", name }, intent);
+  };
+  // The Build drawer hands off to the page (and closes, since as an overlay it
+  // would cover the page it just opened) or runs the batch flow.
+  const handleOpenDependencyFromDrawer = (name: string) => {
+    setDependencyDrawerOpen(false);
+    selectManually({ kind: "dependency", name });
+  };
+  const handleResolveAllDependencies = () => {
+    setPendingSeed(chatKeyFor(orgHandle ?? "default", projectName), RESOLVE_ALL_DEPENDENCIES_COMMAND);
     setDependencyDrawerOpen(false);
   };
 
@@ -1362,6 +1357,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                 sections={railSections}
                 plan={planEntries}
                 onReason={onRailReason}
+                dependencyStates={dependencyStates}
               />
             </Box>
             <Box
@@ -1391,6 +1387,16 @@ export function SpecView({ projectName }: { projectName: string }) {
                   live={security.live}
                   isPending={security.isPending}
                   isError={security.isError}
+                />
+              ) : effectiveSelection.kind === "dependency" ? (
+                <DependencyPage
+                  projectName={projectName}
+                  name={effectiveSelection.name}
+                  state={dependencyStates[effectiveSelection.name]}
+                  node={designSection.dependencies.find((d) => d.name === effectiveSelection.name)}
+                  onOpenFile={(path) => selectManually({ kind: "file", path })}
+                  onResolve={(name) => handleResolveFromPage(name, "resolve")}
+                  onReconsider={(name) => handleResolveFromPage(name, "reconsider")}
                 />
               ) : effectiveSelection.kind === "wireframe" ? (
                 <WireframePanel
@@ -1640,7 +1646,8 @@ export function SpecView({ projectName }: { projectName: string }) {
         submitting={dependencyDrawerOpen && buildPhase === "building"}
         onClose={() => setDependencyDrawerOpen(false)}
         onContinue={(inputs) => void onContinueBuild(inputs)}
-        onResolveDependency={handleResolveDrawerDependency}
+        onOpenDependency={handleOpenDependencyFromDrawer}
+        onResolveAll={handleResolveAllDependencies}
       />
     </PageContent>
   );

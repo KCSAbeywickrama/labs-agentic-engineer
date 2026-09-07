@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../../generated/aep-api";
 import { client } from "../../../api/client";
 import { specKeys } from "./keys";
@@ -155,6 +155,58 @@ export function useSpecFileContent(
     queryFn: () => {
       if (!file) throw new Error("no file selected");
       return fetchSpecFileContent(projectName, file);
+    },
+  });
+}
+
+/**
+ * The dependency page's "provide the contract": a URL the platform fetches, or
+ * the document itself (pasted or dropped). The platform validates, normalizes
+ * and commits it into the dependency's directory and records it in
+ * dependency.json. Both the file list and the dependency read model change,
+ * so both refresh.
+ */
+export function useProvideDependencyContract(projectName: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { depName: string; url?: string; content?: string }) => {
+      const { data, error } = await client.POST(
+        "/projects/{projectName}/dependencies/{depName}/contract",
+        {
+          params: { path: { projectName, depName: input.depName } },
+          body: {
+            ...(input.url ? { url: input.url } : {}),
+            ...(input.content ? { content: input.content } : {}),
+          },
+        },
+      );
+      if (error || data === undefined) throw toError(error, "Failed to provide the contract");
+      return data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: specKeys.dependencies(projectName) });
+      void queryClient.invalidateQueries({ queryKey: specKeys.files(projectName) });
+    },
+  });
+}
+
+/** The user's permission to build against a contract the agent wrote. */
+export function useAcceptDependencyAssumption(projectName: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { depName: string; note?: string }) => {
+      const { error } = await client.POST(
+        "/projects/{projectName}/dependencies/{depName}/assumption",
+        {
+          params: { path: { projectName, depName: input.depName } },
+          body: input.note ? { note: input.note } : {},
+        },
+      );
+      if (error) throw toError(error, "Failed to accept the assumption");
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: specKeys.dependencies(projectName) });
+      void queryClient.invalidateQueries({ queryKey: specKeys.files(projectName) });
     },
   });
 }
