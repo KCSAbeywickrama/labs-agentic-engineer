@@ -151,9 +151,16 @@ func TestComputeDependencyStatus(t *testing.T) {
 			wantStatus: DependencyStatusResolved,
 		},
 		{
+			name: "rule 7: an agent-written contract nobody accepted is unresolved/needs-acceptance",
+			dep: Dependency{Kind: DependencyKindExternal, Name: "dhl",
+				Provider: "DHL", Style: DependencyStyleRestAPI, Contract: "openapi.yaml", ContractAssumed: true},
+			wantStatus: DependencyStatusUnresolved,
+			wantReason: DependencyReasonNeedsAcceptance,
+		},
+		{
 			name: "an accepted assumption resolves like any contract",
 			dep: Dependency{Kind: DependencyKindExternal, Name: "dhl",
-				Provider: "DHL", Style: DependencyStyleRestAPI, Contract: "openapi.yaml",
+				Provider: "DHL", Style: DependencyStyleRestAPI, Contract: "openapi.yaml", ContractAssumed: true,
 				Assumed: &DependencyAssumption{By: "admin", At: "2026-09-08T10:00:00Z"}},
 			wantStatus: DependencyStatusResolved,
 		},

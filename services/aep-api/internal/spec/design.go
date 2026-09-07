@@ -150,6 +150,10 @@ const (
 	// external dependency whose provider is chosen but whose contract (or, for
 	// an sdk, its manifest) is not on disk yet.
 	DependencyReasonNeedsContract = "needs-contract"
+	// DependencyReasonNeedsAcceptance pairs with DependencyStatusUnresolved on
+	// an external dependency whose contract on disk was written by the design
+	// agent (marked assumed) and not yet accepted by a user.
+	DependencyReasonNeedsAcceptance = "needs-acceptance"
 	// DependencyReasonNeedsInput pairs with DependencyStatusUnresolved on an
 	// external dependency the platform cannot place at all: no provider, no
 	// style, no candidates — the agent could not identify the system.

@@ -73,6 +73,8 @@ func dependencyBlocker(d spec.Dependency) (kind, description string, blocked boo
 		switch d.Reason {
 		case spec.DependencyReasonNeedsContract:
 			return kindExternalSpec, "No contract yet — provide the API document to continue.", true
+		case spec.DependencyReasonNeedsAcceptance:
+			return kindExternalUnresolved, "The agent wrote this contract from research — accept the assumption, or provide the document.", true
 		case spec.DependencyReasonNeedsInput:
 			return kindExternalUnresolved, "Needs information only you can provide.", true
 		}

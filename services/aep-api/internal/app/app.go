@@ -989,6 +989,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	params.MCPSpecValidator = spec.ValidateOpenAPI
 	params.MCPSpecNormalizer = spec.NormalizeOpenAPIYAML
 	params.MCPSpecFetcher = spec.FetchSpecFromURL
+	params.MCPSpecSlicer = spec.SliceOpenAPI
 	// design-save keys BOTH platform-resource derivations on this catalog: the CRT
 	// role marker for end-user auth (thunder-app generalization), and the type's
 	// declared outputs for the dependency wiring it stamps into design.json. Wired

@@ -85,6 +85,11 @@ type Dependency struct {
 	// Candidates: 2+ identified-but-not-pinned options — the "ambiguous" state.
 	// Omitted, never empty; choosing one REMOVES the field and sets Provider.
 	Candidates []DependencyCandidate `json:"candidates,omitempty"`
+	// ContractAssumed: the contract file on disk is one the design agent wrote
+	// from research (it carries `x-aep-assumed: true`; an sdk.json carries
+	// `"assumed": true`). Until the user accepts it (Assumed) the dependency is
+	// not resolved.
+	ContractAssumed bool `json:"contractAssumed,omitempty"`
 	// Assumed: the user's permission to build against an agent-written
 	// contract (see DependencyAssumption). Read-only for the agent.
 	Assumed *DependencyAssumption `json:"assumed,omitempty"`
@@ -245,4 +250,7 @@ type SdkManifest struct {
 	DocsURL  string            `json:"docsUrl,omitempty"`
 	// Calls lists the SDK calls the design relies on, in the SDK's own naming.
 	Calls []string `json:"calls,omitempty"`
+	// Assumed marks a manifest the design agent wrote without a published
+	// source — the sdk.json twin of a contract's `x-aep-assumed: true`.
+	Assumed bool `json:"assumed,omitempty"`
 }

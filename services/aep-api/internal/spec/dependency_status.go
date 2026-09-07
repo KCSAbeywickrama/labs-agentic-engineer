@@ -27,7 +27,9 @@
 //  4. no Style                      → unresolved / needs-input (a provider named, its shape not)
 //  5. sdk with no manifest on disk  → unresolved / needs-contract
 //  6. rest-api/graphql, no contract → unresolved / needs-contract
-//  7. otherwise                     → resolved; flag assumed when the contract
+//  7. contract agent-written, not
+//     yet accepted by a user          → unresolved / needs-acceptance
+//  8. otherwise                     → resolved; flag assumed when the contract
 //     is agent-written under the user's permission, flag sdk-only when an
 //     sdk dependency has no API contract beside its manifest.
 //
@@ -75,6 +77,8 @@ func ComputeDependencyStatus(dep Dependency, registryHit bool, orgSvc OrgService
 			return DependencyStatusUnresolved, DependencyReasonNeedsContract
 		case dep.Style != DependencyStyleSDK && dep.Contract == "":
 			return DependencyStatusUnresolved, DependencyReasonNeedsContract
+		case dep.ContractAssumed && dep.Assumed == nil:
+			return DependencyStatusUnresolved, DependencyReasonNeedsAcceptance
 		default:
 			return DependencyStatusResolved, ""
 		}

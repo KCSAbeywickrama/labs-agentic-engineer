@@ -97,6 +97,7 @@ type sdkManifestJSON struct {
 	Packages map[string]string `json:"packages"`
 	DocsURL  string            `json:"docsUrl,omitempty"`
 	Calls    []string          `json:"calls,omitempty"`
+	Assumed  bool              `json:"assumed,omitempty"`
 }
 
 // parseDependencyDefinitionJSON decodes one dependency.json. Strict on unknown
@@ -193,7 +194,7 @@ func parseSdkManifestJSON(raw string) (SdkManifest, error) {
 	if err := dec.Decode(&mj); err != nil {
 		return SdkManifest{}, fmt.Errorf("decode %s: %w", SdkManifestFile, err)
 	}
-	return SdkManifest{Packages: mj.Packages, DocsURL: mj.DocsURL, Calls: mj.Calls}, nil
+	return SdkManifest{Packages: mj.Packages, DocsURL: mj.DocsURL, Calls: mj.Calls, Assumed: mj.Assumed}, nil
 }
 
 // assembleDependencyDefinitions parses every dependency directory in the
@@ -344,11 +345,14 @@ func hydrateExternalDependencies(d *DesignFile, files map[string]string) {
 				dep.Description = def.Description
 			}
 			// The contract counts only when the file is actually beside the
-			// definition — a name pointing at nothing is no contract.
-			dep.Contract = ""
+			// definition — a name pointing at nothing is no contract. One the
+			// agent wrote from research says so in the file itself, and counts
+			// only once a user has accepted it.
+			dep.Contract, dep.ContractAssumed = "", false
 			if def.Contract != "" {
-				if _, present := files[dependencyDirPrefix+dep.Name+"/"+def.Contract]; present {
+				if raw, present := files[dependencyDirPrefix+dep.Name+"/"+def.Contract]; present {
 					dep.Contract = def.Contract
+					dep.ContractAssumed = contractMarkedAssumed(raw)
 				}
 			}
 			dep.SDK, dep.Package = "", ""
@@ -367,8 +371,29 @@ func hydrateExternalDependencies(d *DesignFile, files map[string]string) {
 				if len(m.Packages) > 0 {
 					dep.SDK = def.SDK
 					dep.Package = m.Packages[strings.ToLower(strings.TrimSpace(comp.Language))]
+					if m.Assumed {
+						dep.ContractAssumed = true
+					}
 				}
 			}
 		}
 	}
+}
+
+// contractMarkedAssumed reports whether a contract file declares itself
+// agent-written: an OpenAPI document with `x-aep-assumed: true` at the root,
+// or a GraphQL schema whose first lines carry `# x-aep-assumed: true`. The
+// marker lives in the file so a reader of the file alone knows.
+func contractMarkedAssumed(raw string) bool {
+	head := raw
+	if len(head) > 4096 {
+		head = head[:4096]
+	}
+	for _, line := range strings.Split(head, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "x-aep-assumed: true" || t == "\"x-aep-assumed\": true" || t == "\"x-aep-assumed\": true," || t == "# x-aep-assumed: true" {
+			return true
+		}
+	}
+	return false
 }

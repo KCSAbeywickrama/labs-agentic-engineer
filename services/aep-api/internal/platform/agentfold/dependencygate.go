@@ -47,7 +47,7 @@ var (
 	assumptionKeys            = map[string]bool{"by": true, "at": true, "note": true}
 	candidateKeys             = map[string]bool{"name": true, "style": true, "description": true, "package": true}
 	configKeyKeys             = map[string]bool{"key": true, "secret": true, "description": true, "defaultValue": true}
-	sdkManifestKeys           = map[string]bool{"packages": true, "docsUrl": true, "calls": true}
+	sdkManifestKeys           = map[string]bool{"packages": true, "docsUrl": true, "calls": true, "assumed": true}
 	contractFilesByStyle      = map[string][]string{"rest-api": {"openapi.yaml", "openapi.yml", "openapi.json"}, "graphql": {"schema.graphql", "schema.graphqls"}}
 	sdkManifestFile           = "sdk.json"
 	dependencyContractAnyFile = append(append([]string{}, contractFilesByStyle["rest-api"]...), contractFilesByStyle["graphql"]...)
