@@ -90,8 +90,12 @@ const TEST_RUN = /\b(?:npm|pnpm|yarn)\s+(?:run\s+)?test\b|\bplaywright\s+test\b/
 /** A spec file with a body — Playwright's own entry point, however it is spelled. */
 const HAS_TEST_BLOCK = /\btest\s*(?:\.\w+)*\s*\(/;
 
-/** Tools whose input names a file the agent is authoring. */
-const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
+/**
+ * Tools whose input names a file the agent is authoring. Exported because the
+ * issue's status line watches the same set (validation_status_line.ts), and two
+ * copies would let one grow a tool the other never sees.
+ */
+export const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
 
 interface ItemState {
   last: ProgressItemStatus;

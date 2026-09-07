@@ -952,12 +952,19 @@ is watching it, and "what is it doing right now" is the whole question. The rule
 protects against a reader being told about machinery they did not ask about —
 not against answering the one thing they came to find out.
 
-**Unsettled: *test harness* and *validation report*.** Both name internal
-artifacts, which rule 6 has a better claim over — a reader does not have a
-harness, they have criteria waiting to be checked. The middle line says it in
-those terms and the two ends do not; whoever finds better words changes them
-here first. All three are now a distant fallback — the run posts its own line as
-it works — but they still speak before its first comment lands.
+**Unsettled: *test harness*, *validation report*, and *test issues*.** All name
+internal artifacts, which rule 6 has a better claim over — a reader does not have
+a harness or a test issue, they have criteria waiting to be checked. The middle
+line says it in those terms and the others do not; whoever finds better words
+changes them here first.
+
+That covers both writers. The derived fallbacks (*Setting up the test harness…*,
+*Writing the validation report…*) are the console's, now distant — the run posts
+its own line as it works, and they speak only before its first comment lands. The
+platform's rungs live in `validation_status_line.ts`, and two of them —
+*Generating the validation report from the results on disk…* and *Fixing the test
+issues…* — carry the same debt. `harness` is deliberately byte-identical to its
+fallback, so one phase reads the same sentence whichever source produced it.
 
 ## What a change invalidates
 

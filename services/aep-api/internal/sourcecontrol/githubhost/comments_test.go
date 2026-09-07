@@ -23,6 +23,22 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
+// The brand the RUNNER stamps, spelled out here rather than read from the
+// constant — reading it back would make this tautological.
+//
+// It is one literal in two languages: this package classifies comments by it,
+// and runners/remote-worker/src/lib/validation_status_line.ts writes it onto
+// every line a validation run posts. Nothing links them at build time, and the
+// failure is silent in the worst way — change one spelling and every observed
+// line reclassifies as the agent's own words, with both test suites green. The
+// TS side pins the same literal against its own constant.
+func TestObservedCommentMarkerMatchesTheRunnersOwn(t *testing.T) {
+	const marker = "<!-- aep:observed -->"
+	if sourcecontrol.ObservedCommentMarker != marker {
+		t.Fatalf("the runner stamps %q but this host classifies %q", marker, sourcecontrol.ObservedCommentMarker)
+	}
+}
+
 // Three classes, one leading marker each, and the body handed on without it.
 //
 // Both read paths share this, so a class the host gets wrong is wrong on every

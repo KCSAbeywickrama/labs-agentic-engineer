@@ -42,6 +42,18 @@ function stateFor(call: { toolName: string; input: unknown }, progress = new Val
   return ladderStateFor(call.toolName, call.input, progress);
 }
 
+// The brand the BFF classifies by, spelled out rather than read from the
+// constant — reading it back would make this tautological.
+//
+// One literal in two languages: this module stamps it, and the BFF's
+// sourcecontrol.ObservedCommentMarker decides on it which comments are the
+// platform's observation and which are somebody's own words. Change one
+// spelling and every line a run posts reclassifies as the agent's, with both
+// suites green. The Go side pins the same literal.
+test("the observed brand matches the one the BFF classifies by", () => {
+  assert.equal(OBSERVED_COMMENT_MARKER, "<!-- aep:observed -->");
+});
+
 // --- which calls announce which rung ---------------------------------------
 
 // The two ends are matched here because no per-criterion status describes them:
@@ -199,30 +211,27 @@ test("Ladder: healing does not walk the line backwards", () => {
   }
 });
 
-// Step 9's exit-2 sends a run back to authoring, and that is the ordinary path
-// rather than a fault. A strict first-occurrence ratchet would leave it under
-// "generating the report" for the rest of the run — silent AND wrong, which is
-// worse than the silence this exists to fix.
-test("Ladder: going backwards posts again and resets the high-water mark", () => {
+// Nothing behind the mark speaks. The exit-2 loop, the one thing that would
+// deserve to, is the repair mode instead — which is what lets this stay a rule
+// with no exception to reason about.
+test("Ladder: a rung behind the mark is never news", () => {
   const ladder = new Ladder();
   for (const state of LADDER) assert.equal(ladder.admit(state), true, state);
 
-  assert.equal(ladder.admit("authoring"), true, "the loop back to authoring is news");
-  assert.equal(ladder.admit("authoring"), false, "…but only once");
-  assert.equal(ladder.admit("reporting"), true, "and reaching the report again is news too");
+  for (const state of ["harness", "exploring", "authoring", "running"] as const) {
+    assert.equal(ladder.admit(state), false, `${state} spoke from behind the mark`);
+  }
 });
 
-// The rollback rule has no natural bound. A run thrashing between authoring and
-// the generator could post on every lap, and past the read window the earlier
-// lines are gone anyway — so the ladder goes quiet and leaves the last one
-// standing, which is what a finished run looks like.
-test("Ladder: a thrashing run stops posting at the cap", () => {
+// The regression the exception caused before it was removed. After a report
+// SUCCEEDS the mark sits on the last rung, and the run still has step 10 to do —
+// a push, a pull request, whatever it touches on the way. A rule that let a fall
+// speak announced "Setting up the test harness…" over a run that had finished.
+test("Ladder: a finished run does not go back to setting up", () => {
   const ladder = new Ladder();
-  let posted = 0;
-  for (let i = 0; i < MAX_POSTS * 3; i += 1) {
-    if (ladder.admit(i % 2 === 0 ? "authoring" : "reporting")) posted += 1;
-  }
-  assert.equal(posted, MAX_POSTS);
+  for (const state of LADDER) ladder.admit(state);
+
+  assert.equal(ladder.admit("harness"), false, "a late scaffold write restarted the run's story");
 });
 
 // --- the hook ---------------------------------------------------------------
@@ -407,12 +416,16 @@ test("reaching the cap warns once and then stops posting", async () => {
     (reason) => warnings.push(reason),
   );
 
-  // Alternating the last rung with a fall from it is the one shape that can
-  // still climb without bound — a generator invoked, a spec edited, repeat —
-  // and it is why the backstop is still here now that the repair mode absorbs
-  // the ordinary loop.
+  // Rungs are one-way, so they cannot climb past five. What still can is the
+  // repair mode: a report that fails, succeeds, then fails again re-enters it,
+  // and nothing bounds how many times a run may do that. This is the shape the
+  // backstop is still here for.
+  await fire(line.hook, hookInput(bash("npm ci --prefix tests/e2e")));
   for (let i = 0; i < MAX_POSTS * 2; i += 1) {
-    await fire(line.hook, i % 2 === 0 ? reportCall(`tu_${i}`) : hookInput(write("tests/e2e/specs/AC-001-a.spec.ts", "test('AC-001-a: x', () => {});")));
+    await fire(line.hook, reportCall(`tu_${i}`));
+    line.settle(`tu_${i}`, false);
+    await fire(line.hook, reportCall(`tu_ok_${i}`));
+    line.settle(`tu_ok_${i}`, true);
   }
 
   assert.equal(posted.length, MAX_POSTS, "the cap did not hold");

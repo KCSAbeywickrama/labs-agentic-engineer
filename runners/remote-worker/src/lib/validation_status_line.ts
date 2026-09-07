@@ -44,13 +44,11 @@
  *     inside step 6 while the run is still authoring, so "step 7 has begun"
  *     would be wrong for an hour. "Running automated tests against the deployed
  *     system" is true when posted and never false in hindsight.
- *   - IT IS A ONE-WAY RATCHET WITH ONE EXCEPTION. Forward is news; behind is
- *     not, because the middle of the run oscillates by design — twelve criteria
- *     each walk exploring → authoring → running, and every heal walks the last
- *     two again. The exception is a fall from the LAST rung: step 9's exit-2
- *     sends a finished run back to authoring, and a reader left under
- *     "generating the report" would be silent-and-wrong rather than just
- *     silent. See Ladder.admit.
+ *   - IT IS A ONE-WAY RATCHET. Forward is news; behind never is, because the
+ *     middle of the run oscillates by design — twelve criteria each walk
+ *     exploring → authoring → running, and every heal walks the last two again.
+ *     Step 9's exit-2 loop, the one thing behind the mark worth reporting, is
+ *     not a rung at all but the repair MODE below. See Ladder.admit.
  *
  * What this deliberately does NOT do:
  *
@@ -69,7 +67,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import type { HookCallback, PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
-import { ValidationProgressState, validationProgressUpdates } from "./validation_progress.js";
+import { ValidationProgressState, WRITE_TOOLS, validationProgressUpdates } from "./validation_progress.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -192,27 +190,27 @@ export class Ladder {
   private high = -1;
   private posts = 0;
   private repairing = false;
+  private capAnnounced = false;
 
   /**
    * Whether this state is news, and record it if so.
    *
-   * FORWARD is always news. BEHIND is news exactly once — when the run had
-   * reached the last rung and was sent back.
+   * STRICTLY ONE-WAY: forward speaks, behind never does. The run oscillates by
+   * design — step 6 takes a criterion at a time (stub, explore, body, run), so
+   * twelve criteria walk exploring → authoring → running twelve times over, and
+   * step 8 walks the last two again for every heal. Treating any of that as news
+   * would post three lines per criterion and exhaust MAX_POSTS around the
+   * fourth, leaving the rest of a two-hour run in the silence this whole
+   * mechanism exists to end.
    *
-   * That asymmetry is the whole rule, and it exists because the run oscillates
-   * by design. Step 6 takes a criterion at a time: write the stub, explore,
-   * write the body, run it. Twelve criteria walk exploring → authoring →
-   * running twelve times over, and step 8 walks authoring → running again for
-   * every heal. Treating each of those as news would post three lines per
-   * criterion, exhaust MAX_POSTS around the fourth, and leave the rest of a
-   * two-hour run in the silence this whole mechanism exists to end.
+   * None of it is a regression. It is what the middle of a run LOOKS like, and
+   * the console already draws it per criterion.
    *
-   * None of that churn is a regression — it is what the middle of the run LOOKS
-   * like, and the console already draws it per criterion. What IS a regression
-   * is step 9's exit-2 sending a finished run back to authoring: the reader was
-   * told a report was being written, and it no longer is. So only a fall from
-   * the final rung speaks, and after it the mark resets and the climb back up is
-   * ordinary forward news again.
+   * An earlier version let a fall from the LAST rung speak, for step 9's exit-2
+   * sending a finished run back to authoring. The repair mode owns that now, and
+   * keeping the exception beside it was actively wrong: after a report SUCCEEDS
+   * the mark sits on the last rung, so the next scaffold write would announce
+   * "setting up the test harness" over a run that had finished.
    */
   admit(state: LadderState): boolean {
     // Everything a repairing run does IS the repair — re-running a spec,
@@ -222,8 +220,7 @@ export class Ladder {
     if (this.repairing) return false;
     if (this.posts >= MAX_POSTS) return false;
     const at = rank(state);
-    const sentBack = this.high === LADDER.length - 1 && at < this.high;
-    if (at <= this.high && !sentBack) return false;
+    if (at <= this.high) return false;
     this.high = at;
     this.posts += 1;
     return true;
@@ -253,9 +250,17 @@ export class Ladder {
     this.repairing = false;
   }
 
-  /** Whether the cap has just been reached, so it can be said once. */
-  atCap(): boolean {
-    return this.posts >= MAX_POSTS;
+  /**
+   * Whether the cap has just been reached, answered TRUE exactly once.
+   *
+   * The say-once bookkeeping lives with the counter rather than beside the
+   * caller's post: the cap is this object's fact, and a second copy of "have I
+   * mentioned it" would be free to disagree with the count it describes.
+   */
+  justCapped(): boolean {
+    if (this.posts < MAX_POSTS || this.capAnnounced) return false;
+    this.capAnnounced = true;
+    return true;
   }
 }
 
@@ -294,9 +299,6 @@ export function ladderStateFor(
   }
   return undefined;
 }
-
-/** Tools whose input names a file being authored — the same set the rows watch. */
-const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
 
 function writtenPath(toolInput: unknown): string {
   if (!toolInput || typeof toolInput !== "object") return "";
@@ -383,7 +385,6 @@ export function createValidationStatusLine(
   // tool id for the same reason ValidationProgressState.noteRun is: the outcome
   // arrives with nothing but that id, and the command's text is long gone.
   let reportCall: string | undefined;
-  let capAnnounced = false;
 
   const say = (key: LineKey): Promise<void> =>
     post(`${OBSERVED_COMMENT_MARKER}\n${LADDER_LINES[key]}`).catch((err) => {
@@ -391,8 +392,7 @@ export function createValidationStatusLine(
     });
 
   const warnIfCapped = (): void => {
-    if (capAnnounced || !ladder.atCap()) return;
-    capAnnounced = true;
+    if (!ladder.justCapped()) return;
     onError(`status line capped at ${MAX_POSTS} posts for this cycle — the last line will stand`);
   };
 

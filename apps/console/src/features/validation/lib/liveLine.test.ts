@@ -74,14 +74,14 @@ describe("validationLiveLine", () => {
     ).toBe("Writing the validation report…");
   });
 
-  it("stops claiming the report is being written once it has landed", () => {
-    // The report is the authority and the rows now read from it; a line still
-    // claiming the report is being written would outlive its own subject. What
-    // is left is the count, which stays true — the cycle can still be open while
-    // the platform reads the report at the merge commit.
+  it("says nothing once every criterion is answered and the report has landed", () => {
+    // The report is the authority and the rows now read from it. A line claiming
+    // the report is being written would outlive its subject, and the count would
+    // be worse — its trailing ellipsis promises work still in flight on a run
+    // that has answered everything it was asked.
     expect(
       validationLiveLine(AUTO_TWO, { "AC-001-a": "pass", "AC-002-a": "pass" }, true),
-    ).toBe("Checking the criteria, 2 of 2 answered…");
+    ).toBe("");
   });
 
   it("does not wait on manual criteria to call the run settled", () => {

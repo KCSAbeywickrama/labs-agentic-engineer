@@ -82,8 +82,12 @@ export function validationLiveLine(
   // 9-10: the final full run, generate-report.mjs, the push and the pull
   // request. The rows are all settled, so nothing on the page moves until the
   // platform reads the report at the merge commit.
-  if (!hasReport && touched.length === ids.length && ids.every((id) => TERMINAL.has(live?.[id] ?? ""))) {
-    return "Writing the validation report…";
+  if (touched.length === ids.length && ids.every((id) => TERMINAL.has(live?.[id] ?? ""))) {
+    // …and once the report HAS landed, nothing. The rows read from it and the
+    // verdict is beside them, so a line here could only restate them — and the
+    // trailing ellipsis would promise work still in flight on a run that has
+    // answered everything it was asked.
+    return hasReport ? "" : "Writing the validation report…";
   }
 
   // The long middle: work is under way and not finished. The rows carry the

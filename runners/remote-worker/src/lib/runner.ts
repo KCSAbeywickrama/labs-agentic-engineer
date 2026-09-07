@@ -315,6 +315,33 @@ export interface McpAuthOpts {
  * -triggered load is the right shape for mechanics a run may or may not need,
  * and paying for its body on every turn of every validation run is not.
  */
+export function alwaysOnSkills(taskKind: DispatchRequest["taskKind"]): string[] {
+  return taskKind === "validation" ? ["aep", "aep-validation"] : ["aep"];
+}
+
+/**
+ * The skills a run may LOAD on demand — the other half of the sentence above.
+ *
+ * `skills:` is an allowlist, so leaving `playwright-cli` out of the always-on
+ * set is only half a decision: absent from BOTH lists it is not deferred, it is
+ * unreachable, and the Skill tool answers "not in this session's skills
+ * allowlist". That is what shipped — a validation run passed an empty allowlist,
+ * so the load `aep-validation` instructs could never succeed and the agent
+ * grepped the mirror's files by hand instead.
+ *
+ * Named rather than "the whole mirror" as an implementation run gets: that run
+ * may legitimately need any stack skill a `design.json` pinned, while a
+ * validation run builds nothing and has exactly one mechanics skill to reach
+ * for. Listing the mirror would readmit `go`, `ballerina` and every other stack
+ * skill the checkout happens to carry, which is the thing the `skills:` comment
+ * below warns against. Extend this list when a validation run genuinely needs
+ * something else; it is a statement of what the phase uses, not a cap someone
+ * has to work around.
+ */
+export function onDemandSkills(taskKind: DispatchRequest["taskKind"]): string[] {
+  return taskKind === "validation" ? ["playwright-cli"] : [];
+}
+
 /**
  * The status line for THIS dispatch, or undefined when the run cannot or should
  * not keep one.
@@ -357,33 +384,6 @@ export async function validationStatusLineFor(
     return undefined;
   }
   return createValidationStatusLine(progress.state, ghCommentPoster(gh, req.repoUrl, issue), warn);
-}
-
-export function alwaysOnSkills(taskKind: DispatchRequest["taskKind"]): string[] {
-  return taskKind === "validation" ? ["aep", "aep-validation"] : ["aep"];
-}
-
-/**
- * The skills a run may LOAD on demand — the other half of the sentence above.
- *
- * `skills:` is an allowlist, so leaving `playwright-cli` out of the always-on
- * set is only half a decision: absent from BOTH lists it is not deferred, it is
- * unreachable, and the Skill tool answers "not in this session's skills
- * allowlist". That is what shipped — a validation run passed an empty allowlist,
- * so the load `aep-validation` instructs could never succeed and the agent
- * grepped the mirror's files by hand instead.
- *
- * Named rather than "the whole mirror" as an implementation run gets: that run
- * may legitimately need any stack skill a `design.json` pinned, while a
- * validation run builds nothing and has exactly one mechanics skill to reach
- * for. Listing the mirror would readmit `go`, `ballerina` and every other stack
- * skill the checkout happens to carry, which is the thing the `skills:` comment
- * below warns against. Extend this list when a validation run genuinely needs
- * something else; it is a statement of what the phase uses, not a cap someone
- * has to work around.
- */
-export function onDemandSkills(taskKind: DispatchRequest["taskKind"]): string[] {
-  return taskKind === "validation" ? ["playwright-cli"] : [];
 }
 
 /**

@@ -74,6 +74,25 @@ into the runner pod at `/app/skills` for live skill edits (see
   either alone re-creates a log that says reasoning happened without saying what
   it was. ADR-0002 decisions 14–16 have the measurements, including why stderr
   is *not* where retry detail lives.
+- **A validation run keeps its own issue's status line, and the platform writes
+  it.** `lib/validation_status_line.ts` is a `PreToolUse` hook beside the
+  per-criterion one, sharing its `ValidationProgressState` so a row and the line
+  above it cannot disagree. Two things make it unlike every other hook here.
+  It performs **I/O on the agent's path** — an awaited `gh issue comment`
+  through the REAL `gh` (`resolveRealGhPath`, never the `.aep/gh` wrapper) —
+  because the whole value is that the line lands BEFORE the silence it explains;
+  a detached post during a twenty-minute exploration could land after it. And it
+  reads the **outcome** as well as the call, through the same `onToolOutcome`
+  seam the rows settle on, because the report generator FAILING is what puts a
+  run into its repair mode. A failure is warned and swallowed: two hours of work
+  must never die because it could not be watched. The issue number arrives as
+  `AEP_VALIDATION_ISSUE`, stamped by the BFF — nothing else in the pod answers
+  "which issue", since `AEP_TASK_ID` is the cycle's uuid and the number reaches
+  the agent only as prose inside `AEP_PROMPT`. Rungs are one-way and the repair
+  mode absorbs the exit-2 loop, which is what keeps a lapping run to six lines
+  instead of three per criterion; `design/decisions/ADR-0011-the-platform-writes-a-validation-runs-status-line.md`
+  has the measurements, including the p44 run that produced two wrong lines
+  before either rule existed.
 - **Fan-out runs in the foreground.** A `PreToolUse` hook
   (`lib/fanout_foreground.ts`) forces `run_in_background: false` on every
   `Agent`/`Task` call that did not already say so. Backgrounding does not add

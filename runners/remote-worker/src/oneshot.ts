@@ -107,7 +107,7 @@ function readDispatchFromEnv(): { req: DispatchRequest; publisher: PublisherCred
   const issueEnv = process.env.AEP_VALIDATION_ISSUE ?? "";
   const validationIssue = issueEnv === "" ? 0 : Number(issueEnv);
   if (!Number.isSafeInteger(validationIssue) || validationIssue < 0) {
-    throw new Error(`AEP_VALIDATION_ISSUE must be a positive integer: ${issueEnv}`);
+    throw new Error(`AEP_VALIDATION_ISSUE must be a whole number or unset: ${issueEnv}`);
   }
 
   const publisher = requirePublisherCreds();
