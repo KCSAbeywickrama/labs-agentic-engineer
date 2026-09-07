@@ -83,10 +83,41 @@ function scannedFiles(appDir) {
   return [...sourceFiles(path.join(appDir, "src")), ...configs];
 }
 
-/** `{ value }` on success, `{ error }` on a missing or malformed file — never throws. */
+/**
+ * Source with comments blanked out. The import scan runs over this, because
+ * this skill spends paragraphs telling people NOT to import `@mui/material` —
+ * so a comment repeating that advice is likely, and matching it would fail a
+ * correct app. The `[^:]` guard keeps `https://` out of the line-comment rule.
+ */
+const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
+/** A JSX element for `name`, not a mention of it in an import or a string. */
+const rendersElement = (src, name) => new RegExp(`<\\s*${name}[\\s>]`).test(src);
+
+/**
+ * Whether the provider actually ENCLOSES the app. `main.tsx` importing the
+ * symbol, or rendering it somewhere off the root, both leave the deployed page
+ * unthemed while reading as wired.
+ */
+function providerWrapsRoot(text) {
+  const src = stripComments(text);
+  if (!rendersElement(src, "OxygenUIThemeProvider")) return false;
+  const root = src.indexOf(".render(");
+  return root === -1 ? true : rendersElement(src.slice(root), "OxygenUIThemeProvider");
+}
+
+/**
+ * `{ value }` for a JSON OBJECT, `{ error }` for anything else — never throws.
+ * A bare `null` parses fine and would then throw on the first field read,
+ * killing the run before a single FAIL row is printed.
+ */
 function tryReadJSON(p) {
   try {
-    return { value: JSON.parse(readFileSync(p, "utf8")) };
+    const value = JSON.parse(readFileSync(p, "utf8"));
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      return { error: `expected a JSON object, got ${Array.isArray(value) ? "an array" : String(value)}` };
+    }
+    return { value };
   } catch (e) {
     return { error: e.message };
   }
@@ -124,7 +155,7 @@ function verifyApp(appDir) {
   const offenders = [];
   for (const file of scannedFiles(appDir)) {
     const text = readFileSync(file, "utf8");
-    for (const m of text.matchAll(IMPORT_RE)) offenders.push(`${path.relative(appDir, file)} → ${m[1]}`);
+    for (const m of stripComments(text).matchAll(IMPORT_RE)) offenders.push(`${path.relative(appDir, file)} → ${m[1]}`);
   }
   rows.push({
     name: `src/ and the build config import nothing from ${BUNDLED_LABEL}`,
@@ -135,11 +166,11 @@ function verifyApp(appDir) {
   const main = ["src/main.tsx", "src/main.jsx", "src/main.ts", "src/main.js"].map((p) => path.join(appDir, p)).find(existsSync);
   rows.push({
     name: "src/main.tsx wraps the root in OxygenUIThemeProvider",
-    ok: main !== undefined && readFileSync(main, "utf8").includes("OxygenUIThemeProvider"),
+    ok: main !== undefined && providerWrapsRoot(readFileSync(main, "utf8")),
     fix:
       main === undefined
         ? "no src/main.tsx — scaffold per react-webapp, then wire the provider per SKILL.md Setup"
-        : "render <OxygenUIThemeProvider theme={…}> outermost in main.tsx (SKILL.md, Setup)",
+        : "render <OxygenUIThemeProvider theme={…}> around the app INSIDE createRoot(...).render(...) — importing it, or rendering it off the root, leaves the page unthemed (SKILL.md, Setup)",
   });
 
   const installedPath = path.join(appDir, "node_modules", OXYGEN, "package.json");

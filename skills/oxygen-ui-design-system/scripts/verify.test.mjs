@@ -174,3 +174,70 @@ test("a path that needs escaping still runs the checks", () => {
   assert.match(r.stdout + r.stderr, /verify: ok \(\d+ checks\)/);
   assert.equal(r.status, 0);
 });
+
+// --- the checks must not be fooled, in either direction ---------------------
+
+// This skill spends paragraphs saying "never import @mui/material", so a
+// comment repeating that advice inside an app is likely. It must not fail one.
+test("a bundled package named in a comment is not an import", () => {
+  const { status, out } = run(
+    fixtureApp({
+      src: {
+        "src/pages/Note.tsx": `// never import { Table } from '@mui/material' — use ListingTable\n/* also not from '@emotion/react' */\nexport const n = 1;\n`,
+      },
+    }),
+  );
+  assert.equal(status, 0, out);
+  assert.doesNotMatch(out, /^FAIL/m);
+});
+
+test("a real import is still caught on a line that also carries a URL", () => {
+  const { status, out } = run(
+    fixtureApp({ src: { "src/pages/L.tsx": `import { Table } from '@mui/material'; // see https://mui.com/table\n` } }),
+  );
+  assert.equal(status, 1);
+  assert.match(out, /src\/pages\/L\.tsx → @mui\/material/);
+});
+
+// Importing the provider, or rendering it off the root, leaves the deployed
+// page unthemed while reading as wired.
+test("the provider imported but not wrapping the root fails", () => {
+  const { status, out } = run(
+    fixtureApp({
+      main: `import { OxygenUIThemeProvider } from '@wso2/oxygen-ui';\ncreateRoot(document.getElementById('root')!).render(<App />);`,
+    }),
+  );
+  assert.equal(status, 1);
+  assert.match(out, /FAIL  src\/main\.tsx wraps the root in OxygenUIThemeProvider/);
+  assert.match(out, /INSIDE createRoot/);
+});
+
+test("the provider rendered off the root fails", () => {
+  const { status, out } = run(
+    fixtureApp({
+      main: `import { OxygenUIThemeProvider } from '@wso2/oxygen-ui';\nexport const Preview = () => <OxygenUIThemeProvider><Swatch /></OxygenUIThemeProvider>;\ncreateRoot(document.getElementById('root')!).render(<App />);`,
+    }),
+  );
+  assert.equal(status, 1);
+  assert.match(out, /FAIL  src\/main\.tsx wraps the root in OxygenUIThemeProvider/);
+});
+
+// `JSON.parse("null")` succeeds, then every field read throws — which would
+// kill the run before a single row is printed.
+test("a package.json that is literally null is a named failure", () => {
+  const dir = fixtureApp();
+  writeFileSync(path.join(dir, "package.json"), "null");
+  const { status, out } = run(dir);
+  assert.equal(status, 1);
+  assert.match(out, /FAIL  package\.json parses/);
+  assert.match(out, /expected a JSON object, got null/);
+});
+
+test("an installed Oxygen package.json that is null fails the install check, not the process", () => {
+  const dir = fixtureApp();
+  writeFileSync(path.join(dir, "node_modules/@wso2/oxygen-ui/package.json"), "null");
+  const { status, out } = run(dir);
+  assert.equal(status, 1);
+  assert.match(out, /FAIL  @wso2\/oxygen-ui is installed/);
+  assert.doesNotMatch(out, /at \w+ \(/); // no stack frames
+});

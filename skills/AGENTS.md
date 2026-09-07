@@ -139,13 +139,13 @@ changing a web-app skill:
 grep -rniE 'astryx|@astryxdesign|\boxygen\b|@wso2/oxygen' skills/ --include='*.md'
 ```
 
-Only `skills/organization/SKILL.md`, `skills/oxygen-ui-design-system/**`,
-`skills/astryx-design-system/**` and this file should match. A hit anywhere
-else — especially in `architecture`, which is `kind: platform` and read-only in
-the console — means an org can no longer swap its design system without a
-platform change.
+Four paths may match, plus the one exception below: `skills/organization/SKILL.md`,
+`skills/oxygen-ui-design-system/**`, `skills/astryx-design-system/**` and this
+file. A hit anywhere else — especially in `architecture`, which is
+`kind: platform` and read-only in the console — means an org can no longer swap
+its design system without a platform change.
 
-One documented exception: `skills/wireframes/SKILL.md` says the wireframe
+The exception: `skills/wireframes/SKILL.md` says the wireframe
 compiler renders with an "Oxygen UI palette" and applies "the Oxygen theme".
 That is the **compiler's** drawing style for a `.excalidraw` picture, not the
 app's UI toolkit, and it does not follow the org's design system — swapping

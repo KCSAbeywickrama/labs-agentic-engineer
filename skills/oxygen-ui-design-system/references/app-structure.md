@@ -93,25 +93,23 @@ parent route whose `element` is a layout that renders `<Outlet/>`).
 ```tsx
 // src/App.tsx
 import { Route, Routes } from 'react-router';
-import appRoutes from './config/appRoutes';
+import appRoutes, { type AppRoute } from './config/appRoutes';
+
+// Recursive, because `AppRoute.children` is: a renderer that walks only one
+// level type-checks against a grandchild route and then never renders it.
+// The branch is required — `RouteProps` is a union, and an index route may
+// not carry children, so passing both fails to compile.
+function renderRoute(route: AppRoute, key: string) {
+  if (route.index) return <Route key={key} index element={route.element} />;
+  return (
+    <Route key={key} path={route.path} element={route.element}>
+      {route.children?.map((child, i) => renderRoute(child, child.path ?? `index-${i}`))}
+    </Route>
+  );
+}
 
 export default function App() {
-  return (
-    <Routes>
-      {appRoutes.map((route) => (
-        <Route key={route.path ?? 'layout'} path={route.path} element={route.element}>
-          {route.children?.map((child, i) => (
-            <Route
-              key={child.path ?? `index-${i}`}
-              index={child.index}
-              path={child.path}
-              element={child.element}
-            />
-          ))}
-        </Route>
-      ))}
-    </Routes>
-  );
+  return <Routes>{appRoutes.map((route, i) => renderRoute(route, route.path ?? `layout-${i}`))}</Routes>;
 }
 ```
 
