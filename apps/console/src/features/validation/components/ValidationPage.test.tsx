@@ -1534,11 +1534,11 @@ describe("ValidationPage agent status line", () => {
     // would spend the reader's attention where none is needed.
     validating();
     mockIssueComments = [
-      { id: "o1", body: "Running specs against the deployed system.", observed: true },
+      { id: "o1", body: "Running automated tests against the deployed system…", observed: true },
     ];
     renderPage(undefined);
 
-    expect(screen.getByText("Running specs against the deployed system.")).toBeInTheDocument();
+    expect(screen.getByText("Running automated tests against the deployed system…")).toBeInTheDocument();
     expect(screen.queryByText(/The agent:/)).not.toBeInTheDocument();
   });
 
@@ -1548,7 +1548,7 @@ describe("ValidationPage agent status line", () => {
     // reader who cannot tell them apart over-trusts the mechanical one.
     validating();
     mockIssueComments = [
-      { id: "o1", body: "Running specs against the deployed system.", observed: true },
+      { id: "o1", body: "Running automated tests against the deployed system…", observed: true },
       { id: "c2", body: "AC-001-b blocked: the roles gate published no second login." },
     ];
     renderPage(undefined);

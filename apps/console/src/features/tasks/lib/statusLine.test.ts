@@ -54,9 +54,9 @@ describe("statusLine", () => {
     // progress did not.
     expect(
       statusLine({
-        comments: [observed("Running specs against the deployed system.")],
+        comments: [observed("Running automated tests against the deployed system…")],
       }),
-    ).toEqual({ text: "Running specs against the deployed system.", writer: "platform" });
+    ).toEqual({ text: "Running automated tests against the deployed system…", writer: "platform" });
   });
 
   it("takes the NEWEST comment — the thread arrives oldest first", () => {
@@ -77,11 +77,11 @@ describe("statusLine", () => {
     // sounds: the agent's FIRST act is an opening comment, so it would pin
     // "Starting validation…" over the whole run and hide every line after it.
     const opening = comment("Starting validation: 12 criteria, 9 to author.", "c1");
-    const ladder = observed("Running specs against the deployed system.", "c2");
+    const ladder = observed("Running automated tests against the deployed system…", "c2");
     const blocker = comment("AC-001-b blocked: the roles gate published no second login.", "c3");
 
     expect(statusLine({ comments: [opening, ladder] })).toEqual({
-      text: "Running specs against the deployed system.",
+      text: "Running automated tests against the deployed system…",
       writer: "platform",
     });
     expect(statusLine({ comments: [opening, ladder, blocker] })).toEqual({
@@ -102,8 +102,8 @@ describe("statusLine", () => {
   it("statusLineText is the claim without the attribution", () => {
     // What the Builds rows take: eleven tasks with one line each have no room
     // for a second signal per row.
-    expect(statusLineText({ comments: [observed("Setting up the Playwright harness.")] })).toBe(
-      "Setting up the Playwright harness.",
+    expect(statusLineText({ comments: [observed("Setting up the test harness…")] })).toBe(
+      "Setting up the test harness…",
     );
     expect(statusLineText({ comments: [] })).toBeNull();
   });

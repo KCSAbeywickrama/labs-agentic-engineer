@@ -66,8 +66,8 @@ only record of a run that survives the run.
    ADR-0009's rejection of phase markers, whose objection was that the workflow's
    steps interleave: `authoring.md` has the run testing all through step 6, so
    the first `npm test` fires while it is still authoring. A line claiming "step
-   7 has begun" would be wrong for an hour; "Running specs against the deployed
-   system" is true when posted and never false in hindsight.
+   7 has begun" would be wrong for an hour; "Running automated tests against the
+   deployed system" is true when posted and never false in hindsight.
 
 4. **A ratchet that can roll back, capped at 12.** Each rung posts on first
    occurrence, so the eleven criteria after the first add nothing. But step 9's

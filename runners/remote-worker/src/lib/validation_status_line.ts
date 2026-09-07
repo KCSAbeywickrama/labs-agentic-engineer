@@ -42,8 +42,8 @@
  *
  *   - EACH LINE NAMES THE EVIDENCE, NOT THE STEP. The first `npm test` fires
  *     inside step 6 while the run is still authoring, so "step 7 has begun"
- *     would be wrong for an hour. "Running specs against the deployed system" is
- *     true when posted and never false in hindsight.
+ *     would be wrong for an hour. "Running automated tests against the deployed
+ *     system" is true when posted and never false in hindsight.
  *   - IT IS A RATCHET THAT CAN ROLL BACK. Each state posts on first occurrence,
  *     so the twelve criteria after the first add nothing. But step 9's exit-2
  *     loop back to authoring is the ordinary path, and a run that returned there
@@ -104,11 +104,11 @@ export type LadderState = (typeof LADDER)[number];
  * are the whole claim — there is no second line a reader will see.
  */
 export const LADDER_LINES: Record<LadderState, string> = {
-  harness: "Setting up the Playwright harness under tests/e2e.",
-  exploring: "Driving the deployed app with playwright-cli to author specs.",
-  authoring: "Writing spec bodies from what the app actually does.",
-  running: "Running specs against the deployed system.",
-  reporting: "Generating the validation report from the results on disk.",
+  harness: "Setting up the test harness…",
+  exploring: "Exploring the deployed app to author automated tests…",
+  authoring: "Authoring automated tests…",
+  running: "Running automated tests against the deployed system…",
+  reporting: "Generating the validation report from the results on disk…",
 };
 
 /**

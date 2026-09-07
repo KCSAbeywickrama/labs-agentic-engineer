@@ -672,27 +672,27 @@ const STATUS_THREAD: Partial<Record<ValidationScenario, StatusPost[]>> = {
   // the unlabelled common case.
   running: [
     { body: "Starting validation: 12 criteria, 9 need new specs." },
-    { body: "Setting up the Playwright harness under tests/e2e.", observed: true },
-    { body: "Driving the deployed app with playwright-cli to author specs.", observed: true },
-    { body: "Writing spec bodies from what the app actually does.", observed: true },
-    { body: "Running specs against the deployed system.", observed: true },
+    { body: "Setting up the test harness…", observed: true },
+    { body: "Exploring the deployed app to author automated tests…", observed: true },
+    { body: "Authoring automated tests…", observed: true },
+    { body: "Running automated tests against the deployed system…", observed: true },
   ],
   // Ends on the AGENT's line, which is what renders the "The agent:" label — the
   // two scenarios are how the attribution is seen to work, by switching between
   // them and watching the prefix appear.
   "awaiting-fix": [
     { body: "Starting validation: 12 criteria, 9 need new specs." },
-    { body: "Running specs against the deployed system.", observed: true },
+    { body: "Running automated tests against the deployed system…", observed: true },
     { body: "3 of 12 failed — report committed, PR #14 open for review." },
   ],
   passed: [
     { body: "Starting validation: 12 criteria, 9 need new specs." },
-    { body: "Generating the validation report from the results on disk.", observed: true },
+    { body: "Generating the validation report from the results on disk…", observed: true },
     { body: "All 12 covered and passing. Report committed, PR #14 open." },
   ],
   failed: [
     { body: "Starting validation: 12 criteria, 9 need new specs." },
-    { body: "Running specs against the deployed system.", observed: true },
+    { body: "Running automated tests against the deployed system…", observed: true },
     { body: "AC-004-b blocked: the roles gate published no second login." },
     { body: "3 of 12 failed — report committed, PR #14 open for review." },
   ],
