@@ -122,16 +122,45 @@ export const LADDER_LINES: Record<LadderState, string> = {
  */
 export const MAX_POSTS = 12;
 
-/** `npm install --prefix tests/e2e` / `npm ci --prefix tests/e2e`, however spelled. */
-const HARNESS_INSTALL = /\b(?:npm|pnpm|yarn)\s+(?:install|ci|i)\b[^\n]*\btests\/e2e\b/;
+/**
+ * A scaffold file: anything under the e2e package that is not a spec.
+ *
+ * This is the harness signal, and it is a WRITE rather than a shell command
+ * because the shell form is the agent's to choose and the file is not. A run
+ * that reached for `npm --prefix tests/e2e install` instead of the
+ * `npm install --prefix tests/e2e` the skill writes produced no harness line at
+ * all on p44, while `package.json`, `playwright.config.ts`, `targets.json` and
+ * `lib/targets.ts` are named by the skill and land whatever the shell does. The
+ * config is re-copied on EVERY run by instruction, so this fires on a
+ * re-validation too, where the install may legitimately not happen.
+ *
+ * `specs/` is excluded, and that exclusion is what keeps the rung honest: a spec
+ * file lives under this path and means exploring or authoring, one rung along.
+ */
+const HARNESS_FILE = /(^|\/)tests\/e2e\/(?!specs\/)/;
 
 /**
- * The platform's report generator. Matched on the script NAME rather than the
- * `$AEP_SKILLS_DIR` path in front of it, which varies by run — and the skill has
- * the run invoke the platform's copy directly, so this is the call that means
- * "the results on disk are being turned into a verdict".
+ * An install of the e2e package — the two facts tested independently, because
+ * their ORDER is the agent's. `npm install --prefix tests/e2e`,
+ * `npm --prefix tests/e2e install` and `cd tests/e2e && npm install` are the
+ * same act, and a pattern demanding the verb before the path recognises only the
+ * first. Kept beside HARNESS_FILE as a second way in rather than the only one.
  */
-const REPORT_GENERATOR = /\bgenerate-report\.mjs\b/;
+const INSTALL_VERB = /\b(?:npm|pnpm|yarn)\b[^\n]*\b(?:install|ci)\b/;
+const E2E_PACKAGE = /\btests\/e2e\b/;
+
+/**
+ * The platform's report generator, EXECUTED — not merely named.
+ *
+ * `node` is required in front of it because step 5 scaffolds the package by
+ * copying this very file into the repo (`cp "$AEP_SKILLS_DIR/…/generate-report.mjs"
+ * tests/e2e/scripts/…`), and a pattern matching the bare filename read that copy
+ * as a verdict being generated. On p44 that posted "generating the validation
+ * report" as the run's FIRST line, before the app had been opened. Same trap
+ * validation_progress.ts documents for `cat specs/AC-001-a.spec.ts`, and the
+ * same answer: match the act, not the mention.
+ */
+const REPORT_GENERATOR = /\bnode\s+[^\n]*\bgenerate-report\.mjs\b/;
 
 /** Where a state sits in the ladder; -1 for anything not on it. */
 function rank(state: LadderState): number {
@@ -180,12 +209,16 @@ export function ladderStateFor(
 ): LadderState | undefined {
   if (toolName === "Bash") {
     const command = readCommand(toolInput);
-    // Order matters only here: an install and a report call cannot be the same
-    // command, but checking the cheaper, narrower pattern first keeps the
-    // per-call cost of this hook to two regex tests on a string.
-    if (HARNESS_INSTALL.test(command)) return "harness";
     if (REPORT_GENERATOR.test(command)) return "reporting";
+    if (INSTALL_VERB.test(command) && E2E_PACKAGE.test(command)) return "harness";
   }
+
+  // Checked BEFORE the per-criterion derivation, which owns everything under
+  // `specs/` — HARNESS_FILE excludes that path, so the two cannot both answer.
+  if (WRITE_TOOLS.has(toolName) && HARNESS_FILE.test(writtenPath(toolInput))) {
+    return "harness";
+  }
+
   for (const update of validationProgressUpdates(toolName, toolInput, progress)) {
     // `planned` (the test plan) and `healing`/`pass`/`fail` are real criterion
     // statuses with no rung of their own: the first is covered by `harness`
@@ -196,6 +229,16 @@ export function ladderStateFor(
     }
   }
   return undefined;
+}
+
+/** Tools whose input names a file being authored — the same set the rows watch. */
+const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
+
+function writtenPath(toolInput: unknown): string {
+  if (!toolInput || typeof toolInput !== "object") return "";
+  const input = toolInput as Record<string, unknown>;
+  const v = input.file_path ?? input.notebook_path;
+  return typeof v === "string" ? v : "";
 }
 
 function readCommand(toolInput: unknown): string {

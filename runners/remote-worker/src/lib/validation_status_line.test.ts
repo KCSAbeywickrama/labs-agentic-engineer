@@ -55,6 +55,70 @@ test("ladderStateFor: the harness install and the report generator are the two e
   );
 });
 
+// p44, 01:18:13: "Generating the validation report from the results on disk."
+// posted as the run's FIRST line, before the app had been opened. Step 5
+// scaffolds the package by copying this very file into the repo, and a pattern
+// matching the bare filename read that copy as a verdict being generated.
+test("ladderStateFor: scaffolding the report generator is not generating a report", () => {
+  assert.equal(
+    stateFor(
+      bash(
+        'cp "$AEP_SKILLS_DIR/aep-validation/scripts/generate-report.mjs" tests/e2e/scripts/generate-report.mjs',
+      ),
+    ),
+    undefined,
+    "the copy announces nothing — harness already fired on the package write",
+  );
+  assert.equal(stateFor(bash("ls tests/e2e/scripts/generate-report.mjs")), undefined);
+  assert.equal(stateFor(bash("cat scripts/generate-report.mjs | head -20")), undefined);
+});
+
+// p44 posted no harness line at all. The skill writes
+// `npm install --prefix tests/e2e`, but the order of a flag and a verb is the
+// agent's to choose and the pattern demanded one of them.
+test("ladderStateFor: an install is an install whatever order it is written in", () => {
+  for (const command of [
+    "npm install --prefix tests/e2e",
+    "npm --prefix tests/e2e install",
+    "npm --prefix tests/e2e ci",
+    "cd tests/e2e && npm install",
+    "pnpm --prefix tests/e2e install",
+  ]) {
+    assert.equal(stateFor(bash(command)), "harness", command);
+  }
+});
+
+// The surer signal, and the reason the shell form no longer has to be guessed:
+// the skill NAMES these files, and re-copies the config on every run — so this
+// fires on a re-validation too, where the install may legitimately not happen.
+test("ladderStateFor: writing a scaffold file is the harness", () => {
+  for (const file of [
+    "tests/e2e/package.json",
+    "tests/e2e/playwright.config.ts",
+    "tests/e2e/targets.json",
+    "tests/e2e/lib/targets.ts",
+    "/home/aep/aep-workspace/tests/e2e/.gitignore",
+  ]) {
+    assert.equal(stateFor(write(file, "{}")), "harness", file);
+  }
+});
+
+// The exclusion that keeps the rung honest: a spec lives under the same package
+// and means the rung ABOVE. Without it every spec write would report harness and
+// the ladder would ratchet backwards for the whole authoring phase.
+test("ladderStateFor: a spec under tests/e2e is never the harness", () => {
+  assert.equal(
+    stateFor(write("tests/e2e/specs/AC-001-a.spec.ts", "// spec: AC-001-a\n")),
+    "exploring",
+  );
+  assert.equal(
+    stateFor(
+      write("tests/e2e/specs/AC-001-a.spec.ts", "// spec: AC-001-a\ntest('AC-001-a: x', async () => {});"),
+    ),
+    "authoring",
+  );
+});
+
 // The middle three ARE ProgressItemStatus values, read through the same
 // derivation the console's rows use. Pinned here so a change to that derivation
 // cannot silently take the issue's line with it.
