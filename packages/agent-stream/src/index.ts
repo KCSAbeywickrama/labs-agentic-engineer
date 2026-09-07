@@ -74,6 +74,8 @@ export {
   SURFACES,
   TURN_KINDS,
   ASK_QUESTION_TOOL,
+  isQuestionTool,
+  isErrorToolOutput,
   ASK_QUESTIONS_TOOL,
   DECLARE_PLAN_TOOL,
   ANSWER_PREFIX,

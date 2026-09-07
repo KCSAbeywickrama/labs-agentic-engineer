@@ -74,12 +74,38 @@ describe("parseQuestionsInput — ask_question (single)", () => {
   it.each([
     ["missing question", { options: SINGLE.options }],
     ["missing options", { question: "q" }],
-    ["option without label", { question: "q", options: [{ description: "x" }] }],
-    ["duplicate labels", { question: "q", options: [{ label: "a" }, { label: "a", description: "d" }] }],
     ["malformed JSON string", "{nope"],
     ["null", null],
   ])("rejects %s", (_name, value) => {
     expect(parseQuestionsInput(ASK_QUESTION_TOOL, value)).toBeNull();
+  });
+
+  // A card degrades per OPTION, never per card: the agent's turn ends on the
+  // question call, so a dropped card leaves the user staring at nothing while
+  // the conversation waits on them. The model's favourite malformation is an
+  // unlabeled free-text "Other" — the form offers free text anyway.
+  it("drops an option without a label and keeps the card", () => {
+    expect(
+      parseQuestionsInput(ASK_QUESTION_TOOL, {
+        question: "q",
+        options: [{ label: "A" }, { label: "", freeText: true }, { description: "x" }, "not-an-object"],
+      }),
+    ).toEqual([{ question: "q", options: [{ label: "A" }] }]);
+  });
+
+  it("a card whose every option is unlabeled becomes a free-text question", () => {
+    expect(parseQuestionsInput(ASK_QUESTION_TOOL, { question: "q", options: [{ label: "" }] })).toEqual([
+      { question: "q", options: [] },
+    ]);
+  });
+
+  it("keeps the first of two options with the same label", () => {
+    expect(
+      parseQuestionsInput(ASK_QUESTION_TOOL, {
+        question: "q",
+        options: [{ label: "a" }, { label: "b" }, { label: "a", description: "d" }],
+      }),
+    ).toEqual([{ question: "q", options: [{ label: "a" }, { label: "b" }] }]);
   });
 });
 
@@ -94,8 +120,12 @@ describe("parseQuestionsInput — ask_questions (batch)", () => {
     expect(parseQuestionsInput(ASK_QUESTIONS_TOOL, { questions: [] })).toBeNull();
   });
 
-  it("rejects when ANY question is malformed", () => {
-    expect(parseQuestionsInput(ASK_QUESTIONS_TOOL, { questions: [SINGLE, { question: "q" }] })).toBeNull();
+  it("drops a malformed question and keeps the rest of the form", () => {
+    expect(parseQuestionsInput(ASK_QUESTIONS_TOOL, { questions: [SINGLE, { question: "q" }] })).toEqual([SINGLE]);
+  });
+
+  it("a form whose every question is malformed is no card", () => {
+    expect(parseQuestionsInput(ASK_QUESTIONS_TOOL, { questions: [{ question: "q" }, { options: [] }] })).toBeNull();
   });
 
   it("rejects an unknown tool name", () => {

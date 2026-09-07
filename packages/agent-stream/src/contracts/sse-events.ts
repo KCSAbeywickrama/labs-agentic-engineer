@@ -122,8 +122,9 @@ export interface RemoveFileInput {
 //   `ask_question`  — ONE question (a single card).
 //   `ask_questions` — a LIST of questions answered together (a form card).
 // Both ride the ordinary `tool-call` frame — no dedicated event kind — and the
-// console renders them as native question cards. The turn ENDS at the call
-// (`hasToolCall` stop condition); the user's answer(s) return as the NEXT turn's
+// console renders them as native question cards. The turn ENDS at an ACCEPTED
+// call (a stop condition that skips a call the SDK rejected against the schema,
+// so the model can retry); the user's answer(s) return as the NEXT turn's
 // plain-text instruction (`buildAnswerInstruction` / `buildAnswersInstruction`),
 // never a new channel.
 
@@ -132,6 +133,23 @@ export interface RemoveFileInput {
  *  (console). */
 export const ASK_QUESTION_TOOL = "ask_question" as const;
 export const ASK_QUESTIONS_TOOL = "ask_questions" as const;
+
+/** True when `toolName` is one of the question tools (single or batch). */
+export function isQuestionTool(toolName: string | undefined): boolean {
+  return toolName === ASK_QUESTION_TOOL || toolName === ASK_QUESTIONS_TOOL;
+}
+
+/**
+ * True when a persisted `tool-result` part's `output` records an error — the
+ * shape the SDK writes for a call it rejected against the tool schema
+ * (`error-text` / `error-json`) — rather than the tool's own result. A question
+ * call with an error result was never asked: the producer does not end the turn
+ * on it and the renderer does not rebuild a card from it.
+ */
+export function isErrorToolOutput(output: unknown): boolean {
+  const kind = (output as { type?: unknown } | null | undefined)?.type;
+  return typeof kind === "string" && kind.startsWith("error");
+}
 
 /** The answer instructions' leading markers (consumers may detect answers by them). */
 export const ANSWER_PREFIX = 'Answer to "' as const;
