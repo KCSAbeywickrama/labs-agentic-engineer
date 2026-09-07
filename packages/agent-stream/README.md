@@ -41,8 +41,10 @@ The OpenAPI gate deliberately matches the coverage of the platform's
 validating a spec no longer costs a round trip. That tool takes the document as a
 string, so an agent asking about a file it had just written had to retype the
 whole thing as tool input (measured: 4.1k output tokens and 28.9s for a 13KB
-spec). A `dependencies/<name>.openapi.yaml` is exempt: those are third-party
-documents recorded as-is.
+spec). A dependency's contract (`specs/design/dependencies/<name>/openapi.yaml`)
+is exempt: that is a slice of a third-party document, validated structurally
+by the slicer that cut it, and holding it to the platform's own API conventions
+would reject a write the agent is only relaying.
 
 ## Published JSON Schema
 
