@@ -51,14 +51,15 @@ const VISUALLY_HIDDEN = {
 const mono = { fontFamily: "monospace", fontSize: "0.875rem" } as const;
 
 /**
- * The row's first column, holding the one signal a row carries: the status chip
- * when a run is attached, the method glyph otherwise. One width for every row so
- * the ids line up, sized to the longest chip label ("Not validated") — which is
- * why DRIFT_LABEL stays terse, and why a short chip leaves slack. Raw px: a
- * word's width and a Chip's height are not spacing steps.
+ * The row's first column, which holds the method glyph and nothing else, on every
+ * surface. One narrow fixed width, so the ids beside it line up and the failure
+ * block has something to measure its indent from.
+ *
+ * Narrow is the point: the verdict sits at the row's far end instead, so no chip
+ * label can widen this column and none of them leaves slack in it. Raw px, because
+ * a glyph's box is not a spacing step.
  */
-const GUTTER_CHIP = 108;
-const GUTTER_ICON = 22;
+const GUTTER = 22;
 
 /**
  * The row's flex gap, as a theme spacing multiplier (`1` is 8px). A real spacing
@@ -403,13 +404,20 @@ function CriterionChip({
   );
 }
 
-// One acceptance criterion: its single signal in the gutter — the status chip when
-// a run is attached, otherwise who checks it — then its letter, the assertion, and
-// for a failure the spec path and message beneath.
+// One acceptance criterion: the method glyph, its letter, the assertion, the
+// verdict at the far end when a run is attached, and for a failure the spec path
+// and message beneath.
 //
-// One signal, never two: a status chip already says "Manual", so a method mark
-// beside it would say it twice, and a qualifier like flaky rides the verdict
-// instead of competing with it. That is what lets the gutter be a fixed width.
+// Two marks, because they answer two different questions. The glyph says who
+// CHECKS this criterion, which is a standing property of the criterion and true on
+// every surface; the chip says what the last run MADE of it, which exists only
+// where there is a run. They coincide on a manual criterion, whose verdict is
+// "Manual" — the price of keeping "whose job is this" scannable in a fixed column
+// on a page full of results, rather than making the reader read every verdict to
+// find their own work.
+//
+// A qualifier like flaky still rides the verdict rather than becoming a third
+// mark: it modifies that word and belongs beside it.
 function CriterionRow({
   criterion,
   requirementId,
@@ -443,20 +451,11 @@ function CriterionRow({
             display: "flex",
             alignItems: "center",
             height: ROW_LINE,
-            minWidth: hasRun ? GUTTER_CHIP : GUTTER_ICON,
+            minWidth: GUTTER,
             flexShrink: 0,
           }}
         >
-          {hasRun ? (
-            <CriterionChip
-              criterion={criterion}
-              report={report}
-              live={live}
-              awaiting={awaiting}
-            />
-          ) : (
-            <MethodIcon method={criterion.method} />
-          )}
+          <MethodIcon method={criterion.method} />
         </Box>
         <IdMark
           short={shortCriterionId(criterion.id, requirementId)}
@@ -468,15 +467,34 @@ function CriterionRow({
         >
           {criterion.must}
         </Typography>
+        {/* The assertion grows, so the verdict is pushed to the row's far end.
+            Boxed to the shared band for the same reason the gutter is, since a
+            24px chip beside a 24px line needs saying once at each end. */}
+        {hasRun && (
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              height: ROW_LINE,
+              flexShrink: 0,
+            }}
+          >
+            <CriterionChip
+              criterion={criterion}
+              report={report}
+              live={live}
+              awaiting={awaiting}
+            />
+          </Box>
+        )}
       </Box>
       {/* Full-width beneath the row, indented to where the letter starts, so a
-          long trace never crowds the assertion. A failure implies a report, so the
-          chip gutter is the one to measure from. */}
+          long trace never crowds the assertion. */}
       {failed && (report?.failureLocation || report?.spec || report?.failure) && (
         <Box
           sx={(theme) => ({
             mt: 0.75,
-            ml: `calc(${GUTTER_CHIP}px + ${theme.spacing(ROW_GAP)})`,
+            ml: `calc(${GUTTER}px + ${theme.spacing(ROW_GAP)})`,
           })}
         >
           {/* Prefer the reporter's `<file>:<line>`, which points at the failing

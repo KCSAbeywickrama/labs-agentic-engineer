@@ -1192,22 +1192,22 @@ describe("ValidationPage criterion rows", () => {
     renderPage(undefined);
   }
 
-  // One signal per row, and on this page it is the verdict: the status chip already
-  // says "Manual", so a method mark beside it would say the same thing twice at
-  // opposite margins of one row.
-  it("carries the verdict alone, with no method mark", () => {
+  // Two marks answering two questions: the glyph says who checks the criterion,
+  // the chip says what the run made of it. Both belong on a results page — the
+  // reader still has to find their own work in it.
+  it("carries the verdict beside the method, and names neither in words", () => {
     renderWithCriteria();
 
     expect(screen.getByText("Passed")).toBeInTheDocument();
     expect(screen.getByText("Manual")).toBeInTheDocument();
-    // Neither the wire value, nor the word it was spelled as, nor the glyph's
-    // hover phrase — a page with results has no need to say who would have checked.
+    expect(
+      screen.getByText("Requires manual validation."),
+    ).toBeInTheDocument();
+    // The method is a glyph, never a word: neither the wire value nor the word it
+    // is spelled as elsewhere may reach a row.
     for (const word of ["e2e", "auto", "manual"]) {
       expect(screen.queryByText(word)).not.toBeInTheDocument();
     }
-    expect(
-      screen.queryByText("Validated automatically by the agent."),
-    ).not.toBeInTheDocument();
   });
 
   // The tile above already prints "N passed · M manual" and its method line. The

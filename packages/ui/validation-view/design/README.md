@@ -9,16 +9,16 @@ consumers, one component:
 | Spec view's file pane (`SpecView.tsx`) | `criteria` only | Reading the document, before any run exists |
 | Validations page (`ValidationPage.tsx`) | `criteria`, `report`, `live`, `awaitingReport` | Reading run results |
 
-## One gutter, one signal
+## Two marks, at opposite ends of the row
 
-Every criterion row leads with a fixed-width column holding exactly one mark, and
-which mark depends on whether a run is attached:
+Every criterion row leads with a narrow fixed-width column holding the method
+glyph, and — where a run is attached — closes with that run's verdict:
 
 ```text
-SPEC VIEW — no run                    VALIDATIONS — a run
- ✦  a  A registered email …            [Passed]   a  A registered email …
- ○  b  The reset copy reads …          [Manual]   b  The reset copy reads …
-                                       [Failed*]  c  A short password …
+SPEC VIEW — no run              VALIDATIONS — a run
+ ✦  a  A registered email …      ✦  a  A registered email …   [✓ Passed]
+ ○  b  The reset copy reads …    ○  b  The reset copy reads …  [  Manual]
+                                 ✦  c  A short password …      [✗ Failed*]
 ```
 
 `✦` is `Sparkles` at `primary.main`, the glyph this console already means "the
@@ -28,38 +28,49 @@ icon-only, with the explanation on hover and repeated as visually-hidden text �
 on a roleless element is ignored, the same trap `StatusChip` documents for a Chip
 with no `onClick`.
 
-Three rules hold the column to one mark:
+The two marks answer two different questions, which is why both earn a place:
+
+- **The glyph says who CHECKS the criterion.** A standing property of the
+  criterion, so it is on every surface and in the same column whether or not a run
+  has happened. A reader scanning a page of results for their own work finds it
+  there instead of reading every verdict.
+- **The chip says what the run MADE of it.** Only where there is a run.
+- They coincide on a manual criterion, whose verdict is `Manual`. That is the
+  accepted cost of the first point.
+
+Two more rules hold the row to those two:
 
 - **No tally in this view.** Counts belong with the verdict that explains them,
   which the consumer renders above; a second copy here says the same numbers twice.
-- **Never a method mark beside a status chip.** The chip already says `Manual`, so
-  a mark next to it states the same fact at the other margin of the row. Where
-  there are results the chip is sufficient; where there are none the glyph is.
 - **Qualifiers ride the verdict.** `flaky` and `healed` become a single `*` with
   the detail on hover, rather than chips competing with the word they qualify. The
   two flags are independent in `generate-report.mjs` (`flaky` only on a pass,
   `healed` decided before the status), so `Failed*` is a real row and so is a pass
   that was both.
 
-One mark per row is what lets the gutter be one width, which is what keeps the ids
-beside it aligned. `GUTTER_CHIP` / `GUTTER_ICON` / `ROW_GAP` are single constants
-and the failure block derives its indent from them, so the column and the indent
-cannot disagree.
+Putting the verdict at the far end is what lets `GUTTER` be 22px rather than wide
+enough for the longest chip label: no label can widen the column, and none leaves
+slack in it. The ids therefore line up tightly against the glyphs, and the failure
+block derives its indent from the same constant, so column and indent cannot
+disagree. What is given up is the verdicts' left edge, which is ragged because it
+follows a variable-length assertion; their right edge is flush instead.
 
-`GUTTER_CHIP` has to fit the longest label the vocabulary can produce
-(`Not validated`), so a short chip like `Failed` leaves visible slack before the id.
-That is a deliberate trade: the alternatives are right-aligning the chip in the
-column (constant gap, ragged chip left edges) or dropping the column (constant gap,
-ragged ids), and the aligned column is worth more than either. It is also why the
-drift chip's label is kept terse — a descriptive one would widen every row.
+`STATE_ICON` marks the two TERMINAL verdicts and nothing else. `Passed` and
+`Failed` are the answers a run produces and the pair a reader must separate at a
+glance — as outlined chips they otherwise differ only in hue, which is nothing to
+a red/green colour-blind reader. Every other status is the ABSENCE of an answer,
+so marking one would spend the distinction where it is not needed.
 
 ### Vertical alignment is a shared band, not a baseline
 
 `ROW_LINE` (24px, the MUI small Chip's own height) is the height of a row's first
-line. The gutter, the id mark and the requirement number are each given exactly
-that height and centre their own content in it, and the assertion takes it as its
-`line-height`. All three then sit in the middle of one band by construction, and it
-holds for an assertion that wraps because every later line is the same height.
+line. The glyph gutter, the id mark, the requirement number and the verdict box at
+the far end are each given exactly that height and centre their own content in it,
+while the assertion takes it as its `line-height`. Everything on the row then sits
+in the middle of one band by construction, and it holds for an assertion that wraps
+because every later line is the same height. It is also what keeps the two ends of
+the row on the same line as each other, which matters more here than it would with
+a single mark.
 
 `align-items: baseline` is the wrong tool here, and worth knowing why. An MUI Chip
 is `inline-flex` with `align-items: center`, so it has no baseline-aligned flex

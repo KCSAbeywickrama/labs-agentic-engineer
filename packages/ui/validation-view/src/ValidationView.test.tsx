@@ -140,16 +140,17 @@ describe("ValidationView — the Spec view's pane (no run attached)", () => {
 });
 
 describe("ValidationView — the Validations page (a report joined in)", () => {
-  it("puts the verdict where the method mark was, and drops the mark", () => {
+  it("carries the verdict as well as the method, not instead of it", () => {
     render(<ValidationView criteria={CRITERIA} report={FULL_REPORT} />);
     expect(screen.getByText("Passed")).toBeInTheDocument();
     expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.getByText("Manual")).toBeInTheDocument();
     expect(screen.getByText("Not validated")).toBeInTheDocument();
-    // The status chip is sufficient: a manual criterion says "Manual" once, not
-    // once as a method badge and again as a status.
-    expect(screen.queryByText(AGENT)).not.toBeInTheDocument();
-    expect(screen.queryByText(HUMAN)).not.toBeInTheDocument();
+    // The glyphs survive a run: who CHECKS a criterion is a standing property of
+    // it, and a reader scanning a page of results for their own work needs it in
+    // the same fixed column it occupies with no run attached.
+    expect(screen.getAllByText(AGENT)).toHaveLength(2);
+    expect(screen.getAllByText(HUMAN)).toHaveLength(2);
   });
 
   it("chips a criterion the pinned report predates", () => {
