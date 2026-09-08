@@ -26,8 +26,9 @@
  * save-gate validates against, published as JSON Schema via `./json-schema.ts`.
  *
  * The shape rules (what the schema cannot say) live in `checkDependencyDesign`:
- * the name matches the directory, candidates and a provider never coexist, the
- * contract file name fits the style, and `assumed` is echoed but never authored.
+ * the name matches the directory, suggestions and a provider never coexist,
+ * config keys follow a chosen provider, the contract file name fits the style,
+ * and `assumed` is echoed but never authored.
  */
 
 import { z } from "zod";
@@ -44,11 +45,10 @@ export const configKeySchema = z.strictObject({
   defaultValue: z.string().optional(),
 });
 
-export const dependencyCandidateSchema = z.strictObject({
+export const dependencySuggestionSchema = z.strictObject({
   name: z.string().min(1),
-  style: dependencyStyleSchema,
+  style: dependencyStyleSchema.optional(),
   description: z.string().optional(),
-  package: z.string().optional(),
 });
 
 const provenanceSchema = z.strictObject({
@@ -73,8 +73,7 @@ export const dependencyDesignSchema = z.strictObject({
   contract: z.string().min(1).optional(),
   sdk: z.string().min(1).optional(),
   provenance: provenanceSchema.optional(),
-  // 2+ or absent — a lone option is a provider, not a candidate.
-  candidates: z.array(dependencyCandidateSchema).min(2).optional(),
+  suggestions: z.array(dependencySuggestionSchema).optional(),
   config: z.array(configKeySchema).optional(),
   assumed: assumptionSchema.optional(),
 });
@@ -155,14 +154,19 @@ export function checkDependencyDesign(
   if (d.name !== dir) {
     return violation(`"name" must equal the dependency directory ("${dir}"), got "${d.name}".`);
   }
-  if (d.candidates && d.provider) {
+  if (d.suggestions && d.provider) {
     return violation(
-      `"candidates" and "provider" never coexist — choosing one option REMOVES candidates and sets provider + style; keep candidates only while the choice is open.`,
+      `"suggestions" and "provider" never coexist — once the user chose a service, REMOVE suggestions and set provider + style; keep suggestions only while no service is chosen.`,
     );
   }
-  if (d.candidates && (d.style || d.contract || d.sdk)) {
+  if (d.suggestions && (d.style || d.contract || d.sdk)) {
     return violation(
-      `while "candidates" are open, "style", "contract" and "sdk" stay unset — they describe the chosen provider, and none is chosen yet.`,
+      `while "suggestions" are open, "style", "contract" and "sdk" stay unset — they describe the chosen service, and none is chosen yet.`,
+    );
+  }
+  if (d.config?.length && !d.provider && d.source !== "org") {
+    return violation(
+      `"config" is derived from the chosen service and is written only once "provider" is set — leave it out until the user has chosen; the resolve flow derives the keys.`,
     );
   }
   if ((d.contract || d.sdk) && !d.style) {

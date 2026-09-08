@@ -41,7 +41,7 @@ import type { Equal } from "./type-equal.js";
 // component. They live in `specs/design/dependencies/<name>/dependency.json`
 // now (one dependency, one definition); a component that still writes them
 // gets a message naming the file, not a bare "unknown key".
-const MOVED_DEPENDENCY_FIELDS = ["style", "package", "specPath", "candidates", "config"] as const;
+const MOVED_DEPENDENCY_FIELDS = ["style", "package", "specPath", "candidates", "suggestions", "config"] as const;
 
 const resourceWiringSchema = z.strictObject({
   ref: z.string().min(1),
@@ -186,7 +186,7 @@ export function checkComponentDesign(path: string, content: string): ComponentDe
       message:
         `${path}: dependencies[${moved.index}] ("${moved.name}") carries ${moved.fields.map((f) => `"${f}"`).join(", ")} — ` +
         `an external dependency's definition lives in specs/design/dependencies/${moved.name}/dependency.json ` +
-        `(provider, style, contract file, config keys, candidates), written once and shared by every component that uses it. ` +
+        `(provider, style, contract file, config keys, suggestions), written once and shared by every component that uses it. ` +
         `Keep only { "kind": "external", "name": "${moved.name}" } here and put those fields in that file.`,
     };
   }

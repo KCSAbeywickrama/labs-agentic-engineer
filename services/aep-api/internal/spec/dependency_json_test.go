@@ -99,6 +99,26 @@ func TestAssembleDesign_ContractCountsOnlyWhenTheFileIsThere(t *testing.T) {
 	}
 }
 
+// A definition with no provider is unchosen on every surface alike, even with
+// a document beside it (one from before providers were named): nothing is
+// derived at read time, so the file the view and the agent read agrees with
+// the read model, and the user chooses the service.
+func TestAssembleDesign_NoProviderIsUnchosenEvenWithADocument(t *testing.T) {
+	files := directoryDesignFiles()
+	files["dependencies/stripe/dependency.json"] = `{"name":"stripe","style":"rest-api","contract":"openapi.yaml"}`
+	d, err := AssembleDesign(files)
+	if err != nil {
+		t.Fatalf("AssembleDesign: %v", err)
+	}
+	dep := d.Components[0].Dependencies[0]
+	if dep.Provider != "" || dep.Contract != "openapi.yaml" {
+		t.Fatalf("provider must stay as the file has it, contract still counted: %+v", dep)
+	}
+	if status, reason := ComputeDependencyStatus(dep, false, OrgServiceHit{}); status != DependencyStatusUnresolved || reason != DependencyReasonNeedsInput {
+		t.Fatalf("status = %s/%s, want unresolved/needs-input", status, reason)
+	}
+}
+
 func TestAssembleDesign_AssumedMarkerAndAcceptance(t *testing.T) {
 	files := directoryDesignFiles()
 	files["dependencies/stripe/openapi.yaml"] = "openapi: 3.0.3\nx-aep-assumed: true\ninfo: {title: Stripe, version: '1'}\npaths:\n  /charges:\n    post: {responses: {'201': {description: created}}}\n"
@@ -180,9 +200,10 @@ func TestAssembleDesign_LiftsLegacyFieldsAndSplitWritesTheDirectory(t *testing.T
 	if strings.Join(d.LegacyCarriers, ",") != "api,worker" {
 		t.Fatalf("legacy carriers = %v", d.LegacyCarriers)
 	}
-	// Status reads off the lifted definition: a style with no contract on disk.
-	if status, reason := ComputeDependencyStatus(d.Components[0].Dependencies[0], false, OrgServiceHit{}); status != DependencyStatusUnresolved || reason != DependencyReasonNeedsContract {
-		t.Fatalf("status = %s/%s, want unresolved/needs-contract", status, reason)
+	// Status reads off the lifted definition: the legacy shape named no
+	// service and has no document to name one, so the user chooses next.
+	if status, reason := ComputeDependencyStatus(d.Components[0].Dependencies[0], false, OrgServiceHit{}); status != DependencyStatusUnresolved || reason != DependencyReasonNeedsInput {
+		t.Fatalf("status = %s/%s, want unresolved/needs-input", status, reason)
 	}
 
 	out, err := SplitDesign(d)

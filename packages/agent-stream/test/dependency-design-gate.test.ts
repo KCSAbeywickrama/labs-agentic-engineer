@@ -55,17 +55,33 @@ test("accepts a resolved REST dependency", () => {
   assert.equal(checkDependencyDesign(PATH, dep()), null);
 });
 
-test("accepts open candidates with nothing chosen yet", () => {
+test("accepts the need alone: suggestions, no provider, no config", () => {
   const open = dep({
     provider: undefined,
     style: undefined,
     contract: undefined,
-    candidates: [
+    config: undefined,
+    suggestions: [
       { name: "sendgrid", style: "rest-api" },
-      { name: "postmark", style: "rest-api" },
+      { name: "postmark" },
     ],
   });
   assert.equal(checkDependencyDesign(PATH, open), null);
+  // One suggestion is fine — it is a starting point, not a choice.
+  assert.equal(
+    checkDependencyDesign(PATH, dep({ provider: undefined, style: undefined, contract: undefined, config: undefined, suggestions: [{ name: "sendgrid" }] })),
+    null,
+  );
+});
+
+test("config keys follow the chosen service — none before a provider", () => {
+  const problem = checkDependencyDesign(
+    PATH,
+    dep({ provider: undefined, style: undefined, contract: undefined }),
+  );
+  assert.match(problem!.message, /derived from the chosen service/);
+  // A registered org copy carries the org's keys without a project-chosen provider.
+  assert.equal(checkDependencyDesign(PATH, JSON.stringify({ name: "payment-provider", source: "org", config: [{ key: "K" }] })), null);
 });
 
 test("accepts a registered-org stub — the platform fills the rest at save", () => {
@@ -97,21 +113,23 @@ test("rejects read-time state and unknown keys", () => {
   }
 });
 
-test("rejects a single candidate — one option is a provider, not a candidate", () => {
+test("rejects the retired candidates field", () => {
   const problem = checkDependencyDesign(
     PATH,
-    dep({ provider: undefined, style: undefined, contract: undefined, candidates: [{ name: "sendgrid", style: "rest-api" }] }),
+    dep({ provider: undefined, style: undefined, contract: undefined, config: undefined, candidates: [{ name: "sendgrid", style: "rest-api" }, { name: "postmark", style: "rest-api" }] }),
   );
   assert.equal(problem?.code, "SCHEMA_VIOLATION");
+  assert.match(problem!.message, /candidates/);
 });
 
-test("rejects candidates alongside a chosen provider, and alongside a style", () => {
-  const both = dep({ candidates: [{ name: "a", style: "sdk" }, { name: "b", style: "sdk" }] });
+test("rejects suggestions alongside a chosen provider, and alongside a style", () => {
+  const both = dep({ suggestions: [{ name: "a" }, { name: "b" }] });
   assert.match(checkDependencyDesign(PATH, both)!.message, /never coexist/);
   const styled = dep({
     provider: undefined,
     contract: undefined,
-    candidates: [{ name: "a", style: "sdk" }, { name: "b", style: "sdk" }],
+    config: undefined,
+    suggestions: [{ name: "a" }, { name: "b" }],
   });
   assert.match(checkDependencyDesign(PATH, styled)!.message, /stay unset/);
 });

@@ -464,20 +464,22 @@ func TestComponentDesignJSON_LegacyExternalFields_ReadNeverWritten(t *testing.T)
 	if stripe.Style != DependencyStyleSDK || stripe.Package != "npm:stripe@^14" {
 		t.Fatalf("stripe style/package drifted: %+v", stripe)
 	}
+	// The retired `candidates` carry reads as suggestions — the option's
+	// package was the agent's guess and does not come along.
 	email := comp.Dependencies[1]
-	if len(email.Candidates) != 2 {
-		t.Fatalf("want 2 candidates, got %d: %+v", len(email.Candidates), email.Candidates)
+	if len(email.Suggestions) != 2 {
+		t.Fatalf("want 2 suggestions, got %d: %+v", len(email.Suggestions), email.Suggestions)
 	}
-	if email.Candidates[0].Name != "sendgrid-rest" || email.Candidates[0].Style != DependencyStyleRestAPI {
-		t.Fatalf("candidate[0] drifted: %+v", email.Candidates[0])
+	if email.Suggestions[0].Name != "sendgrid-rest" || email.Suggestions[0].Style != DependencyStyleRestAPI {
+		t.Fatalf("suggestion[0] drifted: %+v", email.Suggestions[0])
 	}
-	if email.Candidates[1].Name != "resend-sdk" || email.Candidates[1].Style != DependencyStyleSDK ||
-		email.Candidates[1].Package != "npm:resend@^4.0.0" {
-		t.Fatalf("candidate[1] drifted: %+v", email.Candidates[1])
+	if email.Suggestions[1].Name != "resend-sdk" || email.Suggestions[1].Style != DependencyStyleSDK ||
+		email.Suggestions[1].Description != "Resend Node SDK" {
+		t.Fatalf("suggestion[1] drifted: %+v", email.Suggestions[1])
 	}
 
 	crm := comp.Dependencies[2]
-	if crm.Style != "" || crm.Package != "" || len(crm.Candidates) != 0 {
+	if crm.Style != "" || crm.Package != "" || len(crm.Suggestions) != 0 {
 		t.Fatalf("needs-input dep must carry none of the intent fields: %+v", crm)
 	}
 
@@ -525,10 +527,10 @@ func TestParseComponentDesignJSON_CandidatesLenientOnDecode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if len(comp.Dependencies[0].Candidates) != 1 || comp.Dependencies[0].Candidates[0].Name != "a" {
-		t.Fatalf("external candidates drifted: %+v", comp.Dependencies[0].Candidates)
+	if len(comp.Dependencies[0].Suggestions) != 1 || comp.Dependencies[0].Suggestions[0].Name != "a" {
+		t.Fatalf("external candidates must read as suggestions: %+v", comp.Dependencies[0].Suggestions)
 	}
-	if len(comp.Dependencies[1].Candidates) != 0 {
+	if len(comp.Dependencies[1].Suggestions) != 0 {
 		t.Fatalf("a component dependency carries no definition fields: %+v", comp.Dependencies[1])
 	}
 }

@@ -51,7 +51,7 @@ type Dependency struct {
 	// freshly-fetched resolver-port lookups on every design read; they are NOT
 	// persisted and carry NO gorm/yaml tags — plain wire JSON only. The
 	// architect never sets them.
-	//   Status: resolved|ambiguous|unresolved|blocked
+	//   Status: resolved|unresolved|blocked
 	//   Reason: needs-contract|needs-acceptance|needs-input|not-found|access-required
 	Status string `json:"status,omitempty"`
 	Reason string `json:"reason,omitempty"`
@@ -64,8 +64,8 @@ type Dependency struct {
 	// Source: "project" (agent-authored in this repo) or "org" (a platform-
 	// stamped copy of a Registered External resource — no values collected).
 	Source string `json:"source,omitempty"`
-	// Provider: the concrete system chosen ("Stripe"). Absent while Candidates
-	// are open.
+	// Provider: the concrete system chosen ("Stripe"). Absent until the user
+	// chose one; never beside Suggestions.
 	Provider string `json:"provider,omitempty"`
 	// Style: how the component talks to it — rest-api | graphql | sdk.
 	Style DependencyStyle `json:"style,omitempty"`
@@ -82,9 +82,9 @@ type Dependency struct {
 	Package string `json:"package,omitempty"`
 	// Provenance: where the contract came from (see DependencyProvenance).
 	Provenance *DependencyProvenance `json:"provenance,omitempty"`
-	// Candidates: 2+ identified-but-not-pinned options — the "ambiguous" state.
-	// Omitted, never empty; choosing one REMOVES the field and sets Provider.
-	Candidates []DependencyCandidate `json:"candidates,omitempty"`
+	// Suggestions: services the user might choose, while no provider is
+	// chosen. Choosing one REMOVES the field and sets Provider.
+	Suggestions []DependencySuggestion `json:"suggestions,omitempty"`
 	// ContractAssumed: the contract file on disk is one the design agent wrote
 	// from research (it carries `x-aep-assumed: true`; an sdk.json carries
 	// `"assumed": true`). Until the user accepts it (Assumed) the dependency is
@@ -163,15 +163,15 @@ type EndpointWiring struct {
 	EnvBindings map[string]string `json:"envBindings"`
 }
 
-// DependencyCandidate is one option in an ambiguous external dependency's
-// resolution set (2+ required — see Dependency.Candidates; a single candidate
-// never occurs). Mirrors the agent-stream TS `DependencyCandidate`.
-type DependencyCandidate struct {
+// DependencySuggestion is a service commonly used for a dependency's
+// capability, named from the design agent's knowledge while no provider is
+// chosen — a starting point for the user's choice, never a researched fit and
+// never turned into a provider by the agent. Mirrors the agent-stream TS
+// `DependencySuggestion`.
+type DependencySuggestion struct {
 	Name        string          `json:"name"`
-	Style       DependencyStyle `json:"style"`
+	Style       DependencyStyle `json:"style,omitempty"`
 	Description string          `json:"description,omitempty"`
-	// Package: sdk-style candidates only; ecosystem-prefixed package identifier.
-	Package string `json:"package,omitempty"`
 }
 
 // ConfigKey is one env-var key a component reads at runtime. For an external
@@ -227,17 +227,17 @@ type DependencyAssumption struct {
 // TS `DependencyDesign`). Components reference it by Name; the spec domain
 // hydrates each reference from it at read time.
 type DependencyDefinition struct {
-	Name        string                `json:"name"`
-	Description string                `json:"description,omitempty"`
-	Source      string                `json:"source,omitempty"`
-	Provider    string                `json:"provider,omitempty"`
-	Style       DependencyStyle       `json:"style,omitempty"`
-	Contract    string                `json:"contract,omitempty"`
-	SDK         string                `json:"sdk,omitempty"`
-	Provenance  *DependencyProvenance `json:"provenance,omitempty"`
-	Candidates  []DependencyCandidate `json:"candidates,omitempty"`
-	Config      []ConfigKey           `json:"config,omitempty"`
-	Assumed     *DependencyAssumption `json:"assumed,omitempty"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Source      string                 `json:"source,omitempty"`
+	Provider    string                 `json:"provider,omitempty"`
+	Style       DependencyStyle        `json:"style,omitempty"`
+	Contract    string                 `json:"contract,omitempty"`
+	SDK         string                 `json:"sdk,omitempty"`
+	Provenance  *DependencyProvenance  `json:"provenance,omitempty"`
+	Suggestions []DependencySuggestion `json:"suggestions,omitempty"`
+	Config      []ConfigKey            `json:"config,omitempty"`
+	Assumed     *DependencyAssumption  `json:"assumed,omitempty"`
 }
 
 // SdkManifest is the wire shape of specs/design/dependencies/<name>/sdk.json:

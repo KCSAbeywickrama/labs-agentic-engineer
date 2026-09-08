@@ -48,16 +48,16 @@ export type DependencyStyle = "rest-api" | "graphql" | "sdk";
 export type DependencySource = "project" | "org";
 
 /**
- * One option in an ambiguous dependency's resolution set (2+ required — see
- * `DependencyDesign.candidates`; a single candidate never occurs). Mirrors Go
- * `contracts.DependencyCandidate`.
+ * A service commonly used for this capability, named from the design agent's
+ * knowledge while no provider is chosen — a starting point for the user's
+ * choice, not a researched fit. The definition view offers each as a one-click
+ * answer to "which service do you want to use?"; the resolve flow does the
+ * research once one is picked. Mirrors Go `contracts.DependencySuggestion`.
  */
-export interface DependencyCandidate {
+export interface DependencySuggestion {
   name: string;
-  style: DependencyStyle;
+  style?: DependencyStyle;
   description?: string;
-  /** sdk-style candidates only: ecosystem-prefixed package identifier. */
-  package?: string;
 }
 
 /**
@@ -113,9 +113,10 @@ export interface DependencyDesign {
   /** Defaults to `project`. See `DependencySource`. */
   source?: DependencySource;
   /**
-   * The concrete system chosen ("Stripe", "SendGrid"). Absent while
-   * `candidates` are still open; present on every resolved or assumed
-   * dependency. Never both.
+   * The concrete system chosen ("Stripe", "SendGrid"). Absent until the user
+   * chose one — in requirements, or on the definition, or in the resolve
+   * flow; present on every resolved or assumed dependency. Never beside
+   * `suggestions`.
    */
   provider?: string;
   /** Set once a provider is chosen. */
@@ -132,12 +133,15 @@ export interface DependencyDesign {
   sdk?: string;
   provenance?: DependencyProvenance;
   /**
-   * 2+ identified-but-not-pinned options — the "ambiguous" state. Omitted,
-   * never empty: one option fully known ⇒ `provider`; 2+ ⇒ candidates.
-   * Choosing one REMOVES the field and sets `provider` + `style`.
+   * Services the user might choose, while no provider is chosen. Any length;
+   * choosing one REMOVES the field and sets `provider` + `style`. The agent
+   * never turns a suggestion into a provider on its own.
    */
-  candidates?: DependencyCandidate[];
-  /** The config-key schema every consuming component codes against. */
+  suggestions?: DependencySuggestion[];
+  /**
+   * The config-key schema every consuming component codes against. Derived
+   * from the chosen service, so it is written only once `provider` is set.
+   */
   config?: ConfigKey[];
   /** See `DependencyAssumption`. */
   assumed?: DependencyAssumption;

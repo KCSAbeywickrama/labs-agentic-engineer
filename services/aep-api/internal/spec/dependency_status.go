@@ -21,19 +21,19 @@
 // (dependency_json.go): what is on disk decides, so a stale flag can never
 // contradict the files. Precedence, first match wins:
 //
-//  1. 2+ Candidates                 → ambiguous
-//  2. Source "org" or registry hit  → resolved, flag registered
-//  3. no Provider and no Style      → unresolved / needs-input (not identified)
-//  4. no Style                      → unresolved / needs-input (a provider named, its shape not)
-//  5. sdk with no manifest on disk  → unresolved / needs-contract
-//  6. rest-api/graphql, no contract → unresolved / needs-contract
-//  7. contract agent-written, not
+//  1. Source "org" or registry hit  → resolved, flag registered
+//  2. no Provider                   → unresolved / needs-input (no service chosen;
+//     Suggestions may be open — the user chooses, the agent never does)
+//  3. no Style                      → unresolved / needs-input (a provider named, its shape not)
+//  4. sdk with no manifest on disk  → unresolved / needs-contract
+//  5. rest-api/graphql, no contract → unresolved / needs-contract
+//  6. contract agent-written, not
 //     yet accepted by a user          → unresolved / needs-acceptance
-//  8. otherwise                     → resolved; flag assumed when the contract
+//  7. otherwise                     → resolved; flag assumed when the contract
 //     is agent-written under the user's permission, flag sdk-only when an
 //     sdk dependency has no API contract beside its manifest.
 //
-// The build gate blocks on ambiguous and unresolved and on nothing else: an
+// The build gate blocks on unresolved and on nothing else: an
 // assumed or sdk-only dependency builds, flagged everywhere it appears.
 
 package spec
@@ -65,11 +65,9 @@ func ComputeDependencyStatus(dep Dependency, registryHit bool, orgSvc OrgService
 
 	case DependencyKindExternal:
 		switch {
-		case len(dep.Candidates) >= 2:
-			return DependencyStatusAmbiguous, ""
 		case dep.Source == DependencySourceOrg || registryHit:
 			return DependencyStatusResolved, ""
-		case dep.Provider == "" && dep.Style == "":
+		case dep.Provider == "":
 			return DependencyStatusUnresolved, DependencyReasonNeedsInput
 		case dep.Style == "":
 			return DependencyStatusUnresolved, DependencyReasonNeedsInput

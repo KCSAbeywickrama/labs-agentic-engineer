@@ -935,13 +935,13 @@ func TestBuild_UnknownResourceType_409_NoTagNoWorkflow(t *testing.T) {
 	}
 }
 
-// A doctored client (no inputs at all) cannot skip the drawer: an ambiguous
-// external dependency blocks with a failure, no tag is cut, and no workflow
-// starts.
-func TestBuild_DependencyGate_AmbiguousExternal_BlocksNoTagNoWorkflow(t *testing.T) {
+// A doctored client (no inputs at all) cannot skip the drawer: an external
+// dependency no service was chosen for blocks with a failure, no tag is cut,
+// and no workflow starts.
+func TestBuild_DependencyGate_UnchosenExternal_BlocksNoTagNoWorkflow(t *testing.T) {
 	design := &gateDesign{comps: []spec.DesignComponent{{Name: "o", ComponentType: spec.ComponentTypeService,
 		Dependencies: []spec.Dependency{
-			{Kind: spec.DependencyKindExternal, Name: "salesforce", Status: spec.DependencyStatusAmbiguous},
+			{Kind: spec.DependencyKindExternal, Name: "salesforce", Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsInput},
 		}}}}
 	spy := newPlanSpy()
 	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1"}}
@@ -957,8 +957,8 @@ func TestBuild_DependencyGate_AmbiguousExternal_BlocksNoTagNoWorkflow(t *testing
 	if len(out.Failures) != 1 {
 		t.Fatalf("failures = %+v, want 1", out.Failures)
 	}
-	if f := out.Failures[0]; f.Dependency != "salesforce" || f.Kind != "external-ambiguous" {
-		t.Errorf("failure = %+v, want {salesforce, external-ambiguous}", f)
+	if f := out.Failures[0]; f.Dependency != "salesforce" || f.Kind != "external-unresolved" {
+		t.Errorf("failure = %+v, want {salesforce, external-unresolved}", f)
 	}
 	if out.Tag != "" {
 		t.Errorf("tag = %q, want empty — no tag on a gated build", out.Tag)
@@ -971,16 +971,16 @@ func TestBuild_DependencyGate_AmbiguousExternal_BlocksNoTagNoWorkflow(t *testing
 	}
 }
 
-// A web-application's ambiguous external dependency blocks the build exactly
+// A web-application's unchosen external dependency blocks the build exactly
 // like a service's would (#252 Task 14 — lifting the ComponentType != service
 // guard dependencyGateFailures used to apply here). Task 9 already shows this
 // dependency's status chip and the coding-agent wiring already emits
 // consumed-spec instructions for it regardless of component kind, so the
 // build-time hard gate must not be the one surface that still lets it through.
-func TestBuild_DependencyGate_WebApplication_AmbiguousExternal_Blocks(t *testing.T) {
+func TestBuild_DependencyGate_WebApplication_UnchosenExternal_Blocks(t *testing.T) {
 	design := &gateDesign{comps: []spec.DesignComponent{{Name: "web", ComponentType: spec.ComponentTypeWebApplication,
 		Dependencies: []spec.Dependency{
-			{Kind: spec.DependencyKindExternal, Name: "salesforce", Status: spec.DependencyStatusAmbiguous},
+			{Kind: spec.DependencyKindExternal, Name: "salesforce", Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsInput},
 		}}}}
 	spy := newPlanSpy()
 	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1"}}
@@ -996,8 +996,8 @@ func TestBuild_DependencyGate_WebApplication_AmbiguousExternal_Blocks(t *testing
 	if len(out.Failures) != 1 {
 		t.Fatalf("failures = %+v, want 1", out.Failures)
 	}
-	if f := out.Failures[0]; f.Component != "web" || f.Dependency != "salesforce" || f.Kind != "external-ambiguous" {
-		t.Errorf("failure = %+v, want {web, salesforce, external-ambiguous}", f)
+	if f := out.Failures[0]; f.Component != "web" || f.Dependency != "salesforce" || f.Kind != "external-unresolved" {
+		t.Errorf("failure = %+v, want {web, salesforce, external-unresolved}", f)
 	}
 	if out.Tag != "" {
 		t.Errorf("tag = %q, want empty — no tag on a gated build", out.Tag)

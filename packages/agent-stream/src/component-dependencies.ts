@@ -120,7 +120,7 @@ export function checkComponentDependencies(
     const what = missing.map((d) => `\`${d.name}\` → ${dependencyDesignPath(d.name)}`).join("; ");
     return {
       code: "UNKNOWN_DEPENDENCY",
-      message: `${path} rejected — ${missing.length === 1 ? "an external dependency has" : "external dependencies have"} no definition yet: ${what}. A component references an external dependency by name only; its provider, style, contract file, config keys (or open candidates) live once in that dependency.json, shared by every component that uses it. Write the dependency file first (addFile — for a Registered External resource a stub with "source": "org" is enough), then re-emit this file. The file is unchanged.`,
+      message: `${path} rejected — ${missing.length === 1 ? "an external dependency has" : "external dependencies have"} no definition yet: ${what}. A component references an external dependency by name only; its provider, style, contract file, config keys (or open suggestions) live once in that dependency.json, shared by every component that uses it. Write the dependency file first (addFile — for a Registered External resource a stub with "source": "org" is enough), then re-emit this file. The file is unchanged.`,
     };
   }
 

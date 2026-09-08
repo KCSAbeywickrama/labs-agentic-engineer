@@ -131,8 +131,8 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   conflict: the design is unsatisfiable on this cluster, so the click claims no version and
   starts no workflow.
 - **What preflight gates**: it reports what a version's dependencies still need, and only
-  `needsResolution` — a dependency the design itself cannot name (ambiguous, unresolved, missing spec,
-  or an org service awaiting access) — blocks the version cut. `needsInput` stays the broad "there is
+  `needsResolution` — a dependency the design itself cannot name (no service chosen, an unaccepted
+  assumption, missing spec, or an org service awaiting access) — blocks the version cut. `needsInput` stays the broad "there is
   something to show" flag: an external dependency's config VALUES are collected while the build runs
   and enforced at the deploy gate, so they never hold up starting a build.
 - The **event plane** (`eventcore`): the platform's whole reaction to a pull request, a milestone-matched

@@ -130,10 +130,10 @@ const (
 // ComputeDependencyStatus (dependency_status.go) is the single authority: for
 // kind=org-service, namespace-visible → Resolved, catalog-visible elsewhere →
 // Blocked/AccessRequired, absent → Unresolved/NotFound. For kind=external the
-// state is read off the dependency's own file (hydrated onto the edge): 2+
-// Candidates → Ambiguous; a registered (org) or registry-known name →
-// Resolved+registered; no Provider and no Style → Unresolved/NeedsInput; a
-// Style with no Contract (an sdk without its manifest, a rest-api/graphql
+// state is read off the dependency's own file (hydrated onto the edge): a
+// registered (org) or registry-known name → Resolved+registered; no Provider
+// (the user has not chosen a service; Suggestions may be open) →
+// Unresolved/NeedsInput; a Style with no Contract (an sdk without its manifest, a rest-api/graphql
 // without its document) → Unresolved/NeedsContract; otherwise Resolved, with
 // the "assumed" and "sdk-only" flags saying what kind of resolved.
 // component/platform-resource are always Resolved here. The build gate blocks
@@ -142,7 +142,6 @@ const (
 	DependencyStatusResolved   = "resolved"
 	DependencyStatusBlocked    = "blocked"
 	DependencyStatusUnresolved = "unresolved"
-	DependencyStatusAmbiguous  = "ambiguous"
 
 	DependencyReasonAccessRequired = "access-required"
 	DependencyReasonNotFound       = "not-found"
@@ -155,8 +154,8 @@ const (
 	// agent (marked assumed) and not yet accepted by a user.
 	DependencyReasonNeedsAcceptance = "needs-acceptance"
 	// DependencyReasonNeedsInput pairs with DependencyStatusUnresolved on an
-	// external dependency the platform cannot place at all: no provider, no
-	// style, no candidates — the agent could not identify the system.
+	// external dependency no service has been chosen for yet (no provider, or a
+	// provider with no style) — the user's answer, or the resolve flow, is next.
 	DependencyReasonNeedsInput = "needs-input"
 
 	// Flags qualify a RESOLVED external dependency (Dependency.Flags).
@@ -186,9 +185,9 @@ const (
 // spec domain owns all behaviour over it (ComputeDependencyStatus, validators).
 type Dependency = contracts.Dependency
 
-// DependencyCandidate is one option in an ambiguous external dependency's
-// resolution set (see Dependency.Candidates). Wire shape in the contracts leaf.
-type DependencyCandidate = contracts.DependencyCandidate
+// DependencySuggestion is a service the user might choose for an external
+// dependency (see Dependency.Suggestions). Wire shape in the contracts leaf.
+type DependencySuggestion = contracts.DependencySuggestion
 
 // DependencyWiring is the platform-stamped consumer-side wiring for a component /
 // platform-resource / external dependency (see derive_wiring.go). Wire shape in

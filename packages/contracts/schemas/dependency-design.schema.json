@@ -55,8 +55,7 @@
       },
       "additionalProperties": false
     },
-    "candidates": {
-      "minItems": 2,
+    "suggestions": {
       "type": "array",
       "items": {
         "type": "object",
@@ -75,14 +74,10 @@
           },
           "description": {
             "type": "string"
-          },
-          "package": {
-            "type": "string"
           }
         },
         "required": [
-          "name",
-          "style"
+          "name"
         ],
         "additionalProperties": false
       }

@@ -67,7 +67,7 @@ var (
 	// definition); a component that still writes them gets a message naming
 	// that file, not a bare "unknown property". Mirrors MOVED_DEPENDENCY_FIELDS
 	// in component-design-schema.ts.
-	movedDependencyKeys = []string{"style", "package", "specPath", "candidates", "config"}
+	movedDependencyKeys = []string{"style", "package", "specPath", "candidates", "suggestions", "config"}
 	designKnownKeys     = map[string]bool{
 		"name": true, "type": true, "version": true, "language": true,
 		"buildpack": true, "appPath": true, "entrypoint": true,
@@ -230,7 +230,7 @@ func validateDependency(i int, d any) *designProblem {
 			name, _ := dep["name"].(string)
 			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf(
 				"dependencies[%d] (%q) carries %s — an external dependency's definition lives in specs/design/dependencies/%s/dependency.json "+
-					"(provider, style, contract file, config keys, candidates), written once and shared by every component that uses it. "+
+					"(provider, style, contract file, config keys, suggestions), written once and shared by every component that uses it. "+
 					"Keep only { \"kind\": \"external\", \"name\": %q } here and put those fields in that file.",
 				i, name, strings.Join(moved, ", "), name, name)}
 		}

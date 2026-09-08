@@ -284,17 +284,39 @@ func TestAcceptDependencyAssumption_RefusesAContractNobodyAssumed(t *testing.T) 
 // A document cannot settle which system it belongs to, and an OpenAPI document
 // is not a GraphQL schema: both refusals keep the file the platform writes one
 // the agent's gates accept afterwards.
-func TestCollectDependencyContract_RefusesOpenCandidatesAndGraphQL(t *testing.T) {
+func TestCollectDependencyContract_DocumentNamesTheServiceAndRefusesGraphQL(t *testing.T) {
 	t.Parallel()
 	files := designFilesWithDeps(`[{"kind":"external","name":"mail"},{"kind":"external","name":"shop"}]`)
-	files["dependencies/mail/dependency.json"] = `{"name":"mail","candidates":[{"name":"sendgrid","style":"rest-api"},{"name":"postmark","style":"rest-api"}]}`
+	files["dependencies/mail/dependency.json"] = `{"name":"mail","suggestions":[{"name":"sendgrid","style":"rest-api"},{"name":"postmark","style":"rest-api"}]}`
 	files["dependencies/shop/dependency.json"] = `{"name":"shop","provider":"Shopify","style":"graphql"}`
 	svc := newService(readsFor(t, files))
-	svc.fileCommitter = &fakeCommitter{}
-	if _, err := svc.CollectDependencyContract(context.Background(), "acme", "web", "mail", []byte(validOpenAPI), ""); !errors.Is(err, ErrDependencyNotChosen) {
-		t.Fatalf("open candidates: want ErrDependencyNotChosen, got %v", err)
+	fc := &fakeCommitter{}
+	svc.fileCommitter = fc
+	// Handing over a document is choosing: the provider is the document's
+	// title and the suggestions close.
+	if _, err := svc.CollectDependencyContract(context.Background(), "acme", "web", "mail", []byte(validOpenAPI), ""); err != nil {
+		t.Fatalf("open suggestions: %v", err)
+	}
+	var defW *DesignFileWrite
+	for i := range fc.writes {
+		if fc.writes[i].Path == "specs/design/dependencies/mail/dependency.json" {
+			defW = &fc.writes[i]
+		}
+	}
+	if defW == nil || !strings.Contains(defW.Content, `"provider": "Stripe"`) || strings.Contains(defW.Content, `"suggestions"`) {
+		t.Fatalf("dependency.json = %+v", defW)
 	}
 	if _, err := svc.CollectDependencyContract(context.Background(), "acme", "web", "shop", []byte(validOpenAPI), ""); !errors.Is(err, ErrDependencyWrongKind) {
 		t.Fatalf("graphql: want ErrDependencyWrongKind, got %v", err)
+	}
+	// A document that names no system settles nothing: the platform never
+	// invents a provider.
+	untitled := "openapi: 3.0.3\ninfo: {version: '1'}\npaths:\n  /x:\n    get: {responses: {'200': {description: ok}}}\n"
+	files2 := designFilesWithDeps(`[{"kind":"external","name":"mail"}]`)
+	files2["dependencies/mail/dependency.json"] = `{"name":"mail"}`
+	svc2 := newService(readsFor(t, files2))
+	svc2.fileCommitter = &fakeCommitter{}
+	if _, err := svc2.CollectDependencyContract(context.Background(), "acme", "web", "mail", []byte(untitled), ""); !errors.Is(err, ErrDependencyNotChosen) {
+		t.Fatalf("untitled document on an unchosen dependency: want ErrDependencyNotChosen, got %v", err)
 	}
 }

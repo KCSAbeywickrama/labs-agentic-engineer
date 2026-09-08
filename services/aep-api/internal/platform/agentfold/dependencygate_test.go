@@ -54,7 +54,7 @@ func str(s string) *string { return &s }
 // TestDependencyGate_Parity locks fold-parity with checkDependencyDesign: every
 // case here has its twin in packages/agent-stream/test/dependency-design-gate.test.ts.
 func TestDependencyGate_Parity(t *testing.T) {
-	two := []any{map[string]any{"name": "a", "style": "sdk"}, map[string]any{"name": "b", "style": "sdk"}}
+	two := []any{map[string]any{"name": "a", "style": "sdk"}, map[string]any{"name": "b"}}
 	cases := []struct {
 		name    string
 		content string
@@ -63,15 +63,19 @@ func TestDependencyGate_Parity(t *testing.T) {
 		wantMsg string
 	}{
 		{"resolved rest dependency", dep(nil), nil, true, ""},
-		{"open candidates, nothing chosen", dep(map[string]any{"provider": nil, "style": nil, "contract": nil, "candidates": two}), nil, true, ""},
+		{"open suggestions, nothing chosen", dep(map[string]any{"provider": nil, "style": nil, "contract": nil, "config": nil, "suggestions": two}), nil, true, ""},
+		{"a single suggestion is fine", dep(map[string]any{"provider": nil, "style": nil, "contract": nil, "config": nil, "suggestions": two[:1]}), nil, true, ""},
+		{"the need alone", dep(map[string]any{"provider": nil, "style": nil, "contract": nil, "config": nil}), nil, true, ""},
+		{"config before a provider", dep(map[string]any{"provider": nil, "style": nil, "contract": nil}), nil, false, "derived from the chosen service"},
+		{"org copy carries config without a project provider", `{"name":"payment-provider","source":"org","config":[{"key":"K"}]}`, nil, true, ""},
 		{"registered-org stub", `{"name":"payment-provider","source":"org"}`, nil, true, ""},
 		{"provider chosen, no contract yet", dep(map[string]any{"contract": nil}), nil, true, ""},
 		{"name not the directory", dep(map[string]any{"name": "stripe"}), nil, false, `"payment-provider"`},
 		{"read-time status rejected", dep(map[string]any{"status": "resolved"}), nil, false, "unknown property status"},
 		{"retired specPath rejected", dep(map[string]any{"specPath": "https://x"}), nil, false, "unknown property specPath"},
-		{"single candidate", dep(map[string]any{"provider": nil, "style": nil, "contract": nil, "candidates": []any{map[string]any{"name": "a", "style": "sdk"}}}), nil, false, "2 or more"},
-		{"candidates with a provider", dep(map[string]any{"candidates": two}), nil, false, "never coexist"},
-		{"candidates with a style", dep(map[string]any{"provider": nil, "contract": nil, "candidates": two}), nil, false, "stay unset"},
+		{"retired candidates", dep(map[string]any{"provider": nil, "style": nil, "contract": nil, "config": nil, "candidates": two}), nil, false, `"candidates" is retired`},
+		{"suggestions with a provider", dep(map[string]any{"suggestions": two}), nil, false, "never coexist"},
+		{"suggestions with a style", dep(map[string]any{"provider": nil, "contract": nil, "config": nil, "suggestions": two}), nil, false, "stay unset"},
 		{"contract not fitting the style", dep(map[string]any{"contract": "schema.graphql"}), nil, false, `for style "rest-api"`},
 		{"graphql contract", dep(map[string]any{"style": "graphql", "contract": "schema.graphql"}), nil, true, ""},
 		{"contract as a path", dep(map[string]any{"contract": "specs/x/openapi.yaml"}), nil, false, "not a path"},
@@ -87,7 +91,8 @@ func TestDependencyGate_Parity(t *testing.T) {
 		// Types the zod schema pins — the fold must refuse the same shapes.
 		{"secret not a boolean", dep(map[string]any{"config": []any{map[string]any{"key": "K", "secret": "yes"}}}), nil, false, "secret: must be a boolean"},
 		{"defaultValue not a string", dep(map[string]any{"config": []any{map[string]any{"key": "K", "defaultValue": 5}}}), nil, false, "defaultValue: must be a string"},
-		{"candidate package not a string", dep(map[string]any{"provider": nil, "style": nil, "contract": nil, "candidates": []any{map[string]any{"name": "a", "style": "sdk", "package": 1}, map[string]any{"name": "b", "style": "sdk"}}}), nil, false, "package: must be a string"},
+		{"suggestion description not a string", dep(map[string]any{"provider": nil, "style": nil, "contract": nil, "config": nil, "suggestions": []any{map[string]any{"name": "a", "description": 1}}}), nil, false, "description: must be a string"},
+		{"suggestion carries a package", dep(map[string]any{"provider": nil, "style": nil, "contract": nil, "config": nil, "suggestions": []any{map[string]any{"name": "a", "package": "npm:a"}}}), nil, false, "unknown property package"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

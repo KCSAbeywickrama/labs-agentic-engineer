@@ -3532,7 +3532,7 @@ components:
           type: boolean
         needsResolution:
           description: Whether any emitted item blocks the version cut — a dependency the design
-            itself cannot resolve (ambiguous, unresolved, missing spec, or an org service awaiting
+            itself cannot resolve (unresolved, missing spec, or an org service awaiting
             access). This is the ONLY flag a client may block Build on.
           type: boolean
       required:
@@ -4179,7 +4179,7 @@ components:
         are read-time computed by spec.ComputeDependencyStatus — never authored,
         never persisted (Design.json write-gate rejects them). An external
         dependency's definition (source, provider, style, contract, sdk, package,
-        provenance, candidates, config, assumed) is HYDRATED from its own file,
+        provenance, suggestions, config, assumed) is HYDRATED from its own file,
         specs/design/dependencies/<name>/dependency.json — one dependency, one
         definition, referenced by name from every component that uses it.
       x-go-type: contracts.Dependency
@@ -4207,7 +4207,7 @@ components:
           description: project (agent-authored here) or org (a platform-stamped copy of a Registered External resource).
           type: string
         provider:
-          description: The concrete system chosen; absent while candidates are open.
+          description: The concrete system chosen; absent until the user chose one (suggestions may be open).
           type: string
         style:
           description: rest-api | graphql | sdk
@@ -4228,9 +4228,9 @@ components:
           $ref: '#/components/schemas/DependencyProvenance'
         assumed:
           $ref: '#/components/schemas/DependencyAssumption'
-        candidates:
+        suggestions:
           items:
-            $ref: '#/components/schemas/DependencyCandidate'
+            $ref: '#/components/schemas/DependencySuggestion'
           type: array
           nullable: true
         config:
@@ -4308,9 +4308,9 @@ components:
       - by
       - at
       type: object
-    DependencyCandidate:
-      description: One option in an ambiguous external dependency's resolution set.
-      x-go-type: contracts.DependencyCandidate
+    DependencySuggestion:
+      description: A service the user might choose for an external dependency, named while no provider is chosen.
+      x-go-type: contracts.DependencySuggestion
       x-go-type-import:
         path: github.com/wso2/aep/aep-api/internal/contracts
       additionalProperties: false
@@ -4321,11 +4321,8 @@ components:
           type: string
         description:
           type: string
-        package:
-          type: string
       required:
       - name
-      - style
       type: object
     CycleBuild:
       additionalProperties: false
@@ -5327,7 +5324,6 @@ components:
           enum:
           - external-config
           - external-spec
-          - external-ambiguous
           - external-unresolved
           - platform-resource
           - org-service

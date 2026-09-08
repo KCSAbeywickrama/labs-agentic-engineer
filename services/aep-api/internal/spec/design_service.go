@@ -34,7 +34,7 @@ var ErrSpecNotApproved = errors.New("spec must be saved (tagged) before generati
 // ErrUnresolvedDependency is the design-domain sentinel surfaced (as 409 by the
 // controller) when the tag-cut (SaveAndProceed) is attempted while a
 // dependency in the design being tagged is still in a non-actionable state:
-// an `org-service` that is not namespace-visible (unresolved/blocked/ambiguous
+// an `org-service` that is not namespace-visible (unresolved/blocked
 // against the live org catalog — see resolveOrgServices). external
 // dependencies are NOT proceed-gated here for now: the needsSpec flag that
 // used to drive this was dropped (dependency-management schema revision —
@@ -85,10 +85,10 @@ var (
 	// ErrDependencyNotAssumed: AcceptDependencyAssumption on a dependency whose
 	// contract on disk is not an agent-written one (nothing to accept).
 	ErrDependencyNotAssumed = errors.New("dependency has no assumed contract to accept")
-	// ErrDependencyNotChosen: a contract offered for a dependency whose
-	// candidates are still open — a document cannot settle which system it
-	// belongs to; the provider is chosen first.
-	ErrDependencyNotChosen = errors.New("dependency has open candidates — choose a provider before providing its contract")
+	// ErrDependencyNotChosen: a document offered for a dependency no service has
+	// been chosen for, and the document names none itself (no `info.title`) —
+	// nothing says which system it is, and the platform never names one.
+	ErrDependencyNotChosen = errors.New("no service chosen yet, and the document names none — choose the service first")
 	// ErrSpecFetchFailed: the SSRF-guarded fetch of a user-supplied spec URL
 	// failed (bad URL, blocked target, non-2xx, oversized).
 	ErrSpecFetchFailed = errors.New("failed to fetch spec from URL")
@@ -309,12 +309,20 @@ func (s *designService) collectContract(ctx context.Context, orgID, projectID, c
 	if !found {
 		def = DependencyDefinition{Name: depName, Description: design.Components[compIdx].Dependencies[depIdx].Description}
 	}
-	// The file this writes must pass the agent's own gates afterwards: no
-	// contract beside open candidates, and an OpenAPI document only on a
-	// dependency whose style takes one.
-	if len(def.Candidates) > 0 {
-		return "", fmt.Errorf("%w: %q", ErrDependencyNotChosen, depName)
+	// Handing over a document is choosing the service: a definition with no
+	// provider yet takes the document's own name for it (`info.title`) — and
+	// is refused when the document names none, since the platform never
+	// invents a provider. Any suggestions still open close, so the file this
+	// writes passes the agent's own gates afterwards (suggestions never beside
+	// a provider). An OpenAPI document lands only on a dependency whose style
+	// takes one.
+	if def.Provider == "" && def.Source != DependencySourceOrg {
+		def.Provider = contractTitle(string(rawSpec))
+		if def.Provider == "" {
+			return "", fmt.Errorf("%w: %q", ErrDependencyNotChosen, depName)
+		}
 	}
+	def.Suggestions = nil
 	if def.Style == DependencyStyleGraphQL {
 		return "", fmt.Errorf("%w: dependency %q is a GraphQL API; its contract is a schema, not an OpenAPI document", ErrDependencyWrongKind, depName)
 	}

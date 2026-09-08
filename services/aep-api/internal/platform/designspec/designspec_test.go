@@ -124,9 +124,13 @@ func TestDependencyDesign_AcceptsTheDefinitionShape(t *testing.T) {
 	if err := ValidateDependencyDesignInDir([]byte(stub), "payment-provider"); err != nil {
 		t.Fatalf("registered-org stub rejected: %v", err)
 	}
-	open := `{"name":"email","candidates":[{"name":"a","style":"rest-api"},{"name":"b","style":"graphql"}]}`
+	open := `{"name":"email","suggestions":[{"name":"a","style":"rest-api"},{"name":"b"}]}`
 	if err := ValidateDependencyDesignInDir([]byte(open), "email"); err != nil {
-		t.Fatalf("open candidates rejected: %v", err)
+		t.Fatalf("open suggestions rejected: %v", err)
+	}
+	one := `{"name":"email","suggestions":[{"name":"a"}]}`
+	if err := ValidateDependencyDesignInDir([]byte(one), "email"); err != nil {
+		t.Fatalf("a single suggestion rejected: %v", err)
 	}
 }
 
@@ -135,15 +139,13 @@ func TestDependencyDesign_RejectsUnknownKeysStateAndDirMismatch(t *testing.T) {
 	wantCode(t, ValidateDependencyDesignInDir([]byte(`{"name":"payment-provider","status":"resolved"}`), "payment-provider"), CodeSchemaViolation)
 	wantCode(t, ValidateDependencyDesignInDir([]byte(`{"name":"payment-provider","specPath":"x"}`), "payment-provider"), CodeSchemaViolation)
 	wantCode(t, ValidateDependencyDesignInDir([]byte(`{"name":"payment-provider","style":"soap"}`), "payment-provider"), CodeSchemaViolation)
-	wantCode(t, ValidateDependencyDesignInDir([]byte(`{"name":"email","candidates":[{"name":"a","style":"rest-api"}]}`), "email"), CodeSchemaViolation)
+	wantCode(t, ValidateDependencyDesignInDir([]byte(`{"name":"email","candidates":[{"name":"a","style":"rest-api"},{"name":"b","style":"sdk"}]}`), "email"), CodeSchemaViolation)
 	wantCode(t, ValidateDependencyDesignInDir([]byte(validDependency), "stripe"), CodeSchemaViolation)
 }
 
-func TestCandidatesMinItems_RejectsFewerThanTwo(t *testing.T) {
-	for _, candidates := range []string{`[]`, `[{"name":"only-one","style":"rest-api"}]`} {
-		def := `{"name":"email","candidates":` + candidates + `}`
-		wantCode(t, ValidateDependencyDesignInDir([]byte(def), "email"), CodeSchemaViolation)
-	}
+func TestSuggestions_NameRequiredStyleOptional(t *testing.T) {
+	wantCode(t, ValidateDependencyDesignInDir([]byte(`{"name":"email","suggestions":[{"style":"rest-api"}]}`), "email"), CodeSchemaViolation)
+	wantCode(t, ValidateDependencyDesignInDir([]byte(`{"name":"email","suggestions":[{"name":"a","package":"npm:a"}]}`), "email"), CodeSchemaViolation)
 }
 
 // TestRetiredExternalFieldsRejected documents the hard-break: specUrl (URL

@@ -153,8 +153,9 @@ type endpointWiringJSON struct {
 	EnvBindings map[string]string `json:"envBindings"`
 }
 
-// candidateJSON is the on-disk shape of one entry in a dependency's
-// `candidates` array. Mirrors DependencyCandidate.
+// candidateJSON is the retired on-disk shape of one entry in a `candidates`
+// array (a component's legacy carry, or a definition written before
+// suggestions). Decoded only, and read as a suggestion.
 type candidateJSON struct {
 	Name        string `json:"name"`
 	Style       string `json:"style"`
@@ -259,8 +260,8 @@ func validateExposure(dir, exposure string) error {
 // model. This is a PURE DECODE: no Status/Reason is ever computed here (this
 // codec has no org/registry context to correctly resolve against — that
 // requires the shared resolver, which reads the live catalog). Every
-// resolution state (resolved/ambiguous/unresolved) is derived at READ time by
-// that resolver from the presence/absence of Style/Package/Candidates/SpecPath
+// resolution state (resolved/unresolved/blocked) is derived at READ time by
+// that resolver from the presence/absence of Provider/Style/Contract/SDK
 // — never stored, never computed here.
 //
 // A dependency entry missing `kind` or `name`, or declaring a `kind` outside
@@ -296,7 +297,7 @@ func assembleDependencies(dir string, in []dependencyJSON) ([]Dependency, error)
 			// dependency file exists, lifts it into one when it does not.
 			dep.Style = d.Style
 			dep.Package = d.Package
-			dep.Candidates = toModelCandidates(d.Candidates)
+			dep.Suggestions = toModelCandidates(d.Candidates)
 			dep.Config = toModelConfigKeys(d.Config)
 			if d.SpecPath != "" {
 				dep.Provenance = &DependencyProvenance{SourceURL: d.SpecPath}
@@ -417,36 +418,39 @@ func toJSONDeps(in []Dependency) []dependencyJSON {
 	return out
 }
 
-// toModelCandidates/toJSONCandidates mirror toModelConfigKeys/toJSONConfigKeys
-// for the `candidates` array (DependencyCandidate ⇄ candidateJSON).
-func toModelCandidates(in []candidateJSON) []DependencyCandidate {
+// toModelCandidates reads the retired `candidates` array as suggestions — the
+// option's package was the agent's guess and is not carried over.
+func toModelCandidates(in []candidateJSON) []DependencySuggestion {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]DependencyCandidate, 0, len(in))
+	out := make([]DependencySuggestion, 0, len(in))
 	for _, c := range in {
-		out = append(out, DependencyCandidate{
-			Name:        c.Name,
-			Style:       c.Style,
-			Description: c.Description,
-			Package:     c.Package,
-		})
+		out = append(out, DependencySuggestion{Name: c.Name, Style: c.Style, Description: c.Description})
 	}
 	return out
 }
 
-func toJSONCandidates(in []DependencyCandidate) []candidateJSON {
+// toModelSuggestions/toJSONSuggestions mirror toModelConfigKeys/toJSONConfigKeys
+// for the `suggestions` array (DependencySuggestion ⇄ suggestionJSON).
+func toModelSuggestions(in []suggestionJSON) []DependencySuggestion {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]candidateJSON, 0, len(in))
+	out := make([]DependencySuggestion, 0, len(in))
 	for _, c := range in {
-		out = append(out, candidateJSON{
-			Name:        c.Name,
-			Style:       c.Style,
-			Description: c.Description,
-			Package:     c.Package,
-		})
+		out = append(out, DependencySuggestion{Name: c.Name, Style: c.Style, Description: c.Description})
+	}
+	return out
+}
+
+func toJSONSuggestions(in []DependencySuggestion) []suggestionJSON {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]suggestionJSON, 0, len(in))
+	for _, c := range in {
+		out = append(out, suggestionJSON{Name: c.Name, Style: c.Style, Description: c.Description})
 	}
 	return out
 }

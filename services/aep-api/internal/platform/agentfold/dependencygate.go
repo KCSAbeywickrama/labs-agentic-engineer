@@ -21,7 +21,7 @@
 // agent would self-correct against one rule and the fold would enforce
 // another. Kept as a hand-written mirror (like designgate.go) rather than a
 // JSON-schema check because half the rules are shape rules the schema cannot
-// say — name equals directory, candidates and a provider never coexist, the
+// say — name equals directory, suggestions and a provider never coexist, config keys follow a chosen provider, the
 // contract file name fits the style, `assumed` is echoed but never authored.
 
 package agentfold
@@ -42,10 +42,10 @@ var (
 
 	dependencyStyles          = map[string]bool{"rest-api": true, "graphql": true, "sdk": true}
 	dependencySources         = map[string]bool{"project": true, "org": true}
-	dependencyDefinitionKeys  = map[string]bool{"name": true, "description": true, "source": true, "provider": true, "style": true, "contract": true, "sdk": true, "provenance": true, "candidates": true, "config": true, "assumed": true}
+	dependencyDefinitionKeys  = map[string]bool{"name": true, "description": true, "source": true, "provider": true, "style": true, "contract": true, "sdk": true, "provenance": true, "suggestions": true, "config": true, "assumed": true}
 	provenanceKeys            = map[string]bool{"sourceUrl": true, "sha256": true, "fetchedAt": true, "sliced": true}
 	assumptionKeys            = map[string]bool{"by": true, "at": true, "note": true}
-	candidateKeys             = map[string]bool{"name": true, "style": true, "description": true, "package": true}
+	suggestionKeys            = map[string]bool{"name": true, "style": true, "description": true}
 	configKeyKeys             = map[string]bool{"key": true, "secret": true, "description": true, "defaultValue": true}
 	sdkManifestKeys           = map[string]bool{"packages": true, "docsUrl": true, "calls": true, "assumed": true}
 	contractFilesByStyle      = map[string][]string{"rest-api": {"openapi.yaml", "openapi.yml", "openapi.json"}, "graphql": {"schema.graphql", "schema.graphqls"}}
@@ -96,6 +96,9 @@ func validateDependencyDesign(content, dirName string, prior *string) *designPro
 	}
 	for k := range obj {
 		if !dependencyDefinitionKeys[k] {
+			if k == "candidates" {
+				return &designProblem{code: ErrSchemaViolation, message: `"candidates" is retired — write "suggestions" (services the user might choose, any number); the user chooses the service, never you.`}
+			}
 			return &designProblem{code: ErrSchemaViolation, message: "unknown property " + k}
 		}
 	}
@@ -128,29 +131,33 @@ func validateDependencyDesign(content, dirName string, prior *string) *designPro
 	if p := validateAssumption(obj["assumed"]); p != nil {
 		return p
 	}
-	candidates, hasCandidates := obj["candidates"]
-	if hasCandidates {
-		if p := validateCandidates(candidates); p != nil {
+	suggestions, hasSuggestions := obj["suggestions"]
+	if hasSuggestions {
+		if p := validateSuggestions(suggestions); p != nil {
 			return p
 		}
 	}
+	provider, _ := obj["provider"].(string)
+	source, _ := obj["source"].(string)
 	if cfg, present := obj["config"]; present {
 		if p := validateConfigKeys(cfg); p != nil {
 			return p
 		}
+		if list, ok := cfg.([]any); ok && len(list) > 0 && provider == "" && source != "org" {
+			return &designProblem{code: ErrSchemaViolation, message: `"config" is derived from the chosen service and is written only once "provider" is set — leave it out until the user has chosen; the resolve flow derives the keys.`}
+		}
 	}
 
-	provider, _ := obj["provider"].(string)
 	contract, hasContract := obj["contract"].(string)
 	sdk, hasSDK := obj["sdk"].(string)
 	if name != dirName {
 		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("\"name\" must equal the dependency directory (%q), got %q.", dirName, name)}
 	}
-	if hasCandidates && provider != "" {
-		return &designProblem{code: ErrSchemaViolation, message: `"candidates" and "provider" never coexist — choosing one option REMOVES candidates and sets provider + style; keep candidates only while the choice is open.`}
+	if hasSuggestions && provider != "" {
+		return &designProblem{code: ErrSchemaViolation, message: `"suggestions" and "provider" never coexist — once the user chose a service, REMOVE suggestions and set provider + style; keep suggestions only while no service is chosen.`}
 	}
-	if hasCandidates && (style != "" || hasContract || hasSDK) {
-		return &designProblem{code: ErrSchemaViolation, message: `while "candidates" are open, "style", "contract" and "sdk" stay unset — they describe the chosen provider, and none is chosen yet.`}
+	if hasSuggestions && (style != "" || hasContract || hasSDK) {
+		return &designProblem{code: ErrSchemaViolation, message: `while "suggestions" are open, "style", "contract" and "sdk" stay unset — they describe the chosen service, and none is chosen yet.`}
 	}
 	if (hasContract || hasSDK) && style == "" {
 		return &designProblem{code: ErrSchemaViolation, message: `"style" is required once a "contract" or "sdk" is named — it says how the component talks to the system.`}
@@ -242,35 +249,32 @@ func validateAssumption(v any) *designProblem {
 	return nil
 }
 
-func validateCandidates(v any) *designProblem {
+func validateSuggestions(v any) *designProblem {
 	list, ok := v.([]any)
 	if !ok {
-		return &designProblem{code: ErrSchemaViolation, message: "candidates: must be an array"}
-	}
-	if len(list) < 2 {
-		return &designProblem{code: ErrSchemaViolation, message: "candidates: 2 or more, or omit the field — a lone option is a provider, not a candidate"}
+		return &designProblem{code: ErrSchemaViolation, message: "suggestions: must be an array"}
 	}
 	for i, c := range list {
 		obj, ok := c.(map[string]any)
 		if !ok {
-			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("candidates[%d]: must be an object", i)}
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("suggestions[%d]: must be an object", i)}
 		}
 		for k := range obj {
-			if !candidateKeys[k] {
-				return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("candidates[%d]: unknown property %s", i, k)}
+			if !suggestionKeys[k] {
+				return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("suggestions[%d]: unknown property %s", i, k)}
 			}
 		}
 		if n, ok := obj["name"].(string); !ok || n == "" {
-			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("candidates[%d].name: must be a non-empty string", i)}
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("suggestions[%d].name: must be a non-empty string", i)}
 		}
-		if s, ok := obj["style"].(string); !ok || !dependencyStyles[s] {
-			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("candidates[%d].style: %q is not an allowed value", i, obj["style"])}
+		if sv, present := obj["style"]; present {
+			if s, ok := sv.(string); !ok || !dependencyStyles[s] {
+				return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("suggestions[%d].style: %q is not an allowed value", i, sv)}
+			}
 		}
-		for _, f := range []string{"description", "package"} {
-			if v, present := obj[f]; present {
-				if _, ok := v.(string); !ok {
-					return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("candidates[%d].%s: must be a string", i, f)}
-				}
+		if dv, present := obj["description"]; present {
+			if _, ok := dv.(string); !ok {
+				return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("suggestions[%d].description: must be a string", i)}
 			}
 		}
 	}

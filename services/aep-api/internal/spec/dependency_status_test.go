@@ -25,7 +25,7 @@ import "testing"
 // test; artifacts.resolveOrgServices' own tests pin the same outcomes through
 // the read path unchanged).
 func TestComputeDependencyStatus(t *testing.T) {
-	twoCandidates := []DependencyCandidate{
+	twoSuggestions := []DependencySuggestion{
 		{Name: "sendgrid-rest", Style: DependencyStyleRestAPI},
 		{Name: "resend-sdk", Style: DependencyStyleSDK},
 	}
@@ -75,11 +75,18 @@ func TestComputeDependencyStatus(t *testing.T) {
 
 		// --- external: precedence order (first match wins) -------------------
 		{
-			name: "rule 1: 2+ candidates is ambiguous, even with a registry hit",
+			name: "open suggestions never resolve on their own: the user chooses",
 			dep: Dependency{Kind: DependencyKindExternal, Name: "email-provider",
-				Candidates: twoCandidates},
+				Suggestions: twoSuggestions},
+			wantStatus: DependencyStatusUnresolved,
+			wantReason: DependencyReasonNeedsInput,
+		},
+		{
+			name: "a registry hit resolves over open suggestions",
+			dep: Dependency{Kind: DependencyKindExternal, Name: "email-provider",
+				Suggestions: twoSuggestions},
 			registryHit: true,
-			wantStatus:  DependencyStatusAmbiguous,
+			wantStatus:  DependencyStatusResolved,
 		},
 		{
 			name:        "rule 2: registry reuse resolves with nothing else known",
@@ -145,10 +152,11 @@ func TestComputeDependencyStatus(t *testing.T) {
 			wantStatus: DependencyStatusResolved,
 		},
 		{
-			name: "a style alone (legacy lift, no provider name) still resolves with a contract",
+			name: "no provider is unchosen even with a contract named (hydration names the provider off the document on disk)",
 			dep: Dependency{Kind: DependencyKindExternal, Name: "openweather",
 				Style: DependencyStyleRestAPI, Contract: "openapi.yaml"},
-			wantStatus: DependencyStatusResolved,
+			wantStatus: DependencyStatusUnresolved,
+			wantReason: DependencyReasonNeedsInput,
 		},
 		{
 			name: "rule 7: an agent-written contract nobody accepted is unresolved/needs-acceptance",

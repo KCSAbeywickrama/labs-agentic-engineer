@@ -20,7 +20,7 @@
 //
 // One dependency, one definition. A component's design.json says only
 // `{ "kind": "external", "name": "payment-provider" }`; the provider, style,
-// contract file, config keys and open candidates live once, here, shared by
+// contract file, config keys and open suggestions live once, here, shared by
 // every component that uses the dependency. The read path (AssembleDesign)
 // hydrates each reference so downstream readers — wiring derivation, the build
 // preflight, the deploy gate, the console — keep the flat `Dependency` they
@@ -69,17 +69,29 @@ func ContractPath(depName, contractFile string) string {
 }
 
 type dependencyDefinitionJSON struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	Source      string          `json:"source,omitempty"`
-	Provider    string          `json:"provider,omitempty"`
-	Style       string          `json:"style,omitempty"`
-	Contract    string          `json:"contract,omitempty"`
-	SDK         string          `json:"sdk,omitempty"`
-	Provenance  *provenanceJSON `json:"provenance,omitempty"`
-	Candidates  []candidateJSON `json:"candidates,omitempty"`
-	Config      []configKeyJSON `json:"config,omitempty"`
-	Assumed     *assumptionJSON `json:"assumed,omitempty"`
+	Name        string           `json:"name"`
+	Description string           `json:"description,omitempty"`
+	Source      string           `json:"source,omitempty"`
+	Provider    string           `json:"provider,omitempty"`
+	Style       string           `json:"style,omitempty"`
+	Contract    string           `json:"contract,omitempty"`
+	SDK         string           `json:"sdk,omitempty"`
+	Provenance  *provenanceJSON  `json:"provenance,omitempty"`
+	Suggestions []suggestionJSON `json:"suggestions,omitempty"`
+	// Candidates is the retired 2+-options field: decoded so a file written
+	// before suggestions existed still reads (its options become suggestions),
+	// never encoded — the next save writes suggestions.
+	Candidates []candidateJSON `json:"candidates,omitempty"`
+	Config     []configKeyJSON `json:"config,omitempty"`
+	Assumed    *assumptionJSON `json:"assumed,omitempty"`
+}
+
+// suggestionJSON is the on-disk shape of one entry in a dependency's
+// `suggestions` array. Mirrors DependencySuggestion.
+type suggestionJSON struct {
+	Name        string `json:"name"`
+	Style       string `json:"style,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 type provenanceJSON struct {
@@ -129,7 +141,7 @@ func parseDependencyDefinitionJSON(dir, raw string) (DependencyDefinition, error
 		Style:       dj.Style,
 		Contract:    dj.Contract,
 		SDK:         dj.SDK,
-		Candidates:  toModelCandidates(dj.Candidates),
+		Suggestions: append(toModelSuggestions(dj.Suggestions), toModelCandidates(dj.Candidates)...),
 		Config:      toModelConfigKeys(dj.Config),
 	}
 	if dj.Provenance != nil {
@@ -164,7 +176,7 @@ func marshalDependencyDefinitionJSON(dir string, def DependencyDefinition) ([]by
 		Style:       def.Style,
 		Contract:    def.Contract,
 		SDK:         def.SDK,
-		Candidates:  toJSONCandidates(def.Candidates),
+		Suggestions: toJSONSuggestions(def.Suggestions),
 		Config:      toJSONConfigKeys(def.Config),
 	}
 	if def.Provenance != nil {
@@ -223,7 +235,7 @@ func assembleDependencyDefinitions(files map[string]string) ([]DependencyDefinit
 // on disk but still carries one on the component (a design from before the
 // dependency file existed), a definition built from what the components say —
 // config keys unioned across the consumers that carry them, the first
-// non-empty style / candidates / contract URL winning. A definition already on
+// non-empty style / suggestions / contract URL winning. A definition already on
 // disk is never touched: the file is the truth, and a stale copy on a
 // component is exactly what the next save strips. The result is sorted by
 // name; the second return is the components that carried legacy fields, so the
@@ -243,7 +255,7 @@ func liftLegacyDefinitions(defs []DependencyDefinition, comps []DesignComponent)
 			if d.Kind != DependencyKindExternal || d.Name == "" {
 				continue
 			}
-			hasLegacy := d.Style != "" || d.Package != "" || len(d.Candidates) > 0 || len(d.Config) > 0 || d.Provenance != nil
+			hasLegacy := d.Style != "" || d.Package != "" || len(d.Suggestions) > 0 || len(d.Config) > 0 || d.Provenance != nil
 			if !hasLegacy {
 				continue
 			}
@@ -260,7 +272,7 @@ func liftLegacyDefinitions(defs []DependencyDefinition, comps []DesignComponent)
 			// the coding agent's research pointer (the old specPath) is
 			// provenance, not a contract.
 			def := DependencyDefinition{Name: d.Name, Description: d.Description, Style: d.Style}
-			def.Candidates = append([]DependencyCandidate(nil), d.Candidates...)
+			def.Suggestions = append([]DependencySuggestion(nil), d.Suggestions...)
 			def.Config = append([]ConfigKey(nil), d.Config...)
 			if d.Provenance != nil {
 				p := *d.Provenance
@@ -324,13 +336,13 @@ func hydrateExternalDependencies(d *DesignFile, files map[string]string) {
 			if !ok {
 				// Nothing on disk and nothing lifted: strip any legacy carry so
 				// the edge reads as the reference it is.
-				dep.Style, dep.Package, dep.Candidates, dep.Config, dep.Provenance = "", "", nil, nil, nil
+				dep.Style, dep.Package, dep.Suggestions, dep.Config, dep.Provenance = "", "", nil, nil, nil
 				continue
 			}
 			dep.Source = def.Source
 			dep.Provider = def.Provider
 			dep.Style = def.Style
-			dep.Candidates = append([]DependencyCandidate(nil), def.Candidates...)
+			dep.Suggestions = append([]DependencySuggestion(nil), def.Suggestions...)
 			dep.Config = append([]ConfigKey(nil), def.Config...)
 			dep.Provenance = nil
 			if def.Provenance != nil {
@@ -379,6 +391,23 @@ func hydrateExternalDependencies(d *DesignFile, files map[string]string) {
 			}
 		}
 	}
+}
+
+// contractTitle is the system an OpenAPI document (YAML or JSON) names in
+// `info.title`, or "" when it names none. Handing over a document is choosing
+// its system (CollectDependencyContract writes this as the provider); nothing
+// is derived from it at read time — a file with no provider reads as unchosen,
+// on every surface alike, until the user's choice is written to it.
+func contractTitle(raw string) string {
+	var doc struct {
+		Info struct {
+			Title string `yaml:"title"`
+		} `yaml:"info"`
+	}
+	if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(doc.Info.Title)
 }
 
 // contractMarkedAssumed reports whether a contract file declares itself

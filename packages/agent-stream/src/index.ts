@@ -103,7 +103,6 @@ export type {
   Dependency,
   DependencyKind,
   DependencyStyle,
-  DependencyCandidate,
   ConfigKey,
   ExposesAPI,
 } from "./contracts/component-design.js";
@@ -155,6 +154,7 @@ export type { ComponentDependencyProblem } from "./component-dependencies.js";
 export {
   checkDependencyDesign,
   dependencyDesignSchema,
+  dependencySuggestionSchema,
   sdkManifestSchema,
   dependencyDir,
   dependencyDesignPath,
@@ -166,6 +166,7 @@ export {
 export type { DependencyDesignProblem } from "./dependency-design-schema.js";
 export type {
   DependencyDesign,
+  DependencySuggestion,
   DependencySource,
   DependencyProvenance,
   DependencyAssumption,

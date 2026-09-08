@@ -342,7 +342,6 @@ func (e OrgEndpointDTOType) Valid() bool {
 
 // Defines values for PreflightItemKind.
 const (
-	PreflightItemKindExternalAmbiguous  PreflightItemKind = "external-ambiguous"
 	PreflightItemKindExternalConfig     PreflightItemKind = "external-config"
 	PreflightItemKindExternalSpec       PreflightItemKind = "external-spec"
 	PreflightItemKindExternalUnresolved PreflightItemKind = "external-unresolved"
@@ -353,8 +352,6 @@ const (
 // Valid indicates whether the value is a known member of the PreflightItemKind enum.
 func (e PreflightItemKind) Valid() bool {
 	switch e {
-	case PreflightItemKindExternalAmbiguous:
-		return true
 	case PreflightItemKindExternalConfig:
 		return true
 	case PreflightItemKindExternalSpec:
@@ -931,7 +928,7 @@ type BuildPreflight struct {
 	// NeedsInput Whether preflight emitted any item at all. Kept as the broad "there is something to show" flag; it does NOT gate Build, because an external dependency's values are collected on the Builds page while the coding agent runs and are enforced at the deploy gate instead.
 	NeedsInput bool `json:"needsInput"`
 
-	// NeedsResolution Whether any emitted item blocks the version cut — a dependency the design itself cannot resolve (ambiguous, unresolved, missing spec, or an org service awaiting access). This is the ONLY flag a client may block Build on.
+	// NeedsResolution Whether any emitted item blocks the version cut — a dependency the design itself cannot resolve (unresolved, missing spec, or an org service awaiting access). This is the ONLY flag a client may block Build on.
 	NeedsResolution bool `json:"needsResolution"`
 }
 
@@ -1238,14 +1235,11 @@ type DeleteOp struct {
 	Path    string `json:"path"`
 }
 
-// Dependency A component's unified, kind-discriminated dependency entry. status/reason/flags are read-time computed by spec.ComputeDependencyStatus — never authored, never persisted (Design.json write-gate rejects them). An external dependency's definition (source, provider, style, contract, sdk, package, provenance, candidates, config, assumed) is HYDRATED from its own file, specs/design/dependencies/<name>/dependency.json — one dependency, one definition, referenced by name from every component that uses it.
+// Dependency A component's unified, kind-discriminated dependency entry. status/reason/flags are read-time computed by spec.ComputeDependencyStatus — never authored, never persisted (Design.json write-gate rejects them). An external dependency's definition (source, provider, style, contract, sdk, package, provenance, suggestions, config, assumed) is HYDRATED from its own file, specs/design/dependencies/<name>/dependency.json — one dependency, one definition, referenced by name from every component that uses it.
 type Dependency = contracts.Dependency
 
 // DependencyAssumption The user's permission to build against a contract the agent wrote from research — who accepted, when, and the agent's note of what it was unsure about.
 type DependencyAssumption = contracts.DependencyAssumption
-
-// DependencyCandidate One option in an ambiguous external dependency's resolution set.
-type DependencyCandidate = contracts.DependencyCandidate
 
 // DependencyContractBody Exactly one of url (fetched by the platform, SSRF-hardened) or content (the document itself, pasted or uploaded).
 type DependencyContractBody struct {
@@ -1269,6 +1263,9 @@ type DependencyStatus struct {
 	Status     string                       `json:"status"`
 	ValueState ExternalDependencyValueState `json:"valueState,omitempty"`
 }
+
+// DependencySuggestion A service the user might choose for an external dependency, named while no provider is chosen.
+type DependencySuggestion = contracts.DependencySuggestion
 
 // DeployStage Deploy-stage aggregate on ProjectStatus (#184) — what's live in dev and rollout progress.
 type DeployStage struct {

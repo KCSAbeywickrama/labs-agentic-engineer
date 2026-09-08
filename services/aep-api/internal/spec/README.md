@@ -54,14 +54,15 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   the org-skills repo, `AgentTurn` (turn lifecycle) + the resumable-turn SSE broker (in-memory seam).
 - **One external dependency, one definition** (ADR-0027). An external dependency lives in
   `specs/design/dependencies/<name>/` — `dependency.json` (provider, style, config keys, open
-  candidates, provenance, the user's `assumed` record) beside the committed contract it points at
+  suggestions, provenance, the user's `assumed` record) beside the committed contract it points at
   (an OpenAPI/GraphQL slice, an `sdk.json` manifest). A component's `design.json` references it by
   name only; `AssembleDesign` hydrates every reference from the directory (`dependency_json.go`), so
   downstream readers keep the flat `Dependency`, and `SplitDesign` writes both halves back. A design
   from before the directory existed is lifted into one at its next save (the legacy fields on the
   component are decoded, never re-encoded). `ComputeDependencyStatus` reads the state off the
-  hydrated edge — candidates → ambiguous; org/registry → resolved+registered; no provider →
-  needs-input; a style with no contract or manifest on disk → needs-contract; an agent-written
+  hydrated edge — org/registry → resolved+registered; no provider (the user has not chosen a
+  service; `suggestions` may be open) → needs-input; a style with no contract or manifest on disk
+  → needs-contract; an agent-written
   contract (`x-aep-assumed: true` in the file) with no acceptance → needs-acceptance; else resolved,
   flagged assumed / sdk-only — and the build gate blocks on nothing else. The write-gates (zod in
   `@aep/agent-stream`, `agentfold/dependencygate.go`, `designspec` at save) validate the file; the

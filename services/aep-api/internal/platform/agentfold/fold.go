@@ -650,6 +650,6 @@ func (f *Fold) checkComponentDependencies(ctx context.Context, path, content str
 	if len(missing) > 1 {
 		noun = "external dependencies have"
 	}
-	return ErrUnknownDependency, fmt.Sprintf("%s rejected — %s no definition yet: %s. A component references an external dependency by name only; its provider, style, contract file, config keys (or open candidates) live once in that dependency.json, shared by every component that uses it. Write the dependency file first (addFile — for a Registered External resource a stub with \"source\": \"org\" is enough), then re-emit this file. The file is unchanged.",
+	return ErrUnknownDependency, fmt.Sprintf("%s rejected — %s no definition yet: %s. A component references an external dependency by name only; its provider, style, contract file, config keys (or open suggestions) live once in that dependency.json, shared by every component that uses it. Write the dependency file first (addFile — for a Registered External resource a stub with \"source\": \"org\" is enough), then re-emit this file. The file is unchanged.",
 		path, noun, strings.Join(missing, "; "))
 }

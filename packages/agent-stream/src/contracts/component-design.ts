@@ -116,7 +116,7 @@ export type DependencyKind = "component" | "org-service" | "external" | "platfor
 // The external dependency's own definition lives in its directory
 // (`./dependency-design.ts`); these re-exports keep the older import paths
 // working for readers that only need the shared leaf types.
-export type { DependencyStyle, DependencyCandidate, ConfigKey } from "./dependency-design.js";
+export type { DependencyStyle, DependencySuggestion, ConfigKey } from "./dependency-design.js";
 
 /**
  * One dependency edge as a component declares it. A single flat shape carries
