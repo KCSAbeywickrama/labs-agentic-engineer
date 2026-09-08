@@ -372,6 +372,13 @@ Checklist before finishing a wireframe file:
 - The right primitive does each job — `badge` for status, `tabs` for section
   switching, `avatar` for people, `progress` for completion, `table` + `row`
   for real data.
+- **Every `table` column and stat `card` value is data the provider returns
+  for that screen.** Where the provider's `openapi.yaml` exists, check the
+  list operation the table binds to: a column its response carries no field
+  for (a per-row count that only a detail endpoint could supply) is either
+  added to the API design now or dropped from the wireframe. Left in,
+  the coding run either fills it with one request per row or drops it
+  silently, and the reviewer sees a screen that does not match either way.
 - Color is rare and meaningful: `primary` on each screen's main action
   (usually one, at most two equals), plus the odd status `badge`.
 - Navigation is on the control that triggers it: the button/link/table that

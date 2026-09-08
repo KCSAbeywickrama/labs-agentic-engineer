@@ -36,7 +36,7 @@ src/
 ├── config/
 │   └── appRoutes.tsx       # routes grouped under layouts
 ├── layouts/
-│   ├── AppLayout.tsx       # signed-in app shell (AppShell/Header/Sidebar)
+│   ├── AppLayout.tsx       # signed-in app shell: sidebar (AppLayout) or top-nav (TopNavLayout) below
 │   ├── GateLayout.tsx      # login / unauthenticated
 │   └── DefaultLayout.tsx   # standalone pages (home, error)
 └── pages/
@@ -224,6 +224,69 @@ export default function AppLayout(): JSX.Element {
   );
 }
 ```
+
+### TopNavLayout — the links in the top bar, no sidebar
+
+The shell for a wireframe whose `navbar` carries the links (`navbar "Acme
+Store | Products -> Products | Orders -> Orders"`) and that draws no
+`sidebar` — a simple product flow rather than a console.
+`Header` has no links slot of its own, but it renders its children in order in
+a flex toolbar, so a `Tabs` sits between `Header.Brand` and `Header.Spacer`.
+`AppShell.Sidebar` is omitted, and `AppShell.Main` fills the width.
+
+```tsx
+import { AppShell, Header, Tab, Tabs, UserMenu } from '@wso2/oxygen-ui';
+import { LogOut } from '@wso2/oxygen-ui-icons-react';
+import { Link, Outlet, useLocation } from 'react-router';
+import type { JSX } from 'react';
+
+// One entry per `navbar` item that carries `-> Screen`, in the DSL's order.
+// Scope it to the role when the wireframe draws a different navbar per role.
+const NAV = [
+  { label: 'Products', to: '/products' },
+  { label: 'Orders', to: '/orders' },
+];
+
+export default function TopNavLayout(): JSX.Element {
+  const { pathname } = useLocation();
+  const active = NAV.find((item) => pathname.startsWith(item.to))?.to ?? false;
+
+  return (
+    <AppShell>
+      <AppShell.Navbar>
+        <Header>
+          <Header.Brand>
+            <Header.BrandTitle>Acme Store</Header.BrandTitle>
+          </Header.Brand>
+          <Tabs value={active} sx={{ ml: 4, alignSelf: 'stretch' }}>
+            {NAV.map((item) => (
+              <Tab key={item.to} value={item.to} label={item.label} component={Link} to={item.to} />
+            ))}
+          </Tabs>
+          <Header.Spacer />
+          <Header.Actions>
+            <UserMenu>
+              <UserMenu.Trigger name="Jane Doe" />
+              <UserMenu.Header name="Jane Doe" email="jane@example.com" />
+              <UserMenu.Logout icon={<LogOut size={18} />} onClick={() => {}} />
+            </UserMenu>
+          </Header.Actions>
+        </Header>
+      </AppShell.Navbar>
+
+      <AppShell.Main>
+        <Outlet />
+      </AppShell.Main>
+    </AppShell>
+  );
+}
+```
+
+`value={false}` on `Tabs` is what MUI expects when no tab is active (a detail
+route not in the nav), so `active` falls back to `false`, not `undefined`.
+Which shell a wireframe wants is decided by its chrome: a `sidebar` line means
+AppLayout above; links in the `navbar` and no `sidebar` means this one. Never
+both — the wireframe never draws both either.
 
 ### GateLayout — login / unauthenticated
 

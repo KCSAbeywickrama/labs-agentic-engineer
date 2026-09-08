@@ -52,7 +52,7 @@ in that order, with that literal content:
 | `navbar "App \| Nav -> S"` / `sidebar "…"` | the app's real navigation chrome, identical on every screen of a role; each item that carries `-> S` links there |
 | `heading`, `text`, `link`, `breadcrumb` | the same words on the page |
 | `card "Label \| Value \| Caption"` | a stat tile with that label, that value bound to live data, that caption |
-| `table "A \| B \| C"` + `row` lines | a data table with exactly those columns; the `row`s are example data, so bind the table to the real list |
+| `table "A \| B \| C"` + `row` lines | a data table with exactly those columns, bound to the real list. A column the list endpoint does not return is a contract gap: render the columns it does return, name the gap in your report, and never fill it with one request per row — the `row`s are example data, not a licence to fetch every record's detail |
 | `list`, `tabs`, `badge`, `progress`, `avatar`, `chart`, `image` | the matching UI primitive — a status is a badge, not a paragraph |
 | `input`, `textarea`, `select`, `search`, `checkbox`, `radio`, `toggle` | a real form control whose placeholder/label is the DSL label, wired to submit |
 | `button "X" primary` | a primary-styled button; every button the DSL marks `primary` is primary on the page, and only those. Unmarked buttons take a non-primary style (destructive where the DSL says `danger`) |
@@ -67,6 +67,22 @@ wrong for the data the API actually returns, and say so in the PR.
 `list`, and data `card` needs what it shows with no rows, while fetching,
 and when the request fails. A wireframe shows the happy path; the page
 must not break off it.
+
+**The example data is the mock's seed.** The reviewer compares the running
+page against the rendered wireframe, so mock mode should show the `row`s the
+DSL draws, and a stat `card`'s value should agree with the rows it counts.
+Print them instead of retyping them:
+
+```bash
+node "$AEP_SKILLS_DIR/wireframes/scripts/seed.mjs" specs/design/components/<name>/wireframes.dsl
+```
+
+That prints, per screen, every `table` (columns and its `row`s as records),
+stat `card` (label, value, caption), `list`, `select` (label and preselected
+value) and `badge` as JSON. Map each record onto the provider's schema in the
+mock handlers and derive the stat values from those records. If
+`$AEP_SKILLS_DIR` is unset, the script is `scripts/seed.mjs` next to this
+skill's `SKILL.md`.
 
 ## Arrow for arrow
 
