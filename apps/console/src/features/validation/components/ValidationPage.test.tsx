@@ -263,6 +263,25 @@ const CRITERIA = JSON.stringify({
   ],
 });
 
+// The oracle after the spec moved on: AC-001-c is authored but absent from the
+// pinned REPORT below, which is what the page really sees whenever criteria are
+// edited after an attempt settled. The console reads the criteria at the branch tip
+// and the report at the merge commit of the attempt that wrote it.
+const CRITERIA_DRIFTED = JSON.stringify({
+  requirements: [
+    {
+      id: "REQ-001",
+      statement: "Shoppers can search the catalog.",
+      criteria: [
+        { id: "AC-001-a", must: "Search returns matches", method: "e2e" },
+        { id: "AC-001-b", must: "Category filter works", method: "e2e" },
+        { id: "AC-001-c", must: "An empty search explains itself", method: "e2e" },
+        { id: "AC-003-b", must: "Payment is encrypted", method: "manual" },
+      ],
+    },
+  ],
+});
+
 const REPORT = JSON.stringify({
   criteria: [
     { id: "AC-001-a", status: "pass" },
@@ -805,6 +824,52 @@ describe("ValidationPage lifecycle", () => {
   // The regression this replaced a default with: no state may FORCE a body, because
   // `?view=logs | absent` has no third value, so `onViewChange(undefined)` cannot
   // outrank a forced arm and the "View report" button silently does nothing.
+  // "Out of run" is a claim about a run that FINISHED without covering the row. A
+  // repeat attempt in flight may still answer it, so while one is running the row
+  // waits with everything else.
+  it("says a drifted criterion is pending while a repeat attempt runs", () => {
+    mockValidation = "running";
+    mockRun = {
+      ...run({
+        validation: {
+          verdict: "failed",
+          reportPath: "tests/validation/report.json",
+        },
+        cycles: [validationCycle],
+      }),
+      state: "running",
+    };
+    mockCriteria.data = { content: CRITERIA_DRIFTED };
+    mockReport.data = { content: REPORT };
+    renderPage(undefined);
+
+    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(screen.queryByText("Out of run")).not.toBeInTheDocument();
+    // The rows the pinned report DOES cover keep the last attempt's verdict, which
+    // is what makes widening the pending signal safe.
+    expect(screen.getByText("Passed")).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+  });
+
+  // The other side of the same gate: nothing is running, so the report's silence
+  // about this row is final.
+  it("says a drifted criterion is out of run once nothing is running", () => {
+    mockValidation = "failed";
+    mockRun = run({
+      validation: {
+        verdict: "failed",
+        reportPath: "tests/validation/report.json",
+      },
+      cycles: [validationCycle],
+    });
+    mockCriteria.data = { content: CRITERIA_DRIFTED };
+    mockReport.data = { content: REPORT };
+    renderPage(undefined);
+
+    expect(screen.getByText("Out of run")).toBeInTheDocument();
+    expect(screen.queryByText("Pending")).not.toBeInTheDocument();
+  });
+
   it("keeps the report/log toggle working while a repeat attempt runs", () => {
     mockValidation = "running";
     mockRun = {

@@ -30,7 +30,7 @@ import {
   type CriterionReport,
   type ValidationReport,
 } from "./report.js";
-import { CRITERION_STATE_LABEL } from "./counts.js";
+import { CRITERION_STATE_LABEL, runAnswers, runWorksOn } from "./counts.js";
 import { shortCriterionId, shortRequirementId } from "./shortId.js";
 
 // Visually-hidden TEXT rather than an aria-label, for the reason StatusChip
@@ -64,11 +64,22 @@ const mono = { fontFamily: "monospace", fontSize: "0.875rem" } as const;
  * "Not validated"; a longer one would push its own row's id out of the column. A
  * short chip therefore leaves slack after it — the price of the column, and the
  * reason DRIFT_LABEL is kept terse rather than descriptive.
+ *
+ * Raw px, unlike the gap below, because neither is a spacing step: one is the
+ * width of a word and the other the height of a Chip. There is no theme token
+ * that means either, and rounding them to one would only hide what sets them.
  */
 const GUTTER_CHIP = 108;
 const GUTTER_ICON = 22;
-/** The row's own flex gap, in px — theme spacing(1). */
-const ROW_GAP = 8;
+
+/**
+ * The row's flex gap, as a theme spacing multiplier — `1` is 8px.
+ *
+ * A token and not a px literal: this one IS a spacing step, so the theme is
+ * entitled to move it. The failure block's indent has to add it to a px width, so
+ * it reads the same token back through `theme.spacing`.
+ */
+const ROW_GAP = 1;
 
 /**
  * The height of a row's FIRST line, shared by everything sitting on it.
@@ -89,6 +100,10 @@ const ROW_GAP = 8;
  *
  * 24px is the MUI small Chip's own height, so the tallest occupant sets it and
  * nothing has to be stretched.
+ *
+ * Passed to `height` as a bare number, which emotion renders as px, but to
+ * `line-height` as an explicit `px` string — `line-height` is unitless in CSS, so
+ * a bare 24 there would mean 24 TIMES the font size rather than 24 pixels.
  */
 const ROW_LINE = 24;
 
@@ -117,7 +132,7 @@ function IdMark({ short, full }: { short: string; full: string }) {
         justifyContent: "center",
         // The row's shared band rather than padding of its own, so the mark sits
         // in the same line as the chip and the assertion — see ROW_LINE.
-        height: `${ROW_LINE}px`,
+        height: ROW_LINE,
         minWidth: 20,
         px: 0.75,
         borderRadius: 0.75,
@@ -155,24 +170,6 @@ const STATE_COLOR: Record<string, ChipColor> = {
   not_validated: "warning",
   manual: "default",
 };
-
-/**
- * Whether a validation run answers this method at all.
- *
- * `e2e` is the only one it does. generate-report.mjs gives an e2e criterion the
- * test's own result and decides every other method from the method alone —
- * `manual` for a manual criterion, `not_validated` for anything else it cannot
- * automate — so what will become of those rows is knowable before the run starts.
- *
- * One predicate, read by all three places that need it: which glyph the Spec view
- * shows, whether a live status may speak for a row, and whether "Pending" is a
- * promise the run can keep. Shared deliberately — with the glyph claiming a person
- * checks a `scenario` criterion while the awaiting branch still promised "Pending"
- * for it, the two surfaces contradicted each other about the same row.
- */
-function runAnswers(method: string): boolean {
-  return method === "e2e";
-}
 
 /**
  * Who checks a criterion — a mark, not a word.
@@ -375,13 +372,18 @@ function CriterionChip({
   live: string | undefined;
   awaiting: boolean;
 }) {
-  // A criterion the run does not answer never takes a live status. The run
-  // reports one — its test plan names every criterion, not only the ones an agent
-  // will work — but it will never ANSWER this row, so a chip reading "Planned"
-  // promises a result nobody is going to produce. It is the only status such a
-  // row can receive, and nothing supersedes it: every later status needs a spec
-  // file it will never have.
-  if (live && runAnswers(criterion.method)) {
+  // `runWorksOn`, not `runAnswers`: the question here is whether the run is
+  // WORKING on this row, which is wider than whether it will answer it. A run
+  // explores and runs a legacy `scenario` criterion and still reports
+  // `not_validated` for it, so it emits progress for a row it will never answer —
+  // and the console's run-wide progress line counts that row too. Asking the
+  // narrower question here made the row refuse a status the line beside it had
+  // already counted.
+  //
+  // Only `manual` is excluded, and unconditionally: the run names every criterion
+  // in its test plan, but a person answers this one, so a chip reading "Planned"
+  // promises a result nobody is going to produce.
+  if (live && runWorksOn(criterion.method)) {
     // pass/fail arrive on the live feed too — report.json's own words, so its chip.
     return LIVE_LABEL[live] ? (
       <LiveChip status={live} />
@@ -395,10 +397,11 @@ function CriterionChip({
     );
   }
 
-  // A criterion the run does not answer gets its final word rather than
-  // "Pending": no result is coming, so a chip promising one is a claim the report
-  // will contradict. Which final word is decided by the method alone, which is
-  // why it can be said this early.
+  // `runAnswers` here, the narrow question, because this branch is about the
+  // VERDICT: a criterion the run will not answer gets its final word rather than
+  // "Pending", since no result is coming and a chip promising one is a claim the
+  // report will contradict. Which final word is decided by the method alone,
+  // which is why it can be said before the run ends.
   //
   // "Pending" itself is local rather than a sixth CRITERION_STATE_LABEL entry:
   // that map is report.json's vocabulary, and a criterion with no report has no
@@ -417,14 +420,18 @@ function CriterionChip({
     );
   }
 
-  // A settled run whose report has no row for this criterion. The consumer reads
-  // the criteria at the branch tip and the report at the merge commit of the
-  // attempt that wrote it, so a criterion authored since then cannot have a
-  // result — which is the ordinary authoring loop (run, read a failure, ask the
-  // agent for another criterion), not a fault. Hence a neutral chip and not a
-  // `warning`: colouring the expected state teaches the reader to discount the
-  // colour. Local wording for the same reason "Pending" above is local — this
-  // criterion is absent from report.json, so report.json has no word for it.
+  // No attempt in flight, and the report has no row for this criterion. The
+  // consumer reads the criteria at the branch tip and the report at the merge
+  // commit of the attempt that wrote it, so a criterion authored since then cannot
+  // have a result — the ordinary authoring loop (run, read a failure, ask the agent
+  // for another criterion), not a fault. Hence a neutral chip and not a `warning`:
+  // colouring the expected state teaches the reader to discount the colour. Local
+  // wording for the same reason "Pending" above is local — this criterion is absent
+  // from report.json, so report.json has no word for it.
+  //
+  // Reached only after the `awaiting` branch above, which is what keeps this off a
+  // row the CURRENT run may still answer. Saying "out of run" while a run is
+  // working is the one thing this chip must never do.
   return (
     <Tooltip title={DRIFT_TOOLTIP}>
       <Chip
@@ -472,14 +479,14 @@ function CriterionRow({
           wraps rather than drifting to the middle of it. Alignment within that
           line is ROW_LINE's job, not this property's. */}
       <Box
-        sx={{ display: "flex", gap: `${ROW_GAP}px`, alignItems: "flex-start" }}
+        sx={{ display: "flex", gap: ROW_GAP, alignItems: "flex-start" }}
       >
         <Box
           sx={{
             display: "flex",
             alignItems: "center",
-            height: `${ROW_LINE}px`,
-            minWidth: hasRun ? `${GUTTER_CHIP}px` : `${GUTTER_ICON}px`,
+            height: ROW_LINE,
+            minWidth: hasRun ? GUTTER_CHIP : GUTTER_ICON,
             flexShrink: 0,
           }}
         >
@@ -510,7 +517,12 @@ function CriterionRow({
           failure only exists with a report attached, so the chip gutter is the
           right one to measure from. */}
       {failed && (report?.failureLocation || report?.spec || report?.failure) && (
-        <Box sx={{ mt: 0.75, ml: `${GUTTER_CHIP + ROW_GAP}px` }}>
+        <Box
+          sx={(theme) => ({
+            mt: 0.75,
+            ml: `calc(${GUTTER_CHIP}px + ${theme.spacing(ROW_GAP)})`,
+          })}
+        >
           {/* Prefer the reporter's `<file>:<line>`, which points at the failing
               assertion rather than merely the spec that contains it. The gate
               above admits it on its own: a reporter can hand back a location with
@@ -593,7 +605,7 @@ function RequirementCard({
         sx={{
           display: "flex",
           alignItems: "flex-start",
-          gap: `${ROW_GAP}px`,
+          gap: ROW_GAP,
           mb: count > 0 ? 1.5 : 0,
         }}
       >
@@ -779,6 +791,13 @@ export interface ValidationViewProps {
    * Off by default, like its neighbours, and ignored for any criterion that
    * HAS a report — the Spec view's file preview shows the plain oracle with no run
    * attached to it, and chips there would name a run that does not exist.
+   *
+   * "An attempt is in flight" means ANY attempt, not only a version's first. On a
+   * repeat attempt a criterion the pinned report never covered is waiting on the
+   * run working right now, so it is pending; passing this only for a first attempt
+   * left such a row saying it was out of the run while the run was on its way to
+   * answering it. Safe to widen because `report` outranks this — a covered row
+   * keeps the previous attempt's verdict, and only uncovered rows read it.
    *
    * Named for the state rather than `pending`: a boolean prop by that name reads as
    * react-query's `isPending` — "still loading" — which is the opposite of what this

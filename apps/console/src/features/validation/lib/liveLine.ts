@@ -38,6 +38,7 @@
 // it IS the rows, and it says something only in the two windows where they say
 // nothing.
 
+import { runWorksOn } from "@aep/ui-validation-view";
 import type { LiveStatuses, ValidationCriteria } from "@aep/ui-validation-view";
 
 /** report.json's terminal words, which the live feed also emits. */
@@ -47,10 +48,15 @@ const TERMINAL = new Set(["pass", "fail"]);
  * The criteria a RUN can act on. `manual` criteria are answered by a human and
  * never move, so counting them would mean the line never reaches "all settled"
  * on any project that has one.
+ *
+ * The set comes from the shared vocabulary rather than a local `!== "manual"`,
+ * because the criterion ROWS test the same thing to decide whether a live status
+ * may speak for a row. Written twice, the two drifted — this line counted a
+ * criterion as answerable that its own row was refusing to show progress for.
  */
 function agentCriteriaIds(oracle: ValidationCriteria): string[] {
   return oracle.requirements.flatMap((r) =>
-    r.criteria.filter((c) => c.method !== "manual").map((c) => c.id),
+    r.criteria.filter((c) => runWorksOn(c.method)).map((c) => c.id),
   );
 }
 

@@ -191,6 +191,23 @@ describe("ValidationView — the Validations page (a report joined in)", () => {
     expect(screen.queryByText("Out of run")).not.toBeInTheDocument();
   });
 
+  // The run works on a `scenario` criterion — explores it, authors a spec, runs
+  // it — and still reports `not_validated` for it. So it emits progress for a row
+  // it will never answer, and the console's run-wide line counts that row. A row
+  // that refused the status would contradict the line directly above it.
+  it("shows live progress for a criterion the run works on but cannot answer", () => {
+    render(
+      <ValidationView
+        criteria={CRITERIA}
+        report={FULL_REPORT}
+        live={{ "AC-003-b": "running" }}
+      />,
+    );
+    expect(screen.getByText("Running…")).toBeInTheDocument();
+    // Not the pinned report's word for it, which the live status outranks.
+    expect(screen.queryByText("Not validated")).not.toBeInTheDocument();
+  });
+
   it("lets a live status outrank the previous attempt's verdict", () => {
     render(
       <ValidationView

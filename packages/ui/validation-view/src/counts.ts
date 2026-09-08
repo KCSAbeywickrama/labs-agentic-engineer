@@ -80,6 +80,37 @@ export const METHOD_COLOR: Record<string, string> = {
 /** The colour for a method this vocabulary does not know. */
 export const METHOD_FALLBACK_COLOR = "#616161";
 
+/**
+ * Whether a validation run produces a VERDICT for this method.
+ *
+ * `e2e` only. generate-report.mjs gives an e2e criterion its test's own result and
+ * decides every other method from the method alone — `manual` for a manual
+ * criterion, `not_validated` for anything else it cannot automate — so what
+ * becomes of those rows is knowable before the run starts.
+ */
+export function runAnswers(method: string): boolean {
+  return method === "e2e";
+}
+
+/**
+ * Whether a run WORKS ON this criterion — explores it, authors a spec for it,
+ * runs it — and therefore emits live progress naming it.
+ *
+ * Deliberately wider than `runAnswers`, and the gap between them is not
+ * academic: a run works on a legacy `scenario` criterion and still reports
+ * `not_validated` for it, so it emits progress for a row it will never answer.
+ * Only `manual` is outside both, being a person's to judge, which is why a run
+ * never names it.
+ *
+ * The two were briefly one predicate, which put this package's rows out of step
+ * with the console's run-wide progress line — that line counts exactly this set,
+ * so a row refusing a status the line had already counted left the two
+ * contradicting each other about the same criterion. Both read this now.
+ */
+export function runWorksOn(method: string): boolean {
+  return method !== "manual";
+}
+
 /** Display order for the method tally; unknown methods sort after these. */
 export const METHOD_ORDER = ["e2e", "scenario", "manual"];
 

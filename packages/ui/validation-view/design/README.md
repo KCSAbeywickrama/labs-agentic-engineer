@@ -75,17 +75,30 @@ the shared band it needs none, because its parent centres it.
 The row itself is `align-items: flex-start`, which keeps the marks on the first
 line of a wrapping assertion. `center` would drift them into the middle of it.
 
-## `runAnswers` is the one predicate
+## Two predicates, because a run gets asked two questions
 
-`e2e` is the only method a run answers. `generate-report.mjs` gives an e2e
-criterion its test's result and decides every other method from the method alone —
-`manual` for manual, `not_validated` for anything else.
+Both live in `counts.ts` (`runAnswers`, `runWorksOn`) so every caller reads the
+same answer:
 
-That single fact drives three decisions, so it lives in one predicate rather than
-three inlined method comparisons: which glyph a row shows, whether a live status
-may speak for a row, and whether `Pending` is a promise the run can keep. Splitting
-them is how the glyph came to claim a person checks a legacy `scenario` criterion
-while the awaiting branch still promised it an agent result.
+- **`runAnswers(method)`** — will the run produce a *verdict* for this row? `e2e`
+  only. `generate-report.mjs` gives an e2e criterion its test's result and decides
+  every other method from the method alone, `manual` for manual and
+  `not_validated` for anything else. Read by the glyph and by the `awaiting`
+  branch, which is why a criterion the run cannot answer gets its final word
+  instead of a `Pending` the report would contradict.
+- **`runWorksOn(method)`** — is the run *working on* this row, and so emitting live
+  progress naming it? Everything but `manual`. A run explores, authors and runs a
+  legacy `scenario` criterion and still reports `not_validated` for it. Read by the
+  live-status guard, and by the console's run-wide progress line
+  (`liveLine.ts`), which counts exactly this set.
+
+The gap between them is the whole point, and both mistakes have now been made.
+Inlining `method === "manual"` in three places let the glyph claim a person checks
+a `scenario` criterion while the `awaiting` branch still promised it an agent
+result. Collapsing all three onto `runAnswers` then fixed that and broke the other
+end: the row refused a live status that the progress line directly above it had
+already counted. `liveLine.ts` reads `runWorksOn` from this package rather than
+repeating the comparison, so the two cannot disagree again.
 
 ## Drift is a normal state, so it has a chip
 
@@ -99,6 +112,14 @@ for another criterion. It gets a neutral `Out of run` chip. Neutral and not
 `warning`, because colouring the expected state teaches the reader to discount the
 colour; and locally worded, because `CRITERION_STATE_LABEL` is `report.json`'s
 vocabulary and this criterion is absent from `report.json`.
+
+The chip is a claim about a run that FINISHED without covering the row, so it is
+gated on no attempt being in flight. `awaitingReport` therefore means "any attempt
+is in flight", not "this version's first" — narrowed to the first, the page told a
+reader that a criterion authored since the last run was out of that run while the
+current run was on its way to answering it. Widening it is safe because `report`
+outranks the pending fallback: a covered row keeps the previous attempt's verdict,
+and only uncovered rows read the flag.
 
 The `hasRun` flag that chooses gutter contents is read from the **parsed**
 `statuses`, never from the `report` prop. The prop is raw text and parsing can
