@@ -459,7 +459,7 @@ function ValidationBody({
             Nothing else in the spec workspace says so, and the reader meets the
             criteria here before any run has produced a result to learn from. */}
         {!hideDescription && (
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1, maxWidth: "72ch" }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
             Each criterion represents one thing your software must do, based on your
             requirements. After every deployment they are checked against the running
             software, and the results appear under Validations. To change one, ask the
