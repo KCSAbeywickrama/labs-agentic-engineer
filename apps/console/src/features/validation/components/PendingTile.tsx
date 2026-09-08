@@ -31,9 +31,8 @@ import type { StatusLine } from "../../tasks/lib/statusLine";
 // prose — otherwise nothing tells the reader that "auto" and "manual" are the two
 // halves this page is about to split the criteria into.
 //
-// It no longer echoes a badge on the rows below: those carry a glyph now, not a
-// word. So this is the only place the words appear, which is the argument for
-// marking them here rather than against it.
+// The rows below carry a glyph rather than a word, so this is the only place the
+// words appear — which is the argument for marking them, not against it.
 //
 // A wash and not a fill: a filled pill mid-sentence stops the line dead, while a
 // tint carries the mark and lets the words keep flowing. `text.primary` over an

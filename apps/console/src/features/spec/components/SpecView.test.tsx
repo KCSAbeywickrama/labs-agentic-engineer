@@ -1832,8 +1832,9 @@ describe("SpecView validation criteria explanation", () => {
   });
 
   it("names no method at all — the glyph does it", () => {
-    // `e2e` is an acronym the console lexicon forbids, and it used to be spelled
-    // "auto" on a badge. Neither word is on the row now, so neither can leak.
+    // `e2e` is an acronym the console lexicon forbids, and "auto" is the word it
+    // is spelled as elsewhere. Neither belongs on a row, where the glyph carries
+    // the distinction, so neither may leak here.
     render(<SpecView projectName="proj1" />);
 
     for (const word of ["e2e", "auto", "manual"]) {

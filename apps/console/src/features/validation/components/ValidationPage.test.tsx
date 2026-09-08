@@ -1176,11 +1176,10 @@ describe("ValidationPage lifecycle", () => {
   });
 });
 
-// The method badge is the reader's only signal for who checks a criterion, and it
-// used to render the wire value verbatim — `E2E`, an acronym the lexicon forbids
-// and nothing in the product expanded. The wire value cannot change (the runner,
-// the report generator and the tests/e2e/specs/<AC-ID>.spec.ts path all key on
-// it), so the display name is the thing under test here.
+// `e2e` is an acronym the console lexicon forbids and nothing in the product
+// expands, and it cannot change — the runner, the report generator and the
+// tests/e2e/specs/<AC-ID>.spec.ts path all key on it. So no surface may leak it,
+// which is part of what these assertions hold.
 describe("ValidationPage criterion rows", () => {
   function renderWithCriteria() {
     mockValidation = "passed";
@@ -1193,11 +1192,9 @@ describe("ValidationPage criterion rows", () => {
     renderPage(undefined);
   }
 
-  // One signal per row, and it is the verdict. A manual criterion used to carry
-  // TWO marks saying the same thing at opposite margins — a purple `manual` method
-  // badge on the left and a neutral "Manual" status chip on the right. The status
-  // chip is sufficient here, so the method mark is gone and the chip has moved into
-  // the column the badge used to hold.
+  // One signal per row, and on this page it is the verdict: the status chip already
+  // says "Manual", so a method mark beside it would say the same thing twice at
+  // opposite margins of one row.
   it("carries the verdict alone, with no method mark", () => {
     renderWithCriteria();
 

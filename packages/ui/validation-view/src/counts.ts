@@ -52,10 +52,8 @@ export const CRITERION_STATE_LABEL: Record<string, string> = {
  * surfaces naming a method must name it the same way. A method with no entry
  * renders verbatim, so `manual` and anything unrecognised are unaffected.
  *
- * The criterion rows no longer read this — they mark the method with a glyph
- * rather than a word (ValidationView's methodMark) — so the remaining readers are
- * the consumer's own prose and tally, which is why it still has to be one word in
- * one place.
+ * Read by a consumer's prose and its tally, not by the criterion rows — those mark
+ * the method with a glyph rather than a word (ValidationView's methodMark).
  */
 export const METHOD_LABEL: Record<string, string> = {
   e2e: "auto",
@@ -66,10 +64,8 @@ export const METHOD_LABEL: Record<string, string> = {
  * said in prose, so a consumer naming a method in a sentence can mark it as a term
  * rather than leave it as ordinary text.
  *
- * It used to sit solid behind a badge on every criterion row as well. Those rows
- * now carry a glyph on the console's own agent/person colours instead, so a
- * consumer's sentence is the only reader left — nothing on screen has to match
- * these hexes any more.
+ * A consumer's sentence is the only reader: the criterion rows carry a glyph on
+ * the console's own agent/person colours, so nothing else has to match these hexes.
  */
 export const METHOD_COLOR: Record<string, string> = {
   e2e: "#1976d2",
@@ -102,10 +98,10 @@ export function runAnswers(method: string): boolean {
  * Only `manual` is outside both, being a person's to judge, which is why a run
  * never names it.
  *
- * The two were briefly one predicate, which put this package's rows out of step
- * with the console's run-wide progress line — that line counts exactly this set,
- * so a row refusing a status the line had already counted left the two
- * contradicting each other about the same criterion. Both read this now.
+ * Do not collapse the two. The console's run-wide progress line counts exactly
+ * this set, so a criterion row that answers the narrower question refuses a status
+ * the line beside it has already counted, and the two then contradict each other
+ * about the same criterion.
  */
 export function runWorksOn(method: string): boolean {
   return method !== "manual";

@@ -33,11 +33,9 @@ import {
 import { CRITERION_STATE_LABEL, runAnswers, runWorksOn } from "./counts.js";
 import { shortCriterionId, shortRequirementId } from "./shortId.js";
 
-// Visually-hidden TEXT rather than an aria-label, for the reason StatusChip
-// records in the console: an aria-label on a roleless element is ignored by screen
-// readers, so an accessible name has to come from content. Mirrored here rather
-// than imported because this package does not depend on apps/console, and
-// @wso2/oxygen-ui does not re-export MUI's `visuallyHidden`.
+// An accessible name must come from CONTENT here: an aria-label on a roleless
+// element is ignored. Local because this package cannot reach the console's copy
+// and @wso2/oxygen-ui does not re-export MUI's `visuallyHidden`.
 const VISUALLY_HIDDEN = {
   position: "absolute",
   width: 1,
@@ -53,74 +51,41 @@ const VISUALLY_HIDDEN = {
 const mono = { fontFamily: "monospace", fontSize: "0.875rem" } as const;
 
 /**
- * The row's first column, which holds whichever single signal the row carries:
- * the status chip when a run is attached, the method icon when none is.
- *
- * One constant per mode, because the width has to be identical on every row for
- * the ids beside it to line up — and the failure block derives its indent from it,
- * so the two can no longer drift the way `minWidth: 92` and `ml: "108px"` did.
- *
- * Sized to the longest chip label the vocabulary can produce, which is now
- * "Not validated"; a longer one would push its own row's id out of the column. A
- * short chip therefore leaves slack after it — the price of the column, and the
- * reason DRIFT_LABEL is kept terse rather than descriptive.
- *
- * Raw px, unlike the gap below, because neither is a spacing step: one is the
- * width of a word and the other the height of a Chip. There is no theme token
- * that means either, and rounding them to one would only hide what sets them.
+ * The row's first column, holding the one signal a row carries: the status chip
+ * when a run is attached, the method glyph otherwise. One width for every row so
+ * the ids line up, sized to the longest chip label ("Not validated") — which is
+ * why DRIFT_LABEL stays terse, and why a short chip leaves slack. Raw px: a
+ * word's width and a Chip's height are not spacing steps.
  */
 const GUTTER_CHIP = 108;
 const GUTTER_ICON = 22;
 
 /**
- * The row's flex gap, as a theme spacing multiplier — `1` is 8px.
- *
- * A token and not a px literal: this one IS a spacing step, so the theme is
- * entitled to move it. The failure block's indent has to add it to a px width, so
- * it reads the same token back through `theme.spacing`.
+ * The row's flex gap, as a theme spacing multiplier (`1` is 8px). A real spacing
+ * step, so the theme owns it; the failure indent adds it to a px width by reading
+ * the same token back through `theme.spacing`.
  */
 const ROW_GAP = 1;
 
 /**
- * The height of a row's FIRST line, shared by everything sitting on it.
+ * The height of a row's first line. Every occupant takes this height and centres
+ * its content in it, and the assertion takes it as `line-height`, so all three sit
+ * in one band even when the assertion wraps. 24px is the small Chip's own height.
  *
- * Baseline alignment cannot do this job. An MUI Chip is `inline-flex` with
- * `align-items: center`, so it has no baseline-aligned flex item and therefore no
- * in-flow line box — CSS then synthesises its baseline from its bottom margin
- * edge. `align-items: baseline` consequently sat the chip's BOTTOM on the
- * assertion's baseline instead of its label, and because the chip (24px) and the
- * id mark (~18px) are different heights, the two did not even agree with each
- * other.
- *
- * So every occupant is given this exact height and centres its own content in it,
- * and the assertion takes it as its `line-height`. The first line of the row is
- * then one band that all three sit in the middle of, by construction rather than
- * by inference — and it survives an assertion that wraps, because every later line
- * is the same height too.
- *
- * 24px is the MUI small Chip's own height, so the tallest occupant sets it and
- * nothing has to be stretched.
- *
- * Passed to `height` as a bare number, which emotion renders as px, but to
- * `line-height` as an explicit `px` string — `line-height` is unitless in CSS, so
- * a bare 24 there would mean 24 TIMES the font size rather than 24 pixels.
+ * Not `align-items: baseline`: a Chip is `inline-flex`/`center`, so it has no
+ * in-flow line box and CSS synthesises its baseline from the bottom margin edge.
+ * `line-height` needs the explicit `px` — bare 24 means 24x the font size.
  */
 const ROW_LINE = 24;
 
 /**
- * A requirement number or a criterion letter, on a soft neutral ground.
+ * A requirement number or criterion letter on a soft neutral ground — a ground
+ * rather than `1.`/`a)` because these are names, not positions: ids are stable by
+ * contract (a spec file is named after its criterion), so a deleted requirement
+ * leaves a gap that reads fine as names and as a fault as a list.
  *
- * A ground rather than list punctuation (`1.`, `a)`) because these are names, not
- * positions: ids are stable by contract — a spec file is named after its criterion,
- * so renumbering one would orphan it — which means deleting a requirement leaves a
- * gap. `1, 3, 4` reads correctly as names and reads as a rendering fault as a list.
- * Neutral rather than coloured: on these rows colour belongs to the status chip and
- * to the agent glyph.
- *
- * `full` is the unabbreviated id, on hover, and only when it differs from what is
- * shown. It is the handle the reader needs elsewhere — spec filenames, report.json,
- * telling the agent which criterion to change — and the short form cannot be typed
- * back into any of them.
+ * `full` shows on hover when it differs — the handle for spec filenames,
+ * report.json and naming a criterion to the agent, none of which take `short`.
  */
 function IdMark({ short, full }: { short: string; full: string }) {
   const mark = (
@@ -130,8 +95,7 @@ function IdMark({ short, full }: { short: string; full: string }) {
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        // The row's shared band rather than padding of its own, so the mark sits
-        // in the same line as the chip and the assertion — see ROW_LINE.
+        // The shared band, not padding of its own — see ROW_LINE.
         height: ROW_LINE,
         minWidth: 20,
         px: 0.75,
@@ -158,11 +122,10 @@ type ChipColor =
   | "success"
   | "warning";
 
-// report.json status → the chip colour shown on a criterion when a run report is
-// joined in. The LABEL comes from CRITERION_STATE_LABEL (counts.ts), which the
-// consumer's own tally line reads too — so a row's chip and the verdict tile above
-// this view can never call the same status by two different names. Unknown statuses
-// fall through to a neutral chip labelled verbatim.
+// report.json status → chip colour. The LABEL comes from CRITERION_STATE_LABEL
+// (counts.ts), which the consumer's tally reads too, so a row and the verdict tile
+// above it cannot name the same status differently. Unknown statuses fall through
+// to a neutral chip labelled verbatim.
 const STATE_COLOR: Record<string, ChipColor> = {
   pass: "success",
   fail: "error",
@@ -174,16 +137,11 @@ const STATE_COLOR: Record<string, ChipColor> = {
 /**
  * Who checks a criterion — a mark, not a word.
  *
- * `e2e` is the only method an agent drives, so it takes the console's agent glyph:
- * the same Sparkles at the same primary.main that the agent chat, the "ask the
- * agent" action and the nav already carry, so the row inherits a meaning the
- * reader arrives with instead of teaching a new one.
- *
- * Everything else falls to the person. `manual` by definition; the legacy
- * `scenario` and the `"unknown"` parse.ts assigns a criterion with no method
- * because neither is ever automated, which leaves them somebody's to check in
- * practice. That is also why one sentence covers all three: the icon is already
- * claiming a human does the work, so the tooltip says exactly that much.
+ * `e2e` takes the console's agent glyph (Sparkles at primary.main, as in the agent
+ * chat and the nav), so the row inherits a meaning the reader already has.
+ * Everything else falls to the person: neither `manual`, legacy `scenario`, nor
+ * the `"unknown"` parse.ts gives a method-less criterion is ever automated, which
+ * is why one sentence serves all three.
  */
 function methodMark(method: string): {
   Icon: typeof Sparkles;
@@ -207,19 +165,17 @@ function methodMark(method: string): {
  * The gutter's occupant when no run is attached — the Spec view's whole case, and
  * a validation view whose report would not parse.
  *
- * Icon-only, so the sentence is repeated as hidden text. Tooltip does put its
- * title on the child as an `aria-label`, but the child is a bare span: an
- * aria-label on a roleless element is ignored, which is the same trap StatusChip
- * documents for a Chip with no onClick. Content-based naming works whatever the
- * role, so that is what this uses.
+ * Icon-only, so the sentence is repeated as hidden text. Tooltip does set its
+ * title as an `aria-label`, but on a bare span that is ignored, so the name has to
+ * come from content.
  */
 function MethodIcon({ method }: { method: string }) {
   const { Icon, color, title } = methodMark(method);
   return (
     <Tooltip title={title}>
-      {/* No vertical handling here: the gutter centres this in the row's shared
-          band (ROW_LINE), which is the same thing that puts a status chip on the
-          line. `flex` so the svg is not an inline box with its own leading. */}
+      {/* The gutter centres this in the shared band, so there is nothing vertical
+          to do here. `flex` keeps the svg out of an inline box with its own
+          leading. */}
       <Box component="span" sx={{ display: "flex", color, flexShrink: 0 }}>
         <Icon size={16} aria-hidden />
         <Box component="span" sx={VISUALLY_HIDDEN}>
@@ -233,11 +189,10 @@ function MethodIcon({ method }: { method: string }) {
 /**
  * What the report says qualifies a verdict, as one sentence — or nothing.
  *
- * The two flags are independent in generate-report.mjs: `flaky` is only set on a
- * pass, but `healed` is set before the status is decided. So a failure the agent
- * tried to repair is a real row, and so is a pass that was both repaired and
- * flaky — which is why all four readings are spelled out rather than concatenated
- * from fragments that would read as a list of tags.
+ * The flags are independent in generate-report.mjs (`flaky` only on a pass,
+ * `healed` decided before the status), so a repaired failure and a pass that was
+ * both are each real. All four readings are written out rather than concatenated
+ * from fragments, which would read as a list of tags.
  */
 function verdictNote(
   status: string,
@@ -260,14 +215,10 @@ function verdictNote(
  * The per-criterion run-state chip (only rendered when a report is joined in).
  *
  * `note` is the report's qualifier on this verdict — flaky, healed, or both — and
- * it rides the chip as a single `*` rather than as its own chips beside it. Those
- * qualify THIS word, and as separate chips they read as independent facts and push
- * the verdict out of the row's one aligned column. One mark covers every
- * combination, because distinguishing them is all a second mark would buy and none
- * of them changes what the reader does next.
- *
- * Declared `string | undefined` rather than optional: `exactOptionalPropertyTypes`
- * is on, so a caller with nothing to say passes it explicitly.
+ * rides the chip as a single `*`. It qualifies THIS word, so a chip of its own
+ * would read as an independent fact and push the verdict out of the aligned
+ * column. `string | undefined` rather than optional, since
+ * `exactOptionalPropertyTypes` is on.
  */
 function StateChip({ status, note }: { status: string; note: string | undefined }) {
   const label = CRITERION_STATE_LABEL[status] ?? status;
@@ -305,12 +256,11 @@ function StateChip({ status, note }: { status: string; note: string | undefined 
  */
 export type LiveStatuses = Readonly<Record<string, string>>;
 
-// The in-flight vocabulary, LOCAL for the same reason "Pending" below is: these
-// words describe work happening, and report.json can only describe work in the
-// past tense, so none of them belongs in CRITERION_STATE_LABEL. Its two terminal
-// words (`pass`/`fail`) DO arrive on the live feed, and deliberately fall through
-// to StateChip — a criterion that has passed reads the same whether the news came
-// from the feed or from the report, because it is the same fact.
+// The in-flight vocabulary, local for the same reason "Pending" below is: these
+// words describe work happening, and report.json only speaks in the past tense, so
+// none of them belongs in CRITERION_STATE_LABEL. Its terminal words (`pass`/`fail`)
+// do arrive on this feed and fall through to StateChip on purpose — a criterion
+// that passed is the same fact whichever source said so.
 const LIVE_LABEL: Record<string, string> = {
   planned: "Planned",
   exploring: "Exploring…",
@@ -325,7 +275,7 @@ const LIVE_LABEL: Record<string, string> = {
 // and leave nothing to spend on this one.
 const LIVE_COLOR: Record<string, ChipColor> = { healing: "warning" };
 
-/** The chip for a criterion the pinned report predates — see CriterionChip. */
+/** For a criterion the pinned report has no row for — see CriterionChip. */
 const DRIFT_LABEL = "Out of run";
 const DRIFT_TOOLTIP =
   "Authored after the last validation run, so it has no result yet.";
@@ -357,9 +307,9 @@ function LiveChip({ status }: { status: string }) {
  * current run spends re-working it. The report wins again the moment the cycle
  * settles, because the consumer stops supplying live statuses then.
  *
- * Only called when a run IS attached, so unlike its predecessor it always returns
- * a chip. CriterionRow handles the no-run case, which shows who checks the
- * criterion instead of what happened to it.
+ * Only called when a run IS attached, so it always returns a chip. CriterionRow
+ * handles the no-run case, showing who checks the criterion instead of what
+ * happened to it.
  */
 function CriterionChip({
   criterion,
@@ -372,17 +322,11 @@ function CriterionChip({
   live: string | undefined;
   awaiting: boolean;
 }) {
-  // `runWorksOn`, not `runAnswers`: the question here is whether the run is
-  // WORKING on this row, which is wider than whether it will answer it. A run
-  // explores and runs a legacy `scenario` criterion and still reports
-  // `not_validated` for it, so it emits progress for a row it will never answer —
-  // and the console's run-wide progress line counts that row too. Asking the
-  // narrower question here made the row refuse a status the line beside it had
-  // already counted.
-  //
-  // Only `manual` is excluded, and unconditionally: the run names every criterion
-  // in its test plan, but a person answers this one, so a chip reading "Planned"
-  // promises a result nobody is going to produce.
+  // `runWorksOn`, not `runAnswers`: the question is whether the run is WORKING on
+  // this row, not whether it will answer it. The console's run-wide progress line
+  // counts the same set, so refusing a status here would contradict it. `manual`
+  // is excluded unconditionally — a person answers it, so "Planned" would promise
+  // a result nobody is going to produce.
   if (live && runWorksOn(criterion.method)) {
     // pass/fail arrive on the live feed too — report.json's own words, so its chip.
     return LIVE_LABEL[live] ? (
@@ -398,14 +342,12 @@ function CriterionChip({
   }
 
   // `runAnswers` here, the narrow question, because this branch is about the
-  // VERDICT: a criterion the run will not answer gets its final word rather than
-  // "Pending", since no result is coming and a chip promising one is a claim the
-  // report will contradict. Which final word is decided by the method alone,
-  // which is why it can be said before the run ends.
+  // VERDICT: a criterion the run will not answer gets its final word instead of
+  // "Pending", which would promise a result the report goes on to contradict. The
+  // method alone decides that word, which is why it can be said this early.
   //
-  // "Pending" itself is local rather than a sixth CRITERION_STATE_LABEL entry:
-  // that map is report.json's vocabulary, and a criterion with no report has no
-  // status to name.
+  // "Pending" is local rather than a sixth CRITERION_STATE_LABEL entry: that map
+  // is report.json's vocabulary, and this criterion has no report to name.
   if (awaiting) {
     if (!runAnswers(criterion.method)) {
       return (
@@ -423,15 +365,9 @@ function CriterionChip({
   // No attempt in flight, and the report has no row for this criterion. The
   // consumer reads the criteria at the branch tip and the report at the merge
   // commit of the attempt that wrote it, so a criterion authored since then cannot
-  // have a result — the ordinary authoring loop (run, read a failure, ask the agent
-  // for another criterion), not a fault. Hence a neutral chip and not a `warning`:
-  // colouring the expected state teaches the reader to discount the colour. Local
-  // wording for the same reason "Pending" above is local — this criterion is absent
-  // from report.json, so report.json has no word for it.
-  //
-  // Reached only after the `awaiting` branch above, which is what keeps this off a
-  // row the CURRENT run may still answer. Saying "out of run" while a run is
-  // working is the one thing this chip must never do.
+  // have a result — the ordinary authoring loop, not a fault, hence neutral rather
+  // than `warning`. Ranked below `awaiting` deliberately: claiming a row is out of
+  // the run while a run works on it is the one thing this chip must never do.
   return (
     <Tooltip title={DRIFT_TOOLTIP}>
       <Chip
@@ -445,14 +381,12 @@ function CriterionChip({
 }
 
 // One acceptance criterion: its single signal in the gutter — the status chip when
-// a run is attached, otherwise who checks it — then its letter, the atomic
-// assertion, and, for a failure, the spec path and message beneath.
+// a run is attached, otherwise who checks it — then its letter, the assertion, and
+// for a failure the spec path and message beneath.
 //
-// One signal and not two. A manual criterion used to carry a purple MANUAL badge
-// here AND a neutral "Manual" status chip at the far end of the row, saying the
-// same thing twice at opposite margins; and flaky/healed were two more chips
-// competing with the verdict they qualify. The gutter now holds exactly one thing,
-// which is what lets it be a fixed width and the letters beside it line up.
+// One signal, never two: a status chip already says "Manual", so a method mark
+// beside it would say it twice, and a qualifier like flaky rides the verdict
+// instead of competing with it. That is what lets the gutter be a fixed width.
 function CriterionRow({
   criterion,
   requirementId,
@@ -475,9 +409,9 @@ function CriterionRow({
     // a failure block stays inside the criterion it belongs to instead of being cut
     // off from its own assertion.
     <Box sx={{ py: 1 }}>
-      {/* `flex-start`, so the marks stay on the FIRST line of an assertion that
-          wraps rather than drifting to the middle of it. Alignment within that
-          line is ROW_LINE's job, not this property's. */}
+      {/* `flex-start` keeps the marks on the FIRST line of an assertion that wraps
+          rather than centring them in it. Alignment WITHIN that line is
+          ROW_LINE's job. */}
       <Box
         sx={{ display: "flex", gap: ROW_GAP, alignItems: "flex-start" }}
       >
@@ -512,10 +446,9 @@ function CriterionRow({
           {criterion.must}
         </Typography>
       </Box>
-      {/* Failure detail sits full-width beneath the row, indented to where the
-          criterion's letter starts, so a long trace never crowds the assertion. A
-          failure only exists with a report attached, so the chip gutter is the
-          right one to measure from. */}
+      {/* Full-width beneath the row, indented to where the letter starts, so a
+          long trace never crowds the assertion. A failure implies a report, so the
+          chip gutter is the one to measure from. */}
       {failed && (report?.failureLocation || report?.spec || report?.failure) && (
         <Box
           sx={(theme) => ({
@@ -524,10 +457,9 @@ function CriterionRow({
           })}
         >
           {/* Prefer the reporter's `<file>:<line>`, which points at the failing
-              assertion rather than merely the spec that contains it. The gate
-              above admits it on its own: a reporter can hand back a location with
-              an empty message, and dropping the block then would throw away the
-              only pointer to the failing assertion the run produced. */}
+              assertion rather than the spec containing it. Admitted on its own,
+              because a reporter can return a location with an empty message and
+              dropping the block would throw away the only pointer there is. */}
           {(report?.failureLocation || report?.spec) && (
             <Typography variant="caption" color="text.secondary" sx={mono}>
               {report.failureLocation || report.spec}
@@ -543,12 +475,10 @@ function CriterionRow({
                 mt: 0.5,
                 p: 1,
                 borderRadius: 1,
-                // A wash, not a saturated fill. The state chip on the row above
-                // already says "failed", so the surface's job is to be READABLE —
-                // a stack trace is the longest text on the page and it was set in
-                // monospace on solid error.main. The tint composites over
-                // whichever surface is beneath it, so it holds in both themes;
-                // same idiom as StatusChip's soft tones.
+                // A wash, not a saturated fill: the chip already says "failed",
+                // so this surface's only job is to keep the longest text on the
+                // page readable. The tint composites over whatever is beneath it,
+                // so it holds in both themes.
                 bgcolor: (theme) => alpha(theme.palette.error.main, 0.08),
                 color: "text.primary",
                 fontFamily: "monospace",
@@ -589,18 +519,14 @@ function RequirementCard({
         borderColor: "divider",
         borderRadius: 1,
         p: 2,
-        // Twice the gap between two criteria (16px). These were both 12px, so a
-        // requirement boundary carried the same weight as a row boundary and the
-        // nesting was invisible in the rhythm.
+        // Twice the gap between two criteria, so a requirement boundary outweighs
+        // a row boundary and the nesting shows in the rhythm.
         mb: 3,
       }}
     >
-      {/* The number leads the statement, echoing the rows below where the letter
-          leads the assertion — so the card reads the same way at both levels. The
-          "N criteria" caption that used to sit up here is gone: it counted a list
-          the reader is looking at. */}
-      {/* The same shared-band idiom as the rows below, so the number sits on the
-          statement's first line and stays there when the statement wraps. */}
+      {/* The number leads the statement, as the letter leads the assertion below,
+          so the card reads the same way at both levels. Same shared-band idiom, so
+          the number stays on the statement's first line when it wraps. */}
       <Box
         sx={{
           display: "flex",
@@ -625,16 +551,11 @@ function RequirementCard({
           No criteria.
         </Typography>
       ) : (
-        // A rule on the TOP of every row, not between rows. Bottom-of-all-but-last
-        // left the first criterion as the only one with no boundary above it, so it
-        // read as belonging to the statement in a way its siblings did not — and it
-        // made a one-criterion requirement render with no rule at all. This way the
-        // statement is the card's header, every criterion is bounded the same, and
-        // the card's own border closes the list at the bottom.
-        //
-        // Owned here rather than by CriterionRow because it is a property of the
-        // LIST; the rows get their own box because the badge row and the statement
-        // above are their siblings.
+        // A rule on the TOP of every row, so the statement reads as the card's
+        // header and the card's own border closes the list. Bounding
+        // all-but-the-last instead leaves the first criterion unbounded above and a
+        // one-criterion requirement with no rule at all. Owned here because it is a
+        // property of the LIST, not of a row.
         <Box sx={{ "& > *": { borderTop: 1, borderColor: "divider" } }}>
           {requirement.criteria.map((c) => (
             <CriterionRow
@@ -678,11 +599,11 @@ function ValidationBody({
    * status chip, or — with no run to report — who checks it.
    *
    * Read from `statuses`, NOT from the `report` prop. The prop is raw text and
-   * parsing it can fail, which leaves `statuses` undefined while a report WAS
-   * supplied; keying off the prop would then hand every row the drift chip,
-   * announcing that all of them were authored after the last run when the truth is
-   * that the file is unreadable. This way such a view degrades to the plain
-   * oracle, with the warning Alert above it naming the real problem.
+   * parsing it can fail, leaving `statuses` undefined while a report WAS supplied;
+   * keying off the prop would then hand every row the drift chip, announcing that
+   * all of them post-date the last run when the truth is that the file is
+   * unreadable. This way such a view degrades to the plain oracle, with the warning
+   * Alert above it naming the real problem.
    */
   const hasRun = statuses !== undefined || awaitingReport;
   const reqCount = requirements.length;
@@ -715,14 +636,10 @@ function ValidationBody({
           </Typography>
         )}
 
-        {/* No summary line here. It read "N requirements · M criteria" over a
-            per-method tally, and on the Validations page it sat directly beneath a
-            tile already printing both — the same numbers twice, a screen apart.
-            The counts that a reader acts on belong with the verdict that explains
-            them, which the consumer renders above this view.
-
-            The gap it used to leave below itself now belongs to the list, which is
-            what it was separating the heading from. */}
+        {/* No tally here. Counts belong with the verdict that explains them, which
+            the consumer renders above this view; a second copy a screen lower says
+            the same numbers twice. The margin separates the heading from the
+            list. */}
         <Box sx={{ mt: 3 }}>
           {reqCount === 0 ? (
             <Typography variant="body2" color="text.secondary">
@@ -792,12 +709,10 @@ export interface ValidationViewProps {
    * HAS a report — the Spec view's file preview shows the plain oracle with no run
    * attached to it, and chips there would name a run that does not exist.
    *
-   * "An attempt is in flight" means ANY attempt, not only a version's first. On a
-   * repeat attempt a criterion the pinned report never covered is waiting on the
-   * run working right now, so it is pending; passing this only for a first attempt
-   * left such a row saying it was out of the run while the run was on its way to
-   * answering it. Safe to widen because `report` outranks this — a covered row
-   * keeps the previous attempt's verdict, and only uncovered rows read it.
+   * ANY attempt, not only a version's first: on a repeat attempt a criterion the
+   * pinned report never covered is waiting on the run working right now. Safe,
+   * because `report` outranks this — a covered row keeps the previous attempt's
+   * verdict, and only uncovered rows read it.
    *
    * Named for the state rather than `pending`: a boolean prop by that name reads as
    * react-query's `isPending` — "still loading" — which is the opposite of what this

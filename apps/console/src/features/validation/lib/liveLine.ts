@@ -49,10 +49,10 @@ const TERMINAL = new Set(["pass", "fail"]);
  * never move, so counting them would mean the line never reaches "all settled"
  * on any project that has one.
  *
- * The set comes from the shared vocabulary rather than a local `!== "manual"`,
- * because the criterion ROWS test the same thing to decide whether a live status
- * may speak for a row. Written twice, the two drifted — this line counted a
- * criterion as answerable that its own row was refusing to show progress for.
+ * From the shared vocabulary rather than a local `!== "manual"`: the criterion
+ * ROWS test the same thing to decide whether a live status may speak for a row, so
+ * a second copy here can count a criterion as answerable that its own row is
+ * refusing to show progress for.
  */
 function agentCriteriaIds(oracle: ValidationCriteria): string[] {
   return oracle.requirements.flatMap((r) =>

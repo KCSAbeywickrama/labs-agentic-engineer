@@ -333,15 +333,11 @@ export function ValidationPage({
   // it is worth showing, because it says what is being checked and what will never be
   // checked by an agent at all.
   //
-  // This gates the pending TILE and the reads behind it, NOT the criterion rows.
-  // Those take `validating`, because a row's fallback has to know whether ANY
-  // attempt is in flight: on a repeat attempt, a criterion the pinned report never
-  // covered is waiting on the run working right now, not left over from the one
-  // before it.
-  //
-  // Widening the row signal costs the previous attempt's results nothing, because
-  // the report outranks the fallback (see CriterionChip) — a row the report covers
-  // keeps its verdict either way, and only the uncovered rows move.
+  // Gates the pending TILE and the reads behind it, NOT the criterion rows: those
+  // take `validating`, because a row's fallback has to know whether ANY attempt is
+  // in flight. Safe for them, because the report outranks that fallback (see
+  // CriterionChip) — a row the report covers keeps its verdict either way, and only
+  // uncovered rows move.
   const awaitingFirstVerdict = state === "running" && rawVerdict === "";
   // `unreported` MEANS no report was committed at that commit, and the server
   // omits reportPath for it. Requesting the file anyway would 404 to rediscover
@@ -735,10 +731,10 @@ export function ValidationPage({
         noPadding
         fullWidth
         hideDescription
-        // `validating`, not `awaitingFirstVerdict`: a row with no result yet is
-        // waiting on whichever attempt is in flight, first or repeat. Narrowed to
-        // the first, it told the reader that a criterion authored since the last run
-        // was "out of run" while the current run was on its way to answering it.
+        // `validating`, not `awaitingFirstVerdict`: a row with no result yet waits
+        // on whichever attempt is in flight, first or repeat. Narrow it to the first
+        // and a criterion authored since the last run reads as out of that run while
+        // the current one is on its way to answering it.
         awaitingReport={validating}
         criteria={criteria.data.content}
         {...(report.data ? { report: report.data.content } : {})}

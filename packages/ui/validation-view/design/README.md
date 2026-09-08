@@ -28,32 +28,30 @@ icon-only, with the explanation on hover and repeated as visually-hidden text �
 on a roleless element is ignored, the same trap `StatusChip` documents for a Chip
 with no `onClick`.
 
-Three things this replaced, each because it said something twice or said nothing:
+Three rules hold the column to one mark:
 
-- **A summary line.** `N requirements · M criteria` over `AUTO 9` / `MANUAL 3`
-  badges. On the Validations page it sat directly beneath a tile already printing
-  both figures. Counts belong with the verdict that explains them, which the
-  consumer renders above this view.
-- **A method badge on every row.** A manual criterion carried a purple `MANUAL`
-  badge at the left margin *and* a neutral `Manual` status chip at the right — the
-  same fact at opposite ends of one row. Where there are results, the status chip
-  is sufficient; where there are none, the glyph is.
-- **Separate `flaky` / `healed` chips.** They qualify the verdict, so they now ride
-  it as a single `*` with the detail on hover. Both flags are independent in
-  `generate-report.mjs` (`flaky` only on a pass, `healed` set before the status is
-  decided), so `Failed*` is a real row and so is a pass that was both.
+- **No tally in this view.** Counts belong with the verdict that explains them,
+  which the consumer renders above; a second copy here says the same numbers twice.
+- **Never a method mark beside a status chip.** The chip already says `Manual`, so
+  a mark next to it states the same fact at the other margin of the row. Where
+  there are results the chip is sufficient; where there are none the glyph is.
+- **Qualifiers ride the verdict.** `flaky` and `healed` become a single `*` with
+  the detail on hover, rather than chips competing with the word they qualify. The
+  two flags are independent in `generate-report.mjs` (`flaky` only on a pass,
+  `healed` decided before the status), so `Failed*` is a real row and so is a pass
+  that was both.
 
-Collapsing to one chip per row is what lets the gutter be one width for every row,
-which is what keeps the ids beside it aligned. `GUTTER_CHIP` / `GUTTER_ICON` /
-`ROW_GAP` are single constants and the failure block derives its indent from them;
-they were previously two unrelated magic numbers (`minWidth: 92`, `ml: "108px"`).
+One mark per row is what lets the gutter be one width, which is what keeps the ids
+beside it aligned. `GUTTER_CHIP` / `GUTTER_ICON` / `ROW_GAP` are single constants
+and the failure block derives its indent from them, so the column and the indent
+cannot disagree.
 
 `GUTTER_CHIP` has to fit the longest label the vocabulary can produce
 (`Not validated`), so a short chip like `Failed` leaves visible slack before the id.
-That is a deliberate trade, taken twice: the alternatives are right-aligning the
-chip in the column (constant gap, ragged chip left edges) or dropping the column
-(constant gap, ragged ids), and the aligned column won both times. It is also why
-the drift chip's label is kept terse — a descriptive one would widen every row.
+That is a deliberate trade: the alternatives are right-aligning the chip in the
+column (constant gap, ragged chip left edges) or dropping the column (constant gap,
+ragged ids), and the aligned column is worth more than either. It is also why the
+drift chip's label is kept terse — a descriptive one would widen every row.
 
 ### Vertical alignment is a shared band, not a baseline
 
@@ -63,14 +61,14 @@ that height and centre their own content in it, and the assertion takes it as it
 `line-height`. All three then sit in the middle of one band by construction, and it
 holds for an assertion that wraps because every later line is the same height.
 
-`align-items: baseline` was tried first and is the wrong tool. An MUI Chip is
-`inline-flex` with `align-items: center`, so it has no baseline-aligned flex item
-and therefore no in-flow line box — CSS synthesises its baseline from its bottom
-margin edge. Baseline alignment consequently sat the chip's *bottom* on the
+`align-items: baseline` is the wrong tool here, and worth knowing why. An MUI Chip
+is `inline-flex` with `align-items: center`, so it has no baseline-aligned flex
+item and therefore no in-flow line box — CSS then synthesises its baseline from its
+bottom margin edge. Baseline alignment therefore sits the chip's *bottom* on the
 assertion's baseline rather than its label, and since the chip (24px) and the id
-mark (~18px) had different heights, the two did not even agree with each other. The
-glyph had the same defect for the same reason and needed its own workaround; under
-the shared band it needs none, because its parent centres it.
+mark (~18px) are different heights, the two do not even agree with each other. A
+bare glyph has the same defect for the same reason; under the shared band it needs
+no special handling, because its parent centres it.
 
 The row itself is `align-items: flex-start`, which keeps the marks on the first
 line of a wrapping assertion. `center` would drift them into the middle of it.
@@ -92,13 +90,13 @@ same answer:
   live-status guard, and by the console's run-wide progress line
   (`liveLine.ts`), which counts exactly this set.
 
-The gap between them is the whole point, and both mistakes have now been made.
-Inlining `method === "manual"` in three places let the glyph claim a person checks
-a `scenario` criterion while the `awaiting` branch still promised it an agent
-result. Collapsing all three onto `runAnswers` then fixed that and broke the other
-end: the row refused a live status that the progress line directly above it had
-already counted. `liveLine.ts` reads `runWorksOn` from this package rather than
-repeating the comparison, so the two cannot disagree again.
+The gap between them is the whole point, and there is a mistake waiting on each
+side of it. Inline the comparison per call site and the glyph can claim a person
+checks a `scenario` criterion while the `awaiting` branch promises it an agent
+result. Collapse all three onto `runAnswers` and a row refuses a live status that
+the progress line above it has already counted. `liveLine.ts` reads `runWorksOn`
+from this package rather than repeating the comparison, so the two cannot
+disagree.
 
 ## Drift is a normal state, so it has a chip
 
