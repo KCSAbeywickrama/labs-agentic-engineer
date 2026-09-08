@@ -21,6 +21,7 @@ import type { components } from "../../../generated/aep-api";
 import { client } from "../../../api/client";
 import { specKeys } from "./keys";
 import { toSpecEntries } from "./mapping";
+import { scheduleFreshnessPoll } from "./dependencyFreshness";
 import { ApiRequestError } from "../../../api/errors";
 
 type FileContent = components["schemas"]["FileContent"];
@@ -184,7 +185,10 @@ export function useProvideDependencyContract(projectName: string) {
       return data;
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: specKeys.dependencies(projectName) });
+      // The write lands through the Files API and the read model is served
+      // from the repo's HEAD, which follows a moment later — the same shape a
+      // turn end has, so the same immediate-then-later refresh.
+      scheduleFreshnessPoll(queryClient, projectName);
       void queryClient.invalidateQueries({ queryKey: specKeys.files(projectName) });
     },
   });
@@ -205,7 +209,7 @@ export function useAcceptDependencyAssumption(projectName: string) {
       if (error) throw toError(error, "Failed to accept the assumption");
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: specKeys.dependencies(projectName) });
+      scheduleFreshnessPoll(queryClient, projectName);
       void queryClient.invalidateQueries({ queryKey: specKeys.files(projectName) });
     },
   });

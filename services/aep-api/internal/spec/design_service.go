@@ -428,6 +428,12 @@ func (s *designService) AcceptDependencyAssumption(ctx context.Context, orgID, p
 	if note == "" && def.Provenance != nil && def.Provenance.SourceURL != "" {
 		note = "Written by the design agent from " + def.Provenance.SourceURL
 	}
+	// The record names the person the way a turn names its author — the
+	// display identity the bearer carries — and falls back to the caller's
+	// subject when the token has none.
+	if a := journalAuthorFrom(ctx); a != nil && a.DisplayName != "" {
+		by = a.DisplayName
+	}
 	def.Assumed = &DependencyAssumption{By: by, At: time.Now().UTC().Format(time.RFC3339), Note: note}
 
 	body, err := marshalDependencyDefinitionJSON(depName, def)
