@@ -165,7 +165,7 @@ architecture.
 `/design` ends at the design and its validation criteria — no task planning,
 no application code. Close with three parts and nothing more: one line per
 component (name, type, one-clause role); a **"Needs your input"** block
-listing only the dependencies still ambiguous or unresolved, each named the
+listing only the dependencies still unresolved, each named the
 way its group in the rail names it so the user can press **Resolve** on its definition; and
 a one-line pointer to `specs/design/`. The dependency narration during the
 turn (the `architecture` skill owns its format) already carried the

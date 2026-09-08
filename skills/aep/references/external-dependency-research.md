@@ -27,7 +27,7 @@ injected.
 | `description` | what the system is; the component's reference carries why this component uses it |
 | `config[]` | the env-var keys the component reads; names are fixed, values arrive injected |
 
-A definition still carrying `candidates`, or with no `contract` on disk, is
+A definition with no `provider` (open `suggestions` or not), or with no `contract` on disk, is
 **not yours to resolve** — the design has an open question the user must answer
 (the Build gate would not have let this run start; if you meet one anyway,
 report it and leave the dependency unimplemented rather than picking for them).

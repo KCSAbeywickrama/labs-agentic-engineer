@@ -1,6 +1,6 @@
 ---
 name: resolve-dependency
-description: Use for taking one external dependency from open to resolved — `/resolve-dependency <name>` names it; `/resolve-dependencies` walks every open one in turn. Choose the provider, get its contract on disk (found, uploaded, or assumed with the user's permission), settle the config keys.
+description: Use for taking one external dependency from open to resolved — `/resolve-dependency <name> [answer]` names it and may carry the service the user chose; `/resolve-dependencies` walks every open one in turn. Settle the service the user chose (research and ask when they left it to you — never choose for them), get its contract on disk (found, uploaded, or assumed with the user's permission), then derive the config keys.
 metadata:
   aep:
     kind: platform
@@ -11,8 +11,10 @@ metadata:
 
 One external dependency, taken from whatever state it is in to **resolved**:
 a chosen provider, a committed contract in its own directory, and the config
-keys every consumer codes against. The instruction names the dependency — the
-one the user clicked **Resolve** on. `/resolve-dependencies` (plural, no name)
+keys every consumer codes against. The instruction names the dependency, and
+may carry the user's answer after the name — `/resolve-dependency
+currency-converter Open Exchange Rates`, or a document URL — which is the
+service they chose on the definition. `/resolve-dependencies` (plural, no name)
 walks every dependency that is still open, one at a time, in the order the
 Build drawer lists them, and ends with the list empty or with what is left
 named plainly.
@@ -29,8 +31,7 @@ say, in one line, where it stands:
 
 | On disk | State | This flow's job |
 |---|---|---|
-| `candidates` (2+) | ambiguous | choose the provider |
-| no `provider`, no `style`, no `candidates` | needs-input | identify the system |
+| no `provider` (`suggestions` may be open) | needs-input | settle the service the user chose |
 | `provider` + `style`, no `contract` (or no `sdk` for style `sdk`) | needs-contract | get the contract |
 | contract on disk, `assumed` absent, contract marked assumed | needs-acceptance | ask the user to accept |
 | contract on disk | resolved | nothing — say so and stop |
@@ -41,18 +42,28 @@ Each step is at most one `ask_question`; a `/resolve-dependencies` walk asks
 them per dependency, never as one batch across dependencies — the user
 answers one system at a time.
 
-## 1. Choose the provider
+## 1. Settle the service — the user's choice, never yours
 
-With `candidates`, put the choice to the user: each candidate with the one
-distinction that matters for THIS product, your recommendation marked, and
-"another system" as a free-text option. With nothing identified, ask what the
-system is and how it authenticates. A real signal (the requirement names it, a
-Registered External resource fits, an org skill mandates it) lets you choose
-without asking — say which signal.
+All research for an open dependency happens here, and the user chooses.
 
-Write the choice: `provider` and `style` set, `candidates` removed. For a
-Registered External resource, write only `{ "name", "source": "org" }` — the
-platform fills the rest at save, and no contract step follows.
+- **The instruction carries an answer.** A service name settles `provider`:
+  find out how it is consumed (`style`), and go on to the contract. A
+  document URL settles both: fetch it through `slice_openapi_spec` (the URL
+  plus the operations the design calls), take `provider` from the document's
+  `info.title`, and treat it as route 1 below already taken.
+- **No answer.** Research the capability (`web_search`) — the `suggestions`
+  on file are a starting point, not findings. Then ask ONE question: the
+  services that genuinely fit, each with the one distinction that matters for
+  THIS product, your recommendation marked, and "another system" as a
+  free-text option. One fit is still a question ("Use Stripe?"). Write
+  nothing until they answer. Never write the options back into the file —
+  the question lives in this conversation.
+- **A Registered External resource fits.** Say so and write only
+  `{ "name", "source": "org" }` — the platform fills the rest at save, and no
+  contract step follows.
+
+Write the choice: `provider` and `style` set, `suggestions` removed. The
+config keys come last (step 3), from the service chosen — never before.
 
 ## 2. Get the contract
 
@@ -103,7 +114,7 @@ contract contradicts them.
 
 ## Close
 
-One line per dependency you touched: its name, the state it is in now, and
-the one thing (if any) still needed from the user — "accept the assumption on
-the dependency's definition", "upload the document". Nothing else: the files carry the
-detail, and the Build drawer re-reads them.
+One line per dependency you touched: its name, the service chosen, the state
+it is in now, and the one thing (if any) still needed from the user — "accept
+the assumption on the dependency's definition", "upload the document". Nothing
+else: the files carry the detail, and the Build drawer re-reads them.

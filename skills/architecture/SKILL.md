@@ -304,24 +304,24 @@ Work each one in order:
    config from the org record at every save, and the build collects no values
    for it. A user-asked reconsider may switch to a different Registered name,
    or create a **Project External resource** under a **new** name.
-2. **`web_search` for candidates** when nothing registered fits. Stop at the
-   options actually worth presenting — often 2–3 genuine contenders, sometimes
-   one when a real signal already points to it.
-3. **Emit the outcome**, never a `status`:
-   - **A real SIGNAL points to one system → `provider` + `style`.** A signal
-     is one of: the requirement names or implies the vendor, an org or
-     platform skill mandates it, or a concrete technical reason forces it.
-     "This one is popular" is not a signal — it is a guess dressed as a
-     resolution, and it belongs in `candidates`.
-   - **No signal and 2+ viable equivalents → `candidates`** — 2 or more,
-     never one, each with its own `style` and, for an SDK, a lean `package`;
-     `provider`, `style`, `contract` stay unset. This is the EXPECTED outcome
-     for a genuinely choosable dependency (transactional email:
-     SendGrid/Resend/Postmark); don't force a pick the requirements don't
-     justify. Choosing one later REMOVES `candidates`.
-   - **You can't identify the system at all** → `name` plus a `description`
-     saying what is missing and what the user must supply.
-4. **Get the contract on disk — for a chosen provider only.** `style` says
+2. **The PRD names the service, or nobody has.** The user chooses providers;
+   you never do. Two outcomes, never a `status`:
+   - **The PRD's Product Decisions name a service for this capability**
+     ("Payments: Stripe") → write `provider` + `style` and go on to the
+     contract (step 3). An org or platform skill that mandates a vendor
+     counts the same way. Nothing else does: "the requirement implies it",
+     "this one is popular", "there is only one real option" are guesses, and
+     a guess is the user's to make.
+   - **No service named** → write the NEED only: `name`, `description`, and
+     `suggestions` — services commonly used for this capability, from what
+     you know, any number, each `{ "name", "style"?, "description"? }` with
+     the one distinction that matters for THIS product. No `web_search`, no
+     `provider`, no `style`, no `contract`, no `config` — the config keys
+     follow the service, and none is chosen. The definition then asks the
+     user which service to use; their answer runs the `resolve-dependency`
+     flow, which does the research. This is the EXPECTED outcome for a
+     choosable dependency; do not force a pick the PRD does not make.
+3. **Get the contract on disk — for a named provider only.** `style` says
    how: `rest-api` and `graphql` need a document in the directory
    (`openapi.yaml` / `schema.graphql`), `sdk` needs `sdk.json` (and the API
    slice beside it when the provider has one). The contract is a SLICE: name
@@ -335,13 +335,14 @@ Work each one in order:
    `contract` unset, say so under **Needs your input**, and the
    `resolve-dependency` flow takes it from there (it may write an ASSUMED
    contract, but only with the user's permission).
-5. **Derive `config` keys** from the contract — a `rest-api`'s
-   `components.securitySchemes`, an `sdk`'s auth documentation. A reused
-   Registered row already named the keys — keep them.
-6. **Reference it** from each consuming component:
+4. **Derive `config` keys** from the contract — a `rest-api`'s
+   `components.securitySchemes`, an `sdk`'s auth documentation — for a named
+   provider only; a definition with no provider carries no keys (the gate
+   refuses them). A reused Registered row already named the keys — keep them.
+5. **Reference it** from each consuming component:
    `{ "kind": "external", "name": "<name>", "description": "<why this component uses it>" }`.
-   `style`, `package`, `specPath`, `candidates`, `config` on the component are
-   refused — they belong in the dependency file.
+   `style`, `package`, `specPath`, `suggestions`, `config` on the component
+   are refused — they belong in the dependency file.
 
 ### Config-key conventions
 
@@ -363,16 +364,16 @@ value-collection gate needs something to collect.
 You never author `status`/`reason`. The platform reads them off the dependency
 file at read time, first match wins:
 
-1. `candidates` present (2+) → `ambiguous`
-2. `source: "org"`, or `name` matches a registered external resource →
+1. `source: "org"`, or `name` matches a registered external resource →
    `resolved` (flagged `registered`)
-3. no `provider` and no `style` → `unresolved`/`needs-input`
-4. a `style` whose contract is not on disk (no `openapi.yaml` /
+2. no `provider` (`suggestions` open or not) → `unresolved`/`needs-input` —
+   the user has not chosen a service; the definition asks them
+3. a `style` whose contract is not on disk (no `openapi.yaml` /
    `schema.graphql` for `rest-api` / `graphql`; no `sdk.json` for `sdk`) →
    `unresolved`/`needs-contract`
-5. a contract marked assumed with no user acceptance → `unresolved`/
+4. a contract marked assumed with no user acceptance → `unresolved`/
    `needs-acceptance`
-6. otherwise → `resolved` — flagged `assumed` when the contract was accepted
+5. otherwise → `resolved` — flagged `assumed` when the contract was accepted
    as an assumption, `sdk-only` when an `sdk` dependency has no API slice
 
 `component` is always `resolved` here. A `platform-resource` is too — once
@@ -391,18 +392,16 @@ you settle it**, before moving to the next:
 
 - resolved → `✓ <capability>: using <choice>` (say `, contract sliced` when
   you cut one, `, registered` for an org reuse)
-- candidates → `<capability>: options are A / B / C — tell me which (I'll
-  continue meanwhile)`
+- needs-input → `<capability>: your choice — A / B / C are common; pick one
+  on its definition, or ask me to find one`
 - needs-contract → `<capability>: <provider> chosen, no published contract
   found — you can upload one or let me assume it, from the dependency's definition in the spec view`
-- needs-input → `<capability>: I couldn't identify the system — tell me which +
-  how it authenticates`
 
-Never block the design on an ambiguous or unresolved dependency — print the line
+Never block the design on an unresolved dependency — print the line
 and keep emitting the rest; the user replies in the same chat to steer it, now or
 later. Then **close with three parts and nothing more**: one line per component
 (name, type, one-clause role); a **"Needs your input"** block listing ONLY the
-dependencies still ambiguous or unresolved, each with the single thing you need;
+dependencies still unresolved, each with the single thing you need;
 and a one-line pointer to `specs/design/`. The narration already carried the
 play-by-play, so a file-by-file recap would only bury the user's next action.
 Each **Needs your input** line names the dependency the way its definition in the spec view does, so
@@ -418,14 +417,15 @@ instruction names it. A plain chat turn may still point you at a dependency
 ("reconsider `stripe`"): read `specs/design/dependencies/<name>/dependency.json`
 from the snapshot and act on its current state.
 
-- **Ambiguous — it carries `candidates`.** The user clicked to CHOOSE, so hand
-  them the choice: each option with a one-line distinction, plus that they may
-  name another. Pin the one they name — the same signal rule as discovery, so
-  with no signal the choice stays theirs — then remove `candidates`, set
-  `provider` + `style`, and go for the contract (step 4).
+- **No service chosen — it carries `suggestions`, or nothing.** The user's
+  answer, if the instruction carries one (a service name or a document URL),
+  IS the choice: set `provider` + `style`, remove `suggestions`, and go for
+  the contract (step 3). With no answer, put the choice to them — the
+  suggestions, or what your research finds, each with a one-line distinction,
+  plus that they may name another — and write nothing until they answer.
 - **Already resolved — reconsider.** This is the only branch that may leave a
-  catalog row that still fills the role. Present fresh alternatives as
-  `candidates`, or repin to the Registered name the user picks, or start a
+  catalog row that still fills the role. Present fresh alternatives in the
+  conversation, or repin to the Registered name the user picks, or start a
   **Project External resource** under a **new** name.
 
 Edit ONLY that dependency's file: re-emit the whole `dependency.json` (never a
