@@ -44,12 +44,19 @@ const BUNDLED = ["@mui/", "@emotion/", "lucide-react"];
 
 const isBundled = (dep) => BUNDLED.some((p) => (p.endsWith("/") ? dep.startsWith(p) : dep === p));
 
-/** `npm view <spec> <field…> --json`, parsed; throws with npm's stderr on failure. */
-function npmView(cwd, spec, fields) {
+/**
+ * `npm view <spec> <field…> --json`, parsed; throws with npm's stderr on
+ * failure. One field comes back bare, several come back keyed by field name.
+ * npm 12 wraps every result in an array, npm 10 only a multi-version match —
+ * so a single-version lookup unwraps the array, and `many` (a range) always
+ * returns one.
+ */
+function npmView(cwd, spec, fields, { many = false } = {}) {
   const r = spawnSync("npm", ["view", spec, ...fields, "--json"], { cwd, encoding: "utf8" });
   if (r.status !== 0) throw new Error(`npm view ${spec} failed: ${(r.stderr || r.stdout).trim()}`);
-  const value = JSON.parse(r.stdout);
-  // One field comes back bare; several come back keyed by field name.
+  let value = JSON.parse(r.stdout);
+  if (many) return Array.isArray(value) ? value : [value];
+  if (Array.isArray(value)) value = value[0];
   return fields.length === 1 ? { [fields[0]]: value } : value;
 }
 
@@ -110,8 +117,9 @@ function satisfies(version, range) {
 
 /** The newest non-prerelease `react-router` whose React peer the pinned React satisfies. */
 function resolveRouter(appDir, react) {
-  const raw = npmView(appDir, `${ROUTER}@>=7.0.0`, ["version", "peerDependencies.react"]);
-  const releases = (Array.isArray(raw) ? raw : [raw]).filter((r) => r && typeof r.version === "string");
+  const releases = npmView(appDir, `${ROUTER}@>=7.0.0`, ["version", "peerDependencies.react"], { many: true }).filter(
+    (r) => r && typeof r.version === "string",
+  );
   const ok = releases
     .filter((r) => !parse(r.version)?.pre && satisfies(react, r["peerDependencies.react"]))
     .sort((a, b) => compare(parse(a.version), parse(b.version)));

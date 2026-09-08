@@ -148,7 +148,12 @@ function main() {
   }
   const json = `${JSON.stringify(seedFromDsl(text), null, 2)}\n`;
   if (outFile) {
-    writeFileSync(outFile, json);
+    try {
+      writeFileSync(outFile, json);
+    } catch (e) {
+      console.log(`FAIL  cannot write ${outFile}: ${e.message}`);
+      process.exit(1);
+    }
     console.log(`wrote ${outFile}`);
   } else {
     process.stdout.write(json);

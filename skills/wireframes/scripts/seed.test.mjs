@@ -148,6 +148,16 @@ test("the CLI prints JSON for a file, or writes it with -o", () => {
   assert.equal(JSON.parse(readFileSync(out, "utf8")).screens.QueueRiskDetail.stats.length, 3);
 });
 
+test("an output path that cannot be written is a named failure, not a stack trace", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wireframes-seed-"));
+  const dsl = path.join(dir, "wireframes.dsl");
+  writeFileSync(dsl, DSL);
+  const r = spawnSync(process.execPath, [SCRIPT, "-o", dir, dsl], { encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /FAIL  cannot write .*wireframes-seed-/);
+  assert.doesNotMatch(r.stdout + r.stderr, /at \w+ \(/);
+});
+
 test("a missing file is a named failure; no file prints the usage", () => {
   const missing = spawnSync(process.execPath, [SCRIPT, "/nowhere/wireframes.dsl"], { encoding: "utf8" });
   assert.equal(missing.status, 1);

@@ -49,7 +49,7 @@ case "$1" in
   view)
     case "$2" in
       @wso2/oxygen-ui@latest) cat "$FAKE_NPM_DATA/oxygen.json";;
-      @wso2/oxygen-ui-icons-react@latest) echo '"0.13.1"';;
+      @wso2/oxygen-ui-icons-react@latest) cat "$FAKE_NPM_DATA/icons.json";;
       "react-router@>=7.0.0") cat "$FAKE_NPM_DATA/router.json";;
       *) echo "unexpected view $2" >&2; exit 1;;
     esac;;
@@ -90,6 +90,7 @@ function fixture({ pkg, installed = false } = {}) {
   const data = path.join(dir, "registry");
   mkdirSync(data);
   writeFileSync(path.join(data, "oxygen.json"), JSON.stringify(OXYGEN_LATEST));
+  writeFileSync(path.join(data, "icons.json"), JSON.stringify("0.13.1"));
   writeFileSync(path.join(data, "router.json"), JSON.stringify(ROUTER_RELEASES));
   return { app, bin, data, log: path.join(dir, "npm.log") };
 }
@@ -159,6 +160,21 @@ test("the router is the newest release whose React peer range the pinned React s
   const none = pick(releases([["8.3.1", ">=19.2.7"]]));
   assert.equal(none.status, 1);
   assert.match(none.out, /FAIL  could not resolve versions\n  fix: no react-router release accepts react 19\.2\.3/);
+});
+
+// npm 12 wraps every `--json` result in an array (`[{…}]`, `["0.13.1"]`),
+// where npm 10 wraps only a multi-version match. Verified against npm 12.0.2.
+test("npm 12's array-wrapped results resolve the same versions as npm 10's", () => {
+  const f = fixture();
+  writeFileSync(path.join(f.data, "oxygen.json"), JSON.stringify([OXYGEN_LATEST]));
+  writeFileSync(path.join(f.data, "icons.json"), JSON.stringify(["0.13.1"]));
+  writeFileSync(path.join(f.data, "router.json"), JSON.stringify([{ version: "7.18.3", "peerDependencies.react": ">=18" }]));
+  const { status, out, pkg } = run(f);
+  assert.equal(status, 0, out);
+  assert.equal(pkg.dependencies.react, "19.2.3");
+  assert.equal(pkg.dependencies["@wso2/oxygen-ui"], "^0.13.1");
+  assert.equal(pkg.dependencies["@wso2/oxygen-ui-icons-react"], "^0.13.1");
+  assert.equal(pkg.dependencies["react-router"], "^7.18.3");
 });
 
 test("--charts adds the charts package at Oxygen's version", () => {

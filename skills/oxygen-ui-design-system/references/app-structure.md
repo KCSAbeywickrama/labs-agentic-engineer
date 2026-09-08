@@ -282,8 +282,10 @@ export default function TopNavLayout(): JSX.Element {
 }
 ```
 
-`value={false}` on `Tabs` is what MUI expects when no tab is active (a detail
-route not in the nav), so `active` falls back to `false`, not `undefined`.
+`startsWith` keeps a section's tab active on that section's detail routes
+(`/products/42` highlights Products, which is what a person expects). On a
+route under no section (`/callback`, a role home) nothing matches, and
+`value={false}` is what MUI expects for "no tab active" — never `undefined`.
 Which shell a wireframe wants is decided by its chrome: a `sidebar` line means
 AppLayout above; links in the `navbar` and no `sidebar` means this one. Never
 both — the wireframe never draws both either.
