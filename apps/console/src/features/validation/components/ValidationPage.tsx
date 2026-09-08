@@ -629,7 +629,7 @@ export function ValidationPage({
         {headerWithCancelError}
         <EmptyState
           compact
-          description="Nothing validated yet. After a build, your software is checked against the validation criteria in your spec; results appear here."
+          description="Nothing validated yet. After a deployment, the deployed system is checked against the validation criteria in your spec. Results appear here."
         />
       </>
     );

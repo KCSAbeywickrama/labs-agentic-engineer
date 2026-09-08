@@ -654,6 +654,12 @@ describe("ValidationPage lifecycle", () => {
     mockRun = run({});
     renderPage(undefined);
     expect(screen.getByText(/Nothing validated yet/)).toBeInTheDocument();
+    // The event is a DEPLOYMENT, not a build: validation drives a running
+    // instance and needs its resolved endpoints, so a build alone cannot trigger
+    // it. And it names the same subject the agent's own status line does.
+    expect(
+      screen.getByText(/After a deployment, the deployed system is checked/),
+    ).toBeInTheDocument();
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
   });
 
