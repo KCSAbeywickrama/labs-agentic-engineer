@@ -192,23 +192,18 @@ function LiveChip({ status }: { status: string }) {
 /**
  * The one chip a criterion's row carries, in precedence order.
  *
- * `manual` wins over everything. Such a criterion is answered by a person, so
- * the run will never answer it — that is what the method means — and any chip
- * promising a result is a claim the eventual report contradicts. It outranks a
- * live status as well as a report: a run legitimately reports progress for a
- * manual criterion (its test plan names every criterion, not only the ones an
- * agent will work), and rendering that as a run state left the row promising a
- * result beside a badge saying nobody would produce one.
+ * `manual` is the exception that shapes the order: such a criterion is answered
+ * by a person, so a run signal must not speak for it. It skips the live status
+ * and lands on the report's own `manual`, or on the same final word `awaiting`
+ * would otherwise have given it.
  *
- * Then live over report, and the ordering there is the whole point: a repeat
+ * Otherwise live beats report, and that ordering is the whole point: a repeat
  * attempt carries the PREVIOUS attempt's report, so ranking the report higher
  * would freeze a criterion on the last run's verdict for the entire time the
  * current run spends re-working it. The report wins again the moment the cycle
  * settles, because the consumer stops supplying live statuses then.
  *
- * `awaiting` last, and only it can yield nothing: the Spec view renders this
- * same pane with no run attached, where a chip would name a run that does not
- * exist.
+ * A view with no run attached yields no chip at all — see the `awaiting` guard.
  */
 function CriterionChip({
   criterion,
@@ -221,15 +216,35 @@ function CriterionChip({
   live: string | undefined;
   awaiting: boolean;
 }) {
-  if (criterion.method === "manual") return <StateChip status="manual" />;
-  // pass/fail arrive on the live feed too — report.json's own words, so its chip.
-  if (live) return LIVE_LABEL[live] ? <LiveChip status={live} /> : <StateChip status={live} />;
+  // A `manual` criterion never takes a live status. The run reports one — its
+  // test plan names every criterion, not only the ones an agent will work — but
+  // the run will never ANSWER this one, so a chip reading "Planned" promises a
+  // result nobody is going to produce, beside a badge saying as much. It is the
+  // only status such a row can receive, and nothing supersedes it: every later
+  // status needs a spec file it will never have.
+  if (live && criterion.method !== "manual") {
+    // pass/fail arrive on the live feed too — report.json's own words, so its chip.
+    return LIVE_LABEL[live] ? <LiveChip status={live} /> : <StateChip status={live} />;
+  }
   if (report) return <StateChip status={report.status} />;
-  // "Pending" is local rather than a sixth CRITERION_STATE_LABEL entry: that map
-  // is report.json's vocabulary, and a criterion with no report has no status to
-  // name.
-  if (awaiting) return <Chip size="small" variant="outlined" label="Pending" sx={{ flexShrink: 0 }} />;
-  return null;
+
+  // Nothing awaited means no run is attached at all: the Spec view renders this
+  // same pane over the plain oracle, where any chip would name a run that does
+  // not exist. Checked HERE rather than first, because "this row has no signal"
+  // and "this view has no run" are different things — an `unreported` attempt
+  // has live statuses on other rows and none on this one.
+  if (!awaiting) return null;
+
+  // A manual criterion gets its final word rather than "Pending": the run will
+  // never answer it, so a chip promising a result is a claim the report
+  // contradicts. "Pending" is local rather than a sixth CRITERION_STATE_LABEL
+  // entry: that map is report.json's vocabulary, and a criterion with no report
+  // has no status to name.
+  return criterion.method === "manual" ? (
+    <StateChip status="manual" />
+  ) : (
+    <Chip size="small" variant="outlined" label="Pending" sx={{ flexShrink: 0 }} />
+  );
 }
 
 // One acceptance criterion: method badge, its id, the atomic assertion, its

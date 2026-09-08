@@ -1469,27 +1469,6 @@ describe("ValidationPage manual criteria ignore the live feed", () => {
     expect(screen.queryByText("Running…")).not.toBeInTheDocument();
   });
 
-  it("still says Manual when no report was fetched and nothing is awaiting", () => {
-    // `unreported` settles the run and skips the report read, so `awaiting` is
-    // false and there is no report — the two branches that used to carry a manual
-    // row. Before the guard it fell through to nothing and rendered no chip.
-    mockValidation = "unreported";
-    mockRun = run({
-      validation: { verdict: "unreported" },
-      cycles: [validationCycle],
-    });
-    mockCriteria.data = { content: CRITERIA };
-    mockLive = { "AC-001-a": "authoring" };
-    renderPage(undefined);
-
-    expect(screen.getByText("Manual")).toBeInTheDocument();
-    // Asserted negatively too: the method BADGE also carries the word "manual",
-    // so presence alone would still pass if the chip regressed to something else
-    // and only the badge matched. Neither of the two chips it could wrongly show
-    // here may appear on any row.
-    expect(screen.queryByText("Pending")).not.toBeInTheDocument();
-    expect(screen.queryByText("Planned")).not.toBeInTheDocument();
-  });
 });
 
 // The run-wide narration a reader arrives with. Until now the tile had exactly

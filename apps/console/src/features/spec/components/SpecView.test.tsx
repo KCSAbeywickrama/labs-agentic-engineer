@@ -1812,6 +1812,20 @@ describe("SpecView validation criteria explanation", () => {
     expect(screen.getByText(/To change one, ask the agent/)).toBeInTheDocument();
   });
 
+  it("puts no status chip on the preview, for any method", () => {
+    // This pane has no run attached — it is a file preview of the oracle — so a
+    // chip here would name a run that does not exist. `manual` is the one that
+    // regressed: a rule giving manual criteria their final word was ranked above
+    // the has-a-run check, and stamped "Manual" onto every preview.
+    render(<SpecView projectName="proj1" />);
+
+    // The method BADGE still says manual (lowercase; the chip would capitalise).
+    expect(screen.getByText("manual")).toBeInTheDocument();
+    for (const chip of ["Manual", "Pending", "Passed", "Failed", "Planned"]) {
+      expect(screen.queryByText(chip)).not.toBeInTheDocument();
+    }
+  });
+
   it("names the methods without the e2e acronym", () => {
     render(<SpecView projectName="proj1" />);
 
