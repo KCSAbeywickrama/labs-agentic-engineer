@@ -6486,7 +6486,18 @@ components:
             The tool call this event is about, and the join key of the whole
             feed: a `tool_result` carries the id of the `tool_use` it answers,
             and `git_commit`, `git_push` and `gh_action` carry the id of the
-            shell call that caused them. Absent on every other kind.
+            shell call that caused them.
+
+            `task_started` and `task_settled` carry it too, where the runtime
+            named the call that launched the task. That is what lets a surface
+            draw ONE row for a backgrounded command — the action, marked
+            background, later gaining its outcome — instead of an action row and
+            an unattached settle row repeating the same command line. `taskId`
+            still joins a task's start to its end; this joins both of them to the
+            call that started it, which `taskId` cannot do.
+
+            Absent on every other kind, and absent on a task whose launching
+            call the runtime did not name.
           type: string
         ts:
           description: >-

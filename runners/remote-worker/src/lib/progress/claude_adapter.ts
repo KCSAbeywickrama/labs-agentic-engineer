@@ -644,6 +644,10 @@ interface BashTaskRecord {
    * `task_settled` carries the SAME summary its `task_started` did.
    */
   summary: string;
+  /** The call that launched it, where the runtime named one. Carried onto both
+   *  task events so a surface can draw ONE row for the command instead of an
+   *  action row plus an unattached settle. */
+  toolUseId?: string;
 }
 
 /** One tool call in flight. */
@@ -876,8 +880,14 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
       // already carried the command; this is what will still be true when the
       // task settles minutes later.
       const summary = (toolUseId ? pending.get(toolUseId)?.command : "") || trimSummary(str(m.description));
-      bashTasks.set(taskId, { ownerAgentId: owner, summary });
-      return [{ kind: "task_started", agentId: owner, taskId, ...(summary ? { summary } : {}) }];
+      bashTasks.set(taskId, { ownerAgentId: owner, summary, ...(toolUseId ? { toolUseId } : {}) });
+      return [{
+        kind: "task_started",
+        agentId: owner,
+        taskId,
+        ...(summary ? { summary } : {}),
+        ...(toolUseId ? { toolUseId } : {}),
+      }];
     }
 
     // A spawned agent's birth certificate — see the module header.
@@ -958,6 +968,11 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
         agentId: bash.ownerAgentId,
         taskId,
         ...(bash.summary ? { summary: bash.summary } : {}),
+        // The launching call, so a surface can fold this onto the action row it
+        // already drew rather than repeating the whole command line beside it.
+        // Held from the start for the same reason `summary` is: the runtime's
+        // notification carries an id and a status and nothing else.
+        ...(bash.toolUseId ? { toolUseId: bash.toolUseId } : {}),
         ...(status ? { status } : {}),
       }];
     }

@@ -80,6 +80,9 @@ export interface CallOutcome {
   summary?: string | undefined;
   durationMs?: number | undefined;
   exitCode?: number | undefined;
+  /** `task_settled` only — a backgrounded command's ending is judged on its
+   *  status, having no `ok` of its own. */
+  kind?: string | undefined;
 }
 
 /**
@@ -103,6 +106,18 @@ export interface OutcomeView {
 export function formatOutcome(e: CallOutcome | undefined): OutcomeView {
   if (!e) return { detail: "", duration: "", tone: "muted" };
   const duration = e.durationMs && e.durationMs >= SLOW_CALL_MS ? formatDuration(e.durationMs) : "";
+
+  // A BACKGROUNDED command's ending always speaks, including when it succeeded.
+  // That is the one exception to the silent-success rule above it, and it earns
+  // the exception: the action row said the command was detached, so "it is done"
+  // is news the action did not carry. A foreground call proves it finished by
+  // the next action appearing; a background one does not.
+  if (e.kind === "task_settled") {
+    const status = e.status ?? "completed";
+    const tone: LineTone = status === "failed" ? "error" : status === "completed" ? "success" : "warn";
+    return { detail: status, duration, tone };
+  }
+
   if (e.ok !== false) return { detail: "", duration, tone: "muted" };
 
   // A SEVERED call is not a failure and must not be called one. The command

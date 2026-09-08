@@ -198,7 +198,10 @@ export function RunCrew({ events }: { events: StampedRunEvent[] }) {
                 pl: { xs: 0, md: 2 },
               })}
             >
-              <CrewInspector member={selected} />
+              {/* Picking a dispatched agent moves the inspector to it — the
+                  same selection the tree drives, so the two cannot disagree
+                  about which agent is being read. */}
+              <CrewInspector member={selected} onSelect={setChosenId} />
             </Box>
           </Stack>
         )}

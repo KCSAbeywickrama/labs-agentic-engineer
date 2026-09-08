@@ -245,3 +245,43 @@ test("grouping: an agent that claims itself as its parent still renders, at the 
   ]);
   assert.equal(looped.rows.filter((r) => r.kind === "section").length, 1);
 });
+
+// The reported bug: one backgrounded `gh issue comment` drew TWO rows on a live
+// feed — the action, and a settle repeating the same 130-character command line
+// beside it. `task_started` is silent and shares the action's `toolUseId`, so the
+// risk in folding is that it claims the action's place and the settle lands on a
+// row nobody can see.
+test("mergeOutcomes: a backgrounded command is ONE row that gains its outcome", () => {
+  const rows = mergeOutcomes([
+    { kind: "gh_action", toolUseId: "t1", command: "gh issue comment 3 --body \"Starting\"" },
+    { kind: "task_started", toolUseId: "t1", taskId: "bg1", summary: "gh issue comment 3 --body \"Starting\"" },
+    { kind: "task_settled", toolUseId: "t1", taskId: "bg1", summary: "gh issue comment 3 --body \"Starting\"", status: "completed" },
+  ]);
+
+  assert.equal(rows.length, 1, "one command, one row");
+  assert.equal(rows[0]!.line.kind, "gh_action", "and it is the ACTION that survives, not the settle");
+  assert.equal(rows[0]!.outcome?.kind, "task_settled", "with the ending folded onto it");
+  assert.equal(rows[0]!.backgrounded, true, "marked async, so a row with no outcome yet reads as detached");
+});
+
+// Before the settle arrives the row still has to say it is detached — otherwise
+// a four-minute build is indistinguishable from a call being waited on.
+test("mergeOutcomes: a still-running background command is marked before it settles", () => {
+  const rows = mergeOutcomes([
+    { kind: "tool_use", toolUseId: "t1", summary: "bal build" },
+    { kind: "task_started", toolUseId: "t1", taskId: "bg1", summary: "bal build" },
+  ]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.backgrounded, true);
+  assert.equal(rows[0]!.outcome, undefined, "nothing has come back yet, and the row must not pretend otherwise");
+});
+
+// A settle whose action never reached this surface still has to draw: dropping
+// it would hide the ending of a command a reader can see nothing else about.
+test("mergeOutcomes: an orphaned settle is still a row of its own", () => {
+  const rows = mergeOutcomes([
+    { kind: "task_settled", toolUseId: "gone", taskId: "bg1", summary: "pnpm dev:mock", status: "stopped" },
+  ]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.line.kind, "task_settled");
+});

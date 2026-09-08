@@ -18,6 +18,7 @@
 
 import { Box, Typography } from "@wso2/oxygen-ui";
 import {
+  crewStateLabel,
   crewTone,
   formatAgentStatus,
   isCrewSettled,
@@ -36,7 +37,114 @@ import type { StampedRunEvent } from "../hooks/useRunProgress";
 // list: an invented summary of an agent's work is exactly the thing a reader
 // cannot check, and the agent's own closing report is right there.
 
-export function CrewInspector({ member }: { member: CrewMember<StampedRunEvent> }) {
+/**
+ * What this agent DISPATCHED, and what became of each one.
+ *
+ * The gap this closes: a spawn is filed under the agent it created, so it became
+ * that agent's section header and left no trace in the feed of the agent that
+ * ordered it. Reading the lead's own log, a run's whole fan-out was invisible —
+ * three agents appeared from nowhere in the tree and the lead's steps jumped
+ * from "read the design" to "open the pull request" with nine minutes and all
+ * the actual work in between unaccounted for.
+ *
+ * Derived from `member.children`, not from a fabricated event: every field here
+ * is one the runtime declared about the child. Deliberately NOT interleaved into
+ * the steps below — the honest position for a spawn is where it happened, and
+ * `steps` holds only this agent's own events. Putting `agent_started` in the
+ * parent's rows instead would draw it twice on the flat feed, which renders each
+ * child section with a header of its own.
+ *
+ * `running` on a row here is the answer to "why is the lead quiet": it is
+ * waiting on this. The header above already says so in the runtime's words; this
+ * says WHICH, with a way to go and look.
+ */
+function DispatchedCrew({
+  children,
+  onSelect,
+}: {
+  children: readonly CrewMember<StampedRunEvent>[];
+  onSelect?: ((id: string) => void) | undefined;
+}) {
+  if (children.length === 0) return null;
+  return (
+    <Box sx={{ mb: 1 }}>
+      <Typography component="div" sx={{ font: "inherit", color: "grey.500", mb: 0.25 }}>
+        dispatched {children.length === 1 ? "1 agent" : `${String(children.length)} agents`}
+      </Typography>
+      {children.map((child) => {
+        const tone = toneColor(crewTone(child.state));
+        const live = !isCrewSettled(child.state);
+        return (
+          <Box
+            key={child.id}
+            component={onSelect ? "button" : "div"}
+            type={onSelect ? "button" : undefined}
+            onClick={onSelect ? () => { onSelect(child.id); } : undefined}
+            // Deliberately does NOT open with the agent's name. The tree's rows
+            // are named `<agent>: <state>…`, and a second control whose name
+            // also began with the agent's name left a screen-reader user two
+            // near-identical buttons per agent with nothing to tell them apart.
+            // This one is an action, so it reads as one.
+            aria-label={
+              onSelect ? `Show ${child.agent.label}, ${crewStateLabel(child.state)}` : undefined
+            }
+            sx={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: 1,
+              width: "100%",
+              font: "inherit",
+              textAlign: "left",
+              background: "none",
+              border: 0,
+              p: 0,
+              pl: 1,
+              color: "inherit",
+              cursor: onSelect ? "pointer" : "default",
+              "&:hover": onSelect ? { color: "grey.100" } : undefined,
+            }}
+          >
+            <Typography component="span" sx={{ font: "inherit", flexShrink: 0 }}>
+              ⑂
+            </Typography>
+            <Typography
+              component="span"
+              title={child.agent.label}
+              sx={{
+                font: "inherit",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                minWidth: 0,
+              }}
+            >
+              {child.agent.label}
+            </Typography>
+            {child.background && (
+              <Typography component="span" sx={{ font: "inherit", color: "grey.500", flexShrink: 0 }}>
+                background
+              </Typography>
+            )}
+            <Typography
+              component="span"
+              sx={{ font: "inherit", color: tone, ml: "auto", flexShrink: 0 }}
+            >
+              {live ? crewStateLabel(child.state) : formatAgentStatus(child.agent)}
+            </Typography>
+          </Box>
+        );
+      })}
+    </Box>
+  );
+}
+
+export function CrewInspector({
+  member,
+  onSelect,
+}: {
+  member: CrewMember<StampedRunEvent>;
+  onSelect?: ((id: string) => void) | undefined;
+}) {
   const settled = isCrewSettled(member.state);
   return (
     <Box sx={{ minWidth: 0 }}>
@@ -98,6 +206,8 @@ export function CrewInspector({ member }: { member: CrewMember<StampedRunEvent> 
           there", and it is the ONLY place the plan appears on a cycle with a
           single agent, where there is no tree at all. */}
       <AgentPlan plan={member.plan} />
+
+      <DispatchedCrew children={member.children} onSelect={onSelect} />
 
       <AgentSteps steps={member.steps} />
     </Box>

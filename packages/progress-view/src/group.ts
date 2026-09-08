@@ -196,16 +196,47 @@ export interface OutcomePairable {
 export interface MergedRow<E> {
   line: E;
   outcome?: E | undefined;
+  /**
+   * The action put its command in the BACKGROUND and has not been answered yet.
+   *
+   * Known from the `task_started` sharing this action's `toolUseId`, which is a
+   * silent kind and draws no row of its own. Without this a backgrounded build
+   * is indistinguishable from a call still in flight, and a reader watching a
+   * row with no outcome for four minutes has no way to tell "detached, come back
+   * later" from "waiting on this right now".
+   */
+  backgrounded?: boolean | undefined;
 }
+
+/** The kinds that ANSWER an action rather than being one. */
+const IS_OUTCOME = new Set(["tool_result", "task_settled"]);
 
 export function mergeOutcomes<E extends OutcomePairable>(events: readonly E[]): MergedRow<E>[] {
   const rows: MergedRow<E>[] = [];
   const byToolUse = new Map<string, MergedRow<E>>();
   for (const line of events) {
-    if (line.kind === "tool_result" && line.toolUseId) {
+    // A `task_settled` is an outcome in exactly the same sense as a
+    // `tool_result`: the row for the command was drawn the instant the runtime
+    // yielded it, and this says how it ended, minutes later. Folding it is what
+    // stops a backgrounded command being drawn twice — once as the action, once
+    // as a settle repeating the same command line, which is how one `gh issue
+    // comment` filled four lines of a live feed.
+    if (IS_OUTCOME.has(line.kind) && line.toolUseId) {
       const action = byToolUse.get(line.toolUseId);
       if (action) {
         action.outcome = line;
+        continue;
+      }
+    }
+
+    // The start of a backgrounded command marks the action it belongs to rather
+    // than becoming a row. It carries the same `toolUseId`, so it must NOT claim
+    // the action's place in the map either — the settle has to land on the row a
+    // reader can actually see.
+    if (line.kind === "task_started" && line.toolUseId) {
+      const action = byToolUse.get(line.toolUseId);
+      if (action) {
+        action.backgrounded = true;
         continue;
       }
     }
@@ -214,7 +245,11 @@ export function mergeOutcomes<E extends OutcomePairable>(events: readonly E[]): 
     // Only an ACTION claims the id: a tool_result kept as its own row must not
     // then swallow a later result, and the git_*/gh_action rewrites of a Bash
     // call are actions too, so they take their outcome the same way.
-    if (line.kind !== "tool_result" && line.toolUseId) byToolUse.set(line.toolUseId, row);
+    // First action wins: one call has one action row, and a later event sharing
+    // its id (a `task_started`, or a replayed duplicate) must not displace it.
+    if (!IS_OUTCOME.has(line.kind) && line.toolUseId && !byToolUse.has(line.toolUseId)) {
+      byToolUse.set(line.toolUseId, row);
+    }
   }
   return rows;
 }

@@ -774,17 +774,30 @@ test("adapter: a backgrounded command is a task of its own, owned by the agent t
     task_type: "local_bash",
     is_backgrounded: true,
   });
+  // `toolUseId` rides both task events: it names the `Bash` call that launched
+  // the command, which is what lets a surface fold the settle onto the action
+  // row it already drew. Without it a live feed drew one `gh issue comment`
+  // twice — once as the action, once as a settle repeating the whole command
+  // line. `taskId` cannot do this job: it joins the task's start to its end,
+  // and the launching call has no taskId at all.
   assert.deepEqual(started, [
-    { kind: "task_started", agentId: "agent-1", taskId: "bo1", summary: "sleep 25 && echo done" },
+    { kind: "task_started", agentId: "agent-1", taskId: "bo1", summary: "sleep 25 && echo done", toolUseId: "b1" },
   ]);
 
   // `stopped` at session end is what names an orphan: the command never
-  // finished, and the run ended anyway. The settle repeats the START's summary:
-  // the notification carries only a status and an id, and `background bo1 ·
-  // stopped` cannot be matched by eye to any command on the feed.
+  // finished, and the run ended anyway. The settle repeats the START's summary
+  // AND its launching call, because the notification carries only a status and
+  // an id — so both have to be held from the start.
   const settled = a.translate({ type: "system", subtype: "task_notification", task_id: "bo1", status: "stopped" });
   assert.deepEqual(settled, [
-    { kind: "task_settled", agentId: "agent-1", taskId: "bo1", summary: "sleep 25 && echo done", status: "stopped" },
+    {
+      kind: "task_settled",
+      agentId: "agent-1",
+      taskId: "bo1",
+      summary: "sleep 25 && echo done",
+      toolUseId: "b1",
+      status: "stopped",
+    },
   ]);
 });
 

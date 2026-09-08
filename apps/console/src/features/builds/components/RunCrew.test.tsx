@@ -324,6 +324,39 @@ describe("RunCrew", () => {
     expect(screen.getByText(/stopped/)).toBeInTheDocument();
   });
 
+  // The gap: a spawn is filed under the agent it CREATES, so it became that
+  // agent's section header and left no trace in the log of the agent that
+  // ordered it. Reading the lead's own steps, a run's whole fan-out was
+  // invisible — its steps jumped from reading the design to opening the pull
+  // request, with three agents and nine minutes unaccounted for in between.
+  it("shows the lead what it dispatched, and what became of each one", () => {
+    render(<RunCrew events={fanOut()} />);
+
+    // The lead is the default selection, so this is what a reader sees first.
+    expect(screen.getByText(/dispatched 2 agents/)).toBeInTheDocument();
+
+    // Each dispatched agent is named in the lead's own panel, with its state —
+    // which is the answer to "why is the lead quiet": it is waiting on these.
+    const dispatched = screen.getByRole("button", { name: /^Show Implement todo-api/ });
+    expect(dispatched).toBeInTheDocument();
+
+    // And it is a way IN: picking one moves the inspector to that agent, the
+    // same selection the tree drives.
+    fireEvent.click(dispatched);
+    expect(
+      screen.getByText("Implemented the service and its smoke test."),
+    ).toBeInTheDocument();
+  });
+
+  // A crew of one dispatched nobody, and an empty "dispatched 0 agents" heading
+  // would be chrome around a fact the panel already makes obvious.
+  it("says nothing about dispatch when an agent spawned nobody", () => {
+    seq = 0;
+    const events = [ev(0, { kind: "tool_use", agentId: "lead", tool: "Read", summary: "specs/design.md", toolUseId: "t1" })];
+    render(<RunCrew events={events} />);
+    expect(screen.queryByText(/dispatched/)).not.toBeInTheDocument();
+  });
+
   it("the hint says how many agents, how many are running, and how quiet it is", () => {
     seq = 0;
     const events = [ev(0, { kind: "agent_started", agentId: "a1", label: "todo-api", depth: 1 })];

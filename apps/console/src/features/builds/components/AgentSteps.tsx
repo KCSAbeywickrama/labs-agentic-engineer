@@ -156,15 +156,21 @@ export function AgentSteps({ steps }: { steps: readonly StampedRunEvent[] }) {
         // Deliberately silent events carry no row — see formatEvent.
         if (!text) return null;
         const { detail, duration, tone: outcomeTone } = formatOutcome(row.outcome);
+        // `background` rides the outcome column, which is where a reader already
+        // looks to find out what became of a row. On its own it means the
+        // command was detached and has not come back; beside a status it says
+        // both what the row was and how it ended. One row, both facts, at every
+        // moment of the command's life — which is what the two rows it replaced
+        // were each half of.
+        const outcome = [row.backgrounded ? "background" : "", detail, duration]
+          .filter(Boolean)
+          .join(" · ");
         return (
           <LogRow
             key={runEventKey(row.line)}
             text={text}
             tone={toneColor(tone)}
-            outcome={{
-              text: [detail, duration].filter(Boolean).join(" · "),
-              tone: toneColor(outcomeTone),
-            }}
+            outcome={{ text: outcome, tone: toneColor(outcomeTone) }}
           />
         );
       })}

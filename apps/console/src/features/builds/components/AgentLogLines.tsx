@@ -134,15 +134,17 @@ function SectionRows({ section }: { section: AgentSection<StampedRunEvent> }) {
         // Deliberately silent events carry no row — see formatEvent.
         if (!text) return null;
         const { detail, duration, tone: outcomeTone } = formatOutcome(own.outcome);
+        // See AgentSteps: `background` rides the outcome column so one row
+        // carries both what the command was and what became of it.
+        const outcome = [own.backgrounded ? "background" : "", detail, duration]
+          .filter(Boolean)
+          .join(" · ");
         return (
           <LogRow
             key={runEventKey(row.event)}
             text={text}
             tone={toneColor(tone)}
-            outcome={{
-              text: [detail, duration].filter(Boolean).join(" · "),
-              tone: toneColor(outcomeTone),
-            }}
+            outcome={{ text: outcome, tone: toneColor(outcomeTone) }}
           />
         );
       })}
