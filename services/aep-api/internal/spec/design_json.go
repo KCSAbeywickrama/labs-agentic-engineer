@@ -100,13 +100,12 @@ type endpointJSON struct {
 }
 
 // dependencyJSON is the on-disk shape for one unified dependency entry. It
-// mirrors Dependency MINUS Status/Reason (read-time computed, never
+// mirrors Dependency MINUS Status/Reason/Flags (read-time computed, never
 // persisted): omitting them makes DisallowUnknownFields reject any `status` or
-// `reason` key inside a dependency entry. `style`/`package`/`specPath`/
-// `candidates` are external-only (kind-conditioned validation lives in the
-// write-gates — the zod superRefine + agentfold/designgate.go — not here: this
-// decoder stays lenient about kind-specific fields, matching the rest of the
-// struct).
+// `reason` key inside a dependency entry. An external dependency's definition
+// fields are legacy here (see below) — the write-gates refuse them on a
+// component, and this decoder stays lenient about kind-specific fields,
+// matching the rest of the struct.
 type dependencyJSON struct {
 	Kind        string `json:"kind"`
 	Name        string `json:"name"`

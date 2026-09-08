@@ -53,6 +53,17 @@ var (
 	dependencyContractAnyFile = append(append([]string{}, contractFilesByStyle["rest-api"]...), contractFilesByStyle["graphql"]...)
 )
 
+// CheckDependencyFileForSave is the save-time gate's view of the same rules
+// (spec/save_gate.go): the shape checks the JSON schema cannot express, over a
+// file already on the way to the repo. The `assumed` rule does not apply — at
+// save the record is the file's own, whoever wrote it — so the file stands in
+// as its own prior. Returns ("", "") when the path is not a dependency file or
+// the content passes.
+func CheckDependencyFileForSave(path, content string) (code, message string) {
+	c, m := checkDependencyDesignGuard(path, content, &content)
+	return string(c), m
+}
+
 // checkDependencyDesignGuard mirrors checkDependencyDesign: a dependency.json
 // or sdk.json body must validate before it folds. `prior` is the file as it
 // stands before this write (nil when it does not exist) — the one input the
@@ -255,6 +266,13 @@ func validateCandidates(v any) *designProblem {
 		if s, ok := obj["style"].(string); !ok || !dependencyStyles[s] {
 			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("candidates[%d].style: %q is not an allowed value", i, obj["style"])}
 		}
+		for _, f := range []string{"description", "package"} {
+			if v, present := obj[f]; present {
+				if _, ok := v.(string); !ok {
+					return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("candidates[%d].%s: must be a string", i, f)}
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -278,7 +296,21 @@ func validateConfigKeys(v any) *designProblem {
 		if !ok || key == "" {
 			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("config[%d].key: must be a non-empty string", i)}
 		}
-		secret, _ := obj["secret"].(bool)
+		secret := false
+		if v, present := obj["secret"]; present {
+			b, ok := v.(bool)
+			if !ok {
+				return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("config[%d].secret: must be a boolean", i)}
+			}
+			secret = b
+		}
+		for _, f := range []string{"description", "defaultValue"} {
+			if v, present := obj[f]; present {
+				if _, ok := v.(string); !ok {
+					return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("config[%d].%s: must be a string", i, f)}
+				}
+			}
+		}
 		if _, hasDefault := obj["defaultValue"]; hasDefault && secret {
 			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("config key %q is secret and cannot carry a defaultValue.", key)}
 		}
@@ -317,6 +349,16 @@ func validateSdkManifest(content string) *designProblem {
 		}
 		if !packageRefRe.MatchString(pkg) {
 			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf(`package for %q must be ecosystem-prefixed ("npm:…", "go:…", "pypi:…", "ballerina:…"), got %q.`, lang, pkg)}
+		}
+	}
+	if dv, present := obj["docsUrl"]; present {
+		if _, ok := dv.(string); !ok {
+			return &designProblem{code: ErrSchemaViolation, message: "docsUrl: must be a string"}
+		}
+	}
+	if av, present := obj["assumed"]; present {
+		if _, ok := av.(bool); !ok {
+			return &designProblem{code: ErrSchemaViolation, message: "assumed: must be a boolean"}
 		}
 	}
 	if cv, present := obj["calls"]; present {

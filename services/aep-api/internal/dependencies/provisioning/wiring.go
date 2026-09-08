@@ -303,11 +303,12 @@ func (s *Service) resolveDependenciesYAML(ctx context.Context, orgID, projectID 
 		}
 	}
 
-	// external deps with a design-time-collected spec (specPath set): tell the
-	// coding agent to implement the client against that EXACT stored contract.
-	// This is independent of the external resource's binding/provisioning state
-	// below — the spec is a static repo artifact from design save, not a runtime
-	// resolution, so it applies whether or not the connection is bound yet.
+	// external deps with a committed contract (the slice in the dependency's
+	// own directory): tell the coding agent to implement the client against
+	// that EXACT file. This is independent of the external resource's
+	// binding/provisioning state below — the contract is a static repo
+	// artifact from design time, not a runtime resolution, so it applies
+	// whether or not the connection is bound yet.
 	for _, d := range comp.Dependencies {
 		if d.Kind == spec.DependencyKindExternal && d.Contract != "" {
 			contractSections = append(contractSections, externalSpecContractSection(d.Name, spec.ContractPath(d.Name, d.Contract), d.Assumed != nil))

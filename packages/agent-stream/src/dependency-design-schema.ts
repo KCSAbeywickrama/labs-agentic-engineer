@@ -250,7 +250,19 @@ function assumptionChanged(next: unknown, prior: string | undefined): boolean {
     return true;
   }
   const was = (before as { assumed?: unknown } | null)?.assumed;
-  return JSON.stringify(was) !== JSON.stringify(next);
+  return canonical(was) !== canonical(next);
+}
+
+/** JSON with sorted object keys — the Go fold compares the same way, so a re-ordered echo reads equal on both sides. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonical((value as Record<string, unknown>)[k])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
 }
 
 function parseJson(path: string, content: string): { value: unknown } | { problem: DependencyDesignProblem } {

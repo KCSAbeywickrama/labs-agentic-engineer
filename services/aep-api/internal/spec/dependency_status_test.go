@@ -211,9 +211,14 @@ func TestComputeDependencyFlags(t *testing.T) {
 		},
 		{
 			name: "accepted assumption → assumed",
-			dep: Dependency{Kind: DependencyKindExternal, Name: "dhl", Provider: "DHL", Style: DependencyStyleRestAPI, Contract: "openapi.yaml",
+			dep: Dependency{Kind: DependencyKindExternal, Name: "dhl", Provider: "DHL", Style: DependencyStyleRestAPI, Contract: "openapi.yaml", ContractAssumed: true,
 				Assumed: &DependencyAssumption{By: "admin", At: "now"}},
 			want: []string{DependencyFlagAssumed},
+		},
+		{
+			name: "an acceptance echoed beside a real document is no flag",
+			dep: Dependency{Kind: DependencyKindExternal, Name: "dhl", Provider: "DHL", Style: DependencyStyleRestAPI, Contract: "openapi.yaml",
+				Assumed: &DependencyAssumption{By: "admin", At: "now"}},
 		},
 		{
 			name: "sdk with manifest and no API slice → sdk-only",
@@ -226,7 +231,7 @@ func TestComputeDependencyFlags(t *testing.T) {
 		},
 		{
 			name: "assumed sdk-only carries both, in a fixed order",
-			dep: Dependency{Kind: DependencyKindExternal, Name: "twilio", Provider: "Twilio", Style: DependencyStyleSDK, SDK: "sdk.json",
+			dep: Dependency{Kind: DependencyKindExternal, Name: "twilio", Provider: "Twilio", Style: DependencyStyleSDK, SDK: "sdk.json", ContractAssumed: true,
 				Assumed: &DependencyAssumption{By: "admin", At: "now"}},
 			want: []string{DependencyFlagAssumed, DependencyFlagSDKOnly},
 		},

@@ -184,7 +184,6 @@ func SliceOpenAPI(raw []byte, selectors []string) ([]byte, error) {
 	if schemes, ok := components["securitySchemes"].(map[string]any); ok && len(schemes) > 0 {
 		keptComponents["securitySchemes"] = schemes
 	}
-	visit(doc["security"])
 
 	out := map[string]any{"openapi": doc["openapi"], "paths": keptPaths}
 	for _, k := range []string{"info", "servers", "security", "externalDocs"} {

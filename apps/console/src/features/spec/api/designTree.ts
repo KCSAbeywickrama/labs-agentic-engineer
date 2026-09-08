@@ -101,7 +101,12 @@ export function dependencyOf(path: string): string | null {
 }
 
 export function dependencyDefinitionPath(name: string): string {
-  return `specs/design/dependencies/${name}/dependency.json`;
+  return dependencyFilePath(name, "dependency.json");
+}
+
+/** A file in a dependency's directory, by its bare name (`openapi.yaml`, `sdk.json`). */
+export function dependencyFilePath(name: string, file: string): string {
+  return `specs/design/dependencies/${name}/${file}`;
 }
 
 function isDsl(path: string): boolean {

@@ -52,7 +52,7 @@ type Dependency struct {
 	// persisted and carry NO gorm/yaml tags — plain wire JSON only. The
 	// architect never sets them.
 	//   Status: resolved|ambiguous|unresolved|blocked
-	//   Reason: needs-spec|needs-input|not-found|access-required
+	//   Reason: needs-contract|needs-acceptance|needs-input|not-found|access-required
 	Status string `json:"status,omitempty"`
 	Reason string `json:"reason,omitempty"`
 	// external: the definition, HYDRATED at read time from the dependency's own

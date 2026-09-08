@@ -85,6 +85,10 @@ var (
 	// ErrDependencyNotAssumed: AcceptDependencyAssumption on a dependency whose
 	// contract on disk is not an agent-written one (nothing to accept).
 	ErrDependencyNotAssumed = errors.New("dependency has no assumed contract to accept")
+	// ErrDependencyNotChosen: a contract offered for a dependency whose
+	// candidates are still open — a document cannot settle which system it
+	// belongs to; the provider is chosen first.
+	ErrDependencyNotChosen = errors.New("dependency has open candidates — choose a provider before providing its contract")
 	// ErrSpecFetchFailed: the SSRF-guarded fetch of a user-supplied spec URL
 	// failed (bad URL, blocked target, non-2xx, oversized).
 	ErrSpecFetchFailed = errors.New("failed to fetch spec from URL")
@@ -304,6 +308,15 @@ func (s *designService) collectContract(ctx context.Context, orgID, projectID, c
 	def, found := definitionByName(design.Dependencies, depName)
 	if !found {
 		def = DependencyDefinition{Name: depName, Description: design.Components[compIdx].Dependencies[depIdx].Description}
+	}
+	// The file this writes must pass the agent's own gates afterwards: no
+	// contract beside open candidates, and an OpenAPI document only on a
+	// dependency whose style takes one.
+	if len(def.Candidates) > 0 {
+		return "", fmt.Errorf("%w: %q", ErrDependencyNotChosen, depName)
+	}
+	if def.Style == DependencyStyleGraphQL {
+		return "", fmt.Errorf("%w: dependency %q is a GraphQL API; its contract is a schema, not an OpenAPI document", ErrDependencyWrongKind, depName)
 	}
 	if def.Style == "" {
 		def.Style = DependencyStyleRestAPI

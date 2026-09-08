@@ -101,7 +101,9 @@ func ComputeDependencyFlags(dep Dependency, registryHit bool) []string {
 	if dep.Source == DependencySourceOrg || registryHit {
 		flags = append(flags, DependencyFlagRegistered)
 	}
-	if dep.Assumed != nil {
+	// Assumed means the contract on disk is the agent-written one AND the user
+	// accepted it; a record echoed beside a real document is not a flag.
+	if dep.ContractAssumed && dep.Assumed != nil {
 		flags = append(flags, DependencyFlagAssumed)
 	}
 	if dep.Style == DependencyStyleSDK && dep.Contract == "" {

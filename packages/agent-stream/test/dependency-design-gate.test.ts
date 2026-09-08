@@ -171,3 +171,8 @@ test("config keys: an optional description, and a defaultValue on a non-secret k
     "SCHEMA_VIOLATION",
   );
 });
+
+test("an echoed assumption record compares by value, whatever the key order", () => {
+  const prior = bundle({ [PATH]: dep({ assumed: { by: "admin", at: "2026-09-08T10:15:00Z", note: "n" } }) });
+  assert.equal(checkDependencyDesign(PATH, dep({ assumed: { note: "n", at: "2026-09-08T10:15:00Z", by: "admin" } }), prior), null);
+});

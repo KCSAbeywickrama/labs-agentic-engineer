@@ -44,6 +44,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // DependencyDesignFile is the definition's file name in its directory.
@@ -220,60 +222,59 @@ func assembleDependencyDefinitions(files map[string]string) ([]DependencyDefinit
 // liftLegacyDefinitions adds, for every external edge that has no definition
 // on disk but still carries one on the component (a design from before the
 // dependency file existed), a definition built from what the components say —
-// config keys unioned across consumers by key, the first non-empty style /
-// candidates / contract URL winning. The result is sorted by name. A reference
-// with no definition anywhere is left alone: hydration reads it as
-// needs-input, which is the truth.
-func liftLegacyDefinitions(defs []DependencyDefinition, comps []DesignComponent) []DependencyDefinition {
-	byName := make(map[string]int, len(defs))
-	for i, d := range defs {
-		byName[d.Name] = i
+// config keys unioned across the consumers that carry them, the first
+// non-empty style / candidates / contract URL winning. A definition already on
+// disk is never touched: the file is the truth, and a stale copy on a
+// component is exactly what the next save strips. The result is sorted by
+// name; the second return is the components that carried legacy fields, so the
+// save that writes the lifted files also re-renders them. A reference with no
+// definition anywhere is left alone: hydration reads it as needs-input, which
+// is the truth.
+func liftLegacyDefinitions(defs []DependencyDefinition, comps []DesignComponent) ([]DependencyDefinition, []string) {
+	onDisk := make(map[string]bool, len(defs))
+	for _, d := range defs {
+		onDisk[d.Name] = true
 	}
+	lifted := map[string]int{}
+	var carriers []string
 	for _, c := range comps {
+		carried := false
 		for _, d := range c.Dependencies {
 			if d.Kind != DependencyKindExternal || d.Name == "" {
 				continue
 			}
-			if _, exists := byName[d.Name]; exists {
+			hasLegacy := d.Style != "" || d.Package != "" || len(d.Candidates) > 0 || len(d.Config) > 0 || d.Provenance != nil
+			if !hasLegacy {
 				continue
 			}
-			carried := d.Style != "" || d.Package != "" || len(d.Candidates) > 0 || len(d.Config) > 0 || d.Provenance != nil
-			if !carried {
+			carried = true
+			if onDisk[d.Name] {
 				continue
 			}
-			def := DependencyDefinition{Name: d.Name, Description: d.Description}
-			// The legacy shape had no provider name; the style is the only
-			// evidence a system was chosen, and the coding agent's research
-			// pointer (the old specPath) is provenance, not a contract.
-			def.Style = d.Style
+			if i, ok := lifted[d.Name]; ok {
+				defs[i].Config = unionConfigKeys(defs[i].Config, d.Config)
+				continue
+			}
+			// The legacy shape had no provider name — the style is the only
+			// evidence a system was chosen, and nothing here invents one — and
+			// the coding agent's research pointer (the old specPath) is
+			// provenance, not a contract.
+			def := DependencyDefinition{Name: d.Name, Description: d.Description, Style: d.Style}
 			def.Candidates = append([]DependencyCandidate(nil), d.Candidates...)
 			def.Config = append([]ConfigKey(nil), d.Config...)
 			if d.Provenance != nil {
 				p := *d.Provenance
 				def.Provenance = &p
 			}
-			if d.Style != "" && len(d.Candidates) == 0 {
-				def.Provider = d.Name
-			}
-			byName[d.Name] = len(defs)
+			lifted[d.Name] = len(defs)
 			defs = append(defs, def)
 		}
-	}
-	// Config keys from later consumers of an already-lifted name.
-	for _, c := range comps {
-		for _, d := range c.Dependencies {
-			if d.Kind != DependencyKindExternal {
-				continue
-			}
-			i, ok := byName[d.Name]
-			if !ok || len(d.Config) == 0 {
-				continue
-			}
-			defs[i].Config = unionConfigKeys(defs[i].Config, d.Config)
+		if carried {
+			carriers = append(carriers, c.Name)
 		}
 	}
 	sort.Slice(defs, func(i, j int) bool { return defs[i].Name < defs[j].Name })
-	return defs
+	return defs, carriers
 }
 
 // unionConfigKeys merges two key lists by key name; a secret marking wins on
@@ -381,17 +382,18 @@ func hydrateExternalDependencies(d *DesignFile, files map[string]string) {
 }
 
 // contractMarkedAssumed reports whether a contract file declares itself
-// agent-written: an OpenAPI document with `x-aep-assumed: true` at the root,
-// or a GraphQL schema whose first lines carry `# x-aep-assumed: true`. The
-// marker lives in the file so a reader of the file alone knows.
+// agent-written: an OpenAPI document (YAML or JSON) with `x-aep-assumed: true`
+// at the root, or a GraphQL schema carrying a `# x-aep-assumed: true` comment
+// line. The marker lives in the file so a reader of the file alone knows.
 func contractMarkedAssumed(raw string) bool {
-	head := raw
-	if len(head) > 4096 {
-		head = head[:4096]
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(raw), &doc); err == nil && doc != nil {
+		if v, ok := doc["x-aep-assumed"].(bool); ok {
+			return v
+		}
 	}
-	for _, line := range strings.Split(head, "\n") {
-		t := strings.TrimSpace(line)
-		if t == "x-aep-assumed: true" || t == "\"x-aep-assumed\": true" || t == "\"x-aep-assumed\": true," || t == "# x-aep-assumed: true" {
+	for _, line := range strings.Split(raw, "\n") {
+		if strings.TrimSpace(line) == "# x-aep-assumed: true" {
 			return true
 		}
 	}

@@ -84,6 +84,10 @@ func TestDependencyGate_Parity(t *testing.T) {
 		{"secret key with a default", dep(map[string]any{"config": []any{map[string]any{"key": "K", "secret": true, "defaultValue": "x"}}}), nil, false, "secret"},
 		{"bad sha256", dep(map[string]any{"provenance": map[string]any{"sha256": "nope"}}), nil, false, "sha256"},
 		{"good provenance", dep(map[string]any{"provenance": map[string]any{"sourceUrl": "https://x", "sha256": strings.Repeat("ab", 32), "sliced": true}}), nil, true, ""},
+		// Types the zod schema pins — the fold must refuse the same shapes.
+		{"secret not a boolean", dep(map[string]any{"config": []any{map[string]any{"key": "K", "secret": "yes"}}}), nil, false, "secret: must be a boolean"},
+		{"defaultValue not a string", dep(map[string]any{"config": []any{map[string]any{"key": "K", "defaultValue": 5}}}), nil, false, "defaultValue: must be a string"},
+		{"candidate package not a string", dep(map[string]any{"provider": nil, "style": nil, "contract": nil, "candidates": []any{map[string]any{"name": "a", "style": "sdk", "package": 1}, map[string]any{"name": "b", "style": "sdk"}}}), nil, false, "package: must be a string"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -137,6 +141,8 @@ func TestDependencyGate_SdkManifest(t *testing.T) {
 		"upper-case lang": {`{"packages":{"TypeScript":"npm:stripe"}}`, "lower-case"},
 		"no ecosystem":    {`{"packages":{"go":"stripe-go"}}`, "ecosystem-prefixed"},
 		"unknown key":     {`{"packages":{"go":"go:x"},"version":"1"}`, "unknown property version"},
+		"docsUrl type":    {`{"packages":{"go":"go:x"},"docsUrl":3}`, "docsUrl: must be a string"},
+		"assumed type":    {`{"packages":{"go":"go:x"},"assumed":"yes"}`, "assumed: must be a boolean"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := validateSdkManifest(c.content)

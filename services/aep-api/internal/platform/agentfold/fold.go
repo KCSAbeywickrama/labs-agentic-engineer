@@ -206,6 +206,9 @@ func (f *Fold) AddFile(ctx context.Context, path, content string) (OpResult, err
 		return opErr(path, op, ErrAlreadyExists,
 			path+" already exists — use editFile to change it, or removeFile then addFile to replace it wholesale."), nil
 	}
+	if code, msg := f.checkComponentDependencies(ctx, path, next); code != "" {
+		return opErr(path, op, code, msg), nil
+	}
 	return f.commit(path, op, next, nil, func(e string) string {
 		return path + " would not be valid YAML: " + e
 	}), nil
@@ -258,6 +261,9 @@ func (f *Fold) EditFile(ctx context.Context, path, oldString, newString string) 
 
 	idx := starts[0]
 	after := content[:idx] + newS + content[idx+len(oldS):]
+	if code, msg := f.checkComponentDependencies(ctx, path, after); code != "" {
+		return opErr(path, op, code, msg), nil
+	}
 	return f.commit(path, op, after, &content, func(e string) string {
 		return "Edit rejected — result would not be valid YAML: " + e + ". The file is unchanged; fix the indentation of newString and retry."
 	}), nil
@@ -606,4 +612,44 @@ func checkComponentDesignGuard(path, content string) (ErrCode, string) {
 		return "", ""
 	}
 	return err.code, path + ": " + err.message
+}
+
+// checkComponentDependencies mirrors the agent gate's checkComponentDependencies
+// for the half the fold can judge with a file read: a component's external
+// dependency must have its definition on disk (or in this turn's overlay),
+// because the component only references it by name — one dependency, one
+// definition. The cell-membership half lives on the agent side, where the cell
+// is always in the bundle.
+func (f *Fold) checkComponentDependencies(ctx context.Context, path, content string) (ErrCode, string) {
+	if componentDesignRe.FindStringSubmatch(path) == nil {
+		return "", ""
+	}
+	var parsed struct {
+		Dependencies []struct {
+			Kind string `json:"kind"`
+			Name string `json:"name"`
+		} `json:"dependencies"`
+	}
+	if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+		return "", "" // the schema gate reports malformed JSON
+	}
+	var missing []string
+	for _, d := range parsed.Dependencies {
+		if d.Kind != "external" || d.Name == "" {
+			continue
+		}
+		defPath := "specs/design/dependencies/" + d.Name + "/dependency.json"
+		if _, exists, err := f.read(ctx, defPath); err != nil || !exists {
+			missing = append(missing, "`"+d.Name+"` → "+defPath)
+		}
+	}
+	if len(missing) == 0 {
+		return "", ""
+	}
+	noun := "an external dependency has"
+	if len(missing) > 1 {
+		noun = "external dependencies have"
+	}
+	return ErrUnknownDependency, fmt.Sprintf("%s rejected — %s no definition yet: %s. A component references an external dependency by name only; its provider, style, contract file, config keys (or open candidates) live once in that dependency.json, shared by every component that uses it. Write the dependency file first (addFile — for a Registered External resource a stub with \"source\": \"org\" is enough), then re-emit this file. The file is unchanged.",
+		path, noun, strings.Join(missing, "; "))
 }

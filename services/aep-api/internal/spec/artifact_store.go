@@ -124,7 +124,12 @@ type DesignFile struct {
 	// sorted. Every component's external edge is hydrated from the matching
 	// entry at assembly; SplitDesign writes them back.
 	Dependencies []DependencyDefinition `json:"dependencies,omitempty"`
-	SourceSpec   string                 `json:"sourceSpec,omitempty"`
+	// LegacyCarriers are the components whose design.json still carries an
+	// external dependency's definition fields (a design from before the
+	// dependency file existed). The next save re-renders them as bare
+	// references and writes the lifted definitions — see derive.go.
+	LegacyCarriers []string `json:"-"`
+	SourceSpec     string   `json:"sourceSpec,omitempty"`
 }
 
 // DesignRootFile is the canonical root design document: the cell. Its presence
@@ -388,7 +393,7 @@ func AssembleDesign(files map[string]string) (*DesignFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	out.Dependencies = liftLegacyDefinitions(defs, out.Components)
+	out.Dependencies, out.LegacyCarriers = liftLegacyDefinitions(defs, out.Components)
 	hydrateExternalDependencies(out, files)
 	return out, nil
 }

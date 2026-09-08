@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/platform/agentfold"
 	"github.com/wso2/aep/aep-api/internal/platform/designspec"
 	"github.com/wso2/aep/aep-api/internal/platform/securityspec"
 )
@@ -132,6 +133,19 @@ func validateDesignBundle(files map[string]string) error {
 				verrs = append(verrs, FileValidationError{Path: key, Code: ve.Code, Message: ve.Message})
 			} else {
 				verrs = append(verrs, FileValidationError{Path: key, Code: designspec.CodeSchemaViolation, Message: err.Error()})
+			}
+			continue
+		}
+		// The shape rules the schema cannot say — the same ones the agent's
+		// write-gate and the fold enforce — so a file the platform commits is
+		// one the agent can keep editing.
+		for _, file := range []string{key, dependencyDirPrefix + name + "/" + SdkManifestFile} {
+			body, present := files[file]
+			if !present {
+				continue
+			}
+			if code, msg := agentfold.CheckDependencyFileForSave("specs/design/"+file, body); code != "" {
+				verrs = append(verrs, FileValidationError{Path: file, Code: code, Message: msg})
 			}
 		}
 	}

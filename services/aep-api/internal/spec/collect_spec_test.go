@@ -23,10 +23,10 @@ import (
 	"testing"
 )
 
-// CollectSpec (dependency-management — the collect-dependency-spec route). The
-// route resolves the {component, dep} external target, validates + normalizes
-// the OpenAPI contract, and atomically commits the spec file + the design.json
-// specPath edit (which records the dependency as having a stored contract).
+// CollectSpec / CollectDependencyContract. The route resolves the external
+// dependency, validates + normalizes the OpenAPI document, and atomically
+// commits it into the dependency's own directory with the dependency.json that
+// records it as the contract.
 
 const validOpenAPI = `openapi: 3.0.3
 info:
@@ -278,5 +278,23 @@ func TestAcceptDependencyAssumption_RefusesAContractNobodyAssumed(t *testing.T) 
 	}
 	if err := svc.AcceptDependencyAssumption(context.Background(), "acme", "web", "ghost", "admin", ""); !errors.Is(err, ErrDependencyNotFound) {
 		t.Fatalf("want ErrDependencyNotFound, got %v", err)
+	}
+}
+
+// A document cannot settle which system it belongs to, and an OpenAPI document
+// is not a GraphQL schema: both refusals keep the file the platform writes one
+// the agent's gates accept afterwards.
+func TestCollectDependencyContract_RefusesOpenCandidatesAndGraphQL(t *testing.T) {
+	t.Parallel()
+	files := designFilesWithDeps(`[{"kind":"external","name":"mail"},{"kind":"external","name":"shop"}]`)
+	files["dependencies/mail/dependency.json"] = `{"name":"mail","candidates":[{"name":"sendgrid","style":"rest-api"},{"name":"postmark","style":"rest-api"}]}`
+	files["dependencies/shop/dependency.json"] = `{"name":"shop","provider":"Shopify","style":"graphql"}`
+	svc := newService(readsFor(t, files))
+	svc.fileCommitter = &fakeCommitter{}
+	if _, err := svc.CollectDependencyContract(context.Background(), "acme", "web", "mail", []byte(validOpenAPI), ""); !errors.Is(err, ErrDependencyNotChosen) {
+		t.Fatalf("open candidates: want ErrDependencyNotChosen, got %v", err)
+	}
+	if _, err := svc.CollectDependencyContract(context.Background(), "acme", "web", "shop", []byte(validOpenAPI), ""); !errors.Is(err, ErrDependencyWrongKind) {
+		t.Fatalf("graphql: want ErrDependencyWrongKind, got %v", err)
 	}
 }

@@ -41,7 +41,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { FileText, Plug, TriangleAlert, Upload } from "@wso2/oxygen-ui-icons-react";
-import type { DesignDependencyNode } from "../api/designTree";
+import { dependencyFilePath, type DesignDependencyNode } from "../api/designTree";
 import {
   useAcceptDependencyAssumption,
   useProvideDependencyContract,
@@ -208,6 +208,10 @@ export function DependencyPage({
   const resolved = dep?.status === "resolved";
   const awaitingAcceptance = dep?.reason === "needs-acceptance";
   const hasContract = Boolean(dep?.contract);
+  // Narrowed once: inside the JSX closures TypeScript loses the `dep?.contract`
+  // guard, and the path helper takes the bare file name.
+  const contractFile = dep?.contract ?? "";
+  const sdkFile = dep?.sdk ?? "";
 
   return (
     <Box sx={{ height: "100%", overflow: "auto", p: 3 }}>
@@ -236,9 +240,13 @@ export function DependencyPage({
             {name}
           </Typography>
           {resolved ? (
-            <Button variant="outlined" onClick={() => onReconsider(name)}>
-              Reconsider
-            </Button>
+            // A reconsider is a conversation about a consumer's choice; with no
+            // consumer there is nobody to reconsider for.
+            state && state.usedBy.length > 0 && (
+              <Button variant="outlined" onClick={() => onReconsider(name)}>
+                Reconsider
+              </Button>
+            )
           ) : (
             <Button variant="contained" onClick={() => onResolve(name)}>
               Resolve
@@ -316,7 +324,7 @@ export function DependencyPage({
                 Accept the assumption
               </Button>
               {dep.contract && (
-                <Button variant="text" onClick={() => onOpenFile(`specs/design/dependencies/${name}/${dep.contract}`)}>
+                <Button variant="text" onClick={() => onOpenFile(dependencyFilePath(name, contractFile))}>
                   Read it first
                 </Button>
               )}
@@ -341,7 +349,7 @@ export function DependencyPage({
               size="small"
               startIcon={<FileText size={14} />}
               sx={{ alignSelf: "flex-start" }}
-              onClick={() => onOpenFile(`specs/design/dependencies/${name}/${dep.contract}`)}
+              onClick={() => onOpenFile(dependencyFilePath(name, contractFile))}
             >
               {dep.contract}
             </Button>
@@ -367,16 +375,24 @@ export function DependencyPage({
               variant="text"
               size="small"
               startIcon={<FileText size={14} />}
-              onClick={() => onOpenFile(`specs/design/dependencies/${name}/${dep.sdk}`)}
+              onClick={() => onOpenFile(dependencyFilePath(name, sdkFile))}
             >
               {dep.sdk}
             </Button>
             {dep.package && <Fact label="Package" value={dep.package} />}
           </Box>
         )}
-        {dep && dep.kind === "external" && dep.source !== "org" && !dep.candidates?.length && (
-          <ProvideContract projectName={projectName} name={name} replacing={hasContract} />
-        )}
+        {/* A document settles the contract, not the choice: with candidates
+            open or nothing identified yet, the provider comes first (Resolve),
+            and a registered org dependency's contract is the org record's. */}
+        {dep &&
+          dep.kind === "external" &&
+          dep.source !== "org" &&
+          !dep.candidates?.length &&
+          Boolean(dep.provider || dep.style) &&
+          dep.style !== "graphql" && (
+            <ProvideContract projectName={projectName} name={name} replacing={hasContract} />
+          )}
 
         {dep?.config && dep.config.length > 0 && (
           <>

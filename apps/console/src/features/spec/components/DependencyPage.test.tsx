@@ -151,3 +151,15 @@ describe("DependencyPage", () => {
     expect(screen.getByRole("button", { name: "dependency.json" })).toBeInTheDocument();
   });
 });
+
+describe("DependencyPage — when a document is not the next step", () => {
+  it("offers no upload before a system is identified, nor for an org-registered one", () => {
+    renderPage(stateOf({ status: "unresolved", reason: "needs-input" }, { blocking: true, todo: "Needs input" }));
+    expect(screen.queryByLabelText("OpenAPI document URL")).not.toBeInTheDocument();
+  });
+
+  it("offers no Reconsider for a resolved dependency nothing references", () => {
+    renderPage(stateOf({ status: "resolved", provider: "DHL", style: "rest-api", contract: "openapi.yaml" }, { usedBy: [] }));
+    expect(screen.queryByRole("button", { name: "Reconsider" })).not.toBeInTheDocument();
+  });
+});
