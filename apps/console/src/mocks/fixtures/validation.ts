@@ -26,7 +26,11 @@ type RunVerdict = NonNullable<
 // flight (see ValidationAttempt below) and whether the repo has an oracle at all:
 //   localStorage.setItem('aep:mock:validation-criteria', 'missing')
 // which drops validation-criteria.json from the file list, so the read 404s the way
-// it does for a version whose spec authored none (handlers/project.ts).
+// it does for a version whose spec authored none (handlers/project.ts). The same key
+// also takes:
+//   localStorage.setItem('aep:mock:validation-criteria', 'drifted')
+// which adds a criterion to the ORACLE that the report does not speak for — see
+// DRIFTED below.
 //
 // Setting it alone is enough: with no `aep:mock:project` chosen, the base scenario
 // becomes `deployed` rather than the usual `building`, because a verdict only
@@ -123,6 +127,49 @@ const CATALOGUE: CatalogueEntry[] = [
     method: "manual",
   },
 ];
+
+/**
+ * A criterion the oracle carries and the pinned report does not.
+ *
+ * Deliberately OUTSIDE the catalogue. build() derives both files from one outcome
+ * map, so every entry it can see lands in both — and drift is precisely the case
+ * where the two files disagree, which is why this is spliced into the oracle after
+ * the pair is built.
+ *
+ * Not a contrived state: the console reads the criteria at the branch tip and the
+ * report at the merge commit of the attempt that wrote it, so any criterion
+ * authored since that attempt looks exactly like this. Asking the agent for one
+ * more criterion after reading a failure is the ordinary way to get here.
+ */
+const DRIFTED: CatalogueEntry = {
+  req: "REQ-001",
+  statement: REQ_001,
+  id: "AC-001-c",
+  must: "A search with no matches explains that nothing was found",
+  method: "e2e",
+};
+
+/** The oracle with DRIFTED appended to its requirement; the report is left alone. */
+function withDrift(criteria: string): string {
+  const doc = JSON.parse(criteria) as {
+    requirements: {
+      id: string;
+      statement: string;
+      criteria: Record<string, unknown>[];
+    }[];
+  };
+  const entry = { id: DRIFTED.id, must: DRIFTED.must, method: DRIFTED.method };
+  const req = doc.requirements.find((r) => r.id === DRIFTED.req);
+  if (req) req.criteria.push(entry);
+  else {
+    doc.requirements.push({
+      id: DRIFTED.req,
+      statement: DRIFTED.statement,
+      criteria: [entry],
+    });
+  }
+  return JSON.stringify(doc, null, 2);
+}
 
 /** One criterion's outcome in a run report — the only thing a scenario varies. */
 interface Outcome {
@@ -372,14 +419,18 @@ const ARTIFACTS: Record<ValidationScenario, Artifacts> = {
 export function validationFiles(
   scenario: ValidationScenario,
   attempt: ValidationAttempt = "first",
+  drifted = false,
 ): { path: string; content: string }[] {
   // A repeat attempt is running OVER a failed one whose report is still committed —
   // which is what its copy counts. A first attempt has the oracle and nothing else.
   const { criteria, report } = isRepeat(scenario, attempt)
     ? FAILED
     : ARTIFACTS[scenario];
+  // Only the oracle moves: a report is written once and pinned, so drift can only
+  // ever come from the criteria side.
+  const oracle = criteria && drifted ? withDrift(criteria) : criteria;
   return [
-    ...(criteria ? [{ path: CRITERIA_PATH, content: criteria }] : []),
+    ...(oracle ? [{ path: CRITERIA_PATH, content: oracle }] : []),
     ...(report ? [{ path: REPORT_PATH, content: report }] : []),
   ];
 }

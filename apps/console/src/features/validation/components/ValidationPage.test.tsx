@@ -1116,7 +1116,7 @@ describe("ValidationPage lifecycle", () => {
 // and nothing in the product expanded. The wire value cannot change (the runner,
 // the report generator and the tests/e2e/specs/<AC-ID>.spec.ts path all key on
 // it), so the display name is the thing under test here.
-describe("ValidationPage criterion method badges", () => {
+describe("ValidationPage criterion rows", () => {
   function renderWithCriteria() {
     mockValidation = "passed";
     mockRun = run({
@@ -1128,34 +1128,46 @@ describe("ValidationPage criterion method badges", () => {
     renderPage(undefined);
   }
 
-  it("says auto rather than the e2e wire value", () => {
+  // One signal per row, and it is the verdict. A manual criterion used to carry
+  // TWO marks saying the same thing at opposite margins — a purple `manual` method
+  // badge on the left and a neutral "Manual" status chip on the right. The status
+  // chip is sufficient here, so the method mark is gone and the chip has moved into
+  // the column the badge used to hold.
+  it("carries the verdict alone, with no method mark", () => {
     renderWithCriteria();
 
-    // Two e2e criteria in the fixture, plus the summary tally's own badge.
-    expect(screen.getAllByText("auto")).toHaveLength(2);
-    expect(screen.queryByText("e2e")).not.toBeInTheDocument();
-    expect(screen.getByText("auto 2")).toBeInTheDocument();
+    expect(screen.getByText("Passed")).toBeInTheDocument();
+    expect(screen.getByText("Manual")).toBeInTheDocument();
+    // Neither the wire value, nor the word it was spelled as, nor the glyph's
+    // hover phrase — a page with results has no need to say who would have checked.
+    for (const word of ["e2e", "auto", "manual"]) {
+      expect(screen.queryByText(word)).not.toBeInTheDocument();
+    }
+    expect(
+      screen.queryByText("Validated automatically by the agent."),
+    ).not.toBeInTheDocument();
   });
 
-  it("leaves the manual badge alone", () => {
+  // The tile above already prints "N passed · M manual" and its method line. The
+  // view's own tally repeated those numbers a few rows lower on the same screen.
+  it("drops the summary tally the tile above already prints", () => {
     renderWithCriteria();
 
-    expect(screen.getByText("manual")).toBeInTheDocument();
-    expect(screen.getByText("manual 1")).toBeInTheDocument();
+    expect(screen.queryByText("auto 2")).not.toBeInTheDocument();
+    expect(screen.queryByText("manual 1")).not.toBeInTheDocument();
+    expect(screen.queryByText(/requirements ·/)).not.toBeInTheDocument();
   });
 
-  it("explains each method on hover", async () => {
+  // Inside REQ-001's card the `AC-001-` half of every criterion id is already on
+  // the page, so the rows print only what distinguishes them. The full id stays
+  // reachable on hover, being the handle for spec filenames and for the agent.
+  it("shortens the ids to what the card does not already say", () => {
     renderWithCriteria();
 
-    fireEvent.mouseOver(screen.getAllByText("auto")[0]!);
-    expect(
-      await screen.findByText("Validated automatically by the agent."),
-    ).toBeInTheDocument();
-
-    fireEvent.mouseOver(screen.getByText("manual"));
-    expect(
-      await screen.findByText("Requires manual validation."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("1")).toBeInTheDocument();
+    expect(screen.getAllByText("a").length).toBeGreaterThan(0);
+    expect(screen.queryByText("AC-001-a")).not.toBeInTheDocument();
+    expect(screen.queryByText("REQ-001")).not.toBeInTheDocument();
   });
 
   // The description explaining what criteria ARE belongs to the Spec view, where

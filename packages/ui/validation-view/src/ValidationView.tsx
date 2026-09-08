@@ -16,9 +16,9 @@
  * under the License.
  */
 
-import { forwardRef, useMemo, type ComponentPropsWithoutRef } from "react";
+import { useMemo } from "react";
 import { Alert, alpha, Box, Chip, Tooltip, Typography } from "@wso2/oxygen-ui";
-import { Check } from "@wso2/oxygen-ui-icons-react";
+import { Check, Sparkles, User } from "@wso2/oxygen-ui-icons-react";
 import {
   parseValidationCriteria,
   type Criterion,
@@ -30,29 +30,108 @@ import {
   type CriterionReport,
   type ValidationReport,
 } from "./report.js";
-import {
-  CRITERION_STATE_LABEL,
-  METHOD_COLOR,
-  METHOD_FALLBACK_COLOR,
-  METHOD_LABEL,
-  tallyCriterionMethods,
-} from "./counts.js";
+import { CRITERION_STATE_LABEL } from "./counts.js";
+import { shortCriterionId, shortRequirementId } from "./shortId.js";
 
-// The method colours are solid behind a badge here. Text color is computed for
-// contrast (getContrastText), so labels stay readable in both themes — the same
-// approach as the DesignView type badges and the OpenAPI viewer's method badges.
-// One line saying who does the checking, shown on hover. Only the two methods a
-// design turn can author carry one; anything else gets a bare badge rather than
-// an invented explanation.
-const METHOD_TOOLTIP: Record<string, string> = {
-  e2e: "Validated automatically by the agent.",
-  manual: "Requires manual validation.",
-};
-// Requirement ids are structural, so a muted slate keeps them from competing
-// with the colored method badges.
-const REQ_COLOR = "#546e7a";
+// Visually-hidden TEXT rather than an aria-label, for the reason StatusChip
+// records in the console: an aria-label on a roleless element is ignored by screen
+// readers, so an accessible name has to come from content. Mirrored here rather
+// than imported because this package does not depend on apps/console, and
+// @wso2/oxygen-ui does not re-export MUI's `visuallyHidden`.
+const VISUALLY_HIDDEN = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0 0 0 0)",
+  whiteSpace: "nowrap",
+  border: 0,
+} as const;
 
 const mono = { fontFamily: "monospace", fontSize: "0.875rem" } as const;
+
+/**
+ * The row's first column, which holds whichever single signal the row carries:
+ * the status chip when a run is attached, the method icon when none is.
+ *
+ * One constant per mode, because the width has to be identical on every row for
+ * the ids beside it to line up — and the failure block derives its indent from it,
+ * so the two can no longer drift the way `minWidth: 92` and `ml: "108px"` did.
+ *
+ * Sized to the longest chip label the vocabulary can produce, which is now
+ * "Not validated"; a longer one would push its own row's id out of the column. A
+ * short chip therefore leaves slack after it — the price of the column, and the
+ * reason DRIFT_LABEL is kept terse rather than descriptive.
+ */
+const GUTTER_CHIP = 108;
+const GUTTER_ICON = 22;
+/** The row's own flex gap, in px — theme spacing(1). */
+const ROW_GAP = 8;
+
+/**
+ * The height of a row's FIRST line, shared by everything sitting on it.
+ *
+ * Baseline alignment cannot do this job. An MUI Chip is `inline-flex` with
+ * `align-items: center`, so it has no baseline-aligned flex item and therefore no
+ * in-flow line box — CSS then synthesises its baseline from its bottom margin
+ * edge. `align-items: baseline` consequently sat the chip's BOTTOM on the
+ * assertion's baseline instead of its label, and because the chip (24px) and the
+ * id mark (~18px) are different heights, the two did not even agree with each
+ * other.
+ *
+ * So every occupant is given this exact height and centres its own content in it,
+ * and the assertion takes it as its `line-height`. The first line of the row is
+ * then one band that all three sit in the middle of, by construction rather than
+ * by inference — and it survives an assertion that wraps, because every later line
+ * is the same height too.
+ *
+ * 24px is the MUI small Chip's own height, so the tallest occupant sets it and
+ * nothing has to be stretched.
+ */
+const ROW_LINE = 24;
+
+/**
+ * A requirement number or a criterion letter, on a soft neutral ground.
+ *
+ * A ground rather than list punctuation (`1.`, `a)`) because these are names, not
+ * positions: ids are stable by contract — a spec file is named after its criterion,
+ * so renumbering one would orphan it — which means deleting a requirement leaves a
+ * gap. `1, 3, 4` reads correctly as names and reads as a rendering fault as a list.
+ * Neutral rather than coloured: on these rows colour belongs to the status chip and
+ * to the agent glyph.
+ *
+ * `full` is the unabbreviated id, on hover, and only when it differs from what is
+ * shown. It is the handle the reader needs elsewhere — spec filenames, report.json,
+ * telling the agent which criterion to change — and the short form cannot be typed
+ * back into any of them.
+ */
+function IdMark({ short, full }: { short: string; full: string }) {
+  const mark = (
+    <Box
+      component="span"
+      sx={(theme) => ({
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        // The row's shared band rather than padding of its own, so the mark sits
+        // in the same line as the chip and the assertion — see ROW_LINE.
+        height: `${ROW_LINE}px`,
+        minWidth: 20,
+        px: 0.75,
+        borderRadius: 0.75,
+        flexShrink: 0,
+        bgcolor: theme.palette.action.hover,
+        color: "text.secondary",
+        ...mono,
+      })}
+    >
+      {short}
+    </Box>
+  );
+  return short === full ? mark : <Tooltip title={full}>{mark}</Tooltip>;
+}
 
 // The MUI/Oxygen Chip color union — kept local so the state map stays typed.
 type ChipColor =
@@ -66,9 +145,9 @@ type ChipColor =
 
 // report.json status → the chip colour shown on a criterion when a run report is
 // joined in. The LABEL comes from CRITERION_STATE_LABEL (counts.ts), which the
-// consumer's tally line reads too — so a criterion's chip and the summary above
-// it can never call the same status by two different names. Unknown statuses fall
-// through to a neutral chip labelled verbatim.
+// consumer's own tally line reads too — so a row's chip and the verdict tile above
+// this view can never call the same status by two different names. Unknown statuses
+// fall through to a neutral chip labelled verbatim.
 const STATE_COLOR: Record<string, ChipColor> = {
   pass: "success",
   fail: "error",
@@ -77,73 +156,146 @@ const STATE_COLOR: Record<string, ChipColor> = {
   manual: "default",
 };
 
-type SolidBadgeProps = { label: string; color: string } & ComponentPropsWithoutRef<"span">;
-
-// Forwards its ref and any remaining props onto the Box, because Tooltip hands
-// its child both a ref and the hover/focus handlers that open it. The console
-// wraps un-forwarding components in an inline-flex Box instead (see the kind chip
-// in SkillsSection), which works here too — but that comment calls itself out as
-// standing in for a ref the child could not hold, and this badge is local enough
-// to just hold one.
-const SolidBadge = forwardRef<HTMLSpanElement, SolidBadgeProps>(function SolidBadge(
-  { label, color, ...rest },
-  ref,
-) {
-  return (
-    <Box
-      component="span"
-      ref={ref}
-      {...rest}
-      sx={(theme) => ({
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        px: 1,
-        py: 0.5,
-        borderRadius: 1,
-        flexShrink: 0,
-        fontFamily: "monospace",
-        fontSize: "0.6875rem",
-        fontWeight: 700,
-        letterSpacing: "0.06em",
-        textTransform: "uppercase",
-        bgcolor: color,
-        color: theme.palette.getContrastText(color),
-      })}
-    >
-      {label}
-    </Box>
-  );
-});
-
-// Says who checks a criterion, with a tooltip carrying what the word means —
-// the badge alone cannot, and it is the reader's first encounter with the
-// distinction. `count` is passed only by the summary tally, which shows the same
-// badge with its total appended, so both surfaces stay in step by construction.
-function MethodBadge({ method, count }: { method: string; count?: number }) {
-  const label = METHOD_LABEL[method] ?? method;
-  const badge = (
-    <SolidBadge
-      label={count === undefined ? label : `${label} ${count}`}
-      color={METHOD_COLOR[method] ?? METHOD_FALLBACK_COLOR}
-    />
-  );
-  const tooltip = METHOD_TOOLTIP[method];
-  return tooltip ? <Tooltip title={tooltip}>{badge}</Tooltip> : badge;
+/**
+ * Whether a validation run answers this method at all.
+ *
+ * `e2e` is the only one it does. generate-report.mjs gives an e2e criterion the
+ * test's own result and decides every other method from the method alone —
+ * `manual` for a manual criterion, `not_validated` for anything else it cannot
+ * automate — so what will become of those rows is knowable before the run starts.
+ *
+ * One predicate, read by all three places that need it: which glyph the Spec view
+ * shows, whether a live status may speak for a row, and whether "Pending" is a
+ * promise the run can keep. Shared deliberately — with the glyph claiming a person
+ * checks a `scenario` criterion while the awaiting branch still promised "Pending"
+ * for it, the two surfaces contradicted each other about the same row.
+ */
+function runAnswers(method: string): boolean {
+  return method === "e2e";
 }
 
-// The per-criterion run-state chip (only rendered when a report is joined in).
-function StateChip({ status }: { status: string }) {
+/**
+ * Who checks a criterion — a mark, not a word.
+ *
+ * `e2e` is the only method an agent drives, so it takes the console's agent glyph:
+ * the same Sparkles at the same primary.main that the agent chat, the "ask the
+ * agent" action and the nav already carry, so the row inherits a meaning the
+ * reader arrives with instead of teaching a new one.
+ *
+ * Everything else falls to the person. `manual` by definition; the legacy
+ * `scenario` and the `"unknown"` parse.ts assigns a criterion with no method
+ * because neither is ever automated, which leaves them somebody's to check in
+ * practice. That is also why one sentence covers all three: the icon is already
+ * claiming a human does the work, so the tooltip says exactly that much.
+ */
+function methodMark(method: string): {
+  Icon: typeof Sparkles;
+  color: string;
+  title: string;
+} {
+  return runAnswers(method)
+    ? {
+        Icon: Sparkles,
+        color: "primary.main",
+        title: "Validated automatically by the agent.",
+      }
+    : {
+        Icon: User,
+        color: "text.secondary",
+        title: "Requires manual validation.",
+      };
+}
+
+/**
+ * The gutter's occupant when no run is attached — the Spec view's whole case, and
+ * a validation view whose report would not parse.
+ *
+ * Icon-only, so the sentence is repeated as hidden text. Tooltip does put its
+ * title on the child as an `aria-label`, but the child is a bare span: an
+ * aria-label on a roleless element is ignored, which is the same trap StatusChip
+ * documents for a Chip with no onClick. Content-based naming works whatever the
+ * role, so that is what this uses.
+ */
+function MethodIcon({ method }: { method: string }) {
+  const { Icon, color, title } = methodMark(method);
   return (
+    <Tooltip title={title}>
+      {/* No vertical handling here: the gutter centres this in the row's shared
+          band (ROW_LINE), which is the same thing that puts a status chip on the
+          line. `flex` so the svg is not an inline box with its own leading. */}
+      <Box component="span" sx={{ display: "flex", color, flexShrink: 0 }}>
+        <Icon size={16} aria-hidden />
+        <Box component="span" sx={VISUALLY_HIDDEN}>
+          {title}
+        </Box>
+      </Box>
+    </Tooltip>
+  );
+}
+
+/**
+ * What the report says qualifies a verdict, as one sentence — or nothing.
+ *
+ * The two flags are independent in generate-report.mjs: `flaky` is only set on a
+ * pass, but `healed` is set before the status is decided. So a failure the agent
+ * tried to repair is a real row, and so is a pass that was both repaired and
+ * flaky — which is why all four readings are spelled out rather than concatenated
+ * from fragments that would read as a list of tags.
+ */
+function verdictNote(
+  status: string,
+  report: CriterionReport | undefined,
+): string | undefined {
+  const flaky = report?.flaky ?? false;
+  const healed = report?.healed ?? false;
+  if (!flaky && !healed) return undefined;
+  const verdict = CRITERION_STATE_LABEL[status] ?? status;
+  if (flaky && healed) {
+    return `${verdict}, but the test was flaky, and the agent repaired it.`;
+  }
+  if (flaky) return `${verdict}, but the test was flaky.`;
+  return status === "fail"
+    ? `${verdict}. The agent tried to repair the test.`
+    : `${verdict} after the agent repaired the test.`;
+}
+
+/**
+ * The per-criterion run-state chip (only rendered when a report is joined in).
+ *
+ * `note` is the report's qualifier on this verdict — flaky, healed, or both — and
+ * it rides the chip as a single `*` rather than as its own chips beside it. Those
+ * qualify THIS word, and as separate chips they read as independent facts and push
+ * the verdict out of the row's one aligned column. One mark covers every
+ * combination, because distinguishing them is all a second mark would buy and none
+ * of them changes what the reader does next.
+ *
+ * Declared `string | undefined` rather than optional: `exactOptionalPropertyTypes`
+ * is on, so a caller with nothing to say passes it explicitly.
+ */
+function StateChip({ status, note }: { status: string; note: string | undefined }) {
+  const label = CRITERION_STATE_LABEL[status] ?? status;
+  const chip = (
     <Chip
       size="small"
       variant="outlined"
       color={STATE_COLOR[status] ?? "default"}
       {...(status === "pass" ? { icon: <Check size={14} /> } : {})}
-      label={CRITERION_STATE_LABEL[status] ?? status}
+      label={
+        note === undefined ? (
+          label
+        ) : (
+          <>
+            <span aria-hidden>{`${label}*`}</span>
+            <Box component="span" sx={VISUALLY_HIDDEN}>
+              {note}
+            </Box>
+          </>
+        )
+      }
       sx={{ flexShrink: 0 }}
     />
   );
+  return note === undefined ? chip : <Tooltip title={note}>{chip}</Tooltip>;
 }
 
 /**
@@ -176,6 +328,11 @@ const LIVE_LABEL: Record<string, string> = {
 // and leave nothing to spend on this one.
 const LIVE_COLOR: Record<string, ChipColor> = { healing: "warning" };
 
+/** The chip for a criterion the pinned report predates — see CriterionChip. */
+const DRIFT_LABEL = "Out of run";
+const DRIFT_TOOLTIP =
+  "Authored after the last validation run, so it has no result yet.";
+
 // The per-criterion chip while the run is still working on it.
 function LiveChip({ status }: { status: string }) {
   return (
@@ -203,7 +360,9 @@ function LiveChip({ status }: { status: string }) {
  * current run spends re-working it. The report wins again the moment the cycle
  * settles, because the consumer stops supplying live statuses then.
  *
- * A view with no run attached yields no chip at all — see the `awaiting` guard.
+ * Only called when a run IS attached, so unlike its predecessor it always returns
+ * a chip. CriterionRow handles the no-run case, which shows who checks the
+ * criterion instead of what happened to it.
  */
 function CriterionChip({
   criterion,
@@ -216,50 +375,92 @@ function CriterionChip({
   live: string | undefined;
   awaiting: boolean;
 }) {
-  // A `manual` criterion never takes a live status. The run reports one — its
-  // test plan names every criterion, not only the ones an agent will work — but
-  // the run will never ANSWER this one, so a chip reading "Planned" promises a
-  // result nobody is going to produce, beside a badge saying as much. It is the
-  // only status such a row can receive, and nothing supersedes it: every later
-  // status needs a spec file it will never have.
-  if (live && criterion.method !== "manual") {
+  // A criterion the run does not answer never takes a live status. The run
+  // reports one — its test plan names every criterion, not only the ones an agent
+  // will work — but it will never ANSWER this row, so a chip reading "Planned"
+  // promises a result nobody is going to produce. It is the only status such a
+  // row can receive, and nothing supersedes it: every later status needs a spec
+  // file it will never have.
+  if (live && runAnswers(criterion.method)) {
     // pass/fail arrive on the live feed too — report.json's own words, so its chip.
-    return LIVE_LABEL[live] ? <LiveChip status={live} /> : <StateChip status={live} />;
+    return LIVE_LABEL[live] ? (
+      <LiveChip status={live} />
+    ) : (
+      <StateChip status={live} note={undefined} />
+    );
   }
-  if (report) return <StateChip status={report.status} />;
+  if (report) {
+    return (
+      <StateChip status={report.status} note={verdictNote(report.status, report)} />
+    );
+  }
 
-  // Nothing awaited means no run is attached at all: the Spec view renders this
-  // same pane over the plain oracle, where any chip would name a run that does
-  // not exist. Checked HERE rather than first, because "this row has no signal"
-  // and "this view has no run" are different things — an `unreported` attempt
-  // has live statuses on other rows and none on this one.
-  if (!awaiting) return null;
+  // A criterion the run does not answer gets its final word rather than
+  // "Pending": no result is coming, so a chip promising one is a claim the report
+  // will contradict. Which final word is decided by the method alone, which is
+  // why it can be said this early.
+  //
+  // "Pending" itself is local rather than a sixth CRITERION_STATE_LABEL entry:
+  // that map is report.json's vocabulary, and a criterion with no report has no
+  // status to name.
+  if (awaiting) {
+    if (!runAnswers(criterion.method)) {
+      return (
+        <StateChip
+          status={criterion.method === "manual" ? "manual" : "not_validated"}
+          note={undefined}
+        />
+      );
+    }
+    return (
+      <Chip size="small" variant="outlined" label="Pending" sx={{ flexShrink: 0 }} />
+    );
+  }
 
-  // A manual criterion gets its final word rather than "Pending": the run will
-  // never answer it, so a chip promising a result is a claim the report
-  // contradicts. "Pending" is local rather than a sixth CRITERION_STATE_LABEL
-  // entry: that map is report.json's vocabulary, and a criterion with no report
-  // has no status to name.
-  return criterion.method === "manual" ? (
-    <StateChip status="manual" />
-  ) : (
-    <Chip size="small" variant="outlined" label="Pending" sx={{ flexShrink: 0 }} />
+  // A settled run whose report has no row for this criterion. The consumer reads
+  // the criteria at the branch tip and the report at the merge commit of the
+  // attempt that wrote it, so a criterion authored since then cannot have a
+  // result — which is the ordinary authoring loop (run, read a failure, ask the
+  // agent for another criterion), not a fault. Hence a neutral chip and not a
+  // `warning`: colouring the expected state teaches the reader to discount the
+  // colour. Local wording for the same reason "Pending" above is local — this
+  // criterion is absent from report.json, so report.json has no word for it.
+  return (
+    <Tooltip title={DRIFT_TOOLTIP}>
+      <Chip
+        size="small"
+        variant="outlined"
+        label={DRIFT_LABEL}
+        sx={{ flexShrink: 0 }}
+      />
+    </Tooltip>
   );
 }
 
-// One acceptance criterion: method badge, its id, the atomic assertion, its
-// status chip (CriterionChip decides which one wins), healed/flaky markers, and
-// — for a failure — the spec path and message beneath.
+// One acceptance criterion: its single signal in the gutter — the status chip when
+// a run is attached, otherwise who checks it — then its letter, the atomic
+// assertion, and, for a failure, the spec path and message beneath.
+//
+// One signal and not two. A manual criterion used to carry a purple MANUAL badge
+// here AND a neutral "Manual" status chip at the far end of the row, saying the
+// same thing twice at opposite margins; and flaky/healed were two more chips
+// competing with the verdict they qualify. The gutter now holds exactly one thing,
+// which is what lets it be a fixed width and the letters beside it line up.
 function CriterionRow({
   criterion,
+  requirementId,
   report,
   live,
   awaiting,
+  hasRun,
 }: {
   criterion: Criterion;
+  /** The card this row sits in, so the letter can drop the prefix it repeats. */
+  requirementId: string;
   report: CriterionReport | undefined;
   live: string | undefined;
   awaiting: boolean;
+  hasRun: boolean;
 }) {
   const failed = report?.status === "fail";
   return (
@@ -267,33 +468,49 @@ function CriterionRow({
     // a failure block stays inside the criterion it belongs to instead of being cut
     // off from its own assertion.
     <Box sx={{ py: 1 }}>
-      <Box sx={{ display: "flex", gap: 1.5, alignItems: "flex-start" }}>
-        <Box sx={{ minWidth: 92, flexShrink: 0, pt: "1px" }}>
-          <MethodBadge method={criterion.method} />
+      {/* `flex-start`, so the marks stay on the FIRST line of an assertion that
+          wraps rather than drifting to the middle of it. Alignment within that
+          line is ROW_LINE's job, not this property's. */}
+      <Box
+        sx={{ display: "flex", gap: `${ROW_GAP}px`, alignItems: "flex-start" }}
+      >
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            height: `${ROW_LINE}px`,
+            minWidth: hasRun ? `${GUTTER_CHIP}px` : `${GUTTER_ICON}px`,
+            flexShrink: 0,
+          }}
+        >
+          {hasRun ? (
+            <CriterionChip
+              criterion={criterion}
+              report={report}
+              live={live}
+              awaiting={awaiting}
+            />
+          ) : (
+            <MethodIcon method={criterion.method} />
+          )}
         </Box>
-        <Typography component="span" sx={{ ...mono, flexShrink: 0 }}>
-          {criterion.id}
-        </Typography>
-        <Typography variant="body2" sx={{ flexGrow: 1 }}>
+        <IdMark
+          short={shortCriterionId(criterion.id, requirementId)}
+          full={criterion.id}
+        />
+        <Typography
+          variant="body2"
+          sx={{ flexGrow: 1, lineHeight: `${ROW_LINE}px` }}
+        >
           {criterion.must}
         </Typography>
-        {report?.flaky && (
-          <Chip size="small" variant="outlined" color="warning" label="flaky" sx={{ flexShrink: 0 }} />
-        )}
-        {report?.healed && (
-          <Chip size="small" variant="outlined" label="healed" sx={{ flexShrink: 0 }} />
-        )}
-        <CriterionChip
-          criterion={criterion}
-          report={report}
-          live={live}
-          awaiting={awaiting}
-        />
       </Box>
-      {/* Failure detail sits full-width beneath the row (indented past the
-          method badge) so a long trace never crowds the assertion. */}
+      {/* Failure detail sits full-width beneath the row, indented to where the
+          criterion's letter starts, so a long trace never crowds the assertion. A
+          failure only exists with a report attached, so the chip gutter is the
+          right one to measure from. */}
       {failed && (report?.failureLocation || report?.spec || report?.failure) && (
-        <Box sx={{ mt: 0.75, ml: "108px" }}>
+        <Box sx={{ mt: 0.75, ml: `${GUTTER_CHIP + ROW_GAP}px` }}>
           {/* Prefer the reporter's `<file>:<line>`, which points at the failing
               assertion rather than merely the spec that contains it. The gate
               above admits it on its own: a reporter can hand back a location with
@@ -344,11 +561,13 @@ function RequirementCard({
   statuses,
   live,
   awaiting,
+  hasRun,
 }: {
   requirement: Requirement;
   statuses: ValidationReport | undefined;
   live: LiveStatuses | undefined;
   awaiting: boolean;
+  hasRun: boolean;
 }) {
   const count = requirement.criteria.length;
   return (
@@ -364,18 +583,31 @@ function RequirementCard({
         mb: 3,
       }}
     >
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
-        <SolidBadge label={requirement.id} color={REQ_COLOR} />
-        <Typography variant="caption" color="text.secondary">
-          {count} {count === 1 ? "criterion" : "criteria"}
+      {/* The number leads the statement, echoing the rows below where the letter
+          leads the assertion — so the card reads the same way at both levels. The
+          "N criteria" caption that used to sit up here is gone: it counted a list
+          the reader is looking at. */}
+      {/* The same shared-band idiom as the rows below, so the number sits on the
+          statement's first line and stays there when the statement wraps. */}
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: `${ROW_GAP}px`,
+          mb: count > 0 ? 1.5 : 0,
+        }}
+      >
+        <IdMark
+          short={shortRequirementId(requirement.id)}
+          full={requirement.id}
+        />
+        <Typography
+          variant="body1"
+          sx={{ fontWeight: 500, lineHeight: `${ROW_LINE}px` }}
+        >
+          {requirement.statement}
         </Typography>
       </Box>
-      <Typography
-        variant="body1"
-        sx={{ fontWeight: 500, mb: count > 0 ? 1.5 : 0 }}
-      >
-        {requirement.statement}
-      </Typography>
       {count === 0 ? (
         <Typography variant="body2" color="text.secondary">
           No criteria.
@@ -396,9 +628,11 @@ function RequirementCard({
             <CriterionRow
               key={c.id}
               criterion={c}
+              requirementId={requirement.id}
               report={statuses?.get(c.id)}
               live={live?.[c.id]}
               awaiting={awaiting}
+              hasRun={hasRun}
             />
           ))}
         </Box>
@@ -427,16 +661,18 @@ function ValidationBody({
   awaitingReport: boolean;
 }) {
   const { requirements } = criteria;
-  // Per-method tally for the summary header, from counts.ts so the consumer's own
-  // method line (the console's tile, while an attempt is still running) counts the
-  // same criteria in the same order. The per-run-state tally is deliberately NOT
-  // here: it belongs with the verdict it explains, which the consumer renders above
-  // this view (tallyCriterionStates), and duplicating it here would put the same
-  // numbers on the page twice.
-  const methods = useMemo(() => tallyCriterionMethods(criteria), [criteria]);
-  // Every criterion has exactly one method, so the tally is a partition of them.
-  const total = methods.reduce((n, m) => n + m.count, 0);
-
+  /**
+   * Whether a RUN is attached, which decides what every row's gutter holds: its
+   * status chip, or — with no run to report — who checks it.
+   *
+   * Read from `statuses`, NOT from the `report` prop. The prop is raw text and
+   * parsing it can fail, which leaves `statuses` undefined while a report WAS
+   * supplied; keying off the prop would then hand every row the drift chip,
+   * announcing that all of them were authored after the last run when the truth is
+   * that the file is unreadable. This way such a view degrades to the plain
+   * oracle, with the warning Alert above it naming the real problem.
+   */
+  const hasRun = statuses !== undefined || awaitingReport;
   const reqCount = requirements.length;
   return (
     // `height`/`overflow` are the file-pane contract and stay unconditional: on a
@@ -467,41 +703,32 @@ function ValidationBody({
           </Typography>
         )}
 
-        {/* Summary — totals plus a colored tally per verification method */}
-        <Box
-          sx={{
-            mt: 1,
-            mb: 3,
-            display: "flex",
-            alignItems: "center",
-            gap: 1.5,
-            flexWrap: "wrap",
-          }}
-        >
-          <Typography variant="body2" color="text.secondary">
-            {reqCount} {reqCount === 1 ? "requirement" : "requirements"} ·{" "}
-            {total} {total === 1 ? "criterion" : "criteria"}
-          </Typography>
-          {methods.map(({ method, count }) => (
-            <MethodBadge key={method} method={method} count={count} />
-          ))}
-        </Box>
+        {/* No summary line here. It read "N requirements · M criteria" over a
+            per-method tally, and on the Validations page it sat directly beneath a
+            tile already printing both — the same numbers twice, a screen apart.
+            The counts that a reader acts on belong with the verdict that explains
+            them, which the consumer renders above this view.
 
-        {reqCount === 0 ? (
-          <Typography variant="body2" color="text.secondary">
-            No validation criteria.
-          </Typography>
-        ) : (
-          requirements.map((r) => (
-            <RequirementCard
-              key={r.id}
-              requirement={r}
-              statuses={statuses}
-              live={live}
-              awaiting={awaitingReport}
-            />
-          ))
-        )}
+            The gap it used to leave below itself now belongs to the list, which is
+            what it was separating the heading from. */}
+        <Box sx={{ mt: 3 }}>
+          {reqCount === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No validation criteria.
+            </Typography>
+          ) : (
+            requirements.map((r) => (
+              <RequirementCard
+                key={r.id}
+                requirement={r}
+                statuses={statuses}
+                live={live}
+                awaiting={awaitingReport}
+                hasRun={hasRun}
+              />
+            ))
+          )}
+        </Box>
       </Box>
     </Box>
   );

@@ -48,19 +48,28 @@ export const CRITERION_STATE_LABEL: Record<string, string> = {
  * `e2e` is the contract shared with the runner, the report generator and the
  * spec-path convention, so it cannot be renamed — but it is an acronym the reader
  * has to expand, which the console lexicon forbids. The same split
- * CRITERION_STATE_LABEL draws for run statuses, and here for the same reason: the
- * badge on a criterion and the consumer's method tally must call a method by one
- * name. A method with no entry renders verbatim, so `manual` and anything
- * unrecognised are unaffected.
+ * CRITERION_STATE_LABEL draws for run statuses, and here for the same reason: two
+ * surfaces naming a method must name it the same way. A method with no entry
+ * renders verbatim, so `manual` and anything unrecognised are unaffected.
+ *
+ * The criterion rows no longer read this — they mark the method with a glyph
+ * rather than a word (ValidationView's methodMark) — so the remaining readers are
+ * the consumer's own prose and tally, which is why it still has to be one word in
+ * one place.
  */
 export const METHOD_LABEL: Record<string, string> = {
   e2e: "auto",
 };
 
 /**
- * criterion method → its identifying colour. Solid behind a badge, and a wash
- * behind the same word said in prose, so a consumer naming a method in a sentence
- * can mark it with the colour the reader will meet on every row.
+ * criterion method → its identifying colour, as a wash behind the method's word
+ * said in prose, so a consumer naming a method in a sentence can mark it as a term
+ * rather than leave it as ordinary text.
+ *
+ * It used to sit solid behind a badge on every criterion row as well. Those rows
+ * now carry a glyph on the console's own agent/person colours instead, so a
+ * consumer's sentence is the only reader left — nothing on screen has to match
+ * these hexes any more.
  */
 export const METHOD_COLOR: Record<string, string> = {
   e2e: "#1976d2",

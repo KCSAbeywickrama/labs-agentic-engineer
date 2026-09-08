@@ -1812,25 +1812,42 @@ describe("SpecView validation criteria explanation", () => {
     expect(screen.getByText(/To change one, ask the agent/)).toBeInTheDocument();
   });
 
-  it("puts no status chip on the preview, for any method", () => {
+  it("marks who checks each criterion, and never with a run signal", () => {
     // This pane has no run attached — it is a file preview of the oracle — so a
     // chip here would name a run that does not exist. `manual` is the one that
     // regressed: a rule giving manual criteria their final word was ranked above
     // the has-a-run check, and stamped "Manual" onto every preview.
     render(<SpecView projectName="proj1" />);
 
-    // The method BADGE still says manual (lowercase; the chip would capitalise).
-    expect(screen.getByText("manual")).toBeInTheDocument();
+    // Each row's mark is a glyph, so its phrase is what identifies it. The glyph
+    // carries no visible text of its own, which is why the phrase is also the
+    // accessible name.
+    expect(
+      screen.getByText("Validated automatically by the agent."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Requires manual validation.")).toBeInTheDocument();
     for (const chip of ["Manual", "Pending", "Passed", "Failed", "Planned"]) {
       expect(screen.queryByText(chip)).not.toBeInTheDocument();
     }
   });
 
-  it("names the methods without the e2e acronym", () => {
+  it("names no method at all — the glyph does it", () => {
+    // `e2e` is an acronym the console lexicon forbids, and it used to be spelled
+    // "auto" on a badge. Neither word is on the row now, so neither can leak.
     render(<SpecView projectName="proj1" />);
 
-    expect(screen.getByText("auto")).toBeInTheDocument();
-    expect(screen.getByText("manual")).toBeInTheDocument();
-    expect(screen.queryByText("e2e")).not.toBeInTheDocument();
+    for (const word of ["e2e", "auto", "manual"]) {
+      expect(screen.queryByText(word)).not.toBeInTheDocument();
+    }
+  });
+
+  it("shortens the ids, keeping the full one on hover", () => {
+    render(<SpecView projectName="proj1" />);
+
+    expect(screen.getByText("1")).toBeInTheDocument();
+    expect(screen.getByText("a")).toBeInTheDocument();
+    expect(screen.getByText("b")).toBeInTheDocument();
+    expect(screen.queryByText("AC-001-a")).not.toBeInTheDocument();
+    expect(screen.queryByText("REQ-001")).not.toBeInTheDocument();
   });
 });
