@@ -107,7 +107,7 @@ export interface RunEventView {
 }
 
 /** The kinds that carry no row at all — see `isSilentKind`. */
-const SILENT_KINDS = new Set(["agent_progress", "work_item", "heartbeat"]);
+const SILENT_KINDS = new Set(["agent_progress", "work_item", "heartbeat", "task_started"]);
 
 /**
  * Kinds that are STATE, not rows: a surface repaints something it already drew
@@ -118,6 +118,20 @@ const SILENT_KINDS = new Set(["agent_progress", "work_item", "heartbeat"]);
  * row repainted, not five rows printed), and `heartbeat` says only that the
  * silence is explained. Exported because a consumer that folds them still wants
  * to know, without duplicating the list, that formatting them is a no-op.
+ *
+ * `task_started` is here for a different reason and it is the one worth
+ * spelling out: it is a DUPLICATE, not a state. One backgrounded command puts
+ * three events on the wire — the `tool_use` (or `gh_action`) carrying the
+ * command, then a `task_started` carrying the same command plus the id the
+ * runtime minted for it, then a `task_settled`. Printing all three made 47
+ * background launches 141 rows in one live run (2026-09-08), two of them
+ * identical text. The fold belongs HERE rather than in the producer because the
+ * event is not redundant on the wire: `buildCrew` opens its background-task row
+ * from `task_started`, so a task that is merely still running would otherwise
+ * be invisible until it settled. What is redundant is the ROW, and a row is a
+ * renderer's word. The action is announced once by the `tool_use` and the
+ * outcome once by `task_settled` — one action, one outcome, the same shape every
+ * other tool call has.
  */
 export function isSilentKind(kind: string): boolean {
   return SILENT_KINDS.has(kind);
@@ -189,6 +203,10 @@ export function agentReportFromStarted(e: RunEventView): AgentReport {
     role: e.role,
     status: "running",
     background: e.background,
+    // The producer declared this agent. Everything else that opens a report —
+    // a first sighting, a settle with no start — leaves it unset, which is what
+    // stops a surface treating an unannounced author as an announced one.
+    declared: true,
   };
 }
 
@@ -240,10 +258,16 @@ export function formatEvent(e: RunEventView): FormattedLine {
       return { text: `▸ ${parts.join(" · ")}`, tone: "info" };
     }
     case "agent_started": {
-      // The section header. `background` is printed only when the runtime said
-      // FALSE is also worth knowing — the platform forces fan-out into the
-      // foreground, so a true here is the forcing having failed, and that is
-      // exactly what a reader of an empty section needs to see.
+      // The section header. `background` is printed when the runtime said TRUE:
+      // this agent was spawned DETACHED, so its parent kept working and the
+      // section will fill in interleaved with everyone else's. That is the
+      // ordinary shape of a build — fan-out is backgrounded by default
+      // (ADR-0011) and the skill, not the platform, decides it — so the word is
+      // context for reading an interleaved feed, not an alarm. `false` is the
+      // notable case and is never printed here, because a parent blocked inside
+      // a child is already said where it reads better: the crew view shows the
+      // parent WAITING ON that child by name. Absence is neither answer; the
+      // runtime simply did not say.
       const parts = [agentName(e)];
       if (e.background) parts.push("background");
       if (e.model) parts.push(e.model);
@@ -281,15 +305,11 @@ export function formatEvent(e: RunEventView): FormattedLine {
       return { text: parts.filter(Boolean).join(" "), tone };
     }
     case "task_started":
-      // A backgrounded shell command. It outlives the tool call that started it,
-      // so it is an action of its own rather than that call's outcome. The
-      // producer's own summary where it gave one; the task id is a poor name but
-      // the only one left, and an unnamed background task is how a reader loses
-      // track of one.
-      return {
-        text: `⟳ background ${e.summary ?? e.command ?? e.taskId ?? "task"}`,
-        tone: "muted",
-      };
+      // State, never a row — see isSilentKind, where the reasoning is: the
+      // `tool_use` for the call that launched this task already printed the
+      // command, and repeating it is the same sentence twice. The id this event
+      // carries is what a surface needs; the text is not.
+      return { text: "", tone: "muted" };
     case "task_settled": {
       // Always a row: nothing else on the feed reveals how a backgrounded
       // command ended, and by the time it does the run has usually moved on.

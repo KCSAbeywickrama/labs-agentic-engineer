@@ -36,6 +36,18 @@ package codingagent
 // inferences are marked as such — a synthesised `agent_started` carries
 // `role: "inferred"`, which is how a reader tells an agent the runtime declared
 // from one this reader deduced.
+//
+// THE LIFT DOES NOT NUMBER. Every event it returns carries `seq: 0`, and the
+// recorder stamps the real one as it appends (recordingSession.number). That
+// split is not tidiness — it is the fix for a measured data loss. Numbering here
+// could only ever be a function of the PRODUCER's seq, and a third of this
+// stream has none: raw stdout (container bootstrap, a stray library write, a
+// subprocess writing straight to fd 1, a crash tail) reaches the default arm
+// below with no envelope at all. Those lines were all numbered 0, so a consumer
+// deduping on (cycle, attempt, seq) — which the contract tells it to — kept the
+// first and threw the rest away. A five-line npm notice arrived as one line; a
+// five-line stack trace would have arrived as its first line. Only the party
+// that writes the events in order can number them, and that is the recorder.
 
 import (
 	"encoding/json"
@@ -123,6 +135,13 @@ func (l *lifter) line(raw, podTs string) []gen.RunEvent {
 		if ev.AgentID == "" {
 			ev.AgentID = leadAgentID
 		}
+		// The producer's own seq is DROPPED here and re-stamped by the recorder.
+		// It is not lost: the recorder reads it off the raw line for dedupe and
+		// gap detection (producerSeq), which is the only job it can do — one
+		// producer's numbering cannot also number the seq-less lines interleaved
+		// with it. In the ordinary case the recorder hands the line back the same
+		// number, because both sequences are dense and start at 1.
+		ev.Seq = 0
 		return []gen.RunEvent{ev}
 	}
 	ln := parseProgressLine(raw)
@@ -173,13 +192,14 @@ func (l *lifter) lift(ln runnerLine) []gen.RunEvent {
 }
 
 // announce is the synthesised `agent_started` for a subagent this page has just
-// met. depth is 1 because that is all a v1 feed can support: it carried one
+// met. It is returned BEFORE the line that revealed the agent, and the recorder
+// numbers the slice in order, so the row that opens an agent always precedes the
+// row that reports on it. depth is 1 because that is all a v1 feed can support: it carried one
 // `emitterId` per line and no parent, so every agent it can describe is one the
 // lead spawned. Saying 1 rather than leaving it absent is the honest reading —
 // absence on this kind would mean "the lead's own event".
 func (l *lifter) announce(ln runnerLine) gen.RunEvent {
 	ev := l.base(ln, gen.RunEventKindAgentStarted)
-	ev.Seq = announceSeq(ln.Seq)
 	ev.Label = capText(ln.EmitterLabel, capShortText)
 	ev.Depth = 1
 	ev.Role = roleInferred
@@ -194,7 +214,6 @@ func (l *lifter) base(ln runnerLine, kind gen.RunEventKind) gen.RunEvent {
 	}
 	return gen.RunEvent{
 		V:       gen.RunEventV2,
-		Seq:     liftedSeq(ln.Seq),
 		TS:      parseEventTime(ln.Ts),
 		Kind:    kind,
 		AgentID: agent,
@@ -341,22 +360,6 @@ func (l *lifter) attributeAgent(ev *gen.RunEvent, ln runnerLine) {
 	ev.Label = capText(ln.EmitterLabel, capShortText)
 	ev.Depth = 1
 }
-
-// liftedSeq maps a runner's v1 seq onto the v2 sequence.
-//
-// It cannot be the identity. (attempt, seq) is the feed's dedup key, and the
-// lift turns one v1 line into TWO events when it meets a subagent for the first
-// time — under identity numbering the synthesised `agent_started` and the line
-// that revealed it would share a seq and one of them would be deduped away.
-// Doubling leaves exactly one free slot before every line (announceSeq), keeps
-// the order the runner wrote, and is a pure function of the v1 seq — so the same
-// line lifts to the same seq on every re-read of a sliding log window, which is
-// what makes the client's dedup work at all.
-func liftedSeq(v1Seq int64) int64 { return v1Seq * 2 }
-
-// announceSeq is the slot immediately before a line's own, where the synthesised
-// `agent_started` goes.
-func announceSeq(v1Seq int64) int64 { return v1Seq*2 - 1 }
 
 // runOutcome maps v1's result status onto the v2 outcome. v1 had no word for a
 // cancelled run — it only ever wrote success or failure — so an unrecognised

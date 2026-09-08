@@ -131,9 +131,17 @@ func NewRecordingStore(workspaceRoot string, maxCycleBytes int64) *RecordingStor
 type recordingMeta struct {
 	State   gen.RunCycleViewRecording `json:"state"`
 	Attempt int                       `json:"attempt"`
-	Events  int64                     `json:"events"`
-	Bytes   int64                     `json:"bytes"`
-	Cursor  recordCursor              `json:"cursor"`
+	// Events is how many lines the CYCLE's files hold, across attempts. It is a
+	// count of rows and not a position, so it is not Cursor.LastSeq and the two
+	// are not required to agree: LastSeq is one attempt's highest position, and
+	// the dark-zone markers (stable negative seqs) are counted here and occupy no
+	// position at all. What the two must never do is disagree about whether an
+	// event EXISTS — which they did while seq-less prose was recorded and left
+	// out of the cursor entirely, so state.json reported 1189 events under a
+	// cursor that had only ever seen 1184 of them.
+	Events int64        `json:"events"`
+	Bytes  int64        `json:"bytes"`
+	Cursor recordCursor `json:"cursor"`
 	// Closed marks a recording nobody will write to again. It is distinct from
 	// State because `gaps` is set the MOMENT a gap is detected, while the run is
 	// still going: without this flag a restart would read `gaps`, conclude the
@@ -148,19 +156,28 @@ type recordingMeta struct {
 // otherwise write twice, or misread as missing?":
 //
 //   - ProducerSeq is the highest ENVELOPE seq recorded — the producer's own
-//     numbering, before the lift doubles it. Dedupe and gap detection both run
-//     in that space and not in the v2 one, because a lifted v1 feed occupies
-//     only the EVEN seqs (2·s, with 2·s−1 reserved for a synthesised
-//     `agent_started`) and a gap detector reading v2 seqs would call every
-//     single step a missing event.
+//     numbering, which is a different sequence from the one written to the file.
+//     Dedupe and gap detection both run in THIS space, because it is the only
+//     one that can answer "did the producer write something we never saw": the
+//     recorded seq counts what the platform wrote down, so a hole in it is
+//     invisible by construction, and a lift that turns one line into two events
+//     (an inferred `agent_started` and the line that revealed it) would make a
+//     detector reading recorded seqs report a missing event between every pair.
 //   - ProseTS is the pod-clock timestamp of the last seq-LESS line recorded
-//     (container bootstrap output, a stray library write). Those carry no
-//     producer numbering at all, so the only cursor they have is the kubelet's
-//     own monotonic stamp; a re-read skips anything at or before it. Counting
-//     them instead would not survive an incremental read, which starts partway
-//     down the log and has no idea how many lines it skipped.
-//   - LastSeq is the highest v2 seq actually written, which is where a gap
-//     notice goes — the slot after it is free in both numbering schemes.
+//     (container bootstrap output, a stray library write, a subprocess writing
+//     straight to fd 1, a crash tail). Those carry no producer numbering at all,
+//     so the only cursor they have is the kubelet's own monotonic stamp; a
+//     re-read skips anything at or before it. Counting them instead would not
+//     survive an incremental read, which starts partway down the log and has no
+//     idea how many lines it skipped. It is this cursor — persisted, so it
+//     outlives a restart and the final full re-read — that makes the recorder's
+//     own numbering of those lines stable.
+//   - LastSeq is the last position handed out in the v2 feed. It is the
+//     recorder's own numbering, not the producer's: EVERY event written takes
+//     the next one (recordingSession.number), which is why the cursor now
+//     accounts for the seq-less lines it used to ignore. Dark-zone markers are
+//     the one exception — they keep their stable negative seqs and consume no
+//     position.
 //   - BootSeq is the last dark-zone marker written. Those markers carry stable
 //     NEGATIVE seqs and are re-derived on every poll, so recording one per poll
 //     would write the same row hundreds of times; only a state TRANSITION is

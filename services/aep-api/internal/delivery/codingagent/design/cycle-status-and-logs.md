@@ -64,6 +64,16 @@ The runner makes **no network call** for any of this. Its stdout is still the
 one transport, which is what keeps a runner that cannot reach the platform from
 being a runner whose work is invisible.
 
+**A `run_settled` does not close the feed** — the pod's terminal phase does. The
+runner's last event is a statement about its own session, not about the
+container's stdout, and the container keeps writing after it: a package manager's
+exit notice, a shutdown hook, a crash tail from whatever was still running.
+Those lines are recorded like any other, because stopping at `run_settled` would
+throw away the output most likely to explain a run that ended badly. The cost is
+that a reader cannot assume `run_settled` is the last line — it is the line that
+says how the run ENDED, and `state.json`'s `closed` is the one that says nothing
+more is coming.
+
 ### On disk
 
 ```text
@@ -71,8 +81,11 @@ being a runner whose work is invisible.
 <workspaceRoot>/runs/<orgId>/<cycleId>/state.json                what can be served
 ```
 
-`state.json` carries the state, the newest attempt, and the recorder's own
-cursor into the producer's stream. The state machine:
+`state.json` carries the state, the newest attempt, the cycle's event and byte
+counts, and the recorder's own cursor. `events` counts ROWS across attempts while
+`cursor.lastSeq` is one attempt's highest position, so the two need not be equal
+— the dark-zone markers are counted and hold no position. What they must never
+do is disagree about whether an event exists. The state machine:
 
 ```text
 (no directory) ─── none
@@ -93,11 +106,15 @@ feed presented as the whole of it is the one thing the state exists to prevent.
 screen and are very different bugs.
 
 **Dedupe and gap detection run in the PRODUCER's numbering** — the `seq` on the
-raw envelope, before the lift doubles it. A lifted v1 feed occupies only the
-even v2 seqs (`2·s`, with `2·s−1` reserved for a synthesised `agent_started`),
-so a detector reading v2 seqs would report a missing event between every single
-pair of lines. A seq-less line (container bootstrap output) has no numbering at
-all, so its cursor is the kubelet's own monotonic timestamp.
+raw envelope, which is a different sequence from the one written to the file. It
+is the only numbering that can answer "did the producer write something we never
+saw": the recorded seq counts what the platform wrote down, so a hole in it is
+invisible by construction, and one line can lift to two events (an inferred
+`agent_started` and the line that revealed it), which would make a detector
+reading recorded seqs report a missing event between every pair. A seq-less line
+(container bootstrap output, a stray library write, a subprocess writing straight
+to fd 1, a crash tail) has no producer numbering at all, so its cursor is the
+kubelet's own monotonic timestamp.
 
 A detected gap tries the observability archive first (**its only remaining
 job**: it indexed the same pod's output all along, so a burst the platform's own
@@ -226,12 +243,24 @@ declared. Announcements are per PAGE, not per run — a live tail is a sliding
 see rather than pretending it watched them start, and a console upserting agents
 by id repaints one row instead of adding one.
 
-**Seqs are doubled.** `(attempt, seq)` is the feed's dedup key and the lift turns
-one v1 line into TWO events when it meets an agent, so a lifted event sits at
-`2·seq` and its announcement at `2·seq − 1`. It is a pure function of the v1 seq,
-so the same line lifts to the same seq on every re-read of a sliding window —
-which is what makes a client's dedup work at all. Native v2 events keep the
-producer's own seq; only the lift renumbers.
+**The recorder numbers the feed; the lift does not.** `(attempt, seq)` is the
+dedup key every consumer is told to use, and the producer's numbering cannot
+serve as it: a third of the lines on this stream carry no envelope at all, so
+they lifted to `seq: 0` — all of them, which made them ONE event to anybody
+deduping by seq. A measured run ended with five `npm notice` lines written by the
+`npx` shim after the runner's process had settled, and the console rendered one
+of them; the same path carries stack traces, compiler errors and crash tails, so
+a multi-line diagnostic arrived as its first line.
+
+So the lift returns events with no seq at all and the recorder stamps each one as
+it appends (`recordingSession.number`) — the event's POSITION IN THE FILE, which
+is exactly what the contract says `seq` is. It is stable across re-reads because
+the recorder never lifts a line twice: an enveloped line is skipped once its seq
+is at or below `cursor.producerSeq`, a seq-less one once its pod clock is at or
+below `cursor.proseTs`, and both cursors are persisted beside the events, so a
+restart and the final full re-read resume the numbering rather than restart it.
+A recording that watched a run from its first line therefore numbers every runner
+event exactly as the runner did, right up to the first seq-less line.
 
 ### Platform markers are notices
 

@@ -35,15 +35,25 @@ are running, and how long since the last event**. The age is shown only while
 something is running — on a settled cycle it would count how long ago the build
 was, which the page header already says.
 
-## A crew of one is not a crew
+## A crew of one is still a crew
 
-A validation cycle runs a single validator; a small coding cycle never fans out.
-Those cycles get no toggle, no tree and no lanes — a tree with one row and a
-timeline with one lane are chrome around a fact already on screen. They render
-exactly what the flat form rendered (the agent's steps, the runtime's totals, its
-closing report) plus the liveness hint, which is the one thing the flat form
-could never show. This is why the Validation page, which mounts the same feed
-filtered to validation cycles, looks as it always did.
+A validation cycle runs a single validator; a coding cycle is one agent until it
+fans out. Those cycles get the **same tree and the same inspector** a fanned-out
+one gets, from the first agent.
+
+The alternative — draw the flat form until a second agent arrives, then become a
+tree — costs more than the row it saves: the layout changes shape mid-run, at the
+moment the reader is watching it most closely, and a surface they had just
+learned is replaced by another one. With the tree there from the start, a spawned
+agent **appears in place**, as a row under the lead, and nothing else moves.
+
+The **timeline** is the exception, and not on chrome-avoidance grounds: a
+timeline compares lanes, and one lane compares nothing — it draws a single bar
+spanning the cycle, which the hint beside it already says in words. So the toggle
+appears with the second agent. That *adds a control* rather than moving anything
+already on screen, which is the rule above. A reader whose remembered choice is
+the timeline still gets the crew on a single-agent cycle; their choice stands for
+the next cycle that fanned out.
 
 ## What each region owes the reader
 
@@ -53,6 +63,13 @@ row: a state dot, the agent's name, one live sub-line in the runtime's own words
 and how long it has been going. Background shell tasks (`task_started` /
 `task_settled`) are children of the agent that started them, so an orphaned
 `dev:mock` still holding a port has somebody's name on it.
+
+A command row is **elided in the middle**, never at the end: what identifies a
+command is its tail, and five `cd expense-webapp && npm install …` rows truncated
+tail-first rendered as five identical sentences. The split is `lib/elide.ts` (in
+characters); the elision is CSS, because only the browser knows how wide the
+column ended up. Both halves stay in the DOM, so the row still reads whole to a
+screen reader and copies whole, and the row carries the command as its `title`.
 
 Under those sit the agent's **plan** entries — the lead's own task list, which
 reaches the feed as `work_item {source: "plan"}` and is folded onto its owner by
@@ -72,9 +89,9 @@ whole life including the parts that never reached this feed. Under it, the
 agent's closing report: a spawned agent's transcript dies with its pod, so this
 is the only copy. Then its **plan**, above its steps — what it set out to do,
 above what it did. That repeats the tree's rows for the selected agent, the same
-way a settled agent's report is both its tree sub-line and the note here, and it
-is the *only* place the plan appears on a single-agent cycle, where there is no
-tree at all. Nothing here is invented; there is no narration tab and no file
+way a settled agent's report is both its tree sub-line and the note here — the
+labelled copy, where the tree's rows sit unlabelled under the agent whose list
+they are. Nothing here is invented; there is no narration tab and no file
 list.
 
 **Timeline.** One lane per agent on one axis, the cycle's first word to its last.
@@ -149,3 +166,4 @@ imports it too.
 | `components/AgentSteps.tsx` | the shared row, report note and empty copy |
 | `hooks/useRunView.ts` | the remembered choice, shared across the page |
 | `hooks/useTicker.ts` | the second hand |
+| `lib/elide.ts` | the head/tail split behind a middle-elided command |

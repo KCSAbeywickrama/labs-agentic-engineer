@@ -265,6 +265,13 @@ function usageFromResult(m: Record<string, unknown>): RunEventUsage | undefined 
  * The three rewrites exist because a commit, a push and a `gh` call are the
  * run's EFFECTS — the things a reader scans a feed for — and they read as
  * effects rather than as shell only if the producer says which they are.
+ *
+ * A command's absolute paths are NOT shortened the way a file tool's argument
+ * is (see `relativiseToWorkspace`). The contract calls this field "the command
+ * line that ran", and a relative path in it would be a claim that resolves only
+ * from the workspace root — which is not where the command ran once an agent has
+ * `cd`-ed into a component. Editing the text of a command a reader may re-run
+ * is the one place brevity is worth less than truth.
  */
 function bashEvents(command: string): RunEventInput[] {
   const cmd = command.trim();
@@ -290,7 +297,35 @@ function bashEvents(command: string): RunEventInput[] {
   return [{ kind: "tool_use", tool: "Bash", summary: trimSummary(cmd) }];
 }
 
-function summaryFromInput(input: unknown): string {
+/**
+ * A path inside the workspace, said the way a reader of the workspace would say
+ * it.
+ *
+ * The workspace root is ~95 characters of nothing — a mount point, an
+ * environment name, a project handle and a UUID — and it is identical on every
+ * row of a run. Live (2026-09-08) that pushed the only meaningful part of a
+ * `Read` off the right edge and left ten consecutive reads looking like one
+ * repeated line: `$ Read /home/aep/aep-workspace/default/employees-submit-…
+ * /07f229c4-4e80-4168-9609-e5a4c4ff7f66/specs/design/security.json`.
+ *
+ * Two cases are deliberately left alone. A path OUTSIDE the workspace stays
+ * absolute, because "outside" is the interesting half of that fact — the
+ * runtime's own session directory under `$HOME/.claude/projects/…` reads as a
+ * detour precisely because it does not start where the project does. And a path
+ * under the workspace's own `.claude/` needs nothing special: relativised it
+ * becomes `.claude/skills/aep/references/component-contract.md`, which is both
+ * short and unambiguous about being tooling rather than the product.
+ *
+ * Matching is on a path boundary, so a sibling checkout at `<root>-old` is not
+ * mistaken for a child of the root.
+ */
+function relativiseToWorkspace(path: string, root: string): string {
+  if (!root || !path.startsWith("/")) return path;
+  if (path === root) return ".";
+  return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
+}
+
+function summaryFromInput(input: unknown, workspaceRoot: string): string {
   if (input && typeof input === "object") {
     const o = input as Record<string, unknown>;
     // Most file tools carry file_path / pattern / path; `skill` is the Skill
@@ -298,7 +333,9 @@ function summaryFromInput(input: unknown): string {
     // likely to have. Reaching any of them beats the JSON dump below, which
     // rendered `$ Skill {"skill":"aep:aep"}` in a live run.
     const candidate = o.file_path ?? o.path ?? o.pattern ?? o.glob ?? o.url ?? o.skill ?? o.description;
-    if (typeof candidate === "string") return trimSummary(candidate);
+    // Relativised BEFORE the cap, so the cap spends its 200 characters on the
+    // part that identifies the file rather than on the mount point.
+    if (typeof candidate === "string") return trimSummary(relativiseToWorkspace(candidate, workspaceRoot));
     // Fall back to a compact JSON dump (truncated). Helps surface unknown tools.
     try {
       return trimSummary(JSON.stringify(o));
@@ -385,10 +422,18 @@ const TOOL_USE_ERROR_TAG = /<\/?tool_use_error>/g;
 // A line that announces the fault, as opposed to the build chatter above it.
 // `bal build` prints nine lines of dependency pulls before the first ERROR, so
 // "the line after the exit code" would report "Compiling source" — technically
-// the first line and useless as a diagnosis. Anchored at the start so a line
-// merely CONTAINING the word (a path, a prose sentence) does not win over the
-// compiler's own.
-const ANNOUNCES_FAULT = /^(?:error|fatal|panic|exception|failed)\b/i;
+// the first line and useless as a diagnosis.
+//
+// Matched ANYWHERE in the line, not anchored at its start. Anchoring looked
+// like the conservative choice and it excluded the commonest compiler-error
+// shape there is — `src/main.tsx(13,44): error TS2307: …` puts the file first,
+// so `^error` never fires and such a line only ever read well when it happened
+// to also be the first line of output. Every diagnostic family this feed sees
+// (tsc, javac, ballerina, gcc, a test runner's failure line) leads with a
+// location. The cost of unanchoring is a prose line that merely mentions the
+// word winning over the real one; the fallback below makes that the mild
+// failure, since the tail of the output is where a diagnosis lives anyway.
+const ANNOUNCES_FAULT = /\b(?:error|fatal|panic|exception|failed)\b/i;
 
 // How much of a failed spawned agent's error text reaches the feed. See the
 // notice in `settleFanOutResult` for why that case is not held to the one-line
@@ -430,7 +475,14 @@ function failureDetail(content: unknown): { exitCode?: number; summary: string }
   const code = EXIT_CODE_LINE.exec(lines[0]);
   const rest = code ? lines.slice(1) : lines;
   let at = rest.findIndex((l) => ANNOUNCES_FAULT.test(l));
-  if (at < 0) at = 0;
+  // Nothing announced a fault, so fall back to the LAST line rather than the
+  // first. Shell output is a banner then a diagnosis: a compiler names its
+  // sources, npm prints its version notice, a test runner lists what it ran,
+  // and the sentence that explains the exit code comes last. Taking line 0 put
+  // `--- expense-webapp dir ---` and `import React from 'react';` on the feed
+  // as two of four failure diagnoses in one live run (2026-09-08) — an echoed
+  // heading and the first line of a file the command had cat'd.
+  if (at < 0) at = rest.length - 1;
   let diagnosis = rest[at] ?? "";
   // A line ending in a colon is introducing the next one, not stating anything
   // ("InputValidationError: Read failed due to the following issue:" — the issue
@@ -514,6 +566,17 @@ interface AgentRecord {
 /** One backgrounded shell command, which outlives the tool call that started it. */
 interface BashTaskRecord {
   ownerAgentId: string;
+  /**
+   * The command, held so the SETTLE can name it too.
+   *
+   * The runtime's notification carries a status and an id and nothing else, so
+   * without this the only name a finished background command has is its
+   * `taskId` — and `background bql1cn6sh · failed` cannot be matched by eye to
+   * any command on the feed. Live (2026-09-08) that was every one of 47
+   * background settles. The contract states the rule at `summary`: a
+   * `task_settled` carries the SAME summary its `task_started` did.
+   */
+  summary: string;
 }
 
 /** One tool call in flight. */
@@ -620,21 +683,43 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
   // consumer that keys off it.
   let sawInit = false;
 
+  // Where this run's project sits, so a row can say `specs/design/security.json`
+  // instead of ~95 characters of mount point, environment, handle and UUID.
+  //
+  // Read off the runtime's `init` message rather than taken as an option,
+  // because that message is the runtime DECLARING the cwd it is working in —
+  // the same value the runner passed it as `policy.workspace`, echoed back by
+  // the only layer that can confirm it took effect. An option would be a second
+  // copy of one fact, and this adapter's whole rule is that the session's own
+  // declaration wins over anything inferred beside it. Empty until the init
+  // arrives, which leaves paths absolute rather than mis-relativised.
+  let workspaceRoot = "";
+
   /**
    * Which agent a forwarded message belongs to.
    *
-   * `parent_tool_use_id` names the fan-out CALL, not the agent, so it is
-   * resolved through the spawn map. An id with no `task_started` behind it is
-   * still not the lead — the SDK sets a parent only on messages it forwarded
-   * from inside a fan-out call, so the id's presence is itself the proof — so
-   * it falls back to the call id, which is stable for that agent's life. Doing
-   * it the other way round would file a whole agent's work under the lead,
-   * which is the single failure this surface exists to prevent.
+   * `parent_tool_use_id` names a tool CALL, not an agent, so it is resolved
+   * through the two joins. `spawnedAgent` answers first: the call started an
+   * agent, and the message came from inside it. `issuedBy` answers second: the
+   * call started no agent, so the message is the runtime narrating that call to
+   * whoever MADE it — which is the lead for a `TaskOutput` the lead is blocked
+   * in, and a spawned agent for one of its own.
+   *
+   * **A tool_use_id is never an agent id.** This used to end `?? parent`, on the
+   * reasoning that a parent with no `task_started` behind it still could not be
+   * the lead. It can: the runtime stamps `parent_tool_use_id` on the
+   * `tool_progress` frames of ANY call in flight, and a blocking `TaskOutput` is
+   * a long one. Live (2026-09-08) that minted a fresh agent per wait — a run
+   * with 3 agents reported 10, six of them named `toolu_…`, 84 events between
+   * them — and because a minted id has no `agent_started` and can never settle,
+   * the lead stayed classified `waiting` on it and the stall alarm went quiet.
+   * The lead is therefore the last resort, which is the codebase's own
+   * convention (`settleFanOutResult` writes `agentId ?? LEAD_AGENT_ID`).
    */
   function authorOf(m: Record<string, unknown>): string {
     const parent = parentOf(m);
     if (!parent) return LEAD_AGENT_ID;
-    return spawnedAgent.get(parent) ?? parent;
+    return spawnedAgent.get(parent) ?? issuedBy.get(parent) ?? LEAD_AGENT_ID;
   }
 
   function trackCall(id: string, call: Omit<PendingCall, "startedAt">): void {
@@ -677,6 +762,11 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
   // --- system messages ------------------------------------------------------
 
   function onInit(m: Record<string, unknown>): RunEventInput[] {
+    // Before the `sawInit` gate: a spawned agent's own init carries the same
+    // cwd, so learning it from whichever arrives first costs nothing and a run
+    // whose first init was missed still shortens its paths. Trailing slashes
+    // are stripped so the boundary test below is a single form.
+    if (!workspaceRoot) workspaceRoot = str(m.cwd).replace(/\/+$/, "");
     if (sawInit) return [];
     sawInit = true;
     return [{
@@ -713,9 +803,14 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
         (toolUseId ? issuedBy.get(toolUseId) : undefined) ??
         matchingBashCall(str(m.description))?.agentId ??
         LEAD_AGENT_ID;
-      bashTasks.set(taskId, { ownerAgentId: owner });
-      const command = (toolUseId ? pending.get(toolUseId)?.command : "") || trimSummary(str(m.description));
-      return [{ kind: "task_started", agentId: owner, taskId, ...(command ? { command } : {}) }];
+      // `summary`, not `command`: the contract reserves `command` for the
+      // `tool_use`/`tool_result`/`git_*` kinds and names `summary` as the one
+      // line describing a task at both its ends. The tool call's own row
+      // already carried the command; this is what will still be true when the
+      // task settles minutes later.
+      const summary = (toolUseId ? pending.get(toolUseId)?.command : "") || trimSummary(str(m.description));
+      bashTasks.set(taskId, { ownerAgentId: owner, summary });
+      return [{ kind: "task_started", agentId: owner, taskId, ...(summary ? { summary } : {}) }];
     }
 
     // A spawned agent's birth certificate — see the module header.
@@ -788,7 +883,16 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
       // No `outputBytes`: the notification names an `output_file` and never its
       // size, and stat-ing a path off a message would be the adapter reaching
       // into the filesystem to invent a figure the runtime declined to report.
-      return [{ kind: "task_settled", agentId: bash.ownerAgentId, taskId, ...(status ? { status } : {}) }];
+      // The summary comes from the START — see BashTaskRecord.summary. It is the
+      // adapter's to repeat because the runtime does not repeat it, and a
+      // consumer joining the feed late has no start to fold onto.
+      return [{
+        kind: "task_settled",
+        agentId: bash.ownerAgentId,
+        taskId,
+        ...(bash.summary ? { summary: bash.summary } : {}),
+        ...(status ? { status } : {}),
+      }];
     }
 
     const agent = agents.get(taskId);
@@ -885,7 +989,7 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
         }
         continue;
       }
-      events.push({ kind: "tool_use", tool: tu.name, summary: summaryFromInput(tu.input), ...stamp });
+      events.push({ kind: "tool_use", tool: tu.name, summary: summaryFromInput(tu.input, workspaceRoot), ...stamp });
     }
     return events;
   }

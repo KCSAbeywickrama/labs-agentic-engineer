@@ -533,7 +533,7 @@ export function applyCodingCredential(env: NodeJS.ProcessEnv, cred: CodingCreden
 }
 
 // Mounts local.ts + the library/project/run dirs over the unmodified production
-// image and overrides only the command (image ENTRYPOINT runs oneshot.ts) — the
+// image and overrides only the command (the image's CMD runs oneshot.ts) — the
 // image itself never gains playground-only bytes. The library is mounted over the
 // path the image already bakes it at, so the runner's own default resolves to the
 // working tree and there is ONE library in play rather than two.
@@ -560,7 +560,14 @@ export function dockerInvocation(opts: CodingRunOptions, runDir: string, contain
     // disk (see IMAGE_AGENT_SESSION_DIR).
     containerName,
     "--entrypoint",
-    "npx",
+    // The image's OWN entrypoint wrapper, not `npx` directly. The wrapper sets
+    // the rlimits every process a run spawns inherits (`ulimit -c 0`, so a
+    // crashing JVM or chromium cannot drop a core into the project working
+    // tree) and then execs its argv — which is what the three tokens after the
+    // image name below become, exactly as the image's CMD does in a pod.
+    // Overriding the entrypoint with `npx` skipped that, leaving the playground
+    // as the one run path without the limits.
+    "/usr/local/bin/aep-runner-entrypoint",
     "--shm-size=1g",
     "-v",
     `${LOCAL_ENTRY}:/app/src/local.ts:ro`,
@@ -580,6 +587,7 @@ export function dockerInvocation(opts: CodingRunOptions, runDir: string, contain
     "-e",
     `AEP_LOCAL_SKILLS_DIR=${IMAGE_LIBRARY_DIR}`,
     RUNNER_IMAGE,
+    "npx",
     "tsx",
     "src/local.ts",
   ];

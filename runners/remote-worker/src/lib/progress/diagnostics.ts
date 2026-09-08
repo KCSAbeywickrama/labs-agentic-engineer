@@ -248,6 +248,47 @@ function readRateLimit(m: Record<string, unknown>): StallSignal | undefined {
 }
 
 /**
+ * A per-run reader that drops a stall signal it has just said.
+ *
+ * `readStallSignal` answers about ONE message and cannot know it is the
+ * seventeenth of its kind. That is what a live run got (2026-09-08): 17
+ * `rate_limit` warnings, gaps as short as 8 seconds, and exactly THREE distinct
+ * sentences between them — 82%, 83%, 84%. The runtime re-states a window's
+ * utilisation on every change it notices, most of which round to the same whole
+ * percent, and a warning that repeats every minute is one a reader learns to
+ * skip past — including the minute it finally says `rejected`.
+ *
+ * **The unit of materiality is the rendered sentence, not the raw number.**
+ * A band (10% steps, say) was the alternative and is worse in one specific way:
+ * the sentence prints a whole percent, so banding would suppress a line whose
+ * text visibly differs from the last one, leaving a feed that reports 80% and
+ * then 90% while claiming to report every change. Deduping on the sentence
+ * means the rule is exactly "never say the same thing twice", which is both
+ * what the reader complained about and something a reader can verify from the
+ * feed alone. A window that genuinely oscillates across a whole percent does
+ * produce a line each way, and it should: only the LAST line said is remembered,
+ * so this suppresses repetition, never a change.
+ *
+ * Only the rate limit is filtered. Every other signal here is a discrete
+ * occurrence — a compaction happened, a tool call was denied, the worker is
+ * going away — and a second one is a second fact, not a restatement.
+ *
+ * Per-run, like the adapter's registry: two runs sharing one of these would
+ * swallow the second run's opening line.
+ */
+export function createStallSignalReader(): (message: unknown) => StallSignal | undefined {
+  let lastRateLimit = "";
+  return (message) => {
+    const signal = readStallSignal(message);
+    if (!signal || signal.code !== "rate_limit") return signal;
+    const said = `${signal.level} ${signal.detail}`;
+    if (said === lastRateLimit) return undefined;
+    lastRateLimit = said;
+    return signal;
+  };
+}
+
+/**
  * Whether a message means "the model is working" rather than "the agent did
  * something".
  *

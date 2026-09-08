@@ -88,8 +88,8 @@ import {
   isModelWaitFrame,
   isStreamFrame,
   isToolProgressFrame,
+  createStallSignalReader,
   readApiRetry,
-  readStallSignal,
 } from "./progress/diagnostics.js";
 import { emit as defaultEmit, LEAD_AGENT_ID, type RunEventInput } from "./progress/emitter.js";
 import type { RunWatchdog } from "./progress/watchdog.js";
@@ -346,6 +346,13 @@ export async function consumeRun(stream: RunStream, opts: RunLoopOptions): Promi
   const record = opts.record ?? (() => {});
   const { translate, watchdog, deadline } = opts;
   const live = createLiveTasks();
+
+  // Per RUN, not per module: the reader remembers the last rate-limit sentence
+  // it let through so an unchanged one is not said again. A live run said the
+  // same "near the limit on the seven_day window at 83%" seventeen times, twice
+  // within eight seconds of each other, which is how a warning becomes
+  // something a reader scrolls past.
+  const readStallSignal = createStallSignalReader();
 
   // The newest turn's ending, kept so the settle can carry its verdict and its
   // usage. Undefined right up to the first `result` message, which is what

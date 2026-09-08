@@ -635,3 +635,83 @@ test("crew: an item with no id is skipped, not folded into a row nothing repaint
   );
   assert.deepEqual(crew.lead.plan, []);
 });
+
+// --- what a consumer does with an author the producer never declared ---------
+
+/**
+ * A slice of the live coding run of 2026-09-08, while the producer was minting
+ * an agent id per blocking wait. Two real agents, two phantoms, no settles.
+ */
+const PHANTOMS = fixture("run-2026-09-08-phantom-agents.v2.ndjson");
+
+/** The two agents that run declared, and the two tool-call ids that got counted. */
+const F = {
+  api: "a69fa9b66eb3c8f95",
+  webapp: "a9a6bd95fa3a4592f",
+  phantomA: "toolu_015F5FWtAF7aF4WG4ni6Gnxu",
+  phantomB: "toolu_01SZ1fENcA421vcG6PXyG2zd",
+};
+
+// The honest answer is COUNT THEM, and it is not a shrug.
+//
+// A consumer cannot tell a phantom from a legitimately undeclared agent. The
+// only thing separating `toolu_015F…` from `a69fa9b66eb3c8f95` is one runtime's
+// id prefix, and this package must never branch on that — the contract's rule is
+// that runtime names never reach a consumer's logic. The prefix is not even a
+// reliable tell: `run-2026-09-04.v2.ndjson` is a REAL run whose two real agents
+// are both named `toolu_…`, because aep-api's v1 lift keys an inferred agent by
+// the tool call that spawned it. A renderer that dropped `toolu_`-shaped ids
+// would delete both agents of that run.
+//
+// So a surface reports what the producer said. The console's "5 agents · 5
+// running" was a true rendering of a false feed, and the fix is the producer's
+// invariant (`claude_adapter.test.ts`: every agentId is `lead` or an id the
+// runtime declared). Dropping the events here would have hidden that bug for as
+// long as it kept happening.
+test("crew: an author nobody declared is still counted — a surface reports the feed it was given", () => {
+  const crew = buildCrew(PHANTOMS, endOf(PHANTOMS));
+
+  assert.equal(crew.agents, 5, "the lead, the two real agents, and the two the producer invented");
+  assert.deepEqual(crew.members.map((m) => m.id), [LEAD_AGENT_ID, F.api, F.webapp, F.phantomA, F.phantomB]);
+
+  // Nothing is invented for an undeclared member: no role, and its own id as its
+  // name, which is what makes it recognisable as unannounced rather than as a
+  // badly named agent.
+  for (const id of [F.phantomA, F.phantomB]) {
+    const m = memberOf(crew, id);
+    assert.equal(m.declared, false);
+    assert.equal(m.agent.label, id);
+    assert.equal(m.agent.role, undefined);
+  }
+  // And the declared two are unaffected — they carry the labels their parent
+  // gave them, so the count above is not five of the same thing.
+  assert.equal(memberOf(crew, F.api).declared, true);
+  assert.equal(memberOf(crew, F.api).agent.label, "Build expense-api Ballerina service");
+  assert.equal(memberOf(crew, F.webapp).agent.label, "Build expense-webapp React SPA");
+});
+
+// Counting them is honest. BLOCKING on them is not, and that half was a bug of
+// this package's own: an undeclared child carries no `background`, `undefined`
+// is not `true`, so it read as a foreground spawn and held the lead in
+// `waiting` — which outranks the stall rule. Live, that is how five phantoms
+// that could never settle turned the stall alarm off for the rest of a run.
+test("crew: an undeclared child never blocks its parent, so it cannot mute the stall rule", () => {
+  const crew = buildCrew(PHANTOMS, endOf(PHANTOMS));
+
+  assert.equal(crew.lead.waitingOnId, undefined, "waiting on an agent nobody announced is a claim, not a reading");
+  assert.notEqual(crew.lead.state, "waiting");
+  // The lane agrees with the state: no stretch of the lead's life is charged to
+  // waiting on something that was never declared.
+  assert.deepEqual(laneShape(crew.lead).map(([kind]) => kind).filter((k) => k === "waiting"), []);
+
+  // The discriminator is DECLARED, not `background`, and the v1 lift is the
+  // case that proves it: it announces its inferred agents with no `background`
+  // field at all, and they must still block — the lift declared them, so the
+  // relationship is the producer's claim rather than this package's guess. If
+  // the rule were "absent background does not block", this run's 41-minute wait
+  // would silently become 41 minutes of `working`.
+  const lifted = buildCrew(RUN.slice(0, 400), tsOf(RUN, 486));
+  assert.equal(memberOf(lifted, R.webapp).declared, true);
+  assert.equal(memberOf(lifted, R.webapp).agent.background, undefined);
+  assert.equal(lifted.lead.waitingOnId, R.webapp);
+});

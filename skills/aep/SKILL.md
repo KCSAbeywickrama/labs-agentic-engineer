@@ -232,6 +232,24 @@ subagent you handed it to, keeps its status line current from start to done
    added for a Ballerina component also swallows a web-app's `src/generated/`,
    which that stack **requires** committed. Anchor the pattern; never `git add -f`
    past it.
+
+   **Crash artefacts are the one category to ignore before you have one.** A
+   compiler, a JVM or a browser that dies hard drops a `core` or an
+   `hs_err_pid*.log` wherever it was running — tens of megabytes of binary,
+   untracked, in a tree you are staging from. Nothing lists it, `git status`
+   shows one unfamiliar name among your own files, and a single `git add -A`
+   puts it in the pull request for good. These belong at the top of the
+   repo-root `.gitignore` of every project, unanchored on purpose — they can
+   land in any directory, and unlike `target/` there is no component that wants
+   one committed:
+
+   ```gitignore
+   # crash artefacts — never wanted, in any component
+   core
+   core.*
+   hs_err_pid*.log
+   replay_pid*.log
+   ```
 5. Re-derive the working set (§1) and pick the next issue.
 
 **Say why before you throw work away.** Before deleting or wholesale-rewriting a

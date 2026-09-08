@@ -300,6 +300,36 @@ describe("RunCrew", () => {
     expect(screen.getAllByText("running").length).toBeGreaterThan(0);
   });
 
+  // The reported bug: five consecutive rows of one live run all rendered as
+  // `cd expense-webapp && npm in…`, five different installs a reader could not
+  // tell apart. What identifies a command is at its END, and tail truncation
+  // eats exactly that.
+  it("keeps the identifying end of a command that is too long for the column", () => {
+    seq = 0;
+    const commands = [
+      "cd expense-webapp && npm install react@19.2.3",
+      "cd expense-webapp && npm install vite@7.1.14",
+    ];
+    const events = [
+      ev(0, { kind: "agent_started", agentId: "a1", label: "expense-webapp", depth: 1 }),
+      ...commands.map((summary, i) =>
+        ev(1 + i, { kind: "task_started", agentId: "a1", taskId: `bg${String(i)}`, summary }),
+      ),
+    ];
+    render(<RunCrew events={events} />);
+
+    // The ends survive, and they are what tells the two rows apart. Only the
+    // head can be ellipsised, and it is the half they share.
+    expect(screen.getByText(/install react@19\.2\.3$/)).toBeInTheDocument();
+    expect(screen.getByText(/install vite@7\.1\.14$/)).toBeInTheDocument();
+    // Nothing is dropped from the DOM: the row still reads as the whole command
+    // to a screen reader, and hovering it shows the same string.
+    for (const command of commands) {
+      const row = screen.getByTitle(command);
+      expect(row.textContent).toContain(command);
+    }
+  });
+
   it("the hint says how many agents, how many are running, and how quiet it is", () => {
     seq = 0;
     const events = [ev(0, { kind: "agent_started", agentId: "a1", label: "todo-api", depth: 1 })];
@@ -387,7 +417,7 @@ describe("RunCrew", () => {
   // A validation cycle runs a single validator, and a small coding cycle never
   // fans out. A tree with one row and a timeline with one lane would be chrome
   // around a fact already on screen.
-  it("draws no crew for a cycle with only one agent", () => {
+  it("gives a single-agent cycle the same tree and inspector as a fanned-out one", () => {
     seq = 0;
     const events = [
       ev(0, { kind: "run_started", agentId: "lead", taskKind: "validation" }),
@@ -397,14 +427,73 @@ describe("RunCrew", () => {
       ev(4, { kind: "run_settled", agentId: "lead", outcome: "success" }),
     ];
     render(<RunCrew events={events} />);
-    expect(screen.queryByRole("button", { name: "Timeline" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Crew" })).toBeNull();
-    // Exactly what the flat form showed: the steps, the totals and the report.
+    // The tree is there with its one row — the layout a second agent will join,
+    // rather than one it would replace.
+    expect(row("lead agent")).toBeInTheDocument();
+    // And the inspector beside it: the steps, the totals and the report.
     expect(screen.getByText("$ pnpm playwright test")).toBeInTheDocument();
     expect(screen.getByText("completed · 3m4s · 22 tools")).toBeInTheDocument();
-    expect(screen.getByText("Checked 5 automated criteria.")).toBeInTheDocument();
-    // …plus the one thing it could never show.
+    expect(screen.getAllByText("Checked 5 automated criteria.").length).toBeGreaterThan(0);
     expect(screen.getByText("1 agent · all settled")).toBeInTheDocument();
+  });
+
+  // The timeline is the one thing a crew of one does NOT get: it compares lanes,
+  // and one lane compares nothing — a single bar spanning the cycle, which the
+  // hint beside it already says in words.
+  it("offers no timeline for a single lane", () => {
+    seq = 0;
+    const events = [ev(0, { kind: "run_started", agentId: "lead", taskKind: "validation" })];
+    render(<RunCrew events={events} />);
+    expect(screen.queryByRole("button", { name: "Timeline" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Crew" })).toBeNull();
+  });
+
+  // THE PRODUCT RULE this shape exists for: the page must not change shape
+  // mid-run. A reader learns one surface while the lead works alone, and the
+  // first spawned agent then appears IN PLACE, as a row under it.
+  it("adds a row when the first subagent arrives, rather than rearranging the page", () => {
+    seq = 0;
+    const alone = [
+      ev(0, { kind: "run_started", agentId: "lead", taskKind: "implementation" }),
+      ev(1, { kind: "tool_use", agentId: "lead", tool: "Bash", summary: "git status", toolUseId: "m1" }),
+    ];
+    const { rerender } = render(<RunCrew events={alone} />);
+    const treeBefore = row("lead agent").closest("ul");
+    expect(treeBefore).not.toBeNull();
+    expect(screen.getByText("$ git status")).toBeInTheDocument();
+
+    rerender(
+      <RunCrew
+        events={[
+          ...alone,
+          ev(2, { kind: "agent_started", agentId: "a1", label: "Implement todo-api", depth: 1 }),
+        ]}
+      />,
+    );
+
+    // The same tree, one row longer — not a different surface.
+    expect(row("lead agent").closest("ul")).toBe(treeBefore);
+    expect(row("Implement todo-api")).toBeInTheDocument();
+    // The lead's own steps are still what the inspector shows: a new agent must
+    // not move the reader's selection.
+    expect(screen.getByText("$ git status")).toBeInTheDocument();
+    // …and the second lane is what brings the timeline with it.
+    expect(screen.getByRole("button", { name: "Timeline" })).toBeInTheDocument();
+  });
+
+  // A reader who left the timeline on and then opened a single-agent cycle has
+  // no toggle to switch back with, so the crew has to be what it draws.
+  it("draws the crew for one agent even when the remembered view is the timeline", () => {
+    localStorage.setItem("aep:builds:run-view", "timeline");
+    resetRunViewForTest();
+    seq = 0;
+    const events = [
+      ev(0, { kind: "run_started", agentId: "lead", taskKind: "validation" }),
+      ev(1, { kind: "tool_use", agentId: "lead", tool: "Bash", summary: "pnpm playwright test", toolUseId: "v1" }),
+    ];
+    render(<RunCrew events={events} />);
+    expect(screen.getByText("$ pnpm playwright test")).toBeInTheDocument();
+    expect(screen.queryByText(/solid · working/)).toBeNull();
   });
 
   // --- the agent's own plan ---------------------------------------------------
@@ -476,10 +565,10 @@ describe("RunCrew", () => {
       ev(3, { kind: "run_settled", agentId: "lead", outcome: "success" }),
     ];
     render(<RunCrew events={events} />);
-    // No tree at all on a crew of one, so the inspector is the only surface the
-    // list can reach — and the skill's promise has to hold on the commonest
-    // shape a run takes.
-    expect(screen.queryByRole("button", { name: "Crew" })).toBeNull();
+    // The commonest shape a run takes, and the skill's promise has to hold on
+    // it: the entry is under the agent in the tree AND labelled in the
+    // inspector, exactly as it is on a cycle that fanned out.
+    expect(planRow("Fix the redirect handler").previousElementSibling).toBe(row("lead agent"));
     expect(screen.getByText("Plan")).toBeInTheDocument();
     // …and a settled agent KEEPS it: the list is what it set out to do and
     // whether it got there, which only becomes a record once the run is over.

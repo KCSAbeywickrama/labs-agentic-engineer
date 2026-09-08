@@ -18,6 +18,7 @@ package codingagent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -126,6 +127,21 @@ func (f *recorderFixture) session(t *testing.T, attempt int) *recordingSession {
 	}
 	s.cur = cur
 	return s
+}
+
+// meta reads the cycle's state.json — the one file a reader still has after the
+// pod is gone, so what it says has to agree with the events beside it.
+func (f *recorderFixture) meta(t *testing.T) recordingMeta {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(gitfs.RunsDir(f.root), "acme", "c1", recordingStateFile))
+	if err != nil {
+		t.Fatalf("read state.json: %v", err)
+	}
+	var m recordingMeta
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("parse state.json: %v", err)
+	}
+	return m
 }
 
 // recorded reads back everything the recorder wrote for one attempt.
@@ -601,6 +617,141 @@ func TestProducerSeq_ReadsBothEnvelopeVersionsAndRejectsProse(t *testing.T) {
 		seq, ok := producerSeq(tc.raw)
 		if seq != tc.want || ok != tc.wantSeq {
 			t.Errorf("producerSeq(%q) = (%d,%v), want (%d,%v)", tc.raw, seq, ok, tc.want, tc.wantSeq)
+		}
+	}
+}
+
+// TestRecorder_EveryLineGetsItsOwnSeq is the measured loss, replayed.
+//
+// The tail of a real 55-minute run (testdata/run-2026-09-08-npm-tail.ndjson):
+// six runner events, then five lines of raw container stdout — npm's own update
+// notice, written to fd 1 by the `npx` shim AFTER the runner's node process had
+// already settled, so no emitter in the runner could ever have numbered them.
+// The lift gave all five `seq: 0`, and a console deduping on the key the
+// contract names — (cycleId, attempt, seq) — rendered exactly one of them. The
+// recording held 1189 events; the screen showed 1185.
+//
+// It is not really about npm. Everything unstructured takes this path: a stack
+// trace, a compiler's error list, a crash tail, the container's bootstrap
+// output. A multi-line diagnostic reached the console as its first line, and the
+// day that costs somebody a day is the day a run dies and the reason is on lines
+// two through eight.
+//
+// The test drives the whole read path — poll, the terminal FULL RE-READ, then a
+// restart re-ingesting the same page off the persisted cursor — because the
+// numbering has to be stable across all three or the fix trades a dropped line
+// for a duplicated one.
+func TestRecorder_EveryLineGetsItsOwnSeq(t *testing.T) {
+	t.Parallel()
+
+	raw, err := os.ReadFile(filepath.Join("testdata", "run-2026-09-08-npm-tail.ndjson"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	if len(lines) != 11 {
+		t.Fatalf("fixture holds %d lines, want 11 (6 runner events + 5 prose)", len(lines))
+	}
+	wantProse := []string{
+		"npm notice",
+		"npm notice New major version of npm available! 10.9.8 -> 12.0.2",
+		"npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.2",
+		"npm notice To update run: npm install -g npm@12.0.2",
+		"npm notice",
+	}
+
+	// The runner's own events land first, while the pod is Running; the prose
+	// arrives on the page that also carries the terminal phase, which is exactly
+	// how it happened (the five lines are stamped 108ms after `run_settled`).
+	live := LiveTail{Pod: runningPod(), Text: strings.Join(lines[:6], "\n") + "\n"}
+	final := LiveTail{Pod: succeededPod(), Text: string(raw)}
+
+	f := newRecorderFixture(t, live, final)
+	s := f.session(t, 1)
+	if done, _ := s.poll(context.Background()); done {
+		t.Fatal("a Running pod ended the session")
+	}
+	if done, _ := s.poll(context.Background()); !done {
+		t.Fatal("a terminal pod did not end the session")
+	}
+
+	events := f.recorded(t, 1)
+	if len(events) != 11 {
+		t.Fatalf("recorded %d events, want 11 — the whole tail, deduped once\n%+v", len(events), events)
+	}
+
+	// EVERY line has its own identity. `seq` is the console's dedup key, so a
+	// repeat here is a row the user never sees.
+	seen := map[int64]int{}
+	for i, ev := range events {
+		if n, dup := seen[ev.Seq]; dup {
+			t.Fatalf("event %d (%s %q) reuses seq %d, already taken by event %d — a consumer deduping on (attempt, seq) drops one of them",
+				i, ev.Kind, ev.Detail, ev.Seq, n)
+		}
+		seen[ev.Seq] = i
+		if i > 0 && ev.Seq <= events[i-1].Seq {
+			t.Fatalf("seq went backwards at %d: %d after %d", i, ev.Seq, events[i-1].Seq)
+		}
+	}
+
+	// All five prose lines survive, in order and whole.
+	var prose []string
+	for _, ev := range events {
+		if strings.HasPrefix(ev.Detail, "npm notice") {
+			if ev.Kind != gen.RunEventKindNotice {
+				t.Errorf("raw stdout lifted to %q, want a notice", ev.Kind)
+			}
+			prose = append(prose, ev.Detail)
+		}
+	}
+	if len(prose) != len(wantProse) {
+		t.Fatalf("recorded %d prose lines, want %d — this is the loss\n%v", len(prose), len(wantProse), prose)
+	}
+	for i := range wantProse {
+		if prose[i] != wantProse[i] {
+			t.Errorf("prose line %d = %q, want %q", i, prose[i], wantProse[i])
+		}
+	}
+
+	// The seq is the event's POSITION IN THE RECORDING, which is what the
+	// contract says it is: dense from 1, one per line, prose included. (This
+	// fixture is a TAIL, so position 1 is the producer's 1179. A recording that
+	// watched the run from its first line — the ordinary case — numbers every
+	// runner event exactly as the runner did, right up to the first seq-less
+	// line, which keeps a recording diffable against the pod's own log.)
+	for i, ev := range events {
+		if ev.Seq != int64(i+1) {
+			t.Errorf("event %d is at seq %d, want %d — seq is the position in the attempt", i, ev.Seq, i+1)
+		}
+	}
+
+	// F13: state.json must not disagree with itself. It used to report 1189
+	// events under a cursor that had only ever seen 1184 of them, because the
+	// seq-less lines advanced nothing.
+	meta := f.meta(t)
+	if meta.Events != int64(len(events)) {
+		t.Errorf("state.json events = %d, want %d", meta.Events, len(events))
+	}
+	if meta.Cursor.LastSeq != events[len(events)-1].Seq {
+		t.Errorf("state.json cursor.lastSeq = %d, want %d — the cursor must account for the seq-less lines too",
+			meta.Cursor.LastSeq, events[len(events)-1].Seq)
+	}
+	if meta.Cursor.ProseTS.IsZero() {
+		t.Error("state.json cursor.proseTs is unset; a restart would re-record the prose")
+	}
+
+	// A RESTART re-reads the whole log off the persisted cursor. Nothing may be
+	// written twice and nothing renumbered — the recorder's numbering is stable
+	// only because ProducerSeq and ProseTS both survive the restart.
+	restarted := f.session(t, 1)
+	restarted.ingest(context.Background(), final)
+	after := f.recorded(t, 1)
+	if len(after) != len(events) {
+		t.Fatalf("a restart re-recorded the page: %d events, want %d", len(after), len(events))
+	}
+	for i := range after {
+		if after[i].Seq != events[i].Seq || after[i].Detail != events[i].Detail {
+			t.Errorf("event %d changed across the restart: %+v, want %+v", i, after[i], events[i])
 		}
 	}
 }

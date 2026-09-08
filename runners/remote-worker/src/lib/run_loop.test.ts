@@ -103,6 +103,45 @@ function byAgent(emitted: Emitted[], agentId: string): RunEventInput[] {
   return emitted.map((e) => e.event).filter((e) => e.agentId === agentId);
 }
 
+// --- the rate-limit filter, as the loop actually wires it -------------------
+
+/** One `rate_limit_event` at a given utilisation, the shape the SDK sends. */
+function rateLimit(utilization: number): unknown {
+  return {
+    type: "rate_limit_event",
+    rate_limit_info: { status: "allowed_warning", rateLimitType: "seven_day", utilization },
+  };
+}
+
+// The filter itself is pinned in diagnostics.test.ts. What is pinned HERE is the
+// wiring, and specifically that the reader is built per RUN: a module-level
+// factory would remember the last sentence across runs, so a second pod on a
+// throttled account would stay silent about a limit it had never reported.
+test("consumeRun: an unchanged rate-limit sentence is said once per run", async () => {
+  // 0.823 → 0.826 both round to 83%, so they are ONE sentence, not two.
+  const stream = [rateLimit(0.82), rateLimit(0.823), rateLimit(0.826), rateLimit(0.834)];
+
+  const first = await replay(stream);
+  const said = kindsOf(first.emitted, "notice").filter((e) => e.code === "rate_limit");
+  assert.deepEqual(
+    said.map((e) => e.detail),
+    [
+      "[rate-limit] near the limit on the seven_day window at 82%",
+      "[rate-limit] near the limit on the seven_day window at 83%",
+    ],
+    "four events, two distinct sentences — the repeat of 83% is dropped, the move to 83% is not",
+  );
+
+  // A fresh run says it again. This is the assertion that fails if the reader is
+  // ever hoisted out of `consumeRun`.
+  const second = await replay([rateLimit(0.82)]);
+  assert.equal(
+    kindsOf(second.emitted, "notice").filter((e) => e.code === "rate_limit").length,
+    1,
+    "a new run has said nothing yet, so its first warning must go out",
+  );
+});
+
 // --- probe 2: the lead ends its turn while a subagent is still working -------
 
 // The agent ids in probe 2, as the runtime declared them. They are the SDK's
@@ -168,11 +207,15 @@ test("consumeRun: the orphaned shell command is reported as stopped, owned by th
   assert.equal(started.length, 1);
   assert.equal(settled.length, 1);
   assert.deepEqual(
-    { agentId: started[0].agentId, taskId: started[0].taskId, command: started[0].command },
-    { agentId: P2.agent, taskId: P2.bashTask, command: "sleep 25 && echo slow-done" },
+    { agentId: started[0].agentId, taskId: started[0].taskId, summary: started[0].summary },
+    { agentId: P2.agent, taskId: P2.bashTask, summary: "sleep 25 && echo slow-done" },
   );
   assert.equal(settled[0].status, "stopped", "not `failed` — the work was taken away, it did not go wrong");
   assert.equal(settled[0].agentId, P2.agent);
+  // The settle repeats the start's summary: the runtime's notification carries
+  // only an id and a status, so without it the row reads `background <id> ·
+  // stopped` and matches no command on the feed.
+  assert.equal(settled[0].summary, "sleep 25 && echo slow-done");
 });
 
 // The agent settles from its notification, which is the only completion signal a

@@ -56,6 +56,18 @@ export interface AgentReport {
   /** Spawned detached from its parent's turn, where the runtime said. */
   background?: boolean | undefined;
   /**
+   * Did an `agent_started` for this agent actually arrive, or is the agent known
+   * only because something claimed to be it?
+   *
+   * The second case is legitimate and stays on the surface: a feed joined
+   * mid-run, a feed the platform admits has gaps, and the v1 lift's `inferred`
+   * agents all produce it. What it must NOT do is let the surface assume
+   * anything the producer never declared — see the blocking rule in `crew.ts`,
+   * where an undeclared child used to hold its parent in `waiting` forever and
+   * so muted the stall report.
+   */
+  declared?: boolean | undefined;
+  /**
    * What it says it is doing right now. Earns its place HERE and nowhere else:
    * as the live status of work the reader has chosen not to expand. A new phrase
    * REPLACES the previous one — it is a state, not a log line.

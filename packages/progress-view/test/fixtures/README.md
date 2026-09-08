@@ -1,6 +1,6 @@
 # Run-event fixtures
 
-Two **real** sessions in the v2 `RunEvent` envelope, for the crew model to be
+Three **real** sessions in the v2 `RunEvent` envelope, for the crew model to be
 tested against. They are frozen artifacts: regenerate them only when the
 recording they came from changes, never by hand.
 
@@ -11,11 +11,13 @@ something a run actually produced.
 | File | Events | What it holds |
 |---|---|---|
 | `probe1-background-fanout.v2.ndjson` | 40 | A 17-second probe: three subagents launched **backgrounded** in one turn, one of which fans out again to a depth-2 child. Every agent settles with its own report. Carries `agent_progress`, a `notice`, and a `heartbeat`. |
+| `run-2026-09-08-phantom-agents.v2.ndjson` | 151 | A slice (seq 60–210, 5m50s) of a live coding run **while its producer was broken**: the adapter minted an agent id from the `tool_use_id` of every blocking wait, so two of the five authors on this feed are agent ids that no `agent_started` ever declared. Held because a consumer cannot tell a phantom from a legitimately undeclared agent, and this is what it must do with one. No settles of any kind. |
 | `run-2026-09-04.v2.ndjson` | 761 | A real 55-minute coding run (09:25:39 → 10:19:57). Two subagents in sequence — 41m11s / 162 tools / +2069−78, then 7m50s / 74 tools / +69−37 — so the lead's lane has two `waiting` stretches. Holds real 60s+ silences with a tool call still unanswered, which is what the amber rule is tested against. |
 
-Neither recording was v2 when it was made. Both were converted **once**, by the
-two producers that convert for real — this package must not grow a third
-translator, and it depends on neither the runner nor aep-api.
+The first two were not v2 when they were made, and each was converted **once**,
+by a producer that converts for real — this package must not grow a translator
+of its own, and it depends on neither the runner nor aep-api. The third needed no
+conversion: it was recorded from a pod that already spoke v2.
 
 ## How they were generated
 
@@ -55,3 +57,23 @@ to be faithful to the recording rather than flattering: it renders a v1 `phase`
 line as an `agent_progress` whose phrase is the raw phase id
 (`workspace_provisioning`), and the crew model shows exactly that. A phrase is
 the runtime's own words, and this package does not improve them.
+
+### `run-2026-09-08-phantom-agents.v2.ndjson`
+
+Source: the runner's own recorder, captured live from the coding cycle of
+2026-09-08 (`cycle1.recorder.ndjson`, seq 60–210). **Not converted at all** —
+this is the v2 feed exactly as the pod emitted it, which is the point: it is
+evidence of a producer defect, so a translation step would be a chance to
+launder it.
+
+The defect is fixed at the producer (`claude_adapter.ts`'s `authorOf`, and the
+invariant test beside it), so no run emits this shape any more. The fixture stays
+because the CONSUMER's behaviour under it is a decision worth pinning: an author
+the producer never declared is counted and shown, never dropped. Dropping it
+would need this package to recognise one runtime's id prefix — which the contract
+forbids, and which would in any case delete both real agents of
+`run-2026-09-04.v2.ndjson`, whose ids are `toolu_…` because the v1 lift keys an
+inferred agent by the call that spawned it.
+
+Scanned for credentials and personal data before it was committed; it carries a
+demo expense-tracker project's file paths and shell commands and nothing else.

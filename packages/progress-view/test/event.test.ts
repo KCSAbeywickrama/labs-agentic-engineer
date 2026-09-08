@@ -52,11 +52,20 @@ test("every kind the contract declares renders — a blank row is the defect thi
     "turn_ended",
     "run_settled",
   ];
-  // Only the three STATE kinds may be silent, plus `tool_result` on a fast
-  // success (an outcome speaks only when it carries something the action did
-  // not) and `turn_ended` on a turn that went fine. Everything else must earn
-  // its row from a bare payload.
-  const mayBeSilent = new Set(["agent_progress", "work_item", "heartbeat", "tool_result", "turn_ended"]);
+  // Only the STATE kinds may be silent, plus `tool_result` on a fast success
+  // (an outcome speaks only when it carries something the action did not) and
+  // `turn_ended` on a turn that went fine. Everything else must earn its row
+  // from a bare payload. `task_started` joined the silent set because it is a
+  // DUPLICATE rather than a state — the `tool_use` that launched the background
+  // command already printed it. See isSilentKind.
+  const mayBeSilent = new Set([
+    "agent_progress",
+    "work_item",
+    "heartbeat",
+    "task_started",
+    "tool_result",
+    "turn_ended",
+  ]);
   for (const kind of kinds) {
     const { text } = formatEvent({ kind, agentId: "lead" });
     if (mayBeSilent.has(kind)) continue;
@@ -96,11 +105,12 @@ test("agent_started is the section header, and names the agent the parent named 
 });
 
 test("a BACKGROUND agent says so, because it changes what its parent is doing", () => {
-  // Background is the ordinary case for a builder — the skill tells a lead to
-  // dispatch a whole wave detached and wait on it — so the header says which
-  // agents the lead is NOT blocked inside. (The platform used to force every
-  // fan-out into the foreground because a backgrounded subagent forwarded none
-  // of its messages. Measured on an older runtime; no longer true.)
+  // Background is the ordinary case for a builder — fan-out is backgrounded by
+  // default (ADR-0011) and the skill, not the platform, decides the shape — so
+  // the header says which agents the lead is NOT blocked inside, which is what
+  // makes an interleaved feed readable. (An older runtime forwarded none of a
+  // backgrounded subagent's messages, so the platform forced fan-out into the
+  // foreground. That hook is deleted and this word is no longer a fault report.)
   assert.equal(
     formatEvent({ agentId: "ag_1", kind: "agent_started", label: "todo-api", background: true }).text,
     "⑂ todo-api · background",
@@ -226,18 +236,30 @@ test("tool_use and tool_result read exactly as they do on the v1 feed", () => {
   assert.equal(formatEvent({ ...LEAD, kind: "tool_result", tool: "Read", ok: true, durationMs: 40 }).text, "");
 });
 
-test("a backgrounded task is an action of its own, and its settle always speaks", () => {
-  // It outlives the tool call that started it, so the call's outcome cannot
-  // report it — by the time it ends the run has usually moved on.
+test("one backgrounded command is ONE action row and one outcome row, never three", () => {
+  // The wire carries three events for one launch: the `tool_use` with the
+  // command, a `task_started` with the same command plus the runtime's id, and
+  // a `task_settled`. Printing all three made 47 launches 141 rows in one live
+  // run (2026-09-08), two of them the same text. The start is folded away — the
+  // action was already announced by the call that made it.
   assert.equal(
     formatEvent({ ...LEAD, kind: "task_started", taskId: "bg1", summary: "bal build --offline" }).text,
-    "⟳ background bal build --offline",
+    "",
   );
-  // Nothing else on the feed names it, so the id stands in rather than nothing.
-  assert.equal(formatEvent({ ...LEAD, kind: "task_started", taskId: "bg1" }).text, "⟳ background bg1");
+  assert.equal(isSilentKind("task_started"), true, "a folded row must be dropped, not printed blank");
+
+  // The settle is the one row, and it names the COMMAND rather than the id: the
+  // runtime's notification carries neither, so the producer repeats the start's
+  // summary. Without it the row reads `background bg1 · failed`, which cannot be
+  // matched by eye to anything else on the feed.
   const settled = formatEvent({ ...LEAD, kind: "task_settled", taskId: "bg1", summary: "bal build --offline", status: "failed", outputBytes: 20_480 });
   assert.equal(settled.text, "✗ background bal build --offline · failed · 20.0 KB output");
   assert.equal(settled.tone, "error");
+  // A producer that gave no summary still leaves the id rather than nothing.
+  assert.equal(
+    formatEvent({ ...LEAD, kind: "task_settled", taskId: "bg1", status: "completed" }).text,
+    "↳ background bg1 · completed",
+  );
 });
 
 test("notice names WHICH condition in words, and never renders a bare code as nothing", () => {

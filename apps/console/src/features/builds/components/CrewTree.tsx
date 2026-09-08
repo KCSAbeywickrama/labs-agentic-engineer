@@ -27,6 +27,7 @@ import {
   type CrewTask,
 } from "@aep/progress-view";
 import { toneColor } from "../../../components/logTone";
+import { elideMiddle } from "../lib/elide";
 import { PlanRow } from "./AgentPlan";
 import type { StampedRunEvent } from "../hooks/useRunProgress";
 
@@ -67,11 +68,47 @@ function StateDot({ state }: { state: CrewState }) {
   );
 }
 
+/**
+ * A command, elided in the MIDDLE.
+ *
+ * The head is an overflowing box and ellipsises when the column is too narrow;
+ * the tail never shrinks, so the part that says WHICH command this is survives
+ * — `cd expense-webapp && … react@19.2.3` rather than five rows of
+ * `cd expense-webapp && npm in…`. See `elideMiddle` for why the split is in
+ * characters and the elision is in CSS.
+ *
+ * Both halves stay in the DOM, so the row still reads as the whole command to a
+ * screen reader and the tree's text is still the text. `title` is for the mouse
+ * only, on top of that, never instead of it.
+ */
+function Command({ text }: { text: string }) {
+  const { head, tail } = elideMiddle(text);
+  return (
+    <Box component="span" sx={{ display: "flex", minWidth: 0, flex: 1 }}>
+      <Typography
+        component="span"
+        sx={{ font: "inherit", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+      >
+        {head}
+      </Typography>
+      <Typography
+        component="span"
+        sx={{ font: "inherit", flexShrink: 0, whiteSpace: "pre" }}
+      >
+        {tail}
+      </Typography>
+    </Box>
+  );
+}
+
 /** A shell command the agent backgrounded — its owner's row, one level in. */
 function TaskRow({ task, depth }: { task: CrewTask; depth: number }) {
   const failed = task.status === "failed";
   return (
     <Box
+      // The whole row, so a hover anywhere on it reveals the command — the
+      // status at its right end is part of what a reader is pointing at.
+      title={task.label}
       sx={{
         display: "flex",
         alignItems: "baseline",
@@ -84,13 +121,7 @@ function TaskRow({ task, depth }: { task: CrewTask; depth: number }) {
       <Typography component="span" sx={{ font: "inherit", flexShrink: 0 }}>
         ⟳
       </Typography>
-      <Typography
-        component="span"
-        title={task.label}
-        sx={{ font: "inherit", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-      >
-        {task.label}
-      </Typography>
+      <Command text={task.label} />
       <Typography component="span" sx={{ font: "inherit", ml: "auto", flexShrink: 0 }}>
         {task.status}
       </Typography>

@@ -144,6 +144,11 @@ export function groupByAgent<E extends RunEventView>(events: readonly E[]): Agen
           label: opened.label,
           role: opened.role,
           background: opened.background,
+          // The arrival of this event IS the declaration — see
+          // AgentReport.declared. Copied field by field like the rest, because
+          // the counters already folded onto this section outrank a start that
+          // knows nothing about them.
+          declared: opened.declared,
         };
         continue;
       }

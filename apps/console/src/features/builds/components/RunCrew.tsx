@@ -107,24 +107,26 @@ export function RunCrew({ events }: { events: StampedRunEvent[] }) {
   // inspector beside a full tree reads as a broken page.
   const selected = crew.members.find((m) => m.id === chosenId) ?? crew.lead;
 
-  // A crew of ONE is not a crew. A validation cycle runs a single validator and
-  // a small coding cycle never fans out: a tree with one row, a toggle offering
-  // a timeline with one lane, and an inspector for the only agent there is would
-  // all be chrome around a fact already on screen. Those cycles get exactly what
-  // they had — one agent's steps, its totals and its report — plus the liveness
-  // hint, which is the one thing the flat form could never show.
-  if (crew.agents === 1) {
-    return (
-      <Box>
-        <Stack direction="row" sx={{ alignItems: "center", justifyContent: "flex-end", mb: 1 }}>
-          <CrewHint agents={crew.agents} running={crew.running} silentForMs={crew.silentForMs} />
-        </Stack>
-        <LogSurface>
-          <CrewInspector member={crew.lead} />
-        </LogSurface>
-      </Box>
-    );
-  }
+  // THE CREW IS THERE FROM THE FIRST AGENT.
+  //
+  // A cycle that fans out starts as one agent, so a layout that only becomes a
+  // tree once a second one arrives RESHAPES ITSELF mid-run — the very moment a
+  // reader is watching it most closely. A tree of one row costs a little
+  // chrome; a page that rearranges costs the reader the surface they had just
+  // learned. So one agent gets the same tree and the same inspector a fanned-out
+  // cycle gets, and a spawned agent then appears IN PLACE, as a row under the
+  // lead, with nothing else moving.
+  //
+  // The TIMELINE is the exception, and it is not chrome-avoidance: a timeline
+  // compares lanes, and one lane compares nothing — it would draw a single bar
+  // spanning the whole cycle, which the hint beside it already says in words.
+  // The toggle therefore appears with the second agent. That adds a control
+  // rather than moving anything already on screen, which is the rule above.
+  const fannedOut = crew.agents > 1;
+  // The choice is remembered per browser, so a reader who left the timeline on
+  // can arrive at a single-agent cycle: the crew is what such a cycle draws,
+  // and their choice still stands for the next one that fanned out.
+  const showTimeline = fannedOut && view === "timeline";
 
   const show = (id: string) => {
     setChosenId(id);
@@ -141,24 +143,26 @@ export function RunCrew({ events }: { events: StampedRunEvent[] }) {
         sx={{ alignItems: "center", justifyContent: "flex-end", mb: 1 }}
       >
         <CrewHint agents={crew.agents} running={crew.running} silentForMs={crew.silentForMs} />
-        <ToggleButtonGroup
-          exclusive
-          size="small"
-          value={view}
-          onChange={(_, next: string | null) => {
-            // Null is the reader clicking the button that is already on. A view
-            // is not a filter — there is no "neither", so the choice stands.
-            if (next === "crew" || next === "timeline") setView(next);
-          }}
-          aria-label="How to read this cycle"
-        >
-          <ToggleButton value="crew">Crew</ToggleButton>
-          <ToggleButton value="timeline">Timeline</ToggleButton>
-        </ToggleButtonGroup>
+        {fannedOut && (
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={view}
+            onChange={(_, next: string | null) => {
+              // Null is the reader clicking the button that is already on. A view
+              // is not a filter — there is no "neither", so the choice stands.
+              if (next === "crew" || next === "timeline") setView(next);
+            }}
+            aria-label="How to read this cycle"
+          >
+            <ToggleButton value="crew">Crew</ToggleButton>
+            <ToggleButton value="timeline">Timeline</ToggleButton>
+          </ToggleButtonGroup>
+        )}
       </Stack>
 
       <LogSurface maxHeight="none">
-        {view === "timeline" ? (
+        {showTimeline ? (
           <CrewTimeline crew={crew} onSelect={show} />
         ) : (
           <Stack

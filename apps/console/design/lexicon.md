@@ -170,7 +170,11 @@ not carry: who is acting, why it failed.
 
 | Situation | Says |
 |---|---|
-| The coding agent is working it | **`Running · Coding agent`** |
+| It is moving, and the surface cannot say who is working | **`Running`** |
+| The coding agent is writing code | **`Running · Coding agent`** |
+| The platform is merging its pull request | **`Running · Merging the pull request`** |
+| Its components are building | **`Running · Building components`** |
+| Every stage is done and the version has not settled | **`Deploying to development`** |
 | The run ended badly, and the platform said why | **`Failed · <reason>`** |
 | The run ended badly and left no reason | **`Failed`** |
 | Built, and it is the version running in development | **`Deployed to development`** |
@@ -180,6 +184,15 @@ not carry: who is acting, why it failed.
 
 **`Built`, never *Completed*.** "Completed" describes the run; the row is about
 the version.
+
+**The qualifier names the actor working NOW, and only a surface that has read
+the run may add one.** `in_progress` spans the whole build-session rail
+(ADR-0014) — the agent writes, the platform merges, the components build, the
+cluster rolls out — so one hard-coded actor is true for a fifth of a run and
+false for the rest. The build page reads the run and names the rail's current
+stage; the ledger cannot afford that read (ADR-0021 §6) and so says the bare
+`Running`. A stage that is waiting, needs a human or failed is named by neither:
+the rail below spells it out in a sentence a pill has no room for.
 
 **There is no queued status, and that is a gap rather than a choice.** The
 design drew `Queued · next` for a version waiting its turn, and the platform

@@ -24,8 +24,15 @@
 // branches a fixture cannot reach on purpose — a failed agent, a severed
 // command, a plan item, a heartbeat storm — plus every wording decision that
 // has cost a run once.
+//
+// The one exception is at the bottom of this file: a recording replayed through
+// the adapter ALONE, to assert the feed's attribution invariant. That is a
+// property of what this module may write into `agentId`, it has to hold over a
+// whole session rather than over one message, and it is checked here because
+// this is the only module that can break it.
 
 import { test } from "node:test";
+import fs from "node:fs";
 import assert from "node:assert/strict";
 import { createClaudeAdapter, type ClaudeAdapterOptions } from "./claude_adapter.js";
 import type { RunEventInput, RunEventModelUsage, RunEventUsage } from "./emitter.js";
@@ -378,9 +385,33 @@ test("adapter: a forwarded message is attributed to the AGENT, by its runtime id
 
 // The failure this prevents is the whole reason the surface exists: filing an
 // agent's work under the lead makes a run look like one agent doing everything.
-test("adapter: an agent we never saw start is still not the lead", () => {
+// This used to assert the opposite — that a parent with no `task_started`
+// behind it became an agent named after the call — and that is the bug F1
+// records. A `tool_use_id` is not an identity: the runtime stamps
+// `parent_tool_use_id` on the frames of ANY call in flight, so a lead blocked
+// in `TaskOutput` minted one phantom agent per wait. See `authorOf`.
+test("adapter: a parent that started no agent belongs to whoever ISSUED the call", () => {
+  const a = adapter();
+  // The lead issues a blocking wait. No agent is spawned by it.
+  a.translate(assistant(null, toolUse("toolu_wait", "TaskOutput", { task_id: "agent-1", block: true })));
+  const progress = a.translate({ type: "tool_progress", tool_use_id: "toolu_wait", parent_tool_use_id: "toolu_wait" });
+  assert.equal((progress[0] as { agentId: string }).agentId, "lead");
+});
+
+test("adapter: a call issued by a spawned agent stays that agent's, spawn or no spawn", () => {
+  const a = withAgent();
+  // agent-1 issues a call of its own; frames forwarded from inside it name that
+  // call as their parent, and the work is still agent-1's.
+  a.translate(assistant("toolu_spawn", toolUse("toolu_inner", "Bash", { command: "npm ci" })));
+  const progress = a.translate({ type: "tool_progress", tool_use_id: "toolu_inner", parent_tool_use_id: "toolu_inner" });
+  assert.equal((progress[0] as { agentId: string }).agentId, "agent-1");
+});
+
+// The last resort, and the only safe one: a parent this run never saw declared
+// or issued is the lead, exactly as `settleFanOutResult` already had it.
+test("adapter: a parent from nowhere is the lead, never an id of its own", () => {
   const events = once(assistant("toolu_unknown", toolUse("t9", "Bash", { command: "ls" })));
-  assert.equal((events[0] as { agentId: string }).agentId, "toolu_unknown");
+  assert.equal((events[0] as { agentId: string }).agentId, "lead");
 });
 
 test("adapter: two agents at once are told apart", () => {
@@ -744,13 +775,17 @@ test("adapter: a backgrounded command is a task of its own, owned by the agent t
     is_backgrounded: true,
   });
   assert.deepEqual(started, [
-    { kind: "task_started", agentId: "agent-1", taskId: "bo1", command: "sleep 25 && echo done" },
+    { kind: "task_started", agentId: "agent-1", taskId: "bo1", summary: "sleep 25 && echo done" },
   ]);
 
   // `stopped` at session end is what names an orphan: the command never
-  // finished, and the run ended anyway.
+  // finished, and the run ended anyway. The settle repeats the START's summary:
+  // the notification carries only a status and an id, and `background bo1 ·
+  // stopped` cannot be matched by eye to any command on the feed.
   const settled = a.translate({ type: "system", subtype: "task_notification", task_id: "bo1", status: "stopped" });
-  assert.deepEqual(settled, [{ kind: "task_settled", agentId: "agent-1", taskId: "bo1", status: "stopped" }]);
+  assert.deepEqual(settled, [
+    { kind: "task_settled", agentId: "agent-1", taskId: "bo1", summary: "sleep 25 && echo done", status: "stopped" },
+  ]);
 });
 
 // ADR-0002's known limit, carried over: a runtime that does not name the call
@@ -912,4 +947,247 @@ test("adapter: an unknown message, and a malformed one, produce nothing", () => 
   assert.deepEqual(once({ type: "assistant", message: {} }), []);
   assert.deepEqual(once(null), []);
   assert.deepEqual(once("not a message"), []);
+});
+
+// --- the invariants a live run broke ----------------------------------------
+//
+// Everything below is pinned against the coding run of 2026-09-08, whose feed
+// is the evidence for each defect. The unit tests above cover one branch each;
+// these state a property that has to hold across a WHOLE session, which is the
+// altitude at which all four of these bugs actually showed up.
+
+/** One recording, as `query()` yielded it. */
+function fixture(name: string): unknown[] {
+  const file = new URL(`../../../test/fixtures/${name}`, import.meta.url);
+  return fs
+    .readFileSync(file, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as unknown);
+}
+
+/**
+ * Probe 1 with the runtime's liveness frames put back.
+ *
+ * The recordings pre-date `tool_progress` being kept, and that message is the
+ * one that broke attribution: the runtime stamps `parent_tool_use_id` on the
+ * frames of ANY call still in flight, including a blocking `TaskOutput`. Probe
+ * 1 has three of those, made by the lead, so following each fan-out and each
+ * wait with the frame the runtime really sends reproduces the live shape
+ * without inventing a session.
+ */
+function withProgressFrames(messages: unknown[]): unknown[] {
+  const out: unknown[] = [];
+  for (const m of messages) {
+    out.push(m);
+    const msg = m as { type?: string; message?: { content?: unknown[] } };
+    if (msg.type !== "assistant" || !Array.isArray(msg.message?.content)) continue;
+    for (const block of msg.message.content) {
+      const b = block as { type?: string; id?: string };
+      if (b.type !== "tool_use" || !b.id) continue;
+      out.push({ type: "tool_progress", tool_use_id: b.id, parent_tool_use_id: b.id, elapsed_time_seconds: 30 });
+    }
+  }
+  return out;
+}
+
+// THE invariant of the whole feed: `agentId` is `lead`, or an id the runtime
+// itself declared in a `system/task_started`. Nothing else is an agent.
+//
+// Live (2026-09-08) the adapter minted one agent per blocking wait: a run with
+// three real agents reported ten, six of them named `toolu_…` across 84 events,
+// and the console drew a lane for each. Worse than the miscount, a minted id has
+// no `agent_started` and can never settle, so the lead stayed classified
+// `waiting` on it and the stall alarm went quiet for the rest of the run.
+test("adapter: every agentId on the feed is `lead` or an agent the runtime DECLARED", () => {
+  const messages = withProgressFrames(fixture("probe1-background-fanout.jsonl"));
+  // A clock that moves, so the heartbeat budget does not swallow the very
+  // frames this test is about.
+  let clock = 0;
+  const a = adapter({ now: () => (clock += 60_000) });
+
+  const declared = new Set<string>();
+  const seen = new Set<string>();
+  for (const m of messages) {
+    const msg = m as { type?: string; subtype?: string; task_id?: string; task_type?: string };
+    if (msg.type === "system" && msg.subtype === "task_started" && msg.task_type === "local_agent") {
+      declared.add(msg.task_id as string);
+    }
+    for (const event of a.translate(m)) seen.add(event.agentId ?? "lead");
+  }
+
+  assert.equal(declared.size, 4, "probe 1 spawns three agents and one depth-2 child");
+  for (const id of seen) {
+    assert.doesNotMatch(id, /^toolu_/, `a tool_use_id reached the feed as an agent: ${id}`);
+    assert.ok(id === "lead" || declared.has(id), `undeclared agent on the feed: ${id}`);
+  }
+  // Said the other way round, because a set that is merely a subset could still
+  // be missing an agent: the feed's authors are exactly the lead plus the four.
+  assert.deepEqual([...seen].sort(), ["lead", ...declared].sort());
+});
+
+// The same property over the depth-2 spawn, which is the case the two joins
+// exist for: gamma's child is issued from inside gamma, so `issuedBy` has to
+// answer before the lead does.
+test("adapter: a depth-2 child's steps belong to the child, not to the lead", () => {
+  const messages = withProgressFrames(fixture("probe1-background-fanout.jsonl"));
+  let clock = 0;
+  const a = adapter({ now: () => (clock += 60_000) });
+  const events = messages.flatMap((m) => a.translate(m));
+
+  const child = events.find((e) => e.kind === "agent_started" && e.depth === 2);
+  assert.ok(child, "probe 1 has a depth-2 spawn");
+  assert.ok(child.parentAgentId, "and it names the agent that spawned it, not the lead");
+  assert.ok(
+    events.some((e) => e.agentId === child.agentId && e.kind !== "agent_started"),
+    "the child produced steps of its own, and they are filed under the child",
+  );
+});
+
+// --- the diagnosis of a failed command --------------------------------------
+//
+// Four `tool_result`s came back `ok:false` in the live run and two of them
+// reported a useless line. The SUMMARIES below are that run's own output; the
+// payloads are reconstructions of the shape that produces them, since the pod's
+// raw tool output is not on the feed and dies with the pod.
+
+function diagnosisOf(output: string): string {
+  const a = adapter();
+  a.translate(assistant(null, toolUse("t1", "Bash", { command: "sh -c '…'" })));
+  const events = a.translate(toolResult(null, "t1", { content: output, isError: true }));
+  return (events[0] as { summary: string }).summary;
+}
+
+// Live seq 155. The command echoed a heading before each listing, so line 0 was
+// `--- expense-webapp dir ---` and that is what the feed reported as the
+// diagnosis. Nothing here announces a fault in so many words, so the rule that
+// has to save it is the fallback: shell output puts its verdict LAST.
+test("adapter: with no fault word, the diagnosis is the LAST line and not the banner", () => {
+  assert.equal(
+    diagnosisOf(
+      [
+        "Exit code 1",
+        "--- expense-webapp dir ---",
+        "src",
+        "package.json",
+        "--- expense-api dir ---",
+        "ls: cannot access 'expense-api': No such file or directory",
+      ].join("\n"),
+    ),
+    "ls: cannot access 'expense-api': No such file or directory",
+  );
+});
+
+// Live seq 388. The command cat'd a file and then built it, so line 0 was that
+// file's first line — `import React from 'react';` went onto a user-visible
+// build log as the reason a build failed.
+test("adapter: a fault word anywhere in the line beats the first line of a cat'd file", () => {
+  assert.equal(
+    diagnosisOf(
+      [
+        "Exit code 1",
+        "import React from 'react';",
+        "import { useState } from 'react';",
+        "",
+        "src/App.tsx(4,10): error TS2305: Module './api' has no exported member 'listClaims'.",
+      ].join("\n"),
+    ),
+    "src/App.tsx(4,10): error TS2305: Module './api' has no exported member 'listClaims'.",
+  );
+});
+
+// Live seq 558 and 585, the two that read well. They did so by luck — each was
+// the first line of its output — so both are pinned here against a fix that
+// might have traded one end of the output for the other.
+test("adapter: the failures that already read well still read the same", () => {
+  assert.equal(
+    diagnosisOf("Exit code 1\nls: cannot access '.gitignore': No such file or directory"),
+    "ls: cannot access '.gitignore': No such file or directory",
+  );
+  assert.equal(
+    diagnosisOf(
+      "Exit code 2\nsrc/main.tsx(13,44): error TS2307: Cannot find module '../mock/browser' or its corresponding type declarations.",
+    ),
+    "src/main.tsx(13,44): error TS2307: Cannot find module '../mock/browser' or its corresponding type declarations.",
+  );
+});
+
+// The same tsc error behind npm's own banner, which is what it looks like the
+// moment the build is run through a script rather than directly. `^error` never
+// fires on it — the file name comes first — so the anchored pattern would have
+// fallen through to the banner. This is the case the unanchoring buys.
+test("adapter: a compiler error is found behind the runner's banner", () => {
+  assert.equal(
+    diagnosisOf(
+      [
+        "Exit code 2",
+        "> expense-webapp@0.0.0 build",
+        "> tsc -b && vite build",
+        "src/main.tsx(13,44): error TS2307: Cannot find module '../mock/browser'.",
+        "Found 1 error in src/main.tsx:13",
+      ].join("\n"),
+    ),
+    "src/main.tsx(13,44): error TS2307: Cannot find module '../mock/browser'.",
+  );
+});
+
+// --- paths a reader can actually read ---------------------------------------
+
+const WORKSPACE = "/home/aep/aep-workspace/default/employees-submit-expense1121/07f229c4-4e80-4168-9609-e5a4c4ff7f66";
+
+/** An adapter whose init has declared the live run's workspace root. */
+function inWorkspace(root: string = WORKSPACE) {
+  const a = adapter();
+  a.translate({ type: "system", subtype: "init", model: "claude-sonnet-5", cwd: root });
+  return a;
+}
+
+function summaryOf(a: ReturnType<typeof adapter>, tool: string, input: Record<string, unknown>): string {
+  const events = a.translate(assistant(null, toolUse(`t-${tool}-${JSON.stringify(input)}`, tool, input)));
+  return (events[0] as { summary: string }).summary;
+}
+
+// Live: `$ Read /home/aep/aep-workspace/default/employees-submit-expense1121/
+// 07f229c4-4e80-4168-9609-e5a4c4ff7f66/specs/design/security.json` — 95 leading
+// characters, identical on all 104 path rows of the run, and ten consecutive
+// reads that looked like one repeated line.
+test("adapter: a path inside the workspace is said the way the workspace says it", () => {
+  const a = inWorkspace();
+  assert.equal(summaryOf(a, "Read", { file_path: `${WORKSPACE}/specs/design/security.json` }), "specs/design/security.json");
+  // Tooling relativises to `.claude/…`, which needs no special case: it is short
+  // and it still reads as tooling rather than as the product.
+  assert.equal(
+    summaryOf(a, "Read", { file_path: `${WORKSPACE}/.claude/skills/aep/references/component-contract.md` }),
+    ".claude/skills/aep/references/component-contract.md",
+  );
+  assert.equal(summaryOf(a, "Glob", { path: WORKSPACE }), ".");
+});
+
+test("adapter: a path OUTSIDE the workspace stays absolute — that is the interesting half", () => {
+  const a = inWorkspace();
+  // The runtime's own session directory. Shortening it would hide that the read
+  // left the project at all.
+  const outside = "/home/aep/.claude/projects/-home-aep-aep-workspace/session.jsonl";
+  assert.equal(summaryOf(a, "Read", { file_path: outside }), outside);
+  // A sibling checkout is not a child of the root: the match is on a path
+  // boundary, not a string prefix.
+  assert.equal(summaryOf(a, "Read", { file_path: `${WORKSPACE}-old/src/App.tsx` }), `${WORKSPACE}-old/src/App.tsx`);
+});
+
+test("adapter: with no init declared, a path is left exactly as the runtime gave it", () => {
+  assert.equal(
+    summaryOf(adapter(), "Read", { file_path: `${WORKSPACE}/specs/design/security.json` }),
+    `${WORKSPACE}/specs/design/security.json`,
+  );
+});
+
+// A command is not shortened even though it carries the same noise: the contract
+// calls this field the command line that RAN, and a relative path in it resolves
+// only from the workspace root — which is not where the command ran once an
+// agent has `cd`-ed into a component.
+test("adapter: a shell command keeps its absolute paths, because it is a command", () => {
+  const a = inWorkspace();
+  const command = `cat ${WORKSPACE}/specs/design/security.json`;
+  const events = a.translate(assistant(null, toolUse("t1", "Bash", { command })));
+  assert.equal((events[0] as { summary: string }).summary, command);
 });

@@ -301,7 +301,7 @@ into the runner pod at `/app/skills` for live skill edits (see
   committed document `aep-api` and the console generate from — into
   `remote-worker/src/generated/aep-api.d.ts`. The root `.gitignore` rule
   `generated/` keeps it out of git, and that is correct, not an oversight:
-  the image's ENTRYPOINT is `npx tsx src/oneshot.ts`, there is no `tsc` in the
+  the image runs `npx tsx src/oneshot.ts`, there is no `tsc` in the
   image, and `tsx` erases types — so a **type-only** import
   (`import type { components } from "../generated/aep-api"`) resolves at
   workspace typecheck and vanishes before the pod ever runs. Do NOT "fix" this
@@ -433,6 +433,36 @@ into the runner pod at `/app/skills` for live skill edits (see
   on an out-of-sync `npm ci`, which is the loud outcome. The quiet one is worse:
   a range that still resolves leaves the pod running a version the tests never
   saw.
+- **The image states what the environment IS, so no agent has to discover it.**
+  Two entries earn their place there rather than in a skill or a prompt.
+  `AGENT_BROWSER_ARGS=--no-sandbox` (Dockerfile): a pod has no usable chromium
+  sandbox — no setuid helper, and the runtime's seccomp profile denies the
+  unprivileged user namespace the zygote falls back to — so without it the first
+  browser command of a walk fails and the agent spends failed tasks guessing.
+  The pod is the boundary that holds; the argument for why dropping chromium's
+  own is acceptable is at the variable. And `remote-worker/docker-entrypoint.sh`,
+  the image's ENTRYPOINT, which sets `ulimit -c 0` (soft AND hard, so no
+  descendant can raise it) before exec'ing the CMD: a `bal build` JVM or a
+  chromium that crashes used to drop a `core` of tens of megabytes into the
+  cloned repository, untracked and one `git add -A` from a customer's PR. It has
+  to be the image because Kubernetes has no `ulimit` field and Node cannot call
+  `setrlimit`. Any new way of starting the container goes THROUGH that wrapper —
+  the playground's `--entrypoint` names it (`playground/src/engine/coding-run.ts`)
+  rather than `npx`, which is how it skipped the limits for a while.
+  What the image CANNOT state is `/dev/shm`, which is the caller's: this
+  Chromium aborts on the 64Mi a pod gets by default, so all three run paths size
+  it to 1 GiB — `--shm-size=1g` locally and in the playground, a bounded
+  `medium: Memory` emptyDir in the Job. ADR-0013 has the two properties that are
+  easy to get wrong (it is charged to `memoryLimit`, and unbounded it is sized
+  from the NODE's memory) and why `--disable-dev-shm-usage` was rejected.
+  The `core` guard has a second half in the RUNNER: `installCrashArtefactExclude`
+  (`lib/workspace.ts`) writes the crash-artefact patterns into the clone's
+  `.git/info/exclude` — per-clone, never committed, so no platform concern
+  reaches a customer's `.gitignore`. It is not redundant with the rlimit (it
+  covers the JVM's own `hs_err_pid*.log`, which no rlimit suppresses), and
+  neither is redundant with the patterns `skills/aep/SKILL.md` names — that is
+  the only copy a reader meets when they wonder why `core` is not in
+  `git status`.
 - **One image**, `remote-worker/Dockerfile`, serves BOTH task kinds
   (`AEP_TASK_KIND=implementation` and `=validation`). It is Debian-based
   because Playwright's browsers are glibc-linked; do not reintroduce a second,

@@ -40,6 +40,17 @@ package codingagent
 // The runner makes no network call for any of this. Its stdout is still the one
 // transport, which is what keeps a runner that cannot reach the platform from
 // being a runner whose work is invisible.
+//
+// A `run_settled` DOES NOT CLOSE THE FEED — the pod's terminal phase does. The
+// runner's last event is a statement about its own session, not about the
+// container's stdout, and the container keeps writing after it: a package
+// manager's exit notice, a shutdown hook, a crash tail from whatever was still
+// running. Those lines are recorded like any other. The alternative — stop at
+// `run_settled` — throws away the output most likely to explain a run that ended
+// badly, which is the one thing this recording exists to hold on to. What it
+// costs is that a reader cannot assume `run_settled` is the last line; it is the
+// line that says how the run ENDED, and `state.json`'s `closed` is the one that
+// says nothing more is coming.
 
 import (
 	"bufio"
@@ -420,11 +431,6 @@ func (s *recordingSession) ingest(ctx context.Context, tail LiveTail) {
 			return
 		}
 	}
-	for i := range events {
-		if events[i].Seq > s.cur.LastSeq {
-			s.cur.LastSeq = events[i].Seq
-		}
-	}
 	_, dropped, err := s.rec.store.Append(s.cycle.OrgID, s.cycle.ID, s.attempt, events, s.cur)
 	if err != nil {
 		slog.WarnContext(ctx, "codingagent.CycleRecorder: append to recording failed",
@@ -440,8 +446,7 @@ func (s *recordingSession) ingest(ctx context.Context, tail LiveTail) {
 		// that trips it keeps RUNNING — stopping an agent to protect a log would be
 		// the wrong trade — and says on the feed that the rest is not recorded.
 		s.capped = true
-		s.cur.LastSeq++
-		notice := platformNotice(s.cur.LastSeq, gen.RunEventLevelWarn,
+		notice := platformNotice(s.nextSeq(), gen.RunEventLevelWarn,
 			"This cycle's output passed the recording size limit; the rest of the run was not recorded.")
 		notice.Code = gen.RunEventCodeGap
 		_, _, _ = s.rec.store.Append(s.cycle.OrgID, s.cycle.ID, s.attempt, []gen.RunEvent{notice}, s.cur)
@@ -467,14 +472,16 @@ func (s *recordingSession) consume(ctx context.Context, text string) []gen.RunEv
 	backfilled := false
 	for _, ln := range splitPage(text) {
 		if !ln.hasSeq {
-			// A seq-less line (container bootstrap output, a stray library write).
-			// The kubelet's own clock is its only cursor — see recordCursor.ProseTS.
+			// A seq-less line (container bootstrap output, a stray library write, a
+			// subprocess writing straight to fd 1, a crash tail). The kubelet's own
+			// clock is its only cursor — see recordCursor.ProseTS — and its position
+			// in this file is its only sequence, which s.number stamps.
 			ts := parseEventTime(ln.ts)
 			if ts.IsZero() || !ts.After(s.cur.ProseTS) {
 				continue
 			}
 			s.cur.ProseTS = ts
-			out = append(out, s.lift.line(ln.msg, ln.ts)...)
+			out = append(out, s.number(s.lift.line(ln.msg, ln.ts))...)
 			continue
 		}
 		if ln.seq <= s.cur.ProducerSeq {
@@ -482,16 +489,14 @@ func (s *recordingSession) consume(ctx context.Context, text string) []gen.RunEv
 		}
 		if s.cur.ProducerSeq > 0 && ln.seq > s.cur.ProducerSeq+1 {
 			recovered, missing := s.repairGap(ctx, s.cur.ProducerSeq, ln.seq, &backfilled)
-			out = append(out, recovered...)
+			out = append(out, s.number(recovered)...)
 			if missing > 0 {
-				s.cur.LastSeq = maxSeqOf(out, s.cur.LastSeq)
-				s.cur.LastSeq++
-				out = append(out, gapNotice(s.cur.LastSeq, missing))
+				out = append(out, gapNotice(s.nextSeq(), missing))
 				s.markGaps(ctx)
 			}
 		}
 		s.cur.ProducerSeq = ln.seq
-		out = append(out, s.lift.line(ln.msg, ln.ts)...)
+		out = append(out, s.number(s.lift.line(ln.msg, ln.ts))...)
 	}
 	return out
 }
@@ -541,6 +546,48 @@ func (s *recordingSession) repairGap(ctx context.Context, after, before int64, b
 	return out, missing
 }
 
+// number stamps the recording's own seq onto events the lift produced, in the
+// order they will be written, and reports the same slice.
+//
+// THE RECORDER IS THE FEED'S NUMBERING AUTHORITY, and it has to be. `seq` is
+// what the contract tells a consumer to dedupe and order on, and the producer's
+// numbering cannot serve: a third of the lines on this stream carry no envelope
+// at all (container bootstrap, a stray library write, a subprocess writing
+// straight to fd 1, a crash tail), so they used to be numbered 0 — every one of
+// them, which made them one event to anybody deduping by seq. A measured run
+// ended with five `npm notice` lines and a console that showed one of them.
+//
+// The number is this event's POSITION IN THE FILE, which is exactly what the
+// contract says seq is, and it is STABLE ACROSS RE-READS because the recorder
+// never lifts a line twice: a line with an envelope is skipped once its seq is
+// at or below cursor.ProducerSeq, and a seq-less one once its pod clock is at or
+// below cursor.ProseTS. Both cursors are persisted beside the events, so a
+// restart — and the final full re-read every terminal pod gets — resumes the
+// numbering rather than restarting it.
+//
+// Events carrying a NEGATIVE seq are left alone. Those are the platform's own
+// dark-zone markers (agent_progress.go's seqBoot* space): they are re-derived on
+// every poll and their whole purpose is that the same state collapses to one row
+// under the client's dedup, which only a fixed seq achieves.
+func (s *recordingSession) number(events []gen.RunEvent) []gen.RunEvent {
+	for i := range events {
+		if events[i].Seq < 0 {
+			continue
+		}
+		events[i].Seq = s.nextSeq()
+	}
+	return events
+}
+
+// nextSeq allocates the next free position in this attempt's feed. It is the
+// only writer of cursor.LastSeq, so the cursor persisted in state.json always
+// accounts for every event the file holds — including the seq-less ones, which
+// it silently did not before.
+func (s *recordingSession) nextSeq() int64 {
+	s.cur.LastSeq++
+	return s.cur.LastSeq
+}
+
 // markGaps latches the cycle's recording as known-incomplete. It does NOT close
 // it: the run is still going and the rest of the feed is still worth recording.
 func (s *recordingSession) markGaps(ctx context.Context) {
@@ -572,16 +619,6 @@ func gapNotice(seq, missing int64) gen.RunEvent {
 		fmt.Sprintf("… %d event(s) of this run were not captured and could not be recovered", missing))
 	ev.Code = gen.RunEventCodeGap
 	return ev
-}
-
-// maxSeqOf returns the largest seq in events, or floor when none is larger.
-func maxSeqOf(events []gen.RunEvent, floor int64) int64 {
-	for i := range events {
-		if events[i].Seq > floor {
-			floor = events[i].Seq
-		}
-	}
-	return floor
 }
 
 // pageLine is one raw log line split into what the recorder decides on: the

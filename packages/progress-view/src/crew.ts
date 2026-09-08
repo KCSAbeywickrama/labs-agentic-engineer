@@ -181,6 +181,12 @@ export interface CrewMember<E> {
    * surface renders as no sub-line rather than as an empty one.
    */
   caption: string;
+  /**
+   * Did an `agent_started` for this member arrive, or is it known only from
+   * events that claimed to be it? See AgentReport.declared — and the blocking
+   * rule, which is the reason this is on the member and not only on the report.
+   */
+  declared: boolean;
   /** The agent it is blocked inside, when it is `waiting`. */
   waitingOnId?: string | undefined;
   /** Spawned detached from its parent's turn, where the runtime said so. */
@@ -477,9 +483,23 @@ export function buildCrew<E extends RunEventView>(
     const settledMs =
       v.settledMs ?? (status === "running" ? undefined : (runSettledMs ?? v.lastMs));
 
-    // Blocked inside a FOREGROUND child: a background agent is detached from its
-    // parent's turn by definition, so its parent went on working.
-    const blocker = children.filter((c) => !c.background && !isCrewSettled(c.state)).at(-1);
+    // Blocked inside a DECLARED foreground child: a background agent is
+    // detached from its parent's turn by definition, so its parent went on
+    // working — and an agent the producer never announced is not a relationship
+    // this surface may assume at all.
+    //
+    // `declared` is load-bearing and it is not a guard against one past bug. An
+    // undeclared child carries no `background` field, `undefined` is not `true`,
+    // so it read as a foreground spawn and held its parent in `waiting` — which
+    // outranks the stall rule. That is a diagnostic being silenced by an agent
+    // nobody declared and which can therefore never settle. It happened live
+    // (2026-09-08: a producer minting an agent per blocking wait, so the lead
+    // was `waiting` for the rest of the run and the alarm never fired), and the
+    // same shape is reachable from any producer that synthesises agents from
+    // first sighting — the v1 lift's `inferred` agents do exactly that. Waiting
+    // is a claim, so it needs a declaration; firing a stall report slightly
+    // early is the safe direction for a diagnostic, and staying quiet is not.
+    const blocker = children.filter((c) => c.declared && !c.background && !isCrewSettled(c.state)).at(-1);
     const silentForMs = v.lastMs === undefined ? undefined : Math.max(0, now - v.lastMs);
     const state = stateOf(status, Boolean(blocker), v.inFlight.size > 0, silentForMs);
 
@@ -494,6 +514,7 @@ export function buildCrew<E extends RunEventView>(
       caption: captionOf(state, agent, v, blocker, silentForMs, now),
       waitingOnId: state === "waiting" ? blocker?.id : undefined,
       background: section.agent.background === true,
+      declared: section.agent.declared === true,
       silentForMs,
       elapsedMs: elapsedOf(agent, v, settledMs, now),
       steps,
@@ -544,15 +565,19 @@ export function buildCrew<E extends RunEventView>(
 }
 
 /**
- * The stretches a parent spent blocked: each foreground child's whole life.
+ * The stretches a parent spent blocked: each DECLARED foreground child's whole
+ * life.
  *
  * A background child is skipped — its parent never stopped for it, and painting
  * its span on the parent's lane would charge the parent for time it spent
- * working.
+ * working. An UNDECLARED child is skipped for the stronger reason given at the
+ * blocking rule above: nothing announced it, so no stretch of the parent's lane
+ * may be attributed to waiting on it. The two rules have to agree, or a lane
+ * would show a wait that the parent's own state denies.
  */
 function waitIntervals<E>(children: readonly CrewMember<E>[], now: number): Interval[] {
   return children.flatMap((c) => {
-    if (c.background) return [];
+    if (c.background || !c.declared) return [];
     const start = c.spans[0]?.startMs;
     if (start === undefined) return [];
     return [{ startMs: start, endMs: c.spans.at(-1)?.endMs ?? now }];

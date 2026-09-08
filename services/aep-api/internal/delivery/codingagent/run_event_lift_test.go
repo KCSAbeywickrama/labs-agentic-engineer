@@ -170,8 +170,12 @@ func TestParseRunEventTakesNativeV2(t *testing.T) {
 		native.WaitingOn != gen.RunEventWaitingOnTool || native.ElapsedMs != 120000 {
 		t.Errorf("native v2 = %+v, want it passed through whole", native)
 	}
-	if native.Seq != 5 {
-		t.Errorf("native v2 seq = %d, want the producer's own 5 — only the LIFT renumbers", native.Seq)
+	// The producer's seq is dropped: the RECORDER numbers the feed, because a
+	// producer's numbering cannot also number the seq-less lines interleaved with
+	// it (see recordingSession.number). The number is not lost — the recorder
+	// reads it off the raw line for dedupe and gap detection.
+	if native.Seq != 0 {
+		t.Errorf("native v2 seq = %d, want 0 — the lift does not number, the recorder does", native.Seq)
 	}
 
 	// A v2 envelope naming a kind this build cannot render is wrapped, not
@@ -229,17 +233,17 @@ func TestLiftAnnouncesEachAgentOnceAsInferred(t *testing.T) {
 		t.Errorf("second announcement = %+v", started[1])
 	}
 
-	// The announcement comes BEFORE the line that revealed the agent, and takes
-	// the free slot the seq doubling leaves for it — a client dedups on
-	// (attempt, seq), so a shared seq would drop one of the two.
+	// The announcement comes BEFORE the line that revealed the agent. ORDER is
+	// the whole guarantee the lift offers: it hands back a slice, the recorder
+	// numbers that slice in place, so a client deduping on (attempt, seq) gets
+	// two distinct rows without the lift ever inventing a number.
 	if got[1].Kind != gen.RunEventKindAgentStarted || got[2].AgentID != "toolu_web" {
 		t.Fatalf("announcement is not immediately before its line: %+v", got)
 	}
-	if got[1].Seq >= got[2].Seq {
-		t.Errorf("announcement seq %d is not before its line's %d", got[1].Seq, got[2].Seq)
-	}
-	if got[0].Seq >= got[1].Seq {
-		t.Errorf("announcement seq %d collides backwards with the previous line's %d", got[1].Seq, got[0].Seq)
+	for i, ev := range got {
+		if ev.Seq != 0 {
+			t.Errorf("lifted event %d carries seq %d; the lift must leave numbering to the recorder", i, ev.Seq)
+		}
 	}
 	// Ordinary work events carry the agent but NOT the tree fields — the contract
 	// scopes label/depth to the three agent-lifecycle kinds.
@@ -496,12 +500,13 @@ func TestLiftARealV1Recording(t *testing.T) {
 		t.Errorf("run_settled usage = %+v, want the recording's own figures", last.Usage)
 	}
 
-	// Seqs are strictly increasing across the whole lift, announcements included:
-	// that is what makes (attempt, seq) a usable dedup key.
-	for i := 1; i < len(got); i++ {
-		if got[i].Seq <= got[i-1].Seq {
-			t.Fatalf("seq went backwards at %d: %d after %d (%s after %s)",
-				i, got[i].Seq, got[i-1].Seq, got[i].Kind, got[i-1].Kind)
+	// The lift numbers nothing, announcements included. What makes (attempt, seq)
+	// a usable dedup key is the recorder stamping this slice in order, which
+	// TestRecorder_EveryLineGetsItsOwnSeq covers end to end.
+	for i, ev := range got {
+		if ev.Seq != 0 {
+			t.Fatalf("lifted event %d (%s) carries seq %d; the lift must leave numbering to the recorder",
+				i, ev.Kind, ev.Seq)
 		}
 	}
 }

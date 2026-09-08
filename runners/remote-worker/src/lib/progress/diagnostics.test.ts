@@ -23,6 +23,7 @@ import {
   isModelWaitFrame,
   isStreamFrame,
   isToolProgressFrame,
+  createStallSignalReader,
   readApiRetry,
   readStallSignal,
 } from "./diagnostics.js";
@@ -226,4 +227,56 @@ test("readStallSignal: every other message is not a signal", () => {
   assert.equal(readStallSignal({ type: "system", subtype: "task_started" }), undefined);
   assert.equal(readStallSignal({ type: "assistant", message: { content: [] } }), undefined);
   assert.equal(readStallSignal(null), undefined);
+});
+
+// The live run of 2026-09-08 carried 17 of these, gaps as short as 8 seconds,
+// and exactly three distinct sentences between them. A warning that repeats
+// every minute is one a reader learns to skip past — including the minute it
+// finally says `rejected`.
+test("stall reader: a rate-limit warning is said once per thing it has to say", () => {
+  const read = createStallSignalReader();
+  const window = (utilization: number, status = "allowed_warning"): unknown => ({
+    type: "rate_limit_event",
+    rate_limit_info: { status, rateLimitType: "seven_day", utilization },
+  });
+
+  // The live utilisations, in the order the run saw them: 82% four times,
+  // 83% eleven times, 84% twice.
+  const run = [0.822, 0.8241, 0.8249, 0.8203, 0.8251, 0.8288, 0.834, 0.8299, 0.8312, 0.8349, 0.8302, 0.8281,
+    0.8266, 0.8341, 0.8337, 0.8449, 0.8351];
+  const said = run.map((u) => read(window(u))).filter((s) => s !== undefined);
+  assert.deepEqual(said.map((s) => s!.detail), [
+    "[rate-limit] near the limit on the seven_day window at 82%",
+    "[rate-limit] near the limit on the seven_day window at 83%",
+    "[rate-limit] near the limit on the seven_day window at 84%",
+  ], "three sentences, not seventeen — one per whole percent the reader can see change");
+});
+
+test("stall reader: the line that MATTERS is never swallowed by the ones before it", () => {
+  const read = createStallSignalReader();
+  const at = (status: string, utilization: number): unknown => ({
+    type: "rate_limit_event",
+    rate_limit_info: { status, rateLimitType: "seven_day", utilization },
+  });
+  assert.ok(read(at("allowed_warning", 0.83)), "the first crossing always speaks");
+  assert.equal(read(at("allowed_warning", 0.834)), undefined, "the same sentence again does not");
+  // A status change is a different sentence, so it is a different fact: the
+  // provider is now refusing, which is the whole explanation for a run that is
+  // about to go nowhere.
+  const rejected = read(at("rejected", 0.834));
+  assert.equal(rejected?.level, "error");
+  assert.equal(rejected?.detail, "[rate-limit] rejected on the seven_day window at 83%");
+  // And a window that comes back down says so, rather than being remembered as
+  // "already said": only the LAST line is held, so this suppresses repetition
+  // and never a change.
+  assert.ok(read(at("allowed_warning", 0.82)));
+});
+
+// Only the rate limit repeats itself. Everything else here is a discrete
+// occurrence, and a second one is a second fact.
+test("stall reader: a second compaction is a second event, not a repeat", () => {
+  const read = createStallSignalReader();
+  const compaction = { type: "system", subtype: "compact_boundary" };
+  assert.ok(read(compaction));
+  assert.ok(read(compaction), "two compactions are two silences to explain");
 });

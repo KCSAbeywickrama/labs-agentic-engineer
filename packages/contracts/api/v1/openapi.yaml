@@ -6416,11 +6416,17 @@ components:
             that `stopped` is a cancellation and not a failure.
         summary:
           description: >-
-            `tool_use`, `tool_result`, the `git_*` kinds and `gh_action`: one
-            line describing the call, composed by the producer for a reader — a
-            file path, a search term, a workflow name. Capped, and never the raw
-            arguments, which is what keeps a feed readable when an agent passes a
-            whole file as a parameter.
+            `tool_use`, `tool_result`, the `git_*` kinds, `gh_action`,
+            `task_started` and `task_settled`: one line describing the call,
+            composed by the producer for a reader — a file path, a search term, a
+            workflow name. Capped, and never the raw arguments, which is what
+            keeps a feed readable when an agent passes a whole file as a
+            parameter.
+
+            A `task_settled` carries the SAME summary its `task_started` did.
+            Without it the only thing left to name a finished background command
+            is its `taskId`, and a row reading `background bql1cn6sh · failed`
+            cannot be matched by eye to the command that failed.
           maxLength: 200
           type: string
         taskId:
