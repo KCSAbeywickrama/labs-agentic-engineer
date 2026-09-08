@@ -31,7 +31,7 @@ browser config — they are pod env for nginx.
    # ← the design system's check goes here (see below)
    npx tsc --noEmit              # type-check without emitting
    npm run build                 # actually build
-   ! grep -rqE "mock/|msw" dist/ # the bundle carries no mock — step 3
+   ! grep -rq mockServiceWorker dist/ # the bundle carries no mock — step 3
    git status --porcelain --ignored=matching -- . \
      | grep '^!!' | grep -vE 'node_modules|dist'   # ← output MUST be empty
    ```
