@@ -50,8 +50,6 @@ const FLAG_LABEL: Record<string, string> = {
 export function dependencyTodo(dep: Dependency): string {
   if (dep.kind !== "external") return "";
   switch (dep.status) {
-    case "ambiguous":
-      return "Choose a provider";
     case "unresolved":
       switch (dep.reason) {
         case "needs-contract":
@@ -59,7 +57,8 @@ export function dependencyTodo(dep: Dependency): string {
         case "needs-acceptance":
           return "Needs your acceptance";
         default:
-          return "Needs input";
+          // No service chosen yet — the definition asks which one.
+          return "Choose a service";
       }
     default:
       return "";

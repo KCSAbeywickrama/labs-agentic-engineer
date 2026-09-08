@@ -155,8 +155,10 @@ opposite side of the wire).
 **External dependency**:
 A project's need for a third-party API or SDK, defined **once** in its own
 directory, `specs/design/dependencies/<name>/` — `dependency.json` (the
-provider chosen, `style: rest-api | graphql | sdk`, the config keys every
-consumer codes against, open `candidates` while nothing is chosen) beside the
+provider the user chose, `style: rest-api | graphql | sdk`, the config keys
+every consumer codes against, or — while no service is chosen — `suggestions`,
+services commonly used for the capability, named from the design agent's
+knowledge for the user to pick from, never a choice the agent made) beside the
 committed **contract** it points at (an OpenAPI or GraphQL slice, an `sdk.json`
 manifest). A component **references** it by name only, as a `kind: external`
 entry in its `design.json` `dependencies[]`; the platform hydrates the
@@ -164,7 +166,18 @@ reference from the file when it reads the design. Resolved when the contract
 is on disk (read-time, ADR-0003, never a stored flag); a Registered External
 resource is a platform-stamped `source: org` copy of the same shape.
 _Avoid_: `specPath` (a URL was never a contract), `needsSpec`, `specUrl`,
-`sources` — retired fields, rejected on write.
+`sources`, `candidates` (researched fits the agent could not decide between —
+the agent no longer decides at all) — retired fields, rejected on write.
+
+**Given (external service)**:
+A provider requirements records because the business already holds it: a
+Registered External resource of the org (written from the org default, without
+a question) or a service the user already uses or must use ("Payments: Stripe —
+finance has the account"). A given is a settled Product Decision; the design
+turn binds and researches it. A capability with no given stays unnamed in the
+PRD, and the user chooses its service on the dependency's definition.
+_Avoid_: proposal, recommendation (the agent never proposes a provider),
+`*assumed*` on a provider line.
 
 **Assumed contract**:
 A dependency's contract the design agent wrote from the provider's

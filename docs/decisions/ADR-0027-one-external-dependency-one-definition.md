@@ -27,7 +27,7 @@ means its contract is on disk.**
 
 ```
 specs/design/dependencies/<name>/
-  dependency.json        provider, style, config keys, open candidates, contract ref, provenance, the user's `assumed` record
+  dependency.json        provider, style, config keys, open suggestions, contract ref, provenance, the user's `assumed` record
   openapi.yaml           the REST slice   (or schema.graphql for GraphQL)
   sdk.json               the SDK manifest (style sdk): a package per implementation language, docs, the calls used
 ```
@@ -64,20 +64,39 @@ specs/design/dependencies/<name>/
   `assumed` after. Replacing an assumption with a real document is the next
   design iteration.
 - **State is still derived at read time** (ADR-0003), from the directory:
-  candidates → `ambiguous`; org-stamped or registry-known → `resolved`,
-  flagged `registered`; no provider → `unresolved / needs-input`; a style with
-  no contract or manifest on disk → `unresolved / needs-contract`; an
+  org-stamped or registry-known → `resolved`, flagged `registered`; no
+  provider (open `suggestions` or not) → `unresolved / needs-input`; a style
+  with no contract or manifest on disk → `unresolved / needs-contract`; an
   unaccepted assumption → `unresolved / needs-acceptance`; otherwise
   `resolved`, flagged `assumed` / `sdk-only`. The build gate blocks on
-  `ambiguous` and `unresolved` and on nothing else: an assumed or SDK-only
-  dependency builds, flagged wherever it appears.
+  `unresolved` and on nothing else: an assumed or SDK-only dependency builds,
+  flagged wherever it appears. A definition with a contract on disk but no
+  provider named (one from before providers were named) reads its provider
+  off the document's title: handing over the document was the choice.
+- **The user chooses the provider; the agent never does.** Requirements
+  records what the business already holds — a Registered External resource of
+  the org, written as a given without a question; a service the user already
+  uses or must use, written as a settled Product Decision — and leaves every
+  other capability unnamed. The design turn binds and researches only what
+  the PRD names. An open capability is written as the *need*: name, purpose,
+  and `suggestions` (services commonly used for it, from the agent's
+  knowledge, any number, no research) — no provider, no config keys, since
+  the keys follow the service. The retired `candidates` (two or more
+  researched fits, the `ambiguous` state) read as suggestions; the fold
+  refuses them on write. All research for an open dependency happens in the
+  `resolve-dependency` flow, which the user starts by answering "which
+  service?" on the definition — a name, a document URL, a suggestion, or
+  "find one" — and which asks in the conversation when its search finds
+  several fits, never writing options back into the file.
 
-**The flow.** The design turn researches each dependency, writes its directory
-with whatever it found, and ends by naming what is open; it never blocks. Each
-dependency's directory is a group in the spec rail, and its definition renders
-as the view where the user resolves it: **Resolve** runs the guided
-`resolve-dependency` flow, a URL or a dropped file goes straight into the
-directory, and an agent-written contract waits for acceptance there. Build with open dependencies lists them and offers one
+**The flow.** The design turn writes each dependency's directory — researched
+for a provider the PRD names, the need alone otherwise — and ends by naming
+what is open; it never blocks. Each dependency's directory is a group in the
+spec rail, and its definition renders as the view where the user resolves it:
+the **Service** card asks which service to use and sends the answer into the
+guided `resolve-dependency` flow, **Resolve** runs the flow for a chosen
+service, a URL or a dropped file goes straight into the directory, and an
+agent-written contract waits for acceptance there. Build with open dependencies lists them and offers one
 button that runs the flow over all of them.
 
 ## Consequences

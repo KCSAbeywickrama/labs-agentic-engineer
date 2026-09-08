@@ -26,10 +26,9 @@ const ext = (over: Partial<Dependency>): Dependency => ({ kind: "external", name
 
 describe("dependencyTodo — the one thing the user must do", () => {
   it("names the step by status and reason, in the user's words", () => {
-    expect(dependencyTodo(ext({ status: "ambiguous" }))).toBe("Choose a provider");
     expect(dependencyTodo(ext({ status: "unresolved", reason: "needs-contract" }))).toBe("Needs a contract");
     expect(dependencyTodo(ext({ status: "unresolved", reason: "needs-acceptance" }))).toBe("Needs your acceptance");
-    expect(dependencyTodo(ext({ status: "unresolved", reason: "needs-input" }))).toBe("Needs input");
+    expect(dependencyTodo(ext({ status: "unresolved", reason: "needs-input" }))).toBe("Choose a service");
   });
   it("is empty for a resolved dependency and for every other kind", () => {
     expect(dependencyTodo(ext({ status: "resolved", flags: ["assumed"] }))).toBe("");
@@ -51,8 +50,8 @@ describe("computeDependencyStates — one entry per external dependency", () => 
 
   it("marks a dependency the build gate would refuse as blocking, with its todo", () => {
     const states = computeDependencyStates([
-      { componentName: "api", dependencies: [ext({ name: "mail", status: "ambiguous" })] },
+      { componentName: "api", dependencies: [ext({ name: "mail", status: "unresolved", reason: "needs-input" })] },
     ]);
-    expect(states["mail"]).toMatchObject({ blocking: true, todo: "Choose a provider", flags: [] });
+    expect(states["mail"]).toMatchObject({ blocking: true, todo: "Choose a service", flags: [] });
   });
 });

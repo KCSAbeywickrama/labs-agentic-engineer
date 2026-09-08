@@ -50,10 +50,11 @@ export function useResolveDependencyViaChat(
   componentName: string,
   dep: Dependency,
   intent: DependencyResolutionIntent,
+  answer?: string,
 ) => void {
   return useCallback(
-    (componentName: string, dep: Dependency, intent: DependencyResolutionIntent) => {
-      const message = buildDependencyResolutionMessage(componentName, dep, intent);
+    (componentName: string, dep: Dependency, intent: DependencyResolutionIntent, answer?: string) => {
+      const message = buildDependencyResolutionMessage(componentName, dep, intent, answer);
       setPendingSeed(chatKeyFor(org, projectName), message);
     },
     [org, projectName],

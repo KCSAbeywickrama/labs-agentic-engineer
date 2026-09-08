@@ -634,19 +634,24 @@ its definition is one file with a view of its own.
 | | |
 |---|---|
 | Rail group | one per dependency, plug glyph, between Flows and the components; rows are its files — **Definition** · **API** · **SDK** |
-| A header that blocks the build | an amber mark after the name; the words on hover and as its label: **Choose a provider** · **Needs a contract** · **Needs your acceptance** · **Needs input** |
+| A header that blocks the build | an amber mark after the name; the words on hover and as its label: **Choose a service** · **Needs a contract** · **Needs your acceptance** |
 | A header that is resolved, with a qualifier | quiet text after the name: **Assumed** · **Registered** · **SDK only** |
 | The definition's eyebrow chips | **External dependency**, the qualifiers, and either the todo or **Resolved** |
 | Its facts | **Provider** · **Style** (**REST API** / **GraphQL** / **SDK**) · **Source** · **Package** — labelled rows under the name, never a subtitle repeating it |
-| Its sections | **Description** · **Used by** · **Candidates** · **Interface** · **Configuration** |
-| Its primary button | **Resolve** (runs the guided flow) — **Reconsider** once resolved |
+| Its sections | **Description** · **Used by** · **Service** (while none is chosen) or **Interface** (once one is) · **Configuration** (once keys exist) |
+| The Service card | question *Which service do you want to use for this?*; field **Service name or document URL** + **Use this**; the suggestions as chips (*Commonly used — pick one to have the agent set it up:*, each **name · style**); button **Ask the agent to find one**. Every answer runs `/resolve-dependency <name>` with the answer after the name |
+| Its primary button | **Resolve** (runs the guided flow), shown once a service is chosen — **Reconsider** once resolved |
 | Providing a document | button **Provide interface** (**Replace interface** once one is on file) beside the Interface heading; it opens a modal — field **OpenAPI document URL** + **Fetch**; drop zone *Drop an OpenAPI document (YAML or JSON) here, or click to choose one.*; **Cancel** |
 | Once a document is on file | the Interface section links to it in place, with its **Source**, what was **Kept** and when it was **Read on** |
 | An agent-written interface | box titled *The agent wrote this interface from research*; button **Accept the assumption**; link **Read it first** |
 
 **The todo names what the reader must do, never the state machine's word.** *Needs a
-contract*, not *needs-contract* or *unresolved*; *Choose a provider*, not *ambiguous*. The
+contract*, not *needs-contract* or *unresolved*; *Choose a service*, not *needs-input*. The
 wire words stay on the wire.
+
+**The user chooses the service; the agent never does.** A suggestion is a starting point the
+design agent named from what it knows, not a fit it researched — the copy says *commonly used*,
+never *recommended*. The research happens in the resolve flow, after the user answers.
 
 **Assumed is a qualifier, not a warning.** An accepted assumption builds. It is shown as quiet
 text so the reader knows what kind of resolved this is, and stays shown everywhere the

@@ -31,6 +31,23 @@ export type ParsedDependencyDefinition =
   | { ok: true; definition: DependencyDefinition }
   | { ok: false; message: string };
 
+/**
+ * A file written before `suggestions` existed carries `candidates` — the
+ * retired "two or more researched fits" field. It reads as suggestions, the
+ * way the platform's read path lifts it (dependency_json.go), so the view
+ * shows the Service card with the options rather than a parse error; the
+ * next write by the agent or the resolve flow lands `suggestions`.
+ */
+function liftRetiredCandidates(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null || !("candidates" in raw)) return raw;
+  const { candidates, ...rest } = raw as { candidates?: unknown; suggestions?: unknown[] };
+  if (!Array.isArray(candidates)) return raw;
+  const lifted = candidates
+    .filter((c): c is { name: string; style?: string; description?: string } => typeof c === "object" && c !== null && typeof (c as { name?: unknown }).name === "string")
+    .map((c) => ({ name: c.name, ...(c.style ? { style: c.style } : {}), ...(c.description ? { description: c.description } : {}) }));
+  return { ...rest, suggestions: [...(Array.isArray(rest.suggestions) ? rest.suggestions : []), ...lifted] };
+}
+
 /** Parse a dependency.json; the message names what is wrong with it. */
 export function parseDependencyDefinition(text: string): ParsedDependencyDefinition {
   let raw: unknown;
@@ -39,7 +56,7 @@ export function parseDependencyDefinition(text: string): ParsedDependencyDefinit
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "not valid JSON" };
   }
-  const result = dependencyDesignSchema.safeParse(raw);
+  const result = dependencyDesignSchema.safeParse(liftRetiredCandidates(raw));
   if (!result.success) {
     const issue = result.error.issues[0];
     const where = issue && issue.path.length > 0 ? `${issue.path.join(".")}: ` : "";

@@ -360,8 +360,8 @@ const BLOCKED_ITEMS: PreflightItem[] = [
   {
     component: "checkout-api",
     dependency: "crm",
-    kind: "external-ambiguous",
-    description: "More than one candidate fits.",
+    kind: "external-unresolved",
+    description: "No service chosen yet — choose which one to use.",
   },
 ];
 
@@ -1206,10 +1206,12 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
     // seam the design view's cards use, with the FULL endpoint entry.
     expect(screen.getByRole("heading", { name: "stripe" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Resolve" }));
+    // The definition's Resolve carries no answer — the Service card's does.
     expect(mockResolveViaChat).toHaveBeenCalledWith(
       "checkout-api",
       CHECKOUT_DEPS[0]!.dependencies![0],
       "resolve",
+      undefined,
     );
   });
 

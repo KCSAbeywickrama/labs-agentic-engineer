@@ -26,9 +26,9 @@ const ambiguousDep: Dependency = {
   kind: "external",
   name: "email-provider",
   description: "Transactional email for signup + reset flows.",
-  status: "ambiguous",
-  reason: "2 candidates available",
-  candidates: [
+  status: "unresolved",
+  reason: "needs-input",
+  suggestions: [
     {
       name: "sendgrid-rest",
       style: "rest-api",
@@ -38,7 +38,6 @@ const ambiguousDep: Dependency = {
       name: "resend-sdk",
       style: "sdk",
       description: "Resend Node SDK",
-      package: "npm:resend@^4.0.0",
     },
   ],
 };
@@ -63,6 +62,18 @@ describe("buildDependencyResolutionMessage — lean seed message (#252 Task 17)"
       "resolve",
     );
     expect(msg).toBe("/resolve-dependency email-provider");
+  });
+
+  it("resolve intent with an answer: the user's service name or URL rides after the name", () => {
+    expect(buildDependencyResolutionMessage("checkout-api", ambiguousDep, "resolve", " Postmark ")).toBe(
+      "/resolve-dependency email-provider Postmark",
+    );
+    expect(
+      buildDependencyResolutionMessage("checkout-api", ambiguousDep, "resolve", "https://x/openapi.yaml"),
+    ).toBe("/resolve-dependency email-provider https://x/openapi.yaml");
+    expect(buildDependencyResolutionMessage("checkout-api", ambiguousDep, "resolve", "  ")).toBe(
+      "/resolve-dependency email-provider",
+    );
   });
 
   it("reconsider intent: names the dependency and component, asking to look at other options", () => {
@@ -92,7 +103,7 @@ describe("buildDependencyResolutionMessage — lean seed message (#252 Task 17)"
     // none of that survives the lean message.
     expect(resolveMsg).not.toContain("```");
     expect(resolveMsg).not.toContain(JSON.stringify(ambiguousDep));
-    expect(resolveMsg).not.toContain("candidates");
+    expect(resolveMsg).not.toContain("suggestions");
     expect(reconsiderMsg).not.toContain("```");
     expect(reconsiderMsg).not.toContain("style");
     expect(reconsiderMsg).not.toContain("package");

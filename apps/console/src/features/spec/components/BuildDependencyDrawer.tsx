@@ -49,7 +49,6 @@ type BuildInputItem = components["schemas"]["BuildInputItem"];
  * the build request as an approval and is settled elsewhere.
  */
 const RESOLUTION_KINDS = new Set([
-  "external-ambiguous",
   "external-unresolved",
   "external-spec",
   "org-service",

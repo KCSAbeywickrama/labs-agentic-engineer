@@ -32,8 +32,8 @@ type BuildInputItem = components["schemas"]["BuildInputItem"];
 const AMBIGUOUS: PreflightItem = {
   component: "checkout-api",
   dependency: "crm",
-  kind: "external-ambiguous",
-  description: "More than one candidate fits — resolve which one to use.",
+  kind: "external-unresolved",
+  description: "No service chosen yet — choose which one to use.",
 };
 const UNRESOLVED: PreflightItem = {
   component: "checkout-api",
@@ -106,7 +106,7 @@ describe("BuildDependencyDrawer — lists what blocks the cut", () => {
   it("renders each row's plain-language reason", () => {
     setup([AMBIGUOUS, NEEDS_CONTRACT]);
 
-    expect(screen.getByText(/more than one candidate fits/i)).toBeInTheDocument();
+    expect(screen.getByText(/no service chosen yet/i)).toBeInTheDocument();
     expect(screen.getByText(/no contract yet/i)).toBeInTheDocument();
   });
 
@@ -218,7 +218,7 @@ describe("groupPreflightItems", () => {
       { ...AMBIGUOUS, component: "a-api" },
       UNRESOLVED,
     ]);
-    expect(groups.map((g) => g.key)).toEqual(["external-ambiguous:crm", "external-unresolved:weather-api"]);
+    expect(groups.map((g) => g.key)).toEqual(["external-unresolved:crm", "external-unresolved:weather-api"]);
     expect(groups[0]!.usedBy).toEqual(["a-api", "z-api"]);
     expect(groups[0]!.representative.component).toBe("a-api");
   });

@@ -143,14 +143,29 @@ describe("DependencyView", () => {
     expect(screen.queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
   });
 
-  it("lists open candidates and asks the user to choose rather than offering an upload", () => {
-    renderView(
-      { candidates: [{ name: "sendgrid", style: "rest-api", description: "Mail API" }, { name: "postmark", style: "rest-api" }] },
-      stateOf({ status: "ambiguous" }, { blocking: true, todo: "Choose a provider" }),
+  it("asks which service to use while none is chosen — typed, picked from the suggestions, or left to the agent", () => {
+    const { onResolve } = renderView(
+      { suggestions: [{ name: "sendgrid", style: "rest-api", description: "Mail API" }, { name: "postmark" }] },
+      stateOf({ status: "unresolved", reason: "needs-input" }, { blocking: true, todo: "Choose a service" }),
     );
-    expect(screen.getByText("sendgrid")).toBeInTheDocument();
-    expect(screen.getByText("postmark")).toBeInTheDocument();
+    expect(screen.getByText("Which service do you want to use for this?")).toBeInTheDocument();
+    // Nothing about an interface applies before a service is chosen, and the
+    // header does not repeat the card's actions.
+    expect(screen.queryByText("Interface")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /interface/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Service name or document URL"), { target: { value: " Open Exchange Rates " } });
+    fireEvent.click(screen.getByRole("button", { name: "Use this" }));
+    expect(onResolve).toHaveBeenCalledWith("dhl-courier", "Open Exchange Rates");
+
+    fireEvent.click(screen.getByRole("button", { name: "sendgrid · REST API" }));
+    expect(onResolve).toHaveBeenCalledWith("dhl-courier", "sendgrid");
+    fireEvent.click(screen.getByRole("button", { name: "postmark" }));
+    expect(onResolve).toHaveBeenCalledWith("dhl-courier", "postmark");
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask the agent to find one" }));
+    expect(onResolve).toHaveBeenLastCalledWith("dhl-courier");
   });
 
   it("renders the file alone when the read model does not know the name yet, Resolve still offered", () => {
@@ -158,6 +173,25 @@ describe("DependencyView", () => {
     expect(screen.getByRole("heading", { name: "dhl-courier" })).toBeInTheDocument();
     expect(screen.getByText(/no component references this dependency yet/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Resolve" })).toBeInTheDocument();
+  });
+
+  it("reads a file still carrying the retired candidates as suggestions", () => {
+    render(
+      <OxygenUIThemeProvider theme={OxygenTheme}>
+        <DependencyView
+          projectName="proj1"
+          name="mail"
+          definition={JSON.stringify({ name: "mail", candidates: [{ name: "sendgrid", style: "rest-api", package: "npm:x" }, { name: "postmark", style: "rest-api" }] })}
+          state={undefined}
+          onOpenFile={() => {}}
+          onResolve={() => {}}
+          onReconsider={() => {}}
+        />
+      </OxygenUIThemeProvider>,
+    );
+    expect(screen.getByText("Which service do you want to use for this?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "sendgrid · REST API" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "postmark · REST API" })).toBeInTheDocument();
   });
 
   it("says what is wrong with a definition it cannot read", () => {
@@ -180,7 +214,7 @@ describe("DependencyView", () => {
 
 describe("DependencyView — when a document is not the next step", () => {
   it("offers no upload before a system is identified, nor for an org-registered one", () => {
-    renderView({}, stateOf({ status: "unresolved", reason: "needs-input" }, { blocking: true, todo: "Needs input" }));
+    renderView({}, stateOf({ status: "unresolved", reason: "needs-input" }, { blocking: true, todo: "Choose a service" }));
     expect(screen.queryByRole("button", { name: /interface/i })).not.toBeInTheDocument();
   });
 

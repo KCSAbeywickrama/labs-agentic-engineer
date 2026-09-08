@@ -402,7 +402,7 @@ export function SpecView({ projectName }: { projectName: string }) {
     [dependencies.data, selectedComponentName],
   );
   // Keyed by dependency name for DesignView's optional dependencyStatus prop
-  // — status/reason are the ONLY fields this map carries. candidates/config
+  // — status/reason are the ONLY fields this map carries. suggestions/config
   // are already in the raw design.json DesignView parses itself; see
   // DesignViewProps.dependencyStatus's comment for why status/reason can't
   // join them.
@@ -435,7 +435,7 @@ export function SpecView({ projectName }: { projectName: string }) {
     [dependencies.data, selectedComponentName],
   );
   // Fires Task 5's seeded chat message with the dependency's FULL endpoint
-  // entry (status/reason/candidates/config included) — never the
+  // entry (status/reason/suggestions/config included) — never the
   // locally parsed one, which deliberately drops status/reason. `intent`
   // (#252 Task 17) is "resolve" from the design-view card's chat button on a
   // non-resolved dependency, or "reconsider" from its hamburger's "Discuss in
@@ -459,9 +459,9 @@ export function SpecView({ projectName }: { projectName: string }) {
   );
   // The definition view's Resolve / Reconsider. The component is context for
   // the reconsider's prose only; the resolve is the skill command.
-  const handleResolveFromDefinition = (name: string, intent: DependencyResolutionIntent) => {
+  const handleResolveFromDefinition = (name: string, intent: DependencyResolutionIntent, answer?: string) => {
     const state = dependencyStates[name];
-    resolveDependencyViaChat(state?.usedBy[0] ?? "", state?.dependency ?? { kind: "external", name }, intent);
+    resolveDependencyViaChat(state?.usedBy[0] ?? "", state?.dependency ?? { kind: "external", name }, intent, answer);
   };
   // The definition view's two writes land in git outside the room; the room's
   // copy of the definition is brought up to date here, so the pane — which
@@ -1433,7 +1433,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                         definition={structuredLive}
                         state={dependencyStates[dependencyOf(selectedFile.path) ?? ""]}
                         onOpenFile={(path) => selectManually({ kind: "file", path })}
-                        onResolve={(name) => handleResolveFromDefinition(name, "resolve")}
+                        onResolve={(name, answer) => handleResolveFromDefinition(name, "resolve", answer)}
                         onReconsider={(name) => handleResolveFromDefinition(name, "reconsider")}
                         onCommitted={handleDependencyCommitted}
                       />
@@ -1464,7 +1464,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                         definition={content.data.content}
                         state={dependencyStates[dependencyOf(selectedFile.path) ?? ""]}
                         onOpenFile={(path) => selectManually({ kind: "file", path })}
-                        onResolve={(name) => handleResolveFromDefinition(name, "resolve")}
+                        onResolve={(name, answer) => handleResolveFromDefinition(name, "resolve", answer)}
                         onReconsider={(name) => handleResolveFromDefinition(name, "reconsider")}
                         onCommitted={handleDependencyCommitted}
                       />

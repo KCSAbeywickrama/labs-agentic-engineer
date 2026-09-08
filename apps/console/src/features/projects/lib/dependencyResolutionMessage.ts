@@ -43,9 +43,10 @@ type Dependency = components["schemas"]["Dependency"];
 
 /**
  * Why a dependency's chat turn is being seeded:
- *  - "resolve": the dependency is unresolved/ambiguous — the "Resolve via/in
- *    chat" button on a non-resolved dependency (build drawer blocker/spec
- *    panels, design-view card).
+ *  - "resolve": the dependency is unresolved — the Resolve button on a
+ *    non-resolved dependency (design-view card, the definition view), or the
+ *    definition's Service card answering "which service?" with a name or a
+ *    document URL.
  *  - "reconsider": the dependency is already resolved — the hamburger's
  *    "Discuss in chat & modify" menu item, for a user who wants to revisit an
  *    already-made choice.
@@ -65,12 +66,17 @@ export function buildDependencyResolutionMessage(
   componentName: string,
   dep: Dependency,
   intent: DependencyResolutionIntent,
+  answer?: string,
 ): string {
   // Resolving runs the guided flow (the `resolve-dependency` skill); a
   // reconsider is a conversation about an already-resolved choice, so it
   // stays prose. The component is context for the reconsider only — the
-  // dependency's definition is its own file, shared by every consumer.
-  return intent === "reconsider"
-    ? `Let's reconsider the "${dep.name}" dependency on "${componentName}" — I'd like to look at other options.`
-    : `/resolve-dependency ${dep.name}`;
+  // dependency's definition is its own file, shared by every consumer. The
+  // user's answer to "which service?" — a name or a document URL — rides
+  // after the dependency's name, where the skill reads it as the choice.
+  if (intent === "reconsider") {
+    return `Let's reconsider the "${dep.name}" dependency on "${componentName}" — I'd like to look at other options.`;
+  }
+  const chosen = answer?.trim();
+  return chosen ? `/resolve-dependency ${dep.name} ${chosen}` : `/resolve-dependency ${dep.name}`;
 }

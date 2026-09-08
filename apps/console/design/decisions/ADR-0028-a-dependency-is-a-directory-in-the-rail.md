@@ -18,8 +18,8 @@ files to show, the way a component does.
 **Every external dependency is a group in the rail, shaped like a
 component's.** The group sits between Flows and the components, with the plug
 glyph telling it apart; its header carries the one thing the user must do
-(*Choose a provider*, *Needs a contract*, *Needs your acceptance*, *Needs
-input*) as an amber mark with the words on hover, or the qualifier on a
+(*Choose a service*, *Needs a contract*, *Needs your acceptance*) as an amber
+mark with the words on hover, or the qualifier on a
 resolved one (*Assumed*, *Registered*, *SDK only*) as quiet text. Its rows are
 the directory's files, named for what they are under the dependency's own
 header — **Definition** (`dependency.json`), **API** (`openapi.yaml` or
@@ -38,16 +38,26 @@ over the read model.
 qualifiers, the todo or *Resolved*), the name as the heading with **Resolve**
 or **Reconsider** beside it, then labelled facts — *Provider*, *Style*,
 *Source*, *Package* — so the provider reads as the provider and never as the
-name said twice. Sections follow: Description, Used by, Candidates,
-Interface, Configuration.
+name said twice. Sections follow: Description, Used by, then Service while
+no service is chosen or Interface once one is, and Configuration once the
+keys exist.
 
 **The definition owns everything that moves a dependency forward.**
 
-- **Resolve** runs the guided flow — the message is the skill command,
-  `/resolve-dependency <name>`, nothing else, because the agent reads the
-  definition from its file and the playbook from its skills. A resolved
-  dependency offers **Reconsider** instead, which stays prose: it opens a
-  conversation about a choice already made.
+- **The Service card** asks *Which service do you want to use for this?* while
+  the definition names no provider — the agent never chooses one (repo
+  ADR-0027). Three ways to answer: type a service name or a document URL and
+  **Use this**; pick one of the design agent's `suggestions`, shown as chips
+  and labelled *commonly used*, never recommended; or **Ask the agent to
+  find one**. Every answer sends `/resolve-dependency <name>` with the answer
+  after the name, and the resolve flow does the research from there. The
+  header shows no Resolve while the card is up, so the ways forward are in
+  one place.
+- **Resolve** runs the guided flow once a service is chosen — the message is
+  the skill command, `/resolve-dependency <name>`, nothing else, because the
+  agent reads the definition from its file and the playbook from its skills.
+  A resolved dependency offers **Reconsider** instead, which stays prose: it
+  opens a conversation about a choice already made.
 - **Provide interface** sits beside the Interface heading and opens a modal:
   a URL the platform fetches, or a dropped file, straight into the
   dependency's directory. A modal rather than a form in the document, because

@@ -30,8 +30,8 @@ type Dependency = components["schemas"]["Dependency"];
 const dep: Dependency = {
   kind: "external",
   name: "email-provider",
-  status: "ambiguous",
-  reason: "2 candidates available",
+  status: "unresolved",
+  reason: "needs-input",
 };
 
 describe("useResolveDependencyViaChat — the Task 9 seam (#252 Task 5)", () => {
@@ -48,6 +48,14 @@ describe("useResolveDependencyViaChat — the Task 9 seam (#252 Task 5)", () => 
     expect(seeded).toBe(
       buildDependencyResolutionMessage("checkout-api", dep, "resolve"),
     );
+  });
+
+  it("carries the user's answer into the resolve message", () => {
+    const { result } = renderHook(() => useResolveDependencyViaChat("acme", "proj1"));
+    result.current("checkout-api", dep, "resolve", "Postmark");
+
+    const seeded = consumePendingSeed(chatKeyFor("acme", "proj1"))?.message;
+    expect(seeded).toBe("/resolve-dependency email-provider Postmark");
   });
 
   it("seeds the project's chat with the reconsider message (reconsider intent)", () => {
