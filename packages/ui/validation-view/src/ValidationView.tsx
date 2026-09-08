@@ -300,9 +300,9 @@ const LIVE_LABEL: Record<string, string> = {
 const LIVE_COLOR: Record<string, ChipColor> = { healing: "warning" };
 
 /** For a criterion the pinned report has no row for — see CriterionChip. */
-const DRIFT_LABEL = "Out of run";
+const DRIFT_LABEL = "No result";
 const DRIFT_TOOLTIP =
-  "Authored after the last validation run, so it has no result yet.";
+  "The last validation run produced no result for this criterion.";
 
 // The per-criterion chip while the run is still working on it.
 function LiveChip({ status }: { status: string }) {
@@ -670,9 +670,10 @@ function ValidationBody({
             criteria here before any run has produced a result to learn from. */}
         {!hideDescription && (
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Each criterion represents one thing your software must do, based on your
-            requirements. After every deployment they are checked against the running
-            software, and the results appear under Validations. To change one, ask the
+            Each criterion represents one thing your system must do, based on your
+            requirements. After every deployment the ones that can be automated are
+            checked against the deployed system, and the results appear under
+            Validations. The rest you have to check yourself. To change one, ask the
             agent.
           </Typography>
         )}

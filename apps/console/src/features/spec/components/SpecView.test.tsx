@@ -1806,9 +1806,18 @@ describe("SpecView validation criteria explanation", () => {
     render(<SpecView projectName="proj1" />);
 
     expect(
-      screen.getByText(/Each criterion represents one thing your software must do/),
+      screen.getByText(/Each criterion represents one thing your system must do/),
     ).toBeInTheDocument();
     expect(screen.getByText(/based on your requirements/)).toBeInTheDocument();
+    // Both halves, because only the automatable ones are checked for the reader.
+    // Claiming all of them were is what this sentence used to do, above a list
+    // whose glyphs said otherwise.
+    expect(
+      screen.getByText(/the ones that can be automated are checked/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/The rest you have to check yourself/),
+    ).toBeInTheDocument();
     expect(screen.getByText(/To change one, ask the agent/)).toBeInTheDocument();
   });
 

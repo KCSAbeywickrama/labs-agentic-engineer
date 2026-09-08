@@ -77,7 +77,7 @@ describe("ValidationView — the Spec view's pane (no run attached)", () => {
     expect(screen.getAllByText(AGENT)).toHaveLength(2);
     expect(screen.getAllByText(HUMAN)).toHaveLength(2);
     // Nothing here may name a run that does not exist.
-    for (const word of ["Passed", "Failed", "Pending", "Manual", "Out of run"]) {
+    for (const word of ["Passed", "Failed", "Pending", "Manual", "No result"]) {
       expect(screen.queryByText(word)).not.toBeInTheDocument();
     }
   });
@@ -162,7 +162,7 @@ describe("ValidationView — the Validations page (a report joined in)", () => {
         report={reportOf([{ id: "AC-001-a", status: "pass" }])}
       />,
     );
-    expect(screen.getAllByText("Out of run")).toHaveLength(3);
+    expect(screen.getAllByText("No result")).toHaveLength(3);
     expect(screen.getByText("Passed")).toBeInTheDocument();
   });
 
@@ -176,7 +176,7 @@ describe("ValidationView — the Validations page (a report joined in)", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText(AGENT)).toHaveLength(2);
     expect(screen.getAllByText(HUMAN)).toHaveLength(2);
-    expect(screen.queryByText("Out of run")).not.toBeInTheDocument();
+    expect(screen.queryByText("No result")).not.toBeInTheDocument();
   });
 
   it("says what is about to happen while a first attempt is in flight", () => {
@@ -189,7 +189,7 @@ describe("ValidationView — the Validations page (a report joined in)", () => {
     expect(screen.getByText("Manual")).toBeInTheDocument();
     expect(screen.getByText("Not validated")).toBeInTheDocument();
     // Nothing has drifted — there is no report to have missed them.
-    expect(screen.queryByText("Out of run")).not.toBeInTheDocument();
+    expect(screen.queryByText("No result")).not.toBeInTheDocument();
   });
 
   // The run works on a `scenario` criterion — explores it, authors a spec, runs

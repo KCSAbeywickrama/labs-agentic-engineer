@@ -117,7 +117,7 @@ show an older attempt the newest run's results). The join is by criterion id, so
 criterion authored since that commit has no row in that report.
 
 That is the ordinary authoring loop: run validation, read a failure, ask the agent
-for another criterion. It gets a neutral `Out of run` chip. Neutral and not
+for another criterion. It gets a neutral `No result` chip. Neutral and not
 `warning`, because colouring the expected state teaches the reader to discount the
 colour; and locally worded, because `CRITERION_STATE_LABEL` is `report.json`'s
 vocabulary and this criterion is absent from `report.json`.

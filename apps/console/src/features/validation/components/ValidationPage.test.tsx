@@ -824,7 +824,7 @@ describe("ValidationPage lifecycle", () => {
   // The regression this replaced a default with: no state may FORCE a body, because
   // `?view=logs | absent` has no third value, so `onViewChange(undefined)` cannot
   // outrank a forced arm and the "View report" button silently does nothing.
-  // "Out of run" is a claim about a run that FINISHED without covering the row. A
+  // "No result" is a claim about a run that FINISHED without covering the row. A
   // repeat attempt in flight may still answer it, so while one is running the row
   // waits with everything else.
   it("says a drifted criterion is pending while a repeat attempt runs", () => {
@@ -844,7 +844,7 @@ describe("ValidationPage lifecycle", () => {
     renderPage(undefined);
 
     expect(screen.getByText("Pending")).toBeInTheDocument();
-    expect(screen.queryByText("Out of run")).not.toBeInTheDocument();
+    expect(screen.queryByText("No result")).not.toBeInTheDocument();
     // The rows the pinned report DOES cover keep the last attempt's verdict, which
     // is what makes widening the pending signal safe.
     expect(screen.getByText("Passed")).toBeInTheDocument();
@@ -866,7 +866,7 @@ describe("ValidationPage lifecycle", () => {
     mockReport.data = { content: REPORT };
     renderPage(undefined);
 
-    expect(screen.getByText("Out of run")).toBeInTheDocument();
+    expect(screen.getByText("No result")).toBeInTheDocument();
     expect(screen.queryByText("Pending")).not.toBeInTheDocument();
   });
 
