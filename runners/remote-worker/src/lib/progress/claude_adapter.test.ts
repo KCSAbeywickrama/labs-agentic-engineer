@@ -1078,6 +1078,50 @@ test("adapter: with no fault word, the diagnosis is the LAST line and not the ba
   );
 });
 
+// Live seq 13 of the FOLLOWING run (hello-world-single, 2026-09-08), which is
+// the regression the last-line rule above introduced: `gh` closes every error
+// with an accessibility footer, so "the last line" was guidance and the run
+// reported `Learn about accessibility experiences using `gh help accessibility``
+// as the reason a `gh issue view` failed. The fault is the last line that is not
+// advice.
+test("adapter: a tool's closing advice is not the reason it failed", () => {
+  assert.equal(
+    diagnosisOf(
+      [
+        "Exit code 1",
+        "specify only one of `--json` or `--comments`",
+        "",
+        "Learn about accessibility experiences using `gh help accessibility`",
+      ].join("\n"),
+    ),
+    "specify only one of `--json` or `--comments`",
+  );
+});
+
+// The other shapes of the same footer, from the tools this platform actually
+// runs. `git` and `cargo` both end on advice after the sentence that matters.
+test("adapter: the guidance skip covers the tools the runner drives", () => {
+  assert.equal(
+    diagnosisOf(["Exit code 1", "fatal: not a git repository", "Use 'git help' for a list"].join("\n")),
+    "fatal: not a git repository",
+  );
+  assert.equal(
+    diagnosisOf(
+      ["Exit code 101", "could not compile `hello` due to 2 errors", "For more information, run `cargo build`"].join("\n"),
+    ),
+    "could not compile `hello` due to 2 errors",
+  );
+});
+
+// A command whose whole output is advice still has to say something: the rule
+// walks back for a statement, and stops rather than returning nothing.
+test("adapter: output that is nothing but advice still reports its last line", () => {
+  assert.equal(
+    diagnosisOf(["Exit code 1", "Usage: gh issue view {<number> | <url>}", "See 'gh issue view --help'"].join("\n")),
+    "Usage: gh issue view {<number> | <url>}",
+  );
+});
+
 // Live seq 388. The command cat'd a file and then built it, so line 0 was that
 // file's first line — `import React from 'react';` went onto a user-visible
 // build log as the reason a build failed.
@@ -1181,13 +1225,57 @@ test("adapter: with no init declared, a path is left exactly as the runtime gave
   );
 });
 
-// A command is not shortened even though it carries the same noise: the contract
-// calls this field the command line that RAN, and a relative path in it resolves
-// only from the workspace root — which is not where the command ran once an
-// agent has `cd`-ed into a component.
-test("adapter: a shell command keeps its absolute paths, because it is a command", () => {
+// A shell call carries BOTH fields, because the contract defines two and they
+// answer different questions. This test used to assert that a command was left
+// entirely alone — right about `command`, wrong about the row a reader sees: the
+// hello-world run (2026-09-08) put 66 of 379 rows through the feed carrying the
+// same ~95-character prefix, and `agent_progress` truncated them to
+// `Running cat /home/aep/aep-workspace/default/hello-world-s…`, which says
+// nothing at all.
+//
+// `command` is still never rewritten, and for the original reason: a relative
+// path in it resolves only from the workspace root, which is not where the
+// command ran once an agent has `cd`-ed into a component.
+test("adapter: a shell command keeps its exact text AND gains a reader's line", () => {
   const a = inWorkspace();
   const command = `cat ${WORKSPACE}/specs/design/security.json`;
   const events = a.translate(assistant(null, toolUse("t1", "Bash", { command })));
-  assert.equal((events[0] as { summary: string }).summary, command);
+  const use = events[0] as { summary: string; command: string };
+  assert.equal(use.summary, "cat ~ws/specs/design/security.json", "the row a reader scans");
+  assert.equal(use.command, command, "and the line they could re-run, with its paths untouched");
+});
+
+// Every occurrence, not just a leading one: an agent writes `cp <ws>/a <ws>/b`.
+//
+// This is also the test that pins the ORDER. Two of these paths is 224
+// characters, well past the 200 the contract allows a summary, and the cap used
+// to be applied to the raw command before anything collapsed it — so the tail
+// was already `…` and shortening could not save it. Collapse first, cap after:
+// the same mistake as truncating a path from the wrong end, one layer up.
+test("adapter: every workspace prefix collapses, and before the summary is capped", () => {
+  const a = inWorkspace();
+  const command = `cp ${WORKSPACE}/specs/a.json ${WORKSPACE}/specs/b.json`;
+  assert.ok(command.length > 200, "the fixture has to exceed the cap or it proves nothing");
+  const events = a.translate(assistant(null, toolUse("t1", "Bash", { command })));
+  assert.equal((events[0] as { summary: string }).summary, "cp ~ws/specs/a.json ~ws/specs/b.json");
+});
+
+// A command with no workspace path in it says everything in ONE field. Sending
+// `command` as well would put the same string twice on every row of the feed,
+// and every renderer reads `summary ?? command`, so the second field only earns
+// its place once the two differ.
+test("adapter: a command with nothing to collapse carries one field, not two", () => {
+  const a = inWorkspace();
+  const events = a.translate(assistant(null, toolUse("t1", "Bash", { command: "bal build" })));
+  assert.deepEqual(events, [
+    { kind: "tool_use", tool: "Bash", summary: "bal build", agentId: "lead", toolUseId: "t1" },
+  ]);
+});
+
+// No init seen yet, so there is no root to collapse against. The command must
+// survive untouched rather than be mangled against an empty string.
+test("adapter: with no workspace root known, a command is left exactly as it ran", () => {
+  const a = adapter();
+  const events = a.translate(assistant(null, toolUse("t1", "Bash", { command: "ls -la /etc" })));
+  assert.equal((events[0] as { summary: string }).summary, "ls -la /etc");
 });

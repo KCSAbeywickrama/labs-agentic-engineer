@@ -273,8 +273,53 @@ function usageFromResult(m: Record<string, unknown>): RunEventUsage | undefined 
  * `cd`-ed into a component. Editing the text of a command a reader may re-run
  * is the one place brevity is worth less than truth.
  */
-function bashEvents(command: string): RunEventInput[] {
+/**
+ * A shell command as a READER's line: the workspace root collapsed to `~ws`.
+ *
+ * `command` keeps the exact text — see `bashEvents` — and this is the other
+ * field the contract defines: "one line describing the call, composed by the
+ * producer for a reader". A live run (2026-09-08) put 66 of 379 rows through the
+ * feed carrying the same ~95-character prefix, and `agent_progress` then
+ * truncated them to `Running cat /home/aep/aep-workspace/default/hello-world-s…`
+ * — a row that says nothing at all. Collapsing the prefix is what makes the tail
+ * survive the width.
+ *
+ * `~ws` rather than deleting the prefix outright: a bare `hello-webapp && npm
+ * run build` would read as a command someone could paste, and it is not one.
+ */
+function commandForReader(cmd: string, root: string): string {
+  if (!root) return cmd;
+  return cmd.split(root).join("~ws");
+}
+
+/**
+ * The second field, and ONLY when it earns its place.
+ *
+ * `command` and `summary` say different things — one is the line that ran, one
+ * is the line a reader scans — but on a command with no workspace path in it
+ * they are the same string, and sending both would put a duplicate on every row
+ * of the feed. Every renderer reads `summary ?? command`, so one field is
+ * enough whenever the collapse changed nothing.
+ */
+function readerLine(cmd: string, shown: string): { summary?: string } {
+  return shown === cmd ? {} : { summary: trimSummary(shown) };
+}
+
+/**
+ * A shell row's fields. `summary` alone while it says everything; `command`
+ * joins it only once the two differ, and then carries the exact line — uncapped,
+ * because the contract puts no ceiling on `command` and its whole purpose is to
+ * be the text somebody can re-run.
+ */
+function shellFields(cmd: string, shown: string): { summary: string; command?: string } {
+  return shown === cmd
+    ? { summary: trimSummary(cmd) }
+    : { summary: trimSummary(shown), command: cmd };
+}
+
+function bashEvents(command: string, workspaceRoot: string): RunEventInput[] {
   const cmd = command.trim();
+  const shown = commandForReader(cmd, workspaceRoot);
   // git commit -m "..." or -F file
   if (/^git\s+commit\b/.test(cmd)) {
     const msgMatch = cmd.match(/-m\s+(['"])(.+?)\1/);
@@ -287,14 +332,14 @@ function bashEvents(command: string): RunEventInput[] {
     return [{
       kind: "git_push",
       ...(branch && branch !== "push" ? { branch } : {}),
-      summary: trimSummary(cmd),
+      summary: trimSummary(shown),
     }];
   }
   // gh anything
   if (/^gh\s+/.test(cmd)) {
-    return [{ kind: "gh_action", command: trimSummary(cmd) }];
+    return [{ kind: "gh_action", command: cmd, ...readerLine(cmd, shown) }];
   }
-  return [{ kind: "tool_use", tool: "Bash", summary: trimSummary(cmd) }];
+  return [{ kind: "tool_use", tool: "Bash", ...shellFields(cmd, shown) }];
 }
 
 /**
@@ -435,6 +480,21 @@ const TOOL_USE_ERROR_TAG = /<\/?tool_use_error>/g;
 // failure, since the tail of the output is where a diagnosis lives anyway.
 const ANNOUNCES_FAULT = /\b(?:error|fatal|panic|exception|failed)\b/i;
 
+/**
+ * A trailing line that TELLS THE READER WHAT TO DO NEXT rather than saying what
+ * went wrong. Skipped when walking back from the end for a diagnosis.
+ *
+ * This is the other half of the last-line rule, and it was learned the hard way.
+ * Taking the last line fixed a live run's `--- expense-webapp dir ---`, and then
+ * the very next run reported `Learn about accessibility experiences using
+ * `gh help accessibility`` as the reason a `gh issue view` failed — gh prints
+ * that footer after every error. `git`, `cargo` and `npm` all end the same way
+ * ("See 'git help'", "For more information about this error…"), so the fault is
+ * the LAST line that is not guidance, not the last line.
+ */
+const OFFERS_GUIDANCE =
+  /^\s*(?:learn (?:more|about)\b|see\b|try\b|usage:|hint:|note:|for more info(?:rmation)?\b|run ['"`]|use ['"`])/i;
+
 // How much of a failed spawned agent's error text reaches the feed. See the
 // notice in `settleFanOutResult` for why that case is not held to the one-line
 // rule below.
@@ -482,7 +542,14 @@ function failureDetail(content: unknown): { exitCode?: number; summary: string }
   // `--- expense-webapp dir ---` and `import React from 'react';` on the feed
   // as two of four failure diagnoses in one live run (2026-09-08) — an echoed
   // heading and the first line of a file the command had cat'd.
-  if (at < 0) at = rest.length - 1;
+  if (at < 0) {
+    // Walk back past the tool's closing advice to the last line that states
+    // something. If a command printed nothing BUT guidance, the last line is
+    // still better than nothing.
+    let end = rest.length - 1;
+    while (end > 0 && (rest[end] === "" || OFFERS_GUIDANCE.test(rest[end]))) end--;
+    at = end;
+  }
   let diagnosis = rest[at] ?? "";
   // A line ending in a colon is introducing the next one, not stating anything
   // ("InputValidationError: Read failed due to the following issue:" — the issue
@@ -977,7 +1044,11 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
       if (PLAN_READ_TOOLS.has(tu.name)) continue;
 
       const delta = lineDelta(tu.name, tu.input);
-      const command = tu.name === "Bash" ? trimSummary(str(tu.input.command)) : "";
+      // NOT capped here: `bashEvents` collapses the workspace prefix, and a cap
+      // applied first would have already eaten the tail it is trying to save —
+      // the same mistake as truncating a path from the wrong end. Each branch
+      // caps its own fields once it has composed them.
+      const command = tu.name === "Bash" ? str(tu.input.command) : "";
       trackCall(tu.id, { tool: tu.name, command, agentId, added: delta.added, removed: delta.removed });
 
       const stamp = { agentId, ...(tu.id ? { toolUseId: tu.id } : {}) };
@@ -985,7 +1056,7 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
         if (!command) {
           events.push({ kind: "tool_use", tool: "Bash", summary: "", ...stamp });
         } else {
-          events.push(...bashEvents(command).map((e) => ({ ...e, ...stamp })));
+          events.push(...bashEvents(command, workspaceRoot).map((e) => ({ ...e, ...stamp })));
         }
         continue;
       }
