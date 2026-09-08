@@ -27,7 +27,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
-// fakeDependencyContracts records the dependency page's two writes and answers
+// fakeDependencyContracts records the dependency definition view's two writes and answers
 // with whatever error the test scripts — the HTTP contract under test is the
 // mapping, not the service.
 type fakeDependencyContracts struct {

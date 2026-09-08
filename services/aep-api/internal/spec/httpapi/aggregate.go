@@ -63,7 +63,7 @@ func New(d spec.Deps) (*Handlers, error) {
 		tagsHandler:   tags.New(d.Artifacts),
 		skillsHandler: skills.New(d.Skills, d.SkillMut, d.SkillImport),
 		collabHandler: collab.New(d.CollabRepo),
-		// The dependency page's two writes (provide a contract, accept an
+		// The dependency definition view's two writes (provide a contract, accept an
 		// assumption) — the one slice that touches a dependency's directory
 		// on the user's behalf rather than the agent's.
 		designdepsHandler: designdeps.New(d.Design),

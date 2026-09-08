@@ -625,21 +625,24 @@ below its own footnotes. Path order alone puts `features/…` above `prd.md`, wh
 [#579](https://github.com/wso2/labs-agentic-engineer/issues/579) made routine by giving `/expand` a
 lens on every story; the list pins the PRD instead, and everything behind it keeps path order.
 
-### The Dependencies group, and a dependency's page
+### A dependency's group, and its definition
 
-Decided in [ADR-0028](decisions/ADR-0028-a-dependency-has-a-page.md). An external
-dependency is one definition in its own directory, so it is one row and one page.
+Decided in [ADR-0028](decisions/ADR-0028-a-dependency-is-a-directory-in-the-rail.md). An
+external dependency is one directory, so it is one rail group shaped like a component's, and
+its definition is one file with a view of its own.
 
 | | |
 |---|---|
-| Rail group | **Dependencies**, between Flows and the components |
-| A row that blocks the build | an amber mark; the words on hover and as its label: **Choose a provider** · **Needs a contract** · **Needs your acceptance** · **Needs input** |
-| A row that is resolved, with a qualifier | quiet text after the name: **Assumed** · **Registered** · **SDK only** |
-| The page's header chips | **External dependency**, the style (**REST API** / **GraphQL** / **SDK**), the qualifiers, and either the todo or **Resolved** |
+| Rail group | one per dependency, plug glyph, between Flows and the components; rows are its files — **Definition** · **API** · **SDK** |
+| A header that blocks the build | an amber mark after the name; the words on hover and as its label: **Choose a provider** · **Needs a contract** · **Needs your acceptance** · **Needs input** |
+| A header that is resolved, with a qualifier | quiet text after the name: **Assumed** · **Registered** · **SDK only** |
+| The definition's eyebrow chips | **External dependency**, the qualifiers, and either the todo or **Resolved** |
+| Its facts | **Provider** · **Style** (**REST API** / **GraphQL** / **SDK**) · **Source** · **Package** — labelled rows under the name, never a subtitle repeating it |
+| Its sections | **Description** · **Used by** · **Candidates** · **Interface** · **Configuration** |
 | Its primary button | **Resolve** (runs the guided flow) — **Reconsider** once resolved |
-| Providing a document | field **OpenAPI document URL** + **Fetch**; drop zone *Drop an OpenAPI document (YAML or JSON) here, or click to choose one.* |
-| An agent-written contract | box titled *The agent wrote this contract from research*; button **Accept the assumption**; link **Read it first** |
-| After a document lands | *Contract committed — the dependency is resolved on the next read.* |
+| Providing a document | button **Provide interface** (**Replace interface** once one is on file) beside the Interface heading; it opens a modal — field **OpenAPI document URL** + **Fetch**; drop zone *Drop an OpenAPI document (YAML or JSON) here, or click to choose one.*; **Cancel** |
+| Once a document is on file | the Interface section links to it in place, with its **Source**, what was **Kept** and when it was **Read on** |
+| An agent-written interface | box titled *The agent wrote this interface from research*; button **Accept the assumption**; link **Read it first** |
 
 **The todo names what the reader must do, never the state machine's word.** *Needs a
 contract*, not *needs-contract* or *unresolved*; *Choose a provider*, not *ambiguous*. The
@@ -649,11 +652,15 @@ wire words stay on the wire.
 text so the reader knows what kind of resolved this is, and stays shown everywhere the
 dependency appears until a real document replaces it.
 
+**Interface is the user's word; contract is the file's role.** The rail row, the section, the
+button and the modal say *interface*; `contract` stays the field in the definition that names
+the file.
+
 **The Build drawer lists.** Title **Dependencies to resolve**; body *The version cannot be cut
 until each of these has a provider and a contract on file. Resolve them one by one from their
-pages, or let the agent walk you through all of them.* One row per dependency with **Open**;
-one button **Resolve all in chat**; **Cancel** / **Continue**. Nothing in the drawer resolves
-anything, and *Resolve via chat* per row is gone.
+definitions, or let the agent walk you through all of them.* One row per dependency with **Open**
+(its definition); one button **Resolve all in chat**; **Cancel** / **Continue**. Nothing in the
+drawer resolves anything, and *Resolve via chat* per row is gone.
 
 ### Section state
 

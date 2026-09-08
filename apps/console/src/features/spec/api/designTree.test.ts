@@ -17,7 +17,14 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { buildDesignSection, componentOf, dependencyOf, followSelection, isFlow, selectionKey } from "./designTree";
+import {
+  buildDesignSection,
+  componentOf,
+  dependencyOf,
+  followSelection,
+  isDependencyDefinition,
+  isFlow,
+} from "./designTree";
 import type { SpecFileEntry } from "./mapping";
 
 // Full repo-relative paths, mirroring mapping.ts's current scheme
@@ -170,24 +177,24 @@ describe("dependencies — one directory, one definition", () => {
     ]);
     expect(section.overview.map((f) => f.path)).toEqual(["specs/design/domain-model.md"]);
     expect(section.dependencies.map((d) => d.name)).toEqual(["sendgrid", "stripe"]);
-    expect(section.dependencies[1]).toMatchObject({
-      name: "stripe",
-      definitionPath: "specs/design/dependencies/stripe/dependency.json",
-    });
+    // The definition leads its directory, whatever the alphabet says.
     expect(section.dependencies[1]!.files.map((f) => f.path)).toEqual([
+      "specs/design/dependencies/stripe/dependency.json",
       "specs/design/dependencies/stripe/openapi.yaml",
     ]);
   });
 
-  it("follows a dependency.json to the dependency page, and a contract to the file", () => {
+  it("follows a dependency's files as files — the pane picks the renderer by path", () => {
     expect(followSelection("specs/design/dependencies/stripe/dependency.json")).toEqual({
-      kind: "dependency",
-      name: "stripe",
+      kind: "file",
+      path: "specs/design/dependencies/stripe/dependency.json",
     });
     expect(followSelection("specs/design/dependencies/stripe/openapi.yaml")).toEqual({
       kind: "file",
       path: "specs/design/dependencies/stripe/openapi.yaml",
     });
-    expect(selectionKey({ kind: "dependency", name: "stripe" })).toBe("dependency:stripe");
+    expect(isDependencyDefinition("specs/design/dependencies/stripe/dependency.json")).toBe(true);
+    expect(isDependencyDefinition("specs/design/dependencies/stripe/sdk.json")).toBe(false);
+    expect(isDependencyDefinition("specs/design/components/orders/design.json")).toBe(false);
   });
 });

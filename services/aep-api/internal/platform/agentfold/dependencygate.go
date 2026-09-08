@@ -179,7 +179,7 @@ func validateDependencyDesign(content, dirName string, prior *string) *designPro
 		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf(`style "sdk" needs its manifest: write specs/design/dependencies/%s/%s and set "sdk": %q.`, dirName, sdkManifestFile, sdkManifestFile)}
 	}
 	if assumptionAuthored(obj["assumed"], prior) {
-		return &designProblem{code: ErrSchemaViolation, message: `"assumed" is the user's permission record — it is written when the user accepts your proposal on the dependency page, never by you. Leave the field exactly as the file already has it (or omit it), and ask the user to accept the assumption instead.`}
+		return &designProblem{code: ErrSchemaViolation, message: `"assumed" is the user's permission record — it is written when the user accepts your proposal from the dependency's definition in the spec view, never by you. Leave the field exactly as the file already has it (or omit it), and ask the user to accept the assumption instead.`}
 	}
 	return nil
 }

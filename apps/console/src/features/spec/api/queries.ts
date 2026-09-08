@@ -161,7 +161,7 @@ export function useSpecFileContent(
 }
 
 /**
- * The dependency page's "provide the contract": a URL the platform fetches, or
+ * The definition view's "provide the interface": a URL the platform fetches, or
  * the document itself (pasted or dropped). The platform validates, normalizes
  * and commits it into the dependency's directory and records it in
  * dependency.json. Both the file list and the dependency read model change,

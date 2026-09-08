@@ -157,16 +157,19 @@ here: they're the open `console` + `feature` issues.
   once the last value is saved. A Registered External is outside the gate — its
   values live on the org record, which no project surface can clear —
   [ADR-0023](../../docs/decisions/ADR-0023-external-dependency-values-are-a-deploy-gate.md)
-- Every external dependency is a row in the spec rail's **Dependencies** group
-  and a page in the spec view, since its definition is one file in its own
-  directory (repo ADR-0027). The row carries the one thing the user must do;
-  the page shows the provider, the committed contract and its provenance, the
-  config keys and who uses it, and owns every way forward: **Resolve** runs the
-  guided `/resolve-dependency` flow, a URL or a dropped file lands a document
-  straight in the directory, and a contract the agent wrote waits there for the
-  user's acceptance. The Build drawer lists what blocks the cut, links each row
-  to its page, and offers one **Resolve all in chat** —
-  [ADR-0028](design/decisions/ADR-0028-a-dependency-has-a-page.md)
+- Every external dependency is a group in the spec rail, shaped like a
+  component's, since its definition is one file in its own directory (repo
+  ADR-0027): the header carries the one thing the user must do, and the rows
+  are its files — the definition, the interface (an OpenAPI document or a
+  GraphQL schema), an SDK manifest. The definition renders as its own view,
+  the way a component's design does: the provider, the interface on file with
+  its provenance, the config keys and who uses it, and every way forward —
+  **Resolve** runs the guided `/resolve-dependency` flow, **Provide interface**
+  opens a modal that lands a document straight in the directory, and an
+  interface the agent wrote waits there for the user's acceptance. The Build
+  drawer lists what blocks the cut, opens each row's definition, and offers one
+  **Resolve all in chat** —
+  [ADR-0028](design/decisions/ADR-0028-a-dependency-is-a-directory-in-the-rail.md)
 - Empty states teach *what*, never narrate the *how* — the five flow-narrating
   empty states (Builds, Deployments, Validations, Components, Recent activity —
   the last retired with the feed itself, #662)

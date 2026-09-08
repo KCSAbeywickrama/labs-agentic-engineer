@@ -59,8 +59,8 @@ function isResolutionKind(kind: PreflightItem["kind"]): boolean {
   return RESOLUTION_KINDS.has(kind);
 }
 
-/** An external dependency has a page; an org-service is resolved from the design view. */
-function hasDependencyPage(kind: PreflightItem["kind"]): boolean {
+/** An external dependency has a definition to open; an org-service is resolved from the design view. */
+function hasDefinition(kind: PreflightItem["kind"]): boolean {
   return kind !== "org-service";
 }
 
@@ -126,7 +126,7 @@ function DependencyRow({
     <Stack spacing={0.75}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
         <Typography variant="subtitle1">{item.dependency}</Typography>
-        {onOpen && hasDependencyPage(item.kind) && (
+        {onOpen && hasDefinition(item.kind) && (
           <Button size="small" onClick={() => onOpen(item.dependency)}>
             Open
           </Button>
@@ -188,7 +188,7 @@ export function BuildDependencyDrawer({
         <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
           {groups.length === 0
             ? "Everything is resolved — continue to build."
-            : "The version cannot be cut until each of these has a provider and a contract on file. Resolve them one by one from their pages, or let the agent walk you through all of them."}
+            : "The version cannot be cut until each of these has a provider and a contract on file. Resolve them one by one from their definitions, or let the agent walk you through all of them."}
         </Typography>
 
         {groups.length > 0 && (

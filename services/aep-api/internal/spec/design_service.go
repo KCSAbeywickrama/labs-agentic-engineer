@@ -219,7 +219,7 @@ func (s *designService) CollectSpec(ctx context.Context, orgID, projectID, compo
 }
 
 // CollectDependencyContract is CollectSpec without a consumer in hand — the
-// dependency page's route, where the user provides the document for the
+// dependency definition view's route, where the user provides the document for the
 // dependency itself. Any component that references the dependency stands in
 // as the consumer whose design.json is re-rendered (the migration ride).
 func (s *designService) CollectDependencyContract(ctx context.Context, orgID, projectID, depName string, rawSpec []byte, specURL string) (string, error) {

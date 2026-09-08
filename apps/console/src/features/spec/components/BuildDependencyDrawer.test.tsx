@@ -110,7 +110,7 @@ describe("BuildDependencyDrawer — lists what blocks the cut", () => {
     expect(screen.getByText(/no contract yet/i)).toBeInTheDocument();
   });
 
-  it("never offers a local input — the dependency page owns uploads", () => {
+  it("never offers a local input — the dependency's definition owns uploads", () => {
     setup([AMBIGUOUS, NEEDS_CONTRACT]);
 
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
@@ -149,7 +149,7 @@ describe("BuildDependencyDrawer — the two ways forward", () => {
     expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
   });
 
-  it("opens an external dependency's page from its row", () => {
+  it("opens an external dependency's definition from its row", () => {
     const { onOpenDependency } = setup([NEEDS_CONTRACT]);
 
     fireEvent.click(screen.getByRole("button", { name: /open/i }));

@@ -205,7 +205,7 @@ func TestCollectSpec_NoCommitterWired(t *testing.T) {
 	}
 }
 
-// The dependency page's route: no consumer named, the definition file is the
+// The dependency definition view's route: no consumer named, the definition file is the
 // target, and a user-provided document replaces an assumption outright.
 func TestCollectDependencyContract_WritesTheDirectoryWithoutAConsumer(t *testing.T) {
 	t.Parallel()

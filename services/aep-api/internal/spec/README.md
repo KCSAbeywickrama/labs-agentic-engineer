@@ -31,7 +31,7 @@ flowchart LR
 | `tags` | list the project's `v<N>` spec version tags | `GET .../tags` |
 | `skills` | list / create / update / delete / import / sync / get the org Skill library | `/skills...` |
 | `collab` | the collab session descriptor + the S2S room-access oracle | `.../spec/collab-session`, `GET /collab/validate` |
-| `designdeps` | the dependency page's two writes into an external dependency's directory: provide its contract (a URL the platform fetches, or the document itself), accept the contract the design agent wrote | `POST .../dependencies/{name}/contract`, `POST .../dependencies/{name}/assumption` |
+| `designdeps` | the dependency definition view's two writes into an external dependency's directory: provide its contract (a URL the platform fetches, or the document itself), accept the contract the design agent wrote | `POST .../dependencies/{name}/contract`, `POST .../dependencies/{name}/assumption` |
 
 *Still flat in the domain root (not carved into finer slices): the artifacts store/versioning machinery,
 the genai turn engine (runner/broker/sweeper), and the files / design / skills services.*

@@ -199,7 +199,7 @@ export function checkDependencyDesign(
     const authored = assumptionChanged(d.assumed, bundle.read(path));
     if (authored) {
       return violation(
-        `"assumed" is the user's permission record — it is written when the user accepts your proposal on the dependency page, never by you. Leave the field exactly as the file already has it (or omit it), and ask the user to accept the assumption instead.`,
+        `"assumed" is the user's permission record — it is written when the user accepts your proposal from the dependency's definition in the spec view, never by you. Leave the field exactly as the file already has it (or omit it), and ask the user to accept the assumption instead.`,
       );
     }
   }

@@ -394,7 +394,7 @@ you settle it**, before moving to the next:
 - candidates → `<capability>: options are A / B / C — tell me which (I'll
   continue meanwhile)`
 - needs-contract → `<capability>: <provider> chosen, no published contract
-  found — you can upload one or let me assume it, on the dependency page`
+  found — you can upload one or let me assume it, from the dependency's definition in the spec view`
 - needs-input → `<capability>: I couldn't identify the system — tell me which +
   how it authenticates`
 
@@ -405,7 +405,7 @@ later. Then **close with three parts and nothing more**: one line per component
 dependencies still ambiguous or unresolved, each with the single thing you need;
 and a one-line pointer to `specs/design/`. The narration already carried the
 play-by-play, so a file-by-file recap would only bury the user's next action.
-Each **Needs your input** line names the dependency the way its page does, so
+Each **Needs your input** line names the dependency the way its definition in the spec view does, so
 the user can click through and press **Resolve** — that runs the
 `resolve-dependency` flow, which is where the contract gets provided or
 assumed; the design turn never waits for it.

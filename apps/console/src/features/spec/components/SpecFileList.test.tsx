@@ -380,19 +380,20 @@ describe("SpecFileList — the design reads as its parts (#686)", () => {
   });
 });
 
-describe("SpecFileList — the Dependencies group", () => {
-  it("lists each dependency directory once, with what the user must do", () => {
+describe("SpecFileList — a dependency's group", () => {
+  it("lists each dependency directory like a component, its files as rows and its state on the header", () => {
+    const onSelect = vi.fn();
     render(
       <OxygenUIThemeProvider theme={OxygenTheme}>
         <SpecFileList
           files={designEntries(
             "specs/design/design.cell",
-            "specs/design/dependencies/stripe/dependency.json",
             "specs/design/dependencies/stripe/openapi.yaml",
+            "specs/design/dependencies/stripe/dependency.json",
             "specs/design/dependencies/dhl/dependency.json",
           )}
           selection={null}
-          onSelect={() => {}}
+          onSelect={onSelect}
           onRegenerateDesign={() => {}}
           sections={railSections(RAIL_INPUT)}
           onReason={() => {}}
@@ -415,11 +416,22 @@ describe("SpecFileList — the Dependencies group", () => {
         />
       </OxygenUIThemeProvider>,
     );
-    expect(screen.getByText("Dependencies")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^dhl/ })).toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "Spec files" });
+    // One group per dependency, headed like a component's.
+    expect(within(nav).getByRole("button", { name: "Collapse dhl" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "Collapse stripe" })).toBeInTheDocument();
     expect(screen.getByLabelText("dhl: Needs a contract")).toBeInTheDocument();
     expect(screen.getByText("Assumed")).toBeInTheDocument();
-    // The contract file is the page's, not a rail row of its own.
-    expect(screen.queryByText("openapi")).not.toBeInTheDocument();
+    // The files are rows, named for what they are — definition first.
+    const labels = within(nav)
+      .getAllByRole("button")
+      .map((b) => b.textContent)
+      .filter((t) => t === "Definition" || t === "API");
+    expect(labels).toEqual(["Definition", "Definition", "API"]);
+    fireEvent.click(within(nav).getAllByRole("button", { name: "API" })[0]!);
+    expect(onSelect).toHaveBeenCalledWith({
+      kind: "file",
+      path: "specs/design/dependencies/stripe/openapi.yaml",
+    });
   });
 });

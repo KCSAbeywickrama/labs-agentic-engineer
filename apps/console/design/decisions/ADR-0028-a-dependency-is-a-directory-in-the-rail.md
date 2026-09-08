@@ -1,4 +1,4 @@
-# ADR-0028 — A dependency has a page, and the Build drawer lists
+# ADR-0028 — A dependency is a directory in the rail, its definition a view
 
 ## Context
 
@@ -10,49 +10,73 @@ front of the Build button, at the worst moment.
 
 Platform-side, the dependency now has one definition in its own directory
 (repo [ADR-0027](../../../../docs/decisions/ADR-0027-one-external-dependency-one-definition.md)),
-so it has something to show.
+beside the interface it exposes and, for an SDK, its manifest — so it has
+files to show, the way a component does.
 
 ## Decision
 
-**Every external dependency is a row in the rail and a page in the spec
-view.** The rail's **Dependencies** group sits between Flows and the
-components; a row carries the one thing the user must do (*Choose a provider*,
-*Needs a contract*, *Needs your acceptance*, *Needs input*) as an amber mark
-with the words on hover, or the qualifier on a resolved one (*Assumed*,
-*Registered*, *SDK only*) as quiet text. The dependency's own files (the
-contract, an `sdk.json`) are the page's, not rail rows.
+**Every external dependency is a group in the rail, shaped like a
+component's.** The group sits between Flows and the components, with the plug
+glyph telling it apart; its header carries the one thing the user must do
+(*Choose a provider*, *Needs a contract*, *Needs your acceptance*, *Needs
+input*) as an amber mark with the words on hover, or the qualifier on a
+resolved one (*Assumed*, *Registered*, *SDK only*) as quiet text. Its rows are
+the directory's files, named for what they are under the dependency's own
+header — **Definition** (`dependency.json`), **API** (`openapi.yaml` or
+`schema.graphql`), **SDK** (`sdk.json`) — the definition first.
 
-**The page owns everything that moves a dependency forward.**
+**Every view is a file's.** The rail's selection model stays what it was: a
+row selects a path, and the pane picks the renderer by path. The definition
+renders through `DependencyView` the way a component's `design.json` renders
+through `DesignView` — reading the live doc ahead of the commit and the
+committed copy otherwise — with the read model adding what a file cannot
+know: status, flags, who uses it. The interface and the manifest open in the
+existing file viewers. There is no dependency-shaped selection and no page
+over the read model.
+
+**The definition view is the component view's shape.** Eyebrow chips (kind,
+qualifiers, the todo or *Resolved*), the name as the heading with **Resolve**
+or **Reconsider** beside it, then labelled facts — *Provider*, *Style*,
+*Source*, *Package* — so the provider reads as the provider and never as the
+name said twice. Sections follow: Description, Used by, Candidates,
+Interface, Configuration.
+
+**The definition owns everything that moves a dependency forward.**
 
 - **Resolve** runs the guided flow — the message is the skill command,
   `/resolve-dependency <name>`, nothing else, because the agent reads the
   definition from its file and the playbook from its skills. A resolved
   dependency offers **Reconsider** instead, which stays prose: it opens a
   conversation about a choice already made.
-- **Provide the contract** takes a URL the platform fetches, or a dropped file,
-  straight into the dependency's directory. Question cards the flow asks
-  render on the spec view around the page, so the user never leaves it.
-- **Accept the assumption** appears only for a contract the agent wrote, and
-  is the only way the `assumed` record gets written.
+- **Provide interface** sits beside the Interface heading and opens a modal:
+  a URL the platform fetches, or a dropped file, straight into the
+  dependency's directory. A modal rather than a form in the document, because
+  the document is what the dependency *is* and the upload is an act on it.
+  Once a document is on file the section links to it in place, with its
+  provenance, and the button reads **Replace interface**.
+- **Accept the assumption** appears inline, only for an interface the agent
+  wrote, and is the only way the `assumed` record gets written.
 
 **The Build drawer lists; it does not resolve.** One row per blocking
-dependency, each with **Open** to its page (an org-service has no page and
-stays a design-view matter), and one button — **Resolve all in chat** — that
-runs the flow over every open dependency and ends back at Build. Opening a
-page or starting the batch closes the drawer, which as an overlay would
-otherwise cover what it just opened. The paste-a-spec form is gone from the
-drawer; the page owns uploads.
+dependency, each with **Open** to its definition (an org-service has no
+directory and stays a design-view matter), and one button — **Resolve all in
+chat** — that runs the flow over every open dependency and ends back at
+Build. Opening a definition or starting the batch closes the drawer, which as
+an overlay would otherwise cover what it just opened. The paste-a-spec form is
+gone from the drawer.
 
 **One state per dependency.** The dependencies read model is per component;
 the definition is one file, so the console folds the rows by name
-(`dependencyStates.ts`) and the rail, the page and the drawer read one answer.
+(`dependencyStates.ts`) and the rail, the view and the drawer read one answer.
 
 ## Consequences
 
 - "Resolve via chat" is gone from the drawer and from the lexicon; the
   design view's dependency cards keep their chat button, now sending the
   skill command.
-- `SpecSelection` gains `{ kind: "dependency", name }`; a `dependency.json`
-  in the rail follows to the page, its contract files to the file view.
-- Two endpoints back the page: `POST …/dependencies/{name}/contract` and
+- `SpecSelection` is unchanged; `followSelection` sends a `dependency.json`
+  write to the file, and the pane renders it as the definition.
+- *Interface* is the user's word in the rail, the section, the button and the
+  modal; `contract` remains the definition's field naming the file.
+- Two endpoints back the view: `POST …/dependencies/{name}/contract` and
   `POST …/dependencies/{name}/assumption`.

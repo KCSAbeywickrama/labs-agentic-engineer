@@ -184,7 +184,7 @@ export const projectHandlers = [
   http.get("*/api/v1/projects/:projectName/dependencies/readiness", () =>
     respond((s) => projectDependencyReadiness(s)),
   ),
-  // The dependency page's two writes (ADR-0028): a document lands in the
+  // The dependency definition view's two writes (ADR-0028): a document lands in the
   // dependency's directory; an assumption is accepted. Neither echoes anything
   // the page needs beyond success, so the mock acknowledges and the page
   // refetches the dependencies read model.

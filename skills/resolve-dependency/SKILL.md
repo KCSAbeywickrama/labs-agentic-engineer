@@ -70,7 +70,7 @@ Three routes, tried in this order, and the user is told which one you took:
    the user for anything.
 2. **Ask for it.** When no public document exists (most couriers, most
    private APIs), ask ONE question: whether the user can provide the document
-   — as a URL, or by uploading it on the dependency page — or would rather
+   — as a URL, or by uploading it from the dependency's definition in the spec view — or would rather
    proceed on your assumption. Say what a document from them buys (the
    validation checks run against it) and what an assumption costs (the
    coding agent builds to a guess you will name).
@@ -82,7 +82,7 @@ Three routes, tried in this order, and the user is told which one you took:
    you are unsure about (auth scheme, pagination, error shapes). Record
    `contract` and a `provenance` block with `sourceUrl` naming the
    documentation you read. Then tell the user the contract is written and
-   waits for their acceptance on the dependency page — you cannot write the
+   waits for their acceptance on the dependency's definition in the spec view — you cannot write the
    `assumed` record; only they can. The dependency stays needs-acceptance
    until they do.
 
@@ -105,5 +105,5 @@ contract contradicts them.
 
 One line per dependency you touched: its name, the state it is in now, and
 the one thing (if any) still needed from the user — "accept the assumption on
-the dependency page", "upload the document". Nothing else: the files carry the
+the dependency's definition", "upload the document". Nothing else: the files carry the
 detail, and the Build drawer re-reads them.

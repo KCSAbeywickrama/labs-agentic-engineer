@@ -23,20 +23,18 @@ export type SpecSelection =
   | { kind: "file"; path: string }
   | { kind: "cell-diagram" }
   | { kind: "security" }
-  | { kind: "wireframe"; component: string; dslPath: string }
-  /** An external dependency's page — its definition, contract and state. */
-  | { kind: "dependency"; name: string };
+  | { kind: "wireframe"; component: string; dslPath: string };
 
 /**
- * One external dependency's directory, `specs/design/dependencies/<name>/`:
- * the definition (dependency.json) plus whatever contract files sit beside it.
- * One dependency, one definition — components only reference it by name.
+ * One external dependency's directory, `specs/design/dependencies/<name>/`,
+ * shaped like a component's: the definition (dependency.json), the interface
+ * it exposes (openapi.yaml / schema.graphql) and an sdk.json when the style
+ * is SDK — every one a browsable file. One dependency, one definition;
+ * components only reference it by name.
  */
 export interface DesignDependencyNode {
   name: string;
-  /** The dependency.json path, when it exists. */
-  definitionPath: string | null;
-  /** Every other file in the directory — the contract, an sdk.json. */
+  /** The directory's files, definition first, then path order. */
   files: SpecFileEntry[];
 }
 
@@ -104,6 +102,13 @@ export function dependencyDefinitionPath(name: string): string {
   return dependencyFilePath(name, "dependency.json");
 }
 
+const DEPENDENCY_DEFINITION_RE = /^specs\/design\/dependencies\/[^/]+\/dependency\.json$/;
+
+/** Is this a dependency's definition (`specs/design/dependencies/<name>/dependency.json`)? */
+export function isDependencyDefinition(path: string): boolean {
+  return DEPENDENCY_DEFINITION_RE.test(path);
+}
+
 /** A file in a dependency's directory, by its bare name (`openapi.yaml`, `sdk.json`). */
 export function dependencyFilePath(name: string, file: string): string {
   return `specs/design/dependencies/${name}/${file}`;
@@ -163,16 +168,24 @@ export function buildDesignSection(files: SpecFileEntry[]): DesignSection {
     if (name === null) continue;
     let node = byDependency.get(name);
     if (!node) {
-      node = { name, definitionPath: null, files: [] };
+      node = { name, files: [] };
       byDependency.set(name, node);
     }
-    if (f.path === dependencyDefinitionPath(name)) node.definitionPath = f.path;
-    else node.files.push(f);
+    node.files.push(f);
   }
   const dependencies = [...byDependency.values()].sort((a, b) =>
     a.name.localeCompare(b.name),
   );
-  for (const d of dependencies) d.files.sort((a, b) => a.path.localeCompare(b.path));
+  // The definition leads its directory the way the PRD leads Requirements:
+  // it is what the dependency IS, and on path alone `dependency.json` sorts
+  // below `openapi.yaml` only by accident of the alphabet.
+  for (const d of dependencies) {
+    d.files.sort(
+      (a, b) =>
+        Number(isDependencyDefinition(b.path)) - Number(isDependencyDefinition(a.path)) ||
+        a.path.localeCompare(b.path),
+    );
+  }
 
   return {
     overview,
@@ -189,7 +202,9 @@ export function buildDesignSection(files: SpecFileEntry[]): DesignSection {
  * The selection that WATCHES a path being written (#576, ADR-0026) — the same
  * routing the rail's own rows use: the cell opens as the Architecture diagram,
  * security.json opens the Security entry, a wireframe `.dsl` opens as its
- * component's diagram, and everything else is the file itself. One definition,
+ * component's diagram, and everything else is the file itself (a structured
+ * file — a component's design.json, a dependency's dependency.json — is a
+ * file selection too; the pane picks its renderer by path). One definition,
  * so follow-the-write can never land somewhere a click on the rail would not
  * have gone.
  */
@@ -199,10 +214,6 @@ export function followSelection(path: string): SpecSelection {
   const component = componentOf(path);
   if (component && isDsl(path)) {
     return { kind: "wireframe", component, dslPath: path };
-  }
-  const dependency = dependencyOf(path);
-  if (dependency && path === dependencyDefinitionPath(dependency)) {
-    return { kind: "dependency", name: dependency };
   }
   return { kind: "file", path };
 }
@@ -218,7 +229,5 @@ export function selectionKey(sel: SpecSelection): string {
       return "security";
     case "wireframe":
       return `wireframe:${sel.component}`;
-    case "dependency":
-      return `dependency:${sel.name}`;
   }
 }

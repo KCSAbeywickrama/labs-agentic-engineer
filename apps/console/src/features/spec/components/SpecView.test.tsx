@@ -257,8 +257,8 @@ const mockUseSpecFileContent = vi.fn();
 const mockUseDesignDependencies = vi.fn();
 
 vi.mock("../api/queries", () => ({
-  // The dependency page's two writes: stubbed, since this file renders without a
-  // QueryClientProvider; DependencyPage's own behavior is its own test's.
+  // The definition view's two writes: stubbed, since this file renders without a
+  // QueryClientProvider; DependencyView's own behavior is its own test's.
   useProvideDependencyContract: () => ({ mutate: vi.fn(), isPending: false, isError: false, isSuccess: false, error: null }),
   useAcceptDependencyAssumption: () => ({ mutate: vi.fn(), isPending: false, isError: false, error: null }),
   useSpecFiles: (...args: unknown[]) => mockUseSpecFiles(...args),
@@ -1161,7 +1161,7 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
     });
   });
 
-  it("opens a dependency's page from a drawer row and closes the drawer, which would otherwise cover it", async () => {
+  it("opens a dependency's definition from a drawer row and closes the drawer, which would otherwise cover it", async () => {
     mockPreflightRefetch.mockResolvedValue({
       data: {
         needsInput: true,
@@ -1169,6 +1169,26 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
         items: DRAWER_PREFLIGHT_ITEMS,
       },
     });
+    // The definition is a file in the spec, rendered like a component's
+    // design.json: the drawer's Open selects it, and the pane reads it.
+    const definitionPath = "specs/design/dependencies/stripe/dependency.json";
+    mockUseSpecFiles.mockReturnValue({
+      data: [...BASE_FILES, { path: definitionPath, sha: "dep1", group: "designs" }],
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockUseSpecFileContent.mockImplementation((_project: string, file: { path: string } | null) => ({
+      data:
+        file?.path === definitionPath
+          ? { sha: "dep1", content: JSON.stringify({ name: "stripe", provider: "Stripe", style: "rest-api" }) }
+          : undefined,
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    }));
 
     render(<SpecView projectName="proj1" />);
     clickBuild();
@@ -1181,9 +1201,9 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
     await waitFor(() =>
       expect(screen.queryByTestId("dependency-drawer")).not.toBeInTheDocument(),
     );
-    // The page is the selection now: its heading is the dependency's name,
-    // and its Resolve runs the guided flow through the same seeded-chat seam
-    // the design view's cards use, with the FULL endpoint entry.
+    // The definition is the selection now: its heading is the dependency's
+    // name, and its Resolve runs the guided flow through the same seeded-chat
+    // seam the design view's cards use, with the FULL endpoint entry.
     expect(screen.getByRole("heading", { name: "stripe" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Resolve" }));
     expect(mockResolveViaChat).toHaveBeenCalledWith(

@@ -65,6 +65,7 @@ import { CollabTextArea } from "../collab/CollabTextArea";
 import { SpecMdEditor } from "../collab/SpecMdEditor";
 import { useYTextString } from "../collab/useYTextString";
 import { useTurnEndFlush } from "../collab/useTurnEndFlush";
+import { refreshRoomCopy } from "../collab/refreshRoomCopy";
 import { START_COMMAND } from "@aep/contracts/commands";
 import { fragmentToMarkdown } from "@aep/collab-doc";
 import { prdUnsettled } from "../lib/prdUnsettled";
@@ -91,7 +92,7 @@ import type { DependencyResolutionIntent } from "../../projects/lib/dependencyRe
 import { usePlan } from "../../agent-chat/usePlan";
 import { approvalInputsFor } from "../lib/buildInputs";
 import { BuildDependencyDrawer } from "./BuildDependencyDrawer";
-import { DependencyPage } from "./DependencyPage";
+import { DependencyView } from "./DependencyView";
 import { computeDependencyStates } from "../lib/dependencyStates";
 import { RESOLVE_ALL_DEPENDENCIES_COMMAND } from "../../projects/lib/dependencyResolutionMessage";
 import { SpecFileList } from "./SpecFileList";
@@ -101,8 +102,15 @@ import { OpenApiView } from "@aep/ui-openapi-view";
 import { DesignView } from "@aep/ui-design-view";
 import type { DependencyStatusInfo } from "@aep/ui-design-view";
 import { ValidationView } from "@aep/ui-validation-view";
-import { type SpecSelection, buildDesignSection } from "../api/designTree";
-import { DESIGN_CELL_PATH, componentOf, followSelection } from "../api/designTree";
+import {
+  type SpecSelection,
+  DESIGN_CELL_PATH,
+  componentOf,
+  dependencyDefinitionPath,
+  dependencyOf,
+  followSelection,
+  isDependencyDefinition,
+} from "../api/designTree";
 import { useSession } from "../../../auth/SessionContext";
 
 type PreflightItem = components["schemas"]["PreflightItem"];
@@ -443,24 +451,31 @@ export function SpecView({ projectName }: { projectName: string }) {
   };
 
   // One state per external dependency (its definition is one file, so its
-  // state is one answer): the rail's chips, the dependency page and the Build
+  // state is one answer): the rail's marks, the definition view and the Build
   // drawer all read this fold of the per-component read model.
   const dependencyStates = useMemo(
     () => computeDependencyStates(dependencies.data ?? []),
     [dependencies.data],
   );
-  const designSection = useMemo(() => buildDesignSection(files), [files]);
-  // The dependency page's Resolve / Reconsider. The component is context for
+  // The definition view's Resolve / Reconsider. The component is context for
   // the reconsider's prose only; the resolve is the skill command.
-  const handleResolveFromPage = (name: string, intent: DependencyResolutionIntent) => {
+  const handleResolveFromDefinition = (name: string, intent: DependencyResolutionIntent) => {
     const state = dependencyStates[name];
     resolveDependencyViaChat(state?.usedBy[0] ?? "", state?.dependency ?? { kind: "external", name }, intent);
   };
-  // The Build drawer hands off to the page (and closes, since as an overlay it
-  // would cover the page it just opened) or runs the batch flow.
+  // The definition view's two writes land in git outside the room; the room's
+  // copy of the definition is brought up to date here, so the pane — which
+  // reads the room first — shows the interface the moment it is on file.
+  const handleDependencyCommitted = (name: string) => {
+    void refreshRoomCopy(projectName, collab.getFileText, dependencyDefinitionPath(name));
+  };
+  // The Build drawer hands off to the dependency's definition — a file,
+  // rendered by DependencyView like a component's design.json — and closes,
+  // since as an overlay it would cover what it just opened; or it runs the
+  // batch flow.
   const handleOpenDependencyFromDrawer = (name: string) => {
     setDependencyDrawerOpen(false);
-    selectManually({ kind: "dependency", name });
+    selectManually({ kind: "file", path: dependencyDefinitionPath(name) });
   };
   const handleResolveAllDependencies = () => {
     setPendingSeed(chatKeyFor(orgHandle ?? "default", projectName), RESOLVE_ALL_DEPENDENCIES_COMMAND);
@@ -485,10 +500,13 @@ export function SpecView({ projectName }: { projectName: string }) {
     /^specs\/validation\/validation-criteria\.json$/.test(
       selectedFile?.path ?? "",
     );
+  // A dependency's definition renders as its own structured view (ADR-0028)
+  // — the same path a component's design.json takes.
+  const isDependencyDefinitionFile = isDependencyDefinition(selectedFile?.path ?? "");
   // The structured files share the read-only render path (no collab editor,
   // sourced from the live doc or the committed fetch).
   const isStructuredFile =
-    isOpenApiFile || isComponentDesignFile || isValidationCriteriaFile;
+    isOpenApiFile || isComponentDesignFile || isValidationCriteriaFile || isDependencyDefinitionFile;
   // Canvas-based views (cell diagram, Excalidraw) need a flex-column,
   // overflow-hidden ancestor so their own `flex: 1` roots get a real
   // measured height to stretch into — a plain overflow:auto block (used for
@@ -1388,16 +1406,6 @@ export function SpecView({ projectName }: { projectName: string }) {
                   isPending={security.isPending}
                   isError={security.isError}
                 />
-              ) : effectiveSelection.kind === "dependency" ? (
-                <DependencyPage
-                  projectName={projectName}
-                  name={effectiveSelection.name}
-                  state={dependencyStates[effectiveSelection.name]}
-                  node={designSection.dependencies.find((d) => d.name === effectiveSelection.name)}
-                  onOpenFile={(path) => selectManually({ kind: "file", path })}
-                  onResolve={(name) => handleResolveFromPage(name, "resolve")}
-                  onReconsider={(name) => handleResolveFromPage(name, "reconsider")}
-                />
               ) : effectiveSelection.kind === "wireframe" ? (
                 <WireframePanel
                   projectName={projectName}
@@ -1418,6 +1426,17 @@ export function SpecView({ projectName }: { projectName: string }) {
                       <OpenApiView spec={structuredLive} />
                     ) : isValidationCriteriaFile ? (
                       <ValidationView criteria={structuredLive} />
+                    ) : isDependencyDefinitionFile ? (
+                      <DependencyView
+                        projectName={projectName}
+                        name={dependencyOf(selectedFile.path) ?? ""}
+                        definition={structuredLive}
+                        state={dependencyStates[dependencyOf(selectedFile.path) ?? ""]}
+                        onOpenFile={(path) => selectManually({ kind: "file", path })}
+                        onResolve={(name) => handleResolveFromDefinition(name, "resolve")}
+                        onReconsider={(name) => handleResolveFromDefinition(name, "reconsider")}
+                        onCommitted={handleDependencyCommitted}
+                      />
                     ) : (
                       <DesignView
                         design={structuredLive}
@@ -1436,6 +1455,18 @@ export function SpecView({ projectName }: { projectName: string }) {
                       <ValidationView
                         key={content.data.sha}
                         criteria={content.data.content}
+                      />
+                    ) : isDependencyDefinitionFile ? (
+                      <DependencyView
+                        key={content.data.sha}
+                        projectName={projectName}
+                        name={dependencyOf(selectedFile.path) ?? ""}
+                        definition={content.data.content}
+                        state={dependencyStates[dependencyOf(selectedFile.path) ?? ""]}
+                        onOpenFile={(path) => selectManually({ kind: "file", path })}
+                        onResolve={(name) => handleResolveFromDefinition(name, "resolve")}
+                        onReconsider={(name) => handleResolveFromDefinition(name, "reconsider")}
+                        onCommitted={handleDependencyCommitted}
                       />
                     ) : (
                       <DesignView

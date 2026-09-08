@@ -74,10 +74,10 @@ specs/design/dependencies/<name>/
 
 **The flow.** The design turn researches each dependency, writes its directory
 with whatever it found, and ends by naming what is open; it never blocks. Each
-dependency has a page in the spec view where the user resolves it: **Resolve**
-runs the guided `resolve-dependency` flow, a URL or a dropped file goes
-straight into the directory, and an agent-written contract waits for
-acceptance there. Build with open dependencies lists them and offers one
+dependency's directory is a group in the spec rail, and its definition renders
+as the view where the user resolves it: **Resolve** runs the guided
+`resolve-dependency` flow, a URL or a dropped file goes straight into the
+directory, and an agent-written contract waits for acceptance there. Build with open dependencies lists them and offers one
 button that runs the flow over all of them.
 
 ## Consequences

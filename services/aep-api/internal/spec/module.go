@@ -47,12 +47,12 @@ type Deps struct {
 	SkillImport *SkillImportService
 	// CollabRepo is the project-ownership oracle behind the two collab ops.
 	CollabRepo sourcecontrol.RepoService
-	// Design backs the dependency page's two writes (provide a contract,
+	// Design backs the dependency definition view's two writes (provide a contract,
 	// accept an assumption). *designService satisfies it.
 	Design DependencyContractService
 }
 
-// DependencyContractService is the dependency page's write surface into an
+// DependencyContractService is the dependency definition view's write surface into an
 // external dependency's directory — see CollectDependencyContract and
 // AcceptDependencyAssumption on the design service.
 type DependencyContractService interface {

@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package designdeps is the spec domain's slice for the dependency page's two
+// Package designdeps is the spec domain's slice for the dependency definition view's two
 // writes: the user provides an external dependency's contract, or accepts the
 // contract the design agent wrote. Both land in the dependency's own directory
 // (specs/design/dependencies/<name>/) through the design service.
