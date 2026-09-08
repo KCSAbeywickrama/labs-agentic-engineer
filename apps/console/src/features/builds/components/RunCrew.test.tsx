@@ -204,9 +204,10 @@ describe("RunCrew", () => {
 
   it("says when an agent was spawned in the background", () => {
     render(<RunCrew events={fanOut()} />);
-    // Printed only when the runtime said TRUE: the platform forces fan-out into
-    // the foreground, so a true is the forcing having failed — which is exactly
-    // what explains an agent that forwarded nothing.
+    // Printed only when the runtime said TRUE, which is the ordinary case for a
+    // builder: fan-out is backgrounded by default and the skill decides its
+    // shape (ADR-0011). A `false` means the parent is blocked inside this
+    // agent's call, and the row says that in words, so only true needs a chip.
     expect(within(row("Implement todo-webapp")).getByText("background")).toBeInTheDocument();
     expect(within(row("Implement todo-api")).queryByText("background")).toBeNull();
   });
@@ -287,47 +288,40 @@ describe("RunCrew", () => {
     expect(container.textContent).not.toContain("AC-001-a");
   });
 
-  it("puts a backgrounded shell command under the agent that started it", () => {
+  // The tree is agents, not their commands. It used to carry a row per
+  // backgrounded command, and a live run produced 47 — so the column that
+  // answers "who is working" was mostly raw command lines.
+  //
+  // The concern that put them there is still real and still served: an orphaned
+  // `dev:mock` holding a port after the run ends has to have somebody's name on
+  // it. That name is now on its `task_settled` row in the inspector, under the
+  // agent that ran it, which is where a reader goes once they have picked the
+  // agent this column is for.
+  it("names the agent in the tree and leaves its commands to the inspector", () => {
     seq = 0;
     const events = [
       ev(0, { kind: "agent_started", agentId: "a1", label: "todo-webapp", depth: 1 }),
-      ev(1, { kind: "task_started", agentId: "a1", taskId: "bg1", summary: "pnpm dev:mock" }),
-    ];
-    render(<RunCrew events={events} />);
-    // An orphaned `dev:mock` still holding a port after the run ends has
-    // somebody's name on it.
-    expect(screen.getByText("pnpm dev:mock")).toBeInTheDocument();
-    expect(screen.getAllByText("running").length).toBeGreaterThan(0);
-  });
-
-  // The reported bug: five consecutive rows of one live run all rendered as
-  // `cd expense-webapp && npm in…`, five different installs a reader could not
-  // tell apart. What identifies a command is at its END, and tail truncation
-  // eats exactly that.
-  it("keeps the identifying end of a command that is too long for the column", () => {
-    seq = 0;
-    const commands = [
-      "cd expense-webapp && npm install react@19.2.3",
-      "cd expense-webapp && npm install vite@7.1.14",
-    ];
-    const events = [
-      ev(0, { kind: "agent_started", agentId: "a1", label: "expense-webapp", depth: 1 }),
-      ...commands.map((summary, i) =>
-        ev(1 + i, { kind: "task_started", agentId: "a1", taskId: `bg${String(i)}`, summary }),
-      ),
+      ev(1, { kind: "tool_use", agentId: "a1", tool: "Bash", summary: "pnpm dev:mock", toolUseId: "t1" }),
+      ev(2, { kind: "task_started", agentId: "a1", taskId: "bg1", summary: "pnpm dev:mock" }),
+      ev(3, { kind: "task_settled", agentId: "a1", taskId: "bg1", summary: "pnpm dev:mock", status: "stopped" }),
     ];
     render(<RunCrew events={events} />);
 
-    // The ends survive, and they are what tells the two rows apart. Only the
-    // head can be ellipsised, and it is the half they share.
-    expect(screen.getByText(/install react@19\.2\.3$/)).toBeInTheDocument();
-    expect(screen.getByText(/install vite@7\.1\.14$/)).toBeInTheDocument();
-    // Nothing is dropped from the DOM: the row still reads as the whole command
-    // to a screen reader, and hovering it shows the same string.
-    for (const command of commands) {
-      const row = screen.getByTitle(command);
-      expect(row.textContent).toContain(command);
+    // The agent has a row, and the command is nowhere in the tree — not even
+    // once, which is the whole point of the change.
+    expect(row("todo-webapp")).toBeInTheDocument();
+    expect(screen.queryByText(/pnpm dev:mock/)).not.toBeInTheDocument();
+
+    // Pick the agent, and its feed answers with the command and what became of
+    // it. This is also the cost of the change, stated honestly: a subagent's
+    // commands are one click away rather than on screen from the start.
+    fireEvent.click(row("todo-webapp"));
+    const shown = screen.getAllByText(/pnpm dev:mock/);
+    expect(shown.length).toBeGreaterThan(0);
+    for (const el of shown) {
+      expect(el.closest("ul")).toBeNull();
     }
+    expect(screen.getByText(/stopped/)).toBeInTheDocument();
   });
 
   it("the hint says how many agents, how many are running, and how quiet it is", () => {

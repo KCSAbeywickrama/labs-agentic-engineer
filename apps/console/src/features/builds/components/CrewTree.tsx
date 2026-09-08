@@ -24,12 +24,22 @@ import {
   isCrewSettled,
   type CrewMember,
   type CrewState,
-  type CrewTask,
 } from "@aep/progress-view";
 import { toneColor } from "../../../components/logTone";
-import { elideMiddle } from "../lib/elide";
 import { PlanRow } from "./AgentPlan";
 import type { StampedRunEvent } from "../hooks/useRunProgress";
+
+// The tree holds AGENTS and nothing else: a name, a state, what the runtime says
+// it is doing, and how long it has been going. It deliberately does NOT list an
+// agent's commands.
+//
+// It used to. Every backgrounded shell command got a row of its own, and a live
+// run produced 47 of them — so the column that answers "who is working" was
+// mostly raw command lines, and the answer was buried in its own evidence. The
+// commands did not go anywhere: the inspector beside this holds each agent's
+// whole feed, which is where a reader goes once they have picked the agent this
+// column is for. `CrewMember.tasks` is still computed and still true; nothing
+// here renders it.
 
 // WHO IS DOING WHAT RIGHT NOW. One row per agent, nested as the runtime declared
 // the tree, each row carrying its own liveness rather than deferring it to a
@@ -65,67 +75,6 @@ function StateDot({ state }: { state: CrewState }) {
           : {}),
       }}
     />
-  );
-}
-
-/**
- * A command, elided in the MIDDLE.
- *
- * The head is an overflowing box and ellipsises when the column is too narrow;
- * the tail never shrinks, so the part that says WHICH command this is survives
- * — `cd expense-webapp && … react@19.2.3` rather than five rows of
- * `cd expense-webapp && npm in…`. See `elideMiddle` for why the split is in
- * characters and the elision is in CSS.
- *
- * Both halves stay in the DOM, so the row still reads as the whole command to a
- * screen reader and the tree's text is still the text. `title` is for the mouse
- * only, on top of that, never instead of it.
- */
-function Command({ text }: { text: string }) {
-  const { head, tail } = elideMiddle(text);
-  return (
-    <Box component="span" sx={{ display: "flex", minWidth: 0, flex: 1 }}>
-      <Typography
-        component="span"
-        sx={{ font: "inherit", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-      >
-        {head}
-      </Typography>
-      <Typography
-        component="span"
-        sx={{ font: "inherit", flexShrink: 0, whiteSpace: "pre" }}
-      >
-        {tail}
-      </Typography>
-    </Box>
-  );
-}
-
-/** A shell command the agent backgrounded — its owner's row, one level in. */
-function TaskRow({ task, depth }: { task: CrewTask; depth: number }) {
-  const failed = task.status === "failed";
-  return (
-    <Box
-      // The whole row, so a hover anywhere on it reveals the command — the
-      // status at its right end is part of what a reader is pointing at.
-      title={task.label}
-      sx={{
-        display: "flex",
-        alignItems: "baseline",
-        gap: 1,
-        pl: 2 + depth * 2,
-        py: 0.25,
-        color: failed ? "error.light" : "grey.500",
-      }}
-    >
-      <Typography component="span" sx={{ font: "inherit", flexShrink: 0 }}>
-        ⟳
-      </Typography>
-      <Command text={task.label} />
-      <Typography component="span" sx={{ font: "inherit", ml: "auto", flexShrink: 0 }}>
-        {task.status}
-      </Typography>
-    </Box>
   );
 }
 
@@ -184,9 +133,11 @@ function CrewRow({
           >
             {member.agent.label}
           </Typography>
-          {/* Printed only when the runtime said TRUE. The platform forces
-              fan-out into the foreground, so a true here is the forcing having
-              failed — and that is exactly what explains an empty section. */}
+          {/* Printed only when the runtime said TRUE, which is the ordinary case
+              for a builder: fan-out is backgrounded by default and the skill is
+              what decides its shape (ADR-0011). `false` means the parent is
+              blocked inside this agent's call, and the row says so in words
+              instead — so only the true case needs a chip. */}
           {member.background && (
             <Typography component="span" sx={{ font: "inherit", color: "grey.500", flexShrink: 0 }}>
               background
@@ -248,9 +199,6 @@ function CrewRow({
           )}
         </Box>
       </ListItemButton>
-      {member.tasks.map((task) => (
-        <TaskRow key={task.id} task={task} depth={member.depth} />
-      ))}
       {/* The agent's own plan, under the agent whose plan it is — including the
           entries a LEAD wrote and handed to this one, since "what was this one
           sent to do" is the question a reader has about its row. Shown on a

@@ -60,16 +60,24 @@ the next cycle that fanned out.
 **Crew tree.** One row per agent, indented by the depth the runtime *declared*
 (`agent_started.depth` / `parentAgentId`) rather than by anything inferred. Each
 row: a state dot, the agent's name, one live sub-line in the runtime's own words,
-and how long it has been going. Background shell tasks (`task_started` /
-`task_settled`) are children of the agent that started them, so an orphaned
-`dev:mock` still holding a port has somebody's name on it.
+and how long it has been going.
 
-A command row is **elided in the middle**, never at the end: what identifies a
-command is its tail, and five `cd expense-webapp && npm install …` rows truncated
-tail-first rendered as five identical sentences. The split is `lib/elide.ts` (in
-characters); the elision is CSS, because only the browser knows how wide the
-column ended up. Both halves stay in the DOM, so the row still reads whole to a
-screen reader and copies whole, and the row carries the command as its `title`.
+**The tree holds agents and nothing else.** It carried a row per backgrounded
+shell command until a live run produced 47 of them, and the column that answers
+"who is working" became mostly raw command lines — the answer buried in its own
+evidence. Two earlier attempts to save those rows are worth recording as
+rejected, because both treated a symptom: truncating them from the other end
+(what identifies a command is its head, not its tail, unlike a path), and
+eliding them in the middle. Neither addressed the row count, and the row count
+was the problem.
+
+The concern that put them there stands: an orphaned `dev:mock` still holding a
+port after the run ends has to have somebody's name on it. That name is on its
+`task_settled` row in the **inspector**, under the agent that ran it.
+`CrewMember.tasks` is still computed and still true; nothing in the tree renders
+it. The cost, stated plainly: a subagent's commands are one click away rather
+than on screen from the start, and for the lead — the default selection — they
+are already on screen.
 
 Under those sit the agent's **plan** entries — the lead's own task list, which
 reaches the feed as `work_item {source: "plan"}` and is folded onto its owner by
@@ -166,4 +174,3 @@ imports it too.
 | `components/AgentSteps.tsx` | the shared row, report note and empty copy |
 | `hooks/useRunView.ts` | the remembered choice, shared across the page |
 | `hooks/useTicker.ts` | the second hand |
-| `lib/elide.ts` | the head/tail split behind a middle-elided command |
