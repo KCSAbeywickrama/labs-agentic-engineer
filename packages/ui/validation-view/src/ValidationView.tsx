@@ -18,7 +18,7 @@
 
 import { useMemo } from "react";
 import { Alert, alpha, Box, Chip, Tooltip, Typography } from "@wso2/oxygen-ui";
-import { Check, Sparkles, User } from "@wso2/oxygen-ui-icons-react";
+import { Check, Sparkles, User, X } from "@wso2/oxygen-ui-icons-react";
 import {
   parseValidationCriteria,
   type Criterion,
@@ -126,6 +126,28 @@ type ChipColor =
 // (counts.ts), which the consumer's tally reads too, so a row and the verdict tile
 // above it cannot name the same status differently. Unknown statuses fall through
 // to a neutral chip labelled verbatim.
+// An icon for the two TERMINAL verdicts only. They are the answers a run produces
+// and the pair a reader has to tell apart at a glance — without one, `Failed` is
+// separated from `Passed` by hue alone, which is nothing to a red/green
+// colour-blind reader. Every other status is the ABSENCE of an answer rather than
+// one of them, so a mark there would compete for the distinction this pair needs.
+const STATE_ICON: Record<string, typeof Check> = { pass: Check, fail: X };
+
+/**
+ * Shared by every chip a row can carry. Hoisted rather than written inline for the
+ * reason GitHubRefChip records: an sx literal is a new object each render, which
+ * emotion has to re-serialise.
+ *
+ * MUI insets a small chip's icon by 4px while its label sits at 8px, so an icon
+ * crowds the border in a way no text does. Matching the label's inset makes a chip
+ * that carries an icon start its content exactly where one without an icon starts
+ * its text. Inert on the chips that never take an icon.
+ */
+const CHIP_SX = {
+  flexShrink: 0,
+  "& .MuiChip-icon": { ml: 1 },
+} as const;
+
 const STATE_COLOR: Record<string, ChipColor> = {
   pass: "success",
   fail: "error",
@@ -222,12 +244,13 @@ function verdictNote(
  */
 function StateChip({ status, note }: { status: string; note: string | undefined }) {
   const label = CRITERION_STATE_LABEL[status] ?? status;
+  const Icon = STATE_ICON[status];
   const chip = (
     <Chip
       size="small"
       variant="outlined"
       color={STATE_COLOR[status] ?? "default"}
-      {...(status === "pass" ? { icon: <Check size={14} /> } : {})}
+      {...(Icon ? { icon: <Icon size={14} /> } : {})}
       label={
         note === undefined ? (
           label
@@ -240,7 +263,7 @@ function StateChip({ status, note }: { status: string; note: string | undefined 
           </>
         )
       }
-      sx={{ flexShrink: 0 }}
+      sx={CHIP_SX}
     />
   );
   return note === undefined ? chip : <Tooltip title={note}>{chip}</Tooltip>;
@@ -288,7 +311,7 @@ function LiveChip({ status }: { status: string }) {
       variant="outlined"
       color={LIVE_COLOR[status] ?? "info"}
       label={LIVE_LABEL[status] ?? status}
-      sx={{ flexShrink: 0 }}
+      sx={CHIP_SX}
     />
   );
 }
@@ -358,7 +381,7 @@ function CriterionChip({
       );
     }
     return (
-      <Chip size="small" variant="outlined" label="Pending" sx={{ flexShrink: 0 }} />
+      <Chip size="small" variant="outlined" label="Pending" sx={CHIP_SX} />
     );
   }
 
@@ -374,7 +397,7 @@ function CriterionChip({
         size="small"
         variant="outlined"
         label={DRIFT_LABEL}
-        sx={{ flexShrink: 0 }}
+        sx={CHIP_SX}
       />
     </Tooltip>
   );

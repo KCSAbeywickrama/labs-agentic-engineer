@@ -223,6 +223,31 @@ describe("ValidationView — the Validations page (a report joined in)", () => {
   });
 });
 
+describe("ValidationView — the terminal verdicts carry an icon", () => {
+  /** The chip element wrapping a label, and whether it renders an icon. */
+  function hasIcon(label: string): boolean {
+    const chip = screen.getByText(label).closest(".MuiChip-root");
+    return chip?.querySelector("svg") != null;
+  }
+
+  it("separates pass from fail by more than colour", () => {
+    // Outlined chips in success/error differ only in hue without these, which is
+    // nothing to a red/green colour-blind reader — and pass/fail is the one pair
+    // that has to be told apart at a glance.
+    render(<ValidationView criteria={CRITERIA} report={FULL_REPORT} />);
+    expect(hasIcon("Passed")).toBe(true);
+    expect(hasIcon("Failed")).toBe(true);
+  });
+
+  it("leaves the non-answers unmarked", () => {
+    // Everything else is the ABSENCE of a verdict rather than one of them, so a
+    // mark would compete for the distinction the pair above needs.
+    render(<ValidationView criteria={CRITERIA} report={FULL_REPORT} />);
+    expect(hasIcon("Manual")).toBe(false);
+    expect(hasIcon("Not validated")).toBe(false);
+  });
+});
+
 describe("ValidationView — flaky and healed ride the verdict", () => {
   function noteFor(entry: Record<string, unknown>): string {
     render(
