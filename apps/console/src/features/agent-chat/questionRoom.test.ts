@@ -24,6 +24,7 @@ import {
   mirrorQuestion,
   readRoomQuestions,
   updateRoomAnswer,
+  withdrawRoomQuestion,
 } from "./questionRoom";
 import { applySelection } from "./questionCards";
 
@@ -32,6 +33,18 @@ const Q = { question: "Which auth flow?", options: [{ label: "OIDC" }] };
 function entryOf(doc: Doc, toolCallId: string) {
   return readRoomQuestions(doc).find((e) => e.toolCallId === toolCallId);
 }
+
+describe("withdrawRoomQuestion", () => {
+  it("removes the entry a streamed prefix left, and is a no-op otherwise", () => {
+    const doc = new Doc();
+    mirrorQuestion(doc, { toolCallId: "tc-bad", questions: [Q], streaming: true });
+    mirrorQuestion(doc, { toolCallId: "tc-good", questions: [Q] });
+    withdrawRoomQuestion(doc, "tc-bad");
+    withdrawRoomQuestion(doc, "tc-bad");
+    withdrawRoomQuestion(doc, "never");
+    expect(readRoomQuestions(doc).map((e) => e.toolCallId)).toEqual(["tc-good"]);
+  });
+});
 
 describe("closeStaleRoomQuestions", () => {
   it("closes an entry once its question is no longer answerable (composer answer)", () => {
