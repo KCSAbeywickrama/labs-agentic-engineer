@@ -259,5 +259,24 @@ func toBuildPreflight(pf BuildPreflight) gen.BuildPreflight {
 			Parameters:   it.Parameters,
 		})
 	}
-	return gen.BuildPreflight{NeedsInput: pf.NeedsInput, NeedsResolution: pf.NeedsResolution, Items: items}
+	// The version half rides the same response: the click asks one question.
+	// Changes stays nil when there are none, so an unchanged tree and a first
+	// build are told apart by specUnchanged, not by an empty list.
+	var changes []gen.BuildChange
+	for _, c := range pf.Changes {
+		changes = append(changes, gen.BuildChange{
+			Name:  c.Name,
+			Kind:  gen.BuildChangeKind(c.Kind),
+			State: gen.BuildChangeState(c.State),
+		})
+	}
+	return gen.BuildPreflight{
+		NeedsInput:       pf.NeedsInput,
+		NeedsResolution:  pf.NeedsResolution,
+		Items:            items,
+		CurrentVersion:   pf.CurrentVersion,
+		SuggestedVersion: pf.SuggestedVersion,
+		SpecUnchanged:    pf.SpecUnchanged,
+		Changes:          changes,
+	}
 }

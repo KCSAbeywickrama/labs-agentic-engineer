@@ -17,10 +17,15 @@
 package build_test
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/delivery/build"
+	deliveryhttpapi "github.com/wso2/aep/aep-api/internal/delivery/httpapi"
+	"github.com/wso2/aep/aep-api/internal/edge"
 	"github.com/wso2/aep/aep-api/internal/gen"
+	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
@@ -96,5 +101,71 @@ func TestBuild_NoNameLeavesTheSuggestionToTheTagger(t *testing.T) {
 	}
 	if tagger.version != "" {
 		t.Errorf("tagger asked to cut %q, want the empty suggestion", tagger.version)
+	}
+}
+
+// pfVersions is the version half's port, faked for the HTTP-surface test.
+type pfVersions struct{ facts spec.VersionFacts }
+
+func (f pfVersions) BuildVersionFacts(context.Context, string, string) (spec.VersionFacts, error) {
+	return f.facts, nil
+}
+
+// The version facts have to reach the WIRE, not just the service: the dialog
+// reads them off this response, and a mapping that drops them leaves the field
+// and the change list empty with nothing failing anywhere.
+func TestGetPreflight_CarriesTheVersionFactsOnTheWire(t *testing.T) {
+	pfSvc := build.NewPreflightService(build.PreflightDeps{
+		Design: pfDesign{},
+		Status: pfStatus{},
+		Versions: pfVersions{facts: spec.VersionFacts{
+			CurrentVersion:   "payments-v2",
+			SuggestedVersion: "v3",
+			Changes: []spec.VersionChange{
+				{Name: "orders-api", Kind: spec.VersionChangeKindComponent, State: spec.VersionChangeChanged},
+				{Name: "postgres-cnpg", Kind: spec.VersionChangeKindResource, State: spec.VersionChangeNew},
+			},
+		}},
+	})
+	h := componenttest.New(t, componenttest.Options{Deps: edge.Deps{
+		Delivery: mustDelivery(deliveryhttpapi.New(deliveryhttpapi.Deps{PreflightSvc: pfSvc})),
+	}})
+
+	resp := h.AsOrg("acme").Get("/api/v1/projects/shop/build/preflight")
+
+	if resp.Code != 200 {
+		t.Fatalf("preflight: got %d body=%s", resp.Code, resp.Body.String())
+	}
+	pf := decodeBody[gen.BuildPreflight](t, resp.Body.String())
+	if pf.CurrentVersion != "payments-v2" || pf.SuggestedVersion != "v3" {
+		t.Errorf("versions = %q/%q, want payments-v2/v3", pf.CurrentVersion, pf.SuggestedVersion)
+	}
+	if len(pf.Changes) != 2 {
+		t.Fatalf("changes = %+v, want two rows", pf.Changes)
+	}
+	if pf.Changes[0].Name != "orders-api" || pf.Changes[0].Kind != "component" || pf.Changes[0].State != "changed" {
+		t.Errorf("first change = %+v", pf.Changes[0])
+	}
+	if pf.Changes[1].Kind != "platform-resource" || pf.Changes[1].State != "new" {
+		t.Errorf("second change = %+v", pf.Changes[1])
+	}
+}
+
+// An unchanged tree says so on the wire, and carries no list.
+func TestGetPreflight_UnchangedTreeOnTheWire(t *testing.T) {
+	pfSvc := build.NewPreflightService(build.PreflightDeps{
+		Design:   pfDesign{},
+		Status:   pfStatus{},
+		Versions: pfVersions{facts: spec.VersionFacts{CurrentVersion: "v2", SuggestedVersion: "v3", SpecUnchanged: true}},
+	})
+	h := componenttest.New(t, componenttest.Options{Deps: edge.Deps{
+		Delivery: mustDelivery(deliveryhttpapi.New(deliveryhttpapi.Deps{PreflightSvc: pfSvc})),
+	}})
+
+	resp := h.AsOrg("acme").Get("/api/v1/projects/shop/build/preflight")
+
+	pf := decodeBody[gen.BuildPreflight](t, resp.Body.String())
+	if !pf.SpecUnchanged || len(pf.Changes) != 0 {
+		t.Errorf("preflight = %+v, want specUnchanged with no changes", pf)
 	}
 }
