@@ -300,10 +300,15 @@ Work each one in order:
 
 1. **Reuse first.** Call `list_external_resources`. When a **Registered
    External resource** fits, write the stub `{ "name": "<its exact name>",
-   "source": "org" }` and stop — the platform fills provider, contract and
-   config from the org record at every save, and the build collects no values
-   for it. A user-asked reconsider may switch to a different Registered name,
-   or create a **Project External resource** under a **new** name.
+   "source": "org" }` — the platform fills provider, contract and config from
+   the org record, and the build collects no values for it, because
+   org values stay on the Registered name.
+   Write consumption instructions into the dependency `description` — the
+   row's consumption instructions and its org resource docs pointers, as the
+   tool returns them — because the coding agent reads them there and never
+   calls the catalog. Then stop. A user-asked reconsider may switch to a
+   different Registered name, or create a **Project External resource** under
+   a **new** name.
 2. **The PRD names the service, or nobody has.** The user chooses providers;
    you never do. Two outcomes, never a `status`:
    - **The PRD's Product Decisions name a service for this capability**
