@@ -801,11 +801,9 @@ describe("SpecView onBuild routing (#164)", () => {
     expect(mockMutateAsync).not.toHaveBeenCalled();
     fireEvent.click(confirm);
 
+    // The suggestion is not claimed: an untouched field sends no name.
     await waitFor(() =>
-      expect(mockMutateAsync).toHaveBeenCalledWith({
-        inputs: [],
-        version: "v3",
-      }),
+      expect(mockMutateAsync).toHaveBeenCalledWith({ inputs: [] }),
     );
     expect(mockNavigate).toHaveBeenCalledWith({
       to: "/projects/$projectName/builds/$tag",
@@ -996,7 +994,6 @@ describe("SpecView onBuild routing (#164)", () => {
     await waitFor(() =>
       expect(mockMutateAsync).toHaveBeenCalledWith({
         inputs: COLLECTABLE_APPROVALS,
-        version: "v3",
       }),
     );
   });

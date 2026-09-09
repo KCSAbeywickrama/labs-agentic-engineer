@@ -61,14 +61,18 @@ type fakeTagger struct {
 	err    error
 	called int
 	seq    *[]string
+	// version records the name the build asked to cut — empty when it took the
+	// platform's suggestion.
+	version string
 }
 
 func (f *fakeTagger) BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (spec.BuildScope, error) {
 	return spec.BuildScope{Tag: tag}, nil
 }
 
-func (f *fakeTagger) TagSpec(context.Context, string, string) (*spec.SpecSaveResult, error) {
+func (f *fakeTagger) TagSpec(_ context.Context, _, _, version string) (*spec.SpecSaveResult, error) {
 	f.called++
+	f.version = version
 	if f.seq != nil {
 		*f.seq = append(*f.seq, "tag")
 	}

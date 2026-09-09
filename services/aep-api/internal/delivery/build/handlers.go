@@ -86,10 +86,12 @@ func (h *Handler) BuildProject(ctx context.Context, request gen.BuildProjectRequ
 		}
 	}
 	var inputs []BuildInputItem
+	var version string
 	if request.Body != nil {
 		inputs = toBuildInputItems(request.Body.Inputs)
+		version = request.Body.Version
 	}
-	tag, failures, err := h.svc.Run(ctx, org, request.ProjectName, inputs)
+	tag, failures, err := h.svc.Run(ctx, org, request.ProjectName, inputs, version)
 	if err != nil {
 		return nil, mapBuildRunError(err)
 	}

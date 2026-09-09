@@ -36,8 +36,21 @@ type buildSpecTagger struct {
 	art spec.ArtifactService
 }
 
-func (t buildSpecTagger) TagSpec(ctx context.Context, orgID, projectID string) (*spec.SpecSaveResult, error) {
-	return t.art.SaveSpec(ctx, orgID, projectID, spec.SaveRequest{Message: "Build"})
+func (t buildSpecTagger) TagSpec(ctx context.Context, orgID, projectID, version string) (*spec.SpecSaveResult, error) {
+	// The name rides as Name, never as the message: the message is the tag's
+	// body (what this save was), the name is the tag itself (what the version
+	// IS). Empty takes the platform's suggestion.
+	return t.art.SaveSpec(ctx, orgID, projectID, spec.SaveRequest{Message: "Build", Name: version})
+}
+
+// buildVersionFacts adapts the artifact service onto the preflight's
+// VersionFactsReader — what the next version would be called and carry.
+type buildVersionFacts struct {
+	art spec.ArtifactService
+}
+
+func (v buildVersionFacts) BuildVersionFacts(ctx context.Context, orgID, projectID string) (spec.VersionFacts, error) {
+	return v.art.BuildVersionFacts(ctx, orgID, projectID)
 }
 
 func (t buildSpecTagger) BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (spec.BuildScope, error) {

@@ -50,13 +50,16 @@ function open(over: Partial<Parameters<typeof StartBuildDialog>[0]> = {}) {
 }
 
 describe("StartBuildDialog", () => {
-  it("offers the suggested name, and builds with it", () => {
+  // An untouched field sends no name at all: the suggestion stays a
+  // suggestion, so a build that loses the race for it is offered the next one
+  // instead of being refused.
+  it("offers the suggested name, and builds without claiming it", () => {
     const { onBuild } = open();
 
     expect(screen.getByTestId("version-name")).toHaveValue("v3");
     fireEvent.click(screen.getByRole("button", { name: "Build v3" }));
 
-    expect(onBuild).toHaveBeenCalledWith("v3");
+    expect(onBuild).toHaveBeenCalledWith("");
   });
 
   it("builds with the name the user typed instead", () => {

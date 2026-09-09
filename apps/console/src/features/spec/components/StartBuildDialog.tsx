@@ -183,7 +183,17 @@ export function StartBuildDialog({
           variant="contained"
           loading={submitting}
           disabled={error !== null || submitting}
-          onClick={() => onBuild(specUnchanged ? "" : name.trim())}
+          // An untouched field sends NO name, so the platform's suggestion
+          // stays a suggestion: if another build claims it first, the next one
+          // is offered rather than refused. A name the user actually typed is
+          // sent, and a collision on it is theirs to see.
+          onClick={() =>
+            onBuild(
+              specUnchanged || name.trim() === suggestedVersion
+                ? ""
+                : name.trim(),
+            )
+          }
         >
           {action}
         </Button>
