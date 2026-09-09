@@ -53,7 +53,7 @@ type BuildResponse = components["schemas"]["BuildResponse"];
 // --- Router -----------------------------------------------------------
 const mockNavigate = vi.fn();
 const mockSearch = vi.hoisted(() => ({
-  current: {} as { generate?: "design"; view?: "architecture" },
+  current: {} as { generate?: "design"; view?: "architecture"; file?: string },
 }));
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => mockNavigate,
@@ -361,7 +361,7 @@ const BLOCKED_ITEMS: PreflightItem[] = [
     component: "checkout-api",
     dependency: "crm",
     kind: "external-unresolved",
-    description: "No service chosen yet — choose which one to use.",
+    description: "No provider chosen yet — choose which one to use.",
   },
 ];
 
@@ -1141,6 +1141,42 @@ describe("SpecView dependency wiring (#252 Task 9)", () => {
 });
 
 // --- #252 Task 10: build dependency drawer wiring --------------------------
+// A link in the chat (`aep://spec/<path>`, ADR-0028) lands here as `?file=`:
+// the document is selected once and the param is stripped, so a rail click
+// afterwards survives a reload.
+describe("SpecView — a document linked from the chat", () => {
+  it("selects the linked definition and strips the param", async () => {
+    const definitionPath = "specs/design/dependencies/currency-service/dependency.json";
+    mockUseSpecFiles.mockReturnValue({
+      data: [...BASE_FILES, { path: definitionPath, sha: "dep1", group: "designs" }],
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockUseSpecFileContent.mockImplementation((_project: string, file: { path: string } | null) => ({
+      data:
+        file?.path === definitionPath
+          ? { sha: "dep1", content: JSON.stringify({ name: "currency-service", suggestions: [{ name: "Open Exchange Rates" }] }) }
+          : undefined,
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    }));
+    mockSearch.current = { file: definitionPath };
+
+    render(<SpecView projectName="proj1" />);
+
+    expect(await screen.findByRole("heading", { name: "currency-service" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select a provider" })).toBeInTheDocument();
+    expect(mockNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "/projects/$projectName/spec", params: { projectName: "proj1" }, replace: true }),
+    );
+    mockSearch.current = {};
+  });
+});
+
 describe("SpecView build dependency drawer (#252 Task 10)", () => {
   const DRAWER_PREFLIGHT_ITEMS: PreflightItem[] = [
     {
@@ -1206,12 +1242,10 @@ describe("SpecView build dependency drawer (#252 Task 10)", () => {
     // seam the design view's cards use, with the FULL endpoint entry.
     expect(screen.getByRole("heading", { name: "stripe" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Resolve" }));
-    // The definition's Resolve carries no answer — the Service card's does.
     expect(mockResolveViaChat).toHaveBeenCalledWith(
       "checkout-api",
       CHECKOUT_DEPS[0]!.dependencies![0],
       "resolve",
-      undefined,
     );
   });
 

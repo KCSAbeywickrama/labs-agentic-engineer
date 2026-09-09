@@ -57,8 +57,8 @@ export function dependencyTodo(dep: Dependency): string {
         case "needs-acceptance":
           return "Needs your acceptance";
         default:
-          // No service chosen yet — the definition asks which one.
-          return "Choose a service";
+          // No provider chosen yet — the definition offers Select a provider.
+          return "Choose a provider";
       }
     default:
       return "";

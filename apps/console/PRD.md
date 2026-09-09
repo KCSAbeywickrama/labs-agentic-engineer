@@ -164,11 +164,13 @@ here: they're the open `console` + `feature` issues.
   GraphQL schema), an SDK manifest. The definition renders as its own view,
   the way a component's design does: the provider, the interface on file with
   its provenance, the config keys and who uses it, and every way forward —
-  **Resolve** runs the guided `/resolve-dependency` flow, **Provide interface**
-  opens a modal that lands a document straight in the directory, and an
-  interface the agent wrote waits there for the user's acceptance. The Build
-  drawer lists what blocks the cut, opens each row's definition, and offers one
-  **Resolve all in chat** —
+  **Select a provider** (or **Resolve** once one is chosen) runs the guided
+  `/resolve-dependency` flow, whose cards ask which provider and, if none is
+  published, how to get its interface; choosing *proceed on your assumption*
+  there is the whole consent. **Provide interface** opens a modal that lands a
+  document straight in the directory. The design turn's closing list links
+  each open definition. The Build drawer lists what blocks the cut, opens each
+  row's definition, and offers one **Resolve all in chat** —
   [ADR-0028](design/decisions/ADR-0028-a-dependency-is-a-directory-in-the-rail.md)
 - Empty states teach *what*, never narrate the *how* — the five flow-narrating
   empty states (Builds, Deployments, Validations, Components, Recent activity —

@@ -18,7 +18,7 @@ files to show, the way a component does.
 **Every external dependency is a group in the rail, shaped like a
 component's.** The group sits between Flows and the components, with the plug
 glyph telling it apart; its header carries the one thing the user must do
-(*Choose a service*, *Needs a contract*, *Needs your acceptance*) as an amber
+(*Choose a provider*, *Needs a contract*, *Needs your acceptance*) as an amber
 mark with the words on hover, or the qualifier on a
 resolved one (*Assumed*, *Registered*, *SDK only*) as quiet text. Its rows are
 the directory's files, named for what they are under the dependency's own
@@ -38,21 +38,36 @@ over the read model.
 qualifiers, the todo or *Resolved*), the name as the heading with **Resolve**
 or **Reconsider** beside it, then labelled facts — *Provider*, *Style*,
 *Source*, *Package* — so the provider reads as the provider and never as the
-name said twice. Sections follow: Description, Used by, then Service while
-no service is chosen or Interface once one is, and Configuration once the
-keys exist.
+name said twice. Sections follow: Description, Used by, Provider, then
+Interface once a provider is chosen, and Configuration once the keys exist.
+The dependency is the *service* the product needs (`currency-service`); the
+*provider* is who supplies it.
 
 **The definition owns everything that moves a dependency forward.**
 
-- **The Service card** asks *Which service do you want to use for this?* while
-  the definition names no provider — the agent never chooses one (repo
-  ADR-0027). Three ways to answer: type a service name or a document URL and
-  **Use this**; pick one of the design agent's `suggestions`, shown as chips
-  and labelled *commonly used*, never recommended; or **Ask the agent to
-  find one**. Every answer sends `/resolve-dependency <name>` with the answer
-  after the name, and the resolve flow does the research from there. The
-  header shows no Resolve while the card is up, so the ways forward are in
-  one place.
+- **Select a provider**, beside the Provider heading while the definition
+  names none, runs the resolve flow — the agent never chooses one (repo
+  ADR-0027). The choice happens in the flow's own question cards, rendered on
+  the spec view around the definition: the first card offers the design
+  agent's `suggestions` as options, *Another provider* as free text (a name
+  or a document URL) and *Find one for me*; when no published interface
+  exists, a second card offers *Give a link*, *Upload one* and *Proceed on
+  your assumption*. The header shows no Resolve while none is chosen, so the
+  way in is in one place.
+- **Typed option actions.** A question option may carry an `action` the
+  console runs when the answer is submitted, before it reaches the agent:
+  `accept-assumption` records the user's authorization on the definition
+  (the acceptance endpoint, which no longer waits for an interface on disk)
+  and refreshes the room's copy so the agent's next snapshot carries the
+  record; `upload-interface` opens the interface modal over the card and
+  sends the answer once the document lands. So *Proceed on your assumption*
+  is the whole consent — no acceptance box follows. The box stays only as the
+  fallback for an assumed interface nobody authorized from the card.
+- **A link in the chat opens a document.** The design turn's closing list
+  links each open dependency's definition as `aep://spec/<path>`; the chat's
+  markdown renderer turns it into a click that opens the spec view on that
+  file (`?file=`, stripped once followed, like `generate`). Nothing more
+  happens on the click: the user presses **Select a provider** themselves.
 - **Resolve** runs the guided flow once a service is chosen — the message is
   the skill command, `/resolve-dependency <name>`, nothing else, because the
   agent reads the definition from its file and the playbook from its skills.

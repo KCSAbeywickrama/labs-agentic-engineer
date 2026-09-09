@@ -50,14 +50,6 @@ describe("useResolveDependencyViaChat — the Task 9 seam (#252 Task 5)", () => 
     );
   });
 
-  it("carries the user's answer into the resolve message", () => {
-    const { result } = renderHook(() => useResolveDependencyViaChat("acme", "proj1"));
-    result.current("checkout-api", dep, "resolve", "Postmark");
-
-    const seeded = consumePendingSeed(chatKeyFor("acme", "proj1"))?.message;
-    expect(seeded).toBe("/resolve-dependency email-provider Postmark");
-  });
-
   it("seeds the project's chat with the reconsider message (reconsider intent)", () => {
     const { result } = renderHook(() => useResolveDependencyViaChat("acme", "proj1"));
     result.current("checkout-api", dep, "reconsider");

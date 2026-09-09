@@ -296,7 +296,8 @@ export function SpecView({ projectName }: { projectName: string }) {
   const search = useSearch({ strict: false }) as {
     generate?: "design";
     view?: "architecture";
-  };
+    file?: string;
+};
   const generate = search.generate;
   const agentInRoom = collab.peers.some((p) => p.kind === "agent");
   const hasDesignCell = files.some((f) => f.path === DESIGN_CELL_PATH);
@@ -314,6 +315,22 @@ export function SpecView({ projectName }: { projectName: string }) {
   useEffect(() => {
     if (search.view === "architecture") setSelection({ kind: "cell-diagram" });
   }, [search.view]);
+
+  // `?file=` — a click on a document link in the chat (the design turn's
+  // closing list of open dependencies). Select it as a manual choice, then
+  // strip the param so a rail click afterwards is never undone by a reload.
+  const linkedFile = search.file;
+  useEffect(() => {
+    if (!linkedFile) return;
+    setSelection({ kind: "file", path: linkedFile });
+    void navigate({
+      to: "/projects/$projectName/spec",
+      params: { projectName },
+      search: (prev: Record<string, unknown>) =>
+        Object.fromEntries(Object.entries(prev).filter(([k]) => k !== "file")),
+      replace: true,
+    });
+  }, [linkedFile, navigate, projectName]);
 
   // Follow the write (#576, ADR-0026): while a turn runs, the editor selects
   // each artifact as its write starts, so the passive watcher — the default
@@ -459,16 +476,15 @@ export function SpecView({ projectName }: { projectName: string }) {
   );
   // The definition view's Resolve / Reconsider. The component is context for
   // the reconsider's prose only; the resolve is the skill command.
-  const handleResolveFromDefinition = (name: string, intent: DependencyResolutionIntent, answer?: string) => {
+  const handleResolveFromDefinition = (name: string, intent: DependencyResolutionIntent) => {
     const state = dependencyStates[name];
-    resolveDependencyViaChat(state?.usedBy[0] ?? "", state?.dependency ?? { kind: "external", name }, intent, answer);
+    resolveDependencyViaChat(state?.usedBy[0] ?? "", state?.dependency ?? { kind: "external", name }, intent);
   };
   // The definition view's two writes land in git outside the room; the room's
   // copy of the definition is brought up to date here, so the pane — which
   // reads the room first — shows the interface the moment it is on file.
-  const handleDependencyCommitted = (name: string) => {
-    void refreshRoomCopy(projectName, collab.getFileText, dependencyDefinitionPath(name));
-  };
+  const handleDependencyCommitted = (name: string) =>
+    refreshRoomCopy(projectName, collab.getFileText, dependencyDefinitionPath(name)).then(() => undefined);
   // The Build drawer hands off to the dependency's definition — a file,
   // rendered by DependencyView like a component's design.json — and closes,
   // since as an overlay it would cover what it just opened; or it runs the
@@ -1354,6 +1370,7 @@ export function SpecView({ projectName }: { projectName: string }) {
             entry={roomQuestion}
             org={orgHandle ?? "default"}
             projectName={projectName}
+            onDependencyCommitted={handleDependencyCommitted}
           />
         ) : (
           <Box sx={{ flexGrow: 1, minHeight: 0, display: "flex" }}>
@@ -1433,7 +1450,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                         definition={structuredLive}
                         state={dependencyStates[dependencyOf(selectedFile.path) ?? ""]}
                         onOpenFile={(path) => selectManually({ kind: "file", path })}
-                        onResolve={(name, answer) => handleResolveFromDefinition(name, "resolve", answer)}
+                        onResolve={(name) => handleResolveFromDefinition(name, "resolve")}
                         onReconsider={(name) => handleResolveFromDefinition(name, "reconsider")}
                         onCommitted={handleDependencyCommitted}
                       />
@@ -1464,7 +1481,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                         definition={content.data.content}
                         state={dependencyStates[dependencyOf(selectedFile.path) ?? ""]}
                         onOpenFile={(path) => selectManually({ kind: "file", path })}
-                        onResolve={(name, answer) => handleResolveFromDefinition(name, "resolve", answer)}
+                        onResolve={(name) => handleResolveFromDefinition(name, "resolve")}
                         onReconsider={(name) => handleResolveFromDefinition(name, "reconsider")}
                         onCommitted={handleDependencyCommitted}
                       />

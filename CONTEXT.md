@@ -153,8 +153,10 @@ _Avoid_: connection (in OpenChoreo that names a consumed endpoint — the
 opposite side of the wire).
 
 **External dependency**:
-A project's need for a third-party API or SDK, defined **once** in its own
-directory, `specs/design/dependencies/<name>/` — `dependency.json` (the
+A project's need for a third-party API or SDK — the *service* the product
+needs, named `<capability>-service` (`currency-service`); the system chosen to
+supply it is its *provider* — defined **once** in its own directory,
+`specs/design/dependencies/<name>/` — `dependency.json` (the
 provider the user chose, `style: rest-api | graphql | sdk`, the config keys
 every consumer codes against, or — while no service is chosen — `suggestions`,
 services commonly used for the capability, named from the design agent's
@@ -182,8 +184,10 @@ _Avoid_: proposal, recommendation (the agent never proposes a provider),
 **Assumed contract**:
 A dependency's contract the design agent wrote from the provider's
 documentation because no published document could be found or supplied. It
-counts as resolved only once a user has accepted it (the `assumed` record in
-`dependency.json`, written by the platform, never by the agent) and stays
+counts as resolved only under the user's authorization (the `assumed` record
+in `dependency.json`, written by the platform, never by the agent — recorded
+when the user answers *proceed on your assumption* in the resolve flow, or
+from the definition's acceptance box for one nobody authorized) and stays
 flagged wherever the dependency appears until a real contract replaces it.
 _Avoid_: stub, mock (those are code; this is a contract the code is built to).
 

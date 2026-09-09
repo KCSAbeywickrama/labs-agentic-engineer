@@ -64,18 +64,6 @@ describe("buildDependencyResolutionMessage — lean seed message (#252 Task 17)"
     expect(msg).toBe("/resolve-dependency email-provider");
   });
 
-  it("resolve intent with an answer: the user's service name or URL rides after the name", () => {
-    expect(buildDependencyResolutionMessage("checkout-api", ambiguousDep, "resolve", " Postmark ")).toBe(
-      "/resolve-dependency email-provider Postmark",
-    );
-    expect(
-      buildDependencyResolutionMessage("checkout-api", ambiguousDep, "resolve", "https://x/openapi.yaml"),
-    ).toBe("/resolve-dependency email-provider https://x/openapi.yaml");
-    expect(buildDependencyResolutionMessage("checkout-api", ambiguousDep, "resolve", "  ")).toBe(
-      "/resolve-dependency email-provider",
-    );
-  });
-
   it("reconsider intent: names the dependency and component, asking to look at other options", () => {
     const msg = buildDependencyResolutionMessage(
       "checkout-api",

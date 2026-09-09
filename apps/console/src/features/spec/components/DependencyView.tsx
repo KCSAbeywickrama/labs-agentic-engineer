@@ -25,13 +25,13 @@
  * The FILE is the source (live doc ahead of the commit, else the committed
  * copy); the read model adds what a file cannot know — status, flags, who
  * uses it. Three things move a dependency forward, and all three live here
- * rather than in chat: the **Service** card asks which service to use while
- * none is chosen (a name or document URL typed, a suggestion picked, or the
- * agent asked to find one — every answer runs `/resolve-dependency <name>`
- * with the answer attached), **Resolve** runs the same flow once a service is
- * chosen, **Provide interface** opens the modal that lands a document beside
- * the definition, and **Accept** records the user's permission to build
- * against an interface the agent wrote. Both writes land
+ * rather than in chat: **Select a provider** runs the guided flow
+ * (`/resolve-dependency <name>`), whose first card asks which provider with
+ * the definition's suggestions as options; **Resolve** runs the same flow
+ * once a provider is chosen; **Provide interface** opens the modal that
+ * lands a document beside the definition; and **Accept** records the user's
+ * permission to build against an interface the agent wrote — the fallback
+ * for one nobody authorized from the flow's own card. Both writes land
  * in git outside the room, so the view reports them (`onCommitted`) for the
  * owner to bring the room's copy up to date. Question cards the flow asks
  * render on the spec view around this pane, so the user never leaves it.
@@ -39,7 +39,7 @@
 
 import type React from "react";
 import { useMemo, useState } from "react";
-import { Alert, Box, Button, Chip, Stack, TextField, Typography } from "@wso2/oxygen-ui";
+import { Alert, Box, Button, Chip, Stack, Typography } from "@wso2/oxygen-ui";
 import { FileText, Plug, TriangleAlert } from "@wso2/oxygen-ui-icons-react";
 import { dependencyFilePath } from "../api/designTree";
 import { useAcceptDependencyAssumption } from "../api/queries";
@@ -115,11 +115,8 @@ export function DependencyView({
   /** The folded read model, when it knows the name. */
   state: DependencyState | undefined;
   onOpenFile: (path: string) => void;
-  /**
-   * Runs the guided flow for this dependency. `answer` is the user's choice
-   * of service — a name or a document URL — when the Service card asked.
-   */
-  onResolve: (name: string, answer?: string) => void;
+  /** Runs the guided flow for this dependency — its first card asks which provider. */
+  onResolve: (name: string) => void;
   /** Opens a conversation about an already-resolved choice. */
   onReconsider: (name: string) => void;
   /** A write landed in the dependency's directory outside the room. */
@@ -128,7 +125,6 @@ export function DependencyView({
   const parsed = useMemo(() => parseDependencyDefinition(definition), [definition]);
   const accept = useAcceptDependencyAssumption(projectName);
   const [providing, setProviding] = useState(false);
-  const [serviceAnswer, setServiceAnswer] = useState("");
 
   if (!parsed.ok) {
     return (
@@ -188,8 +184,8 @@ export function DependencyView({
               </Button>
             )
           ) : (
-            // While no service is chosen the Service card below carries the
-            // ways forward, so the header does not repeat one of them.
+            // While no provider is chosen the Provider section's button is the
+            // way in, so the header does not repeat it.
             chosen && (
               <Button variant="contained" onClick={() => onResolve(name)}>
                 Resolve
@@ -201,7 +197,6 @@ export function DependencyView({
         {/* Facts — labeled, so the provider reads as the provider and never as
             the name said twice. */}
         <Box sx={{ mt: 2, display: "flex", flexDirection: "column", gap: 0.5 }}>
-          {file.provider && <Fact label="Provider" value={file.provider} />}
           {file.style && <Fact label="Style" value={STYLE_LABEL[file.style] ?? file.style} />}
           {file.source === "org" && <Fact label="Source" value="Organization registry" />}
           {edge?.package && <Fact label="Package" value={edge.package} />}
@@ -229,123 +224,99 @@ export function DependencyView({
           </Typography>
         )}
 
+        {/* The dependency is the service the product needs; the provider is who
+            supplies it. Chosen: the name, and the Interface below. Not chosen:
+            one button into the resolve flow, whose first card asks which —
+            the agent's suggestions as its options (ADR-0028). */}
+        <SectionHeading
+          action={
+            !chosen && (
+              <Button variant="contained" size="small" onClick={() => onResolve(name)}>
+                Select a provider
+              </Button>
+            )
+          }
+        >
+          Provider
+        </SectionHeading>
         {chosen ? (
-          <>
-            <SectionHeading
-              action={
-                canProvide && (
-                  <Button size="small" variant="outlined" onClick={() => setProviding(true)}>
-                    {hasInterface ? "Replace interface" : "Provide interface"}
-                  </Button>
-                )
-              }
-            >
-              Interface
-            </SectionHeading>
-            {awaitingAcceptance && (
-              <Box sx={{ border: 1, borderColor: "warning.main", borderRadius: 1, p: 2, mb: 2 }}>
-                <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-                  The agent wrote this interface from research
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-                  No published document was found. Accepting lets the build code against the
-                  agent&apos;s interface as written; it stays marked assumed everywhere until a real
-                  document replaces it.
-                </Typography>
-                <Stack direction="row" spacing={1}>
-                  <Button
-                    variant="contained"
-                    loading={accept.isPending}
-                    onClick={() => accept.mutate({ depName: name }, { onSuccess: () => onCommitted?.(name) })}
-                  >
-                    Accept the assumption
-                  </Button>
-                  {hasInterface && (
-                    <Button variant="text" onClick={() => onOpenFile(dependencyFilePath(name, contractFile))}>
-                      Read it first
-                    </Button>
-                  )}
-                </Stack>
-                {accept.isError && (
-                  <Typography variant="body2" color="error" sx={{ mt: 1 }}>
-                    {accept.error instanceof Error ? accept.error.message : "The assumption was not recorded."}
-                  </Typography>
-                )}
-              </Box>
-            )}
-            {file.assumed && (
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                Assumed interface, accepted by {file.assumed.by} on {file.assumed.at}
-                {file.assumed.note ? ` — ${file.assumed.note}` : ""}.
-              </Typography>
-            )}
-            {hasInterface ? (
-              <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-                <FileLink label={contractFile} onClick={() => onOpenFile(dependencyFilePath(name, contractFile))} />
-                {file.provenance?.sourceUrl && <Fact label="Source" value={file.provenance.sourceUrl} />}
-                {file.provenance?.sliced && <Fact label="Kept" value="the operations the design uses" />}
-                {file.provenance?.fetchedAt && <Fact label="Read on" value={file.provenance.fetchedAt} />}
-              </Box>
-            ) : file.style === "sdk" && sdkFile ? (
-              <Typography variant="body2" color="text.secondary">
-                SDK only — no API document beside the manifest.
-              </Typography>
-            ) : (
-                <Typography variant="body2" color="text.secondary">
-                  No interface on file yet.
-                </Typography>
-            )}
-            {sdkFile && (
-              <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 1 }}>
-                <FileLink label={sdkFile} onClick={() => onOpenFile(dependencyFilePath(name, sdkFile))} />
-              </Box>
-            )}
-          </>
+          <Typography variant="body1">{file.source === "org" ? "Registered by the organization" : file.provider}</Typography>
         ) : (
+          <Typography variant="body2" color="text.secondary">
+            None chosen yet. Select one and the agent sets it up: its interface, then the configuration keys.
+          </Typography>
+        )}
+        {chosen && (
           <>
-            <SectionHeading>Service</SectionHeading>
-            <Typography variant="body2" sx={{ mb: 1.5 }}>
-              Which service do you want to use for this?
+        <SectionHeading
+          action={
+            canProvide && (
+              <Button size="small" variant="outlined" onClick={() => setProviding(true)}>
+                {hasInterface ? "Replace interface" : "Provide interface"}
+              </Button>
+            )
+          }
+        >
+          Interface
+        </SectionHeading>
+        {awaitingAcceptance && (
+          <Box sx={{ border: 1, borderColor: "warning.main", borderRadius: 1, p: 2, mb: 2 }}>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+              The agent wrote this interface from research
             </Typography>
-            <Stack direction="row" spacing={1} sx={{ mb: 1.5 }}>
-              <TextField
-                size="small"
-                fullWidth
-                label="Service name or document URL"
-                placeholder="Open Exchange Rates, or https://…/openapi.yaml"
-                value={serviceAnswer}
-                onChange={(e) => setServiceAnswer(e.target.value)}
-              />
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+              No published document was found. Accepting lets the build code against the
+              agent&apos;s interface as written; it stays marked assumed everywhere until a real
+              document replaces it.
+            </Typography>
+            <Stack direction="row" spacing={1}>
               <Button
                 variant="contained"
-                disabled={serviceAnswer.trim() === ""}
-                onClick={() => onResolve(name, serviceAnswer.trim())}
-                sx={{ flexShrink: 0, whiteSpace: "nowrap" }}
+                loading={accept.isPending}
+                onClick={() => accept.mutate({ depName: name }, { onSuccess: () => onCommitted?.(name) })}
               >
-                Use this
+                Accept the assumption
               </Button>
+              {hasInterface && (
+                <Button variant="text" onClick={() => onOpenFile(dependencyFilePath(name, contractFile))}>
+                  Read it first
+                </Button>
+              )}
             </Stack>
-            {file.suggestions && file.suggestions.length > 0 && (
-              <>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 0.75 }}>
-                  Commonly used — pick one to have the agent set it up:
-                </Typography>
-                <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
-                  {file.suggestions.map((s) => (
-                    <Chip
-                      key={s.name}
-                      variant="outlined"
-                      label={s.style ? `${s.name} · ${STYLE_LABEL[s.style] ?? s.style}` : s.name}
-                      title={s.description}
-                      onClick={() => onResolve(name, s.name)}
-                    />
-                  ))}
-                </Stack>
-              </>
+            {accept.isError && (
+              <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+                {accept.error instanceof Error ? accept.error.message : "The assumption was not recorded."}
+              </Typography>
             )}
-            <Button variant="text" onClick={() => onResolve(name)}>
-              Ask the agent to find one
-            </Button>
+          </Box>
+        )}
+        {file.assumed && (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Assumed interface, accepted by {file.assumed.by} on {file.assumed.at}
+            {file.assumed.note ? ` — ${file.assumed.note}` : ""}.
+          </Typography>
+        )}
+        {hasInterface ? (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+            <FileLink label={contractFile} onClick={() => onOpenFile(dependencyFilePath(name, contractFile))} />
+            {file.provenance?.sourceUrl && <Fact label="Source" value={file.provenance.sourceUrl} />}
+            {file.provenance?.sliced && <Fact label="Kept" value="the operations the design uses" />}
+            {file.provenance?.fetchedAt && <Fact label="Read on" value={file.provenance.fetchedAt} />}
+          </Box>
+        ) : file.style === "sdk" && sdkFile ? (
+          <Typography variant="body2" color="text.secondary">
+            SDK only — no API document beside the manifest.
+          </Typography>
+        ) : (
+            <Typography variant="body2" color="text.secondary">
+              No interface on file yet.
+            </Typography>
+        )}
+        {sdkFile && (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 1 }}>
+            <FileLink label={sdkFile} onClick={() => onOpenFile(dependencyFilePath(name, sdkFile))} />
+          </Box>
+        )}
           </>
         )}
         {file.config && file.config.length > 0 && (

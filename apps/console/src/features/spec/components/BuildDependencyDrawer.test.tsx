@@ -33,7 +33,7 @@ const AMBIGUOUS: PreflightItem = {
   component: "checkout-api",
   dependency: "crm",
   kind: "external-unresolved",
-  description: "No service chosen yet — choose which one to use.",
+  description: "No provider chosen yet — choose which one to use.",
 };
 const UNRESOLVED: PreflightItem = {
   component: "checkout-api",
@@ -106,7 +106,7 @@ describe("BuildDependencyDrawer — lists what blocks the cut", () => {
   it("renders each row's plain-language reason", () => {
     setup([AMBIGUOUS, NEEDS_CONTRACT]);
 
-    expect(screen.getByText(/no service chosen yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/no provider chosen yet/i)).toBeInTheDocument();
     expect(screen.getByText(/no contract yet/i)).toBeInTheDocument();
   });
 

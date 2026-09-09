@@ -28,7 +28,7 @@ describe("dependencyTodo — the one thing the user must do", () => {
   it("names the step by status and reason, in the user's words", () => {
     expect(dependencyTodo(ext({ status: "unresolved", reason: "needs-contract" }))).toBe("Needs a contract");
     expect(dependencyTodo(ext({ status: "unresolved", reason: "needs-acceptance" }))).toBe("Needs your acceptance");
-    expect(dependencyTodo(ext({ status: "unresolved", reason: "needs-input" }))).toBe("Choose a service");
+    expect(dependencyTodo(ext({ status: "unresolved", reason: "needs-input" }))).toBe("Choose a provider");
   });
   it("is empty for a resolved dependency and for every other kind", () => {
     expect(dependencyTodo(ext({ status: "resolved", flags: ["assumed"] }))).toBe("");
@@ -52,6 +52,6 @@ describe("computeDependencyStates — one entry per external dependency", () => 
     const states = computeDependencyStates([
       { componentName: "api", dependencies: [ext({ name: "mail", status: "unresolved", reason: "needs-input" })] },
     ]);
-    expect(states["mail"]).toMatchObject({ blocking: true, todo: "Choose a service", flags: [] });
+    expect(states["mail"]).toMatchObject({ blocking: true, todo: "Choose a provider", flags: [] });
   });
 });

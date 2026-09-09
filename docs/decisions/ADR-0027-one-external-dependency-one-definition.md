@@ -84,19 +84,28 @@ specs/design/dependencies/<name>/
   the keys follow the service. The retired `candidates` (two or more
   researched fits, the `ambiguous` state) read as suggestions; the fold
   refuses them on write. All research for an open dependency happens in the
-  `resolve-dependency` flow, which the user starts by answering "which
-  service?" on the definition — a name, a document URL, a suggestion, or
-  "find one" — and which asks in the conversation when its search finds
-  several fits, never writing options back into the file.
+  `resolve-dependency` flow, which the user starts from the definition
+  (**Select a provider**) and which asks in the conversation — the
+  suggestions as options, another provider as free text, or "find one for
+  me" — never writing options back into the file. A need is named
+  `<capability>-service`; the system chosen for it is its provider.
+- **The user's answer is the authorization.** When no published interface
+  exists the flow asks how to get one — a link, an upload, or the agent's
+  assumption. Choosing the assumption records the user's `assumed` record on
+  the definition at that moment (a typed question option the console runs
+  against the acceptance endpoint, which accepts a definition with no
+  interface on disk yet); the agent then writes the assumed interface and
+  carries the record along. Nothing further is asked. The gate still refuses
+  an agent-authored record.
 
 **The flow.** The design turn writes each dependency's directory — researched
 for a provider the PRD names, the need alone otherwise — and ends by naming
 what is open; it never blocks. Each dependency's directory is a group in the
 spec rail, and its definition renders as the view where the user resolves it:
-the **Service** card asks which service to use and sends the answer into the
-guided `resolve-dependency` flow, **Resolve** runs the flow for a chosen
-service, a URL or a dropped file goes straight into the directory, and an
-agent-written contract waits for acceptance there. Build with open dependencies lists them and offers one
+**Select a provider** runs the guided `resolve-dependency` flow, whose cards
+ask which provider and, if need be, how to get its interface; **Resolve** runs
+the flow for a chosen provider; a URL or a dropped file goes straight into the
+directory. The design turn's closing list links each open definition. Build with open dependencies lists them and offers one
 button that runs the flow over all of them.
 
 ## Consequences

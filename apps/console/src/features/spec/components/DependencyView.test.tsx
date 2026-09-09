@@ -71,7 +71,7 @@ function renderView(definition: Record<string, unknown>, state: DependencyState 
 }
 
 describe("DependencyView", () => {
-  it("renders the file like a component's design: name once, the provider as a fact, and Resolve", () => {
+  it("renders the file like a component's design: name once, the provider in its section, and Resolve", () => {
     const { onResolve } = renderView(
       { provider: "DHL", style: "rest-api", description: "Shipment tracking." },
       stateOf({ status: "unresolved", reason: "needs-contract" }, { blocking: true, todo: "Needs a contract" }),
@@ -143,29 +143,21 @@ describe("DependencyView", () => {
     expect(screen.queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
   });
 
-  it("asks which service to use while none is chosen — typed, picked from the suggestions, or left to the agent", () => {
+  it("offers Select a provider while none is chosen — the flow's card asks which, with the suggestions", () => {
     const { onResolve } = renderView(
       { suggestions: [{ name: "sendgrid", style: "rest-api", description: "Mail API" }, { name: "postmark" }] },
-      stateOf({ status: "unresolved", reason: "needs-input" }, { blocking: true, todo: "Choose a service" }),
+      stateOf({ status: "unresolved", reason: "needs-input" }, { blocking: true, todo: "Choose a provider" }),
     );
-    expect(screen.getByText("Which service do you want to use for this?")).toBeInTheDocument();
-    // Nothing about an interface applies before a service is chosen, and the
-    // header does not repeat the card's actions.
+    expect(screen.getByText("Provider")).toBeInTheDocument();
+    expect(screen.getByText(/none chosen yet/i)).toBeInTheDocument();
+    // Nothing about an interface applies before a provider is chosen; the
+    // suggestions are the card's, not the view's; the header does not repeat
+    // the section's button.
     expect(screen.queryByText("Interface")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /interface/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/sendgrid/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("Service name or document URL"), { target: { value: " Open Exchange Rates " } });
-    fireEvent.click(screen.getByRole("button", { name: "Use this" }));
-    expect(onResolve).toHaveBeenCalledWith("dhl-courier", "Open Exchange Rates");
-
-    fireEvent.click(screen.getByRole("button", { name: "sendgrid · REST API" }));
-    expect(onResolve).toHaveBeenCalledWith("dhl-courier", "sendgrid");
-    fireEvent.click(screen.getByRole("button", { name: "postmark" }));
-    expect(onResolve).toHaveBeenCalledWith("dhl-courier", "postmark");
-
-    fireEvent.click(screen.getByRole("button", { name: "Ask the agent to find one" }));
-    expect(onResolve).toHaveBeenLastCalledWith("dhl-courier");
+    fireEvent.click(screen.getByRole("button", { name: "Select a provider" }));
+    expect(onResolve).toHaveBeenCalledWith("dhl-courier");
   });
 
   it("renders the file alone when the read model does not know the name yet, Resolve still offered", () => {
@@ -189,9 +181,8 @@ describe("DependencyView", () => {
         />
       </OxygenUIThemeProvider>,
     );
-    expect(screen.getByText("Which service do you want to use for this?")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "sendgrid · REST API" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "postmark · REST API" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select a provider" })).toBeInTheDocument();
+    expect(screen.queryByText(/couldn.t parse/i)).not.toBeInTheDocument();
   });
 
   it("says what is wrong with a definition it cannot read", () => {
