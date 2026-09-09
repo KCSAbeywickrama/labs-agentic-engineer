@@ -28,7 +28,12 @@ always the ones you have — which is why this file carries none of them.
 
 ## What is already true on this platform
 
-- **The CLI and its browser are installed.** 
+- **The CLI and its browser are installed.** Confirm it once, with
+  `command -v agent-browser`. If that fails, the CLI is not provisioned for
+  this run: say so in one line, record the walk as not run, and move on. Do
+  not search the filesystem for it, try `npx`, or install it — a coding run
+  installs nothing outside the project's own package manager, and a hunt for
+  a binary that is not there costs more than the walk it was for.
 
 ## Pitfalls
 

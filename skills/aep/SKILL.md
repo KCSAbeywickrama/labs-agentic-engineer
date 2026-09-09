@@ -298,8 +298,11 @@ the progress feed and the person watching sees an empty section where a componen
 was built.
 
 **A subagent starts from its prompt and nothing else.** It does not have this
-skill. This list is a **build** dispatch — a walk's prompt is the literal one in
-step 3, and nothing else. Name **exactly these**, and nothing else:
+skill, and it must not load it: the skill is listed in its mirror by
+description, so left unsaid, a subagent loads the umbrella and re-derives the
+cycle it is not running — 24 KB it then carries for the whole build. This list
+is a **build** dispatch — a walk's prompt is the literal one in step 3, and
+nothing else. Name **exactly these**, and nothing else:
 
 1. its issue — the number, and to read it in full;
 2. its App Paths — the only paths it may write;
@@ -311,7 +314,9 @@ step 3, and nothing else. Name **exactly these**, and nothing else:
    readable, while nothing may be written outside its App Paths;
 5. the stack skills it must load, by name — and that where a stack skill's own
    flow contradicts the component contract, the contract wins (a stack skill may
-   end its flow at "open a PR", which this subagent may not do);
+   end its flow at "open a PR", which this subagent may not do). In the same
+   line, that it loads **no other skill and not `aep`**: this prompt is its
+   whole procedure;
 6. **the artefacts only you could resolve** — and say which is which: the
    component's `workload.yaml` when you hold a resolved one, pasted verbatim and
    not to be changed; **or** that no wiring was resolved, so it authors the file
