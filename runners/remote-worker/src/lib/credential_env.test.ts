@@ -18,8 +18,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CREDENTIAL_ENV_KEYS, credentialEnvValues } from "./credential_env.js";
-import { Scrubber } from "./progress/scrubber.js";
+import { CREDENTIAL_ENV_KEYS, scanCredentialEnv } from "./credential_env.js";
+import { MIN_LITERAL_LEN, Scrubber } from "./progress/scrubber.js";
 
 // A token whose SHAPE no TOKEN_PATTERN matches — same instrument as
 // console_scrub.test.ts. Every test below turns on this distinction: a
@@ -29,30 +29,75 @@ const OPAQUE_GIT_TOKEN = "aQ7fL2mZ9xR4tY6uP1sD3gH5jK8nB0vC";
 
 function scrubberFor(env: NodeJS.ProcessEnv): Scrubber {
   const s = new Scrubber();
-  for (const v of credentialEnvValues(env)) s.addLiteral(v);
+  for (const v of scanCredentialEnv(env).values) s.addLiteral(v);
   return s;
 }
 
-test("credentialEnvValues: collects a mounted GITHUB_TOKEN", () => {
-  assert.deepEqual(credentialEnvValues({ GITHUB_TOKEN: OPAQUE_GIT_TOKEN }), [OPAQUE_GIT_TOKEN]);
+test("scanCredentialEnv: collects a mounted GITHUB_TOKEN", () => {
+  const { values, tooShort } = scanCredentialEnv({ GITHUB_TOKEN: OPAQUE_GIT_TOKEN });
+  assert.deepEqual(values, [OPAQUE_GIT_TOKEN]);
+  assert.deepEqual(tooShort, []);
 });
 
-test("credentialEnvValues: an empty GITHUB_TOKEN does not mask a set GH_TOKEN", () => {
+test("scanCredentialEnv: an empty GITHUB_TOKEN does not mask a set GH_TOKEN", () => {
   // The runner's own envHasGitHubToken() checks the two independently, so the
   // priming side has to as well.
   assert.deepEqual(
-    credentialEnvValues({ GITHUB_TOKEN: "", GH_TOKEN: OPAQUE_GIT_TOKEN }),
+    scanCredentialEnv({ GITHUB_TOKEN: "", GH_TOKEN: OPAQUE_GIT_TOKEN }).values,
     [OPAQUE_GIT_TOKEN],
   );
 });
 
-test("credentialEnvValues: unset and empty entries are dropped, not passed through", () => {
-  assert.deepEqual(credentialEnvValues({ GITHUB_TOKEN: "", ANTHROPIC_API_KEY: undefined }), []);
-  assert.deepEqual(credentialEnvValues({}), []);
+test("scanCredentialEnv: unset and empty are neither enrolled nor reported", () => {
+  // Nothing was mounted, so there is nothing to protect AND nothing to warn
+  // about — an empty env must not produce a scary log line on every local run.
+  assert.deepEqual(scanCredentialEnv({ GITHUB_TOKEN: "", ANTHROPIC_API_KEY: undefined }), {
+    values: [],
+    tooShort: [],
+  });
+  assert.deepEqual(scanCredentialEnv({}), { values: [], tooShort: [] });
 });
 
-test("credentialEnvValues: collects every mounted credential at once", () => {
-  const values = credentialEnvValues({
+test("scanCredentialEnv: boundary — MIN_LITERAL_LEN enrolls, one less is reported", () => {
+  // The scrubber drops a literal shorter than MIN_LITERAL_LEN in silence, so
+  // this boundary is the whole point of the partition. Both sides asserted
+  // against the imported constant, not a hardcoded 12, so a threshold change
+  // moves the test with it.
+  const justLongEnough = "a".repeat(MIN_LITERAL_LEN);
+  const justTooShort = "b".repeat(MIN_LITERAL_LEN - 1);
+
+  assert.deepEqual(scanCredentialEnv({ GITHUB_TOKEN: justLongEnough }), {
+    values: [justLongEnough],
+    tooShort: [],
+  });
+  assert.deepEqual(scanCredentialEnv({ GITHUB_TOKEN: justTooShort }), {
+    values: [],
+    tooShort: ["GITHUB_TOKEN"],
+  });
+});
+
+test("scanCredentialEnv: tooShort carries NAMES, never values", () => {
+  // This list is built to be logged, so a value in it would be the disclosure
+  // the module exists to prevent.
+  const { values, tooShort } = scanCredentialEnv({
+    GITHUB_TOKEN: "short",
+    PUBLISHER_CLIENT_SECRET: "root",
+  });
+  assert.deepEqual(values, []);
+  assert.deepEqual(tooShort, ["GITHUB_TOKEN", "PUBLISHER_CLIENT_SECRET"]);
+  assert.ok(!tooShort.join(",").includes("short"));
+  assert.ok(!tooShort.join(",").includes("root"));
+});
+
+test("a short credential is NOT redacted — which is why it is reported", () => {
+  // Pins the consequence rather than the mechanism: the scrubber cannot cover
+  // this value, so the run has to say so out loud instead of looking covered.
+  const s = scrubberFor({ GITHUB_TOKEN: "short-tok" });
+  assert.ok(s.scrub("token=short-tok").includes("short-tok"));
+});
+
+test("scanCredentialEnv: collects every mounted credential at once", () => {
+  const { values } = scanCredentialEnv({
     GITHUB_TOKEN: "github-token-value-0001",
     GH_TOKEN: "gh-token-value-0002",
     ANTHROPIC_API_KEY: "anthropic-key-value-0003",

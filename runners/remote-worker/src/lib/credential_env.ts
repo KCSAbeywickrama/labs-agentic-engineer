@@ -16,6 +16,8 @@
  * under the License.
  */
 
+import { MIN_LITERAL_LEN } from "./progress/scrubber.js";
+
 // The env var names the platform mounts a CREDENTIAL under — and the one place
 // that list lives.
 //
@@ -57,18 +59,44 @@ export const CREDENTIAL_ENV_KEYS = [
   "PUBLISHER_CLIENT_SECRET",
 ] as const;
 
+/** What a scan of the environment found. Values on one side, NAMES on the other. */
+export interface CredentialEnvScan {
+  /** Values long enough for the scrubber to actually enroll. */
+  values: string[];
+  /**
+   * The NAMES of mounted credentials whose values are too short to enroll —
+   * never the values themselves, since this list is built to be logged.
+   */
+  tooShort: string[];
+}
+
 /**
- * The mounted credential values present in `env`, ready for primeScrubber().
+ * Partition the mounted credentials into what the scrubber can enroll and what
+ * it cannot.
  *
- * Unset and empty entries are dropped rather than passed through: the scrubber
- * ignores them anyway, and an empty literal would be a silent no-op that reads
- * like coverage.
+ * The split exists because `Scrubber.addLiteral` silently drops anything shorter
+ * than MIN_LITERAL_LEN, and that threshold is not negotiable: a 4-character
+ * literal would redact every occurrence of those characters in ordinary log
+ * text, which is the over-redaction that disabled the entropy backstop. So a
+ * short credential cannot be protected — and returning it anyway would produce
+ * exactly the silent no-op that reads like coverage which this module was
+ * written to end. It is reported by NAME instead, and the caller says so out
+ * loud.
+ *
+ * Unset and empty entries are neither: nothing was mounted, so there is nothing
+ * to protect and nothing to report.
  */
-export function credentialEnvValues(env: NodeJS.ProcessEnv = process.env): string[] {
-  const out: string[] = [];
+export function scanCredentialEnv(env: NodeJS.ProcessEnv = process.env): CredentialEnvScan {
+  const values: string[] = [];
+  const tooShort: string[] = [];
   for (const key of CREDENTIAL_ENV_KEYS) {
     const value = env[key];
-    if (value !== undefined && value !== "") out.push(value);
+    if (value === undefined || value === "") continue;
+    if (value.length < MIN_LITERAL_LEN) {
+      tooShort.push(key);
+      continue;
+    }
+    values.push(value);
   }
-  return out;
+  return { values, tooShort };
 }

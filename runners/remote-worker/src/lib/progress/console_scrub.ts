@@ -40,7 +40,8 @@
 
 import { format } from "node:util";
 import { emit, primeScrubber } from "./emitter.js";
-import { credentialEnvValues } from "../credential_env.js";
+import { MIN_LITERAL_LEN } from "./scrubber.js";
+import { scanCredentialEnv } from "../credential_env.js";
 
 type ConsoleMethod = "log" | "info" | "warn" | "error" | "debug";
 
@@ -82,7 +83,20 @@ export function installLogRedaction(
   env: NodeJS.ProcessEnv = process.env,
 ): void {
   installConsoleScrubber(target);
-  primeScrubber(credentialEnvValues(env));
+  const { values, tooShort } = scanCredentialEnv(env);
+  primeScrubber(values);
+  if (tooShort.length > 0) {
+    // NAMES only, and deliberately not fatal. A value this short cannot be
+    // enrolled without the literal shredding ordinary log text, so the honest
+    // outcome is an unprotected credential the operator is TOLD about — a
+    // misconfiguration is not itself a disclosure, and failing a whole cycle
+    // over a placeholder in a local run would be the worse trade. Routed
+    // through `target` so it lands on the feed like every other line.
+    target.warn(
+      `[redaction] mounted credential(s) under ${MIN_LITERAL_LEN} chars cannot be enrolled; ` +
+        `their values will NOT be redacted from this log: ${tooShort.join(", ")}`,
+    );
+  }
 }
 
 export function installConsoleScrubber(target: ConsoleLike = console): void {

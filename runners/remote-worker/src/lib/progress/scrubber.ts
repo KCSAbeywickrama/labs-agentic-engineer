@@ -31,7 +31,7 @@ const REDACTED = "[REDACTED]";
 
 // Minimum literal length to enroll. Shorter strings are too noisy
 // (would shred normal text — e.g. the literal "admin" or a 4-char id).
-const MIN_LITERAL_LEN = 12;
+export const MIN_LITERAL_LEN = 12;
 
 // Well-known token shapes. We redact only the value, preserving the
 // header key (`Authorization:` / `x-api-key:`) so the line stays readable.

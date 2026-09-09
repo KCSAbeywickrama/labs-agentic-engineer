@@ -314,7 +314,14 @@ Four further gaps, all verified rather than assumed:
     bash, so nothing can enroll it, and its at-rest copy in
     `.gh-config/hosts.yml` is covered by an `oauth_token:` shape pattern on both
     sides instead. Closing it means giving the helper a way to hand the runner
-    what it minted.
+    what it minted. And a mounted credential SHORTER than `MIN_LITERAL_LEN`
+    cannot be enrolled at all — a 4-character literal would redact those
+    characters everywhere they appear in ordinary text — so `scanCredentialEnv`
+    reports it by NAME and `installLogRedaction` warns. Warn, not fail: a short
+    value is a misconfiguration rather than a disclosure, and ending a cycle over
+    a placeholder in a local run is the worse trade. Lowering the threshold for
+    credentials specifically was rejected for the reason the entropy backstop
+    was disabled.
 
 8. **`console.*` is converted, not merely scrubbed.** It shares the fd with the
    feed, so a bare line makes the stream unparseable — and a watchdog cannot
