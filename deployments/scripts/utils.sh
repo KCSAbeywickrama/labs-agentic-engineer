@@ -44,10 +44,13 @@ fetch_gh_raw() {
                 "https://api.github.com/repos/$owner/$repo/contents/$path?ref=$ref" -o "$dest"; then
                 return 0
             fi
-        else
-            if curl -fsSL "$url" -o "$dest"; then
-                return 0
-            fi
+            # The PAT is only here to dodge the anonymous throttle. When GitHub
+            # rejects it outright — expired, or a token minted for a different
+            # service — every attempt would 401 on a file that is public, so
+            # fall through to the anonymous URL instead of burning the retries.
+        fi
+        if curl -fsSL "$url" -o "$dest"; then
+            return 0
         fi
         echo "⚠️  fetch $url failed (attempt $attempt/5) — retrying in $((attempt * 15))s..."
         sleep $((attempt * 15))
