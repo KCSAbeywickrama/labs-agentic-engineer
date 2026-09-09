@@ -312,15 +312,19 @@ Work each one in order:
      counts the same way. Nothing else does: "the requirement implies it",
      "this one is popular", "there is only one real option" are guesses, and
      a guess is the user's to make.
-   - **No service named** → write the NEED only: `name`, `description`, and
-     `suggestions` — services commonly used for this capability, from what
+   - **No provider named** → write the NEED only: `name`, `description`, and
+     `suggestions` — providers commonly used for this capability, from what
      you know, any number, each `{ "name", "style"?, "description"? }` with
      the one distinction that matters for THIS product. No `web_search`, no
      `provider`, no `style`, no `contract`, no `config` — the config keys
-     follow the service, and none is chosen. The definition then asks the
-     user which service to use; their answer runs the `resolve-dependency`
-     flow, which does the research. This is the EXPECTED outcome for a
-     choosable dependency; do not force a pick the PRD does not make.
+     follow the provider, and none is chosen. The definition then offers
+     **Select a provider**, which runs the `resolve-dependency` flow: it asks
+     the user, with your suggestions as the options, and does the research.
+     This is the EXPECTED outcome for a choosable dependency; do not force a
+     pick the PRD does not make.
+   The dependency IS the service the product needs, so name it
+   `<capability>-service` (`currency-service`, `payment-service`,
+   `email-service`); the chosen system is its provider.
 3. **Get the contract on disk — for a named provider only.** `style` says
    how: `rest-api` and `graphql` need a document in the directory
    (`openapi.yaml` / `schema.graphql`), `sdk` needs `sdk.json` (and the API
@@ -392,8 +396,8 @@ you settle it**, before moving to the next:
 
 - resolved → `✓ <capability>: using <choice>` (say `, contract sliced` when
   you cut one, `, registered` for an org reuse)
-- needs-input → `<capability>: your choice — A / B / C are common; pick one
-  on its definition, or ask me to find one`
+- needs-input → `<capability>: your choice — A / B / C are common; select a
+  provider on its definition`
 - needs-contract → `<capability>: <provider> chosen, no published contract
   found — you can upload one or let me assume it, from the dependency's definition in the spec view`
 
@@ -401,8 +405,11 @@ Never block the design on an unresolved dependency — print the line
 and keep emitting the rest; the user replies in the same chat to steer it, now or
 later. Then **close with three parts and nothing more**: one line per component
 (name, type, one-clause role); a **"Needs your input"** block listing ONLY the
-dependencies still unresolved, each with the single thing you need;
-and a one-line pointer to `specs/design/`. The narration already carried the
+dependencies still unresolved, each as a LINK to its definition —
+`[currency-service](aep://spec/specs/design/dependencies/currency-service/dependency.json)`
+— followed by the single thing you need (the console opens the definition
+from the link; this link form is the one place a repo path is allowed in
+your prose); and a one-line pointer to `specs/design/`. The narration already carried the
 play-by-play, so a file-by-file recap would only bury the user's next action.
 Each **Needs your input** line names the dependency the way its definition in the spec view does, so
 the user can click through and press **Resolve** — that runs the

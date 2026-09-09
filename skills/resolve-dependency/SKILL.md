@@ -1,6 +1,6 @@
 ---
 name: resolve-dependency
-description: Use for taking one external dependency from open to resolved — `/resolve-dependency <name> [answer]` names it and may carry the service the user chose; `/resolve-dependencies` walks every open one in turn. Settle the service the user chose (research and ask when they left it to you — never choose for them), get its contract on disk (found, uploaded, or assumed with the user's permission), then derive the config keys.
+description: Use for taking one external dependency from open to resolved — `/resolve-dependency <name> [answer]` names it and may carry the provider the user chose; `/resolve-dependencies` walks every open one in turn. Ask which provider (their suggestions as options; never choose for them), get its interface on disk (found, uploaded from the card, or assumed under the authorization the card records), then derive the config keys.
 metadata:
   aep:
     kind: platform
@@ -14,7 +14,7 @@ a chosen provider, a committed contract in its own directory, and the config
 keys every consumer codes against. The instruction names the dependency, and
 may carry the user's answer after the name — `/resolve-dependency
 currency-converter Open Exchange Rates`, or a document URL — which is the
-service they chose on the definition. `/resolve-dependencies` (plural, no name)
+provider they chose on the definition. `/resolve-dependencies` (plural, no name)
 walks every dependency that is still open, one at a time, in the order the
 Build drawer lists them, and ends with the list empty or with what is left
 named plainly.
@@ -31,7 +31,7 @@ say, in one line, where it stands:
 
 | On disk | State | This flow's job |
 |---|---|---|
-| no `provider` (`suggestions` may be open) | needs-input | settle the service the user chose |
+| no `provider` (`suggestions` may be open) | needs-input | ask which provider, settle it |
 | `provider` + `style`, no `contract` (or no `sdk` for style `sdk`) | needs-contract | get the contract |
 | contract on disk, `assumed` absent, contract marked assumed | needs-acceptance | ask the user to accept |
 | contract on disk | resolved | nothing — say so and stop |
@@ -42,28 +42,36 @@ Each step is at most one `ask_question`; a `/resolve-dependencies` walk asks
 them per dependency, never as one batch across dependencies — the user
 answers one system at a time.
 
-## 1. Settle the service — the user's choice, never yours
+## 1. Settle the provider — the user's choice, never yours
 
 All research for an open dependency happens here, and the user chooses.
 
-- **The instruction carries an answer.** A service name settles `provider`:
-  find out how it is consumed (`style`), and go on to the contract. A
-  document URL settles both: fetch it through `slice_openapi_spec` (the URL
-  plus the operations the design calls), take `provider` from the document's
-  `info.title`, and treat it as route 1 below already taken.
-- **No answer.** Research the capability (`web_search`) — the `suggestions`
-  on file are a starting point, not findings. Then ask ONE question: the
-  services that genuinely fit, each with the one distinction that matters for
-  THIS product, your recommendation marked, and "another system" as a
-  free-text option. One fit is still a question ("Use Stripe?"). Write
-  nothing until they answer. Never write the options back into the file —
-  the question lives in this conversation.
+- **No provider yet: ask the "Which provider?" card first.** ONE
+  `ask_question`, before any research: the `suggestions` on file as the
+  options (label = the suggestion's name; description = its one-line
+  distinction for THIS product; mark at most one recommended only when a
+  real signal favours it), then ALWAYS these two, in this order —
+  `{ "label": "Another provider", "freeText": true, "description": "Name a different provider, or paste a link to its API document." }`
+  and `{ "label": "Find one for me", "description": "I research the options and come back with what fits." }`.
+  Never write options back into the file — the question lives in this
+  conversation.
+  - A named provider settles `provider`: find out how it is consumed
+    (`style`) and go on to step 2.
+  - A document URL settles both: fetch it through `slice_openapi_spec` (the
+    URL plus the operations the design calls), take `provider` from the
+    document's `info.title`, and treat step 2's route 1 as taken.
+  - **Find one for me**: research the capability (`web_search`) and come
+    back with ONE more card — the providers that genuinely fit, each with its
+    distinction, your recommendation marked, and **Another provider** as
+    free text. One fit is still a question ("Use Stripe?").
+- **The instruction already carries an answer** (a name or a URL after the
+  dependency's name): treat it as the card's answer and skip the card.
 - **A Registered External resource fits.** Say so and write only
   `{ "name", "source": "org" }` — the platform fills the rest at save, and no
   contract step follows.
 
 Write the choice: `provider` and `style` set, `suggestions` removed. The
-config keys come last (step 3), from the service chosen — never before.
+config keys come last (step 3), from the provider chosen — never before.
 
 ## 2. Get the contract
 
@@ -80,22 +88,42 @@ Three routes, tried in this order, and the user is told which one you took:
    dependency well enough to slice it — go back to the flows before asking
    the user for anything.
 2. **Ask for it.** When no public document exists (most couriers, most
-   private APIs), ask ONE question: whether the user can provide the document
-   — as a URL, or by uploading it from the dependency's definition in the spec view — or would rather
-   proceed on your assumption. Say what a document from them buys (the
-   validation checks run against it) and what an assumption costs (the
-   coding agent builds to a guess you will name).
-3. **Assume it, with permission.** Only when the user chose that option.
-   Write the contract yourself from the provider's documentation pages and
-   what you know — the operations the design needs and nothing more — as
+   private APIs), ask ONE question — "How should I get its interface?" —
+   whose `options` are EXACTLY these three, `action` included (the console
+   runs the action when the user answers; an option without it is a dead
+   button):
+
+   ```json
+   [
+     { "label": "Give a link", "freeText": true,
+       "description": "Paste a URL to the provider's published OpenAPI document." },
+     { "label": "Upload one",
+       "action": { "kind": "upload-interface", "dependency": "<name>" },
+       "description": "Upload the document here; I read it once it lands." },
+     { "label": "Proceed on your assumption", "recommended": true,
+       "action": { "kind": "accept-assumption", "dependency": "<name>" },
+       "description": "I write the interface from the provider's documentation, covering only what this design calls. Choosing this authorizes it — nothing further is asked; validation cannot check it against a published document." }
+   ]
+   ```
+
+   - **Give a link** → route 1 with that URL.
+   - **Upload one** → the answer arrives once the document is on disk; read
+     it from the snapshot and go on to step 3.
+   - **Proceed on your assumption** → the user's authorization is already
+     recorded on the definition when the answer reaches you; go on to route
+     3. Never describe this option as needing a later acceptance.
+3. **Assume it — authorized by that answer, and only then.** Write the
+   contract yourself from the provider's documentation pages and what you
+   know — the operations the design needs and nothing more — as
    `openapi.yaml` in the dependency's directory, with `x-aep-assumed: true`
    at the document root and, in the `info.description`, a short note of what
    you are unsure about (auth scheme, pagination, error shapes). Record
    `contract` and a `provenance` block with `sourceUrl` naming the
-   documentation you read. Then tell the user the contract is written and
-   waits for their acceptance on the dependency's definition in the spec view — you cannot write the
-   `assumed` record; only they can. The dependency stays needs-acceptance
-   until they do.
+   documentation you read. Re-read `dependency.json` from the snapshot
+   first: the user's `assumed` record is already on it — carry it over
+   exactly; you never write or alter it. Nothing further is asked of the
+   user: the dependency reads resolved (flagged assumed) the moment the
+   file lands.
 
 An `sdk` style needs its manifest too: write `sdk.json` with a `packages`
 entry for every implementation language the design's components use (the
@@ -114,7 +142,6 @@ contract contradicts them.
 
 ## Close
 
-One line per dependency you touched: its name, the service chosen, the state
-it is in now, and the one thing (if any) still needed from the user — "accept
-the assumption on the dependency's definition", "upload the document". Nothing
+One line per dependency you touched: its name, the provider chosen, the state
+it is in now, and the one thing (if any) still needed from the user. Nothing
 else: the files carry the detail, and the Build drawer re-reads them.
