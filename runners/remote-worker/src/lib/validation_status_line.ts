@@ -66,7 +66,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import type { HookCallback, PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { ValidationProgressState, WRITE_TOOLS, validationProgressUpdates } from "./validation_progress.js";
 
 const execFileAsync = promisify(execFile);
@@ -323,9 +322,16 @@ export type PostComment = (body: string) => Promise<void>;
  * because they are the same fact reaching two surfaces.
  */
 export interface ValidationStatusLine {
-  /** PreToolUse hook: the rung a call announces before it runs. */
-  hook: HookCallback;
-  /** Called by the SDK translator when a tool call settles. */
+  /**
+   * A tool call, before it runs: the rung it announces.
+   *
+   * Wired onto `RuntimePolicy.observe.toolUse`, which is why it takes plain
+   * arguments rather than a runtime's hook shape — which mechanism delivers a
+   * call is the adapter's business. AWAITED there, unlike the per-criterion
+   * watcher next door, because this one posts: see the comment on the body.
+   */
+  observe(toolName: string, toolInput: unknown, toolUseId: string): Promise<void>;
+  /** Called when a tool call settles, with the `ok` that reaches the feed. */
   settle(toolUseId: string, ok: boolean): void;
 }
 
@@ -422,15 +428,12 @@ export function createValidationStatusLine(
     onError(`status line capped at ${MAX_POSTS} posts for this cycle — the last line will stand`);
   };
 
-  const hook: HookCallback = async (input) => {
-    const hookInput = input as PreToolUseHookInput;
-    if (hookInput?.hook_event_name !== "PreToolUse") return {};
+  const observe = async (toolName: string, toolInput: unknown, toolUseId: string): Promise<void> => {
+    const state = ladderStateFor(toolName, toolInput, progress);
+    if (state === "reporting") reportCall = toolUseId;
+    if (state === undefined || !ladder.admit(state)) return;
 
-    const state = ladderStateFor(hookInput.tool_name, hookInput.tool_input, progress);
-    if (state === "reporting") reportCall = hookInput.tool_use_id;
-    if (state === undefined || !ladder.admit(state)) return {};
-
-    // Awaited rather than detached, because the whole value of a PreToolUse hook
+    // Awaited rather than detached, because the whole value of a pre-call watcher
     // here is that the line lands BEFORE the silence it explains — a detached
     // post during a twenty-minute exploration could land after it. A failure is
     // reported and swallowed: the run's work is the tests, and losing a status
@@ -444,13 +447,13 @@ export function createValidationStatusLine(
     await say(state);
     warnIfCapped();
 
-    // Never a decision — see the header. This hook watches the calls the run
-    // needs; it does not get to stop one.
-    return {};
+    // Never a decision — see the header. This watcher reads the calls the run
+    // needs; it does not get to stop one, and `RuntimeObservers` ignores what
+    // it returns.
   };
 
   return {
-    hook,
+    observe,
 
     settle: (toolUseId, ok) => {
       if (toolUseId !== reportCall) return;

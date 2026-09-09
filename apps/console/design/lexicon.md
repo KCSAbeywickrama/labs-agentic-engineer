@@ -170,7 +170,11 @@ not carry: who is acting, why it failed.
 
 | Situation | Says |
 |---|---|
-| The coding agent is working it | **`Running · Coding agent`** |
+| It is moving, and the surface cannot say who is working | **`Running`** |
+| The coding agent is writing code | **`Running · Coding agent`** |
+| The platform is merging its pull request | **`Running · Merging the pull request`** |
+| Its components are building | **`Running · Building components`** |
+| Every stage is done and the version has not settled | **`Deploying to development`** |
 | The run ended badly, and the platform said why | **`Failed · <reason>`** |
 | The run ended badly and left no reason | **`Failed`** |
 | Built, and it is the version running in development | **`Deployed to development`** |
@@ -180,6 +184,15 @@ not carry: who is acting, why it failed.
 
 **`Built`, never *Completed*.** "Completed" describes the run; the row is about
 the version.
+
+**The qualifier names the actor working NOW, and only a surface that has read
+the run may add one.** `in_progress` spans the whole build-session rail
+(ADR-0014) — the agent writes, the platform merges, the components build, the
+cluster rolls out — so one hard-coded actor is true for a fifth of a run and
+false for the rest. The build page reads the run and names the rail's current
+stage; the ledger cannot afford that read (ADR-0021 §6) and so says the bare
+`Running`. A stage that is waiting, needs a human or failed is named by neither:
+the rail below spells it out in a sentence a pill has no room for.
 
 **There is no queued status, and that is a gap rather than a choice.** The
 design drew `Queued · next` for a version waiting its turn, and the platform
@@ -387,6 +400,39 @@ right-aligned under the log, away from where its content starts.
 **A run that is neither streaming nor terminal is labelled by neither.** A run
 parked at the deploy gate has not ended, and *Run finished* over its log would
 contradict the summary card telling the reader it is waiting on them.
+
+### The coding agent log
+
+A cycle's log is a **crew** — the agents the run is made of — with two views the
+reader switches between, never both at once. The words name what a reader wants
+to know, not the runtime's mechanics: nothing here says "subagent", "fan-out" or
+a tool's name.
+
+| | |
+|---|---|
+| The two views | **Crew** · **Timeline** |
+| Crew answers | who is doing what right now |
+| Timeline answers | where the time went, and what ran at once |
+| The run's own agent | **lead** |
+| A spawned agent | its **label** — the description the lead gave it, never an id |
+| The count beside the toggle | **`N agents · M running · last event Xs ago`** |
+
+An agent's state names its situation (naming rule 6):
+
+| Situation | Says |
+|---|---|
+| Events are arriving | **`working`** |
+| Blocked inside an agent it spawned | **`waiting on <label>`** |
+| A minute of silence with a call unanswered | **`stalled`**, with what it is waiting on |
+| It finished | **`completed`** and its own **report** |
+| The runtime reported a failure | **`failed`** |
+| It was stopped, or the run was cancelled | **`stopped`** / **`cancelled`** — never *failed* |
+
+**Silence is never a verdict.** A quiet agent reads as `working` with the age of
+its last event beside it; only the runtime saying so makes a row a failure.
+
+**Plan** is the lead's own task list, shown under the agent that owns each entry.
+It is what the run set out to do, beside what it did.
 
 ## The project overview
 
@@ -1393,6 +1439,18 @@ Endpoints · Alerts**. **Settings** stays in the footer in both contexts
 > this file; ADR-0010's decision (the sidebar swaps wholesale to project sections) still holds and
 > only its illustrative list is stale, so it is left for an explicit supersede rather than edited
 > in place.
+
+## The coding agent
+
+The organization's choice of what drives a coding run, on Settings. "Runtime" is
+the product word for the agent that writes the code; the user never sees an
+internal adapter or port name.
+
+| | |
+|---|---|
+| Card | **Coding agent** |
+| Fields | **Runtime** · **Model** |
+| A runtime the platform cannot run | shown, disabled, with the reason — never hidden, so the choice is honest |
 
 ## Resources
 

@@ -239,20 +239,19 @@ test("Ladder: a finished run does not go back to setting up", () => {
   assert.equal(ladder.admit("harness"), false, "a late scaffold write restarted the run's story");
 });
 
-// --- the hook ---------------------------------------------------------------
+// --- the watcher ---------------------------------------------------------------
 
 function hookInput(call: { toolName: string; input: unknown }) {
   return {
-    hook_event_name: "PreToolUse",
     tool_name: call.toolName,
     tool_input: call.input,
     tool_use_id: "tu_1",
   };
 }
 
-test("the hook posts one branded line per rung", async () => {
+test("the watcher posts one branded line per rung", async () => {
   const posted: string[] = [];
-  const { hook } = createValidationStatusLine(
+  const { observe } = createValidationStatusLine(
     new ValidationProgressState(),
     async (body) => {
       posted.push(body);
@@ -260,12 +259,8 @@ test("the hook posts one branded line per rung", async () => {
     () => assert.fail("a successful post must not warn"),
   );
 
-  await hook(hookInput(bash("npm ci --prefix tests/e2e")) as never, undefined, { signal: undefined } as never);
-  await hook(
-    hookInput(write("tests/e2e/specs/AC-001-a.spec.ts", "// spec: AC-001-a\n")) as never,
-    undefined,
-    { signal: undefined } as never,
-  );
+  await fire(observe, hookInput(bash("npm ci --prefix tests/e2e")));
+  await fire(observe, hookInput(write("tests/e2e/specs/AC-001-a.spec.ts", "// spec: AC-001-a\n")));
 
   assert.deepEqual(posted, [
     `${OBSERVED_COMMENT_MARKER}\n${LADDER_LINES.harness}`,
@@ -278,8 +273,8 @@ test("the hook posts one branded line per rung", async () => {
 // the agent's own words; branded as machine they would vanish entirely.
 test("every line carries the observed brand, first", async () => {
   const posted: string[] = [];
-  const { hook } = createValidationStatusLine(new ValidationProgressState(), async (b) => void posted.push(b), () => {});
-  await hook(hookInput(bash("npm ci --prefix tests/e2e")) as never, undefined, { signal: undefined } as never);
+  const { observe } = createValidationStatusLine(new ValidationProgressState(), async (b) => void posted.push(b), () => {});
+  await fire(observe, hookInput(bash("npm ci --prefix tests/e2e")));
   assert.ok(posted[0]?.startsWith(OBSERVED_COMMENT_MARKER), posted[0]);
 });
 
@@ -298,7 +293,7 @@ test("every rung's line is a single sentence on one line", () => {
 // reported on the run's own feed and swallowed.
 test("a failed post warns and never throws", async () => {
   const warnings: string[] = [];
-  const { hook } = createValidationStatusLine(
+  const { observe } = createValidationStatusLine(
     new ValidationProgressState(),
     async () => {
       throw new Error("gh: 403 rate limited");
@@ -306,23 +301,21 @@ test("a failed post warns and never throws", async () => {
     (reason) => warnings.push(reason),
   );
 
-  const decision = await hook(hookInput(bash("npm ci --prefix tests/e2e")) as never, undefined, {
-    signal: undefined,
-  } as never);
+  const decision = await fire(observe, hookInput(bash("npm ci --prefix tests/e2e")));
 
-  assert.deepEqual(decision, {}, "the hook watches; it never decides");
+  assert.equal(decision, undefined, "the watcher watches; it never decides");
   assert.equal(warnings.length, 1);
   assert.match(warnings[0] ?? "", /harness/);
   assert.match(warnings[0] ?? "", /rate limited/);
 });
 
-// It watches the calls a run has to make. A hook that could refuse one would be
-// a far worse bargain than no status line.
-test("the hook never blocks a tool call", async () => {
-  const { hook } = createValidationStatusLine(new ValidationProgressState(), async () => {}, () => {});
+// It watches the calls a run has to make. A watcher that could refuse one would
+// be a far worse bargain than no status line.
+test("the watcher never blocks a tool call", async () => {
+  const { observe } = createValidationStatusLine(new ValidationProgressState(), async () => {}, () => {});
   for (const call of [bash("npm ci --prefix tests/e2e"), bash("ls"), write("x.ts", "y")]) {
-    const decision = await hook(hookInput(call) as never, undefined, { signal: undefined } as never);
-    assert.deepEqual(decision, {});
+    const decision = await fire(observe, hookInput(call));
+    assert.equal(decision, undefined);
   }
 });
 
@@ -330,15 +323,17 @@ test("the hook never blocks a tool call", async () => {
 
 function reportCall(id = "tu_report") {
   return {
-    hook_event_name: "PreToolUse",
     tool_name: "Bash",
     tool_input: { command: 'node "$AEP_SKILLS_DIR/aep-validation/scripts/generate-report.mjs" --issue 7' },
     tool_use_id: id,
   };
 }
 
-async function fire(hook: ReturnType<typeof createValidationStatusLine>["hook"], input: unknown) {
-  return hook(input as never, undefined, { signal: undefined } as never);
+async function fire(
+  observe: ReturnType<typeof createValidationStatusLine>["observe"],
+  input: { tool_name: string; tool_input: unknown; tool_use_id: string },
+) {
+  return observe(input.tool_name, input.tool_input, input.tool_use_id);
 }
 
 // The whole reason this mode exists. Step 9's exit 2 is "the ordinary loop, not
@@ -349,20 +344,20 @@ test("a lapping run says it is repairing ONCE, however many laps it takes", asyn
   const posted: string[] = [];
   const line = createValidationStatusLine(new ValidationProgressState(), async (b) => void posted.push(b), () => {});
 
-  await fire(line.hook, hookInput(bash("npm ci --prefix tests/e2e")));
-  await fire(line.hook, hookInput(write("tests/e2e/specs/AC-001-a.spec.ts", "// spec: AC-001-a\n")));
-  await fire(line.hook, hookInput(write("tests/e2e/specs/AC-001-a.spec.ts", "// spec: AC-001-a\ntest('AC-001-a: x', () => {});")));
-  await fire(line.hook, hookInput(bash("npm test --prefix tests/e2e -- specs/AC-001-a.spec.ts")));
+  await fire(line.observe, hookInput(bash("npm ci --prefix tests/e2e")));
+  await fire(line.observe, hookInput(write("tests/e2e/specs/AC-001-a.spec.ts", "// spec: AC-001-a\n")));
+  await fire(line.observe, hookInput(write("tests/e2e/specs/AC-001-a.spec.ts", "// spec: AC-001-a\ntest('AC-001-a: x', () => {});")));
+  await fire(line.observe, hookInput(bash("npm test --prefix tests/e2e -- specs/AC-001-a.spec.ts")));
 
   // Four laps: generate, refused, cover the gap, generate again…
   for (let lap = 0; lap < 4; lap += 1) {
-    await fire(line.hook, reportCall(`tu_${lap}`));
+    await fire(line.observe, reportCall(`tu_${lap}`));
     line.settle(`tu_${lap}`, false);
-    await fire(line.hook, hookInput(bash("npm test --prefix tests/e2e -- specs/AC-001-b.spec.ts")));
-    await fire(line.hook, hookInput(write("tests/e2e/specs/AC-001-b.spec.ts", "test('AC-001-b: y', () => {});")));
+    await fire(line.observe, hookInput(bash("npm test --prefix tests/e2e -- specs/AC-001-b.spec.ts")));
+    await fire(line.observe, hookInput(write("tests/e2e/specs/AC-001-b.spec.ts", "test('AC-001-b: y', () => {});")));
   }
   // …and the fifth one lands.
-  await fire(line.hook, reportCall("tu_ok"));
+  await fire(line.observe, reportCall("tu_ok"));
   line.settle("tu_ok", true);
 
   const lines = posted.map((b) => b.split("\n")[1]);
@@ -383,8 +378,7 @@ test("a failing spec run is not a repair", async () => {
   const posted: string[] = [];
   const line = createValidationStatusLine(new ValidationProgressState(), async (b) => void posted.push(b), () => {});
 
-  await fire(line.hook, {
-    hook_event_name: "PreToolUse",
+  await fire(line.observe, {
     tool_name: "Bash",
     tool_input: { command: "npm test --prefix tests/e2e -- specs/AC-001-a.spec.ts" },
     tool_use_id: "tu_test",
@@ -400,10 +394,10 @@ test("the report landing says nothing — the closing summary is next", async ()
   const posted: string[] = [];
   const line = createValidationStatusLine(new ValidationProgressState(), async (b) => void posted.push(b), () => {});
 
-  await fire(line.hook, reportCall("tu_1"));
+  await fire(line.observe, reportCall("tu_1"));
   line.settle("tu_1", false);
   const afterRepair = posted.length;
-  await fire(line.hook, reportCall("tu_2"));
+  await fire(line.observe, reportCall("tu_2"));
   line.settle("tu_2", true);
 
   assert.equal(posted.length, afterRepair, "landing the report posted a line of its own");
@@ -425,11 +419,11 @@ test("reaching the cap warns once and then stops posting", async () => {
   // repair mode: a report that fails, succeeds, then fails again re-enters it,
   // and nothing bounds how many times a run may do that. This is the shape the
   // backstop is still here for.
-  await fire(line.hook, hookInput(bash("npm ci --prefix tests/e2e")));
+  await fire(line.observe, hookInput(bash("npm ci --prefix tests/e2e")));
   for (let i = 0; i < MAX_POSTS * 2; i += 1) {
-    await fire(line.hook, reportCall(`tu_${i}`));
+    await fire(line.observe, reportCall(`tu_${i}`));
     line.settle(`tu_${i}`, false);
-    await fire(line.hook, reportCall(`tu_ok_${i}`));
+    await fire(line.observe, reportCall(`tu_ok_${i}`));
     line.settle(`tu_ok_${i}`, true);
   }
 
@@ -466,7 +460,7 @@ test("the poster runs the workspace's gh under the agent's own environment", asy
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-// Awaited inside a PreToolUse hook, so a hung `gh` sits between the agent and
+// Awaited by the runtime before the call it describes, so a hung `gh` sits between the agent and
 // its next tool call. Unbounded, one stalled connection would hold a two-hour
 // validation there — trading the work for the commentary on it.
 test("a hanging gh is abandoned rather than holding the run", async () => {
@@ -484,10 +478,10 @@ test("a hanging gh is abandoned rather than holding the run", async () => {
 
   const started = Date.now();
   const decision = await Promise.race([
-    fire(line.hook, hookInput(bash("npm ci --prefix tests/e2e"))),
+    fire(line.observe, hookInput(bash("npm ci --prefix tests/e2e"))),
     new Promise((r) => setTimeout(() => r("STILL BLOCKED"), POST_TIMEOUT_MS + 5_000)),
   ]);
-  assert.notEqual(decision, "STILL BLOCKED", "the hook never came back");
+  assert.notEqual(decision, "STILL BLOCKED", "the watcher never came back");
   assert.ok(Date.now() - started < POST_TIMEOUT_MS + 5_000);
   assert.equal(warnings.length, 1, "an abandoned post must say so");
   fs.rmSync(dir, { recursive: true, force: true });

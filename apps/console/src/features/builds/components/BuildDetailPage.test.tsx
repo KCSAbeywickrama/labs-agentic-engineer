@@ -27,6 +27,7 @@ type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 type RunCycleView = components["schemas"]["RunCycleView"];
 type TaskView = components["schemas"]["TaskView"];
 type DeployStage = components["schemas"]["DeployStage"];
+type CycleBuild = components["schemas"]["CycleBuild"];
 
 // Router stubbed to plain anchors — no RouterProvider needed.
 vi.mock("@tanstack/react-router", () => ({
@@ -122,6 +123,10 @@ vi.mock("../../spec/api/queries", () => ({
 
 let mockBuilds: BuildSummary[] = [];
 let mockRuns: MilestoneRunView[] = [];
+// The cluster's answer for every cycle this page asks about. One list rather
+// than one per cycle: the page asks about the current session and the merged
+// one, and every test that cares has them be the same session.
+let mockCycleBuilds: CycleBuild[] = [];
 // Which cycle the Build logs section asked the cluster about, in order.
 const cycleBuildsCalls: Array<{ cycleId: string; enabled: boolean }> = [];
 vi.mock("../api/queries", () => ({
@@ -136,7 +141,7 @@ vi.mock("../api/queries", () => ({
   useCycleBuilds: (_p: string, _t: string, cycleId: string, enabled: boolean) => {
     cycleBuildsCalls.push({ cycleId, enabled });
     return {
-      data: [],
+      data: enabled ? mockCycleBuilds : undefined,
       isPending: false,
       isError: false,
       error: null,
@@ -207,6 +212,18 @@ const task = (issueNumber: number, over: Partial<TaskView> = {}): TaskView => ({
 
 const merged = (issueNumber: number) => task(issueNumber, { derivedStatus: "merged" });
 
+const componentBuild = (over: Partial<CycleBuild> = {}): CycleBuild => ({
+  component: "catalog-api",
+  buildName: "catalog-api-build-1",
+  status: "Running",
+  completed: false,
+  attempt: 1,
+  ...over,
+});
+
+const greenBuild = (component: string): CycleBuild =>
+  componentBuild({ component, buildName: `${component}-build-1`, status: "WorkflowSucceeded", completed: true });
+
 const renderPage = () =>
   render(<BuildDetailPage projectName="demo-shop" tag="v2" />);
 
@@ -234,6 +251,7 @@ afterEach(() => {
   mockRuns = [];
   mockTasks = [];
   mockDeploy = undefined;
+  mockCycleBuilds = [];
   mockDesignDeps = [];
   mockReadiness = undefined;
   cycleBuildsCalls.length = 0;
@@ -429,6 +447,60 @@ describe("BuildDetailPage — the Deployments link", () => {
   });
 });
 
+// The header pill names WHO IS WORKING NOW, not who worked first. A run stays
+// `in_progress` from the agent's first token to the rollout, so a hard-coded
+// "Running · Coding agent" was true for the first of five stages and a lie for
+// the rest — measured on a live run: both components green at 05:50, the header
+// still crediting the coding agent at 05:52, with the Build logs section on the
+// same screen showing them succeeded.
+describe("BuildDetailPage — what the header says is happening", () => {
+  const headerPill = (label: string) => screen.getAllByText(label)[0];
+
+  it("credits the coding agent while the agent is the one working", () => {
+    mockBuilds = [build()];
+    mockRuns = [run({ cycles: [cycle({ prNumber: 0 })] })];
+    renderPage();
+    expect(screen.getByText("Running · Coding agent")).toBeInTheDocument();
+  });
+
+  it("names the platform once the pull request is open", () => {
+    mockBuilds = [build()];
+    mockRuns = [run({ cycles: [cycle({ prNumber: 9 })] })];
+    renderPage();
+    expect(headerPill("Running · Merging the pull request")).toBeInTheDocument();
+    expect(screen.queryByText("Running · Coding agent")).not.toBeInTheDocument();
+  });
+
+  it("names the component builds while they are building", () => {
+    mockBuilds = [build()];
+    mockRuns = [run({ cycles: [cycle({ prNumber: 9, mergeSha: "abc1234" })] })];
+    mockCycleBuilds = [componentBuild(), componentBuild({ component: "web-app" })];
+    renderPage();
+    expect(headerPill("Running · Building components")).toBeInTheDocument();
+    expect(screen.queryByText("Running · Coding agent")).not.toBeInTheDocument();
+  });
+
+  // The exact minute the reported page contradicted itself.
+  it("moves on to the rollout once every component is green", () => {
+    mockBuilds = [build()];
+    mockRuns = [run({ cycles: [cycle({ prNumber: 9, mergeSha: "abc1234" })] })];
+    mockCycleBuilds = [greenBuild("catalog-api"), greenBuild("web-app")];
+    renderPage();
+    expect(headerPill("Deploying to development")).toBeInTheDocument();
+    expect(screen.queryByText("Running · Coding agent")).not.toBeInTheDocument();
+  });
+
+  // A run in its planning phase has no build session, so there is no stage to
+  // name and the header claims no actor at all.
+  it("claims no actor before a build session exists", () => {
+    mockBuilds = [build()];
+    mockRuns = [run({ state: "planning", cycles: [] })];
+    renderPage();
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.queryByText("Running · Coding agent")).not.toBeInTheDocument();
+  });
+});
+
 describe("BuildDetailPage — the Duration cell", () => {
   it("counts up second by second while the build has not ended", () => {
     vi.useFakeTimers();
@@ -480,6 +552,100 @@ describe("BuildDetailPage — the Duration cell", () => {
       vi.advanceTimersByTime(2000);
     });
     expect(screen.getByText("20m 02s")).toBeInTheDocument();
+  });
+});
+
+// THE CLOCK IS THE PAGE'S, NOT ONE COMPONENT'S.
+//
+// The reported bug: task rows sat at `0m 24s` for two minutes while the summary
+// card's `1m 43s and counting` ticked above them. The ticker was called inside
+// `BuildSummaryCard`, so the forced re-render landed in that subtree only —
+// and `BuildTaskList` is a sibling, formatting its own elapsed time against
+// `Date.now()` with nothing driving it. Polling does not save it: react-query's
+// structural sharing hands back the same objects when a payload has not
+// changed, so a poll on a run that has not transitioned re-renders nothing.
+describe("BuildDetailPage — one clock for the whole page", () => {
+  // An open build session that claims issue 7 and has no pull request yet: the
+  // row is in progress, counting from the session's start.
+  const working = () =>
+    run({
+      cycles: [cycle({ resolves: [7], prNumber: 0, createdAt: "2026-08-14T16:20:00Z" })],
+    });
+
+  it("advances a live task row's elapsed time with no payload change at all", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-14T16:20:24Z"));
+    // The build started earlier than the session, so the card's number and the
+    // row's cannot be mistaken for one another.
+    mockBuilds = [build({ startedAt: "2026-08-14T16:10:00Z", completedAt: null })];
+    mockTasks = [task(7)];
+    mockRuns = [working()];
+    renderPage();
+
+    expect(screen.getByText("0m 24s")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
+    // Not a refetch, not a prop change — the same events the frozen rows saw.
+    expect(screen.getByText("0m 34s")).toBeInTheDocument();
+  });
+
+  it("keeps the row and the card on the same second", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-14T16:21:43Z"));
+    mockBuilds = [build({ startedAt: "2026-08-14T16:20:00Z", completedAt: null })];
+    mockTasks = [task(7)];
+    mockRuns = [working()];
+    renderPage();
+
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    // Both are measured from the same instant against the same clock, so they
+    // read the same span — the card counts the build, the row counts the
+    // session, and here they started together.
+    expect(screen.getAllByText("1m 48s")).toHaveLength(2);
+  });
+
+  // The rows are their OWN reason to run the clock, not a side effect of the
+  // card's. A version can be complete while a later run reworks it — its
+  // duration is frozen and its rows are not.
+  it("counts a live row on a version whose own duration has stopped", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-14T16:20:24Z"));
+    mockBuilds = [
+      build({ status: "completed", completedAt: "2026-08-14T16:18:00Z" }),
+    ];
+    mockTasks = [task(7)];
+    mockRuns = [working()];
+    renderPage();
+
+    expect(screen.getByText("0m 24s")).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(3_000);
+    });
+    expect(screen.getByText("0m 27s")).toBeInTheDocument();
+  });
+
+  // The interval is the page's, but its CONDITION is still what is actually
+  // counting: a settled build with settled rows must not re-render once a
+  // second for a reader with nothing to watch.
+  it("runs no clock when nothing on the page is counting", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-14T16:40:00Z"));
+    mockBuilds = [
+      build({ status: "completed", completedAt: "2026-08-14T16:38:04Z" }),
+    ];
+    mockTasks = [merged(7)];
+    mockRuns = [
+      run({
+        state: "succeeded",
+        cycles: [cycle({ resolves: [7], prNumber: 9, mergeSha: "abc", endedAt: "2026-08-14T16:38:00Z" })],
+      }),
+    ];
+    renderPage();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
