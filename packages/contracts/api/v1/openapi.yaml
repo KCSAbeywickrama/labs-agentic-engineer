@@ -3565,9 +3565,50 @@ components:
       - logs
       - complete
       type: object
+    BuildChange:
+      additionalProperties: false
+      description: One thing this version changes, compared with the newest version — the row the
+        Start build dialog lists. `removed` is a statement rather than an action — a build
+        deprovisions nothing, so a removed dependency's resource stays.
+      properties:
+        kind:
+          description: What the name belongs to. `requirements` is the PRD itself, which owns no
+            directory and is reported as one row.
+          enum:
+          - component
+          - external
+          - platform-resource
+          - requirements
+          type: string
+        name:
+          description: The component, dependency or resource name, as the design writes it.
+          type: string
+        state:
+          enum:
+          - new
+          - changed
+          - removed
+          type: string
+      required:
+      - name
+      - kind
+      - state
+      type: object
     BuildPreflight:
       additionalProperties: false
       properties:
+        changes:
+          description: What this version changes against the newest one, computed from the diff
+            between that version's tag and HEAD. Empty when specUnchanged, and every row is `new`
+            when the project has no version yet.
+          items:
+            $ref: '#/components/schemas/BuildChange'
+          type: array
+          nullable: true
+        currentVersion:
+          description: The newest version's tag name, or empty when the project has never been
+            built. Ordered by tag creation time, not by any number in the name.
+          type: string
         items:
           items:
             $ref: '#/components/schemas/PreflightItem'
@@ -3584,6 +3625,15 @@ components:
             itself cannot resolve (unresolved, missing spec, or an org service awaiting
             access). This is the ONLY flag a client may block Build on.
           type: boolean
+        specUnchanged:
+          description: Whether the `specs/` tree at HEAD matches the newest version's, so a build
+            reuses that version and reopens its milestone instead of cutting a new one. The client
+            locks the version field and says Rebuild.
+          type: boolean
+        suggestedVersion:
+          description: What the version field is prefilled with — `v<count of versions + 1>`,
+            incremented until the name is free. A suggestion only; the user may replace it.
+          type: string
       required:
       - needsInput
       - needsResolution
@@ -3597,6 +3647,11 @@ components:
             $ref: '#/components/schemas/BuildInputItem'
           type: array
           nullable: true
+        version:
+          description: The tag name to cut for this version. Empty takes the suggested one. Must be
+            a valid tag name; a name already in use is a 409. Ignored when the spec tree is
+            unchanged, because that build reuses the existing version.
+          type: string
       type: object
     BuildResponse:
       additionalProperties: false
@@ -7294,7 +7349,9 @@ components:
           description: True when specs/ changed after latest was tagged.
           type: boolean
         tags:
-          description: Spec version tags (v<N>), newest first.
+          description: Spec version tags, newest first. A version carries the name the user gave
+            it at build time (`v<N>` when they kept the suggestion), and "newest" is the tags'
+            creation order, not any number in the name.
           items:
             type: string
           type: array
