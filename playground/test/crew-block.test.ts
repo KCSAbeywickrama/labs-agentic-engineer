@@ -206,6 +206,29 @@ test("every drawn row fits the terminal, and a block too tall says what it hid",
   assert.match(capped[2] as string, /… 3 more/);
 });
 
+test("a multi-line shell label stays one row, and keeps its place in the tree", () => {
+  // Measured on a real run: a heredoc or an `&&` chain reaches the feed with its
+  // newlines intact, and one BlockRow then drew as three physical lines — the
+  // exact shape the redraw arithmetic cannot survive.
+  const rows = block([
+    { kind: "agent_started", agentId: "lead", label: "lead agent", depth: 0, ts: at(0) },
+    {
+      kind: "task_started",
+      agentId: "lead",
+      taskId: "t9",
+      summary: "cd /tmp/baltest && cat > narrow.bal << 'EOF'\nimport ballerina/http;\nEOF",
+      ts: at(1_000),
+    },
+  ]);
+  for (const row of rows) {
+    assert.ok(!row.includes("\n"), `"${row}" must be one physical line`);
+  }
+  const task = rows.find((r) => r.includes("narrow.bal"));
+  assert.ok(task, "the backgrounded command must still be drawn");
+  assert.match(task, /^ {4}⟳ cd \/tmp\/baltest/, "its indent under the lead is the tree");
+  assert.match(task, /import ballerina\/http;/, "the flattened tail is still readable");
+});
+
 test("a plan entry handed to a spawned agent is drawn under that agent", () => {
   const rows = block([
     ...RUN,

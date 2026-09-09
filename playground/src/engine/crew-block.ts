@@ -111,8 +111,26 @@ const QUIET = "♥";
 /** Two spaces, so the block sits in the same column as the streamed step lines. */
 const MARGIN = "  ";
 
+/**
+ * Line breaks collapsed to spaces, indentation kept.
+ *
+ * A row is one physical line **by construction**, not by every caller
+ * remembering: `openCrewPane` redraws by counting the rows it last drew, so a
+ * row carrying a newline makes the block taller than the pane believes and the
+ * redraw eats the transcript above it. It also breaks `lay`'s arithmetic, which
+ * measures a row by `String.length`. A backgrounded shell label is what bites —
+ * a heredoc or an `&&` chain arrives with its newlines intact.
+ *
+ * Not `oneLine`, which trims: here the leading MARGIN and the depth indent are
+ * the tree, and trimming them flattens it.
+ */
+function flat(text: string): string {
+  return text.replace(/[\r\n]+/g, " ");
+}
+
 /** Cut to width, saying so — a silently cut line reads as a line that ended. */
-function trunc(text: string, width: number): string {
+function trunc(raw: string, width: number): string {
+  const text = flat(raw);
   if (width <= 0) return "";
   if (text.length <= width) return text;
   return `${text.slice(0, Math.max(0, width - 1))}…`;
@@ -125,7 +143,10 @@ function trunc(text: string, width: number): string {
  * the left half has to be cut for it. When even that will not fit, the right
  * half is dropped rather than pushed off the edge half-drawn.
  */
-function lay(left: string, right: string, width: number): string {
+function lay(leftRaw: string, rightRaw: string, width: number): string {
+  // Flattened before anything is measured — see `flat`.
+  const left = flat(leftRaw);
+  const right = flat(rightRaw);
   if (!right) return trunc(left, width);
   if (right.length + 4 > width) return trunc(left, width);
   const gap = width - left.length - right.length;
