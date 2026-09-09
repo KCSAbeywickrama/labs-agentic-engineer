@@ -157,6 +157,23 @@ here: they're the open `console` + `feature` issues.
   once the last value is saved. A Registered External is outside the gate — its
   values live on the org record, which no project surface can clear —
   [ADR-0023](../../docs/decisions/ADR-0023-external-dependency-values-are-a-deploy-gate.md)
+- Every external dependency is a group in the spec rail, shaped like a
+  component's, since its definition is one file in its own directory (repo
+  ADR-0027): the header carries the one thing the user must do, and the rows
+  are its files — the definition, the interface (an OpenAPI document or a
+  GraphQL schema), an SDK manifest. The definition renders as its own view,
+  the way a component's design does: the provider, the interface on file with
+  its provenance, the config keys and who uses it, and every way forward —
+  **Select a provider** (or **Resolve** once one is chosen) runs the guided
+  `/resolve-dependency` flow, whose cards ask which provider and, when neither
+  a published document nor the provider's own documentation exists, how to
+  get its interface; an interface the agent derives from that documentation
+  needs no consent and reads *Derived from docs*, and choosing *proceed on
+  your assumption* on the card is the whole consent for a guess. **Provide interface** opens a modal that lands a
+  document straight in the directory. The design turn's closing list links
+  each open definition. The Build drawer lists what blocks the cut, opens each
+  row's definition, and offers one **Resolve all in chat** —
+  [ADR-0028](design/decisions/ADR-0028-a-dependency-is-a-directory-in-the-rail.md)
 - Empty states teach *what*, never narrate the *how* — the five flow-narrating
   empty states (Builds, Deployments, Validations, Components, Recent activity —
   the last retired with the feed itself, #662)

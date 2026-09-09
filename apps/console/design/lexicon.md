@@ -671,6 +671,60 @@ below its own footnotes. Path order alone puts `features/…` above `prd.md`, wh
 [#579](https://github.com/wso2/labs-agentic-engineer/issues/579) made routine by giving `/expand` a
 lens on every story; the list pins the PRD instead, and everything behind it keeps path order.
 
+### A dependency's group, and its definition
+
+Decided in [ADR-0028](decisions/ADR-0028-a-dependency-is-a-directory-in-the-rail.md). An
+external dependency is one directory, so it is one rail group shaped like a component's, and
+its definition is one file with a view of its own.
+
+| | |
+|---|---|
+| Rail group | one per dependency, plug glyph, between Flows and the components; rows are its files — **Definition** · **API** · **SDK** |
+| A header that blocks the build | an amber mark after the name; the words on hover and as its label: **Choose a provider** · **Needs a contract** · **Needs your acceptance** |
+| A header that is resolved, with a qualifier | quiet text after the name: **Assumed** · **Derived from docs** · **Registered** · **SDK only** |
+| The definition's eyebrow chips | **External dependency**, the qualifiers, and either the todo or **Resolved** |
+| Its facts | **Provider** · **Style** (**REST API** / **GraphQL** / **SDK**) · **Source** · **Package** — labelled rows under the name, never a subtitle repeating it |
+| Its sections | **Description** · **Used by** · **Provider** · **Interface** (once a provider is chosen) · **Configuration** (once keys exist) |
+| The Provider section | the provider's name (*Registered by the organization* for an org resource), or *None chosen yet. Select one and the agent sets it up: its interface, then the configuration keys.* with the button **Select a provider** beside the heading, which runs `/resolve-dependency <name>` |
+| The flow's first card | *Which provider?* — the definition's suggestions as options, **Another provider** as free text (a name or a link to its API document), **Find one for me** |
+| The flow's second card | *How should I get its interface?* — **Give a link** (free text), **Upload one** (opens the upload modal over the card; the answer is sent once the document lands), **Proceed on your assumption** (records the authorization on the definition when the answer is sent; the agent then writes the interface — nothing further is asked) |
+| Its primary button | **Resolve** (runs the guided flow), shown once a provider is chosen — **Reconsider** once resolved |
+| Providing a document | button **Provide interface** (**Replace interface** once one is on file) beside the Interface heading; it opens a modal — field **OpenAPI document URL** + **Fetch**; drop zone *Drop an OpenAPI document (YAML or JSON) here, or click to choose one.*; **Cancel** |
+| Once a document is on file | the Interface section links to it in place, with its **Source**, what was **Kept** and when it was **Read on** |
+| An interface derived from the provider's documentation | line *Derived from the provider's documentation — every operation cites its page; no published document exists to check it against.*, then the file link and its Source; nothing to accept |
+| An agent-written interface nobody authorized | box titled *The agent wrote this interface from research*; button **Accept the assumption**; link **Read it first** |
+
+**The todo names what the reader must do, never the state machine's word.** *Needs a
+contract*, not *needs-contract* or *unresolved*; *Choose a provider*, not *needs-input*. The
+wire words stay on the wire.
+
+**The dependency is the service; the provider supplies it.** A need is named
+`<capability>-service` (*currency-service*), and the system chosen for it is its *provider*
+(*Open Exchange Rates*). Never "the service Stripe".
+
+**The user chooses the provider; the agent never does.** A suggestion is a starting point the
+design agent named from what it knows, not a fit it researched — it is an option on the flow's
+first card, never a chip on the definition. The research happens in the resolve flow, after
+the user answers.
+
+**A link in the chat opens a document, nothing more.** The design turn's closing list links each
+open dependency's definition; the click lands on it, and the user presses **Select a
+provider** themselves.
+
+**Assumed is a qualifier, not a warning.** An accepted assumption builds. It is shown as quiet
+text so the reader knows what kind of resolved this is, and stays shown everywhere the
+dependency appears until a real document replaces it.
+
+**Interface is the user's word; contract is the file's role.** The rail row, the section, the
+button and the modal say *interface*; `contract` stays the field in the definition that names
+the file.
+
+**The Build drawer lists.** Title **Dependencies to resolve**; body *The version cannot be cut
+until each of these has a provider and a contract on file. Resolve them one by one from their
+definitions, or let the agent walk you through all of them.* One row per dependency with **Open**
+(its definition); one button **Resolve all in chat**; **Cancel** / **Continue**. Nothing in the
+drawer resolves anything, and *Resolve via chat* per row is gone.
+
 ### Section state
 
 | state | shown as |

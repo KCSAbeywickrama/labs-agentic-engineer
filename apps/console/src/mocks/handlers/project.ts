@@ -219,6 +219,24 @@ export const projectHandlers = [
   http.get("*/api/v1/projects/:projectName/dependencies/readiness", () =>
     respond((s) => projectDependencyReadiness(s)),
   ),
+  // The dependency definition view's two writes (ADR-0028): a document lands in the
+  // dependency's directory; an assumption is accepted. Neither echoes anything
+  // the page needs beyond success, so the mock acknowledges and the page
+  // refetches the dependencies read model.
+  http.post("*/api/v1/projects/:projectName/dependencies/:name/contract", ({ params }) => {
+    if (scenario() === "error") {
+      return HttpResponse.json(projectSectionError, { status: 500 });
+    }
+    return HttpResponse.json({
+      contract: `specs/design/dependencies/${String(params["name"])}/openapi.yaml`,
+    });
+  }),
+  http.post("*/api/v1/projects/:projectName/dependencies/:name/assumption", () => {
+    if (scenario() === "error") {
+      return HttpResponse.json(projectSectionError, { status: 500 });
+    }
+    return HttpResponse.json({ status: "accepted" });
+  }),
   // Re-collect an external connection's values (#395 follow-up). Values are
   // write-only on the real platform (secrets go to the secret manager and
   // never echo), so the mock just acknowledges.

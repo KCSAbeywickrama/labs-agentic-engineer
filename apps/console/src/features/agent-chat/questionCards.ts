@@ -31,6 +31,7 @@ import {
   type AskQuestionInput,
   type QuestionAnswer,
   type AskQuestionOption,
+  type QuestionOptionAction,
 } from "@aep/agent-stream";
 import type { ChatMessage } from "./chatStore";
 
@@ -43,6 +44,17 @@ import type { ChatMessage } from "./chatStore";
  * facing a blank panel; a card short one option is answerable, and the form
  * always offers free text for whatever the missing option meant.
  */
+/** A well-formed typed action, or undefined — a malformed one is dropped, the option stays. */
+function parseOptionAction(raw: unknown): QuestionOptionAction | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const a = raw as Record<string, unknown>;
+  if (typeof a.dependency !== "string" || !a.dependency) return undefined;
+  if (a.kind === "accept-assumption" || a.kind === "upload-interface") {
+    return { kind: a.kind, dependency: a.dependency };
+  }
+  return undefined;
+}
+
 function parseOneQuestion(value: unknown): AskQuestionInput | null {
   if (typeof value !== "object" || value === null) return null;
   const v = value as Record<string, unknown>;
@@ -57,11 +69,13 @@ function parseOneQuestion(value: unknown): AskQuestionInput | null {
     const o = raw as Record<string, unknown>;
     if (typeof o.label !== "string" || !o.label || seen.has(o.label)) continue;
     seen.add(o.label);
+    const action = parseOptionAction(o.action);
     options.push({
       label: o.label,
       ...(typeof o.description === "string" ? { description: o.description } : {}),
       ...(o.recommended === true ? { recommended: true } : {}),
       ...(o.freeText === true ? { freeText: true } : {}),
+      ...(action ? { action } : {}),
     });
   }
   return {
