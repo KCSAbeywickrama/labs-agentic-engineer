@@ -49,7 +49,7 @@ in that order, with that literal content:
 
 | DSL | Build |
 |---|---|
-| `navbar "App \| Nav -> S"` / `sidebar "…"` | the app's real navigation chrome, identical on every screen of a role; each item that carries `-> S` links there |
+| `navbar "App"` / `sidebar "A -> S \| B"` | the pinned design system's canonical app shell — the brand in the top bar, the `sidebar` items as the navigation rail — identical on every screen of a role; each item that carries `-> S` links there. Navigation stays in the rail even if a wireframe put a link in the `navbar` |
 | `heading`, `text`, `link`, `breadcrumb` | the same words on the page |
 | `card "Label \| Value \| Caption"` | a stat tile with that label, that value bound to live data, that caption |
 | `table "A \| B \| C"` + `row` lines | a data table with exactly those columns, bound to the real list. A column the list endpoint does not return is filled from **one** more request to another list operation of the contract (a name joined on id from the entity list; a count from the child list filtered once and grouped) — never one request per row, and never dropped while some list operation can supply it. Only a column no list can supply is left out, with the gap named in your report |

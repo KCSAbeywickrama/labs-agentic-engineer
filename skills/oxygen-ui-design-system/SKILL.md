@@ -47,10 +47,18 @@ uses — a lookup made for an earlier screen sits thousands of tokens back and
 does not count as confirmed. It reads nothing this skill carries, so it cannot
 drift from the version this app installed.
 
-The package also ships prose (`node_modules/@wso2/oxygen-ui/.claude/patterns.md`,
-`components.md`, `theming.md`). `patterns.md` is worth a read for a screen
-composition you have not built before. `components.md` is hand-written and
-lags the types — never settle a prop from it (Known errors below).
+Oxygen's own docs sit beside the types: `components.md` is the index of
+**every composite the library ships**, `patterns.md` holds whole-screen
+compositions, `theming.md` and `migration.md` the rest. Read them from the
+installed package (`node_modules/@wso2/oxygen-ui/.claude/`), which is matched
+to the installed version; before `npm install` has run, the same four files are
+in `references/oxygen/` beside this skill, taken from 0.13.1. Use the index to
+**reach for Oxygen's composite first** — `ListingTable`, `PageTitle`, `Form.*`,
+`UserMenu`, `SearchBar`, `ComplexSelect`, `StatCard`, `NotificationPanel` —
+and drop to a plain MUI primitive (`Box`, `TextField`, `Chip`, still imported
+from `@wso2/oxygen-ui`) only where no composite covers the element. The prose
+is hand-written and lags the types: never settle a prop from it — print it
+(Known errors below).
 
 ### Known errors in the package's docs
 
@@ -131,12 +139,50 @@ createRoot(document.getElementById('root')!).render(
 ```
 
 `OxygenTheme` is the stock theme, and the fallback. It is what a project gets
-when this organization has not set brand colors — see the next section. Then
-lay the app out per `references/app-structure.md`: `src/config/appRoutes.tsx`
-(routes grouped under layouts), `src/layouts/AppLayout.tsx` (the `AppShell` —
-the sidebar shell when the wireframe draws a `sidebar`, the top-nav shell when
-its `navbar` carries the links and there is no `sidebar`), `src/pages/*.tsx`
-(each `PageContent` > `PageTitle` > content).
+when this organization has not set brand colors — see Brand colors below. Then
+lay the app out as the sample app is laid out — the next section.
+
+## The sample app is the structure
+
+Oxygen ships a reference application, and **every web app this platform
+builds has its shape**: the same shell, the same layouts, the same route
+table, the same page anatomy. Its source is in `sample/src/` beside this skill
+(vendored from `samples/oxygen-ui-test-app` in the Oxygen UI repo; the npm
+package does not carry it). Read the real files before scaffolding, and match
+them rather than inferring structure from prose:
+
+| To see… | Read in `sample/src/` |
+|---|---|
+| The app shell: `Header` (toggle, brand, actions) in `AppShell.Navbar`, `Sidebar` categories and items in `AppShell.Sidebar`, `AppShell.Main`, `Footer` | `layouts/AppLayout.tsx` |
+| The route table grouped under layouts | `config/appRoutes.tsx`, `App.tsx` |
+| Login / unauthenticated layout | `layouts/GateLayout.tsx` |
+| A listing page with a table and a page-title action | `pages/Organizations.tsx`, `pages/Projects.tsx` |
+| A detail page (title, avatar, back button, sections) | `pages/ProjectOverview.tsx` |
+| Rows-as-cards listing (`ListingTable variant="card"`) | `pages/ProjectOverview.tsx` (MCP Servers section) |
+| A multi-step form / wizard | `components/ComponentCreate/IntegrationWizard.tsx` |
+| A settings page | `pages/SettingsPage.tsx` |
+| A dashboard with stat tiles and charts | `pages/Analytics.tsx` |
+| Empty and error states | `pages/EmptyComponentList.tsx`, `pages/ErrorPage.tsx` |
+
+**The shell is not negotiable.** `AppLayout` is `AppShell` with the brand and
+the account cluster in the header, the app's navigation in the **sidebar**,
+the routed page in `AppShell.Main`, and a `Footer`. A generated app never
+moves navigation into the header, never drops the sidebar, and never invents a
+second shell: the wireframes are drawn against this shell too (`wireframes`
+draws a brand-only `navbar` and a `sidebar` on every screen), so the
+wireframe, the running app and the sample line up one to one. What the
+sample's sidebar shows for its console — organisations, projects, analytics —
+becomes the wireframe's `sidebar` items for this app; the categories, icons
+and footer items (Settings, Help) keep the sample's arrangement.
+
+**What the platform overrides in the sample.** Three files are Oxygen's demo
+wiring, not this platform's — take the structure and not the code:
+`main.tsx` (its `HashRouter`, `window.__APP_RUNTIME_CONFIG__` and theme
+picker; ours is the Setup snippet above, with `BrowserRouter` and one theme),
+`mock-data/` (this platform's mock is `react-webapp`'s `mock/` with msw),
+and the org/project `Header.Switchers` selects, which a wireframe has to draw
+before they exist. `references/app-structure.md` carries the excerpts already
+adjusted to this platform.
 
 ## Brand colors
 
@@ -172,7 +218,7 @@ project's `## Brand colors` line in `specs/requirements/prd.md` if it has one,
 otherwise the line above. **A color neither one sets is not chosen** — that
 part of the theme stays stock and nothing is invented. With no hex resolved,
 the provider keeps `OxygenTheme` exactly as Setup wires it and this section is
-done. With one or two, derive `src/theme.ts` per `references/theming.md` — a
+done. With one or two, derive `src/theme.ts` per `references/brand-theme.md` — a
 theme of your own from the stock one, never brand colors painted over
 components through `sx`.
 
@@ -272,8 +318,7 @@ specifies. "Install no other library" above is about UI and styling.
 
 | If you're about to build… | Use instead |
 |---|---|
-| Page shell with top bar + side nav | `AppShell` > `AppShell.Navbar` (`Header`), `AppShell.Sidebar` (`Sidebar`), `AppShell.Main`, `AppShell.Footer` (`Footer`) — `references/app-structure.md`, AppLayout |
-| Page shell with the links in the top bar and no side nav | `AppShell` > `AppShell.Navbar` (`Header` + `Tabs` bound to the route), `AppShell.Main` — `references/app-structure.md`, TopNavLayout |
+| The page shell | the sample's `AppLayout`: `AppShell` > `AppShell.Navbar` (`Header`: toggle, brand, spacer, actions), `AppShell.Sidebar` (`Sidebar` categories + items), `AppShell.Main`, `AppShell.Footer` (`Footer`) — `sample/src/layouts/AppLayout.tsx`, excerpt in `references/app-structure.md`. Navigation lives in the sidebar, never in the header |
 | A page heading, with or without its action buttons | `PageTitle` (`.Header`, `.SubHeader`, `.Actions` for the buttons, `.BackButton`, `.Avatar`) inside `PageContent` |
 | A data table / list of records | `ListingTable` (`.Container`, `.Toolbar`, `.Head`, `.Body`, `.Row`, `.Cell`, `.RowActions`, `.EmptyState`, `.Footer`) |
 | A form with grouped fields | `Form.Section` + `Form.Stack` (fields are plain `TextField`, `Select`, `Checkbox`, `Switch`) |
@@ -300,8 +345,7 @@ improvising around the component:
 
 | DSL | Oxygen |
 |---|---|
-| `navbar "Brand \| A -> S \| B -> T"` and no `sidebar` | the **TopNavLayout** shell (`references/app-structure.md`): `Header` in `AppShell.Navbar` with `Header.Brand`, then `Tabs` whose `value` is the current route and one `Tab component={Link} to="…"` per link, `Header.Spacer`, `Header.Actions` with `UserMenu`; no `AppShell.Sidebar`. Identical on every screen of a role |
-| `navbar "Brand"` + `sidebar "A -> S \| B"` | the **AppLayout** shell: brand-only `Header` in `AppShell.Navbar`, one `Sidebar.Item id link={<Link to="…" />}` per item in `AppShell.Sidebar` |
+| `navbar "Brand"` + `sidebar "A -> S \| B \| C -> T"` | the sample's `AppLayout`, on every screen of a role: `Header` with `Header.Toggle`, `Header.Brand` > `Header.BrandTitle` (the brand), `Header.Spacer`, `Header.Actions` (`ColorSchemeToggle`, `UserMenu`) in `AppShell.Navbar`; one `Sidebar.Item id link={<Link to="…" />}` per sidebar item in `AppShell.Sidebar`, grouped with `Sidebar.Category` as the sample groups its own, `activeItem` from the route; a `Footer` in `AppShell.Footer`. A link the wireframe put in the `navbar` still goes in the sidebar — the header never carries navigation |
 | `row` + `heading` + `right` + `button`(s) at the top of a screen | one `PageTitle`: the heading in `PageTitle.Header`, the buttons in `PageTitle.Actions`. Never a `Stack` around `PageTitle` — it squeezes the button until its label wraps onto two lines |
 | `heading` elsewhere | `Typography variant="h6"` (section title) |
 | `text`, `link`, `breadcrumb` | `Typography`, `Link component={RouterLink} to="…"`, `AppBreadcrumbs` |
@@ -341,7 +385,7 @@ derives from them, so the numbers agree with the table by construction.
 | Page renders blank in the cluster, every asset 404s | `base` in `vite.config.ts` or `basename` on the router, copied from a sample | Remove both — served at host root (`react-webapp`) |
 | A sub-component or prop "does not exist" | Answered from memory, or from the package's prose docs | `scripts/props.mjs <Component>` — the installed types reflect the installed version; neither training data nor `components.md` does |
 | Every record in a list is its own `Card` | Defaulted to a card grid instead of checking data density | `ListingTable` for records; `Card` for widgets and galleries |
-| Brand colors are set, deployed app is stock-themed; or the accent is unreadable in one mode | The theme was never derived, or a pale hue was used in both schemes | `references/theming.md` — derive `brandTheme` with `createOxygenTheme`; darken the light scheme's `main` |
+| Brand colors are set, deployed app is stock-themed; or the accent is unreadable in one mode | The theme was never derived, or a pale hue was used in both schemes | `references/brand-theme.md` — derive `brandTheme` with `createOxygenTheme`; darken the light scheme's `main` |
 | The user gave brand colors in chat, the build ignored them | A coding run never sees a conversation — colors reach it only from this skill or the project's `specs/requirements/prd.md` | Set them in The organization's colors (Settings → Skills) for the whole org, or under `## Brand colors` in the project's `specs/requirements/prd.md` for one project; an answer that is not in a file did not happen |
 
 ## Red flags — stop and use Oxygen
@@ -359,6 +403,9 @@ derives from them, so the numbers agree with the table by construction.
 - About to wrap `PageTitle` in a `Stack` to place a button beside it, use a
   bare `Select` with a `label`, or put a caption under a `StatCard` — each is
   a row in the wireframe table above, with the component that fits
+- About to put navigation in the header, drop the sidebar, or lay a page out
+  in a way `sample/src/` does not — the sample app is the structure, and the
+  wireframe was drawn against it
 - About to satisfy a brand-color requirement by styling components instead of
   deriving a theme — or about to ignore one because no stock theme matches
 - About to ask which theme or colors to use — that is settled in Brand colors,
