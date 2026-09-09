@@ -19,6 +19,8 @@
     "deadcode-ts:check": "knip --production"
   },
   "devDependencies": {
+    "@cucumber/gherkin": "^42.0.1",
+    "@cucumber/messages": "^34.2.1",
     "@eslint/js": "^9.13.0",
     "eslint": "^9.13.0",
     "knip": "^5.88.1",
