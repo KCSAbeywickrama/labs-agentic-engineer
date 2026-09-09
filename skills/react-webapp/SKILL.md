@@ -19,8 +19,11 @@ browser config — they are pod env for nginx.
 
 1. **Scaffold** per Layout, including the nginx drop-in copy in step 1 of Layout.
    Read [mock-mode.md](references/mock-mode.md) and include its dependencies in
-   `package.json`, then `npm install` **once** with the complete dependency set —
-   npm can only satisfy a peer set it sees all at once.
+   `package.json`, then install **once** with the complete dependency set — npm
+   can only satisfy a peer set it sees all at once, and a package added to an
+   already-resolved tree costs a second full resolve at best. With a design
+   system, its own Setup step IS that install (it writes the manifest and runs
+   `npm install` itself); without one, `npm install`.
 2. **Prepare shared interfaces** — write `src/env.ts`, generate `src/generated/`
    from each dependency's OpenAPI contract, and write `src/api.ts` with a
    **same-origin** `baseUrl`. With auth, establish `src/auth.ts` and its exports
@@ -37,7 +40,7 @@ browser config — they are pod env for nginx.
    # ← the design system's check goes here (see below)
    npx tsc --noEmit              # type-check without emitting
    npm run build                 # actually build
-   ! grep -rqE "setupWorker|msw/browser" dist/assets/*.js  # no mock in the bundle
+   ! grep -rq mockServiceWorker dist/ # the bundle carries no mock — step 4
    git status --porcelain --ignored=matching -- . \
      | grep '^!!' | grep -vE 'node_modules|dist'   # ← output MUST be empty
    ```

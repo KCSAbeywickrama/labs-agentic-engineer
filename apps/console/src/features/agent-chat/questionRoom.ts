@@ -132,6 +132,16 @@ export function closeRoomQuestion(doc: Doc, toolCallId: string): void {
   map.set(toolCallId, { ...existing, submitted: true });
 }
 
+/**
+ * Remove a question from the room outright — the entry a streamed prefix left
+ * when the SDK then rejected the complete call. Unlike a close, nothing was
+ * ever asked, so nothing is kept as submitted. Idempotent.
+ */
+export function withdrawRoomQuestion(doc: Doc, toolCallId: string): void {
+  const map = questionsMap(doc);
+  if (map.has(toolCallId)) map.delete(toolCallId);
+}
+
 /** How long an unbacked ("orphan") entry may live before it is closable. */
 export const ORPHAN_QUESTION_TTL_MS = 24 * 60 * 60 * 1000;
 

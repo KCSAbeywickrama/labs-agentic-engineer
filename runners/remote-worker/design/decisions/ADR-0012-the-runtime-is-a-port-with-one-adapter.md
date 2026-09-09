@@ -1,7 +1,7 @@
 # ADR-0012 — The runtime is a port, and it has one adapter
 
 **Status:** accepted · 2026-09-07
-**Supersedes nothing.** Extends ADR-0002 (run observability) and ADR-0011 (the
+**Supersedes nothing.** Extends ADR-0002 (run observability) and ADR-0014 (the
 tool glossary), which each carved out one half of this seam before it existed.
 
 ## Context
@@ -153,3 +153,12 @@ adapter to mean anything.
   by the runner and enforced by whichever adapter is running.
 - `ValidationProgressTracker.hook` became `observe(toolName, toolInput, toolUseId)`.
   Which mechanism delivers a tool call is the adapter's business.
+- **A watcher may be AWAITED.** `RuntimeObservers.toolUse` answers
+  `void | Promise<void>`, and the adapter awaits it. Merging ADR-0011 is what
+  established the need: the validation status line posts a comment from that
+  seam, and its whole value is that the line explaining a twenty-minute silence
+  lands before the silence — which only holds while the runtime holds the call
+  until the watcher returns. It stays a watcher: the return value is still
+  ignored, so awaiting buys ordering and never a veto. Pinned in
+  `runtime/claude/runtime.test.ts` (`watchHook`), because losing the `await`
+  breaks nothing a type-checker or a unit test of the line itself would see.

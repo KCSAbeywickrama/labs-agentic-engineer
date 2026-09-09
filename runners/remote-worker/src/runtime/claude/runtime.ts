@@ -113,12 +113,17 @@ const LOOPBACK_TOKEN = "loopback";
  * `policy.observe.toolUse` is not a decision — see `RuntimeObservers` — so this
  * adapts the platform's watcher onto the SDK's hook shape and always returns an
  * empty decision. It exists so the port never has to mention `HookCallback`.
+ *
+ * The watcher is AWAITED, which is the one thing this adapter has to get right
+ * for it: a watcher that posts (the validation status line) is only worth
+ * having if its line lands before the call it describes, and the SDK awaiting
+ * this callback is what holds the call until it has.
  */
-function watchHook(observe: NonNullable<RuntimePolicy["observe"]>["toolUse"]): HookCallback {
+export function watchHook(observe: NonNullable<RuntimePolicy["observe"]>["toolUse"]): HookCallback {
   return async (input) => {
     const hookInput = input as { hook_event_name?: string; tool_name?: string; tool_input?: unknown; tool_use_id?: string };
     if (hookInput?.hook_event_name !== "PreToolUse") return {};
-    observe?.(hookInput.tool_name ?? "", hookInput.tool_input, hookInput.tool_use_id ?? "");
+    await observe?.(hookInput.tool_name ?? "", hookInput.tool_input, hookInput.tool_use_id ?? "");
     return {};
   };
 }

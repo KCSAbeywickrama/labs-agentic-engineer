@@ -893,21 +893,32 @@ readers never reach.
 
 | | |
 |---|---|
-| Description, under the heading | *Each criterion represents one thing your software must do, based on your requirements. After every deployment they are checked against the running software, and the results appear under Validations. To change one, ask the agent.* |
-| Checked by a test | **`AUTO`**, tooltip *Validated automatically by the agent.* |
-| Checked by a person | **`MANUAL`**, tooltip *Requires manual validation.* |
+| Description, under the heading | *Each criterion represents one thing your system must do, based on your requirements. After every deployment the ones that can be automated are checked against the deployed system, and the results appear under Validations. The rest you have to check yourself. To change one, ask the agent.* |
+| Checked by a test | the **agent glyph** — `Sparkles`, `primary.main` — tooltip *Validated automatically by the agent.* |
+| Checked by a person | the **person glyph** — `User`, `text.secondary` — tooltip *Requires manual validation.* |
 
-**`AUTO`, never `E2E`.** The stored value stays `e2e` — the validation runner,
-the report generator and the per-criterion spec path all key on it — so the badge
-carries a **display name** instead, the same split the run-state chips already
-draw. `E2E` was never a copy decision: it was agent-authored JSON rendered
-verbatim, which is how an unexpanded acronym reached the screen past naming rule
-4. The rule now has a place to bite, because the word is finally a string
-somebody wrote.
+**A glyph, never the word.** The stored value stays `e2e` — the validation
+runner, the report generator and the per-criterion spec path all key on it — and
+no row spells it out, because a row marks the method rather than naming it. That
+shuts naming rule 4's oldest hole here: `E2E` was never a copy decision, it was
+agent-authored JSON rendered verbatim, and an acronym can no longer reach a row
+even by accident. The display name **`auto`** survives where prose needs a word
+for the same thing — the Validations pending tile and its tally — and is not a
+row's vocabulary.
 
-**Every badge earns a tooltip, and only the two real methods get one.** A third
-value exists in older documents; it renders bare rather than being given an
-invented explanation.
+**The agent glyph is the console's own.** `Sparkles` at `primary.main` is what
+the agent chat, the "ask the agent" action and the nav already mean *the agent*
+by, so a row inherits a meaning the reader arrives with instead of teaching a
+new one.
+
+**Everything that is not `e2e` takes the person glyph.** A third method exists in
+older documents, and a criterion can arrive with no method at all. Neither is ever
+automated, so both fall to the person rather than rendering bare — the glyph is
+already claiming a human does the work, and one sentence is honest for all three.
+
+**The mark is the accessible name, not the tooltip.** A tooltip exists only while
+hovered, and `Tooltip` puts its title on a bare span where an aria-label is
+ignored, so the same sentence is repeated as visually-hidden text.
 
 **"Ask the agent", not an edit control.** There is no way to edit a criterion
 here, by design: they are written from the requirements alone and never from the
@@ -920,13 +931,12 @@ render the same pane, and Validations suppresses it — a reader there came for 
 results, so a sentence promising that results appear under Validations is
 redundant on the page holding them.
 
-**Unsettled: `deployment` or `build`.** This description says criteria are checked
-*after every deployment*; the **Validations** empty state says *"After a build,
-your software is checked against the validation criteria in your spec"*. Both name
-the same event. *Deployment* is the more accurate word, since validation runs
-against the deployed system and needs its resolved endpoints, but that empty state
-was out of scope when this pane was written. Whoever settles it changes both and
-deletes this note.
+**`deployment`, not `build`, and `the deployed system`, not `your software`.**
+Validation runs against a running instance and needs its resolved endpoints, so
+the event before it is a deployment; the **Validations** empty state says so too.
+The subject takes the platform's own noun, the one the agent's status line, the
+validation task's title and the `aep-validation` skill all already use — so the
+description and the run name the same thing the same way.
 
 ### What a criterion is doing, while a run is under way
 
@@ -941,32 +951,61 @@ The row now says what is happening to it. In the order a reader meets them:
 |---|---|
 | Nothing has happened to it yet | **`Pending`** |
 | The run has decided how it will check this one | **`Planned`** |
-| Driving the running software to learn how to check it | **`Exploring…`** |
+| Driving the deployed system to learn how to check it | **`Exploring…`** |
 | Writing its check | **`Authoring…`** |
 | Its check is running | **`Running…`** |
 | It worked, then broke — being repaired | **`Healing…`** |
-| Settled | **`Passed`** / **`Failed`**, unchanged |
+| Settled | **`Passed`** / **`Failed`** |
+| The last run has no row for it | **`No result`** |
 
-Above the rows, one line — **the agent's, in its own words**, and only while the
-run is under way. It is the newest comment on the run's validation issue, the
-same status line a dev cycle keeps on the issue it is working, and the
-`aep-validation` skill asks for it in those terms: *say what the criterion rows
-cannot*. So the two are different granularities and cannot contradict each other
-— the rows say where each criterion stands, the line says where the run is in its
-workflow and what it decided.
+**`Passed` and `Failed` carry a mark; nothing else does.** They are the two
+answers a run produces, and as outlined chips they would otherwise differ by hue
+alone, which is nothing to a red/green colour-blind reader. Every other word in
+the table is the ABSENCE of an answer, so marking one would spend the distinction
+where it is not needed.
 
-Its vocabulary is not fixed here, because it is not ours. This file governs agent
-prose, and what it asks of this line is a shape rather than words: **one line,
-present tense, about the run and not about a criterion.** A phase enum was
-rejected for it (`liveLine.ts` carries why) — the workflow loops, so any fixed
-ladder either marches backwards on screen or is pinned forward and lies.
+**A trailing `*` qualifies the verdict.** A test that was flaky, or one the agent
+repaired, modifies the word beside it rather than earning a chip of its own; the
+tooltip says which applies. **`Failed*`** is a real row — a repair can leave a
+test still failing.
 
-Two derived sentences remain as the **fallback**, for the window before the first
-comment lands and for a run whose agent posts none:
+**`No result` is about a run that finished without covering the row.** The
+criteria are read at the branch tip and the report at the merge commit of the
+attempt that wrote it, so a criterion authored or renamed since has no row in
+that report. Tooltip: *The last validation run produced no result for this
+criterion.* Neutral rather than a warning, because editing the spec after a run
+is the ordinary loop and colouring the expected state teaches the reader to
+discount the colour. It never appears while an attempt is in flight; such a row
+reads **`Pending`**, the run still being able to answer it.
+
+Above the rows, one line, and only while the run is under way. It is the newest
+comment on the run's validation issue, the same status line a dev cycle keeps on
+the issue it is working. It says where the RUN is; the rows say where each
+criterion stands. Different granularities, so they cannot contradict each other.
+
+**Two writers, and only one of them is labelled.** Most of the line is the
+platform's: it watches the run's own tool calls and posts what it saw — the
+harness, the exploration, the specs running, the report. That is what the pulse
+beside it already means, so it carries no label. The agent writes the two ends
+and anything between them that no command can show — a criterion it cannot
+reach, a login the roles gate never published — and those lines are prefixed
+**The agent:**, because a reader who cannot tell them apart over-trusts the
+mechanical one. Newest wins either way.
+
+The platform's words are not fixed here (`runners/.../validation_status_line.ts`
+holds them, one per rung); the agent's are not ours to fix at all. What this file
+asks of both is a shape: **one line, present tense, about the run and not about a
+criterion**, and **naming the evidence rather than the step** — the workflow
+loops, so a line claiming a step is wrong for most of a run, while one naming the
+call it just watched stays true.
+
+Three derived sentences remain as the **fallback**, for the window before the
+first comment lands and for a run whose posts failed:
 
 | | |
 |---|---|
 | Nothing picked up yet | *Setting up the test harness…* |
+| Work under way | *Checking the criteria, N of M answered…* |
 | All settled, no results published | *Writing the validation report…* |
 
 **The line is led by the working pulse, and shows only while validating.** The
@@ -1001,12 +1040,19 @@ is watching it, and "what is it doing right now" is the whole question. The rule
 protects against a reader being told about machinery they did not ask about —
 not against answering the one thing they came to find out.
 
-**Unsettled: *test harness* and *validation report*.** Both fallback lines name
+**Unsettled: *test harness*, *validation report*, and *test issues*.** All name
 internal artifacts, which rule 6 has a better claim over — a reader does not have
-a harness, they have criteria waiting to be checked. They are the two windows
-where nothing else moves, so something had to be said; whoever finds better words
-changes them here first. Less load-bearing now that the agent's own line covers
-the run — but they still speak first on every run, before its opening comment.
+a harness or a test issue, they have criteria waiting to be checked. The middle
+line says it in those terms and the others do not; whoever finds better words
+changes them here first.
+
+That covers both writers. The derived fallbacks (*Setting up the test harness…*,
+*Writing the validation report…*) are the console's, now distant — the run posts
+its own line as it works, and they speak only before its first comment lands. The
+platform's rungs live in `validation_status_line.ts`, and two of them —
+*Generating the validation report from the automated test results…* and *Fixing the test
+issues…* — carry the same debt. `harness` is deliberately byte-identical to its
+fallback, so one phase reads the same sentence whichever source produced it.
 
 ## What a change invalidates
 
@@ -1119,7 +1165,7 @@ five surfaces fill themselves.
 |---|---|---|
 | Builds | **No builds yet.** A build hands your design to coding agents, which write your components and open pull requests. | **Go to the spec** |
 | Deployments | **Nothing deployed yet.** Your components run here once they are built — each environment shows what is live and where to reach it. | — |
-| Validations *(never validated)* | **Nothing validated yet.** After a build, your software is checked against the **validation criteria** in your spec; results appear here. | — |
+| Validations *(never validated)* | **Nothing validated yet.** After a deployment, the deployed system is checked against the **validation criteria** in your spec. Results appear here. | — |
 | Validations *(version skipped)* | **This version was not validated** — it has no validation criteria, or it was an incident run, which gets no validation cycle. | — |
 | Components *(overview)* | **No components yet.** Components are the services and apps your design is made of — they appear as agents build them. | — |
 | Architecture *(overview)* | **No architecture yet.** Once the agent designs your app, its components and the connections between them are drawn here. | — |

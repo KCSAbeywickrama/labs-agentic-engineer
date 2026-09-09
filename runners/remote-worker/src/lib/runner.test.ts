@@ -24,18 +24,86 @@ import path from "node:path";
 import {
   alwaysOnSkills,
   contractReferencePath,
+  validationStatusLineFor,
   onDemandSkills,
   promptWithProjectRoot,
   systemPromptAppend,
 } from "./runner.js";
 import { toolGlossary } from "./tool_glossary.js";
 import { MissingWorkflowSkillError, requireWorkflowBodies } from "./skills_presence.js";
+import { createValidationProgressTracker } from "./validation_progress.js";
+import type { DispatchRequest } from "./types.js";
 
 // What is NOT here any more: the MCP option builder, the deny list, the setting
 // sources and the debug options all moved to `runtime/claude/runtime.test.ts`
 // with the code they pin. This file is what `lib/runner.ts` still decides —
 // which is, deliberately, only things a second runtime would decide the same
 // way.
+
+// --- the issue status line: three ways to have none, all of them normal ------
+
+function validationDispatch(overrides: Partial<DispatchRequest> = {}): DispatchRequest {
+  return {
+    taskId: "11111111-1111-1111-1111-111111111111",
+    orgId: "acme",
+    projectId: "widgets",
+    componentName: "aep-validation",
+    repoUrl: "https://github.com/acme/widgets.git",
+    bearer: "",
+    identity: { name: "AEP", email: "aep@example.com" },
+    gitServiceUrl: "https://git.example.com",
+    prompt: "validation task",
+    taskKind: "validation",
+    validationIssue: 7,
+    ...overrides,
+  };
+}
+
+const progressTracker = () => createValidationProgressTracker(() => {});
+
+// The workspace's own wrapper and child env, as provisionWorkspace leaves them.
+const gh = { path: "/ws/.aep/gh", env: { GH_CONFIG_DIR: "/ws/.gh-config" } };
+
+// A coding run has no validation issue to speak on, and registering the hook
+// anyway would put a GitHub round trip on the Write and Bash calls of every
+// build to derive nothing.
+test("validationStatusLineFor: a run with no per-criterion tracker keeps no line", async () => {
+  const line = validationStatusLineFor(
+    validationDispatch({ taskKind: "implementation", validationIssue: undefined }),
+    undefined,
+    gh,
+    () => assert.fail("a coding run must not warn about a status line it never wanted"),
+  );
+  assert.equal(line, undefined);
+});
+
+// A validation dispatch that carried no issue number — an older BFF, or one that
+// could not resolve it — runs exactly as it did before, minus the line. Silent
+// is the old behaviour; failing here would trade two hours of work for the
+// commentary on it.
+test("validationStatusLineFor: a validation run with no issue number keeps no line", async () => {
+  const line = validationStatusLineFor(
+    validationDispatch({ validationIssue: undefined }),
+    progressTracker(),
+    gh,
+    () => assert.fail("an absent issue number is a normal dispatch, not a fault to report"),
+  );
+  assert.equal(line, undefined);
+});
+
+// The whole point: a validation run that CAN name its issue gets the line.
+test("validationStatusLineFor: a validation run that names its issue keeps a line", () => {
+  const line = validationStatusLineFor(
+    validationDispatch(),
+    progressTracker(),
+    gh,
+    () => assert.fail("a wired run must not warn"),
+  );
+  // Both halves, because the report generator's OUTCOME is what the repair line
+  // keys on and a tracker missing `settle` would report the loop as progress.
+  assert.equal(typeof line?.observe, "function");
+  assert.equal(typeof line?.settle, "function");
+});
 
 // --- alwaysOnSkills: the run's own workflow is not the design's to choose ----
 
@@ -230,7 +298,6 @@ import { allowsWriteOutsideProject } from "./workspace_guard.js";
 import { buildMcpPolicy, startCodingRun } from "./runner.js";
 import { createRunTerminator } from "./run_loop.js";
 import type { TaskLog } from "./logger.js";
-import type { DispatchRequest } from "./types.js";
 import type { WorkspaceLayout } from "./workspace.js";
 
 const STAGED_SECRET = "staged-secret-value-123456";

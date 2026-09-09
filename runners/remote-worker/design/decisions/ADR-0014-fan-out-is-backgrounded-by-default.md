@@ -1,4 +1,4 @@
-# ADR-0011 — Fan-out is backgrounded by default, and the skill is what says so
+# ADR-0014 — Fan-out is backgrounded by default, and the skill is what says so
 
 **Status:** Accepted
 

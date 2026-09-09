@@ -290,6 +290,54 @@ func TestDispatch_ValidationCycleDispatchesOnOCPath(t *testing.T) {
 	}
 }
 
+// TestDispatch_ValidationCycleNamesItsIssueToThePod: the runner posts the
+// validation issue's status line itself, and nothing else in the pod's
+// environment answers "which issue" — AEP_TASK_ID is the cycle's uuid, and the
+// number reaches the agent only as prose inside AEP_PROMPT.
+func TestDispatch_ValidationCycleNamesItsIssueToThePod(t *testing.T) {
+	rec := &chainRecorder{}
+	e := newOCDispatchExecutor(rec)
+
+	req := codingMilestoneDispatch()
+	req.Kind = delivery.CycleKindValidation
+	req.IssueNumber = 77
+
+	if _, err := e.Dispatch(context.Background(), req); err != nil {
+		t.Fatalf("a validation cycle must dispatch on the OC path: %v", err)
+	}
+	if got := podEnv(rec, envValidationIssue); got != "77" {
+		t.Errorf("%s = %q, want %q", envValidationIssue, got, "77")
+	}
+}
+
+// TestDispatch_CodingCycleNamesNoIssue: a coding cycle discovers a whole
+// working set rather than being anchored to one issue, so it has no issue to
+// name. The var is ABSENT rather than "0" — the runner reads presence, and a
+// stamped zero would be a number it has to know is not one.
+func TestDispatch_CodingCycleNamesNoIssue(t *testing.T) {
+	rec := &chainRecorder{}
+	e := newOCDispatchExecutor(rec)
+
+	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	for _, ev := range rec.load.Env {
+		if ev.Key == envValidationIssue {
+			t.Fatalf("a coding cycle stamped %s = %q", envValidationIssue, ev.Value)
+		}
+	}
+}
+
+// podEnv reads one env var off the dispatched Workload.
+func podEnv(rec *chainRecorder, key string) string {
+	for _, ev := range rec.load.Env {
+		if ev.Key == key {
+			return ev.Value
+		}
+	}
+	return ""
+}
+
 // TestDispatch_OCPathStillRequiresTheOrgsSecretRefs: refs-only means the run
 // cannot start without them, and the message must name which one is missing.
 // (The Anthropic side's equivalent — a resolver that cannot answer — is

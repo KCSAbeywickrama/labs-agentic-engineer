@@ -52,6 +52,9 @@ import { createRunWatchdog } from "./progress/watchdog.js";
 import { stagedSecretValues, webSearchDenial } from "./websearch_dlp.js";
 import { allowsWriteOutsideProject } from "./workspace_guard.js";
 import { createValidationProgressTracker } from "./validation_progress.js";
+import type { ValidationProgressTracker } from "./validation_progress.js";
+import { createValidationStatusLine, ghCommentPoster } from "./validation_status_line.js";
+import type { GhInvocation, ValidationStatusLine } from "./validation_status_line.js";
 import { staticTokenSource, type AccessTokenSource } from "./auth_retry.js";
 import { webFetchDenial } from "./webfetch_guard.js";
 import { SKILLS_MIRROR_DIR, requireWorkflowBodies } from "./skills_presence.js";
@@ -250,6 +253,43 @@ export function onDemandSkills(taskKind: DispatchRequest["taskKind"]): string[] 
 }
 
 /**
+ * The status line for THIS dispatch, or undefined when the run cannot or should
+ * not keep one.
+ *
+ * Validation-specific, and named for it: only a validation cycle is anchored to
+ * an issue, so only a validation cycle has a line to keep. It answers with the
+ * whole tracker rather than a hook — the report generator's OUTCOME is half the
+ * mechanism, and a caller handed only the hook would report the exit-2 loop as
+ * progress and back again.
+ *
+ * Two conditions, and each absence is a NORMAL run rather than a fault: a coding
+ * run has no validation issue to speak on, and a validation dispatch that
+ * carried no issue number (an older BFF, or one that could not resolve it) works
+ * exactly as it did before, minus the line. Never throws for either — a status
+ * line is how a run is WATCHED, and failing a two-hour validation because it
+ * could not be watched would trade the work for the commentary.
+ *
+ * It shares the per-criterion tracker's state so both derive one run's history
+ * once — see ValidationProgressTracker.state.
+ *
+ * `gh` is passed rather than resolved here because the answer is the WORKSPACE's,
+ * not this machine's: the wrapper the run's own `gh` calls go through, and the
+ * child environment that makes it authenticate. Resolving a binary off PATH
+ * instead — the first attempt — posted as nobody in the mode where no token is
+ * mounted, and could not be tested without a `gh` on the test machine.
+ */
+export function validationStatusLineFor(
+  req: DispatchRequest,
+  progress: ValidationProgressTracker | undefined,
+  gh: GhInvocation,
+  warn: (reason: string) => void,
+): ValidationStatusLine | undefined {
+  const issue = req.validationIssue ?? 0;
+  if (!progress || issue <= 0) return undefined;
+  return createValidationStatusLine(progress.state, ghCommentPoster(gh, req.repoUrl, issue), warn);
+}
+
+/**
  * `PLAYWRIGHT_MCP_CONFIG`, but only when there is a config to point at.
  *
  * Spread into the child env so the variable is absent rather than empty when the
@@ -351,6 +391,22 @@ export async function startCodingRun(
         })
       : undefined;
 
+  // The RUN's own line on its issue — see validationStatusLineFor above.
+  const validationStatusLine = validationStatusLineFor(
+    req,
+    validationProgress,
+    // The wrapper and env the agent's own `gh` calls use — see ghCommentPoster
+    // for why the raw binary is not enough.
+    { path: layout.ghWrapper, env: childEnv },
+    (reason) => {
+      // Uncoded on purpose: the notice codes are a contract enum whose labels
+      // `@aep/progress-view` owns (RunEvent.code), and adding one is a contract
+      // change rather than a merge's to make. The reason already reads as a
+      // sentence, which is what an uncoded notice renders.
+      emit({ kind: "notice", level: "warn", detail: reason });
+    },
+  );
+
   const deadline = runDeadlineFromEnv(process.env);
   // The one way anything in this file ends a run early. It is handed to the MCP
   // policy below and to the loop further down, and the loop is what acts on it
@@ -396,14 +452,24 @@ export async function startCodingRun(
       ),
     },
     ...buildMcpPolicy(req, layout, terminator, mcpAuth),
-    ...(validationProgress
+    ...(validationProgress || validationStatusLine
       ? {
           observe: {
-            toolUse: validationProgress.observe,
-            // The tracker settles a criterion from the SAME `ok` the feed
-            // reports, rather than re-deriving success from the tool result a
-            // second time.
-            toolOutcome: validationProgress.settle,
+            // Fanned out here rather than chained inside either watcher, so
+            // neither can swallow the other's call. The rows move first: the
+            // status line awaits a GitHub round trip, and a row is cheaper to
+            // be right about than a comment.
+            toolUse: async (toolName: string, toolInput: unknown, toolUseId: string) => {
+              validationProgress?.observe(toolName, toolInput, toolUseId);
+              await validationStatusLine?.observe(toolName, toolInput, toolUseId);
+            },
+            // Both settle from the SAME `ok` the feed reports, rather than
+            // re-deriving success from the tool result a second time: the rows
+            // settle a spec run, the status line settles the report generator.
+            toolOutcome: (toolUseId: string, ok: boolean) => {
+              validationProgress?.settle(toolUseId, ok);
+              validationStatusLine?.settle(toolUseId, ok);
+            },
           },
         }
       : {}),

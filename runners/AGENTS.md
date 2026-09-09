@@ -187,6 +187,28 @@ into the runner pod at `/app/skills` for live skill edits (see
   either alone re-creates a log that says reasoning happened without saying what
   it was. ADR-0002 decisions 14–16 have the measurements, including why stderr
   is *not* where retry detail lives.
+- **A validation run keeps its own issue's status line, and the platform writes
+  it.** `lib/validation_status_line.ts` is a WATCHER on
+  `RuntimePolicy.observe.toolUse` beside the per-criterion one, sharing its
+  `ValidationProgressState` so a row and the line above it cannot disagree (the
+  two are fanned out in `runner.ts`, rows first, so neither can swallow the
+  other's call). Two things make it unlike every other watcher here.
+  It performs **I/O on the agent's path** — an awaited `gh issue comment`
+  through the REAL `gh` (`resolveRealGhPath`, never the `.aep/gh` wrapper) —
+  because the whole value is that the line lands BEFORE the silence it explains;
+  a detached post during a twenty-minute exploration could land after it, and
+  `RuntimeObservers.toolUse` is awaited for exactly this one caller (ADR-0012).
+  And it reads the **outcome** as well as the call, through the same
+  `observe.toolOutcome` seam the rows settle on, because the report generator
+  FAILING is what puts a run into its repair mode. A failure is warned and swallowed: two hours of work
+  must never die because it could not be watched. The issue number arrives as
+  `AEP_VALIDATION_ISSUE`, stamped by the BFF — nothing else in the pod answers
+  "which issue", since `AEP_TASK_ID` is the cycle's uuid and the number reaches
+  the agent only as prose inside `AEP_PROMPT`. Rungs are one-way and the repair
+  mode absorbs the exit-2 loop, which is what keeps a lapping run to six lines
+  instead of three per criterion; `design/decisions/ADR-0011-the-platform-writes-a-validation-runs-status-line.md`
+  has the measurements, including the p44 run that produced two wrong lines
+  before either rule existed.
 - **Fan-out is NOT forced into the foreground any more, and the hook that did it
   is deleted.** `lib/fanout_foreground.ts` rewrote `run_in_background` to `false`
   on every `Agent`/`Task` call, for two measured reasons. The first — that a
@@ -204,7 +226,7 @@ into the runner pod at `/app/skills` for live skill edits (see
   followed by its own attributed steps. Read ADR-0002 decision 13 and its
   amendments before reintroducing any of this. The shape itself is the skill's,
   and it is now background-by-default:
-  `ADR-0011-fan-out-is-backgrounded-by-default.md` is that decision, and the
+  `ADR-0014-fan-out-is-backgrounded-by-default.md` is that decision, and the
   glossary below is what lets the skill state it without naming a runtime.
 - **Authored files land in the project.** `lib/workspace_guard.ts` is a
   `PreToolUse` hook that denies `Write`/`Edit`/`NotebookEdit` outside the
@@ -366,7 +388,7 @@ into the runner pod at `/app/skills` for live skill edits (see
   entry in `GLOSSARIES` and nothing else — this is not the runtime port, which is
   the seam `progress/claude_adapter.ts` sits on. `make workflow-skill` prints the
   glossary after the composed body in both modes, since the roles do not resolve
-  without it. ADR-0011.
+  without it. ADR-0014.
 - **A mirror with no workflow skill is FATAL.** `requireWorkflowBodies` throws and
   both entrypoints report a failed run. Every other skill degrades — a dangling
   pin warns and the build continues — because missing guidance costs quality and

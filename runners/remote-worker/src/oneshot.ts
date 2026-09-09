@@ -100,6 +100,17 @@ function readDispatchFromEnv(): { req: DispatchRequest; publisher: PublisherCred
     throw new Error(`AEP_TASK_KIND must be "implementation" or "validation": ${taskKind}`);
   }
 
+  // Absent on every non-validation dispatch, and absent rather than 0 when the
+  // BFF could not name one — the run then works exactly as before, minus its
+  // status line. A garbage value is the one case worth refusing: posting to
+  // whatever issue "12abc" truncates to would put this run's lines on a
+  // stranger's ticket.
+  const issueEnv = process.env.AEP_VALIDATION_ISSUE ?? "";
+  const validationIssue = issueEnv === "" ? 0 : Number(issueEnv);
+  if (!Number.isSafeInteger(validationIssue) || validationIssue < 0) {
+    throw new Error(`AEP_VALIDATION_ISSUE must be a whole number or unset: ${issueEnv}`);
+  }
+
   const publisher = requirePublisherCreds();
 
   if (!isUUID(taskId)) throw new Error(`AEP_TASK_ID is not a valid UUID: ${taskId}`);
@@ -124,6 +135,7 @@ function readDispatchFromEnv(): { req: DispatchRequest; publisher: PublisherCred
       mcpUrl: mcpUrl || undefined,
       mcpToken: undefined,
       taskKind,
+      validationIssue: validationIssue > 0 ? validationIssue : undefined,
       // OFF unless a human opts this pod in. The sinks are files in a workspace
       // nothing collects, so in the cluster they are write-only — and the debug
       // log holds prompt text. The opt-in exists because a stall that only

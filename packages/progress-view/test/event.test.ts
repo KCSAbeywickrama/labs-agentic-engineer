@@ -106,7 +106,7 @@ test("agent_started is the section header, and names the agent the parent named 
 
 test("a BACKGROUND agent says so, because it changes what its parent is doing", () => {
   // Background is the ordinary case for a builder — fan-out is backgrounded by
-  // default (ADR-0011) and the skill, not the platform, decides the shape — so
+  // default (ADR-0014) and the skill, not the platform, decides the shape — so
   // the header says which agents the lead is NOT blocked inside, which is what
   // makes an interleaved feed readable. (An older runtime forwarded none of a
   // backgrounded subagent's messages, so the platform forced fan-out into the

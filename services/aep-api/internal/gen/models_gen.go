@@ -1840,7 +1840,7 @@ type InputFailure struct {
 	Reason     string `json:"reason"`
 }
 
-// IssueComment One comment on an issue, exactly as GitHub holds it. The platform stores none of this — it is read live on every request, so GitHub stays the only copy. The platform's OWN machine comments are excluded (a resolved-dependency block, a provisioning note, a closing line — written for the agent, not for a person); what remains is the coding agent's progress notes and whatever a human wrote, which appear alike. They cannot be told apart by author, and are not meant to be — the platform comments through the org's own credential and the coding runner is handed that same credential, so both arrive under one login.
+// IssueComment One comment on an issue, exactly as GitHub holds it. The platform stores none of this — it is read live on every request, so GitHub stays the only copy. The platform's notes TO THE AGENT are excluded (a resolved-dependency block, a provisioning note, a closing line — written for a reader that is not a person); what remains is what a human wrote, what an agent said, and what the platform observed of a run. Author cannot separate them and is not meant to — the platform comments through the org's own credential and the coding runner is handed that same credential, so all three arrive under one login. `observed` is what separates a machine's report of a tool call from somebody's judgement about the work.
 type IssueComment struct {
 	// Author The commenter's GitHub login. Empty when the account is gone — GitHub answers a null author for a deleted user, which is a fact about the comment, not a read failure.
 	Author    string    `json:"author"`
@@ -1848,8 +1848,11 @@ type IssueComment struct {
 	CreatedAt time.Time `json:"createdAt"`
 
 	// ID GitHub's own node id — stable across reads, and the list key a consumer should render on.
-	ID  string `json:"id"`
-	URL string `json:"url"`
+	ID string `json:"id"`
+
+	// Observed True when the PLATFORM wrote this line from what it saw the run do, rather than an agent or a person writing it. A validation run's harness, exploration, spec runs and report are reported this way — inferred from tool calls the run had to make, never declared by it — so a reader can tell a mechanical observation from a judgement. Absent means somebody wrote it.
+	Observed bool   `json:"observed,omitempty"`
+	URL      string `json:"url"`
 }
 
 // IssueInfo One issue from list/search. Field names are CAPITALIZED on the wire (historical shape the deployed aep-mcp-server parses — do not "fix" without a coordinated MCP-server release).
@@ -2506,7 +2509,8 @@ type RunEvent struct {
 	// Status `agent_settled` and `task_settled` only: how the agent, or the backgrounded task it owned, ended. See AgentStatus — in particular that `stopped` is a cancellation and not a failure.
 	Status AgentStatus `json:"status,omitempty"`
 
-	// Summary `tool_use`, `tool_result`, the `git_*` kinds and `gh_action`: one line describing the call, composed by the producer for a reader — a file path, a search term, a workflow name. Capped, and never the raw arguments, which is what keeps a feed readable when an agent passes a whole file as a parameter.
+	// Summary `tool_use`, `tool_result`, the `git_*` kinds, `gh_action`, `task_started` and `task_settled`: one line describing the call, composed by the producer for a reader — a file path, a search term, a workflow name. Capped, and never the raw arguments, which is what keeps a feed readable when an agent passes a whole file as a parameter.
+	// A `task_settled` carries the SAME summary its `task_started` did. Without it the only thing left to name a finished background command is its `taskId`, and a row reading `background bql1cn6sh · failed` cannot be matched by eye to the command that failed.
 	Summary string `json:"summary,omitempty"`
 
 	// TaskID `task_started` and `task_settled`: the backgrounded command's id, which is what pairs the two. Distinct from `toolUseId` on purpose — the tool call that STARTS a background task settles immediately while the task runs on, so `toolUseId` cannot join a task's start to its end.
@@ -2527,7 +2531,9 @@ type RunEvent struct {
 	// ToolCount `agent_settled` only: how many tool calls that agent made, from the runtime's report on it. A spawned agent's individual calls need not reach this feed, so this is often the only measure of how much work it did.
 	ToolCount int `json:"toolCount,omitempty"`
 
-	// ToolUseID The tool call this event is about, and the join key of the whole feed: a `tool_result` carries the id of the `tool_use` it answers, and `git_commit`, `git_push` and `gh_action` carry the id of the shell call that caused them. Absent on every other kind.
+	// ToolUseID The tool call this event is about, and the join key of the whole feed: a `tool_result` carries the id of the `tool_use` it answers, and `git_commit`, `git_push` and `gh_action` carry the id of the shell call that caused them.
+	// `task_started` and `task_settled` carry it too, where the runtime named the call that launched the task. That is what lets a surface draw ONE row for a backgrounded command — the action, marked background, later gaining its outcome — instead of an action row and an unattached settle row repeating the same command line. `taskId` still joins a task's start to its end; this joins both of them to the call that started it, which `taskId` cannot do.
+	// Absent on every other kind, and absent on a task whose launching call the runtime did not name.
 	ToolUseID string `json:"toolUseId,omitempty"`
 
 	// TS When the producer emitted the event, from the producer's own clock. Ordering within an attempt is `seq`'s job, not this field's — two events can share a timestamp, and a producer's clock is not the platform's.

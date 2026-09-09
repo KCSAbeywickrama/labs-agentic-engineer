@@ -262,7 +262,7 @@ export function formatEvent(e: RunEventView): FormattedLine {
       // this agent was spawned DETACHED, so its parent kept working and the
       // section will fill in interleaved with everyone else's. That is the
       // ordinary shape of a build — fan-out is backgrounded by default
-      // (ADR-0011) and the skill, not the platform, decides it — so the word is
+      // (ADR-0014) and the skill, not the platform, decides it — so the word is
       // context for reading an interleaved feed, not an alarm. `false` is the
       // notable case and is never printed here, because a parent blocked inside
       // a child is already said where it reads better: the crew view shows the

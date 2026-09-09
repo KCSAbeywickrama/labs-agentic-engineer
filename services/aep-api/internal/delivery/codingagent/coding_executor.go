@@ -293,6 +293,12 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 	}
 	env[envAgentRuntime] = runtimeName
 	env[envAgentModel] = model
+	// Only a validation cycle is issue-anchored, so only it can name an issue.
+	// Absent rather than "0" for every other kind: the runner reads presence, and
+	// a stamped zero would be a number it has to know is not one.
+	if disp.validationIssue > 0 {
+		env[envValidationIssue] = strconv.Itoa(disp.validationIssue)
+	}
 	secretEnv := []SecretEnvRef{
 		{Key: anthropicEnvVarOrDefault(anthropicSR.EnvVar), SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
 		{Key: envGitHubToken, SecretName: githubSR.SecretRefName, SecretKey: githubSR.Property},
@@ -505,6 +511,13 @@ const validationComponentSentinel = "aep-validation"
 // is what makes the runner preload the `aep-validation` skill instead of `aep`.
 const validationTaskKind = "validation"
 
+// envValidationIssue names the validation issue to the pod. A validation run
+// posts that issue's status line as it works — see the runner's
+// validation_status_line.ts — and nothing else in the pod's environment answers
+// "which issue": AEP_TASK_ID is the cycle's uuid, and the number reaches the
+// agent only as prose inside AEP_PROMPT.
+const envValidationIssue = "AEP_VALIDATION_ISSUE"
+
 // validationDeadlineSeconds bounds a validation run (2h): browser boot + live
 // exploration + authoring/healing e2e specs is longer than a coding run.
 const validationDeadlineSeconds int64 = 7200
@@ -545,6 +558,12 @@ type dispatchShape struct {
 	// so the milestone (and the cycle kind) is what names it — not an issue.
 	milestoneNumber int
 	milestoneTitle  string
+	// validationIssue is the issue a VALIDATION cycle is anchored to, and zero
+	// for every other kind. It reaches the pod as AEP_VALIDATION_ISSUE because
+	// the runner posts that issue's status line itself, and it cannot name an
+	// issue it was only told about in prose: AEP_TASK_ID is the cycle's uuid,
+	// and the number is otherwise buried in the free text of AEP_PROMPT.
+	validationIssue int
 }
 
 // buildValidationPrompt is the validation-runner directive: it points at the

@@ -28,9 +28,13 @@ always the ones you have — which is why this file carries none of them.
 
 ## What is already true on this platform
 
-- **The CLI and its browser are installed.** Nothing to fetch, and no
-  `agent-browser install` — the browser is a chromium the image already baked
-  and points the CLI at.
+- **The CLI and its browser are installed.** Confirm it once, with
+  `command -v agent-browser`. If that fails, the CLI is not provisioned for
+  this run: say so in one line, record the walk as not run, and move on. Do not
+  search the filesystem for it, try `npx`, or install it — there is no
+  `agent-browser install` step to reach for, the browser is a chromium the
+  image already baked and points the CLI at, and a hunt for a binary that is
+  not there costs more than the walk it was for.
 - **Chromium runs with `--no-sandbox`, and the environment already says so.**
   `AGENT_BROWSER_ARGS=--no-sandbox` is set in the image, so a command written
   straight out of `agent-browser skills get core` works as written. You do not

@@ -213,8 +213,14 @@ export interface SkillsPolicy {
  * bargain than no progress feature.
  */
 export interface RuntimeObservers {
-  /** A tool call, before it runs. The return value is ignored. */
-  toolUse?(toolName: string, toolInput: unknown, toolUseId: string): void;
+  /**
+   * A tool call, before it runs. The return value is ignored — but a promise
+   * is AWAITED, so a watcher that has to reach the outside world lands before
+   * the call it describes. The validation status line does: its whole value is
+   * that the line explaining a twenty-minute silence is posted before the
+   * silence, not after it (`lib/validation_status_line.ts`).
+   */
+  toolUse?(toolName: string, toolInput: unknown, toolUseId: string): void | Promise<void>;
   /** A plain tool call settling, with the same `ok` that reaches the feed. */
   toolOutcome?(toolUseId: string, ok: boolean): void;
 }
