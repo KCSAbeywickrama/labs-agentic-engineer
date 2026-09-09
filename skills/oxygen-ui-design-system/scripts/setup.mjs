@@ -120,36 +120,48 @@ function resolveRouter(appDir, react) {
   const releases = npmView(appDir, `${ROUTER}@>=7.0.0`, ["version", "peerDependencies.react"], { many: true }).filter(
     (r) => r && typeof r.version === "string",
   );
+  // A release whose version string is not x.y.z (a dist-tag echoed back, a
+  // malformed entry) is skipped rather than allowed to break the sort.
   const ok = releases
-    .filter((r) => !parse(r.version)?.pre && satisfies(react, r["peerDependencies.react"]))
+    .filter((r) => {
+      const p = parse(r.version);
+      return p !== null && !p.pre && satisfies(react, r["peerDependencies.react"]);
+    })
     .sort((a, b) => compare(parse(a.version), parse(b.version)));
   if (ok.length === 0) throw new Error(`no ${ROUTER} release accepts react ${react}; check ${ROUTER}'s peer dependency by hand`);
   return ok[ok.length - 1].version;
 }
 
+const EXACT = /^\d+\.\d+\.\d+$/;
+
 /**
- * `{ oxygen, icons, router, react }` — versions to write. The peer React
- * version comes from the installed package when there is one (no network),
- * else from the registry.
+ * `{ oxygen, icons, router, react, reactDom }` — versions to write. The peer
+ * versions come from the installed package when there is one (no network),
+ * else from the registry. `react-dom` follows its own peer entry when Oxygen
+ * pins one exactly, and React's version otherwise.
  */
 function resolveVersions(appDir) {
   const installed = path.join(appDir, "node_modules", OXYGEN, "package.json");
   let oxygen;
   let react;
+  let reactDom;
   if (existsSync(installed)) {
     const pkg = JSON.parse(readFileSync(installed, "utf8"));
     oxygen = pkg.version;
     react = pkg.peerDependencies?.react;
+    reactDom = pkg.peerDependencies?.["react-dom"];
   }
   if (!oxygen || !react) {
-    const v = npmView(appDir, `${OXYGEN}@latest`, ["version", "peerDependencies.react"]);
+    const v = npmView(appDir, `${OXYGEN}@latest`, ["version", "peerDependencies.react", "peerDependencies.react-dom"]);
     oxygen = v.version;
     react = v["peerDependencies.react"];
+    reactDom = v["peerDependencies.react-dom"];
   }
-  if (!/^\d+\.\d+\.\d+$/.test(react ?? "")) throw new Error(`${OXYGEN} names no exact React peer version (got ${react ?? "nothing"}); pin react by hand`);
+  if (!EXACT.test(react ?? "")) throw new Error(`${OXYGEN} names no exact React peer version (got ${react ?? "nothing"}); pin react by hand`);
+  if (!EXACT.test(reactDom ?? "")) reactDom = react;
   const icons = npmView(appDir, `${ICONS}@latest`, ["version"]).version;
   const router = resolveRouter(appDir, react);
-  return { oxygen, icons, router, react };
+  return { oxygen, icons, router, react, reactDom };
 }
 
 function main() {
@@ -190,7 +202,7 @@ function main() {
   }
   const wanted = {
     react: versions.react,
-    "react-dom": versions.react,
+    "react-dom": versions.reactDom,
     [OXYGEN]: `^${versions.oxygen}`,
     [ICONS]: `^${versions.icons}`,
     [ROUTER]: `^${versions.router}`,
@@ -206,7 +218,11 @@ function main() {
   }
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 
-  console.log(`ok    react and react-dom pinned to ${versions.react} (Oxygen ${versions.oxygen}'s peer dependency)`);
+  console.log(
+    versions.reactDom === versions.react
+      ? `ok    react and react-dom pinned to ${versions.react} (Oxygen ${versions.oxygen}'s peer dependency)`
+      : `ok    react pinned to ${versions.react}, react-dom to ${versions.reactDom} (Oxygen ${versions.oxygen}'s peer dependencies)`,
+  );
   console.log(`ok    react-router ${versions.router} — the newest release whose React peer accepts ${versions.react}`);
   console.log(changed.length ? `ok    package.json: ${changed.join(", ")}` : "ok    package.json already carried every dependency at these versions");
   if (removed.length) console.log(`ok    removed ${removed.join(", ")} — Oxygen bundles them; a second copy breaks theming at runtime`);

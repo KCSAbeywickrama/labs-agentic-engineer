@@ -12,20 +12,23 @@ base and returns a ready theme; there is no compile step and nothing
 generated to commit:
 
 ```ts
-// src/theme.ts
+// src/theme.ts — the example below is what BOTH colors resolved produce.
+// Write only the keys whose color resolved: an accent alone is the two
+// `primary` lines and nothing else; a neutral alone is the `background`
+// line and nothing else. A key you do not write is the stock value.
 import { createOxygenTheme } from '@wso2/oxygen-ui';
 
 export const brandTheme = createOxygenTheme({
   colorSchemes: {
     light: {
       palette: {
-        primary: { main: '#f5c518' },                        // accent
+        primary: { main: '#f5c518' },                        // accent (only if resolved)
       },
     },
     dark: {
       palette: {
-        primary: { main: '#f5c518' },                        // accent
-        background: { default: '#0a0a0a', paper: '#161616' }, // neutral, as a ramp
+        primary: { main: '#f5c518' },                        // accent (only if resolved)
+        background: { default: '#0a0a0a', paper: '#161616' }, // neutral (only if resolved), as a ramp
       },
     },
   },

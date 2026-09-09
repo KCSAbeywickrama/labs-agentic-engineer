@@ -176,8 +176,12 @@ automatically. Keep each comment `text` SHORT (a phrase, not a sentence).
   `sidebar` carrying that role's destinations. That is the app shell the
   design system's sample app has and the one the coding run builds, so the
   wireframe, the generated app and the sample line up one to one. Never put
-  links in the `navbar`, and never draw a screen without the `sidebar` — a
-  "simple" flow gets a short sidebar, not a different shell.
+  links in the `navbar`, and never draw a signed-in screen without the
+  `sidebar` — a "simple" flow gets a short sidebar, not a different shell. A
+  role-less public flow (a checkout) is the same shell with the public
+  destinations in its `sidebar`. The one screen drawn with no chrome at all
+  is a sign-in form the app **owns** (the DSL section above): it is built on
+  the design system's gate layout, outside the shell, and nothing else is.
 - Repeat the SAME `navbar` on every screen of one app. Repeat the SAME
   `sidebar` too, EXCEPT where a role's screens scope it to that role's
   destinations — the items both roles share still keep the same label and

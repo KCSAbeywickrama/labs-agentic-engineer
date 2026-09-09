@@ -39,7 +39,7 @@ const ROUTER_RELEASES = [
   { version: "8.0.0-pre.1", "peerDependencies.react": ">=18" },
   { version: "8.3.1", "peerDependencies.react": ">=19.2.7" },
 ];
-const OXYGEN_LATEST = { version: "0.13.1", "peerDependencies.react": "19.2.3" };
+const OXYGEN_LATEST = { version: "0.13.1", "peerDependencies.react": "19.2.3", "peerDependencies.react-dom": "19.2.3" };
 
 // Answers each `npm view` from a JSON file in the fixture's data dir, so a
 // test can rewrite what the registry says without touching the script.
@@ -175,6 +175,37 @@ test("npm 12's array-wrapped results resolve the same versions as npm 10's", () 
   assert.equal(pkg.dependencies["@wso2/oxygen-ui"], "^0.13.1");
   assert.equal(pkg.dependencies["@wso2/oxygen-ui-icons-react"], "^0.13.1");
   assert.equal(pkg.dependencies["react-router"], "^7.18.3");
+});
+
+// The registry can echo a dist-tag or a malformed entry into a version list;
+// one such row must be skipped, not allowed to throw inside the sort.
+test("a router release whose version is not x.y.z is skipped", () => {
+  const f = fixture();
+  writeFileSync(
+    path.join(f.data, "router.json"),
+    JSON.stringify([
+      { version: "latest", "peerDependencies.react": ">=18" },
+      { version: "7.18.3", "peerDependencies.react": ">=18" },
+      { version: "", "peerDependencies.react": ">=18" },
+    ]),
+  );
+  const { status, out, pkg } = run(f, ["--no-install"]);
+  assert.equal(status, 0, out);
+  assert.equal(pkg.dependencies["react-router"], "^7.18.3");
+});
+
+test("react-dom follows its own exact peer when Oxygen pins one, and React's version otherwise", () => {
+  const f = fixture();
+  writeFileSync(path.join(f.data, "oxygen.json"), JSON.stringify({ version: "0.13.1", "peerDependencies.react": "19.2.3", "peerDependencies.react-dom": "19.2.4" }));
+  let r = run(f, ["--no-install"]);
+  assert.equal(r.pkg.dependencies.react, "19.2.3");
+  assert.equal(r.pkg.dependencies["react-dom"], "19.2.4");
+  assert.match(r.out, /react pinned to 19\.2\.3, react-dom to 19\.2\.4/);
+
+  const g = fixture();
+  writeFileSync(path.join(g.data, "oxygen.json"), JSON.stringify({ version: "0.13.1", "peerDependencies.react": "19.2.3", "peerDependencies.react-dom": ">=19" }));
+  r = run(g, ["--no-install"]);
+  assert.equal(r.pkg.dependencies["react-dom"], "19.2.3", "a range is npm's to enforce; pin to React's exact version");
 });
 
 test("--charts adds the charts package at Oxygen's version", () => {

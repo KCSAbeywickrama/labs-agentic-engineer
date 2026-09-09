@@ -135,7 +135,7 @@ function main() {
   const outIdx = args.indexOf("-o");
   const outFile = outIdx === -1 ? null : args[outIdx + 1];
   const input = args.find((a, i) => !a.startsWith("-") && (outIdx === -1 || i !== outIdx + 1));
-  if (!input) {
+  if (!input || (outIdx !== -1 && (!outFile || outFile.startsWith("-")))) {
     console.log("usage: node seed.mjs <wireframes.dsl> [-o <fixtures.json>]");
     process.exit(2);
   }

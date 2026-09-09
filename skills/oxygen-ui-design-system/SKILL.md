@@ -34,7 +34,7 @@ uses, then write the JSX** — never the reverse. One command does it, from the
 App Path, after `npm install`:
 
 ```bash
-node "$AEP_SKILLS_DIR/oxygen-ui-design-system/scripts/props.mjs" PageTitle StatCard ListingTable
+node "${AEP_SKILLS_DIR:-.claude/skills}/oxygen-ui-design-system/scripts/props.mjs" PageTitle StatCard ListingTable
 ```
 
 It reads the installed `.d.ts` and prints, per component, every prop with its
@@ -62,8 +62,8 @@ is hand-written and lags the types: never settle a prop from it — print it
 
 ### Known errors in the package's docs
 
-Four snippets in the package's `.claude/*.md` do not compile against the code
-they ship with — verified with `tsc` against 0.13.1. The `.d.ts` is right and
+Seven snippets in the package's `.claude/*.md` do not compile against the code
+they ship with — verified against the 0.13.1 types. The `.d.ts` is right and
 the prose is wrong. `references/app-structure.md` beside this skill carries a
 corrected scaffold.
 
@@ -73,6 +73,9 @@ corrected scaffold.
 | `<Footer companyName="WSO2 LLC" />` | `Footer` takes children: `<Footer><Footer.Copyright>© WSO2 LLC</Footer.Copyright></Footer>` |
 | `DashboardIcon` | not an export — the lucide name is `LayoutDashboard` |
 | `GoogleIcon` | not an export — the brand icons carry no `Icon` suffix, so it is `Google` |
+| `<Grid item xs={12} md={4}>` (`patterns.md`) | MUI 7's `Grid` has no `item`/`xs`/`md` props — it is `<Grid size={{ xs: 12, md: 4 }}>`, as the sample app writes it |
+| `<ColorSchemeImage light="…" dark="…" />` (`theming.md`) | the props are `src={{ light: "…", dark: "…" }}` and `alt`; `width`/`height` optional |
+| `import { extendTheme } from '@mui/material/styles'` (`theming.md`, `migration.md`) | not an Oxygen export, and any `@mui/*` import fails Verify — a brand theme is `createOxygenTheme` from `@wso2/oxygen-ui` (`references/brand-theme.md`) |
 
 A snippet that fails `tsc` is a doc bug, not a version you are missing — print
 the props and follow them.
@@ -94,7 +97,7 @@ gate between your PR and the dev environment.
 Path:
 
 ```bash
-node "$AEP_SKILLS_DIR/oxygen-ui-design-system/scripts/setup.mjs"   # --charts if a screen draws a chart
+node "${AEP_SKILLS_DIR:-.claude/skills}/oxygen-ui-design-system/scripts/setup.mjs"   # --charts if a screen draws a chart
 ```
 
 One command, one install. It pins `react` and `react-dom` to exactly the
@@ -103,9 +106,10 @@ version Oxygen's peer dependency names (a newer 19.x fails `npm install` with
 `@wso2/oxygen-ui-icons-react` and `react-router` to `package.json`, removes any
 `@mui/*`, `@emotion/*` or `lucide-react` a scaffold slipped in, and runs
 `npm install` once. `--charts` adds `@wso2/oxygen-ui-charts-react`;
-`--no-install` writes the manifest only. Running it again changes nothing. If
-`$AEP_SKILLS_DIR` is unset, the script is `scripts/setup.mjs` next to this
-skill's `SKILL.md`.
+`--no-install` writes the manifest only. Running it again changes nothing.
+`AEP_SKILLS_DIR` is where a run finds the skill library; the fallback is the
+mirror the platform writes into every project, `.claude/skills/`, which is
+also where this skill's own `scripts/` live.
 
 **Never install `@mui/*`, `@emotion/*`, or `lucide-react` yourself.**
 `@wso2/oxygen-ui` bundles MUI, MUI X and Emotion as its own dependencies, and
@@ -175,6 +179,14 @@ sample's sidebar shows for its console — organisations, projects, analytics �
 becomes the wireframe's `sidebar` items for this app; the categories, icons
 and footer items (Settings, Help) keep the sample's arrangement.
 
+**Known defects in the sample.** It is vendored verbatim so a refresh stays a
+wholesale copy, and it carries a few demo shortcuts a generated app must not
+inherit — `sample/README.md` lists them (a login box pre-filled with
+credentials, a route param read under the wrong name, absolute paths that drop
+the organisation prefix, a detail page that shows the first record for an
+unknown id, an advanced filter that is never applied). Take the structure;
+where a line is on that list, write it right.
+
 **What the platform overrides in the sample.** Three files are Oxygen's demo
 wiring, not this platform's — take the structure and not the code:
 `main.tsx` (its `HashRouter`, `window.__APP_RUNTIME_CONFIG__` and theme
@@ -228,12 +240,12 @@ This skill's step in `react-webapp`'s verify sequence — after `npm install`,
 before `npx tsc --noEmit`, from the App Path:
 
 ```bash
-node "$AEP_SKILLS_DIR/oxygen-ui-design-system/scripts/verify.mjs"
+node "${AEP_SKILLS_DIR:-.claude/skills}/oxygen-ui-design-system/scripts/verify.mjs"
 ```
 
-If `$AEP_SKILLS_DIR` is unset, the script is `scripts/verify.mjs` next to this
-skill's `SKILL.md` (the BFF mirrors that directory to
-`.claude/skills/oxygen-ui-design-system/` at the repo root). A non-zero exit
+`AEP_SKILLS_DIR` falls back to `.claude/skills/`, the mirror the BFF writes
+into every project (this skill lands at
+`.claude/skills/oxygen-ui-design-system/`). A non-zero exit
 fails verification like any other step in that sequence, and every failure
 line names its fix. It is there because Oxygen's wiring faults — a second MUI
 or Emotion installed beside the bundled one, an import that bypasses
@@ -345,13 +357,14 @@ improvising around the component:
 
 | DSL | Oxygen |
 |---|---|
+| a `screen` with no `navbar`/`sidebar` — an app-owned sign-in, the one screen the wireframes skill draws without chrome | the sample's `GateLayout` (`Layout.Content` + `ParticleBackground`), the form inside it; every signed-in screen is under `AppLayout` |
 | `navbar "Brand"` + `sidebar "A -> S \| B \| C -> T"` | the sample's `AppLayout`, on every screen of a role: `Header` with `Header.Toggle`, `Header.Brand` > `Header.BrandTitle` (the brand), `Header.Spacer`, `Header.Actions` (`ColorSchemeToggle`, `UserMenu`) in `AppShell.Navbar`; one `Sidebar.Item id link={<Link to="…" />}` per sidebar item in `AppShell.Sidebar`, grouped with `Sidebar.Category` as the sample groups its own, `activeItem` from the route; a `Footer` in `AppShell.Footer`. A link the wireframe put in the `navbar` still goes in the sidebar — the header never carries navigation |
 | `row` + `heading` + `right` + `button`(s) at the top of a screen | one `PageTitle`: the heading in `PageTitle.Header`, the buttons in `PageTitle.Actions`. Never a `Stack` around `PageTitle` — it squeezes the button until its label wraps onto two lines |
 | `heading` elsewhere | `Typography variant="h6"` (section title) |
 | `text`, `link`, `breadcrumb` | `Typography`, `Link component={RouterLink} to="…"`, `AppBreadcrumbs` |
 | `card "Label \| Value \| Caption"` | `Card` > `CardContent` > `Typography variant="overline"` (label), `Typography variant="h4"` (value), `Typography variant="caption" color="text.secondary"` (caption). `StatCard` holds only `label` + `value` (+ `icon`): use it for a two-part `card "Label \| Value"`, and never park the caption outside it |
 | `card "Title"` with nested children | `Card` > `CardHeader title="Title"` + `CardContent` holding the children |
-| `table "A \| B \| C" [-> S]` + `row` lines | `ListingTable.Container` > `ListingTable` > `.Head` / `.Body` / `.Row` / `.Cell` with exactly those columns; `-> S` makes each `ListingTable.Row clickable onClick={() => navigate(…)}`; `ListingTable.EmptyState` with no rows. **Every drawn column is built.** One the list response does not carry is filled from **one** more request to another list operation of the same contract — a name column from the entity list joined on id, a count column from the child list filtered once and grouped — never from one request per row. Only when no list operation can supply it is the column omitted, with a line in your report |
+| `table "A \| B \| C" [-> S]` + `row` lines | `ListingTable.Container` > `ListingTable` > `.Head` / `.Body` / `.Row` / `.Cell` with exactly those columns; `-> S` makes each `ListingTable.Row clickable onClick={() => navigate(…)}`; `ListingTable.EmptyState` with no rows. **Every drawn column is built.** A column the list response does not carry is filled from **one** request to whichever other list operation of the contract supplies it — a name column from the entity list joined on id, a count column from the child list filtered once and grouped; two missing columns may need two such requests, one per list, never one per row. Only a column no list operation can supply is omitted, with a line in your report |
 | `select "Label: Value"` | `TextField select label="Label"` with a `MenuItem` per option and `Value` preselected — never a bare `Select`: its `label` prop renders nothing without `FormControl` + `InputLabel`, so the control shows no label at all |
 | `select "Active only"` (one filter, no `Label:`) | `FormControlLabel control={<Switch />} label="Active only"` — the DSL string is the visible label, and a select whose only choice is on/off is a switch |
 | `input "Label"` | `TextField label="Label"`; a label naming a date → `TextField type="date" label="Label" slotProps={{ inputLabel: { shrink: true } }}` |
@@ -364,7 +377,7 @@ improvising around the component:
 
 The `row` lines under a `table`, the stat `card`s and the `select`s are the
 demo data the reviewer compares the screen against. Do not retype them:
-`node "$AEP_SKILLS_DIR/wireframes/scripts/seed.mjs" <wireframes.dsl>` prints
+`node "${AEP_SKILLS_DIR:-.claude/skills}/wireframes/scripts/seed.mjs" <wireframes.dsl>` prints
 them per screen as JSON; mock handlers serve those rows, and every stat value
 derives from them, so the numbers agree with the table by construction.
 
@@ -377,7 +390,7 @@ derives from them, so the numbers agree with the table by construction.
 | A select shows its value but no label | `label` on a bare `Select` needs `FormControl` + `InputLabel` to render | `TextField select label="…"` |
 | A stat card's caption sits outside the card | `StatCard` has no caption slot and discards children | `Card` > `CardContent` > three `Typography`s (the wireframe table) |
 | A list screen fires one request per row | A column the list endpoint does not return, filled from the detail endpoint | Fill it from one bulk request to another list operation (join on id, or filter + group), as the wireframe table says |
-| A drawn column is missing from the page | The list endpoint lacks it and the agent dropped it | Drop a column only when no list operation of the contract can supply it; a joinable list or a filterable child list can |
+| A drawn column is missing from the page | The list endpoint lacks it and the agent dropped it | Drop a column only when no list operation of the contract can supply it, and say so in your report; a joinable entity list or a filterable child list supplies it in one request |
 | Components render in stock Material blue, not the Oxygen theme | `OxygenUIThemeProvider` missing, or not outermost in `main.tsx` | Wrap the root exactly as Setup shows; Verify fails on this |
 | Theme applies to some components and not others; console warns about multiple Emotion/MUI instances | `@mui/material` or `@emotion/*` installed beside Oxygen's bundled copy, or imported directly | Remove them from `package.json` and every import; import from `@wso2/oxygen-ui` only |
 | `Cannot find module 'lucide-react'` or an icon import fails | Icons imported from the wrong package, or a made-up name | Import the bare lucide name from `@wso2/oxygen-ui-icons-react`; check the name at lucide.dev |

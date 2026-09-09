@@ -158,6 +158,16 @@ test("an output path that cannot be written is a named failure, not a stack trac
   assert.doesNotMatch(r.stdout + r.stderr, /at \w+ \(/);
 });
 
+test("-o without a path is a usage error, not a failed write of 'undefined'", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wireframes-seed-"));
+  const dsl = path.join(dir, "wireframes.dsl");
+  writeFileSync(dsl, DSL);
+  const r = spawnSync(process.execPath, [SCRIPT, dsl, "-o"], { encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stdout, /usage: node seed\.mjs/);
+  assert.doesNotMatch(r.stdout, /undefined/);
+});
+
 test("a missing file is a named failure; no file prints the usage", () => {
   const missing = spawnSync(process.execPath, [SCRIPT, "/nowhere/wireframes.dsl"], { encoding: "utf8" });
   assert.equal(missing.status, 1);

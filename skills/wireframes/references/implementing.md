@@ -74,15 +74,16 @@ DSL draws, and a stat `card`'s value should agree with the rows it counts.
 Print them instead of retyping them:
 
 ```bash
-node "$AEP_SKILLS_DIR/wireframes/scripts/seed.mjs" specs/design/components/<name>/wireframes.dsl
+node "${AEP_SKILLS_DIR:-.claude/skills}/wireframes/scripts/seed.mjs" specs/design/components/<name>/wireframes.dsl
 ```
 
 That prints, per screen, every `table` (columns and its `row`s as records),
 stat `card` (label, value, caption), `list`, `select` (label and preselected
 value) and `badge` as JSON. Map each record onto the provider's schema in the
-mock handlers and derive the stat values from those records. If
-`$AEP_SKILLS_DIR` is unset, the script is `scripts/seed.mjs` next to this
-skill's `SKILL.md`.
+mock handlers and derive the stat values from those records. `AEP_SKILLS_DIR`
+is where a run finds the skill library; the fallback is `.claude/skills/`, the
+mirror the platform writes into every project, where this skill's `scripts/`
+also live.
 
 ## Arrow for arrow
 
