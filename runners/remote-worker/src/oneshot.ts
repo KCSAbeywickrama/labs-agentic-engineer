@@ -38,8 +38,7 @@ import { openTaskLog } from "./lib/logger.js";
 import { isUUID, isSlug } from "./lib/uuid.js";
 import type { DispatchRequest } from "./lib/types.js";
 import { emit, primeScrubber } from "./lib/progress/emitter.js";
-import { credentialEnvValues } from "./lib/credential_env.js";
-import { installConsoleScrubber } from "./lib/progress/console_scrub.js";
+import { installLogRedaction } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
 import { listMirroredSkills, readSkillBodies, resolveSkillPresence } from "./lib/skills_presence.js";
 import { ClientCredentialsTokenProvider } from "./lib/oauth.js";
@@ -136,16 +135,11 @@ function readDispatchFromEnv(): { req: DispatchRequest; publisher: PublisherCred
 }
 
 async function main(): Promise<number> {
-  // Before anything logs: the BFF forwards this pod's console output into the
-  // user-visible build log, so every line has to pass the scrubber.
-  installConsoleScrubber();
-
-  // And before anything CAN log: enroll every credential the container mounted.
-  // Enrollment is what redacts a value — the scrubber's shape patterns cover
-  // only well-known GitHub prefixes, so an unenrolled credential reaches the
-  // build log intact (see credential_env.ts). This runs ahead of dispatch
-  // validation deliberately: those failures log too.
-  primeScrubber(credentialEnvValues());
+  // Before anything logs, and before anything CAN log: the BFF forwards this
+  // pod's console output into the user-visible build log, so console is wrapped
+  // and every mounted credential is enrolled as a literal in one call. Ahead of
+  // dispatch validation deliberately — those failures log too.
+  installLogRedaction();
 
   let req: DispatchRequest;
   let publisher: PublisherCreds;

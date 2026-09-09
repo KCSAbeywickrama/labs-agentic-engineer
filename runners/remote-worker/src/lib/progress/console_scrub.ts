@@ -39,7 +39,8 @@
 // (the git token, minted mid-run) still redact earlier-wrapped methods.
 
 import { format } from "node:util";
-import { emit } from "./emitter.js";
+import { emit, primeScrubber } from "./emitter.js";
+import { credentialEnvValues } from "../credential_env.js";
 
 type ConsoleMethod = "log" | "info" | "warn" | "error" | "debug";
 
@@ -61,6 +62,28 @@ const LEVELS: Record<ConsoleMethod, "info" | "warn" | "error"> = {
   warn: "warn",
   error: "error",
 };
+
+/**
+ * The whole log-safety install, in one call — for every entrypoint.
+ *
+ * Two steps that only work together: wrap console so output reaches the feed as
+ * scrubbed events, and ENROLL the mounted credentials so the scrubber has
+ * literals to match. Wrapping without enrolling is what shipped: the feed was
+ * well-formed and the git credential went through it intact, because shape
+ * patterns cover only the well-known GitHub prefixes.
+ *
+ * One function rather than two calls per entrypoint, for the same reason
+ * `requireWorkflowBodies` sits inside `runClaudeQuery`: a third entrypoint
+ * cannot then forget half of it. Ordering is fixed here too — enrolling after
+ * the first line is logged is a race nobody should have to remember.
+ */
+export function installLogRedaction(
+  target: ConsoleLike = console,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  installConsoleScrubber(target);
+  primeScrubber(credentialEnvValues(env));
+}
 
 export function installConsoleScrubber(target: ConsoleLike = console): void {
   if (wrapped.has(target)) return;

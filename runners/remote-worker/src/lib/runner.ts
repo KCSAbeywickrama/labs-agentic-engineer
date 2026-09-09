@@ -373,9 +373,7 @@ export async function runClaudeQuery(
   // F3c — surface AEP_TASK_ID and AEP_PLATFORM_URL to the agent's
   // child env so the aep skill's verification-failed shell snippet can
   // hit POST $AEP_PLATFORM_URL/api/v1/tasks/$AEP_TASK_ID/verification-failed.
-  // The bearer rides through a file (AEP_BEARER_FILE) so the agent's
-  // SDK transcripts can't leak it; the curl snippet reads the file at
-  // call time.
+  // The curl snippet reads AEP_BEARER_FILE at call time.
   const childEnv: Record<string, string> = {
     ...(process.env as Record<string, string>),
     PATH: `${layout.aepDir}:${process.env.PATH ?? ""}`,

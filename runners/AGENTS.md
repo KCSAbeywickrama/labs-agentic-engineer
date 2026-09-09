@@ -42,8 +42,16 @@ into the runner pod at `/app/skills` for live skill edits (see
   shape patterns know only well-known GitHub prefixes, and the BFF's second line
   of defense (`delivery/codingagent/redact.go`) is shape-based too and says so —
   an opaque credential is nobody's to catch but the runner's. `GITHUB_TOKEN` was
-  in no list at all. Mount a new credential and it goes in that one, or it
-  reaches the user-visible build log verbatim.
+  in no PRIMING list at all — `websearch_dlp.ts` already treated it as a
+  candidate secret, but that answers a different question (may this web call go
+  out), not this one. `installLogRedaction()` does both halves in one call so a
+  third entrypoint cannot wrap console and forget to enroll; mount a new
+  credential and it goes in `CREDENTIAL_ENV_KEYS` too, or it reaches the
+  user-visible build log verbatim. That list MIRRORS the Go dispatch constants
+  with nothing mechanical between them. **Known gap:** the credhelper git path
+  mints its token inside bash, so no literal exists to enroll — its at-rest copy
+  in `.gh-config/hosts.yml` is covered by shape (`oauth_token:`) on both sides
+  and nothing more. ADR-0002 decision 18.
 - **The progress contract is `lib/progress/schema.ts`, and it moves with three
   mirrors**: `contracts/progress.go`, the three progress schemas in
   `packages/contracts/api/v1/openapi.yaml` (contract-first — then `make gen-api`),

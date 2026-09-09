@@ -62,9 +62,8 @@ import { runClaudeQuery } from "./lib/runner.js";
 import { openTaskLog } from "./lib/logger.js";
 import type { DispatchRequest } from "./lib/types.js";
 import type { WorkspaceLayout } from "./lib/workspace.js";
-import { emit, primeScrubber } from "./lib/progress/emitter.js";
-import { credentialEnvValues } from "./lib/credential_env.js";
-import { installConsoleScrubber } from "./lib/progress/console_scrub.js";
+import { emit } from "./lib/progress/emitter.js";
+import { installLogRedaction } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
 import { listMirroredSkills, readSkillBodies, resolveSkillPresence } from "./lib/skills_presence.js";
 import { mirrorLocalSkillLibrary } from "./lib/local_skill_mirror.js";
@@ -136,10 +135,7 @@ function localDirWorkspace(run: LocalRun): WorkspaceLayout {
 
 
 async function main(): Promise<number> {
-  installConsoleScrubber();
-  // Enroll the mounted credentials before the first line can be logged —
-  // same contract as the pod entrypoint, one shared list (credential_env.ts).
-  primeScrubber(credentialEnvValues());
+  installLogRedaction();
 
   let run: LocalRun;
   try {

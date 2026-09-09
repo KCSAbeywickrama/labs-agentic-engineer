@@ -63,11 +63,13 @@ test("credentialEnvValues: collects every mounted credential at once", () => {
 });
 
 test("CREDENTIAL_ENV_KEYS: names the credentials the dispatch mounts", () => {
-  // A guard, not a tautology: the BFF's dispatch stamps exactly these secret-env
-  // keys (delivery/codingagent — ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN,
-  // GITHUB_TOKEN, PUBLISHER_CLIENT_ID/_SECRET). Mounting a new credential
-  // without priming it is the defect this module exists to prevent, so adding
-  // one has to fail here first.
+  // A MIRROR pin, and only that. The dispatch's source of truth is Go —
+  // delivery/codingagent/oc_dispatcher.go (envAnthropicAPIKey, envGitHubToken)
+  // and publisher.go (envPublisherClientSecret) — so a credential added THERE
+  // breaks nothing here. What this test buys is that the two cannot drift
+  // silently on this side: an edit to the list is a deliberate act with a
+  // failing test in front of it. Keeping them in step is a review obligation,
+  // the same way progress/schema.ts names its three mirrors.
   assert.deepEqual([...CREDENTIAL_ENV_KEYS], [
     "GITHUB_TOKEN",
     "GH_TOKEN",

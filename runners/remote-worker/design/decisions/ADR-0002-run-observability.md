@@ -291,6 +291,31 @@ Four further gaps, all verified rather than assumed:
     Deliberately not fed to `watchdog.observe` — none is the agent making
     progress, and an idle report that fires slightly early is the safe direction.
 
+18. **Redaction is by ENROLLED LITERAL first; shape is the backstop.** The
+    scrubber matches primed literals, then a small set of well-known token
+    shapes. Only the first is general, so the credentials the platform mounts
+    are enrolled from one named list (`lib/credential_env.ts`) inside
+    `installLogRedaction`, which every entrypoint calls before its first line.
+    `GITHUB_TOKEN` was enrolled nowhere for as long as the mount existed, and
+    the failure was invisible in exactly the way that matters: the tokens people
+    tested with carried `ghp_`/`github_pat_` prefixes a shape pattern caught, so
+    the feed looked correct while any credential outside those families passed
+    through whole. The BFF's second line of defense states the division of
+    labour outright — `delivery/codingagent/redact.go`: "It cannot catch an
+    opaque token (that is the runner's job)" — so shape was never the layer
+    holding this. Two consequences. A NAMED list, not the deny-by-default sweep
+    `websearch_dlp.ts` runs over the same environment: that sweep decides
+    whether to block a web call, where a false positive costs one denied search,
+    while enrolling a literal rewrites every line containing it — the
+    over-redaction that disabled the entropy backstop above. And the list is a
+    MIRROR of the Go dispatch constants with no mechanical link, so mounting a
+    credential means adding it here too; the test pins the list, not the
+    correspondence. KNOWN GAP: the credhelper git path mints its token inside
+    bash, so nothing can enroll it, and its at-rest copy in
+    `.gh-config/hosts.yml` is covered by an `oauth_token:` shape pattern on both
+    sides instead. Closing it means giving the helper a way to hand the runner
+    what it minted.
+
 8. **`console.*` is converted, not merely scrubbed.** It shares the fd with the
    feed, so a bare line makes the stream unparseable — and a watchdog cannot
    watch a feed it cannot parse. Every call becomes a typed `log` event. The
