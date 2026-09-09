@@ -36,6 +36,14 @@ into the runner pod at `/app/skills` for live skill edits (see
   the feed stays parseable NDJSON end to end; don't bypass it by writing to
   `process.stdout` directly. The BFF still wraps any non-NDJSON pod line into a
   build-log event, but that is now a safety net, not the normal path.
+  **Redaction is by ENROLLED LITERAL first.** `lib/credential_env.ts` names the
+  credential env vars a dispatch mounts, and both entrypoints prime them into the
+  scrubber before their first log line. It has to be a literal: the scrubber's
+  shape patterns know only well-known GitHub prefixes, and the BFF's second line
+  of defense (`delivery/codingagent/redact.go`) is shape-based too and says so —
+  an opaque credential is nobody's to catch but the runner's. `GITHUB_TOKEN` was
+  in no list at all. Mount a new credential and it goes in that one, or it
+  reaches the user-visible build log verbatim.
 - **The progress contract is `lib/progress/schema.ts`, and it moves with three
   mirrors**: `contracts/progress.go`, the three progress schemas in
   `packages/contracts/api/v1/openapi.yaml` (contract-first — then `make gen-api`),

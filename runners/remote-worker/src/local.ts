@@ -63,6 +63,7 @@ import { openTaskLog } from "./lib/logger.js";
 import type { DispatchRequest } from "./lib/types.js";
 import type { WorkspaceLayout } from "./lib/workspace.js";
 import { emit, primeScrubber } from "./lib/progress/emitter.js";
+import { credentialEnvValues } from "./lib/credential_env.js";
 import { installConsoleScrubber } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
 import { listMirroredSkills, readSkillBodies, resolveSkillPresence } from "./lib/skills_presence.js";
@@ -136,6 +137,9 @@ function localDirWorkspace(run: LocalRun): WorkspaceLayout {
 
 async function main(): Promise<number> {
   installConsoleScrubber();
+  // Enroll the mounted credentials before the first line can be logged —
+  // same contract as the pod entrypoint, one shared list (credential_env.ts).
+  primeScrubber(credentialEnvValues());
 
   let run: LocalRun;
   try {
@@ -145,11 +149,6 @@ async function main(): Promise<number> {
     return 2;
   }
 
-  // BOTH credential variables: a run authenticates with exactly one of them
-  // (an org may bill its coding agent to a Claude Code OAuth token instead of
-  // an API key), and priming only the one that happens to be unset would leave
-  // the other unredacted in the progress feed. Unset entries are skipped.
-  primeScrubber([process.env.ANTHROPIC_API_KEY, process.env.CLAUDE_CODE_OAUTH_TOKEN]);
   emit({ kind: "phase", phase: "workspace_provisioning" });
 
   let layout: WorkspaceLayout;

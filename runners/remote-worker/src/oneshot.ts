@@ -38,6 +38,7 @@ import { openTaskLog } from "./lib/logger.js";
 import { isUUID, isSlug } from "./lib/uuid.js";
 import type { DispatchRequest } from "./lib/types.js";
 import { emit, primeScrubber } from "./lib/progress/emitter.js";
+import { credentialEnvValues } from "./lib/credential_env.js";
 import { installConsoleScrubber } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
 import { listMirroredSkills, readSkillBodies, resolveSkillPresence } from "./lib/skills_presence.js";
@@ -139,13 +140,21 @@ async function main(): Promise<number> {
   // user-visible build log, so every line has to pass the scrubber.
   installConsoleScrubber();
 
+  // And before anything CAN log: enroll every credential the container mounted.
+  // Enrollment is what redacts a value — the scrubber's shape patterns cover
+  // only well-known GitHub prefixes, so an unenrolled credential reaches the
+  // build log intact (see credential_env.ts). This runs ahead of dispatch
+  // validation deliberately: those failures log too.
+  primeScrubber(credentialEnvValues());
+
   let req: DispatchRequest;
   let publisher: PublisherCreds;
   try {
     ({ req, publisher } = readDispatchFromEnv());
   } catch (err) {
-    // Nothing is enrolled as a literal yet (the bearer hasn't been read), so
-    // this line is covered only by the scrubber's token-shape patterns.
+    // Every MOUNTED credential is already enrolled (above); the only secret
+    // this line could not cover is the CC token, which has not been minted yet
+    // and so cannot appear in a validation failure.
     console.error("[oneshot] env validation failed:", err instanceof Error ? err.message : String(err));
     return 2;
   }
@@ -173,17 +182,10 @@ async function main(): Promise<number> {
     return 2;
   }
 
-  // BOTH credential variables: a run authenticates with exactly one of them
-  // (an org may bill its coding agent to a Claude Code OAuth token instead of
-  // an API key), and priming only the one that happens to be unset would leave
-  // the other unredacted in the progress feed. Unset entries are skipped.
-  primeScrubber([
-    process.env.ANTHROPIC_API_KEY,
-    process.env.CLAUDE_CODE_OAUTH_TOKEN,
-    req.bearer,
-    publisher.clientSecret,
-    req.mcpToken,
-  ]);
+  // No second priming pass here: the mounted credentials went in above, and
+  // req.bearer / req.mcpToken ARE the ccToken enrolled at the mint. The env
+  // pair that used to be listed here now lives in credential_env.ts, which is
+  // also what widened it to the git credential.
 
   emit({
     kind: "phase",
