@@ -37,6 +37,7 @@ export type {
   EditFileInput,
   RemoveFileInput,
   AskQuestionOption,
+  QuestionOptionAction,
   AskQuestionInput,
   AskQuestionsInput,
   QuestionAnswer,

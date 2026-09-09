@@ -269,6 +269,54 @@ func TestAcceptDependencyAssumption_RecordsTheUsersPermission(t *testing.T) {
 	// fake, and the real committer sees the sha it read.
 }
 
+// The record may precede the interface (the user answered "proceed on your
+// assumption"; the agent writes it next), and a definition no component
+// references yet is judged from its own directory.
+func TestAcceptDependencyAssumption_BeforeTheInterfaceAndWithoutAConsumer(t *testing.T) {
+	t.Parallel()
+	// Referenced, no interface yet.
+	files := designFilesWithDeps(`[{"kind":"external","name":"stripe"}]`)
+	files["dependencies/stripe/dependency.json"] = `{"name":"stripe","provider":"Stripe","style":"rest-api"}`
+	fc := &fakeCommitter{}
+	svc := newService(readsFor(t, files))
+	svc.fileCommitter = fc
+	if err := svc.AcceptDependencyAssumption(context.Background(), "acme", "web", "stripe", "admin", ""); err != nil {
+		t.Fatalf("before the interface: %v", err)
+	}
+	if len(fc.writes) != 1 || !strings.Contains(fc.writes[0].Content, `"assumed": {`) {
+		t.Fatalf("writes = %+v", fc.writes)
+	}
+	// No consumer: an assumed interface on disk is accepted, a real one refused.
+	orphan := designFilesWithDeps(`[]`)
+	orphan["dependencies/printer/dependency.json"] = `{"name":"printer","provider":"Star","style":"rest-api","contract":"openapi.yaml"}`
+	orphan["dependencies/printer/openapi.yaml"] = "openapi: 3.0.3\nx-aep-assumed: true\ninfo: {title: Star, version: '1'}\npaths: {}\n"
+	svc2 := newService(readsFor(t, orphan))
+	svc2.fileCommitter = &contractReadingCommitter{fakeCommitter: fakeCommitter{}, files: orphan}
+	if err := svc2.AcceptDependencyAssumption(context.Background(), "acme", "web", "printer", "admin", ""); err != nil {
+		t.Fatalf("orphan with an assumed interface: %v", err)
+	}
+	orphan["dependencies/printer/openapi.yaml"] = "openapi: 3.0.3\ninfo: {title: Star, version: '1'}\npaths: {}\n"
+	svc3 := newService(readsFor(t, orphan))
+	svc3.fileCommitter = &contractReadingCommitter{fakeCommitter: fakeCommitter{}, files: orphan}
+	if err := svc3.AcceptDependencyAssumption(context.Background(), "acme", "web", "printer", "admin", ""); !errors.Is(err, ErrDependencyNotAssumed) {
+		t.Fatalf("orphan with a real interface: want ErrDependencyNotAssumed, got %v", err)
+	}
+}
+
+// contractReadingCommitter is a fakeCommitter that also answers ReadFile for
+// the contract files the fixture holds (keyed relative to specs/design/).
+type contractReadingCommitter struct {
+	fakeCommitter
+	files map[string]string
+}
+
+func (c *contractReadingCommitter) ReadFile(ctx context.Context, org, project, path string) (string, string, bool, error) {
+	if raw, ok := c.files[strings.TrimPrefix(path, DesignDir+"/")]; ok && !strings.HasSuffix(path, "dependency.json") {
+		return raw, "sha-contract", true, nil
+	}
+	return c.fakeCommitter.ReadFile(ctx, org, project, path)
+}
+
 func TestAcceptDependencyAssumption_RefusesAContractNobodyAssumed(t *testing.T) {
 	t.Parallel()
 	svc := newService(readsFor(t, acceptFiles(false)))

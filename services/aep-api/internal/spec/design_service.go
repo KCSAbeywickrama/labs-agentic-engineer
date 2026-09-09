@@ -397,8 +397,11 @@ func componentExists(comps []DesignComponent, name string) bool {
 // the contract the design agent wrote for depName: the `assumed` block in the
 // dependency's dependency.json, which only this path writes (the agent's
 // write-gate refuses it). `by` is the accepting user; `note` defaults to the
-// agent's own uncertainty note when empty. Refused when the contract on disk
-// is not an agent-written one — there is nothing to accept.
+// agent's own uncertainty note when empty. The record may precede the
+// interface: answering "proceed on your assumption" in the resolve flow
+// records it, and the agent then writes the interface and echoes the record.
+// Refused when a real (not agent-written) document is on disk — there is
+// nothing to accept.
 func (s *designService) AcceptDependencyAssumption(ctx context.Context, orgID, projectID, depName, by, note string) error {
 	if s.fileCommitter == nil {
 		return fmt.Errorf("assumption acceptance unavailable: no committed-truth write surface wired")
@@ -430,7 +433,27 @@ func (s *designService) AcceptDependencyAssumption(ctx context.Context, orgID, p
 			break
 		}
 	}
-	if edge == nil || !edge.ContractAssumed {
+	// Accepted before the interface exists (the user answered "proceed on your
+	// assumption" and the agent is about to write it), or once an agent-written
+	// one is on disk. Refused when a real document is on disk — nothing there
+	// is an assumption. A definition no component references yet has no
+	// hydrated edge; its directory is read directly for the same answer.
+	contractOnDisk, assumedOnDisk := "", false
+	if edge != nil {
+		contractOnDisk, assumedOnDisk = edge.Contract, edge.ContractAssumed
+		if contractOnDisk == "" && edge.SDK != "" {
+			contractOnDisk = edge.SDK
+		}
+	} else if def.Contract != "" {
+		raw, _, exists, rerr := s.fileCommitter.ReadFile(ctx, orgID, projectID, ContractPath(depName, def.Contract))
+		if rerr != nil {
+			return fmt.Errorf("read contract for %q: %w", depName, rerr)
+		}
+		if exists {
+			contractOnDisk, assumedOnDisk = def.Contract, contractMarkedAssumed(raw)
+		}
+	}
+	if contractOnDisk != "" && !assumedOnDisk {
 		return fmt.Errorf("%w: %q", ErrDependencyNotAssumed, depName)
 	}
 	if note == "" && def.Provenance != nil && def.Provenance.SourceURL != "" {
