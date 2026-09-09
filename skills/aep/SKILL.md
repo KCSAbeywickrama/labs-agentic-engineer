@@ -303,8 +303,10 @@ your instructions names them for this session. **Fanning out is the default, not
 the exception**: a provider and its consumer may be built at the same time, by
 different subagents (**Contract-first**). Two tests, and they are the only two:
 
-- **Disjoint App Paths** — no file and no module written by both. Overlap is the
-  only reason to serialise; work those inline, in ascending order.
+- **Disjoint write boundaries** — no file or module written by both. Separate
+  App Paths qualify; a stack skill may also split one App Path into exclusive
+  subdirectories or files. Pass those narrower boundaries to each worker.
+  Overlapping writes stay inline, in ascending order.
 - **Big enough to be worth a subagent.** A one-file change, a config tweak, a
   small fix issue: work those inline. A subagent for small work costs more than it
   saves and makes the run harder to follow.

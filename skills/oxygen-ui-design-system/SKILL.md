@@ -37,7 +37,10 @@ read, in this order:
    to the version this app installed:
    `node_modules/@wso2/oxygen-ui/.claude/components.md` (every composite
    component's props and sub-components), `patterns.md` (whole screens), and
-   `theming.md`. This skill does not carry a second copy of them on purpose —
+   `theming.md`. Both run past a thousand lines: grep the component's `^## `
+   heading and read from that offset, and resolve a screen's whole component set
+   in one pass — never front to back, never paged.
+   This skill does not carry a second copy of them on purpose —
    a copy here would ride the org's library while the real API rides the
    package, and the two would drift with nothing to catch it.
 2. **The `.d.ts`**, for anything the prose does not settle or contradicts:
@@ -76,14 +79,12 @@ gate between your PR and the dev environment.
 `react-webapp` scaffolds the app. Add Oxygen to it, from the App Path:
 
 ```bash
-# 1. React exactly at the version Oxygen's peer dependency names — a newer
-#    19.x fails `npm install` with ERESOLVE, and forcing past that ships two Reacts
-REACT_VER=$(npm view @wso2/oxygen-ui@latest peerDependencies.react)
-npm install react@"$REACT_VER" react-dom@"$REACT_VER"
-# 2. Oxygen itself, its icon set, and the router its app shell is built around
-npm install @wso2/oxygen-ui@latest @wso2/oxygen-ui-icons-react@latest react-router
-# optional, only if a screen draws a chart
-npm install @wso2/oxygen-ui-charts-react@latest
+# Add these to package.json, then install ONCE with everything else (react-webapp,
+# step 1). Never onto an already-installed tree: Oxygen pins react-dom to an exact
+# version, and npm can only satisfy that while it is still free to pick react-router
+# too. Unversioned is correct — the peer graph resolves the set.
+npm install @wso2/oxygen-ui @wso2/oxygen-ui-icons-react react react-dom react-router
+# add @wso2/oxygen-ui-charts-react only if a screen draws a chart
 ```
 
 **Never install `@mui/*`, `@emotion/*`, or `lucide-react` yourself.**
@@ -343,7 +344,7 @@ this is what it becomes here:
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `npm install` fails with `ERESOLVE` on `react` | Oxygen's peer dependency is an exact React version and the scaffold installed a newer one | Install `react`/`react-dom` at exactly `npm view @wso2/oxygen-ui@latest peerDependencies.react`; never `--force` or `--legacy-peer-deps` past it |
+| `npm install` fails with `ERESOLVE` on `react` | A package was added to an already-installed tree, so npm cannot move the React that is already fixed there | Put every dependency in `package.json` and install once; never `--force` or `--legacy-peer-deps` past it |
 | Components render in stock Material blue, not the Oxygen theme | `OxygenUIThemeProvider` missing, or not outermost in `main.tsx` | Wrap the root exactly as Setup shows; Verify fails on this |
 | Theme applies to some components and not others; console warns about multiple Emotion/MUI instances | `@mui/material` or `@emotion/*` installed beside Oxygen's bundled copy, or imported directly | Remove them from `package.json` and every import; import from `@wso2/oxygen-ui` only |
 | `Cannot find module 'lucide-react'` or an icon import fails | Icons imported from the wrong package, or a made-up name | Import the bare lucide name from `@wso2/oxygen-ui-icons-react`; check the name at lucide.dev |
