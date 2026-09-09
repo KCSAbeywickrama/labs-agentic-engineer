@@ -78,12 +78,16 @@ if [ -n "${CEILING:-}" ] && ! [[ "$CEILING" =~ ^[1-9][0-9]*$ ]]; then
 fi
 
 # The local plane keeps CLUSTER_CONTEXT in one place; source it rather than
-# restating "k3d-openchoreo" here. env.sh is pure assignments, no side effects.
+# restating "k3d-openchoreo" here. env.sh is pure assignments, no side effects —
+# but it assigns UNCONDITIONALLY, so an exported override has to be carried
+# across the source by hand or it is silently replaced by the default.
+CLUSTER_CONTEXT_OVERRIDE="${CLUSTER_CONTEXT:-}"
 if [ -f "${SCRIPT_DIR}/../deployments/scripts/env.sh" ]; then
     # shellcheck source=/dev/null
     . "${SCRIPT_DIR}/../deployments/scripts/env.sh"
 fi
-CLUSTER_CONTEXT="${CLUSTER_CONTEXT:-k3d-openchoreo}"
+CLUSTER_CONTEXT="${CLUSTER_CONTEXT_OVERRIDE:-${CLUSTER_CONTEXT:-k3d-openchoreo}}"
+# Not in env.sh — this one is restated from setup-local.sh, which creates it.
 AEP_NS="${AEP_NS:-wso2-aep}"
 
 # Read a key out of a cluster Secret; empty when kubectl, the cluster or the key
@@ -127,8 +131,11 @@ TOKEN=$(curl -sS -X POST "${THUNDER_URL%/}/oauth2/token" \
 if [ -z "$TOKEN" ]; then
     echo "❌ Thunder did not return an access_token for '${SEEDER_CLIENT_ID}'." >&2
     echo "   Tried the secret from ${SECRET_SOURCE}." >&2
-    echo "   The two paths that register this client disagree on its secret, so" >&2
-    echo "   read the live one and pass it explicitly:" >&2
+    echo "   Two paths register this client and they disagree on its secret:" >&2
+    echo "     deployments/scripts/setup-local.sh  — a random one, in the Secret" >&2
+    echo "     single-cluster/values-thunder.yaml  — the literal default" >&2
+    echo "   Whichever ran last is the one Thunder honours, so read the live one" >&2
+    echo "   and pass it explicitly:" >&2
     echo "     SEEDER_CLIENT_SECRET=\$(kubectl --context ${CLUSTER_CONTEXT} get secret \\" >&2
     echo "       aep-thunder-secrets -n ${AEP_NS} \\" >&2
     echo "       -o jsonpath='{.data.LOCAL_DEV_SEEDER_SECRET}' | base64 -d) \\" >&2
