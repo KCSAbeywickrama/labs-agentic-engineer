@@ -908,6 +908,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		SkillMut:      skillMutationSvc,
 		SkillImport:   skillImportSvc,
 		CollabRepo:    repoService,
+		Design:        designService,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("assemble spec domain: %w", err)
@@ -989,6 +990,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	params.MCPSpecValidator = spec.ValidateOpenAPI
 	params.MCPSpecNormalizer = spec.NormalizeOpenAPIYAML
 	params.MCPSpecFetcher = spec.FetchSpecFromURL
+	params.MCPSpecSlicer = spec.SliceOpenAPI
 	// design-save keys BOTH platform-resource derivations on this catalog: the CRT
 	// role marker for end-user auth (thunder-app generalization), and the type's
 	// declared outputs for the dependency wiring it stamps into design.json. Wired
@@ -1138,10 +1140,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// A planned Task's prose body names the App Path the agent works in — the
 	// same component → appPath read the merged-PR build fan-out matches against.
 	taskPlan.SetComponentPaths(designComponents{store: artifactStore})
-	// Committed-truth spec-collect write surface: CollectSpec fetches/validates an
-	// external dependency's OpenAPI contract and atomically commits the spec file
-	// + the design.json specPath edit (clearing the external-needs-spec gate) via
-	// the Files API. Composition-root adapter keeps files out of the design feature.
+	// Committed-truth write surface for a dependency's directory: the design
+	// service fetches/validates a contract and atomically commits it with the
+	// dependency.json that records it (clearing the needs-contract gate), and
+	// records the user's acceptance of an assumed one, via the Files API.
+	// Composition-root adapter keeps files out of the design feature.
 	designService.SetFileCommitter(designFilesCommitter{files: filesSvc})
 	// Grant cascade → design: commit the exposesAPI.orgPublished durability marker
 	// on a provider component when its cross-project access request is granted.

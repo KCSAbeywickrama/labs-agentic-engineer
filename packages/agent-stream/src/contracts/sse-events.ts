@@ -155,6 +155,19 @@ export function isErrorToolOutput(output: unknown): boolean {
 export const ANSWER_PREFIX = 'Answer to "' as const;
 export const ANSWERS_PREFIX = "Answers:" as const;
 
+/**
+ * What choosing an option DOES, beyond answering: the console runs the action
+ * when the answer is submitted, before the answer reaches the agent, so a
+ * decision the platform must record (the user's authorization to build on an
+ * assumed interface) or a thing a card cannot take (a file) happens on the
+ * same click. The dependency is named by its directory name.
+ */
+export type QuestionOptionAction =
+  /** Record the user's authorization to build on the agent's assumed interface for this dependency. */
+  | { kind: "accept-assumption"; dependency: string }
+  /** Open the interface upload for this dependency; the answer is sent once the document lands. */
+  | { kind: "upload-interface"; dependency: string };
+
 /** One candidate answer on a question. */
 export interface AskQuestionOption {
   /** Short display text — the value echoed back in the serialized answer. */
@@ -172,6 +185,8 @@ export interface AskQuestionOption {
    * field and requires text before submit.
    */
   freeText?: boolean;
+  /** See `QuestionOptionAction`. */
+  action?: QuestionOptionAction;
 }
 
 /**

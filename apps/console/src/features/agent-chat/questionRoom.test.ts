@@ -35,6 +35,20 @@ function entryOf(doc: Doc, toolCallId: string) {
 }
 
 describe("withdrawRoomQuestion", () => {
+  it("keeps the copy of a question that carries the typed option actions when an older client re-mirrors without them", () => {
+    const doc = new Doc();
+    const withAction = [{ question: "How?", options: [{ label: "Proceed on your assumption", action: { kind: "accept-assumption" as const, dependency: "mail" } }] }];
+    const stripped = [{ question: "How?", options: [{ label: "Proceed on your assumption" }] }];
+    mirrorQuestion(doc, { toolCallId: "c1", questions: withAction });
+    mirrorQuestion(doc, { toolCallId: "c1", questions: stripped });
+    expect(readRoomQuestions(doc)[0]!.questions[0]!.options[0]!.action).toEqual({ kind: "accept-assumption", dependency: "mail" });
+    // The other order lands the same: the richer copy wins.
+    const doc2 = new Doc();
+    mirrorQuestion(doc2, { toolCallId: "c1", questions: stripped });
+    mirrorQuestion(doc2, { toolCallId: "c1", questions: withAction });
+    expect(readRoomQuestions(doc2)[0]!.questions[0]!.options[0]!.action).toBeDefined();
+  });
+
   it("removes the entry a streamed prefix left, and is a no-op otherwise", () => {
     const doc = new Doc();
     mirrorQuestion(doc, { toolCallId: "tc-bad", questions: [Q], streaming: true });

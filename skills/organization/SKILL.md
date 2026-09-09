@@ -14,7 +14,8 @@ Anything not below is open: interview for it normally.
   on, recording it as a plain Product Decision in the PRD — no special tag. The
   user can override it in chat like any other decision, and the override wins.
 - **At design time**: a settled section pins its provider or technology
-  outright. A settled capability gets no candidates list.
+  outright. A settled capability gets no suggestions list — it is a given,
+  not a choice left to the user.
 
 ## Authentication & identity
 

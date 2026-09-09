@@ -84,6 +84,24 @@ describe("parseQuestionsInput — ask_question (single)", () => {
   // question call, so a dropped card leaves the user staring at nothing while
   // the conversation waits on them. The model's favourite malformation is an
   // unlabeled free-text "Other" — the form offers free text anyway.
+  it("carries a well-formed typed action and drops a malformed one", () => {
+    const qs = parseQuestionsInput("ask_question", {
+      question: "How should I get its interface?",
+      options: [
+        { label: "Upload one", action: { kind: "upload-interface", dependency: "mail" } },
+        { label: "Proceed on your assumption", action: { kind: "accept-assumption", dependency: "mail" } },
+        { label: "Unknown kind", action: { kind: "delete-everything", dependency: "mail" } },
+        { label: "No dependency", action: { kind: "accept-assumption" } },
+      ],
+    });
+    expect(qs![0]!.options.map((o) => o.action)).toEqual([
+      { kind: "upload-interface", dependency: "mail" },
+      { kind: "accept-assumption", dependency: "mail" },
+      undefined,
+      undefined,
+    ]);
+  });
+
   it("drops an option without a label and keeps the card", () => {
     expect(
       parseQuestionsInput(ASK_QUESTION_TOOL, {

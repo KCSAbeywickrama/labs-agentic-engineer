@@ -121,6 +121,25 @@ const askQuestionOptionSchema = z.object({
     "escape hatch): the form focuses the text field and blocks submit until text is entered. When the ENTIRE " +
     "question needs a typed answer, prefer an empty options array instead.",
   ),
+  action: z
+    .discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("accept-assumption"),
+        dependency: z.string().min(1).describe("The dependency's directory name (specs/design/dependencies/<name>)."),
+      }),
+      z.object({
+        kind: z.literal("upload-interface"),
+        dependency: z.string().min(1).describe("The dependency's directory name (specs/design/dependencies/<name>)."),
+      }),
+    ])
+    .optional()
+    .describe(
+      "What choosing this option DOES, run by the console when the user submits, before the answer reaches you. " +
+      "'accept-assumption': records the user's authorization to build on the interface you will write from research " +
+      "— use it on the 'proceed on your assumption' option of the resolve-dependency flow, so no separate acceptance " +
+      "is needed. 'upload-interface': opens the interface upload for the dependency; the answer arrives once the " +
+      "document is on disk. Never on any other option.",
+    ),
 });
 
 export const askQuestionInputSchema = z.object({
