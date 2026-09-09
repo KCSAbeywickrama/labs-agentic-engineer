@@ -1806,17 +1806,58 @@ describe("SpecView validation criteria explanation", () => {
     render(<SpecView projectName="proj1" />);
 
     expect(
-      screen.getByText(/Each criterion represents one thing your software must do/),
+      screen.getByText(/Each criterion represents one thing your system must do/),
     ).toBeInTheDocument();
     expect(screen.getByText(/based on your requirements/)).toBeInTheDocument();
+    // Both halves, because only the automatable ones are checked for the reader.
+    // Claiming all of them were is what this sentence used to do, above a list
+    // whose glyphs said otherwise.
+    expect(
+      screen.getByText(/the ones that can be automated are checked/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/The rest you have to check yourself/),
+    ).toBeInTheDocument();
     expect(screen.getByText(/To change one, ask the agent/)).toBeInTheDocument();
   });
 
-  it("names the methods without the e2e acronym", () => {
+  it("marks who checks each criterion, and never with a run signal", () => {
+    // This pane has no run attached — it is a file preview of the oracle — so a
+    // chip here would name a run that does not exist. `manual` is the one that
+    // regressed: a rule giving manual criteria their final word was ranked above
+    // the has-a-run check, and stamped "Manual" onto every preview.
     render(<SpecView projectName="proj1" />);
 
-    expect(screen.getByText("auto")).toBeInTheDocument();
-    expect(screen.getByText("manual")).toBeInTheDocument();
-    expect(screen.queryByText("e2e")).not.toBeInTheDocument();
+    // Each row's mark is a glyph, so its phrase is what identifies it. The glyph
+    // carries no visible text of its own, which is why the phrase is also the
+    // accessible name.
+    expect(
+      screen.getByText("Validated automatically by the agent."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Requires manual validation.")).toBeInTheDocument();
+    for (const chip of ["Manual", "Pending", "Passed", "Failed", "Planned"]) {
+      expect(screen.queryByText(chip)).not.toBeInTheDocument();
+    }
+  });
+
+  it("names no method at all — the glyph does it", () => {
+    // `e2e` is an acronym the console lexicon forbids, and "auto" is the word it
+    // is spelled as elsewhere. Neither belongs on a row, where the glyph carries
+    // the distinction, so neither may leak here.
+    render(<SpecView projectName="proj1" />);
+
+    for (const word of ["e2e", "auto", "manual"]) {
+      expect(screen.queryByText(word)).not.toBeInTheDocument();
+    }
+  });
+
+  it("shortens the ids, keeping the full one on hover", () => {
+    render(<SpecView projectName="proj1" />);
+
+    expect(screen.getByText("1")).toBeInTheDocument();
+    expect(screen.getByText("a")).toBeInTheDocument();
+    expect(screen.getByText("b")).toBeInTheDocument();
+    expect(screen.queryByText("AC-001-a")).not.toBeInTheDocument();
+    expect(screen.queryByText("REQ-001")).not.toBeInTheDocument();
   });
 });

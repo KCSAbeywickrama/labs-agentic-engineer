@@ -333,15 +333,11 @@ export function ValidationPage({
   // it is worth showing, because it says what is being checked and what will never be
   // checked by an agent at all.
   //
-  // Deliberately not every `running` state. A repeat attempt has the previous
-  // attempt's verdict and report, which the page renders with its numbers marked as
-  // the last attempt's; replacing that with a page of Pending chips would throw away
-  // the only results anyone has.
-  //
-  // This gates the PENDING fallback only. A criterion the current attempt is
-  // actually working on gets a live status regardless (see `live` below), which is
-  // what un-freezes a repeat attempt without inventing a row that says nothing:
-  // "Pending" is a guess about every criterion, `Authoring…` is a fact about one.
+  // Gates the pending TILE and the reads behind it, NOT the criterion rows: those
+  // take `validating`, because a row's fallback has to know whether ANY attempt is
+  // in flight. Safe for them, because the report outranks that fallback (see
+  // CriterionChip) — a row the report covers keeps its verdict either way, and only
+  // uncovered rows move.
   const awaitingFirstVerdict = state === "running" && rawVerdict === "";
   // `unreported` MEANS no report was committed at that commit, and the server
   // omits reportPath for it. Requesting the file anyway would 404 to rediscover
@@ -633,7 +629,7 @@ export function ValidationPage({
         {headerWithCancelError}
         <EmptyState
           compact
-          description="Nothing validated yet. After a build, your software is checked against the validation criteria in your spec; results appear here."
+          description="Nothing validated yet. After a deployment, the deployed system is checked against the validation criteria in your spec. Results appear here."
         />
       </>
     );
@@ -735,9 +731,11 @@ export function ValidationPage({
         noPadding
         fullWidth
         hideDescription
-        // A first attempt in flight has no report by definition, so every row says
-        // what is ABOUT to happen to it instead of nothing at all.
-        awaitingReport={awaitingFirstVerdict}
+        // `validating`, not `awaitingFirstVerdict`: a row with no result yet waits
+        // on whichever attempt is in flight, first or repeat. Narrow it to the first
+        // and a criterion authored since the last run reads as out of that run while
+        // the current one is on its way to answering it.
+        awaitingReport={validating}
         criteria={criteria.data.content}
         {...(report.data ? { report: report.data.content } : {})}
         live={live.statuses}

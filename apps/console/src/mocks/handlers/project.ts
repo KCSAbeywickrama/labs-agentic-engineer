@@ -119,6 +119,14 @@ function criteriaMissing(): boolean {
   return localStorage.getItem("aep:mock:validation-criteria") === "missing";
 }
 
+// Whether the oracle should carry a criterion the pinned report predates
+// (aep:mock:validation-criteria=drifted). Shares the key with `missing` because both
+// describe the criteria FILE rather than a run, and the two are mutually exclusive:
+// a file that is absent cannot also have drifted.
+function criteriaDrifted(): boolean {
+  return localStorage.getItem("aep:mock:validation-criteria") === "drifted";
+}
+
 // The project's files with the two validation artifacts swapped for the ones the
 // overridden verdict implies. Dropping them first is what makes `unreported` and
 // `skipped` reachable: those scenarios contribute FEWER files, not different ones.
@@ -127,7 +135,7 @@ function specFiles(s: Exclude<ProjectScenario, "error">) {
   if (!v) return projectSpecFiles[s];
   return [
     ...projectSpecFiles[s].filter((f) => !VALIDATION_FILE_PATHS.includes(f.path)),
-    ...validationFiles(v, validationAttempt()).filter(
+    ...validationFiles(v, validationAttempt(), criteriaDrifted()).filter(
       (f) => !(criteriaMissing() && f.path === CRITERIA_PATH),
     ),
   ];
