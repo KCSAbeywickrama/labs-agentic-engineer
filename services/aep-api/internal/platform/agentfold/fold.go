@@ -209,9 +209,36 @@ func (f *Fold) AddFile(ctx context.Context, path, content string) (OpResult, err
 	if code, msg := f.checkComponentDependencies(ctx, path, next); code != "" {
 		return opErr(path, op, code, msg), nil
 	}
-	return f.commit(path, op, next, nil, func(e string) string {
+	// A definition removed this turn to be re-added wholesale is still judged
+	// against what was on disk: the user's authorization record rides through
+	// (preserveAssumption), and an altered record is still refused.
+	prior, err := f.removedThisTurn(ctx, path)
+	if err != nil {
+		return OpResult{}, err
+	}
+	return f.commit(path, op, next, prior, func(e string) string {
 		return path + " would not be valid YAML: " + e
 	}), nil
+}
+
+// removedThisTurn is the base content of a path the overlay marks deleted,
+// nil for any other path.
+func (f *Fold) removedThisTurn(ctx context.Context, path string) (*string, error) {
+	if v, ok := f.overlay[path]; !ok || v != nil {
+		return nil, nil
+	}
+	if c, ok := f.baseCache[path]; ok {
+		return c, nil
+	}
+	raw, exists, err := f.base(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("agentfold: read base %q: %w", path, err)
+	}
+	if !exists {
+		return nil, nil
+	}
+	s := lf(string(raw))
+	return &s, nil
 }
 
 // EditFile is FileBundle.editFile: an anchored, exactly-once literal
@@ -299,6 +326,9 @@ func (f *Fold) commit(path string, op Op, content string, prior *string, rejectM
 	if code, msg := checkComponentDesignGuard(path, content); code != "" {
 		return opErr(path, op, code, msg)
 	}
+	// The user's authorization record on a dependency's definition rides
+	// through every agent write of the file (preserveAssumption).
+	content = preserveAssumption(path, content, prior)
 	if code, msg := checkDependencyDesignGuard(path, content, prior); code != "" {
 		return opErr(path, op, code, msg)
 	}

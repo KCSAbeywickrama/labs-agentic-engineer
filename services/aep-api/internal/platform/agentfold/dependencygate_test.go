@@ -17,6 +17,7 @@
 package agentfold
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -164,5 +165,51 @@ func TestDependencyGate_SdkManifest(t *testing.T) {
 	}
 	if code, _ := checkDependencyDesignGuard("specs/design/dependencies/payment-provider/openapi.yaml", "openapi: 3", nil); code != "" {
 		t.Fatalf("a contract file is not this gate's, got %q", code)
+	}
+}
+
+// The user's record is the platform's: a write that leaves it out gets it back.
+func TestDependencyGate_AssumptionPreservedThroughAWrite(t *testing.T) {
+	assumed := map[string]any{"by": "admin", "at": "2026-09-08T10:15:00Z"}
+	prior := dep(map[string]any{"assumed": assumed})
+	restored := preserveAssumption(depPath, dep(map[string]any{"description": "edited"}), str(prior))
+	var got map[string]any
+	if err := json.Unmarshal([]byte(restored), &got); err != nil || got["assumed"] == nil || got["description"] != "edited" {
+		t.Fatalf("record not put back: %s", restored)
+	}
+	if p := validateDependencyDesign(restored, "payment-provider", str(prior)); p != nil {
+		t.Fatalf("the put-back record must read as an echo, got %s", p.message)
+	}
+	carried := dep(map[string]any{"assumed": assumed, "description": "edited"})
+	if preserveAssumption(depPath, carried, str(prior)) != carried {
+		t.Fatalf("a carried record must be left as written")
+	}
+	if preserveAssumption("specs/design/components/api/design.json", "{}", str(prior)) != "{}" {
+		t.Fatalf("another path must be left alone")
+	}
+	if preserveAssumption(depPath, "{nope", str(prior)) != "{nope" || preserveAssumption(depPath, dep(nil), nil) != dep(nil) {
+		t.Fatalf("an unparseable write and no prior must be left alone")
+	}
+	// Through the fold: the commit carries the record even when the agent's
+	// content does not.
+	// Through the fold, the way a wholesale re-emission goes — removeFile, then
+	// addFile without the record: the commit still carries it.
+	f := NewFromSnapshot(map[string]string{depPath: prior})
+	ctx := context.Background()
+	if res, err := f.RemoveFile(ctx, depPath); err != nil || res.Status != StatusApplied {
+		t.Fatalf("remove: %+v %v", res, err)
+	}
+	res, err := f.AddFile(ctx, depPath, dep(map[string]any{"description": "edited"}))
+	if err != nil || res.Status != StatusApplied {
+		t.Fatalf("add: %+v %v", res, err)
+	}
+	if out := f.Touched()[depPath]; out == nil || !strings.Contains(*out, `"assumed"`) {
+		t.Fatalf("committed content lost the record: %v", out)
+	}
+	// And an altered record on the re-add is still refused.
+	f2 := NewFromSnapshot(map[string]string{depPath: prior})
+	_, _ = f2.RemoveFile(ctx, depPath)
+	if res, _ := f2.AddFile(ctx, depPath, dep(map[string]any{"assumed": map[string]any{"by": "agent", "at": "2026-09-08T10:15:00Z"}})); res.Status == StatusApplied {
+		t.Fatalf("an altered record on a re-add must be refused")
 	}
 }

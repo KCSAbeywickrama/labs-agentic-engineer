@@ -68,6 +68,37 @@ func CheckDependencyFileForSave(path, content string) (code, message string) {
 // or sdk.json body must validate before it folds. `prior` is the file as it
 // stands before this write (nil when it does not exist) — the one input the
 // assumed-is-echoed rule needs.
+// preserveAssumption is the fold's twin of the TS bundle's: the user's
+// `assumed` record on a dependency's definition rides through every agent
+// write of the file, put back from the prior content when the write leaves
+// it out. Any other path, an unparseable write, or nothing on file returns
+// content unchanged.
+func preserveAssumption(path, content string, prior *string) string {
+	if prior == nil || dependencyDesignRe.FindStringSubmatch(path) == nil {
+		return content
+	}
+	var before, next map[string]any
+	if json.Unmarshal([]byte(*prior), &before) != nil || json.Unmarshal([]byte(content), &next) != nil || next == nil {
+		return content
+	}
+	was, had := before["assumed"]
+	if !had || was == nil {
+		return content
+	}
+	if _, present := next["assumed"]; present {
+		return content
+	}
+	next["assumed"] = was
+	out, err := json.MarshalIndent(next, "", "  ")
+	if err != nil {
+		return content
+	}
+	if strings.HasSuffix(content, "\n") {
+		return string(out) + "\n"
+	}
+	return string(out)
+}
+
 func checkDependencyDesignGuard(path, content string, prior *string) (ErrCode, string) {
 	if m := sdkManifestRe.FindStringSubmatch(path); m != nil {
 		if p := validateSdkManifest(content); p != nil {

@@ -26,7 +26,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { checkDependencyDesign } from "../src/dependency-design-schema.ts";
+import { checkDependencyDesign, preserveAssumption } from "../src/dependency-design-schema.ts";
 
 const PATH = "specs/design/dependencies/payment-provider/dependency.json";
 const SDK_PATH = "specs/design/dependencies/payment-provider/sdk.json";
@@ -193,4 +193,19 @@ test("config keys: an optional description, and a defaultValue on a non-secret k
 test("an echoed assumption record compares by value, whatever the key order", () => {
   const prior = bundle({ [PATH]: dep({ assumed: { by: "admin", at: "2026-09-08T10:15:00Z", note: "n" } }) });
   assert.equal(checkDependencyDesign(PATH, dep({ assumed: { note: "n", at: "2026-09-08T10:15:00Z", by: "admin" } }), prior), null);
+});
+
+test("the user's assumed record rides through a write that leaves it out", () => {
+  const record = { by: "admin", at: "2026-09-08T10:15:00Z" };
+  const prior = dep({ assumed: record });
+  // Left out → put back; carried → untouched; other paths and unparseable writes → untouched.
+  assert.deepEqual(JSON.parse(preserveAssumption(PATH, dep({ description: "edited" }), prior)).assumed, record);
+  const carried = dep({ assumed: record, description: "edited" });
+  assert.equal(preserveAssumption(PATH, carried, prior), carried);
+  assert.equal(preserveAssumption("specs/design/components/api/design.json", "{}", prior), "{}");
+  assert.equal(preserveAssumption(PATH, "{nope", prior), "{nope");
+  assert.equal(preserveAssumption(PATH, dep(), dep()), dep());
+  // And the gate then reads the put-back record as an echo, not an authoring.
+  const restored = preserveAssumption(PATH, dep({ description: "edited" }), prior);
+  assert.equal(checkDependencyDesign(PATH, restored, bundle({ [PATH]: prior })), null);
 });

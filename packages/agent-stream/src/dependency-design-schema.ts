@@ -239,6 +239,33 @@ function checkSdkManifest(path: string, content: string): DependencyDesignProble
 }
 
 /**
+ * The user's `assumed` record is the platform's, not the agent's: a write of
+ * `dependency.json` that leaves it out (a re-emission from a snapshot taken
+ * before the user authorized the assumption, or a model that simply forgot
+ * to carry it) must not lose it. The record is put back from the file already
+ * in the bundle before the gate looks — so the agent never drops it, and the
+ * one write that legitimately removes it (a real document replacing the
+ * assumption) is the platform's own, which does not pass through here.
+ * Returns `content` unchanged for any other path, an unparseable write (the
+ * gate reports that), or when nothing was on file.
+ */
+export function preserveAssumption(path: string, content: string, prior: string | undefined): string {
+  if (!DEPENDENCY_DESIGN_JSON_RE.test(path) || prior === undefined) return content;
+  let before: unknown;
+  let next: unknown;
+  try {
+    before = JSON.parse(prior);
+    next = JSON.parse(content);
+  } catch {
+    return content;
+  }
+  const was = (before as { assumed?: unknown } | null)?.assumed;
+  if (was === undefined || typeof next !== "object" || next === null || Array.isArray(next)) return content;
+  if ((next as { assumed?: unknown }).assumed !== undefined) return content;
+  return JSON.stringify({ ...(next as Record<string, unknown>), assumed: was }, null, 2) + (content.endsWith("\n") ? "\n" : "");
+}
+
+/**
  * True when `next` introduces or alters the assumption record relative to the
  * file already in the bundle. An unreadable or absent prior file means the
  * write is authoring the record. Omitting a record the file has is allowed —

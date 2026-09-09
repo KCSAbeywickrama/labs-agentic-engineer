@@ -154,6 +154,7 @@ export type { ComponentDependencyProblem } from "./component-dependencies.js";
 // --- The dependency.json write-gate (one dependency, one definition) --------
 export {
   checkDependencyDesign,
+  preserveAssumption,
   dependencyDesignSchema,
   dependencySuggestionSchema,
   sdkManifestSchema,

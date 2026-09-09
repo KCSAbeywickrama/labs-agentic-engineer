@@ -95,8 +95,11 @@ specs/design/dependencies/<name>/
   the definition at that moment (a typed question option the console runs
   against the acceptance endpoint, which accepts a definition with no
   interface on disk yet); the agent then writes the assumed interface and
-  carries the record along. Nothing further is asked. The gate still refuses
-  an agent-authored record.
+  carries the record along — and cannot drop it: both write gates put the
+  record back from the file on disk when a write of the definition leaves it
+  out, so a re-emission from a snapshot taken before the authorization, or a
+  model that forgot it, loses nothing. Nothing further is asked. The gate
+  still refuses an agent-authored record.
 
 **The flow.** The design turn writes each dependency's directory — researched
 for a provider the PRD names, the need alone otherwise — and ends by naming
