@@ -37,6 +37,14 @@ package codingagent
 // Without that read the recording would stop a poll interval short of the run's
 // own ending, every time.
 //
+// EVERY READ WINDOW IS MEASURED FROM THE DATA, never from the platform's clock,
+// and every poll is bounded. Those two are one lesson: the reader cannot know
+// how long its own read took or which instant inside it the answer describes. A
+// window anchored on "when my last read returned" assumes the answer described
+// that instant, and a measured 13.22 s log call proved it does not — three times
+// in one run the next window began after lines nobody had read, and a cursor
+// that only moves forward never asked again. See windowStart and sinceSecondsAt.
+//
 // The runner makes no network call for any of this. Its stdout is still the one
 // transport, which is what keeps a runner that cannot reach the platform from
 // being a runner whose work is invisible.
@@ -78,7 +86,24 @@ const (
 	// exact cursor would race the clock and drop whatever landed in the rounding.
 	// Overlap costs a re-read of a second or two of log, which dedupe throws
 	// away; the alternative costs events, which nothing can recover.
+	//
+	// It is deliberately NOT the platform's slack against a slow read. It used
+	// to be asked to be both, and three seconds is nowhere near enough for that:
+	// one measured OpenChoreo log call took 13.22 s. Latency is answered by
+	// anchoring the window on the DATA (recordCursor.LastLineTS), which makes a
+	// stalled read widen the next window by the length of the stall; this
+	// constant only covers the API's own second-granularity rounding.
 	recordReadOverlap = 3 * time.Second
+	// defaultPollTimeout bounds ONE poll's OpenChoreo calls. The OC client has
+	// no timeout of its own, so a hung call silently blocked the session loop
+	// for as long as it liked — a 13-second read is not an error anywhere in the
+	// logs, it just stops the recording dead. A poll that overruns this must
+	// FAIL rather than stall: the error path leaves the cursor unmoved, so the
+	// next poll asks for the same window and nothing is skipped.
+	//
+	// Generously above the worst read measured (13.22 s) so it can never cut a
+	// healthy-but-slow poll short, and no wider than the idle cadence.
+	defaultPollTimeout = 30 * time.Second
 )
 
 // CycleRecorder records dispatched cycles' feeds. Its lifecycle is the cycle
@@ -96,8 +121,15 @@ type CycleRecorder struct {
 	// 200-event window that used to be a run's whole history is gone with it.
 	archive ArchiveLogSource
 
-	livePoll time.Duration
-	idlePoll time.Duration
+	livePoll    time.Duration
+	idlePoll    time.Duration
+	pollTimeout time.Duration
+
+	// now is the clock every session reads. A field only so a test can drive a
+	// read window and a stall on the same clock — the failure this recorder got
+	// wrong is a relationship between two instants, and no test can express one
+	// against the wall clock.
+	now func() time.Time
 
 	mu       sync.Mutex
 	sessions map[string]*recordingSession
@@ -110,11 +142,13 @@ func NewCycleRecorder(src RecordingLogSource, store *RecordingStore) *CycleRecor
 		return nil
 	}
 	return &CycleRecorder{
-		src:      src,
-		store:    store,
-		livePoll: defaultLivePoll,
-		idlePoll: defaultIdlePoll,
-		sessions: map[string]*recordingSession{},
+		src:         src,
+		store:       store,
+		livePoll:    defaultLivePoll,
+		idlePoll:    defaultIdlePoll,
+		pollTimeout: defaultPollTimeout,
+		now:         time.Now,
+		sessions:    map[string]*recordingSession{},
 	}
 }
 
@@ -257,7 +291,7 @@ func (r *CycleRecorder) CloseCancelled(ctx context.Context, cycle *delivery.RunC
 	settled := gen.RunEvent{
 		V:       gen.RunEventV2,
 		Seq:     cur.LastSeq,
-		TS:      time.Now().UTC(),
+		TS:      r.now().UTC(),
 		Kind:    gen.RunEventKindRunSettled,
 		AgentID: leadAgentID,
 		Outcome: gen.RunEventOutcomeCancelled,
@@ -289,9 +323,17 @@ type recordingSession struct {
 	cur  recordCursor
 	lift *lifter
 
-	// lastRead is when the previous successful read returned, and is what the
-	// next read's sinceSeconds is measured from. Zero means "never read", which
-	// asks for the whole log.
+	// binding is the cycle Component's release binding, resolved ONCE. It is
+	// fixed for the attempt, so re-resolving it every second spent a round trip
+	// re-deriving a constant. Cleared when a read says it is gone, so a
+	// re-rendered binding is picked up rather than 404ing forever.
+	binding string
+
+	// lastRead is when the previous successful read returned. It is the FALLBACK
+	// anchor for the next read's window and nothing more: it is the platform's
+	// clock, and the window belongs to the data's (recordCursor.LastLineTS). It
+	// is used only before anything has been ingested, where there is no line to
+	// measure from. Zero means "never read", which asks for the whole log.
 	lastRead time.Time
 	// gapped latches the moment the feed is known to have lost events.
 	gapped bool
@@ -350,8 +392,17 @@ func (s *recordingSession) run(ctx context.Context) {
 }
 
 // poll performs one read and reports whether the session is over.
+//
+// Every OpenChoreo call it makes is BOUNDED. The OC client carries no timeout of
+// its own, so before this a hung call blocked the session loop for as long as it
+// liked and left no trace anywhere: a recording that simply stopped growing, and
+// not one warning to say why. A poll that overruns fails instead, and failing is
+// safe — the cursor does not move, so the next poll asks for the same window.
 func (s *recordingSession) poll(ctx context.Context) (done bool, phase string) {
-	tail, err := s.rec.src.ReadSince(ctx, s.cycle.OrgID, s.cycle.ProjectID, s.cycle.JobRef, s.sinceSeconds())
+	ctx, cancel := context.WithTimeout(ctx, s.rec.pollTimeout)
+	defer cancel()
+
+	tail, err := s.read(ctx, s.windowStart())
 	if err != nil {
 		if errors.Is(err, ErrComponentGone) {
 			// The Component was deleted out from under a running recording — a
@@ -360,14 +411,15 @@ func (s *recordingSession) poll(ctx context.Context) (done bool, phase string) {
 			s.close(ctx, gen.RunCycleViewRecordingGaps)
 			return true, ""
 		}
-		// A transport failure is not an answer about the cycle. Keep the session
-		// and try again on the next tick; the cursor did not move, so the retry
-		// asks for the same window.
+		// A transport failure — or this poll's own deadline — is not an answer
+		// about the cycle. Keep the session and try again on the next tick; the
+		// cursor did not move, so the retry asks for the same window, widened by
+		// however long the failure took.
 		slog.WarnContext(ctx, "codingagent.CycleRecorder: pod log read failed (transient)",
 			"cycle", s.cycle.ID, "attempt", s.attempt, "error", err)
 		return false, ""
 	}
-	s.lastRead = time.Now()
+	s.lastRead = s.rec.now()
 	s.ingest(ctx, tail)
 
 	if !terminalPod(tail.Pod) {
@@ -377,7 +429,7 @@ func (s *recordingSession) poll(ctx context.Context) (done bool, phase string) {
 	// written its last words and the log API still serves them while the
 	// Component exists; dedupe by seq makes re-reading the whole log free of
 	// duplicates, so the cheapest correct thing is to ask for all of it.
-	if final, ferr := s.rec.src.ReadSince(ctx, s.cycle.OrgID, s.cycle.ProjectID, s.cycle.JobRef, 0); ferr == nil {
+	if final, ferr := s.read(ctx, time.Time{}); ferr == nil {
 		s.ingest(ctx, final)
 	} else {
 		slog.WarnContext(ctx, "codingagent.CycleRecorder: final log read failed; the recording may be short of the run's ending",
@@ -392,27 +444,92 @@ func (s *recordingSession) poll(ctx context.Context) (done bool, phase string) {
 	return true, tail.Pod.Phase
 }
 
-// sinceSeconds is the time cursor for the next read: everything since the last
-// successful one, widened by recordReadOverlap. Zero — the whole log — until
-// the first read lands.
-func (s *recordingSession) sinceSeconds() int64 {
-	if s.lastRead.IsZero() {
-		return 0
+// windowStart is the instant the next read asks from: the newest line this
+// session has INGESTED, less recordReadOverlap for the API's own second
+// granularity. The zero time — the whole log — until anything has been read.
+//
+// The anchor is the DATA's clock, and that is the whole fix. It used to be
+// `lastRead`: the platform's own wall clock, stamped when the previous read
+// RETURNED, which quietly asserts that the answer described that instant.
+// Nothing says it does. One measured OpenChoreo log call took 13.22 s, and no
+// part of the response says which moment inside it the log was read at — so on
+// three occasions in one run the next window began AFTER lines the recorder had
+// never seen, and because the cursor only moves forward, nothing ever asked for
+// them again. Two events, then two, then seven, reported to the user as
+// permanently lost.
+//
+// Anchored on the newest line ingested, a stall cannot open a hole: a 13-second
+// stall makes the next window 13 seconds wider, and a wider window costs a
+// re-read that dedupe throws away.
+//
+// ProseTS is the fallback below it for one reason only: a cursor persisted
+// before LastLineTS existed has no line clock, and a restart reading it should
+// resume wide rather than guess.
+func (s *recordingSession) windowStart() time.Time {
+	anchor := s.cur.LastLineTS
+	if anchor.IsZero() {
+		anchor = s.cur.ProseTS
 	}
-	since := time.Since(s.lastRead) + recordReadOverlap
-	secs := int64(since/time.Second) + 1
-	if secs < 1 {
-		secs = 1
+	if anchor.IsZero() {
+		if s.lastRead.IsZero() {
+			return time.Time{} // nothing read yet: ask for the whole log
+		}
+		anchor = s.lastRead
 	}
-	return secs
+	return anchor.Add(-recordReadOverlap)
+}
+
+// read reads the pod log from an absolute instant, resolving the session's
+// release binding on the way if it does not hold one yet.
+//
+// A read that says the Component is gone gets ONE re-resolve when the binding
+// came from the cache. The name is fixed for the attempt, but a re-render can
+// replace it, and a cached name that has been replaced would 404 for the rest of
+// the run — the recorder would close the recording `gaps` while the pod was
+// still happily writing.
+func (s *recordingSession) read(ctx context.Context, since time.Time) (LiveTail, error) {
+	binding, cached, err := s.releaseBinding(ctx)
+	if err != nil {
+		return LiveTail{}, err
+	}
+	tail, err := s.rec.src.ReadSince(ctx, s.cycle.OrgID, binding, since)
+	if err == nil || !cached || !errors.Is(err, ErrComponentGone) {
+		return tail, err
+	}
+	s.binding = ""
+	if binding, _, err = s.releaseBinding(ctx); err != nil {
+		return LiveTail{}, err
+	}
+	return s.rec.src.ReadSince(ctx, s.cycle.OrgID, binding, since)
+}
+
+// releaseBinding returns the session's binding name and whether it came from
+// the cache (which is what says a 404 on it is worth re-resolving).
+func (s *recordingSession) releaseBinding(ctx context.Context) (name string, cached bool, err error) {
+	if s.binding != "" {
+		return s.binding, true, nil
+	}
+	name, err = s.rec.src.Binding(ctx, s.cycle.OrgID, s.cycle.ProjectID, s.cycle.JobRef)
+	if err != nil {
+		return "", false, err
+	}
+	s.binding = name
+	return name, false, nil
 }
 
 // ingest turns one raw page into events and appends whatever is new.
+//
+// `observedAt` is read once, here, and handed to every marker this page mints.
+// The markers below are not things a producer said — they are the platform's own
+// reading of a pod and of its own recording — so the platform's clock at the
+// moment it read them is their honest timestamp, and `RunEvent.ts` has no way to
+// say "no clock" (see platformNotice).
 func (s *recordingSession) ingest(ctx context.Context, tail LiveTail) {
 	if s.capped {
 		return
 	}
-	events := s.consume(ctx, tail.Text)
+	observedAt := s.rec.now().UTC()
+	events := s.consume(ctx, tail.Text, observedAt)
 	if len(events) == 0 {
 		// Nothing the producer said. While NOTHING has ever been recorded and the
 		// pod has not settled, the pod's own state is the only report there is —
@@ -421,7 +538,7 @@ func (s *recordingSession) ingest(ctx context.Context, tail LiveTail) {
 		// re-derived per viewer, because a viewer that reads only the recording
 		// would otherwise see nothing at all until the runner's first line.
 		if s.cur.ProducerSeq == 0 && s.cur.ProseTS.IsZero() && !terminalPod(tail.Pod) {
-			boot := bootstrapRunEvent(tail.Pod.Found, tail.Pod.Phase, tail.Pod.WaitingReason, tail.Pod.Message)
+			boot := bootstrapRunEvent(observedAt, tail.Pod.Found, tail.Pod.Phase, tail.Pod.WaitingReason, tail.Pod.Message)
 			if boot.Seq == s.cur.BootSeq {
 				return // the same state, re-derived: one row, not one per second
 			}
@@ -446,7 +563,7 @@ func (s *recordingSession) ingest(ctx context.Context, tail LiveTail) {
 		// that trips it keeps RUNNING — stopping an agent to protect a log would be
 		// the wrong trade — and says on the feed that the rest is not recorded.
 		s.capped = true
-		notice := platformNotice(s.nextSeq(), gen.RunEventLevelWarn,
+		notice := platformNotice(observedAt, s.nextSeq(), gen.RunEventLevelWarn,
 			"This cycle's output passed the recording size limit; the rest of the run was not recorded.")
 		notice.Code = gen.RunEventCodeGap
 		_, _, _ = s.rec.store.Append(s.cycle.OrgID, s.cycle.ID, s.attempt, []gen.RunEvent{notice}, s.cur)
@@ -457,7 +574,7 @@ func (s *recordingSession) ingest(ctx context.Context, tail LiveTail) {
 // consume turns one raw pod-log page into the v2 events this session has not
 // recorded yet, splicing in a backfill (or a `notice`) wherever the producer's
 // own numbering shows events missing.
-func (s *recordingSession) consume(ctx context.Context, text string) []gen.RunEvent {
+func (s *recordingSession) consume(ctx context.Context, text string, observedAt time.Time) []gen.RunEvent {
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
@@ -469,7 +586,7 @@ func (s *recordingSession) consume(ctx context.Context, text string) []gen.RunEv
 	text = dropTruncatedTail(text)
 
 	out := make([]gen.RunEvent, 0, 64)
-	backfilled := false
+	repaired := false
 	for _, ln := range splitPage(text) {
 		if !ln.hasSeq {
 			// A seq-less line (container bootstrap output, a stray library write, a
@@ -481,6 +598,7 @@ func (s *recordingSession) consume(ctx context.Context, text string) []gen.RunEv
 				continue
 			}
 			s.cur.ProseTS = ts
+			s.markLineTime(ts)
 			out = append(out, s.number(s.lift.line(ln.msg, ln.ts))...)
 			continue
 		}
@@ -488,48 +606,135 @@ func (s *recordingSession) consume(ctx context.Context, text string) []gen.RunEv
 			continue // already recorded; the read window deliberately overlaps
 		}
 		if s.cur.ProducerSeq > 0 && ln.seq > s.cur.ProducerSeq+1 {
-			recovered, missing := s.repairGap(ctx, s.cur.ProducerSeq, ln.seq, &backfilled)
+			recovered, missing := s.repairGap(ctx, s.cur.ProducerSeq, ln.seq, &repaired)
 			out = append(out, s.number(recovered)...)
 			if missing > 0 {
-				out = append(out, gapNotice(s.nextSeq(), missing))
+				// A gap is a fact about a POSITION in the feed, so it is stamped
+				// with the clock of the line that revealed it — the kubelet's own,
+				// which stays exact even when this page is a backfill read minutes
+				// after the events went missing. This read's clock stands in only
+				// when that line carried no prefix at all.
+				at := parseEventTime(ln.ts)
+				if at.IsZero() {
+					at = observedAt
+				}
+				out = append(out, gapNotice(at, s.nextSeq(), missing))
 				s.markGaps(ctx)
 			}
 		}
 		s.cur.ProducerSeq = ln.seq
+		// EVERY ingested line leaves a time trace, not just the seq-less ones.
+		// While only ProseTS was written, a run whose lines all carried envelopes
+		// left the recorder with no idea what the pod's clock said — so the read
+		// window had nothing to measure from but the platform's own, which is the
+		// hole this closes (see windowStart).
+		s.markLineTime(parseEventTime(ln.ts))
 		out = append(out, s.number(s.lift.line(ln.msg, ln.ts))...)
 	}
 	return out
 }
 
-// repairGap asks the observability plane for the events the pod read skipped
-// over, and reports how many are still missing after it answers.
+// markLineTime advances the cursor's newest-ingested-line clock. It only ever
+// moves FORWARD: taking the newest is what keeps a backfill read — which serves
+// lines older than the ones already recorded — from winding the read window back
+// and re-reading the same stretch of log for the rest of the run.
+func (s *recordingSession) markLineTime(ts time.Time) {
+	if !ts.IsZero() && ts.After(s.cur.LastLineTS) {
+		s.cur.LastLineTS = ts
+	}
+}
+
+// repairGap goes back for the events this page skipped over, and reports how
+// many are still missing after it has tried.
 //
-// The archive is the ONLY caller-visible use left for the observer on this
-// path. It used to be the ordinary post-mortem source — a finished run's whole
-// history was its newest 200 events — and the recording replaced that. What it
-// is good for is precisely this: it indexed the same pod's output all along, so
-// a burst the platform's own read missed may still be there.
+// TWO sources, in this order, because they can answer different questions:
 //
-// At most one archive call per page: a page with several gaps is a page whose
-// source is struggling, and hammering the observer would not help it.
-func (s *recordingSession) repairGap(ctx context.Context, after, before int64, backfilled *bool) ([]gen.RunEvent, int64) {
+//  1. the LIVE pod log, re-read with an explicit window that reaches back to the
+//     last line already ingested. While the pod's Component exists the lines are
+//     still there — the log API serves the whole log for as long as it does, and
+//     probing it directly during the incident returned a complete, in-order
+//     `1..478` with nothing missing. A hole in the recording is therefore
+//     usually a hole in what the platform ASKED FOR, and asking again with a
+//     window that cannot have moved is the direct repair.
+//  2. the observability ARCHIVE, for whatever the pod could not give back — a
+//     stretch the kubelet has since rotated away, or a Component already
+//     deleted. This is the ONLY caller-visible use left for the observer on this
+//     path: it used to be the ordinary post-mortem source (a finished run's
+//     whole history was its newest 200 events) and the recording replaced that.
+//
+// At most one repair per page: a page with several gaps is a page whose source is
+// struggling, and hammering it would not help.
+func (s *recordingSession) repairGap(ctx context.Context, after, before int64, repaired *bool) ([]gen.RunEvent, int64) {
 	missing := before - after - 1
-	if s.rec.archive == nil || *backfilled {
+	if *repaired {
 		return nil, missing
 	}
-	*backfilled = true
+	*repaired = true
+
+	out := make([]gen.RunEvent, 0, missing)
+	// The window reaches back to the last line ingested, which by definition
+	// precedes the hole: the events went missing AFTER it. Nothing has been
+	// ingested at all only on a page whose very first envelope is out of step,
+	// and the whole log is the honest ask there.
+	tail, err := s.read(ctx, s.windowStart())
+	switch {
+	case err != nil:
+		slog.WarnContext(ctx, "codingagent.CycleRecorder: re-reading the pod for a feed gap failed",
+			"cycle", s.cycle.ID, "attempt", s.attempt, "afterSeq", after, "beforeSeq", before, "error", err)
+	case strings.TrimSpace(tail.Text) == "":
+		slog.WarnContext(ctx, "codingagent.CycleRecorder: the pod had nothing to give back for a feed gap",
+			"cycle", s.cycle.ID, "attempt", s.attempt, "afterSeq", after, "beforeSeq", before)
+	default:
+		out, after, missing = s.spliceRange(redactSecrets(tail.Text), out, after, before, missing)
+	}
+	if missing > 0 {
+		out, missing = s.repairFromArchive(ctx, out, after, before, missing)
+	}
+	if len(out) > 0 || missing > 0 {
+		slog.InfoContext(ctx, "codingagent.CycleRecorder: repaired a feed gap",
+			"cycle", s.cycle.ID, "attempt", s.attempt, "recovered", len(out), "stillMissing", missing)
+	}
+	return out, missing
+}
+
+// repairFromArchive asks the observability plane for what the pod could not give
+// back. It logs at WARN when it cannot answer: the incident this path exists for
+// left NO trace in the logs at all, because the only log line here sat after an
+// early return that both an error and an empty answer took.
+func (s *recordingSession) repairFromArchive(ctx context.Context, out []gen.RunEvent, after, before, missing int64) ([]gen.RunEvent, int64) {
+	if s.rec.archive == nil {
+		return out, missing
+	}
 	text, err := s.rec.archive.CycleArchive(ctx, ArchiveScope{
 		OrgName:       s.cycle.OrgID,
 		ProjectName:   s.cycle.ProjectID,
 		ComponentName: s.cycle.JobRef,
 		From:          s.cycle.CreatedAt.UTC().Add(-5 * time.Minute),
-		To:            time.Now().UTC(),
+		To:            s.rec.now().UTC(),
 	})
-	if err != nil || strings.TrimSpace(text) == "" {
-		return nil, missing
+	switch {
+	case err != nil:
+		slog.WarnContext(ctx, "codingagent.CycleRecorder: archive read for a feed gap failed",
+			"cycle", s.cycle.ID, "attempt", s.attempt, "afterSeq", after, "beforeSeq", before, "error", err)
+		return out, missing
+	case strings.TrimSpace(text) == "":
+		slog.WarnContext(ctx, "codingagent.CycleRecorder: the archive holds nothing for a feed gap",
+			"cycle", s.cycle.ID, "attempt", s.attempt, "afterSeq", after, "beforeSeq", before)
+		return out, missing
 	}
-	text = redactSecrets(text)
-	out := make([]gen.RunEvent, 0, missing)
+	out, _, missing = s.spliceRange(redactSecrets(text), out, after, before, missing)
+	return out, missing
+}
+
+// spliceRange lifts the lines of a re-read page whose producer seq falls INSIDE
+// the hole (after, before) and appends them to out, reporting how far it got and
+// how many are still missing.
+//
+// The range test is what keeps a repair from disturbing the cursor: everything
+// at or below `after` is already recorded and everything at or above `before` is
+// about to be, so a repair page is never allowed to advance ProducerSeq or to
+// lift a line the ordinary path will lift.
+func (s *recordingSession) spliceRange(text string, out []gen.RunEvent, after, before, missing int64) ([]gen.RunEvent, int64, int64) {
 	for _, ln := range splitPage(text) {
 		if !ln.hasSeq || ln.seq <= after || ln.seq >= before {
 			continue
@@ -541,9 +746,7 @@ func (s *recordingSession) repairGap(ctx context.Context, after, before int64, b
 	if missing < 0 {
 		missing = 0
 	}
-	slog.InfoContext(ctx, "codingagent.CycleRecorder: backfilled a feed gap from the archive",
-		"cycle", s.cycle.ID, "attempt", s.attempt, "recovered", len(out), "stillMissing", missing)
-	return out, missing
+	return out, after, missing
 }
 
 // number stamps the recording's own seq onto events the lift produced, in the
@@ -601,7 +804,22 @@ func (s *recordingSession) markGaps(ctx context.Context) {
 }
 
 // close finalises the recording and drops the session.
+//
+// A recording closing as `gaps` says so ON THE FEED before it closes, because
+// this is the moment — and the only moment — at which the loss becomes
+// permanent. Nothing more can be read once the session is over, so the mid-run
+// notices that said "not captured yet" are answered here, once, by the row that
+// says nothing more is coming.
 func (s *recordingSession) close(ctx context.Context, state gen.RunCycleViewRecording) {
+	if state == gen.RunCycleViewRecordingGaps && !s.capped {
+		notice := platformNotice(s.rec.now().UTC(), s.nextSeq(), gen.RunEventLevelWarn,
+			"Some of this run's output was never captured, and the pod it was written to is gone — nothing can recover it now.")
+		notice.Code = gen.RunEventCodeGap
+		if _, _, err := s.rec.store.Append(s.cycle.OrgID, s.cycle.ID, s.attempt, []gen.RunEvent{notice}, s.cur); err != nil {
+			slog.WarnContext(ctx, "codingagent.CycleRecorder: could not name a closing gap on the feed",
+				"cycle", s.cycle.ID, "attempt", s.attempt, "error", err)
+		}
+	}
 	if err := s.rec.store.Close(s.cycle.OrgID, s.cycle.ID, state); err != nil {
 		slog.WarnContext(ctx, "codingagent.CycleRecorder: close recording failed", "cycle", s.cycle.ID, "error", err)
 		return
@@ -614,9 +832,19 @@ func (s *recordingSession) close(ctx context.Context, state gen.RunCycleViewReco
 // the point they went missing rather than reported once at the end. A reader
 // scrolling a feed has to be able to see WHERE the hole is; a flag on the
 // response can only say that there is one somewhere.
-func gapNotice(seq, missing int64) gen.RunEvent {
-	ev := platformNotice(seq, gen.RunEventLevelWarn,
-		fmt.Sprintf("… %d event(s) of this run were not captured and could not be recovered", missing))
+//
+// It says "not captured YET", and the word is load-bearing. This row is written
+// the instant a hole is detected — with the pod still running, its Component
+// still readable and the recorder about to ask for that stretch of log again on
+// its next tick — and the sentence there before it read "were not captured and
+// could not be recovered", which was simply not true at the moment it was
+// written. A user was told three times in one run that events were gone for
+// good while every one of them was still sitting in the pod's log. The
+// unrecoverable wording belongs to the one place it is true: the recording
+// closing as `gaps` (see close).
+func gapNotice(at time.Time, seq, missing int64) gen.RunEvent {
+	ev := platformNotice(at, seq, gen.RunEventLevelWarn,
+		fmt.Sprintf("… %d event(s) of this run have not been captured yet", missing))
 	ev.Code = gen.RunEventCodeGap
 	return ev
 }
