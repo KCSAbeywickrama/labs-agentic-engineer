@@ -695,6 +695,35 @@ test("aep-validation still names the force-push its push step needs", () => {
   );
 });
 
+// The two comments a validation run has always posted are STEP-anchored, and
+// that is why they are the two that reliably happen — ADR-0010's own rule, that
+// an obligation stated beside a numbered sequence gets skipped while one inside
+// it lands. The platform now writes the middle, so nothing else is asked for;
+// lose either of these and the issue has no opening claim or no closing verdict.
+test("aep-validation keeps the two comments its steps ask for", () => {
+  const body = fs.readFileSync(path.join(LIBRARY, "aep-validation", "SKILL.md"), "utf8");
+  assert.ok(body.includes("Post a brief opening comment"), "step 1 lost its opening comment");
+  assert.ok(
+    body.includes("Post an issue comment with the summary counts"),
+    "step 10 lost its closing summary",
+  );
+});
+
+// …and asks for NOTHING else. The skill carried a `## The status line` section
+// telling the agent to keep the middle current; it never did, and the platform
+// now writes those lines itself (ADR-0011). Restoring the section would put two
+// writers on one line — the `aep` body is always-on for a validation run too, so
+// its own keep-it-current rule is already in the prompt and needs no second
+// voice here.
+test("aep-validation asks for no status line of its own", () => {
+  const body = fs.readFileSync(path.join(LIBRARY, "aep-validation", "SKILL.md"), "utf8");
+  const headings = body.split("\n").filter((l) => /^#{1,6}\s+\S/.test(l));
+  assert.ok(
+    !headings.some((h) => /status line/i.test(h)),
+    `aep-validation grew a status-line section back: ${headings.filter((h) => /status line/i.test(h)).join(", ")}`,
+  );
+});
+
 test("re-mirroring the same workspace replaces the previous mode's body", async () => {
   await inTempDir(async (dir) => {
     const workspace = path.join(dir, "ws");

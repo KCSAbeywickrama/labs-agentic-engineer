@@ -1427,7 +1427,7 @@ type InputFailure struct {
 	Reason     string `json:"reason"`
 }
 
-// IssueComment One comment on an issue, exactly as GitHub holds it. The platform stores none of this — it is read live on every request, so GitHub stays the only copy. The platform's OWN machine comments are excluded (a resolved-dependency block, a provisioning note, a closing line — written for the agent, not for a person); what remains is the coding agent's progress notes and whatever a human wrote, which appear alike. They cannot be told apart by author, and are not meant to be — the platform comments through the org's own credential and the coding runner is handed that same credential, so both arrive under one login.
+// IssueComment One comment on an issue, exactly as GitHub holds it. The platform stores none of this — it is read live on every request, so GitHub stays the only copy. The platform's notes TO THE AGENT are excluded (a resolved-dependency block, a provisioning note, a closing line — written for a reader that is not a person); what remains is what a human wrote, what an agent said, and what the platform observed of a run. Author cannot separate them and is not meant to — the platform comments through the org's own credential and the coding runner is handed that same credential, so all three arrive under one login. `observed` is what separates a machine's report of a tool call from somebody's judgement about the work.
 type IssueComment struct {
 	// Author The commenter's GitHub login. Empty when the account is gone — GitHub answers a null author for a deleted user, which is a fact about the comment, not a read failure.
 	Author    string    `json:"author"`
@@ -1435,8 +1435,11 @@ type IssueComment struct {
 	CreatedAt time.Time `json:"createdAt"`
 
 	// ID GitHub's own node id — stable across reads, and the list key a consumer should render on.
-	ID  string `json:"id"`
-	URL string `json:"url"`
+	ID string `json:"id"`
+
+	// Observed True when the PLATFORM wrote this line from what it saw the run do, rather than an agent or a person writing it. A validation run's harness, exploration, spec runs and report are reported this way — inferred from tool calls the run had to make, never declared by it — so a reader can tell a mechanical observation from a judgement. Absent means somebody wrote it.
+	Observed bool   `json:"observed,omitempty"`
+	URL      string `json:"url"`
 }
 
 // IssueInfo One issue from list/search. Field names are CAPITALIZED on the wire (historical shape the deployed aep-mcp-server parses — do not "fix" without a coordinated MCP-server release).

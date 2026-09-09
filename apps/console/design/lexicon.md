@@ -901,26 +901,34 @@ The row now says what is happening to it. In the order a reader meets them:
 | It worked, then broke — being repaired | **`Healing…`** |
 | Settled | **`Passed`** / **`Failed`**, unchanged |
 
-Above the rows, one line — **the agent's, in its own words**, and only while the
-run is under way. It is the newest comment on the run's validation issue, the
-same status line a dev cycle keeps on the issue it is working, and the
-`aep-validation` skill asks for it in those terms: *say what the criterion rows
-cannot*. So the two are different granularities and cannot contradict each other
-— the rows say where each criterion stands, the line says where the run is in its
-workflow and what it decided.
+Above the rows, one line, and only while the run is under way. It is the newest
+comment on the run's validation issue, the same status line a dev cycle keeps on
+the issue it is working. It says where the RUN is; the rows say where each
+criterion stands. Different granularities, so they cannot contradict each other.
 
-Its vocabulary is not fixed here, because it is not ours. This file governs agent
-prose, and what it asks of this line is a shape rather than words: **one line,
-present tense, about the run and not about a criterion.** A phase enum was
-rejected for it (`liveLine.ts` carries why) — the workflow loops, so any fixed
-ladder either marches backwards on screen or is pinned forward and lies.
+**Two writers, and only one of them is labelled.** Most of the line is the
+platform's: it watches the run's own tool calls and posts what it saw — the
+harness, the exploration, the specs running, the report. That is what the pulse
+beside it already means, so it carries no label. The agent writes the two ends
+and anything between them that no command can show — a criterion it cannot
+reach, a login the roles gate never published — and those lines are prefixed
+**The agent:**, because a reader who cannot tell them apart over-trusts the
+mechanical one. Newest wins either way.
 
-Two derived sentences remain as the **fallback**, for the window before the first
-comment lands and for a run whose agent posts none:
+The platform's words are not fixed here (`runners/.../validation_status_line.ts`
+holds them, one per rung); the agent's are not ours to fix at all. What this file
+asks of both is a shape: **one line, present tense, about the run and not about a
+criterion**, and **naming the evidence rather than the step** — the workflow
+loops, so a line claiming a step is wrong for most of a run, while one naming the
+call it just watched stays true.
+
+Three derived sentences remain as the **fallback**, for the window before the
+first comment lands and for a run whose posts failed:
 
 | | |
 |---|---|
 | Nothing picked up yet | *Setting up the test harness…* |
+| Work under way | *Checking the criteria, N of M answered…* |
 | All settled, no results published | *Writing the validation report…* |
 
 **The line is led by the working pulse, and shows only while validating.** The
@@ -955,12 +963,19 @@ is watching it, and "what is it doing right now" is the whole question. The rule
 protects against a reader being told about machinery they did not ask about —
 not against answering the one thing they came to find out.
 
-**Unsettled: *test harness* and *validation report*.** Both fallback lines name
+**Unsettled: *test harness*, *validation report*, and *test issues*.** All name
 internal artifacts, which rule 6 has a better claim over — a reader does not have
-a harness, they have criteria waiting to be checked. They are the two windows
-where nothing else moves, so something had to be said; whoever finds better words
-changes them here first. Less load-bearing now that the agent's own line covers
-the run — but they still speak first on every run, before its opening comment.
+a harness or a test issue, they have criteria waiting to be checked. The middle
+line says it in those terms and the others do not; whoever finds better words
+changes them here first.
+
+That covers both writers. The derived fallbacks (*Setting up the test harness…*,
+*Writing the validation report…*) are the console's, now distant — the run posts
+its own line as it works, and they speak only before its first comment lands. The
+platform's rungs live in `validation_status_line.ts`, and two of them —
+*Generating the validation report from the automated test results…* and *Fixing the test
+issues…* — carry the same debt. `harness` is deliberately byte-identical to its
+fallback, so one phase reads the same sentence whichever source produced it.
 
 ## What a change invalidates
 

@@ -55,11 +55,11 @@ function agentCriteriaIds(oracle: ValidationCriteria): string[] {
 }
 
 /**
- * What to say above the rows, or "" to say nothing.
+ * What to say above the rows, or "" when there are no rows to say it about.
  *
- * Empty is the normal answer. Once any criterion has a status the rows carry
- * the whole story, and a summary sentence over them would only be a coarser
- * version of what the reader is already looking at.
+ * Empty means this page has nothing to describe — no criteria, or none a run can
+ * act on. Every other answer is a sentence, because a live run with a blank line
+ * over it looks exactly like one that died.
  */
 export function validationLiveLine(
   oracle: ValidationCriteria | undefined,
@@ -82,9 +82,23 @@ export function validationLiveLine(
   // 9-10: the final full run, generate-report.mjs, the push and the pull
   // request. The rows are all settled, so nothing on the page moves until the
   // platform reads the report at the merge commit.
-  if (!hasReport && touched.length === ids.length && ids.every((id) => TERMINAL.has(live?.[id] ?? ""))) {
-    return "Writing the validation report…";
+  if (touched.length === ids.length && ids.every((id) => TERMINAL.has(live?.[id] ?? ""))) {
+    // …and once the report HAS landed, nothing. The rows read from it and the
+    // verdict is beside them, so a line here could only restate them — and the
+    // trailing ellipsis would promise work still in flight on a run that has
+    // answered everything it was asked.
+    return hasReport ? "" : "Writing the validation report…";
   }
 
-  return "";
+  // The long middle: work is under way and not finished. The rows carry the
+  // detail here, so this says the one thing they do not — how far through the
+  // whole set the run is, which is a count no single row can show.
+  //
+  // It is a FALLBACK, and a distant one. The run posts its own line on the issue
+  // as it works, so a reader normally sees that instead; this speaks when a post
+  // failed, or before the first one lands. Blank was the old answer and it was
+  // the worst of the three: the tile went empty for the longest stretch of the
+  // run, which reads the same as a run that stopped.
+  const answered = ids.filter((id) => TERMINAL.has(live?.[id] ?? "")).length;
+  return `Checking the criteria, ${answered} of ${ids.length} answered…`;
 }

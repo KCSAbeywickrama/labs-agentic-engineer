@@ -25,6 +25,7 @@ import {
 } from "@aep/ui-validation-view";
 import { validationView } from "../../projects/lib/pipeline";
 import { FULL_WIDTH_ALERT_MESSAGE, LiveNote } from "./LiveNote";
+import type { StatusLine } from "../../tasks/lib/statusLine";
 
 // A method named inside a sentence: the badge's word, set the way the badge sets it
 // — same monospace, same weight, same tracking, same uppercase — so a reader
@@ -92,7 +93,7 @@ export function PendingTile({
   /** The criteria read came back `not_found`: none were ever authored. */
   noCriteria?: boolean;
   /** What the run is doing while no criterion has anything to say — see LiveNote. */
-  note?: string;
+  note?: string | StatusLine;
 }) {
   const view = validationView("running");
   if (!view) return null;
