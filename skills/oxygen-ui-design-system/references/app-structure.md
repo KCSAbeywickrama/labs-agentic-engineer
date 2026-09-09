@@ -1,6 +1,8 @@
 # Oxygen UI — App Structure & Setup
 
-The canonical structure, mirroring Oxygen's own sample app. It sits inside the layout
+The canonical structure, mirroring Oxygen's own sample app — whose real
+source is in `sample/src/` beside this skill; these are its excerpts, adjusted
+to this platform where `SKILL.md` says the platform overrides the sample. It sits inside the layout
 `react-webapp` prescribes (`src/env.ts`, `src/generated/`, `src/api.ts`, `mock/`, `nginx/` are
 that skill's and stay as it says); this file adds `config/`, `layouts/` and `pages/`. Use this when scaffolding a
 new app or adding pages/layouts to an existing one. Stack: **React 19 + Vite + react-router
@@ -36,7 +38,7 @@ src/
 ├── config/
 │   └── appRoutes.tsx       # routes grouped under layouts
 ├── layouts/
-│   ├── AppLayout.tsx       # signed-in app shell (AppShell/Header/Sidebar)
+│   ├── AppLayout.tsx       # the sample app's shell — see sample/src/layouts/AppLayout.tsx
 │   ├── GateLayout.tsx      # login / unauthenticated
 │   └── DefaultLayout.tsx   # standalone pages (home, error)
 └── pages/

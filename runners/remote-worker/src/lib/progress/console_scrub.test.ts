@@ -53,7 +53,7 @@ function events(): Array<Record<string, unknown>> {
 }
 
 function summaries(): string[] {
-  return events().map((e) => String(e.summary));
+  return events().map((e) => String(e.detail));
 }
 
 /** A console with all five methods, so the bridge has something to wrap. */
@@ -85,13 +85,14 @@ test("installConsoleScrubber: console output lands on the feed as typed, parseab
   // The envelope every other event carries — this is what a bare stdout line
   // used to be missing, and what made the feed not-NDJSON.
   for (const e of out) {
-    assert.equal(e.kind, "log");
-    assert.equal(e.schemaVersion, 1);
+    assert.equal(e.kind, "notice");
+    assert.equal(e.v, 2);
+    assert.equal(e.agentId, "lead", "a runner line is the lead's unless somebody says otherwise");
     assert.ok(typeof e.ts === "string" && e.ts !== "");
     assert.ok(typeof e.seq === "number");
   }
   assert.deepEqual(out.map((e) => e.level), ["info", "warn", "error"]);
-  assert.equal(out[0]?.summary, "[local] materialised 6 skill(s); preload=4");
+  assert.equal(out[0]?.detail, "[local] materialised 6 skill(s); preload=4");
   // seq is monotonic across the bridge and the rest of the feed alike.
   assert.deepEqual(out.map((e) => e.seq), [1, 2, 3]);
 });
@@ -192,11 +193,15 @@ test("installLogRedaction: warns by NAME when a mounted credential is too short 
 
   const warned = events();
   assert.equal(warned.length, 1);
+  assert.equal(warned[0]?.kind, "notice");
   assert.equal(warned[0]?.level, "warn");
-  const summary = String(warned[0]?.summary);
+  // Code-LESS on purpose: `code` names closed conditions a consumer branches
+  // on, and this is prose for whoever reads the log.
+  assert.equal(warned[0]?.code, undefined);
+  const detail = String(warned[0]?.detail);
   // The NAME is what makes the warning actionable...
-  assert.match(summary, /GITHUB_TOKEN/);
+  assert.match(detail, /GITHUB_TOKEN/);
   // ...and the value must never ride along: this line goes to the build log,
   // so putting it there would be the disclosure the module exists to prevent.
-  assert.ok(!summary.includes("short-tok"));
+  assert.ok(!detail.includes("short-tok"));
 });
