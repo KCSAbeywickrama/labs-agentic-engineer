@@ -724,6 +724,17 @@ describe("BuildDetailPage — every delivery run's agent log", () => {
     expect(feeds().map((f) => f.dataset.runNumber)).toEqual(["2", "1"]);
   });
 
+  it("numbers nothing when one run delivered the version", () => {
+    // `RunFeed` prefixes its heading whenever `runNumber` is defined, so passing
+    // 1 here would relabel the ordinary case's only box from "Cycle 1" to
+    // "Run 1 · Cycle 1" — a number that tells it apart from nothing.
+    mockBuilds = [build()];
+    mockRuns = [devRun()];
+    renderPage();
+
+    expect(feeds()[0]!.dataset.runNumber).toBe("undefined");
+  });
+
   it("lets only the newest run open a box", () => {
     // One open log on the page, not one per feed.
     mockBuilds = [build()];

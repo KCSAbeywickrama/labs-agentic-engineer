@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -596,6 +597,61 @@ func TestRecorder_ArchiveBackfillRepairsAGapTheLivePodCannot(t *testing.T) {
 	}
 	if archive.reads() != 1 {
 		t.Errorf("the archive was read %d times, want 1 — at most one repair per page", archive.reads())
+	}
+}
+
+// TestRecorder_ArchiveFillsTheBottomOfAGapTheLivePodOnlyTopsUp pins the MERGE of
+// the repair's two sources, which is the case where they disagree about how much
+// of the hole they can answer.
+//
+// The pod is serving the top of the hole (4, 5) and has rotated the bottom away
+// (2, 3); the archive indexed all of it. Filtering the archive by how far the
+// live answer reached asks it for the stretch above 5 — nothing — and reports 2
+// and 3 permanently missing while they sit in the archive. Both sources are
+// therefore asked for the whole hole, and the merge is ordered on the PRODUCER's
+// seq, not on which source answered first: `number` stamps position in the file,
+// so appending the archive's 2 and 3 after the live 4 and 5 would write a
+// descending seq run into the recording.
+//
+// Driven through repairGap directly rather than through a poll. The repair's read
+// window is anchored on the last line ingested, so it can never reach FURTHER
+// BACK than the page that revealed the gap — no arrangement of this fixture's
+// clock makes a poll produce a part-answered hole. What the two sources can each
+// return is a property of the repair, and this is the level it lives at.
+func TestRecorder_ArchiveFillsTheBottomOfAGapTheLivePodOnlyTopsUp(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2026, 9, 4, 9, 25, 39, 0, time.UTC)
+	line := func(seq int, summary string) fakeLogLine {
+		return v1LogLine(seq, at.Add(time.Duration(seq)*time.Second),
+			`"kind":"log","summary":"`+summary+`"`)
+	}
+	// The pod no longer holds 2 and 3.
+	f := newRecorderFixture(t, at.Add(10*time.Second),
+		line(1, "one"), line(4, "four"), line(5, "five"), line(6, "six"),
+	)
+	f.rec.WithArchive(&spyArchive{text: pageOf(
+		line(1, "one"), line(2, "two"), line(3, "three"),
+		line(4, "four"), line(5, "five"), line(6, "six"),
+	)})
+
+	s := f.session(t, 1)
+	s.cur.ProducerSeq = 1
+
+	repaired := false
+	out, missing := s.repairGap(context.Background(), 1, 6, &repaired)
+
+	if missing != 0 {
+		t.Errorf("still missing %d — the archive holds every event in the hole", missing)
+	}
+	var got []string
+	for _, ev := range out {
+		got = append(got, ev.Detail)
+	}
+	// Ascending, because that is the order the producer wrote them in and the
+	// order `number` is about to stamp as their position in the file.
+	if want := []string{"two", "three", "four", "five"}; !slices.Equal(got, want) {
+		t.Errorf("recovered %v, want %v", got, want)
 	}
 }
 

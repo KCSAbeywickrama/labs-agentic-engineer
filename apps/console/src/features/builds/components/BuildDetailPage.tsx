@@ -688,7 +688,13 @@ function AgentLogSection({
                 // the runs this SECTION shows, not the version's whole run list:
                 // a run that only validated has no feed here, so numbering the
                 // full list would print "Run 3" over "Run 1" with no Run 2.
-                runNumber={runs.length - i}
+                //
+                // OMITTED ENTIRELY for a version delivered by one run, which is
+                // the ordinary case: `RunFeed` prefixes the heading whenever the
+                // prop is defined, so passing 1 would relabel every single-run
+                // version's only box from "Cycle 1" to "Run 1 · Cycle 1" — a run
+                // number that distinguishes it from nothing.
+                {...(runs.length > 1 ? { runNumber: runs.length - i } : {})}
                 // Only the newest run may open a box, so exactly one log is open
                 // on the page rather than one per feed.
                 expandNewest={i === 0}

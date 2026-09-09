@@ -67,6 +67,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -671,7 +672,28 @@ func (s *recordingSession) repairGap(ctx context.Context, after, before int64, r
 	}
 	*repaired = true
 
-	out := make([]gen.RunEvent, 0, missing)
+	// BOTH SOURCES ARE ASKED FOR THE WHOLE HOLE, and what they return is merged
+	// on the PRODUCER's seq before anything is numbered.
+	//
+	// Neither half of that is incidental. Filtering the archive by how far the
+	// live answer happened to reach loses events the archive still has: a live
+	// re-read that comes back with only the TOP of the hole (say 15..19 of
+	// 11..19) would move the floor to 19, and the archive — the source that
+	// exists precisely for the stretch the pod can no longer serve — would then
+	// be asked only for 19..20 and hand back nothing. 11..14 would be reported
+	// missing while sitting in the archive all along.
+	//
+	// And once both are asked for the same range, order stops being free.
+	// `RecordingStore.Append` writes a batch in slice order and `number` stamps
+	// each event with its POSITION IN THE FILE, so appending the archive's
+	// 11..14 after the live 15..19 would write a descending seq run into the
+	// recording — the one thing seq promises a consumer it can order on. Hence
+	// lines carry their producer seq through the merge and are sorted on it
+	// here, and `seen` keeps the overlap (the common case: both sources hold
+	// the same events) from being recorded twice.
+	lines := make([]repairedLine, 0, missing)
+	seen := make(map[int64]bool, missing)
+
 	// The window reaches back to the last line ingested, which by definition
 	// precedes the hole: the events went missing AFTER it. Nothing has been
 	// ingested at all only on a page whose very first envelope is out of step,
@@ -685,10 +707,16 @@ func (s *recordingSession) repairGap(ctx context.Context, after, before int64, r
 		slog.WarnContext(ctx, "codingagent.CycleRecorder: the pod had nothing to give back for a feed gap",
 			"cycle", s.cycle.ID, "attempt", s.attempt, "afterSeq", after, "beforeSeq", before)
 	default:
-		out, after, missing = s.spliceRange(redactSecrets(tail.Text), out, after, before, missing)
+		lines, missing = s.spliceRange(redactSecrets(tail.Text), lines, seen, after, before, missing)
 	}
 	if missing > 0 {
-		out, missing = s.repairFromArchive(ctx, out, after, before, missing)
+		lines, missing = s.repairFromArchive(ctx, lines, seen, after, before, missing)
+	}
+
+	sort.SliceStable(lines, func(i, j int) bool { return lines[i].seq < lines[j].seq })
+	out := make([]gen.RunEvent, 0, len(lines))
+	for _, ln := range lines {
+		out = append(out, ln.evs...)
 	}
 	if len(out) > 0 || missing > 0 {
 		slog.InfoContext(ctx, "codingagent.CycleRecorder: repaired a feed gap",
@@ -697,11 +725,23 @@ func (s *recordingSession) repairGap(ctx context.Context, after, before int64, r
 	return out, missing
 }
 
+// repairedLine is one recovered producer line held with the seq it was written
+// under, so a merge of two sources can be ordered by the PRODUCER's numbering
+// rather than by which source answered first.
+//
+// A line and not an event, because one line can lift to several events and they
+// have to stay together and in order: `number` stamps position in the file, so
+// interleaving two lines' events would renumber them into nonsense.
+type repairedLine struct {
+	seq int64
+	evs []gen.RunEvent
+}
+
 // repairFromArchive asks the observability plane for what the pod could not give
 // back. It logs at WARN when it cannot answer: the incident this path exists for
 // left NO trace in the logs at all, because the only log line here sat after an
 // early return that both an error and an empty answer took.
-func (s *recordingSession) repairFromArchive(ctx context.Context, out []gen.RunEvent, after, before, missing int64) ([]gen.RunEvent, int64) {
+func (s *recordingSession) repairFromArchive(ctx context.Context, out []repairedLine, seen map[int64]bool, after, before, missing int64) ([]repairedLine, int64) {
 	if s.rec.archive == nil {
 		return out, missing
 	}
@@ -722,31 +762,37 @@ func (s *recordingSession) repairFromArchive(ctx context.Context, out []gen.RunE
 			"cycle", s.cycle.ID, "attempt", s.attempt, "afterSeq", after, "beforeSeq", before)
 		return out, missing
 	}
-	out, _, missing = s.spliceRange(redactSecrets(text), out, after, before, missing)
+	out, missing = s.spliceRange(redactSecrets(text), out, seen, after, before, missing)
 	return out, missing
 }
 
 // spliceRange lifts the lines of a re-read page whose producer seq falls INSIDE
-// the hole (after, before) and appends them to out, reporting how far it got and
-// how many are still missing.
+// the hole (after, before) and appends them to out, reporting how many are still
+// missing.
 //
 // The range test is what keeps a repair from disturbing the cursor: everything
 // at or below `after` is already recorded and everything at or above `before` is
 // about to be, so a repair page is never allowed to advance ProducerSeq or to
-// lift a line the ordinary path will lift.
-func (s *recordingSession) spliceRange(text string, out []gen.RunEvent, after, before, missing int64) ([]gen.RunEvent, int64, int64) {
+// lift a line the ordinary path will lift. `after` and `before` are the HOLE's
+// own bounds and never move — see the merge in repairGap for why narrowing them
+// as lines come back costs recoverable events.
+//
+// `seen` carries across the two sources, which routinely overlap: the archive
+// indexed the same stdout the pod is still serving, so without it every event
+// the live re-read already recovered would be recorded a second time.
+func (s *recordingSession) spliceRange(text string, out []repairedLine, seen map[int64]bool, after, before, missing int64) ([]repairedLine, int64) {
 	for _, ln := range splitPage(text) {
-		if !ln.hasSeq || ln.seq <= after || ln.seq >= before {
+		if !ln.hasSeq || ln.seq <= after || ln.seq >= before || seen[ln.seq] {
 			continue
 		}
-		out = append(out, s.lift.line(ln.msg, ln.ts)...)
+		seen[ln.seq] = true
+		out = append(out, repairedLine{seq: ln.seq, evs: s.lift.line(ln.msg, ln.ts)})
 		missing--
-		after = ln.seq
 	}
 	if missing < 0 {
 		missing = 0
 	}
-	return out, after, missing
+	return out, missing
 }
 
 // number stamps the recording's own seq onto events the lift produced, in the

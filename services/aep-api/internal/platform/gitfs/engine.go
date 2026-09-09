@@ -185,6 +185,17 @@ type gitConfigRule struct{ key, value string }
 // higher precedence than any config file). The indices are derived from the
 // slice, so adding a rule above is the whole change — there is no count to
 // keep in step by hand.
+//
+// MINIMUM GIT 2.31, which is where these variables were added. Below it they
+// are inert and every rule above silently stops applying. The image installs
+// Alpine's unversioned `git` package (services/aep-api/Dockerfile) and is not
+// pinned to a floor: 2.31 shipped in March 2021, the image currently resolves
+// 2.47, and pinning an apk version would break the build the first time the
+// package is superseded — a certainty, against a regression that is not. What
+// guards it instead is TestGitResolvesEveryForcedConfigRule, which asks the
+// git binary on the box what it RESOLVES for every rule here: on a git too old
+// to read this environment, that test fails rather than the platform quietly
+// losing the rule.
 func forcedConfigEnv() map[string]string {
 	env := map[string]string{"GIT_CONFIG_COUNT": strconv.Itoa(len(forcedConfig))}
 	for i, c := range forcedConfig {

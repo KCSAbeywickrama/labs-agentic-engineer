@@ -43,10 +43,26 @@ import (
 // record before it forks, so it is on disk by the time the process we waited
 // for has exited: a decision, not a timing window, and nothing to poll.
 //
-// The second arm is the teeth. GIT_CONFIG_COUNT=0 makes git ignore the
-// engine's env-forced config without the test having to know how many
-// entries there are, and the same fetch then does hand the mirror over —
-// proving the trace scan can see a handoff when one happens.
+// The control is the teeth, and it runs FIRST. GIT_CONFIG_COUNT=0 makes git
+// ignore the engine's env-forced config without the test having to know how many
+// entries there are, and the same fetch then has to hand the mirror over —
+// proving the trace scan can see a handoff when one happens. Without that, the
+// assertion that matters ("no handoff under the engine's env") passes for any
+// reason at all, including git never handing off in the first place.
+//
+// WHICH IS VERSION-DEPENDENT, so the control is a PRECONDITION rather than an
+// assertion. Measured: git 2.47.3 (what the aep-api image ships, and the only
+// version the guard has to protect) and 2.54.0 both hand a fetch to
+// `git maintenance run --auto`; 2.55.0 — which is what `ubuntu-latest` carries —
+// does not, and asserting that it must turned this into a red build about git's
+// behaviour rather than ours. When the ambient git will not hand off even with
+// the forced config disabled, this environment cannot show the handoff the guard
+// suppresses, and the test says so instead of passing vacuously.
+//
+// The forced config itself stays covered everywhere:
+// TestForcedConfigOutranksAMirrorAlreadyOnDisk and
+// TestGitResolvesEveryForcedConfigRule ask git what it RESOLVES, which is
+// deterministic on every version and never skips.
 func TestFetchNeverHandsTheMirrorToAutoMaintenance(t *testing.T) {
 	fx := workspacetest.New(t, seedFiles())
 	ctx := context.Background()
@@ -61,38 +77,59 @@ func TestFetchNeverHandsTheMirrorToAutoMaintenance(t *testing.T) {
 	mustHead(t, fx, "")
 	fetchArgs := recordedFetchArgv(t, rec)
 
-	for _, tc := range []struct {
-		name        string
-		env         map[string]string
-		wantHandoff bool
-	}{
-		{name: "engine env", wantHandoff: false},
-		{name: "forced config switched off", env: map[string]string{"GIT_CONFIG_COUNT": "0"}, wantHandoff: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			// Give every arm a commit of its own to fetch, so each replay
-			// transfers real objects instead of short-circuiting.
-			fx.Origin.Seed(t, map[string]string{"specs/" + tc.name + ".md": "x\n"}, tc.name)
-
-			traceDir := t.TempDir()
-			env := map[string]string{"GIT_TRACE2_EVENT": traceDir}
-			for k, v := range tc.env {
-				env[k] = v
-			}
-			if _, err := gitfs.RunGitWithEnv(fx.Engine, ctx, env, fetchArgs...); err != nil {
-				t.Fatalf("fetch: %v", err)
-			}
-
-			traced := tracedCommands(t, traceDir)
-			if !traced["fetch"] {
-				t.Fatalf("trace sink captured no fetch — the assertion below would pass vacuously (saw %v)", traced)
-			}
-			spawned := spawnedAutoMaintenance(t, traceDir)
-			if spawned != tc.wantHandoff {
-				t.Fatalf("fetch spawned `git maintenance run --auto` = %v, want %v", spawned, tc.wantHandoff)
-			}
-		})
+	// The control, first: with the engine's forced config switched off, this git
+	// has to hand the mirror over. If it does not, the guard has nothing
+	// observable to suppress here and the assertion below would pass for the
+	// wrong reason.
+	if !fetchHandsOff(t, fx, ctx, fetchArgs, "control", map[string]string{"GIT_CONFIG_COUNT": "0"}) {
+		t.Skipf("%s does not hand a fetch to `git maintenance run --auto` even with the engine's forced config disabled, "+
+			"so this environment cannot show the handoff the guard suppresses; the forced config itself is still asserted by "+
+			"TestForcedConfigOutranksAMirrorAlreadyOnDisk and TestGitResolvesEveryForcedConfigRule",
+			gitVersion(t, fx, ctx))
 	}
+
+	if fetchHandsOff(t, fx, ctx, fetchArgs, "engine env", nil) {
+		t.Fatal("fetch spawned `git maintenance run --auto` under the engine's env — " +
+			"the mirror is being repacked outside the per-repo lock, and the reaper is no longer its only maintainer")
+	}
+}
+
+// fetchHandsOff replays the engine's own fetch under extra env and reports
+// whether the fetching process recorded starting a `git maintenance` child.
+//
+// It reads the FETCHING process's own child_start record rather than looking for
+// the maintenance process or its packs: git writes that record before it forks,
+// so it is on disk by the time the process we waited for has exited. A decision,
+// not a timing window, and nothing to poll.
+func fetchHandsOff(t *testing.T, fx *workspacetest.Fixture, ctx context.Context, fetchArgs []string, label string, extra map[string]string) bool {
+	t.Helper()
+	// A commit of its own for every replay, so each transfers real objects
+	// instead of short-circuiting.
+	fx.Origin.Seed(t, map[string]string{"specs/" + label + ".md": "x\n"}, label)
+
+	traceDir := t.TempDir()
+	env := map[string]string{"GIT_TRACE2_EVENT": traceDir}
+	for k, v := range extra {
+		env[k] = v
+	}
+	if _, err := gitfs.RunGitWithEnv(fx.Engine, ctx, env, fetchArgs...); err != nil {
+		t.Fatalf("%s: fetch: %v", label, err)
+	}
+	if traced := tracedCommands(t, traceDir); !traced["fetch"] {
+		t.Fatalf("%s: trace sink captured no fetch — every verdict from it would be vacuous (saw %v)", label, traced)
+	}
+	return spawnedAutoMaintenance(t, traceDir)
+}
+
+// gitVersion reports the `git version` line of the binary the engine runs, for
+// a skip message that names the thing it is skipping on.
+func gitVersion(t *testing.T, fx *workspacetest.Fixture, ctx context.Context) string {
+	t.Helper()
+	out, err := gitfs.RunGitWithEnv(fx.Engine, ctx, nil, "version")
+	if err != nil {
+		return "this git"
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // TestForcedConfigOutranksAMirrorAlreadyOnDisk pins WHERE the knob lives. A
