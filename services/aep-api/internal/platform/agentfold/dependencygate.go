@@ -47,7 +47,7 @@ var (
 	assumptionKeys            = map[string]bool{"by": true, "at": true, "note": true}
 	suggestionKeys            = map[string]bool{"name": true, "style": true, "description": true}
 	configKeyKeys             = map[string]bool{"key": true, "secret": true, "description": true, "defaultValue": true}
-	sdkManifestKeys           = map[string]bool{"packages": true, "docsUrl": true, "calls": true, "assumed": true}
+	sdkManifestKeys           = map[string]bool{"packages": true, "docsUrl": true, "calls": true, "derived": true, "assumed": true}
 	contractFilesByStyle      = map[string][]string{"rest-api": {"openapi.yaml", "openapi.yml", "openapi.json"}, "graphql": {"schema.graphql", "schema.graphqls"}}
 	sdkManifestFile           = "sdk.json"
 	dependencyContractAnyFile = append(append([]string{}, contractFilesByStyle["rest-api"]...), contractFilesByStyle["graphql"]...)
@@ -394,6 +394,11 @@ func validateSdkManifest(content string) *designProblem {
 	if av, present := obj["assumed"]; present {
 		if _, ok := av.(bool); !ok {
 			return &designProblem{code: ErrSchemaViolation, message: "assumed: must be a boolean"}
+		}
+	}
+	if dv, present := obj["derived"]; present {
+		if _, ok := dv.(bool); !ok {
+			return &designProblem{code: ErrSchemaViolation, message: "derived: must be a boolean"}
 		}
 	}
 	if cv, present := obj["calls"]; present {

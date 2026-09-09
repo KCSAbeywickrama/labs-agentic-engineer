@@ -64,7 +64,8 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   service; `suggestions` may be open) → needs-input; a style with no contract or manifest on disk
   → needs-contract; an agent-written
   contract (`x-aep-assumed: true` in the file) with no acceptance → needs-acceptance; else resolved,
-  flagged assumed / sdk-only — and the build gate blocks on nothing else. The write-gates (zod in
+  flagged assumed / derived (`x-aep-derived: true` — written from the provider's own reference) /
+  sdk-only — and the build gate blocks on nothing else. The write-gates (zod in
   `@aep/agent-stream`, `agentfold/dependencygate.go`, `designspec` at save) validate the file; the
   `assumed` record is the one field only the platform writes (`designdeps`).
 - **The Skill library.** One flat authored library at repo-root `skills/`, COPY'd into the image and read

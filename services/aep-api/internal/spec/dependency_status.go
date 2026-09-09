@@ -30,8 +30,10 @@
 //  6. contract agent-written, not
 //     yet accepted by a user          → unresolved / needs-acceptance
 //  7. otherwise                     → resolved; flag assumed when the contract
-//     is agent-written under the user's permission, flag sdk-only when an
-//     sdk dependency has no API contract beside its manifest.
+//     is agent-written under the user's permission, flag derived when it was
+//     written from the provider's own documentation (no permission needed),
+//     flag sdk-only when an sdk dependency has no API contract beside its
+//     manifest.
 //
 // The build gate blocks on unresolved and on nothing else: an
 // assumed or sdk-only dependency builds, flagged everywhere it appears.
@@ -103,6 +105,9 @@ func ComputeDependencyFlags(dep Dependency, registryHit bool) []string {
 	// accepted it; a record echoed beside a real document is not a flag.
 	if dep.ContractAssumed && dep.Assumed != nil {
 		flags = append(flags, DependencyFlagAssumed)
+	}
+	if dep.ContractDerived {
+		flags = append(flags, DependencyFlagDerived)
 	}
 	if dep.Style == DependencyStyleSDK && dep.Contract == "" {
 		flags = append(flags, DependencyFlagSDKOnly)

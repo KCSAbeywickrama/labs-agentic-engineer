@@ -75,7 +75,8 @@ config keys come last (step 3), from the provider chosen — never before.
 
 ## 2. Get the contract
 
-Three routes, tried in this order, and the user is told which one you took:
+Four routes — a ladder, climbed in this order, and the user is told which
+rung you took:
 
 1. **Find it.** `web_search` for the provider's published OpenAPI or GraphQL
    document. Name the operations the design actually calls (the flows and
@@ -87,11 +88,23 @@ Three routes, tried in this order, and the user is told which one you took:
    returned. If you cannot name the operations, you do not understand the
    dependency well enough to slice it — go back to the flows before asking
    the user for anything.
-2. **Ask for it.** When no public document exists (most couriers, most
-   private APIs), ask ONE question — "How should I get its interface?" —
-   whose `options` are EXACTLY these three, `action` included (the console
-   runs the action when the user answers; an option without it is a dead
-   button):
+2. **Derive it from the provider's documentation.** When no public document
+   exists but the provider's OWN developer reference does — pages that name
+   the operations the design calls, with their parameters and responses —
+   write the interface from those pages: the operations the design needs and
+   nothing more, as `openapi.yaml` in the dependency's directory, with
+   `x-aep-derived: true` at the document root and, on EVERY operation, an
+   `x-aep-source: <page url>` naming the page it came from. Record `contract`
+   and a `provenance` block with `sourceUrl` = the reference's root page. No
+   permission is needed: the dependency reads resolved, flagged *derived*.
+   The bar is the whole design, not part of it — if one operation the design
+   needs has no page, or the only pages are marketing, a blog, a third-party
+   tutorial or a partial reference, this rung does not apply: go to 3.
+3. **Ask for it.** When neither a document nor documentation exists (most
+   couriers, most private APIs), ask ONE question — "How should I get its
+   interface?" — whose `options` are EXACTLY these three, `action` included
+   (the console runs the action when the user answers; an option without it
+   is a dead button):
 
    ```json
    [
@@ -111,8 +124,8 @@ Three routes, tried in this order, and the user is told which one you took:
      it from the snapshot and go on to step 3.
    - **Proceed on your assumption** → the user's authorization is already
      recorded on the definition when the answer reaches you; go on to route
-     3. Never describe this option as needing a later acceptance.
-3. **Assume it — authorized by that answer, and only then.** Write the
+     4. Never describe this option as needing a later acceptance.
+4. **Assume it — authorized by that answer, and only then.** Write the
    contract yourself from the provider's documentation pages and what you
    know — the operations the design needs and nothing more — as
    `openapi.yaml` in the dependency's directory, with `x-aep-assumed: true`

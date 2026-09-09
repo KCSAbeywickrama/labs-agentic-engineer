@@ -311,7 +311,7 @@ func (s *Service) resolveDependenciesYAML(ctx context.Context, orgID, projectID 
 	// whether or not the connection is bound yet.
 	for _, d := range comp.Dependencies {
 		if d.Kind == spec.DependencyKindExternal && d.Contract != "" {
-			contractSections = append(contractSections, externalSpecContractSection(d.Name, spec.ContractPath(d.Name, d.Contract), d.Assumed != nil))
+			contractSections = append(contractSections, externalSpecContractSection(d.Name, spec.ContractPath(d.Name, d.Contract), d.Assumed != nil, d.ContractDerived))
 		}
 	}
 
@@ -367,7 +367,18 @@ func localComponentContractSection(depName string) string {
 // file path. It is the authoritative contract when present; the coding agent
 // fetches it (URL) or reads it (file) and researches the API's own docs for
 // anything the contract doesn't cover.
-func externalSpecContractSection(depName, contractPath string, assumed bool) string {
+func externalSpecContractSection(depName, contractPath string, assumed, derived bool) string {
+	if derived && !assumed {
+		return fmt.Sprintf(
+			"External API contract for `%s`: `%s` — a file in your checked-out repo, DERIVED by the "+
+				"design agent from the provider's own developer reference (no published document exists; "+
+				"every operation's `x-aep-source` names the page it came from). Code against it as written, "+
+				"keep the integration behind one adapter so a corrected contract is a local change, read the "+
+				"cited page when a detail is unclear, and say in the PR that the interface was derived from "+
+				"documentation.",
+			depName, contractPath,
+		)
+	}
 	if assumed {
 		return fmt.Sprintf(
 			"External API contract for `%s`: `%s` — a file in your checked-out repo, written by the "+

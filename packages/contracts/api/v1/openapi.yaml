@@ -4198,7 +4198,7 @@ components:
         reason:
           type: string
         flags:
-          description: Read-time qualifiers on a resolved external dependency — registered, assumed, sdk-only.
+          description: Read-time qualifiers on a resolved external dependency — registered, assumed, derived, sdk-only.
           items:
             type: string
           type: array
@@ -4220,6 +4220,9 @@ components:
           type: string
         contractAssumed:
           description: The contract on disk was written by the design agent from research; it counts only once a user accepts it (assumed).
+          type: boolean
+        contractDerived:
+          description: The contract on disk was written by the design agent from the provider's own developer reference, every operation cited; resolved and flagged derived, no authorization asked.
           type: boolean
         package:
           description: For an sdk dependency, the package for this component's language, from the manifest.

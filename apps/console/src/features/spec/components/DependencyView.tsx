@@ -290,6 +290,11 @@ export function DependencyView({
             )}
           </Box>
         )}
+        {edge?.contractDerived && (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Derived from the provider&apos;s documentation — every operation cites its page; no published document exists to check it against.
+          </Typography>
+        )}
         {file.assumed && (
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             Assumed interface, accepted by {file.assumed.by} on {file.assumed.at}

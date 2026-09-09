@@ -152,6 +152,12 @@ func TestComputeDependencyStatus(t *testing.T) {
 			wantStatus: DependencyStatusResolved,
 		},
 		{
+			name: "a derived contract resolves with no permission asked",
+			dep: Dependency{Kind: DependencyKindExternal, Name: "printer",
+				Provider: "Star", Style: DependencyStyleRestAPI, Contract: "openapi.yaml", ContractDerived: true},
+			wantStatus: DependencyStatusResolved,
+		},
+		{
 			name: "no provider is unchosen even with a contract named (hydration names the provider off the document on disk)",
 			dep: Dependency{Kind: DependencyKindExternal, Name: "openweather",
 				Style: DependencyStyleRestAPI, Contract: "openapi.yaml"},

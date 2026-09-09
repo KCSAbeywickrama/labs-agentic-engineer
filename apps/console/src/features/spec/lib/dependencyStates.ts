@@ -43,6 +43,7 @@ export interface DependencyState {
 const FLAG_LABEL: Record<string, string> = {
   registered: "Registered",
   assumed: "Assumed",
+  derived: "Derived from docs",
   "sdk-only": "SDK only",
 };
 

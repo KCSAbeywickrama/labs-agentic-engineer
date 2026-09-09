@@ -165,9 +165,11 @@ here: they're the open `console` + `feature` issues.
   the way a component's design does: the provider, the interface on file with
   its provenance, the config keys and who uses it, and every way forward —
   **Select a provider** (or **Resolve** once one is chosen) runs the guided
-  `/resolve-dependency` flow, whose cards ask which provider and, if none is
-  published, how to get its interface; choosing *proceed on your assumption*
-  there is the whole consent. **Provide interface** opens a modal that lands a
+  `/resolve-dependency` flow, whose cards ask which provider and, when neither
+  a published document nor the provider's own documentation exists, how to
+  get its interface; an interface the agent derives from that documentation
+  needs no consent and reads *Derived from docs*, and choosing *proceed on
+  your assumption* on the card is the whole consent for a guess. **Provide interface** opens a modal that lands a
   document straight in the directory. The design turn's closing list links
   each open definition. The Build drawer lists what blocks the cut, opens each
   row's definition, and offers one **Resolve all in chat** —

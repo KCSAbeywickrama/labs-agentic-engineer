@@ -161,6 +161,7 @@ const (
 	// Flags qualify a RESOLVED external dependency (Dependency.Flags).
 	DependencyFlagRegistered = "registered"
 	DependencyFlagAssumed    = "assumed"
+	DependencyFlagDerived    = "derived"
 	DependencyFlagSDKOnly    = "sdk-only"
 
 	// Dependency.Source / DependencyDefinition.Source values.

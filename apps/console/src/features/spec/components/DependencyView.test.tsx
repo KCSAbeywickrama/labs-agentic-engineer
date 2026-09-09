@@ -203,6 +203,19 @@ describe("DependencyView", () => {
   });
 });
 
+describe("DependencyView — an interface derived from the provider's documentation", () => {
+  it("says so, links the file, and asks nothing", () => {
+    renderView(
+      { provider: "Star", style: "rest-api", contract: "openapi.yaml", provenance: { sourceUrl: "https://star.example/docs" } },
+      stateOf({ status: "resolved", contract: "openapi.yaml", contractDerived: true, flags: ["derived"] }, { flags: ["Derived from docs"] }),
+    );
+    expect(screen.getByText(/derived from the provider.s documentation/i)).toBeInTheDocument();
+    expect(screen.getByText("Derived from docs")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "openapi.yaml" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /accept the assumption/i })).not.toBeInTheDocument();
+  });
+});
+
 describe("DependencyView — when a document is not the next step", () => {
   it("offers no upload before a system is identified, nor for an org-registered one", () => {
     renderView({}, stateOf({ status: "unresolved", reason: "needs-input" }, { blocking: true, todo: "Choose a service" }));

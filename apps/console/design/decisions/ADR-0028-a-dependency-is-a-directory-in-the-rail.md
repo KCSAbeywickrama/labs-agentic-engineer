@@ -20,7 +20,8 @@ component's.** The group sits between Flows and the components, with the plug
 glyph telling it apart; its header carries the one thing the user must do
 (*Choose a provider*, *Needs a contract*, *Needs your acceptance*) as an amber
 mark with the words on hover, or the qualifier on a
-resolved one (*Assumed*, *Registered*, *SDK only*) as quiet text. Its rows are
+resolved one (*Assumed*, *Derived from docs*, *Registered*, *SDK only*) as
+quiet text. Its rows are
 the directory's files, named for what they are under the dependency's own
 header — **Definition** (`dependency.json`), **API** (`openapi.yaml` or
 `schema.graphql`), **SDK** (`sdk.json`) — the definition first.

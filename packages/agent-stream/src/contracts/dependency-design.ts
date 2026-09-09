@@ -166,6 +166,11 @@ export interface SdkManifest {
   /** The SDK calls the design relies on, in the SDK's own naming. */
   calls?: string[];
   /**
+   * The agent wrote this manifest from the provider's SDK reference — the
+   * sdk.json twin of a contract's `x-aep-derived: true`. Resolved, flagged.
+   */
+  derived?: boolean;
+  /**
    * The agent wrote this manifest without a published source — the sdk.json
    * twin of a contract's `x-aep-assumed: true`. Counts only once a user accepts
    * the assumption (`DependencyDesign.assumed`).

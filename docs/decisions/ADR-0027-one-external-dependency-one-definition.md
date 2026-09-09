@@ -68,7 +68,7 @@ specs/design/dependencies/<name>/
   provider (open `suggestions` or not) → `unresolved / needs-input`; a style
   with no contract or manifest on disk → `unresolved / needs-contract`; an
   unaccepted assumption → `unresolved / needs-acceptance`; otherwise
-  `resolved`, flagged `assumed` / `sdk-only`. The build gate blocks on
+  `resolved`, flagged `assumed` / `derived` / `sdk-only`. The build gate blocks on
   `unresolved` and on nothing else: an assumed or SDK-only dependency builds,
   flagged wherever it appears. A definition with a contract on disk but no
   provider named (one from before providers were named) reads its provider
@@ -89,6 +89,15 @@ specs/design/dependencies/<name>/
   suggestions as options, another provider as free text, or "find one for
   me" — never writing options back into the file. A need is named
   `<capability>-service`; the system chosen for it is its provider.
+- **One ladder for an interface, wherever it is searched for** — the design
+  turn for a provider the PRD gives, the resolve flow after the user selected
+  one, never before a provider is chosen. Find a published document and slice
+  it; failing that, **derive** one from the provider's own developer
+  reference when it names every operation the design calls with parameters
+  and responses (`x-aep-derived: true` at the root, `x-aep-source` on every
+  operation, provenance at the reference) — resolved, flagged `derived`, no
+  authorization asked; failing that, ask: a link, an upload, or an
+  assumption.
 - **The user's answer is the authorization.** When no published interface
   exists the flow asks how to get one — a link, an upload, or the agent's
   assumption. Choosing the assumption records the user's `assumed` record on

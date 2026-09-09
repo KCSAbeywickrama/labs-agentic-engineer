@@ -119,6 +119,28 @@ func TestAssembleDesign_NoProviderIsUnchosenEvenWithADocument(t *testing.T) {
 	}
 }
 
+// A contract written from the provider's own documentation says so in the
+// file; the dependency reads resolved and flagged derived, no record needed.
+func TestAssembleDesign_DerivedMarker(t *testing.T) {
+	files := directoryDesignFiles()
+	files["dependencies/stripe/openapi.yaml"] = "openapi: 3.0.3\nx-aep-derived: true\ninfo: {title: Stripe, version: '1'}\npaths: {}\n"
+	d, err := AssembleDesign(files)
+	if err != nil {
+		t.Fatalf("AssembleDesign: %v", err)
+	}
+	dep := d.Components[0].Dependencies[0]
+	if !dep.ContractDerived || dep.ContractAssumed {
+		t.Fatalf("markers = derived %v assumed %v", dep.ContractDerived, dep.ContractAssumed)
+	}
+	ApplyDependencyStatus(&dep, false, OrgServiceHit{})
+	if dep.Status != DependencyStatusResolved || strings.Join(dep.Flags, ",") != "derived" {
+		t.Fatalf("status %s flags %v, want resolved/derived", dep.Status, dep.Flags)
+	}
+	if a, dv := contractMarkers("# x-aep-derived: true\ntype Query { a: String }"); a || !dv {
+		t.Fatalf("graphql comment marker: assumed %v derived %v", a, dv)
+	}
+}
+
 func TestAssembleDesign_AssumedMarkerAndAcceptance(t *testing.T) {
 	files := directoryDesignFiles()
 	files["dependencies/stripe/openapi.yaml"] = "openapi: 3.0.3\nx-aep-assumed: true\ninfo: {title: Stripe, version: '1'}\npaths:\n  /charges:\n    post: {responses: {'201': {description: created}}}\n"

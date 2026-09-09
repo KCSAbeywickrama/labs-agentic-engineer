@@ -181,6 +181,16 @@ PRD, and the user chooses its service on the dependency's definition.
 _Avoid_: proposal, recommendation (the agent never proposes a provider),
 `*assumed*` on a provider line.
 
+**Derived interface**:
+A dependency's contract the design agent wrote from the provider's own
+developer reference — pages that name every operation the design calls, with
+parameters and responses — because no document is published. The file carries
+`x-aep-derived: true` and every operation an `x-aep-source` page; the
+dependency reads resolved, flagged *derived* wherever it appears, and no
+authorization is asked. Less than that reference (marketing pages, a partial
+one, a third-party tutorial) is an Assumed contract, which asks.
+_Avoid_: assumed (that one asks), reverse-engineered.
+
 **Assumed contract**:
 A dependency's contract the design agent wrote from the provider's
 documentation because no published document could be found or supplied. It

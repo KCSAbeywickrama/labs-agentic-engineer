@@ -24,6 +24,7 @@ injected.
 | `contract` | the contract file in the same directory — **authoritative** where it and the docs disagree; it is a SLICE of the provider's document (the operations the design uses), so an operation absent from it is one the design did not plan |
 | `provenance` | where the slice was cut from (`sourceUrl`, the full document's `sha256`) — the place to look when you need an operation the slice lacks |
 | `assumed` | the user ACCEPTED a contract the design agent wrote from research (the file itself carries `x-aep-assumed: true`): build to it as written, keep the integration behind one adapter, and say in the PR what you could not verify |
+| (file marker) `x-aep-derived: true` | the design agent wrote the contract from the provider's own developer reference — each operation's `x-aep-source` names the page: build to it as written, keep the integration behind one adapter, read the cited page when a detail is unclear, and say in the PR that the interface was derived from documentation |
 | `description` | what the system is; the component's reference carries why this component uses it |
 | `config[]` | the env-var keys the component reads; names are fixed, values arrive injected |
 

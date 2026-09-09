@@ -635,7 +635,7 @@ its definition is one file with a view of its own.
 |---|---|
 | Rail group | one per dependency, plug glyph, between Flows and the components; rows are its files — **Definition** · **API** · **SDK** |
 | A header that blocks the build | an amber mark after the name; the words on hover and as its label: **Choose a provider** · **Needs a contract** · **Needs your acceptance** |
-| A header that is resolved, with a qualifier | quiet text after the name: **Assumed** · **Registered** · **SDK only** |
+| A header that is resolved, with a qualifier | quiet text after the name: **Assumed** · **Derived from docs** · **Registered** · **SDK only** |
 | The definition's eyebrow chips | **External dependency**, the qualifiers, and either the todo or **Resolved** |
 | Its facts | **Provider** · **Style** (**REST API** / **GraphQL** / **SDK**) · **Source** · **Package** — labelled rows under the name, never a subtitle repeating it |
 | Its sections | **Description** · **Used by** · **Provider** · **Interface** (once a provider is chosen) · **Configuration** (once keys exist) |
@@ -645,7 +645,8 @@ its definition is one file with a view of its own.
 | Its primary button | **Resolve** (runs the guided flow), shown once a provider is chosen — **Reconsider** once resolved |
 | Providing a document | button **Provide interface** (**Replace interface** once one is on file) beside the Interface heading; it opens a modal — field **OpenAPI document URL** + **Fetch**; drop zone *Drop an OpenAPI document (YAML or JSON) here, or click to choose one.*; **Cancel** |
 | Once a document is on file | the Interface section links to it in place, with its **Source**, what was **Kept** and when it was **Read on** |
-| An agent-written interface | box titled *The agent wrote this interface from research*; button **Accept the assumption**; link **Read it first** |
+| An interface derived from the provider's documentation | line *Derived from the provider's documentation — every operation cites its page; no published document exists to check it against.*, then the file link and its Source; nothing to accept |
+| An agent-written interface nobody authorized | box titled *The agent wrote this interface from research*; button **Accept the assumption**; link **Read it first** |
 
 **The todo names what the reader must do, never the state machine's word.** *Needs a
 contract*, not *needs-contract* or *unresolved*; *Choose a provider*, not *needs-input*. The

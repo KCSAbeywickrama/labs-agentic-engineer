@@ -85,6 +85,7 @@ export const sdkManifestSchema = z.strictObject({
   packages: z.record(z.string().min(1), z.string().min(1)),
   docsUrl: z.string().optional(),
   calls: z.array(z.string().min(1)).optional(),
+  derived: z.boolean().optional(),
   assumed: z.boolean().optional(),
 });
 

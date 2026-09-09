@@ -90,6 +90,12 @@ type Dependency struct {
 	// `"assumed": true`). Until the user accepts it (Assumed) the dependency is
 	// not resolved.
 	ContractAssumed bool `json:"contractAssumed,omitempty"`
+	// ContractDerived: the contract file on disk was written by the design
+	// agent from the provider's own developer reference (it carries
+	// `x-aep-derived: true`; an sdk.json carries `"derived": true`) — every
+	// operation cited from a page. Resolved, flagged `derived`; no
+	// authorization is asked, unlike an assumption.
+	ContractDerived bool `json:"contractDerived,omitempty"`
 	// Assumed: the user's permission to build against an agent-written
 	// contract (see DependencyAssumption). Read-only for the agent.
 	Assumed *DependencyAssumption `json:"assumed,omitempty"`
@@ -250,6 +256,9 @@ type SdkManifest struct {
 	DocsURL  string            `json:"docsUrl,omitempty"`
 	// Calls lists the SDK calls the design relies on, in the SDK's own naming.
 	Calls []string `json:"calls,omitempty"`
+	// Derived marks a manifest the design agent wrote from the provider's
+	// SDK reference — the sdk.json twin of a contract's `x-aep-derived: true`.
+	Derived bool `json:"derived,omitempty"`
 	// Assumed marks a manifest the design agent wrote without a published
 	// source — the sdk.json twin of a contract's `x-aep-assumed: true`.
 	Assumed bool `json:"assumed,omitempty"`

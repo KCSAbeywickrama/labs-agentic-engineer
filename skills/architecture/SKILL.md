@@ -334,11 +334,18 @@ Work each one in order:
    their referenced schemas — it fetches outside your context, so the
    document's size does not matter — then `addFile` the returned content as
    `openapi.yaml` and copy the returned `provenance` into `dependency.json`.
-   A user-supplied document goes through the same tool. Never hand-author a
-   contract during the design turn: with no document to be found, leave
-   `contract` unset, say so under **Needs your input**, and the
-   `resolve-dependency` flow takes it from there (it may write an ASSUMED
-   contract, but only with the user's permission).
+   A user-supplied document goes through the same tool. With no document to
+   be found, climb one rung: **derive** the interface from the provider's
+   OWN developer reference when it names every operation the design calls
+   with parameters and responses — `openapi.yaml` with `x-aep-derived: true`
+   at the root and `x-aep-source: <page>` on every operation, `provenance.
+   sourceUrl` = the reference's root page. That needs no permission: the
+   dependency reads resolved, flagged *derived*. With no such documentation
+   either, never guess during the design turn: leave `contract` unset, say so
+   under **Needs your input**, and the `resolve-dependency` flow takes it
+   from there (it may write an ASSUMED contract, but only under the user's
+   authorization). This rung is for a NAMED provider only — an open
+   capability gets no interface search at all.
 4. **Derive `config` keys** from the contract — a `rest-api`'s
    `components.securitySchemes`, an `sdk`'s auth documentation — for a named
    provider only; a definition with no provider carries no keys (the gate
@@ -378,7 +385,8 @@ file at read time, first match wins:
 4. a contract marked assumed with no user acceptance → `unresolved`/
    `needs-acceptance`
 5. otherwise → `resolved` — flagged `assumed` when the contract was accepted
-   as an assumption, `sdk-only` when an `sdk` dependency has no API slice
+   as an assumption, `derived` when it was written from the provider's own
+   documentation, `sdk-only` when an `sdk` dependency has no API slice
 
 `component` is always `resolved` here. A `platform-resource` is too — once
 emitted — so only emit one whose `resourceType` is a `name` from this turn's
@@ -395,7 +403,8 @@ user watches live. **Narrate each dependency decision in one plain-prose line as
 you settle it**, before moving to the next:
 
 - resolved → `✓ <capability>: using <choice>` (say `, contract sliced` when
-  you cut one, `, registered` for an org reuse)
+  you cut one, `, interface derived from docs` when you wrote it from the
+  provider's reference, `, registered` for an org reuse)
 - needs-input → `<capability>: your choice — A / B / C are common; select a
   provider on its definition`
 - needs-contract → `<capability>: <provider> chosen, no published contract

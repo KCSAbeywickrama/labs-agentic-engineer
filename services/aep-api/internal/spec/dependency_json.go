@@ -111,6 +111,7 @@ type sdkManifestJSON struct {
 	Packages map[string]string `json:"packages"`
 	DocsURL  string            `json:"docsUrl,omitempty"`
 	Calls    []string          `json:"calls,omitempty"`
+	Derived  bool              `json:"derived,omitempty"`
 	Assumed  bool              `json:"assumed,omitempty"`
 }
 
@@ -208,7 +209,7 @@ func parseSdkManifestJSON(raw string) (SdkManifest, error) {
 	if err := dec.Decode(&mj); err != nil {
 		return SdkManifest{}, fmt.Errorf("decode %s: %w", SdkManifestFile, err)
 	}
-	return SdkManifest{Packages: mj.Packages, DocsURL: mj.DocsURL, Calls: mj.Calls, Assumed: mj.Assumed}, nil
+	return SdkManifest{Packages: mj.Packages, DocsURL: mj.DocsURL, Calls: mj.Calls, Derived: mj.Derived, Assumed: mj.Assumed}, nil
 }
 
 // assembleDependencyDefinitions parses every dependency directory in the
@@ -361,11 +362,11 @@ func hydrateExternalDependencies(d *DesignFile, files map[string]string) {
 			// definition — a name pointing at nothing is no contract. One the
 			// agent wrote from research says so in the file itself, and counts
 			// only once a user has accepted it.
-			dep.Contract, dep.ContractAssumed = "", false
+			dep.Contract, dep.ContractAssumed, dep.ContractDerived = "", false, false
 			if def.Contract != "" {
 				if raw, present := files[dependencyDirPrefix+dep.Name+"/"+def.Contract]; present {
 					dep.Contract = def.Contract
-					dep.ContractAssumed = contractMarkedAssumed(raw)
+					dep.ContractAssumed, dep.ContractDerived = contractMarkers(raw)
 				}
 			}
 			dep.SDK, dep.Package = "", ""
@@ -386,6 +387,9 @@ func hydrateExternalDependencies(d *DesignFile, files map[string]string) {
 					dep.Package = m.Packages[strings.ToLower(strings.TrimSpace(comp.Language))]
 					if m.Assumed {
 						dep.ContractAssumed = true
+					}
+					if m.Derived {
+						dep.ContractDerived = true
 					}
 				}
 			}
@@ -410,21 +414,38 @@ func contractTitle(raw string) string {
 	return strings.TrimSpace(doc.Info.Title)
 }
 
-// contractMarkedAssumed reports whether a contract file declares itself
-// agent-written: an OpenAPI document (YAML or JSON) with `x-aep-assumed: true`
-// at the root, or a GraphQL schema carrying a `# x-aep-assumed: true` comment
-// line. The marker lives in the file so a reader of the file alone knows.
-func contractMarkedAssumed(raw string) bool {
+// contractMarkers reports what a contract file declares itself to be: an
+// OpenAPI document (YAML or JSON) with `x-aep-assumed: true` or
+// `x-aep-derived: true` at the root, or a GraphQL schema carrying the same as
+// a `# …: true` comment line. Assumed: written from research with no
+// documentation behind it (needs the user's authorization). Derived: written
+// from the provider's own developer reference, every operation cited
+// (resolved, flagged). The marker lives in the file so a reader of the file
+// alone knows.
+func contractMarkers(raw string) (assumed, derived bool) {
 	var doc map[string]any
 	if err := yaml.Unmarshal([]byte(raw), &doc); err == nil && doc != nil {
 		if v, ok := doc["x-aep-assumed"].(bool); ok {
-			return v
+			assumed = v
+		}
+		if v, ok := doc["x-aep-derived"].(bool); ok {
+			derived = v
 		}
 	}
 	for _, line := range strings.Split(raw, "\n") {
-		if strings.TrimSpace(line) == "# x-aep-assumed: true" {
-			return true
+		switch strings.TrimSpace(line) {
+		case "# x-aep-assumed: true":
+			assumed = true
+		case "# x-aep-derived: true":
+			derived = true
 		}
 	}
-	return false
+	return assumed, derived
+}
+
+// contractMarkedAssumed is contractMarkers' assumed half, for the callers
+// that only ask that.
+func contractMarkedAssumed(raw string) bool {
+	assumed, _ := contractMarkers(raw)
+	return assumed
 }

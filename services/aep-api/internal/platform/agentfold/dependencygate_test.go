@@ -149,6 +149,7 @@ func TestDependencyGate_SdkManifest(t *testing.T) {
 		"unknown key":     {`{"packages":{"go":"go:x"},"version":"1"}`, "unknown property version"},
 		"docsUrl type":    {`{"packages":{"go":"go:x"},"docsUrl":3}`, "docsUrl: must be a string"},
 		"assumed type":    {`{"packages":{"go":"go:x"},"assumed":"yes"}`, "assumed: must be a boolean"},
+		"derived type":    {`{"packages":{"go":"go:x"},"derived":"yes"}`, "derived: must be a boolean"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := validateSdkManifest(c.content)

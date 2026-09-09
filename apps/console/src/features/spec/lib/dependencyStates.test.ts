@@ -46,6 +46,7 @@ describe("computeDependencyStates — one entry per external dependency", () => 
     expect(states["stripe"]!.usedBy).toEqual(["api", "web"]);
     expect(states["stripe"]!.blocking).toBe(false);
     expect(states["stripe"]!.flags).toEqual(["Assumed", "SDK only"]);
+    expect(computeDependencyStates([{ componentName: "web", dependencies: [ext({ status: "resolved", flags: ["derived"] })] }])["stripe"]!.flags).toEqual(["Derived from docs"]);
   });
 
   it("marks a dependency the build gate would refuse as blocking, with its todo", () => {
