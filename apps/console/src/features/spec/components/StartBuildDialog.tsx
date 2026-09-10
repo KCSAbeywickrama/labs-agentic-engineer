@@ -193,7 +193,15 @@ export function StartBuildDialog({
           // DialogContent zeroes its top padding under a DialogTitle, which
           // clips an outlined field's floating label. The first field buys it
           // back.
-          sx={{ mt: 1, mb: 2.5 }}
+          //
+          // The field takes the SAME fill as the list below it: the two are the
+          // dialog's two pieces of content, and a transparent field beside a
+          // filled list reads as two different materials.
+          sx={{
+            mt: 1,
+            mb: 2.5,
+            "& .MuiOutlinedInput-root": { bgcolor: "background.default" },
+          }}
         />
         <Typography variant="subtitle2" sx={{ mb: 1 }}>
           {changesHeading(currentVersion, specUnchanged)}
