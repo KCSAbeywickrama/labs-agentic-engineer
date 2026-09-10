@@ -52,6 +52,29 @@ is then suspect.
 `Then` is the only keyword that decides anything. Everything else exists to
 reach it.
 
+## Acting — a command that succeeded is not an action that happened
+
+**`agent-browser click` on a disabled control prints `✓ Done` and exits 0.**
+Measured, by role and by ref. The click does nothing and nothing says so. If the
+`Then` that follows was already true, the scenario passes without ever
+exercising anything — a false pass produced by the tool rather than by
+judgement. (Playwright does not behave this way: `locator.click()` waits for
+actionability and times out instead.)
+
+So before acting on a control, read it:
+
+```bash
+agent-browser snapshot -i        # a control shows [disabled] when it is
+```
+
+- **A control the `When` needs that is `[disabled]` or absent means the action
+  cannot be performed.** That scenario is `blocked`. Do not click it anyway and
+  do not fall through to the `Then`.
+- **Otherwise, prefer evidence over the exit code** — assert a state change only
+  the action could have produced. `agent-browser network requests` shows whether
+  the request actually left the page, which is the cheapest proof for anything
+  that writes.
+
 ## Asserting — the part that matters
 
 **Every `Then` is settled by one command whose exit code is the verdict**, and
@@ -82,8 +105,15 @@ agent-browser get url
 |---|---|
 | `passed` | every `Then` was settled affirmatively by a recorded command |
 | `failed` | a `Then`'s command said no — the app did not do what the scenario claims |
-| `blocked` | a `Given` or `When` could not be carried out, so no `Then` was ever reached |
+| `blocked` | a `Given` or `When` could not be carried out — the control was `[disabled]` or absent, or the state could not be reached |
 | `unjudgeable` | the `Then` asks about something this app cannot show you |
+
+**A prevented `When` is `blocked` even when the `Then` holds.** If the control
+is disabled, the scenario did not exercise the behaviour it claims to — the
+assertion would have held without it, so passing it records something that was
+never tested. Judge the outcome on whether the action happened, not on whether
+the page ended up in the right state. This rule exists because it is the one
+place two runs of this skill disagreed with each other.
 
 `failed` and `blocked` are both defects and must not be merged: one says the
 behaviour is wrong, the other says you never got to see it. `unjudgeable` is for
