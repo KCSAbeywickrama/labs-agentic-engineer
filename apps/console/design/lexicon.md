@@ -733,14 +733,9 @@ name, its hint *Letters, digits, dot, dash and underscore.* and, when the name i
 named `<name>` already exists.* Then the heading **What changed since `<version>`** —
 **What this version creates** on a first build, **No spec changes since `<version>`** on a
 rebuild — over three groups, in this order and never merged, each unrendered when empty:
-
-| group | its line |
-|---|---|
-| **Components** | — |
-| **External dependencies** | *you choose the provider and supply its keys* |
-| **Platform resources** | *the build provisions these for you* |
-
-A row is a name and a chip — **new** or **removed**, no chip for a change. The requirements are
+**Components** · **External dependencies** · **Platform resources**. The headings are bold and
+carry no explanatory line; the list sits on its own surface, which is what makes the scrolling
+frame read as one. A row is a name and a chip — **new** or **removed**, no chip for a change. The requirements are
 never a row: every row names something that exists once the version is built. Under the list, when
 anything was removed: *A removed dependency keeps its resource. Take it down from Resources.*
 **Cancel** / **Build `<name>`**, which reads **Rebuild `<name>`** when the spec tree has not

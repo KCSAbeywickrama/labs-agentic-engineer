@@ -105,19 +105,13 @@ describe("StartBuildDialog", () => {
 
   // A bare list of names cannot say what a name IS: a database the platform
   // stands up reads exactly like a third-party API the user must go and sign up
-  // for. The groups are the difference, and the captions are why it matters.
-  it("groups the rows by kind, and says what each group asks of you", () => {
+  // for. The headings are the whole of the difference the dialog draws.
+  it("groups the rows by kind", () => {
     open();
 
     expect(screen.getByText("Components")).toBeInTheDocument();
     expect(screen.getByText("External dependencies")).toBeInTheDocument();
-    expect(
-      screen.getByText("you choose the provider and supply its keys"),
-    ).toBeInTheDocument();
     expect(screen.getByText("Platform resources")).toBeInTheDocument();
-    expect(
-      screen.getByText("the build provisions these for you"),
-    ).toBeInTheDocument();
   });
 
   it("renders no heading for a kind this version does not touch", () => {

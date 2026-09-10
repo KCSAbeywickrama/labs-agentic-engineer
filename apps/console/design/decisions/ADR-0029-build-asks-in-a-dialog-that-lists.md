@@ -44,12 +44,14 @@ learn, and the rail already reaches every definition.
 
 **A name alone does not say what a name is, so the change list is GROUPED** —
 **Components**, **External dependencies**, **Platform resources**, in that
-order, with empty groups unrendered. `ceramics-db` and `currency-service` read
-identically as bare names, and one is a database the build is about to stand up
-while the other needs a provider and its keys from the user. The two dependency
-kinds are never one group for exactly that reason, and each carries the one
-line that says its obligation: *you choose the provider and supply its keys* /
-*the build provisions these for you*.
+order, headings in bold, empty groups unrendered, and the whole list on its own
+surface so the frame that scrolls is visible as a frame. `ceramics-db` and
+`currency-service` read identically as bare names, and one is a database the
+build is about to stand up while the other needs a provider and its keys from
+the user. The two dependency kinds are never one group for exactly that reason.
+The heading is all the dialog says about it: a line of explanation under each
+(*you choose the provider and supply its keys*) was tried and read as clutter
+over a list this short.
 
 **Every row names something that EXISTS once the version is built.** That is
 what keeps the requirements out of the list: they are the input to the version,

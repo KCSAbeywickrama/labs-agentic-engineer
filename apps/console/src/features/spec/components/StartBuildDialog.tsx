@@ -28,7 +28,8 @@
  * `ceramics-db` and `currency-service` read identically, and one is a database
  * the platform is about to stand up while the other needs a provider and its
  * keys from the user. Same word, opposite obligations — so they are never one
- * group, and each group says its obligation in a line.
+ * group. The heading is the whole of what the dialog says about that: a line of
+ * explanation under each was tried and read as clutter over a list this short.
  *
  * Rows are names plus a `new` or `removed` chip; no chip means the thing
  * changed. `removed` states a fact rather than promising an act — a build
@@ -67,21 +68,12 @@ const LIST_MAX_HEIGHT = 280;
 
 /**
  * The groups, in reading order: what you are building, then what it needs from
- * you, then what the platform hands you. Each caption is the whole explanation
- * the dialog offers for the difference.
+ * you, then what the platform hands you.
  */
-const GROUPS: { kind: BuildChange["kind"]; title: string; caption: string }[] = [
-  { kind: "component", title: "Components", caption: "" },
-  {
-    kind: "external",
-    title: "External dependencies",
-    caption: "you choose the provider and supply its keys",
-  },
-  {
-    kind: "platform-resource",
-    title: "Platform resources",
-    caption: "the build provisions these for you",
-  },
+const GROUPS: { kind: BuildChange["kind"]; title: string }[] = [
+  { kind: "component", title: "Components" },
+  { kind: "external", title: "External dependencies" },
+  { kind: "platform-resource", title: "Platform resources" },
 ];
 
 /** What the group of rows is called, which depends on what the project has. */
@@ -110,30 +102,17 @@ function ChangeRow({ change }: { change: BuildChange }) {
 /** One kind's rows under its heading. An empty group renders nothing. */
 function ChangeGroup({
   title,
-  caption,
   changes,
 }: {
   title: string;
-  caption: string;
   changes: BuildChange[];
 }) {
   if (changes.length === 0) return null;
   return (
     <Stack spacing={1}>
-      <Stack
-        direction="row"
-        alignItems="baseline"
-        justifyContent="space-between"
-        spacing={1}
-        flexWrap="wrap"
-      >
-        <Typography variant="subtitle2">{title}</Typography>
-        {caption && (
-          <Typography variant="caption" color="text.secondary">
-            {caption}
-          </Typography>
-        )}
-      </Stack>
+      <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+        {title}
+      </Typography>
       <Stack spacing={1} sx={{ pl: 1.5 }}>
         {changes.map((change) => (
           <ChangeRow key={`${change.kind}:${change.name}`} change={change} />
@@ -220,13 +199,25 @@ export function StartBuildDialog({
           {changesHeading(currentVersion, specUnchanged)}
         </Typography>
         {changes.length > 0 ? (
-          <Box sx={{ maxHeight: LIST_MAX_HEIGHT, overflowY: "auto" }}>
+          // Its own surface, so the frame that scrolls is visible as a frame:
+          // `background.default` is the opaque tone under the dialog's paper,
+          // which sets the list apart without inventing a colour.
+          <Box
+            sx={{
+              maxHeight: LIST_MAX_HEIGHT,
+              overflowY: "auto",
+              bgcolor: "background.default",
+              border: 1,
+              borderColor: "divider",
+              borderRadius: 1,
+              p: 1.5,
+            }}
+          >
             <Stack spacing={2.5}>
               {GROUPS.map((group) => (
                 <ChangeGroup
                   key={group.kind}
                   title={group.title}
-                  caption={group.caption}
                   changes={changes.filter((c) => c.kind === group.kind)}
                 />
               ))}
