@@ -62,9 +62,30 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 // The coding agent's stream is its own tested surface and needs a live run to
-// say anything; the build page only decides WHETHER to mount it.
+// say anything; the build page decides WHICH runs to mount it for, in what order,
+// and which one may open a box. Those are attributes rather than rendered text, so
+// the page's WIRING is assertable without a stream.
 vi.mock("./RunFeed", () => ({
-  RunFeed: () => <div>run feed</div>,
+  RunFeed: ({
+    runId,
+    cycleKinds,
+    expandNewest,
+    runNumber,
+  }: {
+    runId: string;
+    cycleKinds?: readonly string[];
+    expandNewest?: boolean;
+    runNumber?: number;
+  }) => (
+    <div
+      data-testid="run-feed"
+      data-run-id={runId}
+      data-expand-newest={String(expandNewest)}
+      data-run-number={String(runNumber)}
+    >
+      {(cycleKinds ?? []).join(",")}
+    </div>
+  ),
 }));
 
 let mockTasks: TaskView[] = [];
@@ -646,6 +667,139 @@ describe("BuildDetailPage — one clock for the whole page", () => {
     ];
     renderPage();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+// A version is routinely delivered by more than one RUN — the dev run writes it, a
+// validation run finds a defect, a task run repairs it — and each is its own row with
+// its own feed. The page mounted `deliveryRuns[0]` only, so the newest run's log was
+// the only one reachable: testing9231 v1 on the live stack showed a 105-event two-file
+// fix labelled "Cycle 1" and offered no way at all to the 841-event run that wrote the
+// version. The fixtures below are that run list.
+describe("BuildDetailPage — every delivery run's agent log", () => {
+  const feeds = () => screen.getAllByTestId("run-feed");
+  const devRun = () =>
+    run({
+      id: "run-dev",
+      kind: "dev",
+      origin: "spec-build",
+      state: "succeeded",
+      cycles: [cycle({ id: "c1", prNumber: 6, mergeSha: "aaa1111" })],
+    });
+  const validationRun = () =>
+    run({
+      id: "run-validation",
+      kind: "validation",
+      origin: "revalidate",
+      state: "failed",
+      cycles: [cycle({ id: "v1", kind: "validation", prNumber: 8, mergeSha: "bbb2222" })],
+    });
+  const fixRun = () =>
+    run({
+      id: "run-fix",
+      kind: "task",
+      origin: "incident-adoption",
+      state: "succeeded",
+      cycles: [cycle({ id: "c2", prNumber: 13, mergeSha: "ccc3333" })],
+    });
+
+  it("mounts one feed per delivery run, newest first", () => {
+    mockBuilds = [build()];
+    // Newest first, the order list-build-runs answers in.
+    mockRuns = [fixRun(), validationRun(), devRun()];
+    renderPage();
+
+    expect(feeds().map((f) => f.dataset.runId)).toEqual(["run-fix", "run-dev"]);
+  });
+
+  it("numbers the runs from the OLDEST, so the numbers descend down the page", () => {
+    // Every feed numbers its own cycles from 1, so without this the page shows two
+    // boxes both called "Cycle 1". Counted over the runs this section SHOWS: the
+    // validation run has no feed here, so numbering the full list would print
+    // "Run 3" over "Run 1" with no Run 2 anywhere.
+    mockBuilds = [build()];
+    mockRuns = [fixRun(), validationRun(), devRun()];
+    renderPage();
+
+    expect(feeds().map((f) => f.dataset.runNumber)).toEqual(["2", "1"]);
+  });
+
+  it("numbers nothing when one run delivered the version", () => {
+    // `RunFeed` prefixes its heading whenever `runNumber` is defined, so passing
+    // 1 here would relabel the ordinary case's only box from "Cycle 1" to
+    // "Run 1 · Cycle 1" — a number that tells it apart from nothing.
+    mockBuilds = [build()];
+    mockRuns = [devRun()];
+    renderPage();
+
+    expect(feeds()[0]!.dataset.runNumber).toBe("undefined");
+  });
+
+  it("lets only the newest run open a box", () => {
+    // One open log on the page, not one per feed.
+    mockBuilds = [build()];
+    mockRuns = [fixRun(), devRun()];
+    renderPage();
+
+    expect(feeds().map((f) => f.dataset.expandNewest)).toEqual(["true", "false"]);
+  });
+
+  it("captions the earlier runs once, above the second feed", () => {
+    mockBuilds = [build()];
+    mockRuns = [fixRun(), devRun()];
+    renderPage();
+
+    const caption = screen.getByText("EARLIER RUNS OF V2");
+    const [newest, earlier] = feeds();
+    expect(
+      newest!.compareDocumentPosition(caption) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      caption.compareDocumentPosition(earlier!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("draws no caption for a version delivered by one run", () => {
+    // The ordinary case: a caption over a single feed would be a rule with no
+    // boundary under it.
+    mockBuilds = [build()];
+    mockRuns = [devRun()];
+    renderPage();
+
+    expect(feeds()).toHaveLength(1);
+    expect(screen.queryByText(/^EARLIER RUNS OF/)).not.toBeInTheDocument();
+  });
+
+  it("shows each feed only the cycle kinds this surface owns", () => {
+    // A validation run that REPAIRS what it found is a delivery run — kept for its
+    // coding cycles — so without the filter its validation cycle would render here
+    // as well as on the Validation board, which is the disagreement `buildCycles`
+    // and `mergedCycle` already avoid everywhere else on this page.
+    mockBuilds = [build()];
+    mockRuns = [devRun()];
+    renderPage();
+
+    expect(feeds()[0]).toHaveTextContent("coding,fix,conflict");
+  });
+
+  it("leaves out a run that only re-judged the version", () => {
+    // Its verdict lives on the Validation board, which draws its own feed for it.
+    mockBuilds = [build()];
+    mockRuns = [validationRun(), devRun()];
+    renderPage();
+
+    expect(feeds().map((f) => f.dataset.runId)).toEqual(["run-dev"]);
+  });
+
+  it("says nothing was dispatched when no run delivered anything", () => {
+    mockBuilds = [build()];
+    mockRuns = [validationRun()];
+    renderPage();
+
+    expect(screen.queryAllByTestId("run-feed")).toHaveLength(0);
+    expect(
+      screen.getByText(/Nothing has been dispatched for this version yet/),
+    ).toBeInTheDocument();
   });
 });
 
