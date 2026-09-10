@@ -43,7 +43,7 @@ func TestPreflight_CarriesTheVersionFacts(t *testing.T) {
 		CurrentVersion:   "payments-v2",
 		SuggestedVersion: "v3",
 		Changes: []spec.VersionChange{
-			{Name: "Requirements", Kind: spec.VersionChangeKindRequirements, State: spec.VersionChangeChanged},
+			{Name: "orders-api", Kind: spec.VersionChangeKindComponent, State: spec.VersionChangeChanged},
 			{Name: "reports-web", Kind: spec.VersionChangeKindComponent, State: spec.VersionChangeNew},
 		},
 	}}
@@ -61,7 +61,7 @@ func TestPreflight_CarriesTheVersionFacts(t *testing.T) {
 	require.Equal(t, "v3", pf.SuggestedVersion)
 	require.False(t, pf.SpecUnchanged)
 	require.Equal(t, []BuildChange{
-		{Name: "Requirements", Kind: "requirements", State: "changed"},
+		{Name: "orders-api", Kind: "component", State: "changed"},
 		{Name: "reports-web", Kind: "component", State: "new"},
 	}, pf.Changes)
 }

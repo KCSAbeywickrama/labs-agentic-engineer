@@ -63,7 +63,6 @@ const (
 	BuildChangeKindComponent        BuildChangeKind = "component"
 	BuildChangeKindExternal         BuildChangeKind = "external"
 	BuildChangeKindPlatformResource BuildChangeKind = "platform-resource"
-	BuildChangeKindRequirements     BuildChangeKind = "requirements"
 )
 
 // Valid indicates whether the value is a known member of the BuildChangeKind enum.
@@ -74,8 +73,6 @@ func (e BuildChangeKind) Valid() bool {
 	case BuildChangeKindExternal:
 		return true
 	case BuildChangeKindPlatformResource:
-		return true
-	case BuildChangeKindRequirements:
 		return true
 	default:
 		return false
@@ -1325,9 +1322,9 @@ type ApplyResult struct {
 	Warnings  []Warning  `json:"warnings,omitempty"`
 }
 
-// BuildChange One thing this version changes, compared with the newest version — the row the Start build dialog lists. `removed` is a statement rather than an action — a build deprovisions nothing, so a removed dependency's resource stays.
+// BuildChange One thing this version changes, compared with the newest version — the row the Start build dialog lists. Every row names something that EXISTS once the version is built, which is why the requirements are not one of them — they are the input, not the output. `removed` is a statement rather than an action — a build deprovisions nothing, so a removed dependency's resource stays.
 type BuildChange struct {
-	// Kind What the name belongs to. `requirements` is the PRD itself, which owns no directory and is reported as one row.
+	// Kind What the name belongs to, and the group the dialog lists it under. The two dependency kinds carry opposite obligations — an `external` needs a provider and its keys from the user, a `platform-resource` is provisioned by the build — so they are never one group.
 	Kind BuildChangeKind `json:"kind"`
 
 	// Name The component, dependency or resource name, as the design writes it.
@@ -1335,7 +1332,7 @@ type BuildChange struct {
 	State BuildChangeState `json:"state"`
 }
 
-// BuildChangeKind What the name belongs to. `requirements` is the PRD itself, which owns no directory and is reported as one row.
+// BuildChangeKind What the name belongs to, and the group the dialog lists it under. The two dependency kinds carry opposite obligations — an `external` needs a provider and its keys from the user, a `platform-resource` is provisioned by the build — so they are never one group.
 type BuildChangeKind string
 
 // BuildChangeState defines model for BuildChange.State.

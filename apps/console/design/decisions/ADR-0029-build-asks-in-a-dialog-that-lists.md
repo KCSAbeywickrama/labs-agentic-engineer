@@ -42,6 +42,21 @@ accepted cost of keeping one way to do the work.
 carries no per-row button: a second button in a dialog is a second thing to
 learn, and the rail already reaches every definition.
 
+**A name alone does not say what a name is, so the change list is GROUPED** —
+**Components**, **External dependencies**, **Platform resources**, in that
+order, with empty groups unrendered. `ceramics-db` and `currency-service` read
+identically as bare names, and one is a database the build is about to stand up
+while the other needs a provider and its keys from the user. The two dependency
+kinds are never one group for exactly that reason, and each carries the one
+line that says its obligation: *you choose the provider and supply its keys* /
+*the build provisions these for you*.
+
+**Every row names something that EXISTS once the version is built.** That is
+what keeps the requirements out of the list: they are the input to the version,
+not a thing it makes, and they move on nearly every version — so the row sat
+among component names as though it were one, saying nothing. What changed in
+the requirements is read where the requirements are.
+
 ## Consequences
 
 - `BuildDependencyDrawer` is deleted. The paragraph *"The Build drawer lists;

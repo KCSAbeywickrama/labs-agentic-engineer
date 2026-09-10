@@ -730,11 +730,21 @@ and nothing else, since the rail already reaches every definition.
 
 *Nothing is open* — title **Start build**. A **Version** field first, prefilled with the suggested
 name, its hint *Letters, digits, dot, dash and underscore.* and, when the name is taken, *A version
-named `<name>` already exists.* Then the group **What changed since `<version>`** —
+named `<name>` already exists.* Then the heading **What changed since `<version>`** —
 **What this version creates** on a first build, **No spec changes since `<version>`** on a
-rebuild — one row per name, chip **new** or **removed**, no chip for a change. Under a removed row:
-*A removed dependency keeps its resource. Take it down from Resources.* **Cancel** /
-**Build `<name>`**, which reads **Rebuild `<name>`** when the spec tree has not moved.
+rebuild — over three groups, in this order and never merged, each unrendered when empty:
+
+| group | its line |
+|---|---|
+| **Components** | — |
+| **External dependencies** | *you choose the provider and supply its keys* |
+| **Platform resources** | *the build provisions these for you* |
+
+A row is a name and a chip — **new** or **removed**, no chip for a change. The requirements are
+never a row: every row names something that exists once the version is built. Under the list, when
+anything was removed: *A removed dependency keeps its resource. Take it down from Resources.*
+**Cancel** / **Build `<name>`**, which reads **Rebuild `<name>`** when the spec tree has not
+moved.
 
 ### Section state
 

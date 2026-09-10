@@ -93,11 +93,10 @@ func TestBuildVersionFactsOverRealGit(t *testing.T) {
 	if facts.CurrentVersion != "" || facts.SuggestedVersion != "v1" || facts.SpecUnchanged {
 		t.Fatalf("fresh project = %+v, want no current version, v1 suggested, not unchanged", facts)
 	}
-	if rows := factRows(t, facts); len(rows) != 3 ||
-		rows[requirementsRowName].State != VersionChangeNew ||
+	if rows := factRows(t, facts); len(rows) != 2 ||
 		rows["orders-api"].State != VersionChangeNew ||
 		rows["legacy-mailer"].State != VersionChangeNew {
-		t.Fatalf("first build rows = %+v, want everything new", facts.Changes)
+		t.Fatalf("first build rows = %+v, want the component and the dependency, both new", facts.Changes)
 	}
 
 	// --- the version is cut -------------------------------------------------
@@ -137,11 +136,10 @@ func TestBuildVersionFactsOverRealGit(t *testing.T) {
 	}
 	rows := factRows(t, facts)
 	want := map[string]string{
-		requirementsRowName: VersionChangeChanged,
-		"orders-api":        VersionChangeChanged,
-		"reports-web":       VersionChangeNew,
-		"legacy-mailer":     VersionChangeRemoved,
-		"orders-cache":      VersionChangeNew,
+		"orders-api":    VersionChangeChanged,
+		"reports-web":   VersionChangeNew,
+		"legacy-mailer": VersionChangeRemoved,
+		"orders-cache":  VersionChangeNew,
 	}
 	for name, state := range want {
 		if got, listed := rows[name]; !listed || got.State != state {
@@ -149,7 +147,8 @@ func TestBuildVersionFactsOverRealGit(t *testing.T) {
 		}
 	}
 	if len(rows) != len(want) {
-		t.Errorf("rows = %+v, want exactly %d — README.md is not part of the spec", facts.Changes, len(want))
+		t.Errorf("rows = %+v, want exactly %d — README.md is not part of the spec, and the edited PRD is not a row",
+			facts.Changes, len(want))
 	}
 	if rows["orders-cache"].Kind != VersionChangeKindResource {
 		t.Errorf("orders-cache kind = %q, want platform-resource — it is declared in a design, not a directory",
@@ -208,9 +207,6 @@ func TestBuildVersionFactsIgnoresForeignTags(t *testing.T) {
 	}
 	if facts.SpecUnchanged {
 		t.Errorf("the spec moved after v1: %+v", facts)
-	}
-	if rows := factRows(t, facts); rows[requirementsRowName].State != VersionChangeChanged {
-		t.Errorf("rows = %+v, want the requirements changed since v1", facts.Changes)
 	}
 }
 

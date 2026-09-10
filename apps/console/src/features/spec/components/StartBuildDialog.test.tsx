@@ -29,6 +29,7 @@ const CHANGES: BuildChange[] = [
   { name: "orders-api", kind: "component", state: "changed" },
   { name: "reports-web", kind: "component", state: "new" },
   { name: "legacy-mailer", kind: "external", state: "removed" },
+  { name: "orders-db", kind: "platform-resource", state: "new" },
 ];
 
 function open(over: Partial<Parameters<typeof StartBuildDialog>[0]> = {}) {
@@ -96,10 +97,35 @@ describe("StartBuildDialog", () => {
 
     expect(screen.getByText("What changed since v2")).toBeInTheDocument();
     expect(screen.getByText("orders-api")).toBeInTheDocument();
-    expect(screen.getByText("new")).toBeInTheDocument();
+    expect(screen.getAllByText("new")).toHaveLength(2);
     expect(screen.getByText("removed")).toBeInTheDocument();
     // `changed` is the default state, so it earns no chip.
     expect(screen.queryByText("changed")).not.toBeInTheDocument();
+  });
+
+  // A bare list of names cannot say what a name IS: a database the platform
+  // stands up reads exactly like a third-party API the user must go and sign up
+  // for. The groups are the difference, and the captions are why it matters.
+  it("groups the rows by kind, and says what each group asks of you", () => {
+    open();
+
+    expect(screen.getByText("Components")).toBeInTheDocument();
+    expect(screen.getByText("External dependencies")).toBeInTheDocument();
+    expect(
+      screen.getByText("you choose the provider and supply its keys"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Platform resources")).toBeInTheDocument();
+    expect(
+      screen.getByText("the build provisions these for you"),
+    ).toBeInTheDocument();
+  });
+
+  it("renders no heading for a kind this version does not touch", () => {
+    open({ changes: CHANGES.filter((c) => c.kind === "component") });
+
+    expect(screen.getByText("Components")).toBeInTheDocument();
+    expect(screen.queryByText("External dependencies")).not.toBeInTheDocument();
+    expect(screen.queryByText("Platform resources")).not.toBeInTheDocument();
   });
 
   // A build deprovisions nothing, so the dialog states the fact rather than

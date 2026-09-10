@@ -3568,17 +3568,20 @@ components:
     BuildChange:
       additionalProperties: false
       description: One thing this version changes, compared with the newest version — the row the
-        Start build dialog lists. `removed` is a statement rather than an action — a build
-        deprovisions nothing, so a removed dependency's resource stays.
+        Start build dialog lists. Every row names something that EXISTS once the version is built,
+        which is why the requirements are not one of them — they are the input, not the output.
+        `removed` is a statement rather than an action — a build deprovisions nothing, so a removed
+        dependency's resource stays.
       properties:
         kind:
-          description: What the name belongs to. `requirements` is the PRD itself, which owns no
-            directory and is reported as one row.
+          description: What the name belongs to, and the group the dialog lists it under. The two
+            dependency kinds carry opposite obligations — an `external` needs a provider and its
+            keys from the user, a `platform-resource` is provisioned by the build — so they are
+            never one group.
           enum:
           - component
           - external
           - platform-resource
-          - requirements
           type: string
         name:
           description: The component, dependency or resource name, as the design writes it.

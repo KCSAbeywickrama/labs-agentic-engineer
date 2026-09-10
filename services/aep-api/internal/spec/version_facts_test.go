@@ -65,29 +65,20 @@ func TestVersionChangesNamesOwnersNotFiles(t *testing.T) {
 	if r := got["legacy-mailer"]; r.State != VersionChangeRemoved || r.Kind != VersionChangeKindExternal {
 		t.Errorf("legacy-mailer = %+v, want a removed external dependency", r)
 	}
-	// The requirements did not move, so they are not a row.
-	if _, listed := got[requirementsRowName]; listed {
-		t.Errorf("changes name the requirements though prd.md is unchanged: %+v", got)
-	}
 }
 
-func TestVersionChangesFoldsTheRequirementsIntoOneRow(t *testing.T) {
-	before := []sourcecontrol.Entry{
-		blob("specs/requirements/prd.md", "r1"),
-		blob("specs/requirements/user-stories.md", "s1"),
-	}
+// Every row names something that EXISTS once the version is built. The
+// requirements are the input to that, and they move on nearly every version,
+// so they are not a row at all.
+func TestVersionChangesNeverNameTheRequirements(t *testing.T) {
+	before := []sourcecontrol.Entry{blob("specs/requirements/prd.md", "r1")}
 	after := []sourcecontrol.Entry{
 		blob("specs/requirements/prd.md", "r2"),
-		blob("specs/requirements/user-stories.md", "s2"),
+		blob("specs/requirements/user-stories.md", "s1"),
 	}
 
-	got := versionChanges(before, after, nil, nil)
-
-	if len(got) != 1 || got[0].Name != requirementsRowName || got[0].Kind != VersionChangeKindRequirements {
-		t.Fatalf("changes = %+v, want one requirements row", got)
-	}
-	if got[0].State != VersionChangeChanged {
-		t.Errorf("requirements state = %q, want changed", got[0].State)
+	if got := versionChanges(before, after, nil, nil); len(got) != 0 {
+		t.Fatalf("changes = %+v, want none — the requirements are not a row", got)
 	}
 }
 
@@ -99,18 +90,18 @@ func TestVersionChangesOnAFirstBuildAreAllNew(t *testing.T) {
 
 	got := versionChanges(nil, after, nil, map[string]bool{"postgres-cnpg": true})
 
-	if len(got) != 3 {
-		t.Fatalf("changes = %+v, want three rows", got)
+	if len(got) != 2 {
+		t.Fatalf("changes = %+v, want the component and the resource", got)
 	}
 	for _, r := range got {
 		if r.State != VersionChangeNew {
 			t.Errorf("%s = %q, want every row new on a first build", r.Name, r.State)
 		}
 	}
-	// The requirements read first: what the product asked for, then what
-	// implements it.
-	if got[0].Kind != VersionChangeKindRequirements {
-		t.Errorf("first row = %+v, want the requirements", got[0])
+	// Grouped by kind, so the dialog can render its headings straight off the
+	// order it is given.
+	if got[0].Kind != VersionChangeKindComponent || got[1].Kind != VersionChangeKindResource {
+		t.Errorf("order = %+v, want the component before the resource", got)
 	}
 }
 

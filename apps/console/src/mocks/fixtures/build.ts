@@ -54,12 +54,11 @@ const CHANGES: BuildPreflight = {
   suggestedVersion: "v3",
   specUnchanged: false,
   changes: [
-    { name: "Requirements", kind: "requirements", state: "changed" },
     { name: "orders-api", kind: "component", state: "changed" },
     { name: "reports-web", kind: "component", state: "new" },
     { name: "currency-service", kind: "external", state: "changed" },
-    { name: "postgres-cnpg", kind: "platform-resource", state: "new" },
     { name: "legacy-mailer", kind: "external", state: "removed" },
+    { name: "postgres-cnpg", kind: "platform-resource", state: "new" },
   ],
 };
 
@@ -71,9 +70,9 @@ const FIRST: BuildPreflight = {
   suggestedVersion: "v1",
   specUnchanged: false,
   changes: [
-    { name: "Requirements", kind: "requirements", state: "new" },
     { name: "orders-api", kind: "component", state: "new" },
     { name: "storefront-web", kind: "component", state: "new" },
+    { name: "currency-service", kind: "external", state: "new" },
     { name: "postgres-cnpg", kind: "platform-resource", state: "new" },
   ],
 };

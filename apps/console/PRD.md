@@ -100,9 +100,11 @@ here: they're the open `console` + `feature` issues.
   projects and a modal for the rest. An open dependency opens **Resolve
   dependencies** (the names, and one **Resolve** that runs the guided flow over
   all of them); everything else opens **Start build**, which carries the
-  version's **name** — the user's, and the tag that gets cut — over the list of
-  what this version changes, chipped **new** and **removed**. An unchanged spec
-  tree rebuilds the version it matches rather than cutting a second one
+  version's **name** — the user's, and the tag that gets cut — over what this
+  version changes, grouped **Components** · **External dependencies** ·
+  **Platform resources** so a name says what it is, chipped **new** and
+  **removed**. An unchanged spec tree rebuilds the version it matches rather
+  than cutting a second one
   ([ADR-0029](design/decisions/ADR-0029-build-asks-in-a-dialog-that-lists.md),
   [ADR-0030](design/decisions/ADR-0030-a-version-carries-the-name-the-user-gives-it.md)) —
   [#749](https://github.com/wso2/labs-agentic-engineer/issues/749)

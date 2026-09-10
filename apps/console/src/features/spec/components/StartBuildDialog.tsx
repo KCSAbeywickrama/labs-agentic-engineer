@@ -24,10 +24,20 @@
  * the field is the first thing in the dialog and the last thing the user can
  * still change.
  *
- * The list is names, not a manifest. A `new` chip and a `removed` chip; no chip
- * means the thing changed. `removed` states a fact rather than promising an
- * act — a build deprovisions nothing, so the resource behind a removed
- * dependency stays until somebody removes it from Resources.
+ * The list is GROUPED, because a bare list of names cannot say what a name is:
+ * `ceramics-db` and `currency-service` read identically, and one is a database
+ * the platform is about to stand up while the other needs a provider and its
+ * keys from the user. Same word, opposite obligations — so they are never one
+ * group, and each group says its obligation in a line.
+ *
+ * Rows are names plus a `new` or `removed` chip; no chip means the thing
+ * changed. `removed` states a fact rather than promising an act — a build
+ * deprovisions nothing, so the resource behind a removed dependency stays
+ * until somebody takes it down from Resources.
+ *
+ * The requirements are not a row. Every row names something that exists once
+ * the version is built, and the requirements are the input to that — they also
+ * move on nearly every version, so the row carried no signal.
  *
  * An unchanged spec tree cuts nothing: the version is reused, its milestone
  * reopened, and the dialog says so with the field locked and the action reading
@@ -55,6 +65,25 @@ type BuildChange = components["schemas"]["BuildChange"];
 /** The scroll bound: the frame stays put however long the list runs. */
 const LIST_MAX_HEIGHT = 280;
 
+/**
+ * The groups, in reading order: what you are building, then what it needs from
+ * you, then what the platform hands you. Each caption is the whole explanation
+ * the dialog offers for the difference.
+ */
+const GROUPS: { kind: BuildChange["kind"]; title: string; caption: string }[] = [
+  { kind: "component", title: "Components", caption: "" },
+  {
+    kind: "external",
+    title: "External dependencies",
+    caption: "you choose the provider and supply its keys",
+  },
+  {
+    kind: "platform-resource",
+    title: "Platform resources",
+    caption: "the build provisions these for you",
+  },
+];
+
 /** What the group of rows is called, which depends on what the project has. */
 function changesHeading(currentVersion: string, specUnchanged: boolean): string {
   if (specUnchanged) return `No spec changes since ${currentVersion}`;
@@ -74,6 +103,42 @@ function ChangeRow({ change }: { change: BuildChange }) {
       {change.state !== "changed" && (
         <Chip size="small" variant="outlined" label={change.state} />
       )}
+    </Stack>
+  );
+}
+
+/** One kind's rows under its heading. An empty group renders nothing. */
+function ChangeGroup({
+  title,
+  caption,
+  changes,
+}: {
+  title: string;
+  caption: string;
+  changes: BuildChange[];
+}) {
+  if (changes.length === 0) return null;
+  return (
+    <Stack spacing={1}>
+      <Stack
+        direction="row"
+        alignItems="baseline"
+        justifyContent="space-between"
+        spacing={1}
+        flexWrap="wrap"
+      >
+        <Typography variant="subtitle2">{title}</Typography>
+        {caption && (
+          <Typography variant="caption" color="text.secondary">
+            {caption}
+          </Typography>
+        )}
+      </Stack>
+      <Stack spacing={1} sx={{ pl: 1.5 }}>
+        {changes.map((change) => (
+          <ChangeRow key={`${change.kind}:${change.name}`} change={change} />
+        ))}
+      </Stack>
     </Stack>
   );
 }
@@ -156,9 +221,14 @@ export function StartBuildDialog({
         </Typography>
         {changes.length > 0 ? (
           <Box sx={{ maxHeight: LIST_MAX_HEIGHT, overflowY: "auto" }}>
-            <Stack spacing={1}>
-              {changes.map((change) => (
-                <ChangeRow key={`${change.kind}:${change.name}`} change={change} />
+            <Stack spacing={2.5}>
+              {GROUPS.map((group) => (
+                <ChangeGroup
+                  key={group.kind}
+                  title={group.title}
+                  caption={group.caption}
+                  changes={changes.filter((c) => c.kind === group.kind)}
+                />
               ))}
             </Stack>
           </Box>

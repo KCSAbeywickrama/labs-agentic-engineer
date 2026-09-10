@@ -26,12 +26,15 @@ package spec
 // carries every fact a row needs.
 //
 // Rows are named by OWNER, not by file: `specs/design/components/orders-api/…`
-// is the component, `specs/design/dependencies/currency-service/…` is the
-// dependency, and everything under `specs/requirements/` is one row, because
-// the PRD is what a person calls "the requirements" and its file names are not
-// worth listing. A platform resource owns no directory (it lives inside a
+// is the component and `specs/design/dependencies/currency-service/…` is the
+// dependency. A platform resource owns no directory (it lives inside a
 // component's `design.json`), so those rows come from reading the design at
 // both trees — which is also the only way to see one arrive at all.
+//
+// The REQUIREMENTS are deliberately not a row. Every row here names something
+// that exists once the version is built; the requirements are the input to
+// that, and they move on nearly every version, so the row carried no signal
+// while sitting among component names as though it were one of them.
 
 import (
 	"context"
@@ -44,19 +47,14 @@ import (
 
 // Version change kinds and states — the wire vocabulary of BuildChange.
 const (
-	VersionChangeKindRequirements = "requirements"
-	VersionChangeKindComponent    = "component"
-	VersionChangeKindExternal     = "external"
-	VersionChangeKindResource     = "platform-resource"
+	VersionChangeKindComponent = "component"
+	VersionChangeKindExternal  = "external"
+	VersionChangeKindResource  = "platform-resource"
 
 	VersionChangeNew     = "new"
 	VersionChangeChanged = "changed"
 	VersionChangeRemoved = "removed"
 )
-
-// requirementsRowName is what the requirements row is called. A person reads
-// the row, not the path.
-const requirementsRowName = "Requirements"
 
 // The two design directories a row can be named after, and the file a
 // component's platform resources are declared in.
@@ -201,12 +199,8 @@ func versionChanges(before, after []sourcecontrol.Entry, resourcesBefore, resour
 		}
 	}
 
-	// Requirements first, then by kind and name — a stable order, and the one a
-	// reader scans: what the product asked for, then what implements it.
+	// By kind, then by name — a stable order, and the one the dialog groups on.
 	sort.SliceStable(rows, func(i, j int) bool {
-		if (rows[i].Kind == VersionChangeKindRequirements) != (rows[j].Kind == VersionChangeKindRequirements) {
-			return rows[i].Kind == VersionChangeKindRequirements
-		}
 		if rows[i].Kind != rows[j].Kind {
 			return rows[i].Kind < rows[j].Kind
 		}
@@ -238,9 +232,6 @@ func ownerShas(entries []sourcecontrol.Entry) map[owner]string {
 // ownerOf names what a `specs/` path belongs to, or ok=false for a path no row
 // speaks for.
 func ownerOf(path string) (owner, bool) {
-	if strings.HasPrefix(path, requirementsPrefix) {
-		return owner{kind: VersionChangeKindRequirements, name: requirementsRowName}, true
-	}
 	if name, ok := pathSegmentUnder(path, componentsPrefix); ok {
 		return owner{kind: VersionChangeKindComponent, name: name}, true
 	}
