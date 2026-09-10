@@ -142,6 +142,42 @@ says so. A rule that genuinely refuses nothing (`the opener sees the
 consolidated order`) gets no refusal invented for it; inventing one is a worse
 defect than omitting it.
 
+**Assert what the refusal DOES, not how the user hears about it.** A `Then`
+written as "is told X" presumes the product answers a rejected action with a
+message. Plenty of products refuse by not offering the action at all — the
+control is absent or disabled — and then no one is ever *told* anything, so the
+scenario cannot be satisfied however correct the product is.
+
+That wording also fails the test this skill already applies to steps: if the
+sentence would have to change when the implementation changes, it contains
+implementation. And a message is not what the rule guarantees. `A bought item
+cannot be edited` guarantees the item does not change; whether a toast appears
+is a separate product decision, and an unstated one is not yours to invent.
+
+| Instead of | Write |
+|---|---|
+| `Then he is told "Milk" is already on the list` | `Then the list still has exactly one item` |
+| `Then she is told the item name cannot be empty` | `Then no item is added to the list` |
+| `Then he is told a bought item cannot be edited` | `Then the quantity of "Milk" is unchanged` |
+
+Both shapes of product satisfy the right-hand column, and both are still
+refuted by one that actually allows the action — which is the whole job.
+
+Beware quoting a value inside a "told" step: `is told "milk" is already on the
+list` silently demands the product echo the user's own casing back, which
+almost none do. State the effect and the quoting problem disappears.
+
+**Count the whole set, not the part that matches what you expected.** An effect
+assertion has to be written so the defect it guards against cannot slip past
+its own filter. `the list still has exactly one item named "Milk"` reads right
+and is vacuous: if the product wrongly accepted `" milk "`, the list now holds
+a `"Milk"` AND a `" milk "`, and a count filtered to `"Milk"` is still one — so
+the scenario passes on exactly the bug it exists to catch. Count the list.
+
+The same trap waits wherever a refusal is asserted by looking only at what you
+expected to see. Ask what the product would do if the rule were missing, and
+make sure the assertion would notice it.
+
 **Where `@negative` goes.** Tags inherit down `Feature` → `Rule` → `Scenario`,
 so put it at the level where it is true:
 
