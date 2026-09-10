@@ -146,7 +146,10 @@ func TestGetPreflight_CarriesTheVersionFactsOnTheWire(t *testing.T) {
 	if pf.Changes[0].Name != "orders-api" || pf.Changes[0].Kind != "component" || pf.Changes[0].State != "changed" {
 		t.Errorf("first change = %+v", pf.Changes[0])
 	}
-	if pf.Changes[1].Kind != "platform-resource" || pf.Changes[1].State != "new" {
+	// Name, Kind and State are mapped independently, so each is asserted: a
+	// dropped Name would otherwise pass this test.
+	if pf.Changes[1].Name != "postgres-cnpg" || pf.Changes[1].Kind != "platform-resource" ||
+		pf.Changes[1].State != "new" {
 		t.Errorf("second change = %+v", pf.Changes[1])
 	}
 }

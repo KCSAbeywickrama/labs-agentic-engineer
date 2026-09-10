@@ -822,6 +822,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/BuildResponse'
           description: OK
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: The requested `version` name is already in use, or a build is already
+            running for this project. Nothing was cut.
         default:
           content:
             application/json:

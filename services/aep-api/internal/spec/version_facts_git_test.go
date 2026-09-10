@@ -192,8 +192,10 @@ func TestBuildVersionFactsIgnoresForeignTags(t *testing.T) {
 
 	tagAt(t, r, "v1", specTagSubject+"v1", "2026-01-01T10:00:00+00:00")
 	r.seed(map[string]string{"specs/requirements/prd.md": "# PRD\n\nsecond\n"}, "edit")
-	// A release tag somebody pushed, newer than the version.
+	// Two release tags somebody pushed, newer than the version — and one of them
+	// is named exactly like a version, which is the case a name alone gets wrong.
 	tagAt(t, r, "release-2026-02", "ship it", "2026-02-01T10:00:00+00:00")
+	tagAt(t, r, "v2", "ship it", "2026-02-02T10:00:00+00:00")
 
 	facts, err := r.svc.BuildVersionFacts(ctx, r.org, r.proj)
 	if err != nil {
@@ -202,8 +204,11 @@ func TestBuildVersionFactsIgnoresForeignTags(t *testing.T) {
 	if facts.CurrentVersion != "v1" {
 		t.Errorf("current = %q, want v1 — a release tag is not a version", facts.CurrentVersion)
 	}
-	if facts.SuggestedVersion != "v2" {
-		t.Errorf("suggested = %q, want v2 — the foreign tag is not counted", facts.SuggestedVersion)
+	// One version exists, so counting offers v2 — which the release tag already
+	// holds, so the suggestion steps past it.
+	if facts.SuggestedVersion != "v3" {
+		t.Errorf("suggested = %q, want v3 — a foreign tag is not counted, but its name is taken",
+			facts.SuggestedVersion)
 	}
 	if facts.SpecUnchanged {
 		t.Errorf("the spec moved after v1: %+v", facts)

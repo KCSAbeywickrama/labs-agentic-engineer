@@ -250,13 +250,18 @@ export function SpecView({ projectName }: { projectName: string }) {
   useEffect(() => {
     if (buildDialog !== "resolve") return;
     const chatKey = chatKeyFor(orgHandle ?? "default", projectName);
-    return subscribeTurnEnd(chatKey, () => {
+    // The refetch outlives the dialog: a turn can end just as the user closes
+    // it, and the answer would then arrive and REOPEN a dialog over the
+    // conversation they just went back to. Unsubscribing does not stop a
+    // promise already in flight, so the cleanup marks it stale instead.
+    let closed = false;
+    const unsubscribe = subscribeTurnEnd(chatKey, () => {
       void collabRef.current
         .flush()
         .catch(() => undefined)
         .then(() => preflightRef.current.refetch())
         .then(({ data }) => {
-          if (!data) return;
+          if (closed || !data) return;
           setPreview(data);
           // What the click would answer NOW. The user has been resolving in the
           // chat beside the dialog, and when the last one goes the version is
@@ -265,6 +270,10 @@ export function SpecView({ projectName }: { projectName: string }) {
           setBuildDialog(data.needsResolution ? "resolve" : "build");
         });
     });
+    return () => {
+      closed = true;
+      unsubscribe();
+    };
   }, [buildDialog, orgHandle, projectName]);
 
   // Collapse the sidebar while focused on the spec, expand when leaving.

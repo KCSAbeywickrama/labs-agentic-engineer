@@ -51,9 +51,16 @@ import (
 // read — never inferred from the name, which is the user's.
 const specTagSubject = "Spec "
 
-// legacyVersionName matches the names cut before versions were named, kept as a
-// fallback for a tag whose annotation could not be read (a lightweight tag, an
-// older mirror). It is a recognition rule, never a validation one.
+// legacyTagSubject is the subject the retired per-artifact save wrote on a
+// requirements tag. Those tags ARE this platform's versions, cut before a
+// version could be named, so they are recognised alongside the current marker.
+const legacyTagSubject = "Requirements "
+
+// legacyVersionName is the last resort, and it is deliberately narrow: it
+// applies ONLY to a tag carrying no annotation at all. An annotated tag says
+// what it is, and a repo's own release tag may well be called `v1` — reading
+// that as the newest version would hand the change list the wrong baseline and
+// tell a build the spec had moved when it had not.
 var legacyVersionName = regexp.MustCompile(`^v(\d+)$`)
 
 // versionNamePattern is the shape a version name may take — the same subset the
@@ -87,9 +94,18 @@ func ValidateVersionName(name string) error {
 }
 
 // isVersionTag reports whether a tag is one of this platform's spec versions.
+//
+// The annotation decides it. A name only decides when there is no annotation to
+// read — a lightweight tag from an old mirror — because any repo may hold a
+// release tag called `v1`, and mistaking one for a version is not a cosmetic
+// error: it becomes the baseline the change list and the rebuild check are
+// computed against.
 func isVersionTag(t sourcecontrol.TagInfo) bool {
-	return strings.HasPrefix(t.Message, specTagSubject) ||
-		legacyVersionName.MatchString(t.Name)
+	if t.Message != "" {
+		return strings.HasPrefix(t.Message, specTagSubject) ||
+			strings.HasPrefix(t.Message, legacyTagSubject)
+	}
+	return legacyVersionName.MatchString(t.Name)
 }
 
 // versionTags returns the project's versions, NEWEST FIRST by creation time.
