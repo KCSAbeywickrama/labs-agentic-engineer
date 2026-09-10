@@ -719,11 +719,27 @@ dependency appears until a real document replaces it.
 button and the modal say *interface*; `contract` stays the field in the definition that names
 the file.
 
-**The Build drawer lists.** Title **Dependencies to resolve**; body *The version cannot be cut
-until each of these has a provider and a contract on file. Resolve them one by one from their
-definitions, or let the agent walk you through all of them.* One row per dependency with **Open**
-(its definition); one button **Resolve all in chat**; **Cancel** / **Continue**. Nothing in the
-drawer resolves anything, and *Resolve via chat* per row is gone.
+**Build asks in a dialog, and the dialog lists**
+([ADR-0029](decisions/ADR-0029-build-asks-in-a-dialog-that-lists.md)). One click opens exactly one
+of two, and neither resolves anything.
+
+*Something is open* — title **Resolve dependencies**; body *These need a provider and an interface
+before `<version>` can be cut.* One row per dependency: its name, the sentence saying what it
+needs, and **Used by:** chips when more than one component declares it. **Cancel** / **Resolve** —
+and nothing else, since the rail already reaches every definition.
+
+*Nothing is open* — title **Start build**. A **Version** field first, prefilled with the suggested
+name, its hint *Letters, digits, dot, dash and underscore.* and, when the name is taken, *A version
+named `<name>` already exists.* Then the heading **What changed since `<version>`** —
+**What this version creates** on a first build, **No spec changes since `<version>`** on a
+rebuild — over three groups, in this order and never merged, each unrendered when empty:
+**Components** · **External dependencies** · **Platform resources**. The headings are bold and
+carry no explanatory line; the list sits on its own surface, which is what makes the scrolling
+frame read as one. A row is a name and a chip — **new** or **removed**, no chip for a change. The requirements are
+never a row: every row names something that exists once the version is built. Under the list, when
+anything was removed: *A removed dependency keeps its resource. Take it down from Resources.*
+**Cancel** / **Build `<name>`**, which reads **Rebuild `<name>`** when the spec tree has not
+moved.
 
 ### Section state
 

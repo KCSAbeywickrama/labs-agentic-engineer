@@ -1106,9 +1106,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// anything already provisioned OR in-flight (buildProvisionStatus collapses the
 	// provisioning tri-state onto the "already handled" bool).
 	preflightSvc := build.NewPreflightService(build.PreflightDeps{
-		Design:  designComponents{store: artifactStore},
-		Status:  buildProvisionStatus{svc: provisioningSvc},
-		Catalog: buildOrgCatalog{svc: provisioningSvc},
+		Design:   designComponents{store: artifactStore},
+		Status:   buildProvisionStatus{svc: provisioningSvc},
+		Catalog:  buildOrgCatalog{svc: provisioningSvc},
+		Versions: buildVersionFacts{art: artifactSvcGit},
 	})
 	// delivery — the Delivery Pipeline domain (P6): the public single-tag build
 	// surface, the task read + promote-dispatch surface, and the task-log SSE

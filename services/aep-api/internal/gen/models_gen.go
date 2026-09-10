@@ -58,6 +58,48 @@ func (e AgentStatus) Valid() bool {
 	}
 }
 
+// Defines values for BuildChangeKind.
+const (
+	BuildChangeKindComponent        BuildChangeKind = "component"
+	BuildChangeKindExternal         BuildChangeKind = "external"
+	BuildChangeKindPlatformResource BuildChangeKind = "platform-resource"
+)
+
+// Valid indicates whether the value is a known member of the BuildChangeKind enum.
+func (e BuildChangeKind) Valid() bool {
+	switch e {
+	case BuildChangeKindComponent:
+		return true
+	case BuildChangeKindExternal:
+		return true
+	case BuildChangeKindPlatformResource:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BuildChangeState.
+const (
+	Changed BuildChangeState = "changed"
+	New     BuildChangeState = "new"
+	Removed BuildChangeState = "removed"
+)
+
+// Valid indicates whether the value is a known member of the BuildChangeState enum.
+func (e BuildChangeState) Valid() bool {
+	switch e {
+	case Changed:
+		return true
+	case New:
+		return true
+	case Removed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BuildInputItemKind.
 const (
 	BuildInputItemKindExternalConfig   BuildInputItemKind = "external-config"
@@ -1140,16 +1182,16 @@ func (e TurnInputMultipartIntent) Valid() bool {
 
 // Defines values for WorkloadDependencyDTOKind.
 const (
-	OrgService WorkloadDependencyDTOKind = "org-service"
-	Resource   WorkloadDependencyDTOKind = "resource"
+	WorkloadDependencyDTOKindOrgService WorkloadDependencyDTOKind = "org-service"
+	WorkloadDependencyDTOKindResource   WorkloadDependencyDTOKind = "resource"
 )
 
 // Valid indicates whether the value is a known member of the WorkloadDependencyDTOKind enum.
 func (e WorkloadDependencyDTOKind) Valid() bool {
 	switch e {
-	case OrgService:
+	case WorkloadDependencyDTOKindOrgService:
 		return true
-	case Resource:
+	case WorkloadDependencyDTOKindResource:
 		return true
 	default:
 		return false
@@ -1280,6 +1322,22 @@ type ApplyResult struct {
 	Warnings  []Warning  `json:"warnings,omitempty"`
 }
 
+// BuildChange One thing this version changes, compared with the newest version — the row the Start build dialog lists. Every row names something that EXISTS once the version is built, which is why the requirements are not one of them — they are the input, not the output. `removed` is a statement rather than an action — a build deprovisions nothing, so a removed dependency's resource stays.
+type BuildChange struct {
+	// Kind What the name belongs to, and the group the dialog lists it under. The two dependency kinds carry opposite obligations — an `external` needs a provider and its keys from the user, a `platform-resource` is provisioned by the build — so they are never one group.
+	Kind BuildChangeKind `json:"kind"`
+
+	// Name The component, dependency or resource name, as the design writes it.
+	Name  string           `json:"name"`
+	State BuildChangeState `json:"state"`
+}
+
+// BuildChangeKind What the name belongs to, and the group the dialog lists it under. The two dependency kinds carry opposite obligations — an `external` needs a provider and its keys from the user, a `platform-resource` is provisioned by the build — so they are never one group.
+type BuildChangeKind string
+
+// BuildChangeState defines model for BuildChange.State.
+type BuildChangeState string
+
 // BuildInputItem defines model for BuildInputItem.
 type BuildInputItem struct {
 	Approved bool `json:"approved,omitempty"`
@@ -1324,13 +1382,24 @@ type BuildLogs struct {
 
 // BuildPreflight defines model for BuildPreflight.
 type BuildPreflight struct {
-	Items []PreflightItem `json:"items"`
+	// Changes What this version changes against the newest one, computed from the diff between that version's tag and HEAD. Empty when specUnchanged, and every row is `new` when the project has no version yet.
+	Changes []BuildChange `json:"changes,omitempty"`
+
+	// CurrentVersion The newest version's tag name, or empty when the project has never been built. Ordered by tag creation time, not by any number in the name.
+	CurrentVersion string          `json:"currentVersion,omitempty"`
+	Items          []PreflightItem `json:"items"`
 
 	// NeedsInput Whether preflight emitted any item at all. Kept as the broad "there is something to show" flag; it does NOT gate Build, because an external dependency's values are collected on the Builds page while the coding agent runs and are enforced at the deploy gate instead.
 	NeedsInput bool `json:"needsInput"`
 
 	// NeedsResolution Whether any emitted item blocks the version cut — a dependency the design itself cannot resolve (unresolved, missing spec, or an org service awaiting access). This is the ONLY flag a client may block Build on.
 	NeedsResolution bool `json:"needsResolution"`
+
+	// SpecUnchanged Whether the `specs/` tree at HEAD matches the newest version's, so a build reuses that version and reopens its milestone instead of cutting a new one. The client locks the version field and says Rebuild.
+	SpecUnchanged bool `json:"specUnchanged,omitempty"`
+
+	// SuggestedVersion What the version field is prefilled with — `v<count of versions + 1>`, incremented until the name is free. A suggestion only; the user may replace it.
+	SuggestedVersion string `json:"suggestedVersion,omitempty"`
 }
 
 // BuildProgressEvent One SSE frame on the VERSION progress stream, which spans every run that has worked the version. `type` discriminates the payload: `cycle` carries a RunCycleView (client upserts by id), `line` one RunProgressLine, and `done` says why the stream ended (the server then closes it). `cycle` and `line` frames also carry `run` — a version's story spans several executions, so a cycle is only identified once you know which run opened it.
@@ -1373,6 +1442,9 @@ type BuildProgressRunKind string
 // BuildRequest defines model for BuildRequest.
 type BuildRequest struct {
 	Inputs []BuildInputItem `json:"inputs,omitempty"`
+
+	// Version The tag name to cut for this version. Empty takes the suggested one. Must be a valid tag name; a name already in use is a 409. Ignored when the spec tree is unchanged, because that build reuses the existing version.
+	Version string `json:"version,omitempty"`
 }
 
 // BuildResponse defines model for BuildResponse.
@@ -2843,7 +2915,7 @@ type TagList struct {
 	// SpecDirty True when specs/ changed after latest was tagged.
 	SpecDirty bool `json:"specDirty,omitempty"`
 
-	// Tags Spec version tags (v<N>), newest first.
+	// Tags Spec version tags, newest first. A version carries the name the user gave it at build time (`v<N>` when they kept the suggestion), and "newest" is the tags' creation order, not any number in the name.
 	Tags []string `json:"tags"`
 }
 
