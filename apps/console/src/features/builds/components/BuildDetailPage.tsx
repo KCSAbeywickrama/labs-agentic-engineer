@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   Alert,
   Box,
@@ -45,7 +45,7 @@ import { createLink, Link } from "@tanstack/react-router";
 import { EmptyState } from "../../../components/EmptyState";
 import { LogSection } from "../../../components/LogSection";
 import { PageHeader } from "../../../components/PageHeader";
-import { StatusChip } from "../../../components/StatusChip";
+import { SectionCaption } from "../../../components/SectionCaption";
 import type { components } from "../../../generated/aep-api";
 import { useAllTasks } from "../../tasks/api/queries";
 import { useProjectStatus } from "../../projects/api/queries";
@@ -61,19 +61,31 @@ import {
   milestoneLabel,
   taskBreakdown,
 } from "../lib/ledger";
-import { anyTaskRunning, runClaims, taskTally, type RunClaims } from "../lib/taskRow";
 import {
+  anyTaskRunning,
+  runClaims,
+  taskElapsedFrom,
+  taskTally,
+  type RunClaims,
+} from "../lib/taskRow";
+import {
+  BUILD_CYCLE_KINDS,
+  buildCycles,
   externalValuesPark,
   isAgentStreaming,
   isDeliveryRun,
+  isTerminalRun,
   mergedCycle,
 } from "../lib/runView";
+import { settledLabel } from "../lib/feedTail";
 import { AgentPulse } from "./AgentPulse";
 import { BuildTaskList } from "./BuildTaskList";
 import { CycleBuilds } from "./CycleBuilds";
 import { EXTERNAL_RESOURCES_ANCHOR, ExternalResources } from "./ExternalResources";
+import { RunFailureCard } from "./RunFailureCard";
 import { RunFeed } from "./RunFeed";
 import { useCycleBuilds } from "../api/queries";
+import { useSessionStages } from "../hooks/useSessionStages";
 import { useTicker } from "../hooks/useTicker";
 
 type BuildSummary = components["schemas"]["BuildSummary"];
@@ -104,9 +116,24 @@ export function BuildDetailPage({
 
   const runs = useBuildRuns(projectName, tag);
   const runList = runs.data?.runs ?? [];
-  // The runs that DELIVERED this version. A run that only re-judged it has no
-  // build session to show — its verdict lives on the Validation board.
-  const current = runList.filter(isDeliveryRun)[0];
+  // The runs that DELIVERED this version, newest first (the order list-build-runs
+  // answers in). A run that only re-judged it has no build session to show — its
+  // verdict lives on the Validation board.
+  //
+  // ALL of them, not just the newest: a version is routinely delivered by more
+  // than one run — the dev run writes it, a validation run finds a defect, a task
+  // run repairs it — and each of those is a separate `milestone_runs` row with its
+  // own agent feed. Reading `[0]` mounted one feed, so the newest run's log was
+  // the only one this page could reach: on the live stack, testing9231 v1 showed a
+  // 105-event two-file FX fix labelled "Cycle 1" while the 841-event run that
+  // actually wrote the version (pull request #6, three subagents) had no surface
+  // anywhere. The recordings were never the problem — all four were intact on the
+  // volume, and `stream-run-progress` is keyed per run — the page just asked for one.
+  const deliveryRuns = runList.filter(isDeliveryRun);
+  // The run the page's own header, actions and park notice speak for: the newest,
+  // because those answer "what is happening now" and an older run answers a
+  // different question.
+  const current = deliveryRuns[0];
 
   const issues = useAllTasks(projectName, tag, { live });
   const tasks = issues.data ?? [];
@@ -117,6 +144,36 @@ export function BuildDetailPage({
   // `TaskView.executions` empty for agent work ("its pull request lives on the
   // run's cycle record instead"). Without this every open task read `Pending`.
   const claims = runClaims(runList);
+
+  // The run's CURRENT build session, which is what the header names the actor
+  // from. The newest one, not the merged one the Build logs section asks about:
+  // the question here is what is happening now, and a session that merged an
+  // hour ago answers a different one.
+  const stages = useSessionStages(
+    projectName,
+    tag,
+    buildCycles(current?.cycles ?? []).at(-1),
+    tasks,
+  );
+
+  // ONE CLOCK FOR THE PAGE.
+  //
+  // Both the summary card's duration and every live task row are measured
+  // against `Date.now()`, so both need a re-render a second to move at all —
+  // and a ticker called inside one component re-renders only ITS subtree. That
+  // is exactly what happened: the ticker sat in `BuildSummaryCard`, and the
+  // task rows beside it, a sibling away, sat frozen at whatever they read on
+  // first paint while the card's "1m 43s and counting" ticked above them.
+  //
+  // So the interval lives at the page, where both surfaces are below it. One
+  // interval rather than one per surface: two clocks for one page drift apart,
+  // and a row that says 2m 42s next to a card that says 2m 43s is a page
+  // arguing with itself. (`RunCrew` keeps its own — its clock runs on whether a
+  // CYCLE still has an agent working, a fact this page does not hold, and it
+  // renders on surfaces this page does not own.)
+  const durationOpen = build ? isDurationOpen(build) : false;
+  const rowsCounting = tasks.some((t) => taskElapsedFrom(t, claims) !== null);
+  useTicker(durationOpen || rowsCounting);
 
   const backTo = {
     link: <Link to="/projects/$projectName/builds" params={{ projectName }} />,
@@ -177,7 +234,7 @@ export function BuildDetailPage({
     );
   }
 
-  const status = ledgerStatus(build, projectStatus.data?.deploy);
+  const status = ledgerStatus(build, projectStatus.data?.deploy, stages);
   // The deploy gate's park (ADR-0023), read from the RUN. `ledgerStatus`
   // already knows a parked version is parked — `BuildSummary.waitingReason`
   // carries it — but only the run names the dependencies the notice below
@@ -190,7 +247,7 @@ export function BuildDetailPage({
         title={`Build ${build.tag}`}
         status={
           park
-            ? { label: "Waiting for values", tone: "warning", variant: "filled" }
+            ? { label: "Waiting for configuration", tone: "warning", variant: "filled" }
             : { label: status.label, tone: status.tone, variant: "filled" }
         }
         backTo={backTo}
@@ -200,6 +257,9 @@ export function BuildDetailPage({
       />
 
       <Stack spacing={2}>
+        {/* Why the run failed, or what it is retrying — before the summary,
+            because a reader arriving at a failed build asks that first. */}
+        <RunFailureCard projectName={projectName} run={current} />
         <BuildSummaryCard
           projectName={projectName}
           build={build}
@@ -259,8 +319,10 @@ export function BuildDetailPage({
                 it to be true. */}
         <AgentLogSection
           projectName={projectName}
-          runId={current?.id}
+          tag={tag}
+          runs={deliveryRuns}
           streaming={isAgentStreaming(runList) && park === null}
+          runState={current?.state}
         />
 
         {/* The cycle that MERGED, not the newest one: the cluster read answers
@@ -321,10 +383,10 @@ function BuildSummaryCard({
   deploy?: components["schemas"]["DeployStage"] | undefined;
 }) {
   const live = isLedgerLive(build);
-  // The duration counts against `Date.now()` until the build ends, so this card
-  // has to re-render every second for it to move at all.
+  // The duration counts against `Date.now()` until the build ends. The clock
+  // that makes it move is the PAGE's — see "one clock for the page" above; this
+  // card only decides whether the number is still open.
   const counting = isDurationOpen(build);
-  useTicker(counting);
   const duration = buildDuration(build.startedAt, build.completedAt);
   // Derived from the tasks this page already holds — the same TAG-SCOPED read
   // the Tasks section below renders.
@@ -403,7 +465,7 @@ function BuildSummaryCard({
               color="inherit"
               href={`#${EXTERNAL_RESOURCES_ANCHOR}`}
             >
-              Supply values
+              Add configuration
             </Button>
           }
         >
@@ -412,7 +474,7 @@ function BuildSummaryCard({
           </Typography>
           <Typography variant="body2">
             Everything built. This version is not deployed until every external
-            resource holds its development values — add them under External
+            resource holds its development configuration — add it under External
             resources below and the run resumes and deploys on its own, with
             nothing to restart.
           </Typography>
@@ -437,7 +499,7 @@ function BuildSummaryCard({
         )}
         <Typography variant="caption" color="text.secondary">
           {park
-            ? `${build.tag} is built and waiting for its external values.`
+            ? `${build.tag} is built and waiting for its external configuration.`
             : deploymentNote(build.tag, deploy)}
         </Typography>
       </Stack>
@@ -452,8 +514,8 @@ function BuildSummaryCard({
  * list rendered as punctuation.
  */
 function parkTitle(dependencies: string[]): string {
-  if (dependencies.length === 0) return "Waiting for external values";
-  return `Waiting for values: ${dependencies.join(", ")}`;
+  if (dependencies.length === 0) return "Waiting for external configuration";
+  return `Waiting for configuration: ${dependencies.join(", ")}`;
 }
 
 /**
@@ -461,7 +523,7 @@ function parkTitle(dependencies: string[]): string {
  *
  * Every state the header pill can show gets its own sentence. The generic
  * "deploys as its tasks merge" line is for a version that has not reached an
- * environment — using it while the header reads "Deploying to development"
+ * environment — using it while the header reads "Deploying"
  * put two contradictory claims on one card.
  */
 function deploymentNote(
@@ -471,11 +533,11 @@ function deploymentNote(
   if (deploy?.version !== tag) return `${tag} deploys as its tasks merge.`;
   switch (deploy.status) {
     case "deployed":
-      return `${tag} is live in development.`;
+      return `${tag} is live.`;
     case "deploying":
-      return `${tag} is rolling out to development now.`;
+      return `${tag} is rolling out now.`;
     case "failed":
-      return `${tag} failed to deploy to development.`;
+      return `${tag} failed to deploy.`;
     default:
       return `${tag} deploys as its tasks merge.`;
   }
@@ -562,33 +624,132 @@ function BuildActions({
   );
 }
 
+/**
+ * Every delivery run's agent log, newest first — the shape the Validation page
+ * already uses for a version judged more than once (`ValidationPage`, "EARLIER
+ * VALIDATION RUNS").
+ *
+ * A feed PER RUN rather than one version-wide stream, for the same reason that
+ * page gives: `stream-build-progress` does span a version's runs, but it emits
+ * them oldest first, and this page leads with the newest run on purpose. The cost
+ * is near nothing — a settled run's stream is finite, so the server sends `done`
+ * and closes and the client stops without reattaching, leaving at most ONE
+ * connection held open, since only the newest run can still be live.
+ *
+ * Cycles are filtered to the kinds this surface owns (`BUILD_CYCLE_KINDS`). The
+ * single feed did not filter, which was survivable while only the newest run was
+ * mounted; stacking every delivery run makes it matter, because a validation run
+ * that REPAIRS what it found is a delivery run — `isDeliveryRun` keeps it for its
+ * coding cycles — and its validation cycle would then render here as well as on
+ * the Validation board. The rest of this page already draws that line the same
+ * way: `buildCycles` and `mergedCycle` both exclude validation.
+ */
 function AgentLogSection({
   projectName,
-  runId,
+  tag,
+  runs,
   streaming,
+  runState,
 }: {
   projectName: string;
-  runId: string | undefined;
+  /** Names the version in the earlier-runs caption, matching the phrasing the
+   *  Builds page's own run history uses ("EARLIER RUNS OF V1"). */
+  tag: string;
+  /** The version's delivery runs, newest first. */
+  runs: components["schemas"]["MilestoneRunView"][];
   streaming: boolean;
+  /** Forwarded to `AgentLogMeta`, which is where it is explained. */
+  runState: string | undefined;
 }) {
   return (
     <LogSection
       title="Coding agent log"
-      meta={
-        streaming ? (
-          <StatusChip label="streaming" tone="info" appearance="soft" dot />
-        ) : undefined
-      }
+      meta={<AgentLogMeta streaming={streaming} runState={runState} />}
     >
-      {runId ? (
-        <RunFeed projectName={projectName} runId={runId} />
-      ) : (
+      {runs.length === 0 ? (
         <EmptyState
           compact
           description="Nothing has been dispatched for this version yet — the agent's log appears once a build session starts."
         />
+      ) : runs.every((r) => r.cycles.length === 0) && runState && isTerminalRun(runState) ? (
+        // Every run ended before dispatching a cycle: the failure (or cancel)
+        // happened while the platform was still preparing the version. Saying
+        // so is the difference between "the agent wrote nothing" and "the
+        // agent never started" — the card above says why.
+        <EmptyState
+          compact
+          description="Did not start — the run ended while the platform was preparing the version."
+        />
+      ) : (
+        <Stack spacing={2}>
+          {runs.map((run, i) => (
+            <Fragment key={run.id}>
+              {/* Before the SECOND feed, so the caption separates the run being
+                  read from the runs that came before it. Never drawn for a
+                  version delivered by a single run, which is the ordinary case. */}
+              {i === 1 && (
+                <SectionCaption>
+                  EARLIER RUNS OF {tag.toUpperCase()}
+                </SectionCaption>
+              )}
+              <RunFeed
+                projectName={projectName}
+                runId={run.id}
+                cycleKinds={BUILD_CYCLE_KINDS}
+                // Counted from the OLDEST, so the numbers descend down the page
+                // in step with the cycle ordinals inside each feed. Counted over
+                // the runs this SECTION shows, not the version's whole run list:
+                // a run that only validated has no feed here, so numbering the
+                // full list would print "Run 3" over "Run 1" with no Run 2.
+                //
+                // OMITTED ENTIRELY for a version delivered by one run, which is
+                // the ordinary case: `RunFeed` prefixes the heading whenever the
+                // prop is defined, so passing 1 would relabel every single-run
+                // version's only box from "Cycle 1" to "Run 1 · Cycle 1" — a run
+                // number that distinguishes it from nothing.
+                {...(runs.length > 1 ? { runNumber: runs.length - i } : {})}
+                // Only the newest run may open a box, so exactly one log is open
+                // on the page rather than one per feed.
+                expandNewest={i === 0}
+              />
+            </Fragment>
+          ))}
+        </Stack>
       )}
     </LogSection>
+  );
+}
+
+/**
+ * The coding agent log's header note — the Tasks header's treatment, applied to
+ * a different fact.
+ *
+ * Secondary caption text beside the title, with `AgentPulse` for "working right
+ * now", exactly as `TasksMeta` renders its counts. It was a `StatusChip` before,
+ * which made two sections one card apart label themselves in two different
+ * shapes.
+ */
+function AgentLogMeta({
+  streaming,
+  runState,
+}: {
+  streaming: boolean;
+  /** The run's own state, for the settled half. Both halves read the run list so
+   *  they cannot disagree — see `settledLabel`. */
+  runState: string | undefined;
+}) {
+  // Live beats settled: `streaming` is the stronger claim and the one a reader
+  // is watching for. A run that is neither streaming nor terminal (parked at the
+  // deploy gate, or between cycles) is labelled by neither — the summary card
+  // above says what it is waiting on, and a note here would only compete.
+  if (!streaming && (!runState || !isTerminalRun(runState))) return null;
+  return (
+    <Stack direction="row" spacing={1.25} sx={{ alignItems: "center" }}>
+      <Typography variant="caption" color="text.secondary">
+        {streaming ? "Streaming" : settledLabel(runState)}
+      </Typography>
+      {streaming && <AgentPulse />}
+    </Stack>
   );
 }
 

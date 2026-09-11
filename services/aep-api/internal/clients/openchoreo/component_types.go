@@ -152,11 +152,14 @@ type ComponentTrait struct {
 
 // -- Deployment (ReleaseBinding) ---------------------------------------------
 
-// DevEnvironmentName is the platform's fixed dev environment — the OC
-// environment every project auto-deploys to. The single shared constant for
-// what was previously pinned per-feature (runtimeconfig, provisioning,
-// codingagent, project status).
-const DevEnvironmentName = "development"
+// DevEnvironmentName is the platform's fixed environment — the OC environment
+// every project auto-deploys to. The single shared constant for what was
+// previously pinned per-feature (runtimeconfig, provisioning, codingagent,
+// project status). Where Agent Manager is deployed alongside AEP this is the
+// same Environment object Agent Manager's platform-resources chart owns, so
+// both products share one environment, one environment Thunder and one
+// gateway.
+const DevEnvironmentName = "default"
 
 // ComponentSpecDesired is the platform-owned half of a Component's spec: the
 // trait shape and the build/deploy policy.
@@ -232,8 +235,48 @@ type ReleaseBindingSummary struct {
 	// ReadyReason is the Ready-typed condition's reason (OC copies the
 	// failing sub-condition's reason into the aggregate).
 	ReadyReason string
+	// ReleaseName is the ComponentRelease the binding PINS (spec.releaseName),
+	// "" when it pins none.
+	//
+	// It is what separates "this component is serving the release it should be"
+	// from "this component is serving an older one": Ready alone says only that
+	// whatever is pinned came up, and a version behind by one release is Ready
+	// and wrong. The run supervisor compares it against the release the
+	// component's newest succeeded build would cut (delivery.ReleaseNameFor).
+	ReleaseName string
+	// ExternalURL is the public URL this binding advertises, "" for a component
+	// that exposes none (a worker, an internal-only service).
+	//
+	// It rides the summary because it is a fact of the SAME object, read on the
+	// same call: `status.endpoints[].externalURLs`, picked by the same
+	// scheme preference as the deployments read (PreferPlainHTTPEndpoints).
+	// Carrying it is what lets a reader ask whether the binding's Ready claim is
+	// true at the EDGE without a second request — see the endpoint deploy-wait
+	// in `projects`, where Ready over an unanswerable URL is what dispatched
+	// validation against a system that could not be reached.
+	ExternalURL string
 }
 
 // -- ComponentOpenAPI (Test tab) ----------------------------------------------
+
+// BuildRunSummary is one build WorkflowRun reduced to the facts the milestone
+// loop decides on, with OpenChoreo's condition vocabulary already mapped.
+//
+// Status is carried verbatim beside the two booleans because OC's status is a
+// condition REASON — an open string, not a closed set — so it is display and
+// logging material, while Completed and Succeeded are what anything branches on.
+type BuildRunSummary struct {
+	Name      string
+	Status    string
+	Completed bool
+	Succeeded bool
+	// CommitSHA is the commit the run was pinned to, "" for a build of whatever
+	// the branch tip was.
+	CommitSHA string
+	// StartedAt is the run's creation timestamp — what orders two succeeded
+	// builds of the same component. The list is not ordered by the host, so
+	// "the newest green build" has to be decided on a fact the run carries.
+	StartedAt time.Time
+}
 
 // -- Build Logs ---------------------------------------------------------------

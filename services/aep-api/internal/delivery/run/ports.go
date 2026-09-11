@@ -18,6 +18,7 @@ package run
 
 import (
 	"context"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
@@ -78,6 +79,14 @@ type RunStore interface {
 	SetWaiting(ctx context.Context, id, reason string, dependencies []string) error
 	// Settle writes the terminal state and its reason, once.
 	Settle(ctx context.Context, id, state, reason string) error
+	// RecordFailure writes the fault the run is failing on (delivery.RunFailure),
+	// replacing any earlier record — an activity calls it on EVERY attempt that
+	// meets the fault, so the row reads "attempt 2 of 3" while the run is still
+	// planning. ClearFailure removes it once a later attempt succeeds: a blip
+	// that healed is not a failure to report. Both are read-model bookkeeping,
+	// never the loop's arithmetic.
+	RecordFailure(ctx context.Context, id string, failure delivery.RunFailure) error
+	ClearFailure(ctx context.Context, id string) error
 	// BumpBudget increments one counter — bookkeeping for the read model, never
 	// the loop's own arithmetic.
 	BumpBudget(ctx context.Context, id string, counter delivery.RunBudget) error
@@ -155,7 +164,7 @@ type DesignReader interface {
 	ComponentPaths(ctx context.Context, orgID, projectID string) (map[string]string, error)
 }
 
-// BuildRunInfo is one OpenChoreo WorkflowRun reduced to the two facts the
+// BuildRunInfo is one OpenChoreo WorkflowRun reduced to the facts the
 // supervisor needs. The OpenChoreo status vocabulary is deliberately mapped in
 // the adapter: this package knows "terminal" and "succeeded", nothing about
 // condition reasons.
@@ -163,6 +172,20 @@ type BuildRunInfo struct {
 	Name      string `json:"name"`
 	Terminal  bool   `json:"terminal"`
 	Succeeded bool   `json:"succeeded"`
+	// CommitSHA is the commit this run built. It is the version state's DESIRED
+	// half: the newest succeeded run's commit names the release the component
+	// should be serving.
+	//
+	// A field rather than a substring of Name, which also carries a short
+	// commit: the name is composed through k8sname.Bounded, which truncates a
+	// long readable head and appends a digest, so parsing it back is sound for
+	// some projects and silently wrong for others. Empty for a run triggered
+	// without a pinned commit, which cannot be matched to a merge and therefore
+	// cannot be promoted.
+	CommitSHA string `json:"commitSha,omitempty"`
+	// StartedAt is when the cluster admitted the run — what orders two green
+	// builds of one component, since the host returns them unordered.
+	StartedAt time.Time `json:"startedAt"`
 }
 
 // BuildReader reads back a component's WorkflowRuns.
@@ -185,7 +208,7 @@ type BuildReader interface {
 type ValidationCoordinator interface {
 	// EnsureValidationIssue mints the run's validation issue into the milestone
 	// at deployed-green and returns its number, or 0 when the project has no
-	// acceptance criteria. Minting here rather than at plan time is what keeps
+	// validation criteria. Minting here rather than at plan time is what keeps
 	// an unworkable issue out of the working set for the whole run.
 	EnsureValidationIssue(ctx context.Context, orgID, projectID string, milestoneNumber int) (int, error)
 	// Verdict reads the validation runner's committed report AT `at` — the
@@ -246,20 +269,29 @@ type Dispatcher interface {
 // call a green WorkflowRun the end of the cycle and validate against whatever
 // happened to be running.
 //
-// Idempotent and convergent: the release name is derived from the merge commit,
-// so a retried deploy re-pins the same release and changes nothing.
+// Idempotent and convergent: the release name is derived from the commit, so a
+// retried deploy re-pins the same release and changes nothing.
 //
-// An EMPTY commitSHA converges instead of promoting — it re-asserts the wiring
-// of components that are already serving without moving which release is live.
-// That is how the stage's last pass supplies the facts that only exist once
-// everything is up (a protected API's CORS allowlist is the project's SPA
+// An EMPTY commitSHA on a target converges instead of promoting — it re-asserts
+// the wiring of components that are already serving without moving which release
+// is live. That is how the stage's last pass supplies the facts that only exist
+// once everything is up (a protected API's CORS allowlist is the project's SPA
 // origins) without cutting a second release for them.
 type Deployer interface {
-	Deploy(ctx context.Context, orgID, projectID string, components []string, commitSHA string) ([]delivery.ComponentDeploy, error)
-	// PlanDeploymentWaves orders the set: every component in a wave has each of
-	// its hard providers in an earlier one. Ordering lives with the deployer
-	// because it is read off the same design the writes are composed from.
-	PlanDeploymentWaves(ctx context.Context, orgID, projectID string, components []string) ([][]string, error)
+	// Deploy promotes each target at ITS OWN commit. Per target rather than per
+	// call because a reconcile promotes each component at its own newest green
+	// build, which is a different commit for each of them in exactly the case
+	// that motivated the model (ADR-0026).
+	Deploy(ctx context.Context, orgID, projectID string, targets []delivery.DeployTarget) ([]delivery.ComponentDeploy, error)
+	// PlanDeploymentWaves plans one reconcile pass over the version's state:
+	// which behind components may be promoted, in which order, which to wait for
+	// and which are held on a provider that is not serving.
+	//
+	// Planning lives with the deployer because it is read off the same design the
+	// writes are composed from — and it reads the WHOLE design's edges, which is
+	// what makes a provider with no release an unsatisfied edge rather than an
+	// assumed-satisfied one.
+	PlanDeploymentWaves(ctx context.Context, orgID, projectID string, state delivery.VersionState) (delivery.DeployPlan, error)
 }
 
 // Gates authors the version's dependencies and mints its `provision` gate
@@ -272,6 +304,15 @@ type Deployer interface {
 // predicate honest from the moment the first Task lands.
 type Gates interface {
 	ProvisionForBuild(ctx context.Context, orgID, projectID, tag string, milestoneNumber int, inputs []delivery.ProvisionInput) error
+}
+
+// RunFailedRecorder is told when a run settles FAILED, so a surface a reader
+// is not looking at (the project's activity feed) can carry the fact. It is
+// handed the run id and nothing else: the recorder reads the row — tag,
+// failure code, component — itself, so the workflow carries no copy of facts
+// the row already holds. Best-effort by contract: it never returns an error.
+type RunFailedRecorder interface {
+	RecordRunFailed(ctx context.Context, orgID, runID string)
 }
 
 // Planner runs the version's planning turn, minting one prose issue per planned
@@ -353,6 +394,10 @@ type WorkCanceller interface {
 // becomes Ready delivers nothing. The supervisor observes it and asks; the plane
 // still owns the write, the labels and the dedupe key.
 type DeployIssueMinter interface {
+	// The commit is per component, riding the target: a reconcile's failures can
+	// be at different commits in one pass, and the dedupe key is (component,
+	// commit) — so one commit for the whole list would file the next version's
+	// failure against the previous version's key, or the reverse.
 	MintDeployFixIssues(ctx context.Context, orgID, projectID string, milestoneNumber int,
-		components []string, reasons map[string]string, commitSHA string) ([]int, error)
+		failed []delivery.DeployTarget, reasons map[string]string) ([]int, error)
 }

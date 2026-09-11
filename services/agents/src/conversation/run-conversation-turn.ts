@@ -29,11 +29,11 @@
  * preserved across turns.
  */
 
-import { hasToolCall, isStepCount, type FilePart, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
+import { isStepCount, type FilePart, type LanguageModel, type ModelMessage, type StopCondition, type ToolSet } from "ai";
 import {
   FileBundle,
-  ASK_QUESTION_TOOL,
-  ASK_QUESTIONS_TOOL,
+  isErrorToolOutput,
+  isQuestionTool,
   type McpConfig,
   type StreamPart,
   type Surface,
@@ -43,7 +43,8 @@ import { DocFileBundle } from "../collab/doc-bundle.js";
 import { StreamingDocWriter } from "../collab/streaming-add.js";
 import type { RoomPeer } from "../collab/room-peer.js";
 import { runTurn } from "../agents/main/run-turn.js";
-import { buildFileTools, buildRegisterDraftTools } from "../agents/main/tools/files.js";
+import { buildFileToolSet, buildRegisterDraftTools } from "../agents/main/tools/files.js";
+import { tapWrites, type WriteLedger } from "../agents/main/tools/write-ledger.js";
 import { buildTaskPlanTools } from "../agents/main/tools/task-plan.js";
 import { TaskPlan } from "../agents/main/task-plan-accumulator.js";
 import { buildInstructions, buildTaskPlanInstructions, buildPrompt, buildEagerSkillsBlock } from "../agents/main/prompt.js";
@@ -97,24 +98,42 @@ function freshConversation(id: string): Conversation {
 }
 
 /**
+ * Stop when the last step carries a question tool-call the schema ACCEPTED.
+ * The SDK's own `hasToolCall` also matches a call whose input failed
+ * validation (it stays in `step.toolCalls` flagged `invalid`), which would end
+ * the turn on a question nobody can render — an empty option label was enough
+ * to leave the console blank and the conversation stuck awaiting-human.
+ * Skipping invalid calls lets the model read the validation error as a tool
+ * error and retry in the next step.
+ */
+function hasValidQuestionCall(): StopCondition<ToolSet> {
+  return ({ steps }) =>
+    steps[steps.length - 1]?.toolCalls.some((call) => !call.invalid && isQuestionTool(call.toolName)) ?? false;
+}
+
+/**
  * True when the turn ended on a HITL question tool-call (`ask_question` or
- * `ask_questions`, console ADR-0012 / #270). Scans only the messages appended
- * THIS turn; the paired `hasToolCall` stop conditions guarantee such a call is
- * the last step, so a match means the turn is awaiting the user's answer.
+ * `ask_questions`, console ADR-0012 / #270) that RESOLVED — its placeholder
+ * result is on the transcript and is not an error. Scans only the messages
+ * appended THIS turn; the paired stop condition guarantees an accepted call is
+ * the last step, so a match means the turn is awaiting the user's answer. A
+ * call the schema rejected leaves an error result instead, and a turn that
+ * then ran out of steps is done, not awaiting anyone.
  */
 function endedAwaitingHuman(appended: ModelMessage[]): boolean {
+  const asked = new Set<string>();
+  const resolved = new Set<string>();
   for (const m of appended) {
-    if (m.role !== "assistant" || !Array.isArray(m.content)) continue;
+    if (!Array.isArray(m.content)) continue;
     for (const part of m.content) {
-      if (
-        part.type === "tool-call" &&
-        (part.toolName === ASK_QUESTION_TOOL || part.toolName === ASK_QUESTIONS_TOOL)
-      ) {
-        return true;
+      if (m.role === "assistant" && part.type === "tool-call" && isQuestionTool(part.toolName)) {
+        asked.add(part.toolCallId);
+      } else if (m.role === "tool" && part.type === "tool-result" && asked.has(part.toolCallId)) {
+        if (!isErrorToolOutput(part.output)) resolved.add(part.toolCallId);
       }
     }
   }
-  return false;
+  return resolved.size > 0;
 }
 
 export interface RunConversationTurnInput {
@@ -248,6 +267,10 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     let bundle: FileBundle | undefined;
     let tools: ToolSet;
     let instructions: string;
+    // The turn's write ledger (files turns only) — see write-ledger.ts: it is
+    // what lets each file write settle at its OWN tool-input-end instead of at
+    // the step's tail, which for a batched step is minutes later.
+    let writes: WriteLedger | undefined;
     if (toolset === "task-plan") {
       // Read-only context: `files` mutates nothing; the accumulator validates
       // planTask/updateTask against it (known components + existing Tasks).
@@ -257,7 +280,9 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       bundle = input.collabPeer
         ? new DocFileBundle(input.collabPeer, input.files)
         : new FileBundle(input.files);
-      tools = buildFileTools(bundle, skills);
+      const fileToolSet = buildFileToolSet(bundle, skills);
+      tools = fileToolSet.tools;
+      writes = fileToolSet.writes;
       if (input.registerDraft) {
         tools = { ...tools, ...buildRegisterDraftTools() };
       }
@@ -304,12 +329,19 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     if (input.collabPeer && bundle) {
       docWriter = new StreamingDocWriter(input.collabPeer, bundle);
     }
+    // 3d. Per-call verdicts (write-ledger.ts): a file write is applied and
+    //     reported at its own tool-input-end, so a step that batches five
+    //     addFiles settles each one as it lands instead of flushing all five
+    //     verdicts after the last body. Only the WIRE is re-projected — the doc
+    //     writer keeps observing the SDK's own frames, so its optimistic preview
+    //     is still finalized (or rolled back) by the authoritative execute().
+    const forward = writes ? tapWrites(writes, input.onEvent) : input.onEvent;
     const onEvent = docWriter
       ? (p: StreamPart) => {
           docWriter!.observe(p);
-          input.onEvent(p);
+          forward(p);
         }
-      : input.onEvent;
+      : forward;
 
     // 4. one generic turn. The instructions append the skill catalog at the END
     //    of the system prompt; buildPrompt inlines CURRENT STATE; prepend a one-line
@@ -359,13 +391,9 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       messages: conv.messages, // appended in place by runTurn
       ...(freshAttachments.length ? { fileParts: freshAttachments } : {}),
       tools,
-      // End the turn at a HITL question call (the question tools live on the
-      // `files` set only, so these never fire on a task-plan turn).
-      stopWhen: [
-        isStepCount(config.maxSteps),
-        hasToolCall(ASK_QUESTION_TOOL),
-        hasToolCall(ASK_QUESTIONS_TOOL),
-      ],
+      // End the turn at an ACCEPTED HITL question call (the question tools live
+      // on the `files` set only, so this never fires on a task-plan turn).
+      stopWhen: [isStepCount(config.maxSteps), hasValidQuestionCall()],
       maxOutputTokens: config.maxOutputTokens,
       providerOptions: modelProviderOptions(),
       // History is append-only (see the module doc above), so the prefix this

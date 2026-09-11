@@ -18,8 +18,8 @@
 
 /**
  * Anti-drift gate: the checked-in JSON Schema artifact must equal a fresh render
- * of `componentDesignSchema`. If this fails, the Zod schema changed without
- * regenerating — run `pnpm --filter @aep/agent-stream gen`.
+ * of its Zod schema. If this fails, the Zod schema changed without regenerating
+ * — run `pnpm --filter @aep/agent-stream gen`.
  */
 
 import { test } from "node:test";
@@ -27,14 +27,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   componentDesignJsonSchema,
-  rolesDesignJsonSchema,
+  dependencyDesignJsonSchema,
+  securityDesignJsonSchema,
   planTaskJsonSchema,
   updateTaskJsonSchema,
   agentAfmJsonSchema,
 } from "../src/json-schema.js";
 import {
   COMPONENT_DESIGN_SCHEMA_ARTIFACT,
-  ROLES_DESIGN_SCHEMA_ARTIFACT,
+  DEPENDENCY_DESIGN_SCHEMA_ARTIFACT,
+  SECURITY_DESIGN_SCHEMA_ARTIFACT,
   PLAN_TASK_SCHEMA_ARTIFACT,
   UPDATE_TASK_SCHEMA_ARTIFACT,
   AGENT_AFM_SCHEMA_ARTIFACT,
@@ -44,7 +46,8 @@ import {
 // one means the schema changed without `pnpm --filter @aep/agent-stream gen`.
 const artifacts: [string, string, () => Record<string, unknown>][] = [
   ["component-design.schema.json", COMPONENT_DESIGN_SCHEMA_ARTIFACT, componentDesignJsonSchema],
-  ["roles-design.schema.json", ROLES_DESIGN_SCHEMA_ARTIFACT, rolesDesignJsonSchema],
+  ["dependency-design.schema.json", DEPENDENCY_DESIGN_SCHEMA_ARTIFACT, dependencyDesignJsonSchema],
+  ["security-design.schema.json", SECURITY_DESIGN_SCHEMA_ARTIFACT, securityDesignJsonSchema],
   ["plan-task.schema.json", PLAN_TASK_SCHEMA_ARTIFACT, planTaskJsonSchema],
   ["update-task.schema.json", UPDATE_TASK_SCHEMA_ARTIFACT, updateTaskJsonSchema],
   ["agent-afm.schema.json", AGENT_AFM_SCHEMA_ARTIFACT, agentAfmJsonSchema],

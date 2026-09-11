@@ -25,12 +25,13 @@ type ApiError = components["schemas"]["Error"];
 // Scenario switch for the project overview (#77/#183) and spec view (#80).
 // Toggle in devtools:
 //   localStorage.setItem('aep:mock:project',
-//     'fresh' | 'spec' | 'spec-failed' | 'building' | 'deploying' |
-//     'deployed' | 'deploy-failed' | 'repo-error' | 'error')
+//     'fresh' | 'spec' | 'spec-failed' | 'kickoff-failed' | 'building' |
+//     'deploying' | 'deployed' | 'deploy-failed' | 'repo-error' | 'error')
 export type ProjectScenario =
   | "fresh"
   | "spec"
   | "spec-failed"
+  | "kickoff-failed"
   | "building"
   | "deploying"
   | "deployed"
@@ -74,6 +75,56 @@ const noDeploy: DeployStage = {
 // server hid a real bug: the header chip read "Active" under MSW and "Building"
 // forever against the API. Mirror the server, and let the stage aggregates
 // carry the scenario.
+/**
+ * Track states the project scenarios cannot reach on their own.
+ *
+ * The overview track's hardest states are about the RELATIONSHIP between the
+ * three aggregates — a spec being amended while the last published version
+ * builds, a new version building over an older one still serving dev — and the
+ * scenario list is a ladder, so no rung holds two stages in disagreement.
+ *
+ * These override only `spec`/`build`/`deploy` on top of whatever scenario is
+ * selected, exactly as the validation override does, rather than adding rungs
+ * to a ladder twelve fixture records are keyed on.
+ */
+export const TRACK_SCENARIOS = ["amending", "drifting", "build-failed"] as const;
+
+export type TrackScenario = (typeof TRACK_SCENARIOS)[number];
+
+type TrackAggregates = Pick<ProjectStatus, "spec" | "build" | "deploy">;
+
+export const trackOverrides: Record<TrackScenario, TrackAggregates> = {
+  // Two legs unsettled at once: you are editing v1's spec while the platform
+  // builds v1. The summary is the only thing that can say so.
+  amending: {
+    spec: { exists: true, version: "v1", dirty: true, design: true, agent: "" },
+    build: { version: "v1", status: "running" },
+    deploy: noDeploy,
+  },
+  // Three versions on one bar: v2 published, v2 building, v1 still serving dev.
+  drifting: {
+    spec: { exists: true, version: "v2", dirty: false, design: true, agent: "" },
+    build: { version: "v2", status: "running" },
+    deploy: {
+      version: "v1",
+      status: "deployed",
+      components: { total: 3, ready: 3 },
+      validation: "passed",
+    },
+  },
+  // A red leg that keeps its version.
+  "build-failed": {
+    spec: { exists: true, version: "v2", dirty: false, design: true, agent: "" },
+    build: { version: "v2", status: "failed" },
+    deploy: {
+      version: "v1",
+      status: "deployed",
+      components: { total: 3, ready: 3 },
+      validation: "passed",
+    },
+  },
+};
+
 export const projectStatuses: Record<
   Exclude<ProjectScenario, "error">,
   ProjectStatus
@@ -106,6 +157,23 @@ export const projectStatuses: Record<
     specStatus: "draft",
     designStatus: "in_progress",
     spec: { exists: true, version: "", dirty: false, design: true, agent: "" },
+    build: idleBuild,
+    deploy: noDeploy,
+  },
+  // The kickoff turn died before it wrote anything — distinct from
+  // `spec-failed`, where a seeded PRD survives. The track's spec leg has a
+  // branch of its own for this ("The agent couldn't start / Try again"), and
+  // until this fixture existed nothing in the console could reach it.
+  "kickoff-failed": {
+    phase: "spec",
+    repoStatus: "ready",
+    repoUrl: REPO_URL,
+    hasSpec: false,
+    hasDesign: false,
+    hasTasks: false,
+    specStatus: "failed",
+    designStatus: "",
+    spec: { ...noSpec, agent: "failed" },
     build: idleBuild,
     deploy: noDeploy,
   },
@@ -285,9 +353,9 @@ const deploymentsByScenario: Partial<
   deploying: {
     storefront: [
       {
-        name: "demo-shop-storefront-development",
+        name: "demo-shop-storefront-default",
         componentName: "storefront",
-        environment: "development",
+        environment: "default",
         status: "Progressing",
         releaseName: "demo-shop-storefront-a1b2c3",
         createdAt: "2026-07-12T05:04:00Z",
@@ -295,9 +363,9 @@ const deploymentsByScenario: Partial<
     ],
     "catalog-api": [
       {
-        name: "demo-shop-catalog-api-development",
+        name: "demo-shop-catalog-api-default",
         componentName: "catalog-api",
-        environment: "development",
+        environment: "default",
         status: "Ready",
         releaseName: "demo-shop-catalog-api-d4e5f6",
         endpointUrl: "https://catalog-api.dev.acme-aep.io",
@@ -306,9 +374,9 @@ const deploymentsByScenario: Partial<
     ],
     "orders-api": [
       {
-        name: "demo-shop-orders-api-development",
+        name: "demo-shop-orders-api-default",
         componentName: "orders-api",
-        environment: "development",
+        environment: "default",
         createdAt: "2026-07-12T05:05:30Z",
       },
     ],
@@ -316,9 +384,9 @@ const deploymentsByScenario: Partial<
   deployed: {
     storefront: [
       {
-        name: "demo-shop-storefront-development",
+        name: "demo-shop-storefront-default",
         componentName: "storefront",
-        environment: "development",
+        environment: "default",
         status: "Ready",
         releaseName: "demo-shop-storefront-a1b2c3",
         endpointUrl: "https://storefront.dev.acme-aep.io",
@@ -327,9 +395,9 @@ const deploymentsByScenario: Partial<
     ],
     "catalog-api": [
       {
-        name: "demo-shop-catalog-api-development",
+        name: "demo-shop-catalog-api-default",
         componentName: "catalog-api",
-        environment: "development",
+        environment: "default",
         status: "Ready",
         releaseName: "demo-shop-catalog-api-d4e5f6",
         endpointUrl: "https://catalog-api.dev.acme-aep.io",
@@ -351,9 +419,9 @@ const deploymentsByScenario: Partial<
     // all-settled while still showing the Undeployed chip.
     "orders-api": [
       {
-        name: "demo-shop-orders-api-development",
+        name: "demo-shop-orders-api-default",
         componentName: "orders-api",
-        environment: "development",
+        environment: "default",
         status: "Undeployed",
         createdAt: "2026-07-12T05:01:00Z",
       },
@@ -362,9 +430,9 @@ const deploymentsByScenario: Partial<
   "deploy-failed": {
     storefront: [
       {
-        name: "demo-shop-storefront-development",
+        name: "demo-shop-storefront-default",
         componentName: "storefront",
-        environment: "development",
+        environment: "default",
         status: "ReleaseFailed",
         releaseName: "demo-shop-storefront-a1b2c3",
         createdAt: "2026-07-12T05:04:00Z",
@@ -372,9 +440,9 @@ const deploymentsByScenario: Partial<
     ],
     "catalog-api": [
       {
-        name: "demo-shop-catalog-api-development",
+        name: "demo-shop-catalog-api-default",
         componentName: "catalog-api",
-        environment: "development",
+        environment: "default",
         status: "Ready",
         releaseName: "demo-shop-catalog-api-d4e5f6",
         endpointUrl: "https://catalog-api.dev.acme-aep.io",
@@ -385,9 +453,9 @@ const deploymentsByScenario: Partial<
     // mid-rollout picture (error + success + transitional).
     "orders-api": [
       {
-        name: "demo-shop-orders-api-development",
+        name: "demo-shop-orders-api-default",
         componentName: "orders-api",
-        environment: "development",
+        environment: "default",
         status: "Progressing",
         releaseName: "demo-shop-orders-api-g7h8i9",
         createdAt: "2026-07-12T05:01:00Z",
@@ -427,6 +495,29 @@ const sharedAuthDependency = {
     },
   ],
 };
+
+// The project's architecture as the agent authors it (ADR-0008: the console
+// derives the diagram in the browser from this file, and commits nothing).
+// Mirrors `designDependencies` above so the overview's diagram and its
+// dependency list agree — a graph that disagreed with the rows beside it would
+// be worse than no graph.
+const designCell = `title Demo Shop
+version v1
+
+component storefront web-app
+component catalog-api service
+component orders-api service
+
+north Customer -> storefront : HTTPS
+
+storefront -> catalog-api
+storefront -> orders-api
+
+catalog-api -> south shop-db : postgres
+orders-api -> south shop-db : postgres
+storefront -> east shop-auth : sign-in
+orders-api -> east stripe : payments
+`;
 
 const designDependencies: ComponentDependencies[] = [
   {
@@ -513,8 +604,12 @@ export function projectDependencyReadiness(
 export function projectDependencies(
   s: Exclude<ProjectScenario, "error">,
 ): ComponentDependencies[] {
-  // No design yet, nothing to declare dependencies.
-  return s === "fresh" || s === "repo-error" ? [] : designDependencies;
+  // No design yet, nothing to declare dependencies. `kickoff-failed` belongs
+  // here for the same reason `fresh` does: its status says `hasDesign: false`,
+  // so a dependency list would be architecture the project never had.
+  return s === "fresh" || s === "repo-error" || s === "kickoff-failed"
+    ? []
+    : designDependencies;
 }
 
 // The OpenAPI contract served by GET .../components/:name/openapi — a
@@ -557,6 +652,7 @@ export const projectComponents: Record<
   fresh: emptyComponents,
   spec: emptyComponents,
   "spec-failed": emptyComponents,
+  "kickoff-failed": emptyComponents,
   building: builtComponents,
   deploying: builtComponents,
   deployed: deployedComponents,
@@ -758,7 +854,7 @@ const doneTasks: TaskView[] = buildingTasks.map((t) => ({
 // property and lives on the run rows, which is where the deployment surface
 // reads it.
 export const validationTask: TaskView = {
-  ...task(30, "Validate deployed system against acceptance criteria", "merged"),
+  ...task(30, "Validate the deployed system against its validation criteria", "merged"),
   executorClass: "validation",
 };
 
@@ -769,6 +865,7 @@ export const projectTasks: Record<
   fresh: [],
   spec: [],
   "spec-failed": [],
+  "kickoff-failed": [],
   building: [...v3Tasks, ...buildingTasks],
   deploying: doneTasks,
   deployed: doneTasks,
@@ -1104,6 +1201,7 @@ export const projectBuildRuns: Record<
   fresh: noRuns,
   spec: noRuns,
   "spec-failed": noRuns,
+  "kickoff-failed": noRuns,
   // A gate is open in the `building` scenario's issue list, so its run is
   // parked — which is exactly when the hold notice and cancel both matter.
   building: waitingRun,
@@ -1163,6 +1261,7 @@ export const projectCycleBuilds: Record<
   fresh: [],
   spec: [],
   "spec-failed": [],
+  "kickoff-failed": [],
   building: movingFanOut,
   deploying: movingFanOut,
   deployed: greenFanOut,
@@ -1177,6 +1276,7 @@ export const projectBuilds: Record<
   fresh: noBuilds,
   spec: noBuilds,
   "spec-failed": noBuilds,
+  "kickoff-failed": noBuilds,
   building: runningLedger,
   deploying: completedV1Build,
   deployed: completedV1Build,
@@ -1194,6 +1294,7 @@ export const projectTags: Record<Exclude<ProjectScenario, "error">, TagList> = {
   fresh: noTags,
   spec: noTags,
   "spec-failed": noTags,
+  "kickoff-failed": noTags,
   building: v1Tags,
   deploying: v1Tags,
   deployed: { ...v1Tags, specDirty: true },
@@ -1219,6 +1320,31 @@ to a cart, and check out.
 - Order history per customer.
 `;
 
+// The same PRD mid-interview: the agent has made calls it wants challenged and
+// left holes only the user can fill. Without this nothing in the mock could
+// reach the rail's attention state — the ornament, the count chip and the whole
+// problems dialog behind it were unreachable, on a surface that exists to
+// report exactly this.
+const unsettledPrd = `# Demo Shop — PRD
+
+## Goal
+
+A small storefront where customers browse the product catalog, add items
+to a cart, and check out.
+
+## Requirements
+
+- Browse products by category with search.
+- Cart persists across sessions *assumed* for 30 days.
+- Checkout with a mocked payment provider *assumed* card only.
+- Order history per customer *assumed* last 12 months.
+
+## Open Questions
+
+- Which payment provider goes live first?
+- Does checkout need guest orders, or is an account required?
+`;
+
 const userStories = `# Demo Shop — User stories
 
 - As a shopper, I can search the catalog so that I find products quickly.
@@ -1227,21 +1353,110 @@ const userStories = `# Demo Shop — User stories
 - As a returning customer, I can see my past orders.
 `;
 
-const architectureMd = `# Demo Shop — Component architecture
+const domainModelMd = `# Demo Shop — Domain model
 
-Three components behind the project cell:
+The records the two services own: the catalog's products and the orders a
+customer places against them.
 
-| Component | Type | Responsibility |
-|---|---|---|
-| storefront | web-application | Customer-facing UI |
-| catalog-api | service | Product catalog CRUD + search |
-| orders-api | service | Cart, checkout, order history |
+\`\`\`mermaid
+erDiagram
+    PRODUCT ||--o{ ORDER_LINE : "appears in"
+    ORDER ||--|{ ORDER_LINE : contains
+    PRODUCT {
+        string id PK
+        string name
+        decimal price
+        int stock
+    }
+    ORDER {
+        string id PK
+        string customerId
+        string status "cart | placed | shipped"
+        datetime placedAt
+    }
+    ORDER_LINE {
+        string orderId FK
+        string productId FK
+        int quantity
+    }
+\`\`\`
+`;
 
-The storefront talks to both services; services share nothing.
+const flowBrowseAndCheckout = `# Browse the catalog and check out
+
+A customer searches the catalog, fills a cart, and places the order.
+
+\`\`\`mermaid
+sequenceDiagram
+    actor Customer
+    participant storefront
+    participant catalog-api
+    participant orders-api
+
+    Customer->>storefront: search products
+    storefront->>catalog-api: search
+    Customer->>storefront: add to cart, check out
+    storefront->>orders-api: place order
+    alt a line is out of stock
+        orders-api-->>storefront: refused
+    else
+        orders-api-->>storefront: placed
+    end
+\`\`\`
+`;
+
+const flowOrderHistory = `# Review order history
+
+A signed-in customer opens past orders and follows one to its lines.
+
+\`\`\`mermaid
+sequenceDiagram
+    actor Customer
+    participant storefront
+    participant orders-api
+
+    Customer->>storefront: open order history
+    storefront->>orders-api: list orders
+    Customer->>storefront: open an order
+    storefront->>orders-api: get order + lines
+    orders-api-->>storefront: order detail
+\`\`\`
+`;
+
+// The security design (#665): ONE document, and the Security rail entry reads
+// it alone. The roles it declares are the ones `fixtures/roles.ts` reconciles
+// against — `Compliance Admin` exists on the directory, `Viewer` does not yet
+// ("New at Build") — so the panel's live half has something to disagree with.
+const securityJson = `{
+  "version": 1,
+  "coldStartRole": "Compliance Admin",
+  "publicComponents": ["storefront"],
+  "roles": [
+    {
+      "name": "Compliance Admin",
+      "description": "Approves and audits submitted claims.",
+      "stories": [1, 2],
+      "grantedBy": "Platform IdP",
+      "permissions": [
+        { "component": "orders-api", "actions": ["approve", "refund"] },
+        { "component": "storefront", "screens": ["Orders", "Audit log"] }
+      ]
+    },
+    {
+      "name": "Viewer",
+      "description": "Reads the catalog and their own order history.",
+      "stories": [3],
+      "grantedBy": "Platform IdP",
+      "permissions": [{ "component": "catalog-api", "actions": ["read"] }]
+    }
+  ],
+  "testUsers": [{ "username": "test-compliance-admin", "role": "Compliance Admin" }],
+  "thunder": { "name": "demo-shop", "type": "browser" }
+}
 `;
 
 // Per-component design files (#80 rich design view): design.json for each of
-// the three components named in architectureMd, plus one wireframes.dsl for
+// the three components the domain model and flows name, plus one wireframes.dsl for
 // the customer-facing component — enough to exercise the Designs sidebar's
 // component grouping and the derived Architecture / Wireframe views.
 const storefrontDesignJson = `{
@@ -1350,14 +1565,6 @@ const ordersApiDesignJson = `{
   "dependencies": []
 }`;
 
-const validationPlan = `# Demo Shop — Validation plan
-
-- Catalog search returns seeded products by name and category.
-- Cart contents survive a browser restart.
-- Checkout produces an order visible in order history.
-- Each service exposes /healthz returning 200.
-`;
-
 // The two validation artifacts come from ./validation.ts, which builds the oracle
 // and the run report from ONE outcome map so they cannot disagree — and which the
 // aep:mock:validation switch swaps wholesale to reach every verdict.
@@ -1375,14 +1582,31 @@ const prdOnlyFiles: MockSpecFile[] = [
   { path: "specs/requirements/prd.md", content: seededPrd },
 ];
 
-const collaborationFiles: MockSpecFile[] = [
-  ...prdOnlyFiles,
+// Requirements plus the design prose, with a SETTLED PRD. Everything from
+// `building` onward builds on this: those scenarios have published a version,
+// and a published spec carrying open questions would contradict its own status.
+const settledSpecFiles: MockSpecFile[] = [
+  { path: "specs/requirements/prd.md", content: seededPrd },
   { path: "specs/requirements/user-stories.md", content: userStories },
-  { path: "specs/design/architecture.md", content: architectureMd },
+  // The design root rides with the first design artifact — a domain model
+  // without its cell would claim a design state the platform never produces.
+  { path: "specs/design/design.cell", content: designCell },
+  { path: "specs/design/domain-model.md", content: domainModelMd },
+];
+
+// The same set mid-interview: the unsettled PRD, which is when assumptions and
+// open questions exist. Only the `spec` scenario gets it — that scenario IS the
+// interview in progress.
+const collaborationFiles: MockSpecFile[] = [
+  { path: "specs/requirements/prd.md", content: unsettledPrd },
+  ...settledSpecFiles.slice(1),
 ];
 
 const fullFiles: MockSpecFile[] = [
-  ...collaborationFiles,
+  ...settledSpecFiles,
+  { path: "specs/design/flows/browse-and-check-out.md", content: flowBrowseAndCheckout },
+  { path: "specs/design/flows/review-order-history.md", content: flowOrderHistory },
+  { path: "specs/design/security.json", content: securityJson },
   {
     path: "specs/design/components/storefront/design.json",
     content: storefrontDesignJson,
@@ -1399,7 +1623,6 @@ const fullFiles: MockSpecFile[] = [
     path: "specs/design/components/orders-api/design.json",
     content: ordersApiDesignJson,
   },
-  { path: "specs/validation/validation-plan.md", content: validationPlan },
   {
     path: "specs/validation/validation-criteria.json",
     content: DEFAULT_VALIDATION_CRITERIA,
@@ -1415,7 +1638,11 @@ export const projectSpecFiles: Record<
   fresh: prdOnlyFiles,
   spec: collaborationFiles,
   "spec-failed": prdOnlyFiles,
-  building: fullFiles,
+  "kickoff-failed": [],
+  // `building` deliberately keeps design.cell OUT: a build can start from a
+  // published spec before the architecture file lands, and that is the state
+  // the overview's diagram empty-state exists for.
+  building: fullFiles.filter((f) => f.path !== "specs/design/design.cell"),
   deploying: fullFiles,
   deployed: fullFiles,
   "deploy-failed": fullFiles,

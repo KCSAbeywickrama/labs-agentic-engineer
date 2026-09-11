@@ -41,12 +41,16 @@ BFF, which is its only backend.
 ## Spec versioning
 
 The whole spec — requirements, design, and validation files under the repo's
-`specs/` tree — is versioned as **one incrementing `v<N>` git tag sequence**,
-cut when the user approves/publishes. There are no per-artifact version
-trails (the earlier `v<N>-<M>` design-revision tags are legacy). The console
-reads this via `GET /projects/{p}/tags` (`latest` + `specDirty`): the
-"vN published" chip is the latest tag, and "draft changes" means `specs/`
-moved on GitHub after that tag.
+`specs/` tree — is versioned as **one tag per snapshot**, cut when the user
+approves/publishes. **The user names the version** in the Start build dialog;
+the box suggests `v<count of versions + 1>` and most projects keep it, so the
+sequence usually reads `v1`, `v2`, `v3`. Order is the tags' creation order,
+not the number
+([ADR-0030](design/decisions/ADR-0030-a-version-carries-the-name-the-user-gives-it.md)).
+There are no per-artifact version trails (the earlier `v<N>-<M>`
+design-revision tags are legacy). The console reads this via
+`GET /projects/{p}/tags` (`latest` + `specDirty`): the published chip names
+the latest tag, and "draft changes" means `specs/` moved on GitHub after it.
 
 ## Personas
 
@@ -71,14 +75,15 @@ Approved at section level; per-section detail is defined feature-by-feature.
   needs a registered name reuses it — Build does not re-collect those secrets.
 - **Project view** — inside a project the sidebar nav swaps to its sections
   (ADR-0010; no back-item, home is the header brand / project switcher):
-  - **Overview** — component map + status, deployment state, recent activity.
-  - **Spec** — the requirement, derived design + acceptance criteria.
+  - **Overview** — the Spec → Build → Deploy track, the components and
+    dependencies index, and the architecture diagram.
+  - **Spec** — the requirement, derived design + validation criteria.
   - **Builds** — the version ledger: one row per version, with its milestone,
     status, duration and start. A row opens that version's
     build — summary card, task list, External resources, coding-agent log,
     build logs (ADR-0021, ADR-0023).
   - **Deployments** — dev environment state and URLs.
-  - **Validations** — the runs checking a build against the spec's acceptance
+  - **Validations** — the runs checking a build against the spec's validation
     criteria.
   - **Issues** — issues the SRE agent raises against the running project
     (placeholder until its feature lands).
@@ -91,6 +96,72 @@ which is also what closes its issue. Newest first; links go to the feature's
 GitHub issue plus any ADRs it produced. Features still being built aren't
 here: they're the open `console` + `feature` issues.
 
+- Build asks in a dialog — one click, one surface, never a drawer for some
+  projects and a modal for the rest. An open dependency opens **Resolve
+  dependencies** (the names, and one **Resolve** that runs the guided flow over
+  all of them); everything else opens **Start build**, which carries the
+  version's **name** — the user's, and the tag that gets cut — over what this
+  version changes, grouped **Components** · **External dependencies** ·
+  **Platform resources** so a name says what it is, chipped **new** and
+  **removed**. An unchanged spec tree rebuilds the version it matches rather
+  than cutting a second one
+  ([ADR-0029](design/decisions/ADR-0029-build-asks-in-a-dialog-that-lists.md),
+  [ADR-0030](design/decisions/ADR-0030-a-version-carries-the-name-the-user-gives-it.md)) —
+  [#749](https://github.com/wso2/labs-agentic-engineer/issues/749)
+  (contract: `BuildPreflight.changes` + the version fields, `BuildRequest.version`)
+- Spec view — the design reads as its parts: the rail's **DESIGN** section
+  lists *Architecture · Domain model · Security* as documents, then a
+  collapsible **Flows** group — one row per key flow, a ghost row while the
+  turn is still planning it — and one group per component, every group header
+  carrying a glyph and every component holding *Design · API · Wireframe*.
+  Presents the bundle shape the platform now writes
+  ([ADR-0020, repo-wide](../../docs/decisions/ADR-0020-design-cell-is-the-design-root.md)):
+  the cell is the design root, the domain model and each key flow are one
+  diagram per file, and *Design overview* retires with the file it named —
+  [#686](https://github.com/wso2/labs-agentic-engineer/issues/686)
+  (no contract change)
+- Point at a passage, say what should change — **any** markdown spec document,
+  not just the PRD's lensed lines. A drag snaps to whole blocks on release
+  (a partial paragraph becomes the paragraph, a heading takes its section) and
+  offers a single chip: **nothing opens, nothing takes the keyboard**, so
+  select-and-retype, copy and delete still mean what they always did. The chip
+  (or ⌘K, or a lens) opens one box with two sends — **Change** rewrites the
+  selection in place and leaves the chat panel shut, because the document is the
+  feedback and a panel would cover the very thing being changed; **Discuss**
+  sends the same selection as a grilling and opens the panel to it. What travels
+  is an **anchor that locates rather than carries** — the file, and a name per
+  selected node (markdown names a block by a bounded excerpt of its rendered
+  text) — so the agent resolves it against the CURRENT document rather than a
+  photograph of one. It rides as metadata beside the user's words, never folded
+  into them, and the transcript shows it as a frozen tag above the message that
+  is never re-checked: when the agent cannot find what was named, the agent says
+  so in its reply. **The PRD's lens catalogue is re-cut in the same change**
+  (#652): an `*assumed*` run offers **Agree · Discuss** — Agree is a direct
+  edit that strips the flag, no agent turn, live while an agent holds one —
+  and every bullet offers **Discuss**, which opens the same aim box with Enter
+  sending Discuss.
+  `/settle` on a flagged line is retired; it stays over the Open Questions
+  section and on each question —
+  [#666](https://github.com/wso2/labs-agentic-engineer/issues/666)
+  (ADR-0023, ADR-0024; contract: `TurnInputBody.anchor` / `.intent`, and
+  `get-conversation`'s response schema typed at last)
+- The project overview is a track of links, not a page of cards — Spec → Build
+  → Deploy is one bar with a step numeral per leg and a chevron in each seam,
+  and every leg links to the section that runs it. Lit means unsettled and more
+  than one leg may be lit (amending a spec while the last version builds lights
+  both, with one summary line relating them); a pulse means the platform is
+  working and amber-and-still means it is waiting on you. Validation rides the
+  deploy leg rather than becoming a fourth gate. Below the track, the components
+  and dependencies index sits beside the project's architecture diagram — the
+  same `design.cell` render as the spec workspace, sharing its layout, linking
+  through to the Architecture view. The activity feed is deleted rather than
+  relocated, its whole `features/activity` module with it, and the project's
+  status chip moves from three page titles to the toolbar beside the project
+  switcher. A project with nothing in it gets the same body, each panel showing
+  its own empty state, rather than a substitute page. The overview offers no actions at all: every way of starting work
+  stays on the page that owns it —
+  [#662](https://github.com/wso2/labs-agentic-engineer/issues/662)
+  ([ADR-0022](design/decisions/ADR-0022-the-overview-is-a-track-of-links.md))
 - External dependency values are collected on a version's build page, not in
   front of the Build button — provisioning authors every declared key EMPTY at
   build time, so the coding agent gets its env vars defined and Build never
@@ -103,8 +174,26 @@ here: they're the open `console` + `feature` issues.
   once the last value is saved. A Registered External is outside the gate — its
   values live on the org record, which no project surface can clear —
   [ADR-0023](../../docs/decisions/ADR-0023-external-dependency-values-are-a-deploy-gate.md)
+- Every external dependency is a group in the spec rail, shaped like a
+  component's, since its definition is one file in its own directory (repo
+  ADR-0027): the header carries the one thing the user must do, and the rows
+  are its files — the definition, the interface (an OpenAPI document or a
+  GraphQL schema), an SDK manifest. The definition renders as its own view,
+  the way a component's design does: the provider, the interface on file with
+  its provenance, the config keys and who uses it, and every way forward —
+  **Select a provider** (or **Resolve** once one is chosen) runs the guided
+  `/resolve-dependency` flow, whose cards ask which provider and, when neither
+  a published document nor the provider's own documentation exists, how to
+  get its interface; an interface the agent derives from that documentation
+  needs no consent and reads *Derived from docs*, and choosing *proceed on
+  your assumption* on the card is the whole consent for a guess. **Provide interface** opens a modal that lands a
+  document straight in the directory. The design turn's closing list links
+  each open definition. The Build drawer lists what blocks the cut, opens each
+  row's definition, and offers one **Resolve all in chat** —
+  [ADR-0028](design/decisions/ADR-0028-a-dependency-is-a-directory-in-the-rail.md)
 - Empty states teach *what*, never narrate the *how* — the five flow-narrating
-  empty states (Builds, Deployments, Validations, Components, Recent activity)
+  empty states (Builds, Deployments, Validations, Components, Recent activity —
+  the last retired with the feed itself, #662)
   now say what lives on the page and why it is empty, retiring *published* /
   *plan* from all of them; Builds, the one surface a user can act on, gains a
   **Go to the spec** CTA. Wordings live in the lexicon's **Empty states**
@@ -153,7 +242,7 @@ here: they're the open `console` + `feature` issues.
 - Spec view — the rail is the flow: **Requirements · Design · Validation**
   each carrying state (ready · being worked on · needs attention · not begun),
   documents named as documents rather than files (*Product requirements*,
-  *Design overview*, *Acceptance criteria*), and the app's existing pulse on a
+  *Design overview*, *Validation criteria*), and the app's existing pulse on a
   section an agent is writing. An amber section explains itself in **rows** —
   *N assumptions to challenge*, *N open questions*, *The requirements have
   changed since* — each going where the work already happens. Staleness is
@@ -164,6 +253,20 @@ here: they're the open `console` + `feature` issues.
   had asked for —
   [#575](https://github.com/wso2/labs-agentic-engineer/issues/575)
   (contract: `SpecStage.designOutdated`)
+- Spec view — the turn declares its plan: a skill says what it is **about to
+  write** (`declare_plan`, fire-and-forget tool-call-as-UI — ADR-0025), and the
+  rail renders the checklist — **ghost rows** holding the coming documents'
+  places, a pulse on the one being written, and an honest **count** (*2 of 6*)
+  that grows in waves because the cell fixes the component set mid-run. Every
+  status is derived from the mutation stream, never self-reported. A clean
+  turn's plan dissolves; a dead turn leaves its **wreckage** — done ticks, one
+  error, the remaining ghosts — surfaced through the attention chip until the
+  next declaring turn replaces it. The **editor follows the write** and yields
+  to the reader's first manual click (ADR-0026), superseding the cell's
+  yank-back. The chat records each declaration as an activity step (*Planned 3
+  documents*) —
+  [#576](https://github.com/wso2/labs-agentic-engineer/issues/576)
+  (contract: `declare_plan` in `@aep/agent-stream`; no aep-api change)
 - Overview — the spec card stops rewriting itself: **one button** (*Open spec*)
   in every state instead of three captions walked during a single kickoff with
   no user input, and **one line that always says something** instead of blanking
@@ -192,7 +295,10 @@ here: they're the open `console` + `feature` issues.
   Questions — and every flagged line (an `*assumed*` decision, an open
   question) carries its own `/settle`, so the subject comes from what the user
   clicked instead of their memory. Section lenses show at rest, line lenses on
-  hover, and all of them go inert while an agent holds the turn. Retires the
+  hover, and all of them go inert while an agent holds the turn. The lenses stay
+  the PRD's own, but the affordance no longer is: every markdown document now
+  carries selection-anchored aiming beside them, and the flagged line's
+  `/settle` became Agree and Discuss (#666). Retires the
   composer's `Actions ▾` menu of raw slash commands. **Open questions no longer
   block Generate design** on either side — the console disable and the two
   skill clauses both go — since a recorded gap is information, not corruption
@@ -213,6 +319,23 @@ here: they're the open `console` + `feature` issues.
   favour of **Agentic Engineer**. First feature to draw on the console lexicon
   (ADR-0019) —
   [#561](https://github.com/wso2/labs-agentic-engineer/issues/561)
+- Deployments, rebuilt as an environment board — a **card per environment**
+  (Development: running version, rollout count, the validation verdict and
+  the promotion; Production: the promotion gate and how much live
+  configuration is set), then a **ledger with one row per environment that
+  runs something** (Version · Milestone · Environment · Status · Validation ·
+  Deployed, the Builds ledger's own table), each row opening the
+  environment's page at `/deployments/$environment`: a summary card
+  (Deployed, Milestone, Validation, the commit that shipped it, a link to the
+  build) and the components running there with **Visit** / **Try API** and
+  their URLs. Connections keep their Configure surface on a card under the
+  ledger. A row is what the environment runs NOW — the platform keeps no
+  deployment record, so the design's past deployments, Duration, Redeploy and
+  runtime log wait on a backend read. The Development card names how many
+  **test users** the project has, one per role, and opens them in a dialog —
+  a table of username, masked password with reveal and copy, role, and the
+  cold-start account — so the card holds one height whatever the design
+  declares. **No contract change** (ADR-0027, amending ADR-0021)
 - Deployments page — one-story rail + environment panel: Development /
   Validation / Production as one numbered rail (Builds-spine vocabulary,
   ADR-0014) with a side panel (version, rollout, endpoints, production

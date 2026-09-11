@@ -21,8 +21,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/platform/agentfold"
 	"github.com/wso2/aep/aep-api/internal/platform/designspec"
-	"github.com/wso2/aep/aep-api/internal/platform/rolesspec"
+	"github.com/wso2/aep/aep-api/internal/platform/securityspec"
 )
 
 // The hard save gate (docs/design/agents-generation-migration.md §8). Save is
@@ -61,24 +62,24 @@ func (e *DesignValidationError) Error() string {
 const (
 	// codeInvalidOpenAPI — a component openapi.yaml does not parse as YAML.
 	codeInvalidOpenAPI = "INVALID_OPENAPI"
-	// codeInvalidFrontmatter — the root design.md or a component design.md
-	// frontmatter block does not parse.
+	// codeInvalidFrontmatter — the root design.cell frontmatter block does
+	// not parse.
 	codeInvalidFrontmatter = "INVALID_FRONTMATTER"
 )
 
 // validateDesignBundle is the design hard gate (§8). It runs on the HEAD design
 // bundle (keys relative to specs/design/) before a tag is cut:
 //
-//   - layout: the root design.md must exist (a bundle with no root can't be
+//   - layout: the root design.cell must exist (a bundle with no root can't be
 //     assembled into a design);
-//   - frontmatter: root + per-component design.md frontmatter must parse
-//     (surfaced by AssembleDesign);
+//   - frontmatter: the root design.cell frontmatter must parse (surfaced by
+//     AssembleDesign);
 //   - component design.json: every present design.json validates against the
 //     single published schema + the name==dir rule (designspec — the same
 //     definition the agent's write gate uses);
-//   - roles.json, when present: the structured half of the security design
-//     validates against the same published schema and referential rules the
-//     agent's write gate applies;
+//   - security.json, when present: the security design validates against the
+//     same published schema and referential rules the agent's write gate
+//     applies;
 //   - OpenAPI: every present component openapi.yaml/yml must parse.
 //
 // A missing root is ErrArtifactPathInvalid (400). Any other failure aggregates
@@ -92,7 +93,7 @@ func validateDesignBundle(files map[string]string) error {
 
 	var verrs []FileValidationError
 
-	// Root + per-component design.md frontmatter parseability + layout shape.
+	// Root design.cell frontmatter parseability + layout shape.
 	if _, err := AssembleDesign(files); err != nil {
 		verrs = append(verrs, FileValidationError{
 			Path: designRootFile, Code: codeInvalidFrontmatter, Message: err.Error(),
@@ -116,19 +117,48 @@ func validateDesignBundle(files map[string]string) error {
 		}
 	}
 
-	// The roles document, when present: schema + the referential rules
+	// The security.json document, when present: schema + the referential rules
 	// (every test user's role declared, coldStartRole declared or null). Same
 	// single definition the agent's write gate uses, so a document that passes
 	// one gate passes the other.
-	if raw, ok := files[rolesspec.BundleKey]; ok && strings.TrimSpace(raw) != "" {
-		if _, err := rolesspec.Parse([]byte(raw)); err != nil {
-			var ve *rolesspec.ValidationError
-			code := rolesspec.CodeSchemaViolation
+	for _, name := range DependencyNamesIn(files) {
+		key := dependencyDesignKey(name)
+		content, ok := files[key]
+		if !ok {
+			continue
+		}
+		if err := designspec.ValidateDependencyDesignInDir([]byte(content), name); err != nil {
+			var ve *designspec.ValidationError
+			if errors.As(err, &ve) {
+				verrs = append(verrs, FileValidationError{Path: key, Code: ve.Code, Message: ve.Message})
+			} else {
+				verrs = append(verrs, FileValidationError{Path: key, Code: designspec.CodeSchemaViolation, Message: err.Error()})
+			}
+			continue
+		}
+		// The shape rules the schema cannot say — the same ones the agent's
+		// write-gate and the fold enforce — so a file the platform commits is
+		// one the agent can keep editing.
+		for _, file := range []string{key, dependencyDirPrefix + name + "/" + SdkManifestFile} {
+			body, present := files[file]
+			if !present {
+				continue
+			}
+			if code, msg := agentfold.CheckDependencyFileForSave("specs/design/"+file, body); code != "" {
+				verrs = append(verrs, FileValidationError{Path: file, Code: code, Message: msg})
+			}
+		}
+	}
+
+	if raw, ok := files[securityspec.BundleKey]; ok && strings.TrimSpace(raw) != "" {
+		if _, err := securityspec.Parse([]byte(raw)); err != nil {
+			var ve *securityspec.ValidationError
+			code := securityspec.CodeSchemaViolation
 			msg := err.Error()
 			if errors.As(err, &ve) {
 				code, msg = ve.Code, ve.Message
 			}
-			verrs = append(verrs, FileValidationError{Path: rolesspec.BundleKey, Code: code, Message: msg})
+			verrs = append(verrs, FileValidationError{Path: securityspec.BundleKey, Code: code, Message: msg})
 		}
 	}
 

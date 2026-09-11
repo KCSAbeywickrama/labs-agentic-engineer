@@ -37,6 +37,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/observability"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
+	"github.com/wso2/aep/aep-api/internal/clients/thunderapp"
 	"github.com/wso2/aep/aep-api/internal/clients/thundersvc"
 	"github.com/wso2/aep/aep-api/internal/config"
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -151,6 +152,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	orgRepo := organization.NewOrganizationRepository(db)
 	orgCredRepo := organization.NewOrgCredentialRepository(db, in.ColumnCipher)
 	orgAnthropicRepo := organization.NewOrgAnthropicRepository(db)
+	orgCodingAgentRepo := organization.NewOrgCodingAgentRepository(db)
 	idpRepo := organization.NewIDPRepository(db, in.ColumnCipher)
 	codingAgentLogRepo := delivery.NewCodingAgentLogRepository(db)
 	activityRepo := projects.NewActivityEventRepository(db)
@@ -305,6 +307,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	buildCredService := organization.NewBuildCredentialsService(repoRepo, credResolver, gitSecretClient)
 	credService.WithBuildSecretCleaner(buildCredService)
 	anthropicCredService := organization.NewAnthropicCredentialService(orgAnthropicRepo, credStore)
+	// The org's coding-agent runtime and model. ONE instance, read by two
+	// callers for two different reasons: /config projects and edits it, and
+	// coding dispatch copies it onto the run it launches.
+	codingAgentSettings := organization.NewCodingAgentService(orgCodingAgentRepo)
 
 	// Task JWT manager — RS256. The public key is published on
 	// /auth/external/jwks.json. Used to mint BFF MCP tokens
@@ -416,10 +422,35 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// configService can call back into it to mirror env-var edits onto
 	// the OC Component's workflow params.
 	projectService := projects.NewProjectService(projectClient, repoService, webhookRegService, artifactSvcGit, executionRepo)
+	// Cell-namespace provisioning. OpenChoreo 1.2.0 stopped materializing a
+	// project's namespace as a side effect of creating the Project — a
+	// ProjectReleaseBinding per environment does it now, and nothing creates
+	// those for us. Without this the project is created, reports Ready, and
+	// then fails every deploy with "namespace ... not found".
+	projectService.SetProjectCellProvisioner(openchoreo.NewProjectCellClient(ocConfig))
 	// Build/deploy stage sources for the status poll (#184): the milestone-run
 	// index (one row read) + the org-scoped release-binding list —
 	// consumer-side ports wired here so projects imports neither.
 	projectService.SetStageSources(projectRunRows{runs: milestoneRunRepo, cycles: runCycleRepo, ledger: usageLedgerRepo}, componentClient)
+	// ONE endpoint gate, shared by the status poll here and the deploy-stage
+	// readiness poll below. Shared because the two used to hold different
+	// definitions of "up": the console counted a component live off the binding
+	// alone while the supervisor was dispatching validation at a URL that could
+	// not be reached. One gate makes the first probe serve both and makes the
+	// two answers impossible to diverge.
+	//
+	// Wired only when the data-plane gateway fronts TLS — the same stated fact
+	// that decides which advertised URL is the live one (PreferPlainHTTPEndpoints
+	// above). A plane without it has no per-host certificate to wait for, and its
+	// `*.openchoreoapis.localhost` names resolve to loopback from inside this
+	// process, so every probe would fail and hold every web component for ever.
+	var endpointGate *projects.EndpointGate
+	if cfg.PlatformAPI.DataPlaneGatewayTLS {
+		endpointGate = projects.NewEndpointGate(projects.NewHTTPEndpointProbe())
+	} else {
+		slog.Info("endpoint deploy-wait disabled — data-plane gateway does not front TLS, so there is no certificate window to wait for")
+	}
+	projectService.SetEndpointGate(endpointGate)
 	organizationService := organization.NewOrganizationService(orgRepo, namespaceClient)
 	// componentService takes repoSvc + buildCredSvc so TriggerBuild can
 	// pre-stage the per-WorkflowRun build Secret in workflows-<orgID>
@@ -489,9 +520,24 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// come from OpenChoreo; a finished cycle's come from the observability
 	// plane while its component is retained; when neither can answer the reader
 	// says so rather than serving an empty stream.
+	// The run-feed RECORDING store, on the workspace volume aep-api already
+	// mounts and already sweeps. It is what makes a cycle's feed survive its pod:
+	// the recorder (below, driven by the cycle watcher) writes it once,
+	// server-side, and every viewer reads the file instead of re-deriving the
+	// pod's log per connection. Nil when there is no workspace volume (Fake()),
+	// and every feed then honestly reports `recording: none`.
+	codingLogSource := codingagent.NewOCLogSource(runtimeClient)
+	codingArchive := codingagent.NewObserverArchive(observClient, runtimeClient)
+	runRecordings := codingagent.NewRecordingStore(cfg.Workspace.Root, cfg.Workspace.RecordingMaxBytes)
+	// The archive is attached to the RECORDER, not to the reader, as its
+	// gap-backfill: it is no longer the ordinary post-mortem source for the run
+	// feed (the recording is), and its 200-event window went with that.
+	runRecorder := codingagent.NewCycleRecorder(codingLogSource, runRecordings).
+		WithArchive(codingArchive)
 	agentProgressReader := codingagent.NewAgentProgressReader(
-		codingagent.NewOCLogSource(runtimeClient), codingAgentLogRepo).
-		WithArchive(codingagent.NewObserverArchive(observClient, runtimeClient))
+		codingLogSource, codingAgentLogRepo).
+		WithArchive(codingArchive).
+		WithRecordings(runRecordings)
 	execProgressSvc.WithCodingProgress(agentProgressReader)
 	// The task-log SSE stream: one connection per open task-detail page carries
 	// the Task's whole live state (status + executions + unified timeline across
@@ -535,43 +581,66 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			thunderBase = thunderBase[:idx]
 		}
 	}
+	// The System resource server's identifier is a NAME derived from the
+	// public issuer, not from the admin URL — in-cluster the two differ, and
+	// the identifier has to match what the IdP registered.
+	systemRS := cfg.ThunderAdmin.SystemResourceIdentifier
+	if systemRS == "" {
+		systemRS = thundersvc.SystemResourceIdentifier(cfg.PlatformIDP.Issuer)
+	}
 	if cfg.ThunderAdmin.ClientID != "" && cfg.ThunderAdmin.ClientSecret != "" && thunderBase != "" {
 		thunderAdminClient = thundersvc.New(thundersvc.Config{
-			BaseURL:      thunderBase,
-			ClientID:     cfg.ThunderAdmin.ClientID,
-			ClientSecret: cfg.ThunderAdmin.ClientSecret,
+			BaseURL:                  thunderBase,
+			ClientID:                 cfg.ThunderAdmin.ClientID,
+			ClientSecret:             cfg.ThunderAdmin.ClientSecret,
+			SystemResourceIdentifier: systemRS,
 		})
-		slog.Info("Thunder admin client", "baseURL", thunderBase, "clientID", cfg.ThunderAdmin.ClientID)
+		slog.Info("Thunder admin client", "baseURL", thunderBase, "clientID", cfg.ThunderAdmin.ClientID,
+			"systemResource", systemRS)
 	} else {
 		slog.Warn("Thunder admin client disabled — set THUNDER_ADMIN_URL + THUNDER_SYSTEM_CLIENT_ID + THUNDER_SYSTEM_CLIENT_SECRET")
 	}
 
-	// The identity domain: the platform's record of the SHARED roles and test
-	// users it creates on Thunder at build time, and the ensure that creates
-	// them. Both are optional — with no Thunder admin client there is no
-	// directory to write to, so `rolesEnsure` reports Enabled()==false and the
-	// build skips the roles gate entirely rather than failing every build.
-	// The store is wired regardless: it is what the validation credential
-	// provider reads, and reading an empty table is a correct "no test user".
+	// The identity domain: the platform's record of the roles and test users it
+	// creates at build time, and the ensure that creates them.
+	//
+	// NOT on the platform IdP. Roles and test users belong to the ENVIRONMENT the
+	// version is validated in, on that environment's own Thunder, resolved per
+	// (org, environment) from the binding record on the OpenChoreo Environment
+	// plus the admin credential in the secret store (identity_targets.go). The T1
+	// admin client above stays for the per-org publisher apps and the OU
+	// validator, which are platform-tier objects.
+	//
+	// The resolver is optional — without OpenBao there is no credential to read,
+	// so `rolesEnsure` reports Enabled()==false and the build skips the roles
+	// gate entirely rather than failing every build. The store is wired
+	// regardless: reading an empty table is a correct "no test user".
 	identityStore := identity.NewStore(db, in.ColumnCipher)
 	var rolesEnsure *identity.EnsureService
 	var roleCatalogSvc *identity.CatalogService
-	// The console's Security panel. It takes the directory OPTIONALLY: with no
-	// Thunder admin client it still serves this project's references and their
-	// ownership from the store, and reports directoryAvailable=false so the
-	// console says "unknown" rather than "does not exist". The mutations refuse
-	// in that state — there is nothing to write to.
-	var identityDirectory identity.Directory
-	if thunderAdminClient != nil {
-		directory := thunderDirectory{c: thunderAdminClient}
-		identityDirectory = directory
-		rolesEnsure = identity.NewEnsureService(directory, identityStore, identityDesignReader{art: artifactSvcGit})
-		roleCatalogSvc = identity.NewCatalogService(directory, identityStore)
-		slog.Info("roles ensure wired — a build provisions the roles and test users specs/design/roles.json declares")
+	// The console's Security panel. It takes the resolver OPTIONALLY: with none
+	// it reports directoryAvailable=false so the console says "unknown" rather
+	// than "does not exist", and its mutations refuse — there is nothing to
+	// write to.
+	var identityTargets identity.TargetResolver
+	if bindingKV, kvErr := environmentThunderCredentials(cfg); kvErr != nil {
+		slog.Warn("roles ensure disabled — the environment Thunder credential store is unreachable",
+			"error", kvErr)
+	} else if bindingKV == nil {
+		slog.Warn("roles ensure disabled — OPENBAO_ADDR is not set, so no environment's Thunder admin credential can be read; " +
+			"builds will not provision roles or test users")
 	} else {
-		slog.Warn("roles ensure disabled — no Thunder admin client; builds will not provision roles or test users")
+		// ONE place decides which environment's identity provider a build's roles
+		// belong to: the environment aep-api deploys and validates in.
+		resolver := newIdentityTargetResolver(environmentClient, bindingKV,
+			openchoreo.DevEnvironmentName, cfg.ThunderEnvAdminRoute)
+		identityTargets = resolver
+		rolesEnsure = identity.NewEnsureService(resolver, identityStore, identityDesignReader{art: artifactSvcGit})
+		roleCatalogSvc = identity.NewCatalogService(resolver, identityStore)
+		slog.Info("roles ensure wired — a build provisions specs/design/security.json's roles and test users on the environment's own Thunder",
+			"environment", openchoreo.DevEnvironmentName, "adminRoute", cfg.ThunderEnvAdminRoute)
 	}
-	identityPanel := identity.NewPanelService(identityDirectory, identityStore)
+	identityPanel := identity.NewPanelService(identityTargets, identityStore)
 
 	// Wire the Thunder OU validator into the org service so a stale/phantom JWT
 	// `ouId` can't poison the org→OU mapping (the root cause behind the runner
@@ -638,6 +707,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// Dispatch reads secret_ref_name only — it does not call
 	// EnsureOrgPublisher. POST /build provisions the SecretReference while the
 	// console JWT is still on ctx.
+	// Which runtime and model this org's cycles run on. The values are copied
+	// onto each Job's env, so a change applies from the next cycle.
+	codingExecutor.WithCodingAgentSettings(codingAgentSettings)
 	codingExecutor.WithPublisherCredentials(
 		codingagent.NewIDPPublisherResolver(idpRepo),
 		codingagent.PublisherTokenURLFromJWKS(cfg.PlatformIDP.JWKSURL),
@@ -824,7 +896,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		organization.PlatformIDPConfig{Issuer: cfg.PlatformIDP.Issuer, JWKSURL: cfg.PlatformIDP.JWKSURL},
 		cfg.BFFPublicURL,
 		cfg.GitHubAppClientID,
-	)
+	).WithCodingAgent(codingAgentSettings)
 
 	// Strict-handler feature dependencies — everything the contract-first
 	// /api/v1 edge serves (internal/api/handlers_*.go).
@@ -918,6 +990,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		SkillMut:      skillMutationSvc,
 		SkillImport:   skillImportSvc,
 		CollabRepo:    repoService,
+		Design:        designService,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("assemble spec domain: %w", err)
@@ -999,6 +1072,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	params.MCPSpecValidator = spec.ValidateOpenAPI
 	params.MCPSpecNormalizer = spec.NormalizeOpenAPIYAML
 	params.MCPSpecFetcher = spec.FetchSpecFromURL
+	params.MCPSpecSlicer = spec.SliceOpenAPI
 	// design-save keys BOTH platform-resource derivations on this catalog: the CRT
 	// role marker for end-user auth (thunder-app generalization), and the type's
 	// declared outputs for the dependency wiring it stamps into design.json. Wired
@@ -1071,6 +1145,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		OrgSecrets:        secretRefWriter,
 		OrgResourceDocs:   provisioning.NewGitOrgResourceDocs(repoService, gitOpsService),
 		Roles:             rolesEnsurerOrNil(rolesEnsure),
+		Markers:           resourceTypeCatalog,
+		SecurityJSON:      securityJSONReader{art: artifactSvcGit},
 	})
 	// Assemble the dependencies domain (P8): the provisioning slice (7 ops over
 	// provisioningSvc) + the resource-type-discovery slice (ListPlatformResourceTypes
@@ -1089,9 +1165,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// anything already provisioned OR in-flight (buildProvisionStatus collapses the
 	// provisioning tri-state onto the "already handled" bool).
 	preflightSvc := build.NewPreflightService(build.PreflightDeps{
-		Design:  designComponents{store: artifactStore},
-		Status:  buildProvisionStatus{svc: provisioningSvc},
-		Catalog: buildOrgCatalog{svc: provisioningSvc},
+		Design:   designComponents{store: artifactStore},
+		Status:   buildProvisionStatus{svc: provisioningSvc},
+		Catalog:  buildOrgCatalog{svc: provisioningSvc},
+		Versions: buildVersionFacts{art: artifactSvcGit},
 	})
 	// delivery — the Delivery Pipeline domain (P6): the public single-tag build
 	// surface, the task read + promote-dispatch surface, and the task-log SSE
@@ -1102,8 +1179,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// The milestone run READ surface. Both readers are the root repositories
 	// (this is a read model — it writes nothing), and the log source is the same
 	// OC/archive reader the task-log stream uses.
-	runReads := runread.NewReads(milestoneRunRepo, runCycleRepo)
-	runProgress := runread.NewProgressService(milestoneRunRepo, runCycleRepo, agentProgressReader)
+	runReads := runread.NewReads(milestoneRunRepo, runCycleRepo).
+		WithRecordings(agentProgressReader)
+	runProgress := runread.NewProgressService(milestoneRunRepo, runCycleRepo, agentProgressReader).
+		WithRecordings(agentProgressReader)
 	// A cycle's builds are DERIVED from OpenChoreo on read, never stored, so
 	// this read is the one part of the run surface that touches the cluster —
 	// which is why it is its own endpoint rather than a field on the run read.
@@ -1123,7 +1202,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// Component, which is what actually stops the pod and frees the org's
 		// billing concurrency slot. Revalidate is the event plane's.
 		RunCommands: runread.NewCommands(milestoneRunRepo, milestoneRunRepo, runSupervisor, eventcoreRevalidator{events: eventPlane}).
-			WithCycleReaper(codingagent.NewCycleReaper(componentClient, runCycleRepo)),
+			WithCycleReaper(codingagent.NewCycleReaper(componentClient, runCycleRepo).
+				WithRecorder(runRecorder)),
 		RunCycleBuilds: runCycleBuilds,
 	}
 	// WritePublisher stamps secret_ref_name onto the org's IDP profile;
@@ -1146,10 +1226,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// A planned Task's prose body names the App Path the agent works in — the
 	// same component → appPath read the merged-PR build fan-out matches against.
 	taskPlan.SetComponentPaths(designComponents{store: artifactStore})
-	// Committed-truth spec-collect write surface: CollectSpec fetches/validates an
-	// external dependency's OpenAPI contract and atomically commits the spec file
-	// + the design.json specPath edit (clearing the external-needs-spec gate) via
-	// the Files API. Composition-root adapter keeps files out of the design feature.
+	// Committed-truth write surface for a dependency's directory: the design
+	// service fetches/validates a contract and atomically commits it with the
+	// dependency.json that records it (clearing the needs-contract gate), and
+	// records the user's acceptance of an assumed one, via the Files API.
+	// Composition-root adapter keeps files out of the design feature.
 	designService.SetFileCommitter(designFilesCommitter{files: filesSvc})
 	// Grant cascade → design: commit the exposesAPI.orgPublished durability marker
 	// on a provider component when its cross-project access request is granted.
@@ -1231,20 +1312,49 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// The deployment service's two config inputs, wired here because both are
 	// built after it.
 	deploymentService.SetConfigSources(configService, runtimeConfigSvc)
+	// Thunder deploy-wait: after OC Ready, a web-app with ConsumerURLEnvConfig
+	// stays pending until the ThunderApplication CR carries the SPA callback.
+	// Nil reader (no kube API base — local compose) skips the wait.
+	deploymentService.SetResourceCatalog(thunderWaitMarkerCatalog{cat: resourceTypeCatalog})
+	deploymentService.SetResourceClient(resourceClient)
+	if cfg.KubeAPI.BaseURL != "" {
+		thunderClient, err := thunderapp.New(thunderapp.Config{
+			BaseURL:     cfg.KubeAPI.BaseURL,
+			BearerToken: cfg.KubeAPI.BearerToken,
+			TokenFile:   cfg.KubeAPI.TokenFile,
+			CAFile:      cfg.KubeAPI.CAFile,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("thunderapp client: %w", err)
+		}
+		deploymentService.SetThunderApplicationReader(thunderApplicationReader{
+			client: thunderClient,
+		})
+		slog.Info("ThunderApplication CR reader", "baseURL", cfg.KubeAPI.BaseURL)
+	} else {
+		slog.Info("ThunderApplication CR reader disabled — no KUBERNETES_SERVICE_HOST/PORT or KUBE_API_BASE_URL; thunder deploy-wait skipped")
+	}
+
 	// An ai-agent's model access. Without this the deploy still succeeds and
 	// the agent still starts — it simply comes up with no MODEL_* and fails
 	// its first turn with an upstream 401 ("x-api-key header is required"),
 	// which is a long way from the missing wire that caused it.
 	deploymentService.SetModelAccess(componentService)
-
+	// Endpoint deploy-wait: after OC Ready, a component that advertises an
+	// external URL stays pending until that URL answers. OC reports Ready when
+	// the control plane is done, which on a cloud plane is minutes before a
+	// first-ever hostname has a certificate — and `serving` is what the
+	// validation sweep dispatches on.
+	//
+	// Gated on the SAME stated fact as PreferPlainHTTPEndpoints above, because
+	// both turn on what the data-plane gateway really is — see endpoint_wait.go
+	// for why the local plane must not wire it.
+	deploymentService.SetEndpointGate(endpointGate)
 	// The address a consumer reaches a protected sibling's managed API on. Config
-	// carries only an override; the default lives beside the context-path builder
-	// it has to agree with.
-	if host := cfg.APIGatewayHost; host != "" {
-		deploymentService.SetAPIGatewayHost(host)
-	} else {
-		deploymentService.SetAPIGatewayHost(projects.DefaultAPIGatewayHost)
-	}
+	// carries only an OVERRIDE: the gateway is one per (org, environment), so the
+	// address is derived per deploy beside the context-path builder it has to
+	// agree with (projects.APIGatewayHost). Empty is the normal case.
+	deploymentService.SetAPIGatewayHostOverride(cfg.APIGatewayHost)
 	configService.SetConverger(deploymentService)
 	// The cross-project access grant is the only deploy observer left. The two
 	// that rode beside it — the env-config.js re-emit and the api-configuration
@@ -1330,7 +1440,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// died without a pull request, and banks the run's token spend. It writes no
 	// logs and deletes no components — history is the observability plane's and
 	// deletion is retention's. Always on (no longer gated on cluster-gateway-proxy).
-	watchers = append(watchers, codingagent.NewJobWatcher(runtimeClient, runCycleRepo, asServiceIdentity))
+	watchers = append(watchers, codingagent.NewJobWatcher(runtimeClient, runCycleRepo, asServiceIdentity).
+		WithRecorder(runRecorder))
 	slog.Info("codingagent.JobWatcher: enabled (OpenChoreo resource tree)")
 	// The milestone run supervisor's Temporal worker. Registered only when
 	// Temporal is configured (TEMPORAL_HOSTPORT set). The watcher dials in a
@@ -1338,7 +1449,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// worker connects when it comes up.
 	if cfg.Temporal.Enabled() {
 		runActs := run.NewActivities(run.Deps{
-			Runs:       runRuns{runs: milestoneRunRepo},
+			Runs: runRuns{runs: milestoneRunRepo},
+			// A failed settle becomes one feed line (run_failed), read off the
+			// row the settle just wrote.
+			Failed:     runFailedActivityRecorder{svc: activitySvc, runs: milestoneRunRepo},
 			Cycles:     runCycles{cycles: runCycleRepo},
 			Milestones: issueService,
 			PRs:        issueService,
@@ -1414,7 +1528,7 @@ func computeDegradations(cfg config.Config, secretsDelivery bool) []Degradation 
 		off("secrets-delivery", "SecretsProvider not injected — secret writes + external-secret cleanup disabled")
 	}
 	if cfg.AEPInternalBaseURL == "" {
-		off("mcp-discovery", "AEP_INTERNAL_BASE_URL not set — design-turn MCP discovery omitted")
+		off("mcp-discovery", "AEP_API_INTERNAL_BASE_URL not set — design-turn MCP discovery omitted")
 	}
 	thunderBase := cfg.ThunderAdmin.BaseURL
 	if thunderBase == "" {
@@ -1474,6 +1588,30 @@ func buildGitHost(cfg config.Config) (sourcecontrol.Host, error) {
 		return nil, fmt.Errorf("unknown GIT_PROVIDER %q — supported: github", cfg.GitProvider)
 	}
 }
+
+// environmentThunderCredentials opens the secret store the environment-tier
+// Thunder binding's admin credential is read from.
+//
+// (nil, nil) when OPENBAO_ADDR is unset: a stack with no secret store cannot
+// reach any environment's identity provider, and the caller skips the whole
+// feature rather than wiring a resolver that fails every call. It performs no
+// I/O — Assemble stays pure; the first read happens when a build asks.
+func environmentThunderCredentials(cfg config.Config) (bindingCredentialReader, error) {
+	if cfg.OpenBaoAddr == "" {
+		return nil, nil
+	}
+	kv, err := secrets.NewDeliveryKV(cfg.OpenBaoAddr, cfg.OpenBaoToken, thunderBindingKVMount)
+	if err != nil {
+		return nil, err
+	}
+	return openBaoBindingCredentials{kv: kv, mount: thunderBindingKVMount}, nil
+}
+
+// thunderBindingKVMount is the KV mount setup-environment-thunder.sh writes the
+// binding credential under, and the one the binding's recorded path is prefixed
+// with. It matches the mount every other local secret is delivered through
+// (deliveryOpenBaoConfigFromAppConfig).
+const thunderBindingKVMount = "secret"
 
 // deliveryOpenBaoConfigFromAppConfig maps local OPENBAO_* config onto the
 // provider-neutral StoreConfig.OpenBao shape. Nil when addr is unset.

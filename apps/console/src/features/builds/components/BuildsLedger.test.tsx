@@ -110,9 +110,12 @@ describe("BuildsLedger", () => {
     ).toEqual(["v3", "v2", "v1"]);
     // The whole point of the page ADR-0021 introduced: three versions readable
     // at once, which the now-first page could never show.
-    expect(screen.getByText("Running · Coding agent")).toBeTruthy();
+    // The ledger names no actor: it reads only the version ledger (ADR-0021 §6),
+    // which carries no build session to say who is working — the build page
+    // makes that read and its header says "Running · Building components".
+    expect(screen.getByText("Running")).toBeTruthy();
     expect(screen.getByText("Failed · Merge conflict")).toBeTruthy();
-    expect(screen.getByText("Deployed to development")).toBeTruthy();
+    expect(screen.getByText("Deployed")).toBeTruthy();
   });
 
   it("opens a version's build page when its row is clicked", () => {
@@ -139,7 +142,7 @@ describe("BuildsLedger", () => {
 
   it("filters a rolling-out version under Running, not just tints it", () => {
     // The filter read `build.status`, which is `completed` during a rollout, so
-    // a row showing "Deploying to development" was hidden from Running.
+    // a row showing "Deploying" was hidden from Running.
     mockBuilds = [build({ tag: "v2" }), build({ tag: "v1" })];
     mockDeploy = {
       version: "v1",
@@ -152,7 +155,7 @@ describe("BuildsLedger", () => {
     fireEvent.mouseDown(screen.getByRole("combobox", { name: /status/i }));
     fireEvent.click(screen.getByRole("option", { name: "In progress" }));
 
-    expect(screen.getByText("Deploying to development")).toBeTruthy();
+    expect(screen.getByText("Deploying")).toBeTruthy();
     expect(screen.queryByText("Built")).toBeNull();
   });
 
@@ -199,7 +202,7 @@ describe("BuildsLedger", () => {
       validation: "none",
     };
     renderLedger();
-    expect(screen.getByText("Deploying to development")).toBeTruthy();
+    expect(screen.getByText("Deploying")).toBeTruthy();
   });
 
   it("names a failed rollout rather than calling the version Built", () => {
@@ -224,7 +227,7 @@ describe("BuildsLedger", () => {
     };
     renderLedger();
 
-    expect(screen.getByText("Deployed to development")).toBeTruthy();
+    expect(screen.getByText("Deployed")).toBeTruthy();
     // v2 is completed but is not the deployed version — claiming anything about
     // where it reached would be a guess.
     expect(screen.getByText("Built")).toBeTruthy();
@@ -253,13 +256,13 @@ describe("BuildsLedger", () => {
 
   it("says a parked version waits on the READER, and lets its row go quiet", () => {
     // ADR-0023's deploy gate. `status` is `in_progress` for a parked run as
-    // much as a running one, so the row used to say "Running · Coding agent"
-    // on a run that had stopped and was waiting on this reader.
+    // much as a running one, so the row used to say the run was moving on a run
+    // that had stopped and was waiting on this reader.
     mockBuilds = [build({ tag: "v2", status: "in_progress", waitingReason: "external-values" })];
     renderLedger();
 
-    expect(screen.getByText("Waiting for values")).toBeTruthy();
-    expect(screen.queryByText("Running · Coding agent")).toBeNull();
+    expect(screen.getByText("Waiting for configuration")).toBeTruthy();
+    expect(screen.queryByText("Running")).toBeNull();
   });
 
   it("keeps a parked version under the In progress filter", () => {
@@ -275,7 +278,7 @@ describe("BuildsLedger", () => {
     fireEvent.mouseDown(screen.getByRole("combobox", { name: /status/i }));
     fireEvent.click(screen.getByRole("option", { name: "In progress" }));
 
-    expect(screen.getByText("Waiting for values")).toBeTruthy();
+    expect(screen.getByText("Waiting for configuration")).toBeTruthy();
     expect(screen.queryByText("Built")).toBeNull();
   });
 

@@ -61,14 +61,18 @@ type fakeTagger struct {
 	err    error
 	called int
 	seq    *[]string
+	// version records the name the build asked to cut — empty when it took the
+	// platform's suggestion.
+	version string
 }
 
 func (f *fakeTagger) BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (spec.BuildScope, error) {
 	return spec.BuildScope{Tag: tag}, nil
 }
 
-func (f *fakeTagger) TagSpec(context.Context, string, string) (*spec.SpecSaveResult, error) {
+func (f *fakeTagger) TagSpec(_ context.Context, _, _, version string) (*spec.SpecSaveResult, error) {
 	f.called++
+	f.version = version
 	if f.seq != nil {
 		*f.seq = append(*f.seq, "tag")
 	}
@@ -94,6 +98,11 @@ type planSpy struct {
 	// built from, and the supersede lookup's input.
 	rows    []delivery.MilestoneRun
 	listErr error
+	// milestoneIssues is what the claimed milestone HOLDS. It decides whether the
+	// rebuild branch tells the run to skip planning: `unchanged` alone does not,
+	// because a milestone whose planning phase never finished holds no work and
+	// must be planned. Empty (the default) is that case.
+	milestoneIssues []sourcecontrol.IssueInfo
 
 	admitted []delivery.MilestoneRun
 	planned  chan int
@@ -124,7 +133,9 @@ func (p *planSpy) ReopenMilestone(_ context.Context, _, _ string, number int) er
 	return nil
 }
 func (p *planSpy) ListMilestoneIssues(context.Context, string, string, sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error) {
-	return nil, nil
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]sourcecontrol.IssueInfo(nil), p.milestoneIssues...), nil
 }
 
 // The issue-write surface. Only CloseIssue is on the plan path (supersede); the
@@ -337,18 +348,20 @@ func TestBuild_CutsTheTagAndClaimsTheVersion(t *testing.T) {
 	}
 }
 
-// THE SPEC-SAVE STATUS IS THE WHOLE BRANCH, and this is the pair that pins it.
-// There is no second question asked anywhere — in particular not "was the last run
-// cancelled" — so what the click does after a cancel is decided by whether the
-// person edited the spec, and by nothing else.
+// THE SPEC-SAVE STATUS PICKS THE BRANCH, and this is the pair that pins it: what
+// the click does after a cancel is decided by whether the person edited the spec.
 //
 // `unchanged` is the SAME tag, so the same milestone: reopen it and exactly the
-// issues a cancel closed inside it, and tell the run NOT to plan. The run must be
-// told, because a re-plan over a milestone whose issues were all closed would
-// recognise every title slug, mint nothing, and hand the loop an empty working set
-// to read as "delivered".
+// issues a cancel closed inside it, and — when that milestone HOLDS the version's
+// work — tell the run not to plan. The run must be told, because a re-plan over a
+// milestone whose issues were all closed would recognise every title slug, mint
+// nothing, and hand the loop an empty working set to read as "delivered".
 func TestBuild_UnchangedSpec_ReopensTheIncrementAndDoesNotReplan(t *testing.T) {
 	spy := newPlanSpy()
+	// The milestone was filled by the build this one is recovering from.
+	spy.milestoneIssues = []sourcecontrol.IssueInfo{
+		{Number: 31, State: "closed", Labels: []string{"aep", "development", "aep:cancelled"}},
+	}
 	tagger := &fakeTagger{res: &spec.SpecSaveResult{Status: spec.SpecSaveUnchanged, Tag: "v2", Version: 2}}
 	svc := withPlanPath(newSvc(fakeRepos{}, tagger), spy)
 
@@ -367,6 +380,39 @@ func TestBuild_UnchangedSpec_ReopensTheIncrementAndDoesNotReplan(t *testing.T) {
 	}
 	if req := spy.startedRuns()[0]; !req.Rebuild {
 		t.Errorf("started %+v, want Rebuild set so the run mints its gates and skips the planning turn", req)
+	}
+}
+
+// AN UNCHANGED SPEC IS NOT EVIDENCE THE MILESTONE WAS FILLED, and this is the
+// case that proves the second question has to be asked.
+//
+// A run that died in its PLANNING phase — `plan-failed`, or a cancel that landed
+// before the planning turn — leaves the milestone holding its gates and no work
+// at all. The spec is unchanged, so the click takes the rebuild branch; but
+// telling the run to skip planning there hands the loop an empty working set,
+// which it reads as "planning produced nothing to work" and settles the version
+// SUCCEEDED having built none of it. The milestone still has to be reopened —
+// this build IS that version being worked — but the plan has to run.
+func TestBuild_UnchangedSpecOverAnUnplannedMilestone_StillPlansIt(t *testing.T) {
+	spy := newPlanSpy()
+	// Gates and nothing else: the shape a planning phase that never finished leaves.
+	spy.milestoneIssues = []sourcecontrol.IssueInfo{
+		{Number: 12, State: "open", Labels: []string{"provision", "aep:dep/orders-db"}},
+	}
+	tagger := &fakeTagger{res: &spec.SpecSaveResult{Status: spec.SpecSaveUnchanged, Tag: "v2", Version: 2}}
+	svc := withPlanPath(newSvc(fakeRepos{}, tagger), spy)
+
+	code, body := postBuild(t, svc, "shop")
+	if code != 200 {
+		t.Fatalf("build: got %d body=%s", code, body)
+	}
+	spy.awaitStart(t)
+	if got := spy.reopened(); len(got) != 1 || got[0] != 9 {
+		t.Errorf("reopened milestones = %v, want the claimed one reopened — the version is being worked", got)
+	}
+	if req := spy.startedRuns()[0]; req.Rebuild {
+		t.Errorf("started %+v, want Rebuild CLEAR: skipping the plan over a milestone with no work "+
+			"would settle an unbuilt version as delivered", req)
 	}
 }
 
@@ -496,7 +542,7 @@ func TestBuild_SpecValidationFails_400_NoVersionClaimed(t *testing.T) {
 	spy := newPlanSpy()
 	tagger := &fakeTagger{err: &spec.SpecValidationError{Files: []spec.FileValidationError{
 		{Path: "specs/requirements/prd.md", Code: "MISSING_REQUIREMENTS", Message: "missing"},
-		{Path: "specs/design/design.md", Code: "MISSING_DESIGN", Message: "missing"},
+		{Path: "specs/design/design.cell", Code: "MISSING_DESIGN", Message: "missing"},
 	}}}
 	svc := withPlanPath(newSvc(fakeRepos{}, tagger), spy)
 
@@ -854,13 +900,52 @@ type noopAuth struct{}
 
 func (noopAuth) DerivePlatformResourceFactsAtHead(context.Context, string, string) error { return nil }
 
-// A doctored client (no inputs at all) cannot skip the drawer: an ambiguous
-// external dependency blocks with a failure, no tag is cut, and no workflow
-// starts.
-func TestBuild_DependencyGate_AmbiguousExternal_BlocksNoTagNoWorkflow(t *testing.T) {
+type errAuth struct{ err error }
+
+func (e errAuth) DerivePlatformResourceFactsAtHead(context.Context, string, string) error {
+	return e.err
+}
+
+// An uninstalled resourceType is refused at the click: HTTP 409, no tag, no
+// Temporal run. The design is unsatisfiable on this cluster; retrying provision
+// cannot invent a ClusterResourceType.
+func TestBuild_UnknownResourceType_409_NoTagNoWorkflow(t *testing.T) {
+	spy := newPlanSpy()
+	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1"}}
+	coord := build.NewInputsCoordinator(nil, errAuth{err: build.ErrUnknownResourceType}, nil)
+	svc := withPlanPath(build.NewService(build.Deps{
+		Repos: fakeRepos{}, Tagger: tagger, Coord: coord,
+	}), spy)
+
+	code, body := postBuild(t, svc, "shop")
+	if code != 409 {
+		t.Fatalf("status = %d, want 409 (body=%s)", code, body)
+	}
+	e := componenttest.DecodeEnvelope(t, body)
+	if e.Code != "conflict" {
+		t.Fatalf("409 envelope = %+v", e)
+	}
+	if !strings.Contains(e.Message, "resourceType is not installed") {
+		t.Errorf("409 message = %q, want it to name the missing resourceType", e.Message)
+	}
+	if tagger.called != 0 {
+		t.Errorf("tagger called %d times, want 0 — unknown type must block before the tag-cut", tagger.called)
+	}
+	if len(spy.milestones()) != 0 {
+		t.Errorf("a rejected click minted a milestone: %v", spy.milestones())
+	}
+	if len(spy.startedRuns()) != 0 {
+		t.Errorf("a rejected click started a run: %v", spy.startedRuns())
+	}
+}
+
+// A doctored client (no inputs at all) cannot skip the drawer: an external
+// dependency no service was chosen for blocks with a failure, no tag is cut,
+// and no workflow starts.
+func TestBuild_DependencyGate_UnchosenExternal_BlocksNoTagNoWorkflow(t *testing.T) {
 	design := &gateDesign{comps: []spec.DesignComponent{{Name: "o", ComponentType: spec.ComponentTypeService,
 		Dependencies: []spec.Dependency{
-			{Kind: spec.DependencyKindExternal, Name: "salesforce", Status: spec.DependencyStatusAmbiguous},
+			{Kind: spec.DependencyKindExternal, Name: "salesforce", Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsInput},
 		}}}}
 	spy := newPlanSpy()
 	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1"}}
@@ -876,8 +961,8 @@ func TestBuild_DependencyGate_AmbiguousExternal_BlocksNoTagNoWorkflow(t *testing
 	if len(out.Failures) != 1 {
 		t.Fatalf("failures = %+v, want 1", out.Failures)
 	}
-	if f := out.Failures[0]; f.Dependency != "salesforce" || f.Kind != "external-ambiguous" {
-		t.Errorf("failure = %+v, want {salesforce, external-ambiguous}", f)
+	if f := out.Failures[0]; f.Dependency != "salesforce" || f.Kind != "external-unresolved" {
+		t.Errorf("failure = %+v, want {salesforce, external-unresolved}", f)
 	}
 	if out.Tag != "" {
 		t.Errorf("tag = %q, want empty — no tag on a gated build", out.Tag)
@@ -890,16 +975,16 @@ func TestBuild_DependencyGate_AmbiguousExternal_BlocksNoTagNoWorkflow(t *testing
 	}
 }
 
-// A web-application's ambiguous external dependency blocks the build exactly
+// A web-application's unchosen external dependency blocks the build exactly
 // like a service's would (#252 Task 14 — lifting the ComponentType != service
 // guard dependencyGateFailures used to apply here). Task 9 already shows this
 // dependency's status chip and the coding-agent wiring already emits
 // consumed-spec instructions for it regardless of component kind, so the
 // build-time hard gate must not be the one surface that still lets it through.
-func TestBuild_DependencyGate_WebApplication_AmbiguousExternal_Blocks(t *testing.T) {
+func TestBuild_DependencyGate_WebApplication_UnchosenExternal_Blocks(t *testing.T) {
 	design := &gateDesign{comps: []spec.DesignComponent{{Name: "web", ComponentType: spec.ComponentTypeWebApplication,
 		Dependencies: []spec.Dependency{
-			{Kind: spec.DependencyKindExternal, Name: "salesforce", Status: spec.DependencyStatusAmbiguous},
+			{Kind: spec.DependencyKindExternal, Name: "salesforce", Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsInput},
 		}}}}
 	spy := newPlanSpy()
 	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1"}}
@@ -915,8 +1000,8 @@ func TestBuild_DependencyGate_WebApplication_AmbiguousExternal_Blocks(t *testing
 	if len(out.Failures) != 1 {
 		t.Fatalf("failures = %+v, want 1", out.Failures)
 	}
-	if f := out.Failures[0]; f.Component != "web" || f.Dependency != "salesforce" || f.Kind != "external-ambiguous" {
-		t.Errorf("failure = %+v, want {web, salesforce, external-ambiguous}", f)
+	if f := out.Failures[0]; f.Component != "web" || f.Dependency != "salesforce" || f.Kind != "external-unresolved" {
+		t.Errorf("failure = %+v, want {web, salesforce, external-unresolved}", f)
 	}
 	if out.Tag != "" {
 		t.Errorf("tag = %q, want empty — no tag on a gated build", out.Tag)
@@ -954,13 +1039,13 @@ func TestBuild_DependencyGate_NeedsInput_Blocks(t *testing.T) {
 	}
 }
 
-// A doctored client sending no external-spec input for a needs-spec dependency
-// still gets gated: kind maps to the pre-existing "external-spec".
-func TestBuild_DependencyGate_NeedsSpec_NoDrawerInput_Blocks(t *testing.T) {
+// A doctored client sending no external-spec input for a needs-contract
+// dependency still gets gated: kind maps to the pre-existing "external-spec".
+func TestBuild_DependencyGate_NeedsContract_NoDrawerInput_Blocks(t *testing.T) {
 	design := &gateDesign{comps: []spec.DesignComponent{{Name: "o", ComponentType: spec.ComponentTypeService,
 		Dependencies: []spec.Dependency{
 			{Kind: spec.DependencyKindExternal, Name: "partner-api",
-				Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsSpec},
+				Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsContract},
 		}}}}
 	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1"}}
 	svc := build.NewService(build.Deps{
@@ -984,11 +1069,11 @@ func TestBuild_DependencyGate_NeedsSpec_NoDrawerInput_Blocks(t *testing.T) {
 // pasted spec with THIS build request. ApplyPreTag commits it (CollectSpec)
 // BEFORE the gate re-reads — so the gate sees the now-resolved dependency and
 // the build proceeds. Proves the gate runs AFTER ApplyPreTag, not before.
-func TestBuild_DependencyGate_NeedsSpec_ResolvedByThisRequestsDrawerInput_Proceeds(t *testing.T) {
+func TestBuild_DependencyGate_NeedsContract_ResolvedByThisRequestsDrawerInput_Proceeds(t *testing.T) {
 	design := &gateDesign{comps: []spec.DesignComponent{{Name: "o", ComponentType: spec.ComponentTypeService,
 		Dependencies: []spec.Dependency{
 			{Kind: spec.DependencyKindExternal, Name: "partner-api",
-				Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsSpec},
+				Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsContract},
 		}}}}
 	spy := newPlanSpy()
 	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1"}}

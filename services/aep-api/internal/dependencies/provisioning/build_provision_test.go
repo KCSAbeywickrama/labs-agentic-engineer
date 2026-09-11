@@ -18,6 +18,7 @@ package provisioning
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -25,6 +26,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/dependencies"
 	"github.com/wso2/aep/aep-api/internal/gen"
 	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 	"github.com/wso2/aep/aep-api/internal/spec"
@@ -45,7 +47,7 @@ func TestProvisionForBuild_ByKind(t *testing.T) {
 
 	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", 0, []BuildProvisionInput{
 		{Component: "orders", Dependency: "stripe", Kind: "external-config",
-			Config: map[string]string{"region": "us"}, SecretRefByEnv: map[string]string{"development": "sm://x"}},
+			Config: map[string]string{"region": "us"}, SecretRefByEnv: map[string]string{"default": "sm://x"}},
 		{Component: "orders", Dependency: "orders-db", Kind: "platform-resource",
 			Parameters: map[string]any{"instances": 1}, Approved: true},
 	})
@@ -69,7 +71,7 @@ func TestProvisionForBuild_ByKind(t *testing.T) {
 	if ext.calls != 0 {
 		t.Fatalf("external dep must NOT go through Provision (that re-writes secrets), got %d Provision calls", ext.calls)
 	}
-	if got := ext.authorByEnv["development"]; got.SecretStorePath != "" || got.Plain["region"] != "" {
+	if got := ext.authorByEnv["default"]; got.SecretStorePath != "" || got.Plain["region"] != "" {
 		t.Fatalf("author must ignore request config/ref and use empty design values: %+v", got)
 	}
 
@@ -124,6 +126,45 @@ func TestProvisionForBuild_UsesMintedPlatformGateDespiteListRace(t *testing.T) {
 	}
 }
 
+// designWithPlatformDeps is a local fixture for the fail-fast test: three
+// platform-resource names that designWithDeps() does not carry, so the
+// provisioner is reached instead of a 404 from findDepInProject.
+func designWithPlatformDeps(names ...string) []spec.DesignComponent {
+	deps := make([]spec.Dependency, 0, len(names))
+	for _, n := range names {
+		deps = append(deps, spec.Dependency{
+			Kind:         spec.DependencyKindPlatformResource,
+			Name:         n,
+			ResourceType: "postgres-cnpg",
+		})
+	}
+	return []spec.DesignComponent{{Name: "orders", Dependencies: deps}}
+}
+
+func TestProvisionForBuild_PermanentPlatformFailureSkipsRemainingPlatformWaits(t *testing.T) {
+	issues := newFakeIssues(nil)
+	plat := &fakePlatProv{err: fmt.Errorf("%w: no release", dependencies.ErrProvisionPermanent)}
+	svc := newTestService(issues, &fakeExecStore{}, fakeDesign{comps: designWithPlatformDeps("bad-a", "bad-b", "bad-c")}, &fakeExtProv{}, plat, &fakeBindings{})
+
+	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", 0, []BuildProvisionInput{
+		{Component: "orders", Dependency: "bad-a", Kind: "platform-resource", Approved: true},
+		{Component: "orders", Dependency: "bad-b", Kind: "platform-resource", Approved: true},
+		{Component: "orders", Dependency: "bad-c", Kind: "platform-resource", Approved: true},
+	})
+	if err != nil {
+		t.Fatalf("batch error: %v", err)
+	}
+	if plat.calls != 1 {
+		t.Fatalf("permanent platform failure must skip remaining platform waits, got %d calls", plat.calls)
+	}
+	if len(fails) != 1 {
+		t.Fatalf("want 1 failure, got %+v", fails)
+	}
+	if !errors.Is(fails[0].Err, dependencies.ErrProvisionPermanent) {
+		t.Fatalf("failure must carry ErrProvisionPermanent, got %v", fails[0].Err)
+	}
+}
+
 // TestProvisionForBuild_ExternalAuthorFailureContinues pins the batch semantics:
 // a per-input author error becomes a ProvisionFailure (data, not an activity
 // error) and the batch continues to the remaining inputs.
@@ -136,7 +177,7 @@ func TestProvisionForBuild_ExternalAuthorFailureContinues(t *testing.T) {
 
 	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", 0, []BuildProvisionInput{
 		{Component: "orders", Dependency: "stripe", Kind: "external-config",
-			SecretRefByEnv: map[string]string{"development": "sm://x"}},
+			SecretRefByEnv: map[string]string{"default": "sm://x"}},
 		{Component: "orders", Dependency: "orders-db", Kind: "platform-resource",
 			Parameters: map[string]any{"instances": 1}},
 	})
@@ -242,14 +283,14 @@ func TestProvisionForBuild_SettlesReadyGateNotInInputs(t *testing.T) {
 	plat := &fakePlatProv{}
 	// orders-db (platform-resource) is already Ready in OC but NOT in the drawer inputs.
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
-		ocname.ExternalResourceBindingName("proj", "orders-db", "development"): readyBinding("host", "port"),
+		ocname.ExternalResourceBindingName("proj", "orders-db", "default"): readyBinding("host", "port"),
 	}}
 	design := &countingDesign{comps: designWithDeps()}
 	svc := newTestService(issues, execs, design, ext, plat, bindings)
 
 	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", 0, []BuildProvisionInput{
 		{Component: "orders", Dependency: "stripe", Kind: "external-config",
-			Config: map[string]string{"region": "us"}, SecretRefByEnv: map[string]string{"development": "sm://x"}},
+			Config: map[string]string{"region": "us"}, SecretRefByEnv: map[string]string{"default": "sm://x"}},
 	})
 	if err != nil {
 		t.Fatalf("ProvisionForBuild: %v", err)
@@ -294,7 +335,7 @@ func TestProvisionForBuild_SkipsNotReadyGateNotInInputs(t *testing.T) {
 
 	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v3", 0, []BuildProvisionInput{
 		{Component: "orders", Dependency: "stripe", Kind: "external-config",
-			SecretRefByEnv: map[string]string{"development": "sm://x"}},
+			SecretRefByEnv: map[string]string{"default": "sm://x"}},
 	})
 	if err != nil || len(fails) != 0 {
 		t.Fatalf("want clean run, got fails=%+v err=%v", fails, err)
@@ -315,7 +356,7 @@ func TestSettleReadyGate_NoOpenGate(t *testing.T) {
 	issues := newFakeIssues(nil) // no open gates
 	execs := &fakeExecStore{}
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
-		ocname.ExternalResourceBindingName("proj", "orders-db", "development"): readyBinding(),
+		ocname.ExternalResourceBindingName("proj", "orders-db", "default"): readyBinding(),
 	}}
 	svc := newTestService(issues, execs, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, bindings)
 
@@ -340,7 +381,7 @@ func TestProvisionForBuild_EmptyInputsDoesNotMint(t *testing.T) {
 	execs := &fakeExecStore{}
 	// orders-db is Ready in OC, but there is no existing gate to settle.
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
-		ocname.ExternalResourceBindingName("proj", "orders-db", "development"): readyBinding(),
+		ocname.ExternalResourceBindingName("proj", "orders-db", "default"): readyBinding(),
 	}}
 	svc := newTestService(issues, execs, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, bindings)
 
@@ -398,8 +439,8 @@ func gateNumber(issues *fakeIssues, depName string) int {
 func TestProvisionForBuild_RegisteredExternal_AuthorsFromOrgCells(t *testing.T) {
 	plane := NewMemoryValuePlane()
 	plane.PutEnvCells("acme", "stripe", []EnvCell{
-		{Environment: "development", Key: "api_key", Status: "configured"},
-		{Environment: "development", Key: "region", Status: "configured", Value: "us"},
+		{Environment: "default", Key: "api_key", Status: "configured"},
+		{Environment: "default", Key: "region", Status: "configured", Value: "us"},
 	})
 	ext := &fakeExtProv{}
 	svc := NewService(Deps{
@@ -428,7 +469,7 @@ func TestProvisionForBuild_RegisteredExternal_AuthorsFromOrgCells(t *testing.T) 
 	if ext.calls != 0 {
 		t.Fatalf("Registered build must not Provision (project OpenBao), got %d", ext.calls)
 	}
-	got := ext.authorByEnv["development"]
+	got := ext.authorByEnv["default"]
 	if got.Plain["region"] != "us" {
 		t.Fatalf("Registered author Plain = %+v, want region=us from org cells", got.Plain)
 	}
@@ -436,8 +477,8 @@ func TestProvisionForBuild_RegisteredExternal_AuthorsFromOrgCells(t *testing.T) 
 		t.Fatalf("secret cell must not appear in Plain: %+v", got.Plain)
 	}
 	inst := plane.Instances("acme", "stripe")
-	if len(inst) != 1 || inst[0].Project != "proj" || inst[0].Environment != "development" {
-		t.Fatalf("instances after Registered author = %+v, want {proj, development}", inst)
+	if len(inst) != 1 || inst[0].Project != "proj" || inst[0].Environment != "default" {
+		t.Fatalf("instances after Registered author = %+v, want {proj, default}", inst)
 	}
 }
 
@@ -481,7 +522,7 @@ func TestProvisionForBuild_RegisteredExternal_AuthorsOrgSecretStorePath(t *testi
 		PlatProv:          &fakePlatProv{},
 		Bindings:          &fakeBindings{},
 		CatalogValuePlane: plane,
-		Environments:      fakeEnvs{names: []string{"development"}},
+		Environments:      fakeEnvs{names: []string{"default"}},
 		OrgSecrets:        writer,
 	})
 
@@ -498,8 +539,8 @@ func TestProvisionForBuild_RegisteredExternal_AuthorsOrgSecretStorePath(t *testi
 			Key         string `json:"key"`
 			Value       string `json:"value"`
 		}{
-			{Environment: "development", Key: "api_key", Value: "sk_live"},
-			{Environment: "development", Key: "region", Value: "us"},
+			{Environment: "default", Key: "api_key", Value: "sk_live"},
+			{Environment: "default", Key: "region", Value: "us"},
 		},
 	})
 	if err != nil {
@@ -521,7 +562,7 @@ func TestProvisionForBuild_RegisteredExternal_AuthorsOrgSecretStorePath(t *testi
 	if ext.calls != 0 {
 		t.Fatalf("Registered build must not Provision (project OpenBao), got %d", ext.calls)
 	}
-	got := ext.authorByEnv["development"]
+	got := ext.authorByEnv["default"]
 	if got.SecretStorePath == "" {
 		t.Fatal("AuthorPreparedValues must receive a non-empty SecretStorePath from the org-catalog writer")
 	}
@@ -543,7 +584,7 @@ func TestProvisionForBuild_RegisteredExternal_AuthorsOrgSecretStorePath(t *testi
 func TestProvisionForBuild_RegisteredAfterRestart_AuthorsOrgSecretStorePath(t *testing.T) {
 	plane := NewMemoryValuePlane()
 	ext := &fakeExtProv{}
-	writer := &fakeOrgSecrets{key: "org-catalog-github-development"}
+	writer := &fakeOrgSecrets{key: "org-catalog-github-default"}
 	svc := NewService(Deps{
 		Issues: newFakeIssues(nil),
 		Execs:  &fakeExecStore{},
@@ -561,7 +602,7 @@ func TestProvisionForBuild_RegisteredAfterRestart_AuthorsOrgSecretStorePath(t *t
 		PlatProv:          &fakePlatProv{},
 		Bindings:          &fakeBindings{},
 		CatalogValuePlane: plane,
-		Environments:      fakeEnvs{names: []string{"development"}},
+		Environments:      fakeEnvs{names: []string{"default"}},
 		OrgSecrets:        writer,
 	})
 
@@ -574,7 +615,7 @@ func TestProvisionForBuild_RegisteredAfterRestart_AuthorsOrgSecretStorePath(t *t
 	if len(fails) != 0 {
 		t.Fatalf("want no failures, got %+v", fails)
 	}
-	got := ext.authorByEnv["development"]
+	got := ext.authorByEnv["default"]
 	if got.SecretStorePath != writer.key {
 		t.Fatalf("SecretStorePath = %q, want reconstructed org-catalog key %q", got.SecretStorePath, writer.key)
 	}

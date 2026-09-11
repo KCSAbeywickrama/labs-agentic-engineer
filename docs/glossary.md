@@ -23,7 +23,7 @@ namespace — see SecretReference.
 ### `org-env NS` (DP) — `wc-<orgUUID8>-<orgHash8>-<env>`
 The data-plane namespace minted **once per (org, env)** by wso2cloud's `ou`
 service, iterating over every `Environment` CR present in the bootstrap CP
-directory. Today the only env is `development`. Holds user-app runtime
+directory. Today the only env is `default`. Holds user-app runtime
 workloads on cluster `cloud-dp-oc-dp`.
 
 ### `workflows NS` (WP) — `workflows-wc-<orgUUID8>-<orgHash8>`
@@ -37,7 +37,7 @@ release NS on the DP.
 The component-release sub-namespace minted by OC's `renderedrelease-controller`
 per `ReleaseBinding`. Holds the rendered user app pods **and** the rendered
 coding-agent cycle Jobs: a cycle's ephemeral `coding-agent` Component binds to
-the project's `development` environment, so OC renders its `batch/v1 Job` and
+the project's `default` environment, so OC renders its `batch/v1 Job` and
 the ExternalSecrets it needs here, beside the project's own workloads.
 App-factory writes nothing into this namespace directly — every create and
 delete goes through the OC API on the CP.
@@ -129,7 +129,7 @@ ephemeral Component of this type in the **milestone's own project**, so OC
 renders the cycle's `batch/v1 Job` into the project's release NS and materialises
 its ExternalSecrets from the org's secret store (refs only; the BFF writes no
 secret material). The type pins the cost envelope: `backoffLimit: 0`,
-`activeDeadlineSeconds` (1h default, 2h for a validation cycle),
+`activeDeadlineSeconds` (3h for a coding cycle, 2h for a validation cycle),
 `ttlSecondsAfterFinished`, and schema-bounded CPU/memory requests and limits.
 The type name is also the key wso2cloud's entitlement gate reads
 (`job/coding-agent`, `coding-agent`): a create over the org's cap answers `402`,
@@ -191,27 +191,58 @@ historical bookkeeping; consider for cleanup later.
 ## Identity and tokens
 
 ### `Thunder`
-WSO2's IDP (`platform-idp` on cloud). Issues OIDC tokens for users and
-client-credentials tokens for service-to-service. The lab stack runs a local
-Thunder instance via `deployments/single-cluster/values-thunder.yaml`.
+WSO2's IDP. Issues OIDC tokens for users and client-credentials tokens for
+service-to-service. The cluster runs it in **two tiers**: one **platform IdP**
+and one **environment Thunder** per `(org, environment)`. See
+`deployments/design/two-tier-thunder.md`.
 
-### Platform IdP
-The single shared Thunder instance backing every generated app's end-user
-sign-in, as opposed to a dedicated instance per project. One issuer, one JWKS,
-one keymanager-gateway trust chain — the API gateway validates every JWT
-against this one issuer's JWKS and injects `X-User-Id`; services never verify
-tokens themselves. A future bring-your-own-instance reference is deliberately
-out of scope; the `thunder-app` `ClusterResourceType`/CRD leave room for one
-(e.g. an `instanceRef`) without a breaking change.
+### Platform IdP (T1)
+The one shared ThunderID per cluster — release and namespace `platform-idp`,
+installed by `deployments/scripts/setup-thunder.sh`, and the issuer OpenChoreo's
+control plane is configured with. It backs platform sign-in for both consoles
+and every service-to-service token. It is owned by neither product: each
+publishes its own bootstrap bundle (AEP's is
+`deployments/single-cluster/thunder-resources/`) and the installer composes the
+documents ThunderID keeps only one of. ADR-0027, ADR-0028.
+
+### Environment Thunder (T2)
+One ThunderID per `(org, environment)` — release and namespace
+`thunder-<org>-<env>`, issuer `http://<env>-idp.amp.localhost:8080`, installed
+by `deployments/scripts/setup-environment-thunder.sh`. It holds what belongs to
+what is *deployed* in that environment: generated apps' end-user identity, and
+the roles and test users a version declares. It trusts the platform IdP as an
+issuer but is not interchangeable with it — a platform token is refused at an
+environment's gateway. ADR-0029.
+
+### Thunder binding record
+How an environment says which T2 is its own, and how each consumer reaches it:
+ConfigMap `thunder-binding-<org>-<env>` (selected by
+`aep.wso2.com/kind=thunder-binding` + `/org` + `/env`), the credential mirrored
+as a Secret into `thunder-app-operator-system` for `thunder-app` and into
+OpenBao at `secret/aep/thunder/<org>/<env>` for `aep-api`, and the non-secret
+half projected onto the OpenChoreo `Environment` as `aep.wso2.com/thunder-*`
+annotations. Nothing derives an issuer from a name; everything reads the record.
+
+### Environment gateway
+The API Platform gateway for one environment — `api-platform-<org>-<env>` in
+namespace `<org>-<env>`, installed by
+`deployments/scripts/setup-environment-gateway.sh`. Its only Thunder keymanager
+is the T2 named in that environment's binding, so it is where a managed API's
+authentication is terminated against that environment's identity and no other.
+The `api-configuration` trait stamps `restapi-target: api-platform-<org>-<env>`
+on every RestApi; `aep-api` derives the same host in
+`internal/projects/gateway_address.go`.
 
 ### Thunder application
 A `platform-resource` dependency (`resourceType: thunder-app`) representing a
-per-project OAuth (PKCE) client registered on the Platform IdP. Declared under
-the *same* dependency name by both the SPA performing sign-in and the service
-whose API it protects. Provisioned like any other platform resource — via a
-`ThunderApplication` CR reconciled by the in-repo `thunder-app-operator`
+per-project OAuth (PKCE) client registered on the **environment's** Thunder.
+Declared under the *same* dependency name by both the SPA performing sign-in and
+the service whose API it protects. Provisioned like any other platform resource
+— via a `ThunderApplication` CR reconciled by the in-repo `thunder-app-operator`
 against Thunder's admin REST API — never by an application-plane component
-calling Thunder directly.
+calling Thunder directly. The operator resolves its target per CR from the
+binding record for the CR's `(org, environment)`; a CR with no binding registers
+nowhere and says so.
 
 ### `callerIdentity` — retired
 The implicit per-component field this dependency replaces. Design agents no
@@ -389,6 +420,33 @@ supervisor dispatches on returns counts), and `mergeVerdict` +`mergeReason` when
 something decided against merging (`declined` by the policy, `refused` by the
 host).
 
+### Crew
+The agents of ONE cycle, arranged as the tree the runtime declared, each carrying
+how long it has been going and how long it has been quiet. Built by
+`buildCrew(events, now)` in `@aep/progress-view` and rendered by the console's
+crew view (`apps/console/design/crew-view.md`); the playground reads the same
+model, so a run looks the same wherever it is watched.
+
+A crew is not a log. The feed answers *what happened*; the crew answers *who is
+doing what, and is anything stuck* — which a flat log cannot, because a stall on
+a log surface is indistinguishable from a log that has scrolled. Every member
+carries a **state**: `working` while events arrive, `waiting` while it is blocked
+inside a FOREGROUND agent it spawned (never idle, and never a warning — the
+silence is explained by a row one level down), `stalled` after 60 seconds of
+silence with a tool call still unanswered, and `done | failed | cancelled` once
+the runtime says so. **Silence is never a verdict**: an agent quiet for ten
+minutes with nothing outstanding is still `working`, with the age stated beside
+it.
+
+The counterpart view over the same model is the **timeline** — one lane per
+agent on the cycle's own time axis, each lane split into the stretches its agent
+worked and the stretches it spent blocked. That split is the point: a lead that
+took 55 minutes is not slow if 41 of them were one spawned agent.
+
+A **crew of one** is not a crew, and gets neither tree nor lanes — a validation
+cycle runs a single validator, and the tree would be chrome around a fact
+already on screen.
+
 ### Arming label
 `aep`, and it says one thing: something may work this issue. It carries no
 meaning about WHAT the work is — that is the kind — and it is also the
@@ -419,6 +477,19 @@ mean something: open work on a milestone with no live run is otherwise
 indistinguishable from work nobody started, so the run that gave up would be
 replaced within a tick by one with fresh budgets. Cleared by a rebuild, or by a
 person removing the label.
+
+### Acceptance oracle
+`specs/validation/validation-criteria.json` in its JUDGING role — the source of
+truth a validation run grades the deployed system against. *Oracle* names what
+the document DOES, not what it is: the console calls the document itself the
+**Validation criteria** (`apps/console/design/lexicon.md` holds that mapping),
+and one row inside it is an **acceptance criterion**, which is what its
+`AC-001-a`-style id says. Different axes, so both words are correct and neither
+is a leftover. Authored from the requirement prose alone by the
+`validation-criteria` skill, deliberately blind to the design and the code it
+will grade. A version with no acceptance oracle has nothing to validate: no
+validation task is filed, nothing will ever judge it, and the verdict settles
+`skipped` rather than staying silent.
 
 ### Green ending
 The only thing that CLOSES a milestone: zero open working-set issues **and** a

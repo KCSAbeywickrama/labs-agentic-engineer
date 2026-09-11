@@ -20,6 +20,10 @@ import { describe, expect, it } from "vitest";
 import {
   countOf,
   CRITERION_STATE_LABEL,
+  METHOD_LABEL,
+  runAnswers,
+  runWorksOn,
+  tallyCriterionMethods,
   tallyCriterionStates,
   uncoveredCount,
 } from "./counts.js";
@@ -177,5 +181,105 @@ describe("CRITERION_STATE_LABEL", () => {
     for (const s of ["pass", "fail", "not_run", "not_validated", "manual"]) {
       expect(CRITERION_STATE_LABEL[s], `no label for ${s}`).toBeTruthy();
     }
+  });
+});
+
+describe("tallyCriterionMethods", () => {
+  // One requirement per method, so the ORDER of the result cannot be inherited
+  // from the order the criteria were authored in.
+  const mixed: ValidationCriteria = {
+    requirements: [
+      {
+        id: "REQ-1",
+        statement: "s",
+        criteria: [
+          { id: "AC-1", must: "m", method: "manual" },
+          { id: "AC-2", must: "m", method: "e2e" },
+        ],
+      },
+      {
+        id: "REQ-2",
+        statement: "s",
+        criteria: [
+          { id: "AC-3", must: "m", method: "e2e" },
+          { id: "AC-4", must: "m", method: "scenario" },
+        ],
+      },
+    ],
+  };
+
+  it("counts every authored criterion, across requirements", () => {
+    expect(tallyCriterionMethods(mixed)).toEqual([
+      { method: "e2e", count: 2 },
+      { method: "scenario", count: 1 },
+      { method: "manual", count: 1 },
+    ]);
+  });
+
+  // The tally is a partition of the criteria, which is what lets the view's
+  // summary header read its total off it.
+  it("adds up to the number of criteria authored", () => {
+    const total = tallyCriterionMethods(mixed).reduce((n, m) => n + m.count, 0);
+    expect(total).toBe(4);
+  });
+
+  it("surfaces an unknown method after the known ones, alphabetically", () => {
+    const odd: ValidationCriteria = {
+      requirements: [
+        {
+          id: "REQ-1",
+          statement: "s",
+          criteria: [
+            { id: "AC-1", must: "m", method: "smoke" },
+            { id: "AC-2", must: "m", method: "e2e" },
+            { id: "AC-3", must: "m", method: "chaos" },
+          ],
+        },
+      ],
+    };
+    expect(tallyCriterionMethods(odd).map((m) => m.method)).toEqual([
+      "e2e",
+      "chaos",
+      "smoke",
+    ]);
+  });
+
+  it("is empty for an oracle with no criteria", () => {
+    expect(tallyCriterionMethods({ requirements: [] })).toEqual([]);
+  });
+});
+
+describe("METHOD_LABEL", () => {
+  // The wire value is an acronym the console lexicon forbids on screen; every
+  // other method is already a word, so it renders verbatim.
+  it("expands the e2e wire value and leaves the rest alone", () => {
+    expect(METHOD_LABEL["e2e"]).toBe("auto");
+    expect(METHOD_LABEL["manual"]).toBeUndefined();
+  });
+});
+
+// The two questions a run gets asked about a method, and the gap between them.
+// Collapsing them into one predicate put the criterion rows out of step with the
+// console's run-wide progress line, which reads runWorksOn.
+describe("runAnswers / runWorksOn", () => {
+  it("answers only e2e", () => {
+    expect(runAnswers("e2e")).toBe(true);
+    for (const m of ["manual", "scenario", "unknown", ""]) {
+      expect(runAnswers(m)).toBe(false);
+    }
+  });
+
+  it("works on everything except manual", () => {
+    for (const m of ["e2e", "scenario", "unknown", ""]) {
+      expect(runWorksOn(m)).toBe(true);
+    }
+    expect(runWorksOn("manual")).toBe(false);
+  });
+
+  it("differ exactly where a run acts without answering", () => {
+    // `scenario` is the live case: worked on, never answered. If these two ever
+    // agree on it, one of the two callers is wrong.
+    expect(runWorksOn("scenario")).toBe(true);
+    expect(runAnswers("scenario")).toBe(false);
   });
 });

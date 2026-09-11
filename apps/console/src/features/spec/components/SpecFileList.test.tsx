@@ -19,7 +19,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { OxygenTheme, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import type { SpecFileEntry } from "../api/mapping";
 import { SpecFileList } from "./SpecFileList";
@@ -38,12 +38,21 @@ const RAIL_INPUT: RailInput = {
   designOutdated: false,
   assumptions: 0,
   openQuestions: 0,
+  planEntries: [],
+  planWreckage: false,
 };
 
 /** The list as `SpecView` hands it over: deduped and sorted by path. */
 function entries(...paths: string[]): SpecFileEntry[] {
   return paths
     .map((path) => ({ path, sha: "sha", group: "requirements" as const }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/** Design-group files — the existing `entries` helper marks everything requirements. */
+function designEntries(...paths: string[]): SpecFileEntry[] {
+  return paths
+    .map((path) => ({ path, sha: "sha", group: "designs" as const }))
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
@@ -170,14 +179,14 @@ describe("SpecFileList — the rail carries state", () => {
     const onReason = renderWith({ assumptions: 2, openQuestions: 1 });
 
     fireEvent.click(screen.getByRole("button", { name: "Requirements: 3 to resolve" }));
-    expect(screen.getByText("1 open question")).toBeInTheDocument();
-    expect(screen.getByText("2 assumptions to challenge")).toBeInTheDocument();
+    expect(screen.getByText("1 question only you can answer")).toBeInTheDocument();
+    expect(screen.getByText("2 decisions marked assumed")).toBeInTheDocument();
 
     fireEvent.click(screen.getAllByRole("button", { name: "Open the document" })[0]!);
     expect(onReason).toHaveBeenCalledWith("document");
   });
 
-  // The acceptance criteria are written against the same stories, so they go
+  // The validation criteria are written against the same stories, so they go
   // stale with the design and clear with it — two amber sections, one reason
   // each, one repair.
   it("marks design and validation together", () => {
@@ -208,16 +217,240 @@ describe("SpecFileList — artifact labels", () => {
     expect(screen.queryByText("agent.afm.md")).not.toBeInTheDocument();
   });
 
-  it("keeps the established labels for the sibling design artifacts", () => {
+  // Only the ai-agent artifact is pinned here. The sibling labels ("API",
+  // "Design") are upstream's own concern and are covered there — and the rail
+  // now carries a "Design" section header too, so a bare text query for them
+  // matches the header as readily as the file.
+});
+
+// The declared plan (#576): ghosts hold the coming files' places, the header
+// carries the count, and a ghost is disabled — a control that selects nothing
+// is worse than prose.
+describe("SpecFileList — the declared plan", () => {
+  const plan = [
+    { path: "specs/design/domain-model.md", status: "writing" as const, section: "design" as const },
+    {
+      path: "specs/design/components/portal/design.json",
+      status: "planned" as const,
+      section: "design" as const,
+    },
+  ];
+
+  function renderWithPlan() {
+    render(
+      <OxygenUIThemeProvider theme={OxygenTheme}>
+        <SpecFileList
+          files={entries("specs/requirements/prd.md")}
+          selection={null}
+          onSelect={() => {}}
+          onRegenerateDesign={() => {}}
+          sections={railSections({ ...RAIL_INPUT, agentWorking: true, planEntries: plan })}
+          plan={plan}
+          onReason={() => {}}
+        />
+      </OxygenUIThemeProvider>,
+    );
+    return screen.getByRole("navigation", { name: "Spec files" });
+  }
+
+  it("renders a planned-but-unwritten path as a disabled ghost row in its group", () => {
+    const nav = renderWithPlan();
+    // The ghost is the row under the COMPONENT (portal), which the plan lists
+    // but nothing has written; the domain-model row beside it is being
+    // written and must stay live. Asserting "some row is disabled" passed for
+    // the wrong reasons, so each row is now identified and checked on its own.
+    const rows = within(nav).getAllByRole("button", { hidden: true });
+    const disabled = (b: HTMLElement) =>
+      b.hasAttribute("disabled") || b.getAttribute("aria-disabled") === "true";
+    const ghostRows = rows.filter((b) => disabled(b));
+    expect(ghostRows).toHaveLength(1);
+    expect(ghostRows[0]!.textContent).toBe("Design");
+  });
+
+  it("shows the section count from the plan", () => {
+    const nav = renderWithPlan();
+    expect(within(nav).getByText("0 of 2")).toBeTruthy();
+  });
+
+  // The entry a dead turn stopped on has no file behind it any more than one it
+  // never reached, so it must not offer a click that selects nothing.
+  it("disables an errored row that never became a file", () => {
+    const wreck = [
+      {
+        path: "specs/design/components/portal/design.json",
+        status: "error" as const,
+        section: "design" as const,
+      },
+    ];
+    render(
+      <OxygenUIThemeProvider theme={OxygenTheme}>
+        <SpecFileList
+          files={entries("specs/requirements/prd.md")}
+          selection={null}
+          onSelect={() => {}}
+          onRegenerateDesign={() => {}}
+          sections={railSections({ ...RAIL_INPUT, planWreckage: true, planEntries: wreck })}
+          plan={wreck}
+          onReason={() => {}}
+        />
+      </OxygenUIThemeProvider>,
+    );
+    const nav = screen.getByRole("navigation", { name: "Spec files" });
+    const rows = within(nav).getAllByRole("button", { hidden: true });
+    const errored = rows.find((b) => b.textContent === "Design");
+    expect(errored).toBeTruthy();
+    expect(
+      errored!.hasAttribute("disabled") || errored!.getAttribute("aria-disabled") === "true",
+    ).toBe(true);
+  });
+});
+
+describe("SpecFileList — Security rail from security.json", () => {
+  it("hides Security when only the domain model exists", () => {
+    renderList(designEntries("specs/design/domain-model.md"));
+    expect(screen.queryByRole("button", { name: "Security" })).not.toBeInTheDocument();
+  });
+
+  it("shows a Security button for security.json, not a security.json filename row", () => {
     renderList(
-      designFiles(
-        "specs/design/components/hotel-api/openapi.yaml",
-        "specs/design/components/hotel-api/design.json",
+      designEntries("specs/design/domain-model.md", "specs/design/security.json"),
+    );
+    expect(screen.getByRole("button", { name: "Security" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "security.json" })).not.toBeInTheDocument();
+  });
+
+  it("does not show Security for leftover security.md and roles.json alone", () => {
+    renderList(
+      designEntries(
+        "specs/design/domain-model.md",
+        "specs/design/security.md",
+        "specs/design/roles.json",
       ),
     );
+    expect(screen.queryByRole("button", { name: /^Security$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^security$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "roles.json" })).toBeInTheDocument();
+  });
+});
 
-    // Sentence case, matching the document-names table upstream introduced.
-    expect(screen.getByText("API")).toBeInTheDocument();
-    expect(screen.getByText("Design overview")).toBeInTheDocument();
+describe("SpecFileList — the design reads as its parts (#686)", () => {
+  it("lists the documents as rows, then the Flows group, then one group per component", () => {
+    const rows = renderList(
+      designEntries(
+        "specs/design/components/api/design.json",
+        "specs/design/components/api/openapi.yaml",
+        "specs/design/flows/checkout.md",
+        "specs/design/flows/view-order.md",
+        "specs/design/domain-model.md",
+        "specs/design/security.json",
+      ),
+    );
+    expect(rows).toEqual([
+      "Domain model",
+      "Security",
+      "Flows",
+      "checkout",
+      "view-order",
+      "api",
+      "Design",
+      "API",
+    ]);
+  });
+
+  it("shows no Flows group until a flow exists", () => {
+    renderList(designEntries("specs/design/domain-model.md", "specs/design/components/api/design.json"));
+    expect(screen.queryByRole("button", { name: /Flows$/ })).not.toBeInTheDocument();
+  });
+
+  it("collapses and expands the Flows group like a component group", async () => {
+    renderList(designEntries("specs/design/flows/checkout.md"));
+    const header = screen.getByRole("button", { name: "Collapse Flows" });
+    expect(header).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "checkout" })).toBeInTheDocument();
+    fireEvent.click(header);
+    const collapsed = screen.getByRole("button", { name: "Expand Flows" });
+    expect(collapsed).toHaveAttribute("aria-expanded", "false");
+    // The group unmounts its rows once the collapse transition ends.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "checkout" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("holds a planned flow as a ghost row inside the Flows group", () => {
+    const plan = [{ path: "specs/design/flows/checkout.md", status: "planned" as const, section: "design" as const }];
+    render(
+      <OxygenUIThemeProvider theme={OxygenTheme}>
+        <SpecFileList
+          files={designEntries("specs/design/domain-model.md")}
+          selection={null}
+          onSelect={() => {}}
+          onRegenerateDesign={() => {}}
+          sections={railSections({ ...RAIL_INPUT, agentWorking: true, planEntries: plan })}
+          plan={plan}
+          onReason={() => {}}
+        />
+      </OxygenUIThemeProvider>,
+    );
+    const nav = screen.getByRole("navigation", { name: "Spec files" });
+    expect(within(nav).getByRole("button", { name: "Collapse Flows" })).toBeInTheDocument();
+    const ghost = within(nav).getAllByRole("button", { hidden: true }).find((b) => b.textContent === "checkout");
+    expect(ghost).toBeTruthy();
+    expect(ghost!.hasAttribute("disabled") || ghost!.getAttribute("aria-disabled") === "true").toBe(true);
+  });
+});
+
+describe("SpecFileList — a dependency's group", () => {
+  it("lists each dependency directory like a component, its files as rows and its state on the header", () => {
+    const onSelect = vi.fn();
+    render(
+      <OxygenUIThemeProvider theme={OxygenTheme}>
+        <SpecFileList
+          files={designEntries(
+            "specs/design/design.cell",
+            "specs/design/dependencies/stripe/openapi.yaml",
+            "specs/design/dependencies/stripe/dependency.json",
+            "specs/design/dependencies/dhl/dependency.json",
+          )}
+          selection={null}
+          onSelect={onSelect}
+          onRegenerateDesign={() => {}}
+          sections={railSections(RAIL_INPUT)}
+          onReason={() => {}}
+          dependencyStates={{
+            dhl: {
+              dependency: { kind: "external", name: "dhl", status: "unresolved", reason: "needs-contract" },
+              usedBy: ["parcel-api"],
+              blocking: true,
+              todo: "Needs a contract",
+              flags: [],
+            },
+            stripe: {
+              dependency: { kind: "external", name: "stripe", status: "resolved", flags: ["assumed"] },
+              usedBy: ["parcel-api"],
+              blocking: false,
+              todo: "",
+              flags: ["Assumed"],
+            },
+          }}
+        />
+      </OxygenUIThemeProvider>,
+    );
+    const nav = screen.getByRole("navigation", { name: "Spec files" });
+    // One group per dependency, headed like a component's.
+    expect(within(nav).getByRole("button", { name: "Collapse dhl" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "Collapse stripe" })).toBeInTheDocument();
+    expect(screen.getByLabelText("dhl: Needs a contract")).toBeInTheDocument();
+    expect(screen.getByText("Assumed")).toBeInTheDocument();
+    // The files are rows, named for what they are — definition first.
+    const labels = within(nav)
+      .getAllByRole("button")
+      .map((b) => b.textContent)
+      .filter((t) => t === "Definition" || t === "API");
+    expect(labels).toEqual(["Definition", "Definition", "API"]);
+    fireEvent.click(within(nav).getAllByRole("button", { name: "API" })[0]!);
+    expect(onSelect).toHaveBeenCalledWith({
+      kind: "file",
+      path: "specs/design/dependencies/stripe/openapi.yaml",
+    });
   });
 });

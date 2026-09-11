@@ -63,17 +63,23 @@ type ResourceTypeLister interface {
 	List(ctx context.Context) ([]dependencies.PlatformResourceType, error)
 }
 
-// RoleCatalogLister reads the roles that already exist on the platform identity
-// provider — the Role catalog the design agent consults before inventing a
-// name. Roles are SHARED across projects, so the catalog is cluster-wide, not
-// org-scoped: that is precisely what makes reuse meaningful, and it is why the
-// rows carry a name and a description and nothing about who uses them.
+// RoleCatalogLister reads the roles that already exist on the identity provider
+// of the org's environment — the Role catalog the design agent consults before
+// inventing a name. Roles are SHARED across that org's projects, which is
+// precisely what makes reuse meaningful, and it is why the rows carry a name and
+// a description and nothing about who uses them.
+//
+// It takes the ORG HANDLE because the catalog is per (org, environment): every
+// environment has its own identity provider, so "which roles exist" has no
+// cluster-wide answer. The handle is the verified `ocOrgId` claim and never a
+// tool argument — a model naming the org would be a model choosing whose roles
+// it sees.
 //
 // Satisfied by *identity.CatalogService. Read-only with no write counterpart
 // anywhere on this surface — roles are created at BUILD time, deterministically,
 // never by a model.
 type RoleCatalogLister interface {
-	ListRoleCatalog(ctx context.Context) ([]RoleCatalogEntry, error)
+	ListRoleCatalog(ctx context.Context, orgHandle string) ([]RoleCatalogEntry, error)
 }
 
 // RoleCatalogEntry is one row of the role catalog as the tool renders it. It is
@@ -132,3 +138,11 @@ type SpecNormalizer func(content string) (normalized string, err error)
 // MCP tool layer only adds a TIGHTER context-safety cap on top, never a looser
 // SSRF posture.
 type SpecFetcher func(ctx context.Context, url string) ([]byte, error)
+
+// SpecSlicer cuts, from a whole OpenAPI document, the operations named by the
+// selectors (operationId, "METHOD /path", or "/path") plus every schema they
+// reference, as a standalone canonical document. Backs slice_openapi_spec.
+// Satisfied by spec.SliceOpenAPI — the deterministic tool that lets a design
+// commit the slice of a provider's document it actually uses, whatever the
+// size of the source.
+type SpecSlicer func(raw []byte, selectors []string) ([]byte, error)

@@ -106,6 +106,12 @@ const (
 	// dispatch, including the ones carrying no evaluation key: that is the case
 	// it exists for.
 	envEvalKeyManaged = "AEP_EVAL_KEY_MANAGED"
+
+	// The organization's coding-agent setting, as the runner reads it
+	// (`runtime/registry.ts`). Plain env, never a secret: they are two enum
+	// values, and the runner needs both before it can start a session.
+	envAgentRuntime = "AEP_AGENT_RUNTIME"
+	envAgentModel   = "AEP_AGENT_MODEL"
 )
 
 // OCDispatcher creates the ephemeral coding-agent Component chain:

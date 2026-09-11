@@ -56,6 +56,9 @@ export type ErrCode =
   | "SCHEMA_VIOLATION"
   | "INVALID_DSL"
   | "INVALID_OPENAPI"
+  | "INVALID_DIAGRAM"
+  | "UNKNOWN_PARTICIPANT"
+  | "UNKNOWN_DEPENDENCY"
   | "PROTECTED_PATH";
 
 /** A candidate line echoed back for NOT_UNIQUE / NOT_FOUND re-anchoring. */
@@ -119,8 +122,9 @@ export interface RemoveFileInput {
 //   `ask_question`  — ONE question (a single card).
 //   `ask_questions` — a LIST of questions answered together (a form card).
 // Both ride the ordinary `tool-call` frame — no dedicated event kind — and the
-// console renders them as native question cards. The turn ENDS at the call
-// (`hasToolCall` stop condition); the user's answer(s) return as the NEXT turn's
+// console renders them as native question cards. The turn ENDS at an ACCEPTED
+// call (a stop condition that skips a call the SDK rejected against the schema,
+// so the model can retry); the user's answer(s) return as the NEXT turn's
 // plain-text instruction (`buildAnswerInstruction` / `buildAnswersInstruction`),
 // never a new channel.
 
@@ -130,9 +134,39 @@ export interface RemoveFileInput {
 export const ASK_QUESTION_TOOL = "ask_question" as const;
 export const ASK_QUESTIONS_TOOL = "ask_questions" as const;
 
+/** True when `toolName` is one of the question tools (single or batch). */
+export function isQuestionTool(toolName: string | undefined): boolean {
+  return toolName === ASK_QUESTION_TOOL || toolName === ASK_QUESTIONS_TOOL;
+}
+
+/**
+ * True when a persisted `tool-result` part's `output` records an error — the
+ * shape the SDK writes for a call it rejected against the tool schema
+ * (`error-text` / `error-json`) — rather than the tool's own result. A question
+ * call with an error result was never asked: the producer does not end the turn
+ * on it and the renderer does not rebuild a card from it.
+ */
+export function isErrorToolOutput(output: unknown): boolean {
+  const kind = (output as { type?: unknown } | null | undefined)?.type;
+  return typeof kind === "string" && kind.startsWith("error");
+}
+
 /** The answer instructions' leading markers (consumers may detect answers by them). */
 export const ANSWER_PREFIX = 'Answer to "' as const;
 export const ANSWERS_PREFIX = "Answers:" as const;
+
+/**
+ * What choosing an option DOES, beyond answering: the console runs the action
+ * when the answer is submitted, before the answer reaches the agent, so a
+ * decision the platform must record (the user's authorization to build on an
+ * assumed interface) or a thing a card cannot take (a file) happens on the
+ * same click. The dependency is named by its directory name.
+ */
+export type QuestionOptionAction =
+  /** Record the user's authorization to build on the agent's assumed interface for this dependency. */
+  | { kind: "accept-assumption"; dependency: string }
+  /** Open the interface upload for this dependency; the answer is sent once the document lands. */
+  | { kind: "upload-interface"; dependency: string };
 
 /** One candidate answer on a question. */
 export interface AskQuestionOption {
@@ -151,6 +185,8 @@ export interface AskQuestionOption {
    * field and requires text before submit.
    */
   freeText?: boolean;
+  /** See `QuestionOptionAction`. */
+  action?: QuestionOptionAction;
 }
 
 /**
@@ -225,6 +261,45 @@ export function buildAnswersInstruction(
     (a) => `- "${a.question}": ${serializeBody(a.selected, a.freeText)}`,
   );
   return `${ANSWERS_PREFIX}\n${lines.join("\n")}`;
+}
+
+// --- declare_plan (fire-and-forget, console ADR-0025 / #576) -----------------
+//
+// The agent declares the spec-bundle paths it is ABOUT to write, so the
+// console's spec rail can render a checklist (planned → writing → done) and an
+// honest count instead of only a log of what already happened. Unlike the HITL
+// tools above, the call does NOT end the turn: `execute` resolves immediately
+// and the agent keeps working (the fire-and-forget class, console ADR-0025).
+//
+// The plan may GROW: the design agent writes the cell first, and only the cell
+// fixes the component set, so later calls add the per-component files.
+// Consumers take the UNION of every call — first-seen order kept, restated
+// paths ignored — and support no removal. What becomes of an entry the run
+// never writes depends on how the work ENDED: a clean finish dissolves the
+// plan whole (the documents are the record), while a failure keeps the
+// remainder standing as unfinished work until a later declaring call replaces
+// it. A question mid-flight ends neither — the work resumes in the turn that
+// answers.
+
+/** The wire tool NAME — one definition, same rule as the question tools. */
+export const DECLARE_PLAN_TOOL = "declare_plan" as const;
+
+/**
+ * The `declare_plan` tool input. WIRE source of truth.
+ *
+ * NOT yet drift-guarded: the tool is registered — with the Zod schema and the
+ * `Equal<>` assert every other input here carries — when the agents-service
+ * half lands via the handshake. Until then the console renders this shape from
+ * typed mocks and no producer emits it.
+ */
+export interface DeclarePlanInput {
+  /**
+   * Full repo-relative spec-bundle paths (`specs/design/domain-model.md`), in the
+   * order the turn intends to write them. The paths are the identity the
+   * console reconciles file mutations against — no display names ride here;
+   * naming a document is the console's job.
+   */
+  paths: string[];
 }
 
 // --- Skills (progressive disclosure, ADR-0002) ------------------------------
@@ -428,6 +503,57 @@ export const TURN_KINDS = ["chat", "flow", "start", "plan"] as const;
 export type TurnKind = (typeof TURN_KINDS)[number];
 
 /**
+ * What the user pointed at when they aimed a turn at part of a spec document
+ * (#666; console ADR-0024).
+ *
+ * It LOCATES; it never carries the selected content. The agent joins the spec
+ * room as a live peer, so between the selection and the turn starting the user
+ * may keep typing and a teammate may edit too — content captured client-side
+ * would be a photograph of a document that has since moved. The agent resolves
+ * these names against the document in its OWN turn snapshot, and says so in its
+ * reply when it cannot find one. That is the designed failure, not an error.
+ */
+export interface TurnAnchor {
+  /** The authored spec file the selection resolves to. One view, one file. */
+  file: string;
+  /** The selected nodes, in document order. */
+  nodes: TurnAnchorNode[];
+}
+
+/** One selected node — the name the agent resolves, and what the transcript shows. */
+export interface TurnAnchorNode {
+  /**
+   * A structured view supplies the node's own name (`POST /rounds`); markdown
+   * has none, so it supplies a bounded excerpt of the block's RENDERED text.
+   * Bounded is the load-bearing part: an excerpt that grows with the selection
+   * is the carried content this shape exists to avoid.
+   */
+  name: string;
+  /** The node's vocabulary word — `paragraph`, `operation`, `external dependency`. */
+  kind: string;
+  /** Where it sits, when the name cannot stand alone: a heading path, a parent. */
+  context?: string;
+}
+
+/**
+ * An anchored turn's aim (#666): what was pointed at, and what for.
+ *
+ * The two travel together or not at all — an intent with nothing to point at
+ * says nothing, and an anchor with no intent leaves the wording undecided.
+ *
+ * `change` rewrites the named nodes in place; `discuss` opens the same
+ * selection as a grilling. They differ ONLY in how the preamble is phrased,
+ * which is why this is a fact on the turn rather than a `/command` the console
+ * prefixes onto the user's own words.
+ */
+export interface TurnAim {
+  anchor: TurnAnchor;
+  intent: TurnAimIntent;
+}
+
+export type TurnAimIntent = "change" | "discuss";
+
+/**
  * A turn's display record (#463): the raw client-sent instruction and the
  * acting user. `author` mirrors the console's live author shape
  * (`{id: email, displayName}`) so a rehydrated row is attributable — and
@@ -444,6 +570,14 @@ export interface TurnJournal {
    * Names only: the journal is a DISPLAY record, and a chip is not a download.
    */
   attachments?: string[];
+  /**
+   * What this message was aimed at (#666). Journaled for the same reason as
+   * attachment names: the console renders it as a tag above the message, and
+   * without the journal a reload would leave "make this shorter" with nothing
+   * saying what "this" was. A record of the words but not the target is not a
+   * record of what happened.
+   */
+  anchor?: TurnAnchor;
 }
 
 /**
@@ -491,6 +625,57 @@ export function isTurnAttachment(v: unknown): v is TurnAttachment {
 /** Runtime guard for an absent-or-valid `attachments` array. */
 export function isTurnAttachmentsOrAbsent(v: unknown): v is TurnAttachment[] | undefined {
   return v === undefined || (Array.isArray(v) && v.every(isTurnAttachment));
+}
+
+/**
+ * Runtime guard for an untrusted `aim` value (#666).
+ *
+ * A malformed anchor is rejected WHOLE rather than partially: an aim naming
+ * fewer nodes than the user selected would send the agent at the wrong scope
+ * quietly, which is worse than a clean 400 the caller can see.
+ */
+/**
+ * The anchor's size ceilings. An anchor LOCATES and never carries content
+ * (console ADR-0024), so every field is bounded — a locator that grows with
+ * the selection is the carried payload the shape exists to avoid, arriving
+ * through a hand-built request instead of the console. `name`'s 200 mirrors
+ * the contract's maxLength; the rest bound what the contract leaves open.
+ */
+export const TURN_AIM_LIMITS = {
+  nodes: 50,
+  file: 512,
+  name: 200,
+  kind: 64,
+  context: 512,
+} as const;
+
+export function isTurnAim(v: unknown): v is TurnAim {
+  if (v === null || typeof v !== "object") return false;
+  const a = v as Record<string, unknown>;
+  if (a.intent !== "change" && a.intent !== "discuss") return false;
+  const anchor = a.anchor;
+  if (anchor === null || typeof anchor !== "object") return false;
+  const { file, nodes } = anchor as Record<string, unknown>;
+  if (typeof file !== "string" || file.trim() === "" || file.length > TURN_AIM_LIMITS.file) {
+    return false;
+  }
+  if (!Array.isArray(nodes) || nodes.length === 0 || nodes.length > TURN_AIM_LIMITS.nodes) {
+    return false;
+  }
+  return nodes.every((n) => {
+    if (n === null || typeof n !== "object") return false;
+    const node = n as Record<string, unknown>;
+    return (
+      typeof node.name === "string" &&
+      node.name.trim() !== "" &&
+      node.name.length <= TURN_AIM_LIMITS.name &&
+      typeof node.kind === "string" &&
+      node.kind.trim() !== "" &&
+      node.kind.length <= TURN_AIM_LIMITS.kind &&
+      (node.context === undefined ||
+        (typeof node.context === "string" && node.context.length <= TURN_AIM_LIMITS.context))
+    );
+  });
 }
 
 /** The milestone a plan turn is scoped to, and which of its stories already have Tasks. */
@@ -737,15 +922,21 @@ export const AGENT_SSE_EVENT_TYPES = [
   "text-delta",
   "tool-input-start",
   "tool-input-delta",
-  // The per-call completion signal, and the ONLY one a consumer can use to tell
-  // that one tool's arguments are fully written: a step may issue several calls,
-  // and every `tool-result` for that step flushes only after its LAST call, so
-  // `tool-result` marks the end of the STEP's work, not of this call's. For a
-  // file tool the arguments are the file body, which makes this the moment the
-  // file is complete. The ordering is pinned by
-  // `services/agents/test/frame-order.test.ts` (it needs the real SDK loop).
+  // The per-call completion signal for one tool's ARGUMENTS: a step may issue
+  // several calls, and this is the frame that says this one's are fully written.
+  // For a file tool the arguments are the file body, which makes it the moment
+  // the file is complete.
   "tool-input-end",
   "tool-call",
+  // The call's VERDICT, and it rides that call's own `tool-call` — a file write
+  // is applied and reported at its own `tool-input-end`
+  // (`services/agents/src/agents/main/tools/write-ledger.ts`), not at the tail
+  // of the step. That matters because the SDK underneath does the opposite: it
+  // queues a step's calls and executes them all after the whole assistant
+  // message has streamed, which for a step batching five `addFile`s would leave
+  // file 1's verdict waiting on file 5's body. Exactly ONE result per call
+  // reaches the wire. The ordering is pinned by
+  // `services/agents/test/frame-order.test.ts` (it needs the real SDK loop).
   "tool-result",
   "tool-error",
   "error",

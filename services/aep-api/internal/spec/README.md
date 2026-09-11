@@ -28,9 +28,10 @@ flowchart LR
 |---|---|---|
 | `genaiturns` | create / get / active / stream turn + get-conversation (the AgentTurn lifecycle) + list/rotate the project's conversation threads (#430) | `.../agents/{cid}/messages`, `.../agents/conversations`, `.../turns/...` |
 | `files` | list / read / apply files over the project workspace | `GET/POST .../files...` |
-| `tags` | list the project's `v<N>` spec version tags | `GET .../tags` |
+| `tags` | list the project's spec version tags, newest first by creation time | `GET .../tags` |
 | `skills` | list / create / update / delete / import / sync / get the org Skill library | `/skills...` |
 | `collab` | the collab session descriptor + the S2S room-access oracle | `.../spec/collab-session`, `GET /collab/validate` |
+| `designdeps` | the two writes into an external dependency's directory: provide its contract (a URL the platform fetches, or the document itself), and record the user's authorization to build on the design agent's assumed contract — before the agent writes it (the resolve flow's card) or after (the definition's acceptance box) | `POST .../dependencies/{name}/contract`, `POST .../dependencies/{name}/assumption` |
 
 *Still flat in the domain root (not carved into finer slices): the artifacts store/versioning machinery,
 the genai turn engine (runner/broker/sweeper), and the files / design / skills services.*
@@ -41,7 +42,7 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 | `Workspace` · `GitOpsService` · `RepoService` | needs | `sourcecontrol` — the gitfs engine hosting all spec + skills git content |
 | `resourceTypeCatalog` (returns `CRTType`) | needs | `dependencies` — the PE-authored CRT markers + declared outputs, projected at the root |
 | `AnthropicKeyResolver` · git-token `Resolver` | needs | `platform/secrets` — per-org keys + sealed git tokens |
-| `ArtifactService` · `ArtifactStore` · `SplitFrontmatter` | offers | `delivery` / `projects` / `dependencies` / `identity` — design reads, spec-save, status snapshots; `identity` reads `roles.json` from the design bundle AT THE TAG being built, never at HEAD |
+| `ArtifactService` · `ArtifactStore` · `SplitFrontmatter` | offers | `delivery` / `projects` / `dependencies` / `identity` — design reads, spec-save, status snapshots; `identity` reads `security.json` from the design bundle AT THE TAG being built, never at HEAD |
 | `HardConfigEdges` | offers | `projects` (deploy order) — which sibling addresses a component cannot start without |
 | `DescriptorWriter` | offers | `projects` — stamps `specs/.agentic-engineer.toml` into a repo at project create |
 | `Kickoff` | offers | `projects` (create) · `spec/files` (references upload) — fires the project's opening `/start` turn |
@@ -51,6 +52,22 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 ## Owns
 - git spec content (`prd.md`, `specs/design/**`), the annotated `v<N>` tag (the version store),
   the org-skills repo, `AgentTurn` (turn lifecycle) + the resumable-turn SSE broker (in-memory seam).
+- **One external dependency, one definition** (ADR-0027). An external dependency lives in
+  `specs/design/dependencies/<name>/` — `dependency.json` (provider, style, config keys, open
+  suggestions, provenance, the user's `assumed` record) beside the committed contract it points at
+  (an OpenAPI/GraphQL slice, an `sdk.json` manifest). A component's `design.json` references it by
+  name only; `AssembleDesign` hydrates every reference from the directory (`dependency_json.go`), so
+  downstream readers keep the flat `Dependency`, and `SplitDesign` writes both halves back. A design
+  from before the directory existed is lifted into one at its next save (the legacy fields on the
+  component are decoded, never re-encoded). `ComputeDependencyStatus` reads the state off the
+  hydrated edge — org/registry → resolved+registered; no provider (the user has not chosen a
+  service; `suggestions` may be open) → needs-input; a style with no contract or manifest on disk
+  → needs-contract; an agent-written
+  contract (`x-aep-assumed: true` in the file) with no acceptance → needs-acceptance; else resolved,
+  flagged assumed / derived (`x-aep-derived: true` — written from the provider's own reference) /
+  sdk-only — and the build gate blocks on nothing else. The write-gates (zod in
+  `@aep/agent-stream`, `agentfold/dependencygate.go`, `designspec` at save) validate the file; the
+  `assumed` record is the one field only the platform writes (`designdeps`).
 - **The Skill library.** One flat authored library at repo-root `skills/`, COPY'd into the image and read
   at runtime from `config.SkillsDir` (default `/app/skills`) — not go:embed'd. A skill dir is `SKILL.md`
   plus the [Agent Skills standard structure](https://agentskills.io/specification) — `scripts/`,
@@ -131,8 +148,20 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   reached through sourcecontrol's `Workspace`/gitfs engine.
 
 ## Invariants — don't break
-- **Single write-authority** over the git spec-content store and its `v<N>` tags — every save/tag/discard
+- **Single write-authority** over the git spec-content store and its version tags — every save/tag/discard
   runs through this domain's gitfs Workspace engine; no other domain writes spec content.
+- **A version carries the name the user gave it** (console ADR-0030, `version_naming.go`). The name is
+  the tag, the milestone title and the `/builds/<name>` address; `v<N>` is only what the build dialog
+  SUGGESTS (`v<count + 1>`, stepped past any taken name). Two consequences: a tag is recognised as a
+  version by its `Spec <name>` annotation subject, never by its name — so a release tag, or a legacy
+  `v<N>-<M>` design tag, is not one — and versions are ORDERED by `TagInfo.CreatedAt`, never by a
+  number parsed out of a name. A supplied name is used verbatim: a collision is `ErrVersionNameTaken`
+  (the build maps it to 409), never a quietly different tag. Only a name the platform itself suggested
+  is recomputed past a racing pusher.
+- **A name labels a snapshot; it does not make one.** `SaveSpec` still compares the whole `specs/` tree
+  with the newest version's and reuses that version when they match — the requested name is ignored on
+  that path, because cutting a second tag over an identical tree would spend a planning turn to change
+  a word. `BuildVersionFacts` reads the same comparison out as the build dialog's change list.
 - **A `/start` turn carries what the agent cannot read for itself, and nothing more.** Two channels,
   both best-effort and both silent when empty: the captured idea (from the dot-led descriptor, which
   every turn snapshot strips) and the reference documents attached at create (paths only). References
@@ -171,6 +200,14 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
     resource that does not exist; a bounded-name test pins it.
   - Fail-closed: a design declaring a platform-resource whose catalog is unreachable returns
     `ErrResourceCatalogUnavailable` (503) rather than silently skipping either derivation.
+  - **Unknown `resourceType` is refused at build claim, not at design save.** After the catalog
+    fetch, a membership pass (`rejectUnknownResourceTypes`) returns `ErrUnknownResourceType`
+    when a `platform-resource` names a CRT that is not installed. Delivery maps that to HTTP 409
+    and cuts no tag — a design/task-breakdown agent inventing a type must not start a Temporal
+    run. An empty or nil catalog (`PLATFORM_RESOURCES_ENABLED=false`) skips membership so the
+    disabled path does not reject every build. Membership is against the live catalog map, never
+    a hardcoded type name (ADR-0007). Wiring derivation still treats an unknown type as "not
+    derivable yet"; the membership pass is a separate gate before persist.
 - The `/collab/validate` oracle recovers the acting org from VERIFIED claims and refuses any room whose
   `spec-<org>-` prefix mismatches — never a hint of whether the room exists. Platform-wide rules (tenant
   gate, secrets fence) → [../../README.md](../../README.md).

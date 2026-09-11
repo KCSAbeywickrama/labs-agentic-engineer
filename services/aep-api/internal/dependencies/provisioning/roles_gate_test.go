@@ -121,6 +121,95 @@ func TestRolesGate_MintsOpenThenClosesWithTheOutcome(t *testing.T) {
 	}
 }
 
+// A RETRIED ProvisionGates MUST NOT FILE A SECOND ROLES TICKET, and this gate is
+// the one where a duplicate does real harm.
+//
+// The gate is closed by the same call that files it, as soon as the accounts are
+// provisioned — so its DedupeKey, which the host resolves against OPEN issues
+// only, could not see the one the previous attempt left behind. The live incident
+// filed eleven, and because the ticket is the channel the test users' logins are
+// published on, each one republished a set of passwords into a new issue.
+func TestRolesGate_ARetryReusesTheTicketItAlreadyClosed(t *testing.T) {
+	roles := &fakeRolesEnsurer{declared: true, outcome: RolesEnsureOutcome{Summary: "- Roles created: Trainer"}}
+	issues := newFakeIssues(nil)
+	svc := newRolesGateService(roles, issues)
+
+	if f := svc.ensureRolesGate(context.Background(), "acme", "workouts", "v1", 7); f != nil {
+		t.Fatalf("first pass: %+v", f)
+	}
+	if len(issues.created) != 1 {
+		t.Fatalf("setup: created %d gates, want 1", len(issues.created))
+	}
+	first := issues.list[0].Number
+	if !strings.EqualFold(issues.list[0].State, "closed") {
+		t.Fatalf("setup: the gate should have been closed by its own pass, state=%q", issues.list[0].State)
+	}
+
+	// The retry.
+	issues.created = nil
+	if f := svc.ensureRolesGate(context.Background(), "acme", "workouts", "v1", 7); f != nil {
+		t.Fatalf("retry: %+v", f)
+	}
+	if len(issues.created) != 0 {
+		t.Fatalf("a retry filed %d more roles tickets — each one republishes the test users' passwords",
+			len(issues.created))
+	}
+	if len(issues.list) != 1 || issues.list[0].Number != first {
+		t.Errorf("the retry must reuse the ticket it already has, issues=%+v", issues.list)
+	}
+}
+
+// The next VERSION still gets its own ticket. Its logins are its own — reusing
+// v1's would publish v2's passwords onto a closed ticket for a version nobody is
+// building, where the validation agent's milestone-scoped query cannot find them.
+func TestRolesGate_ANewVersionFilesItsOwnTicket(t *testing.T) {
+	roles := &fakeRolesEnsurer{declared: true, outcome: RolesEnsureOutcome{}}
+	issues := newFakeIssues(nil)
+	svc := newRolesGateService(roles, issues)
+
+	if f := svc.ensureRolesGate(context.Background(), "acme", "workouts", "v1", 7); f != nil {
+		t.Fatalf("v1: %+v", f)
+	}
+	issues.created = nil
+	if f := svc.ensureRolesGate(context.Background(), "acme", "workouts", "v2", 8); f != nil {
+		t.Fatalf("v2: %+v", f)
+	}
+	if len(issues.created) != 1 {
+		t.Fatalf("v2 must file its own roles ticket, filed %d", len(issues.created))
+	}
+	if got := issues.created[0].DedupeKey; got != "gate:workouts:v2:roles" {
+		t.Errorf("dedupe key = %q, want v2's", got)
+	}
+	if m := issues.created[0].Milestone; m == nil || *m != 8 {
+		t.Errorf("milestone = %v, want v2's (8) — the agent finds this ticket BY milestone", m)
+	}
+}
+
+// A refusal closing comment names the live security document so a human can
+// rename the colliding username where they authored it.
+func TestRolesGate_RefusalClosingCommentNamesSecurityJSON(t *testing.T) {
+	roles := &fakeRolesEnsurer{
+		declared: true,
+		outcome: RolesEnsureOutcome{
+			Summary:  "- Test users refused: jsmith",
+			Refusals: true,
+		},
+	}
+	issues := newFakeIssues(nil)
+
+	if f := newRolesGateService(roles, issues).ensureRolesGate(
+		context.Background(), "acme", "workouts", "v1", 7); f != nil {
+		t.Fatalf("unexpected failure: %+v", f)
+	}
+	var closing string
+	for _, c := range issues.closed {
+		closing = c
+	}
+	if !strings.Contains(closing, "specs/design/security.json") {
+		t.Fatalf("refusal copy should name security.json: %q", closing)
+	}
+}
+
 // A build with no milestone must fail rather than file the ticket outside one:
 // the agent's lookup is label-within-milestone, so an unmilestoned gate is
 // invisible to it, and an unfiltered query answers with another version's
@@ -201,6 +290,9 @@ func TestRolesGate_PublishesEveryLoginInItsOwnComment(t *testing.T) {
 	// list of real people's logins.
 	if !strings.Contains(comment, "disposable test accounts") {
 		t.Errorf("credentials were published with no warning:\n%s", comment)
+	}
+	if !strings.Contains(comment, "specs/design/security.json") {
+		t.Errorf("published copy should name security.json:\n%s", comment)
 	}
 	// Published BEFORE the close, and the close itself carries no password.
 	if len(issues.closed) != 1 {
@@ -539,4 +631,85 @@ func TestRolesGate_LabelsAreAPlatformGateNotADependencyGate(t *testing.T) {
 	if gateDepFromLabels(labels) != "" {
 		t.Errorf("gateDepFromLabels read a dependency out of %v", labels)
 	}
+}
+
+// The published logins name the ISSUER they are valid at.
+//
+// There is one identity provider per environment now, so a username and a
+// password on their own do not say where to sign in — and the same username on
+// another environment is a different account with a different password. An agent
+// handed the table without the address has to guess, and every guess but one is
+// a failed sign-in it will report as a broken application.
+func TestRolesGate_PublishedLoginsNameTheIssuer(t *testing.T) {
+	const issuer = "http://default-idp.amp.localhost:8080"
+	roles := &fakeRolesEnsurer{
+		declared: true,
+		outcome: RolesEnsureOutcome{
+			Summary:     "- Roles created: Trainer",
+			Issuer:      issuer,
+			Environment: "default",
+			Credentials: []RolesCredential{
+				{Username: "test-trainer", Password: "Aep1!gamma-delta_2", Role: "Trainer"},
+			},
+		},
+	}
+	issues := newFakeIssues(nil)
+
+	if f := newRolesGateService(roles, issues).ensureRolesGate(
+		context.Background(), "acme", "workouts", "v1", 7); f != nil {
+		t.Fatalf("unexpected failure: %+v", f)
+	}
+
+	var credentialComment string
+	for _, body := range allComments(issues) {
+		if strings.Contains(body, sourcecontrol.PublishedCredentialsMarker) {
+			credentialComment = body
+		}
+	}
+	if credentialComment == "" {
+		t.Fatal("no credentials comment was posted")
+	}
+	if !strings.Contains(credentialComment, issuer) {
+		t.Fatalf("the published logins do not name the issuer they are valid at:\n%s", credentialComment)
+	}
+	if !strings.Contains(credentialComment, "default") {
+		t.Fatalf("the published logins do not name the environment:\n%s", credentialComment)
+	}
+
+	// The closing comment names it too — that one is the durable record on the
+	// milestone of WHERE this version's roles were created.
+	namedInClose := false
+	for _, body := range issues.closed {
+		if strings.Contains(body, issuer) {
+			namedInClose = true
+		}
+	}
+	if !namedInClose {
+		t.Fatalf("no closing comment names the identity provider: %v", issues.closed)
+	}
+}
+
+// A gate whose ensure could not name an issuer still publishes the table: the
+// accounts exist and the logins work, and withholding them over a missing
+// address would fail a build whose credentials are fine.
+func TestRolesGate_PublishesLoginsEvenWithNoIssuer(t *testing.T) {
+	roles := &fakeRolesEnsurer{
+		declared: true,
+		outcome: RolesEnsureOutcome{
+			Summary:     "- Roles created: Trainer",
+			Credentials: []RolesCredential{{Username: "test-trainer", Password: "Aep1!x", Role: "Trainer"}},
+		},
+	}
+	issues := newFakeIssues(nil)
+
+	if f := newRolesGateService(roles, issues).ensureRolesGate(
+		context.Background(), "acme", "workouts", "v1", 7); f != nil {
+		t.Fatalf("unexpected failure: %+v", f)
+	}
+	for _, body := range allComments(issues) {
+		if strings.Contains(body, sourcecontrol.PublishedCredentialsMarker) {
+			return
+		}
+	}
+	t.Fatal("no credentials comment was posted")
 }

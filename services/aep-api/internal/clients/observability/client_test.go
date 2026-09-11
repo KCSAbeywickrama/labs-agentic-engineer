@@ -91,7 +91,13 @@ func TestGetBuildLogs_UsesTheWorkflowScopeOnTheQueryEndpoint(t *testing.T) {
 }
 
 func TestGetBuildLogs_SinceNarrowsTheWindow(t *testing.T) {
-	since := time.Date(2026, 8, 6, 9, 0, 0, 0, time.UTC)
+	// RELATIVE to now, deliberately. This was a fixed calendar date, and it
+	// worked until real time drifted more than defaultLookback past it — after
+	// which the clamp below took over, startTime stopped being `since`, and the
+	// test failed for a reason that had nothing to do with the code. A date
+	// literal in a test about a rolling window is a time bomb with a fuse the
+	// length of that window.
+	since := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
 	var got capturedQuery
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got = decodeQuery(t, r)
@@ -104,6 +110,44 @@ func TestGetBuildLogs_SinceNarrowsTheWindow(t *testing.T) {
 	}
 	if got.StartTime != since.Format(time.RFC3339) {
 		t.Fatalf("startTime = %q, want %q", got.StartTime, since.Format(time.RFC3339))
+	}
+
+	// A since older than the lookback does not widen the window: the start is
+	// clamped to now-defaultLookback rather than honoured.
+	tooOld := since.Add(-2 * defaultLookback)
+	if _, err := NewClient(srv.URL).GetBuildLogs(context.Background(), "acme", "shop", "web", "run-1", tooOld); err != nil {
+		t.Fatalf("GetBuildLogs: %v", err)
+	}
+	start, err := time.Parse(time.RFC3339, got.StartTime)
+	if err != nil {
+		t.Fatalf("startTime %q is not RFC3339: %v", got.StartTime, err)
+	}
+	if start.Before(tooOld.Add(defaultLookback)) || time.Since(start) > defaultLookback+time.Minute {
+		t.Fatalf("startTime = %q: an over-old since must be clamped to now-%s", got.StartTime, defaultLookback)
+	}
+}
+
+// The other half of the same rule, and the half nothing asserted: a `since`
+// OLDER than the lookback does NOT widen the window. Reading it as given would
+// let one caller ask the observability plane for an unbounded scan.
+func TestGetBuildLogs_SinceOlderThanTheLookbackIsClamped(t *testing.T) {
+	since := time.Now().UTC().Add(-2 * defaultLookback)
+	var got capturedQuery
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = decodeQuery(t, r)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"logs": []interface{}{}, "total": 0})
+	}))
+	defer srv.Close()
+
+	if _, err := NewClient(srv.URL).GetBuildLogs(context.Background(), "acme", "shop", "web", "run-1", since); err != nil {
+		t.Fatalf("GetBuildLogs: %v", err)
+	}
+	start, err := time.Parse(time.RFC3339, got.StartTime)
+	if err != nil {
+		t.Fatalf("startTime %q does not parse: %v", got.StartTime, err)
+	}
+	if !start.After(since) {
+		t.Fatalf("startTime = %q, want the lookback floor — a since older than %s must not widen the window", got.StartTime, defaultLookback)
 	}
 }
 
@@ -133,13 +177,13 @@ func TestQueryComponentLogs_UsesTheComponentScope(t *testing.T) {
 
 	from := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
 	lines, err := NewClient(srv.URL).QueryComponentLogs(context.Background(), ComponentLogQuery{
-		Namespace: "acme", Project: "shop", Component: "shop-ca-abc", Environment: "development",
+		Namespace: "acme", Project: "shop", Component: "shop-ca-abc", Environment: "default",
 		From: from, To: from.Add(time.Hour),
 	})
 	if err != nil {
 		t.Fatalf("QueryComponentLogs: %v", err)
 	}
-	if got.SearchScope.Component != "shop-ca-abc" || got.SearchScope.Environment != "development" {
+	if got.SearchScope.Component != "shop-ca-abc" || got.SearchScope.Environment != "default" {
 		t.Fatalf("unexpected scope: %+v", got.SearchScope)
 	}
 	if got.SearchScope.WorkflowRunName != "" {
@@ -176,7 +220,7 @@ func TestQueryComponentLogs_PagesByAdvancingTheWindow(t *testing.T) {
 
 	from := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
 	lines, err := NewClient(srv.URL).QueryComponentLogs(context.Background(), ComponentLogQuery{
-		Namespace: "acme", Project: "shop", Component: "shop-ca-abc", Environment: "development",
+		Namespace: "acme", Project: "shop", Component: "shop-ca-abc", Environment: "default",
 		From: from, To: from.Add(2 * time.Hour),
 	})
 	if err != nil {

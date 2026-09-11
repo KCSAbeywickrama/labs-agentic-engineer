@@ -52,10 +52,13 @@ type ComponentClient interface {
 	GetComponent(ctx context.Context, orgName, projectName, componentName string) (*gen.Component, error)
 	CreateComponent(ctx context.Context, orgName, projectName string, req *CreateComponentRequest) (*gen.Component, error)
 
-	// EnsureComponentType get-or-creates a namespaced ComponentType. Idempotent
-	// on (orgName, metadata.name): HTTP 409 GETs the existing type and succeeds.
-	// body is the raw CR map (e.g. CodingAgentComponentType()) posted via the
-	// gen client's WithBody path — no typed converter.
+	// EnsureComponentType converges a namespaced ComponentType onto body.
+	// Idempotent on (orgName, metadata.name): HTTP 409 re-reads the existing
+	// type and PUTs body only if the stored spec has drifted from it, so an org
+	// seeded by an older platform build stops validating today's dispatches
+	// against yesterday's schema. body is the raw CR map (e.g.
+	// CodingAgentComponentType()) posted via the gen client's WithBody path —
+	// no typed converter.
 	EnsureComponentType(ctx context.Context, orgName string, body map[string]any) error
 
 	// ListInternalComponents returns the project's aep-internal coding-agent
@@ -152,6 +155,18 @@ type ComponentClient interface {
 	// See TriggerBuild for the `runName` + `secretRef` contracts.
 	TriggerBuildAtCommit(ctx context.Context, orgName, projectName, componentName, commitSHA, secretRef, runName string) (*gen.WorkflowRun, error)
 	ListWorkflowRuns(ctx context.Context, orgName, projectName, componentName string, limit int, cursor string) (*gen.WorkflowRunList, error)
+	// ListBuildRuns is the same read reduced to the facts the milestone loop
+	// decides on: the run's name, whether it is terminal, whether it succeeded,
+	// and the COMMIT it built.
+	//
+	// It exists beside ListWorkflowRuns because the two answer different
+	// audiences. That one returns the served contract model, which the console
+	// renders; this one returns the commit, which the contract does not carry and
+	// which both halves of the loop need — the event plane to count a commit's
+	// attempts, the supervisor to learn which release a component's newest green
+	// build should be serving. Mapping OpenChoreo's condition vocabulary once,
+	// here, is what keeps two adapters from spelling "succeeded" differently.
+	ListBuildRuns(ctx context.Context, orgName, projectName, componentName string) ([]BuildRunSummary, error)
 	// ListProjectWorkflowRuns is the same read widened to every component in
 	// the project — one call instead of one per component. The run read uses it
 	// to derive a cycle's builds from its merge SHA without first having to
@@ -1037,7 +1052,7 @@ func (c *componentClient) ListProjectReleaseBindings(ctx context.Context, orgNam
 			if isInternalComponent(nil, lbls) {
 				continue
 			}
-			out = append(out, releaseBindingSummary(rb))
+			out = append(out, c.releaseBindingSummary(rb))
 		}
 		next := resp.JSON200.Pagination.NextCursor
 		if next == nil || *next == "" {
@@ -1054,9 +1069,15 @@ func (c *componentClient) ListProjectReleaseBindings(ctx context.Context, orgNam
 }
 
 // releaseBindingSummary extracts the deploy-stage facts: identity, undeploy
-// intent, and the aggregate Ready-typed condition (never the last-array-entry
-// heuristic — condition array order is not guaranteed).
-func releaseBindingSummary(rb ocgen.ReleaseBinding) ReleaseBindingSummary {
+// intent, the aggregate Ready-typed condition (never the last-array-entry
+// heuristic — condition array order is not guaranteed), and the public URL the
+// binding advertises.
+//
+// A METHOD for the URL alone: picking between the advertised http and https
+// forms needs the client's scheme preference, and a summary that chose
+// differently from the deployments read would hand two callers two answers
+// about one binding.
+func (c *componentClient) releaseBindingSummary(rb ocgen.ReleaseBinding) ReleaseBindingSummary {
 	s := ReleaseBindingSummary{}
 	var projectName, componentName string
 	if rb.Spec != nil {
@@ -1064,6 +1085,7 @@ func releaseBindingSummary(rb ocgen.ReleaseBinding) ReleaseBindingSummary {
 		componentName = rb.Spec.Owner.ComponentName
 		s.Environment = rb.Spec.Environment
 		s.Undeploy = rb.Spec.State != nil && *rb.Spec.State == ocgen.ReleaseBindingSpecStateUndeploy
+		s.ReleaseName = derefStr(rb.Spec.ReleaseName)
 	}
 	s.ComponentName = FriendlyComponentName(componentName, projectName)
 	if rb.Status != nil && rb.Status.Conditions != nil {
@@ -1071,6 +1093,14 @@ func releaseBindingSummary(rb ocgen.ReleaseBinding) ReleaseBindingSummary {
 			if cond.Type == "Ready" {
 				s.ReadyStatus = string(cond.Status)
 				s.ReadyReason = cond.Reason
+				break
+			}
+		}
+	}
+	if rb.Status != nil && rb.Status.Endpoints != nil {
+		for _, ep := range *rb.Status.Endpoints {
+			if u := publicEndpointURL(ep.ExternalURLs, c.preferPlainHTTP); u != "" {
+				s.ExternalURL = u
 				break
 			}
 		}
@@ -1264,6 +1294,98 @@ func (c *componentClient) ListWorkflowRuns(ctx context.Context, orgName, project
 	scopedComp := ScopedComponentName(projectName, componentName)
 	return c.listWorkflowRunsBySelector(ctx, orgName,
 		fmt.Sprintf("%s=%s", string(LabelKeyComponent), scopedComp), limit, cursor)
+}
+
+// ListBuildRuns lists a component's build WorkflowRuns with the commit each one
+// built, FOLLOWING PAGINATION to the end.
+//
+// Every page, not the first, and that is a correctness requirement rather than
+// thoroughness. The caller picks the newest SUCCEEDED run to decide which
+// release a component should be serving, and this list is paged with Kubernetes
+// continuation tokens: a page is a slice of the collection in the API server's
+// own order, so a newer green run can sit on a later page. Reading one page
+// would then name an older release as the desired one — and the deploy stage
+// would faithfully promote the component BACKWARDS onto it.
+//
+// The cost is bounded by the page size rather than by the component's history
+// being small: one round trip per buildRunPageSize runs, once per version-state
+// read. The re-trigger budget's own read (eventcore) is a different question —
+// it counts attempts at ONE commit, which are always among the newest runs — and
+// it is free to keep taking the first page.
+func (c *componentClient) ListBuildRuns(ctx context.Context, orgName, projectName, componentName string) ([]BuildRunSummary, error) {
+	scopedComp := ScopedComponentName(projectName, componentName)
+	sel := ocgen.LabelSelectorParam(fmt.Sprintf("%s=%s", string(LabelKeyComponent), scopedComp))
+	limit := ocgen.LimitParam(buildRunPageSize)
+	params := &ocgen.ListWorkflowRunsParams{LabelSelector: &sel, Limit: &limit}
+
+	var out []BuildRunSummary
+	for {
+		resp, err := c.oc.ListWorkflowRunsWithResponse(ctx, orgName, params)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list workflow runs: %w", err)
+		}
+		if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
+			return nil, handleErrorResponse(resp.StatusCode(), ErrorResponses{
+				JSON400: resp.JSON400,
+				JSON401: resp.JSON401,
+				JSON403: resp.JSON403,
+				JSON500: resp.JSON500,
+			})
+		}
+		for _, run := range resp.JSON200.Items {
+			model := workflowRunToModel(run)
+			out = append(out, BuildRunSummary{
+				Name:      model.Name,
+				Status:    model.Status,
+				Completed: model.Completed,
+				Succeeded: model.Status == ReasonWorkflowSucceeded,
+				CommitSHA: buildRunCommit(run),
+				StartedAt: derefTime(run.Metadata.CreationTimestamp),
+			})
+		}
+		next := resp.JSON200.Pagination.NextCursor
+		if next == nil || *next == "" {
+			return out, nil
+		}
+		// A non-advancing cursor would spin this loop forever — fail instead,
+		// exactly as the release-binding listing does.
+		if params.Cursor != nil && *next == string(*params.Cursor) {
+			return nil, fmt.Errorf("list workflow runs for %q: pagination did not advance (cursor %q)",
+				componentName, *next)
+		}
+		cur := ocgen.CursorParam(*next)
+		params.Cursor = &cur
+	}
+}
+
+// buildRunPageSize is how many WorkflowRuns one page of the build listing asks
+// for. Large enough that an ordinary component's whole history arrives in a
+// single round trip, small enough that one response stays a sensible size.
+const buildRunPageSize = 100
+
+// buildRunCommit reads back the commit the trigger pinned the run to —
+// `spec.workflow.parameters.repository.revision.commit`, the exact path
+// injectCommitSHA writes.
+//
+// Read from the spec rather than parsed out of the run's NAME, which also
+// embeds a short commit: that name is composed through k8sname.Bounded, which
+// truncates a long readable head and appends a digest, so the commit is not
+// recoverable from it for every project and component. A build triggered
+// without a pinned commit (a manual build of the branch tip) answers "".
+func buildRunCommit(run ocgen.WorkflowRun) string {
+	if run.Spec == nil || run.Spec.Workflow.Parameters == nil {
+		return ""
+	}
+	repo, ok := (*run.Spec.Workflow.Parameters)["repository"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	rev, ok := repo["revision"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	commit, _ := rev["commit"].(string)
+	return commit
 }
 
 func (c *componentClient) ListProjectWorkflowRuns(ctx context.Context, orgName, projectName string, limit int, cursor string) (*gen.WorkflowRunList, error) {

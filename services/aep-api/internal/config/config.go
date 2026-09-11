@@ -108,26 +108,53 @@ type Config struct {
 	BuildAuthRetryBudget int
 
 	// Thunder admin client config for per-org publisher OAuth app lifecycle.
-	// Loaded from env vars
-	// THUNDER_ADMIN_URL / THUNDER_SYSTEM_CLIENT_ID / THUNDER_SYSTEM_CLIENT_SECRET.
+	// Loaded from env vars THUNDER_ADMIN_URL / THUNDER_SYSTEM_CLIENT_ID /
+	// THUNDER_SYSTEM_CLIENT_SECRET / THUNDER_SYSTEM_RESOURCE_IDENTIFIER.
 	// When ClientID is empty the BFF logs a warning and the IDP service
 	// returns ErrIDPThunderUnavailable (non-fatal — protected components
 	// still deploy, just without per-org publishers).
 	ThunderAdmin ThunderAdminConfig
 
-	// APIGatewayHost is host:port of the API Platform gateway runtime — the hop
-	// that terminates authentication for a managed API. Published to a consumer
-	// of a protected sibling as `<DEP>_GATEWAY_URL` so a SPA's nginx can proxy
-	// the browser's /api through it instead of straight at the project Service.
-	// Loaded from API_GATEWAY_HOST. Empty means "use the platform default" —
-	// the constant lives in the projects domain beside the context-path builder
-	// it must agree with, so config carries only the override.
+	// ThunderEnvAdminRoute picks which address admin calls to an ENVIRONMENT's
+	// Thunder go to — the second identity tier, one instance per (org,
+	// environment), whose binding the OpenChoreo Environment records.
+	//
+	//	issuer   the instance's public issuer. The only address that
+	//	         works from the local docker-compose stack, where aep-api runs
+	//	         outside the cluster and the binding's `*.svc.cluster.local`
+	//	         admin URL resolves to nothing.
+	//	binding  the in-cluster Service address the binding records. Right for an
+	//	         aep-api running INSIDE the cluster, where the public hostnames do
+	//	         not resolve from a pod.
+	//
+	// From THUNDER_ENV_ADMIN_ROUTE. Unset, it follows where this process is
+	// running — `binding` in a pod (KUBERNETES_SERVICE_HOST is set), `issuer`
+	// otherwise — because the wrong one of the two reaches nothing at all.
+	// Anything but `binding` reads as `issuer`.
+	ThunderEnvAdminRoute string
+
+	// KubeAPI is the in-cluster (or override) Kubernetes API the Thunder
+	// Application CR GET uses. BaseURL empty ⇒ thunder wait stays unwired
+	// (local compose has no kube API). See KubeAPIConfig.
+	KubeAPI KubeAPIConfig
+
+	// APIGatewayHost is an OVERRIDE for host:port of the API Platform gateway
+	// runtime — the hop that terminates authentication for a managed API.
+	// Published to a consumer of a protected sibling as `<DEP>_GATEWAY_URL` so a
+	// SPA's nginx can proxy the browser's /api through it instead of straight at
+	// the project Service.
+	//
+	// Loaded from API_GATEWAY_HOST. Empty — the normal case — derives the
+	// address per (org, environment): there is one gateway per environment, and
+	// the derivation lives in the projects domain beside the context-path
+	// builder it must agree with (projects.APIGatewayHost). Set, it WINS for
+	// every environment, which only a data plane that names its gateway
+	// differently wants.
 	APIGatewayHost string
 
 	// Platform IDP defaults seeded into organization_idp_profiles rows
 	// on first access. Loaded from PLATFORM_IDP_ISSUER /
-	// PLATFORM_IDP_JWKS_URL — should match the cluster's Thunder
-	// keymanager in gateway-config.yaml.
+	// PLATFORM_IDP_JWKS_URL.
 	PlatformIDP PlatformIDPDefaults
 
 	Observability ObservabilityConfig
@@ -258,12 +285,35 @@ func (c Config) Validate() error {
 // ThunderAdminConfig holds the aep-system-client OAuth2 credentials
 // + base URL the BFF uses to manage Thunder applications (per-org
 // publisher lifecycle). The same Thunder instance that fronts user
-// PKCE login — see deployments/single-cluster/values-thunder.yaml's
-// CONFIDENTIAL_APPS for the row that ships these credentials.
+// PKCE login — see deployments/single-cluster/thunder-resources/
+// 81-aep-system-client.yaml for the document that ships these credentials.
 type ThunderAdminConfig struct {
 	BaseURL      string
 	ClientID     string
 	ClientSecret string
+	// SystemResourceIdentifier is the `resource` indicator every system-token
+	// request carries: the identifier of the identity provider's System
+	// resource server, the one that owns the `system` scope. Empty means
+	// "derive it from the platform IdP's public issuer" (<issuer>/mcp, the
+	// ThunderID convention) — the composition root does that, so a deployment
+	// only sets this when its IdP uses a non-conventional identifier.
+	SystemResourceIdentifier string
+}
+
+// KubeAPIConfig is the Kubernetes API endpoint used to LIST ThunderApplication
+// CRs (plain net/http — not controller-runtime). Resolved at Load:
+//
+//	BaseURL — https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT when
+//	both are set (Helm pods); else optional KUBE_API_BASE_URL.
+//	BearerToken — KUBE_API_BEARER static override (not a rotating SA token).
+//	TokenFile — in-cluster service-account token path when no bearer override;
+//	the client reads the file per request so projected rotations are picked up.
+//	CAFile — in-cluster service-account ca.crt when present.
+type KubeAPIConfig struct {
+	BaseURL     string
+	BearerToken string
+	TokenFile   string
+	CAFile      string
 }
 
 // PlatformIDPDefaults are the issuer + JWKS URL of the cluster's
@@ -303,7 +353,7 @@ type AgentsSvcConfig struct {
 type WorkspaceConfig struct {
 	// Root is the workspace mount root (AEP_WORKSPACE_ROOT). Layout under it:
 	// repos/<orgId>/<projectId>/<repoSlug>/{git,repo.lock,snapshots/<sha>},
-	// trash/<ulid>, tmp/.
+	// trash/<ulid>, tmp/, runs/<orgId>/<cycleId>.
 	Root string
 	// ReapInterval is the background reaper sweep cadence (trash purge,
 	// snapshot age-reap, orphan reconciliation, quota/LRU eviction).
@@ -314,6 +364,17 @@ type WorkspaceConfig struct {
 	// TrashMaxAge — trash/<ulid> entries (phase 1 of the two-phase delete)
 	// older than this are purged.
 	TrashMaxAge time.Duration
+	// RecordingMaxAge — runs/<orgId>/<cycleId> coding-agent feed recordings
+	// older than this are removed by the reaper. Days, not hours: unlike every
+	// other tree on this mount a recording cannot be rebuilt, so the window is
+	// how long a run stays inspectable rather than how long a cache stays warm
+	// (ADR-0027).
+	RecordingMaxAge time.Duration
+	// RecordingMaxBytes caps ONE cycle's recording. Zero — the default — is no
+	// cap: a 55-minute run wrote about 300KB, so this is a safety valve for a
+	// pathological producer, not an operating limit. A run that trips it records
+	// a notice saying so and keeps running without recording.
+	RecordingMaxBytes int64
 	// OrgQuotaBytes is the per-org disk quota before LRU eviction kicks in.
 	OrgQuotaBytes int64
 	// DiskHighPct / DiskLowPct are the statfs water marks (%): usage above

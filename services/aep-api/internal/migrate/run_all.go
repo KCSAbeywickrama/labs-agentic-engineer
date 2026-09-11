@@ -61,6 +61,12 @@ func BaseModels() []any {
 		&sourcecontrol.WebhookDelivery{},
 		&sourcecontrol.WebhookPayload{},
 		&organization.Organization{},
+		// The org's coding-agent runtime and model. A plain two-column settings
+		// table with a text primary key and nothing to encrypt, so AutoMigrate
+		// expresses the whole schema and there is no Step to append: the
+		// credential tables need raw SQL for their expand/verify/contract
+		// history, and this one has none.
+		&organization.OrgCodingAgentSetting{},
 		&delivery.Execution{},
 		&spec.AgentTurn{},
 		&modelcost.ModelRate{},
@@ -196,6 +202,13 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// append-only. The backfill MUST precede the index creation — see
 		// milestone_run_kind.go.
 		ctxStep("milestone_run_kind", RunMilestoneRunKind),
+		// The identity tables move from one cluster-wide directory to one per
+		// (org, environment): new key columns, composite primary keys, and the
+		// platform-IdP era's rows discarded because they name directory objects
+		// on an instance builds no longer provision to. Ordered LAST because the
+		// list is append-only; it depends only on the AutoMigrate above it, which
+		// is where those three tables come from (BaseModels).
+		ctxStep("phase15_identity_per_environment", RunPhase15IdentityPerEnvironment),
 	}
 }
 

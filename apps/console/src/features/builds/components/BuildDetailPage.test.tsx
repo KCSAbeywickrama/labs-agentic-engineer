@@ -18,7 +18,7 @@
 
 // @vitest-environment jsdom
 
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
 
@@ -27,6 +27,7 @@ type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 type RunCycleView = components["schemas"]["RunCycleView"];
 type TaskView = components["schemas"]["TaskView"];
 type DeployStage = components["schemas"]["DeployStage"];
+type CycleBuild = components["schemas"]["CycleBuild"];
 
 // Router stubbed to plain anchors — no RouterProvider needed.
 vi.mock("@tanstack/react-router", () => ({
@@ -61,9 +62,30 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 // The coding agent's stream is its own tested surface and needs a live run to
-// say anything; the build page only decides WHETHER to mount it.
+// say anything; the build page decides WHICH runs to mount it for, in what order,
+// and which one may open a box. Those are attributes rather than rendered text, so
+// the page's WIRING is assertable without a stream.
 vi.mock("./RunFeed", () => ({
-  RunFeed: () => <div>run feed</div>,
+  RunFeed: ({
+    runId,
+    cycleKinds,
+    expandNewest,
+    runNumber,
+  }: {
+    runId: string;
+    cycleKinds?: readonly string[];
+    expandNewest?: boolean;
+    runNumber?: number;
+  }) => (
+    <div
+      data-testid="run-feed"
+      data-run-id={runId}
+      data-expand-newest={String(expandNewest)}
+      data-run-number={String(runNumber)}
+    >
+      {(cycleKinds ?? []).join(",")}
+    </div>
+  ),
 }));
 
 let mockTasks: TaskView[] = [];
@@ -122,6 +144,10 @@ vi.mock("../../spec/api/queries", () => ({
 
 let mockBuilds: BuildSummary[] = [];
 let mockRuns: MilestoneRunView[] = [];
+// The cluster's answer for every cycle this page asks about. One list rather
+// than one per cycle: the page asks about the current session and the merged
+// one, and every test that cares has them be the same session.
+let mockCycleBuilds: CycleBuild[] = [];
 // Which cycle the Build logs section asked the cluster about, in order.
 const cycleBuildsCalls: Array<{ cycleId: string; enabled: boolean }> = [];
 vi.mock("../api/queries", () => ({
@@ -136,7 +162,7 @@ vi.mock("../api/queries", () => ({
   useCycleBuilds: (_p: string, _t: string, cycleId: string, enabled: boolean) => {
     cycleBuildsCalls.push({ cycleId, enabled });
     return {
-      data: [],
+      data: enabled ? mockCycleBuilds : undefined,
       isPending: false,
       isError: false,
       error: null,
@@ -207,6 +233,18 @@ const task = (issueNumber: number, over: Partial<TaskView> = {}): TaskView => ({
 
 const merged = (issueNumber: number) => task(issueNumber, { derivedStatus: "merged" });
 
+const componentBuild = (over: Partial<CycleBuild> = {}): CycleBuild => ({
+  component: "catalog-api",
+  buildName: "catalog-api-build-1",
+  status: "Running",
+  completed: false,
+  attempt: 1,
+  ...over,
+});
+
+const greenBuild = (component: string): CycleBuild =>
+  componentBuild({ component, buildName: `${component}-build-1`, status: "WorkflowSucceeded", completed: true });
+
 const renderPage = () =>
   render(<BuildDetailPage projectName="demo-shop" tag="v2" />);
 
@@ -234,6 +272,7 @@ afterEach(() => {
   mockRuns = [];
   mockTasks = [];
   mockDeploy = undefined;
+  mockCycleBuilds = [];
   mockDesignDeps = [];
   mockReadiness = undefined;
   cycleBuildsCalls.length = 0;
@@ -241,7 +280,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-// ADR-0023 moved the collection of external values off the Build button and
+// ADR-0023 moved the collection of external configuration off the Build button and
 // onto the run. ADR-0021 then made a VERSION's page the place that says why
 // that version is or is not moving, so this is where the section lives.
 describe("BuildDetailPage — external resources", () => {
@@ -252,9 +291,9 @@ describe("BuildDetailPage — external resources", () => {
     renderPage();
 
     expect(screen.getByText("External resources")).toBeInTheDocument();
-    expect(screen.getByText("1 of 1 need values")).toBeInTheDocument();
+    expect(screen.getByText("1 of 1 need configuration")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Configure stripe" }),
+      screen.getByRole("button", { name: "Configure now: stripe" }),
     ).toBeInTheDocument();
 
     // ORDER, not membership. It is outstanding work a person must do, so it is
@@ -307,7 +346,7 @@ describe("BuildDetailPage — the deploy gate's park", () => {
     renderPage();
 
     expect(
-      screen.getByText("Waiting for values: stripe, sendgrid"),
+      screen.getByText("Waiting for configuration: stripe, sendgrid"),
     ).toBeInTheDocument();
     // The promise the reader needs most: there is no restart button to hunt for.
     expect(
@@ -315,7 +354,7 @@ describe("BuildDetailPage — the deploy gate's park", () => {
     ).toBeInTheDocument();
     // On THIS page, deliberately — a route would be a second way into one
     // configuration surface.
-    expect(screen.getByRole("link", { name: "Supply values" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Add configuration" })).toHaveAttribute(
       "href",
       "#external-resources",
     );
@@ -328,7 +367,7 @@ describe("BuildDetailPage — the deploy gate's park", () => {
     mockRuns = [parked()];
     renderPage();
 
-    expect(screen.getByText("Waiting for external values")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for external configuration")).toBeInTheDocument();
   });
 
   // The regression this exists to stop. `BuildSummary` has no waiting reason,
@@ -340,11 +379,11 @@ describe("BuildDetailPage — the deploy gate's park", () => {
     mockRuns = [parked(["stripe"])];
     renderPage();
 
-    expect(screen.getByText("Waiting for values")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for configuration")).toBeInTheDocument();
     expect(screen.queryByText("Running · Coding agent")).not.toBeInTheDocument();
     // And the rollout line must not contradict the notice above it.
     expect(
-      screen.getByText("v2 is built and waiting for its external values."),
+      screen.getByText("v2 is built and waiting for its external configuration."),
     ).toBeInTheDocument();
   });
 
@@ -418,7 +457,7 @@ describe("BuildDetailPage — the Deployments link", () => {
     };
     renderPage();
     expect(deploymentsLink()).toBeInTheDocument();
-    expect(screen.getByText("v2 is live in development.")).toBeInTheDocument();
+    expect(screen.getByText("v2 is live.")).toBeInTheDocument();
   });
 
   it("stays away when there is no run to have merged anything", () => {
@@ -426,6 +465,60 @@ describe("BuildDetailPage — the Deployments link", () => {
     mockRuns = [];
     renderPage();
     expect(deploymentsLink()).toBeNull();
+  });
+});
+
+// The header pill names WHO IS WORKING NOW, not who worked first. A run stays
+// `in_progress` from the agent's first token to the rollout, so a hard-coded
+// "Running · Coding agent" was true for the first of five stages and a lie for
+// the rest — measured on a live run: both components green at 05:50, the header
+// still crediting the coding agent at 05:52, with the Build logs section on the
+// same screen showing them succeeded.
+describe("BuildDetailPage — what the header says is happening", () => {
+  const headerPill = (label: string) => screen.getAllByText(label)[0];
+
+  it("credits the coding agent while the agent is the one working", () => {
+    mockBuilds = [build()];
+    mockRuns = [run({ cycles: [cycle({ prNumber: 0 })] })];
+    renderPage();
+    expect(screen.getByText("Running · Coding agent")).toBeInTheDocument();
+  });
+
+  it("names the platform once the pull request is open", () => {
+    mockBuilds = [build()];
+    mockRuns = [run({ cycles: [cycle({ prNumber: 9 })] })];
+    renderPage();
+    expect(headerPill("Running · Merging the pull request")).toBeInTheDocument();
+    expect(screen.queryByText("Running · Coding agent")).not.toBeInTheDocument();
+  });
+
+  it("names the component builds while they are building", () => {
+    mockBuilds = [build()];
+    mockRuns = [run({ cycles: [cycle({ prNumber: 9, mergeSha: "abc1234" })] })];
+    mockCycleBuilds = [componentBuild(), componentBuild({ component: "web-app" })];
+    renderPage();
+    expect(headerPill("Running · Building components")).toBeInTheDocument();
+    expect(screen.queryByText("Running · Coding agent")).not.toBeInTheDocument();
+  });
+
+  // The exact minute the reported page contradicted itself.
+  it("moves on to the rollout once every component is green", () => {
+    mockBuilds = [build()];
+    mockRuns = [run({ cycles: [cycle({ prNumber: 9, mergeSha: "abc1234" })] })];
+    mockCycleBuilds = [greenBuild("catalog-api"), greenBuild("web-app")];
+    renderPage();
+    expect(headerPill("Deploying to development")).toBeInTheDocument();
+    expect(screen.queryByText("Running · Coding agent")).not.toBeInTheDocument();
+  });
+
+  // A run in its planning phase has no build session, so there is no stage to
+  // name and the header claims no actor at all.
+  it("claims no actor before a build session exists", () => {
+    mockBuilds = [build()];
+    mockRuns = [run({ state: "planning", cycles: [] })];
+    renderPage();
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    expect(screen.queryByText("Running · Coding agent")).not.toBeInTheDocument();
   });
 });
 
@@ -483,12 +576,239 @@ describe("BuildDetailPage — the Duration cell", () => {
   });
 });
 
-describe("BuildDetailPage — the coding agent log's 'streaming' chip", () => {
+// THE CLOCK IS THE PAGE'S, NOT ONE COMPONENT'S.
+//
+// The reported bug: task rows sat at `0m 24s` for two minutes while the summary
+// card's `1m 43s and counting` ticked above them. The ticker was called inside
+// `BuildSummaryCard`, so the forced re-render landed in that subtree only —
+// and `BuildTaskList` is a sibling, formatting its own elapsed time against
+// `Date.now()` with nothing driving it. Polling does not save it: react-query's
+// structural sharing hands back the same objects when a payload has not
+// changed, so a poll on a run that has not transitioned re-renders nothing.
+describe("BuildDetailPage — one clock for the whole page", () => {
+  // An open build session that claims issue 7 and has no pull request yet: the
+  // row is in progress, counting from the session's start.
+  const working = () =>
+    run({
+      cycles: [cycle({ resolves: [7], prNumber: 0, createdAt: "2026-08-14T16:20:00Z" })],
+    });
+
+  it("advances a live task row's elapsed time with no payload change at all", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-14T16:20:24Z"));
+    // The build started earlier than the session, so the card's number and the
+    // row's cannot be mistaken for one another.
+    mockBuilds = [build({ startedAt: "2026-08-14T16:10:00Z", completedAt: null })];
+    mockTasks = [task(7)];
+    mockRuns = [working()];
+    renderPage();
+
+    expect(screen.getByText("0m 24s")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
+    // Not a refetch, not a prop change — the same events the frozen rows saw.
+    expect(screen.getByText("0m 34s")).toBeInTheDocument();
+  });
+
+  it("keeps the row and the card on the same second", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-14T16:21:43Z"));
+    mockBuilds = [build({ startedAt: "2026-08-14T16:20:00Z", completedAt: null })];
+    mockTasks = [task(7)];
+    mockRuns = [working()];
+    renderPage();
+
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    // Both are measured from the same instant against the same clock, so they
+    // read the same span — the card counts the build, the row counts the
+    // session, and here they started together.
+    expect(screen.getAllByText("1m 48s")).toHaveLength(2);
+  });
+
+  // The rows are their OWN reason to run the clock, not a side effect of the
+  // card's. A version can be complete while a later run reworks it — its
+  // duration is frozen and its rows are not.
+  it("counts a live row on a version whose own duration has stopped", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-14T16:20:24Z"));
+    mockBuilds = [
+      build({ status: "completed", completedAt: "2026-08-14T16:18:00Z" }),
+    ];
+    mockTasks = [task(7)];
+    mockRuns = [working()];
+    renderPage();
+
+    expect(screen.getByText("0m 24s")).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(3_000);
+    });
+    expect(screen.getByText("0m 27s")).toBeInTheDocument();
+  });
+
+  // The interval is the page's, but its CONDITION is still what is actually
+  // counting: a settled build with settled rows must not re-render once a
+  // second for a reader with nothing to watch.
+  it("runs no clock when nothing on the page is counting", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-14T16:40:00Z"));
+    mockBuilds = [
+      build({ status: "completed", completedAt: "2026-08-14T16:38:04Z" }),
+    ];
+    mockTasks = [merged(7)];
+    mockRuns = [
+      run({
+        state: "succeeded",
+        cycles: [cycle({ resolves: [7], prNumber: 9, mergeSha: "abc", endedAt: "2026-08-14T16:38:00Z" })],
+      }),
+    ];
+    renderPage();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+// A version is routinely delivered by more than one RUN — the dev run writes it, a
+// validation run finds a defect, a task run repairs it — and each is its own row with
+// its own feed. The page mounted `deliveryRuns[0]` only, so the newest run's log was
+// the only one reachable: testing9231 v1 on the live stack showed a 105-event two-file
+// fix labelled "Cycle 1" and offered no way at all to the 841-event run that wrote the
+// version. The fixtures below are that run list.
+describe("BuildDetailPage — every delivery run's agent log", () => {
+  const feeds = () => screen.getAllByTestId("run-feed");
+  const devRun = () =>
+    run({
+      id: "run-dev",
+      kind: "dev",
+      origin: "spec-build",
+      state: "succeeded",
+      cycles: [cycle({ id: "c1", prNumber: 6, mergeSha: "aaa1111" })],
+    });
+  const validationRun = () =>
+    run({
+      id: "run-validation",
+      kind: "validation",
+      origin: "revalidate",
+      state: "failed",
+      cycles: [cycle({ id: "v1", kind: "validation", prNumber: 8, mergeSha: "bbb2222" })],
+    });
+  const fixRun = () =>
+    run({
+      id: "run-fix",
+      kind: "task",
+      origin: "incident-adoption",
+      state: "succeeded",
+      cycles: [cycle({ id: "c2", prNumber: 13, mergeSha: "ccc3333" })],
+    });
+
+  it("mounts one feed per delivery run, newest first", () => {
+    mockBuilds = [build()];
+    // Newest first, the order list-build-runs answers in.
+    mockRuns = [fixRun(), validationRun(), devRun()];
+    renderPage();
+
+    expect(feeds().map((f) => f.dataset.runId)).toEqual(["run-fix", "run-dev"]);
+  });
+
+  it("numbers the runs from the OLDEST, so the numbers descend down the page", () => {
+    // Every feed numbers its own cycles from 1, so without this the page shows two
+    // boxes both called "Cycle 1". Counted over the runs this section SHOWS: the
+    // validation run has no feed here, so numbering the full list would print
+    // "Run 3" over "Run 1" with no Run 2 anywhere.
+    mockBuilds = [build()];
+    mockRuns = [fixRun(), validationRun(), devRun()];
+    renderPage();
+
+    expect(feeds().map((f) => f.dataset.runNumber)).toEqual(["2", "1"]);
+  });
+
+  it("numbers nothing when one run delivered the version", () => {
+    // `RunFeed` prefixes its heading whenever `runNumber` is defined, so passing
+    // 1 here would relabel the ordinary case's only box from "Cycle 1" to
+    // "Run 1 · Cycle 1" — a number that tells it apart from nothing.
+    mockBuilds = [build()];
+    mockRuns = [devRun()];
+    renderPage();
+
+    expect(feeds()[0]!.dataset.runNumber).toBe("undefined");
+  });
+
+  it("lets only the newest run open a box", () => {
+    // One open log on the page, not one per feed.
+    mockBuilds = [build()];
+    mockRuns = [fixRun(), devRun()];
+    renderPage();
+
+    expect(feeds().map((f) => f.dataset.expandNewest)).toEqual(["true", "false"]);
+  });
+
+  it("captions the earlier runs once, above the second feed", () => {
+    mockBuilds = [build()];
+    mockRuns = [fixRun(), devRun()];
+    renderPage();
+
+    const caption = screen.getByText("EARLIER RUNS OF V2");
+    const [newest, earlier] = feeds();
+    expect(
+      newest!.compareDocumentPosition(caption) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      caption.compareDocumentPosition(earlier!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("draws no caption for a version delivered by one run", () => {
+    // The ordinary case: a caption over a single feed would be a rule with no
+    // boundary under it.
+    mockBuilds = [build()];
+    mockRuns = [devRun()];
+    renderPage();
+
+    expect(feeds()).toHaveLength(1);
+    expect(screen.queryByText(/^EARLIER RUNS OF/)).not.toBeInTheDocument();
+  });
+
+  it("shows each feed only the cycle kinds this surface owns", () => {
+    // A validation run that REPAIRS what it found is a delivery run — kept for its
+    // coding cycles — so without the filter its validation cycle would render here
+    // as well as on the Validation board, which is the disagreement `buildCycles`
+    // and `mergedCycle` already avoid everywhere else on this page.
+    mockBuilds = [build()];
+    mockRuns = [devRun()];
+    renderPage();
+
+    expect(feeds()[0]).toHaveTextContent("coding,fix,conflict");
+  });
+
+  it("leaves out a run that only re-judged the version", () => {
+    // Its verdict lives on the Validation board, which draws its own feed for it.
+    mockBuilds = [build()];
+    mockRuns = [validationRun(), devRun()];
+    renderPage();
+
+    expect(feeds().map((f) => f.dataset.runId)).toEqual(["run-dev"]);
+  });
+
+  it("says nothing was dispatched when no run delivered anything", () => {
+    mockBuilds = [build()];
+    mockRuns = [validationRun()];
+    renderPage();
+
+    expect(screen.queryAllByTestId("run-feed")).toHaveLength(0);
+    expect(
+      screen.getByText(/Nothing has been dispatched for this version yet/),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("BuildDetailPage — the coding agent log's header note", () => {
   it("says streaming while a build session is open", () => {
     mockBuilds = [build()];
     mockRuns = [run({ cycles: [cycle({ endedAt: null })] })];
     renderPage();
-    expect(screen.getByText("streaming")).toBeInTheDocument();
+    expect(screen.getByText("Streaming")).toBeInTheDocument();
   });
 
   it("stops the moment the agent finishes, though the run is still in progress", () => {
@@ -499,7 +819,7 @@ describe("BuildDetailPage — the coding agent log's 'streaming' chip", () => {
       run({ cycles: [cycle({ endedAt: "2026-08-14T16:38:00Z", mergeSha: "abc1234" })] }),
     ];
     renderPage();
-    expect(screen.queryByText("streaming")).not.toBeInTheDocument();
+    expect(screen.queryByText("Streaming")).not.toBeInTheDocument();
   });
 
   it("stays quiet while the run is PARKED, even with a cycle still open", () => {
@@ -515,7 +835,53 @@ describe("BuildDetailPage — the coding agent log's 'streaming' chip", () => {
       }),
     ];
     renderPage();
-    expect(screen.queryByText("streaming")).not.toBeInTheDocument();
+    expect(screen.queryByText("Streaming")).not.toBeInTheDocument();
+  });
+});
+
+// The run's ending labels the SECTION HEADER, beside "Coding agent log", the way
+// every other section on this page carries its status. It used to sit under the
+// log as `run settled — succeeded`: the stream contract's own word for the
+// transition, with the raw state pasted on in its wire spelling.
+describe("BuildDetailPage — the coding agent log's settled label", () => {
+  it("names how the run ended, beside the section title", () => {
+    mockBuilds = [build()];
+    mockRuns = [
+      run({
+        state: "succeeded",
+        cycles: [cycle({ endedAt: "2026-08-14T16:38:00Z" })],
+      }),
+    ];
+    renderPage();
+    expect(screen.getByText("Run finished successfully")).toBeInTheDocument();
+    // The old body line, in either spelling, is gone.
+    expect(screen.queryByText(/settled/)).not.toBeInTheDocument();
+  });
+
+  it("names a cancelled run as cancelled, not as finished", () => {
+    mockBuilds = [build()];
+    mockRuns = [
+      run({ state: "cancelled", cycles: [cycle({ endedAt: "2026-08-14T16:38:00Z" })] }),
+    ];
+    renderPage();
+    expect(screen.getByText("Run cancelled")).toBeInTheDocument();
+  });
+
+  // Live beats settled, and a non-terminal run is labelled by NEITHER: a run
+  // parked at the deploy gate has not ended, and "Run finished" over its log
+  // would contradict the summary card telling the reader it is waiting on them.
+  it("says nothing about a run that has not ended", () => {
+    mockBuilds = [build()];
+    mockRuns = [
+      run({
+        state: "waiting",
+        waitingReason: "external-values",
+        blockingDependencies: ["stripe"],
+        cycles: [cycle({ endedAt: "2026-08-14T16:38:00Z" })],
+      }),
+    ];
+    renderPage();
+    expect(screen.queryByText(/^Run /)).not.toBeInTheDocument();
   });
 });
 
@@ -634,5 +1000,81 @@ describe("BuildDetailPage — the task list's order and its links", () => {
       "href",
       "https://github.com/acme-dev/demo-shop/issues/1",
     );
+  });
+});
+
+// A failed build used to say `Failed · plan-failed` and nothing else; the reason
+// lived in one aep-api log line. The card under the header is where the run
+// explains itself, in the platform's recorded words, with the facts a bug report
+// needs one click away.
+describe("BuildDetailPage — why the run failed", () => {
+  const sendgrid = (over: Partial<components["schemas"]["RunFailure"]> = {}) => ({
+    code: "dependency-unprovisionable" as const,
+    phase: "planning",
+    component: "allocation-api",
+    dependency: "sendgrid",
+    permanent: true,
+    attempts: 1,
+    maxAttempts: 3,
+    firstAt: "2026-08-14T16:20:54Z",
+    lastAt: "2026-08-14T16:20:54Z",
+    detail: 'external resourcetype "sendgrid": at least one config key required',
+    workflowId: "dev-default-demo-shop-2",
+    ...over,
+  });
+
+  it("explains a failed run from its record, and opens the platform's facts on request", () => {
+    mockBuilds = [build({ status: "failed", reason: "plan-failed", failureCode: "dependency-unprovisionable" })];
+    mockRuns = [run({ state: "failed", terminalReason: "plan-failed", cycles: [], failure: sendgrid() })];
+    renderPage();
+
+    expect(screen.getByText("The platform could not provision `sendgrid`")).toBeInTheDocument();
+    expect(screen.getByText(/allocation-api depends on it/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open sendgrid in the design/ })).toBeInTheDocument();
+    // The header chip reads the same words.
+    expect(screen.getAllByText("Failed · Dependency could not be provisioned").length).toBeGreaterThan(0);
+    // The agent log says the agent never started rather than that it wrote nothing.
+    expect(screen.getByText(/Did not start — the run ended while the platform was preparing the version/)).toBeInTheDocument();
+
+    expect(screen.queryByTestId("run-failure-details")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show details" }));
+    const details = screen.getByTestId("run-failure-details");
+    expect(details).toHaveTextContent("dependency-unprovisionable · permanent");
+    expect(details).toHaveTextContent("1 of 3");
+    expect(details).toHaveTextContent("at least one config key required");
+    expect(details).toHaveTextContent("dev-default-demo-shop-2");
+  });
+
+  it("shows a fault being retried in amber while the run is still planning", () => {
+    mockBuilds = [build({ status: "in_progress" })];
+    mockRuns = [
+      run({
+        state: "planning",
+        cycles: [],
+        failure: sendgrid({ code: "dependency-provision-failed", permanent: false, attempts: 2, dependency: "orders-db", component: "api" }),
+      }),
+    ];
+    renderPage();
+
+    expect(screen.getByRole("status", { name: "Build retrying" })).toHaveTextContent(
+      "Provisioning `orders-db` failed — retrying (attempt 2 of 3)",
+    );
+  });
+
+  it("says the platform recorded no details for a run failed before the record existed", () => {
+    mockBuilds = [build({ status: "failed", reason: "plan-failed" })];
+    mockRuns = [run({ state: "failed", terminalReason: "plan-failed", cycles: [] })];
+    renderPage();
+
+    expect(screen.getByText("The build failed while preparing the version")).toBeInTheDocument();
+    expect(screen.getByText(/recorded no further details/)).toBeInTheDocument();
+  });
+
+  it("draws nothing for a cancelled run", () => {
+    mockBuilds = [build({ status: "cancelled" })];
+    mockRuns = [run({ state: "cancelled", cycles: [], failure: sendgrid() })];
+    renderPage();
+
+    expect(screen.queryByRole("status", { name: /Build (failure|retrying)/ })).not.toBeInTheDocument();
   });
 });

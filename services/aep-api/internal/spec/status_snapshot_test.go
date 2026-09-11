@@ -64,20 +64,20 @@ func TestStatusSnapshot_LadderAndDirty(t *testing.T) {
 		t.Fatalf("after spec: %+v, want HasSpec only", snap)
 	}
 
-	// A blank design.md is NOT a design (the ReadDesign gate): presence alone
+	// A blank design.cell is NOT a design (the ReadDesign gate): presence alone
 	// must not flip the flag.
-	r.seed(map[string]string{"specs/design/design.md": "  \n\n"}, "blank design")
+	r.seed(map[string]string{"specs/design/design.cell": "  \n\n"}, "blank design")
 	r.freshen()
 	if snap = r.snapshot(); snap.HasDesign {
-		t.Fatal("blank design.md flagged HasDesign")
+		t.Fatal("blank design.cell flagged HasDesign")
 	}
 
 	// Design + first version tag.
 	r.seed(map[string]string{
-		"specs/design/design.md":                  "# design\n",
+		"specs/design/design.cell":                "# design\n",
 		"specs/design/components/api/design.json": `{"type":"service"}`,
 	}, "design")
-	r.tag("v1", "spec v1")
+	r.tag("v1", specTagSubject+"v1")
 	r.freshen()
 	snap = r.snapshot()
 	if !snap.HasSpec || !snap.HasDesign {
@@ -123,7 +123,7 @@ func TestStatusSnapshot_ServesMirrorWithoutFetch(t *testing.T) {
 
 	// Origin moves out-of-band: new spec content and a version tag.
 	r.seed(map[string]string{"specs/requirements/prd.md": "# req v2\n"}, "oob edit")
-	r.tag("v1", "oob tag")
+	r.tag("v1", specTagSubject+"v1")
 
 	after := r.snapshot()
 	if after.HeadSHA != before.HeadSHA {
@@ -148,12 +148,12 @@ func TestComponentCountAtTag(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, map[string]string{
 		"specs/requirements/prd.md":               "# req\n",
-		"specs/design/design.md":                  "# design\n",
+		"specs/design/design.cell":                "# design\n",
 		"specs/design/components/api/design.json": `{"type":"service"}`,
 		"specs/design/components/web/design.json": `{"type":"webapp"}`,
 	})
 	ctx := context.Background()
-	r.tag("v1", "spec v1")
+	r.tag("v1", specTagSubject+"v1")
 	r.freshen()
 
 	if n, err := r.svc.ComponentCountAtTag(ctx, r.org, r.proj, "v1"); err != nil || n != 2 {
@@ -161,7 +161,7 @@ func TestComponentCountAtTag(t *testing.T) {
 	}
 
 	r.seed(map[string]string{"specs/design/components/db/design.json": `{"type":"database"}`}, "add db")
-	r.tag("v2", "spec v2")
+	r.tag("v2", specTagSubject+"v2")
 	r.freshen()
 
 	if n, err := r.svc.ComponentCountAtTag(ctx, r.org, r.proj, "v2"); err != nil || n != 3 {

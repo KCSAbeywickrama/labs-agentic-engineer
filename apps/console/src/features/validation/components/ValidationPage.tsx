@@ -23,7 +23,6 @@ import {
   Button,
   CircularProgress,
   Stack,
-  Typography,
 } from "@wso2/oxygen-ui";
 import { FileText, ScrollText, X } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "@tanstack/react-router";
@@ -31,16 +30,22 @@ import { Fragment, useMemo, useState } from "react";
 import {
   parseValidationCriteria,
   parseValidationReport,
+  tallyCriterionMethods,
   tallyCriterionStates,
   ValidationView,
+  type CriterionMethodCount,
   type CriterionTally,
+  type ValidationCriteria,
 } from "@aep/ui-validation-view";
 import { PageHeader, type PageHeaderStatus } from "../../../components/PageHeader";
 import type { StatusTone } from "../../../components/StatusChip";
 import { EmptyState } from "../../../components/EmptyState";
 import { GitHubRefChip } from "../../../components/GitHubRefChip";
+import { SectionCaption } from "../../../components/SectionCaption";
 import { useProjectStatus } from "../../projects/api/queries";
 import { useBuildRuns, useCancelRun } from "../../builds/api/queries";
+import { useValidationLive } from "../hooks/useValidationLive";
+import { validationLiveLine } from "../lib/liveLine";
 import { RunFeed } from "../../builds/components/RunFeed";
 import { isTerminalRun } from "../../builds/lib/runView";
 import {
@@ -49,6 +54,7 @@ import {
   type StageTone,
 } from "../../projects/lib/pipeline";
 import { useTask } from "../../tasks/api/queries";
+import { statusLine, type StatusLine } from "../../tasks/lib/statusLine";
 import { useValidationCriteria, useValidationReport } from "../api/queries";
 import {
   answeredRun,
@@ -56,6 +62,8 @@ import {
   lastMergedValidationCycle,
   validatingRun,
 } from "../lib/runs";
+import { ApiRequestError } from "../../../api/errors";
+import { PendingTile } from "./PendingTile";
 import { VerdictTile } from "./VerdictTile";
 
 // Validation lives on the DEPLOYMENT surface because the deployment is what is
@@ -76,16 +84,6 @@ const VALIDATION_CYCLE = ["validation"] as const;
 // value in the enum is a verdict, and a verdict is something the run already reached.
 const VALIDATION_LIFECYCLE_STATES = new Set(["running", "awaiting-fix"]);
 
-// Hoisted rather than written inline: an sx literal is a new object every render,
-// which emotion has to re-serialize each time.
-const CAPTION_SX = {
-  display: "block",
-  mb: 1,
-  fontWeight: 700,
-  letterSpacing: "0.08em",
-  color: "text.secondary",
-} as const;
-
 /**
  * The line over the version's earlier validation runs.
  *
@@ -93,17 +91,9 @@ const CAPTION_SX = {
  * the Builds page draws its own ("EARLIER RUNS OF V1", `RunHistoryList`). That keeps
  * the caption on a boundary this page already owns — between feeds — so no feed has
  * to know what is rendered above it.
- *
- * Local, and matching the Builds page's captions by hand: three copies of this markup
- * now exist, and they should collapse into a shared component once a fourth caller
- * appears rather than dragging two Builds-page files into a validation change.
  */
 function EarlierRunsCaption() {
-  return (
-    <Typography variant="caption" sx={CAPTION_SX}>
-      EARLIER VALIDATION RUNS
-    </Typography>
-  );
+  return <SectionCaption>EARLIER VALIDATION RUNS</SectionCaption>;
 }
 
 // StageTone → StatusTone. The two unions differ only in `ghost`, which the shared
@@ -139,28 +129,48 @@ function headerChip(view: ReturnType<typeof validationView>): PageHeaderStatus |
   };
 }
 
-// The oracle joined with the run's report, as counts. Parsed here rather than
-// reaching into ValidationView's internals: the tile's copy names run concepts
-// (`validation-unreported`, the milestone staying open) that the shared view
-// package knows nothing about, and a second JSON.parse of a few-KB file inside a
-// useMemo is a cheaper price than teaching that package about runs.
+// The authored oracle. Parsed here rather than reaching into ValidationView's
+// internals: the tiles' copy names run concepts (`validation-unreported`, the
+// milestone staying open) that the shared view package knows nothing about, and a
+// second JSON.parse of a few-KB file inside a useMemo is a cheaper price than
+// teaching that package about runs. A parse failure is `undefined` — the view below
+// renders the error; the tiles simply say less.
+function useOracle(criteria: string | undefined): ValidationCriteria | undefined {
+  return useMemo(() => {
+    if (!criteria) return undefined;
+    const parsed = parseValidationCriteria(criteria);
+    return "kind" in parsed ? undefined : parsed;
+  }, [criteria]);
+}
+
+// The oracle joined with the run's report, as counts — what the verdict tile
+// explains once an attempt has answered.
 function useTally(
-  criteria: string | undefined,
+  oracle: ValidationCriteria | undefined,
   report: string | undefined,
 ): CriterionTally | undefined {
   return useMemo(() => {
-    if (!criteria) return undefined;
-    const oracle = parseValidationCriteria(criteria);
-    if ("kind" in oracle) return undefined;
+    if (!oracle) return undefined;
     const parsed = report ? parseValidationReport(report) : undefined;
     const statuses = parsed && !("kind" in parsed) ? parsed : undefined;
     return tallyCriterionStates(oracle, statuses);
-  }, [criteria, report]);
+  }, [oracle, report]);
+}
+
+// The oracle alone, by method — what the pending tile says while the first attempt
+// is still running, when there is no report to count.
+function useMethods(
+  oracle: ValidationCriteria | undefined,
+): CriterionMethodCount[] | undefined {
+  return useMemo(
+    () => (oracle ? tallyCriterionMethods(oracle) : undefined),
+    [oracle],
+  );
 }
 
 /**
  * The Validation page: a read-only report of the deployed system against its
- * acceptance criteria, plus the validation cycle's live log. No writes.
+ * validation criteria, plus the validation cycle's live log. No writes.
  */
 export function ValidationPage({
   projectName,
@@ -279,19 +289,48 @@ export function ValidationPage({
   // that is a clone url. get-task serves this issue even though list-tasks hides it
   // — a detail read by number deliberately skips the population filter — and answers
   // with GitHub's own url. The hook is a no-op while the number is 0.
-  const issue = useTask(projectName, issueNumber);
+  //
+  // VALIDATION itself is running, not merely the loop: under `awaiting-fix` the
+  // cycle in flight is coding, so the issue's newest comment is a finished
+  // attempt's last words. Not `live.active` — that fold is off in the log body.
+  const validating = state === "running";
+  // Polled only while validating: its newest comment is the agent's status line,
+  // and a GitHub-backed read must cost nothing when there is nothing to show.
+  const issue = useTask(projectName, issueNumber, { live: validating });
   const issueUrl = issue.data?.issueUrl;
+  // The issue's own words — durable, so intact for a reader who joins an hour in,
+  // where the progress stream's replay window has dropped the early events. Most
+  // of them are the PLATFORM's, posted from what it watched the run do; the
+  // agent's are the ends and its judgements. Gated here because a comment
+  // outlives its run: ungated, the closing summary sat under a settled verdict
+  // forever.
+  const postedLine = validating && issue.data ? statusLine(issue.data) : null;
 
   // The run reached an ANSWER — which is not the same as "everything passed", and
   // not the same as "there is a report". Hooks stay unconditional; `enabled` gates
   // them.
   const settled = rawVerdict !== "" && rawVerdict !== "skipped";
+  // The version's FIRST attempt, still in flight: the loop says `running` and nothing
+  // has concluded anything yet, so the oracle is the only thing there is to show — and
+  // it is worth showing, because it says what is being checked and what will never be
+  // checked by an agent at all.
+  //
+  // Gates the pending TILE and the reads behind it, NOT the criterion rows: those
+  // take `validating`, because a row's fallback has to know whether ANY attempt is
+  // in flight. Safe for them, because the report outranks that fallback (see
+  // CriterionChip) — a row the report covers keeps its verdict either way, and only
+  // uncovered rows move.
+  const awaitingFirstVerdict = state === "running" && rawVerdict === "";
   // `unreported` MEANS no report was committed at that commit, and the server
   // omits reportPath for it. Requesting the file anyway would 404 to rediscover
   // what the verdict already told us, and land the reader on a vague "wasn't
   // found" note instead of the tile that explains the breach.
   const missingReport = rawVerdict === "unreported";
-  const criteria = useValidationCriteria(projectName, version, settled);
+  const criteria = useValidationCriteria(
+    projectName,
+    version,
+    settled || awaitingFirstVerdict,
+  );
   // Pinned to the merge commit of the attempt that produced it. Reading the branch
   // tip would show whichever run last overwrote the path — so an older run in the
   // story would display the newest run's results, and a run that committed no report
@@ -303,7 +342,16 @@ export function ValidationPage({
     reportPath,
     reportCycle?.mergeSha,
   );
-  const tally = useTally(criteria.data?.content, report.data?.content);
+  const oracle = useOracle(criteria.data?.content);
+  const tally = useTally(oracle, report.data?.content);
+  const methods = useMethods(oracle);
+  // No oracle was ever authored — the Files API's answer for a version whose spec has
+  // no criteria, and the reason its run will settle as `skipped`. Told apart from a
+  // read that merely FAILED by the envelope's `code`, so a 500 or a dropped connection
+  // still offers a retry instead of announcing there is nothing to validate.
+  const criteriaAbsent =
+    criteria.error instanceof ApiRequestError &&
+    criteria.error.code === "not_found";
 
   // The run this page can still cancel: one that is live, AND live because of
   // validation.
@@ -344,6 +392,16 @@ export function ValidationPage({
   const cancelling =
     cancel.isPending || (cancelRequestedFor === liveRun?.id && !cancel.isError);
 
+  // Whether this page has a criteria view to offer at all — which is what the header
+  // toggle switches to, so the two must be gated on one value or "View report" points
+  // at nothing. True for a settled run (its report) and for a first attempt in flight
+  // (the oracle, chipped with what is about to happen to it).
+  //
+  // It stays true when the criteria are ABSENT: the pending tile is then the whole
+  // report body, saying why it is empty, and the header reads the same in both
+  // running shapes rather than losing a button depending on what the spec authored.
+  const canShowReport = settled || awaitingFirstVerdict;
+
   // Body rule: the log shows while there is no report to show at all, or the reader
   // asked for it. Nothing else — a state that forces the log makes the "View report"
   // button inert, because `?view=logs | absent` has no third value for a default to
@@ -353,17 +411,54 @@ export function ValidationPage({
   // predecessor's report is real and is what the reader wants while the fix is being
   // re-checked; that it belongs to the previous attempt is said by the tile, in the
   // sentence and again in the tally.
-  const showLogs = !settled || view === "logs";
+  const showLogs = !canShowReport || view === "logs";
 
-  // The verdict tile stays visible in BOTH bodies — a verdict does not stop being
-  // true because the reader switched to the log. `state` is what it leads with, so
-  // a repair in flight reads as one instead of as a run that stopped.
+  // What the validating run is doing to each criterion right now. Opened only for
+  // the report body: the log body already streams this same run through RunFeed,
+  // and these statuses are rendered on the rows, which that body does not show.
+  //
+  // `liveRun` rather than the run answering for the version — only one run on a
+  // milestone can be live, and a revalidation in flight is a different row from
+  // the one holding the current verdict. The fold itself returns nothing unless
+  // that run's newest validation cycle is still OPEN, so a repair cycle busy
+  // writing code contributes no statuses and the previous report stands.
+  const live = useValidationLive(projectName, liveRun?.id, !showLogs);
+  // Said above the rows, and only in the two windows where the rows say nothing:
+  // before any criterion has been picked up, and after they have all settled but
+  // the report has not landed. Derived from the rows so it cannot contradict them.
+  // Gated on a validation cycle actually being OPEN, not merely on there being no
+  // statuses. Without that, a settled `unreported` verdict (whose report is never
+  // fetched) and a repair cycle busy writing code both look identical to a run
+  // that has not started, and the tile announced "Setting up the test harness…"
+  // over a run that had finished or was doing something else entirely.
+  //
+  // A posted line WINS when there is one. It is strictly better evidence: it comes
+  // from inside the run, it names what is happening rather than inferring it from
+  // which rows have moved, and it survives both a reload and the stream's replay
+  // window. The derived line stays as the fallback for the window before the first
+  // comment lands, and for a run whose posts failed — a `gh` that could not reach
+  // GitHub costs the line, never the run.
+  const liveNote: StatusLine | string =
+    postedLine ??
+    (live.active ? validationLiveLine(oracle, live.statuses, report.data !== undefined) : "");
+
+  // The tile stays visible in BOTH bodies — a verdict does not stop being true
+  // because the reader switched to the log, and neither does an attempt still being
+  // under way. `state` is what the verdict tile leads with, so a repair in flight
+  // reads as one instead of as a run that stopped.
   const tile = settled ? (
     <VerdictTile
       verdict={rawVerdict}
       state={state}
       repairing={repairing}
       {...(tally ? { tally } : {})}
+      {...(liveNote ? { note: liveNote } : {})}
+    />
+  ) : awaitingFirstVerdict ? (
+    <PendingTile
+      noCriteria={criteriaAbsent}
+      {...(methods ? { methods } : {})}
+      {...(liveNote ? { note: liveNote } : {})}
     />
   ) : null;
 
@@ -433,7 +528,7 @@ export function ValidationPage({
               tooltip="Open the validation PR"
             />
           )}
-          {settled &&
+          {canShowReport &&
             (showLogs ? (
               <Button
                 size="small"
@@ -516,7 +611,7 @@ export function ValidationPage({
         {headerWithCancelError}
         <EmptyState
           compact
-          description="Nothing validated yet. After a build, your software is checked against the acceptance criteria in your spec; results appear here."
+          description="Nothing validated yet. After a deployment, the deployed system is checked against the validation criteria in your spec. Results appear here."
         />
       </>
     );
@@ -579,6 +674,11 @@ export function ValidationPage({
         </Fragment>
       ))}
     </Stack>
+  ) : criteriaAbsent ? (
+    // Nothing under the tile, which has already said there are no criteria and is
+    // the whole body here. An empty report frame beneath it would be a heading over
+    // nothing, and the reader's next move — the log — is one button away.
+    null
   ) : criteria.isPending || (!criteria.isError && !criteria.data) ? (
     <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
       <CircularProgress aria-label="Loading validation report" />
@@ -612,8 +712,15 @@ export function ValidationPage({
       <ValidationView
         noPadding
         fullWidth
+        hideDescription
+        // `validating`, not `awaitingFirstVerdict`: a row with no result yet waits
+        // on whichever attempt is in flight, first or repeat. Narrow it to the first
+        // and a criterion authored since the last run reads as out of that run while
+        // the current one is on its way to answering it.
+        awaitingReport={validating}
         criteria={criteria.data.content}
         {...(report.data ? { report: report.data.content } : {})}
+        live={live.statuses}
       />
     </>
   );

@@ -148,8 +148,8 @@ func TestWiring_GateResolutionPostsNothing(t *testing.T) {
 	w := NewResourceWatcher(svc, nil, time.Second)
 	w.now = func() time.Time { return time.Unix(1000, 0).Add(time.Minute) }
 	ready := readyBinding("host", "port")
-	bindings.byName["o-orders-db-development"] = ready
-	bindings.byName["proj-orders-db-development"] = ready
+	bindings.byName["o-orders-db-default"] = ready
+	bindings.byName["proj-orders-db-default"] = ready
 	if err := w.Sweep(context.Background()); err != nil {
 		t.Fatalf("Sweep: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestWiring_ResolvesEveryEndpointKind(t *testing.T) {
 		Dependencies: []spec.Dependency{
 			{Kind: spec.DependencyKindOrgService, Name: "employee-api"},
 			{Kind: spec.DependencyKindComponent, Name: "orders"},
-			{Kind: spec.DependencyKindExternal, Name: "stripe", SpecPath: "dependencies/stripe.openapi.yaml"},
+			{Kind: spec.DependencyKindExternal, Name: "stripe", Provider: "Stripe", Style: spec.DependencyStyleRestAPI, Contract: "openapi.yaml"},
 		},
 	}}
 	providers := siblingResolved()
@@ -353,7 +353,7 @@ func TestWiring_ResolvesEveryEndpointKind(t *testing.T) {
 		"project `hr`, component `hr-employee-api`, endpoint `http`",
 		"list_org_component_endpoints",
 		"### Consumed API contract — orders (local)",
-		"dependencies/stripe.openapi.yaml",
+		"specs/design/dependencies/stripe/openapi.yaml",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("wiring comment missing %q:\n%s", want, body)

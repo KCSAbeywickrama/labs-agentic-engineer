@@ -24,10 +24,13 @@ package codingagent
 //  1. It NEVER reads the ReleaseBinding's Ready condition. OpenChoreo registers
 //     no health check for `batch/v1 Job`, so a binding reports "completed
 //     successfully" over a Job that is still running or has already failed.
-//  2. It NEVER writes an agent log to Postgres. Live logs come from the
-//     OpenChoreo pod-log API and history from the observability plane; the
-//     database is not the log system of record. The one thing it does take out
-//     of the log is the runner's terminal token-usage line.
+//  2. It NEVER writes an agent log to Postgres. What it DOES do is hand each
+//     dispatched cycle to the CycleRecorder, which writes the cycle's feed to
+//     the workspace volume as v2 RunEvents — observability, not a ledger
+//     (ADR-0027) — so a viewer reads a file instead of re-deriving the pod's
+//     log per connection. Postgres is still not the log system of record. The
+//     one thing this watcher takes out of the log itself is the runner's
+//     terminal token-usage line.
 //  3. It NEVER deletes a Component on a natural terminal. Deletion frees the
 //     billing slot but also destroys the archive, so it belongs to the
 //     retention pass (and to cancel), which decide with the whole picture.
@@ -88,6 +91,14 @@ type JobWatcher struct {
 	runtime openchoreo.RuntimeClient
 	cycles  cycleWatchStore
 
+	// recorder owns each dispatched cycle's feed recording. The watcher is its
+	// DISCOVERY, not its clock: it hands over every cycle it sees on its own 30s
+	// tick, and each recording session then paces itself (1s while its pod is
+	// Running). Discovery belongs here because this is already the one pass that
+	// knows which cycles are dispatched and still in the window. nil → nothing is
+	// recorded and every feed reports `none`.
+	recorder *CycleRecorder
+
 	// asService lifts the tick into the service identity — the watcher has no
 	// inbound request to borrow a user token from. nil in tests.
 	asService func(ctx context.Context) context.Context
@@ -98,6 +109,21 @@ type JobWatcher struct {
 	// missing counts CONSECUTIVE not-found reads per cycle id. Any successful
 	// read clears it, so three scattered misses never add up to a verdict.
 	missing map[string]int
+
+	// absent counts CONSECUTIVE snapshots that returned no pod at all, per cycle
+	// id, and seen records that a snapshot once returned the cycle's pod. Both
+	// exist because an empty snapshot is not the same fact as "no pod was ever
+	// scheduled": the resource tree is read through the OpenChoreo API and the
+	// cluster agent, and under load either answers 200 with nothing in it.
+	// Live, that turned a running agent into `startup_failed:no_pod_scheduled`
+	// twenty-four minutes into its cycle; the pull request it merged sixteen
+	// minutes later then belonged to no open cycle, and the run re-dispatched
+	// at its landing deadline. So an empty snapshot after the grace is a verdict
+	// only when it is sustained (missingTicksToFail, the same bar as a 404) and
+	// only for a pod the watcher has never seen — a pod that was seen cannot
+	// retroactively have never been scheduled.
+	absent map[string]int
+	seen   map[string]bool
 
 	once sync.Once
 }
@@ -115,7 +141,15 @@ func NewJobWatcher(runtime openchoreo.RuntimeClient, cycles cycleWatchStore, asS
 		pollInterval: defaultPollInterval,
 		startupGrace: defaultStartupGrace,
 		missing:      map[string]int{},
+		absent:       map[string]int{},
+		seen:         map[string]bool{},
 	}
+}
+
+// WithRecorder attaches the run-feed recorder. Optional. Returns the receiver.
+func (w *JobWatcher) WithRecorder(rec *CycleRecorder) *JobWatcher {
+	w.recorder = rec
+	return w
 }
 
 // WithIntervals overrides the poll cadence and the startup grace. Zero values
@@ -164,15 +198,37 @@ func (w *JobWatcher) Tick(ctx context.Context) {
 			continue
 		}
 		live[cycle.ID] = true
+		// Recording is started BEFORE the classification below, because a cycle
+		// this pass is about to close still has a feed worth keeping — and the
+		// recorder's own terminal handling (a final full read) is what captures
+		// the runner's last words.
+		//
+		// ctx here is the Run loop's context lifted into the service identity, not
+		// a per-tick one: a session outlives the tick that started it, and one
+		// started on a tick-scoped context would be cancelled a moment later and
+		// record exactly one poll.
+		w.recorder.Ensure(ctx, cycle)
 		w.checkCycle(ctx, cycle)
 	}
-	// Drop streaks for cycles that have left the window, so the map cannot grow
-	// with the table.
+	// Drop streaks for cycles that have left the window, so the maps cannot grow
+	// with the table. The recorder's sessions go with them: a cycle out of the
+	// window is one nothing is watching any more.
 	for id := range w.missing {
 		if !live[id] {
 			delete(w.missing, id)
 		}
 	}
+	for id := range w.absent {
+		if !live[id] {
+			delete(w.absent, id)
+		}
+	}
+	for id := range w.seen {
+		if !live[id] {
+			delete(w.seen, id)
+		}
+	}
+	w.recorder.retain(live)
 }
 
 func (w *JobWatcher) checkCycle(ctx context.Context, cycle *delivery.RunCycle) {
@@ -187,6 +243,10 @@ func (w *JobWatcher) checkCycle(ctx context.Context, cycle *delivery.RunCycle) {
 		return
 	}
 	delete(w.missing, cycle.ID)
+	if pod.Found {
+		w.seen[cycle.ID] = true
+		delete(w.absent, cycle.ID)
+	}
 
 	switch ClassifyPod(pod) {
 	case OutcomeSucceeded:
@@ -198,6 +258,19 @@ func (w *JobWatcher) checkCycle(ctx context.Context, cycle *delivery.RunCycle) {
 		w.captureUsage(ctx, cycle, binding, pod)
 		w.failCycle(ctx, cycle, FailureReason(pod))
 	case OutcomePending:
+		if !pod.Found {
+			// See the absent/seen fields: an empty snapshot is evidence only
+			// when sustained, and never about a pod that has been seen.
+			if w.seen[cycle.ID] {
+				slog.WarnContext(ctx, "codingagent.JobWatcher: snapshot returned no pod for a cycle whose pod was seen (transient; no verdict)",
+					"cycle", cycle.ID, "run", cycle.JobRef)
+				return
+			}
+			w.absent[cycle.ID]++
+			if w.absent[cycle.ID] < missingTicksToFail {
+				return
+			}
+		}
 		w.checkStartupGrace(ctx, cycle, binding, pod)
 	case OutcomeRunning:
 		// Nothing to decide; the live tail is what the console wants meanwhile.

@@ -35,7 +35,6 @@ func validSpecSeed() map[string]string {
 	return map[string]string{
 		"specs/requirements/prd.md":                "# PRD\n\n## User Stories\n\n1. As a user, I want the thing, so that value.\n",
 		"specs/design/design.cell":                 "component svc service\n",
-		"specs/design/design.md":                   "# System\n",
 		"specs/design/components/svc/design.md":    "---\ntype: service\n---\n# svc\n",
 		"specs/design/components/svc/design.json":  validComponentDesignJSON("svc"),
 		"specs/design/components/svc/openapi.yaml": "openapi: 3.0.3\n",
@@ -123,8 +122,8 @@ func TestSaveSpec_GateDesignMissing(t *testing.T) {
 
 	_, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{})
 	paths := specErrPaths(t, err)
-	if !containsPath(paths, "specs/design/design.md") {
-		t.Fatalf("validation paths = %v, want specs/design/design.md", paths)
+	if !containsPath(paths, "specs/design/design.cell") {
+		t.Fatalf("validation paths = %v, want specs/design/design.cell", paths)
 	}
 	if got := r.tags(); len(got) != 0 {
 		t.Errorf("tags = %v, want none", got)
@@ -167,12 +166,12 @@ func TestSaveSpec_GateAggregatesRequirementsAndDesign(t *testing.T) {
 	t.Parallel()
 	// Both gates fail at once → ONE SpecValidationError carrying both entries.
 	r := newRig(t, map[string]string{
-		"specs/design/components/svc/design.json": validComponentDesignJSON("svc"), // no root design.md
+		"specs/design/components/svc/design.json": validComponentDesignJSON("svc"), // no root design.cell
 	})
 
 	_, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{})
 	paths := specErrPaths(t, err)
-	if !containsPath(paths, "specs/requirements/prd.md") || !containsPath(paths, "specs/design/design.md") {
+	if !containsPath(paths, "specs/requirements/prd.md") || !containsPath(paths, "specs/design/design.cell") {
 		t.Fatalf("validation paths = %v, want both the requirements and design entries", paths)
 	}
 }
@@ -209,7 +208,7 @@ func TestSaveSpec_DesignOnlyChange_CutsNewTag(t *testing.T) {
 	if _, err := r.svc.SaveSpec(ctx, r.org, r.proj, SaveRequest{}); err != nil {
 		t.Fatalf("first save: %v", err)
 	}
-	r.seed(map[string]string{"specs/design/design.md": "# System — revised\n"}, "design-only edit")
+	r.seed(map[string]string{"specs/design/domain-model.md": "# Domain model — revised\n"}, "design-only edit")
 	head := r.headSHA()
 
 	res, err := r.svc.SaveSpec(ctx, r.org, r.proj, SaveRequest{})
@@ -229,7 +228,7 @@ func TestSaveSpec_DesignOnlyChange_CutsNewTag(t *testing.T) {
 func TestSaveSpec_LegacyDesignTagsExcluded(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, validSpecSeed())
-	r.tag("v1", "spec v1")
+	r.tag("v1", specTagSubject+"v1")
 	r.tag("v1-1", "legacy design rev")
 	r.tag("v1-2", "legacy design rev")
 	r.seed(map[string]string{"specs/requirements/prd.md": "# PRD v2\n\n## User Stories\n\n1. As a user, I want the thing, so that value.\n"}, "spec edit")
@@ -291,7 +290,7 @@ func TestValidateSpecAtTag_InvalidSpecAtTag(t *testing.T) {
 	t.Parallel()
 	// A tag cut externally over a design-less tree fails re-validation.
 	r := newRig(t, map[string]string{"specs/requirements/prd.md": "the spec\n"})
-	r.tag("v1", "external tag over an unbuildable tree")
+	r.tag("v1", specTagSubject+"v1")
 
 	err := r.svc.ValidateSpecAtTag(context.Background(), r.org, r.proj, "v1")
 	var se *SpecValidationError

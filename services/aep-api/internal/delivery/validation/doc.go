@@ -21,7 +21,7 @@
 // ONE issue per VERSION, filed into that version's milestone by the create
 // itself. The milestone is the version pin — there is no version label, and no
 // follow-up patch, so the issue is never versionless. Per version rather than per
-// project because the issue body embeds the acceptance criteria as they stood at
+// project because the issue body embeds the validation criteria as they stood at
 // mint time: reusing the previous version's issue would hand this version's agent
 // the previous version's oracle.
 //
@@ -36,7 +36,7 @@
 // validation-context endpoint before its agent starts.
 //
 // TEST CREDENTIALS do not come from this domain at all. The build provisions the
-// project's test users (the identity domain, from `specs/design/roles.json`) and
+// project's test users (the identity domain, from `specs/design/security.json`) and
 // publishes each account's login as a comment on the ROLES GATE ticket, which is
 // where the agent reads it (ADR-0022). That leaves exactly one published copy of
 // each password, so no two places can disagree about it.

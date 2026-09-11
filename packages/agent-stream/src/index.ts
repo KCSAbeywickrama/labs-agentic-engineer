@@ -37,9 +37,11 @@ export type {
   EditFileInput,
   RemoveFileInput,
   AskQuestionOption,
+  QuestionOptionAction,
   AskQuestionInput,
   AskQuestionsInput,
   QuestionAnswer,
+  DeclarePlanInput,
   LoadSkillInput,
   LoadSkillResult,
   LoadedSkill,
@@ -53,6 +55,10 @@ export type {
   PlanContextFile,
   TurnJournal,
   TurnAttachment,
+  TurnAnchor,
+  TurnAnchorNode,
+  TurnAim,
+  TurnAimIntent,
   WorkspaceRef,
   McpConfig,
   CollabConfig,
@@ -69,7 +75,10 @@ export {
   SURFACES,
   TURN_KINDS,
   ASK_QUESTION_TOOL,
+  isQuestionTool,
+  isErrorToolOutput,
   ASK_QUESTIONS_TOOL,
+  DECLARE_PLAN_TOOL,
   ANSWER_PREFIX,
   ANSWERS_PREFIX,
   buildAnswerInstruction,
@@ -79,20 +88,22 @@ export {
   isTurnSpec,
   isTurnAttachment,
   isTurnAttachmentsOrAbsent,
+  isTurnAim,
+  TURN_AIM_LIMITS,
   isCollabConfig,
 } from "./contracts/sse-events.js";
 export type {
-  RolesDesign,
+  SecurityDesign,
+  ThunderClient,
   RoleDeclaration,
   RolePermission,
   TestUserDeclaration,
-} from "./contracts/roles-design.js";
+} from "./contracts/security-design.js";
 export type {
   ComponentDesign,
   Dependency,
   DependencyKind,
   DependencyStyle,
-  DependencyCandidate,
   ConfigKey,
   ExposesAPI,
 } from "./contracts/component-design.js";
@@ -135,24 +146,52 @@ export {
   COMPONENT_DESIGN_JSON_RE,
 } from "./component-design-schema.js";
 export type { ComponentDesignProblem } from "./component-design-schema.js";
+export { checkDesignDiagram, cellNodeIds, prdActors, DOMAIN_MODEL_PATH } from "./design-diagrams.js";
+export type { DesignDiagramProblem, DiagramBundleReader, CellNodes } from "./design-diagrams.js";
+export { checkComponentDependencies } from "./component-dependencies.js";
+export type { ComponentDependencyProblem } from "./component-dependencies.js";
 
 // --- The agent.afm.md structural write-gate (the ai-agent component kind) ---
 export { checkAgentAfm, splitAfm, type AfmProblem, type AgentAfmFrontMatter } from "./agent-afm-schema.js";
 
-// --- The roles.json write-gate (the structured half of the security design) --
+// --- The dependency.json write-gate (one dependency, one definition) --------
 export {
-  checkRolesDesign,
-  checkRolesReferences,
-  rolesDesignSchema,
-  ROLES_DESIGN_JSON_RE,
+  checkDependencyDesign,
+  preserveAssumption,
+  dependencyDesignSchema,
+  dependencySuggestionSchema,
+  sdkManifestSchema,
+  dependencyDir,
+  dependencyDesignPath,
+  DEPENDENCY_DESIGN_JSON_RE,
+  SDK_MANIFEST_JSON_RE,
+  CONTRACT_FILES_BY_STYLE,
+  SDK_MANIFEST_FILE,
+} from "./dependency-design-schema.js";
+export type { DependencyDesignProblem } from "./dependency-design-schema.js";
+export type {
+  DependencyDesign,
+  DependencySuggestion,
+  DependencySource,
+  DependencyProvenance,
+  DependencyAssumption,
+  SdkManifest,
+} from "./contracts/dependency-design.js";
+
+// --- The security.json write-gate ------------------------------------------
+export {
+  checkSecurityDesign,
+  checkSecurityReferences,
+  securityDesignSchema,
+  SECURITY_DESIGN_JSON_RE,
   TEST_USERNAME_RE,
-} from "./roles-design-schema.js";
-export type { RolesDesignProblem } from "./roles-design-schema.js";
+} from "./security-design-schema.js";
+export type { SecurityDesignProblem } from "./security-design-schema.js";
 
 // --- JSON Schema publication (the BFF validates the same definitions) --------
 export {
   componentDesignJsonSchema,
-  rolesDesignJsonSchema,
+  securityDesignJsonSchema,
   planTaskJsonSchema,
   updateTaskJsonSchema,
   agentAfmJsonSchema,

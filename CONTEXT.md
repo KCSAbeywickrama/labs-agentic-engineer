@@ -153,14 +153,53 @@ _Avoid_: connection (in OpenChoreo that names a consumed endpoint — the
 opposite side of the wire).
 
 **External dependency**:
-**One component's** declared need for a third-party API or SDK — a `kind:
-external` entry in its `design.json` `dependencies[]` (`style: rest-api | sdk`),
-naming the config keys it reads and, for a REST API, an optional `specPath` (a
-URL or a committed spec file) the coding agent starts from (ADR-0010). Resolved
-at read time (ADR-0003), never a stored flag. It **resolves to** an External
-resource: a **Registered External resource**'s exact name when the catalog
-already has a fit, otherwise a new **Project External resource** name.
-_Avoid_: `needsSpec`, `specUrl`, `sources` — retired fields, rejected on parse.
+A project's need for a third-party API or SDK — the *service* the product
+needs, named `<capability>-service` (`currency-service`); the system chosen to
+supply it is its *provider* — defined **once** in its own directory,
+`specs/design/dependencies/<name>/` — `dependency.json` (the
+provider the user chose, `style: rest-api | graphql | sdk`, the config keys
+every consumer codes against, or — while no service is chosen — `suggestions`,
+services commonly used for the capability, named from the design agent's
+knowledge for the user to pick from, never a choice the agent made) beside the
+committed **contract** it points at (an OpenAPI or GraphQL slice, an `sdk.json`
+manifest). A component **references** it by name only, as a `kind: external`
+entry in its `design.json` `dependencies[]`; the platform hydrates the
+reference from the file when it reads the design. Resolved when the contract
+is on disk (read-time, ADR-0003, never a stored flag); a Registered External
+resource is a platform-stamped `source: org` copy of the same shape.
+_Avoid_: `specPath` (a URL was never a contract), `needsSpec`, `specUrl`,
+`sources`, `candidates` (researched fits the agent could not decide between —
+the agent no longer decides at all) — retired fields, rejected on write.
+
+**Given (external service)**:
+A provider requirements records because the business already holds it: a
+Registered External resource of the org (written from the org default, without
+a question) or a service the user already uses or must use ("Payments: Stripe —
+finance has the account"). A given is a settled Product Decision; the design
+turn binds and researches it. A capability with no given stays unnamed in the
+PRD, and the user chooses its service on the dependency's definition.
+_Avoid_: proposal, recommendation (the agent never proposes a provider),
+`*assumed*` on a provider line.
+
+**Derived interface**:
+A dependency's contract the design agent wrote from the provider's own
+developer reference — pages that name every operation the design calls, with
+parameters and responses — because no document is published. The file carries
+`x-aep-derived: true` and every operation an `x-aep-source` page; the
+dependency reads resolved, flagged *derived* wherever it appears, and no
+authorization is asked. Less than that reference (marketing pages, a partial
+one, a third-party tutorial) is an Assumed contract, which asks.
+_Avoid_: assumed (that one asks), reverse-engineered.
+
+**Assumed contract**:
+A dependency's contract the design agent wrote from the provider's
+documentation because no published document could be found or supplied. It
+counts as resolved only under the user's authorization (the `assumed` record
+in `dependency.json`, written by the platform, never by the agent — recorded
+when the user answers *proceed on your assumption* in the resolve flow, or
+from the definition's acceptance box for one nobody authorized) and stays
+flagged wherever the dependency appears until a real contract replaces it.
+_Avoid_: stub, mock (those are code; this is a contract the code is built to).
 
 **External resource**:
 The org-level shared record of one third-party integration — name, description,
@@ -222,23 +261,14 @@ _Avoid_: reviving `callerIdentity` as a design.json key — it no longer parses.
 
 ## Security & access (`services/aep-api`)
 
-**Security architecture**:
-The prose half of a project's security design (`specs/design/security.md`) — how
-a caller's role is resolved from a token, and the policy narrative behind the
-access rules. It names no Role and declares no Test user: the Roles document
-owns both, so the two documents cannot contradict each other.
-_Avoid_: security spec, auth doc; and never restate a fact `design.json` already
-holds (the Thunder application's dependency name, its scopes, and which
-components sit on each side of sign-in are all read from there).
-
-**Roles document**:
-The structured half of a project's security design (`specs/design/roles.json`) —
-which Roles this project uses, what each may do **within this project**, and its
-Test users. A design artifact like any other: authored during design, versioned
-into the project's `v<N>` tag, read at build time by the platform alone. It
-DECLARES Roles rather than owning them; only the permissions it grants them are
-this project's.
-_Avoid_: security.json, access model, permissions file, RBAC config (it is not
+**`security.json`**:
+A project's security design (`specs/design/security.json`) — which Roles this
+project uses, what each may do **within this project**, its Test users, and the
+Thunder application client the platform registers for sign-in. Authored during
+design, versioned into the project's `v<N>` tag. It DECLARES Roles rather than
+owning them; only the permissions it grants them are this project's.
+_Avoid_: Roles document, roles.json, Security document, Security architecture,
+security.md, access model, permissions file, RBAC config (it is not
 enforcement — it is the declaration the platform provisions from and the coding
 agent wires to).
 
@@ -247,7 +277,7 @@ A named group of people on the Platform IdP, reaching an app as a `groups` claim
 A Role is **shared, not project-scoped**: its scope is whatever the IdP's scope
 is — cluster-wide while one IdP serves the cluster, narrower once the IdP is.
 Two projects naming the same Role mean the same Role, and a person who holds it
-holds it everywhere. What a Role may DO is per-project (the Roles document); the
+holds it everywhere. What a Role may DO is per-project (`security.json`); the
 Role itself is not — so a Role OUTLIVES the projects that declare it: dropping it
 from a design, or deleting the project, leaves the Role standing.
 _Avoid_: group (the IdP's word for what a Role is; use Role in the domain),

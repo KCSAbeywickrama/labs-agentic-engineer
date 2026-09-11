@@ -378,8 +378,8 @@ func Test_buildEnvValues_genericEmission(t *testing.T) {
 		if got := calls[0].Configs["redirectUris"]; got != "http://web.local/callback" {
 			t.Errorf("patched redirectUris = %q; want http://web.local/callback (default path)", got)
 		}
-		if calls[0].BindingName != "proj-user-auth-development" {
-			t.Errorf("patched binding = %q; want proj-user-auth-development", calls[0].BindingName)
+		if calls[0].BindingName != "proj-user-auth-default" {
+			t.Errorf("patched binding = %q; want proj-user-auth-default", calls[0].BindingName)
 		}
 	})
 
@@ -394,8 +394,8 @@ func Test_buildEnvValues_genericEmission(t *testing.T) {
 
 		oc := ocResolving(map[string]string{"web": "http://web.local"})
 		rc := rcBindings(map[string]map[string]string{
-			"proj-user-auth-development": authOutputs(),
-			"proj-orders-db-development": {"host": "db.local", "port": "5432"},
+			"proj-user-auth-default": authOutputs(),
+			"proj-orders-db-default": {"host": "db.local", "port": "5432"},
 		}, nil)
 		// thunder-app carries the consumer-URL marker; postgres-cnpg carries none.
 		cat := &fakeCatalog{markers: authMarkers("thunder-app")}
@@ -426,8 +426,8 @@ func Test_buildEnvValues_genericEmission(t *testing.T) {
 		if len(calls) != 1 {
 			t.Fatalf("want exactly 1 patch (annotated dep only); got %d", len(calls))
 		}
-		if calls[0].BindingName != "proj-user-auth-development" {
-			t.Errorf("patched binding = %q; want proj-user-auth-development", calls[0].BindingName)
+		if calls[0].BindingName != "proj-user-auth-default" {
+			t.Errorf("patched binding = %q; want proj-user-auth-default", calls[0].BindingName)
 		}
 	})
 
@@ -721,6 +721,10 @@ func Test_buildEnvValues_defers(t *testing.T) {
 	// chicken-and-egg as hard withheld window._env_ entirely — the bundle threw at
 	// module load and the app served nothing until an out-of-band watcher repaired
 	// it up to ten minutes later.
+	//
+	// FilesForComponent / buildEnvValues stays ready=true with
+	// USER_AUTH_CLIENT_ID even when the SPA origin is absent — the callback wait
+	// is DeploymentState (applyThunderWait), not env-config.
 	t.Run("an unresolved SPA URL still emits the keys the SPA starts with", func(t *testing.T) {
 		t.Parallel()
 		design := readDesign(t, authWebFiles)
@@ -739,6 +743,35 @@ func Test_buildEnvValues_defers(t *testing.T) {
 		}
 		if n := len(rc.PatchBindingEnvironmentConfigsCalls()); n != 0 {
 			t.Errorf("nothing can be registered before the SPA URL resolves; got %d patches", n)
+		}
+	})
+
+	// Sibling of the blank-page pin above: grading the callback hard on
+	// FilesForComponent would fail this — callback wait is DeploymentState.
+	t.Run("FilesForComponent ready stays true without SPA origin — callback wait is DeploymentState", func(t *testing.T) {
+		t.Parallel()
+		oc := ocResolving(map[string]string{"api": "http://api.local"}) // no "web" origin
+		rc := rcOutputs(authOutputs(), nil)
+		cat := &fakeCatalog{markers: authMarkers("thunder-app")}
+		files := map[string]string{
+			spec.DesignRootFile:          rootDesignMd(),
+			"components/web/design.json": webappWithPR("web", []prDep{{"user-auth", "thunder-app"}}, "api"),
+			"components/api/design.json": serviceComponentMd(),
+		}
+		svc := svcWithCatalog(oc, rc, storeWith(files), cat)
+		got, ready, err := svc.FilesForComponent(ctx, "acme", "proj", "web")
+		if err != nil {
+			t.Fatalf("FilesForComponent: %v", err)
+		}
+		if !ready {
+			t.Fatalf("want ready=true with USER_AUTH_CLIENT_ID; callback wait must not gate env-config")
+		}
+		joined := ""
+		for _, f := range got {
+			joined += f.Value
+		}
+		if !strings.Contains(joined, "USER_AUTH_CLIENT_ID") {
+			t.Errorf("want USER_AUTH_CLIENT_ID emitted; content=%q", joined)
 		}
 	})
 

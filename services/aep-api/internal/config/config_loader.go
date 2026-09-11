@@ -19,6 +19,7 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -59,21 +60,28 @@ func Load() (Config, error) {
 		PlaygroundTokenEnabled:    r.readOptionalBool("PLAYGROUND_TOKEN_ENABLED", false),
 		// Default true: core capability, opt-out (unlike other booleans here which are opt-in extras).
 		PlatformResourcesEnabled: r.readOptionalBool("PLATFORM_RESOURCES_ENABLED", true),
-		AutoMergeCodingPRs:        r.readOptionalBool("AUTO_MERGE_CODING_PRS", false),
-		TenantGateMode:            r.readOptionalString("TENANT_GATE_MODE", "enforce"),
-		OAuthStateSigningKey:      r.readOptionalString("OAUTH_STATE_SIGNING_KEY", ""),
-		BFFPublicURL:              r.readOptionalString("BFF_PUBLIC_URL", "http://localhost:8090"),
-		BuildAuthRetryBudget:      r.readOptionalInt("BUILD_AUTH_RETRY_BUDGET", 3),
-		SkillsDir:                 r.readOptionalString("SKILLS_DIR", "/app/skills"),
+		AutoMergeCodingPRs:       r.readOptionalBool("AUTO_MERGE_CODING_PRS", false),
+		TenantGateMode:           r.readOptionalString("TENANT_GATE_MODE", "enforce"),
+		OAuthStateSigningKey:     r.readOptionalString("OAUTH_STATE_SIGNING_KEY", ""),
+		BFFPublicURL:             r.readOptionalString("BFF_PUBLIC_URL", "http://localhost:8090"),
+		BuildAuthRetryBudget:     r.readOptionalInt("BUILD_AUTH_RETRY_BUDGET", 3),
+		SkillsDir:                r.readOptionalString("SKILLS_DIR", "/app/skills"),
 		ThunderAdmin: ThunderAdminConfig{
 			BaseURL:      r.readOptionalString("THUNDER_ADMIN_URL", ""),
 			ClientID:     r.readOptionalString("THUNDER_SYSTEM_CLIENT_ID", "aep-system-client"),
 			ClientSecret: r.readOptionalString("THUNDER_SYSTEM_CLIENT_SECRET", "aep-system-client-secret"),
+			// Empty here; derived from PlatformIDP.Issuer at the composition root.
+			SystemResourceIdentifier: r.readOptionalString("THUNDER_SYSTEM_RESOURCE_IDENTIFIER", ""),
 		},
-		APIGatewayHost: r.readOptionalString("API_GATEWAY_HOST", ""),
+		ThunderEnvAdminRoute: r.thunderEnvAdminRoute(),
+		KubeAPI:              r.kubeAPI(),
+		APIGatewayHost:       r.readOptionalString("API_GATEWAY_HOST", ""),
 		PlatformIDP: PlatformIDPDefaults{
-			Issuer:  r.readOptionalString("PLATFORM_IDP_ISSUER", "http://thunder.openchoreo.localhost:8080"),
-			JWKSURL: r.readOptionalString("PLATFORM_IDP_JWKS_URL", "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/jwks"),
+			Issuer: r.readOptionalString("PLATFORM_IDP_ISSUER", "http://thunder.openchoreo.localhost:8080"),
+			// The platform IdP's in-cluster JWKS. deployments/scripts/env.sh
+			// (THUNDER_INTERNAL_JWKS_URL) is the source of truth for the IdP's
+			// name; this default must agree with it.
+			JWKSURL: r.readOptionalString("PLATFORM_IDP_JWKS_URL", "http://platform-idp-service.platform-idp.svc.cluster.local:8090/oauth2/jwks"),
 		},
 		TaskTokenSigningKey:    r.taskSigningKey(),
 		TaskTokenIssuer:        r.readOptionalString("BFF_TASK_TOKEN_ISSUER", "aep-bff"),
@@ -100,9 +108,14 @@ func Load() (Config, error) {
 			ReapInterval:   r.readOptionalDuration("AEP_WORKSPACE_REAP_INTERVAL", 5*time.Minute),
 			SnapshotMaxAge: r.readOptionalDuration("AEP_WORKSPACE_SNAPSHOT_MAX_AGE", time.Hour),
 			TrashMaxAge:    r.readOptionalDuration("AEP_WORKSPACE_TRASH_MAX_AGE", time.Hour),
-			OrgQuotaBytes:  r.readOptionalInt64("AEP_WORKSPACE_ORG_QUOTA_BYTES", 2147483648), // 2 GiB
-			DiskHighPct:    r.readOptionalInt("AEP_WORKSPACE_DISK_HIGH_PCT", 85),
-			DiskLowPct:     r.readOptionalInt("AEP_WORKSPACE_DISK_LOW_PCT", 70),
+			// 30 days. A recording is the only thing on this mount nothing can
+			// rebuild, so its window is set by how long a run is worth looking at,
+			// not by cache pressure.
+			RecordingMaxAge:   r.readOptionalDuration("AEP_WORKSPACE_RECORDING_MAX_AGE", 720*time.Hour),
+			RecordingMaxBytes: r.readOptionalInt64("AEP_WORKSPACE_RECORDING_MAX_BYTES", 0),
+			OrgQuotaBytes:     r.readOptionalInt64("AEP_WORKSPACE_ORG_QUOTA_BYTES", 2147483648), // 2 GiB
+			DiskHighPct:       r.readOptionalInt("AEP_WORKSPACE_DISK_HIGH_PCT", 85),
+			DiskLowPct:        r.readOptionalInt("AEP_WORKSPACE_DISK_LOW_PCT", 70),
 		},
 		AgentPlatformURL:   r.readOptionalString("AGENT_PLATFORM_URL", ""),
 		AEPInternalBaseURL: r.readOptionalString("AEP_API_INTERNAL_BASE_URL", ""),
@@ -212,6 +225,57 @@ func (r *configReader) taskSigningKey() string {
 		return ""
 	}
 	return string(b)
+}
+
+const (
+	kubeSATokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	kubeSACAPath    = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+)
+
+// thunderEnvAdminRoute picks which address admin calls to an ENVIRONMENT's
+// Thunder go to. The two are not interchangeable and neither works from where
+// the other is right, so the wrong default is a total failure rather than a
+// slower path:
+//
+//	outside the cluster  the binding's `*.svc.cluster.local` admin URL resolves
+//	                     to nothing; only the public issuer reaches the instance
+//	inside the cluster   the public `*.amp.localhost` issuers resolve to nothing
+//	                     from a pod; only the in-cluster Service address does
+//
+// So the default follows where this process is RUNNING, read from the same
+// signal kubeAPI below already trusts for that question — the API server
+// coordinates the kubelet injects into every pod. An explicit
+// THUNDER_ENV_ADMIN_ROUTE always wins, for a deployment that sits on neither
+// side of that line.
+func (r *configReader) thunderEnvAdminRoute() string {
+	inCluster := os.Getenv("KUBERNETES_SERVICE_HOST") != ""
+	if inCluster {
+		return r.readOptionalString("THUNDER_ENV_ADMIN_ROUTE", "binding")
+	}
+	return r.readOptionalString("THUNDER_ENV_ADMIN_ROUTE", "issuer")
+}
+
+// kubeAPI resolves the Kubernetes API endpoint for ThunderApplication CR LISTs.
+// Empty BaseURL is valid (local compose) — Assemble leaves the thunder reader nil.
+func (r *configReader) kubeAPI() KubeAPIConfig {
+	cfg := KubeAPIConfig{}
+	host := os.Getenv("KUBERNETES_SERVICE_HOST")
+	port := os.Getenv("KUBERNETES_SERVICE_PORT")
+	switch {
+	case host != "" && port != "":
+		cfg.BaseURL = "https://" + net.JoinHostPort(host, port)
+	default:
+		cfg.BaseURL = r.readOptionalString("KUBE_API_BASE_URL", "")
+	}
+	if v := os.Getenv("KUBE_API_BEARER"); v != "" {
+		cfg.BearerToken = v
+	} else if _, err := os.Stat(kubeSATokenPath); err == nil {
+		cfg.TokenFile = kubeSATokenPath
+	}
+	if _, err := os.Stat(kubeSACAPath); err == nil {
+		cfg.CAFile = kubeSACAPath
+	}
+	return cfg
 }
 
 func (r *configReader) readRequiredString(key string) string {

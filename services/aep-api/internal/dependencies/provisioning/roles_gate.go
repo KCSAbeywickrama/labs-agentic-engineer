@@ -42,7 +42,7 @@ package provisioning
 // provisioning.
 //
 // **What failure does.** Nothing a coding agent does depends on these existing:
-// it writes role-matching code from `roles.json`, not from live directory state.
+// it writes role-matching code from `security.json`, not from live directory state.
 // The gate earns its keep when the ensure FAILS — if the IdP is down and the
 // roles never appear, a full coding → build → deploy → validate cycle would end
 // in a meaningless verdict, because validation cannot sign in.
@@ -60,6 +60,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -144,7 +145,7 @@ func (s *Service) ensureRolesGate(ctx context.Context, orgID, projectID, tag str
 		return &ProvisionFailure{Dependency: rolesGate, Reason: err.Error()}
 	}
 
-	if perr := s.publishTestUserLogins(ctx, orgID, projectID, number, outcome.Credentials); perr != nil {
+	if perr := s.publishTestUserLogins(ctx, orgID, projectID, number, outcome); perr != nil {
 		return perr
 	}
 
@@ -161,6 +162,35 @@ func (s *Service) ensureRolesGate(ctx context.Context, orgID, projectID, tag str
 			"project", projectID, "tag", tag, "summary", outcome.Summary)
 	}
 	return nil
+}
+
+// existingRolesGate finds this version's roles gate in ANY state, or 0.
+//
+// ANY state is the whole point: an OPEN one would have been caught by the
+// DedupeKey already, and the case that needs catching is the one an earlier
+// attempt of the same activity filed and then closed.
+//
+// A read failure answers 0 and the caller mints. That direction is deliberate:
+// a duplicate ticket is noise a human can see and close, while wrongly believing
+// a ticket exists would leave the accounts provisioned and their logins published
+// nowhere — the silent degradation this gate exists to prevent.
+func (s *Service) existingRolesGate(ctx context.Context, orgID, projectID, tag string) int {
+	want := PlatformGateLabelPrefix + depSlug(rolesGate)
+	issues, err := s.issues.ListIssues(ctx, orgID, projectID, []string{delivery.KindProvision})
+	if err != nil {
+		slog.WarnContext(ctx, "provisioning: list issues for the roles gate failed — minting",
+			"project", projectID, "tag", tag, "error", err)
+		return 0
+	}
+	for _, issue := range issues {
+		if !gateIsForVersion(issue.Labels, tag) {
+			continue
+		}
+		if delivery.HasLabel(issue.Labels, want) {
+			return issue.Number
+		}
+	}
+	return 0
 }
 
 // commentGateFailure records why the ensure could not finish, on the gate that
@@ -181,11 +211,29 @@ func (s *Service) commentGateFailure(ctx context.Context, orgID, projectID strin
 // the issue number and whether this call minted it; a create failure is logged
 // and reported as not-minted, because the ensure itself has already run and a
 // missing audit issue must not fail a build.
+//
+// "Deduped per (project, tag)" used to rest on the DedupeKey alone, and that was
+// not enough. The key is resolved host-side against OPEN issues, and this gate is
+// CLOSED by the same call that files it as soon as the accounts are provisioned
+// — so a retried ProvisionGates filed a fresh one every attempt. That is worse
+// here than for a dependency gate: this ticket is the channel the test users'
+// logins are published on, so each duplicate republished a set of passwords into
+// a new issue.
+//
+// The lookup below is the fix, and it looks for a gate in ANY state carrying this
+// version's label. Finding one it REUSES the number rather than filing again.
 func (s *Service) mintRolesGate(ctx context.Context, orgID, projectID, tag string, milestoneNumber int) (int, bool) {
+	if n := s.existingRolesGate(ctx, orgID, projectID, tag); n > 0 {
+		// Not minted BY THIS CALL, but the caller's question is "is there a ticket
+		// to publish onto", so this answers yes with the one that exists.
+		return n, true
+	}
 	req := sourcecontrol.CreateIssueRequest{
-		Title:  rolesGateTitle,
-		Body:   rolesGatePendingBody(),
-		Labels: platformGateLabels(rolesGate),
+		Title: rolesGateTitle,
+		Body:  rolesGatePendingBody(),
+		// The version rides a label as well as the dedupe key, so the lookup above
+		// can see a gate an earlier attempt filed and closed.
+		Labels: withGateVersion(platformGateLabels(rolesGate), tag),
 		// Same shape as a dependency gate's key, keyed on the gate's name rather
 		// than a dependency's: one roles gate per version, idempotent across a
 		// crashed re-run.
@@ -214,7 +262,8 @@ func (s *Service) mintRolesGate(ctx context.Context, orgID, projectID, tag strin
 	// idempotent, so paying for it on every mint is cheaper than a class of
 	// silent failure. A failure here is logged and tolerated: the labels the
 	// create already carried are the common case, and re-asserting is the belt.
-	if lerr := s.issues.AddLabels(ctx, orgID, projectID, res.Number, platformGateLabels(rolesGate)); lerr != nil {
+	if lerr := s.issues.AddLabels(ctx, orgID, projectID, res.Number,
+		withGateVersion(platformGateLabels(rolesGate), tag)); lerr != nil {
 		slog.WarnContext(ctx, "provisioning: could not re-assert the roles gate labels — the validation agent finds this ticket BY LABEL",
 			"project", projectID, "gate", res.Number, "error", lerr)
 	}
@@ -225,11 +274,12 @@ func (s *Service) mintRolesGate(ctx context.Context, orgID, projectID, tag strin
 // runs — like every other gate, it says what is about to happen.
 func rolesGatePendingBody() string {
 	return "The roles and test users this version's design declares are created on the " +
-		"platform identity provider before validation runs, so a role-gated acceptance " +
-		"criterion is judged against a real sign-in.\n\n" +
+		"identity provider of the environment this version is validated in, before validation " +
+		"runs, so a role-gated acceptance criterion is judged against a real sign-in.\n\n" +
 		"The platform resolves this gate itself — no agent works it. Roles and test users " +
-		"are SHARED across projects: a role another project already uses is reused rather " +
-		"than duplicated, and one the platform did not create is left untouched.\n\n" +
+		"are SHARED across this organisation's projects in that environment: a role another " +
+		"project already uses is reused rather than duplicated, and one the platform did not " +
+		"create is left untouched.\n\n" +
 		"When this gate closes it posts each test user's login as a comment — that comment is " +
 		"where the validation agent reads the credentials it signs in with. The same passwords " +
 		"are readable from the project's **Security → Roles & users** panel."
@@ -241,12 +291,18 @@ func rolesGatePendingBody() string {
 func rolesGateClosingComment(outcome RolesEnsureOutcome) string {
 	var b strings.Builder
 	b.WriteString("Roles and test users provisioned.\n\n")
+	// WHICH identity provider, before what was done to it. There is one per
+	// environment, so "a role called Viewer was created" is only half a fact.
+	if outcome.Issuer != "" {
+		fmt.Fprintf(&b, "On `%s`, the identity provider of the **%s** environment.\n\n",
+			outcome.Issuer, outcome.Environment)
+	}
 	b.WriteString(outcome.Summary)
 	if outcome.Refusals {
 		b.WriteString("\n\nA refusal is not a failure — the build continues — but it needs a " +
 			"human. The platform modifies only accounts it created, so a username that " +
 			"already belongs to somebody else is left untouched rather than adopted and " +
-			"password-reset. Rename it in `specs/design/roles.json`, or let the platform " +
+			"password-reset. Rename it in `specs/design/security.json`, or let the platform " +
 			"supply the name.")
 	}
 	return b.String()
@@ -264,11 +320,12 @@ func rolesGateClosingComment(outcome RolesEnsureOutcome) string {
 //
 // A project with no accounts publishes nothing and that is not a failure — every
 // role it declares is one the platform does not own, which the summary says.
-func (s *Service) publishTestUserLogins(ctx context.Context, orgID, projectID string, number int, creds []RolesCredential) *ProvisionFailure {
+func (s *Service) publishTestUserLogins(ctx context.Context, orgID, projectID string, number int, outcome RolesEnsureOutcome) *ProvisionFailure {
+	creds := outcome.Credentials
 	if len(creds) == 0 {
 		return nil
 	}
-	if err := s.issues.CommentIssue(ctx, orgID, projectID, number, renderTestUserLogins(creds)); err != nil {
+	if err := s.issues.CommentIssue(ctx, orgID, projectID, number, renderTestUserLogins(outcome)); err != nil {
 		// Redacted on both paths: a client error may quote what it sent, and a
 		// password must not reach a log line or a run's failure reason.
 		reason := redactPasswords(err.Error(), creds)
@@ -306,11 +363,18 @@ func redactPasswords(msg string, creds []RolesCredential) string {
 // the marker, then a table whose columns and cold-start values SKILL.md
 // mirrors, then prose saying what these accounts are.
 //
-// No escaping: a username is `[a-z0-9][a-z0-9._-]*` (rolesspec) and a generated
+// It also names the ISSUER. There is one identity provider per environment now,
+// so a username and password on their own do not say where to sign in — and the
+// same username on another environment is a different account with a different
+// password. The agent reading this comment needs the address as much as the
+// credential.
+//
+// No escaping: a username is `[a-z0-9][a-z0-9._-]*` (securityspec) and a generated
 // password is drawn from an alphabet that excludes the backtick and the pipe, so
 // neither can break out of its cell. The identity domain's
 // TestGeneratedPasswordCarriesNoMarkdownDelimiter pins the password half.
-func renderTestUserLogins(creds []RolesCredential) string {
+func renderTestUserLogins(outcome RolesEnsureOutcome) string {
+	creds := outcome.Credentials
 	if len(creds) == 0 {
 		return ""
 	}
@@ -332,11 +396,17 @@ func renderTestUserLogins(creds []RolesCredential) string {
 		}
 		fmt.Fprintf(&b, "| `%s` | %s | %s | %s |\n", c.Username, password, c.Role, coldStart)
 	}
+	if outcome.Issuer != "" {
+		fmt.Fprintf(&b, "\nSign in at `%s` — the identity provider of the **%s** environment. "+
+			"These logins are valid there and NOWHERE else: every environment has its own "+
+			"identity provider, and the same username on another one is a different account.\n",
+			outcome.Issuer, outcome.Environment)
+	}
 	b.WriteString("\n**These are disposable test accounts for automated agents, not people.** " +
 		"The validation agent signs in as one to judge a role-gated acceptance criterion, and it " +
 		"reads these credentials from this comment. They hold nothing but this project's own " +
 		"application roles. Never put a real person's username in " +
-		"`specs/design/roles.json` — the platform refuses to touch an account it did not create, " +
+		"`specs/design/security.json` — the platform refuses to touch an account it did not create, " +
 		"so that produces a role with no working login rather than a password reset.\n\n" +
 		"The **cold start** account is the one a caller holds before anyone grants them a role; " +
 		"it answers a request that names no role.")

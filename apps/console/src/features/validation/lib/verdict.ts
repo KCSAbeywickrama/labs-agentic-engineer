@@ -229,11 +229,24 @@ export function verdictSentence(
       // deployment's verdict: validating." — the very thing sharing this copy was
       // meant to stop. `awaiting-fix` cannot reach here; it requires a fatal verdict.
       //
-      // Says what there is to SEE rather than what is happening: the rail's stage
-      // note beside it already says the deployed system is being checked, and two
-      // adjacent elements saying that is a restatement.
-      return state === "running"
-        ? "Nothing reported yet — the validation attempt is still running."
-        : "";
+      // Names the ACTOR and nothing else. There is no evidence to summarise yet, so
+      // the sentence's only job is to say who the reader is waiting on; the stage
+      // note beside it carries the progress, and the counts line stays empty until
+      // an attempt reports.
+      if (state === "running") {
+        return "The validation agent is running.";
+      }
+      // `cancelled` is the other lifecycle value with no verdict, and it needs a
+      // sentence for the same reason: it is the ABSENCE of one, so falling through
+      // prints "This deployment's verdict: validation cancelled." `skipped` may be
+      // named that way and this may not — skipped IS a verdict.
+      //
+      // Names the CONSEQUENCE and the recourse rather than the event, on the same
+      // no-restatement rule: the stage note beside it already says validation was
+      // cancelled and the version was never checked.
+      if (state === "cancelled") {
+        return "This version has no verdict — run validation again when you want one.";
+      }
+      return "";
   }
 }

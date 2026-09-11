@@ -175,7 +175,11 @@ type BuildSummary struct {
 	Status          string `json:"status" enum:"started,in_progress,completed,failed"`
 	// Reason is the run's terminal reason for a failed version (empty
 	// otherwise), surfaced beside the Failed badge in the console.
-	Reason      string     `json:"reason,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	// FailureCode is the failure class (delivery.RunFailure.Code) of a failed
+	// version when the platform recorded one — finer than Reason, which names
+	// the phase. Empty otherwise.
+	FailureCode string     `json:"failureCode,omitempty"`
 	StartedAt   time.Time  `json:"startedAt"`
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
 	// WaitingReason says WHY an in-progress version is waiting rather than
@@ -200,7 +204,8 @@ type BuildList struct {
 // ErrBuildAlreadyRunning is treated as success (nil). Any other failure
 // propagates so the caller logs it and the reconcile sweep heals later.
 func (s *Service) StartProjectBuild(ctx context.Context, orgID, projectID string) error {
-	_, failures, err := s.Run(ctx, orgID, projectID, nil)
+	// No name: a build the platform starts for itself takes the suggestion.
+	_, failures, err := s.Run(ctx, orgID, projectID, nil, "")
 	if err != nil {
 		if errors.Is(err, ErrBuildAlreadyRunning) {
 			return nil
@@ -226,7 +231,7 @@ func (s *Service) StartProjectBuild(ctx context.Context, orgID, projectID string
 // The dependency hard gate (dependencyGateFailures) runs after the pre-tag
 // inputs are applied but before the tag is cut — see the inline comment at
 // its call site for why that ordering matters.
-func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []BuildInputItem) (string, []InputFailure, error) {
+func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []BuildInputItem, version string) (string, []InputFailure, error) {
 	// One live DEV RUN per project — the milestone model's mutex (§5). The
 	// partial unique index behind TryAdmit is the authority; this read is what
 	// turns the race into a conflict that names itself, and it runs BEFORE the
@@ -287,26 +292,20 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 	// The whole-spec hard gate runs INSIDE TagSpec, before the tag is cut —
 	// the returned tag always names a validated requirements+design pair. An
 	// unchanged spec returns the existing tag; the workflow still (re)runs.
-	res, err := s.tagger.TagSpec(ctx, orgID, projectID)
+	res, err := s.tagger.TagSpec(ctx, orgID, projectID, version)
 	if err != nil {
 		return "", nil, mapTagError(err)
 	}
-	// THE SPEC-SAVE STATUS IS THE WHOLE BRANCH, and there is no second question
-	// asked anywhere — in particular not "was the last run cancelled".
+	// THE SPEC-SAVE STATUS PICKS THE BRANCH:
 	//
 	//	approved  → a new tag. The ordinary path: supersede the predecessor, mint
 	//	            this version's milestone, plan it fresh.
 	//	unchanged → the SAME tag, so the same milestone. Reopen it and exactly the
-	//	            issues a cancel closed inside it, and DO NOT re-plan — plan
-	//	            dedupe is the title slug against the milestone's issues in any
-	//	            state, so a re-plan over a milestone whose issues were all
-	//	            closed would mint nothing and the run would settle an unbuilt
-	//	            version as delivered.
+	//	            issues a cancel closed inside it.
 	//
 	// A version nobody cancelled takes the same branch and reopens nothing, which
-	// is correct: rebuilding a delivered version re-derives no plan either way,
-	// and this spares it the LLM turn that used to mint nothing.
-	rebuild := res.Status == spec.SpecSaveUnchanged
+	// is correct: rebuilding a delivered version re-derives no plan either way.
+	unchanged := res.Status == spec.SpecSaveUnchanged
 
 	// The milestone plan path (§5). Its synchronous half claims the version —
 	// supersede the previous milestone, mint `v<N>`, admit the run row that IS
@@ -330,8 +329,22 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 		// AFTER the admission, so a click the mutex refused reopens nothing: the
 		// winner is the run that will work this milestone, and two entrants both
 		// reopening it would race one another's writes.
-		if rebuild {
-			s.reopenIncrement(ctx, orgID, projectID, run.MilestoneNumber)
+		//
+		// WHETHER THE RUN SKIPS PLANNING IS A SECOND QUESTION, and asking it of the
+		// milestone rather than of the spec status is the whole point. `rebuild`
+		// means "this milestone is already filled, so re-planning it would mint
+		// nothing" — and an unchanged spec is NOT evidence of that. A run that died
+		// in its planning phase (`plan-failed`, or a cancel that landed before the
+		// planning turn) leaves the milestone holding its gates and no work at all;
+		// skipping the plan there hands the loop an empty working set, which it
+		// reads as "planning produced nothing to work" and settles the version
+		// SUCCEEDED having built none of it (see run.onEmptyWorkingSet).
+		//
+		// So the milestone answers. reopenIncrement already holds its whole issue
+		// list, and reports whether any planned work is in it.
+		rebuild := false
+		if unchanged {
+			rebuild = s.reopenIncrement(ctx, orgID, projectID, run.MilestoneNumber)
 		}
 		// Synchronous, and fast: this hands the version to the supervisor, which
 		// then fills the milestone as its own first phase. The click used to run
@@ -349,16 +362,19 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 	}
 
 	slog.InfoContext(ctx, "build started",
-		"org", orgID, "project", projectID, "tag", res.Tag, "specStatus", res.Status, "rebuild", rebuild)
+		"org", orgID, "project", projectID, "tag", res.Tag, "specStatus", res.Status, "unchanged", unchanged)
 	return res.Tag, nil, nil
 }
 
 // mapPreTagError maps the coordinator's pre-tag failures onto the edge
 // vocabulary: an end-user-auth conflict is a 409 (the design self-contradicts),
-// an unreachable CRT catalog is a retryable 503, anything else a 500.
+// an unknown resourceType is a 409 (unsatisfiable on this cluster), an
+// unreachable CRT catalog is a retryable 503, anything else a 500.
 func mapPreTagError(err error) error {
 	switch {
 	case errors.Is(err, ErrEndUserAuthConflict):
+		return &EdgeError{Status: 409, Message: err.Error()}
+	case errors.Is(err, ErrUnknownResourceType):
 		return &EdgeError{Status: 409, Message: err.Error()}
 	case errors.Is(err, ErrResourceCatalogUnavailable):
 		return &EdgeError{Status: 503, Message: err.Error()}
@@ -386,6 +402,13 @@ func mapTagError(err error) error {
 		return &EdgeError{Status: 404, Message: "project repository not found"}
 	case errors.Is(err, sourcecontrol.ErrRepoNotReady):
 		return &EdgeError{Status: 409, Message: "project repository is not ready yet"}
+	// The name the user typed is theirs, so neither of these is repaired into a
+	// different one: taken is a conflict, malformed is a bad request, and both
+	// say which name so the field can point at itself.
+	case errors.Is(err, spec.ErrVersionNameTaken):
+		return &EdgeError{Status: 409, Message: err.Error()}
+	case errors.Is(err, spec.ErrVersionNameInvalid):
+		return &EdgeError{Status: 400, Message: err.Error()}
 	default:
 		return &EdgeError{Status: 500, Message: "tag spec: " + err.Error()}
 	}

@@ -44,7 +44,7 @@ three services are sub-package slices that import only that root.
 | Slice | Ops / role | Reaches |
 |---|---|---|
 | `provisioning` | 9 HTTP ops: list/delete/collect-values external resources, list-workload-dependencies, project readiness, provision-platform, dependency-status, request/list org-service access + the `provision` gate lifecycle, watcher, teardown | root cores; delivery (provision execution rows); sourcecontrol (gate issues); `WorkloadDepSource` (deployed Workload consumer refs) |
-| `mcpdiscovery` | the MCP discovery server (including `list_roles`, the design-time role catalog) + `ListPlatformResourceTypes` and `ListOrgEndpoints` HTTP reads; `list_external_resources` is RT-backed (Registered at register Ensure and Project Externals with an authored RT), not provisioned-only | root `ResourceTypeLister` / external RT catalog / endpoint catalog |
+| `mcpdiscovery` | the MCP discovery server (including `list_roles`, the design-time role catalog, and `slice_openapi_spec`, which cuts the operations a design uses from a provider's whole document — fetched outside the model's context — with the provenance the dependency file records) + `ListPlatformResourceTypes` and `ListOrgEndpoints` HTTP reads; `list_external_resources` is RT-backed (Registered at register Ensure and Project Externals with an authored RT), not provisioned-only | root `ResourceTypeLister` / external RT catalog / endpoint catalog |
 | `runtimeconfig` | the SPA `env-config.js` convergence service + its watcher (no HTTP op) | root naming/markers; spec (design at HEAD); repositories (execution enumerate) |
 
 Each slice owns its service AND its HTTP handler (as delivery's `build` slice does); `httpapi` aggregates
@@ -63,6 +63,8 @@ slices.
 | OrgResourceDocs | needs | `sourcecontrol` — the first file row on register/update mints the per-org `org-resource-docs` GitHub repo (sentinel project `_resource-docs`) via `EnsureBareRepo` + `Workspace.Mutate`; URL-only and keep-path rows never mint |
 | ProviderResolver (endpoint targets) | needs | root `Catalog` — any-visibility provider lookup for an access request, namespace/project-visible resolves for the wiring block |
 | DesignReader / DesignBundleReader | needs | `spec` — design at HEAD (what to provision) + provider design bundles |
+| ResourceMarkerCatalog | needs | root `ResourceTypeCatalog.MarkersByName` — CRT `end-user-auth` marker lookup for thunder overlay at platform-resource create. Nil skips overlay |
+| SecurityJSONReader | needs | `spec.ArtifactService` — `security.json` bytes at HEAD (empty tag) or a `v<N>` spec tag (`GetDesignAtSpecTag`). Absent file is no overlay; parse of a present file is provisioning's job |
 | RolesEnsurer | needs | `identity` — the build-time roles ensure. The roles gate calls it inside `ProvisionForBuild`, driven by the DESIGN at the tag rather than the drawer inputs, so a role added in a later version is still created. Reports a `RolesEnsureOutcome`, never an identity entity. The outcome carries each test account's login, which the gate publishes as its own comment on the ticket before closing it — that comment is where a validation agent reads the credentials it signs in with, and a failure to publish fails the build |
 | RoleCatalogLister | needs | `identity` — the roles already on the platform IdP, behind the `list_roles` MCP tool. Read-only, with no write counterpart on this surface: roles are created at build time, never by a model |
 | the 11 public ops (provisioning 9 + mcpdiscovery `ListPlatformResourceTypes` and `ListOrgEndpoints`) | offers | the edge (`dependenciesHandlers`) |
@@ -136,5 +138,16 @@ slices.
   `ResourceTypeCatalog.List` returns an empty slice without calling OpenChoreo. HTTP
   `GET .../platform-resource-types`, MCP `list_platform_resource_types`, and design-save
   marker/wiring stamping all degrade off that empty catalog (no separate API signal).
-  Any future entry point that discovers platform resource types must honor the same flag.
+  Spec's build-claim membership check also skip-opens on that empty map so a disabled
+  catalog does not 409 every build. Any future entry point that discovers platform
+  resource types must honor the same flag.
+- **A provision wait-answer is permanent; a transport blip is not.** `ErrProvisionPermanent`
+  wraps wait answers — `Ready=False` / `ResourceTypeNotFound` on the Resource (even when
+  a prior release exists), or a create whose `latestRelease` never appears — and survives
+  aggregation with `%w` so `ProvisionGates` can mark it non-retryable. GetResource blips
+  stay retryable. After the
+  first permanent platform fault, remaining **platform-resource** waits in that sequential
+  loop are skipped (externals and org-services still run). Delivery's twin sentinel
+  (`ErrProvisionPermanent` on `build_fanout.go`) is the Temporal seam, matching
+  `ErrDeployPermanent`.
 - Platform-wide rules (tenant gate, secrets fence, feature-free domains) → [../../README.md](../../README.md).

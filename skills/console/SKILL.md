@@ -24,16 +24,16 @@ that names a directory, a next step that names a command — these rules win.
 |---|---|
 | `specs/requirements/prd.md` | the **Product requirements** |
 | `specs/design/design.cell` | the **Architecture** |
-| `specs/design/design.md` | the **Design overview** |
-| `specs/design/security.md` | **Security** → the **Security architecture** tab (the first one) |
-| `specs/design/roles.json` | **Security** → the **Roles & users** tab |
+| `specs/design/domain-model.md` | the **Domain model** |
+| `specs/design/flows/<slug>.md` | the flow, by its title |
+| `specs/design/security.json` | **Security** |
 | `specs/design/components/<name>/…` | the component, by its own name |
-| `specs/validation/validation-criteria.json` | the **Acceptance criteria** |
+| `specs/validation/validation-criteria.json` | the **Validation criteria** |
 
 `apps/console/design/lexicon.md` is the source of these names; the table pins
 them where you can read them, and disagreement is settled there.
 
-## Never quote a repo path
+## Never quote a repo path The one exception is a dependency link in a design turn's closing list, `[<name>](aep://spec/<path to its dependency.json>)`, which the console turns into a click that opens the definition.
 
 Not in a closing, not in a question, not when something fails. A path is a
 string the user cannot click, in a tree they cannot see.
@@ -58,8 +58,8 @@ written, how many, or in what order.
 
 **A design turn.**
 
-- ✗ *Full design is under `specs/design/` (design.cell, design.md, security.md, per-component design.json/openapi.yaml/wireframes.dsl) with validation criteria at `specs/validation/validation-criteria.json`.*
-- ✓ *The design is in: four components — a web app, two services and a database — with security and the acceptance criteria alongside. `orders-api` still needs a payment provider named before it can be built.*
+- ✗ *Full design is under `specs/design/` (design.cell, domain-model.md, flows/, per-component design.json/openapi.yaml/wireframes.dsl) with validation criteria at `specs/validation/validation-criteria.json`.*
+- ✓ *The design is in: four components — a web app, two services and a database — with security and the validation criteria alongside. `orders-api` still needs a payment provider named before it can be built.*
 
 **A failure.** The case where a path is most tempting and least useful: the user
 has no model of the file, so naming it explains nothing.

@@ -25,14 +25,15 @@ import (
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
-// ErrEndUserAuthConflict and ErrResourceCatalogUnavailable are the build-local
-// pre-tag sentinels the handler maps to 409 / 503. build cannot import the
-// design feature (arch allowlist), so the DesignFactDeriver adapter wired at the
-// composition root translates design's equivalents into these before they cross
-// the port boundary.
+// ErrEndUserAuthConflict, ErrUnknownResourceType, and ErrResourceCatalogUnavailable
+// are the build-local pre-tag sentinels the handler maps to 409 / 409 / 503.
+// build cannot import the design feature (arch allowlist), so the DesignFactDeriver
+// adapter wired at the composition root translates design's equivalents into these
+// before they cross the port boundary.
 var (
 	ErrEndUserAuthConflict        = errors.New("end-user auth conflict")
 	ErrResourceCatalogUnavailable = errors.New("resource-type catalog unavailable")
+	ErrUnknownResourceType        = errors.New("resourceType is not installed on this cluster")
 )
 
 // SpecCollector fetches/accepts an external dependency's OpenAPI contract and
@@ -42,9 +43,10 @@ type SpecCollector interface {
 	CollectSpec(ctx context.Context, orgID, projectID, component, depName string, rawSpec []byte, specURL string) (string, error)
 }
 
-// DesignFactDeriver runs the end-user-auth derivation against the design at HEAD and
-// commits any stamped exposesAPI.auth BEFORE the tag-cut. The adapter maps
-// design's conflict/catalog sentinels onto ErrEndUserAuthConflict /
+// DesignFactDeriver runs the end-user-auth and catalog-membership derivations
+// against the design at HEAD and commits any stamped exposesAPI.auth BEFORE the
+// tag-cut. The adapter maps design's conflict / unknown-type / catalog sentinels
+// onto ErrEndUserAuthConflict / ErrUnknownResourceType /
 // ErrResourceCatalogUnavailable.
 type DesignFactDeriver interface {
 	DerivePlatformResourceFactsAtHead(ctx context.Context, orgID, projectID string) error
@@ -56,11 +58,14 @@ type RepoLookup interface {
 	RepoFullName(ctx context.Context, orgID, projectID string) (string, error)
 }
 
-// SpecTagger runs the whole-spec hard gate and cuts the next `v<N>` tag
-// (spec.SaveSpec). Implementations MUST preserve error identity — the
-// handler unwraps *spec.SpecValidationError into the 422 detail.
+// SpecTagger runs the whole-spec hard gate and cuts the version's tag
+// (spec.SaveSpec). `version` is the name the user gave it, empty for the
+// platform's suggestion; it is ignored when the spec tree is unchanged, which
+// cuts nothing. Implementations MUST preserve error identity — the handler
+// unwraps *spec.SpecValidationError into the 422 detail, and
+// spec.ErrVersionNameTaken into the 409.
 type SpecTagger interface {
-	TagSpec(ctx context.Context, orgID, projectID string) (*spec.SpecSaveResult, error)
+	TagSpec(ctx context.Context, orgID, projectID, version string) (*spec.SpecSaveResult, error)
 	// BuildScopeAtTag reads the tag's story scope (#369): the milestone the
 	// claim mints is the version's.
 	BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (spec.BuildScope, error)

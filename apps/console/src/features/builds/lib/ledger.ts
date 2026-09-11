@@ -18,7 +18,9 @@
 
 import type { StatusTone } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
+import { failureLabel } from "./failure";
 import { hasMergedWork } from "./runView";
+import { frontierIndex, type SpineStage } from "./stage";
 import { taskRowState, type RunClaims } from "./taskRow";
 
 type BuildSummary = components["schemas"]["BuildSummary"];
@@ -64,16 +66,84 @@ export function isAwaitingValues(build: BuildSummary): boolean {
  * What a version's row says about itself.
  *
  * The label names the reader's SITUATION rather than the state machine's name
- * for it (lexicon naming rule 6) — `Running · Coding agent`, not `in_progress`.
+ * for it (lexicon naming rule 6) — `Running · Building components`, not
+ * `in_progress`. Which actor a moving version names is `movingStatus`.
  *
  * `deploy` is the project's deploy aggregate. Only the version it names can be
  * described by where it reached; every other completed version says `Built`,
  * because the platform records ONE deployed version per project and inferring
  * anything about the others would be a guess.
  */
+/**
+ * A raw status value as a label — `in_progress` → "In progress". Only the
+ * unknown-status fallback uses it; every value this console knows has prose of
+ * its own.
+ */
+function humanise(status: string): string {
+  const words = status.replace(/[_-]+/g, " ").trim();
+  if (words === "") return "Unknown";
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * The actor a stage of the Builds rail names, short enough for a status pill
+ * (ADR-0014 — the rail's five stages, each with a named actor).
+ *
+ * Keyed by stage id, and an id this map has not learned falls back to the
+ * unqualified "Running": naming the wrong actor is the failure this exists to
+ * fix, so an unknown stage says nothing about who is working.
+ */
+const STAGE_ACTOR: Record<string, string> = {
+  agent: "Coding agent",
+  pr: "Pull request",
+  merge: "Merging the pull request",
+  builds: "Building components",
+  deploy: "Deploying",
+};
+
+/**
+ * What a MOVING version's row or header says, given how far its rail has got.
+ *
+ * `in_progress` spans the whole rail — the agent writes code, the platform
+ * merges, the components build, the cluster rolls out — so the status alone
+ * cannot name who is working. Hard-coding the first stage made the header read
+ * "Running · Coding agent" for the entire run: measured on a live run, both
+ * components had gone green and the page still credited the agent, while the
+ * Build logs section on the same screen showed them succeeded.
+ *
+ * Three answers, in order:
+ *
+ *   - No stages at all. The ledger cannot afford the run read (ADR-0021 §6) and
+ *     a run in its planning phase has no build session yet, so neither can name
+ *     a stage. Both say "Running" and claim nothing more — a bare label is a
+ *     smaller loss than a wrong one.
+ *   - Every stage done. The rail has nothing left to do and the version has not
+ *     completed, which is the deployment: the last stage is a green build
+ *     deploying itself, and the deploy aggregate is what confirms it once the
+ *     version settles.
+ *   - Otherwise the frontier stage — but only its ACTIVE actor is named. A
+ *     stage that is waiting, needs a human, or failed is a state the rail below
+ *     spells out in a sentence, and compressing it into a pill would either
+ *     say too little to act on or contradict what the rail says.
+ */
+function movingStatus(stages: SpineStage[] | undefined): LedgerStatus {
+  const live = { tone: "info", live: true } as const;
+  if (!stages || stages.length === 0) return { label: "Running", ...live };
+
+  const at = frontierIndex(stages);
+  if (at === null) return { label: "Deploying to development", ...live };
+
+  const stage = stages[at];
+  const actor = stage && stage.state === "active" ? STAGE_ACTOR[stage.id] : undefined;
+  return { label: actor ? `Running · ${actor}` : "Running", ...live };
+}
+
 export function ledgerStatus(
   build: BuildSummary,
   deploy?: DeployStage | undefined,
+  /** This version's current build session, when the surface has read it. The
+   *  ledger has not; the build page has. */
+  stages?: SpineStage[] | undefined,
 ): LedgerStatus {
   switch (build.status) {
     case "started":
@@ -87,24 +157,40 @@ export function ledgerStatus(
       // stay on that page — the row has no space for them and the ledger read
       // does not carry them.
       if (isAwaitingValues(build)) {
-        return { label: "Waiting for values", tone: "warning", live: false };
+        return { label: "Waiting for configuration", tone: "warning", live: false };
       }
-      return { label: "Running · Coding agent", tone: "info", live: true };
-    case "failed":
-      // The platform's terminal reason, when it left one. Without it the row
-      // would say only "Failed", which tells the reader nothing to act on.
+      return movingStatus(stages);
+    case "failed": {
+      // The qualifier names WHAT went wrong, in words: the failure code when the
+      // platform recorded a fault, else the terminal reason — both are codes on
+      // the wire, and `failureLabel` owns their words (lexicon, *A failed run
+      // explains itself*). Without either the row says only "Failed", which
+      // tells the reader nothing to act on.
+      const why = failureLabel(build.failureCode || build.reason);
       return {
-        label: build.reason ? `Failed · ${build.reason}` : "Failed",
+        label: why ? `Failed · ${why}` : "Failed",
         tone: "error",
         live: false,
       };
+    }
+    case "cancelled":
+      // A person stopped this increment. NEUTRAL rather than error: nothing went
+      // wrong, and an error tone would say the platform failed at something a
+      // reader then has to go and look into. No reason is appended either — a
+      // cancel writes none, having no fault to report — so unlike Failed this
+      // label stands alone by design.
+      //
+      // Its own case rather than the `default`, which answers "Unknown": the
+      // status is a contract enum value, so falling through would be the console
+      // telling a reader it does not recognise a state the API had just named.
+      return { label: "Cancelled", tone: "neutral", live: false };
     case "completed": {
       if (deploy && deploy.version === build.tag) {
         if (deploy.status === "deployed") {
-          return { label: "Deployed to development", tone: "success", live: false };
+          return { label: "Deployed", tone: "success", live: false };
         }
         if (deploy.status === "deploying") {
-          return { label: "Deploying to development", tone: "info", live: true };
+          return { label: "Deploying", tone: "info", live: true };
         }
         if (deploy.status === "failed") {
           return { label: "Deploy failed", tone: "error", live: false };
@@ -113,7 +199,17 @@ export function ledgerStatus(
       return { label: "Built", tone: "success", live: false };
     }
     default:
-      return { label: "Unknown", tone: "neutral", live: false };
+      // A status this console does not know about, which in practice means ONE
+      // thing: the BFF is ahead of the bundle. The enum gained `cancelled` and
+      // this branch is how that looked in between — a cancelled build rendering
+      // as "Unknown" against an old bundle, which is worse than the "Failed" it
+      // replaced. They deploy as separate units, so the skew window is real
+      // however carefully the two are rolled.
+      //
+      // So show what the API actually said rather than shrugging. A future value
+      // degrades to a readable label a reader can act on, and it is never live —
+      // an unknown status must not tint and pulse a row as the moving thing.
+      return { label: humanise(build.status), tone: "neutral", live: false };
   }
 }
 

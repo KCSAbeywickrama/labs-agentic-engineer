@@ -35,7 +35,7 @@ import (
 func devBinding(name, readyStatus, readyReason string) openchoreo.ReleaseBindingSummary {
 	return openchoreo.ReleaseBindingSummary{
 		ComponentName: name,
-		Environment:   "development",
+		Environment:   "default",
 		ReadyStatus:   readyStatus,
 		ReadyReason:   readyReason,
 	}
@@ -202,7 +202,12 @@ func TestBuildStage_RunStateMapping(t *testing.T) {
 		{name: "no rows → idle", wantStatus: "idle"},
 		{name: "succeeded", runs: []delivery.MilestoneRun{devRun("v3", delivery.RunStateSucceeded)}, wantVer: "v3", wantStatus: "succeeded"},
 		{name: "failed", runs: []delivery.MilestoneRun{devRun("v3", delivery.RunStateFailed)}, wantVer: "v3", wantStatus: "failed"},
-		{name: "cancelled → failed", runs: []delivery.MilestoneRun{devRun("v3", delivery.RunStateCancelled)}, wantVer: "v3", wantStatus: "failed"},
+		// A cancel is its OWN value, not a flavour of failed: a person abandoning an
+		// increment is a different fact from the platform failing to deliver one, and
+		// the badge read "Build failed" over a build somebody had deliberately
+		// stopped. It has to agree with the version ledger's own mapping
+		// (build.statusFromRunState) or the two surfaces contradict each other.
+		{name: "cancelled is its own status", runs: []delivery.MilestoneRun{devRun("v3", delivery.RunStateCancelled)}, wantVer: "v3", wantStatus: "cancelled"},
 		{name: "running", runs: []delivery.MilestoneRun{devRun("v3", delivery.RunStateRunning)}, wantVer: "v3", wantStatus: "running"},
 		{name: "waiting between cycles is still running", runs: []delivery.MilestoneRun{devRun("v3", delivery.RunStateWaiting)}, wantVer: "v3", wantStatus: "running"},
 	}
@@ -263,9 +268,13 @@ func TestBuildStage_ValidationFailureAttribution(t *testing.T) {
 			wantBuild: "failed", wantValidation: "failed",
 		},
 		{
+			// Still never carved out — the carve-out is about a validation cycle's
+			// failure being attributed to validation rather than to the build, and a
+			// cancel has no verdict either way. What changed is only the word: the
+			// build row says `cancelled`, not `failed`.
 			name:      "a cancelled run is never carved out",
 			runs:      []delivery.MilestoneRun{devRun("v1", delivery.RunStateCancelled)},
-			wantBuild: "failed", wantValidation: "none",
+			wantBuild: "cancelled", wantValidation: "none",
 		},
 	}
 	for _, tc := range cases {
@@ -330,7 +339,7 @@ func TestDeployStage_ConditionMatrix(t *testing.T) {
 			name: "undeploy-state binding excluded from status and counts",
 			bindings: []openchoreo.ReleaseBindingSummary{
 				devBinding("api", "True", "Ready"),
-				{ComponentName: "web", Environment: "development", Undeploy: true, ReadyStatus: "False", ReadyReason: "ResourcesUndeployed"},
+				{ComponentName: "web", Environment: "default", Undeploy: true, ReadyStatus: "False", ReadyReason: "ResourcesUndeployed"},
 			},
 			wantStatus: "deployed",
 			wantReady:  1,
@@ -408,6 +417,17 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 		return []delivery.MilestoneRun{run}
 	}
 
+	// A VALIDATION run over the milestone the dev row names, built by re-kinding
+	// devRun the way the multi-run tests above do. It has to be this kind:
+	// newestValidatingOnMilestone selects on RunValidates, so a dev-kind row can
+	// never stand in for the run that answers for the version. The dev row stays
+	// LIVE for the reason at the top of this test.
+	validationOver := func(tag, state string) []delivery.MilestoneRun {
+		v := devRun(tag, state)
+		v.Kind, v.Origin = delivery.RunKindValidation, delivery.RunOriginRevalidate
+		return []delivery.MilestoneRun{v, devRun(tag, delivery.RunStateRunning)}
+	}
+
 	cycle := func(kind string, ended bool) *delivery.RunCycle {
 		c := &delivery.RunCycle{Kind: kind}
 		if ended {
@@ -432,7 +452,7 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 		{"passed", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictPassed), nil, "passed"},
 		{"partial", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictPartial), nil, "partial"},
 		{"inconclusive", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictInconclusive), nil, "inconclusive"},
-		// skipped is surfaced, not folded into none: "no acceptance criteria" is
+		// skipped is surfaced, not folded into none: "no validation criteria" is
 		// actionable ("author some"), where none means "nothing to say yet".
 		{"skipped", withVerdict(delivery.RunStateRunning, delivery.ValidationVerdictSkipped), nil, "skipped"},
 
@@ -477,6 +497,25 @@ func TestDeployStage_ValidationDerivation(t *testing.T) {
 		{
 			name:       "settled run that never validated → none",
 			runs:       withVerdict(delivery.RunStateFailed, ""),
+			wantStatus: "none",
+		},
+
+		// A person STOPPED the judging. `none` promises a verdict is still coming and
+		// nothing is, so this version would sit "any moment now" forever — and the
+		// promote gate, which holds on `none`, would never open again for it.
+		{
+			name:       "cancelled validation run with no verdict → cancelled",
+			runs:       validationOver("v1", delivery.RunStateCancelled),
+			wantStatus: "cancelled",
+		},
+		// The KIND guard. A cancelled DEV run is an ABANDONED INCREMENT, not judging
+		// somebody declined — the reconcile sweep suppresses its whole milestone for
+		// that reason. Without the guard this reads `cancelled`, which tells the
+		// console there is nothing left to wait for and offers an unjudged, abandoned
+		// version for promotion.
+		{
+			name:       "cancelled DEV run with no verdict → none, not cancelled",
+			runs:       withVerdict(delivery.RunStateCancelled, ""),
 			wantStatus: "none",
 		},
 

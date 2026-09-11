@@ -88,10 +88,16 @@ func (e *Events) mintFixIssue(ctx context.Context, run *delivery.MilestoneRun, e
 // The dedupe key is (component, commit): a redeploy of the same commit that
 // fails the same way finds the open issue and files nothing, while the next
 // version's failure is genuinely new work.
+//
+// The commit rides each FAILURE rather than the call, because one reconcile pass
+// promotes each component at its own newest green build (delivery.DeployTarget):
+// a single commit for the whole list would key at least one issue against a
+// commit that component was never built at.
 func (e *Events) MintDeployFixIssues(ctx context.Context, orgID, projectID string, milestoneNumber int,
-	components []string, reasons map[string]string, commitSHA string) ([]int, error) {
-	filed := make([]int, 0, len(components))
-	for _, component := range components {
+	failed []delivery.DeployTarget, reasons map[string]string) ([]int, error) {
+	filed := make([]int, 0, len(failed))
+	for _, target := range failed {
+		component, commitSHA := target.Component, target.CommitSHA
 		reason := reasons[component]
 		body := fmt.Sprintf(
 			"Component **%s** built successfully at merge commit `%s`, but its deployment never became ready. "+
@@ -127,7 +133,7 @@ func (e *Events) MintDeployFixIssues(ctx context.Context, orgID, projectID strin
 
 // openchoreoDevEnvironment is named here rather than imported so this package
 // keeps no dependency on the OpenChoreo client for one string in one issue body.
-const openchoreoDevEnvironment = "development"
+const openchoreoDevEnvironment = "default"
 
 // mintConflictIssue files the conflict issue for a pull request that would not
 // merge. It NAMES the pull request — the single structured reference the issue

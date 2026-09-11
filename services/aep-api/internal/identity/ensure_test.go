@@ -31,7 +31,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wso2/aep/aep-api/internal/platform/rolesspec"
+	"github.com/wso2/aep/aep-api/internal/platform/securityspec"
 )
 
 const (
@@ -45,7 +45,7 @@ const (
 // userFixture is one authored `testUsers[]` entry.
 type userFixture struct{ username, role string }
 
-// rolesJSON renders a minimal roles.json that the real rolesspec schema
+// rolesJSON renders a minimal security.json that the real securityspec schema
 // accepts. Building it rather than pasting literals keeps every case one line
 // of intent, and keeps the fixtures honest: a schema change breaks these tests
 // instead of letting them ensure a document the platform would reject.
@@ -69,6 +69,7 @@ func rolesJSON(t *testing.T, coldStartRole string, roles []string, users ...user
 		"publicComponents": []string{},
 		"roles":            roleEntries,
 		"testUsers":        userEntries,
+		"thunder":          map[string]any{"name": "Expense Tracker", "type": "browser"},
 	}
 	if coldStartRole != "" {
 		doc["coldStartRole"] = coldStartRole
@@ -80,26 +81,35 @@ func rolesJSON(t *testing.T, coldStartRole string, roles []string, users ...user
 	// A fixture the platform's own parser rejects would make every assertion
 	// below vacuous, so it is checked here rather than discovered as a passing
 	// "declared but errored" case.
-	if _, err := rolesspec.Parse(raw); err != nil {
-		t.Fatalf("fixture is not a valid roles.json: %v", err)
+	if _, err := securityspec.Parse(raw); err != nil {
+		t.Fatalf("fixture is not a valid security.json: %v", err)
 	}
 	return string(raw)
 }
 
+// testScope is the (org, environment) every row this harness writes is keyed
+// by — the pair the resolver picks for testOrg.
+var testScope = Scope{OrgID: testOrg, Environment: testEnvironment}
+
 // harness is one ensure wired to fresh fakes.
 type harness struct {
-	dir    *fakeDirectory
-	store  *fakeStore
-	design *fakeDesign
-	svc    *EnsureService
+	dir     *fakeDirectory
+	targets *fakeTargets
+	store   *fakeStore
+	design  *fakeDesign
+	svc     *EnsureService
 }
 
 func newHarness(doc string) *harness {
-	h := &harness{dir: newFakeDirectory(), store: newFakeStore(), design: &fakeDesign{bundle: map[string]string{}}}
-	if doc != "" {
-		h.design.bundle[rolesspec.BundleKey] = doc
+	dir := newFakeDirectory()
+	h := &harness{
+		dir: dir, targets: newFakeTargets(dir),
+		store: newFakeStore(), design: &fakeDesign{bundle: map[string]string{}},
 	}
-	h.svc = NewEnsureService(h.dir, h.store, h.design)
+	if doc != "" {
+		h.design.bundle[securityspec.BundleKey] = doc
+	}
+	h.svc = NewEnsureService(h.targets, h.store, h.design)
 	return h
 }
 
@@ -117,7 +127,7 @@ func (h *harness) run(t *testing.T) Result {
 }
 
 // setDoc swaps in the next version of the design, for the rebuild cases.
-func (h *harness) setDoc(doc string) { h.design.bundle[rolesspec.BundleKey] = doc }
+func (h *harness) setDoc(doc string) { h.design.bundle[securityspec.BundleKey] = doc }
 
 func contains(names []string, want string) bool {
 	for _, n := range names {
@@ -136,8 +146,8 @@ func contains(names []string, want string) bool {
 func TestEnsureForTagIsNotDeclaredWhenTheDesignCarriesNoRolesDocument(t *testing.T) {
 	cases := map[string]map[string]string{
 		"key absent":     {"design.md": "# design"},
-		"key empty":      {rolesspec.BundleKey: ""},
-		"key whitespace": {rolesspec.BundleKey: "  \n\t "},
+		"key empty":      {securityspec.BundleKey: ""},
+		"key whitespace": {securityspec.BundleKey: "  \n\t "},
 	}
 	for name, bundle := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -164,7 +174,7 @@ func TestEnsureForTagIsNotDeclaredWhenTheDesignCarriesNoRolesDocument(t *testing
 	}
 }
 
-// A roles.json that is present but broken is declared AND an error. The split
+// A security.json that is present but broken is declared AND an error. The split
 // is load-bearing: the caller holds dispatch behind a gate only when the design
 // declares roles, so folding these together would let a broken document ship.
 func TestEnsureForTagReportsDeclaredWhenTheRolesDocumentDoesNotParse(t *testing.T) {
@@ -173,7 +183,8 @@ func TestEnsureForTagReportsDeclaredWhenTheRolesDocumentDoesNotParse(t *testing.
 		"schema violation": `{"version": 2, "coldStartRole": null, "publicComponents": [], "roles": [], "testUsers": []}`,
 		"undeclared coldStart": rolesJSONRaw(`{"version":1,"coldStartRole":"Nobody","publicComponents":[],` +
 			`"roles":[{"name":"Viewer","description":"d","stories":[1],"grantedBy":"g",` +
-			`"permissions":[{"component":"api","actions":["read"]}]}],"testUsers":[]}`),
+			`"permissions":[{"component":"api","actions":["read"]}]}],"testUsers":[],` +
+			`"thunder":{"name":"Expense Tracker","type":"browser"}}`),
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(doc)
@@ -183,10 +194,10 @@ func TestEnsureForTagReportsDeclaredWhenTheRolesDocumentDoesNotParse(t *testing.
 				t.Fatalf("err = nil, want a parse refusal")
 			}
 			if !declared {
-				t.Fatalf("declared = false — the caller would then NOT hold the build for a broken roles.json")
+				t.Fatalf("declared = false — the caller would then NOT hold the build for a broken security.json")
 			}
-			if !strings.Contains(err.Error(), rolesspec.Path) {
-				t.Fatalf("error %q does not name %s", err, rolesspec.Path)
+			if !strings.Contains(err.Error(), securityspec.Path) {
+				t.Fatalf("error %q does not name %s", err, securityspec.Path)
 			}
 			if len(h.dir.writes()) != 0 {
 				t.Fatalf("directory writes = %v, want none for a document that never parsed", h.dir.writes())
@@ -379,7 +390,7 @@ func TestEnsureLeavesAPreExistingDirectoryGroupAlone(t *testing.T) {
 	}
 	// The platform also recorded no ownership over it — the next build must
 	// reach the same conclusion.
-	if _, recorded := h.store.roles["administrators"]; recorded {
+	if _, recorded := h.store.role(testScope, "administrators"); recorded {
 		t.Fatalf("an idp_roles row was written for a group the platform did not create")
 	}
 	// And its planned test account is NOT created.
@@ -401,10 +412,10 @@ func TestEnsureLeavesAPreExistingDirectoryGroupAlone(t *testing.T) {
 	if _, created := h.dir.users["test-administrators"]; created {
 		t.Fatalf("the account was created on the directory anyway")
 	}
-	if _, owned := h.store.users["test-administrators"]; owned {
+	if _, owned := h.store.user(testScope, "test-administrators"); owned {
 		t.Fatalf("a test_users row was written for an account that can never be enrolled")
 	}
-	if _, sealed := h.store.passwords["test-administrators"]; sealed {
+	if _, sealed := h.store.password(testScope, "test-administrators"); sealed {
 		t.Fatalf("a sealed password was written for an account that can never be enrolled")
 	}
 	// No reference either — a ref is what the credential provider serves.
@@ -451,7 +462,7 @@ func TestEnsureRefusesAnAccountThePlatformDoesNotOwn(t *testing.T) {
 	if pw, held := h.dir.passwords[person.ID]; held {
 		t.Fatalf("a password was written for jsmith (%q)", pw)
 	}
-	if _, owned := h.store.users["jsmith"]; owned {
+	if _, owned := h.store.user(testScope, "jsmith"); owned {
 		t.Fatalf("a test_users row was written for an account the platform does not own")
 	}
 	// Refusal is per account and does not stop the pass: the role is still made.
@@ -482,8 +493,8 @@ func TestEnsureAddsANewMemberAndRefreshesTheCachedGroupID(t *testing.T) {
 	h := newHarness(rolesJSON(t, "Viewer", []string{"Viewer"}, userFixture{"test-viewer", "Viewer"}))
 	h.run(t)
 	firstGroupID := h.dir.groups["viewer"].ID
-	if got := h.store.roles["viewer"].ThunderGroupID; got != firstGroupID {
-		t.Fatalf("cached group id = %q, want %q after the first build", got, firstGroupID)
+	if row, _ := h.store.role(testScope, "viewer"); row.ThunderGroupID != firstGroupID {
+		t.Fatalf("cached group id = %q, want %q after the first build", row.ThunderGroupID, firstGroupID)
 	}
 	h.dir.calls = nil
 
@@ -513,8 +524,8 @@ func TestEnsureAddsANewMemberAndRefreshesTheCachedGroupID(t *testing.T) {
 		t.Fatalf("the fake directory did not recreate the group — the case under test did not happen")
 	}
 	// ...and the store's cache followed it.
-	if got := h.store.roles["viewer"].ThunderGroupID; got != recreatedID {
-		t.Fatalf("cached group id = %q, want the recreated %q", got, recreatedID)
+	if row, _ := h.store.role(testScope, "viewer"); row.ThunderGroupID != recreatedID {
+		t.Fatalf("cached group id = %q, want the recreated %q", row.ThunderGroupID, recreatedID)
 	}
 	if got := len(h.dir.memberSet("Viewer")); got != 2 {
 		t.Fatalf("Viewer holds %d members, want both accounts", got)
@@ -538,7 +549,7 @@ func TestEnsureAddsANewMemberAndRefreshesTheCachedGroupID(t *testing.T) {
 func TestEnsureRefreshesAReusedAccountsFactsWithoutTouchingItsPassword(t *testing.T) {
 	h := newHarness(rolesJSON(t, "", []string{"Viewer"}, userFixture{"test-viewer", "Viewer"}))
 	h.run(t)
-	sealed := h.store.passwords["test-viewer"]
+	sealed, _ := h.store.password(testScope, "test-viewer")
 	if sealed == "" {
 		t.Fatalf("the first build sealed no password, so there is nothing to protect")
 	}
@@ -555,7 +566,7 @@ func TestEnsureRefreshesAReusedAccountsFactsWithoutTouchingItsPassword(t *testin
 	if !contains(result.UsersReused, "test-viewer") {
 		t.Fatalf("UsersReused = %v, want the account the platform owns", result.UsersReused)
 	}
-	row := h.store.users["test-viewer"]
+	row, _ := h.store.user(testScope, "test-viewer")
 	if row.RoleName != "Auditor" {
 		t.Fatalf("role_name = %q, want the role v2 gave it", row.RoleName)
 	}
@@ -573,7 +584,7 @@ func TestEnsureRefreshesAReusedAccountsFactsWithoutTouchingItsPassword(t *testin
 	if got := h.store.upsertUserCalls - upserts; got != 1 {
 		t.Fatalf("test_users rewritten %d times, want only the newly created account", got)
 	}
-	if h.store.passwords["test-viewer"] != sealed {
+	if pw, _ := h.store.password(testScope, "test-viewer"); pw != sealed {
 		t.Fatalf("the sealed password changed under a facts-only update")
 	}
 }
@@ -588,7 +599,7 @@ func TestEnsureRefreshesFactsForAnAccountWithNoSealedPassword(t *testing.T) {
 
 	// A row written before the seal existed, or one whose password was never
 	// generated here.
-	h.store.passwords["test-viewer"] = ""
+	h.store.setPassword(testScope, "test-viewer", "")
 	h.dir.users["test-viewer"] = DirectoryAccount{
 		ID: "usr-recreated", Username: "test-viewer", Email: "test-viewer@test-users.invalid",
 	}
@@ -598,8 +609,8 @@ func TestEnsureRefreshesFactsForAnAccountWithNoSealedPassword(t *testing.T) {
 	if !contains(result.UsersReused, "test-viewer") {
 		t.Fatalf("UsersReused = %v", result.UsersReused)
 	}
-	if got := h.store.users["test-viewer"].ThunderUserID; got != "usr-recreated" {
-		t.Fatalf("thunder_user_id = %q, want the refreshed id", got)
+	if row, _ := h.store.user(testScope, "test-viewer"); row.ThunderUserID != "usr-recreated" {
+		t.Fatalf("thunder_user_id = %q, want the refreshed id", row.ThunderUserID)
 	}
 }
 
@@ -610,17 +621,17 @@ func TestEnsureRefreshesFactsForAnAccountWithNoSealedPassword(t *testing.T) {
 // project that first declared the role rather than whoever happened to rebuild.
 func TestEnsureRecreatesAVanishedRoleAndKeepsItsOriginalProvenance(t *testing.T) {
 	h := newHarness(rolesJSON(t, "", []string{"Viewer"}))
-	h.store.roles["viewer"] = IdPRole{
+	h.store.putRole(testScope, IdPRole{
 		Name: "Viewer", ThunderGroupID: "grp-deleted", Description: "first description",
 		CreatedByOrg: "org-first", CreatedByProject: "proj-first",
-	}
+	})
 
 	result := h.run(t)
 
 	if !contains(result.RolesCreated, "Viewer") {
 		t.Fatalf("RolesCreated = %v, want the recreated role", result.RolesCreated)
 	}
-	row := h.store.roles["viewer"]
+	row, _ := h.store.role(testScope, "viewer")
 	if row.ThunderGroupID == "grp-deleted" || row.ThunderGroupID != h.dir.groups["viewer"].ID {
 		t.Fatalf("cached group id = %q, want the newly created %q", row.ThunderGroupID, h.dir.groups["viewer"].ID)
 	}
@@ -692,7 +703,7 @@ func TestEnsureStopsReferencingARoleDroppedFromTheDesign(t *testing.T) {
 	h.setDoc(rolesJSON(t, "", []string{"Viewer"}))
 	h.run(t)
 
-	refs, err := h.store.ListProjectRefs(context.Background(), testOrg, testProject)
+	refs, err := h.store.ListProjectRefs(context.Background(), testScope, testProject)
 	if err != nil {
 		t.Fatalf("ListProjectRefs: %v", err)
 	}
@@ -708,7 +719,7 @@ func TestEnsureStopsReferencingARoleDroppedFromTheDesign(t *testing.T) {
 	if _, stillThere := h.dir.groups["auditor"]; !stillThere {
 		t.Fatalf("dropping a role from the design deleted the shared directory group")
 	}
-	if _, stillRecorded := h.store.roles["auditor"]; !stillRecorded {
+	if _, stillRecorded := h.store.role(testScope, "auditor"); !stillRecorded {
 		t.Fatalf("dropping a role from the design forgot the platform's ownership of it")
 	}
 }
@@ -726,7 +737,7 @@ func TestEnsureSealsARetrievableDistinctPasswordForEachNewAccount(t *testing.T) 
 	ctx := context.Background()
 	seen := map[string]string{}
 	for _, username := range []string{"test-viewer", "test-compliance-admin"} {
-		pw, err := h.store.RevealTestUserPassword(ctx, username)
+		pw, err := h.store.RevealTestUserPassword(ctx, testScope, username)
 		if err != nil {
 			t.Fatalf("RevealTestUserPassword(%q): %v", username, err)
 		}
@@ -977,9 +988,9 @@ func TestEnabledIsFalseWithoutEveryCollaborator(t *testing.T) {
 	}
 	cases := map[string]*EnsureService{
 		"nil service":   nil,
-		"no directory":  NewEnsureService(nil, full.store, full.design),
-		"no store":      NewEnsureService(full.dir, nil, full.design),
-		"no design":     NewEnsureService(full.dir, full.store, nil),
+		"no resolver":   NewEnsureService(nil, full.store, full.design),
+		"no store":      NewEnsureService(full.targets, nil, full.design),
+		"no design":     NewEnsureService(full.targets, full.store, nil),
 		"nothing wired": NewEnsureService(nil, nil, nil),
 	}
 	for name, svc := range cases {
@@ -1007,5 +1018,70 @@ func TestResultSummaryReportsOnlyWhatHappened(t *testing.T) {
 	}
 	if (Result{}).HasRefusals() {
 		t.Fatalf("HasRefusals = true for an empty result")
+	}
+}
+
+// ---- 14: WHICH identity provider ------------------------------------------
+
+// The result carries the issuer and the environment, because the gate publishes
+// the logins and a password without its issuer names no sign-in anybody can
+// reach — there is one identity provider per environment now, and a credential
+// minted on one is rejected by every other.
+func TestEnsureReportsTheIssuerItProvisionedOn(t *testing.T) {
+	h := newHarness(rolesJSON(t, "Viewer", []string{"Viewer"}, userFixture{"test-viewer", "Viewer"}))
+
+	result := h.run(t)
+
+	if result.Issuer != testIssuer {
+		t.Fatalf("Issuer = %q, want %q — the gate has nothing to publish beside the password", result.Issuer, testIssuer)
+	}
+	if result.Environment != testEnvironment {
+		t.Fatalf("Environment = %q, want %q", result.Environment, testEnvironment)
+	}
+	if len(result.Credentials) == 0 {
+		t.Fatalf("no credentials to publish, so the issuer assertion proves nothing")
+	}
+}
+
+// The directory is resolved ONCE per ensure, not once per role: resolving reads
+// the environment's binding and its admin credential over the network, and a
+// design with a dozen roles must not pay for a dozen of those.
+func TestEnsureResolvesTheDirectoryOncePerBuild(t *testing.T) {
+	h := newHarness(rolesJSON(t, "", []string{"Viewer", "Auditor", "Compliance Admin"},
+		userFixture{"test-viewer", "Viewer"}, userFixture{"test-auditor", "Auditor"}))
+
+	h.run(t)
+
+	if h.targets.resolved != 1 {
+		t.Fatalf("resolved the directory %d times for one ensure, want once", h.targets.resolved)
+	}
+	if len(h.targets.orgs) != 1 || h.targets.orgs[0] != testOrg {
+		t.Fatalf("resolved for %v, want the build's own org %q", h.targets.orgs, testOrg)
+	}
+}
+
+// An environment with no identity provider bound to it FAILS the ensure, and
+// writes nothing on the way. The alternative — falling back to some other
+// directory — would create the accounts somewhere their logins do not work,
+// publish them, and send validation to a sign-in that rejects every one.
+func TestEnsureFailsWhenTheEnvironmentHasNoIdentityProvider(t *testing.T) {
+	h := newHarness(rolesJSON(t, "", []string{"Viewer"}, userFixture{"test-viewer", "Viewer"}))
+	h.targets.err = errors.New(`environment "default" of "org-acme" has no Thunder binding`)
+
+	_, declared, err := h.svc.EnsureForTag(context.Background(), testOrg, testProject, testTag)
+	if err == nil {
+		t.Fatal("EnsureForTag succeeded with no identity provider for the environment")
+	}
+	if !declared {
+		t.Fatal("declared = false — the design does carry a roles document, and the gate branches on that separately")
+	}
+	if !strings.Contains(err.Error(), "no Thunder binding") {
+		t.Fatalf("error %q does not name the missing binding", err)
+	}
+	if writes := h.dir.writes(); len(writes) != 0 {
+		t.Fatalf("the directory was written to anyway: %+v", writes)
+	}
+	if len(h.store.replaceCalls) != 0 {
+		t.Fatalf("references were written for a build that provisioned nothing")
 	}
 }

@@ -60,6 +60,15 @@ vi.mock("../../builds/components/RunFeed", () => ({
   ),
 }));
 
+// Live per-criterion statuses ride an SSE stream (useRunProgress). Stubbed to a
+// settable map so the page's chip PRECEDENCE is assertable without a stream — the
+// fold that builds the map is tested on its own in useValidationLive.test.ts.
+let mockLive: Record<string, string> = {};
+let mockLiveActive = true;
+vi.mock("../hooks/useValidationLive", () => ({
+  useValidationLive: () => ({ statuses: mockLive, active: mockLiveActive }),
+}));
+
 // Controllable status + runs + file queries (no QueryClientProvider / MSW).
 let mockValidation = "none";
 let mockRun: MilestoneRunView | undefined;
@@ -72,6 +81,13 @@ let mockNewerRuns: MilestoneRunView[] = [];
 // a GitHub read that failed is not the same state as "no issue yet", and the page
 // is required to treat them alike.
 let mockIssueUrl: string | undefined = "https://github.com/acme/demo/issues/30";
+// The validation issue's comment thread — the status line lives in the NEWEST
+// one. Oldest first, matching the contract. `observed` marks a line the PLATFORM
+// posted from what it watched the run do, which is most of them.
+let mockIssueComments: { id: string; body: string; observed?: boolean }[] = [];
+// Whether the page asked get-task to poll. This read is GitHub-backed, so an
+// idle version must cost nothing and a live one must not go stale.
+let mockIssueLive: boolean | undefined;
 
 function run(over: {
   validation?: RunValidation;
@@ -113,10 +129,13 @@ const validationCycle = {
   createdAt: "2026-07-10T10:00:00Z",
 };
 
+// `error` is widened because the page BRANCHES on it: the envelope's `not_found`
+// means the oracle was never authored, which reads differently from a read that
+// merely failed.
 const mockCriteria = {
   isPending: false,
   isError: false,
-  error: null,
+  error: null as Error | null,
   refetch: vi.fn(),
   data: undefined as { content: string } | undefined,
 };
@@ -190,16 +209,36 @@ vi.mock("../../builds/api/queries", () => ({
 // which is what makes "asked before an issue existed" visible rather than silently
 // answered.
 vi.mock("../../tasks/api/queries", () => ({
-  useTask: (_project: string, issueNumber: number) => ({
-    isPending: false,
-    isError: false,
-    error: null,
-    refetch: vi.fn(),
-    data:
-      issueNumber > 0 && mockIssueUrl !== undefined
-        ? { issueNumber, issueUrl: mockIssueUrl }
-        : undefined,
-  }),
+  useTask: (
+    _project: string,
+    issueNumber: number,
+    opts: { live?: boolean } = {},
+  ) => {
+    mockIssueLive = opts.live;
+    return {
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      data:
+        issueNumber > 0 && mockIssueUrl !== undefined
+          ? {
+              issueNumber,
+              issueUrl: mockIssueUrl,
+              ...(mockIssueComments.length > 0
+                ? {
+                    comments: mockIssueComments.map((c) => ({
+                      ...c,
+                      author: "aep-bot",
+                      createdAt: "2026-09-04T10:00:00Z",
+                      url: `${mockIssueUrl}#issuecomment-${c.id}`,
+                    })),
+                  }
+                : {}),
+            }
+          : undefined,
+    };
+  },
 }));
 
 vi.mock("../api/queries", () => ({
@@ -208,6 +247,7 @@ vi.mock("../api/queries", () => ({
 }));
 
 import { ValidationPage } from "./ValidationPage";
+import { ApiRequestError } from "../../../api/errors";
 
 const CRITERIA = JSON.stringify({
   requirements: [
@@ -217,6 +257,25 @@ const CRITERIA = JSON.stringify({
       criteria: [
         { id: "AC-001-a", must: "Search returns matches", method: "e2e" },
         { id: "AC-001-b", must: "Category filter works", method: "e2e" },
+        { id: "AC-003-b", must: "Payment is encrypted", method: "manual" },
+      ],
+    },
+  ],
+});
+
+// The oracle after the spec moved on: AC-001-c is authored but absent from the
+// pinned REPORT below, which is what the page really sees whenever criteria are
+// edited after an attempt settled. The console reads the criteria at the branch tip
+// and the report at the merge commit of the attempt that wrote it.
+const CRITERIA_DRIFTED = JSON.stringify({
+  requirements: [
+    {
+      id: "REQ-001",
+      statement: "Shoppers can search the catalog.",
+      criteria: [
+        { id: "AC-001-a", must: "Search returns matches", method: "e2e" },
+        { id: "AC-001-b", must: "Category filter works", method: "e2e" },
+        { id: "AC-001-c", must: "An empty search explains itself", method: "e2e" },
         { id: "AC-003-b", must: "Payment is encrypted", method: "manual" },
       ],
     },
@@ -282,10 +341,15 @@ afterEach(() => {
   mockDeployVersion = "v1";
   mockCriteria.isPending = false;
   mockCriteria.isError = false;
+  mockCriteria.error = null;
   mockCriteria.data = undefined;
   mockReport.isError = false;
   mockReport.data = undefined;
+  mockLive = {};
+  mockLiveActive = true;
   mockIssueUrl = "https://github.com/acme/demo/issues/30";
+  mockIssueComments = [];
+  mockIssueLive = undefined;
 });
 
 // A milestone sees SEQUENTIAL runs across its life and only some of them
@@ -399,6 +463,9 @@ describe("ValidationPage cancel", () => {
   });
 });
 
+// The feed tests below ask for ?view=logs: a validating run with no verdict opens
+// on its criteria now, so the log — which is what these are about — is the
+// reader's second click rather than the default body.
 describe("ValidationPage across a milestone's runs", () => {
   // The incident run never validates, and settle stamps `skipped` on a succeeded
   // run that never did. Reading the newest run therefore sent a version that had
@@ -448,7 +515,7 @@ describe("ValidationPage across a milestone's runs", () => {
       },
     ];
 
-    renderPage(undefined);
+    renderPage("logs");
 
     expect(screen.getAllByTestId("run-feed")).toHaveLength(2);
   });
@@ -467,7 +534,7 @@ describe("ValidationPage across a milestone's runs", () => {
       },
     ];
 
-    renderPage(undefined);
+    renderPage("logs");
 
     expect(screen.getAllByTestId("run-feed")).toHaveLength(1);
   });
@@ -487,7 +554,7 @@ describe("ValidationPage across a milestone's runs", () => {
       },
     ];
 
-    renderPage(undefined);
+    renderPage("logs");
 
     // The whole arrangement in one assertion: presence alone would pass whichever
     // end the newest run were drawn at, which is the bug this replaces.
@@ -518,7 +585,7 @@ describe("ValidationPage across a milestone's runs", () => {
       },
     ];
 
-    renderPage(undefined);
+    renderPage("logs");
 
     expect(
       screen
@@ -543,7 +610,7 @@ describe("ValidationPage across a milestone's runs", () => {
       },
     ];
 
-    renderPage(undefined);
+    renderPage("logs");
 
     expect(
       screen
@@ -559,7 +626,7 @@ describe("ValidationPage across a milestone's runs", () => {
     mockValidation = "running";
     mockRun = run({ cycles: [validationCycle] });
 
-    renderPage(undefined);
+    renderPage("logs");
 
     expect(screen.getByTestId("run-feed")).toHaveAttribute(
       "data-run-number",
@@ -573,7 +640,7 @@ describe("ValidationPage across a milestone's runs", () => {
     mockValidation = "running";
     mockRun = run({ cycles: [validationCycle] });
 
-    renderPage(undefined);
+    renderPage("logs");
 
     expect(screen.getAllByTestId("run-feed")).toHaveLength(1);
     expect(
@@ -587,6 +654,12 @@ describe("ValidationPage lifecycle", () => {
     mockRun = run({});
     renderPage(undefined);
     expect(screen.getByText(/Nothing validated yet/)).toBeInTheDocument();
+    // The event is a DEPLOYMENT, not a build: validation drives a running
+    // instance and needs its resolved endpoints, so a build alone cannot trigger
+    // it. And it names the same subject the agent's own status line does.
+    expect(
+      screen.getByText(/After a deployment, the deployed system is checked/),
+    ).toBeInTheDocument();
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
   });
 
@@ -595,10 +668,12 @@ describe("ValidationPage lifecycle", () => {
     expect(screen.getByText(/Nothing validated yet/)).toBeInTheDocument();
   });
 
-  it("shows the validation cycle's feed while the run is validating", () => {
+  it("filters the log to the validation cycle while the run is validating", () => {
     mockValidation = "running";
     mockRun = run({ cycles: [validationCycle] });
-    renderPage(undefined);
+    // ?view=logs, because a validating run now OPENS on its criteria; the log is
+    // one button away rather than the only thing there is.
+    renderPage("logs");
     // The feed streams the WHOLE run; the page filters it to the one phase it
     // owns, so a coding cycle's output never leaks onto the validation page.
     expect(screen.getByTestId("run-feed")).toHaveTextContent("validation");
@@ -614,13 +689,18 @@ describe("ValidationPage lifecycle", () => {
     mockDeployVersion = ""; // no spec-build run has SUCCEEDED yet
     mockBuildVersion = "v1"; // ...but v1's run is live and validating
     mockRun = run({ cycles: [validationCycle] });
+    mockCriteria.data = { content: CRITERIA };
 
     renderPage(undefined);
 
     expect(
       screen.queryByText(/Nothing validated yet/),
     ).not.toBeInTheDocument();
-    expect(screen.getByTestId("run-feed")).toHaveTextContent("validation");
+    // The run was found, so the version's criteria are on screen under the tile
+    // that says an attempt is under way.
+    expect(
+      screen.getByText("Shoppers can search the catalog."),
+    ).toBeInTheDocument();
   });
 
   // The same gap on a later build points the other way: deploy.version still
@@ -632,7 +712,7 @@ describe("ValidationPage lifecycle", () => {
     mockBuildVersion = "v2"; // v2's run is validating right now
     mockRun = run({ cycles: [validationCycle] });
 
-    renderPage(undefined);
+    renderPage("logs");
 
     // The run story is fetched for v2 — the version the chip is talking about.
     expect(screen.getByTestId("run-feed")).toHaveTextContent("validation");
@@ -743,11 +823,59 @@ describe("ValidationPage lifecycle", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByText(/\(last attempt\)$/)).toBeInTheDocument();
+    // And NOT the first-attempt view: real results beat "Pending" everywhere.
+    expect(screen.queryByText("Pending")).not.toBeInTheDocument();
   });
 
   // The regression this replaced a default with: no state may FORCE a body, because
   // `?view=logs | absent` has no third value, so `onViewChange(undefined)` cannot
   // outrank a forced arm and the "View report" button silently does nothing.
+  // "No result" is a claim about a run that FINISHED without covering the row. A
+  // repeat attempt in flight may still answer it, so while one is running the row
+  // waits with everything else.
+  it("says a drifted criterion is pending while a repeat attempt runs", () => {
+    mockValidation = "running";
+    mockRun = {
+      ...run({
+        validation: {
+          verdict: "failed",
+          reportPath: "tests/validation/report.json",
+        },
+        cycles: [validationCycle],
+      }),
+      state: "running",
+    };
+    mockCriteria.data = { content: CRITERIA_DRIFTED };
+    mockReport.data = { content: REPORT };
+    renderPage(undefined);
+
+    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(screen.queryByText("No result")).not.toBeInTheDocument();
+    // The rows the pinned report DOES cover keep the last attempt's verdict, which
+    // is what makes widening the pending signal safe.
+    expect(screen.getByText("Passed")).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+  });
+
+  // The other side of the same gate: nothing is running, so the report's silence
+  // about this row is final.
+  it("says a drifted criterion is out of run once nothing is running", () => {
+    mockValidation = "failed";
+    mockRun = run({
+      validation: {
+        verdict: "failed",
+        reportPath: "tests/validation/report.json",
+      },
+      cycles: [validationCycle],
+    });
+    mockCriteria.data = { content: CRITERIA_DRIFTED };
+    mockReport.data = { content: REPORT };
+    renderPage(undefined);
+
+    expect(screen.getByText("No result")).toBeInTheDocument();
+    expect(screen.queryByText("Pending")).not.toBeInTheDocument();
+  });
+
   it("keeps the report/log toggle working while a repeat attempt runs", () => {
     mockValidation = "running";
     mockRun = {
@@ -1051,5 +1179,555 @@ describe("ValidationPage lifecycle", () => {
     ).toBeInTheDocument();
     // No state chips without a report.
     expect(screen.queryByText("Passed")).not.toBeInTheDocument();
+  });
+});
+
+// `e2e` is an acronym the console lexicon forbids and nothing in the product
+// expands, and it cannot change — the runner, the report generator and the
+// tests/e2e/specs/<AC-ID>.spec.ts path all key on it. So no surface may leak it,
+// which is part of what these assertions hold.
+describe("ValidationPage criterion rows", () => {
+  function renderWithCriteria() {
+    mockValidation = "passed";
+    mockRun = run({
+      validation: { verdict: "passed", reportPath: "tests/validation/report.json" },
+      cycles: [validationCycle],
+    });
+    mockCriteria.data = { content: CRITERIA };
+    mockReport.data = { content: REPORT };
+    renderPage(undefined);
+  }
+
+  // Two marks answering two questions: the glyph says who checks the criterion,
+  // the chip says what the run made of it. Both belong on a results page — the
+  // reader still has to find their own work in it.
+  it("carries the verdict beside the method, and names neither in words", () => {
+    renderWithCriteria();
+
+    expect(screen.getByText("Passed")).toBeInTheDocument();
+    expect(screen.getByText("Manual")).toBeInTheDocument();
+    expect(
+      screen.getByText("Requires manual validation."),
+    ).toBeInTheDocument();
+    // The method is a glyph, never a word: neither the wire value nor the word it
+    // is spelled as elsewhere may reach a row.
+    for (const word of ["e2e", "auto", "manual"]) {
+      expect(screen.queryByText(word)).not.toBeInTheDocument();
+    }
+  });
+
+  // The tile above already prints "N passed · M manual" and its method line. The
+  // view's own tally repeated those numbers a few rows lower on the same screen.
+  it("drops the summary tally the tile above already prints", () => {
+    renderWithCriteria();
+
+    expect(screen.queryByText("auto 2")).not.toBeInTheDocument();
+    expect(screen.queryByText("manual 1")).not.toBeInTheDocument();
+    expect(screen.queryByText(/requirements ·/)).not.toBeInTheDocument();
+  });
+
+  // Inside REQ-001's card the `AC-001-` half of every criterion id is already on
+  // the page, so the rows print only what distinguishes them. The full id stays
+  // reachable on hover, being the handle for spec filenames and for the agent.
+  it("shortens the ids to what the card does not already say", () => {
+    renderWithCriteria();
+
+    expect(screen.getByText("1")).toBeInTheDocument();
+    expect(screen.getAllByText("a").length).toBeGreaterThan(0);
+    expect(screen.queryByText("AC-001-a")).not.toBeInTheDocument();
+    expect(screen.queryByText("REQ-001")).not.toBeInTheDocument();
+  });
+
+  // The description explaining what criteria ARE belongs to the Spec view, where
+  // a reader meets the document cold. Here they arrived to read run results, so a
+  // sentence telling them results appear under Validations would be redundant on
+  // the page holding them. Gated by `hideDescription`, asserted so the gate cannot
+  // be dropped silently.
+  it("omits the spec view's explanation", () => {
+    renderWithCriteria();
+
+    expect(screen.queryByText(/Each criterion represents/)).not.toBeInTheDocument();
+  });
+});
+
+// A version's FIRST attempt has no verdict, no report and — until now — nothing on
+// the page but a log. The oracle is what there is to show, and it says the two
+// things a reader in that state wants: what is being checked, and what the agent is
+// never going to check for them.
+describe("ValidationPage first attempt in flight", () => {
+  function runningFirstAttempt() {
+    mockValidation = "running";
+    mockRun = { ...run({ cycles: [validationCycle] }), state: "running" };
+  }
+
+  it("opens on the criteria, not the log", () => {
+    runningFirstAttempt();
+    mockCriteria.data = { content: CRITERIA };
+
+    renderPage(undefined);
+
+    expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Shoppers can search the catalog."),
+    ).toBeInTheDocument();
+    // Chip and tile headline both, as with every other state.
+    expect(screen.getAllByText("Validating").length).toBe(2);
+    // Read through the tile's own element rather than by text: the two method names
+    // are marked up as terms, so no single text node holds the whole sentence. Their
+    // text is the vocabulary's lowercase label — the uppercase is CSS, exactly as on
+    // the badges.
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "auto criteria are being validated end to end against the deployed system. Please validate the manual criteria yourself.",
+    );
+    // Counted off the ORACLE — there is no report to count — and in the same words
+    // the badges below use.
+    expect(screen.getByText("2 auto · 1 manual")).toBeInTheDocument();
+  });
+
+  // The point of the chips: a manual criterion is not queued behind the agent, it is
+  // queued behind the reader, and "Pending" on it would promise a result nobody is
+  // going to produce.
+  it("chips each criterion with what is about to happen to it", () => {
+    runningFirstAttempt();
+    mockCriteria.data = { content: CRITERIA };
+
+    renderPage(undefined);
+
+    expect(screen.getAllByText("Pending")).toHaveLength(2);
+    expect(screen.getByText("Manual")).toBeInTheDocument();
+  });
+
+  it("keeps the log one click away, and the way back from it", () => {
+    runningFirstAttempt();
+    mockCriteria.data = { content: CRITERIA };
+
+    const onViewChange = renderPage(undefined);
+    fireEvent.click(screen.getByRole("button", { name: /View logs/ }));
+    expect(onViewChange).toHaveBeenCalledWith("logs");
+
+    renderPage("logs");
+    expect(screen.getByTestId("run-feed")).toHaveTextContent("validation");
+    expect(
+      screen.getAllByRole("button", { name: /View report/ }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  // The tile's second sentence is an instruction. Pointing a reader at manual
+  // criteria that do not exist sends them looking for an empty list.
+  it("asks for nothing by hand when every criterion is automated", () => {
+    runningFirstAttempt();
+    mockCriteria.data = {
+      content: JSON.stringify({
+        requirements: [
+          {
+            id: "REQ-001",
+            statement: "Shoppers can search the catalog.",
+            criteria: [
+              { id: "AC-001-a", must: "Search returns matches", method: "e2e" },
+            ],
+          },
+        ],
+      }),
+    };
+
+    renderPage(undefined);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "auto criteria are being validated end to end against the deployed system.",
+    );
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/Please validate/);
+    expect(screen.getByText("1 auto")).toBeInTheDocument();
+  });
+
+  // `not_found` is the Files API's answer for a version whose spec authored no
+  // criteria — the state its run eventually settles as `skipped`. The tile is then
+  // the whole body: there is nothing to list under it.
+  it("says the version has no criteria when the read comes back not_found", () => {
+    runningFirstAttempt();
+    mockCriteria.isError = true;
+    mockCriteria.error = new ApiRequestError(
+      { code: "not_found", message: "no spec file at validation-criteria.json" },
+      "Failed to load",
+    );
+
+    renderPage(undefined);
+
+    expect(
+      screen.getByText(
+        "This version has no validation criteria, so there is nothing to check the deployment against.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Failed to load the validation criteria/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
+    // The log is still reachable — the header reads the same in both running shapes.
+    expect(
+      screen.getByRole("button", { name: /View logs/ }),
+    ).toBeInTheDocument();
+  });
+
+  // The other half of that branch, and the reason it is keyed on the envelope's
+  // code: a read that merely FAILED must not be reported as a spec that authored
+  // nothing.
+  it("offers a retry when the criteria read merely failed", () => {
+    runningFirstAttempt();
+    mockCriteria.isError = true;
+    mockCriteria.error = new ApiRequestError(
+      { code: "internal", message: "upstream unavailable" },
+      "Failed to load",
+    );
+
+    renderPage(undefined);
+
+    expect(
+      screen.getByText(/Failed to load the validation criteria/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(
+      screen.queryByText(/no validation criteria/),
+    ).not.toBeInTheDocument();
+  });
+});
+
+// Until now this page could say what a validation WOULD check and what it
+// eventually FOUND, and nothing at all in between — every row read "Pending" for
+// up to two hours (the validation cycle's deadline), or worse, held the previous
+// attempt's verdict while a new attempt re-worked exactly those criteria.
+describe("ValidationPage live per-criterion progress", () => {
+  it("says what the run is doing while no criterion has been picked up yet", () => {
+    // SKILL.md steps 1-5 — reading the issue, cutting the branch, scaffolding
+    // tests/e2e. The rows cannot narrate it because none of them has been
+    // touched, and this is the stretch that most looks like a dead run.
+    mockValidation = "running";
+    mockRun = { ...run({ cycles: [validationCycle] }), state: "running" };
+    mockCriteria.data = { content: CRITERIA };
+    renderPage(undefined);
+
+    expect(screen.getByText("Setting up the test harness…")).toBeInTheDocument();
+  });
+
+  it("counts the answered criteria once the rows have started moving", () => {
+    mockValidation = "running";
+    mockRun = { ...run({ cycles: [validationCycle] }), state: "running" };
+    mockCriteria.data = { content: CRITERIA };
+    mockLive = { "AC-001-a": "exploring" };
+    renderPage(undefined);
+
+    expect(screen.queryByText("Setting up the test harness…")).not.toBeInTheDocument();
+    expect(screen.getByText(/Checking the criteria, 0 of \d+ answered…/)).toBeInTheDocument();
+    expect(screen.getByText("Exploring…")).toBeInTheDocument();
+    // Untouched auto criteria still read Pending; a manual one never will.
+    expect(screen.getAllByText("Pending").length).toBe(1);
+    expect(screen.getByText("Manual")).toBeInTheDocument();
+  });
+
+  it("shows what a REPEAT attempt is re-working, not the last attempt's verdict", () => {
+    // The freeze this fixes: a repair run re-works precisely the criteria that
+    // failed, and the page showed those rows stuck on `Failed` for the whole
+    // two hours it took. ValidationPage's own comment argued the previous report
+    // beat a wall of Pending chips — true, and beside the point once a row can
+    // say what is happening to it right now.
+    mockValidation = "running";
+    mockRun = {
+      ...run({
+        validation: { verdict: "failed", reportPath: "tests/validation/report.json" },
+        // A SECOND validation cycle, still open: the repeat attempt in flight.
+        cycles: [validationCycle, { ...validationCycle, id: "cycle-9" }],
+      }),
+      state: "running",
+    };
+    mockCriteria.data = { content: CRITERIA };
+    mockReport.data = { content: REPORT };
+    mockLive = { "AC-001-b": "authoring" };
+    renderPage(undefined);
+
+    expect(screen.getByText("Authoring…")).toBeInTheDocument();
+    // AC-001-b was the failure in REPORT; its chip is gone, replaced by the live
+    // status. AC-001-a was not touched, so it keeps last attempt's result.
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+    expect(screen.getByText("Passed")).toBeInTheDocument();
+  });
+
+  it("renders a live pass with report.json's own chip, not a live one", () => {
+    // `pass` and `fail` are report.json's words and arrive on the feed too. A
+    // criterion that has passed reads the same whichever brought the news,
+    // because it is the same fact.
+    mockValidation = "running";
+    mockRun = { ...run({ cycles: [validationCycle] }), state: "running" };
+    mockCriteria.data = { content: CRITERIA };
+    mockLive = { "AC-001-a": "pass", "AC-001-b": "healing" };
+    renderPage(undefined);
+
+    expect(screen.getByText("Passed")).toBeInTheDocument();
+    expect(screen.getByText("Healing…")).toBeInTheDocument();
+  });
+
+  it("narrates the reporting tail, when every row is settled and nothing moves", () => {
+    mockValidation = "running";
+    mockRun = { ...run({ cycles: [validationCycle] }), state: "running" };
+    mockCriteria.data = { content: CRITERIA };
+    // Both auto criteria answered; the manual one never moves and must not hold
+    // the line back.
+    mockLive = { "AC-001-a": "pass", "AC-001-b": "fail" };
+    renderPage(undefined);
+
+    expect(screen.getByText("Writing the validation report…")).toBeInTheDocument();
+  });
+});
+
+describe("ValidationPage live note is gated on an open cycle", () => {
+  it("says nothing over a settled verdict whose report was never fetched", () => {
+    // `unreported` settles the run AND skips the report read, so the page has no
+    // statuses and no report — which read identically to a run that had not
+    // started, and announced "Setting up the test harness…" over a finished one.
+    mockValidation = "unreported";
+    mockRun = run({
+      validation: { verdict: "unreported" },
+      cycles: [validationCycle],
+    });
+    mockCriteria.data = { content: CRITERIA };
+    mockLive = {};
+    mockLiveActive = false;
+    renderPage(undefined);
+
+    expect(screen.queryByText("Setting up the test harness…")).not.toBeInTheDocument();
+  });
+
+  it("says nothing while a repair cycle is writing code", () => {
+    // The newest validation cycle is the PREVIOUS attempt's, already closed, so
+    // nothing is validating even though the run is live.
+    mockValidation = "awaiting-fix";
+    mockRun = {
+      ...run({
+        validation: { verdict: "failed", reportPath: "tests/validation/report.json" },
+        cycles: [validationCycle, { ...validationCycle, id: "cycle-3", kind: "coding" }],
+      }),
+      state: "running",
+    };
+    mockCriteria.data = { content: CRITERIA };
+    mockReport.data = { content: REPORT };
+    mockLive = {};
+    mockLiveActive = false;
+    renderPage(undefined);
+
+    expect(screen.queryByText("Setting up the test harness…")).not.toBeInTheDocument();
+    // The previous attempt's evidence still stands.
+    expect(screen.getByText(/category option never appeared/)).toBeInTheDocument();
+  });
+});
+
+// A run reports `planned` for EVERY criterion in the test plan, and SKILL.md has
+// the agent write a plan section per criterion — manual ones included. So the
+// feed carries a status for a criterion no agent will ever work, and the row used
+// to render it: the method badge read `manual` while the chip beside it read
+// "Planned", for the whole run, with nothing able to supersede it.
+describe("ValidationPage manual criteria ignore the live feed", () => {
+  it("keeps a manual criterion on Manual when the feed reports it planned", () => {
+    mockValidation = "running";
+    mockRun = { ...run({ cycles: [validationCycle] }), state: "running" };
+    mockCriteria.data = { content: CRITERIA };
+    // AC-003-b is the `manual` criterion in CRITERIA; AC-001-a is `e2e`.
+    mockLive = { "AC-001-a": "planned", "AC-003-b": "planned" };
+    renderPage(undefined);
+
+    expect(screen.getByText("Manual")).toBeInTheDocument();
+    // Only the e2e row may say Planned — the manual one must not.
+    expect(screen.getAllByText("Planned")).toHaveLength(1);
+  });
+
+  it("keeps it on Manual through every live status, not just planned", () => {
+    // Nothing else is reachable for a manual criterion today, but the rule is
+    // about the METHOD rather than about which status happened to arrive.
+    mockValidation = "running";
+    mockRun = { ...run({ cycles: [validationCycle] }), state: "running" };
+    mockCriteria.data = { content: CRITERIA };
+    mockLive = { "AC-003-b": "running" };
+    renderPage(undefined);
+
+    expect(screen.getByText("Manual")).toBeInTheDocument();
+    expect(screen.queryByText("Running…")).not.toBeInTheDocument();
+  });
+
+});
+
+// The run-wide narration a reader arrives with. Until now the tile had exactly
+// two sentences in its whole vocabulary and said NOTHING for the entire middle of
+// a run — the longest stretch, and the one where "is this progressing or stuck?"
+// is the only question anyone has. The agent now keeps a status line on its own
+// validation issue (skills/aep/SKILL.md, "The status line") and this renders it.
+describe("ValidationPage agent status line", () => {
+  const validating = () => {
+    mockValidation = "running";
+    mockRun = { ...run({ cycles: [validationCycle] }), state: "running" };
+    mockCriteria.data = { content: CRITERIA };
+  };
+
+  it("shows the agent's own words over the derived sentence", () => {
+    validating();
+    // The derived line would say "Setting up the test harness…" here, because no
+    // criterion has been touched. The agent knows better and said so.
+    mockIssueComments = [{ id: "c1", body: "Reading the criteria; 12 to author." }];
+    renderPage(undefined);
+
+    expect(screen.getByText("Reading the criteria; 12 to author.")).toBeInTheDocument();
+    expect(screen.queryByText("Setting up the test harness…")).not.toBeInTheDocument();
+  });
+
+  it("takes the NEWEST comment, which is the point of a durable line", () => {
+    validating();
+    mockIssueComments = [
+      { id: "c1", body: "Starting validation: 12 criteria, 9 to author." },
+      { id: "c2", body: "Healing AC-004-b — the login step raced the redirect." },
+    ];
+    renderPage(undefined);
+
+    expect(
+      screen.getByText("Healing AC-004-b — the login step raced the redirect."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^Starting validation/)).not.toBeInTheDocument();
+  });
+
+  it("shows the platform's observed line unlabelled — the pulse beside it says machine", () => {
+    // Most lines on a validation issue are this, and labelling the common case
+    // would spend the reader's attention where none is needed.
+    validating();
+    mockIssueComments = [
+      { id: "o1", body: "Running automated tests against the deployed system…", observed: true },
+    ];
+    renderPage(undefined);
+
+    expect(screen.getByText("Running automated tests against the deployed system…")).toBeInTheDocument();
+    expect(screen.queryByText(/The agent:/)).not.toBeInTheDocument();
+  });
+
+  it("labels the AGENT's line, which is the one carrying a judgement", () => {
+    // The platform reports tool calls; the agent speaks between them for what no
+    // command can show. That line is worth more than the one before it, and a
+    // reader who cannot tell them apart over-trusts the mechanical one.
+    validating();
+    mockIssueComments = [
+      { id: "o1", body: "Running automated tests against the deployed system…", observed: true },
+      { id: "c2", body: "AC-001-b blocked: the roles gate published no second login." },
+    ];
+    renderPage(undefined);
+
+    expect(screen.getByText(/The agent:/)).toBeInTheDocument();
+    expect(
+      screen.getByText("AC-001-b blocked: the roles gate published no second login."),
+    ).toBeInTheDocument();
+  });
+
+  it("renders one line of a multi-line comment", () => {
+    // A comment body is markdown over an unbounded textarea; the tile is a note.
+    validating();
+    mockIssueComments = [
+      { id: "c1", body: "Authoring the last three specs.\n\n- AC-005-a\n- AC-005-b" },
+    ];
+    renderPage(undefined);
+
+    expect(screen.getByText("Authoring the last three specs.")).toBeInTheDocument();
+    expect(screen.queryByText(/AC-005-a/)).not.toBeInTheDocument();
+  });
+
+  it("falls back to the derived sentence when the agent has posted nothing", () => {
+    // The skill ASKS for the line, and an asked-for thing can be skipped — so the
+    // page must degrade to what it showed before rather than to a blank.
+    validating();
+    mockIssueComments = [];
+    renderPage(undefined);
+
+    expect(screen.getByText("Setting up the test harness…")).toBeInTheDocument();
+  });
+
+  it("survives the switch to the log body, where the derived line cannot", () => {
+    // The live fold is opened only for the report body, so `live.active` is false
+    // here and the derived sentence is empty by construction. The status line is
+    // polled rather than streamed, so it does not care — and the log view is
+    // exactly where someone watching a long run sits.
+    validating();
+    mockIssueComments = [{ id: "c1", body: "Running the whole suite." }];
+    mockLiveActive = false;
+    renderPage("logs");
+
+    expect(screen.getByText("Running the whole suite.")).toBeInTheDocument();
+  });
+
+  it("polls the issue while the loop is live, and not once it settles", () => {
+    // This read is GitHub-backed: an idle version must cost nothing, and a live
+    // one must not freeze at whatever the line said when the page opened.
+    validating();
+    renderPage(undefined);
+    expect(mockIssueLive).toBe(true);
+
+    mockValidation = "passed";
+    mockRun = {
+      ...run({
+        validation: { verdict: "passed", reportPath: "tests/validation/report.json" },
+        cycles: [validationCycle],
+      }),
+      state: "succeeded",
+    };
+    mockReport.data = { content: REPORT };
+    renderPage(undefined);
+    expect(mockIssueLive).toBe(false);
+  });
+
+  // A comment OUTLIVES the run that wrote it. The closing summary stays the
+  // newest comment on the issue forever, so an ungated line kept announcing a
+  // finished run as if it were still going.
+  it("says nothing over a settled verdict, however recent the comment", () => {
+    mockValidation = "passed";
+    mockRun = {
+      ...run({
+        validation: { verdict: "passed", reportPath: "tests/validation/report.json" },
+        cycles: [validationCycle],
+      }),
+      state: "succeeded",
+    };
+    mockReport.data = { content: REPORT };
+    mockIssueComments = [
+      { id: "c1", body: "Validation complete: 2/2 e2e criteria passing." },
+    ];
+    renderPage(undefined);
+
+    expect(screen.queryByText(/Validation complete/)).not.toBeInTheDocument();
+    // The verdict itself still speaks — this removes a duplicate, not the answer.
+    expect(screen.getByText(/covered by a test and passed/)).toBeInTheDocument();
+  });
+
+  // The sharper half: `awaiting-fix` is a lifecycle state, so the loop IS live —
+  // but the cycle running is CODING. The newest validation cycle closed when it
+  // reported the failure, so its last words describe a finished attempt, and
+  // showing them claims an agent is validating while none is.
+  it("says nothing while a repair cycle codes, even though the loop is live", () => {
+    mockValidation = "awaiting-fix";
+    mockRun = {
+      ...run({
+        validation: { verdict: "failed", reportPath: "tests/validation/report.json" },
+        cycles: [validationCycle, { ...validationCycle, id: "cycle-3", kind: "coding" }],
+      }),
+      state: "running",
+    };
+    mockCriteria.data = { content: CRITERIA };
+    mockReport.data = { content: REPORT };
+    mockLiveActive = false;
+    mockIssueComments = [{ id: "c1", body: "3 of 12 failed — report committed." }];
+    renderPage(undefined);
+
+    expect(screen.queryByText(/3 of 12 failed/)).not.toBeInTheDocument();
+    // And it must not poll GitHub for a line it will not render.
+    expect(mockIssueLive).toBe(false);
+  });
+
+  // The pulse is the claim that an agent is WORKING. It rides with the line, so
+  // the gate above is also what keeps it from animating over a settled run.
+  it("carries the working pulse while it speaks", () => {
+    validating();
+    mockIssueComments = [{ id: "c1", body: "Authoring the last three specs." }];
+    renderPage(undefined);
+
+    expect(screen.getByText("Authoring the last three specs.")).toBeInTheDocument();
+    expect(screen.getByTestId("working-pulse")).toBeInTheDocument();
   });
 });

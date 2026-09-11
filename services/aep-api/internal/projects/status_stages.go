@@ -42,6 +42,7 @@ const (
 	buildIdle      = "idle"
 	buildRunning   = "running"
 	buildFailed    = "failed"
+	buildCancelled = "cancelled"
 	buildSucceeded = "succeeded"
 
 	deployNone      = "none"
@@ -62,6 +63,14 @@ const (
 	// is what is being fixed — rendering the bare `failed` verdict here would read
 	// as terminal while the platform is actively resolving it.
 	validationAwaitingFix = "awaiting-fix"
+	// validationCancelled is a person STOPPING the judging: a validation run
+	// settled cancelled before it recorded a verdict, so nothing will answer for
+	// this version unless somebody re-asks. It is the one no-verdict state that
+	// does NOT hold promotion, and the distinction is the whole reason it exists:
+	// every other way to reach no verdict is an accident — a failed increment, an
+	// agent that died — where refusing to promote an unjudged version is the safe
+	// answer, and this one is a decision somebody already made.
+	validationCancelled = "cancelled"
 )
 
 // milestoneRunRows is the narrow port over the milestone_runs index: the status
@@ -342,6 +351,11 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 	if latest != nil {
 		status.Build.Version = latest.SpecTag()
 		status.Build.Status = buildStageStatus(latest.State)
+		// The failure class, so the overview's track can say WHAT failed in the
+		// same words as the build page. Only a failed run is described by it.
+		if latest.State == delivery.RunStateFailed && latest.Failure != nil {
+			status.Build.FailureCode = latest.Failure.Code
+		}
 		// A VALIDATING-phase failure is not a build failure: every coding cycle
 		// landed and the failure already rides deploy.validation below. Without this
 		// the overview says "build failed" while the validation chip contradicts it.
@@ -367,6 +381,7 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 			dev = append(dev, b)
 		}
 	}
+	dev = s.holdUnreachable(ctx, dev)
 	status.Deploy.Status = deployStageStatus(dev)
 	status.Deploy.Components.Ready = int64(countReady(dev))
 
@@ -375,12 +390,12 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 	//
 	// Scoped to that MILESTONE rather than to the dev run, because a version
 	// can be judged more than once: a revalidation is a later run on the same
-	// milestone and its verdict is the version'"'"'s current answer. Scoped to the
+	// milestone and its verdict is the version's current answer. Scoped to the
 	// milestone rather than to the whole project for the reason above — a run on an
 	// older version must not answer for this one.
 	//
-	// The report itself, and the per-cycle detail behind it, live on the version'"'"'s
-	// run story (list-build-runs), which is where the console'"'"'s validation surface
+	// The report itself, and the per-cycle detail behind it, live on the version's
+	// run story (list-build-runs), which is where the console's validation surface
 	// reads them; validationUrl/validationIssue are therefore no longer served here.
 	state, err := s.validationStage(ctx, orgName, newestValidatingOnMilestone(runs, latest))
 	if err != nil {
@@ -394,11 +409,11 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 // cycle ONLY when the verdict alone cannot answer.
 //
 // That conditional read is the whole point of the split: a verdict that is final is
-// the answer, and a settled run without one never reached validation — both decided
-// from the row already in hand. The extra query happens for the two cases the row
-// cannot settle: a live run with no verdict yet (the case the old code got wrong by
-// calling every such run "validating"), and a live run holding a REPAIRABLE verdict,
-// which is mid-loop rather than finished.
+// the answer, and a settled run without one either had its judging cancelled or never
+// reached validation — all decided from the row already in hand. The extra query
+// happens for the two cases the row cannot settle: a live run with no verdict yet (the
+// case the old code got wrong by calling every such run "validating"), and a live run
+// holding a REPAIRABLE verdict, which is mid-loop rather than finished.
 func (s *Service) validationStage(ctx context.Context, orgID string, run *delivery.MilestoneRun) (string, error) {
 	state, decided := validationStageFromRun(run)
 	if decided {
@@ -471,6 +486,11 @@ func newestValidatingOnMilestone(rows []delivery.MilestoneRun, ref *delivery.Mil
 // folding it into a coarser word is how "completed" came to mean "passed" without
 // saying so — it would discard partial, inconclusive and unreported entirely.
 //
+// A TERMINAL run with no verdict splits in two, and the split is the difference
+// between a state that resolves and one that never will: judging that was CANCELLED
+// is settled (`cancelled`), and everything else is a run that simply never got there
+// (`none`, which promises a verdict is still coming).
+//
 // A verdict is final on a TERMINAL run, and on a live run when it is not one the
 // loop repairs. A live run holding a repairable verdict is undecided: the verdict is
 // mid-loop, so rendering it would tell a reader the version failed validation while
@@ -490,6 +510,23 @@ func validationStageFromRun(run *delivery.MilestoneRun) (state string, decided b
 		if run.ValidationVerdict != "" {
 			return run.ValidationVerdict, true
 		}
+		// A cancelled VALIDATION run: somebody stopped the judging, so no verdict is
+		// coming for this version and `none` — which promises one — would be a lie
+		// that never resolves.
+		//
+		// The KIND guard is load-bearing rather than defensive. This function is
+		// handed whatever newestValidatingOnMilestone returns, which is a
+		// validation-kind run OR a fall-back to the dev run, so testing the state
+		// alone would also catch a cancelled DEV run. That is an ABANDONED INCREMENT
+		// — the reconcile sweep suppresses its whole milestone for exactly that
+		// reason — and reporting it as "nothing left to wait for" would offer the
+		// version for promotion, which is worse than the confusion this state exists
+		// to remove. RunValidates is delivery's own answer to which kinds ask the
+		// question, and the selector above already keys on it, so the two cannot
+		// drift onto different ideas of what validates.
+		if run.State == delivery.RunStateCancelled && delivery.RunValidates(run.Kind) {
+			return validationCancelled, true
+		}
 		// Settled without ever recording a verdict: the run never reached validation.
 		return validationNone, true
 	}
@@ -507,7 +544,7 @@ func validationStageFromRun(run *delivery.MilestoneRun) (state string, decided b
 // unversioned spec; designStatus approved on any legacy v<N>-<M> tag;
 // hasDesign only ever true when a spec exists (the old ladder returned at
 // "prompt" before reading the design); the phase ladder unchanged. One
-// accepted deviation: a design.md with malformed frontmatter counts as
+// accepted deviation: a design.cell with malformed frontmatter counts as
 // present here, where the old ReadDesign failed the whole status read — see
 // spec.StatusSnapshot.HasDesign. HasTasks stays false — tasks are
 // counted live from GitHub, never here.
@@ -536,17 +573,28 @@ func applyFlatArtifactFields(status *gen.ProjectStatus, snap *spec.StatusSnapsho
 
 // buildStageStatus maps a milestone run's state onto the BuildStage enum. A
 // version's delivery IS its run: it is running while the run is (waiting between
-// cycles included — the version is still being delivered), and it succeeds or
-// fails exactly when the run settles. A cancelled or BLOCKED run reads as not
-// delivered: the version did not ship, and the run row's terminal reason is
-// where the difference (abandoned versus out of agent slots) is explained.
+// cycles included — the version is still being delivered), and it settles when
+// the run does.
+//
+// CANCELLED IS ITS OWN VALUE, matching build.statusFromRunState. The two
+// aggregates are read by different surfaces off the same run row — this one
+// drives the project badge in the toolbar, that one the version ledger — so a
+// difference between them is a self-contradiction a reader sees in one glance.
+// It was one: the build page header said Cancelled while the toolbar two
+// centimetres away said "Build failed".
+//
+// A BLOCKED run still reads as failed. The version did not ship and a human has
+// to supply something before it can, which is what "failed, see the reason" says;
+// nobody chose it, and that is the whole difference from a cancel.
 func buildStageStatus(state string) string {
 	switch state {
 	case delivery.RunStateSucceeded:
 		return buildSucceeded
-	case delivery.RunStateFailed, delivery.RunStateCancelled, delivery.RunStateBlocked:
+	case delivery.RunStateCancelled:
+		return buildCancelled
+	case delivery.RunStateFailed, delivery.RunStateBlocked:
 		return buildFailed
-	default: // waiting | running
+	default: // waiting | running | planning
 		return buildRunning
 	}
 }
@@ -570,6 +618,49 @@ var bindingFailureReasons = map[string]bool{
 	"DataPlaneNotConfigured":      true,
 	"ComponentNotFound":           true,
 	"ProjectNotFound":             true,
+}
+
+// holdUnreachable downgrades a binding that claims Ready while its advertised
+// URL does not answer yet, BEFORE the two readers below see it.
+//
+// Done as a pass rather than inside bindingReady on purpose: deployStageStatus
+// and countReady are pure functions of a condition list and are tested as such,
+// and threading a context and a network call through them would make the
+// stage's arithmetic depend on the world. Here the impurity is one function
+// with one job, and both readers keep reading a plain slice.
+//
+// It changes what the console says during the window — "Deploying · 1 of 2"
+// rather than "Deployed · 2 of 2" — which is the point: the old count called a
+// component live at a moment a person clicking its link got a TLS error, and
+// the validation sweep dispatched against exactly that claim.
+//
+// A nil gate returns the slice untouched, so a plane with no probe wired counts
+// exactly as it did before.
+func (s *Service) holdUnreachable(ctx context.Context, dev []openchoreo.ReleaseBindingSummary) []openchoreo.ReleaseBindingSummary {
+	if s == nil || s.endpointGate == nil || len(dev) == 0 {
+		return dev
+	}
+	out := make([]openchoreo.ReleaseBindingSummary, len(dev))
+	copy(out, dev)
+	for i := range out {
+		if !bindingReady(out[i]) {
+			continue
+		}
+		if s.endpointGate.Reachable(ctx, out[i].ReleaseName, out[i].ExternalURL) {
+			continue
+		}
+		// "False" with no failure reason is PENDING to both readers below —
+		// deployStageStatus reads it as progressing, bindingFailed needs a
+		// terminal reason it does not have. Which is the honest reading: the
+		// deployment is still on its way up. The reason is cleared with the
+		// status so that stays true: OpenChoreo's Ready-True reason describes a
+		// verdict this pass has just withdrawn, and leaving it behind would let
+		// bindingFailed read a downgrade as a failure the day OC names a
+		// Ready-True reason that also appears in bindingFailureReasons.
+		out[i].ReadyStatus = "False"
+		out[i].ReadyReason = ""
+	}
+	return out
 }
 
 func bindingReady(b openchoreo.ReleaseBindingSummary) bool { return b.ReadyStatus == "True" }

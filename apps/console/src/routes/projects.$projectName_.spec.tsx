@@ -30,11 +30,24 @@ import { SpecView } from "../features/spec/components/SpecView";
 // `/start` itself at project creation, so the console no longer has a
 // generate-requirements moment to hand across a navigation; the one CTA that
 // still starts an interview seeds the chat directly, from wherever the user is.
+//
+// `?view=architecture`: land on the Architecture tab instead of the workspace's
+// default file. The overview's architecture panel links here — it offers the
+// link BECAUSE it is showing a diagram, so dropping the reader on the PRD would
+// make them hunt the rail for the thing they just clicked.
+//
+// Unlike `generate`, this is not stripped after use: it names WHICH view, so it
+// stays a shareable deep link. A manual rail click still wins for the session.
 export const Route = createFileRoute("/projects/$projectName_/spec")({
   validateSearch: (
     search: Record<string, unknown>,
-  ): { generate?: "design" } => ({
+  ): { generate?: "design"; view?: "architecture"; file?: string } => ({
     ...(search.generate === "design" ? { generate: "design" as const } : {}),
+    ...(search.view === "architecture" ? { view: "architecture" as const } : {}),
+    // `?file=specs/…` — a link from the chat into one document (ADR-0028: the
+    // design turn's closing list links each open dependency's definition).
+    // Stripped once followed, like `generate`: it names a moment, not a view.
+    ...(typeof search.file === "string" && search.file.startsWith("specs/") ? { file: search.file } : {}),
   }),
   component: SpecRoute,
 });

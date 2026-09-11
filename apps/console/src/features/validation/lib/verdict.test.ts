@@ -230,8 +230,20 @@ describe("verdictSentence", () => {
   // shared copy exists to stop.
   it("speaks for a first attempt, which has no verdict yet", () => {
     expect(verdictSentence("", undefined, "running")).toBe(
-      "Nothing reported yet — the validation attempt is still running.",
+      "The validation agent is running.",
     );
+  });
+
+  // Same defect, same guard, for the other lifecycle value that carries no verdict.
+  // The deployments banner passes `cancelled` as BOTH arguments (it is not one of the
+  // in-flight states, so the state IS what it reads as the verdict), and "" here sent
+  // it to the fallback that printed "This deployment's verdict: validation cancelled."
+  // — announcing the absence of a verdict as one.
+  it("speaks for cancelled judging, which is the absence of a verdict", () => {
+    const s = verdictSentence("cancelled", undefined, "cancelled");
+    expect(s).toBe("This version has no verdict — run validation again when you want one.");
+    // Complements the rail's stage note instead of restating it.
+    expect(s).not.toContain("was cancelled");
   });
 
   // `awaiting-fix` cannot reach this path — it requires a fatal verdict — and a
