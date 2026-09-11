@@ -418,6 +418,25 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// index (one row read) + the org-scoped release-binding list —
 	// consumer-side ports wired here so projects imports neither.
 	projectService.SetStageSources(projectRunRows{runs: milestoneRunRepo, cycles: runCycleRepo, ledger: usageLedgerRepo}, componentClient)
+	// ONE endpoint gate, shared by the status poll here and the deploy-stage
+	// readiness poll below. Shared because the two used to hold different
+	// definitions of "up": the console counted a component live off the binding
+	// alone while the supervisor was dispatching validation at a URL that could
+	// not be reached. One gate makes the first probe serve both and makes the
+	// two answers impossible to diverge.
+	//
+	// Wired only when the data-plane gateway fronts TLS — the same stated fact
+	// that decides which advertised URL is the live one (PreferPlainHTTPEndpoints
+	// above). A plane without it has no per-host certificate to wait for, and its
+	// `*.openchoreoapis.localhost` names resolve to loopback from inside this
+	// process, so every probe would fail and hold every web component for ever.
+	var endpointGate *projects.EndpointGate
+	if cfg.PlatformAPI.DataPlaneGatewayTLS {
+		endpointGate = projects.NewEndpointGate(projects.NewHTTPEndpointProbe())
+	} else {
+		slog.Info("endpoint deploy-wait disabled — data-plane gateway does not front TLS, so there is no certificate window to wait for")
+	}
+	projectService.SetEndpointGate(endpointGate)
 	organizationService := organization.NewOrganizationService(orgRepo, namespaceClient)
 	// componentService takes repoSvc + buildCredSvc so TriggerBuild can
 	// pre-stage the per-WorkflowRun build Secret in workflows-<orgID>
@@ -1275,6 +1294,16 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	} else {
 		slog.Info("ThunderApplication CR reader disabled — no KUBERNETES_SERVICE_HOST/PORT or KUBE_API_BASE_URL; thunder deploy-wait skipped")
 	}
+	// Endpoint deploy-wait: after OC Ready, a component that advertises an
+	// external URL stays pending until that URL answers. OC reports Ready when
+	// the control plane is done, which on a cloud plane is minutes before a
+	// first-ever hostname has a certificate — and `serving` is what the
+	// validation sweep dispatches on.
+	//
+	// Gated on the SAME stated fact as PreferPlainHTTPEndpoints above, because
+	// both turn on what the data-plane gateway really is — see endpoint_wait.go
+	// for why the local plane must not wire it.
+	deploymentService.SetEndpointGate(endpointGate)
 	// The address a consumer reaches a protected sibling's managed API on. Config
 	// carries only an override; the default lives beside the context-path builder
 	// it has to agree with.
