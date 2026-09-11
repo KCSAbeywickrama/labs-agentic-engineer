@@ -205,9 +205,10 @@ so a directory lookup keyed on it 404s. Split the two questions a caller raises:
 
 - **Role** (what may they do) comes from `X-User-Groups`, always: the platform
   makes an identity-provider group out of every `security.json` role — enrolling
-  the design's test users in the ones it owns — so the groups claim IS the role
-  (**Implementation** below). A group the platform found rather than created
-  reaches your service the same way; only its membership is somebody else's. A caller whose groups match no declared role holds the design's
+  the project's test accounts in the ones it owns — so the groups claim IS the
+  role (**Implementation** below). A group the platform found rather than created
+  reaches your service the same way; only its membership is somebody else's.
+  A caller whose groups match no declared role holds the design's
   `coldStartRole`, and where that is `null` they are a **403, never a 401**: a
   401 tells the SPA its token expired, so it restarts sign-in and loops forever.
 - **Directory attributes** (which unit is theirs, their own id in the directory)
@@ -222,11 +223,11 @@ so a directory lookup keyed on it 404s. Split the two questions a caller raises:
 
 **`X-User-Groups` is the role authority, and there is no fork to pick.** Every
 `roles[].name` in `security.json` becomes an identity-provider group at Build
-(`security-design`), so a role reaches you only through that header. A service that reads the role from
-anywhere else — a role column in its own table, a roster in config — sees none of
-them: the seeded admin arrives as whatever that service defaults to, and no
-endpoint exists to correct it. Your own records hold per-user DATA, never the
-role.
+(`security-design`), so a role reaches you only through that header. A service
+that reads the role from anywhere else — a role column in its own table, a
+roster in config — sees none of them: the seeded admin arrives as whatever that
+service defaults to, and no endpoint exists to correct it. Your own records hold
+per-user DATA, never the role.
 
 One resolver, called by every protected handler.
 
@@ -240,11 +241,12 @@ the keyword (`admin`, `auditor`) survives the org renaming its groups, an
 equality check does not.
 
 **No group matches a declared role → the design's `coldStartRole`**, read from
-`specs/design/security.json` and not from prose, so a first-time caller in no
-group reaches the app's base experience rather than a 403 nobody can clear.
-`null` there means such a caller reaches nothing: answer **403**. Where the
-design said `null`, defaulting to the least-privileged real role is a silent
-grant.
+`specs/design/security.json` and not from prose. The platform enrols every test
+account in its role's group, so those never arrive here: this is the path a
+**real person** takes on first sign-in, and it is what lets them reach the app's
+base experience instead of a 403 nobody can clear. `coldStartRole: null` means
+such a caller reaches nothing — answer **403**, and never substitute the
+least-privileged real role, which is a silent grant.
 
 When roles scope by the caller's own directory attributes — their unit, their own
 id — resolve the caller's **directory record** by `X-User-Name` and filter on

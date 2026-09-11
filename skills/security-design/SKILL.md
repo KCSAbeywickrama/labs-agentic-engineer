@@ -107,7 +107,7 @@ one is rejected.
 | Field | Rule |
 |---|---|
 | `version` | Always `1`. |
-| `coldStartRole` | The role a caller holds when their identity-provider groups match no declared role — before anyone grants them one — or `null` when such a caller reaches nothing. Must name a declared role. See **the cold start** below. |
+| `coldStartRole` | The role a caller holds when their identity-provider groups match no declared role — a real person's first sign-in — or `null` when such a caller reaches nothing. When non-null, it must name a declared role. See **the cold start** below. |
 | `publicComponents` | Components that serve unauthenticated traffic. Absence of sign-in is a decision, so write it down rather than leaving it to be inferred from silence. |
 | `roles[].name` | Verbatim — it becomes the identity-provider group name and reaches the app as a `groups` claim. Reuse a catalog name where one fits. |
 | `roles[].description` | What the role is for. A **create-time seed only**: a shared role may already have been described by somebody else, and the platform never overwrites that. |
@@ -127,14 +127,21 @@ redirect URIs, and grants.
 
 A matrix whose every role is granted by somebody else describes a system nobody
 can enter. `coldStartRole` names the role a caller holds while their
-identity-provider groups match no declared role — which is where a first-time
-caller starts, and where anyone the org never enrolled stays. The default:
-the PRD's least-privileged actor, so a fresh deployment is usable by whoever
-signs in, and every role above it is granted by someone who already holds one —
-`grantedBy` names who. Say so explicitly where the system needs a different
-origin: an admin admits people, an import loads them, the first user becomes the
-admin. `null` is a real answer, but only for a system where a caller with no role
-genuinely reaches nothing.
+identity-provider groups match no declared role.
+
+**It is for real people, not the test accounts.** The platform enrols every test
+account in its role's group, so those always match; this is the first sign-in of
+somebody the org never enrolled. The default is the PRD's least-privileged
+actor, so a fresh deployment is usable by whoever arrives, and every role above
+it is granted by someone who already holds one — `grantedBy` names who. Say so
+explicitly where the system needs a different origin: an admin admits people, an
+import loads them, the first user becomes the admin. `null` is a real answer,
+but only for a system where such a caller genuinely reaches nothing — the app
+then answers them 403, which nobody can clear from inside the app.
+
+It has a second effect worth knowing when you choose it: the test account for
+this role is the one the platform serves when a caller asks for credentials
+without naming a role.
 
 ---
 
