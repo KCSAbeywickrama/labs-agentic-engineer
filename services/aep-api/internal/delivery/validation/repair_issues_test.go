@@ -24,20 +24,36 @@ import (
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
 
-// failedReport is a runner report with two criteria lost and one passing — the
-// shape a repair pass is built from.
-const failedReport = `{"criteria":[
-  {"id":"AC-001-a","method":"e2e","status":"fail","spec":"tests/e2e/greet.spec.ts",
-   "failure":{"message":"expected \"Hello, Ada\" but saw \"Hello, undefined\"","location":"greet.spec.ts:14"}},
-  {"id":"AC-001-b","method":"e2e","status":"pass"},
-  {"id":"AC-002-a","method":"manual","status":"fail","failure":{"message":"copy reads as a warning"}}
+// failedReport is an agent's report with two scenarios lost, one blocked and one
+// passing — the shape a repair pass is built from. The blocked one is here on
+// purpose: it must never be filed.
+const failedReport = `{"schemaVersion":2,"commit":"abc123","scenarios":[
+  {"feature":"Greeting","featureFile":"specs/acceptance/greeting.feature","line":8,
+   "rule":"The page greets the visitor by name","scenario":"Greeting a known visitor","outcome":"failed",
+   "steps":[
+     {"keyword":"When","text":"Ada opens the page","command":"agent-browser open /"},
+     {"keyword":"Then","text":"she is greeted by name","command":"agent-browser wait --text \"Hello, Ada\"",
+      "exit":1,"observed":"the heading read \"Hello, undefined\""}]},
+  {"feature":"Greeting","featureFile":"specs/acceptance/greeting.feature","line":16,
+   "rule":"The page greets the visitor by name","scenario":"Greeting an unknown visitor","outcome":"passed"},
+  {"feature":"Greeting","featureFile":"specs/acceptance/greeting.feature","line":24,
+   "rule":"A blank name is refused","scenario":"Submitting a blank name","outcome":"blocked",
+   "steps":[{"keyword":"When","text":"Ada submits a blank name","observed":"the Submit button was [disabled]"}]},
+  {"feature":"Copy","featureFile":"specs/acceptance/copy.feature","line":5,
+   "rule":"Warnings read as warnings","scenario":"The cutoff notice","outcome":"failed",
+   "steps":[{"keyword":"Then","text":"the notice reads as a warning",
+             "command":"agent-browser get text .notice","exit":0,"observed":"copy reads as a confirmation"}]}
 ]}`
 
-// One issue PER FAILED CRITERION, not one per attempt. The granularity is what
+// One issue PER FAILED SCENARIO, not one per attempt. The granularity is what
 // keeps a partial repair legible to the no-progress rule: an agent that fixes two
 // of three failures shrinks the working set, where a single omnibus issue it cannot
 // close would look like a cycle that achieved nothing.
-func TestMintRepairIssues_OnePerFailedCriterion(t *testing.T) {
+//
+// The blocked scenario in the fixture is the other half of the rule: a block is
+// reported and left for a person, because the agent cannot tell an app that
+// correctly refuses an action from one too broken to perform it.
+func TestMintRepairIssues_OnePerFailedScenario(t *testing.T) {
 	iss := &fakeIssues{}
 	svc := newSvc(iss, fakeCriteria{raw: []byte(sampleCriteria), found: true})
 
@@ -47,15 +63,20 @@ func TestMintRepairIssues_OnePerFailedCriterion(t *testing.T) {
 		t.Fatalf("MintRepairIssues: %v", err)
 	}
 	if len(filed) != 2 {
-		t.Fatalf("filed %d issues (%v); want one per failed criterion", len(filed), filed)
+		t.Fatalf("filed %d issues (%v); want one per failed scenario, and none for the block", len(filed), filed)
 	}
 	if len(iss.created) != 2 {
 		t.Fatalf("created %d issues; want 2", len(iss.created))
 	}
 
 	first := iss.created[0]
-	if !strings.Contains(first.Title, "AC-001-a") {
-		t.Errorf("title = %q; want the criterion id in it", first.Title)
+	if !strings.Contains(first.Title, "Greeting a known visitor") {
+		t.Errorf("title = %q; want the scenario named in it", first.Title)
+	}
+	for _, req := range iss.created {
+		if strings.Contains(req.Title, "Submitting a blank name") {
+			t.Errorf("a blocked scenario was filed for repair: %q", req.Title)
+		}
 	}
 	if first.Milestone == nil || *first.Milestone != thisMilestone {
 		t.Errorf("milestone = %v; repair work belongs to the version that failed", first.Milestone)
@@ -66,14 +87,14 @@ func TestMintRepairIssues_OnePerFailedCriterion(t *testing.T) {
 		t.Errorf("labels = %v; want the %q working-set label", first.Labels, delivery.LabelAgentWork)
 	}
 
-	// The body has to carry BOTH halves: the oracle's `must` (which the report does
-	// not have) and the report's failure detail (which the oracle does not have).
-	// Either alone leaves the agent guessing.
+	// The body is answerable from the report alone — the scenario text says what
+	// was demanded, the observation says what happened, and the location says
+	// where to read it. Nothing here needs a second read of the specification.
 	for _, want := range []string{
-		"A text box is visible",   // the must, from the oracle
-		"Hello, undefined",        // the message, from the report
-		"greet.spec.ts:14",        // the location, from the report
-		"tests/e2e/greet.spec.ts", // the spec file
+		"The page greets the visitor by name", // the rule
+		"Then she is greeted by name",         // the scenario, as written
+		`the heading read "Hello, undefined"`, // what the agent observed
+		"specs/acceptance/greeting.feature:8", // where to read it
 	} {
 		if !strings.Contains(first.Body, want) {
 			t.Errorf("body is missing %q:\n%s", want, first.Body)
@@ -81,8 +102,8 @@ func TestMintRepairIssues_OnePerFailedCriterion(t *testing.T) {
 	}
 	// Enforcement of this is deferred to separate skill work, so the issue itself has
 	// to say it: the cheapest path to a green report is to weaken the assertion.
-	if !strings.Contains(first.Body, "tests/") {
-		t.Errorf("body does not tell the agent the tests are off limits:\n%s", first.Body)
+	if !strings.Contains(first.Body, "specs/acceptance/") {
+		t.Errorf("body does not tell the agent the scenarios are off limits:\n%s", first.Body)
 	}
 }
 
@@ -162,10 +183,11 @@ func TestMintRepairIssues_RequiresACycleID(t *testing.T) {
 	}
 }
 
-// An unusable oracle costs the issue its `must` and nothing else. Refusing to file
-// would leave the run with no repair work, and a run with nothing to work settles
-// GREEN over a validation failure — strictly worse than a thinner issue body.
-func TestMintRepairIssues_FilesWithoutTheOracle(t *testing.T) {
+// The report is self-sufficient: it carries each scenario's own Given/When/Then,
+// so nothing here reads the specification. This pins that — a reintroduced oracle
+// read would make an unusable oracle able to block repair work, and a run with
+// nothing to work settles GREEN over a validation failure.
+func TestMintRepairIssues_NeedsNoOracle(t *testing.T) {
 	iss := &fakeIssues{}
 	svc := newSvc(iss, fakeCriteria{found: false})
 
@@ -175,43 +197,52 @@ func TestMintRepairIssues_FilesWithoutTheOracle(t *testing.T) {
 		t.Fatalf("MintRepairIssues: %v", err)
 	}
 	if len(filed) != 2 {
-		t.Fatalf("filed %v; want the failures filed even with no oracle to quote", filed)
+		t.Fatalf("filed %v; want the failures filed without consulting the specification", filed)
 	}
 	if !strings.Contains(iss.created[0].Body, "Hello, undefined") {
-		t.Error("the report's own failure detail should still reach the issue")
+		t.Error("the report's own observation should still reach the issue")
 	}
 }
 
-// productionReport is a REAL report shape, taken verbatim from a run's committed
-// tests/validation/report.json (fields trimmed to those this package reads, values
-// left alone). It pins two things the hand-written fixtures above cannot:
+// productionReport is a real agent-browser report — the scenarios, commands and
+// exit codes are taken from a recorded run against a live app, restated in
+// schemaVersion 2. It pins two things the hand-written fixture above cannot:
 //
-//   - the generator echoes `must` into the report, so a repair issue is answerable
-//     from one read and does not depend on the oracle at all;
-//   - a PASSING criterion carries `failure: null`, which the failure decoder has to
-//     survive rather than treat as a malformed object.
+//   - a scenario settled by a VALUE-RETURNING command, which exits 0 because the
+//     command ran. Only the observation says the assertion lost, so a body built
+//     from the exit code alone would come out empty;
+//   - a passing scenario whose steps carry no `observed` at all, which the decoder
+//     has to survive rather than treat as missing evidence.
 const productionReport = `{
-  "schemaVersion": 1,
-  "issue": 3,
-  "commit": "c5208feed192b527c7136e5135cfbcc773ed0860",
-  "generatedAt": "2026-07-31T09:19:11.404Z",
-  "playwrightVersion": "1.61.1",
-  "totals": {"e2e": {"total": 2, "pass": 1, "fail": 1, "notRun": 0}, "manual": 1, "scenario": 0},
-  "criteria": [
-    {"id": "AC-001-a", "requirementId": "REQ-001",
-     "must": "Visiting the app's root URL returns a page without requiring login",
-     "method": "e2e", "status": "pass", "spec": "tests/e2e/specs/AC-001-a.spec.ts",
-     "healed": false, "healAttempts": 0, "flaky": false, "durationMs": 192, "failure": null},
-    {"id": "AC-001-b", "requirementId": "REQ-001",
-     "must": "The page displays the text \"Hello, World!\"",
-     "method": "e2e", "status": "fail", "spec": "tests/e2e/specs/AC-001-b.spec.ts",
-     "healed": false, "healAttempts": 0, "flaky": false, "durationMs": 95,
-     "failure": {"message": "expected \"Hello, World!\" but the heading was empty",
-                 "location": "tests/e2e/specs/AC-001-b.spec.ts:9"}},
-    {"id": "AC-001-c", "requirementId": "REQ-001",
-     "must": "The page renders correctly on desktop and mobile widths",
-     "method": "manual", "status": "manual", "spec": null,
-     "healed": false, "healAttempts": 0, "flaky": false, "durationMs": 0, "failure": null}
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-10T11:02:41.118Z",
+  "commit": "6e4f2d6a1c9b3f70d5e2a84c1b6f09e7d3a5c218",
+  "baseUrl": "https://shopping-list-dev.example",
+  "isolation": "each scenario creates its own list and asserts only on that list",
+  "scenarios": [
+    {"feature": "Adding items to the list",
+     "featureFile": "specs/acceptance/shopping-list.feature", "line": 12,
+     "rule": "A household member can add an item with a name and a quantity",
+     "scenario": "Adding a new item", "tags": ["@story-2"], "outcome": "passed",
+     "steps": [
+       {"text": "the shared shopping list is empty", "keyword": "Given",
+        "command": "POST /lists (a fresh list for this scenario)"},
+       {"text": "Priya adds an item named \"Milk\" with quantity \"2\"", "keyword": "When",
+        "command": "agent-browser find role button click --name \"Add item\""},
+       {"text": "the list shows \"Milk\" with quantity \"2\"", "keyword": "Then",
+        "command": "agent-browser wait --text \"Milk\" --timeout 3000", "exit": 0}]},
+    {"feature": "Adding items to the list",
+     "featureFile": "specs/acceptance/shopping-list.feature", "line": 27,
+     "rule": "An item that duplicates one already on the list is rejected",
+     "scenario": "Adding a duplicate item", "tags": ["@negative"], "outcome": "failed",
+     "steps": [
+       {"text": "the list holds one item named \"Milk\"", "keyword": "Given",
+        "command": "POST /lists then POST /lists/{id}/items"},
+       {"text": "Dan tries to add another item named \"Milk\"", "keyword": "When",
+        "command": "agent-browser find role button click --name \"Add item\""},
+       {"text": "the list still has exactly one item", "keyword": "Then",
+        "command": "agent-browser get count \"[data-testid=item]\"",
+        "exit": 0, "observed": "2 — the list holds \"Milk\" and \" milk \""}]}
   ]
 }`
 
@@ -226,20 +257,21 @@ func TestMintRepairIssues_AgainstAProductionReport(t *testing.T) {
 		t.Fatalf("MintRepairIssues: %v", err)
 	}
 	if len(filed) != 1 {
-		t.Fatalf("filed %d issues; exactly one criterion failed", len(filed))
+		t.Fatalf("filed %d issues; exactly one scenario failed", len(filed))
 	}
 	body := iss.created[0].Body
 	for _, want := range []string{
-		`The page displays the text "Hello, World!"`,         // must, straight from the report
-		`expected "Hello, World!" but the heading was empty`, // the assertion
-		"tests/e2e/specs/AC-001-b.spec.ts:9",                 // location
+		"An item that duplicates one already on the list is rejected", // the rule
+		"Then the list still has exactly one item",                    // the scenario, as written
+		`2 — the list holds "Milk" and " milk "`,                      // the observation, which is the only evidence
+		"specs/acceptance/shopping-list.feature:27",                   // where to read it
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body is missing %q:\n%s", want, body)
 		}
 	}
-	if !strings.Contains(iss.created[0].Title, "AC-001-b") {
-		t.Errorf("title = %q; want the failing criterion named", iss.created[0].Title)
+	if !strings.Contains(iss.created[0].Title, "Adding a duplicate item") {
+		t.Errorf("title = %q; want the failing scenario named", iss.created[0].Title)
 	}
 }
 

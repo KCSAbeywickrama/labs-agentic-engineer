@@ -174,21 +174,31 @@ type fakeCriteria struct {
 	found bool
 }
 
-func (f fakeCriteria) ReadValidationCriteria(_ context.Context, _, _ string) ([]byte, bool, error) {
-	return f.raw, f.found, nil
+// The fixture is carried as raw bytes so a test can hand in a deliberately
+// unusable oracle (empty, or a file with no scenarios) as easily as a good one.
+func (f fakeCriteria) ReadAcceptanceCriteria(_ context.Context, _, _ string) ([]AcceptanceFile, bool, error) {
+	if !f.found {
+		return nil, false, nil
+	}
+	return []AcceptanceFile{{Path: "specs/acceptance/greeting.feature", Content: string(f.raw)}}, true, nil
 }
 
-const sampleCriteria = `{
-  "requirements": [
-    { "id": "REQ-001", "statement": "Greets by name",
-      "criteria": [
-        { "id": "AC-001-a", "must": "A text box is visible", "method": "e2e" },
-        { "id": "AC-001-b", "must": "Says Hello, name", "method": "e2e" }
-      ] },
-    { "id": "REQ-002", "statement": "Copy is clear",
-      "criteria": [ { "id": "AC-002-a", "must": "Greeting is friendly", "method": "manual" } ] }
-  ]
-}`
+const sampleCriteria = `Feature: Greeting
+
+  @story-1
+  Rule: The page greets the visitor by name
+
+    Scenario: Greeting a known visitor
+      Given Ada has opened a new session
+      When she enters her name
+      Then the page greets her by name
+
+    @negative
+    Scenario: A blank name is refused
+      Given Ada has opened a new session
+      When she submits a blank name
+      Then no greeting is shown
+`
 
 func newSvc(iss *fakeIssues, crit fakeCriteria) *Service {
 	return NewService(Deps{Issues: iss, Writer: iss.writer(), Criteria: crit})
@@ -241,25 +251,40 @@ func TestEnsureValidationIssue_CreatesFormattedIssue(t *testing.T) {
 		t.Errorf("dedupe key = %q; want the milestone-scoped %q", got.DedupeKey, "validation:proj:5")
 	}
 
-	// The body is PROSE: the consumer contract the aep-validation skill reads,
+	// The body is PROSE: the consumer contract the acceptance-run skill reads,
 	// with no machine block, and NO deployed endpoints or credentials — the
 	// runner fetches endpoints from the secure validation-context endpoint, and
 	// a login is published on the roles gate ticket.
 	if strings.Contains(got.Body, "aep:task/v1") {
 		t.Errorf("a validation issue body must carry no machine block:\n%s", got.Body)
 	}
-	for _, want := range []string{"## Validation criteria", "## Test layout", "## Report", "AC-001-a", "specs/validation/validation-criteria.json"} {
+	for _, want := range []string{
+		"## Acceptance criteria",
+		"## Report",
+		"specs/acceptance/greeting.feature", // the file is NAMED
+		"tests/acceptance/report.json",      // where the answer goes
+		"There is no test code to author",   // the load-bearing difference
+		// The false-pass guard has to be REACHABLE from the issue: it ships
+		// inside the skill, so the body names the one path that resolves in a
+		// pod. Without this line the guard exists and nothing ever runs it.
+		"acceptance-run/scripts/check-report.mjs",
+		"not backed by a command that could have said no",
+	} {
 		if !strings.Contains(got.Body, want) {
 			t.Errorf("body missing %q", want)
 		}
 	}
+	// The scenario text is the specification, and the issue must not carry a
+	// second copy of it that can disagree with the file.
+	if strings.Contains(got.Body, "Given Ada has opened a new session") {
+		t.Errorf("the issue inlined the scenarios instead of naming the files:\n%s", got.Body)
+	}
 	if strings.Contains(got.Body, "## Deployed endpoints") {
 		t.Error("body must NOT carry a Deployed endpoints section (runner fetches endpoints from validation-context)")
 	}
-	// e2e count reflects the oracle (2 e2e). Coverage is no longer a field —
-	// it is derived from committed-spec presence, so the oracle summary just
-	// counts by method.
-	if !strings.Contains(got.Body, "`e2e` — 2 criteria") {
+	// The fixture holds one rule and two scenarios; the tally is display only,
+	// but a wrong one puts a wrong number in front of a reader.
+	if !strings.Contains(got.Body, "2 scenarios across 1 rule") {
 		t.Errorf("acceptance-oracle counts wrong; body:\n%s", got.Body)
 	}
 }

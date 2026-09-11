@@ -31,12 +31,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
 
-// MintRepairIssues files ONE issue per failed acceptance criterion and returns
+// MintRepairIssues files ONE issue per failed scenario and returns
 // their numbers.
 //
 // One per criterion rather than one per attempt, because the no-progress rule
@@ -65,38 +66,34 @@ func (s *Service) MintRepairIssues(ctx context.Context, orgID, projectID string,
 		// repair work would be silently suppressed by the first attempt's issues.
 		return nil, fmt.Errorf("validation: a cycle id is required — it is the repair issues' dedupe key")
 	}
-	failed := FailedCriteria(report)
+	failed := FailedScenarios(report)
 	if len(failed) == 0 {
 		return nil, nil
 	}
 
-	// The generator echoes each criterion's `must` into the report, so the common
-	// path needs no second read. The oracle is consulted only to fill a gap — an
-	// older report that omitted it — and an unusable oracle is not fatal: the
-	// failure message alone is actionable, and refusing to file would leave the run
-	// with nothing to work and settle it GREEN over a failure.
-	musts := s.mustStatements(ctx, orgID, projectID, failed)
-
+	// No second read of the oracle: the report carries each scenario's own
+	// Given/When/Then, so what the scenario demanded and what the app did are
+	// answerable from the report alone.
 	out := make([]int, 0, len(failed))
-	for _, c := range failed {
-		must := c.Must
-		if must == "" {
-			must = musts[c.ID]
+	for _, f := range failed {
+		title := f.Scenario
+		if strings.TrimSpace(title) == "" {
+			title = f.ID
 		}
 		number, _, err := s.writer.Mint(ctx, orgID, projectID, delivery.IssueSpec{
-			Title:     fmt.Sprintf("Fix the failing acceptance criterion %s", c.ID),
-			Body:      repairIssueBody(c, must),
+			Title:     fmt.Sprintf("Fix the failing scenario: %s", title),
+			Body:      repairIssueBody(f),
 			Labels:    []string{delivery.LabelAgentWork, delivery.KindBug, delivery.SrcValidation},
 			Milestone: milestoneNumber,
-			DedupeKey: delivery.DedupeKeyValidationFix(c.ID, cycleID),
+			DedupeKey: delivery.DedupeKeyValidationFix(f.ID, cycleID),
 		})
 		if err != nil {
-			return out, fmt.Errorf("validation: create repair issue for %s: %w", c.ID, err)
+			return out, fmt.Errorf("validation: create repair issue for %s: %w", f.ID, err)
 		}
 		if number == 0 {
 			// Same hazard EnsureValidationIssue names: an issue exists and we cannot
 			// name it. Erroring retries the activity, and the retry dedupes onto it.
-			return out, fmt.Errorf("validation: filed a repair issue for %s but got no number back", c.ID)
+			return out, fmt.Errorf("validation: filed a repair issue for %s but got no number back", f.ID)
 		}
 		out = append(out, number)
 	}
@@ -105,72 +102,49 @@ func (s *Service) MintRepairIssues(ctx context.Context, orgID, projectID string,
 	return out, nil
 }
 
-// mustStatements maps criterion id → its `must` text from the oracle at HEAD, for
-// the criteria whose report entry did not carry one. It reads nothing when every
-// failure is already self-described, which is the normal case.
+// repairIssueBody is the prose a coding agent reads. It names the scenario, quotes
+// it as written, and says where the run stopped believing it.
 //
-// Empty when the oracle is absent or unusable — see MintRepairIssues on why that is
-// tolerated rather than fatal.
-func (s *Service) mustStatements(ctx context.Context, orgID, projectID string, failed []FailedCriterion) map[string]string {
-	needed := false
-	for _, c := range failed {
-		if c.Must == "" {
-			needed = true
-			break
-		}
-	}
-	if !needed {
-		return nil
-	}
-	raw, found, err := s.criteria.ReadValidationCriteria(ctx, orgID, projectID)
-	if err != nil || !found {
-		return nil
-	}
-	doc, err := parseCriteria(raw)
-	if err != nil {
-		return nil
-	}
-	return doc.mustByID()
-}
-
-// repairIssueBody is the prose a coding agent reads. It names the criterion, what
-// it demanded, and what the assertion actually said.
-//
-// The closing paragraph tells the agent the oracle and the validation tests are
-// not its to change. That is guidance, not enforcement — nothing checks it yet —
-// but the cheapest path to a green report is to weaken the failing assertion, and
-// the issue that hands the agent the failure is the right place to say so.
-func repairIssueBody(c FailedCriterion, must string) string {
+// The closing paragraph tells the agent the scenarios are not its to change. That
+// is guidance, not enforcement — nothing checks it yet — but the cheapest path to
+// a green report is to weaken the failing assertion, and the issue that hands the
+// agent the failure is the right place to say so.
+func repairIssueBody(f FailedScenario) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Acceptance criterion **%s** failed when the deployed system was validated. "+
-		"This is a defect in the implementation, not in the test.\n\n", c.ID)
-	if must != "" {
-		fmt.Fprintf(&b, "What it must do:\n\n> %s\n\n", must)
+	name := f.Scenario
+	if strings.TrimSpace(name) == "" {
+		name = f.ID
+	}
+	fmt.Fprintf(&b, "The scenario **%s** failed when the deployed system was validated. "+
+		"This is a defect in the implementation, not in the specification.\n\n", name)
+	if f.Rule != "" {
+		fmt.Fprintf(&b, "The rule it illustrates:\n\n> %s\n\n", f.Rule)
+	}
+	if f.Text != "" {
+		fmt.Fprintf(&b, "As written:\n\n```gherkin\n%s\n```\n\n", f.Text)
 	}
 	b.WriteString("What the validation run reported:\n\n")
-	fmt.Fprintf(&b, "- Criterion: %s (%s)\n", c.ID, orUnknown(c.Method))
-	if c.Spec != "" {
-		fmt.Fprintf(&b, "- Spec: %s\n", c.Spec)
+	if f.FeatureFile != "" {
+		fmt.Fprintf(&b, "- Scenario: %s\n", withLine(f.FeatureFile, f.Line))
 	}
-	if c.Location != "" {
-		fmt.Fprintf(&b, "- Location: %s\n", c.Location)
+	if f.Step != "" {
+		fmt.Fprintf(&b, "- Settled at: %s\n", f.Step)
 	}
-	if c.Message != "" {
-		fmt.Fprintf(&b, "\n```\n%s\n```\n", c.Message)
+	if f.Observed != "" {
+		fmt.Fprintf(&b, "- Observed: %s\n", f.Observed)
 	}
-	b.WriteString("\nFix the implementation so this criterion holds, then include this issue in " +
+	b.WriteString("\nFix the implementation so this scenario holds, then include this issue in " +
 		"your pull request's Resolves list.\n\n" +
-		"Do not change the validation criteria or anything under `tests/` — they are the " +
-		"question, not the answer. Validation re-runs every criterion as it stands once your " +
-		"fix is built and deployed.\n")
+		"Do not change anything under `specs/acceptance/` or `tests/` — the scenarios are " +
+		"the question, not the answer. Validation drives every scenario again as it stands " +
+		"once your fix is built and deployed.\n")
 	return b.String()
 }
 
-// orUnknown keeps a body from rendering an empty parenthesis for a report that
-// omitted the criterion's method.
-func orUnknown(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return "method unknown"
+// withLine renders `file:line`, or the bare path when the report carried no line.
+func withLine(file string, line int) string {
+	if line <= 0 {
+		return file
 	}
-	return s
+	return file + ":" + strconv.Itoa(line)
 }

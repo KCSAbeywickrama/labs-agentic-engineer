@@ -24,13 +24,12 @@ import path from "node:path";
 import {
   AUTH_BRIDGE_HOST,
   CURL_CONFIG_FILE,
-  PLAYWRIGHT_CLI_CONFIG_FILE,
   curlResolveEntries,
   hostResolverRules,
   probeEndpoints,
   resolveAuthGatewayAddress,
   writeCurlResolveConfig,
-  writePlaywrightCliConfig,
+  agentBrowserArgsEnv,
 } from "./endpoint_access.js";
 
 const GATEWAY = "10.43.246.32";
@@ -230,65 +229,62 @@ test("resolveAuthGatewayAddress resolves the bridge, and swallows a failure", as
   assert.equal(missing, undefined);
 });
 
-// launchOptions.args ONLY. Naming browser.browserName here would leave `channel`
-// undefined, which re-enables the Chromium sandbox — and that cannot start as
-// the pod's non-root user (ADR-0007). This assertion is the guard on that.
-test("writePlaywrightCliConfig writes only launch args, 0600", async () => {
-  const dir = await tmpDir();
-  const written = await writePlaywrightCliConfig(
-    dir,
-    [{ host: "a.localhost", port: 19080, address: GATEWAY }],
+// The separator is the whole risk. AGENT_BROWSER_ARGS is comma OR newline
+// separated, and `--host-resolver-rules` uses commas BETWEEN ITS OWN MAP rules —
+// so a comma join splits the value mid-flag and silently drops every mapping
+// after the first. This asserts the newline form, and that the image's
+// `--no-sandbox` survives: without it Chromium cannot start as the pod's
+// non-root user (ADR-0007).
+test("agentBrowserArgsEnv appends to the image's args with a newline, never a comma", async () => {
+  const env = await agentBrowserArgsEnv(
+    "--no-sandbox",
+    [
+      { host: "a.localhost", port: 19080, address: GATEWAY },
+      { host: "b.localhost", port: 19080, address: GATEWAY },
+    ],
     async () => ({ address: "172.18.0.1" }),
   );
-  assert.equal(written, path.join(dir, PLAYWRIGHT_CLI_CONFIG_FILE));
-
-  const body = await fs.promises.readFile(written as string, "utf8");
-  assert.doesNotMatch(body, /browserName/);
-  assert.deepEqual(JSON.parse(body), {
-    browser: {
-      launchOptions: {
-        args: [
-          `--host-resolver-rules=MAP a.localhost ${GATEWAY},MAP *.openchoreo.localhost 172.18.0.1`,
-        ],
-      },
-    },
-  });
-  assert.equal((await fs.promises.stat(written as string)).mode & 0o777, 0o600);
-  assert.deepEqual(await fs.promises.readdir(dir), [PLAYWRIGHT_CLI_CONFIG_FILE]);
+  assert.equal(
+    env.AGENT_BROWSER_ARGS,
+    "--no-sandbox\n" +
+      `--host-resolver-rules=MAP a.localhost ${GATEWAY},MAP b.localhost ${GATEWAY},` +
+      "MAP *.openchoreo.localhost 172.18.0.1",
+  );
+  // Both mappings survive the split the CLI will perform on it.
+  const parsed = (env.AGENT_BROWSER_ARGS ?? "").split("\n");
+  assert.equal(parsed.length, 2);
+  assert.equal(parsed[0], "--no-sandbox");
+  assert.match(parsed[1] as string, /MAP a\.localhost/);
+  assert.match(parsed[1] as string, /MAP b\.localhost/);
 });
 
 // An unresolvable bridge is not a reason to lose the endpoint rules: those are
 // what the preflight already proved reachable, and the IdP hop may never be
-// taken. It degrades to exactly the coverage this file had before the IdP rule.
-test("writePlaywrightCliConfig still maps the endpoints when the bridge will not resolve", async () => {
-  const dir = await tmpDir();
-  const written = await writePlaywrightCliConfig(
-    dir,
-    [{ host: "a.localhost", port: 19080, address: GATEWAY }],
-    async () => {
-      throw new Error("ENOTFOUND");
-    },
+// taken. It degrades to exactly the coverage this had before the IdP rule.
+test("agentBrowserArgsEnv still maps the endpoints when the bridge will not resolve", async () => {
+  const env = await agentBrowserArgsEnv("--no-sandbox", [{ host: "a.localhost", port: 19080, address: GATEWAY }], async () => {
+    throw new Error("ENOTFOUND");
+  });
+  assert.equal(
+    env.AGENT_BROWSER_ARGS,
+    `--no-sandbox\n--host-resolver-rules=MAP a.localhost ${GATEWAY}`,
   );
-  const cfg = JSON.parse(await fs.promises.readFile(written as string, "utf8"));
-  assert.deepEqual(cfg.browser.launchOptions.args, [
-    `--host-resolver-rules=MAP a.localhost ${GATEWAY}`,
-  ]);
 });
 
-// $PLAYWRIGHT_MCP_CONFIG is fatal when it points at a missing file, so the env
-// is derived from this file's existence. A file left by an earlier run would
-// therefore pin a cluster that no longer exists — it has to be removed, not just
-// left unwritten.
-test("writePlaywrightCliConfig removes a stale config when nothing needs mapping", async () => {
-  const dir = await tmpDir();
-  const stale = path.join(dir, PLAYWRIGHT_CLI_CONFIG_FILE);
-  await fs.promises.writeFile(stale, "stale\n");
-  // A resolvable bridge must not be enough on its own — no endpoint means no
-  // local plane to map, and the file has to go.
-  const written = await writePlaywrightCliConfig(dir, [], async () => ({ address: "172.18.0.1" }));
-  assert.equal(written, undefined);
-  assert.equal(fs.existsSync(stale), false);
-  assert.deepEqual(await fs.promises.readdir(dir), []);
+// A cloud plane resolves its hostnames normally, so there is nothing to map and
+// the image's own value must be left exactly as it is — an empty record is what
+// lets the caller spread this unconditionally.
+test("agentBrowserArgsEnv says nothing when there is nothing to map", async () => {
+  assert.deepEqual(await agentBrowserArgsEnv("--no-sandbox", [], async () => ({ address: "172.18.0.1" })), {});
+});
+
+// An image that set no args at all must not produce a leading newline, which
+// would parse as an empty first argument.
+test("agentBrowserArgsEnv carries the rule alone when the image set no args", async () => {
+  const env = await agentBrowserArgsEnv(undefined, [{ host: "a.localhost", port: 19080, address: GATEWAY }], async () => {
+    throw new Error("ENOTFOUND");
+  });
+  assert.equal(env.AGENT_BROWSER_ARGS, `--host-resolver-rules=MAP a.localhost ${GATEWAY}`);
 });
 
 /** A fetch stub that answers each call with the next queued status, or throws. */

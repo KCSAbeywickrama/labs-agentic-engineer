@@ -1005,7 +1005,7 @@ redundant on the page holding them.
 Validation runs against a running instance and needs its resolved endpoints, so
 the event before it is a deployment; the **Validations** empty state says so too.
 The subject takes the platform's own noun, the one the agent's status line, the
-validation task's title and the `aep-validation` skill all already use — so the
+validation task's title and the `acceptance-run` skill all already use — so the
 description and the run name the same thing the same way.
 
 ### What a criterion is doing, while a run is under way

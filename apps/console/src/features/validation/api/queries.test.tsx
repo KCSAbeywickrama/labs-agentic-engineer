@@ -58,7 +58,7 @@ describe("useValidationReport", () => {
   it("pins the read to the validation cycle's merge commit", async () => {
     const { result } = renderHook(
       () =>
-        useValidationReport("proj1", "v1", true, "tests/validation/report.json", "abc123def456"),
+        useValidationReport("proj1", "v1", true, "tests/acceptance/report.json", "abc123def456"),
       { wrapper: wrapper(new QueryClient()) },
     );
 
@@ -70,7 +70,7 @@ describe("useValidationReport", () => {
   // would be a malformed request rather than a tip read.
   it("omits ref entirely when no merge commit is known", async () => {
     const { result } = renderHook(
-      () => useValidationReport("proj1", "v1", true, "tests/validation/report.json"),
+      () => useValidationReport("proj1", "v1", true, "tests/acceptance/report.json"),
       { wrapper: wrapper(new QueryClient()) },
     );
 
@@ -82,7 +82,7 @@ describe("useValidationReport", () => {
   // makes each run's report its own immutable entry.
   it("caches per merge commit, so two runs never share an entry", async () => {
     const queryClient = new QueryClient();
-    const path = "tests/validation/report.json";
+    const path = "tests/acceptance/report.json";
 
     const first = renderHook(
       () => useValidationReport("proj1", "v1", true, path, "sha-run-1"),

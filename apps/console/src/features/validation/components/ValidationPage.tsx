@@ -29,9 +29,7 @@ import { Link } from "@tanstack/react-router";
 import { Fragment, useMemo, useState } from "react";
 import {
   parseValidationCriteria,
-  parseValidationReport,
   tallyCriterionMethods,
-  tallyCriterionStates,
   ValidationView,
   type CriterionMethodCount,
   type CriterionTally,
@@ -141,20 +139,6 @@ function useOracle(criteria: string | undefined): ValidationCriteria | undefined
     const parsed = parseValidationCriteria(criteria);
     return "kind" in parsed ? undefined : parsed;
   }, [criteria]);
-}
-
-// The oracle joined with the run's report, as counts — what the verdict tile
-// explains once an attempt has answered.
-function useTally(
-  oracle: ValidationCriteria | undefined,
-  report: string | undefined,
-): CriterionTally | undefined {
-  return useMemo(() => {
-    if (!oracle) return undefined;
-    const parsed = report ? parseValidationReport(report) : undefined;
-    const statuses = parsed && !("kind" in parsed) ? parsed : undefined;
-    return tallyCriterionStates(oracle, statuses);
-  }, [oracle, report]);
 }
 
 // The oracle alone, by method — what the pending tile says while the first attempt
@@ -343,7 +327,11 @@ export function ValidationPage({
     reportCycle?.mergeSha,
   );
   const oracle = useOracle(criteria.data?.content);
-  const tally = useTally(oracle, report.data?.content);
+  // NO TALLY. A tally is a join of the oracle and a run's per-criterion results,
+  // and the acceptance report answers per scenario — there are no criterion ids
+  // to join on. Deriving one from the oracle alone would print counts under a
+  // verdict that no run produced, so the tile says the verdict and stops.
+  const tally: CriterionTally | undefined = undefined;
   const methods = useMethods(oracle);
   // No oracle was ever authored — the Files API's answer for a version whose spec has
   // no criteria, and the reason its run will settle as `skipped`. Told apart from a
@@ -709,17 +697,20 @@ export function ValidationPage({
           960px reading column for the Spec file pane, and a page wants neither —
           no page in this console caps its body, and PageContent already supplies
           the outer cap and the centring. */}
+      {/* `rawReport`, not `report`, and no `awaitingReport`.
+          The acceptance run answers per SCENARIO; the criteria are a different
+          decomposition of the same requirement, so there is no id to join the
+          two on. Passing either prop would set `hasRun` inside the view and
+          render a state chip on every criterion row with nothing to fill it —
+          which reads `Not validated`, a VERDICT ("we checked and declined to
+          judge"), where the truth is that this report does not speak about
+          criteria at all. */}
       <ValidationView
         noPadding
         fullWidth
         hideDescription
-        // `validating`, not `awaitingFirstVerdict`: a row with no result yet waits
-        // on whichever attempt is in flight, first or repeat. Narrow it to the first
-        // and a criterion authored since the last run reads as out of that run while
-        // the current one is on its way to answering it.
-        awaitingReport={validating}
         criteria={criteria.data.content}
-        {...(report.data ? { report: report.data.content } : {})}
+        {...(report.data ? { rawReport: report.data.content } : {})}
         live={live.statuses}
       />
     </>

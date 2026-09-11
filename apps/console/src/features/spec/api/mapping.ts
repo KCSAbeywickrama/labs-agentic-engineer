@@ -51,6 +51,12 @@ const GROUP_BY_FOLDER: Record<string, SpecGroup> = {
   requirements: "requirements",
   design: "designs",
   validation: "validation",
+  // The acceptance criteria are a second folder in the SAME section, not a
+  // fourth section: validation is the phase, and an acceptance criterion is the
+  // unit it grades (docs/glossary.md — different axes, both words correct). A
+  // group of its own would put two headers on one phase and force a rail
+  // ordering decision that means nothing to a reader.
+  acceptance: "validation",
 };
 
 // Reference documents (#383) are transient turn inputs, never committed

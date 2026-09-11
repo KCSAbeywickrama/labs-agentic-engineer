@@ -1,7 +1,7 @@
 # Design notes — `@aep/ui-validation-view`
 
 This package renders `specs/validation/validation-criteria.json` — the acceptance
-oracle — optionally joined against a run's `tests/validation/report.json`. Two
+oracle — optionally joined against a run's `tests/acceptance/report.json`. Two
 consumers, one component:
 
 | Consumer | What it passes | What the reader is doing there |

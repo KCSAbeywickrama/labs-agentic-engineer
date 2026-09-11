@@ -63,8 +63,13 @@ export function fileLabel(path: string): string {
   if (VALIDATION_CRITERIA_RE.test(path)) return "Validation criteria";
   // A document nothing above names — a feature file most of the time, where
   // the filename IS the feature's name once the extension is off it. Keeping
-  // `.md` would leave the one surface the user reads throughout still showing
-  // them a file.
-  return basename(path).replace(/\.md$/, "");
+  // the extension would leave the one surface the user reads throughout still
+  // showing them a file.
+  //
+  // Both senses of "feature file" land here and want the same treatment: a
+  // requirement's `<slug>.md` depth document, and a `<capability>.feature` of
+  // acceptance criteria. Each is named for what it covers, under a section
+  // header that already says which phase it belongs to.
+  return basename(path).replace(/\.(md|feature)$/, "");
 }
 

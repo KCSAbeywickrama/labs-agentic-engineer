@@ -121,13 +121,19 @@ regeneration. Read what is already in `specs/acceptance/` before writing.
   needs; it never depends on a scenario above it having run. Note that a
   `Background:` re-runs before every scenario, so it saves writing, not work —
   use it only for state the reader genuinely needs in order to read the file.
+- **Own what you assert about.** The app under test is deployed and keeps its
+  data, so state a scenario did not create belongs to someone else. Where the
+  product has a container — a round, a board, a list — the `Given` creates one
+  and every later step stays inside it: `Given Olivia has opened a new round`,
+  then assert on *that* round. Owning the container is what makes "stands
+  alone" true against a shared database, and it is why nothing has to be reset.
 - **Say the state, not the steps that reach it.** `Given a round is open for
   "Bridge Cafe"`, not four steps that open one.
-- **Data that gets created needs to survive a second run.** The app under test
-  keeps its data between runs. When a scenario creates something whose name must
-  be unique, say so in the step — `When Olivia opens a round for a restaurant
-  named uniquely for this run` — rather than pinning a literal that collides the
-  next time.
+- **Data that gets created needs to survive a second run.** Owning a container
+  keeps scenarios apart from each other; it does not keep this run apart from the
+  last one. When a scenario creates something whose name must be unique, say so
+  in the step — `When Olivia opens a round for a restaurant named uniquely for
+  this run` — rather than pinning a literal that collides the next time.
 
 ## Cover the refusals, and mark them
 
@@ -172,7 +178,14 @@ assertion has to be written so the defect it guards against cannot slip past
 its own filter. `the list still has exactly one item named "Milk"` reads right
 and is vacuous: if the product wrongly accepted `" milk "`, the list now holds
 a `"Milk"` AND a `" milk "`, and a count filtered to `"Milk"` is still one — so
-the scenario passes on exactly the bug it exists to catch. Count the list.
+the scenario passes on exactly the bug it exists to catch. Count the whole of
+the container the scenario owns — `the list still has exactly one item` — which
+is only sound because the `Given` created that list.
+
+Where the product has no container to own, count the *change* rather than the
+total: `Then one more order is on the round than before`. A wrongly accepted
+duplicate makes the change two and the scenario still fails, where a filtered
+count would have passed.
 
 The same trap waits wherever a refusal is asserted by looking only at what you
 expected to see. Ask what the product would do if the rule were missing, and

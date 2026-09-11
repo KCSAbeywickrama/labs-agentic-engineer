@@ -135,9 +135,15 @@ turn — apply them directly, and load one only if you find you do not have it.
 6. **Per-component artifacts** — every `service` gets `openapi.yaml`
    (`openapi-conventions`); every `web-application` gets `wireframes.dsl`
    (`wireframes`).
-7. **Validation criteria** (`validation-criteria`) — mint
-   `specs/validation/validation-criteria.json` LAST. A design without its
-   acceptance oracle is unfinished — never skip this.
+7. **The acceptance oracle** — mint it LAST, and mint BOTH halves. A design
+   without one is unfinished — never skip this.
+   - `validation-criteria` → `specs/validation/validation-criteria.json`
+   - `acceptance-criteria` → `specs/acceptance/<slug>.feature`
+
+   Two documents, deliberately: the same requirement decomposed two ways while
+   the Gherkin path is under trial. Both are authored from the PRD alone, so
+   they are independent of each other and of everything above — emit them in
+   one step. A design that produced only one of them is incomplete.
 
 Order binds only where a step reads an earlier one's result: the cell before
 enrichment (the platform scaffolds each design.json from it), and

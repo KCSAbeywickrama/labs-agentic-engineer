@@ -27,7 +27,7 @@ import { validationKeys } from "./keys";
 // is authoritative — the runner writes the path it actually committed. This
 // constant is the fallback for a run that recorded no path.
 export const CRITERIA_PATH = "specs/validation/validation-criteria.json";
-export const REPORT_PATH = "tests/validation/report.json";
+export const REPORT_PATH = "tests/acceptance/report.json";
 
 // Fetch one validation artifact's content. Reuses the spec Files reader
 // (path-agnostic; `sha` only feeds its cache key, never the request — we key our

@@ -54,7 +54,7 @@ export const VALIDATION_SCENARIOS: ValidationScenario[] = [
 // The paths this module owns. The handler drops them from the project scenario's
 // file list before splicing in the ones a verdict override implies.
 export const CRITERIA_PATH = "specs/validation/validation-criteria.json";
-export const REPORT_PATH = "tests/validation/report.json";
+export const REPORT_PATH = "tests/acceptance/report.json";
 export const VALIDATION_FILE_PATHS = [CRITERIA_PATH, REPORT_PATH];
 
 // Same repo the project fixtures use. Duplicated rather than imported so this

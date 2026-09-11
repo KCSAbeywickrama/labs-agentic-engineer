@@ -51,10 +51,9 @@ import type { ComponentEndpoint } from "./lib/validation_context.js";
 import {
   curlConfigHome,
   curlResolveEntries,
-  playwrightCliConfigHome,
   probeEndpoints,
   writeCurlResolveConfig,
-  writePlaywrightCliConfig,
+  agentBrowserArgsEnv,
 } from "./lib/endpoint_access.js";
 
 function requireEnv(name: string): string {
@@ -224,19 +223,19 @@ async function main(): Promise<number> {
   // A validation run (AEP_TASK_KIND) applies no DESIGN skills at all — it is
   // black-box verification and builds nothing — so `pinnedBodies` stays empty
   // for it. Its workflow arrives another way: alwaysOnSkills() names
-  // `aep-validation` and requireWorkflowBodies() injects the whole SKILL.md into
+  // `acceptance-run` and requireWorkflowBodies() injects the whole SKILL.md into
   // the system prompt, in context from the first token rather than invocable.
   //
   // The ALLOWLIST is not empty though, and that distinction cost a release.
   // Pinning nothing is not the same as allowing nothing: `skills:` gates the
-  // Skill tool, so an empty array made the `playwright-cli` load that
-  // `aep-validation` instructs impossible, and the agent read the mirror's files
+  // Skill tool, so an empty array made the `agent-browser` load that
+  // `acceptance-run` instructs impossible, and the agent read the mirror's files
   // by hand instead. onDemandSkills() names what the phase may load.
   let availableSkillNames: string[] = [];
   let pinnedBodies = "";
   if (req.taskKind === "validation") {
     console.log(
-      "[oneshot] validation run — no design skills apply; aep-validation is injected as this run's workflow",
+      "[oneshot] validation run — no design skills apply; acceptance-run is injected as this run's workflow",
     );
     // PREFLIGHT: where the deployed system is, fetched by the platform before the
     // agent starts. Fatal on purpose — an agent that cannot learn its targets has
@@ -271,11 +270,12 @@ async function main(): Promise<number> {
     try {
       const entries = await curlResolveEntries(endpoints, undefined, (l) => console.log(l));
       const written = await writeCurlResolveConfig(curlConfigHome(), entries);
-      // The same override for the exploration browser. Separate file because
-      // `.curlrc` is a curl mechanism and reaches no browser, and separate from
-      // the project's playwright.config.ts because playwright-cli does not read
-      // that either — it was the one client still dialling loopback.
-      const browserConfig = await writePlaywrightCliConfig(playwrightCliConfigHome(), entries);
+      // The same override for the agent's browser. Applied to this process's env
+      // rather than written to a file: `startCodingRun` spreads `process.env`
+      // into the child, and unlike a config path there is nothing that can go
+      // stale or point at a file that no longer exists.
+      const browserArgs = await agentBrowserArgsEnv(process.env.AGENT_BROWSER_ARGS, entries);
+      Object.assign(process.env, browserArgs);
       if (written === undefined) {
         // No `.localhost` endpoints — a cloud plane resolves them normally and
         // there is nothing to pin. Logged so the absence is a decision on the
@@ -284,10 +284,8 @@ async function main(): Promise<number> {
       } else {
         console.log(`[oneshot] pinned ${entries.length} endpoint host(s) for curl → ${written}`);
       }
-      if (browserConfig !== undefined) {
-        console.log(
-          `[oneshot] pinned ${entries.length} endpoint host(s) for playwright-cli → ${browserConfig}`,
-        );
+      if (browserArgs.AGENT_BROWSER_ARGS !== undefined) {
+        console.log(`[oneshot] pinned ${entries.length} endpoint host(s) for the browser`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

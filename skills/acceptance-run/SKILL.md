@@ -26,19 +26,39 @@ report as passing must have been settled by a command that could have said no.
 3. `agent-browser skills get core` — the CLI serves the guide for the version
    installed. Verbs and flags move between releases; this skill deliberately
    carries none of them beyond the few named below.
-4. Confirm the app answers at its base URL, and note how to **reset it to empty**
-   (see Isolation).
+4. Read `/tmp/validation-context.json` — the platform writes it before this run
+   starts, and it carries `{ "endpoints": [{"component","url"}], … }`. Take the
+   base URL from there. **Never probe, scan, or guess an endpoint**, and never
+   assume localhost: the app under test is deployed. Confirm it answers before
+   the first scenario.
 
-## Isolation — reset, then build
+**One browser at a time.** Work the scenarios in sequence, in this agent. A live
+Chromium is the largest thing in the cycle's pod, and a second session OOM-kills
+the run mid-phase; splitting scenarios across dispatched agents looks like
+parallel work and buys an OOM instead. This binds harder here than it did for a
+compiled suite — there is a browser open for every scenario, not one per run.
+
+## Isolation — own the container, don't reset
 
 Each scenario starts from the state its `Given` steps describe and nothing else.
-Do not let one scenario's leftovers stand in for another's setup.
+The app is deployed and keeps its data: there is no process to restart, no
+database to truncate, and anything you delete belongs to somebody.
 
-Reset by the cheapest total means the app allows — restarting a service whose
-store is in memory, a seed endpoint, a fresh context — then build the `Given`
-state through the app's own interface. Record which reset you used once, at the
-top of the report; if the app offers none, say so, because every later scenario
-is then suspect.
+So isolate by **creating what you assert about**. Where the `Given` names a
+container — a round, a board, a list — make a fresh one through the app's own
+interface and keep every later step inside it. "The list is empty" is then true
+because you just made it, and a count over that list is sound no matter what
+else the database holds.
+
+Where the product has no container to own, assert on the **change** instead of
+the total: read the count before the `When`, and check it moved by exactly what
+the `Then` claims. Weaker, because it assumes nothing else writes while you
+work — but the platform runs one validation at a time per version, so that
+holds here.
+
+Record which of the two you used, once, at the top of the report as
+`isolation`. If a scenario managed neither, say so there: every assertion it
+makes is then suspect.
 
 ## Step routing
 
@@ -124,36 +144,62 @@ guessing; never report `passed` because a scenario looked plausible.
 ## The report
 
 Write `tests/acceptance/report.json`. One entry per scenario in the feature
-files — every one, including those you could not run.
+files — every one, including those you could not run. Stamp `commit` with
+`git rev-parse HEAD` so the report says which code it judged.
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "generatedAt": "<ISO>",
-  "baseUrl": "http://localhost:5173",
-  "reset": "restart the API process (in-memory store)",
+  "commit": "<git rev-parse HEAD>",
+  "baseUrl": "https://<the deployed host from the validation context>",
+  "isolation": "each scenario creates its own list and asserts only on that list",
   "scenarios": [
     {
       "feature": "Adding items to the list",
+      "featureFile": "specs/acceptance/shopping-list.feature",
+      "line": 24,
       "rule": "An item that duplicates one already on the list is rejected",
       "scenario": "Trying to add an exact duplicate",
       "tags": ["@negative"],
-      "outcome": "passed",
+      "outcome": "failed",
       "steps": [
         { "text": "Dan tries to add another item named \"Milk\"", "keyword": "When",
           "command": "agent-browser find role button click --name \"Add\"" },
-        { "text": "he is told \"Milk\" is already on the list", "keyword": "Then",
-          "command": "agent-browser wait --text \"already on the list\" --timeout 3000",
-          "exit": 0 }
+        { "text": "the list still has exactly one item", "keyword": "Then",
+          "command": "agent-browser get count \"[data-testid=item]\"",
+          "exit": 0, "observed": "2 — the list holds \"Milk\" and \" milk \"" }
       ]
     }
   ]
 }
 ```
 
-Then run the report checker named in the run's instructions. It fails the run if
-a scenario in the feature files has no entry, so a scenario you could not manage
-must be reported `blocked` — never dropped.
+`featureFile` and `line` are where the scenario is written, so a reader — and a
+repair issue — can go straight to it.
+
+**`observed` is required wherever the exit code does not settle the step.**
+
+| Case | Why |
+|---|---|
+| a nonzero exit | the exit says the assertion lost; `observed` says what was there instead, and that is what the repair issue quotes |
+| no command at all | a `blocked` step has to record its reason — `the "Edit" button was [disabled]` — or nobody can tell an app that correctly refuses from one that is broken |
+| a value-returning command (`get count`, `get value`, `get url`, `get text`) | exit 0 only means the command RAN. You read the printed value and judged; `observed` is that value, and without it the verdict is unauditable — which is the example above |
+
+It is optional on a passing `wait`, where the command text and `exit: 0` already
+say what held.
+
+Then check it:
+
+```bash
+node "$AEP_SKILLS_DIR/acceptance-run/scripts/check-report.mjs" "$(git rev-parse --show-toplevel)"
+```
+
+It exits 2 on a contract breach and prints every one. A scenario in the feature
+files with no entry fails it, so one you could not manage must be reported
+`blocked` — never dropped. So does a `passed` whose `Then` carries no command
+that could have said no, and a step missing the `observed` its exit code does
+not supply. Fix the REPORT and run it again; never the feature files.
 
 ## Do not
 

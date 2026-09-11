@@ -31,22 +31,19 @@
 //     affected (`dns.lookup` returns the real address), which is why the probe
 //     below needs no override of its own.
 //
-//     The fix is per-client, because no one mechanism reaches all three: a
-//     `resolve` entry per endpoint in curl's own config file, and the equivalent
-//     `--host-resolver-rules` in a config playwright-cli is pointed at, so a
-//     plain `curl <url>` and a bare `playwright-cli open <url>` both work with
+//     The fix is per-client, because no one mechanism reaches both: a `resolve`
+//     entry per endpoint in curl's own config file, and the equivalent
+//     `--host-resolver-rules` in the browser's launch args, so a plain
+//     `curl <url>` and a bare `agent-browser open <url>` both work with
 //     the real hostname, through the real gateway, carrying the real Host header
-//     the HTTPRoute matches on. (The third client, the browser `playwright test`
-//     launches, is configured by `playwright.config.template.ts` in the project's
-//     own repo — it is the one the specs run in, and it is not ours to set from
-//     here.) Rewriting the URL
+//     the HTTPRoute matches on. Rewriting the URL
 //     was the alternative and is worse: an IP in the URL sends `Host: <ip>` and
 //     matches no route, and a Service-DNS URL bypasses the gateway altogether —
 //     dropping the api-configuration trait's auth, CORS and path rewrites, so an
 //     auth-gated criterion could pass through a side door.
 //
 //  2. Whether the deployment answers at all is a PLATFORM fact. It used to be a
-//     `curl` in the aep-validation skill with prose telling the agent to stop if
+//     `curl` in the validation skill with prose telling the agent to stop if
 //     it failed; the agent did not stop — it read RFC 6761's connection refused
 //     as a broken deployment and went hunting through the pod's DNS
 //     configuration. Same reasoning, and the same shape, as the context fetch in
@@ -204,36 +201,12 @@ export async function writeCurlResolveConfig(
 }
 
 /**
- * playwright-cli's config file, pointed at by `$PLAYWRIGHT_MCP_CONFIG`.
- *
- * Deliberately NOT `.playwright/cli.config.json`, the name the CLI looks for by
- * default: that default is resolved against the CWD, and an exploring agent
- * moves between the repo root and `tests/e2e`, so a CWD-relative config is
- * present for some of its commands and absent for the rest. An absolute path in
- * the env holds for every invocation from every directory.
- */
-export const PLAYWRIGHT_CLI_CONFIG_FILE = ".aep-playwright-cli.json";
-
-/**
- * Where that config goes. Same home-directory reasoning as `curlConfigHome`,
- * and the same one-function rule so the writer and the env record cannot drift.
- */
-export function playwrightCliConfigHome(): string {
-  return os.homedir();
-}
-
-/** The absolute path the env variable carries — writer and reader share it. */
-export function playwrightCliConfigPath(): string {
-  return path.join(playwrightCliConfigHome(), PLAYWRIGHT_CLI_CONFIG_FILE);
-}
-
-/**
  * The IdP's name family, and where it is actually reachable from inside a pod.
  *
  * A wildcard, unlike every endpoint rule below it, because the runner never
  * learns the IdP's hostname: the validation context carries the app's endpoints
  * and nothing else, so a pattern is the only handle there is. The same pattern
- * `playwright.config.template.ts` uses, for the same reason.
+ * the validation run's browser uses, for the same reason.
  *
  * `host.k3d.internal` rather than the address DNS returns, because DNS is
  * measurably wrong here: the CoreDNS rewrite maps `(openchoreo|openchoreoapis)
@@ -299,61 +272,47 @@ export async function resolveAuthGatewayAddress(
 }
 
 /**
- * Write the browser's half of the same override, for the EXPLORATION browser.
+ * The browser's half of the same override, as an env fragment.
  *
- * `.curlrc` is a curl mechanism and never reaches a browser, and
- * `playwright.config.template.ts` covers only the browser `playwright test`
- * launches — so playwright-cli, which reads neither, was the one client left
- * dialling loopback. The agent then rediscovered RFC 6761 from scratch each
- * authoring run: 180s of DNS spelunking, a throwaway probe spec and two edits
- * to a config that was never in the path, on the run that measured it (#570).
+ * `.curlrc` is a curl mechanism and never reaches a browser, so without this the
+ * agent's browser is the one client left dialling loopback — and it rediscovers
+ * RFC 6761 from scratch each run (180s of DNS spelunking on the run that
+ * measured it, #570).
  *
- * `launchOptions.args` ONLY. Naming `browser.browserName` here would leave
- * `channel` undefined and re-enable the Chromium sandbox, which cannot start as
- * the pod's non-root user — the failure ADR-0007 exists to keep out of this
- * file. The browser is chosen by `PLAYWRIGHT_MCP_BROWSER` in the image; this
- * only says how to resolve a name.
+ * **`AGENT_BROWSER_ARGS` is COMMA OR NEWLINE separated** (agent-browser 0.35.2),
+ * and `--host-resolver-rules` separates its OWN `MAP` rules with commas. Joining
+ * with commas therefore splits the value mid-flag: the first mapping survives
+ * attached to the flag, every later one becomes a bogus Chromium argument, and
+ * the run reports every endpoint after the first as unreachable. A NEWLINE join
+ * is the only safe form, and it is the whole reason this returns a string rather
+ * than a list.
  *
- * The IdP is mapped alongside them, so an exploration that follows a login
- * redirect does not meet an unresolvable host — the gap that used to leave a
- * dead hop for the agent to misread as a broken deployment, which is the exact
- * fault ADR-0006 exists to remove. Gated on there being an endpoint to map at
- * all: `curlResolveEntries` yields only `.localhost` hosts, so a non-empty list
- * IS the local-plane signal, and a cloud run writes no file and gets no rule.
+ * The image already sets `AGENT_BROWSER_ARGS=--no-sandbox`, which must survive:
+ * Chromium's sandbox cannot start as the pod's non-root user (ADR-0007), so the
+ * current value is kept and the rule appended rather than replacing it. Mixed
+ * separators are fine — the CLI accepts both — so the existing value is passed
+ * through untouched instead of being re-parsed.
  *
- * Returns the path written, or undefined when there is nothing to map — and in
- * that case REMOVES any file a previous run left behind. `$PLAYWRIGHT_MCP_CONFIG`
- * is fatal when it points at a missing file (the daemon exits on ENOENT), so the
- * env is set from this file's existence; a stale file would silently pin a
- * cluster that no longer exists.
+ * The IdP is mapped alongside the endpoints, so an exploration that follows a
+ * login redirect does not meet an unresolvable host — the gap that used to leave
+ * a dead hop for the agent to misread as a broken deployment (ADR-0006). Gated
+ * on there being an endpoint to map at all: `curlResolveEntries` yields only
+ * `.localhost` hosts, so a non-empty list IS the local-plane signal, and a cloud
+ * run gets no rule.
+ *
+ * Returns an empty record when there is nothing to map, so a caller can spread it
+ * and leave the image's own value in place.
  */
-export async function writePlaywrightCliConfig(
-  dir: string,
+export async function agentBrowserArgsEnv(
+  current: string | undefined,
   entries: readonly CurlResolveEntry[],
   lookup: LookupFn = dns.promises.lookup as LookupFn,
-): Promise<string | undefined> {
-  const file = path.join(dir, PLAYWRIGHT_CLI_CONFIG_FILE);
-  if (entries.length === 0) {
-    await fs.promises.rm(file, { force: true });
-    return undefined;
-  }
-  const args = hostResolverRules(entries, await resolveAuthGatewayAddress(lookup));
-  if (args.length === 0) {
-    await fs.promises.rm(file, { force: true });
-    return undefined;
-  }
-  const body = `${JSON.stringify({ browser: { launchOptions: { args } } }, null, 2)}\n`;
-
-  await fs.promises.mkdir(dir, { recursive: true });
-  const staging = await fs.promises.mkdtemp(path.join(dir, ".aep-pwcli-"));
-  try {
-    const staged = path.join(staging, PLAYWRIGHT_CLI_CONFIG_FILE);
-    await fs.promises.writeFile(staged, body, { mode: 0o600 });
-    await fs.promises.rename(staged, file);
-  } finally {
-    await fs.promises.rm(staging, { recursive: true, force: true });
-  }
-  return file;
+): Promise<Record<string, string>> {
+  if (entries.length === 0) return {};
+  const rules = hostResolverRules(entries, await resolveAuthGatewayAddress(lookup));
+  if (rules.length === 0) return {};
+  const existing = (current ?? "").trim();
+  return { AGENT_BROWSER_ARGS: existing ? `${existing}\n${rules.join("\n")}` : rules.join("\n") };
 }
 
 /**

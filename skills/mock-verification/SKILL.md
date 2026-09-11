@@ -1,6 +1,6 @@
 ---
 name: mock-verification
-description: Smoke-walk a `web-application` in a real browser once it builds clean — stand it up in mock mode, walk every flow its wireframes draw, fix each failure where you find it, post progress item by item. Required for every change to a webapp component. Judging a DEPLOYED system is `aep-validation`'s job instead.
+description: Smoke-walk a `web-application` in a real browser once it builds clean — stand it up in mock mode, walk every flow its wireframes draw, fix each failure where you find it, post progress item by item. Required for every change to a webapp component. Judging a DEPLOYED system is `acceptance-run`'s job instead.
 metadata:
   aep:
     kind: platform
@@ -73,7 +73,7 @@ Every item ends in exactly one:
 - **open** — what happens, after three attempts.
 - **outside** — the truth lives outside the app: a computed total, a generated
   checklist, a 403. The mock answers to `openapi.yaml`, so it proves the request
-  went out, never that the number is right; `aep-validation` judges that against
+  went out, never that the number is right; `acceptance-run` judges that against
   the deployed system.
 
 An unreachable screen is **open**, naming the navigation that failed, never

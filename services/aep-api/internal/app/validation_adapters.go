@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 
@@ -29,27 +30,41 @@ import (
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
-// validationCriteriaPath is the acceptance-oracle file the validation minter
-// reads (kept in sync with validation.criteriaFilePath, which is unexported).
-const validationCriteriaPath = "specs/validation/validation-criteria.json"
+// validationCriteriaPath is the acceptance-oracle directory the validation
+// minter reads (kept in sync with validation.criteriaDirPath, which is
+// unexported).
+const validationCriteriaPath = "specs/acceptance"
 
 // validationCriteria adapts the Files API to validation's CriteriaReader port:
-// it reads specs/validation/validation-criteria.json at HEAD, reporting a file
-// absent at HEAD as found=false with no error (the design agent has not authored
-// the oracle yet). Keeps the files feature out of the validation package.
+// it reads the `.feature` files under specs/acceptance/ at HEAD, reporting an
+// empty or absent directory as found=false with no error (the design agent has
+// not authored the oracle yet). Keeps the files feature out of the validation
+// package.
+//
+// Bundle rather than List-then-Read: it reads the whole directory at ONE commit,
+// so two files can never come from different states of the repo.
 type validationCriteria struct {
 	files spec.FilesService
 }
 
-func (a validationCriteria) ReadValidationCriteria(ctx context.Context, orgID, projectID string) (raw []byte, found bool, err error) {
-	fc, rerr := a.files.Read(ctx, orgID, projectID, validationCriteriaPath)
+func (a validationCriteria) ReadAcceptanceCriteria(ctx context.Context, orgID, projectID string) ([]validation.AcceptanceFile, bool, error) {
+	bundle, rerr := a.files.Bundle(ctx, orgID, projectID, validationCriteriaPath, "")
 	if rerr != nil {
 		if errors.Is(rerr, spec.ErrFileNotFound) {
 			return nil, false, nil
 		}
 		return nil, false, rerr
 	}
-	return []byte(fc.Content), true, nil
+	var out []validation.AcceptanceFile
+	for _, fc := range bundle.Files {
+		// The directory is the oracle's, but a stray README or an editor's
+		// leftover is not a scenario file and must not count as one.
+		if !strings.HasSuffix(fc.Path, ".feature") {
+			continue
+		}
+		out = append(out, validation.AcceptanceFile{Path: fc.Path, Content: fc.Content})
+	}
+	return out, len(out) > 0, nil
 }
 
 // HasValidationCriteria satisfies the event plane's ValidationOracle: the same
@@ -58,7 +73,7 @@ func (a validationCriteria) ReadValidationCriteria(ctx context.Context, orgID, p
 // and refusing on it at the trigger would send the caller a shape error about a
 // file they may not have written. The mint parses, and skips one it cannot use.
 func (a validationCriteria) HasValidationCriteria(ctx context.Context, orgID, projectID string) (bool, error) {
-	_, found, err := a.ReadValidationCriteria(ctx, orgID, projectID)
+	_, found, err := a.ReadAcceptanceCriteria(ctx, orgID, projectID)
 	return found, err
 }
 
