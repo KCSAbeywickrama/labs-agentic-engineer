@@ -20,6 +20,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,16 +49,41 @@ const (
 
 // fakeEndpointProbe is a hand double of endpointProbe that counts calls, so a
 // test can assert the probe was NOT consulted as well as what it answered.
+//
+// Guarded, because the concurrency tests below call it from several goroutines
+// at once — an unsynchronised counter there would race rather than fail.
 type fakeEndpointProbe struct {
+	mu      sync.Mutex
 	answers bool
 	calls   int
 	urls    []string
+	// block, when set, holds every probe until it is closed, so a test can be
+	// sure several callers are inside the gate at the same moment.
+	block chan struct{}
 }
 
 func (f *fakeEndpointProbe) Answers(_ context.Context, url string) bool {
+	f.mu.Lock()
 	f.calls++
 	f.urls = append(f.urls, url)
-	return f.answers
+	answers, block := f.answers, f.block
+	f.mu.Unlock()
+	if block != nil {
+		<-block
+	}
+	return answers
+}
+
+func (f *fakeEndpointProbe) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+func (f *fakeEndpointProbe) probedURLs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.urls...)
 }
 
 type endpointWaitOpts struct {
@@ -120,11 +147,11 @@ func TestEndpointWaitHoldsAReadyBindingWhoseURLDoesNotAnswer(t *testing.T) {
 	if h.ready(t) {
 		t.Fatal("component is Ready while its endpoint does not answer — validation would dispatch against an unreachable system")
 	}
-	if probe.calls != 1 {
+	if probe.callCount() != 1 {
 		t.Fatalf("probe calls = %d, want 1", probe.calls)
 	}
-	if probe.urls[0] != endpointWaitURL {
-		t.Errorf("probed %q, want the advertised URL %q", probe.urls[0], endpointWaitURL)
+	if probe.probedURLs()[0] != endpointWaitURL {
+		t.Errorf("probed %q, want the advertised URL %q", probe.probedURLs()[0], endpointWaitURL)
 	}
 }
 
@@ -149,7 +176,7 @@ func TestEndpointWaitPassesAComponentWithNoExternalURL(t *testing.T) {
 	if !h.ready(t) {
 		t.Fatal("a component with no external URL was held — the wave wait would never finish")
 	}
-	if probe.calls != 0 {
+	if probe.callCount() != 0 {
 		t.Fatalf("probe calls = %d, want 0 — there is no URL to probe", probe.calls)
 	}
 }
@@ -166,7 +193,7 @@ func TestEndpointWaitLeavesAnUndeployedComponentAlone(t *testing.T) {
 	if !h.ready(t) {
 		t.Fatal("an undeployed component was held — nothing is owed there")
 	}
-	if probe.calls != 0 {
+	if probe.callCount() != 0 {
 		t.Fatalf("probe calls = %d, want 0", probe.calls)
 	}
 }
@@ -184,7 +211,7 @@ func TestEndpointWaitDoesNotProbeAPendingBinding(t *testing.T) {
 	if h.ready(t) {
 		t.Fatal("a pending binding read as Ready")
 	}
-	if probe.calls != 0 {
+	if probe.callCount() != 0 {
 		t.Fatalf("probe calls = %d, want 0 — the binding is not Ready", probe.calls)
 	}
 }
@@ -201,7 +228,7 @@ func TestEndpointWaitProbesOncePerRelease(t *testing.T) {
 			t.Fatalf("poll %d: component is not Ready though its endpoint answered", i+1)
 		}
 	}
-	if probe.calls != 1 {
+	if probe.callCount() != 1 {
 		t.Fatalf("probe calls = %d over 3 polls, want 1", probe.calls)
 	}
 }
@@ -356,7 +383,7 @@ func TestEndpointGateIsSharedBetweenTheTwoReaders(t *testing.T) {
 	if n := countReady(got); n != 1 {
 		t.Errorf("countReady = %d, want 1 — the supervisor already proved this URL answers", n)
 	}
-	if probe.calls != 1 {
+	if probe.callCount() != 1 {
 		t.Errorf("probe calls = %d across both readers, want 1", probe.calls)
 	}
 }
@@ -376,7 +403,7 @@ func TestEndpointGateDoesNotReprobeInsideTheNegativeWindow(t *testing.T) {
 			t.Fatalf("poll %d: unreachable URL read as reachable", i+1)
 		}
 	}
-	if probe.calls != 1 {
+	if probe.callCount() != 1 {
 		t.Fatalf("probe calls = %d over 5 polls inside the window, want 1", probe.calls)
 	}
 }
@@ -398,7 +425,7 @@ func TestEndpointGateReprobesAfterTheNegativeWindow(t *testing.T) {
 	if !gate.Reachable(context.Background(), endpointWaitRelease, endpointWaitURL) {
 		t.Fatal("the URL answers now, but the gate never re-asked")
 	}
-	if probe.calls != 2 {
+	if probe.callCount() != 2 {
 		t.Fatalf("probe calls = %d, want 2 — one per side of the window", probe.calls)
 	}
 }
@@ -421,5 +448,95 @@ func TestHoldUnreachableClearsTheWithdrawnReadyReason(t *testing.T) {
 
 	if got[0].ReadyReason != "" {
 		t.Errorf("ReadyReason = %q, want empty — the Ready verdict was withdrawn", got[0].ReadyReason)
+	}
+}
+
+// -- concurrency and cancellation --------------------------------------------
+
+// The two readers poll independently, so they arrive together as a matter of
+// course. One probe must serve both: without single-flight each would miss the
+// memo and probe, and the claim that they cannot disagree about whether a
+// component is up would hold only when their polls happened not to overlap.
+func TestEndpointGateCollapsesConcurrentMissesIntoOneProbe(t *testing.T) {
+	probe := &fakeEndpointProbe{answers: true, block: make(chan struct{})}
+	gate := NewEndpointGate(probe)
+
+	const readers = 8
+	verdicts := make([]bool, readers)
+	var wg sync.WaitGroup
+	for i := range readers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			verdicts[i] = gate.Reachable(context.Background(), endpointWaitRelease, endpointWaitURL)
+		}()
+	}
+	// Let every reader reach the gate, then release the single probe.
+	for probe.callCount() == 0 {
+		runtime.Gosched()
+	}
+	close(probe.block)
+	wg.Wait()
+
+	if n := probe.callCount(); n != 1 {
+		t.Errorf("probe calls = %d across %d concurrent readers, want 1", n, readers)
+	}
+	for i, v := range verdicts {
+		if !v {
+			t.Errorf("reader %d read unreachable; every reader must share the one verdict", i)
+		}
+	}
+}
+
+// A caller giving up is not evidence about the endpoint. Caching it would let
+// one abandoned console request tell every other reader — the supervisor
+// included — that the component is down for the whole retry window.
+func TestEndpointGateDoesNotCacheCallerCancellation(t *testing.T) {
+	probe := &fakeEndpointProbe{answers: false}
+	gate := NewEndpointGate(probe)
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if gate.Reachable(cancelled, endpointWaitRelease, endpointWaitURL) {
+		t.Fatal("a cancelled probe read as reachable")
+	}
+
+	// A live caller must get a fresh probe, not the cancelled caller's verdict.
+	probe.answers = true
+	if !gate.Reachable(context.Background(), endpointWaitRelease, endpointWaitURL) {
+		t.Error("the cancelled caller's failure was cached and held a reachable endpoint")
+	}
+	if n := probe.callCount(); n != 2 {
+		t.Errorf("probe calls = %d, want 2 — the live caller must probe afresh", n)
+	}
+}
+
+// The deploy path clears the withdrawn reason too, not just the status path.
+// componentDeployFrom copies OpenChoreo's Ready-True reason before the gate
+// runs, and a held component captioned with the reason it was up is a lie.
+func TestEndpointWaitClearsTheWithdrawnReasonOnTheDeployPath(t *testing.T) {
+	oc := &mocks.ComponentClientMock{
+		GetReleaseBindingStatusFunc: func(context.Context, string, string, string, string) (*openchoreo.ReleaseBindingSummary, error) {
+			return &openchoreo.ReleaseBindingSummary{
+				ReadyStatus: "True",
+				ReadyReason: "ReleaseReady",
+				ReleaseName: endpointWaitRelease,
+				ExternalURL: endpointWaitURL,
+			}, nil
+		},
+	}
+	svc := NewDeploymentService(oc, nil)
+	svc.SetEndpointGate(NewEndpointGate(&fakeEndpointProbe{answers: false}))
+
+	got, err := svc.DeploymentState(context.Background(), endpointWaitOrg, endpointWaitProject,
+		[]string{endpointWaitComp})
+	if err != nil {
+		t.Fatalf("DeploymentState: %v", err)
+	}
+	if got[0].Ready {
+		t.Fatal("component is Ready while its endpoint does not answer")
+	}
+	if got[0].Reason != "" {
+		t.Errorf("Reason = %q, want empty — the Ready verdict was withdrawn", got[0].Reason)
 	}
 }

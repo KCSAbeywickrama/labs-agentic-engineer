@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
@@ -120,6 +122,15 @@ type EndpointGate struct {
 	// arriving inside negativeRetryAfter answer from the memo rather than each
 	// paying probeTimeout. Negative answers expire; positive ones do not.
 	failed sync.Map
+	// inflight collapses CONCURRENT misses on one key into a single probe.
+	//
+	// The memos above are read-then-write, so without this two readers arriving
+	// together both miss and both probe — and the sentence above, that the two
+	// cannot disagree about whether a component is up, would only be true when
+	// their polls happen not to overlap. They are independent pollers on the
+	// same window, so overlapping is the normal case, not the rare one.
+	// Same pattern as organization's ensureInflight.
+	inflight singleflight.Group
 	// now is the clock, so the retry window is testable without sleeping.
 	now func() time.Time
 }
@@ -148,21 +159,68 @@ func (g *EndpointGate) Reachable(ctx context.Context, release, url string) bool 
 		return true
 	}
 	key := release + "\x00" + url
+	if g.memoised(key) {
+		return g.reachableByMemo(key)
+	}
+	// One probe per key, however many readers arrive at once; the others wait
+	// on it and read the same verdict. The func returns no error, so the value
+	// is the bool the shared call produced.
+	v, _, _ := g.inflight.Do(key, func() (any, error) {
+		// Re-checked INSIDE the flight: a caller that queued behind a probe
+		// which has just answered must read that answer, not launch another.
+		if g.memoised(key) {
+			return g.reachableByMemo(key), nil
+		}
+		if !g.probe.Answers(ctx, url) {
+			// A cancelled or timed-out CALLER is not evidence about the
+			// endpoint. Caching it would let one abandoned console request tell
+			// every other reader the component is down for the whole retry
+			// window — including the supervisor, which would hold the deploy.
+			//
+			// The verdict still comes back false for everyone sharing this
+			// flight, which is the safe direction: holding a component for one
+			// more poll costs a poll, and nothing was memoised, so the next
+			// caller probes afresh.
+			if ctx.Err() == nil {
+				g.failed.Store(key, g.clock())
+			}
+			return false, nil
+		}
+		g.seen.Store(key, struct{}{})
+		g.failed.Delete(key)
+		return true, nil
+	})
+	reachable, _ := v.(bool)
+	return reachable
+}
+
+// memoised reports whether this key already has an answer worth reusing — a
+// positive one, which is kept for ever, or a negative one still inside its
+// retry window.
+func (g *EndpointGate) memoised(key string) bool {
 	if _, ok := g.seen.Load(key); ok {
 		return true
 	}
-	if at, ok := g.failed.Load(key); ok {
-		if last, isTime := at.(time.Time); isTime && g.clock().Sub(last) < negativeRetryAfter {
-			return false
-		}
-	}
-	if !g.probe.Answers(ctx, url) {
-		g.failed.Store(key, g.clock())
+	return g.withinNegativeWindow(key)
+}
+
+// reachableByMemo reads the memoised verdict. Only meaningful when memoised
+// said yes: a positive answer wins over a stale negative one, since a URL that
+// has answered cannot go back to never having answered.
+func (g *EndpointGate) reachableByMemo(key string) bool {
+	_, ok := g.seen.Load(key)
+	return ok
+}
+
+// withinNegativeWindow reports whether the last negative answer for this key is
+// still fresh enough to reuse instead of re-probing.
+func (g *EndpointGate) withinNegativeWindow(key string) bool {
+	at, ok := g.failed.Load(key)
+	if !ok {
 		return false
 	}
-	g.seen.Store(key, struct{}{})
-	g.failed.Delete(key)
-	return true
+	last, isTime := at.(time.Time)
+	return isTime && g.clock().Sub(last) < negativeRetryAfter
 }
 
 // SetEndpointGate wires the reachability gate. A nil gate skips it, which is
@@ -208,6 +266,11 @@ func (s *DeploymentService) applyEndpointWait(ctx context.Context, orgID, projec
 	}
 
 	st.Ready = false
+	// Cleared with the verdict it described: componentDeployFrom copied
+	// OpenChoreo's Ready-TRUE reason onto st before this gate ran, and leaving
+	// it behind would caption a held component with the reason it was up. Same
+	// reason holdUnreachable clears ReadyReason on the status path.
+	st.Reason = ""
 	slog.InfoContext(ctx, "deployment: binding is Ready but the endpoint does not answer yet — holding at converging",
 		"org", orgID, "project", projectID, "component", componentName, "url", url, "release", st.Release)
 }
