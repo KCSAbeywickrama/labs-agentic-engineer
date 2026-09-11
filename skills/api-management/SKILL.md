@@ -55,10 +55,20 @@ Two rules are this skill's, because they are the gateway's contract:
   header only when its claim is present; when it is absent the client's own value
   for that header is forwarded. `groups` is the one that matters: a token issued
   without it (a `client_credentials` token, or a user in no groups) leaves
-  `X-User-Groups` caller-controlled. Treat a role decision as trustworthy only
-  for a caller whose token actually carries the claim. A service that owns its
-  own people records sidesteps this: its role comes from the record it stored,
-  keyed on `X-User-Id`, which no caller can set (`thunder-authentication`).
+  `X-User-Groups` caller-controlled.
+
+  That is a **gap in the gateway's contract**, and a service cannot close it from
+  the inside: the header arrives populated with whatever the caller chose, and
+  nothing in the request distinguishes it from one the gateway asserted. What it
+  is NOT is a reason to invent a second role authority — roles reach a service
+  only through that header (`thunder-authentication`), so a service that resolves
+  them from its own table instead sees none of the roles the platform granted and
+  is broken for every real user. Contain it where it can be contained: the
+  bullet above is the rule — a lane with no gateway on it lets a caller set these
+  freely — so keep `client_credentials` clients off externally-reachable
+  role-gated routes, and treat an absent or empty `X-User-Groups` as no role
+  (**403**), never as a reason to fall back to a source the caller can influence.
+  Raise the residual risk rather than designing around it.
 - **An authenticated caller who has no role → 403, never 401.** A 401 tells the
   SPA its token expired, so it restarts sign-in and loops forever. The role
   resolution itself is in `thunder-authentication`.
