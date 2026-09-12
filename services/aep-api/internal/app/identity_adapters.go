@@ -25,7 +25,7 @@ package app
 //	                                               in identity_targets.go)
 //	identity.EnsureService → provisioning.RolesEnsurer (the build gate's driver)
 //	identity.CatalogService → mcpdiscovery.RoleCatalogLister (the design-time
-//	                                                          `list_roles` tool)
+//	                                                          `list_groups` tool)
 //
 // Keeping the mapping here is what lets `identity` name no client package and
 // `provisioning` name no identity entity.
@@ -224,6 +224,7 @@ func (c roleCatalog) ListRoleCatalog(ctx context.Context, orgHandle string) ([]m
 			Description:     e.Description,
 			PlatformCreated: e.PlatformCreated,
 			MemberCount:     e.MemberCount,
+			Projects:        e.Projects,
 		})
 	}
 	return out, nil
