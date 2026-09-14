@@ -19,7 +19,7 @@
 // @vitest-environment jsdom
 
 import type { ElementType } from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
 
@@ -50,8 +50,12 @@ const navigate = vi.fn();
 
 // The version ledger, for the Milestone cell — the Builds surfaces' own read.
 let mockBuilds: components["schemas"]["BuildSummary"][] = [];
+// The newest run's story — a run parked at the deploy gate is the board's
+// "on hold" (ADR-0032). Empty by default: nothing parked.
+let mockRuns: MilestoneRunView[] = [];
 vi.mock("../../builds/api/queries", () => ({
   useBuilds: () => ({ data: mockBuilds, isPending: false, isError: false }),
+  useBuildRuns: () => ({ data: { runs: mockRuns }, isPending: false, isError: false }),
 }));
 
 import { DeploymentsPage } from "./DeploymentsPage";
@@ -60,37 +64,12 @@ type ProjectStatus = components["schemas"]["ProjectStatus"];
 type DeployStage = components["schemas"]["DeployStage"];
 type ComponentDependencies = components["schemas"]["ComponentDependencies"];
 type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
-type ProjectTestUserState = components["schemas"]["ProjectTestUserState"];
+type MilestoneRunView = components["schemas"]["MilestoneRunView"];
+type ProjectDependencyReadiness = components["schemas"]["ProjectDependencyReadiness"];
 
-const MOCK_PASSWORD = "mocknotreal";
-const THUNDER_CONSOLE_USERS = "http://localhost:8097/console/users";
-
-// Roles hooks — overridable so green-deploy fixtures stay Thunder-only by
-// default, and Test-users cases can inject owned rows / reveal answers.
-let mockTestUsers: ProjectTestUserState[] = [];
-const mockReveal = vi.fn(
-  async (username: string) => ({
-    username,
-    password: MOCK_PASSWORD,
-    rotatedAt: null,
-  }),
-);
-
-vi.mock("../../spec/api/roles", () => ({
-  useProjectRoles: () => ({
-    data: {
-      directoryAvailable: true,
-      roles: [],
-      testUsers: mockTestUsers,
-    },
-    isPending: false,
-    isError: false,
-  }),
-  useRevealTestUserPassword: () => ({
-    mutateAsync: mockReveal,
-    isPending: false,
-  }),
-}));
+// The roles read is NOT mocked here on purpose: the Test users panel left this
+// page for the environment page (ADR-0032), and a card that reached for it
+// would throw for want of a QueryClient — which is the assertion.
 
 // Query hooks replaced wholesale — no QueryClientProvider / MSW needed, only the
 // rendering under test is real (mirrors TasksList.test.tsx).
@@ -100,6 +79,18 @@ let mockDeploy: DeployStage = {
   components: { total: 1, ready: 1 },
   validation: "none",
 };
+
+// The component/binding join. One serving binding by default; the on-hold
+// case empties it, because a parked run has deployed nothing.
+const DEFAULT_DEPLOYMENTS = [
+  {
+    componentName: "storefront",
+    environment: "development",
+    status: "Ready",
+    endpointUrl: "https://storefront.dev.example.com",
+  },
+];
+let mockDeployments = DEFAULT_DEPLOYMENTS;
 
 // The design's dependency read (the promote dialog's connection list, and
 // the Configure button's own gate) — overridden per test; defaults to one
@@ -120,6 +111,7 @@ const DEFAULT_DEPENDENCIES: ComponentDependencies[] = [
   },
 ];
 let mockDependencies: ComponentDependencies[] = DEFAULT_DEPENDENCIES;
+let mockDependenciesPending = false;
 
 // Org catalog for Registered vs Project External. Default empty / no envCells
 // so the fixture `stripe` stays a Project External (re-collect test).
@@ -163,21 +155,45 @@ vi.mock("../api/queries", () => ({
   }),
   useComponentsDeployments: () => ({
     isPending: false,
-    deployments: [
-      {
-        componentName: "storefront",
-        environment: "development",
-        status: "Ready",
-        endpointUrl: "https://storefront.dev.example.com",
-      },
-    ],
+    deployments: mockDeployments,
     failedCount: 0,
   }),
   useProjectStatus: () => ({ data: status() }),
+  useProjectDependencyReadiness: () => ({
+    data: mockReadiness,
+    isPending: mockReadiness === undefined,
+    isError: false,
+  }),
 }));
 
+// Whether the platform holds dev values for each external — the deploy gate's
+// own read. Undefined (still loading) by default, so a connection's state word
+// stays blank until a test says what the platform holds.
+let mockReadiness: ProjectDependencyReadiness | undefined;
+
+/** A run parked at the deploy gate, short of the named values. */
+function parkedRun(blocking: string[]): MilestoneRunView {
+  return {
+    id: "run-1",
+    milestoneNumber: 1,
+    milestoneTitle: "v1",
+    kind: "dev",
+    origin: "spec-build",
+    state: "waiting",
+    waitingReason: "external-values",
+    blockingDependencies: blocking,
+    budgets: { cyclesTotal: 0, cycleCeiling: 8, fixCycles: 0, fixCeiling: 3, conflictCycles: 0, conflictCeiling: 2 },
+    cycles: [],
+    createdAt: "2026-09-10T08:00:00Z",
+  } as unknown as MilestoneRunView;
+}
+
 vi.mock("../../spec/api/queries", () => ({
-  useDesignDependencies: () => ({ data: mockDependencies, isPending: false }),
+  useDesignDependencies: () => ({
+    data: mockDependenciesPending ? undefined : mockDependencies,
+    isPending: mockDependenciesPending,
+    isError: false,
+  }),
 }));
 
 vi.mock("../../settings/api/queries", () => ({
@@ -216,12 +232,14 @@ beforeEach(() => {
   mockRepairing = false;
   mockMutate.mockClear();
   mockDependencies = DEFAULT_DEPENDENCIES;
+  mockDependenciesPending = false;
   mockExternalCatalog = [];
   mockExternalCatalogPending = false;
   mockExternalCatalogError = false;
-  mockTestUsers = [];
-  mockReveal.mockClear();
   mockBuilds = [];
+  mockDeployments = DEFAULT_DEPLOYMENTS;
+  mockRuns = [];
+  mockReadiness = undefined;
   navigate.mockClear();
 });
 
@@ -395,19 +413,22 @@ describe("DeploymentsPage — environment board", () => {
     // The two cards, named as places.
     expect(screen.getByRole("heading", { name: "Development" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Production" })).toBeInTheDocument();
-    // The dev card's fact line and the aggregate's word on the rollout — which
-    // the ledger row repeats, so the chip appears twice.
-    expect(screen.getByText(/1 of 1 components live/)).toBeInTheDocument();
-    // Two chips — the card's and the row's — beside the ledger's column header.
+    // The dev card's first step says what is live and invites the try; the
+    // aggregate's word on the rollout is the card's chip, the ledger row's
+    // chip, and the step's own title.
+    expect(screen.getByText(/1 of 1 components live.* You can try them now\./)).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Deployed" })).toBeInTheDocument();
     expect(
       screen.getAllByText("Deployed").filter((el) => el.closest("th") === null),
-    ).toHaveLength(2);
-    // Production is empty, gated, and counts the live configuration it needs.
+    ).toHaveLength(3);
+    // Production is empty and says what unlocks it; its connections group
+    // counts the live configuration a promotion still needs.
     expect(
-      screen.getByText("Only a version whose validation has passed can be promoted here."),
+      screen.getByText("Nothing running yet. v1 is ready to promote once the missing value is set."),
     ).toBeInTheDocument();
-    expect(screen.getByText("0 of 1 live configuration values set")).toBeInTheDocument();
+    // …and Development's group reads the same while the readiness read is out:
+    // an unknown value is not a set one.
+    expect(screen.getAllByRole("group", { name: "Connections — 0 of 1 set" })).toHaveLength(2);
     // The ledger: one row, development, with the milestone read off the
     // version ledger and a validation cell.
     const row = screen.getByRole("row", { name: "Open Development deployment" });
@@ -466,17 +487,19 @@ describe("DeploymentsPage — environment board", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    expect(screen.getAllByText("Deploying")).toHaveLength(2);
+    // The card's chip, the ledger's, and step 1's title.
+    expect(screen.getAllByText("Deploying")).toHaveLength(3);
     const row = screen.getByRole("row", { name: "Open Development deployment" });
     // A verdict is expected and has not arrived: the cell says so, and no
-    // promotion is offered.
+    // promotion is offered — with the reason beside the button.
     expect(within(row).getByText("Not run")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Promote v2 to production/ })).toBeDisabled();
+    expect(screen.getByText("Unavailable until v2 deploys and validates")).toBeInTheDocument();
   });
 });
 
 describe("DeploymentsPage — connections", () => {
-  it("re-collects an external connection's values from the side panel", () => {
+  it("re-collects an external connection's values from the Development card", () => {
     mockDeploy = {
       version: "v1",
       status: "deployed",
@@ -486,9 +509,9 @@ describe("DeploymentsPage — connections", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    // Exactly ONE Configure on screen — the side panel's connection action,
-    // named per connection for screen readers; the rail rows stay uniform
-    // with no per-row extras.
+    // The Development card's connections group carries the dev Configure,
+    // named per connection for screen readers; the Production card's own
+    // Configure for the same connection says so in its name.
     fireEvent.click(screen.getByRole("button", { name: "Configure stripe" }));
     const dialog = screen.getByRole("dialog");
     expect(
@@ -545,12 +568,17 @@ describe("DeploymentsPage — connections", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    expect(screen.getByText("shop-db (postgres-cnpg)")).toBeInTheDocument();
-    expect(screen.getByText("provisioned")).toBeInTheDocument();
-    expect(screen.getByText("platform-managed")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /Configure/ }),
-    ).not.toBeInTheDocument();
+    // Both cards list the platform resource; neither offers to configure it
+    // in development. The identity app's production value IS collected — the
+    // promote dialog asks for it, so the Production card's group offers it.
+    expect(screen.getAllByText("shop-db")).toHaveLength(2);
+    expect(screen.getAllByText("postgres-cnpg")).toHaveLength(2);
+    expect(screen.getAllByText("Provisioned")).toHaveLength(2);
+    expect(screen.getByText("Platform-managed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Configure shop-db" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Configure shop-auth" })).not.toBeInTheDocument();
+    // …twice: step 3's blocker line and the Production card's group.
+    expect(screen.getAllByRole("button", { name: "Configure shop-auth for production" })).toHaveLength(2);
   });
 
   // Registered External: org catalog row with non-empty envCells — values live
@@ -707,15 +735,20 @@ describe("DeploymentsPage — promotion", () => {
       components: { total: 1, ready: 1 },
       validation: "cancelled",
     };
+    // No values to collect, so validation's say is the whole gate.
+    mockDependencies = [];
 
     render(<DeploymentsPage projectName="acme" />);
 
     expect(
       screen.getByRole("button", { name: /Promote v1 to production/ }),
     ).toBeEnabled();
+    expect(screen.getByText("Opens a dialog to confirm the promotion.")).toBeInTheDocument();
   });
 
-  it("opens the promote dialog and gates Promote on required values", () => {
+  // ADR-0032: the missing value is step 3's blocker line, with Configure inline;
+  // the dialog opens ON that connection, and Promote enables once it is set.
+  it("names the missing value on step 3, collects it, and then enables Promote", () => {
     mockDeploy = {
       version: "v1",
       status: "deployed",
@@ -725,21 +758,40 @@ describe("DeploymentsPage — promotion", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /Promote v1 to production/ }),
-    );
+    const promote = screen.getByRole("button", { name: /Promote v1 to production/ });
+    expect(promote).toBeDisabled();
+    expect(screen.getByText("1 value missing")).toBeInTheDocument();
+    expect(screen.getByText("stripe has no production value")).toBeInTheDocument();
+    expect(screen.getByText("Enabled once the value is set")).toBeInTheDocument();
+
+    // Two ways in — the blocker line and the Production card's group — both
+    // named for production so neither is mistaken for the dev re-collect.
+    expect(screen.getAllByRole("button", { name: "Configure stripe for production" })).toHaveLength(2);
+    fireEvent.click(screen.getAllByRole("button", { name: "Configure stripe for production" })[0]!);
 
     const dialog = screen.getByRole("dialog");
     expect(
       within(dialog).getByText(/1 connection needs production values/),
     ).toBeInTheDocument();
-    const promote = within(dialog).getByRole("button", { name: /^Promote$/ });
-    expect(promote).toBeDisabled();
+    const field = within(dialog).getByLabelText(/STRIPE_SECRET_KEY/);
+    expect(field).toHaveFocus();
+    const confirm = within(dialog).getByRole("button", { name: /^Promote$/ });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(field, { target: { value: "sk_live_x" } });
+    expect(confirm).toBeEnabled();
 
-    fireEvent.change(within(dialog).getByLabelText(/STRIPE_SECRET_KEY/), {
-      target: { value: "sk_live_x" },
-    });
-    expect(promote).toBeEnabled();
+    // Back on the board the blocker is gone and the step is ready. The dialog
+    // is still leaving (MUI's exit transition) and keeps the page aria-hidden
+    // meanwhile, so the board is queried with hidden elements included; the
+    // board's button precedes the portal in DOM order.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText("stripe has no production value")).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: /Promote v1 to production/, hidden: true })[0],
+    ).toBeEnabled();
+    expect(
+      screen.getByRole("group", { name: "Connections — 1 of 1 set", hidden: true }),
+    ).toBeInTheDocument();
   });
 
   it("disables the promote entry point while validation is failing", () => {
@@ -784,8 +836,8 @@ describe("DeploymentsPage — promotion", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    // The production card's readiness line counts the provisioned one as set.
-    expect(screen.getByText("2 of 2 live configuration values set")).toBeInTheDocument();
+    // The Production card's connections group counts the provisioned one as set.
+    expect(screen.getByRole("group", { name: "Connections — 2 of 2 set" })).toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole("button", { name: /Promote v1 to production/ }),
@@ -800,170 +852,133 @@ describe("DeploymentsPage — promotion", () => {
   });
 });
 
-describe("DeploymentsPage — Test users", () => {
-  it("hides SignInPanel when deploy is not green", () => {
+describe("DeploymentsPage — the flow (ADR-0032)", () => {
+  it("reads top to bottom as deployed → validation → promote, with Try it now", () => {
     mockDeploy = {
       version: "v1",
-      status: "deploying",
+      status: "deployed",
       components: { total: 1, ready: 1 },
-      validation: "none",
+      validation: "running",
     };
-    mockTestUsers = [
-      {
-        username: "test-viewer",
-        roleName: "Viewer",
-        coldStart: true,
-        exists: true,
-        owned: true,
-        supplied: false,
-      },
+    mockBuilds = [
+      { tag: "v1", milestoneNumber: 3, status: "completed", startedAt: "2026-08-14T16:20:00Z" },
     ];
+    mockReadiness = {
+      configured: true,
+      dependencies: [{ name: "stripe", state: "configured", missingKeys: [] }],
+    };
 
     render(<DeploymentsPage projectName="acme" />);
 
-    expect(
-      screen.queryByText("Test users for agents on this environment"),
-    ).not.toBeInTheDocument();
+    const flow = screen.getByRole("list", { name: "Deployment flow" });
+    const steps = within(flow).getAllByRole("listitem");
+    expect(steps.map((s) => s.getAttribute("aria-label"))).toEqual([
+      "Step 1, Deployed",
+      "Step 2, Validation, Running",
+      "Step 3, Promote to Production",
+    ]);
+    // The header carries the version and its milestone.
+    expect(screen.getByText("v1 · Milestone #3")).toBeInTheDocument();
+    // Step 1: the components and the connections, then the one primary action.
+    expect(within(steps[0]!).getByRole("group", { name: "Components — 1 of 1 live" })).toBeInTheDocument();
+    expect(within(steps[0]!).getByText("Storefront")).toBeInTheDocument();
+    expect(within(steps[0]!).getByText("web app")).toBeInTheDocument();
+    expect(within(steps[0]!).getByText("Live")).toBeInTheDocument();
+    expect(within(steps[0]!).getByRole("group", { name: "Connections — 1 of 1 set" })).toBeInTheDocument();
+    expect(within(steps[0]!).getByText("Set")).toBeInTheDocument();
+    const tryIt = within(steps[0]!).getByRole("link", { name: /Try it now/ });
+    expect(tryIt).toHaveAttribute("href", "/projects/acme/deployments/development");
+    expect(tryIt).not.toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText("Opens the deployment view: app, endpoints, test users")).toBeInTheDocument();
+    expect(screen.getByText(/You can try them now while validation runs\./)).toBeInTheDocument();
+    // Step 2 keeps the shared sentence and the one link.
+    expect(within(steps[1]!).getByText("The validation agent is running.")).toBeInTheDocument();
+    expect(within(steps[1]!).getByRole("link", { name: /View validations/ })).toBeInTheDocument();
+    // Step 3 waits on validation, and says so.
+    expect(within(steps[2]!).getByRole("button", { name: /Promote v1 to production/ })).toBeDisabled();
+    expect(within(steps[2]!).getByText("Enabled when validation passes")).toBeInTheDocument();
+    // The test users left the card for the environment page.
+    expect(screen.queryByText(/Test users for agents/)).not.toBeInTheDocument();
     expect(screen.queryByText("Thunder Console")).not.toBeInTheDocument();
-    expect(screen.queryByText("test-viewer")).not.toBeInTheDocument();
   });
 
-  it("shows Thunder Console only when deploy is green and store is empty", () => {
+  it("says a settled verdict on step 2 with its counts", () => {
     mockDeploy = {
       version: "v1",
       status: "deployed",
       components: { total: 1, ready: 1 },
-      validation: "none",
+      validation: "passed",
     };
-    mockTestUsers = [];
+    mockCounts = { passed: 25, failed: 0, uncovered: 0, total: 25 };
 
     render(<DeploymentsPage projectName="acme" />);
 
-    const link = screen.getByRole("link", {
-      name: "Open Thunder Console to add or remove real accounts",
-    });
-    expect(link).toHaveAttribute("href", THUNDER_CONSOLE_USERS);
-    expect(link).toHaveAttribute("target", "_blank");
-    expect(
-      screen.queryByText("Test users for agents on this environment"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /Reveal/i }),
-    ).not.toBeInTheDocument();
+    const flow = screen.getByRole("list", { name: "Deployment flow" });
+    expect(within(flow).getByRole("listitem", { name: "Step 2, Validation, Passed · 25 of 25" })).toBeInTheDocument();
   });
 
-  it("shows Thunder only when gate has no owned published user", () => {
+  // Artboard 9c: the newest run is parked at the deploy gate. The board says so
+  // where the reader is — until now only the Builds page named the park.
+  it("reads on hold when the run is parked on a connection value", () => {
     mockDeploy = {
       version: "v1",
-      status: "deployed",
-      components: { total: 1, ready: 1 },
+      status: "none",
+      components: { total: 1, ready: 0 },
       validation: "none",
     };
-    mockTestUsers = [
-      {
-        username: "test-viewer",
-        roleName: "Viewer",
-        coldStart: true,
-        exists: false,
-        owned: false,
-        supplied: false,
-      },
-    ];
+    mockRuns = [parkedRun(["stripe"])];
+    mockDeployments = [];
+    mockReadiness = {
+      configured: false,
+      dependencies: [{ name: "stripe", state: "unset", missingKeys: ["STRIPE_SECRET_KEY"] }],
+    };
 
     render(<DeploymentsPage projectName="acme" />);
 
+    expect(screen.getByText("Waiting for configuration")).toBeInTheDocument();
+    const flow = screen.getByRole("list", { name: "Deployment flow" });
+    const steps = within(flow).getAllByRole("listitem");
+    expect(steps[0]).toHaveAttribute("aria-label", "Step 1, Deploy, On hold");
+    expect(screen.getByText("Needs a value for stripe before deploying")).toBeInTheDocument();
     expect(
-      screen.getByRole("link", {
-        name: "Open Thunder Console to add or remove real accounts",
-      }),
+      screen.getByText("storefront depends on it. Deployment continues automatically once it is set."),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("Test users for agents on this environment"),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("test-viewer")).not.toBeInTheDocument();
-  });
-
-  it("lists owned published users and reveals password when deploy is green", async () => {
-    mockDeploy = {
-      version: "v1",
-      status: "deployed",
-      components: { total: 1, ready: 1 },
-      validation: "none",
-    };
-    mockTestUsers = [
-      {
-        username: "test-viewer",
-        roleName: "Viewer",
-        coldStart: true,
-        exists: true,
-        owned: true,
-        supplied: false,
-      },
-    ];
-
-    render(<DeploymentsPage projectName="acme" />);
-
-    expect(
-      screen.getByText("Test users for agents on this environment"),
+      screen.getByText("Deployment is on hold until one connection value is set. It continues automatically."),
     ).toBeInTheDocument();
-    // The card carries the count; the accounts live in the dialog behind it,
-    // so a many-role app cannot grow this card past the ledger beside it.
-    expect(screen.getByText("1 account, one per role")).toBeInTheDocument();
-    expect(screen.queryByText("test-viewer")).not.toBeInTheDocument();
-    const thunder = screen.getByRole("link", {
-      name: "Open Thunder Console to add or remove real accounts",
-    });
-    expect(thunder).toHaveAttribute("href", THUNDER_CONSOLE_USERS);
-    expect(thunder).toHaveAttribute("target", "_blank");
+    // The component names what it waits on; the connection is Missing.
+    expect(within(steps[0]!).getByRole("group", { name: "Components — 0 of 1 deployed · on hold" })).toBeInTheDocument();
+    expect(within(steps[0]!).getByText("Needs stripe")).toBeInTheDocument();
+    expect(within(steps[0]!).getByText("Missing")).toBeInTheDocument();
+    // Try it now is drawn, and disabled.
+    expect(within(steps[0]!).getByRole("link", { name: /Try it now/ })).toHaveAttribute("aria-disabled", "true");
+    // Steps 2 and 3 are inactive with one line each.
+    expect(within(steps[1]!).getByText("Runs automatically after deployment.")).toBeInTheDocument();
+    expect(within(steps[2]!).getByText("Unavailable until v1 deploys and validates")).toBeInTheDocument();
+    // Production explains itself the same way.
+    expect(
+      screen.getByText("Nothing running yet. v1 must deploy and validate in Development first."),
+    ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "View test users" }));
-    const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByText("test-viewer")).toBeInTheDocument();
-
-    fireEvent.click(
-      within(dialog).getByRole("button", {
-        name: "Reveal the password for test-viewer",
-      }),
-    );
-    expect(mockReveal).toHaveBeenCalledWith("test-viewer");
-    await waitFor(() => {
-      expect(within(dialog).getByText(MOCK_PASSWORD)).toBeInTheDocument();
-    });
-    fireEvent.click(
-      within(dialog).getByRole("button", {
-        name: "Hide the password for test-viewer",
-      }),
-    );
-    expect(screen.queryByText(MOCK_PASSWORD)).not.toBeInTheDocument();
-    // Masked, not gone — the row holds its place in the table.
-    expect(within(dialog).getByText("**********")).toBeInTheDocument();
+    // The notice's Configure is the dev re-collect for the blocking connection.
+    fireEvent.click(within(steps[0]!).getByRole("button", { name: "Configure" }));
+    expect(within(screen.getByRole("dialog")).getByText("Configure — stripe")).toBeInTheDocument();
   });
 
-  it("keeps Thunder / Test users copy and omits Roles-gate and account actions", () => {
+  it("leaves the connections groups out while the design read is still out", () => {
     mockDeploy = {
       version: "v1",
       status: "deployed",
       components: { total: 1, ready: 1 },
-      validation: "none",
+      validation: "passed",
     };
-    mockTestUsers = [
-      {
-        username: "test-viewer",
-        roleName: "Viewer",
-        coldStart: true,
-        exists: true,
-        owned: true,
-        supplied: false,
-      },
-    ];
+    mockDependenciesPending = true;
 
     render(<DeploymentsPage projectName="acme" />);
 
-    expect(screen.getByText(/user accounts/)).toBeInTheDocument();
-    expect(screen.getByText(/Test users/)).toBeInTheDocument();
-    expect(screen.queryByText(/Roles gate/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/^Add$/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Rotate/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Delete/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /^Connections/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/has no production value/)).not.toBeInTheDocument();
+    // …and step 1 is still the flow's first step, with its components.
+    expect(screen.getByRole("group", { name: "Components — 1 of 1 live" })).toBeInTheDocument();
   });
 });

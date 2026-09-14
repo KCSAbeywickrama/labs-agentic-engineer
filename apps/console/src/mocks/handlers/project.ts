@@ -6,6 +6,7 @@ type ApplyResult = components["schemas"]["ApplyResult"];
 type BuildRunList = components["schemas"]["BuildRunList"];
 import { http, HttpResponse, type JsonBodyType } from "msw";
 import {
+  heldRun,
   appliedFileContent,
   appliedFileMetas,
   applyFilesError,
@@ -286,9 +287,15 @@ export const projectHandlers = [
       const tag = String(params.tag);
       // Keyed BY TAG: a run story stamped with another version's identity is a
       // fixture that contradicts its own envelope.
+      //
+      // The `on-hold` track parks the newest run at the deploy gate — the status
+      // override alone cannot say WHY nothing is deployed, so the run story has
+      // to say it (ADR-0032).
       const story = v
         ? { ...validationRuns(v, validationAttempt()), tag }
-        : buildRunsForTag(s, tag);
+        : trackScenario() === "on-hold"
+          ? { ...heldRun, tag }
+          : buildRunsForTag(s, tag);
       return withCancellations(story);
     }),
   ),

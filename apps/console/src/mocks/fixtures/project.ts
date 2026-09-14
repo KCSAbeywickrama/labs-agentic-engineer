@@ -87,7 +87,7 @@ const noDeploy: DeployStage = {
  * selected, exactly as the validation override does, rather than adding rungs
  * to a ladder twelve fixture records are keyed on.
  */
-export const TRACK_SCENARIOS = ["amending", "drifting", "build-failed"] as const;
+export const TRACK_SCENARIOS = ["amending", "drifting", "build-failed", "on-hold"] as const;
 
 export type TrackScenario = (typeof TRACK_SCENARIOS)[number];
 
@@ -122,6 +122,14 @@ export const trackOverrides: Record<TrackScenario, TrackAggregates> = {
       components: { total: 3, ready: 3 },
       validation: "passed",
     },
+  },
+  // Parked at the deploy gate (ADR-0032, artboard 9c): the version built and
+  // nothing deployed, because a person still owes stripe its values. The run
+  // story for it is `heldRun` — the runs handler serves it under this track.
+  "on-hold": {
+    spec: { exists: true, version: "v1", dirty: false, design: true, agent: "" },
+    build: { version: "v1", status: "running" },
+    deploy: noDeploy,
   },
 };
 
@@ -966,6 +974,21 @@ const waitingRun: BuildRunList = {
   tag: "v1",
   milestoneNumber: 1,
   runs: [milestoneRun({ state: "waiting" })],
+};
+// A run parked at the DEPLOY GATE: it built, reached the gate short of stripe's
+// values, and stopped in `waiting` naming what it waits on — the state the
+// Deployments board reads as "on hold" (ADR-0032). Served under the `on-hold`
+// track override, whichever project scenario is selected.
+export const heldRun: BuildRunList = {
+  tag: "v1",
+  milestoneNumber: 1,
+  runs: [
+    milestoneRun({
+      state: "waiting",
+      waitingReason: "external-values",
+      blockingDependencies: ["stripe"],
+    }),
+  ],
 };
 // A run that SELF-HEALED: its first validation attempt failed, the platform filed
 // the failed criterion as ordinary work, a coding cycle repaired it, and the second

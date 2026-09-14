@@ -96,6 +96,22 @@ which is also what closes its issue. Newest first; links go to the feature's
 GitHub issue plus any ADRs it produced. Features still being built aren't
 here: they're the open `console` + `feature` issues.
 
+- Deployments — the Development card reads as the flow: **Deployed →
+  Validation → Promote to Production** as three numbered steps on one rail,
+  each with its one action. Step 1 holds the rollout sentence, the components
+  and the connections as grouped lists (Set / Provisioned / Missing +
+  Configure) and a primary **Try it now** into the environment page, where the
+  **Test users** panel now lives; step 2 holds the shared verdict sentence and
+  a status chip with its counts; step 3 holds Promote with its reason and, once
+  validation allows, one blocker line per missing production value with
+  Configure opening the promote dialog. A run parked at the deploy gate reads
+  **On hold** here — chip *Waiting for configuration*, a notice naming the
+  value and the component that depends on it, Try it now disabled. The
+  Production card lists its components and connections the same way; the
+  standalone Connections card is retired; the ledger stays. **No contract
+  change** ([ADR-0032](design/decisions/ADR-0032-the-development-card-is-the-flow.md),
+  amending ADR-0027) —
+  [#775](https://github.com/wso2/labs-agentic-engineer/issues/775)
 - Build asks in a dialog — one click, one surface, never a drawer for some
   projects and a modal for the rest. An open dependency opens **Resolve
   dependencies** (the names, and one **Resolve** that runs the guided flow over

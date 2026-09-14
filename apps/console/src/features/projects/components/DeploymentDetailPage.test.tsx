@@ -111,6 +111,24 @@ vi.mock("../../validation/api/counts", () => ({
   }),
 }));
 
+// The roles read behind the Test users panel (ADR-0032: the panel lives on this
+// page now). Empty by default so a green development shows the Thunder sentence
+// alone; the panel's own cases inject accounts.
+type ProjectTestUserState = components["schemas"]["ProjectTestUserState"];
+let mockTestUsers: ProjectTestUserState[] = [];
+let mockRolesPending = false;
+vi.mock("../../spec/api/roles", () => ({
+  useProjectRoles: () => ({
+    data: { directoryAvailable: true, roles: [], testUsers: mockTestUsers },
+    isPending: mockRolesPending,
+    isError: false,
+  }),
+  useRevealTestUserPassword: () => ({
+    mutateAsync: vi.fn(async (username: string) => ({ username, password: "mocknotreal", rotatedAt: null })),
+    isPending: false,
+  }),
+}));
+
 // The contract viewer is a dialog over its own query; only its opening is
 // under test here.
 const openApiDialog = vi.fn();
@@ -155,6 +173,8 @@ beforeEach(() => {
   mockRuns = [];
   mockRunsPending = false;
   mockCounts = undefined;
+  mockTestUsers = [];
+  mockRolesPending = false;
   openApiDialog.mockClear();
 });
 
@@ -293,5 +313,38 @@ describe("DeploymentDetailPage", () => {
       "href",
       "/projects/expense/deployments",
     );
+  });
+});
+
+describe("DeploymentDetailPage — test users", () => {
+  it("carries the test users when every component in development is live", () => {
+    mockTestUsers = [
+      {
+        username: "test-viewer",
+        roleName: "Viewer",
+        coldStart: true,
+        exists: true,
+        owned: true,
+        supplied: false,
+      },
+    ];
+    render(<DeploymentDetailPage projectName="expense" environment="development" />);
+    expect(screen.getByText("Test users")).toBeTruthy();
+    expect(screen.getByText(/1 account, one per role/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "View test users" })).toBeTruthy();
+  });
+
+  it("keeps the panel off a converging development, and off production", () => {
+    mockDeploy = { ...mockDeploy, status: "deploying" };
+    const { unmount } = render(
+      <DeploymentDetailPage projectName="expense" environment="development" />,
+    );
+    expect(screen.queryByText("Test users")).toBeNull();
+    unmount();
+
+    mockDeploy = { ...mockDeploy, status: "deployed" };
+    mockDeployments = devDeployments().map((d) => ({ ...d, environment: "production" }));
+    render(<DeploymentDetailPage projectName="expense" environment="production" />);
+    expect(screen.queryByText("Test users")).toBeNull();
   });
 });

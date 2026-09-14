@@ -63,6 +63,7 @@ import {
 import { groupDeploymentCards, type DeploymentCard } from "../lib/deploymentRows";
 import { AccentPill } from "./AccentPill";
 import { ComponentOpenApiDialog } from "./ComponentOpenApiDialog";
+import { ProjectSignInPanel } from "./SignInPanel";
 
 type Component = components["schemas"]["Component"];
 
@@ -72,7 +73,9 @@ const RouterLink = createLink(MuiLink);
 /**
  * One environment's deployment (ADR-0027, artboard 1d): a summary card, then
  * the components running there — each with its release, its state, its way
- * in. The route is keyed by ENVIRONMENT because that is the only deployment
+ * in — and, for a green development, the test users an agent can sign in as
+ * (ADR-0032: the board's "Try it now" lands here for the app, the endpoints
+ * and the accounts). The route is keyed by ENVIRONMENT because that is the only deployment
  * identity the platform keeps: a release binding is current state, so there is
  * exactly one deployment per environment to show, and no earlier one to name.
  */
@@ -269,6 +272,21 @@ export function DeploymentDetailPage({
             ))}
           </Stack>
         </Card>
+
+        {/* Test users live with the app they sign in to. Mounted only when every
+            component is live — the roles read stays idle until there is
+            something to sign in to, as it did on the board. */}
+        {environment === "development" &&
+          deploy?.status === "deployed" &&
+          row.total > 0 &&
+          row.live === row.total && (
+            <Card variant="outlined" sx={{ p: 2.25 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                Test users
+              </Typography>
+              <ProjectSignInPanel projectName={projectName} />
+            </Card>
+          )}
       </Stack>
 
       <ComponentOpenApiDialog

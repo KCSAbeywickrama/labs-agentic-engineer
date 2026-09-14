@@ -28,7 +28,7 @@ import {
 import { Link, useNavigate } from "@tanstack/react-router";
 import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
-import { useBuilds } from "../../builds/api/queries";
+import { useBuildRuns, useBuilds } from "../../builds/api/queries";
 import { useDesignDependencies } from "../../spec/api/queries";
 import { useExternalResources } from "../../settings/api/queries";
 import { isRegisteredExternal } from "../../marketplace/kind";
@@ -36,34 +36,38 @@ import { useValidationEvidence } from "../../validation/api/counts";
 import {
   useComponentsDeployments,
   useProjectComponents,
+  useProjectDependencyReadiness,
   useProjectStatus,
 } from "../api/queries";
-import { environmentRows, ledgerRows } from "../lib/deploymentLedger";
+import {
+  deployHold,
+  developmentConnections,
+  productionConnections,
+  promoteStep,
+} from "../lib/deploymentFlow";
+import { environmentRows, ledgerRows, milestoneFor } from "../lib/deploymentLedger";
 import { groupDeploymentCards } from "../lib/deploymentRows";
 import {
-  configuredCount,
   connectionRows,
   seedValues,
   type ConnectionRow,
   type ConnectionValues,
 } from "../lib/promotion";
-import { ConnectionsCard } from "./ConnectionsCard";
 import { ConnectionValuesDialog } from "./ConnectionValuesDialog";
 import { DeploymentsLedger } from "./DeploymentsLedger";
 import { EnvironmentCards } from "./EnvironmentCards";
 import { PromoteDialog } from "./PromoteDialog";
 
 /**
- * Deployments as an ENVIRONMENT BOARD (ADR-0027, artboard 1c): a card per
- * environment — what runs there, how much of it is up, the verdict on it and
- * the promotion it leads to — then a ledger with one row per environment that
- * runs something, each opening the environment's own page.
+ * Deployments as an ENVIRONMENT BOARD (ADR-0027) whose Development card is
+ * the FLOW (ADR-0032): deployed → validated → promoted as three numbered
+ * steps, each with its one action — then a ledger with one row per
+ * environment that runs something, each opening the environment's own page.
  *
- * Data is unchanged from the story rail this replaces: the components list,
- * one list-deployments read per component, the status poll's deploy aggregate,
- * the Spec view's design-dependencies read for the connections a promotion
- * must configure — plus the version ledger the layout already holds, for the
- * Milestone cell. No new contract surface.
+ * Data is the board's, plus two reads the Builds page already makes: the
+ * newest run's story (for a run parked at the deploy gate — the "on hold"
+ * state) and the dependency readiness read (whether the platform holds a
+ * value for each external in development). No new contract surface.
  */
 export function DeploymentsPage({ projectName }: { projectName: string }) {
   const navigate = useNavigate();
@@ -77,15 +81,23 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   // The version ledger, for "Milestone #N" beside the running version. DB-only
   // and already cached by the Builds surfaces.
   const builds = useBuilds(projectName);
+  // The newest run's story — the BUILD version is the newest run's tag. A run
+  // parked at the deploy gate is the one read that says "on hold"; the
+  // validation evidence hook makes the same read, so it is served from cache.
+  const runs = useBuildRuns(projectName, status.data?.build.version || undefined);
   // The design's connections, for promotion readiness. A failed read surfaces
   // as `isError` at the hook; this page degrades it here — `connectionRows`
   // maps an absent payload to [], so the board renders without a
-  // live-configuration line rather than blocking the page.
+  // connections group rather than blocking the page.
   const dependencies = useDesignDependencies(projectName);
   const connections = useMemo(
     () => connectionRows(dependencies.data),
     [dependencies.data],
   );
+  const connectionsKnown = !dependencies.isPending && !dependencies.isError;
+  // Whether the platform holds values for each external in development —
+  // the deploy gate's own read, so "Set" here means what the gate means.
+  const readiness = useProjectDependencyReadiness(projectName, "development");
   // Org catalog: Registered Externals (non-empty envCells) already hold
   // values on the org plane — Connections must not offer Configure / the
   // project values dialog for those names. While the catalog query is
@@ -116,6 +128,8 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   const [values, setValues] = useState<ConnectionValues | null>(null);
   const liveValues = values ?? seedValues(connections);
   const [promoteOpen, setPromoteOpen] = useState(false);
+  // The connection a production Configure asked for — the dialog opens on it.
+  const [promoteFocus, setPromoteFocus] = useState<string | null>(null);
   const [promoteNotice, setPromoteNotice] = useState(false);
   // The connection whose dev values are being re-collected (#395: dummy
   // values at build time, real ones now), and the saved confirmation.
@@ -188,7 +202,24 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
     live: 0,
     total: 0,
   };
-  const configured = configuredCount(connections, liveValues);
+  const componentTypes = new Map<string, string>();
+  for (const c of components.data?.items ?? []) {
+    if (c.type) componentTypes.set(c.name, c.type);
+  }
+  // The version the Development card is about: what runs there, or — while
+  // nothing does yet — the version being built. A hold is a fact about the
+  // BUILD version, so it is the card's only while that is the card's version:
+  // an older version serving under a newer parked build stays "Deployed" here
+  // and the Builds page names the park.
+  const buildVersion = status.data?.build.version ?? "";
+  const version = deploy?.version || buildVersion;
+  const parked = deployHold(runs.data?.runs, dependencies.data);
+  const hold = parked && (!deploy?.version || deploy.version === buildVersion) ? parked : null;
+  const promote = promoteStep(deploy, production, connections, liveValues, hold, version);
+  const devLines = connectionsKnown
+    ? developmentConnections(connections, readiness.data, hold, registeredNames, catalogUnknown)
+    : null;
+  const prodLines = connectionsKnown ? productionConnections(connections, liveValues) : null;
 
   return (
     <>
@@ -200,6 +231,19 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           page shows what did.
         </Alert>
       )}
+      {externalCatalog.isError && (
+        <Alert
+          severity="warning"
+          sx={{ mb: 2 }}
+          action={<Button onClick={() => void externalCatalog.refetch()}>Retry</Button>}
+        >
+          Failed to load org catalog
+          {externalCatalog.error instanceof Error && externalCatalog.error.message
+            ? `: ${externalCatalog.error.message}`
+            : ""}
+          {" — Configure is hidden on connections until it loads."}
+        </Alert>
+      )}
       <Stack spacing={2}>
         {development && (
           <EnvironmentCards
@@ -208,9 +252,22 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
             production={production}
             deploy={deploy}
             validation={validation}
-            connectionCount={dependencies.isPending ? null : connections.length}
-            configured={configured}
-            onPromote={() => setPromoteOpen(true)}
+            version={version}
+            milestone={milestoneFor(version || undefined, builds.data)}
+            hold={hold}
+            componentTypes={componentTypes}
+            developmentConnections={devLines}
+            productionConnections={prodLines}
+            promote={promote}
+            onPromote={() => {
+              setPromoteFocus(null);
+              setPromoteOpen(true);
+            }}
+            onConfigureDevelopment={setValuesTarget}
+            onConfigureProduction={(row) => {
+              setPromoteFocus(row.id);
+              setPromoteOpen(true);
+            }}
           />
         )}
 
@@ -225,24 +282,6 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
               params: { projectName, environment: row.environment },
             })
           }
-        />
-
-        <ConnectionsCard
-          connections={connections}
-          registeredNames={registeredNames}
-          catalogUnknown={catalogUnknown}
-          {...(externalCatalog.isError
-            ? {
-                catalogError: {
-                  message:
-                    externalCatalog.error instanceof Error
-                      ? externalCatalog.error.message
-                      : "",
-                  retry: () => void externalCatalog.refetch(),
-                },
-              }
-            : {})}
-          onConfigure={setValuesTarget}
         />
       </Stack>
 
@@ -268,6 +307,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           validation={deploy.validation}
           rows={connections}
           values={liveValues}
+          {...(promoteFocus ? { focusRowId: promoteFocus } : {})}
           onValueChange={(rowId, key, value) =>
             setValues({
               ...liveValues,

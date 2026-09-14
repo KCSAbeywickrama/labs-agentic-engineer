@@ -21,40 +21,66 @@ import {
   Button,
   Card,
   CardContent,
-  Divider,
   Stack,
   Typography,
   alpha,
 } from "@wso2/oxygen-ui";
-import { ArrowRight, Lock } from "@wso2/oxygen-ui-icons-react";
+import { ArrowRight, CircleAlert } from "@wso2/oxygen-ui-icons-react";
+import { createLink } from "@tanstack/react-router";
 import { StatusChip } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
+import { RunHoldNotice } from "../../builds/components/RunHoldNotice";
 import type { ValidationCounts } from "../../validation/lib/verdict";
+import {
+  componentLine,
+  connectionsHeadline,
+  deployStep,
+  deployedSentence,
+  holdNotice,
+  holdSentence,
+  productionSentence,
+  validationStep,
+  type ConnectionLine,
+  type DeployHold,
+  type PromoteStep,
+} from "../lib/deploymentFlow";
 import { agoLabel, type EnvironmentRow } from "../lib/deploymentLedger";
-import { canPromote } from "../lib/promotion";
-import { ProjectSignInPanel } from "./SignInPanel";
+import type { ConnectionRow } from "../lib/promotion";
+import { AccentPill } from "./AccentPill";
+import { ComponentsGroup, ConnectionsGroup } from "./EnvironmentGroups";
+import { FlowStep } from "./FlowStep";
 import { VerdictBanner } from "./VerdictBanner";
 
 type DeployStage = components["schemas"]["DeployStage"];
 
+const LinkButton = createLink(Button);
+
 /** The card's frame: outlined, and edged in the environment's own colour only
  *  when it has something to say — green when serving, red when broken, blue
- *  while moving. A quiet environment keeps the plain divider. */
+ *  while moving, amber while a person is holding it up. A quiet environment
+ *  keeps the plain divider. */
 function EnvironmentCard({
   row,
+  chip,
+  aside,
   children,
 }: {
   row: EnvironmentRow;
+  /** The header's chip; defaults to the environment's own status. */
+  chip?: { label: string; tone: EnvironmentRow["status"]["tone"] };
+  /** The header's right-hand fact — "v1 · Milestone #1". */
+  aside?: string;
   children: React.ReactNode;
 }) {
-  const tone = row.status.tone;
+  const shown = chip ?? { label: row.status.label, tone: row.status.tone };
+  const tone = shown.tone;
   return (
     <Card
       variant="outlined"
       // Both cards fill the row's height, so the pair reads as one band
       // whatever either of them has to say. Development is always the taller —
-      // it carries the verdict, the promotion and the test users — and letting
-      // Production stop short of it left the board looking half-drawn.
+      // it carries the whole flow — and letting Production stop short of it
+      // left the board looking half-drawn.
       sx={{
         height: "100%",
         ...(tone !== "neutral" && {
@@ -67,17 +93,18 @@ function EnvironmentCard({
           <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: "-0.01em" }}>
             {row.label}
           </Typography>
-          <StatusChip
-            label={row.status.label}
-            tone={row.status.tone}
-            appearance="soft"
-            dot
-          />
+          <StatusChip label={shown.label} tone={shown.tone} appearance="soft" dot />
           <Box sx={{ flex: 1 }} />
-          {row.deployedAt && (
+          {aside ? (
             <Typography variant="caption" color="text.secondary">
-              {agoLabel(row.deployedAt)}
+              {aside}
             </Typography>
+          ) : (
+            row.deployedAt && (
+              <Typography variant="caption" color="text.secondary">
+                {agoLabel(row.deployedAt)}
+              </Typography>
+            )
           )}
         </Stack>
         {children}
@@ -86,36 +113,37 @@ function EnvironmentCard({
   );
 }
 
-/** "Running v1 · 4 of 4 components live" — the card's one-line fact. */
-function RunningLine({ row }: { row: EnvironmentRow }) {
-  const bound = row.cards.filter((c) => c.deployment).length;
-  if (bound === 0) {
-    return (
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-        {row.environment === "development"
-          ? "Nothing running yet — agents deploy to dev when a build merges."
-          : "Nothing running yet"}
-      </Typography>
-    );
-  }
+/** "Try it now →" — the one primary action on the card, into the environment
+ *  page where the app, the endpoints and the test users are. */
+function TryItNow({
+  projectName,
+  disabled,
+}: {
+  projectName: string;
+  disabled: boolean;
+}) {
   return (
-    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-      Running{" "}
-      {row.version ? (
-        <Box component="span" sx={{ fontWeight: 600, color: "text.primary" }}>
-          {row.version}
-        </Box>
-      ) : null}
-      {row.version ? " · " : ""}
-      {row.live} of {row.total} components live
-    </Typography>
+    <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 0.75 }}>
+      <LinkButton
+        variant="contained"
+        disabled={disabled}
+        to="/projects/$projectName/deployments/$environment"
+        params={{ projectName, environment: "development" }}
+        endIcon={<ArrowRight size={16} aria-hidden />}
+      >
+        Try it now
+      </LinkButton>
+      <Typography variant="caption" color="text.secondary">
+        Opens the deployment view: app, endpoints, test users
+      </Typography>
+    </Stack>
   );
 }
 
 /**
- * The two environment cards (ADR-0027, artboard 1c): Development carries the
- * verdict and the promotion, Production carries the gate. Both say what runs
- * there and how much of it is up.
+ * The two environment cards (ADR-0032): Development is the flow — deployed,
+ * validated, promoted, as three numbered steps — and Production is the plain
+ * summary of what runs there and what a promotion still needs.
  */
 export function EnvironmentCards({
   projectName,
@@ -123,9 +151,16 @@ export function EnvironmentCards({
   production,
   deploy,
   validation,
-  connectionCount,
-  configured,
+  version,
+  milestone,
+  hold,
+  componentTypes,
+  developmentConnections,
+  productionConnections,
+  promote,
   onPromote,
+  onConfigureDevelopment,
+  onConfigureProduction,
 }: {
   projectName: string;
   development: EnvironmentRow;
@@ -133,19 +168,36 @@ export function EnvironmentCards({
   deploy?: DeployStage | undefined;
   /** The dev deployment's validation evidence. */
   validation: { verdict: string; repairing: boolean; counts?: ValidationCounts | undefined };
-  /** Connections needing production values; null while the read is in flight. */
-  connectionCount: number | null;
-  /** How many of them already hold their production values. */
-  configured: number;
+  /** The version the card is about: the deployed one, or the build's while
+   *  nothing is deployed yet (a held version still has a name). */
+  version: string;
+  /** "Milestone #1", when the version ledger knows it. */
+  milestone?: string | undefined;
+  /** The newest run parked at the deploy gate, if it is. */
+  hold: DeployHold | null;
+  /** Component name → its type, for the "web app" / "service" captions. */
+  componentTypes: Map<string, string>;
+  /** The design's connections as they stand in each environment; null while
+   *  the dependencies read is out or failed — then no group and no blockers. */
+  developmentConnections: ConnectionLine[] | null;
+  productionConnections: ConnectionLine[] | null;
+  /** Step 3, or null once production runs something. */
+  promote: PromoteStep | null;
   onPromote: () => void;
+  onConfigureDevelopment: (row: ConnectionRow) => void;
+  onConfigureProduction: (row: ConnectionRow) => void;
 }) {
-  // Promotion is offered only while production is empty and dev has a version
-  // to offer; whether it is ENABLED is the deploy aggregate's call (canPromote).
-  const promotable = Boolean(deploy?.version && production.cards.length === 0);
-  const devGreen =
-    deploy?.status === "deployed" &&
-    development.total > 0 &&
-    development.live === development.total;
+  const deployed = deployStep(development, hold);
+  const validating = validationStep(deploy?.validation, validation.counts, deployed);
+  const bound = development.cards.some((c) => c.deployment);
+  const devLines = development.cards.map((c) =>
+    componentLine(c, componentTypes.get(c.componentName), hold),
+  );
+  const aside = version ? (milestone ? `${version} · ${milestone}` : version) : undefined;
+  const holdRow =
+    hold && developmentConnections
+      ? developmentConnections.find((l) => l.state === "missing" && l.configure)?.row
+      : undefined;
 
   return (
     <Box
@@ -154,102 +206,180 @@ export function EnvironmentCards({
         gap: 2,
         // stretch, not start: the two cards share a height (see EnvironmentCard).
         alignItems: "stretch",
-        gridTemplateColumns: { xs: "1fr", md: "repeat(2, minmax(0, 1fr))" },
+        gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1.15fr) minmax(0, 1fr)" },
       }}
     >
-      <EnvironmentCard row={development}>
-        <RunningLine row={development} />
-        {deploy && (
-          <Box sx={{ mt: 1.75 }}>
-            <VerdictBanner
-              projectName={projectName}
-              validation={deploy.validation}
-              verdict={validation.verdict}
-              repairing={validation.repairing}
-              {...(validation.counts ? { counts: validation.counts } : {})}
-            />
-          </Box>
-        )}
-        {deploy && promotable && (
-          <Stack
-            direction="row"
-            spacing={1.5}
-            sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 1, mt: 1.5 }}
-          >
-            <span
-              {...(!canPromote(deploy) && {
-                title: "Enabled once the dev deployment settles and validation has its say",
-              })}
-            >
-              <Button
-                variant="contained"
-                disabled={!canPromote(deploy)}
-                onClick={onPromote}
-                endIcon={<ArrowRight size={16} aria-hidden />}
-              >
-                Promote {deploy.version} to production
-              </Button>
-            </span>
-            <Typography variant="caption" color="text.secondary">
-              Opens a dialog to collect live configuration.
-            </Typography>
-          </Stack>
-        )}
-        {devGreen && (
-          <>
-            <Divider sx={{ my: 2 }} />
-            <ProjectSignInPanel projectName={projectName} />
-          </>
-        )}
+      <EnvironmentCard
+        row={development}
+        {...(hold ? { chip: { label: "Waiting for configuration", tone: "warning" as const } } : {})}
+        {...(aside ? { aside } : {})}
+      >
+        <Box role="list" aria-label="Deployment flow" sx={{ mt: 2 }}>
+          <FlowStep step={1} view={deployed} ringTone="info">
+            {hold && (
+              <>
+                {(() => {
+                  const notice = holdNotice(hold);
+                  return (
+                    <RunHoldNotice
+                      tone="warning"
+                      title={notice.title}
+                      body={notice.body}
+                      {...(holdRow
+                        ? {
+                            action: (
+                              <Button
+                                variant="contained"
+                                size="small"
+                                onClick={() => onConfigureDevelopment(holdRow)}
+                              >
+                                Configure
+                              </Button>
+                            ),
+                          }
+                        : {})}
+                    />
+                  );
+                })()}
+                <Typography variant="body2" color="text.secondary">
+                  {holdSentence(hold)}
+                </Typography>
+              </>
+            )}
+            {!hold && deployed.state === "done" && (
+              <Typography variant="body2" color="text.secondary">
+                {deployedSentence(development, deploy?.validation ?? "")}
+              </Typography>
+            )}
+            {!hold && deployed.state === "active" && (
+              <Typography variant="body2" color="text.secondary">
+                {development.live} of {development.total} components live — the rollout is still converging.
+              </Typography>
+            )}
+            {!hold && deployed.state === "error" && (
+              <Typography variant="body2" color="text.secondary">
+                A component's release failed — the environment page names which.
+              </Typography>
+            )}
+            {(bound || hold) && (
+              <ComponentsGroup
+                lines={devLines}
+                caption={
+                  hold
+                    ? `${development.live} of ${development.total} deployed · on hold`
+                    : `${development.live} of ${development.total} live`
+                }
+              />
+            )}
+            {developmentConnections && developmentConnections.length > 0 && (
+              <ConnectionsGroup
+                lines={developmentConnections}
+                caption={connectionsHeadline(developmentConnections)}
+                environment="development"
+                onConfigure={onConfigureDevelopment}
+              />
+            )}
+            {(bound || hold) && (
+              <TryItNow projectName={projectName} disabled={Boolean(hold) || !bound} />
+            )}
+          </FlowStep>
+
+          <FlowStep step={2} view={validating} last={promote === null}>
+            {deploy && validating.state !== "pending" && (
+              <VerdictBanner
+                projectName={projectName}
+                validation={deploy.validation}
+                verdict={validation.verdict}
+                repairing={validation.repairing}
+                {...(validation.counts ? { counts: validation.counts } : {})}
+              />
+            )}
+          </FlowStep>
+
+          {promote && (
+            <FlowStep step={3} view={promote} last>
+              {promote.missing.map((row) => (
+                <Stack
+                  key={row.id}
+                  direction="row"
+                  spacing={1.25}
+                  sx={(theme) => ({
+                    alignItems: "center",
+                    px: 1.5,
+                    py: 1,
+                    borderRadius: 2,
+                    border: `1px solid ${alpha(theme.palette.warning.main, 0.35)}`,
+                    bgcolor: alpha(theme.palette.warning.main, 0.06),
+                  })}
+                >
+                  <Box component={CircleAlert} size={16} aria-hidden sx={{ color: "warning.main", flexShrink: 0 }} />
+                  <Typography variant="body2" sx={{ flexGrow: 1, minWidth: 0 }}>
+                    {row.name} has no production value
+                  </Typography>
+                  <AccentPill
+                    aria-label={`Configure ${row.name} for production`}
+                    onClick={() => onConfigureProduction(row)}
+                  >
+                    Configure
+                  </AccentPill>
+                </Stack>
+              ))}
+              <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 1 }}>
+                {/* A disabled control swallows its title, so the reason lives
+                    beside it as a caption the reader always sees. */}
+                <Button
+                  variant="contained"
+                  disabled={!promote.enabled}
+                  onClick={onPromote}
+                  endIcon={<ArrowRight size={16} aria-hidden />}
+                >
+                  Promote {version} to production
+                </Button>
+                <Typography variant="caption" color="text.secondary">
+                  {promote.reason}
+                </Typography>
+              </Stack>
+            </FlowStep>
+          )}
+        </Box>
       </EnvironmentCard>
 
       <EnvironmentCard row={production}>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          {production.cards.length > 0 ? (
-            <>
-              Running · {production.live} of {production.total} components live
-            </>
-          ) : (
-            <>
-              Nothing running yet
-              {connectionCount !== null && connectionCount > 0 && (
-                <>
-                  {" · "}
-                  <Box
-                    component="span"
-                    sx={{
-                      color: configured === connectionCount ? "success.main" : "warning.main",
-                    }}
-                  >
-                    {configured} of {connectionCount} live configuration values set
-                  </Box>
-                </>
-              )}
-            </>
-          )}
+          {production.cards.length > 0
+            ? `Running · ${production.live} of ${production.total} components live`
+            : productionSentence(deploy, promote, hold, version)}
         </Typography>
-        {production.cards.length === 0 && (
-          <Stack
-            direction="row"
-            spacing={1.25}
-            sx={{
-              alignItems: "center",
-              mt: 1.75,
-              px: 1.5,
-              py: 1.25,
-              border: 1,
-              borderStyle: "dashed",
-              borderColor: "divider",
-              borderRadius: 2,
-              bgcolor: "action.hover",
-            }}
-          >
-            <Box component={Lock} size={14} aria-hidden sx={{ color: "text.secondary", flexShrink: 0 }} />
-            <Typography variant="body2" color="text.secondary">
-              Only a version whose validation has passed can be promoted here.
-            </Typography>
-          </Stack>
-        )}
+        <Stack spacing={1.25} sx={{ mt: 1.75 }}>
+          {production.cards.length > 0 ? (
+            <ComponentsGroup
+              lines={production.cards.map((c) =>
+                componentLine(c, componentTypes.get(c.componentName), null),
+              )}
+              caption={`${production.live} of ${production.total} live`}
+            />
+          ) : (
+            development.cards.length > 0 && (
+              <ComponentsGroup
+                lines={development.cards.map((c) => ({
+                  card: { ...c, kind: "notDeployed" as const },
+                  kind: componentLine(c, componentTypes.get(c.componentName), null).kind,
+                  label: "—",
+                  tone: "neutral" as const,
+                }))}
+                caption="none deployed"
+              />
+            )
+          )}
+          {productionConnections && productionConnections.length > 0 && (
+            <ConnectionsGroup
+              lines={productionConnections}
+              caption={connectionsHeadline(productionConnections)}
+              environment="production"
+              onConfigure={onConfigureProduction}
+            />
+          )}
+        </Stack>
       </EnvironmentCard>
     </Box>
   );
