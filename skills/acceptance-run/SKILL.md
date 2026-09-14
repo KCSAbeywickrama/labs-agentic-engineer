@@ -201,8 +201,47 @@ files with no entry fails it, so one you could not manage must be reported
 that could have said no, and a step missing the `observed` its exit code does
 not supply. Fix the REPORT and run it again; never the feature files.
 
+## Landing it — the branch name is a contract
+
+**The `aep/m<milestone#>-` prefix is a CONTRACT, not a style.** The platform keys
+your pull request back to this run BY THE BRANCH NAME. A branch outside that
+shape resolves to no run at all: the webhook arrives, the handler finds nothing
+to attach it to, and returns silently. Nothing is logged, no merge is declined,
+and the run sits at its landing deadline with a green agent log, an open pull
+request, and no way to connect them. Everything you just did is stranded.
+
+The milestone is the one your validation issue is filed under:
+
+```bash
+MILESTONE=$(gh issue view <N> --repo <owner/repo> --json milestone -q .milestone.number)
+git checkout -b "aep/m${MILESTONE}-validation"
+```
+
+If `MILESTONE` comes back empty the issue was filed without one — a platform
+fault, not something to work around. Say so in an issue comment and stop.
+
+Then commit the report and open ONE pull request:
+
+```bash
+# always the lease: this branch name repeats every cycle, so a re-validation
+# diverges from what the last one left on it
+git push --force-with-lease -u origin "aep/m${MILESTONE}-validation"
+
+gh pr create \
+  --title "Acceptance run: <passed>/<total> scenarios passed (issue #<N>)" \
+  --body $'Validates #<N>\n\n<the tally, and what failed or blocked>'
+```
+
+**`Validates #<N>`, never `Closes` / `Fixes` / `Resolves`.** The platform owns
+this task's lifecycle — it reopens the task for the next attempt and closes it
+even on an ending where no pull request merged — so a closing keyword would put
+two owners on one issue. The reference still has to be there: a body naming
+nothing is read as somebody else's work and never merges.
+
 ## Do not
 
+- Do not invent a branch name. See above: the prefix is how the run finds your
+  work, and a branch without it fails silently rather than loudly.
 - Do not edit the feature files to match what the app does. They are the
   specification; a mismatch is the finding.
 - Do not fix the app. This run reports; repairing is someone else's step.

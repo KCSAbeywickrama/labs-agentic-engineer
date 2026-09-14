@@ -54,12 +54,16 @@
 // and `curlResolveEntries` returns nothing — so no config is written and the
 // whole local-plane concession costs the cloud path exactly nothing.
 
+import { execFile } from "node:child_process";
 import dns from "node:dns";
 import fs from "node:fs";
+import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
 
 import type { ComponentEndpoint } from "./validation_context.js";
+
+const execFileAsync = promisify(execFile);
 
 /** curl's per-user config file, read from `$CURL_HOME` then `$HOME`. */
 export const CURL_CONFIG_FILE = ".curlrc";
@@ -272,47 +276,102 @@ export async function resolveAuthGatewayAddress(
 }
 
 /**
- * The browser's half of the same override, as an env fragment.
+ * Write the `agent-browser` PATH wrapper that makes the deployed hostnames
+ * resolvable in the browser, and return its path (undefined when nothing needs
+ * mapping, or when there is no real binary to wrap).
  *
- * `.curlrc` is a curl mechanism and never reaches a browser, so without this the
- * agent's browser is the one client left dialling loopback — and it rediscovers
- * RFC 6761 from scratch each run (180s of DNS spelunking on the run that
- * measured it, #570).
+ * **Why a wrapper and not an environment variable.** The rules used to ride
+ * `AGENT_BROWSER_ARGS`, and that was wrong: `skills/agent-browser` tells an
+ * agent to `export AGENT_BROWSER_ARGS=--no-sandbox` whenever the browser will
+ * not launch, so the one variable carrying the mappings is the one a skill
+ * instructs agents to overwrite. Measured on a real run — the agent re-exported
+ * it per command, dropped the IdP rule, and reported 7 of 8 scenarios `blocked`
+ * on an unreachable auth issuer. A config file is no better: the CLI documents
+ * `AGENT_BROWSER_*` as overriding config-file values. Only something the caller
+ * cannot address survives, and `layout.aepDir` is already first on the agent's
+ * PATH and already holds the `gh` wrapper.
  *
- * **`AGENT_BROWSER_ARGS` is COMMA OR NEWLINE separated** (agent-browser 0.35.2),
- * and `--host-resolver-rules` separates its OWN `MAP` rules with commas. Joining
- * with commas therefore splits the value mid-flag: the first mapping survives
- * attached to the flag, every later one becomes a bogus Chromium argument, and
- * the run reports every endpoint after the first as unreachable. A NEWLINE join
- * is the only safe form, and it is the whole reason this returns a string rather
- * than a list.
+ * The wrapper OWNS `--host-resolver-rules`: it drops any the caller supplied
+ * (and any bare `MAP …` fragment left by a caller who comma-joined its own)
+ * before appending this run's. Everything else the caller set — `--no-sandbox`
+ * above all, without which Chromium cannot start as the pod's non-root user
+ * (ADR-0007) — is passed through untouched.
  *
- * The image already sets `AGENT_BROWSER_ARGS=--no-sandbox`, which must survive:
- * Chromium's sandbox cannot start as the pod's non-root user (ADR-0007), so the
- * current value is kept and the rule appended rather than replacing it. Mixed
- * separators are fine — the CLI accepts both — so the existing value is passed
- * through untouched instead of being re-parsed.
+ * It joins with NEWLINES. `AGENT_BROWSER_ARGS` is comma-or-newline separated and
+ * `--host-resolver-rules` separates its own `MAP` rules with commas, so a comma
+ * join splits the value mid-flag: the first mapping stays attached to the flag
+ * and every later one becomes a bogus Chromium argument.
  *
- * The IdP is mapped alongside the endpoints, so an exploration that follows a
- * login redirect does not meet an unresolvable host — the gap that used to leave
- * a dead hop for the agent to misread as a broken deployment (ADR-0006). Gated
- * on there being an endpoint to map at all: `curlResolveEntries` yields only
- * `.localhost` hosts, so a non-empty list IS the local-plane signal, and a cloud
- * run gets no rule.
- *
- * Returns an empty record when there is nothing to map, so a caller can spread it
- * and leave the image's own value in place.
+ * Gated on there being an endpoint to map at all: `curlResolveEntries` yields
+ * only `.localhost` hosts, so a non-empty list IS the local-plane signal and a
+ * cloud run writes no wrapper.
  */
-export async function agentBrowserArgsEnv(
-  current: string | undefined,
+export async function writeAgentBrowserWrapper(
+  dir: string,
   entries: readonly CurlResolveEntry[],
   lookup: LookupFn = dns.promises.lookup as LookupFn,
-): Promise<Record<string, string>> {
-  if (entries.length === 0) return {};
+): Promise<string | undefined> {
+  if (entries.length === 0) return undefined;
   const rules = hostResolverRules(entries, await resolveAuthGatewayAddress(lookup));
-  if (rules.length === 0) return {};
-  const existing = (current ?? "").trim();
-  return { AGENT_BROWSER_ARGS: existing ? `${existing}\n${rules.join("\n")}` : rules.join("\n") };
+  if (rules.length === 0) return undefined;
+  const real = await resolveRealAgentBrowserPath();
+  if (real === undefined) return undefined;
+
+  const file = path.join(dir, "agent-browser");
+  await fs.promises.mkdir(dir, { recursive: true });
+  await fs.promises.writeFile(file, agentBrowserWrapperScript(real, rules[0] as string), { mode: 0o755 });
+  return file;
+}
+
+/** The real binary, resolved off PATH before this wrapper shadows it. */
+async function resolveRealAgentBrowserPath(): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync("which", ["agent-browser"]);
+    const p = stdout.trim().split("\n")[0]?.trim();
+    return p !== undefined && p.startsWith("/") ? p : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The wrapper's text. Exported for the test that pins the separator. */
+export function agentBrowserWrapperScript(realPath: string, rule: string): string {
+  return `#!/usr/bin/env bash
+# agent-browser wrapper — written by the runner's endpoint preflight.
+#
+# The deployed hostnames are *.localhost, which RFC 6761 pins to loopback ahead
+# of DNS, so the browser needs --host-resolver-rules to reach them. This file
+# owns that flag: a caller that sets AGENT_BROWSER_ARGS (the agent-browser skill
+# tells agents to, when the browser will not launch) would otherwise silently
+# un-map every deployed host.
+set -e
+
+RULE=${JSON.stringify(rule)}
+
+# AGENT_BROWSER_ARGS is comma OR newline separated, and a caller may also have
+# space-joined it (which never worked, but says what it meant). Split on all
+# three, then KEEP ONLY FLAGS: every Chromium switch starts with "-", so any
+# other fragment is the tail of a split value - a MAP keyword, a hostname, an
+# address - and passing it on would hand Chromium an argument to nothing.
+keep=""
+while IFS= read -r a; do
+  [ -z "$a" ] && continue
+  case "$a" in
+    --host-resolver-rules=*) continue ;;  # this file owns that flag
+    -*) ;;                                # a real switch: keep it
+    *) continue ;;                        # a fragment of a split value
+  esac
+  keep="\${keep}\${a}
+"
+done <<EOF
+$(printf '%s' "\${AGENT_BROWSER_ARGS:-}" | tr ',\t ' '\n\n\n')
+EOF
+
+# Newline join: --host-resolver-rules uses commas BETWEEN its own MAP rules, so
+# a comma join would split this value mid-flag.
+export AGENT_BROWSER_ARGS="\${keep}\${RULE}"
+exec ${JSON.stringify(realPath)} "$@"
+`;
 }
 
 /**

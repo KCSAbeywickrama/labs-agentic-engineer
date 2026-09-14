@@ -17,10 +17,13 @@
  */
 
 import { test } from "node:test";
+
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import {
   AUTH_BRIDGE_HOST,
   CURL_CONFIG_FILE,
@@ -29,9 +32,12 @@ import {
   probeEndpoints,
   resolveAuthGatewayAddress,
   writeCurlResolveConfig,
-  agentBrowserArgsEnv,
+  agentBrowserWrapperScript,
+  writeAgentBrowserWrapper,
 } from "./endpoint_access.js";
 
+
+const execFileAsync = promisify(execFile);
 const GATEWAY = "10.43.246.32";
 
 /** A lookup stub that answers every name with one address. */
@@ -229,62 +235,82 @@ test("resolveAuthGatewayAddress resolves the bridge, and swallows a failure", as
   assert.equal(missing, undefined);
 });
 
+// The wrapper is BASH, and every bug it can have is a quoting bug — so these
+// run it rather than reading it. The stand-in "real binary" prints the
+// AGENT_BROWSER_ARGS it was handed, which is the whole contract.
+async function runWrapper(callerArgs: string | undefined, rule: string): Promise<string> {
+  const dir = await tmpDir();
+  const stub = path.join(dir, "stub");
+  await fs.promises.writeFile(stub, '#!/usr/bin/env bash\nprintf %s "$AGENT_BROWSER_ARGS"\n', { mode: 0o755 });
+  const wrapper = path.join(dir, "agent-browser");
+  await fs.promises.writeFile(wrapper, agentBrowserWrapperScript(stub, rule), { mode: 0o755 });
+  const env = { ...process.env };
+  if (callerArgs === undefined) delete env.AGENT_BROWSER_ARGS;
+  else env.AGENT_BROWSER_ARGS = callerArgs;
+  const { stdout } = await execFileAsync(wrapper, [], { env });
+  return stdout;
+}
+
+const RULE = `--host-resolver-rules=MAP a.localhost ${GATEWAY},MAP b.localhost ${GATEWAY}`;
+
 // The separator is the whole risk. AGENT_BROWSER_ARGS is comma OR newline
-// separated, and `--host-resolver-rules` uses commas BETWEEN ITS OWN MAP rules —
+// separated, and --host-resolver-rules uses commas BETWEEN ITS OWN MAP rules —
 // so a comma join splits the value mid-flag and silently drops every mapping
-// after the first. This asserts the newline form, and that the image's
-// `--no-sandbox` survives: without it Chromium cannot start as the pod's
-// non-root user (ADR-0007).
-test("agentBrowserArgsEnv appends to the image's args with a newline, never a comma", async () => {
-  const env = await agentBrowserArgsEnv(
-    "--no-sandbox",
-    [
-      { host: "a.localhost", port: 19080, address: GATEWAY },
-      { host: "b.localhost", port: 19080, address: GATEWAY },
-    ],
-    async () => ({ address: "172.18.0.1" }),
-  );
-  assert.equal(
-    env.AGENT_BROWSER_ARGS,
-    "--no-sandbox\n" +
-      `--host-resolver-rules=MAP a.localhost ${GATEWAY},MAP b.localhost ${GATEWAY},` +
-      "MAP *.openchoreo.localhost 172.18.0.1",
-  );
-  // Both mappings survive the split the CLI will perform on it.
-  const parsed = (env.AGENT_BROWSER_ARGS ?? "").split("\n");
-  assert.equal(parsed.length, 2);
-  assert.equal(parsed[0], "--no-sandbox");
-  assert.match(parsed[1] as string, /MAP a\.localhost/);
-  assert.match(parsed[1] as string, /MAP b\.localhost/);
+// after the first.
+test("the wrapper joins with newlines, so a multi-MAP rule survives intact", async () => {
+  const out = await runWrapper("--no-sandbox", RULE);
+  const args = out.split("\n").filter(Boolean);
+  assert.deepEqual(args, ["--no-sandbox", RULE]);
+  // Both mappings still belong to the flag, not to a stray argument.
+  assert.match(args[1] as string, /MAP a\.localhost/);
+  assert.match(args[1] as string, /MAP b\.localhost/);
 });
 
-// An unresolvable bridge is not a reason to lose the endpoint rules: those are
-// what the preflight already proved reachable, and the IdP hop may never be
-// taken. It degrades to exactly the coverage this had before the IdP rule.
-test("agentBrowserArgsEnv still maps the endpoints when the bridge will not resolve", async () => {
-  const env = await agentBrowserArgsEnv("--no-sandbox", [{ host: "a.localhost", port: 19080, address: GATEWAY }], async () => {
-    throw new Error("ENOTFOUND");
-  });
-  assert.equal(
-    env.AGENT_BROWSER_ARGS,
-    `--no-sandbox\n--host-resolver-rules=MAP a.localhost ${GATEWAY}`,
+// The reason this is a wrapper at all: the agent-browser skill tells an agent to
+// export AGENT_BROWSER_ARGS when the browser will not launch. One that does must
+// not be able to un-map the deployed hosts — measured as 7 of 8 scenarios
+// `blocked` on an unreachable auth issuer.
+test("a caller's own resolver rule is discarded, not merged", async () => {
+  const out = await runWrapper(
+    `--no-sandbox --host-resolver-rules=MAP only-this.localhost 1.2.3.4`,
+    RULE,
   );
+  assert.ok(!out.includes("only-this.localhost"), `caller rule survived:\n${out}`);
+  assert.ok(out.includes("MAP a.localhost"), `platform rule missing:\n${out}`);
 });
 
-// A cloud plane resolves its hostnames normally, so there is nothing to map and
-// the image's own value must be left exactly as it is — an empty record is what
-// lets the caller spread this unconditionally.
-test("agentBrowserArgsEnv says nothing when there is nothing to map", async () => {
-  assert.deepEqual(await agentBrowserArgsEnv("--no-sandbox", [], async () => ({ address: "172.18.0.1" })), {});
+// A caller that comma-joined its own rule leaves bare `MAP …` fragments once the
+// value is split on commas. They are arguments to nothing and Chromium would
+// refuse them.
+test("bare MAP fragments from a caller's comma join are dropped", async () => {
+  const out = await runWrapper(
+    `--no-sandbox,--host-resolver-rules=MAP x.localhost 9.9.9.9,MAP y.localhost 9.9.9.9`,
+    RULE,
+  );
+  const args = out.split("\n").filter(Boolean);
+  assert.deepEqual(args, ["--no-sandbox", RULE]);
 });
 
-// An image that set no args at all must not produce a leading newline, which
-// would parse as an empty first argument.
-test("agentBrowserArgsEnv carries the rule alone when the image set no args", async () => {
-  const env = await agentBrowserArgsEnv(undefined, [{ host: "a.localhost", port: 19080, address: GATEWAY }], async () => {
-    throw new Error("ENOTFOUND");
-  });
-  assert.equal(env.AGENT_BROWSER_ARGS, `--host-resolver-rules=MAP a.localhost ${GATEWAY}`);
+// --no-sandbox is not decoration: Chromium cannot start as the pod's non-root
+// user without it (ADR-0007), and the image sets it.
+test("everything the caller set that is not a resolver rule passes through", async () => {
+  const out = await runWrapper("--no-sandbox\n--disable-gpu", RULE);
+  const args = out.split("\n").filter(Boolean);
+  assert.deepEqual(args, ["--no-sandbox", "--disable-gpu", RULE]);
+});
+
+test("an unset AGENT_BROWSER_ARGS yields the rule alone, with no empty argument", async () => {
+  const out = await runWrapper(undefined, RULE);
+  assert.deepEqual(out.split("\n").filter(Boolean), [RULE]);
+  assert.ok(!out.startsWith("\n"), "leading newline parses as an empty first argument");
+});
+
+// A cloud plane resolves its hostnames normally: nothing to map, so no wrapper,
+// so the image's own agent-browser stays on PATH unshadowed.
+test("no endpoints to map writes no wrapper", async () => {
+  const dir = await tmpDir();
+  assert.equal(await writeAgentBrowserWrapper(dir, [], async () => ({ address: "172.18.0.1" })), undefined);
+  assert.deepEqual(await fs.promises.readdir(dir), []);
 });
 
 /** A fetch stub that answers each call with the next queued status, or throws. */

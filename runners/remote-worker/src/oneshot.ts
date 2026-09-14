@@ -53,7 +53,7 @@ import {
   curlResolveEntries,
   probeEndpoints,
   writeCurlResolveConfig,
-  agentBrowserArgsEnv,
+  writeAgentBrowserWrapper,
 } from "./lib/endpoint_access.js";
 
 function requireEnv(name: string): string {
@@ -270,12 +270,11 @@ async function main(): Promise<number> {
     try {
       const entries = await curlResolveEntries(endpoints, undefined, (l) => console.log(l));
       const written = await writeCurlResolveConfig(curlConfigHome(), entries);
-      // The same override for the agent's browser. Applied to this process's env
-      // rather than written to a file: `startCodingRun` spreads `process.env`
-      // into the child, and unlike a config path there is nothing that can go
-      // stale or point at a file that no longer exists.
-      const browserArgs = await agentBrowserArgsEnv(process.env.AGENT_BROWSER_ARGS, entries);
-      Object.assign(process.env, browserArgs);
+      // The same override for the agent's browser, as a PATH wrapper in the
+      // workspace's own bin dir. NOT an env var: the agent-browser skill tells
+      // an agent to export AGENT_BROWSER_ARGS when the browser will not launch,
+      // and one that does would un-map every deployed host. See the writer.
+      const browserWrapper = await writeAgentBrowserWrapper(layout.aepDir, entries);
       if (written === undefined) {
         // No `.localhost` endpoints — a cloud plane resolves them normally and
         // there is nothing to pin. Logged so the absence is a decision on the
@@ -284,8 +283,8 @@ async function main(): Promise<number> {
       } else {
         console.log(`[oneshot] pinned ${entries.length} endpoint host(s) for curl → ${written}`);
       }
-      if (browserArgs.AGENT_BROWSER_ARGS !== undefined) {
-        console.log(`[oneshot] pinned ${entries.length} endpoint host(s) for the browser`);
+      if (browserWrapper !== undefined) {
+        console.log(`[oneshot] pinned ${entries.length} endpoint host(s) for the browser → ${browserWrapper}`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
