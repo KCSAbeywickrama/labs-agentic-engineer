@@ -59,24 +59,43 @@ only the Builds page names.
    (ADR-0027 decision 5 still holds). Promote is disabled until every value
    is set.
 
-4. **Test users move to the environment page.** *Try it now* is captioned
-   "Opens the deployment view: app, endpoints, test users", and the panel
-   renders there, under the components. The card says where they are rather
-   than holding them.
+4. **The environment page is where a version is TRIED.** *Try it now* is
+   captioned "Opens the deployment view: app, endpoints, test users", and the
+   page's Components card becomes **Try it out** (the Deployment Detail
+   design, turn 1): every component as a panel a person can act on. A web
+   application is visited, carries its URL with a copy control, names the
+   components it talks to (the design's component edges), and holds the
+   **test users** that sign in to it — inline, filterable, folded past five
+   rows. A service lists its **endpoints** off the contract the platform
+   serves (`get-component-openapi`, parsed by `@aep/ui-openapi-view`):
+   searchable, filterable by method, a **curl** per row for the deployed URL
+   with an `Authorization: Bearer <token>` placeholder, and *Try* into the
+   contract viewer. Under it, a **Connections** table: each dependency with
+   its type, who uses it, its config keys — masked, always, because nothing
+   reads a value back — and the readiness word; *Edit* re-collects a Project
+   External's development values, *View* opens the dependency's definition
+   on the Spec view. Production shows the same table with no Edit: nothing
+   collects values there.
 
-5. **What the design drew and this does not build.** A *Past deployments*
-   row (no deployment record — ADR-0027 decision 4, unchanged), a validation
-   ETA and a live progress bar (the card would read a second stream for a
-   summary the Validation page already gives), per-service endpoint counts
-   (a per-component contract read for a caption). Each is left out rather
-   than faked.
+5. **What the designs drew and this does not build.** On the board: a
+   *Past deployments* row (no deployment record — ADR-0027 decision 4,
+   unchanged), a validation ETA and a live progress bar (the card would read
+   a second stream for a summary the Validation page already gives),
+   per-service endpoint counts on the card (the page counts them, where the
+   contract is read anyway). On the environment page: a health line with a
+   latency (nothing probes), *Get token*, *Open app as*, a token picker and
+   *Run* (the platform mints no token for a test user), a connection's
+   VALUE (nothing reads one back), and *Compare with Production* (production
+   values are the promote dialog's page state). Each is left out rather than
+   faked; the token surfaces are a backend handshake if wanted.
 
 ## Consequences
 
 - `EnvironmentCards` becomes the flow; `ConnectionsCard` is mounted by
-  nothing and goes. `DeploymentDetailPage` mounts `ProjectSignInPanel` for
-  development. `VerdictBanner` keeps its sentence and its link and moves
-  inside step 2.
+  nothing and goes. `DeploymentDetailPage` composes `TryItOutCard` (the
+  panels, the endpoints, the inline test users) and `ConnectionsTable`;
+  `ProjectSignInPanel` and `TestUsersDialog` stay for the row they share.
+  `VerdictBanner` keeps its sentence and its link and moves inside step 2.
 - The Builds page and the Deployments page now both say *on hold* from the
   same run row, so they cannot disagree about it.
 - **No BE handshake.** The feature changes no contract.

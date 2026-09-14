@@ -19,7 +19,7 @@
 // @vitest-environment jsdom
 
 import type { ElementType } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
 
@@ -58,7 +58,43 @@ let mockDeployments: Deployment[] = [];
 let mockComponentsPending = false;
 let mockFailedCount = 0;
 
+// The mock contract every service panel reads its endpoints from.
+const MOCK_SPEC = `openapi: 3.0.0
+info: { title: claims-api, version: 1.0.0 }
+paths:
+  /claims:
+    get:
+      summary: List claims
+      responses: { "200": { description: OK } }
+    post:
+      summary: File a claim
+      responses: { "201": { description: Created } }
+  /claims/{id}:
+    delete:
+      summary: Withdraw
+      responses: { "204": { description: Gone } }
+`;
+let mockContractError = false;
+type ProjectDependencyReadiness = components["schemas"]["ProjectDependencyReadiness"];
+let mockReadiness: ProjectDependencyReadiness | undefined;
+const mockSaveValues = vi.fn();
+
 vi.mock("../api/queries", () => ({
+  useComponentOpenApi: (_p: string, componentName: string) => ({
+    data: mockContractError ? undefined : { componentName, componentType: "service", spec: MOCK_SPEC },
+    isPending: false,
+    isError: mockContractError,
+    error: mockContractError ? new Error("contract down") : null,
+    refetch: vi.fn(),
+  }),
+  useProjectDependencyReadiness: () => ({ data: mockReadiness, isPending: false, isError: false }),
+  useSaveConnectionValues: () => ({
+    mutate: mockSaveValues,
+    isPending: false,
+    isError: false,
+    error: null,
+    reset: vi.fn(),
+  }),
   useProjectComponents: () => ({
     data: {
       items: [
@@ -83,6 +119,35 @@ vi.mock("../api/queries", () => ({
       deploy: mockDeploy,
     },
   }),
+}));
+
+// The design's graph: the web app talks to the service; the service carries
+// one external with values to collect and one platform resource.
+type ComponentDependencies = components["schemas"]["ComponentDependencies"];
+const mockDependencies: ComponentDependencies[] = [
+  {
+    componentName: "approvals-web",
+    dependencies: [{ kind: "component", name: "claims-api" }],
+  },
+  {
+    componentName: "claims-api",
+    dependencies: [
+      { kind: "platform-resource", name: "claims-db", resourceType: "postgres-cnpg" },
+      { kind: "external", name: "stripe", config: [{ key: "STRIPE_SECRET_KEY", description: "Secret key", secret: true }] },
+    ],
+  },
+];
+let mockDependenciesPending = false;
+vi.mock("../../spec/api/queries", () => ({
+  useDesignDependencies: () => ({
+    data: mockDependenciesPending ? undefined : mockDependencies,
+    isPending: mockDependenciesPending,
+    isError: false,
+    refetch: vi.fn(),
+  }),
+}));
+vi.mock("../../settings/api/queries", () => ({
+  useExternalResources: () => ({ data: [], isPending: false, isError: false, refetch: vi.fn() }),
 }));
 
 let mockRuns: MilestoneRunView[] = [];
@@ -175,6 +240,10 @@ beforeEach(() => {
   mockCounts = undefined;
   mockTestUsers = [];
   mockRolesPending = false;
+  mockContractError = false;
+  mockReadiness = undefined;
+  mockDependenciesPending = false;
+  mockSaveValues.mockClear();
   openApiDialog.mockClear();
 });
 
@@ -220,7 +289,7 @@ describe("DeploymentDetailPage", () => {
   it("gives each component its own way in", () => {
     render(<DeploymentDetailPage projectName="expense" environment="development" />);
 
-    expect(screen.getByText("2 of 2 live")).toBeInTheDocument();
+    expect(screen.getByText(/2 of 2 components live/)).toBeInTheDocument();
     // A web application is visited; a service opens its contract.
     expect(screen.getByRole("link", { name: "Visit approvals-web" })).toHaveAttribute(
       "href",
@@ -264,7 +333,7 @@ describe("DeploymentDetailPage", () => {
     expect(
       screen.queryByRole("link", { name: "View the build that shipped this" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("1 of 1 live")).toBeInTheDocument();
+    expect(screen.getByText(/1 of 1 components live/)).toBeInTheDocument();
     // Only the bound component is listed for production.
     expect(screen.queryByText("approvals-web")).not.toBeInTheDocument();
   });
@@ -329,9 +398,15 @@ describe("DeploymentDetailPage — test users", () => {
       },
     ];
     render(<DeploymentDetailPage projectName="expense" environment="development" />);
-    expect(screen.getByText("Test users")).toBeTruthy();
-    expect(screen.getByText(/1 account, one per role/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "View test users" })).toBeTruthy();
+    // Inside the web app's panel, the accounts that sign in to it.
+    expect(screen.getByText("Sign in with a test user")).toBeInTheDocument();
+    expect(screen.getByText("1 account · one per role · Development only")).toBeInTheDocument();
+    expect(screen.getByText("test-viewer")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reveal the password for test-viewer" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Open Thunder Console to add or remove real accounts" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/sign in with a test user below/)).toBeInTheDocument();
   });
 
   it("keeps the panel off a converging development, and off production", () => {
@@ -339,12 +414,140 @@ describe("DeploymentDetailPage — test users", () => {
     const { unmount } = render(
       <DeploymentDetailPage projectName="expense" environment="development" />,
     );
-    expect(screen.queryByText("Test users")).toBeNull();
+    expect(screen.queryByText("Sign in with a test user")).toBeNull();
     unmount();
 
     mockDeploy = { ...mockDeploy, status: "deployed" };
     mockDeployments = devDeployments().map((d) => ({ ...d, environment: "production" }));
     render(<DeploymentDetailPage projectName="expense" environment="production" />);
-    expect(screen.queryByText("Test users")).toBeNull();
+    expect(screen.queryByText("Sign in with a test user")).toBeNull();
+  });
+});
+
+describe("DeploymentDetailPage — try it out (ADR-0032)", () => {
+  it("lists a service's endpoints off its contract, with a curl for the deployed URL", async () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    render(<DeploymentDetailPage projectName="expense" environment="development" />);
+
+    const list = screen.getByRole("list", { name: "claims-api endpoints" });
+    const rows = within(list).getAllByRole("listitem");
+    expect(rows.map((r) => r.textContent)).toEqual([
+      expect.stringContaining("GET/claims List claims"),
+      expect.stringContaining("POST/claims File a claim"),
+      expect.stringContaining("DELETE/claims/{id} Withdraw"),
+    ]);
+    // The header counts them.
+    expect(screen.getByText(/· service · 3 endpoints/)).toBeInTheDocument();
+
+    fireEvent.click(within(rows[0]!).getByRole("button", { name: "Copy a curl for GET /claims" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    const curl = writeText.mock.calls[0]?.[0] as string;
+    expect(curl).toBe(
+      [
+        "curl -X GET 'https://api.dev.expense.localhost/claims/claims'",
+        "-H 'Accept: application/json'",
+        "-H 'Authorization: Bearer <token>'",
+      ].join(" \\\n  "),
+    );
+    // …and the chosen command expands under the list.
+    expect(screen.getByText(/curl -X GET 'https:\/\/api\.dev\.expense\.localhost\/claims\/claims'/)).toBeInTheDocument();
+
+    // Try opens the contract viewer on that service.
+    fireEvent.click(within(rows[1]!).getByRole("button", { name: "Try POST /claims" }));
+    expect(openApiDialog).toHaveBeenLastCalledWith("claims-api");
+  });
+
+  it("filters the endpoints by method and by text", () => {
+    render(<DeploymentDetailPage projectName="expense" environment="development" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "DELETE" }));
+    let rows = within(screen.getByRole("list", { name: "claims-api endpoints" })).getAllByRole("listitem");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.textContent).toContain("/claims/{id}");
+
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Search claims-api endpoints" }), {
+      target: { value: "file" },
+    });
+    rows = within(screen.getByRole("list", { name: "claims-api endpoints" })).getAllByRole("listitem");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.textContent).toContain("File a claim");
+  });
+
+  it("says the contract could not be loaded rather than showing no endpoints", () => {
+    mockContractError = true;
+    render(<DeploymentDetailPage projectName="expense" environment="development" />);
+    expect(screen.getByText(/The contract could not be loaded: contract down/)).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "claims-api endpoints" })).not.toBeInTheDocument();
+  });
+
+  it("gives the web app its Visit, its URL copy, and who it talks to", async () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    render(<DeploymentDetailPage projectName="expense" environment="development" />);
+
+    expect(screen.getByRole("link", { name: "Visit approvals-web" })).toHaveAttribute(
+      "href",
+      "https://approvals.dev.expense.localhost",
+    );
+    expect(screen.getByText(/Talks to/)).toHaveTextContent("Talks to claims-api on this environment");
+    fireEvent.click(screen.getByRole("button", { name: "Copy the URL of approvals-web" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("https://approvals.dev.expense.localhost"));
+  });
+});
+
+describe("DeploymentDetailPage — connections (ADR-0032)", () => {
+  it("tables the design's connections with their keys masked and the readiness word", () => {
+    mockReadiness = {
+      configured: false,
+      dependencies: [{ name: "stripe", state: "unset", missingKeys: ["STRIPE_SECRET_KEY"] }],
+    };
+
+    render(<DeploymentDetailPage projectName="expense" environment="development" />);
+
+    const table = screen.getByRole("table", { name: "Connections on Development" });
+    expect(screen.getByText("2 dependencies · values for Development")).toBeInTheDocument();
+    const stripe = within(table).getByRole("row", { name: "stripe" });
+    expect(within(stripe).getByText("used by claims-api")).toBeInTheDocument();
+    expect(within(stripe).getByText("External")).toBeInTheDocument();
+    expect(within(stripe).getByText(/STRIPE_SECRET_KEY/)).toBeInTheDocument();
+    expect(within(stripe).queryByText(/sk_/)).not.toBeInTheDocument();
+    expect(within(stripe).getByText("Missing")).toBeInTheDocument();
+    const db = within(table).getByRole("row", { name: "claims-db" });
+    expect(within(db).getByText("postgres-cnpg")).toBeInTheDocument();
+    expect(within(db).getByText("Provisioned")).toBeInTheDocument();
+    expect(within(db).getByRole("link", { name: "View claims-db in the design" })).toHaveAttribute(
+      "href",
+      "/projects/expense/spec",
+    );
+
+    // Edit re-collects the external's development values.
+    fireEvent.click(within(stripe).getByRole("button", { name: "Edit stripe values" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Configure — stripe")).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("STRIPE_SECRET_KEY"), { target: { value: "sk_live_real" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /Save values/ }));
+    expect(mockSaveValues).toHaveBeenCalledWith(
+      { name: "stripe", environment: "development", values: { STRIPE_SECRET_KEY: "sk_live_real" } },
+      expect.anything(),
+    );
+  });
+
+  it("offers no Edit on production, where nothing collects values", () => {
+    mockDeployments = devDeployments().map((d) => ({ ...d, environment: "production" }));
+    render(<DeploymentDetailPage projectName="expense" environment="production" />);
+    expect(screen.getByRole("table", { name: "Connections on Production" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Edit / })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /in the design$/ })).toHaveLength(2);
+  });
+
+  it("holds the table back while the design read is out", () => {
+    mockDependenciesPending = true;
+    render(<DeploymentDetailPage projectName="expense" environment="development" />);
+    expect(screen.queryByRole("table", { name: /^Connections/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "claims-api endpoints" })).toBeInTheDocument();
   });
 });

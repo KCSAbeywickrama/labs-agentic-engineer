@@ -108,7 +108,12 @@ here: they're the open `console` + `feature` issues.
   **On hold** here — chip *Waiting for configuration*, a notice naming the
   value and the component that depends on it, Try it now disabled. The
   Production card lists its components and connections the same way; the
-  standalone Connections card is retired; the ledger stays. **No contract
+  standalone Connections card is retired; the ledger stays. The environment
+  page becomes **Try it out**: a panel per component — a web app with Visit,
+  URL copy, who it talks to and the **test users** inline; a service with its
+  **endpoints** off the contract (search, method filter, a curl per row with
+  a token placeholder, Try into the viewer) — and a **Connections** table
+  (type, used by, keys masked, readiness word, Edit / View). **No contract
   change** ([ADR-0032](design/decisions/ADR-0032-the-development-card-is-the-flow.md),
   amending ADR-0027) —
   [#775](https://github.com/wso2/labs-agentic-engineer/issues/775)
