@@ -67,14 +67,16 @@ function EnvironmentCard({
   children,
 }: {
   row: EnvironmentRow;
-  /** The header's chip; defaults to the environment's own status. */
-  chip?: { label: string; tone: EnvironmentRow["status"]["tone"] };
+  /** The header's chip; defaults to the environment's own status. `null`
+   *  draws none — the Development card's rail already says where the
+   *  version is, and a chip beside the title said it a second time. */
+  chip?: { label: string; tone: EnvironmentRow["status"]["tone"] } | null;
   /** The header's right-hand fact — "v1 · Milestone #1". */
   aside?: string;
   children: React.ReactNode;
 }) {
-  const shown = chip ?? { label: row.status.label, tone: row.status.tone };
-  const tone = shown.tone;
+  const shown = chip === undefined ? { label: row.status.label, tone: row.status.tone } : chip;
+  const tone = (shown ?? row.status).tone;
   return (
     <Card
       variant="outlined"
@@ -94,7 +96,7 @@ function EnvironmentCard({
           <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: "-0.01em" }}>
             {row.label}
           </Typography>
-          <StatusChip label={shown.label} tone={shown.tone} appearance="soft" dot />
+          {shown && <StatusChip label={shown.label} tone={shown.tone} appearance="soft" dot />}
           <Box sx={{ flex: 1 }} />
           {aside ? (
             <Typography variant="caption" color="text.secondary">
@@ -218,7 +220,7 @@ export function EnvironmentCards({
     >
       <EnvironmentCard
         row={development}
-        {...(hold ? { chip: { label: "Waiting for configuration", tone: "warning" as const } } : {})}
+        chip={null}
         {...(aside ? { aside } : {})}
       >
         <Box role="list" aria-label="Deployment flow" sx={{ mt: 2 }}>

@@ -133,7 +133,8 @@ export function deployStep(row: EnvironmentRow, hold: DeployHold | null): FlowSt
   }
   const { status } = row;
   if (status.tone === "error") {
-    return { state: "error", title: "Deploy failed", chip: { label: status.label, tone: "error" } };
+    // The chip carries the word; a title that repeats it read twice.
+    return { state: "error", title: "Deploy", chip: { label: status.label, tone: "error" } };
   }
   if (status.live) {
     return {

@@ -185,7 +185,7 @@ describe("deployStep", () => {
     expect(deployStep(row({ status: { label: "Deploying", tone: "info", live: true }, live: 1 }), null))
       .toMatchObject({ state: "active", chip: { label: "1 of 2 live", tone: "info", live: true } });
     expect(deployStep(row({ status: { label: "Deploy failed", tone: "error", live: false } }), null))
-      .toMatchObject({ state: "error", title: "Deploy failed" });
+      .toMatchObject({ state: "error", title: "Deploy", chip: { label: "Deploy failed", tone: "error" } });
     expect(deployStep(row({ status: { label: "Nothing deployed", tone: "neutral", live: false }, cards: [], live: 0, total: 0 }), null))
       .toMatchObject({ state: "pending", note: "Deploys automatically when a build merges." });
   });

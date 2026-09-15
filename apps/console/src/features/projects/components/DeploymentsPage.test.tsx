@@ -419,13 +419,14 @@ describe("DeploymentsPage — environment board", () => {
     expect(screen.getByRole("heading", { name: "Development" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Production" })).toBeInTheDocument();
     // The dev card's first step says what is live and invites the try; the
-    // aggregate's word on the rollout is the card's chip, the ledger row's
-    // chip, and the step's own title.
+    // aggregate's word on the rollout is the step's own title and the ledger
+    // row's chip — the card header carries no chip of its own, the rail
+    // already says it.
     expect(screen.getByText(/1 of 1 components live.* You can try them now\./)).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Deployed" })).toBeInTheDocument();
     expect(
       screen.getAllByText("Deployed").filter((el) => el.closest("th") === null),
-    ).toHaveLength(3);
+    ).toHaveLength(2);
     // Production is empty and stays so: the sentence and the gate, no lists.
     expect(
       screen.getByText("Nothing running yet. v1 is ready to promote once the missing value is set."),
@@ -494,8 +495,8 @@ describe("DeploymentsPage — environment board", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    // The card's chip, the ledger's, and step 1's title.
-    expect(screen.getAllByText("Deploying")).toHaveLength(3);
+    // The ledger's chip and step 1's title; the card header carries none.
+    expect(screen.getAllByText("Deploying")).toHaveLength(2);
     const row = screen.getByRole("row", { name: "Open Development deployment" });
     // A verdict is expected and has not arrived: the cell says so, and no
     // promotion is offered — with the reason beside the button.
@@ -936,7 +937,6 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    expect(screen.getByText("Waiting for configuration")).toBeInTheDocument();
     const flow = screen.getByRole("list", { name: "Deployment flow" });
     const steps = within(flow).getAllByRole("listitem");
     expect(steps[0]).toHaveAttribute("aria-label", "Step 1, Deploy, On hold");
