@@ -43,8 +43,10 @@ type DeployStage = components["schemas"]["DeployStage"];
 type ProjectDependencyReadiness =
   components["schemas"]["ProjectDependencyReadiness"];
 
-/** Where a step is: done, the one moving, held by a person, broken, or not yet. */
-export type StepState = "done" | "active" | "hold" | "error" | "pending";
+/** Where a step is: done, settled without a result (a skipped validation is
+ *  over but nothing passed), the one moving, held by a person, broken, or
+ *  not yet. */
+export type StepState = "done" | "settled" | "active" | "hold" | "error" | "pending";
 
 export interface StepChip {
   label: string;
@@ -324,9 +326,11 @@ const VALIDATION_CHIP: Record<string, { label: string; tone: StatusTone; state: 
   partial: { label: "Passed*", tone: "success", state: "done", spoken: "passed, partially" },
   failed: { label: "Failed", tone: "error", state: "error" },
   unreported: { label: "Unreported", tone: "error", state: "error" },
-  inconclusive: { label: "Inconclusive", tone: "neutral", state: "done" },
-  skipped: { label: "Skipped", tone: "neutral", state: "done" },
-  cancelled: { label: "Cancelled", tone: "neutral", state: "done" },
+  // Over, with nothing to show for it: no green check for a question that
+  // was never answered.
+  inconclusive: { label: "Inconclusive", tone: "neutral", state: "settled" },
+  skipped: { label: "Skipped", tone: "neutral", state: "settled" },
+  cancelled: { label: "Cancelled", tone: "neutral", state: "settled" },
 };
 
 /**

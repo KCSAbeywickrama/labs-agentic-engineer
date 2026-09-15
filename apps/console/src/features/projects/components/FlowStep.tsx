@@ -23,7 +23,8 @@ import type { FlowStep as FlowStepView, StepState } from "../lib/deploymentFlow"
 
 // One step on the Development card's rail (ADR-0032). The MARK is the state —
 // a check for done, a numbered ring for the step in play, a grey number for
-// what has not happened — and the rail below it is the sequence. Unlike the
+// what has not happened and for what settled without a result (a skipped
+// validation earns no green check) — and the rail below it is the sequence. Unlike the
 // build page's spine (StageRow), the mark carries the step number inside it:
 // there are only ever three steps here, and the number is the reader's first
 // question ("which one am I on?").
@@ -42,6 +43,7 @@ function markTone(state: StepState): "success" | "warning" | "info" | "error" | 
     case "active":
       return "warning";
     default:
+      // pending and settled: a grey ring around the number.
       return null;
   }
 }

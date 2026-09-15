@@ -264,7 +264,8 @@ describe("validationStep", () => {
     expect(validationStep("partial", { total: 25, passed: 24, failed: 0, uncovered: 1 }, done).chip)
       .toMatchObject({ label: "Passed* · 24 of 25", spoken: "passed, partially, 24 of 25" });
     expect(validationStep("failed", undefined, done)).toMatchObject({ state: "error", chip: { label: "Failed" } });
-    expect(validationStep("cancelled", undefined, done)).toMatchObject({ state: "done", chip: { tone: "neutral" } });
+    expect(validationStep("cancelled", undefined, done)).toMatchObject({ state: "settled", chip: { tone: "neutral" } });
+    expect(validationStep("skipped", undefined, done)).toMatchObject({ state: "settled", chip: { label: "Skipped" } });
   });
 });
 
