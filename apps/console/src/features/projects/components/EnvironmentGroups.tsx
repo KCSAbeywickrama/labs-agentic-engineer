@@ -16,11 +16,11 @@
  * under the License.
  */
 
-import { Box, Stack, Typography } from "@wso2/oxygen-ui";
+import { Box, IconButton, Stack, Tooltip, Typography } from "@wso2/oxygen-ui";
+import { Settings } from "@wso2/oxygen-ui-icons-react";
 import type { StatusTone } from "../../../components/StatusChip";
 import type { ComponentLine, ConnectionLine } from "../lib/deploymentFlow";
 import type { ConnectionRow } from "../lib/promotion";
-import { AccentPill } from "./AccentPill";
 
 // The two grouped lists an environment card carries under its first step
 // (ADR-0032): the components and the connections, each a bordered group with
@@ -40,7 +40,7 @@ function GroupList({
     <Box
       role="group"
       aria-label={`${title} — ${caption}`}
-      sx={{ border: 1, borderColor: "divider", borderRadius: 2, overflow: "hidden" }}
+      sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}
     >
       <Stack direction="row" spacing={1} sx={{ alignItems: "baseline", px: 1.5, py: 0.75 }}>
         <Typography variant="caption" sx={{ fontWeight: 700 }}>
@@ -139,10 +139,11 @@ const CONNECTION_TONE: Record<ConnectionLine["state"], StatusTone> = {
 };
 
 /**
- * The connections group. A line that can be configured carries the pill — with
+ * The connections group. A line that can be configured carries a gear — with
  * the connection's name in its accessible name, or every row reads "Configure"
  * to a screen reader (#401 review) — beside its state, so the ask and the way
- * to answer it sit together.
+ * to answer it sit together. A gear rather than the accent pill: the group is
+ * a readout, and one pill per row made it read as a row of actions.
  */
 export function ConnectionsGroup({
   lines,
@@ -169,16 +170,19 @@ export function ConnectionsGroup({
             <>
               {l.label && <StateWord label={l.label} tone={CONNECTION_TONE[l.state]} />}
               {l.configure && (
-                <AccentPill
-                  aria-label={
-                    environment === "production"
-                      ? `Configure ${l.row.name} for production`
-                      : `Configure ${l.row.name}`
-                  }
-                  onClick={() => onConfigure(l.row)}
-                >
-                  Configure
-                </AccentPill>
+                <Tooltip title="Configure">
+                  <IconButton
+                    size="small"
+                    aria-label={
+                      environment === "production"
+                        ? `Configure ${l.row.name} for production`
+                        : `Configure ${l.row.name}`
+                    }
+                    onClick={() => onConfigure(l.row)}
+                  >
+                    <Settings size={15} />
+                  </IconButton>
+                </Tooltip>
               )}
             </>
           }

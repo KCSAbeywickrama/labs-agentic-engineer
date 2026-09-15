@@ -140,12 +140,18 @@ describe("groupDeploymentCards", () => {
     expect(development[0]?.displayName).toBe("catalog-api");
   });
 
-  it("sorts each column by component name", () => {
-    const { development } = groupDeploymentCards(
+  it("keeps the components list's own order, a stray binding last", () => {
+    const { development, production } = groupDeploymentCards(
       [component("zeta"), component("alpha")],
-      [],
+      [
+        { componentName: "alpha", environment: "development", status: "Ready" },
+        { componentName: "gone", environment: "development", status: "Ready" },
+        { componentName: "alpha", environment: "production", status: "Ready" },
+        { componentName: "zeta", environment: "production", status: "Ready" },
+      ],
     );
-    expect(development.map((c) => c.componentName)).toEqual(["alpha", "zeta"]);
+    expect(development.map((c) => c.componentName)).toEqual(["zeta", "alpha", "gone"]);
+    expect(production.map((c) => c.componentName)).toEqual(["zeta", "alpha"]);
   });
 
   it("marks intentionally undeployed bindings", () => {

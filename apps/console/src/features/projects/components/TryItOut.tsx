@@ -392,12 +392,11 @@ function ServiceEndpoints({
       </Stack>
       <Box role="list" aria-label={`${displayName} endpoints`}>
         {shown.map((op) => (
+          <Box key={op.id} role="listitem" sx={{ borderTop: 1, borderColor: "divider" }}>
           <Stack
-            key={op.id}
-            role="listitem"
             direction="row"
             spacing={1.25}
-            sx={{ alignItems: "center", px: 2, py: 0.75, borderTop: 1, borderColor: "divider" }}
+            sx={{ alignItems: "center", px: 2, py: 0.75 }}
           >
             <MethodWord method={op.method} />
             <Typography
@@ -433,6 +432,43 @@ function ServiceEndpoints({
               Try
             </AccentPill>
           </Stack>
+          {/* The chosen command opens under ITS row, where the eye already is. */}
+          {chosen?.id === op.id && baseUrl && (
+            <Box
+              sx={{
+                mx: 2,
+                mb: 1.25,
+                p: 1.5,
+                borderRadius: 1,
+                bgcolor: "grey.900",
+                color: "grey.100",
+                fontFamily: "monospace",
+                fontSize: 12,
+                lineHeight: 1.6,
+              }}
+            >
+              <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between", mb: 0.75 }}>
+                <Typography variant="caption" sx={{ color: "grey.400" }}>
+                  {op.method} {op.path}
+                  {note ? ` · ${note}` : ""}
+                </Typography>
+                <Button
+                  size="small"
+                  color="inherit"
+                  startIcon={<Copy size={13} aria-hidden />}
+                  aria-label={`Copy the curl for ${op.method} ${op.path}`}
+                  onClick={() => copyCurl(op)}
+                  sx={{ color: "grey.100" }}
+                >
+                  Copy
+                </Button>
+              </Stack>
+              <Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", wordBreak: "break-all", fontFamily: "inherit" }}>
+                {curlFor(baseUrl, op)}
+              </Box>
+            </Box>
+          )}
+          </Box>
         ))}
         {visible.length === 0 && (
           <Typography variant="body2" color="text.secondary" sx={{ px: 2, py: 1.5, borderTop: 1, borderColor: "divider" }}>
@@ -440,41 +476,6 @@ function ServiceEndpoints({
           </Typography>
         )}
       </Box>
-      {chosen && baseUrl && (
-        <Box
-          sx={{
-            mx: 2,
-            my: 1.5,
-            p: 1.5,
-            borderRadius: 1.5,
-            bgcolor: "grey.900",
-            color: "grey.100",
-            fontFamily: "monospace",
-            fontSize: 12,
-            lineHeight: 1.6,
-          }}
-        >
-          <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between", mb: 0.75 }}>
-            <Typography variant="caption" sx={{ color: "grey.400" }}>
-              {chosen.method} {chosen.path}
-              {note ? ` · ${note}` : ""}
-            </Typography>
-            <Button
-              size="small"
-              color="inherit"
-              startIcon={<Copy size={13} aria-hidden />}
-              aria-label={`Copy the curl for ${chosen.method} ${chosen.path}`}
-              onClick={() => copyCurl(chosen)}
-              sx={{ color: "grey.100" }}
-            >
-              Copy
-            </Button>
-          </Stack>
-          <Box component="pre" sx={{ m: 0, whiteSpace: "pre-wrap", wordBreak: "break-all", fontFamily: "inherit" }}>
-            {curlFor(baseUrl, chosen)}
-          </Box>
-        </Box>
-      )}
       {visible.length > ENDPOINTS_SHOWN && (
         <Stack
           direction="row"
@@ -533,7 +534,7 @@ function ComponentPanel({
       sx={{
         border: 1,
         borderColor: "divider",
-        borderRadius: 2,
+        borderRadius: 1,
         overflow: "hidden",
         ...(card.kind === "notDeployed" && { opacity: 0.6, borderStyle: "dashed" }),
       }}
@@ -666,7 +667,7 @@ export function TryItOutCard({
           />
         ))}
         {testUsers && !firstWebApp && (
-          <Box sx={{ border: 1, borderColor: "divider", borderRadius: 2, overflow: "hidden" }}>
+          <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
             <TestUsersInline {...testUsers} />
           </Box>
         )}

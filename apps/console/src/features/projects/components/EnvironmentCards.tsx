@@ -21,11 +21,12 @@ import {
   Button,
   Card,
   CardContent,
+  Skeleton,
   Stack,
   Typography,
   alpha,
 } from "@wso2/oxygen-ui";
-import { ArrowRight, CircleAlert } from "@wso2/oxygen-ui-icons-react";
+import { ArrowRight, CircleAlert, Lock } from "@wso2/oxygen-ui-icons-react";
 import { createLink } from "@tanstack/react-router";
 import { StatusChip } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
@@ -156,8 +157,8 @@ export function EnvironmentCards({
   hold,
   componentTypes,
   developmentConnections,
-  productionConnections,
   promote,
+  pending,
   onPromote,
   onConfigureDevelopment,
   onConfigureProduction,
@@ -177,17 +178,23 @@ export function EnvironmentCards({
   hold: DeployHold | null;
   /** Component name → its type, for the "web app" / "service" captions. */
   componentTypes: Map<string, string>;
-  /** The design's connections as they stand in each environment; null while
-   *  the dependencies read is out or failed — then no group and no blockers. */
+  /** The design's connections as they stand in development; null while the
+   *  dependencies read is out or failed — then no group and no blockers. */
   developmentConnections: ConnectionLine[] | null;
-  productionConnections: ConnectionLine[] | null;
   /** Step 3, or null once production runs something. */
   promote: PromoteStep | null;
+  /** Which of the reads behind the steps are still out. Each step holds a
+   *  skeleton for its own rather than painting a state it may take back a
+   *  second later — the card used to fill in one section at a time. */
+  pending: { connections: boolean; validation: boolean; hold: boolean };
   onPromote: () => void;
   onConfigureDevelopment: (row: ConnectionRow) => void;
   onConfigureProduction: (row: ConnectionRow) => void;
 }) {
   const deployed = deployStep(development, hold);
+  // While the run story is out a green step 1 may still turn into a hold, so
+  // its body waits; the header and the components (already read) stay.
+  const holdUnknown = pending.hold && !hold;
   const validating = validationStep(deploy?.validation, validation.counts, deployed);
   const bound = development.cards.some((c) => c.deployment);
   const devLines = development.cards.map((c) =>
@@ -271,32 +278,54 @@ export function EnvironmentCards({
                 }
               />
             )}
-            {developmentConnections && developmentConnections.length > 0 && (
-              <ConnectionsGroup
-                lines={developmentConnections}
-                caption={connectionsHeadline(developmentConnections)}
-                environment="development"
-                onConfigure={onConfigureDevelopment}
-              />
+            {pending.connections ? (
+              <Skeleton variant="rounded" height={88} data-testid="connections-skeleton" />
+            ) : (
+              developmentConnections &&
+              developmentConnections.length > 0 && (
+                <ConnectionsGroup
+                  lines={developmentConnections}
+                  caption={connectionsHeadline(developmentConnections)}
+                  environment="development"
+                  onConfigure={onConfigureDevelopment}
+                />
+              )
             )}
-            {(bound || hold) && (
-              <TryItNow projectName={projectName} disabled={Boolean(hold) || !bound} />
+            {holdUnknown ? (
+              <Skeleton variant="rounded" height={36} width={220} data-testid="try-skeleton" />
+            ) : (
+              (bound || hold) && (
+                <TryItNow projectName={projectName} disabled={Boolean(hold) || !bound} />
+              )
             )}
           </FlowStep>
 
-          <FlowStep step={2} view={validating} last={promote === null}>
-            {deploy && validating.state !== "pending" && (
-              <VerdictBanner
+          <FlowStep
+            step={2}
+            view={pending.validation ? { state: validating.state, title: "Validation" } : validating}
+            last={promote === null && !pending.connections}
+          >
+            {pending.validation ? (
+              <Skeleton variant="rounded" height={52} data-testid="validation-skeleton" />
+            ) : (
+              deploy &&
+              validating.state !== "pending" && (
+                <VerdictBanner
                 projectName={projectName}
                 validation={deploy.validation}
                 verdict={validation.verdict}
                 repairing={validation.repairing}
-                {...(validation.counts ? { counts: validation.counts } : {})}
-              />
+                  {...(validation.counts ? { counts: validation.counts } : {})}
+                />
+              )
             )}
           </FlowStep>
 
-          {promote && (
+          {(pending.connections || pending.validation) && promote !== null ? (
+            <FlowStep step={3} view={{ state: "pending", title: "Promote to Production" }} last>
+              <Skeleton variant="rounded" height={40} width={280} data-testid="promote-skeleton" />
+            </FlowStep>
+          ) : promote && (
             <FlowStep step={3} view={promote} last>
               {promote.missing.map((row) => (
                 <Stack
@@ -307,7 +336,7 @@ export function EnvironmentCards({
                     alignItems: "center",
                     px: 1.5,
                     py: 1,
-                    borderRadius: 2,
+                    borderRadius: 1,
                     border: `1px solid ${alpha(theme.palette.warning.main, 0.35)}`,
                     bgcolor: alpha(theme.palette.warning.main, 0.06),
                   })}
@@ -350,36 +379,41 @@ export function EnvironmentCards({
             ? `Running · ${production.live} of ${production.total} components live`
             : productionSentence(deploy, promote, hold, version)}
         </Typography>
-        <Stack spacing={1.25} sx={{ mt: 1.75 }}>
-          {production.cards.length > 0 ? (
+        {/* An EMPTY production stays an empty state — the gate and nothing
+            else. What a promotion needs is step 3's business on the
+            Development card; listing components that are not there and
+            values that are not set drew a card full of dashes. */}
+        {production.cards.length > 0 ? (
+          <Stack spacing={1.25} sx={{ mt: 1.75 }}>
             <ComponentsGroup
               lines={production.cards.map((c) =>
                 componentLine(c, componentTypes.get(c.componentName), null),
               )}
               caption={`${production.live} of ${production.total} live`}
             />
-          ) : (
-            development.cards.length > 0 && (
-              <ComponentsGroup
-                lines={development.cards.map((c) => ({
-                  card: { ...c, kind: "notDeployed" as const },
-                  kind: componentLine(c, componentTypes.get(c.componentName), null).kind,
-                  label: "—",
-                  tone: "neutral" as const,
-                }))}
-                caption="none deployed"
-              />
-            )
-          )}
-          {productionConnections && productionConnections.length > 0 && (
-            <ConnectionsGroup
-              lines={productionConnections}
-              caption={connectionsHeadline(productionConnections)}
-              environment="production"
-              onConfigure={onConfigureProduction}
-            />
-          )}
-        </Stack>
+          </Stack>
+        ) : (
+          <Stack
+            direction="row"
+            spacing={1.25}
+            sx={{
+              alignItems: "center",
+              mt: 1.75,
+              px: 1.5,
+              py: 1.25,
+              border: 1,
+              borderStyle: "dashed",
+              borderColor: "divider",
+              borderRadius: 1,
+              bgcolor: "action.hover",
+            }}
+          >
+            <Box component={Lock} size={14} aria-hidden sx={{ color: "text.secondary", flexShrink: 0 }} />
+            <Typography variant="body2" color="text.secondary">
+              Only a version whose validation has passed can be promoted here.
+            </Typography>
+          </Stack>
+        )}
       </EnvironmentCard>
     </Box>
   );

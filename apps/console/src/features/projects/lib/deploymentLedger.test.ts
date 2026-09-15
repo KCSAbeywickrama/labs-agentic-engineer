@@ -87,6 +87,12 @@ describe("environmentStatus", () => {
       environmentStatus("development", [], deploy({ status: "none", version: "" }))
         .label,
     ).toBe("Nothing deployed");
+    // …but bound cards under a `none` aggregate fold like production's do
+    // (these carry one still converging), never "Nothing deployed".
+    expect(
+      environmentStatus("development", cards, deploy({ status: "none", version: "" }))
+        .label,
+    ).toBe("Deploying");
   });
 
   it("folds production from its bindings, loudest first", () => {

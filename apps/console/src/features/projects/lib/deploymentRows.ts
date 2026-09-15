@@ -64,6 +64,12 @@ export type DeploymentBoard = {
 // staging, …) lands on the Development board, and a component with no
 // non-production binding still gets a greyed "Not deployed" card there —
 // the Development column always accounts for every component.
+//
+// Cards keep the COMPONENTS LIST's order — the platform's own, which is also
+// the design's — rather than sorting by name: a name sort put a project's API
+// above the app it serves, and the Try-it-out page reads top to bottom
+// (ADR-0032). A binding for a component the list does not know (a component
+// just removed from the design) trails, in the order the bindings came.
 export function groupDeploymentCards(
   componentItems: Component[] | null | undefined,
   deploymentItems: Deployment[] | null | undefined,
@@ -82,34 +88,37 @@ export function groupDeploymentCards(
     };
   };
 
+  const devBindings = new Map<string, Deployment[]>();
+  const prodBindings = new Map<string, Deployment[]>();
+  for (const d of deploymentItems ?? []) {
+    const into = d.environment === "production" ? prodBindings : devBindings;
+    const name = d.componentName ?? "";
+    into.set(name, [...(into.get(name) ?? []), d]);
+  }
+
   const development: DeploymentCard[] = [];
   const production: DeploymentCard[] = [];
-  const inDevelopment = new Set<string>();
-  for (const d of deploymentItems ?? []) {
-    if (d.environment === "production") {
-      production.push(cardOf(d));
-    } else {
-      development.push(cardOf(d));
-      inDevelopment.add(d.componentName ?? "");
-    }
-  }
+  const placed = new Set<string>();
   for (const c of componentItems ?? []) {
-    if (!inDevelopment.has(c.name)) {
+    placed.add(c.name);
+    const dev = devBindings.get(c.name) ?? [];
+    if (dev.length === 0) {
       development.push({
         componentName: c.name,
         displayName: displayNames.get(c.name) ?? c.name,
         kind: "notDeployed",
       });
+    } else {
+      development.push(...dev.map(cardOf));
     }
+    production.push(...(prodBindings.get(c.name) ?? []).map(cardOf));
   }
-
-  const byName = (a: DeploymentCard, b: DeploymentCard) =>
-    a.componentName.localeCompare(b.componentName) ||
-    (a.deployment?.environment ?? "").localeCompare(
-      b.deployment?.environment ?? "",
-    );
-  development.sort(byName);
-  production.sort(byName);
+  for (const [name, ds] of devBindings) {
+    if (!placed.has(name)) development.push(...ds.map(cardOf));
+  }
+  for (const [name, ds] of prodBindings) {
+    if (!placed.has(name)) production.push(...ds.map(cardOf));
+  }
   return { development, production };
 }
 

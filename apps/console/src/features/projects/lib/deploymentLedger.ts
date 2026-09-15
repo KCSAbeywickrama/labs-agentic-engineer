@@ -100,7 +100,14 @@ export function environmentStatus(
       case "failed":
         return { label: "Deploy failed", tone: "error", live: false };
       default:
-        return { label: "Nothing deployed", tone: "neutral", live: false };
+        // `none` is the aggregate's word for "no rollout it is tracking" — but
+        // a binding that is Ready is deployed whatever the aggregate tracks
+        // (a version deployed before the aggregate existed, or after its run
+        // settled). Live bindings under a `none` fold like production's do;
+        // only an empty environment reads "Nothing deployed".
+        return cards.some((c) => c.deployment)
+          ? cardsStatus(cards)
+          : { label: "Nothing deployed", tone: "neutral", live: false };
     }
   }
   return cardsStatus(cards);

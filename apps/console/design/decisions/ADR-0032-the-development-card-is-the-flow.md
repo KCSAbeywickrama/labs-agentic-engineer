@@ -89,6 +89,20 @@ only the Builds page names.
    values are the promote dialog's page state). Each is left out rather than
    faked; the token surfaces are a backend handshake if wanted.
 
+6. **Review round (2026-09-15, on the local plane).** Cards keep the
+   components list's own order — the platform's, which is the design's —
+   rather than a name sort (the API was landing above the app it serves).
+   An empty Production card stays an empty state: the sentence and the gate,
+   no lists of components that are not there. The Development card's
+   connections carry a gear, not a pill — the group is a readout. A curl
+   opens under its own row. Each step holds a skeleton for the read behind
+   it (the design's connections and readiness, the validation evidence, the
+   run story) rather than filling in one section at a time. And the build
+   page's **Go to Deployments** becomes the primary action — a contained
+   button — shown only once the aggregate reports a rollout of that version
+   (live or converging): it is the way into this flow, so it must land on
+   one. A merge alone no longer shows it.
+
 ## Consequences
 
 - `EnvironmentCards` becomes the flow; `ConnectionsCard` is mounted by

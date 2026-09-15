@@ -161,7 +161,7 @@ vi.mock("../api/queries", () => ({
   useProjectStatus: () => ({ data: status() }),
   useProjectDependencyReadiness: () => ({
     data: mockReadiness,
-    isPending: mockReadiness === undefined,
+    isPending: mockReadinessPending,
     isError: false,
   }),
 }));
@@ -170,6 +170,7 @@ vi.mock("../api/queries", () => ({
 // own read. Undefined (still loading) by default, so a connection's state word
 // stays blank until a test says what the platform holds.
 let mockReadiness: ProjectDependencyReadiness | undefined;
+let mockReadinessPending = false;
 
 /** A run parked at the deploy gate, short of the named values. */
 function parkedRun(blocking: string[]): MilestoneRunView {
@@ -218,10 +219,12 @@ let mockVerdict = "";
 // or re-asks it (a revalidation, a fresh run row).
 let mockRepairing = false;
 
+let mockValidationPending = false;
 vi.mock("../../validation/api/counts", () => ({
   useValidationEvidence: () => ({
     verdict: mockVerdict,
     repairing: mockRepairing,
+    pending: mockValidationPending,
     ...(mockCounts ? { counts: mockCounts } : {}),
   }),
 }));
@@ -240,6 +243,8 @@ beforeEach(() => {
   mockDeployments = DEFAULT_DEPLOYMENTS;
   mockRuns = [];
   mockReadiness = undefined;
+  mockReadinessPending = false;
+  mockValidationPending = false;
   navigate.mockClear();
 });
 
@@ -421,14 +426,16 @@ describe("DeploymentsPage — environment board", () => {
     expect(
       screen.getAllByText("Deployed").filter((el) => el.closest("th") === null),
     ).toHaveLength(3);
-    // Production is empty and says what unlocks it; its connections group
-    // counts the live configuration a promotion still needs.
+    // Production is empty and stays so: the sentence and the gate, no lists.
     expect(
       screen.getByText("Nothing running yet. v1 is ready to promote once the missing value is set."),
     ).toBeInTheDocument();
-    // …and Development's group reads the same while the readiness read is out:
-    // an unknown value is not a set one.
-    expect(screen.getAllByRole("group", { name: "Connections — 0 of 1 set" })).toHaveLength(2);
+    expect(
+      screen.getByText("Only a version whose validation has passed can be promoted here."),
+    ).toBeInTheDocument();
+    // Development's group reads unknown values as not set while the
+    // readiness read is out.
+    expect(screen.getByRole("group", { name: "Connections — 0 of 1 set" })).toBeInTheDocument();
     // The ledger: one row, development, with the milestone read off the
     // version ledger and a validation cell.
     const row = screen.getByRole("row", { name: "Open Development deployment" });
@@ -568,17 +575,16 @@ describe("DeploymentsPage — connections", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    // Both cards list the platform resource; neither offers to configure it
-    // in development. The identity app's production value IS collected — the
-    // promote dialog asks for it, so the Production card's group offers it.
-    expect(screen.getAllByText("shop-db")).toHaveLength(2);
-    expect(screen.getAllByText("postgres-cnpg")).toHaveLength(2);
-    expect(screen.getAllByText("Provisioned")).toHaveLength(2);
+    // The Development card lists the platform resource and offers nothing to
+    // configure in development. The identity app's production value IS
+    // collected — the promote dialog asks for it — so step 3 names it.
+    expect(screen.getByText("shop-db")).toBeInTheDocument();
+    expect(screen.getByText("postgres-cnpg")).toBeInTheDocument();
+    expect(screen.getByText("Provisioned")).toBeInTheDocument();
     expect(screen.getByText("Platform-managed")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Configure shop-db" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Configure shop-auth" })).not.toBeInTheDocument();
-    // …twice: step 3's blocker line and the Production card's group.
-    expect(screen.getAllByRole("button", { name: "Configure shop-auth for production" })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Configure shop-auth for production" })).toBeInTheDocument();
   });
 
   // Registered External: org catalog row with non-empty envCells — values live
@@ -764,10 +770,8 @@ describe("DeploymentsPage — promotion", () => {
     expect(screen.getByText("stripe has no production value")).toBeInTheDocument();
     expect(screen.getByText("Enabled once the value is set")).toBeInTheDocument();
 
-    // Two ways in — the blocker line and the Production card's group — both
-    // named for production so neither is mistaken for the dev re-collect.
-    expect(screen.getAllByRole("button", { name: "Configure stripe for production" })).toHaveLength(2);
-    fireEvent.click(screen.getAllByRole("button", { name: "Configure stripe for production" })[0]!);
+    // Named for production, so it is never mistaken for the dev re-collect.
+    fireEvent.click(screen.getByRole("button", { name: "Configure stripe for production" }));
 
     const dialog = screen.getByRole("dialog");
     expect(
@@ -789,9 +793,6 @@ describe("DeploymentsPage — promotion", () => {
     expect(
       screen.getAllByRole("button", { name: /Promote v1 to production/, hidden: true })[0],
     ).toBeEnabled();
-    expect(
-      screen.getByRole("group", { name: "Connections — 1 of 1 set", hidden: true }),
-    ).toBeInTheDocument();
   });
 
   it("disables the promote entry point while validation is failing", () => {
@@ -836,8 +837,8 @@ describe("DeploymentsPage — promotion", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    // The Production card's connections group counts the provisioned one as set.
-    expect(screen.getByRole("group", { name: "Connections — 2 of 2 set" })).toBeInTheDocument();
+    // Nothing is missing, so step 3 names no blocker and Promote is ready.
+    expect(screen.queryByText(/has no production value/)).not.toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole("button", { name: /Promote v1 to production/ }),
@@ -965,7 +966,7 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
     expect(within(screen.getByRole("dialog")).getByText("Configure — stripe")).toBeInTheDocument();
   });
 
-  it("leaves the connections groups out while the design read is still out", () => {
+  it("holds skeletons for the connections and the promote step while the design read is out", () => {
     mockDeploy = {
       version: "v1",
       status: "deployed",
@@ -977,8 +978,28 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
     render(<DeploymentsPage projectName="acme" />);
 
     expect(screen.queryByRole("group", { name: /^Connections/ })).not.toBeInTheDocument();
+    expect(screen.getByTestId("connections-skeleton")).toBeInTheDocument();
+    // Step 3 cannot know what is missing yet, so it does not say nothing is.
     expect(screen.queryByText(/has no production value/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Promote v1 to production/ })).not.toBeInTheDocument();
+    expect(screen.getByTestId("promote-skeleton")).toBeInTheDocument();
     // …and step 1 is still the flow's first step, with its components.
     expect(screen.getByRole("group", { name: "Components — 1 of 1 live" })).toBeInTheDocument();
+  });
+
+  it("holds a skeleton on step 2 while the validation evidence is out", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "passed",
+    };
+    mockValidationPending = true;
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(screen.getByTestId("validation-skeleton")).toBeInTheDocument();
+    expect(screen.queryByText(/View validations/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Passed · 4 of 4")).not.toBeInTheDocument();
   });
 });

@@ -42,7 +42,6 @@ import {
 import {
   deployHold,
   developmentConnections,
-  productionConnections,
   promoteStep,
 } from "../lib/deploymentFlow";
 import { environmentRows, ledgerRows, milestoneFor } from "../lib/deploymentLedger";
@@ -219,7 +218,6 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   const devLines = connectionsKnown
     ? developmentConnections(connections, readiness.data, hold, registeredNames, catalogUnknown)
     : null;
-  const prodLines = connectionsKnown ? productionConnections(connections, liveValues) : null;
 
   return (
     <>
@@ -257,8 +255,12 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
             hold={hold}
             componentTypes={componentTypes}
             developmentConnections={devLines}
-            productionConnections={prodLines}
             promote={promote}
+            pending={{
+              connections: dependencies.isPending || (readiness.isPending && !readiness.isError),
+              validation: validation.pending,
+              hold: Boolean(status.data?.build.version) && runs.isPending,
+            }}
             onPromote={() => {
               setPromoteFocus(null);
               setPromoteOpen(true);
