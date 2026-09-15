@@ -27,6 +27,7 @@ import {
   IconButton,
   Link as MuiLink,
   ListingTable,
+  Skeleton,
   Stack,
   TextField,
   Tooltip,
@@ -260,7 +261,10 @@ export function useTestUsers(projectName: string, enabled: boolean) {
 
 // ── Endpoints ───────────────────────────────────────────────────────────────
 
-const ENDPOINTS_SHOWN = 6;
+/** The list's height: about seven rows, then it scrolls in place. A fixed
+ *  height keeps a 60-endpoint service from pushing the Connections table off
+ *  the page, and keeps the page from re-flowing as filters change. */
+const ENDPOINTS_HEIGHT = 320;
 
 function MethodWord({ method }: { method: Operation["method"] }) {
   const tone = methodTone(method);
@@ -306,7 +310,6 @@ function ServiceEndpoints({
   const contract = useComponentOpenApi(projectName, componentName, true);
   const [query, setQuery] = useState("");
   const [method, setMethod] = useState<Operation["method"] | "ALL">("ALL");
-  const [all, setAll] = useState(false);
   const [chosen, setChosen] = useState<Operation | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
@@ -319,10 +322,28 @@ function ServiceEndpoints({
   }, [contract.data?.spec]);
 
   if (contract.isPending) {
+    // The shape of what is coming — a toolbar and a few rows — rather than a
+    // line of text the list then replaces (ADR-0032 review round).
     return (
-      <Typography variant="caption" color="text.secondary" sx={{ px: 2, py: 1.5, display: "block" }}>
-        Loading endpoints…
-      </Typography>
+      <Box sx={{ borderTop: 1, borderColor: "divider" }} data-testid="endpoints-skeleton" aria-busy>
+        <Stack direction="row" spacing={1.25} sx={{ alignItems: "center", px: 2, py: 1.25 }}>
+          <Skeleton variant="rounded" height={36} sx={{ flexGrow: 1 }} />
+          <Skeleton variant="rounded" height={24} width={140} />
+        </Stack>
+        {[0, 1, 2].map((i) => (
+          <Stack
+            key={i}
+            direction="row"
+            spacing={1.25}
+            sx={{ alignItems: "center", px: 2, py: 0.75, borderTop: 1, borderColor: "divider" }}
+          >
+            <Skeleton variant="text" width={40} />
+            <Skeleton variant="text" sx={{ flexGrow: 1 }} />
+            <Skeleton variant="rounded" height={28} width={72} />
+            <Skeleton variant="rounded" height={28} width={48} />
+          </Stack>
+        ))}
+      </Box>
     );
   }
   if (contract.isError || ops === null) {
@@ -348,7 +369,6 @@ function ServiceEndpoints({
   if (onCount && ops.length > 0) onCount(ops.length);
 
   const visible = filterEndpoints(ops, query, method);
-  const shown = all ? visible : visible.slice(0, ENDPOINTS_SHOWN);
   const methods = methodsIn(ops);
   const copyCurl = (op: Operation) => {
     if (!baseUrl) return;
@@ -390,8 +410,12 @@ function ServiceEndpoints({
           ))}
         </Stack>
       </Stack>
-      <Box role="list" aria-label={`${displayName} endpoints`}>
-        {shown.map((op) => (
+      <Box
+        role="list"
+        aria-label={`${displayName} endpoints`}
+        sx={{ maxHeight: ENDPOINTS_HEIGHT, overflowY: "auto" }}
+      >
+        {visible.map((op) => (
           <Box key={op.id} role="listitem" sx={{ borderTop: 1, borderColor: "divider" }}>
           <Stack
             direction="row"
@@ -476,18 +500,14 @@ function ServiceEndpoints({
           </Typography>
         )}
       </Box>
-      {visible.length > ENDPOINTS_SHOWN && (
-        <Stack
-          direction="row"
-          sx={{ alignItems: "center", justifyContent: "space-between", px: 2, py: 1, borderTop: 1, borderColor: "divider" }}
+      {visible.length !== ops.length && (
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: "block", px: 2, py: 1, borderTop: 1, borderColor: "divider" }}
         >
-          <Typography variant="caption" color="text.secondary">
-            Showing {shown.length} of {visible.length} endpoints
-          </Typography>
-          <Button size="small" onClick={() => setAll((v) => !v)}>
-            {all ? "Show fewer" : "Show all"}
-          </Button>
-        </Stack>
+          {visible.length} of {ops.length} endpoints
+        </Typography>
       )}
     </Box>
   );

@@ -75,14 +75,18 @@ paths:
       responses: { "204": { description: Gone } }
 `;
 let mockContractError = false;
+let mockContractPending = false;
 type ProjectDependencyReadiness = components["schemas"]["ProjectDependencyReadiness"];
 let mockReadiness: ProjectDependencyReadiness | undefined;
 const mockSaveValues = vi.fn();
 
 vi.mock("../api/queries", () => ({
   useComponentOpenApi: (_p: string, componentName: string) => ({
-    data: mockContractError ? undefined : { componentName, componentType: "service", spec: MOCK_SPEC },
-    isPending: false,
+    data:
+      mockContractError || mockContractPending
+        ? undefined
+        : { componentName, componentType: "service", spec: MOCK_SPEC },
+    isPending: mockContractPending,
     isError: mockContractError,
     error: mockContractError ? new Error("contract down") : null,
     refetch: vi.fn(),
@@ -241,6 +245,7 @@ beforeEach(() => {
   mockTestUsers = [];
   mockRolesPending = false;
   mockContractError = false;
+  mockContractPending = false;
   mockReadiness = undefined;
   mockDependenciesPending = false;
   mockSaveValues.mockClear();
@@ -474,6 +479,14 @@ describe("DeploymentDetailPage — try it out (ADR-0032)", () => {
     rows = within(screen.getByRole("list", { name: "claims-api endpoints" })).getAllByRole("listitem");
     expect(rows).toHaveLength(1);
     expect(rows[0]?.textContent).toContain("File a claim");
+  });
+
+  it("holds a skeleton of the list while the contract loads", () => {
+    mockContractPending = true;
+    render(<DeploymentDetailPage projectName="expense" environment="development" />);
+    expect(screen.getByTestId("endpoints-skeleton")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "claims-api endpoints" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Loading endpoints/)).not.toBeInTheDocument();
   });
 
   it("says the contract could not be loaded rather than showing no endpoints", () => {
