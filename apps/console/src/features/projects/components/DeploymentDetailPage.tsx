@@ -264,9 +264,11 @@ export function DeploymentDetailPage({
 
   return (
     <>
+      {/* No status chip beside the title — the summary card just below
+          carries the same chip, and two of one fact in one screenful is one
+          too many (review round). */}
       <PageHeader
         title={title}
-        status={{ label: row.status.label, tone: row.status.tone }}
         backTo={backTo}
         {...(validationView
           ? {

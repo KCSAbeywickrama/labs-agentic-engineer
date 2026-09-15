@@ -333,8 +333,10 @@ describe("DeploymentDetailPage", () => {
 
     render(<DeploymentDetailPage projectName="expense" environment="production" />);
 
-    // No version to name: the aggregate describes development only.
-    expect(screen.getByRole("heading", { name: "Production" })).toBeInTheDocument();
+    // No version to name: the aggregate describes development only. The page
+    // title and the summary card's header both read it, with no chip on the
+    // title.
+    expect(screen.getAllByRole("heading", { name: "Production" })).toHaveLength(2);
     expect(
       screen.queryByRole("link", { name: "View the build that shipped this" }),
     ).not.toBeInTheDocument();
