@@ -65,7 +65,7 @@ makes is then suspect.
 | Keyword | You do |
 |---|---|
 | `Given` | Establish the state. Acting through the UI is fine; so is a direct API call, which is faster and less brittle for setup. |
-| `When` | Perform the one action, through the UI. |
+| `When` | Perform the one action. Through the UI where the system has one; below it — the API — where the UI cannot carry the attempt. Say which in `observed`. |
 | `Then` | **Assert.** |
 | `And` / `But` | Inherit the previous keyword. |
 
@@ -88,8 +88,11 @@ agent-browser snapshot -i        # a control shows [disabled] when it is
 ```
 
 - **A control the `When` needs that is `[disabled]` or absent means the action
-  cannot be performed.** That scenario is `blocked`. Do not click it anyway and
-  do not fall through to the `Then`.
+  cannot be performed through the UI.** Do not click it anyway. If the `Then`
+  claims the action succeeded, the scenario is `blocked`. If it claims the system
+  REFUSED, a disabled control is not that claim — a hidden control and a server
+  that accepts the change look identical from the browser — so attempt it against
+  the API and settle there.
 - **Otherwise, prefer evidence over the exit code** — assert a state change only
   the action could have produced. `agent-browser network requests` shows whether
   the request actually left the page, which is the cheapest proof for anything
@@ -125,7 +128,7 @@ agent-browser get url
 |---|---|
 | `passed` | every `Then` was settled affirmatively by a recorded command |
 | `failed` | a `Then`'s command said no — the app did not do what the scenario claims |
-| `blocked` | a `Given` or `When` could not be carried out — the control was `[disabled]` or absent, or the state could not be reached |
+| `blocked` | a `Given` or `When` could not be carried out at any interface — the control was `[disabled]` or absent and the API could not be attempted either, or the state could not be reached |
 | `unjudgeable` | the `Then` asks about something this app cannot show you |
 
 **A prevented `When` is `blocked` even when the `Then` holds.** If the control
@@ -133,7 +136,8 @@ is disabled, the scenario did not exercise the behaviour it claims to — the
 assertion would have held without it, so passing it records something that was
 never tested. Judge the outcome on whether the action happened, not on whether
 the page ended up in the right state. This rule exists because it is the one
-place two runs of this skill disagreed with each other.
+place two runs of this skill disagreed with each other. The rule asks whether the
+action happened, not whether a browser performed it.
 
 `failed` and `blocked` are both defects and must not be merged: one says the
 behaviour is wrong, the other says you never got to see it. `unjudgeable` is for
