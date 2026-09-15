@@ -205,21 +205,24 @@ export async function writeCurlResolveConfig(
 }
 
 /**
- * The IdP's name family, and where it is actually reachable from inside a pod.
+ * The deployed name family, and the one address that serves all of it.
  *
- * A wildcard, unlike every endpoint rule below it, because the runner never
- * learns the IdP's hostname: the validation context carries the app's endpoints
- * and nothing else, so a pattern is the only handle there is. The same pattern
- * the validation run's browser uses, for the same reason.
+ * A wildcard because the runner never learns every name it must reach: the
+ * validation context carries the app's endpoints and nothing else, so the IdP —
+ * which every signed-in scenario needs — has no entry to map. A pattern is the
+ * only handle there is. `*.localhost` matches across labels, so it covers the
+ * data plane's `…openchoreoapis.localhost` and the control plane's
+ * `…openchoreo.localhost` alike.
  *
  * `host.k3d.internal` rather than the address DNS returns, because DNS is
  * measurably wrong here: the CoreDNS rewrite maps `(openchoreo|openchoreoapis)
  * .localhost` alike onto the DATA-plane gateway, while `*.openchoreo.localhost`
  * is served by the CONTROL-plane one. Following DNS gets a transport failure
- * (curl exit 7); the k3d bridge, which publishes the control-plane gateway,
- * answers. Local-plane only — see the caller's gate.
+ * (curl exit 7); the k3d bridge answers for both, because k3d publishes every
+ * gateway port on the host — each name reaches its own service there on its own
+ * port. Local-plane only — see the caller's gate.
  */
-export const AUTH_HOST_PATTERN = "*.openchoreo.localhost";
+export const LOCAL_HOST_PATTERN = "*.localhost";
 export const AUTH_BRIDGE_HOST = "host.k3d.internal";
 
 /**
@@ -227,44 +230,53 @@ export const AUTH_BRIDGE_HOST = "host.k3d.internal";
  *
  * `--host-resolver-rules` is the one override Chromium honours for RFC 6761:
  * it maps `localhost` and every `*.localhost` name to loopback itself, ahead of
- * DNS and `/etc/hosts`, so nothing else reaches it. One `MAP <host> <address>`
- * per endpoint rather than a pattern — these are the hosts this run actually
- * resolved, and a wildcard would also capture names nobody probed. The IdP is
- * the one exception, appended last and explained above.
+ * DNS and `/etc/hosts`, so nothing else reaches it.
  *
- * No port in any rule: Chromium maps names, and each URL keeps its own port.
+ * ONE rule, and that is a constraint rather than a simplification. Chromium
+ * separates this flag's own `MAP` rules with COMMAS, and `AGENT_BROWSER_ARGS` —
+ * the only channel agent-browser offers — is documented comma-OR-newline
+ * separated. A value carrying two MAPs is therefore split mid-flag by the
+ * browser itself: the first mapping survives, and every later one is handed to
+ * Chromium as an argument to nothing. Measured on the runner image: with
+ * `MAP first.test 127.0.0.1,MAP second.test 127.0.0.1` in one value,
+ * `first.test` is mapped (connection refused) and `second.test` comes back
+ * ERR_NAME_NOT_RESOLVED. A second rule is not extra coverage — it is discarded,
+ * silently. Emitting one is the only shape that survives the channel.
+ *
+ * That rule maps the whole `.localhost` family to the k3d bridge, which is the
+ * one address serving all of it (see the pattern's own note). Per-endpoint
+ * rules could not work here even without the splitting, because the IdP every
+ * signed-in scenario needs is not among the endpoints the context names.
+ *
+ * `entries` no longer supplies addresses; it is the LOCAL-PLANE SIGNAL, since
+ * `curlResolveEntries` yields `.localhost` hosts and nothing else. Without the
+ * bridge there is no single address that serves both planes, so rather than
+ * emit a rule that maps some names to the wrong gateway, emit none and let the
+ * caller say so.
+ *
+ * No port in the rule: Chromium maps names, and each URL keeps its own port.
  */
 export function hostResolverRules(
   entries: readonly CurlResolveEntry[],
-  authAddress?: string,
+  bridgeAddress?: string,
 ): string[] {
-  const seen = new Set<string>();
-  const rules: string[] = [];
-  for (const e of entries) {
-    if (seen.has(e.host)) continue;
-    seen.add(e.host);
-    rules.push(`MAP ${e.host} ${e.address}`);
-  }
-  if (rules.length === 0) {
+  if (entries.length === 0 || bridgeAddress === undefined) {
     return [];
   }
-  // Specific first, pattern last. The suffixes cannot overlap
-  // (`…openchoreoapis.localhost` never matches `*.openchoreo.localhost`), so
-  // this is for a reader rather than for Chromium.
-  if (authAddress !== undefined) {
-    rules.push(`MAP ${AUTH_HOST_PATTERN} ${authAddress}`);
-  }
-  return [`--host-resolver-rules=${rules.join(",")}`];
+  return [`--host-resolver-rules=MAP ${LOCAL_HOST_PATTERN} ${bridgeAddress}`];
 }
 
 /**
- * Where the IdP is reachable from this pod, or undefined if it is not.
+ * Where the deployed system is reachable from this pod, or undefined if the
+ * bridge does not resolve.
  *
- * Forgiving on purpose: a cloud plane has no k3d bridge to resolve, and an
- * exploration hop the agent may never take is not worth failing a run over. The
- * app endpoints — which the preflight DOES prove — are unaffected either way.
+ * Not fatal: a cloud plane has no k3d bridge, and there `curlResolveEntries`
+ * yields nothing either, so the two absences agree and no wrapper is wanted.
+ * On a local plane the absence is real — it costs the browser every mapping,
+ * not just the IdP — so the caller reports it rather than letting the run
+ * discover it as an unreachable app.
  */
-export async function resolveAuthGatewayAddress(
+export async function resolveBridgeAddress(
   lookup: LookupFn = dns.promises.lookup as LookupFn,
 ): Promise<string | undefined> {
   try {
@@ -312,7 +324,7 @@ export async function writeAgentBrowserWrapper(
   lookup: LookupFn = dns.promises.lookup as LookupFn,
 ): Promise<string | undefined> {
   if (entries.length === 0) return undefined;
-  const rules = hostResolverRules(entries, await resolveAuthGatewayAddress(lookup));
+  const rules = hostResolverRules(entries, await resolveBridgeAddress(lookup));
   if (rules.length === 0) return undefined;
   const real = await resolveRealAgentBrowserPath();
   if (real === undefined) return undefined;
@@ -367,8 +379,11 @@ done <<EOF
 $(printf '%s' "\${AGENT_BROWSER_ARGS:-}" | tr ',\t ' '\n\n\n')
 EOF
 
-# Newline join: --host-resolver-rules uses commas BETWEEN its own MAP rules, so
-# a comma join would split this value mid-flag.
+# Newline join, and RULE itself carries no comma — agent-browser splits this
+# variable on commas as readily as on newlines, so a comma anywhere inside it is
+# a split, including one INSIDE a single flag's value. That is why the rule is
+# built as exactly one MAP (see hostResolverRules); a comma join here, or a
+# second MAP there, silently drops everything after the first.
 export AGENT_BROWSER_ARGS="\${keep}\${RULE}"
 exec ${JSON.stringify(realPath)} "$@"
 `;

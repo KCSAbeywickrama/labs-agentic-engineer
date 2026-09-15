@@ -284,7 +284,20 @@ async function main(): Promise<number> {
         console.log(`[oneshot] pinned ${entries.length} endpoint host(s) for curl → ${written}`);
       }
       if (browserWrapper !== undefined) {
-        console.log(`[oneshot] pinned ${entries.length} endpoint host(s) for the browser → ${browserWrapper}`);
+        // Not a per-host count like the curl line above it: the browser gets ONE
+        // rule covering the whole `.localhost` family, because it is the only
+        // shape that survives AGENT_BROWSER_ARGS. See hostResolverRules.
+        console.log(`[oneshot] mapped the deployed .localhost hosts for the browser → ${browserWrapper}`);
+      } else if (entries.length > 0) {
+        // Endpoints to map but no wrapper: the k3d bridge did not resolve, or
+        // there is no agent-browser to wrap. Said out loud because the run does
+        // NOT fail here — the browser falls back to DNS, which answers for the
+        // data plane and not for the IdP, and the agent then reports every
+        // signed-in scenario blocked on an unreachable issuer. That reads as a
+        // verdict about the app; this line is what distinguishes it.
+        console.log(
+          "[oneshot] ⚠️  no browser host mapping written — the browser will resolve deployed hosts by DNS",
+        );
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

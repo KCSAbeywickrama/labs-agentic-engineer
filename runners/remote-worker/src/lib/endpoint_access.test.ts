@@ -30,7 +30,7 @@ import {
   curlResolveEntries,
   hostResolverRules,
   probeEndpoints,
-  resolveAuthGatewayAddress,
+  resolveBridgeAddress,
   writeCurlResolveConfig,
   agentBrowserWrapperScript,
   writeAgentBrowserWrapper,
@@ -187,49 +187,61 @@ test("writeCurlResolveConfig replaces an existing config", async () => {
   assert.deepEqual(await fs.promises.readdir(dir), [CURL_CONFIG_FILE]);
 });
 
-// One MAP per host and no port: Chromium's rule maps names, and the URL keeps
-// its own port. Per-host rather than the wildcard the test config uses, so a
-// name nobody probed is never captured.
-test("hostResolverRules maps each resolved host once, without a port", () => {
-  const args = hostResolverRules([
-    { host: "a.localhost", port: 19080, address: GATEWAY },
-    { host: "b.localhost", port: 443, address: "10.0.0.9" },
-    // Same host on a second port — one MAP, not two.
-    { host: "a.localhost", port: 8443, address: GATEWAY },
-  ]);
-  assert.deepEqual(args, [
-    `--host-resolver-rules=MAP a.localhost ${GATEWAY},MAP b.localhost 10.0.0.9`,
-  ]);
+// One rule for the whole family, mapped to the bridge — no port, because
+// Chromium maps names and each URL keeps its own. Endpoint addresses are NOT
+// used: they name the data-plane gateway, which does not serve the IdP.
+test("hostResolverRules maps the whole .localhost family to the bridge", () => {
+  const args = hostResolverRules(
+    [
+      { host: "a.localhost", port: 19080, address: GATEWAY },
+      { host: "b.localhost", port: 443, address: "10.0.0.9" },
+    ],
+    "172.18.0.1",
+  );
+  assert.deepEqual(args, ["--host-resolver-rules=MAP *.localhost 172.18.0.1"]);
+});
+
+// THE regression guard. Chromium separates this flag's own MAP rules with
+// commas, and agent-browser splits AGENT_BROWSER_ARGS on commas as readily as on
+// newlines — so a comma anywhere in the value is a split, including one inside a
+// single flag. Measured on the runner image: with two MAPs in one value, the
+// first host resolves and the second returns ERR_NAME_NOT_RESOLVED. That cost a
+// whole validation run, reported as 15 of 15 scenarios blocked on an
+// unreachable IdP, which reads as a verdict about the app.
+test("the emitted rule carries no comma, so nothing can be split off it", () => {
+  const args = hostResolverRules(
+    [
+      { host: "a.localhost", port: 19080, address: GATEWAY },
+      { host: "b.localhost", port: 443, address: "10.0.0.9" },
+      { host: "c.localhost", port: 8443, address: "10.0.0.7" },
+    ],
+    "172.18.0.1",
+  );
+  assert.equal(args.length, 1, "more than one arg is more than one thing to lose");
+  assert.ok(!(args[0] as string).includes(","), `a comma is a silent split: ${args[0]}`);
 });
 
 test("hostResolverRules returns nothing when there is nothing to map", () => {
+  // No endpoint is no local plane to be on, whether or not a bridge resolved.
   assert.deepEqual(hostResolverRules([]), []);
-  // …and an auth address alone is not something to map: with no endpoint there
-  // is no local plane to be on.
   assert.deepEqual(hostResolverRules([], "172.18.0.1"), []);
+  // A local plane whose bridge did not resolve: no single address serves both
+  // planes, so emit none rather than one that maps the IdP to the wrong gateway.
+  assert.deepEqual(hostResolverRules([{ host: "a.localhost", port: 19080, address: GATEWAY }]), []);
 });
 
-// The IdP is the one wildcard, because the validation context names the app's
-// endpoints and never the IdP — a pattern is the only handle. Appended last so a
-// reader sees the specific rules first.
-test("hostResolverRules appends the IdP pattern when an auth address is known", () => {
-  const args = hostResolverRules([{ host: "a.localhost", port: 19080, address: GATEWAY }], "172.18.0.1");
-  assert.deepEqual(args, [
-    `--host-resolver-rules=MAP a.localhost ${GATEWAY},MAP *.openchoreo.localhost 172.18.0.1`,
-  ]);
-});
-
-// DNS is measurably wrong for the IdP (the rewrite sends *.openchoreo.localhost
-// to the DATA plane, which does not serve it), so the bridge is looked up by
-// name — and an unresolvable bridge must not cost the app endpoints their rules.
-test("resolveAuthGatewayAddress resolves the bridge, and swallows a failure", async () => {
-  const ok = await resolveAuthGatewayAddress(async (host) => {
+// DNS is measurably wrong here (the rewrite sends *.openchoreo.localhost to the
+// DATA plane, which does not serve it), so the bridge is looked up by name. A
+// failure is answered, not thrown: a cloud plane has no bridge and no
+// `.localhost` endpoints either, so the two absences agree.
+test("resolveBridgeAddress resolves the bridge, and answers undefined on failure", async () => {
+  const ok = await resolveBridgeAddress(async (host) => {
     assert.equal(host, AUTH_BRIDGE_HOST);
     return { address: "172.18.0.1" };
   });
   assert.equal(ok, "172.18.0.1");
 
-  const missing = await resolveAuthGatewayAddress(async () => {
+  const missing = await resolveBridgeAddress(async () => {
     throw new Error("ENOTFOUND");
   });
   assert.equal(missing, undefined);
@@ -251,19 +263,16 @@ async function runWrapper(callerArgs: string | undefined, rule: string): Promise
   return stdout;
 }
 
-const RULE = `--host-resolver-rules=MAP a.localhost ${GATEWAY},MAP b.localhost ${GATEWAY}`;
+// The rule the platform actually emits: ONE MAP, no comma. A wrapper test
+// cannot prove the browser's own parse — this shell only hands the variable on —
+// which is precisely why the no-comma invariant is pinned upstream, on
+// hostResolverRules, where it is the thing that can be got wrong.
+const RULE = `--host-resolver-rules=MAP *.localhost 172.18.0.1`;
 
-// The separator is the whole risk. AGENT_BROWSER_ARGS is comma OR newline
-// separated, and --host-resolver-rules uses commas BETWEEN ITS OWN MAP rules —
-// so a comma join splits the value mid-flag and silently drops every mapping
-// after the first.
-test("the wrapper joins with newlines, so a multi-MAP rule survives intact", async () => {
+test("the wrapper passes the platform rule through as one argument", async () => {
   const out = await runWrapper("--no-sandbox", RULE);
   const args = out.split("\n").filter(Boolean);
   assert.deepEqual(args, ["--no-sandbox", RULE]);
-  // Both mappings still belong to the flag, not to a stray argument.
-  assert.match(args[1] as string, /MAP a\.localhost/);
-  assert.match(args[1] as string, /MAP b\.localhost/);
 });
 
 // The reason this is a wrapper at all: the agent-browser skill tells an agent to
@@ -276,7 +285,7 @@ test("a caller's own resolver rule is discarded, not merged", async () => {
     RULE,
   );
   assert.ok(!out.includes("only-this.localhost"), `caller rule survived:\n${out}`);
-  assert.ok(out.includes("MAP a.localhost"), `platform rule missing:\n${out}`);
+  assert.ok(out.includes("MAP *.localhost"), `platform rule missing:\n${out}`);
 });
 
 // A caller that comma-joined its own rule leaves bare `MAP …` fragments once the
