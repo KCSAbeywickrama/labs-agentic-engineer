@@ -78,6 +78,9 @@ let mockContractError = false;
 let mockContractPending = false;
 type ProjectDependencyReadiness = components["schemas"]["ProjectDependencyReadiness"];
 let mockReadiness: ProjectDependencyReadiness | undefined;
+let mockReadinessPending = false;
+let mockReadinessError = false;
+const mockReadinessRefetch = vi.fn();
 const mockSaveValues = vi.fn();
 
 vi.mock("../api/queries", () => ({
@@ -91,7 +94,13 @@ vi.mock("../api/queries", () => ({
     error: mockContractError ? new Error("contract down") : null,
     refetch: vi.fn(),
   }),
-  useProjectDependencyReadiness: () => ({ data: mockReadiness, isPending: false, isError: false }),
+  useProjectDependencyReadiness: () => ({
+    data: mockReadinessPending || mockReadinessError ? undefined : mockReadiness,
+    isPending: mockReadinessPending,
+    isError: mockReadinessError,
+    error: mockReadinessError ? new Error("readiness down") : null,
+    refetch: mockReadinessRefetch,
+  }),
   useSaveConnectionValues: () => ({
     mutate: mockSaveValues,
     isPending: false,
@@ -247,6 +256,9 @@ beforeEach(() => {
   mockContractError = false;
   mockContractPending = false;
   mockReadiness = undefined;
+  mockReadinessPending = false;
+  mockReadinessError = false;
+  mockReadinessRefetch.mockClear();
   mockDependenciesPending = false;
   mockSaveValues.mockClear();
   openApiDialog.mockClear();
@@ -416,6 +428,19 @@ describe("DeploymentDetailPage — test users", () => {
     expect(screen.getByText(/sign in with a test user below/)).toBeInTheDocument();
   });
 
+  it("carries them under a `none` aggregate too, when every binding is live", () => {
+    // A version deployed before the aggregate existed, or after its run
+    // settled: the aggregate tracks no rollout, the bindings are Ready, and
+    // the row folds them to Deployed — an app a test user can sign in to.
+    mockDeploy = { version: "v1", status: "none", components: { total: 2, ready: 0 }, validation: "none" };
+    mockTestUsers = [
+      { username: "test-viewer", roleName: "Viewer", coldStart: true, exists: true, owned: true, supplied: false },
+    ];
+    render(<DeploymentDetailPage projectName="expense" environment="development" />);
+    expect(screen.getByText("Sign in with a test user")).toBeInTheDocument();
+    expect(screen.getByText("test-viewer")).toBeInTheDocument();
+  });
+
   it("keeps the panel off a converging development, and off production", () => {
     mockDeploy = { ...mockDeploy, status: "deploying" };
     const { unmount } = render(
@@ -563,6 +588,34 @@ describe("DeploymentDetailPage — connections (ADR-0032)", () => {
     mockDependenciesPending = true;
     render(<DeploymentDetailPage projectName="expense" environment="development" />);
     expect(screen.queryByRole("table", { name: /^Connections/ })).not.toBeInTheDocument();
+    expect(screen.getByTestId("connections-skeleton")).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "claims-api endpoints" })).toBeInTheDocument();
+  });
+
+  it("holds the table back while the readiness read is out, rather than calling every value Unknown", () => {
+    mockReadinessPending = true;
+    render(<DeploymentDetailPage projectName="expense" environment="development" />);
+    expect(screen.queryByRole("table", { name: /^Connections/ })).not.toBeInTheDocument();
+    expect(screen.getByTestId("connections-skeleton")).toBeInTheDocument();
+    expect(screen.queryByText("Unknown")).not.toBeInTheDocument();
+  });
+
+  it("does not wait on a readiness read production never makes", () => {
+    mockReadinessPending = true;
+    mockDeployments = devDeployments().map((d) => ({ ...d, environment: "production" }));
+    render(<DeploymentDetailPage projectName="expense" environment="production" />);
+    expect(screen.getByRole("table", { name: "Connections on Production" })).toBeInTheDocument();
+  });
+
+  it("says a failed readiness read over the table, where Unknown is then the honest word", () => {
+    mockReadinessError = true;
+    render(<DeploymentDetailPage projectName="expense" environment="development" />);
+    const table = screen.getByRole("table", { name: "Connections on Development" });
+    expect(within(table).getByText("Unknown")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Whether Development holds values for these connections could not be read: readiness down/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mockReadinessRefetch).toHaveBeenCalled();
   });
 });

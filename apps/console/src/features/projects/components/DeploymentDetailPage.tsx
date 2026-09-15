@@ -49,6 +49,7 @@ import {
   useProjectStatus,
 } from "../api/queries";
 import { connectionTable, talksTo } from "../lib/deploymentDetail";
+import { deployedValidation } from "../lib/deploymentFlow";
 import {
   commitUrl,
   environmentLabel,
@@ -104,11 +105,13 @@ export function DeploymentDetailPage({
   // DB-only; the Builds surfaces make the same read, so it is served from cache
   // whenever the reader came from there.
   const runs = useBuildRuns(projectName, version);
-  const validation = useValidationEvidence(
-    projectName,
-    status.data?.build.version ?? "",
-    deploy?.validation ?? "",
-  );
+  // The aggregate's validation names the BUILD version; this page names the
+  // deployed one, which answers for itself off the run story just read when
+  // the two differ (`deployedValidation`).
+  const pageDeploy = deploy
+    ? { ...deploy, validation: deployedValidation(deploy, status.data?.build.version ?? "", runs.data?.runs) }
+    : undefined;
+  const validation = useValidationEvidence(projectName, version ?? "", pageDeploy?.validation ?? "");
   // The design's graph and its connections — who talks to whom, and what
   // each dependency is — and whether this environment holds values for them.
   const dependencies = useDesignDependencies(projectName);
@@ -150,12 +153,19 @@ export function DeploymentDetailPage({
   const bound = row?.cards.some((c) => c.deployment) ?? false;
   // Test users live with the app they sign in to. Read only for a green
   // development — the roles read stays idle until there is something to sign
-  // in to, as it did on the board.
+  // in to, as it did on the board. Green is the row's own word, which folds
+  // live bindings under a `none` aggregate to Deployed (deploymentLedger):
+  // an app that is serving is one a test user can sign in to, whatever
+  // rollout the aggregate is tracking.
   const green =
     environment === "development" &&
-    deploy?.status === "deployed" &&
+    row?.status.label === "Deployed" &&
     (row?.total ?? 0) > 0 &&
     row?.live === row?.total;
+  // Whether development holds values is a read of its own; production makes
+  // none, so only development can be waiting on it.
+  const readinessOut =
+    environment === "development" && readiness.isPending && !readiness.isError;
   const testUsers = useTestUsers(projectName, Boolean(green));
 
   if (!environment) {
@@ -252,7 +262,7 @@ export function DeploymentDetailPage({
   const merged = mergedCycle(runs.data?.runs);
   const sha = merged?.mergeSha ?? "";
   const commitHref = commitUrl(status.data?.repoUrl, sha);
-  const validationView = validationCell(environment, deploy?.validation, validation.counts);
+  const validationView = validationCell(environment, pageDeploy?.validation, validation.counts);
   const table = connectionTable(
     connections,
     dependencies.data,
@@ -318,7 +328,11 @@ export function DeploymentDetailPage({
         />
 
         {/* The connections, once the design read has answered; a failed read
-            says so rather than claiming the design declares nothing. */}
+            says so rather than claiming the design declares nothing. The
+            readiness read holds the table too — drawn before it answers,
+            every external read Unknown as if that were settled — and a
+            failed one says so over the table, since Unknown is then the
+            honest word. */}
         {dependencies.isError ? (
           <Alert
             severity="warning"
@@ -329,15 +343,29 @@ export function DeploymentDetailPage({
               ? `: ${dependencies.error.message}`
               : ""}
           </Alert>
+        ) : dependencies.isPending || readinessOut ? (
+          <Skeleton variant="rounded" height={160} data-testid="connections-skeleton" />
         ) : (
-          !dependencies.isPending && (
+          <>
+            {readiness.isError && (
+              <Alert
+                severity="warning"
+                action={<Button onClick={() => void readiness.refetch()}>Retry</Button>}
+              >
+                Whether Development holds values for these connections could not be read
+                {readiness.error instanceof Error && readiness.error.message
+                  ? `: ${readiness.error.message}`
+                  : ""}
+                {" — each reads Unknown until it is."}
+              </Alert>
+            )}
             <ConnectionsTable
               projectName={projectName}
               environment={environment}
               rows={table}
               onEdit={setValuesTarget}
             />
-          )
+          </>
         )}
       </Stack>
 

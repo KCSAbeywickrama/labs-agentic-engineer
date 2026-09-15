@@ -92,13 +92,14 @@ settles is how much of the design stands on the reads that DO exist.
    any still converging → *Deploying*; all intentionally undeployed →
    *Undeployed*; otherwise *Deployed*.
 
-6. **Connections keep their surface.** *Amended by ADR-0032: the card under
-   the ledger is retired — each environment card lists its own connections —
-   and the Test users panel moves to the environment page.* The side panel's Connections section —
-   Configure on a Project External, *provisioned* and *platform-managed* on the
-   rest — was the one thing the panel said that nothing else on the page does,
-   so it becomes a card under the ledger. The Test users panel stays on the
-   Development card, shown only when every component is live, as before.
+6. **Connections and test users live on the environment surfaces** (amended
+   by ADR-0032). The side panel's Connections section — Configure on a
+   Project External, *provisioned* and *platform-managed* on the rest — was
+   the one thing the panel said that nothing else on the page does, so it
+   keeps a surface: each environment card lists its own connections beside
+   the components they serve, and the environment page tables them. The Test
+   users panel lives on the Development environment page, inside the web
+   application they sign in to, shown only when every component is live.
 
 ## Consequences
 

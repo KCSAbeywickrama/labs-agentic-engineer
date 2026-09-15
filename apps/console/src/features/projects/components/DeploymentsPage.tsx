@@ -41,6 +41,8 @@ import {
 } from "../api/queries";
 import {
   deployHold,
+  deployedBehindBuild,
+  deployedValidation,
   developmentConnections,
   promoteStep,
 } from "../lib/deploymentFlow";
@@ -111,15 +113,24 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
     }
     return names;
   }, [externalCatalog.data]);
-  // The Validation page's own criteria/report join, keyed on the BUILD version
-  // (the newest run — what deploy.validation describes). The VERDICT comes back
-  // with the counts because `awaiting-fix` folds `failed` and `unreported` into
-  // one word and the banner's sentence differs for each.
-  const validation = useValidationEvidence(
-    projectName,
-    status.data?.build.version ?? "",
-    deploy?.validation ?? "",
-  );
+  // The version the Development card is about: what runs there, or — while
+  // nothing does yet — the version being built. The aggregate's validation
+  // names the BUILD version, so a deployed version older than it answers for
+  // its own (`deployedValidation`) — one more tag-scoped run read, served from
+  // cache whenever the Builds page made it, and not made at all while the two
+  // versions agree.
+  const buildVersion = status.data?.build.version ?? "";
+  const version = deploy?.version || buildVersion;
+  const behind = deployedBehindBuild(deploy, buildVersion);
+  const deployedRuns = useBuildRuns(projectName, behind ? deploy?.version : undefined);
+  const cardDeploy = deploy
+    ? { ...deploy, validation: deployedValidation(deploy, buildVersion, deployedRuns.data?.runs) }
+    : undefined;
+  // The Validation page's own criteria/report join, keyed on the card's
+  // version. The VERDICT comes back with the counts because `awaiting-fix`
+  // folds `failed` and `unreported` into one word and the banner's sentence
+  // differs for each.
+  const validation = useValidationEvidence(projectName, version, cardDeploy?.validation ?? "");
 
   // Production values entered through the promote dialog. Client state only:
   // the contract has no promote surface yet, so these live exactly as long as
@@ -205,16 +216,12 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   for (const c of components.data?.items ?? []) {
     if (c.type) componentTypes.set(c.name, c.type);
   }
-  // The version the Development card is about: what runs there, or — while
-  // nothing does yet — the version being built. A hold is a fact about the
-  // BUILD version, so it is the card's only while that is the card's version:
-  // an older version serving under a newer parked build stays "Deployed" here
-  // and the Builds page names the park.
-  const buildVersion = status.data?.build.version ?? "";
-  const version = deploy?.version || buildVersion;
+  // A hold is a fact about the BUILD version, so it is the card's only while
+  // that is the card's version: an older version serving under a newer parked
+  // build stays "Deployed" here and the Builds page names the park.
   const parked = deployHold(runs.data?.runs, dependencies.data);
-  const hold = parked && (!deploy?.version || deploy.version === buildVersion) ? parked : null;
-  const promote = promoteStep(deploy, production, connections, liveValues, hold, version);
+  const hold = parked && !behind ? parked : null;
+  const promote = promoteStep(cardDeploy, production, connections, liveValues, hold, version);
   const devLines = connectionsKnown
     ? developmentConnections(connections, readiness.data, hold, registeredNames, catalogUnknown)
     : null;
@@ -242,13 +249,39 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           {" — Configure is hidden on connections until it loads."}
         </Alert>
       )}
+      {(runs.isError || deployedRuns.isError) && (
+        // Without the run story the board cannot tell a parked deployment
+        // from one still pending, nor read an older deployed version's
+        // verdict — so it says so rather than drawing the ordinary state.
+        <Alert
+          severity="warning"
+          sx={{ mb: 2 }}
+          action={
+            <Button
+              onClick={() => {
+                if (runs.isError) void runs.refetch();
+                if (deployedRuns.isError) void deployedRuns.refetch();
+              }}
+            >
+              Retry
+            </Button>
+          }
+        >
+          The version's run story could not be loaded
+          {(runs.error ?? deployedRuns.error) instanceof Error &&
+          (runs.error ?? deployedRuns.error)?.message
+            ? `: ${(runs.error ?? deployedRuns.error)?.message}`
+            : ""}
+          {" — a deployment on hold, or the deployed version's validation, cannot be read until it is."}
+        </Alert>
+      )}
       <Stack spacing={2}>
         {development && (
           <EnvironmentCards
             projectName={projectName}
             development={development}
             production={production}
-            deploy={deploy}
+            deploy={cardDeploy}
             validation={validation}
             version={version}
             milestone={milestoneFor(version || undefined, builds.data)}
@@ -258,7 +291,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
             promote={promote}
             pending={{
               connections: dependencies.isPending || (readiness.isPending && !readiness.isError),
-              validation: validation.pending,
+              validation: validation.pending || (behind && deployedRuns.isPending),
               hold: Boolean(status.data?.build.version) && runs.isPending,
             }}
             onPromote={() => {
@@ -276,7 +309,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
         <DeploymentsLedger
           rows={ledgerRows(rows)}
           builds={builds.data}
-          validation={deploy?.validation}
+          validation={cardDeploy?.validation}
           counts={validation.counts}
           onOpen={(row) =>
             void navigate({

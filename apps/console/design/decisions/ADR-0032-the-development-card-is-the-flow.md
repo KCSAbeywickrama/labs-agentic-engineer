@@ -103,6 +103,22 @@ only the Builds page names.
    (live or converging): it is the way into this flow, so it must land on
    one. A merge alone no longer shows it.
 
+   The second round, on the pull request: steps 2 and 3 are about the
+   version the card names. The aggregate's `validation` answers for the
+   BUILD version's milestone, so while a newer build runs, the deployed
+   version's validation is read off its own run story (`deployedValidation`)
+   rather than the newer version's word — the card labelled v1 no longer
+   reads v2's verdict, nor offers or withholds v1's promotion on v2's
+   account. A failed run-story read says so, with Retry, rather than drawing
+   the ordinary state over a park it cannot see. A park that named no values
+   is still said as on hold, without a count. The Production card's sentence
+   carries the environment's own status word — *Running* only when it is.
+   The environment page enables test users off the row's own status, so live
+   bindings under a `none` aggregate count; its Connections table waits for
+   the readiness read and names a failed one over the table, where Unknown
+   is then the honest word; and a Registered External is matched by name
+   regardless of case.
+
 ## Consequences
 
 - `EnvironmentCards` becomes the flow; `ConnectionsCard` is mounted by

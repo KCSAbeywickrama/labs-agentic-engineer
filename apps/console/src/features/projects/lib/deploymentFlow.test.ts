@@ -24,10 +24,14 @@ import {
   connectionsHeadline,
   deployHold,
   deployStep,
+  deployedBehindBuild,
   deployedSentence,
+  deployedValidation,
   developmentConnections,
   holdNotice,
+  holdSentence,
   productionConnections,
+  productionLiveSentence,
   productionSentence,
   promoteStep,
   validationStep,
@@ -235,6 +239,9 @@ describe("connections on the cards", () => {
 
   it("offers no Configure on a Registered external, or while the catalog is unknown", () => {
     expect(developmentConnections([currency], undefined, null, new Set(["Currency-Service"]), false)[0]?.configure).toBe(false);
+    // The catalog's spelling of the name is its own — a case-only difference
+    // is the same Registered External, not one to re-author.
+    expect(developmentConnections([currency], undefined, null, new Set(["currency-service"]), false)[0]?.configure).toBe(false);
     expect(developmentConnections([currency], undefined, null, new Set(), true)[0]?.configure).toBe(false);
     expect(developmentConnections([currency], undefined, null, new Set(), false)[0]).toMatchObject({ state: "unknown", label: "", configure: true });
   });
@@ -314,5 +321,67 @@ describe("promoteStep", () => {
     expect(productionSentence(deployed, null, { blocking: [], dependents: {} }))
       .toBe("Nothing running yet. v1 must deploy and validate in Development first.");
     expect(productionSentence(undefined, null, null)).toMatch(/promote a validated version/);
+  });
+});
+
+describe("holdSentence", () => {
+  it("counts the values owed, and says a park that named none without a count", () => {
+    expect(holdSentence({ blocking: ["stripe"], dependents: {} }))
+      .toBe("Deployment is on hold until one connection value is set. It continues automatically.");
+    expect(holdSentence({ blocking: ["stripe", "sendgrid"], dependents: {} }))
+      .toBe("Deployment is on hold until 2 connection values are set. It continues automatically.");
+    // An older row, or a lost write: parked, and nothing named — not "0 values".
+    expect(holdSentence({ blocking: [], dependents: {} }))
+      .toBe("Deployment is on hold until its connection values are set. It continues automatically.");
+  });
+});
+
+describe("productionLiveSentence", () => {
+  it("says Running only when production's own status does", () => {
+    const serving = row({ environment: "production", label: "Production", live: 2, total: 2 });
+    expect(productionLiveSentence(serving)).toBe("Running · 2 of 2 components live");
+    expect(
+      productionLiveSentence({
+        ...serving,
+        live: 0,
+        status: { label: "Deploy failed", tone: "error", live: false },
+      }),
+    ).toBe("Deploy failed · 0 of 2 components live");
+    expect(
+      productionLiveSentence({
+        ...serving,
+        live: 1,
+        status: { label: "Deploying", tone: "info", live: true },
+      }),
+    ).toBe("Deploying · 1 of 2 components live");
+  });
+});
+
+describe("deployedValidation", () => {
+  const judged = run({
+    id: "run-v1-1",
+    state: "succeeded",
+    validation: { verdict: "partial" },
+  } as Partial<MilestoneRunView>);
+
+  it("is the aggregate's word while the deployed version is the build's", () => {
+    expect(deployedBehindBuild(deployed, "v1")).toBe(false);
+    expect(deployedValidation(deployed, "v1", [judged])).toBe("passed");
+    // Nothing deployed yet: the build's own version, and its own word.
+    const none: DeployStage = { version: "", status: "none", components: { total: 1, ready: 0 }, validation: "none" };
+    expect(deployedBehindBuild(none, "v2")).toBe(false);
+    expect(deployedValidation(none, "v2", [])).toBe("none");
+  });
+
+  it("answers for an older deployed version off its own run story", () => {
+    // v1 serves while v2 builds: the aggregate's `none` is v2's, not v1's.
+    const behind: DeployStage = { ...deployed, validation: "none" };
+    expect(deployedBehindBuild(behind, "v2")).toBe(true);
+    expect(deployedValidation(behind, "v2", [judged])).toBe("partial");
+    // A newer non-validating run on v1 (an adopted incident) does not hide the answer.
+    expect(deployedValidation(behind, "v2", [run({ id: "run-v1-2", kind: "task", state: "succeeded" }), judged])).toBe("partial");
+    // …and a version nothing ever judged reads `none`, as the aggregate would.
+    expect(deployedValidation(behind, "v2", [run({ state: "succeeded" })])).toBe("none");
+    expect(deployedValidation(behind, "v2", undefined)).toBe("none");
   });
 });

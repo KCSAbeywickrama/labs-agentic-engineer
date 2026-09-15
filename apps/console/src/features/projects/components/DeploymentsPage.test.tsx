@@ -53,9 +53,20 @@ let mockBuilds: components["schemas"]["BuildSummary"][] = [];
 // The newest run's story — a run parked at the deploy gate is the board's
 // "on hold" (ADR-0032). Empty by default: nothing parked.
 let mockRuns: MilestoneRunView[] = [];
+// A story per tag, for the case where the deployed version is not the build's
+// — the card reads the deployed one's own; anything unlisted answers `mockRuns`.
+let mockRunsByTag: Record<string, MilestoneRunView[]> = {};
+let mockRunsError = false;
+const mockRunsRefetch = vi.fn();
 vi.mock("../../builds/api/queries", () => ({
   useBuilds: () => ({ data: mockBuilds, isPending: false, isError: false }),
-  useBuildRuns: () => ({ data: { runs: mockRuns }, isPending: false, isError: false }),
+  useBuildRuns: (_p: string, tag?: string) => ({
+    data: mockRunsError ? undefined : { runs: mockRunsByTag[tag ?? ""] ?? mockRuns },
+    isPending: false,
+    isError: mockRunsError && Boolean(tag),
+    error: mockRunsError ? new Error("runs down") : null,
+    refetch: mockRunsRefetch,
+  }),
 }));
 
 import { DeploymentsPage } from "./DeploymentsPage";
@@ -129,10 +140,13 @@ function status(): ProjectStatus {
     hasTasks: true,
     specStatus: "approved",
     spec: { exists: true, version: "v1", dirty: false, design: true, agent: "" },
-    build: { version: "v1", status: "succeeded" },
+    build: { version: mockBuildVersion, status: "succeeded" },
     deploy: mockDeploy,
   };
 }
+// The BUILD version — the newest run's tag, which the aggregate's validation
+// describes. v1 with the deployed version by default; a test moves it ahead.
+let mockBuildVersion = "v1";
 
 // The connection-values dialog's mutation is mocked at module level so opening
 // it needs no QueryClientProvider; mutate is captured for the save assertion.
@@ -220,14 +234,36 @@ let mockVerdict = "";
 let mockRepairing = false;
 
 let mockValidationPending = false;
+// What the page asked the evidence hook for — the version and the validation
+// word must be the card's, not the newest build's.
+const evidenceArgs = vi.fn();
 vi.mock("../../validation/api/counts", () => ({
-  useValidationEvidence: () => ({
-    verdict: mockVerdict,
-    repairing: mockRepairing,
-    pending: mockValidationPending,
-    ...(mockCounts ? { counts: mockCounts } : {}),
-  }),
+  useValidationEvidence: (...args: unknown[]) => {
+    evidenceArgs(...args);
+    return {
+      verdict: mockVerdict,
+      repairing: mockRepairing,
+      pending: mockValidationPending,
+      ...(mockCounts ? { counts: mockCounts } : {}),
+    };
+  },
 }));
+
+/** A settled dev run that judged its version. */
+function judgedRun(tag: string, verdict: "passed" | "partial" | "failed"): MilestoneRunView {
+  return {
+    id: `run-${tag}-1`,
+    milestoneNumber: 1,
+    milestoneTitle: tag,
+    kind: "dev",
+    origin: "spec-build",
+    state: "succeeded",
+    validation: { verdict },
+    budgets: { cyclesTotal: 2, cycleCeiling: 8, fixCycles: 0, fixCeiling: 3, conflictCycles: 0, conflictCeiling: 2 },
+    cycles: [],
+    createdAt: "2026-09-01T08:00:00Z",
+  } as unknown as MilestoneRunView;
+}
 
 beforeEach(() => {
   mockCounts = undefined;
@@ -242,9 +278,14 @@ beforeEach(() => {
   mockBuilds = [];
   mockDeployments = DEFAULT_DEPLOYMENTS;
   mockRuns = [];
+  mockRunsByTag = {};
+  mockRunsError = false;
+  mockRunsRefetch.mockClear();
+  mockBuildVersion = "v1";
   mockReadiness = undefined;
   mockReadinessPending = false;
   mockValidationPending = false;
+  evidenceArgs.mockClear();
   navigate.mockClear();
 });
 
@@ -1001,5 +1042,71 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
     expect(screen.getByTestId("validation-skeleton")).toBeInTheDocument();
     expect(screen.queryByText(/View validations/)).not.toBeInTheDocument();
     expect(screen.queryByText("Passed · 4 of 4")).not.toBeInTheDocument();
+  });
+});
+
+describe("DeploymentsPage — the card's version (review round)", () => {
+  it("keeps steps 2 and 3 about the deployed version while a newer build runs", () => {
+    // v1 serves while v2 builds. The aggregate's validation is v2's — `none`,
+    // nothing has judged it — but the card is v1's, whose own run story says
+    // it passed. Reading the aggregate here drew v1 as never validated and
+    // withheld its promotion on v2's account.
+    mockBuildVersion = "v2";
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "none",
+    };
+    mockRunsByTag = { v1: [judgedRun("v1", "passed")] };
+    mockVerdict = "passed";
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(evidenceArgs).toHaveBeenCalledWith("acme", "v1", "passed");
+    const flow = screen.getByRole("list", { name: "Deployment flow" });
+    const steps = within(flow).getAllByRole("listitem");
+    expect(steps[1]).toHaveAttribute("aria-label", "Step 2, Validation, Passed");
+    expect(screen.queryByText("Starts automatically now that the deployment is live.")).not.toBeInTheDocument();
+    // Step 3 is v1's too: validated, so only the missing value stands in the way.
+    expect(within(steps[2]!).getByText("Enabled once the value is set")).toBeInTheDocument();
+    expect(screen.queryByText("Enabled when validation passes")).not.toBeInTheDocument();
+    // …and the ledger's cell agrees with the card.
+    const row = screen.getByRole("row", { name: "Open Development deployment" });
+    expect(within(row).getByText("v1")).toBeInTheDocument();
+    expect(within(row).getByText("validated")).toBeInTheDocument();
+  });
+
+  it("says a failed run-story read rather than drawing the ordinary state over it", () => {
+    // Without the newest run the board cannot tell a park from a pending
+    // deployment, so it must not quietly draw the latter.
+    mockDeploy = {
+      version: "",
+      status: "none",
+      components: { total: 1, ready: 0 },
+      validation: "none",
+    };
+    mockDeployments = [];
+    mockRunsError = true;
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.getByText(/The version's run story could not be loaded: runs down/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mockRunsRefetch).toHaveBeenCalled();
+  });
+
+  it("names production's own status over its live count, not Running for every populated card", () => {
+    mockDeployments = [
+      ...DEFAULT_DEPLOYMENTS,
+      { componentName: "storefront", environment: "production", status: "Failed", endpointUrl: "" },
+    ];
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(screen.getByText("Deploy failed · 0 of 1 components live")).toBeInTheDocument();
+    expect(screen.queryByText(/^Running ·/)).not.toBeInTheDocument();
   });
 });

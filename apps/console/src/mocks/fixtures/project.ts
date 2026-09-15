@@ -990,6 +990,30 @@ export const heldRun: BuildRunList = {
     }),
   ],
 };
+
+/**
+ * `heldRun` stamped with THIS tag's identity — envelope, run id, milestone —
+ * the way `buildRunsForTag` stamps every other story, so a v2 or v3 asked for
+ * under the `on-hold` track does not answer with a run that calls itself v1.
+ */
+export function heldRunForTag(
+  s: Exclude<ProjectScenario, "error">,
+  tag: string,
+): BuildRunList {
+  const known = (projectBuilds[s].builds ?? []).find((b) => b.tag === tag);
+  const milestoneNumber = known?.milestoneNumber ?? heldRun.milestoneNumber;
+  return {
+    ...heldRun,
+    tag,
+    milestoneNumber,
+    runs: (heldRun.runs ?? []).map((run, i) => ({
+      ...run,
+      id: `run-${tag}-${i + 1}`,
+      milestoneNumber,
+      milestoneTitle: tag,
+    })),
+  };
+}
 // A run that SELF-HEALED: its first validation attempt failed, the platform filed
 // the failed criterion as ordinary work, a coding cycle repaired it, and the second
 // attempt came back clean. Four cycles — coding, validation, coding, validation —

@@ -39,6 +39,7 @@ import {
   deployedSentence,
   holdNotice,
   holdSentence,
+  productionLiveSentence,
   productionSentence,
   validationStep,
   type ConnectionLine,
@@ -378,7 +379,7 @@ export function EnvironmentCards({
       <EnvironmentCard row={production}>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
           {production.cards.length > 0
-            ? `Running · ${production.live} of ${production.total} components live`
+            ? productionLiveSentence(production)
             : productionSentence(deploy, promote, hold, version)}
         </Typography>
         {/* An EMPTY production stays an empty state — the gate and nothing

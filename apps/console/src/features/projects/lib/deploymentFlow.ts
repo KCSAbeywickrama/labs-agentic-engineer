@@ -27,6 +27,7 @@
 import type { StatusTone } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 import { externalValuesPark } from "../../builds/lib/runView";
+import { answeredRun } from "../../validation/lib/runs";
 import type { ValidationCounts } from "../../validation/lib/verdict";
 import { cardChip, type EnvironmentRow } from "./deploymentLedger";
 import type { DeploymentCard } from "./deploymentRows";
@@ -171,10 +172,18 @@ export function deployedSentence(row: EnvironmentRow, validation: string): strin
   return `${head} You can try them now${inFlight ? " while validation runs" : ""}.`;
 }
 
-/** The sentence under an on-hold step 1. */
+/** The sentence under an on-hold step 1. A park that named nothing (an
+ *  older row, or a lost write — `externalValuesPark`) is still a park, so it
+ *  is said without a count rather than as "0 values". */
 export function holdSentence(hold: DeployHold): string {
   const n = hold.blocking.length;
-  return `Deployment is on hold until ${n === 1 ? "one connection value is" : `${n} connection values are`} set. It continues automatically.`;
+  const what =
+    n === 0
+      ? "its connection values are"
+      : n === 1
+        ? "one connection value is"
+        : `${n} connection values are`;
+  return `Deployment is on hold until ${what} set. It continues automatically.`;
 }
 
 /** The notice's own line: what is needed, and who is waiting on it. */
@@ -279,10 +288,14 @@ export function developmentConnections(
   const reported = new Map(
     (readiness?.dependencies ?? []).map((d) => [d.name.toLowerCase(), d.state]),
   );
+  // The catalog spells a name its own way, as the run and the readiness read
+  // do — a case-only difference must not turn a Registered External into one
+  // Configure offers to re-author.
+  const registered = new Set([...registeredNames].map((n) => n.toLowerCase()));
   return rows.map((row) => {
     if (row.provisioned) return line(row, "provisioned", false);
     if (row.kind !== "external") return line(row, "platform", false);
-    const configure = !catalogUnknown && !registeredNames.has(row.name);
+    const configure = !catalogUnknown && !registered.has(row.name.toLowerCase());
     if (blocking.has(row.name.toLowerCase())) return line(row, "missing", configure);
     const state = reported.get(row.name.toLowerCase());
     if (state === undefined) return line(row, "unknown", configure);
@@ -315,6 +328,34 @@ export function connectionsHeadline(lines: ConnectionLine[]): string {
 }
 
 // ── Step 2: Validation ──────────────────────────────────────────────────────
+
+/**
+ * Whether the deployed version is an OLDER one than the build's: v1 serving
+ * under a v2 that is building, parked or converging. The aggregate's
+ * `version` names what runs; `build.version` names the newest dev run.
+ */
+export function deployedBehindBuild(deploy: DeployStage | undefined, buildVersion: string): boolean {
+  return Boolean(deploy?.version) && deploy?.version !== buildVersion;
+}
+
+/**
+ * The validation word for the version the card is about. The aggregate's
+ * `validation` answers for the BUILD version — the newest dev run's milestone
+ * (status_stages.go) — while the card names the DEPLOYED version. The two
+ * agree until a newer build starts; from then until it lands, the deployed
+ * version's answer is its own run story's: the verdict of the run that last
+ * judged it (settled, since a later version superseded it), or `none` when
+ * none ever did. Without this the card labelled v1 read v2's verdict beside
+ * it, and offered or withheld v1's promotion on v2's account.
+ */
+export function deployedValidation(
+  deploy: DeployStage,
+  buildVersion: string,
+  deployedRuns: MilestoneRunView[] | undefined,
+): DeployStage["validation"] {
+  if (!deployedBehindBuild(deploy, buildVersion)) return deploy.validation;
+  return answeredRun(deployedRuns ?? [])?.validation?.verdict ?? "none";
+}
 
 // The chip's word for each value of deploy.validation. Not `validationView`'s
 // labels — those are lower-case predicates for a cell ("validating",
@@ -454,6 +495,17 @@ export function promoteStep(
 }
 
 /** The Production card's one sentence while it is empty. */
+/**
+ * The Production card's sentence once something runs there: the environment's
+ * own status word over the live count. "Running" only when the fold says so —
+ * a failed, converging or undeployed production is populated too, and the
+ * count alone ("0 of 2 live") does not say which.
+ */
+export function productionLiveSentence(row: EnvironmentRow): string {
+  const head = row.status.tone === "success" ? "Running" : row.status.label;
+  return `${head} · ${row.live} of ${row.total} components live`;
+}
+
 export function productionSentence(
   deploy: DeployStage | undefined,
   promote: PromoteStep | null,

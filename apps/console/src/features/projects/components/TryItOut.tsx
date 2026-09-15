@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Avatar,
@@ -321,6 +321,13 @@ function ServiceEndpoints({
     return flattenEndpoints(parsed);
   }, [contract.data?.spec]);
 
+  // The panel header's count, reported once the contract has parsed — from an
+  // effect, not the render path, which set a parent's state mid-render. Zero
+  // is reported too: an empty contract is a count, not an absence.
+  useEffect(() => {
+    if (onCount && Array.isArray(ops)) onCount(ops.length);
+  }, [ops, onCount]);
+
   if (contract.isPending) {
     // The shape of what is coming — a toolbar and a few rows — rather than a
     // line of text the list then replaces (ADR-0032 review round).
@@ -366,7 +373,6 @@ function ServiceEndpoints({
       </Typography>
     );
   }
-  if (onCount && ops.length > 0) onCount(ops.length);
 
   const visible = filterEndpoints(ops, query, method);
   const methods = methodsIn(ops);
