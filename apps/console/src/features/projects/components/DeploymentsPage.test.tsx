@@ -57,12 +57,13 @@ let mockRuns: MilestoneRunView[] = [];
 // — the card reads the deployed one's own; anything unlisted answers `mockRuns`.
 let mockRunsByTag: Record<string, MilestoneRunView[]> = {};
 let mockRunsError = false;
+let mockRunsPending = false;
 const mockRunsRefetch = vi.fn();
 vi.mock("../../builds/api/queries", () => ({
   useBuilds: () => ({ data: mockBuilds, isPending: false, isError: false }),
   useBuildRuns: (_p: string, tag?: string) => ({
-    data: mockRunsError ? undefined : { runs: mockRunsByTag[tag ?? ""] ?? mockRuns },
-    isPending: false,
+    data: mockRunsError || mockRunsPending ? undefined : { runs: mockRunsByTag[tag ?? ""] ?? mockRuns },
+    isPending: mockRunsPending && Boolean(tag),
     isError: mockRunsError && Boolean(tag),
     error: mockRunsError ? new Error("runs down") : null,
     refetch: mockRunsRefetch,
@@ -280,6 +281,7 @@ beforeEach(() => {
   mockRuns = [];
   mockRunsByTag = {};
   mockRunsError = false;
+  mockRunsPending = false;
   mockRunsRefetch.mockClear();
   mockBuildVersion = "v1";
   mockReadiness = undefined;
@@ -1096,6 +1098,41 @@ describe("DeploymentsPage — the card's version (review round)", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(mockRunsRefetch).toHaveBeenCalled();
+  });
+
+  // The deployed version's verdict is its own run story's while it is behind
+  // the build — a read that can be out, or fail. Neither is "Not run".
+  it("holds the verdict while the deployed version's own run story is still out", () => {
+    mockDeploy = { version: "v1", status: "deployed", components: { total: 1, ready: 1 }, validation: "running" };
+    mockBuildVersion = "v2";
+    mockRunsPending = true;
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(screen.getByTestId("validation-cell-skeleton")).toBeInTheDocument();
+    expect(screen.queryByText("Not run")).not.toBeInTheDocument();
+    expect(screen.getByTestId("validation-skeleton")).toBeInTheDocument();
+    expect(screen.getByTestId("promote-skeleton")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Promote v1 to production/ })).not.toBeInTheDocument();
+  });
+
+  it("says the verdict is unavailable, and withholds promotion, when the deployed version's run story fails", () => {
+    mockDeploy = { version: "v1", status: "deployed", components: { total: 1, ready: 1 }, validation: "running" };
+    mockBuildVersion = "v2";
+    mockRunsError = true;
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(screen.getByText(/The version's run story could not be loaded: runs down/)).toBeInTheDocument();
+    const row = screen.getByRole("row", { name: "Open Development deployment" });
+    expect(within(row).getByText("Unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("Not run")).not.toBeInTheDocument();
+    const flow = screen.getByRole("list", { name: "Deployment flow" });
+    const steps = within(flow).getAllByRole("listitem");
+    expect(within(steps[1]!).getByText("The run story could not be loaded, so this version's verdict is unknown.")).toBeInTheDocument();
+    // An unknown verdict is not a permission to promote.
+    expect(within(steps[2]!).getByRole("button", { name: /Promote v1 to production/ })).toBeDisabled();
+    expect(within(steps[2]!).getByText("Unavailable until v1's run story loads")).toBeInTheDocument();
   });
 
   it("names production's own status over its live count, not Running for every populated card", () => {

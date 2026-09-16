@@ -239,7 +239,13 @@ export interface ValidationCell {
   live: boolean;
   /** Accessible name for a label that hedges with a mark. */
   spoken?: string;
+  /** The read behind the word is still out: draw a skeleton, not a word. */
+  pending?: boolean;
 }
+
+/** Whether the deployed version's verdict can be read at all (deploymentFlow
+ *  `deployedValidationState`): still out, or failed. */
+export type ValidationAvailability = "pending" | "failed";
 
 /**
  * The ledger's Validation cell — counts when the criteria/report join resolved
@@ -251,8 +257,20 @@ export function validationCell(
   environment: EnvironmentKey,
   validation: string | undefined,
   counts?: ValidationCounts,
+  availability?: ValidationAvailability,
 ): ValidationCell | null {
   if (environment !== "development") return null;
+  // An unread verdict is not "Not run" — that is a settled claim, and the
+  // read that would settle it is still out, or failed (#776 review).
+  if (availability === "pending") return { label: "", tone: "neutral", live: false, pending: true };
+  if (availability === "failed") {
+    return {
+      label: "Unavailable",
+      tone: "neutral",
+      live: false,
+      spoken: "unavailable, the run story could not be loaded",
+    };
+  }
   const view = validationView(validation ?? "");
   if (!view) return { label: "Not run", tone: "neutral", live: false };
   const tone: StatusTone = view.tone === "ghost" ? "neutral" : view.tone;

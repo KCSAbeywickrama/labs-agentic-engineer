@@ -162,6 +162,7 @@ export function EnvironmentCards({
   developmentConnections,
   promote,
   pending,
+  validationUnavailable = false,
   onPromote,
   onConfigureDevelopment,
   onConfigureProduction,
@@ -190,6 +191,9 @@ export function EnvironmentCards({
    *  skeleton for its own rather than painting a state it may take back a
    *  second later — the card used to fill in one section at a time. */
   pending: { connections: boolean; validation: boolean; hold: boolean };
+  /** The deployed version's run story could not be read: step 2 says the
+   *  verdict is unknown rather than painting one (the page shows the retry). */
+  validationUnavailable?: boolean;
   onPromote: () => void;
   onConfigureDevelopment: (row: ConnectionRow) => void;
   onConfigureProduction: (row: ConnectionRow) => void;
@@ -305,10 +309,20 @@ export function EnvironmentCards({
 
           <FlowStep
             step={2}
-            view={pending.validation ? { state: validating.state, title: "Validation" } : validating}
-            last={promote === null && !pending.connections}
+            view={
+              validationUnavailable
+                ? {
+                    state: "pending",
+                    title: "Validation",
+                    note: "The run story could not be loaded, so this version's verdict is unknown.",
+                  }
+                : pending.validation
+                  ? { state: validating.state, title: "Validation" }
+                  : validating
+            }
+            last={promote === null}
           >
-            {pending.validation ? (
+            {validationUnavailable ? null : pending.validation ? (
               <Skeleton variant="rounded" height={52} data-testid="validation-skeleton" />
             ) : (
               deploy &&

@@ -42,7 +42,8 @@ import {
 import {
   deployHold,
   deployedBehindBuild,
-  deployedValidation,
+  deployedValidationState,
+  promoteUnavailable,
   developmentConnections,
   promoteStep,
 } from "../lib/deploymentFlow";
@@ -123,8 +124,12 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   const version = deploy?.version || buildVersion;
   const behind = deployedBehindBuild(deploy, buildVersion);
   const deployedRuns = useBuildRuns(projectName, behind ? deploy?.version : undefined);
+  const deployedState = deployedValidationState(deploy, buildVersion, deployedRuns);
+  // While the verdict is unknown the aggregate carries `none` — PENDING, which
+  // withholds promotion and paints nothing on its own; the availability flags
+  // below are what every surface reads first, so the word is never shown.
   const cardDeploy = deploy
-    ? { ...deploy, validation: deployedValidation(deploy, buildVersion, deployedRuns.data?.runs) }
+    ? { ...deploy, validation: deployedState.validation ?? "none" }
     : undefined;
   // The Validation page's own criteria/report join, keyed on the card's
   // version. The VERDICT comes back with the counts because `awaiting-fix`
@@ -221,7 +226,11 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   // build stays "Deployed" here and the Builds page names the park.
   const parked = deployHold(runs.data?.runs, dependencies.data);
   const hold = parked && !behind ? parked : null;
-  const promote = promoteStep(cardDeploy, production, connections, liveValues, hold, version);
+  // An unknown verdict withholds promotion outright: `canPromote` would wave
+  // an empty validation through.
+  const promoteIfKnown = promoteStep(cardDeploy, production, connections, liveValues, hold, version);
+  const promote =
+    promoteIfKnown && deployedState.failed ? promoteUnavailable(version) : promoteIfKnown;
   const devLines = connectionsKnown
     ? developmentConnections(connections, readiness.data, hold, registeredNames, catalogUnknown)
     : null;
@@ -291,9 +300,10 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
             promote={promote}
             pending={{
               connections: dependencies.isPending || (readiness.isPending && !readiness.isError),
-              validation: validation.pending || (behind && deployedRuns.isPending),
+              validation: validation.pending || deployedState.pending,
               hold: Boolean(status.data?.build.version) && runs.isPending,
             }}
+            validationUnavailable={deployedState.failed}
             onPromote={() => {
               setPromoteFocus(null);
               setPromoteOpen(true);
@@ -311,6 +321,9 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           builds={builds.data}
           validation={cardDeploy?.validation}
           counts={validation.counts}
+          validationAvailability={
+            deployedState.pending ? "pending" : deployedState.failed ? "failed" : undefined
+          }
           onOpen={(row) =>
             void navigate({
               to: "/projects/$projectName/deployments/$environment",

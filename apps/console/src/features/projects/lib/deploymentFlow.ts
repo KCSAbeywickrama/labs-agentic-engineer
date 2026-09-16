@@ -357,6 +357,54 @@ export function deployedValidation(
   return answeredRun(deployedRuns ?? [])?.validation?.verdict ?? "none";
 }
 
+/**
+ * The deployed version's validation, with the availability of the read it
+ * comes from. While the deployed version is behind the build, its verdict is
+ * its own run story's — a read that can still be OUT or can have FAILED, and
+ * neither is "none": a page that rendered "Not run" over an unread story
+ * claimed a settled fact it did not have (#776 review).
+ */
+export interface DeployedValidation {
+  /** deploy.validation for the card's version; undefined while it is not
+   *  known — every consumer checks `pending` / `failed` before reading it. */
+  validation: DeployStage["validation"] | undefined;
+  /** The deployed version's run story is still out. */
+  pending: boolean;
+  /** …or could not be read: the verdict is unknown, not "not run". */
+  failed: boolean;
+}
+
+export function deployedValidationState(
+  deploy: DeployStage | undefined,
+  buildVersion: string,
+  runs: { data?: { runs?: MilestoneRunView[] } | undefined; isPending: boolean; isError: boolean },
+): DeployedValidation {
+  if (!deploy) return { validation: undefined, pending: false, failed: false };
+  if (!deployedBehindBuild(deploy, buildVersion)) {
+    return { validation: deploy.validation, pending: false, failed: false };
+  }
+  if (runs.isError) return { validation: undefined, pending: false, failed: true };
+  if (runs.isPending || !runs.data) return { validation: undefined, pending: true, failed: false };
+  return {
+    validation: deployedValidation(deploy, buildVersion, runs.data.runs),
+    pending: false,
+    failed: false,
+  };
+}
+
+/** Step 3 while the deployed version's verdict cannot be read: withheld, and
+ *  says why. `canPromote` would wave an empty validation through, which is
+ *  the one thing an unknown verdict must not do. */
+export function promoteUnavailable(version: string): PromoteStep {
+  return {
+    state: "pending",
+    title: "Promote to Production",
+    enabled: false,
+    reason: `Unavailable until ${version}'s run story loads`,
+    missing: [],
+  };
+}
+
 // The chip's word for each value of deploy.validation. Not `validationView`'s
 // labels — those are lower-case predicates for a cell ("validating",
 // "validated*"); a step names its outcome as a heading.
@@ -494,7 +542,6 @@ export function promoteStep(
   };
 }
 
-/** The Production card's one sentence while it is empty. */
 /**
  * The Production card's sentence once something runs there: the environment's
  * own status word over the live count. "Running" only when the fold says so —

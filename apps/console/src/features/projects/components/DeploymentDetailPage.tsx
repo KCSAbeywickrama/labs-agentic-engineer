@@ -49,7 +49,7 @@ import {
   useProjectStatus,
 } from "../api/queries";
 import { connectionTable, talksTo } from "../lib/deploymentDetail";
-import { deployedValidation } from "../lib/deploymentFlow";
+import { deployedValidationState, } from "../lib/deploymentFlow";
 import {
   commitUrl,
   environmentLabel,
@@ -108,9 +108,13 @@ export function DeploymentDetailPage({
   // The aggregate's validation names the BUILD version; this page names the
   // deployed one, which answers for itself off the run story just read when
   // the two differ (`deployedValidation`).
-  const pageDeploy = deploy
-    ? { ...deploy, validation: deployedValidation(deploy, status.data?.build.version ?? "", runs.data?.runs) }
-    : undefined;
+  const deployedState = deployedValidationState(deploy, status.data?.build.version ?? "", runs);
+  const pageDeploy = deploy ? { ...deploy, validation: deployedState.validation } : undefined;
+  const validationAvailability = deployedState.pending
+    ? ("pending" as const)
+    : deployedState.failed
+      ? ("failed" as const)
+      : undefined;
   const validation = useValidationEvidence(projectName, version ?? "", pageDeploy?.validation ?? "");
   // The design's graph and its connections — who talks to whom, and what
   // each dependency is — and whether this environment holds values for them.
@@ -262,7 +266,12 @@ export function DeploymentDetailPage({
   const merged = mergedCycle(runs.data?.runs);
   const sha = merged?.mergeSha ?? "";
   const commitHref = commitUrl(status.data?.repoUrl, sha);
-  const validationView = validationCell(environment, pageDeploy?.validation, validation.counts);
+  const validationView = validationCell(
+    environment,
+    pageDeploy?.validation,
+    validation.counts,
+    validationAvailability,
+  );
   const table = connectionTable(
     connections,
     dependencies.data,
@@ -280,7 +289,7 @@ export function DeploymentDetailPage({
       <PageHeader
         title={title}
         backTo={backTo}
-        {...(validationView
+        {...(validationView && !validationView.pending
           ? {
               actions: (
                 <StatusChip
@@ -299,6 +308,19 @@ export function DeploymentDetailPage({
           Deployments for {deployments.failedCount} component
           {deployments.failedCount === 1 ? "" : "s"} could not be loaded — the
           page shows what did.
+        </Alert>
+      )}
+      {runs.isError && (
+        // The run story is what names the commit, and — when this version is
+        // behind the build — its verdict. Without it neither is known, and
+        // the cells say so rather than settling on "—" and "Not run".
+        <Alert
+          severity="warning"
+          sx={{ mb: 2 }}
+          action={<Button onClick={() => void runs.refetch()}>Retry</Button>}
+        >
+          The version's run story could not be loaded
+          {runs.error instanceof Error && runs.error.message ? `: ${runs.error.message}` : ""}
         </Alert>
       )}
       <Stack spacing={2}>
@@ -419,7 +441,9 @@ function SummaryCard({
     { label: "Milestone", value: milestone ?? "—" },
     {
       label: "Validation",
-      value: validation ? (
+      value: validation?.pending ? (
+        <Skeleton variant="rounded" width={96} height={22} data-testid="validation-cell-skeleton" />
+      ) : validation ? (
         <StatusChip
           label={validation.label}
           tone={validation.tone}

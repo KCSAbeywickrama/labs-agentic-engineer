@@ -19,6 +19,7 @@
 import {
   Box,
   ListingTable,
+  Skeleton,
   Stack,
   Typography,
   alpha,
@@ -33,6 +34,7 @@ import type { ValidationCounts } from "../../validation/lib/verdict";
 import {
   milestoneFor,
   validationCell,
+  type ValidationAvailability,
   type EnvironmentRow,
 } from "../lib/deploymentLedger";
 
@@ -60,6 +62,7 @@ export function DeploymentsLedger({
   builds,
   validation,
   counts,
+  validationAvailability,
   onOpen,
 }: {
   rows: EnvironmentRow[];
@@ -68,6 +71,9 @@ export function DeploymentsLedger({
   /** deploy.validation — development's verdict lifecycle. */
   validation: string | undefined;
   counts?: ValidationCounts | undefined;
+  /** The deployed version's own run read is out or failed: the cell holds a
+   *  skeleton, or says Unavailable, rather than "Not run". */
+  validationAvailability?: ValidationAvailability | undefined;
   onOpen: (row: EnvironmentRow) => void;
 }) {
   return (
@@ -109,7 +115,7 @@ export function DeploymentsLedger({
                 key={row.environment}
                 row={row}
                 milestone={milestoneFor(row.version, builds)}
-                validation={validationCell(row.environment, validation, counts)}
+                validation={validationCell(row.environment, validation, counts, validationAvailability)}
                 onOpen={() => onOpen(row)}
               />
             ))}
@@ -185,7 +191,9 @@ function LedgerRow({
       </ListingTable.Cell>
 
       <ListingTable.Cell>
-        {validation ? (
+        {validation?.pending ? (
+          <Skeleton variant="rounded" width={96} height={22} data-testid="validation-cell-skeleton" />
+        ) : validation ? (
           <StatusChip
             label={validation.label}
             tone={validation.tone}

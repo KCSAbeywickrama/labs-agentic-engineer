@@ -128,7 +128,7 @@ vi.mock("../api/queries", () => ({
   useProjectStatus: () => ({
     data: {
       repoUrl: "https://github.com/acme/expense.git",
-      build: { version: "v1", status: "succeeded" },
+      build: { version: mockBuildVersion, status: "succeeded" },
       deploy: mockDeploy,
     },
   }),
@@ -165,6 +165,9 @@ vi.mock("../../settings/api/queries", () => ({
 
 let mockRuns: MilestoneRunView[] = [];
 let mockRunsPending = false;
+let mockRunsError = false;
+let mockBuildVersion = "v1";
+const mockRunsRefetch = vi.fn();
 vi.mock("../../builds/api/queries", () => ({
   useBuilds: () => ({
     data: [{ tag: "v1", milestoneNumber: 3, status: "completed", startedAt: "2026-08-14T16:20:00Z" }],
@@ -172,9 +175,11 @@ vi.mock("../../builds/api/queries", () => ({
     isError: false,
   }),
   useBuildRuns: () => ({
-    data: mockRunsPending ? undefined : { runs: mockRuns },
+    data: mockRunsPending || mockRunsError ? undefined : { runs: mockRuns },
     isPending: mockRunsPending,
-    isError: false,
+    isError: mockRunsError,
+    error: mockRunsError ? new Error("runs down") : null,
+    refetch: mockRunsRefetch,
   }),
 }));
 
@@ -250,6 +255,9 @@ beforeEach(() => {
   mockFailedCount = 0;
   mockRuns = [];
   mockRunsPending = false;
+  mockRunsError = false;
+  mockBuildVersion = "v1";
+  mockRunsRefetch.mockClear();
   mockCounts = undefined;
   mockTestUsers = [];
   mockRolesPending = false;
@@ -617,5 +625,34 @@ describe("DeploymentDetailPage — connections (ADR-0032)", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(mockReadinessRefetch).toHaveBeenCalled();
+  });
+});
+
+describe("DeploymentDetailPage — the deployed version's own verdict (#776 review)", () => {
+  it("holds the validation cell while the deployed version's run story is out", () => {
+    mockBuildVersion = "v2";
+    mockRunsPending = true;
+
+    render(<DeploymentDetailPage projectName="expense" environment="development" />);
+
+    expect(screen.getByTestId("validation-cell-skeleton")).toBeInTheDocument();
+    expect(screen.queryByText("Not run")).not.toBeInTheDocument();
+    // No header chip either — a chip is a word, and there is none yet.
+    expect(screen.queryByText(/^Validation · /)).not.toBeInTheDocument();
+  });
+
+  it("says the verdict is unavailable, with a retry, when the run story fails", () => {
+    mockBuildVersion = "v2";
+    mockRunsError = true;
+
+    render(<DeploymentDetailPage projectName="expense" environment="development" />);
+
+    expect(screen.getByText(/The version's run story could not be loaded: runs down/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mockRunsRefetch).toHaveBeenCalled();
+    const cell = screen.getByText("Validation").parentElement as HTMLElement;
+    expect(within(cell).getByText("Unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("Not run")).not.toBeInTheDocument();
+    expect(screen.getByText("Validation · Unavailable")).toBeInTheDocument();
   });
 });
