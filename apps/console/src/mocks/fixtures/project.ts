@@ -1417,9 +1417,6 @@ sequenceDiagram
 //    live half agrees;
 //  - `jsmith` holds TWO roles, which is what v2 changed;
 //  - `ledger-sync` is SERVICE-kind — no login, no group, its own list.
-//
-// Screens are exactly the three `storefront/wireframes.dsl` declares, one of
-// each kind: `public`, `null` (any signed-in account) and a handle.
 const securityJson = `{
   "version": 3,
   "permissions": [
@@ -1478,11 +1475,6 @@ const securityJson = `{
       "kind": "service",
       "grants": ["orders:read-all"]
     }
-  ],
-  "screens": [
-    { "component": "storefront", "screen": "Catalog", "requires": "public" },
-    { "component": "storefront", "screen": "Cart", "requires": null },
-    { "component": "storefront", "screen": "Orders", "requires": "orders:read" }
   ],
   "testUsers": [
     { "username": "test-compliance-admin", "roles": ["Compliance Admin"] },
