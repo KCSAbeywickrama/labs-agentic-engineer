@@ -490,6 +490,17 @@ describe("DeploymentTryOutPage — try it out (ADR-0032)", () => {
     expect(screen.queryByRole("list", { name: "claims-api endpoints" })).not.toBeInTheDocument();
   });
 
+  it("leads with the web app, whatever order the board hands the components in", () => {
+    // The board lists claims-api first; the page a person opens comes first.
+    render(<DeploymentTryOutPage projectName="expense" environment="development" />);
+
+    const web = screen.getByRole("link", { name: "Visit approvals-web" });
+    const service = screen.getByRole("button", { name: "Try claims-api API" });
+    expect(web.compareDocumentPosition(service) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The test users still ride in the web app's own panel.
+    expect(screen.getByText(/sign in with a test user below/)).toBeInTheDocument();
+  });
+
   it("gives the web app its Visit, its URL copy, and who it talks to", async () => {
     const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
     Object.assign(navigator, { clipboard: { writeText } });

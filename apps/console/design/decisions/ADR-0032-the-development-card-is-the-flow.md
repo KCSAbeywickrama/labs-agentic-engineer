@@ -62,7 +62,8 @@ only the Builds page names.
 4. **The environment page is where a version is TRIED.** *Try it now* is
    captioned "Opens the deployment view: app, endpoints, test users", and the
    page's Components card becomes **Try it out** (the Deployment Detail
-   design, turn 1): every component as a panel a person can act on. A web
+   design, turn 1): every component as a panel a person can act on, the web
+   applications first — they are what a person opens. A web
    application is visited, carries its URL with a copy control, names the
    components it talks to (the design's component edges), and holds the
    **test users** that sign in to it — inline, filterable, folded past five

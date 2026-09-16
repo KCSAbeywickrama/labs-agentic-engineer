@@ -635,9 +635,11 @@ function ComponentPanel({
 }
 
 /**
- * The "Try it out" card: every component of the environment as a panel. The
- * test users sit inside the first web application's panel — they exist to
- * sign in to it — and under their own heading when there is none.
+ * The "Try it out" card: every component of the environment as a panel. A web
+ * application leads — it is the thing a person opens, and the test users sit
+ * inside the first one's panel because they exist to sign in to it (under
+ * their own heading when the project has no web app at all). The services
+ * follow in the board's order.
  */
 export function TryItOutCard({
   projectName,
@@ -659,7 +661,17 @@ export function TryItOutCard({
   testUsers: TestUsersProps | null;
   onTryApi: (componentName: string) => void;
 }) {
-  const firstWebApp = cards.find((c) => types.get(c.componentName) === "web-application");
+  // Stable: the web apps keep their order among themselves, and so do the rest.
+  const ordered = useMemo(
+    () =>
+      [...cards].sort(
+        (a, b) =>
+          Number(types.get(b.componentName) === "web-application") -
+          Number(types.get(a.componentName) === "web-application"),
+      ),
+    [cards, types],
+  );
+  const firstWebApp = ordered.find((c) => types.get(c.componentName) === "web-application");
   return (
     <Card variant="outlined">
       <Stack
@@ -676,7 +688,7 @@ export function TryItOutCard({
         </Typography>
       </Stack>
       <Stack spacing={3} sx={{ p: 2 }}>
-        {cards.map((card) => (
+        {ordered.map((card) => (
           <ComponentPanel
             key={card.componentName}
             projectName={projectName}
