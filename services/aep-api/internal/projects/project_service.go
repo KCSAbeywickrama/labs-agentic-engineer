@@ -568,7 +568,8 @@ func translateHTTPError(err error) error {
 // provisionProjectCells creates the ProjectReleaseBinding for each environment
 // the project's deployment pipeline promotes through. Idempotent per
 // environment, so a partially-applied earlier attempt converges rather than
-// conflicting.
+// conflicting. The process write-target is that pipeline's source, resolved at
+// boot; this function does not union in extra names.
 //
 // A project with no resolvable pipeline is an error, not an empty list: the
 // caller compensates on error, and silently returning "zero environments" would
