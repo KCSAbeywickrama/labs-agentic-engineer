@@ -42,7 +42,7 @@ concept for *the agreed description of what we're building*.
 |---|---|---|
 | `REQUIREMENTS` | **Product requirements** | `specs/requirements/prd.md` |
 | `DESIGN` (not `DESIGNS` — one design, several files) | **Architecture** · **Domain model** · **Security** as rows, then the groups: **Flows**, then one per component | `specs/design/` |
-| `VALIDATION` | **Validation criteria** | `specs/validation/validation-criteria.json` |
+| `VALIDATION` | **Validation criteria**, then one per capability under **Acceptance criteria** — each labelled by its own capability | `specs/validation/validation-criteria.json` · `specs/acceptance/<slug>.feature` |
 
 **Security** is one rail entry, one page:
 
@@ -1123,6 +1123,81 @@ platform's rungs live in `validation_status_line.ts`, and two of them —
 *Generating the validation report from the automated test results…* and *Fixing the test
 issues…* — carry the same debt. `harness` is deliberately byte-identical to its
 fallback, so one phase reads the same sentence whichever source produced it.
+
+## The acceptance pane
+
+The Gherkin acceptance criteria, and — on the Validations page — the same tree
+with a run's answers on it. One renderer, two surfaces, exactly as the criteria
+pane serves two (ADR-0029 replaced the compiled path on `vld-redesign`).
+
+| | |
+|---|---|
+| Description, under the heading, spec view only | *Each scenario is one concrete example of a rule your product must follow, taken from your requirements alone. After every deployment they are driven against the deployed system and the results appear under Validations. To change one, ask the agent.* |
+| A capability's label in the rail | the file's slug, **title-cased** — `bought-items.feature` reads **Bought items** |
+| A refusal | the **circled minus**, closing the sentence; tooltip *A negative scenario — the product refuses, rejects or limits.* |
+
+**The label is title-cased; a requirement's depth document is not.** Both are
+"feature files" and both fall to naming rule 2, but only one of them is
+referenced by name elsewhere: the PRD links `features/<slug>.md` by its
+filename, so re-casing that one would stop the two matching. A `.feature` slug
+is a capability name nothing else quotes, so it reads as the document tree says.
+
+### The four outcome words are the report's own
+
+**Taken verbatim from `report.json`, title-cased, and that is the decision.**
+There is no mapping table, so there is no fifth vocabulary to fall out of step
+with `report.go`, the run's checker, the `acceptance-run` skill and ADR-0029 —
+and a word the console has never heard of renders as itself rather than as
+something wrong. It is the same call the Go verdict ladder makes for an
+unrecognised outcome: count it as a gap, never as coverage.
+
+| | |
+|---|---|
+| Every `Then` was settled by a command that could have said no | **`Passed`** |
+| A command said no | **`Failed`** |
+| The action could not be carried out at any interface, so the behaviour was never reached | **`Blocked`** |
+| The truth lives outside the running app — a stubbed backend, another system | **`Unjudgeable`** |
+| The last run has no entry for it | **`No result`** |
+
+**Every one of them carries a mark.** ADR-0016 gave `Passed` and `Failed` marks
+because as outlined chips they would otherwise differ by hue alone, which is
+nothing to a red/green colour-blind reader. Four outcomes create two more such
+pairs, so the rule that exempted the others no longer applies to any of them.
+
+**`Blocked` is the only amber, and the only call to action.** No repair issue is
+filed for it, deliberately: the agent cannot tell an app that correctly refuses
+an action from one too broken to perform it, and auto-filing would send a coding
+run to add an affordance the requirement never asked for. A person tells the two
+apart in seconds. `Unjudgeable` stays neutral — it is an honest answer, not a
+defect, and colouring it would spend attention where nothing is wrong.
+
+**`No result` is the console's own word**, and the only one here that is: the
+scenario is absent from the report, so the report has no word for it. It is
+neutral rather than a warning, because the feature files are read at the branch
+tip and the report at the merge commit of the attempt that wrote it — a scenario
+authored since is the ordinary loop, and colouring the expected state teaches a
+reader to discount the colour. It never appears while an attempt is in flight.
+
+**Not `couldn't be automated`.** The criteria path's `partial` sentence said so,
+and it was true there: a criterion declared its method at design time. An
+acceptance scenario declares nothing — every one of them is driven — so the
+verdict copy says **couldn't be settled against the deployed app** and asks the
+reader to **check them yourself**.
+
+### What a scenario is doing, while a run is under way
+
+**Nothing.** The criterion rows used to say (`Planned`, `Exploring…`,
+`Authoring…`, `Running…`, `Healing…`), and those words are retired rather than
+ported: they were fed by per-criterion events the runner emitted from
+Playwright-shaped matchers, which ADR-0029 deleted. There is no per-scenario
+progress source, so inventing per-scenario progress words would be a vocabulary
+with nothing behind it.
+
+What survives is the line above them — the agent's own, the newest comment on
+its validation issue. It was always the better evidence: it comes from inside
+the run and names what is happening rather than inferring it from which rows
+have moved. The three derived fallbacks (*Setting up the test harness…* and its
+siblings) went with the rows that fed them.
 
 ## What a change invalidates
 

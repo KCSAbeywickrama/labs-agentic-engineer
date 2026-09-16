@@ -75,11 +75,14 @@ names rather than one it introduces.
 
 ## Consequences
 
-- **The console renders the report raw.** The acceptance run answers per scenario and the criteria are
-  a different decomposition of the same requirement, so there is no id to join them on. A shaped view
-  is real design work, and the right time for it is after reading a real report. Passing the report
-  through the criteria-joining path would render `Not validated` on every row — a verdict, where the
-  truth is that the report does not speak about criteria.
+- **The console renders the report raw.** *Superseded — the shaped view landed once there were real
+  reports to design against; see `apps/console/design/decisions/ADR-0031`.* The reasoning stands as
+  the reason it waited: the acceptance run answers per scenario and the criteria are a different
+  decomposition of the same requirement, so there is no id to join them on, and passing the report
+  through the criteria-joining path would have rendered `Not validated` on every row — a verdict,
+  where the truth is that the report does not speak about criteria. The shaped view joins the report
+  to the FEATURE FILES instead, on feature + rule + scenario, which is the identity this report's own
+  checker already keys on.
 - **Real-time progress is dark.** The matchers that drove it keyed on Playwright file writes and spec
   names, so against an agent driving a browser they matched nothing. Deleted rather than rewritten;
   the redesign is its own piece of work.

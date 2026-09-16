@@ -7,7 +7,14 @@ consumers, one component:
 | Consumer | What it passes | What the reader is doing there |
 |---|---|---|
 | Spec view's file pane (`SpecView.tsx`) | `criteria` only | Reading the document, before any run exists |
-| Validations page (`ValidationPage.tsx`) | `criteria`, `report`, `live`, `awaitingReport` | Reading run results |
+
+**On `vld-redesign` the Validations page is no longer a consumer.** It renders
+`@aep/ui-acceptance-view` against `specs/acceptance/*.feature` and a
+scenario-keyed report (ADR-0029, and `apps/console/design/decisions/ADR-0031`
+for the view). Everything below still describes this package accurately — the
+report-joined half is intact and still tested — but the second consumer it was
+written for is the criteria path, which that branch does not execute. The
+`report` / `live` / `awaitingReport` props have no caller there.
 
 ## Two marks, at opposite ends of the row
 

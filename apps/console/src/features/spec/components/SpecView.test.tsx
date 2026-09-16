@@ -1907,3 +1907,75 @@ describe("SpecView validation criteria explanation", () => {
     expect(screen.queryByText("REQ-001")).not.toBeInTheDocument();
   });
 });
+
+// A `.feature` file is neither `.md` nor one of the structured JSON/YAML types, so
+// before this it fell through the whole branch tree to CollabTextArea: an editable
+// monospace box over a document nobody edits by hand. That is exactly the
+// dishonesty CommittedFileView's doc comment says was fixed for every other type.
+describe("SpecView acceptance criteria", () => {
+  const FEATURE = [
+    "Feature: Bought items",
+    "",
+    "  @story-6",
+    "  Rule: A bought item is locked from further edits",
+    "",
+    "    @negative",
+    "    Scenario: Editing a bought item is refused",
+    '      Given the shared list has a bought item named "Eggs"',
+    '      When Dev tries to change the quantity of "Eggs" to "2"',
+    '      Then the quantity of "Eggs" is still "1"',
+  ].join("\n");
+
+  beforeEach(() => {
+    mockUseSpecFiles.mockReturnValue({
+      data: [
+        { path: "specs/acceptance/bought-items.feature", sha: "abc", group: "validation" },
+      ],
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockUseSpecFileContent.mockReturnValue({
+      data: { sha: "abc", content: FEATURE },
+      isPending: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+  });
+
+  it("renders the structure as a document, not the file as editable text", () => {
+    render(<SpecView projectName="proj1" />);
+
+    // Twice: the rail's label for the file, and the feature's own heading. They
+    // agree because the label is the title-cased slug and the slug names the
+    // capability — which is the whole reason the label is not the filename.
+    expect(screen.getAllByText("Bought items")).toHaveLength(2);
+    expect(screen.getByText("A bought item is locked from further edits")).toBeInTheDocument();
+    expect(screen.getByText("Editing a bought item is refused")).toBeInTheDocument();
+    // Nothing on this pane takes typing: it is the specification, read-only like
+    // every other structured file.
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("opens a scenario's steps on a click, and not before", () => {
+    render(<SpecView projectName="proj1" />);
+
+    expect(
+      screen.queryByText('Dev tries to change the quantity of "Eggs" to "2"'),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Editing a bought item is refused"));
+    expect(
+      screen.getByText('Dev tries to change the quantity of "Eggs" to "2"'),
+    ).toBeInTheDocument();
+  });
+
+  // Marked in text as well as by the glyph — a Tooltip's aria-label lands on a
+  // bare span, where it is ignored.
+  it("names a refusal for a reader who cannot see the mark", () => {
+    render(<SpecView projectName="proj1" />);
+
+    expect(screen.getByText("Negative scenario")).toBeInTheDocument();
+  });
+});

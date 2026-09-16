@@ -98,6 +98,7 @@ import { WireframePanel } from "./WireframePanel";
 import { OpenApiView } from "@aep/ui-openapi-view";
 import { DesignView } from "@aep/ui-design-view";
 import type { DependencyStatusInfo } from "@aep/ui-design-view";
+import { AcceptanceView } from "@aep/ui-acceptance-view";
 import { ValidationView } from "@aep/ui-validation-view";
 import {
   type SpecSelection,
@@ -525,13 +526,24 @@ export function SpecView({ projectName }: { projectName: string }) {
     /^specs\/validation\/validation-criteria\.json$/.test(
       selectedFile?.path ?? "",
     );
+  // The Gherkin acceptance criteria render as a read-only structured view.
+  // Without this they are neither .md nor structured, so they fall through to
+  // CollabTextArea — an editable monospace box over a document nobody edits by
+  // hand, which is the dishonesty CommittedFileView was written to remove.
+  const isAcceptanceFeatureFile = /^specs\/acceptance\/[^/]+\.feature$/.test(
+    selectedFile?.path ?? "",
+  );
   // A dependency's definition renders as its own structured view (ADR-0028)
   // — the same path a component's design.json takes.
   const isDependencyDefinitionFile = isDependencyDefinition(selectedFile?.path ?? "");
   // The structured files share the read-only render path (no collab editor,
   // sourced from the live doc or the committed fetch).
   const isStructuredFile =
-    isOpenApiFile || isComponentDesignFile || isValidationCriteriaFile || isDependencyDefinitionFile;
+    isOpenApiFile ||
+    isComponentDesignFile ||
+    isValidationCriteriaFile ||
+    isAcceptanceFeatureFile ||
+    isDependencyDefinitionFile;
   // Canvas-based views (cell diagram, Excalidraw) need a flex-column,
   // overflow-hidden ancestor so their own `flex: 1` roots get a real
   // measured height to stretch into — a plain overflow:auto block (used for
@@ -1396,6 +1408,10 @@ export function SpecView({ projectName }: { projectName: string }) {
                       <OpenApiView spec={structuredLive} />
                     ) : isValidationCriteriaFile ? (
                       <ValidationView criteria={structuredLive} />
+                    ) : isAcceptanceFeatureFile ? (
+                      <AcceptanceView
+                        features={[{ path: selectedFile.path, content: structuredLive }]}
+                      />
                     ) : isDependencyDefinitionFile ? (
                       <DependencyView
                         projectName={projectName}
@@ -1425,6 +1441,13 @@ export function SpecView({ projectName }: { projectName: string }) {
                       <ValidationView
                         key={content.data.sha}
                         criteria={content.data.content}
+                      />
+                    ) : isAcceptanceFeatureFile ? (
+                      <AcceptanceView
+                        key={content.data.sha}
+                        features={[
+                          { path: selectedFile.path, content: content.data.content },
+                        ]}
                       />
                     ) : isDependencyDefinitionFile ? (
                       <DependencyView

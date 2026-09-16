@@ -70,6 +70,18 @@ export function fileLabel(path: string): string {
   // requirement's `<slug>.md` depth document, and a `<capability>.feature` of
   // acceptance criteria. Each is named for what it covers, under a section
   // header that already says which phase it belongs to.
-  return basename(path).replace(/\.(md|feature)$/, "");
+  const name = basename(path).replace(/\.(md|feature)$/, "");
+  // A `.feature` slug is a capability name the agent chose (`bought-items`), so it
+  // is title-cased into the sentence the rail already reads in. A requirement's
+  // `<slug>.md` keeps its verbatim name: those are referenced by name in the PRD,
+  // and re-casing one would stop the two matching.
+  return path.endsWith(".feature") ? titleCase(name) : name;
+}
+
+// `bought-items` -> `Bought items`. First word only: a capability is a phrase, not
+// a heading, and Title Casing Every Word reads as a product name.
+function titleCase(slug: string): string {
+  const words = slug.split(/[-_]+/).filter(Boolean).join(" ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 

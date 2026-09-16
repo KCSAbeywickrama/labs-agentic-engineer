@@ -60,15 +60,6 @@ vi.mock("../../builds/components/RunFeed", () => ({
   ),
 }));
 
-// Live per-criterion statuses ride an SSE stream (useRunProgress). Stubbed to a
-// settable map so the page's chip PRECEDENCE is assertable without a stream — the
-// fold that builds the map is tested on its own in useValidationLive.test.ts.
-let mockLive: Record<string, string> = {};
-let mockLiveActive = true;
-vi.mock("../hooks/useValidationLive", () => ({
-  useValidationLive: () => ({ statuses: mockLive, active: mockLiveActive }),
-}));
-
 // Controllable status + runs + file queries (no QueryClientProvider / MSW).
 let mockValidation = "none";
 let mockRun: MilestoneRunView | undefined;
@@ -129,15 +120,15 @@ const validationCycle = {
   createdAt: "2026-07-10T10:00:00Z",
 };
 
-// `error` is widened because the page BRANCHES on it: the envelope's `not_found`
-// means the oracle was never authored, which reads differently from a read that
-// merely failed.
-const mockCriteria = {
+// The oracle is a SET of files now, so the hook reports its own absence rather
+// than the page reading a 404 off one read: `isAbsent` means the version authored
+// no feature files, which reads differently from a read that merely failed.
+const mockFeatures = {
+  features: [] as { path: string; content: string }[],
   isPending: false,
   isError: false,
-  error: null as Error | null,
+  isAbsent: false,
   refetch: vi.fn(),
-  data: undefined as { content: string } | undefined,
 };
 const mockReport = {
   isPending: false,
@@ -242,46 +233,130 @@ vi.mock("../../tasks/api/queries", () => ({
 }));
 
 vi.mock("../api/queries", () => ({
-  useValidationCriteria: () => mockCriteria,
+  useAcceptanceFeatures: () => mockFeatures,
   useValidationReport: () => mockReport,
 }));
 
 import { ValidationPage } from "./ValidationPage";
-import { ApiRequestError } from "../../../api/errors";
 
-const CRITERIA = JSON.stringify({
-  requirements: [
-    {
-      id: "REQ-001",
-      statement: "Shoppers can search the catalog.",
-      criteria: [
-        { id: "AC-001-a", must: "Search returns matches", method: "e2e" },
-        { id: "AC-001-b", must: "Category filter works", method: "e2e" },
-        { id: "AC-003-b", must: "Payment is encrypted", method: "manual" },
-      ],
-    },
-  ],
-});
+const CATALOG_FEATURE = {
+  path: "specs/acceptance/browsing-the-catalog.feature",
+  content: [
+    "Feature: Browsing the catalog",
+    "",
+    "  @story-1",
+    "  Rule: A shopper can find a product by name",
+    "",
+    "    Scenario: Searching for a product by name",
+    '      Given the catalog has a product named "Cedar Desk Lamp"',
+    '      When Priya searches for "Cedar Desk"',
+    '      Then the results include "Cedar Desk Lamp"',
+    "",
+    "    @negative",
+    "    Scenario: A search that matches nothing explains itself",
+    '      Given the catalog has no product named "Zeppelin"',
+    '      When Priya searches for "Zeppelin"',
+    "      Then she is shown that nothing matched, and no products",
+  ].join("\n"),
+};
 
+const CHECKOUT_FEATURE = {
+  path: "specs/acceptance/checkout.feature",
+  content: [
+    "Feature: Checkout",
+    "",
+    "  @story-3",
+    "  Rule: Payment details are transmitted over an encrypted connection",
+    "",
+    "    Scenario: The payment step is encrypted",
+    "      Given Priya is at the payment step",
+    "      When she submits her card details",
+    "      Then the details leave the browser encrypted",
+  ].join("\n"),
+};
+
+const FEATURES = [CATALOG_FEATURE, CHECKOUT_FEATURE];
+
+const CATALOG = "Browsing the catalog";
+const SEARCH_RULE = "A shopper can find a product by name";
+
+function scenarioEntry(
+  over: Record<string, unknown> & { scenario: string; outcome: string },
+): Record<string, unknown> {
+  return {
+    feature: CATALOG,
+    featureFile: CATALOG_FEATURE.path,
+    rule: SEARCH_RULE,
+    steps: [],
+    ...over,
+  };
+}
+
+// One of each outcome the page has to keep apart: a pass, a real defect, and a
+// scenario whose answer lives outside the running app.
 const REPORT = JSON.stringify({
-  criteria: [
-    { id: "AC-001-a", status: "pass" },
-    {
-      id: "AC-001-b",
-      status: "fail",
-      spec: "tests/e2e/specs/AC-001-b.spec.ts",
-      failure: "TimeoutError: category option never appeared",
-    },
-    { id: "AC-003-b", status: "manual" },
+  schemaVersion: 2,
+  commit: "a1b2c3d4e5f6",
+  isolation: "Each scenario creates the cart it asserts on.",
+  scenarios: [
+    scenarioEntry({
+      scenario: "Searching for a product by name",
+      outcome: "passed",
+      steps: [
+        {
+          text: 'the results include "Cedar Desk Lamp"',
+          keyword: "Then",
+          command: 'agent-browser wait --text "Cedar Desk Lamp" --timeout 3000',
+          exit: 0,
+        },
+      ],
+    }),
+    scenarioEntry({
+      scenario: "A search that matches nothing explains itself",
+      outcome: "failed",
+      steps: [
+        {
+          text: "she is shown that nothing matched, and no products",
+          keyword: "Then",
+          command: 'agent-browser get count "[data-testid=product]"',
+          exit: 1,
+          observed: "3 — products were listed for a search that matched nothing",
+        },
+      ],
+    }),
+    scenarioEntry({
+      feature: "Checkout",
+      featureFile: CHECKOUT_FEATURE.path,
+      rule: "Payment details are transmitted over an encrypted connection",
+      scenario: "The payment step is encrypted",
+      outcome: "unjudgeable",
+      steps: [
+        {
+          text: "the details leave the browser encrypted",
+          keyword: "Then",
+          observed: "the development deployment terminates TLS at the gateway",
+        },
+      ],
+    }),
   ],
 });
 
-// A report where nothing produced a result — the shape behind `inconclusive`.
+// A report where nothing was settled — the shape behind `inconclusive`.
 const NOTHING_RAN = JSON.stringify({
-  criteria: [
-    { id: "AC-001-a", status: "not_run" },
-    { id: "AC-001-b", status: "not_run" },
-    { id: "AC-003-b", status: "manual" },
+  schemaVersion: 2,
+  commit: "a1b2c3d4e5f6",
+  isolation: "Each scenario creates the cart it asserts on.",
+  scenarios: [
+    scenarioEntry({
+      scenario: "Searching for a product by name",
+      outcome: "blocked",
+      steps: [{ text: "Priya searches", keyword: "When", observed: "the search box is absent" }],
+    }),
+    scenarioEntry({
+      scenario: "A search that matches nothing explains itself",
+      outcome: "blocked",
+      steps: [{ text: "Priya searches", keyword: "When", observed: "the search box is absent" }],
+    }),
   ],
 });
 
@@ -304,14 +379,12 @@ afterEach(() => {
   mockCancelError = null;
   mockBuildVersion = "v1";
   mockDeployVersion = "v1";
-  mockCriteria.isPending = false;
-  mockCriteria.isError = false;
-  mockCriteria.error = null;
-  mockCriteria.data = undefined;
+  mockFeatures.isPending = false;
+  mockFeatures.isError = false;
+  mockFeatures.isAbsent = false;
+  mockFeatures.features = [];
   mockReport.isError = false;
   mockReport.data = undefined;
-  mockLive = {};
-  mockLiveActive = true;
   mockIssueUrl = "https://github.com/acme/demo/issues/30";
   mockIssueComments = [];
   mockIssueLive = undefined;
@@ -396,7 +469,7 @@ describe("ValidationPage cancel", () => {
       validation: { verdict: "passed" },
       cycles: [validationCycle],
     });
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     mockReport.data = { content: REPORT };
 
     renderPage(undefined);
@@ -452,8 +525,8 @@ describe("ValidationPage across a milestone's runs", () => {
         origin: "incident-adoption",
       },
     ];
-    mockCriteria.data = { content: "{}" };
-    mockReport.data = { content: "# report" };
+    mockFeatures.features = FEATURES;
+    mockReport.data = { content: "{ not json" };
 
     renderPage(undefined);
 
@@ -623,7 +696,7 @@ describe("ValidationPage lifecycle", () => {
     // instance and needs its resolved endpoints, so a build alone cannot trigger
     // it. And it names the same subject the agent's own status line does.
     expect(
-      screen.getByText(/After a deployment, the deployed system is checked/),
+      screen.getByText(/driven against the acceptance criteria/),
     ).toBeInTheDocument();
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
   });
@@ -654,7 +727,7 @@ describe("ValidationPage lifecycle", () => {
     mockDeployVersion = ""; // no spec-build run has SUCCEEDED yet
     mockBuildVersion = "v1"; // ...but v1's run is live and validating
     mockRun = run({ cycles: [validationCycle] });
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
 
     renderPage(undefined);
 
@@ -664,7 +737,7 @@ describe("ValidationPage lifecycle", () => {
     // The run was found, so the version's criteria are on screen under the tile
     // that says an attempt is under way.
     expect(
-      screen.getByText("Shoppers can search the catalog."),
+      screen.getByText("Browsing the catalog"),
     ).toBeInTheDocument();
   });
 
@@ -692,7 +765,7 @@ describe("ValidationPage lifecycle", () => {
       validation: { verdict: "failed" },
       cycles: [validationCycle],
     });
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     renderPage("logs");
     expect(screen.getByTestId("run-feed")).toHaveTextContent("validation");
     // A failed verdict still committed a report, so the toggle back exists.
@@ -726,7 +799,7 @@ describe("ValidationPage lifecycle", () => {
       }),
       state: "running",
     };
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     mockReport.data = { content: REPORT };
     renderPage(undefined);
 
@@ -740,7 +813,7 @@ describe("ValidationPage lifecycle", () => {
     // coding cycle in flight has no validation log to show in its place.
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
     expect(
-      screen.getByText("Shoppers can search the catalog."),
+      screen.getByText("Browsing the catalog"),
     ).toBeInTheDocument();
   });
 
@@ -760,7 +833,7 @@ describe("ValidationPage lifecycle", () => {
       }),
       state: "running",
     };
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     mockReport.data = { content: REPORT };
     renderPage(undefined);
 
@@ -769,7 +842,7 @@ describe("ValidationPage lifecycle", () => {
     // job to say — twice, in the sentence and in the tally.
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
     expect(
-      screen.getByText("Shoppers can search the catalog."),
+      screen.getByText("Browsing the catalog"),
     ).toBeInTheDocument();
     // Chip and tile headline both, as with every other state.
     expect(screen.getAllByText("Validating").length).toBe(2);
@@ -788,7 +861,7 @@ describe("ValidationPage lifecycle", () => {
       }),
       state: "running",
     };
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     mockReport.data = { content: REPORT };
 
     const onViewChange = renderPage("logs");
@@ -813,7 +886,7 @@ describe("ValidationPage lifecycle", () => {
       validation: { verdict: "passed" },
       cycles: [validationCycle],
     });
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     renderPage(undefined);
     // The header chip and the tile headline, both from the shared mapper — which
     // is why they read identically rather than being written twice.
@@ -834,7 +907,7 @@ describe("ValidationPage lifecycle", () => {
       },
       cycles: [validationCycle],
     });
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     mockReport.data = { content: REPORT };
     renderPage(undefined);
 
@@ -847,7 +920,7 @@ describe("ValidationPage lifecycle", () => {
     // because a Chip with no onClick has no role and would ignore an aria-label.
     expect(screen.getByText("Validated, partially")).toBeInTheDocument();
     expect(
-      screen.getByText("Shoppers can search the catalog."),
+      screen.getByText("Browsing the catalog"),
     ).toBeInTheDocument();
   });
 
@@ -860,14 +933,14 @@ describe("ValidationPage lifecycle", () => {
       },
       cycles: [validationCycle],
     });
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     mockReport.data = { content: NOTHING_RAN };
     renderPage(undefined);
 
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
     expect(screen.getAllByText("Validation?").length).toBe(2);
     expect(
-      screen.getByText(/please validate them manually/),
+      screen.getByText(/please check them yourself/),
     ).toBeInTheDocument();
   });
 
@@ -880,7 +953,7 @@ describe("ValidationPage lifecycle", () => {
       validation: { verdict: "unreported" },
       cycles: [validationCycle],
     });
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     renderPage(undefined);
 
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
@@ -891,7 +964,7 @@ describe("ValidationPage lifecycle", () => {
     expect(screen.queryByText(/report wasn't found/)).not.toBeInTheDocument();
     // The criteria still render — they live under specs/, not in the report.
     expect(
-      screen.getByText("Shoppers can search the catalog."),
+      screen.getByText("Browsing the catalog"),
     ).toBeInTheDocument();
     // And with no report there is nothing to count.
     expect(screen.queryByText(/\d+ passed/)).not.toBeInTheDocument();
@@ -903,7 +976,7 @@ describe("ValidationPage lifecycle", () => {
       validation: { verdict: "passed" },
       cycles: [validationCycle],
     });
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     renderPage(undefined);
     expect(
       screen.getByRole("link", { name: /Validation pull request #42/ }),
@@ -919,7 +992,7 @@ describe("ValidationPage lifecycle", () => {
       validation: { verdict: "passed" },
       cycles: [validationCycle],
     });
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     renderPage(undefined);
     expect(
       screen.getByRole("link", { name: /Validation issue #30/ }),
@@ -934,7 +1007,7 @@ describe("ValidationPage lifecycle", () => {
       // omitempty, so a run that never validated says 0, not "absent".
       cycles: [{ ...validationCycle, validationIssue: 0 }],
     });
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     renderPage(undefined);
     expect(
       screen.queryByRole("link", { name: /Validation issue #30/ }),
@@ -954,7 +1027,7 @@ describe("ValidationPage lifecycle", () => {
       validation: { verdict: "passed" },
       cycles: [validationCycle],
     });
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     renderPage(undefined);
     expect(
       screen.queryByRole("link", { name: /Validation issue #30/ }),
@@ -967,7 +1040,7 @@ describe("ValidationPage lifecycle", () => {
       validation: { verdict: "passed" },
       cycles: [validationCycle],
     });
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     mockReport.data = { content: REPORT };
     const onViewChange = renderPage(undefined);
 
@@ -981,7 +1054,7 @@ describe("ValidationPage lifecycle", () => {
       validation: { verdict: "passed" },
       cycles: [validationCycle],
     });
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     mockReport.data = { content: REPORT };
     const onViewChange = renderPage("logs");
 
@@ -996,13 +1069,13 @@ describe("ValidationPage lifecycle", () => {
       validation: { verdict: "passed" },
       cycles: [validationCycle],
     });
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     mockReport.isError = true;
     renderPage(undefined);
 
     expect(screen.getByText(/report wasn't found/)).toBeInTheDocument();
     expect(
-      screen.getByText("Shoppers can search the catalog."),
+      screen.getByText("Browsing the catalog"),
     ).toBeInTheDocument();
     // No state chips without a report.
     expect(screen.queryByText("Passed")).not.toBeInTheDocument();
@@ -1013,49 +1086,55 @@ describe("ValidationPage lifecycle", () => {
 // expands, and it cannot change — the runner, the report generator and the
 // tests/e2e/specs/<AC-ID>.spec.ts path all key on it. So no surface may leak it,
 // which is part of what these assertions hold.
-describe("ValidationPage criterion rows", () => {
-  function renderWithCriteria() {
+describe("ValidationPage scenario rows", () => {
+  function renderWithScenarios() {
     mockValidation = "passed";
     mockRun = run({
       validation: { verdict: "passed", reportPath: "tests/acceptance/report.json" },
       cycles: [validationCycle],
     });
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     mockReport.data = { content: REPORT };
     renderPage(undefined);
   }
 
-  // The tile above already prints "N passed · M manual" and its method line. The
-  // view's own tally repeated those numbers a few rows lower on the same screen.
+  // The tile above already prints the tally. The view's own would repeat those
+  // numbers a few rows lower on the same screen.
   it("drops the summary tally the tile above already prints", () => {
-    renderWithCriteria();
+    renderWithScenarios();
 
-    expect(screen.queryByText("auto 2")).not.toBeInTheDocument();
-    expect(screen.queryByText("manual 1")).not.toBeInTheDocument();
-    expect(screen.queryByText(/requirements ·/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/capabilities ·/)).not.toBeInTheDocument();
   });
 
-  // Inside REQ-001's card the `AC-001-` half of every criterion id is already on
-  // the page, so the rows print only what distinguishes them. The full id stays
-  // reachable on hover, being the handle for spec filenames and for the agent.
-  it("shortens the ids to what the card does not already say", () => {
-    renderWithCriteria();
+  // Every outcome gets its own word, and each one its own glyph — four outlined
+  // chips that differed by hue alone would be nothing to a colour-blind reader.
+  it("chips each scenario with the report's own word", () => {
+    renderWithScenarios();
 
-    expect(screen.getByText("1")).toBeInTheDocument();
-    expect(screen.getAllByText("a").length).toBeGreaterThan(0);
-    expect(screen.queryByText("AC-001-a")).not.toBeInTheDocument();
-    expect(screen.queryByText("REQ-001")).not.toBeInTheDocument();
+    expect(screen.getByText("Passed")).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+    expect(screen.getByText("Unjudgeable")).toBeInTheDocument();
   });
 
-  // The description explaining what criteria ARE belongs to the Spec view, where
-  // a reader meets the document cold. Here they arrived to read run results, so a
-  // sentence telling them results appear under Validations would be redundant on
-  // the page holding them. Gated by `hideDescription`, asserted so the gate cannot
-  // be dropped silently.
+  // Nothing opens by itself, so the one line under a non-passed row is all the
+  // page says about WHY — and it has to be enough to triage on.
+  it("says why a scenario did not pass without being opened", () => {
+    renderWithScenarios();
+
+    expect(
+      screen.getByText("3 — products were listed for a search that matched nothing"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('the results include "Cedar Desk Lamp"'),
+    ).not.toBeInTheDocument();
+  });
+
+  // The description explaining what the criteria ARE belongs to the Spec view,
+  // where a reader meets the document cold. Here they arrived to read run results.
   it("omits the spec view's explanation", () => {
-    renderWithCriteria();
+    renderWithScenarios();
 
-    expect(screen.queryByText(/Each criterion represents/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Each scenario is one concrete example/)).not.toBeInTheDocument();
   });
 });
 
@@ -1071,31 +1150,28 @@ describe("ValidationPage first attempt in flight", () => {
 
   it("opens on the criteria, not the log", () => {
     runningFirstAttempt();
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
 
     renderPage(undefined);
 
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
     expect(
-      screen.getByText("Shoppers can search the catalog."),
+      screen.getByText("Browsing the catalog"),
     ).toBeInTheDocument();
     // Chip and tile headline both, as with every other state.
     expect(screen.getAllByText("Validating").length).toBe(2);
-    // Read through the tile's own element rather than by text: the two method names
-    // are marked up as terms, so no single text node holds the whole sentence. Their
-    // text is the vocabulary's lowercase label — the uppercase is CSS, exactly as on
-    // the badges.
+    // No method split: an acceptance scenario does not declare who checks it, so
+    // every one of them is driven and the tile has one sentence rather than two.
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "auto criteria are being validated end to end against the deployed system. Please validate the manual criteria yourself.",
+      "Every acceptance scenario is being driven against the deployed system.",
     );
-    // Counted off the ORACLE — there is no report to count — and in the same words
-    // the badges below use.
-    expect(screen.getByText("2 auto · 1 manual")).toBeInTheDocument();
+    // Counted off the FEATURE FILES — there is no report to count yet.
+    expect(screen.getByText("3 scenarios")).toBeInTheDocument();
   });
 
   it("keeps the log one click away, and the way back from it", () => {
     runningFirstAttempt();
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
 
     const onViewChange = renderPage(undefined);
     fireEvent.click(screen.getByRole("button", { name: /View logs/ }));
@@ -1108,53 +1184,32 @@ describe("ValidationPage first attempt in flight", () => {
     ).toBeGreaterThan(0);
   });
 
-  // The tile's second sentence is an instruction. Pointing a reader at manual
-  // criteria that do not exist sends them looking for an empty list.
-  it("asks for nothing by hand when every criterion is automated", () => {
+  // The count inflects, and it counts SCENARIOS rather than files — a capability
+  // with three of them is not three capabilities.
+  it("counts the scenarios, not the feature files", () => {
     runningFirstAttempt();
-    mockCriteria.data = {
-      content: JSON.stringify({
-        requirements: [
-          {
-            id: "REQ-001",
-            statement: "Shoppers can search the catalog.",
-            criteria: [
-              { id: "AC-001-a", must: "Search returns matches", method: "e2e" },
-            ],
-          },
-        ],
-      }),
-    };
+    mockFeatures.features = [CHECKOUT_FEATURE];
 
     renderPage(undefined);
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "auto criteria are being validated end to end against the deployed system.",
-    );
-    expect(screen.getByRole("alert")).not.toHaveTextContent(/Please validate/);
-    expect(screen.getByText("1 auto")).toBeInTheDocument();
+    expect(screen.getByText("1 scenario")).toBeInTheDocument();
   });
 
-  // `not_found` is the Files API's answer for a version whose spec authored no
-  // criteria — the state its run eventually settles as `skipped`. The tile is then
-  // the whole body: there is nothing to list under it.
-  it("says the version has no criteria when the read comes back not_found", () => {
+  // No feature files at this version — the state its run eventually settles as
+  // `skipped`. The tile is then the whole body: there is nothing to list under it.
+  it("says the version has no criteria when the spec authored none", () => {
     runningFirstAttempt();
-    mockCriteria.isError = true;
-    mockCriteria.error = new ApiRequestError(
-      { code: "not_found", message: "no spec file at validation-criteria.json" },
-      "Failed to load",
-    );
+    mockFeatures.isAbsent = true;
 
     renderPage(undefined);
 
     expect(
       screen.getByText(
-        "This version has no validation criteria, so there is nothing to check the deployment against.",
+        "This version has no acceptance criteria, so there is nothing to check the deployment against.",
       ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText(/Failed to load the validation criteria/),
+      screen.queryByText(/Failed to load the acceptance criteria/),
     ).not.toBeInTheDocument();
     expect(screen.queryByTestId("run-feed")).not.toBeInTheDocument();
     // The log is still reachable — the header reads the same in both running shapes.
@@ -1163,25 +1218,21 @@ describe("ValidationPage first attempt in flight", () => {
     ).toBeInTheDocument();
   });
 
-  // The other half of that branch, and the reason it is keyed on the envelope's
-  // code: a read that merely FAILED must not be reported as a spec that authored
-  // nothing.
+  // The other half of that branch, and the reason the hook reports absence
+  // separately from failure: a read that merely FAILED must not be reported as a
+  // spec that authored nothing.
   it("offers a retry when the criteria read merely failed", () => {
     runningFirstAttempt();
-    mockCriteria.isError = true;
-    mockCriteria.error = new ApiRequestError(
-      { code: "internal", message: "upstream unavailable" },
-      "Failed to load",
-    );
+    mockFeatures.isError = true;
 
     renderPage(undefined);
 
     expect(
-      screen.getByText(/Failed to load the validation criteria/),
+      screen.getByText(/Failed to load the acceptance criteria/),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
     expect(
-      screen.queryByText(/no validation criteria/),
+      screen.queryByText(/no acceptance criteria/),
     ).not.toBeInTheDocument();
   });
 });
@@ -1190,53 +1241,10 @@ describe("ValidationPage first attempt in flight", () => {
 // eventually FOUND, and nothing at all in between — every row read "Pending" for
 // up to two hours (the validation cycle's deadline), or worse, held the previous
 // attempt's verdict while a new attempt re-worked exactly those criteria.
-describe("ValidationPage live per-criterion progress", () => {
-  it("says what the run is doing while no criterion has been picked up yet", () => {
-    // SKILL.md steps 1-5 — reading the issue, cutting the branch, scaffolding
-    // tests/e2e. The rows cannot narrate it because none of them has been
-    // touched, and this is the stretch that most looks like a dead run.
-    mockValidation = "running";
-    mockRun = { ...run({ cycles: [validationCycle] }), state: "running" };
-    mockCriteria.data = { content: CRITERIA };
-    renderPage(undefined);
-
-    expect(screen.getByText("Setting up the test harness…")).toBeInTheDocument();
-  });
-
-  it("narrates the reporting tail, when every row is settled and nothing moves", () => {
-    mockValidation = "running";
-    mockRun = { ...run({ cycles: [validationCycle] }), state: "running" };
-    mockCriteria.data = { content: CRITERIA };
-    // Both auto criteria answered; the manual one never moves and must not hold
-    // the line back.
-    mockLive = { "AC-001-a": "pass", "AC-001-b": "fail" };
-    renderPage(undefined);
-
-    expect(screen.getByText("Writing the validation report…")).toBeInTheDocument();
-  });
-});
-
-describe("ValidationPage live note is gated on an open cycle", () => {
-  it("says nothing over a settled verdict whose report was never fetched", () => {
-    // `unreported` settles the run AND skips the report read, so the page has no
-    // statuses and no report — which read identically to a run that had not
-    // started, and announced "Setting up the test harness…" over a finished one.
-    mockValidation = "unreported";
-    mockRun = run({
-      validation: { verdict: "unreported" },
-      cycles: [validationCycle],
-    });
-    mockCriteria.data = { content: CRITERIA };
-    mockLive = {};
-    mockLiveActive = false;
-    renderPage(undefined);
-
-    expect(screen.queryByText("Setting up the test harness…")).not.toBeInTheDocument();
-  });
-
-  it("says nothing while a repair cycle is writing code", () => {
-    // The newest validation cycle is the PREVIOUS attempt's, already closed, so
-    // nothing is validating even though the run is live.
+// The previous attempt's evidence has to survive the repair that follows it —
+// that is the whole reason the report is pinned to its own merge commit.
+describe("ValidationPage across a repair", () => {
+  it("keeps the failed attempt's evidence while a repair cycle writes code", () => {
     mockValidation = "awaiting-fix";
     mockRun = {
       ...run({
@@ -1245,15 +1253,13 @@ describe("ValidationPage live note is gated on an open cycle", () => {
       }),
       state: "running",
     };
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     mockReport.data = { content: REPORT };
-    mockLive = {};
-    mockLiveActive = false;
     renderPage(undefined);
 
-    expect(screen.queryByText("Setting up the test harness…")).not.toBeInTheDocument();
-    // The previous attempt's evidence still stands.
-    expect(screen.getByText(/category option never appeared/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/products were listed for a search that matched nothing/),
+    ).toBeInTheDocument();
   });
 });
 
@@ -1266,10 +1272,10 @@ describe("ValidationPage agent status line", () => {
   const validating = () => {
     mockValidation = "running";
     mockRun = { ...run({ cycles: [validationCycle] }), state: "running" };
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
   };
 
-  it("shows the agent's own words over the derived sentence", () => {
+  it("shows the agent's own words", () => {
     validating();
     // The derived line would say "Setting up the test harness…" here, because no
     // criterion has been touched. The agent knows better and said so.
@@ -1336,24 +1342,25 @@ describe("ValidationPage agent status line", () => {
     expect(screen.queryByText(/AC-005-a/)).not.toBeInTheDocument();
   });
 
-  it("falls back to the derived sentence when the agent has posted nothing", () => {
+  it("says nothing when the agent has posted nothing", () => {
     // The skill ASKS for the line, and an asked-for thing can be skipped — so the
     // page must degrade to what it showed before rather than to a blank.
     validating();
     mockIssueComments = [];
     renderPage(undefined);
 
-    expect(screen.getByText("Setting up the test harness…")).toBeInTheDocument();
+    // The derived fallback that used to speak here counted criterion rows moving,
+    // and nothing emits those any more — it was deleted rather than re-derived.
+    expect(screen.queryByText(/Setting up the test harness/)).not.toBeInTheDocument();
   });
 
-  it("survives the switch to the log body, where the derived line cannot", () => {
+  it("survives the switch to the log body", () => {
     // The live fold is opened only for the report body, so `live.active` is false
     // here and the derived sentence is empty by construction. The status line is
     // polled rather than streamed, so it does not care — and the log view is
     // exactly where someone watching a long run sits.
     validating();
     mockIssueComments = [{ id: "c1", body: "Running the whole suite." }];
-    mockLiveActive = false;
     renderPage("logs");
 
     expect(screen.getByText("Running the whole suite.")).toBeInTheDocument();
@@ -1399,7 +1406,7 @@ describe("ValidationPage agent status line", () => {
 
     expect(screen.queryByText(/Validation complete/)).not.toBeInTheDocument();
     // The verdict itself still speaks — this removes a duplicate, not the answer.
-    expect(screen.getByText(/covered by a test and passed/)).toBeInTheDocument();
+    expect(screen.getByText(/were settled and passed/)).toBeInTheDocument();
   });
 
   // The sharper half: `awaiting-fix` is a lifecycle state, so the loop IS live —
@@ -1415,9 +1422,8 @@ describe("ValidationPage agent status line", () => {
       }),
       state: "running",
     };
-    mockCriteria.data = { content: CRITERIA };
+    mockFeatures.features = FEATURES;
     mockReport.data = { content: REPORT };
-    mockLiveActive = false;
     mockIssueComments = [{ id: "c1", body: "3 of 12 failed — report committed." }];
     renderPage(undefined);
 
