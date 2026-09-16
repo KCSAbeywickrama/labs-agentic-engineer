@@ -287,23 +287,22 @@ function MethodWord({ method }: { method: Operation["method"] }) {
 
 /**
  * A service's endpoints off its contract: searchable, filterable by method,
- * a curl per row for the deployed URL, and Try into the contract viewer. The
- * chosen curl expands under the list so the whole command is readable and
- * copyable at once.
+ * and a curl per row for the deployed URL. The chosen curl expands under its
+ * row so the whole command is readable and copyable at once. The panel's own
+ * Try API is the one way into the contract viewer — a Try per row said the
+ * same thing six times (review round).
  */
 function ServiceEndpoints({
   projectName,
   componentName,
   displayName,
   baseUrl,
-  onTryApi,
   onCount,
 }: {
   projectName: string;
   componentName: string;
   displayName: string;
   baseUrl: string | undefined;
-  onTryApi: () => void;
   /** The contract's endpoint count, once known, for the panel header. */
   onCount?: (n: number) => void;
 }) {
@@ -458,9 +457,6 @@ function ServiceEndpoints({
             >
               curl
             </Button>
-            <AccentPill aria-label={`Try ${op.method} ${op.path}`} onClick={onTryApi}>
-              Try
-            </AccentPill>
           </Stack>
           {/* The chosen command opens under ITS row, where the eye already is. */}
           {chosen?.id === op.id && baseUrl && (
@@ -631,7 +627,6 @@ function ComponentPanel({
           componentName={card.componentName}
           displayName={card.displayName}
           baseUrl={d?.endpointUrl}
-          onTryApi={onTryApi}
           onCount={setEndpointCount}
         />
       )}

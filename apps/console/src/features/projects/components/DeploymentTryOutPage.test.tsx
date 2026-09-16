@@ -452,8 +452,9 @@ describe("DeploymentTryOutPage — try it out (ADR-0032)", () => {
     // …and the chosen command expands under the list.
     expect(screen.getByText(/curl -X GET 'https:\/\/api\.dev\.expense\.localhost\/claims\/claims'/)).toBeInTheDocument();
 
-    // Try opens the contract viewer on that service.
-    fireEvent.click(within(rows[1]!).getByRole("button", { name: "Try POST /claims" }));
+    // No Try per row: the panel's own Try API is the one way into the viewer.
+    expect(within(rows[1]!).queryByRole("button", { name: /^Try / })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try claims-api API" }));
     expect(openApiDialog).toHaveBeenLastCalledWith("claims-api");
   });
 
