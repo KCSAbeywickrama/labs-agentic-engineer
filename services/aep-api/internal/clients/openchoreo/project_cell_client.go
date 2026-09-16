@@ -48,6 +48,10 @@ import (
 // Ready=True, a ProjectRelease in place — and then every component deploy into
 // it fails with "namespace ... not found".
 //
+// Cell bindings follow each pipeline's promotion order only — read the pipeline,
+// not every Environment in the namespace. The boot-resolved write-target is not
+// appended here.
+//
 // The generated `gen` client is pinned to a spec version that predates all of
 // this (see services/aep-api/Makefile, OC_SPEC_VERSION), so this is hand-rolled
 // over the same authenticated transport, exactly like ResourceClient.

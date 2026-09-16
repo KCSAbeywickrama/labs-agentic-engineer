@@ -91,7 +91,7 @@ type identityTargetResolver struct {
 	environments environmentBindingReader
 	credentials  bindingCredentialReader
 	// environment is THE choice, made once. Every build deploys and validates in
-	// this one environment today (openchoreo.DevEnvironmentName), so its roles
+	// openchoreo.DevEnvironmentName, set at boot from the pipeline source, so its roles
 	// and test users belong to that environment's identity provider. When a run
 	// carries its own environment, this field becomes a parameter on Resolve and
 	// nothing else about the design moves.
