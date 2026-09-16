@@ -62,7 +62,10 @@ did not list.
 **Nothing is a literal.** Addresses and credentials are `${env:NAME}`, injected
 from the component's dependencies at deploy. `specs/` is committed to git.
 `MODEL_*` needs no dependency — an `ai-agent` gets model access from its
-component type, on the organisation's own key.
+component type, either on the organisation's own key or through the platform's
+AI gateway. Which one is not the agent's business: it reads the same three
+variables either way. See `references/building.md`, "Model access", for the one
+branch that differs.
 
 ## Where each fact is enforced
 
@@ -74,5 +77,5 @@ A design that declares something the implementation ignores is not a design.
 | the agent owns history | `x-aep.memory.type: "server"` | the conversation store, scoped by user |
 | only these operations | `allow: [...]` | generates a tool per entry, and no others |
 | the caller is whoever signed in | `x-aep.identity.mode: "on-behalf-of"` | gates on `x-user-id`, forwards the caller's token |
-| behaviour is graded before the PR | `specs/validation/agent-scenarios.json`, from the requirements alone | runs the scenarios, may revise only the prompt body, reports the score |
+| behaviour is graded before the PR | `specs/validation/agent-scenarios.json`, from the requirements alone | runs the scenarios, may revise only the prompt body, reports the score — **unless evaluation is disabled** (`AEP_AGENT_EVAL` unset or not `on`), in which case it is skipped and the PR says so. See `references/building.md`, "Evaluate before you open the PR" |
 | no secrets in git | `${env:NAME}` | reads them from config, never hardcodes |

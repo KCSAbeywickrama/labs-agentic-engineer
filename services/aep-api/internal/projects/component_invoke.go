@@ -30,6 +30,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
@@ -101,10 +102,16 @@ type InvokeResult struct {
 //     mints, substitutes, or upgrades its own credential. An empty bearer
 //     relays with no Authorization header at all — the upstream gateway then
 //     answers 401 on its own terms, which the tester shows the caller.
+//   - The identity header is DERIVED, never passed through. userID is the
+//     verified JWT subject (auth.ActorFromContext), computed from claims this
+//     service validated — not a header the browser sent. That is what keeps it
+//     compatible with the no-passthrough rule above: an inbound `x-user-id`
+//     still never reaches the upstream, and cannot, because Invoke builds the
+//     outbound request from scratch.
 //   - Request/response size caps bound the BFF's own memory and the upstream
 //     call's duration (invokeDefaultTimeout), so this route cannot become an
 //     amplification or resource-exhaustion vector.
-func (s *componentService) Invoke(ctx context.Context, orgName, projectName, componentName string, in InvokeCall, bearer string) (InvokeResult, error) {
+func (s *componentService) Invoke(ctx context.Context, orgName, projectName, componentName string, in InvokeCall, bearer, userID string) (InvokeResult, error) {
 	if s.artifactStore == nil {
 		return InvokeResult{}, fmt.Errorf("invoke: artifact store not configured")
 	}
@@ -149,6 +156,22 @@ func (s *componentService) Invoke(ctx context.Context, orgName, projectName, com
 	req.Header.Set("Accept", "*/*")
 	if bearer != "" {
 		req.Header.Set("Authorization", bearer)
+	}
+	// WHO IS ASKING. An ai-agent scopes its conversation store by this header
+	// and answers 401 without one, so a relay that omits it can never test an
+	// agent at all — which is exactly how the console's Test tab failed, with a
+	// message about signing in again that had nothing to do with the session.
+	//
+	// It is set only when this service VERIFIED a subject; "unknown" means the
+	// claims were absent, and inventing an identity there would let the tester
+	// read conversations under a name nobody authenticated.
+	//
+	// TEMPORARY IN ONE SENSE: once an agent's endpoint is fronted by the API
+	// gateway, the gateway injects this header from the token it validated and
+	// this line becomes redundant. It is here because an agent is reachable
+	// directly today.
+	if userID != "" && userID != auth.UnknownActor {
+		req.Header.Set(userContextHeader, userID)
 	}
 
 	// A 3xx is the component's ANSWER, never an instruction this relay obeys.
@@ -274,6 +297,13 @@ func (s *componentService) deploymentEndpointIn(ctx context.Context, orgName, pr
 // proof of exhaustion, which an earlier version of this comment wrongly
 // claimed while `/%2525252e%2525252e/admin` sailed through.
 const invokePathDecodeMaxPasses = 3
+
+// userContextHeader is the header an AEP component reads its end user's
+// identity from. It is the same name the API gateway injects from a validated
+// token (spec.ExposesAPI.UserContext defaults to "X-User-Id"), so a component
+// behind the gateway and one reached through this relay see the same header
+// from the same kind of source — a verified subject, never a caller's claim.
+const userContextHeader = "X-User-Id"
 
 // validateInvokePath is the guardrail that keeps this route a scoped relay
 // instead of a general egress proxy: path must be a plain absolute path

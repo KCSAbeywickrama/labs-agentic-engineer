@@ -546,7 +546,7 @@ spec:
 OCEOF
 echo "✅ ClusterComponentType 'deployment/web-application' created"
 
-# ClusterComponentType: deployment/ai-agent — AI agent components (agent.afm.md)
+# ClusterComponentType: aep-ai-agent — AI agent components (agent.afm.md)
 # An agent is service-shaped (a TypeScript HTTP service on port 9090), so this
 # is `deployment/service` cloned with a different name and two deliberate
 # deltas from it, kept as comments below: a larger memory default (a Node
@@ -572,11 +572,21 @@ echo "✅ ClusterComponentType 'deployment/web-application' created"
 # and on org-key rotation) or an OC-side mechanism that can see the org's
 # vault path from within this template — neither exists today. See the task
 # report for the follow-up recommendation.
+#
+# NAME: the cluster-scoped copy is `aep-ai-agent`, not `ai-agent`. Cluster-scoped
+# names have one owner cluster-wide, and OpenChoreo's agent-sandbox module
+# (installed by setup-agent-manager.sh) ships its own `ai-agent`
+# ClusterComponentType — a `workloadType: proxy` sandbox type, incompatible with
+# this deployment-shaped one. Helm refuses to adopt an object it does not own, so
+# a shared name fails the sandbox install outright. Only this object moves: the
+# namespaced copy derived below keeps the name `ai-agent`, and that is the one
+# components reference (kind=ComponentType — see component_client.go's
+# buildCreateComponentBody), so nothing in aep-api changes.
 kubectl apply -f - <<'OCEOF'
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterComponentType
 metadata:
-  name: ai-agent
+  name: aep-ai-agent
 spec:
   workloadType: deployment
   allowedWorkflows:
@@ -793,7 +803,7 @@ spec:
                 - name: "${metadata.componentName}"
                   port: "${workload.endpoints[endpoint].port}"
 OCEOF
-echo "✅ ClusterComponentType 'deployment/ai-agent' created"
+echo "✅ ClusterComponentType 'aep-ai-agent' created"
 
 # ── Sample platform-resource: postgres-cnpg ClusterResourceType (P5) ────────
 # The cluster PE installs the platform-resource catalog; app-factory's BFF only
@@ -859,20 +869,28 @@ echo "✅ ClusterResourceType 'thunder-app' + thunder-app data-plane RBAC create
 # kind=ComponentType reference resolved to `ComponentTypeNotFound` and user
 # components never deployed. Derive namespaced copies (in the org control-plane
 # ns `default`) from the cluster-scoped definitions above so the two can't
-# drift. Same NAME (`service`/`web-application`/`ai-agent`); only kind +
-# namespace differ.
+# drift. Same NAME for `service`/`web-application`; the AI agent type is derived
+# from `aep-ai-agent` into the namespaced name `ai-agent` (see below). Otherwise
+# only kind + namespace differ.
 echo ""
 echo "🧩 Provisioning per-org namespaced ComponentTypes (local ProvisionOrgUnit stand-in)..."
-for _ct in service web-application ai-agent; do
-    kubectl get clustercomponenttype "$_ct" -o json \
+# `<cluster-scoped source>:<namespaced name>`. The two names differ for the AI
+# agent type alone: its cluster-scoped copy is `aep-ai-agent` so OpenChoreo's
+# agent-sandbox module can own the cluster-scoped `ai-agent` (see the CCT block
+# above), while the namespaced copy keeps `ai-agent` — the name components
+# reference, and the one aep-api's ocEntrypoint() derives.
+for _pair in service:service web-application:web-application aep-ai-agent:ai-agent; do
+    _src="${_pair%%:*}"
+    _dst="${_pair##*:}"
+    kubectl get clustercomponenttype "$_src" -o json \
         | python3 -c 'import sys, json
 c = json.load(sys.stdin)
 print(json.dumps({
     "apiVersion": c["apiVersion"],
     "kind": "ComponentType",
-    "metadata": {"name": c["metadata"]["name"], "namespace": "default"},
+    "metadata": {"name": sys.argv[1], "namespace": "default"},
     "spec": c["spec"],
-}))' \
+}))' "$_dst" \
         | kubectl apply -f -
 done
 echo "✅ Namespaced ComponentTypes 'service' + 'web-application' + 'ai-agent' created in ns 'default'"

@@ -33,6 +33,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/clients/agentmanager"
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/clients/observability"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -41,6 +42,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/thundersvc"
 	"github.com/wso2/aep/aep-api/internal/config"
 	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/delivery/agentgovernance"
 	"github.com/wso2/aep/aep-api/internal/delivery/build"
 	"github.com/wso2/aep/aep-api/internal/delivery/codingagent"
 	"github.com/wso2/aep/aep-api/internal/delivery/eventcore"
@@ -337,6 +339,19 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// the Enabled() check.
 	credService.WithSecretRefWriter(secretRefWriter)
 	anthropicCredService.WithSecretRefWriter(secretRefWriter)
+	// A rotated org key must reach the Agent Manager provider that holds a copy
+	// of it, or every governed agent in the org keeps calling Anthropic with a
+	// revoked credential until the next deploy re-asserts it.
+	anthropicCredService.WithModelProvider(ampModelProviderPublisher{
+		amp: ampClientFactory{cfg: agentmanager.Config{
+			TokenURL:     cfg.AgentManager.TokenURL,
+			ClientID:     cfg.AgentManager.ClientID,
+			ClientSecret: cfg.AgentManager.ClientSecret,
+			Resource:     cfg.AgentManager.Resource,
+			HostHeader:   cfg.AgentManager.HostHeader,
+		}},
+		bindings: environmentClient,
+	})
 	validatorProbes := organization.NewValidatorProbes(credService, gitHost, credResolver, minter)
 	credValidator := secrets.NewValidator(db, validatorProbes, nil, cfg.CredentialValidatorInterval)
 
@@ -1340,6 +1355,49 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// its first turn with an upstream 401 ("x-api-key header is required"),
 	// which is a long way from the missing wire that caused it.
 	deploymentService.SetModelAccess(componentService)
+	// Agent Manager governance, called from inside Deploy — the one path every
+	// deployment takes, so the workflow's promote, Converge's drift repair and a
+	// config change's redeploy are all covered by construction.
+	agentComponentKinds := ampComponentKinds{store: artifactStore}
+	agentGovernor := agentgovernance.New(agentgovernance.Deps{
+		AMP: ampClientFactory{cfg: agentmanager.Config{
+			TokenURL:     cfg.AgentManager.TokenURL,
+			ClientID:     cfg.AgentManager.ClientID,
+			ClientSecret: cfg.AgentManager.ClientSecret,
+			Resource:     cfg.AgentManager.Resource,
+			HostHeader:   cfg.AgentManager.HostHeader,
+		}},
+		Keys: ampKeyStore{
+			writer: secretRefWriter,
+			refs:   modelAccessSecretRefClient,
+			orgs:   orgRepo,
+		},
+		Bindings: environmentClient,
+		OrgKeys:  ampOrgKeyReader{creds: anthropicCredService},
+		// Only ai-agent components are governed; a wave's services and web apps
+		// are left alone.
+		Kinds: agentComponentKinds,
+	})
+	deploymentService.SetGovernor(agentGovernor)
+	// The BUILD-TIME half of the same governor: the version's `provision` gate
+	// registers this version's agents before the coding agent is dispatched, so
+	// an Agent Manager that cannot serve the build fails it at PLANNING rather
+	// than after a full coding → build → deploy → validate cycle. The same
+	// governor object, so the two halves can never disagree about what a
+	// registration is; only the credential is withheld (see EnsureRegistration).
+	provisioningSvc.SetAgentRegistrar(ampAgentRegistrar{
+		governor: agentGovernor,
+		kinds:    agentComponentKinds,
+	})
+	// Model access is composed from the AI gateway binding when the environment
+	// has one: an Agent-Manager-governed agent gets the gateway's endpoint and
+	// its own AMP key instead of the org's Anthropic key. Nil-safe — an
+	// environment with no binding composes exactly what it did before.
+	if cs, ok := componentService.(interface {
+		SetAIGatewayBindings(projects.AIGatewayBindingReader)
+	}); ok {
+		cs.SetAIGatewayBindings(environmentClient)
+	}
 	// Endpoint deploy-wait: after OC Ready, a component that advertises an
 	// external URL stays pending until that URL answers. OC reports Ready when
 	// the control plane is done, which on a cloud plane is minutes before a

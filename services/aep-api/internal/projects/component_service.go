@@ -50,7 +50,7 @@ type ComponentService interface {
 	// shape left it reachable only by type assertion, app.go never wired it,
 	// and every ai-agent deployed with no model key and 500'd on its first
 	// turn. Nothing failed at deploy time, which is what made it expensive.
-	ModelAccessEnvVars(ctx context.Context, ocOrgID string) ([]openchoreo.WorkflowEnvVarRef, error)
+	ModelAccessEnvVars(ctx context.Context, ocOrgID, component string) ([]openchoreo.WorkflowEnvVarRef, error)
 
 	ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*gen.ComponentList, error)
 	GetComponent(ctx context.Context, orgName, projectName, componentName string) (*gen.Component, error)
@@ -77,7 +77,7 @@ type ComponentService interface {
 	// general egress proxy. Any component type may be invoked (unlike
 	// GetComponentOpenAPI, which is service-only): an ai-agent today, a
 	// service later for the API tester.
-	Invoke(ctx context.Context, orgName, projectName, componentName string, in InvokeCall, bearer string) (InvokeResult, error)
+	Invoke(ctx context.Context, orgName, projectName, componentName string, in InvokeCall, bearer, userID string) (InvokeResult, error)
 
 	// Build (workflow runs)
 	TriggerBuild(ctx context.Context, orgName, projectName, componentName string) (*gen.WorkflowRun, error)
@@ -122,6 +122,25 @@ const (
 	modelNameEnvVar     = "MODEL_NAME"
 	modelAPIKeyEnvVar   = "MODEL_API_KEY"
 
+	// modelAPIKeyHeaderEnvVar / ampModelAPIKeyHeader are a HACK, and carry an
+	// expiry date.
+	//
+	// Agent Manager's per-agent LLM proxy authenticates on a header of its own
+	// choosing — `API-Key` — and that name is not configurable today. The
+	// Anthropic client an AEP agent is built on sends its credential as
+	// `x-api-key` and offers no way to rename it, so a governed agent's request
+	// arrives at the proxy unauthenticated. Naming the header here, and having
+	// the agent template send the key under whatever name it finds, is what
+	// bridges the two until Agent Manager makes the proxy's header
+	// configurable — which its team has confirmed it will.
+	//
+	// WHEN THAT LANDS: stop setting this variable. The agent template already
+	// falls back to the SDK's own default when it is unset, so every agent
+	// reverts with no code change. Delete these two constants and the branch in
+	// ModelAccessEnvVars that emits them.
+	modelAPIKeyHeaderEnvVar = "MODEL_API_KEY_HEADER"
+	ampModelAPIKeyHeader    = "API-Key"
+
 	modelEndpointDefault = "https://api.anthropic.com/v1"
 	modelNameDefault     = "claude-sonnet-5"
 
@@ -144,6 +163,10 @@ type componentService struct {
 	// (tests / unit-only flows).
 	repoSvc      sourcecontrol.RepoService
 	buildCredSvc BuildSecretStager
+	// aiGatewayBindings resolves the environment's Agent Manager AI gateway.
+	// Nil on a deployment with no Agent Manager, which composes the pre-AMP
+	// direct-key path.
+	aiGatewayBindings AIGatewayBindingReader
 	// modelKeyResolver + secretRefClient back ModelAccessEnvVars, which the
 	// deploy stage calls while composing an ai-agent's ReleaseBinding (see
 	// ai_agent_model_access.go). Optional — nil means "not configured" (tests /
@@ -177,6 +200,17 @@ func NewComponentService(client openchoreo.ComponentClient, observClient observa
 		modelKeyResolver: modelKeyResolver,
 		secretRefClient:  secretRefClient,
 	}
+}
+
+// SetAIGatewayBindings wires the reader that tells ModelAccessEnvVars whether an
+// agent's model access is governed by Agent Manager.
+//
+// A setter rather than a constructor parameter, matching DeploymentService's
+// SetModelAccess and for the same reason: it is optional, every existing caller
+// composes correctly without it, and a deployment with no Agent Manager passes
+// nothing.
+func (s *componentService) SetAIGatewayBindings(r AIGatewayBindingReader) {
+	s.aiGatewayBindings = r
 }
 
 func (s *componentService) ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*gen.ComponentList, error) {

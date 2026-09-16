@@ -74,6 +74,27 @@ type AnthropicCredentialService struct {
 
 	// secretRefWriter mirrors the key into SM-API on Connect. nil-safe.
 	secretRefWriter *SecretRefWriter
+
+	// modelProvider is told when the org's key changes, so an Agent Manager
+	// provider holding a COPY of it stops holding a revoked one. nil-safe.
+	modelProvider ModelProviderPublisher
+}
+
+// ModelProviderPublisher receives the org's current Anthropic key so a governed
+// model provider can be kept truthful.
+//
+// Declared here, implemented at the composition root: this domain must not
+// reach into Agent Manager, and the only thing it has to say is "the key
+// changed". An org with no governed environment has no implementation wired and
+// nothing happens.
+type ModelProviderPublisher interface {
+	PublishOrgModelKey(ctx context.Context, ocOrgID, apiKey string) error
+}
+
+// WithModelProvider injects the publisher; chainable, nil disables the push.
+func (s *AnthropicCredentialService) WithModelProvider(p ModelProviderPublisher) *AnthropicCredentialService {
+	s.modelProvider = p
+	return s
 }
 
 // WithSecretRefWriter injects the SM-API writer; chainable. nil disables
@@ -242,6 +263,30 @@ func (s *AnthropicCredentialService) Connect(ctx context.Context, ocOrgID string
 		if _, err := s.secretRefWriter.WriteAnthropic(ctx, ocOrgID, role, key); err != nil {
 			slog.WarnContext(ctx, "anthropic: SM-API mirror failed (legacy store still authoritative)",
 				"ocOrgId", ocOrgID, "role", role, "error", err)
+		}
+	}
+
+	// Push the new key to the org's Agent Manager provider, which holds a COPY
+	// of it on behalf of every governed agent.
+	//
+	// WHY THIS MATTERS MORE THAN IT LOOKS: without it, a rotated key leaves the
+	// provider calling Anthropic with a revoked one, and EVERY governed agent in
+	// the org fails at once — at the upstream, far from Settings, with nothing
+	// in AEP saying why.
+	//
+	// Best-effort, and deliberately so: the key IS stored, and failing the
+	// user's Settings action because a downstream copy lagged would be the worse
+	// outcome. The next governed deploy re-asserts it anyway (EnsureProvider
+	// writes the current key every time), so this is how fast it converges, not
+	// whether it does.
+	//
+	// Only the DEFAULT role is published: that is the key agents run on. The
+	// coding role belongs to the coding agent, which does not go through the
+	// gateway.
+	if s.modelProvider != nil && role == AnthropicRoleDefault {
+		if err := s.modelProvider.PublishOrgModelKey(ctx, ocOrgID, key); err != nil {
+			slog.WarnContext(ctx, "anthropic: could not publish the rotated key to the Agent Manager provider; governed agents keep the previous key until the next deploy",
+				"ocOrgId", ocOrgID, "error", err)
 		}
 	}
 

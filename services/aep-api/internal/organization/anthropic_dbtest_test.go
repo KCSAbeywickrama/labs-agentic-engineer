@@ -356,3 +356,74 @@ func TestAnthropicResyncSecretRef_NoopCases_DB(t *testing.T) {
 		t.Fatalf("no triplet: want (false,nil), got (%v,%v)", wrote, err)
 	}
 }
+
+// --- rotation reaches the Agent Manager provider ------------------------------
+
+type fakeModelProviderPublisher struct {
+	published string
+	calls     int
+	err       error
+}
+
+func (f *fakeModelProviderPublisher) PublishOrgModelKey(_ context.Context, _, apiKey string) error {
+	f.calls++
+	f.published = apiKey
+	return f.err
+}
+
+// A rotated key must reach the provider that holds a COPY of it. Without this,
+// every governed agent in the org keeps calling Anthropic with a revoked
+// credential, and the failure surfaces at the upstream rather than in Settings.
+func TestAnthropicConnect_PublishesTheKeyToTheModelProvider_DB(t *testing.T) {
+	t.Parallel()
+	svc, _ := anthropicDBService(t, http.StatusOK)
+	pub := &fakeModelProviderPublisher{}
+	svc.WithModelProvider(pub)
+
+	anthropicMustConnect(t, svc, "acme", anthropicDBKey2)
+
+	if pub.calls != 1 {
+		t.Fatalf("publisher calls = %d, want 1", pub.calls)
+	}
+	if pub.published != anthropicDBKey2 {
+		t.Errorf("published %q, want the newly connected key", pub.published)
+	}
+}
+
+// A publisher failure must not fail the user's Settings action: the key IS
+// stored, and the next governed deploy re-asserts it on the provider.
+func TestAnthropicConnect_SurvivesAPublisherFailure_DB(t *testing.T) {
+	t.Parallel()
+	svc, _ := anthropicDBService(t, http.StatusOK)
+	svc.WithModelProvider(&fakeModelProviderPublisher{err: errors.New("amp unreachable")})
+
+	if _, err := svc.Connect(context.Background(), "acme", organization.AnthropicRoleDefault,
+		organization.AnthropicConnectRequest{APIKey: anthropicDBKey2}); err != nil {
+		t.Fatalf("Connect must succeed even when the provider push fails: %v", err)
+	}
+}
+
+// The CODING role's key belongs to the coding agent, which does not call through
+// the gateway. Publishing it would overwrite the provider's credential with one
+// no governed agent uses.
+func TestAnthropicConnect_DoesNotPublishTheCodingRole_DB(t *testing.T) {
+	t.Parallel()
+	svc, _ := anthropicDBService(t, http.StatusOK)
+	pub := &fakeModelProviderPublisher{}
+	svc.WithModelProvider(pub)
+
+	// The domain requires the org's own key first — a coding key is only
+	// meaningful alongside one.
+	anthropicMustConnect(t, svc, "acme", anthropicDBKey2)
+	if pub.calls != 1 {
+		t.Fatalf("default-role connect published %d time(s), want 1", pub.calls)
+	}
+
+	if _, err := svc.Connect(context.Background(), "acme", organization.AnthropicRoleCoding,
+		organization.AnthropicConnectRequest{APIKey: anthropicDBKey2}); err != nil {
+		t.Fatalf("Connect coding role: %v", err)
+	}
+	if pub.calls != 1 {
+		t.Errorf("publisher called %d time(s); the coding role must not publish", pub.calls)
+	}
+}

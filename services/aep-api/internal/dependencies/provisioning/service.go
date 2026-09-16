@@ -55,6 +55,9 @@ type Service struct {
 	environments      EnvironmentLister
 	orgSecrets        OrgSecretWriter
 	orgResourceDocs   OrgResourceDocs
+	// agents resolves the build-time Agent Manager gate (agent_gate.go). Nil is
+	// a documented no-op.
+	agents AgentRegistrar
 	// orgPublish commits the exposesAPI.orgPublished durability marker on a
 	// provider component when its access request is granted. Wired via a setter
 	// (SetOrgPublishMarker) at the composition root — it points BACK at the
@@ -105,6 +108,10 @@ func (s *Service) SetProviderBuildTrigger(t ProviderBuildTrigger) { s.providerBu
 // SetValuesSavedNotifier wires the wake-up a run parked on the deploy gate
 // listens for. Nil is a documented no-op — the run's wait-poll still re-derives.
 func (s *Service) SetValuesSavedNotifier(n ValuesSavedNotifier) { s.valuesSaved = n }
+
+// SetAgentRegistrar wires the build-time Agent Manager gate. Nil skips it, which
+// is the whole pre-Agent-Manager deployment.
+func (s *Service) SetAgentRegistrar(r AgentRegistrar) { s.agents = r }
 
 // Deps is the provisioning service's collaborator set. projects / access /
 // providers may be nil (a nil projects skips the cross-project consumer scan;

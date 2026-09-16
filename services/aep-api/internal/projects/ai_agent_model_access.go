@@ -36,6 +36,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
@@ -59,7 +60,45 @@ import (
 // before its first Settings visit is expected, not exceptional, and retrying
 // cannot conjure a key. The agent then starts unconfigured and agent-building's
 // contract is a 503 from /healthz until one is connected.
-func (s *componentService) ModelAccessEnvVars(ctx context.Context, ocOrgID string) ([]openchoreo.WorkflowEnvVarRef, error) {
+func (s *componentService) ModelAccessEnvVars(ctx context.Context, ocOrgID, component string) ([]openchoreo.WorkflowEnvVarRef, error) {
+	// An Agent-Manager-governed agent takes the AI gateway's endpoint and a key
+	// of its OWN. The org's Anthropic key is not copied into its namespace at
+	// all: it lives once, in Agent Manager's provider, and what the pod holds is
+	// a credential scoped to this agent that can be revoked without touching any
+	// other. The govern stage put it there before this deploy composed.
+	if amp, ok := s.ampModelAccess(ctx, ocOrgID, component); ok {
+		return []openchoreo.WorkflowEnvVarRef{
+			// MODEL_ENDPOINT is a secretKeyRef rather than a literal, and not
+			// because the URL is secret. Agent Manager GENERATES a proxy path
+			// per agent, so the address cannot be derived here; it was written
+			// alongside the key by the govern stage, and reading both from one
+			// SecretReference keeps composition free of any Agent Manager call.
+			{
+				Key: modelEndpointEnvVar,
+				ValueFrom: &openchoreo.WorkflowEnvVarValueRef{
+					SecretKeyRef: &openchoreo.WorkflowSecretKeyRef{
+						Name: amp.SecretRefName,
+						Key:  organization.AMPModelURLKey,
+					},
+				},
+			},
+			{Key: modelNameEnvVar, Value: modelNameDefault},
+			{
+				Key: modelAPIKeyEnvVar,
+				ValueFrom: &openchoreo.WorkflowEnvVarValueRef{
+					SecretKeyRef: &openchoreo.WorkflowSecretKeyRef{
+						Name: amp.SecretRefName,
+						Key:  amp.Property,
+					},
+				},
+			},
+			// HACK, with an expiry date — see modelAPIKeyHeaderEnvVar. The
+			// governed path is the only one that sets it; the direct path below
+			// leaves it unset and the agent uses the SDK's own default.
+			{Key: modelAPIKeyHeaderEnvVar, Value: ampModelAPIKeyHeader},
+		}, nil
+	}
+
 	if s.modelKeyResolver == nil || s.secretRefClient == nil {
 		return nil, fmt.Errorf("model access not configured at the composition root")
 	}
@@ -171,4 +210,63 @@ func (s *componentService) upsertModelAccessSecretReference(ctx context.Context,
 		return fmt.Errorf("create model-access SecretReference: %w", err)
 	}
 	return nil
+}
+
+// AIGatewayBindingReader resolves the environment's AI gateway. Satisfied by
+// openchoreo.EnvironmentClient; nil when this deployment has no Agent Manager,
+// which is the pre-AMP path.
+type AIGatewayBindingReader interface {
+	GetAIGatewayBinding(ctx context.Context, orgID, environment string) (openchoreo.AIGatewayBinding, error)
+}
+
+// ampModelAccessRef is one agent's governed model access: where to send model
+// traffic, and which SecretReference holds the key to send with it.
+type ampModelAccessRef struct {
+	SecretRefName string
+	Property      string
+}
+
+// ampModelAccess answers whether this agent's model access is governed by Agent
+// Manager, and with what.
+//
+// It performs NO network call to Agent Manager and no writes. Everything it
+// needs was established before the deploy composed: the endpoint by the
+// environment's binding record, the credential by the govern stage. Composition
+// stays a local lookup with a soft failure, and the fail-closed behaviour lives
+// in the govern stage where a failure can still stop the deploy.
+//
+// Any doubt resolves to "not governed", which falls back to the org's own
+// Anthropic key. That is the safe direction: an agent on the direct key works
+// and is merely ungoverned, while an agent pointed at a gateway whose key was
+// never stored cannot reach a model at all.
+func (s *componentService) ampModelAccess(ctx context.Context, ocOrgID, component string) (ampModelAccessRef, bool) {
+	if s.aiGatewayBindings == nil || strings.TrimSpace(component) == "" {
+		return ampModelAccessRef{}, false
+	}
+	binding, err := s.aiGatewayBindings.GetAIGatewayBinding(ctx, ocOrgID, openchoreo.DevEnvironmentName)
+	if err != nil {
+		if !errors.Is(err, openchoreo.ErrNoAIGatewayBinding) {
+			slog.WarnContext(ctx, "model access: could not read the AI gateway binding; composing direct model access",
+				"org", ocOrgID, "component", component, "error", err)
+		}
+		return ampModelAccessRef{}, false
+	}
+
+	refName := organization.AMPModelKeySecretRefName(component, openchoreo.DevEnvironmentName)
+	if _, err := s.secretRefClient.GetSecretReference(ctx, ocOrgID, refName); err != nil {
+		// The environment is governed but this agent has no stored key. The
+		// govern stage either skipped it or has not run for this component yet.
+		slog.InfoContext(ctx, "model access: no AMP model key stored for this agent; composing direct model access",
+			"org", ocOrgID, "component", component, "secretRef", refName)
+		return ampModelAccessRef{}, false
+	}
+	// binding.Endpoint is deliberately NOT used as MODEL_ENDPOINT: it is the
+	// gateway's base address, while the agent must call its own proxy path
+	// under it. Resolving the binding still matters — it is what says this
+	// environment is governed at all.
+	_ = binding
+	return ampModelAccessRef{
+		SecretRefName: refName,
+		Property:      secretmanagersvc.SecretKeyAPIKey,
+	}, true
 }

@@ -165,7 +165,11 @@ func (h *Handler) InvokeComponent(ctx context.Context, request gen.InvokeCompone
 		Path:        request.Body.Path,
 		ContentType: request.Body.ContentType,
 		Body:        []byte(request.Body.Body),
-	}, bearer)
+		// The VERIFIED subject, not anything the browser sent. An ai-agent
+		// scopes its conversation store by this identity and refuses a request
+		// without one, so the tester cannot reach an agent at all unless the
+		// relay carries it.
+	}, bearer, auth.ActorFromContext(ctx))
 	if err != nil {
 		switch {
 		case errors.Is(err, projects.ErrComponentNotFound):

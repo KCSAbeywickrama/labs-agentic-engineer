@@ -344,6 +344,55 @@ server.on("request", (req, res) => {
 Log the error, never the request body or the `Authorization` header — a chat
 turn carries the user's own words and their bearer.
 
+**A guardrail block is the ONE upstream error you relay.** When an agent's model
+access is governed, the gateway can refuse a turn on policy grounds and answers
+**422** with a body naming what intervened:
+
+```json
+{"message":{"action":"GUARDRAIL_INTERVENED",
+            "actionReason":"Violation of applied word count constraints detected",
+            "direction":"REQUEST",
+            "interveningGuardrail":"word-count-guardrail"},
+ "type":"WORD_COUNT_GUARDRAIL"}
+```
+
+That is a fact about the CALLER'S MESSAGE, not a fault in this agent. Reporting
+it as a 500 tells the user "the agent broke" when the truth is "your message was
+refused, and here is why" — and the two are indistinguishable in the UI, which
+is exactly how a working guardrail first looked like an outage.
+
+```ts
+// Reads the AI SDK's APICallError body; returns null for anything else.
+function guardrailBlock(err: unknown): { name: string; reason: string } | null {
+  const body = (err as { responseBody?: string; data?: unknown })?.responseBody;
+  if (!body) return null;
+  try {
+    const m = JSON.parse(body)?.message;
+    if (m?.action !== "GUARDRAIL_INTERVENED") return null;
+    return { name: m.interveningGuardrail ?? "guardrail", reason: m.actionReason ?? "refused by policy" };
+  } catch { return null; }
+}
+
+// in the handler's catch:
+const g = guardrailBlock(err);
+if (g) return sendJson(res, 422, { error: g.reason, guardrail: g.name });
+console.error("chat turn failed:", err);
+return sendJson(res, 500, { error: "internal error" });
+```
+
+**RELAY THIS ONE SHAPE AND NOTHING ELSE.** Do not "improve" this into forwarding
+upstream errors generally. An upstream failure body can carry the gateway's
+address, the provider handle, the model account, an SDK stack trace — and in some
+error shapes the request headers, which is where `MODEL_API_KEY` lives. A
+default-relay catch is a credential-disclosure bug, not a better error message.
+Everything that is not a recognised `GUARDRAIL_INTERVENED` body stays a generic
+500 with the detail in the log.
+
+A blocked turn must also leave NOTHING in the conversation store. That already
+holds if the handler flow above is followed — the save is step 6 and the model
+call is step 5 — so relay the refusal and return; never save the user's message
+on the way out.
+
 **Never await `initStore()` before `listen`.** The DB may not be reachable yet
 — `postgres-cnpg` provisions asynchronously, so the first schema init of a
 freshly deployed agent routinely fails. An awaited rejection there is an unhandled
@@ -369,6 +418,52 @@ to fix, not this component's, so do not invent a local answer:
   enough conversation eventually fails every turn or truncates the model's
   context. Retention and summarisation land with the platform store; do not add
   ad-hoc trimming here.
+
+## Model access
+
+Three variables carry it, and all three are injected by the platform —
+`MODEL_ENDPOINT` (the base URL), `MODEL_NAME`, `MODEL_API_KEY`. Read them in
+config like everything else, and build the provider client from them:
+
+```ts
+import { createAnthropic } from "@ai-sdk/anthropic";
+
+const model = createAnthropic({
+  baseURL: process.env.MODEL_ENDPOINT,
+  apiKey:  process.env.MODEL_API_KEY,
+})(process.env.MODEL_NAME ?? "claude-sonnet-5");
+```
+
+**`MODEL_ENDPOINT` is a base the SDK appends to, and it already ends in the
+API version segment** (`…/v1`). Never append a path of your own; the SDK asks
+for `<base>/messages` itself.
+
+### `MODEL_API_KEY_HEADER` — a temporary override
+
+When the platform sets `MODEL_API_KEY_HEADER`, send the key under THAT header
+name instead of the SDK's own:
+
+```ts
+const keyHeader = process.env.MODEL_API_KEY_HEADER;   // normally unset
+const model = createAnthropic(
+  keyHeader
+    ? { baseURL, apiKey: "unused", headers: { [keyHeader]: apiKey } }
+    : { baseURL, apiKey },                            // the SDK's own default
+)(modelName);
+```
+
+This is a HACK with an expiry date. An agent whose model traffic is governed
+reaches the model through Agent Manager's per-agent proxy, and that proxy
+authenticates on `API-Key` — a name it does not yet let anyone configure. The
+Anthropic SDK hardcodes `x-api-key` and offers no way to rename it, so a
+governed agent's request arrives unauthenticated. Naming the header in the
+environment is what bridges the two.
+
+**Write the branch, not the workaround alone.** Agent Manager's team has
+confirmed the proxy's header will become configurable; when it does the
+platform stops setting the variable, and an agent written this way reverts to
+the SDK default with no change. An agent that hardcodes `API-Key` breaks on
+that day, and one that ignores the variable cannot be governed today.
 
 ## Constraints
 
@@ -530,6 +625,20 @@ const { authorization } = callContext.getStore() ?? {};
 ```
 
 ## Evaluate before you open the PR
+
+> **PAUSED on this deployment.** Agent evaluation is OFF unless the environment
+> sets `AEP_AGENT_EVAL=on`. When it is unset or anything else: SKIP this whole
+> section — do not build the harness, do not run the scenarios — and say in the
+> PR description that evaluation was skipped because it is disabled here. The
+> scenario file is still authored at design time, so nothing else changes and
+> turning this back on is a one-word change to this line.
+>
+> Why it is off: the harness boots the agent with only `MODEL_API_KEY`
+> forwarded, so an agent whose model access also needs `MODEL_ENDPOINT` and
+> `MODEL_NAME` — which is every agent once its model access is governed through
+> the AI gateway — fails at boot and scores 0/6 for a reason that has nothing to
+> do with its behaviour. Re-enable once the harness forwards the whole
+> `MODEL_*` set.
 
 Once `npm run build` exits 0, and before the PR, run the agent's scenarios
 against the agent you just built. `specs/validation/agent-scenarios.json` was

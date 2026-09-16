@@ -102,7 +102,7 @@ func TestInvoke_HappyPath_RelaysMethodPathContentTypeAndAuth(t *testing.T) {
 		Path:        "/chat",
 		ContentType: "application/json",
 		Body:        []byte(`{"msg":"hi"}`),
-	}, "Bearer usertoken")
+	}, "Bearer usertoken", "user-42")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestInvoke_HappyPath_RelaysMethodPathContentTypeAndAuth(t *testing.T) {
 func TestInvoke_ComponentNotInCallersDesign_ErrComponentNotFound(t *testing.T) {
 	t.Parallel()
 	svc := invokeTestSvc(t, designFiles("other-component", "service", ""), "http://should-not-be-dialed.invalid", 0)
-	_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "")
+	_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "", "")
 	if !errors.Is(err, ErrComponentNotFound) {
 		t.Fatalf("want ErrComponentNotFound, got %v", err)
 	}
@@ -149,7 +149,7 @@ func TestInvoke_ComponentNotInCallersDesign_ErrComponentNotFound(t *testing.T) {
 func TestInvoke_NoReachableDeployment_ErrNotReachable(t *testing.T) {
 	t.Parallel()
 	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), "", 0)
-	_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "")
+	_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "", "")
 	if !errors.Is(err, ErrNotReachable) {
 		t.Fatalf("want ErrNotReachable, got %v", err)
 	}
@@ -168,7 +168,7 @@ func TestInvoke_BadPath_RejectedWithoutTouchingUpstream(t *testing.T) {
 
 	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
 	for _, p := range []string{"../other", "http://evil", "//evil"} {
-		if _, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: p}, ""); !errors.Is(err, ErrBadPath) {
+		if _, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: p}, "", ""); !errors.Is(err, ErrBadPath) {
 			t.Fatalf("path %q: want ErrBadPath, got %v", p, err)
 		}
 	}
@@ -186,7 +186,7 @@ func TestInvoke_UpstreamErrorStatusesAreRelayedNotErrors(t *testing.T) {
 			w.WriteHeader(status)
 		}))
 		svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
-		result, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "")
+		result, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "", "")
 		upstream.Close()
 		if err != nil {
 			t.Fatalf("status %d: want the invoke call to succeed, got err %v", status, err)
@@ -209,7 +209,7 @@ func TestInvoke_ResponseBodyCappedAt1MiB(t *testing.T) {
 	defer upstream.Close()
 
 	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
-	result, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "")
+	result, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestInvoke_RequestBodyTooLarge_RejectedWithoutTouchingUpstream(t *testing.T
 
 	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
 	oversized := bytes.Repeat([]byte("a"), invokeMaxRequestBody+1)
-	_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "POST", Path: "/x", Body: oversized}, "")
+	_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "POST", Path: "/x", Body: oversized}, "", "")
 	if !errors.Is(err, ErrBodyTooLarge) {
 		t.Fatalf("want ErrBodyTooLarge, got %v", err)
 	}
@@ -244,11 +244,16 @@ func TestInvoke_RequestBodyTooLarge_RejectedWithoutTouchingUpstream(t *testing.T
 }
 
 // 8. Header hygiene: upstream fake asserts it received ONLY Content-Type,
-// Accept, Authorization (+ the handful of headers net/http's own Transport
-// adds unconditionally, which are not a caller-controlled passthrough) — no
-// cookies, no x-forwarded-*, nothing else from an inbound request. And
-// Authorization equals the bearer ARG, proving it came from the header path,
-// not the body.
+// Accept, Authorization and X-User-Id (+ the handful of headers net/http's own
+// Transport adds unconditionally, which are not a caller-controlled
+// passthrough) — no cookies, no x-forwarded-*, nothing else from an inbound
+// request. And Authorization equals the bearer ARG, proving it came from the
+// header path, not the body.
+//
+// X-User-Id is DERIVED, not relayed: it carries the verified JWT subject this
+// service computed, and Invoke builds the outbound request from scratch, so an
+// inbound header of that name can never reach the upstream. The companion test
+// below proves the distinction rather than leaving it to this list.
 func TestInvoke_HeaderHygiene_OnlyContentTypeAcceptAuthorizationReachUpstream(t *testing.T) {
 	t.Parallel()
 	netHTTPPlumbing := map[string]bool{
@@ -256,7 +261,10 @@ func TestInvoke_HeaderHygiene_OnlyContentTypeAcceptAuthorizationReachUpstream(t 
 		"Accept-Encoding": true, // set by net/http.Transport when unset, not by Invoke
 		"Content-Length":  true, // wire framing, not a header choice
 	}
-	relayed := map[string]bool{"Content-Type": true, "Accept": true, "Authorization": true}
+	relayed := map[string]bool{
+		"Content-Type": true, "Accept": true, "Authorization": true,
+		"X-User-Id": true, // derived from verified claims — see the doc comment
+	}
 
 	var gotHeaders http.Header
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -272,13 +280,13 @@ func TestInvoke_HeaderHygiene_OnlyContentTypeAcceptAuthorizationReachUpstream(t 
 		Path:        "/chat",
 		ContentType: "application/json",
 		Body:        []byte(`{}`),
-	}, bearerArg); err != nil {
+	}, bearerArg, "user-42"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	for k := range gotHeaders {
 		if !relayed[k] && !netHTTPPlumbing[k] {
-			t.Fatalf("upstream received unexpected header %q — only Content-Type/Accept/Authorization may reach it", k)
+			t.Fatalf("upstream received unexpected header %q — only Content-Type/Accept/Authorization/X-User-Id may reach it", k)
 		}
 	}
 	if got := gotHeaders.Get("Authorization"); got != bearerArg {
@@ -301,7 +309,7 @@ func TestInvoke_EmptyBearer_RelaysWithNoAuthorizationHeaderOfItsOwn(t *testing.T
 	defer upstream.Close()
 
 	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
-	result, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "")
+	result, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -328,7 +336,7 @@ func TestInvoke_UpstreamTimeout_ErrUpstreamTimeout(t *testing.T) {
 	})
 
 	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 20*time.Millisecond)
-	_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "")
+	_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "", "")
 	if !errors.Is(err, ErrUpstreamTimeout) {
 		t.Fatalf("want ErrUpstreamTimeout, got %v", err)
 	}
@@ -360,7 +368,7 @@ func TestInvoke_RedirectIsRelayedNotFollowed(t *testing.T) {
 
 	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
 	result, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
-		InvokeCall{Method: "GET", Path: "/x"}, "Bearer caller-token")
+		InvokeCall{Method: "GET", Path: "/x"}, "Bearer caller-token", "user-42")
 	if err != nil {
 		t.Fatalf("a 3xx is a relayable answer, not a relay failure: %v", err)
 	}
@@ -400,7 +408,7 @@ func TestInvoke_EncodedTraversalAndProtocolRelative_RejectedWithoutTouchingUpstr
 		"/a/..%2fb",
 	}
 	for _, p := range bad {
-		if _, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: p}, ""); !errors.Is(err, ErrBadPath) {
+		if _, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: p}, "", ""); !errors.Is(err, ErrBadPath) {
 			t.Fatalf("path %q: want ErrBadPath, got %v", p, err)
 		}
 	}
@@ -435,7 +443,7 @@ func TestInvoke_LookalikeSafePaths_StillAccepted(t *testing.T) {
 		"/caf\u00e9/menu",
 	}
 	for _, p := range ok {
-		if _, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: p}, ""); err != nil {
+		if _, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: p}, "", ""); err != nil {
 			t.Fatalf("path %q: want it accepted, got %v", p, err)
 		}
 	}
@@ -467,7 +475,7 @@ func TestInvoke_TimeoutDuringBodyRead_ErrUpstreamTimeout(t *testing.T) {
 	})
 
 	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 50*time.Millisecond)
-	_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "")
+	_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent", InvokeCall{Method: "GET", Path: "/x"}, "", "")
 	if !errors.Is(err, ErrUpstreamTimeout) {
 		t.Fatalf("want ErrUpstreamTimeout for a deadline hit during body read, got %v", err)
 	}
@@ -497,7 +505,7 @@ func TestInvoke_OverlongUTF8AndControlChars_RejectedWithoutTouchingUpstream(t *t
 		}))
 		svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
 		_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
-			InvokeCall{Method: "GET", Path: bad}, "")
+			InvokeCall{Method: "GET", Path: bad}, "", "user-42")
 		upstream.Close()
 		if !errors.Is(err, ErrBadPath) {
 			t.Fatalf("path %q: want ErrBadPath, got %v", bad, err)
@@ -546,7 +554,7 @@ func TestInvoke_UndefendedPathGuards_RejectedWithoutTouchingUpstream(t *testing.
 		}))
 		svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
 		_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
-			InvokeCall{Method: "GET", Path: bad}, "")
+			InvokeCall{Method: "GET", Path: bad}, "", "user-42")
 		upstream.Close()
 		if !errors.Is(err, ErrBadPath) {
 			t.Fatalf("path %q: want ErrBadPath, got %v", bad, err)
@@ -579,7 +587,7 @@ func TestInvoke_QueryMayCarryWhatAPathMayNot(t *testing.T) {
 	}
 	for _, p := range ok {
 		if _, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
-			InvokeCall{Method: "GET", Path: p}, ""); err != nil {
+			InvokeCall{Method: "GET", Path: p}, "", "user-42"); err != nil {
 			t.Fatalf("path %q: want it accepted, got %v", p, err)
 		}
 	}
@@ -603,7 +611,7 @@ func TestInvoke_TruncationDoesNotCutARuneInHalf(t *testing.T) {
 
 	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
 	got, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
-		InvokeCall{Method: "GET", Path: "/chat"}, "")
+		InvokeCall{Method: "GET", Path: "/chat"}, "", "user-42")
 	if err != nil {
 		t.Fatalf("invoke: %v", err)
 	}
@@ -651,7 +659,7 @@ func TestInvoke_PicksTheNamedEnvironmentNotTheFirstListed(t *testing.T) {
 	}
 
 	if _, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
-		InvokeCall{Method: "GET", Path: "/chat"}, ""); err != nil {
+		InvokeCall{Method: "GET", Path: "/chat"}, "", "user-42"); err != nil {
 		t.Fatalf("invoke: %v", err)
 	}
 	if hit != "development" {
@@ -682,11 +690,87 @@ func TestInvoke_NoEndpointInTheNamedEnvironmentIsNotReachable(t *testing.T) {
 	}
 
 	_, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
-		InvokeCall{Method: "GET", Path: "/chat"}, "")
+		InvokeCall{Method: "GET", Path: "/chat"}, "", "user-42")
 	if !errors.Is(err, ErrNotReachable) {
 		t.Fatalf("want ErrNotReachable, got %v", err)
 	}
 	if got := atomic.LoadInt32(&hits); got != 0 {
 		t.Fatalf("fell through to production %d time(s)", got)
+	}
+}
+
+// An ai-agent scopes its conversation store by the end-user identity header and
+// answers 401 without one. A relay that omits it can never test an agent at
+// all — which is how the console's Test tab failed, with a message about
+// signing in again that had nothing to do with the session.
+func TestInvoke_CarriesTheVerifiedUserIdentity(t *testing.T) {
+	t.Parallel()
+	var gotUser string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUser = r.Header.Get("X-User-Id")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
+	if _, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
+		InvokeCall{Method: "POST", Path: "/chat"}, "Bearer t", "user-42"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotUser != "user-42" {
+		t.Errorf("X-User-Id = %q, want the verified subject", gotUser)
+	}
+}
+
+// With no verified subject the relay sends NO identity rather than inventing
+// one. A fabricated id would let the tester read conversations under a name
+// nobody authenticated — the agent 401s instead, which is the honest answer.
+func TestInvoke_NeverInventsAnIdentity(t *testing.T) {
+	t.Parallel()
+	for _, actor := range []string{"", "unknown"} {
+		var sawHeader bool
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, sawHeader = r.Header["X-User-Id"]
+			_, _ = w.Write([]byte(`{}`))
+		}))
+		svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
+		if _, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
+			InvokeCall{Method: "POST", Path: "/chat"}, "Bearer t", actor); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		upstream.Close()
+		if sawHeader {
+			t.Errorf("actor %q: relay sent an identity header it could not verify", actor)
+		}
+	}
+}
+
+// The identity header is DERIVED, never RELAYED — the distinction the
+// no-passthrough rule turns on.
+//
+// Invoke takes the verified subject as an argument and builds the outbound
+// request from scratch, so there is no path by which an inbound `x-user-id`
+// reaches the upstream. This test exists because the two look identical on the
+// wire: if someone ever "simplifies" Invoke into forwarding the caller's
+// request, a browser could name itself any user it liked and read that user's
+// conversations.
+func TestInvoke_AnInboundIdentityHeaderCannotReachUpstream(t *testing.T) {
+	t.Parallel()
+	var got string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("X-User-Id")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	// The caller's own claim, had it been forwarded, would be "attacker".
+	// Invoke never sees it: it is given only the verified subject.
+	svc := invokeTestSvc(t, designFiles("chat-agent", "ai-agent", ""), upstream.URL, 0)
+	if _, err := svc.Invoke(context.Background(), "acme", "web", "chat-agent",
+		InvokeCall{Method: "POST", Path: "/chat"}, "Bearer t", "verified-user"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "verified-user" {
+		t.Errorf("X-User-Id = %q, want the VERIFIED subject", got)
 	}
 }

@@ -32,7 +32,7 @@ import (
 // 500 on its first turn. This pins the wiring itself, not just the branch.
 type stubModelAccess struct{ called bool }
 
-func (s *stubModelAccess) ModelAccessEnvVars(context.Context, string) ([]openchoreo.WorkflowEnvVarRef, error) {
+func (s *stubModelAccess) ModelAccessEnvVars(context.Context, string, string) ([]openchoreo.WorkflowEnvVarRef, error) {
 	s.called = true
 	return []openchoreo.WorkflowEnvVarRef{{Key: "MODEL_API_KEY"}}, nil
 }

@@ -38,7 +38,7 @@ type stubInvoker struct {
 	err                       error
 }
 
-func (s stubInvoker) Invoke(context.Context, string, string, string, projects.InvokeCall, string) (projects.InvokeResult, error) {
+func (s stubInvoker) Invoke(context.Context, string, string, string, projects.InvokeCall, string, string) (projects.InvokeResult, error) {
 	if s.err != nil {
 		return projects.InvokeResult{}, s.err
 	}

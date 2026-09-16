@@ -134,6 +134,92 @@ func (w *SecretRefWriter) WriteAnthropic(ctx context.Context, ocOrgID string, ro
 	return secretRefName, nil
 }
 
+// WriteAMPModelKey stores one agent's Agent-Manager-issued model key and
+// returns the SecretReference name and vault property a ReleaseBinding can
+// secretKeyRef.
+//
+// PER (AGENT, ENVIRONMENT), not per org. Agent Manager issues one key per model
+// config per environment, and the point of routing an agent's model traffic
+// through the AI gateway is that each agent holds a credential that can be
+// revoked on its own. Two agents sharing an entity name would share one key and
+// give that up.
+//
+// Unlike WriteAnthropic this stamps no DB columns: the AMP key is not an org
+// credential a user connected, it is a platform-issued credential whose only
+// consumer is the ReleaseBinding composed moments later. Its coordinates are
+// derived from (org, component, environment) by every reader, so there is
+// nothing to record.
+//
+// The caller must supply a context carrying an ouId claim. In a request that is
+// the user's JWT; the govern stage has no user, so it mints a system token and
+// attaches its claims before calling this.
+func (w *SecretRefWriter) WriteAMPModelKey(ctx context.Context, ocOrgID, component, environment, apiKey, proxyURL string) (string, string, error) {
+	if !w.Enabled() {
+		return "", "", nil
+	}
+	for _, required := range []struct{ name, value string }{
+		{"ocOrgID", ocOrgID},
+		{"component", component},
+		{"environment", environment},
+		{"apiKey", apiKey},
+	} {
+		if strings.TrimSpace(required.value) == "" {
+			return "", "", fmt.Errorf("secret-ref writer: amp model key: %s required", required.name)
+		}
+	}
+	orgUUID, err := orgUUIDForSecretLocation(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("secret-ref writer: amp model key: %w", err)
+	}
+	loc := secretmanagersvc.SecretLocation{
+		OrgName:               orgUUID,
+		ControlPlaneNamespace: ocOrgID,
+		EntityName:            ampModelKeyEntity(component, environment),
+		SecretKey:             secretmanagersvc.SecretKeyAPIKey,
+	}
+	// The URL rides in the same secret as the key. They are useless apart — the
+	// key authenticates against that proxy alone — and one secret means the
+	// deployment composes both from one SecretReference instead of needing a
+	// second source of truth for an address Agent Manager generated.
+	payload := map[string]string{secretmanagersvc.SecretKeyAPIKey: apiKey}
+	if strings.TrimSpace(proxyURL) != "" {
+		payload[AMPModelURLKey] = proxyURL
+	}
+	secretRefName, err := w.client.CreateSecret(ctx, loc, payload)
+	if err != nil {
+		return "", "", fmt.Errorf("secret-ref writer: amp model key upload: %w", err)
+	}
+	slog.InfoContext(ctx, "secret-ref writer: AMP model key stored",
+		"ocOrgId", ocOrgID,
+		"component", component,
+		"environment", environment,
+		"secretRefName", secretRefName)
+	return secretRefName, secretmanagersvc.SecretKeyAPIKey, nil
+}
+
+// AMPModelURLKey is the property inside an agent's AMP secret holding the proxy
+// URL its key authenticates against — the value MODEL_ENDPOINT is composed from.
+const AMPModelURLKey = "url"
+
+// AMPModelKeySecretRefName is the SecretReference a deployment secretKeyRefs to
+// reach one agent's AMP model key.
+//
+// DERIVED, not recorded. SM-API names a SecretReference deterministically from
+// its location (secretsprovider.SecretLocation.SecretRefName), so the writer and
+// the deployment that consumes it can each compute the name from (component,
+// environment) without a row to look it up in. Both sides go through this
+// function so there is exactly one spelling: a second, divergent one would not
+// error, it would simply never find the secret.
+func AMPModelKeySecretRefName(component, environment string) string {
+	return secretmanagersvc.SecretLocation{
+		EntityName: ampModelKeyEntity(component, environment),
+	}.SecretRefName()
+}
+
+func ampModelKeyEntity(component, environment string) string {
+	return fmt.Sprintf("amp-model-%s-%s", component, environment)
+}
+
 // WriteGitHubPAT uploads a per-org GitHub PAT to SM-API and stamps the
 // triplet (plus written_at) onto `org_credentials`. Same semantics as
 // WriteAnthropic: errors are returned, ctx must carry the user JWT.

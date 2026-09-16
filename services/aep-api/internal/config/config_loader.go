@@ -126,6 +126,18 @@ func Load() (Config, error) {
 			HostHeader:   r.readOptionalString("SERVICE_AUTH_HOST_HEADER", ""),
 		},
 
+		// Agent Manager. Defaults match the client AEP publishes into the
+		// platform IdP's bootstrap, so a local stack governs agents without any
+		// .env entry; the token URL falls back to the one the rest of the
+		// service already uses.
+		AgentManager: AgentManagerConfig{
+			TokenURL:     r.readOptionalString("AMP_TOKEN_URL", r.readOptionalString("SERVICE_AUTH_TOKEN_URL", "")),
+			ClientID:     r.readOptionalString("AMP_CLIENT_ID", "amp-publisher-aep"),
+			ClientSecret: r.readOptionalString("AMP_CLIENT_SECRET", "amp-publisher-aep-secret"),
+			Resource:     r.readOptionalString("AMP_RESOURCE", "urn:wso2:amp"),
+			HostHeader:   r.readOptionalString("AMP_TOKEN_HOST_HEADER", r.readOptionalString("SERVICE_AUTH_HOST_HEADER", "")),
+		},
+
 		// Git-service config. Uses the same env-var names git-service used so
 		// existing local .env files / release-bindings keep working.
 		GitProvider:                 r.readOptionalString("GIT_PROVIDER", "github"),

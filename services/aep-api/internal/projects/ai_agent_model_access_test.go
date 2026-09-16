@@ -82,7 +82,7 @@ func TestModelAccessEnvVars_ReturnsTheThreeModelVars(t *testing.T) {
 		fakeSecretRefClient{},
 	).(*componentService)
 
-	got, err := svc.ModelAccessEnvVars(context.Background(), "acme")
+	got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
 	if err != nil {
 		t.Fatalf("ModelAccessEnvVars: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestModelAccessEnvVars_NoConnectedKeyIsNotAnError(t *testing.T) {
 		noKeyResolver{}, fakeSecretRefClient{},
 	).(*componentService)
 
-	got, err := svc.ModelAccessEnvVars(context.Background(), "acme")
+	got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
 	if err != nil {
 		t.Fatalf("an org with no key must not error, got: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestUpsertModelAccessSecretReference_UsesTheReleaseBindingNamespace(t *test
 			Property: "api-key",
 		}}, sr)
 
-	if _, err := svc.(*componentService).ModelAccessEnvVars(context.Background(), "default"); err != nil {
+	if _, err := svc.(*componentService).ModelAccessEnvVars(context.Background(), "default", "checkout-agent"); err != nil {
 		t.Fatalf("ModelAccessEnvVars: %v", err)
 	}
 	for _, ns := range gotNS {
@@ -201,4 +201,149 @@ func (c *namespaceCapturingSecretRefClient) UpdateSecretReference(_ context.Cont
 }
 func (c *namespaceCapturingSecretRefClient) DeleteSecretReference(context.Context, string, string) error {
 	return nil
+}
+
+// --- Agent Manager governed model access --------------------------------------
+
+type fakeAIGatewayBindings struct {
+	err error
+}
+
+func (f fakeAIGatewayBindings) GetAIGatewayBinding(context.Context, string, string) (openchoreo.AIGatewayBinding, error) {
+	if f.err != nil {
+		return openchoreo.AIGatewayBinding{}, f.err
+	}
+	return openchoreo.AIGatewayBinding{
+		OrgID: "acme", Environment: openchoreo.DevEnvironmentName,
+		Endpoint:  "http://ai-gateway.amp.localhost:8084",
+		AdminURL:  "http://api.amp.localhost:8080/api/v1",
+		GatewayID: "gw-uuid",
+	}, nil
+}
+
+// presentSecretRefClient reports that the agent's AMP key IS stored.
+type presentSecretRefClient struct {
+	fakeSecretRefClient
+	askedFor string
+}
+
+func (p *presentSecretRefClient) GetSecretReference(_ context.Context, _ string, name string) (*secretmanagersvc.SecretReference, error) {
+	p.askedFor = name
+	return &secretmanagersvc.SecretReference{}, nil
+}
+
+// A governed agent gets the gateway and its OWN key — never the org's Anthropic
+// key. This is the composition half of the whole feature.
+func TestModelAccessEnvVars_PrefersTheAMPBinding(t *testing.T) {
+	sr := &presentSecretRefClient{}
+	svc := NewComponentService(
+		&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
+		fakeKeyResolver{triplet: organization.SecretRefTriplet{
+			Name: "anthropic-default", KVPath: "user-app-secrets/acme/anthropic", Property: "api-key",
+		}},
+		sr,
+	).(*componentService)
+	svc.SetAIGatewayBindings(fakeAIGatewayBindings{})
+
+	got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+	if err != nil {
+		t.Fatalf("ModelAccessEnvVars: %v", err)
+	}
+	byKey := map[string]openchoreo.WorkflowEnvVarRef{}
+	for _, v := range got {
+		byKey[v.Key] = v
+	}
+	// MODEL_ENDPOINT comes from the SAME secret as the key, not from a literal:
+	// Agent Manager generates a proxy path per agent, so the address is read
+	// back rather than derived, and the two are stored together because the key
+	// authenticates against that proxy alone.
+	endpoint := byKey[modelEndpointEnvVar].ValueFrom
+	if endpoint == nil || endpoint.SecretKeyRef == nil {
+		t.Fatalf("MODEL_ENDPOINT = %+v, want a secretKeyRef to the agent's AMP secret", byKey[modelEndpointEnvVar])
+	}
+	if endpoint.SecretKeyRef.Key != organization.AMPModelURLKey {
+		t.Errorf("MODEL_ENDPOINT key = %q, want %q", endpoint.SecretKeyRef.Key, organization.AMPModelURLKey)
+	}
+	if endpoint.SecretKeyRef.Name != organization.AMPModelKeySecretRefName("checkout-agent", openchoreo.DevEnvironmentName) {
+		t.Errorf("MODEL_ENDPOINT refs %q, want the agent's own AMP secret", endpoint.SecretKeyRef.Name)
+	}
+	ref := byKey[modelAPIKeyEnvVar].ValueFrom.SecretKeyRef
+	want := organization.AMPModelKeySecretRefName("checkout-agent", openchoreo.DevEnvironmentName)
+	if ref.Name != want {
+		t.Errorf("MODEL_API_KEY refs %q, want the agent's own AMP key %q", ref.Name, want)
+	}
+	if sr.askedFor != want {
+		t.Errorf("looked up SecretReference %q, want %q — the writer and this reader must agree on one spelling", sr.askedFor, want)
+	}
+	// The temporary header override (see modelAPIKeyHeaderEnvVar). Without it
+	// the agent sends `x-api-key` and Agent Manager's proxy rejects the turn.
+	if got := byKey[modelAPIKeyHeaderEnvVar].Value; got != ampModelAPIKeyHeader {
+		t.Errorf("MODEL_API_KEY_HEADER = %q, want %q", got, ampModelAPIKeyHeader)
+	}
+}
+
+// THE REGRESSION GUARD for every environment that has no AI gateway. This path
+// must stay byte-for-byte what it was before Agent Manager existed.
+func TestModelAccessEnvVars_FallsBackToTheOrgKey(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		svc  func() *componentService
+	}{
+		{
+			name: "no binding reader wired at all",
+			svc: func() *componentService {
+				return newModelAccessSvc(fakeSecretRefClient{})
+			},
+		},
+		{
+			name: "environment has no AI gateway binding",
+			svc: func() *componentService {
+				s := newModelAccessSvc(fakeSecretRefClient{})
+				s.SetAIGatewayBindings(fakeAIGatewayBindings{err: openchoreo.ErrNoAIGatewayBinding})
+				return s
+			},
+		},
+		{
+			name: "governed environment, but this agent has no stored key",
+			svc: func() *componentService {
+				// fakeSecretRefClient answers ErrNotFound for every lookup.
+				s := newModelAccessSvc(fakeSecretRefClient{})
+				s.SetAIGatewayBindings(fakeAIGatewayBindings{})
+				return s
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.svc().ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+			if err != nil {
+				t.Fatalf("ModelAccessEnvVars: %v", err)
+			}
+			byKey := map[string]openchoreo.WorkflowEnvVarRef{}
+			for _, v := range got {
+				byKey[v.Key] = v
+			}
+			if byKey[modelEndpointEnvVar].Value != modelEndpointDefault {
+				t.Errorf("MODEL_ENDPOINT = %q, want the direct Anthropic endpoint", byKey[modelEndpointEnvVar].Value)
+			}
+			ref := byKey[modelAPIKeyEnvVar].ValueFrom.SecretKeyRef
+			if ref.Name != modelAccessSecretRefName {
+				t.Errorf("MODEL_API_KEY refs %q, want the org-scoped SecretReference", ref.Name)
+			}
+			// The ungoverned path must NOT set the header override: the agent
+			// talks to Anthropic directly, where `x-api-key` is correct.
+			if _, ok := byKey[modelAPIKeyHeaderEnvVar]; ok {
+				t.Error("set MODEL_API_KEY_HEADER on the direct path; only the governed path overrides it")
+			}
+		})
+	}
+}
+
+func newModelAccessSvc(sr secretmanagersvc.OpenChoreoSecretReferenceClient) *componentService {
+	return NewComponentService(
+		&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
+		fakeKeyResolver{triplet: organization.SecretRefTriplet{
+			Name: "anthropic-default", KVPath: "user-app-secrets/acme/anthropic", Property: "api-key",
+		}},
+		sr,
+	).(*componentService)
 }
