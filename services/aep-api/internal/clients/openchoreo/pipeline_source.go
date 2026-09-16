@@ -30,6 +30,10 @@ const (
 var (
 	ErrPipelineEmpty           = errors.New("deployment pipeline promotes through no source environment")
 	ErrPipelineSourceAmbiguous = errors.New("deployment pipeline has more than one source environment")
+	// ErrPipelineCyclic is a nonempty promotion graph with no never-a-target
+	// source (every source is also a target). Unlike ErrPipelineEmpty this
+	// will not become valid by waiting for setup.
+	ErrPipelineCyclic = errors.New("deployment pipeline has no unique source environment (every source is also a target)")
 )
 
 // PipelineSourceEnvironment returns the unique environment that appears as a
@@ -62,6 +66,9 @@ func PipelineSourceEnvironment(p *deploymentPipeline) (string, error) {
 	case 1:
 		return lowest[0], nil
 	case 0:
+		if len(sources) > 0 {
+			return "", fmt.Errorf("%s: %w", pipeID, ErrPipelineCyclic)
+		}
 		return "", fmt.Errorf("%s: %w — run deployments/scripts/setup-aep.sh", pipeID, ErrPipelineEmpty)
 	default:
 		slices.Sort(lowest)

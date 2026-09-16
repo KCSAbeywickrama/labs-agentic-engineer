@@ -61,6 +61,11 @@ func resolveWriteTarget(ctx context.Context, fetch func(context.Context) (string
 	if r.sleep == nil {
 		r.sleep = sleepCtx
 	}
+	if r.budget > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.budget)
+		defer cancel()
+	}
 	start := r.now()
 	backoff := r.initial
 	var last error
@@ -69,11 +74,11 @@ func resolveWriteTarget(ctx context.Context, fetch func(context.Context) (string
 		if err == nil {
 			return name, nil
 		}
-		if errors.Is(err, ErrPipelineSourceAmbiguous) {
+		if errors.Is(err, ErrPipelineSourceAmbiguous) || errors.Is(err, ErrPipelineCyclic) {
 			return "", err
 		}
 		last = err
-		if r.now().Sub(start) >= r.budget {
+		if r.now().Sub(start) >= r.budget || ctx.Err() != nil {
 			return "", fmt.Errorf("resolve write-target from %s/%s: %w",
 				PlatformPipelineNamespace, PlatformPipelineName, last)
 		}

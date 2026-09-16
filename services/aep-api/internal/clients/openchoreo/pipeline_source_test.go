@@ -75,6 +75,13 @@ func twoSources(a, b, target string) *deploymentPipeline {
 	return p
 }
 
+func pipelineCycle(a, b string) *deploymentPipeline {
+	p := &deploymentPipeline{}
+	appendPromotionPath(p, a, b)
+	appendPromotionPath(p, b, a)
+	return p
+}
+
 func TestPipelineSourceEnvironment(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -112,6 +119,11 @@ func TestPipelineSourceEnvironment(t *testing.T) {
 			name:    "two sources",
 			p:       twoSources("dev", "experimental", "staging"),
 			wantErr: ErrPipelineSourceAmbiguous,
+		},
+		{
+			name:    "cycle",
+			p:       pipelineCycle("staging", "production"),
+			wantErr: ErrPipelineCyclic,
 		},
 	}
 	for _, tc := range cases {

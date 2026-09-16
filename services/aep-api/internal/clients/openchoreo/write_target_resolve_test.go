@@ -90,6 +90,46 @@ func TestResolveWriteTarget_RetriesEmptyPipeline(t *testing.T) {
 	}
 }
 
+func TestResolveWriteTarget_BudgetCancelsFetch(t *testing.T) {
+	t.Parallel()
+	start := time.Now()
+	_, err := resolveWriteTarget(context.Background(), func(ctx context.Context) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}, retrySpec{
+		budget:     50 * time.Millisecond,
+		initial:    time.Hour,
+		maxBackoff: time.Hour,
+		sleep: func(context.Context, time.Duration) error {
+			t.Fatal("slept after deadline")
+			return nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "default/default") {
+		t.Fatalf("err=%v, want it to name the pipeline after budget", err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatalf("took %s, deadline did not bound fetch", time.Since(start))
+	}
+}
+
+func TestResolveWriteTarget_CyclicDoesNotRetry(t *testing.T) {
+	t.Parallel()
+	var n int
+	_, err := resolveWriteTarget(context.Background(), func(context.Context) (string, error) {
+		n++
+		return "", fmt.Errorf("x: %w", ErrPipelineCyclic)
+	}, retrySpec{
+		budget:     time.Minute,
+		initial:    time.Second,
+		maxBackoff: 15 * time.Second,
+		sleep:      func(context.Context, time.Duration) error { t.Fatal("slept"); return nil },
+	})
+	if !errors.Is(err, ErrPipelineCyclic) || n != 1 {
+		t.Fatalf("err=%v n=%d", err, n)
+	}
+}
+
 func TestResolveWriteTarget_AmbiguousDoesNotRetry(t *testing.T) {
 	t.Parallel()
 	var n int
