@@ -128,6 +128,10 @@ type Seam struct {
 // one produced; the comments call out the couplings.
 func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	var err error
+	if in.WriteTarget == "" {
+		return nil, fmt.Errorf("assemble: write-target is required (ResolveWriteTarget before Assemble; Fake sets default)")
+	}
+	openchoreo.SetDevEnvironmentName(in.WriteTarget)
 	db := in.DB
 	credStore := in.CredentialStore
 	minter := in.Minter
@@ -180,17 +184,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// rolled clients (component, secretref) keep the legacy positional args
 	// until they migrate too. AuthProvider / strategy / impersonation resolver
 	// arrive via seam — Assemble does not construct them.
-	ocConfig := openchoreo.Config{
-		BaseURL:                cfg.PlatformAPI.BaseURL,
-		HostHeader:             cfg.PlatformAPI.HostHeader,
-		AuthProvider:           seam.AuthProvider,
-		RequestAuthStrategy:    seam.RequestAuthStrategy,
-		ImpersonateOrgResolver: seam.ImpersonateOrgResolver,
-		// A plane whose gateway does not terminate TLS serves only plain http,
-		// while OpenChoreo advertises an https URL beside it regardless. See
-		// Config.PreferPlainHTTPEndpoints.
-		PreferPlainHTTPEndpoints: !cfg.PlatformAPI.DataPlaneGatewayTLS,
-	}
+	ocConfig := ocClientConfig(cfg, seam)
 	projectClient := openchoreo.NewProjectClient(ocConfig)
 	namespaceClient := openchoreo.NewNamespaceClient(ocConfig)
 	environmentClient := openchoreo.NewEnvironmentClient(ocConfig)
