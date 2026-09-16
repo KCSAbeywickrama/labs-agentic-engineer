@@ -27,6 +27,8 @@ type Deployment = components["schemas"]["Deployment"];
 type DeployStage = components["schemas"]["DeployStage"];
 type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 type BuildSummary = components["schemas"]["BuildSummary"];
+type ComponentDependencies = components["schemas"]["ComponentDependencies"];
+type ProjectDependencyReadiness = components["schemas"]["ProjectDependencyReadiness"];
 
 vi.mock("@tanstack/react-router", () => ({
   createLink: (Component: ElementType) =>
@@ -54,6 +56,11 @@ let mockDeploy: DeployStage = {
   validation: "running",
 };
 let mockDeployments: Deployment[] = [];
+let mockReadiness: ProjectDependencyReadiness | undefined;
+let mockReadinessPending = false;
+let mockReadinessError = false;
+const mockReadinessRefetch = vi.fn();
+const mockSaveValues = vi.fn();
 vi.mock("../api/queries", () => ({
   useProjectComponents: () => ({
     data: { items: [{ name: "web", displayName: "Web", type: "web-application" }] },
@@ -63,9 +70,48 @@ vi.mock("../api/queries", () => ({
     refetch: vi.fn(),
   }),
   useComponentsDeployments: () => ({ isPending: false, deployments: mockDeployments, failedCount: 0 }),
+  useProjectDependencyReadiness: () => ({
+    data: mockReadinessPending || mockReadinessError ? undefined : mockReadiness,
+    isPending: mockReadinessPending,
+    isError: mockReadinessError,
+    error: mockReadinessError ? new Error("readiness down") : null,
+    refetch: mockReadinessRefetch,
+  }),
+  useSaveConnectionValues: () => ({
+    mutate: mockSaveValues,
+    isPending: false,
+    isError: false,
+    error: null,
+    reset: vi.fn(),
+  }),
   useProjectStatus: () => ({
     data: { repoUrl: "https://github.com/acme/expense.git", build: { version: "v2", status: "succeeded" }, deploy: mockDeploy },
   }),
+}));
+
+// The design's graph: the web app talks to the service; the service carries
+// one external with values to collect and one platform resource.
+const mockDependencies: ComponentDependencies[] = [
+  { componentName: "web", dependencies: [{ kind: "component", name: "claims-api" }] },
+  {
+    componentName: "claims-api",
+    dependencies: [
+      { kind: "platform-resource", name: "claims-db", resourceType: "postgres-cnpg" },
+      { kind: "external", name: "stripe", config: [{ key: "STRIPE_SECRET_KEY", description: "Secret key", secret: true }] },
+    ],
+  },
+];
+let mockDependenciesPending = false;
+vi.mock("../../spec/api/queries", () => ({
+  useDesignDependencies: () => ({
+    data: mockDependenciesPending ? undefined : mockDependencies,
+    isPending: mockDependenciesPending,
+    isError: false,
+    refetch: vi.fn(),
+  }),
+}));
+vi.mock("../../settings/api/queries", () => ({
+  useExternalResources: () => ({ data: [], isPending: false, isError: false, refetch: vi.fn() }),
 }));
 
 let mockBuilds: BuildSummary[] = [];
@@ -129,6 +175,12 @@ beforeEach(() => {
   mockRunsError = false;
   mockCounts = undefined;
   mockRunsRefetch.mockClear();
+  mockReadiness = undefined;
+  mockReadinessPending = false;
+  mockReadinessError = false;
+  mockReadinessRefetch.mockClear();
+  mockDependenciesPending = false;
+  mockSaveValues.mockClear();
 });
 
 /** The summary card's Deployed cell — its overline label, not the status chip. */
@@ -146,7 +198,9 @@ describe("DeploymentVersionPage (#779)", () => {
 
     render(<DeploymentVersionPage projectName="expense" environment="development" version="v2" />);
 
-    expect(screen.getAllByRole("heading", { name: /Development · v2/ })).toHaveLength(2);
+    expect(screen.getByRole("heading", { name: /Deployment · v2/ })).toBeInTheDocument();
+    expect(screen.getByText("expense · Development")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Development · v2/ })).toBeInTheDocument();
     expect(screen.getByText("Milestone #2")).toBeInTheDocument();
     expect(screen.getByText("12 / 12 passed")).toBeInTheDocument();
     expect(screen.getByText("4e8a0d6")).toBeInTheDocument();
@@ -213,5 +267,86 @@ describe("DeploymentVersionPage (#779)", () => {
   it("rejects a segment that names no environment", () => {
     render(<DeploymentVersionPage projectName="expense" environment="staging" version="v2" />);
     expect(screen.getByText("No environment called staging")).toBeInTheDocument();
+  });
+});
+
+describe("DeploymentVersionPage — connections (#779 review)", () => {
+  it("tables the design's connections with their keys masked and the readiness word", () => {
+    mockReadiness = {
+      configured: false,
+      dependencies: [{ name: "stripe", state: "unset", missingKeys: ["STRIPE_SECRET_KEY"] }],
+    };
+
+    render(<DeploymentVersionPage projectName="expense" environment="development" version="v2" />);
+
+    const table = screen.getByRole("table", { name: "Connections on Development" });
+    expect(screen.getByText("2 dependencies · values for Development")).toBeInTheDocument();
+    const stripe = within(table).getByRole("row", { name: "stripe" });
+    expect(within(stripe).getByText("used by claims-api")).toBeInTheDocument();
+    expect(within(stripe).getByText("External")).toBeInTheDocument();
+    expect(within(stripe).getByText(/STRIPE_SECRET_KEY/)).toBeInTheDocument();
+    expect(within(stripe).queryByText(/sk_/)).not.toBeInTheDocument();
+    expect(within(stripe).getByText("Missing")).toBeInTheDocument();
+    const db = within(table).getByRole("row", { name: "claims-db" });
+    expect(within(db).getByText("postgres-cnpg")).toBeInTheDocument();
+    expect(within(db).getByText("Provisioned")).toBeInTheDocument();
+    expect(within(db).getByRole("link", { name: "View claims-db in the design" })).toHaveAttribute(
+      "href",
+      "/projects/expense/spec",
+    );
+
+    // Edit re-collects the external's development values.
+    fireEvent.click(within(stripe).getByRole("button", { name: "Edit stripe values" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Configure — stripe")).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("STRIPE_SECRET_KEY"), { target: { value: "sk_live_real" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /Save values/ }));
+    expect(mockSaveValues).toHaveBeenCalledWith(
+      { name: "stripe", environment: "development", values: { STRIPE_SECRET_KEY: "sk_live_real" } },
+      expect.anything(),
+    );
+  });
+
+  it("offers no Edit on production, where nothing collects values", () => {
+    mockDeployments = mockDeployments.map((d) => ({ ...d, environment: "production" }));
+    render(<DeploymentVersionPage projectName="expense" environment="production" version="v2" />);
+    expect(screen.getByRole("table", { name: "Connections on Production" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Edit / })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /in the design$/ })).toHaveLength(2);
+  });
+
+  it("holds the table back while the design read is out", () => {
+    mockDependenciesPending = true;
+    render(<DeploymentVersionPage projectName="expense" environment="development" version="v2" />);
+    expect(screen.queryByRole("table", { name: /^Connections/ })).not.toBeInTheDocument();
+    expect(screen.getByTestId("connections-skeleton")).toBeInTheDocument();
+    expect(screen.getByText("Running here now")).toBeInTheDocument();
+  });
+
+  it("holds the table back while the readiness read is out, rather than calling every value Unknown", () => {
+    mockReadinessPending = true;
+    render(<DeploymentVersionPage projectName="expense" environment="development" version="v2" />);
+    expect(screen.queryByRole("table", { name: /^Connections/ })).not.toBeInTheDocument();
+    expect(screen.getByTestId("connections-skeleton")).toBeInTheDocument();
+    expect(screen.queryByText("Unknown")).not.toBeInTheDocument();
+  });
+
+  it("does not wait on a readiness read production never makes", () => {
+    mockReadinessPending = true;
+    mockDeployments = mockDeployments.map((d) => ({ ...d, environment: "production" }));
+    render(<DeploymentVersionPage projectName="expense" environment="production" version="v2" />);
+    expect(screen.getByRole("table", { name: "Connections on Production" })).toBeInTheDocument();
+  });
+
+  it("says a failed readiness read over the table, where Unknown is then the honest word", () => {
+    mockReadinessError = true;
+    render(<DeploymentVersionPage projectName="expense" environment="development" version="v2" />);
+    const table = screen.getByRole("table", { name: "Connections on Development" });
+    expect(within(table).getByText("Unknown")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Whether Development holds values for these connections could not be read: readiness down/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mockReadinessRefetch).toHaveBeenCalled();
   });
 });

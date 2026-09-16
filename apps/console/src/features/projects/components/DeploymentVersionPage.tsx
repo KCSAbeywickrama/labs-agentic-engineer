@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import { useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -24,6 +25,7 @@ import {
   CircularProgress,
   Link as MuiLink,
   Skeleton,
+  Snackbar,
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
@@ -36,13 +38,18 @@ import type { components } from "../../../generated/aep-api";
 import { useBuildRuns, useBuilds } from "../../builds/api/queries";
 import { runStamp } from "../../builds/lib/format";
 import { mergedCycle } from "../../builds/lib/runView";
+import { isRegisteredExternal } from "../../marketplace/kind";
+import { useExternalResources } from "../../settings/api/queries";
+import { useDesignDependencies } from "../../spec/api/queries";
 import { useValidationEvidence } from "../../validation/api/counts";
 import { answeredRun } from "../../validation/lib/runs";
 import {
   useComponentsDeployments,
   useProjectComponents,
+  useProjectDependencyReadiness,
   useProjectStatus,
 } from "../api/queries";
+import { connectionTable } from "../lib/deploymentDetail";
 import {
   commitUrl,
   environmentLabel,
@@ -54,6 +61,9 @@ import {
   type ValidationAvailability,
 } from "../lib/deploymentLedger";
 import { groupDeploymentCards, type DeploymentCard } from "../lib/deploymentRows";
+import { connectionRows, type ConnectionRow } from "../lib/promotion";
+import { ConnectionValuesDialog } from "./ConnectionValuesDialog";
+import { ConnectionsTable } from "./ConnectionsTable";
 
 type BuildSummary = components["schemas"]["BuildSummary"];
 
@@ -68,7 +78,10 @@ const RouterLink = createLink(MuiLink);
  * ledger for the row, the version's run story for the commit and verdict, the
  * component/binding join for what is live. There is no deployment record
  * behind this (ADR-0027 decision 4), so a superseded version says it was
- * superseded and by what, and claims no rollout dates of its own.
+ * superseded and by what, and claims no rollout dates of its own. The
+ * environment's connections — what the design depends on and whether this
+ * environment holds values for it — sit here too, since they are a fact
+ * about the deployment, not about trying it (#779 review).
  */
 export function DeploymentVersionPage({
   projectName,
@@ -94,8 +107,29 @@ export function DeploymentVersionPage({
   const judged = answeredRun(runs.data?.runs ?? []);
   const verdict = judged?.validation?.verdict ?? "";
   const validation = useValidationEvidence(projectName, version, verdict);
+  // The design's connections, and whether this environment holds values for
+  // them. Production makes no readiness read — nothing collects values there.
+  const dependencies = useDesignDependencies(projectName);
+  const connections = useMemo(() => connectionRows(dependencies.data), [dependencies.data]);
+  const readiness = useProjectDependencyReadiness(
+    projectName,
+    environment === "development" ? "development" : "",
+  );
+  const externalCatalog = useExternalResources();
+  const catalogUnknown = externalCatalog.isPending || externalCatalog.isError;
+  const registeredNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const resource of externalCatalog.data ?? []) {
+      if (isRegisteredExternal(resource)) names.add(resource.name);
+    }
+    return names;
+  }, [externalCatalog.data]);
+  const [valuesTarget, setValuesTarget] = useState<ConnectionRow | null>(null);
+  const [valuesSaved, setValuesSaved] = useState(false);
 
-  const title = environment ? `${environmentLabel(environment)} · ${version}` : "Deployment";
+  // "Deployment · v1" — the page is the deployment; the environment is where
+  // it ran, and reads in the subtitle (#779 review).
+  const title = environment ? `Deployment · ${version}` : "Deployment";
   const backTo = {
     link: <Link to="/projects/$projectName/deployments" params={{ projectName }} />,
     label: "Back to Deployments",
@@ -185,12 +219,22 @@ export function DeploymentVersionPage({
       : undefined;
   const validationView = validationCell(environment, verdict || undefined, validation.counts, availability);
   const chip = current && row ? row.status : versionStatus(build);
+  const readinessOut =
+    environment === "development" && readiness.isPending && !readiness.isError;
+  const table = connectionTable(
+    connections,
+    dependencies.data,
+    readiness.data,
+    environment,
+    registeredNames,
+    catalogUnknown,
+  );
 
   return (
     <>
       <PageHeader
         title={title}
-        subtitle={`${projectName} · Deployment`}
+        subtitle={`${projectName} · ${environmentLabel(environment)}`}
         backTo={backTo}
         actions={
           current ? (
@@ -272,7 +316,71 @@ export function DeploymentVersionPage({
             </Typography>
           </Card>
         )}
+
+        {/* The connections, once the design read has answered; a failed read
+            says so rather than claiming the design declares nothing. The
+            readiness read holds the table too — drawn before it answers,
+            every external read Unknown as if that were settled — and a
+            failed one says so over the table, since Unknown is then the
+            honest word. */}
+        {dependencies.isError ? (
+          <Alert
+            severity="warning"
+            action={<Button onClick={() => void dependencies.refetch()}>Retry</Button>}
+          >
+            The design's connections could not be loaded
+            {dependencies.error instanceof Error && dependencies.error.message
+              ? `: ${dependencies.error.message}`
+              : ""}
+          </Alert>
+        ) : dependencies.isPending || readinessOut ? (
+          <Skeleton variant="rounded" height={160} data-testid="connections-skeleton" />
+        ) : (
+          <>
+            {readiness.isError && (
+              <Alert
+                severity="warning"
+                action={<Button onClick={() => void readiness.refetch()}>Retry</Button>}
+              >
+                Whether Development holds values for these connections could not be read
+                {readiness.error instanceof Error && readiness.error.message
+                  ? `: ${readiness.error.message}`
+                  : ""}
+                {" — each reads Unknown until it is."}
+              </Alert>
+            )}
+            <ConnectionsTable
+              projectName={projectName}
+              environment={environment}
+              rows={table}
+              onEdit={setValuesTarget}
+            />
+          </>
+        )}
       </Stack>
+
+      {valuesTarget && (
+        <ConnectionValuesDialog
+          open
+          onClose={() => setValuesTarget(null)}
+          onSaved={() => {
+            setValuesTarget(null);
+            setValuesSaved(true);
+          }}
+          projectName={projectName}
+          connection={valuesTarget}
+          environment="development"
+        />
+      )}
+      <Snackbar
+        open={valuesSaved}
+        autoHideDuration={6000}
+        onClose={() => setValuesSaved(false)}
+      >
+        <Alert severity="success" onClose={() => setValuesSaved(false)}>
+          Values saved — the connection re-provisions with them.
+        </Alert>
+      </Snackbar>
     </>
   );
 }
