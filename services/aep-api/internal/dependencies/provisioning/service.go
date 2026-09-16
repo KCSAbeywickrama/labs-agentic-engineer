@@ -32,7 +32,7 @@ import (
 // defaultEnv is the single environment provisioning pins in v1 — the watcher and
 // the declarative-wiring comment both read the `development` binding (upstream
 // parity: the two naming schemes are deliberately identical).
-const defaultEnv = openchoreo.DevEnvironmentName
+func defaultEnv() string { return openchoreo.DevEnvironmentName }
 
 // Service coordinates dependency provisioning on the `provision` gate funnel: it
 // mints gate issues, collects external values, provisions platform resources,
@@ -327,7 +327,7 @@ func envList(reqEnvs []string) []string {
 		}
 	}
 	if len(out) == 0 {
-		return []string{defaultEnv}
+		return []string{defaultEnv()}
 	}
 	return out
 }

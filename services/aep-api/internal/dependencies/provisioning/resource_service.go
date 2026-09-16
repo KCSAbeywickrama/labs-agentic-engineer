@@ -104,7 +104,7 @@ func (s *Service) provisionResource(ctx context.Context, orgID, projectID, depNa
 	// readiness watcher observes Ready and finishes it. Without a start the
 	// watcher cannot pick it up, so a start failure is a real (logged) problem.
 	if execID != "" {
-		ref := result.BindingByEnv[defaultEnv]
+		ref := result.BindingByEnv[defaultEnv()]
 		if ref == "" {
 			ref = result.ResourceName
 		}
