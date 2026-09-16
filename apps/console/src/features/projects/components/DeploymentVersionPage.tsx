@@ -207,7 +207,10 @@ export function DeploymentVersionPage({
   // when it is the board's own row for it.
   const liveVersion = environment === "development" ? deploy?.version || undefined : row?.version;
   // The aggregate's word for development; production has only its bindings.
-  const current = environment === "development" ? liveVersion === version : bound && liveVersion === version;
+  // Either way it takes a binding to run: a version the aggregate names but
+  // nothing is bound to is not what the environment runs, and the page says
+  // so rather than offering Try Out over nothing.
+  const current = bound && liveVersion === version;
 
   const merged = mergedCycle(runs.data?.runs);
   const sha = merged?.mergeSha ?? "";
@@ -349,12 +352,7 @@ export function DeploymentVersionPage({
                 {" — each reads Unknown until it is."}
               </Alert>
             )}
-            <ConnectionsTable
-              projectName={projectName}
-              environment={environment}
-              rows={table}
-              onEdit={setValuesTarget}
-            />
+            <ConnectionsTable environment={environment} rows={table} onEdit={setValuesTarget} />
           </>
         )}
       </Stack>

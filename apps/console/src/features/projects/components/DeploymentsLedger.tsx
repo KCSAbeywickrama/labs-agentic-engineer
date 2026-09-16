@@ -89,7 +89,7 @@ export function DeploymentsLedger({
           Deployments
         </Typography>
         <Typography variant="caption" color="text.secondary">
-          every version that reached an environment, newest first
+          every version this project built, newest first
         </Typography>
       </Stack>
       {rows.length === 0 ? (

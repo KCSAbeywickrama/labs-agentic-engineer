@@ -113,13 +113,13 @@ here: they're the open `console` + `feature` issues.
   component: a web app with Visit, URL copy, who it talks to and the **test
   users** inline; a service with its **endpoints** off the contract (search,
   method filter, a curl per row with a token placeholder, Try into the
-  viewer) — and a **Connections** table (type, used by, keys masked, readiness
-  word, Edit / View); and **a page per deployed version** at
+  viewer); and **a page per deployed version** at
   `/deployments/$env/$version` (milestone, built, commit, verdict, the build,
-  and what it runs now or what superseded it). The board's **ledger lists
-  every version that reached development**, newest first, plus production's
-  current row, each opening its page; the bare environment URL redirects to
-  Try Out. **No contract change**
+  what it runs now or what superseded it, and the **Connections** table —
+  type, used by, keys masked, readiness word, Edit in development). The
+  board's **ledger lists every version the project built**, newest first,
+  plus production's current row, each opening its page; the bare environment
+  URL redirects to Try Out. **No contract change**
   ([ADR-0032](design/decisions/ADR-0032-the-development-card-is-the-flow.md),
   amending ADR-0027) —
   [#775](https://github.com/wso2/labs-agentic-engineer/issues/775),

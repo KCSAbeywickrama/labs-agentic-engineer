@@ -70,12 +70,13 @@ only the Builds page names.
    serves (`get-component-openapi`, parsed by `@aep/ui-openapi-view`):
    searchable, filterable by method, a **curl** per row for the deployed URL
    with an `Authorization: Bearer <token>` placeholder, and *Try* into the
-   contract viewer. Under it, a **Connections** table: each dependency with
-   its type, who uses it, its config keys — masked, always, because nothing
-   reads a value back — and the readiness word; *Edit* re-collects a Project
-   External's development values, *View* opens the dependency's definition
-   on the Spec view. Production shows the same table with no Edit: nothing
-   collects values there.
+   contract viewer. The **Connections** table sits on the version page, not
+   here — what a version runs it with belongs beside what it runs: each
+   dependency with its type, who uses it, its config keys — masked, always,
+   because nothing reads a value back — and the readiness word; *Edit*
+   re-collects a Project External's development values, and a
+   platform-provisioned connection carries no action of its own. Production
+   shows the same table with no Edit: nothing collects values there.
 
 5. **What the designs drew and this does not build.** On the board: a
    *Past deployments* row (no deployment record — ADR-0027 decision 4,

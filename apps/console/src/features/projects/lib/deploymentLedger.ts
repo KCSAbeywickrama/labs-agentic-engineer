@@ -295,7 +295,7 @@ export function versionLedgerRows(
   // before the ledger kept rows) still gets its row — it IS what runs there.
   const devBound = development?.cards.some((c) => c.deployment) ?? false;
   if (development && (devBound || development.version) && !(development.version && seen.has(development.version))) {
-    out.unshift({
+    const row: LedgerEntry = {
       key: `development:${development.version ?? "current"}`,
       environment: "development",
       label: "Development",
@@ -303,7 +303,13 @@ export function versionLedgerRows(
       status: development.status,
       current: true,
       ...(development.deployedAt ? { deployedAt: development.deployedAt } : {}),
-    });
+    };
+    // Newest first still holds for it: a version the ledger lost is usually an
+    // OLD one, so it takes its place by when it was deployed, not the top.
+    // With no stamp to read it goes first — the only version there is to name.
+    const at = development.deployedAt;
+    const before = at ? out.findIndex((r) => (r.builtAt ?? "") < at) : 0;
+    out.splice(before === -1 ? out.length : before, 0, row);
   }
   for (const row of rows) {
     if (row.environment === "development") continue;

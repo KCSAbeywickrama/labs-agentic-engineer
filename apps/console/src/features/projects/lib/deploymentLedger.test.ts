@@ -341,6 +341,15 @@ describe("versionLedgerRows (#779)", () => {
     expect(rows).toHaveLength(4);
   });
 
+  it("places a legacy live version by its deploy stamp, so newer builds stay above it", () => {
+    const rows = versionLedgerRows(
+      [dev({ version: "v9", deployedAt: "2026-09-02T10:00:00Z" })],
+      builds.filter((b) => b.tag !== "v3"),
+    );
+    expect(rows.map((r) => r.version)).toEqual(["v2", "v9", "v1"]);
+    expect(rows[1]).toMatchObject({ current: true, status: { label: "Deployed" } });
+  });
+
   it("adds production's current row only, without a version the aggregate never names", () => {
     const prod: EnvironmentRow = {
       environment: "production",

@@ -235,6 +235,18 @@ describe("DeploymentVersionPage (#779)", () => {
     expect(within(deployedCell()).getByText("—")).toBeInTheDocument();
   });
 
+  it("does not call the aggregate's version current while nothing is bound to it", () => {
+    // The aggregate names v2, but development holds no binding for it — the
+    // page says so rather than offering Try Out over nothing.
+    mockDeployments = [];
+
+    render(<DeploymentVersionPage projectName="expense" environment="development" version="v2" />);
+
+    expect(screen.getByText(/Nothing runs in Development now\./)).toBeInTheDocument();
+    expect(screen.queryByText("Running here now")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Try out/ })).not.toBeInTheDocument();
+  });
+
   it("says a version still building has not reached the environment", () => {
     render(<DeploymentVersionPage projectName="expense" environment="development" version="v3" />);
     expect(screen.getByText("Building")).toBeInTheDocument();
@@ -290,10 +302,9 @@ describe("DeploymentVersionPage — connections (#779 review)", () => {
     const db = within(table).getByRole("row", { name: "claims-db" });
     expect(within(db).getByText("postgres-cnpg")).toBeInTheDocument();
     expect(within(db).getByText("Provisioned")).toBeInTheDocument();
-    expect(within(db).getByRole("link", { name: "View claims-db in the design" })).toHaveAttribute(
-      "href",
-      "/projects/expense/spec",
-    );
+    // A platform-provisioned connection carries no action of its own.
+    expect(within(db).queryByRole("link")).not.toBeInTheDocument();
+    expect(within(db).queryByRole("button")).not.toBeInTheDocument();
 
     // Edit re-collects the external's development values.
     fireEvent.click(within(stripe).getByRole("button", { name: "Edit stripe values" }));
@@ -312,7 +323,6 @@ describe("DeploymentVersionPage — connections (#779 review)", () => {
     render(<DeploymentVersionPage projectName="expense" environment="production" version="v2" />);
     expect(screen.getByRole("table", { name: "Connections on Production" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Edit / })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: /in the design$/ })).toHaveLength(2);
   });
 
   it("holds the table back while the design read is out", () => {

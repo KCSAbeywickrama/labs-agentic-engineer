@@ -18,22 +18,20 @@
 
 import { Box, Button, Card, Stack, Typography } from "@wso2/oxygen-ui";
 import { Info } from "@wso2/oxygen-ui-icons-react";
-import { createLink } from "@tanstack/react-router";
 import type { StatusTone } from "../../../components/StatusChip";
 import type { ConnectionTableRow } from "../lib/deploymentDetail";
 import type { ConnectionLine } from "../lib/deploymentFlow";
 import type { EnvironmentKey } from "../lib/deploymentLedger";
 import type { ConnectionRow } from "../lib/promotion";
 
-const LinkButton = createLink(Button);
-
 // The environment's Connections table (ADR-0032, the Deployment Detail
 // design): what the design depends on, who uses it, the keys it carries, and
 // whether this environment holds values for it. The keys are MASKED, always —
 // nothing reads a value back, so the column says what is set rather than what
 // it is set to. Edit re-collects a Project External's values in development
-// (the board's own surface); View opens the dependency's definition on the
-// Spec view. What the design drew and this does not build: the value itself,
+// (the board's own surface); a platform-provisioned connection carries no
+// action — the design already reads on the Spec view. What the design drew
+// and this does not build: the value itself,
 // and "Compare with Production" — production values live only in the promote
 // dialog, as page state.
 
@@ -48,12 +46,10 @@ const TONE: Record<ConnectionLine["state"], StatusTone> = {
 const COLUMNS = "minmax(0, 1.1fr) 140px minmax(0, 1.3fr) 130px 88px";
 
 export function ConnectionsTable({
-  projectName,
   environment,
   rows,
   onEdit,
 }: {
-  projectName: string;
   environment: EnvironmentKey;
   rows: ConnectionTableRow[];
   onEdit: (row: ConnectionRow) => void;
@@ -167,7 +163,7 @@ export function ConnectionsTable({
                 </Typography>
               </Stack>
               <Box role="cell" sx={{ display: "flex", justifyContent: "flex-end" }}>
-                {line.configure ? (
+                {line.configure && (
                   <Button
                     size="small"
                     variant="outlined"
@@ -177,18 +173,6 @@ export function ConnectionsTable({
                   >
                     Edit
                   </Button>
-                ) : (
-                  <LinkButton
-                    size="small"
-                    variant="outlined"
-                    color="inherit"
-                    to="/projects/$projectName/spec"
-                    params={{ projectName }}
-                    search={{ file: `specs/design/dependencies/${line.row.name}/dependency.json` }}
-                    aria-label={`View ${line.row.name} in the design`}
-                  >
-                    View
-                  </LinkButton>
                 )}
               </Box>
             </Box>
