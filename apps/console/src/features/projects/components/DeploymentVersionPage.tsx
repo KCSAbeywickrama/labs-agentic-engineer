@@ -538,35 +538,60 @@ function SummaryCard({
 
 /** One live component: its name, release, state and URL — the Try Out page
  *  is where it is acted on; this only says it is there. */
+/**
+ * One running component: its name and status on the first line, then the
+ * release and the URL each on a labelled line of their own — the same shape
+ * for every component, however long its URL (#779 review).
+ */
 function ComponentLine({ card }: { card: DeploymentCard }) {
   const d = card.deployment;
-  return (
-    <Stack
-      direction="row"
-      spacing={1.5}
-      sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 0.5, px: 1.5, py: 1, border: 1, borderColor: "divider", borderRadius: 1 }}
-    >
-      <Typography variant="subtitle2" sx={{ flexShrink: 0 }}>
-        {card.displayName}
-      </Typography>
-      {d?.releaseName && (
-        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+  const facts: Array<{ label: string; value: React.ReactNode }> = [];
+  if (d?.releaseName) {
+    facts.push({
+      label: "Release",
+      value: (
+        <Typography variant="body2" sx={{ fontFamily: "monospace", wordBreak: "break-all" }}>
           {d.releaseName}
         </Typography>
-      )}
-      <Box sx={{ flexGrow: 1 }} />
-      {d?.endpointUrl && (
+      ),
+    });
+  }
+  if (d?.endpointUrl) {
+    facts.push({
+      label: "URL",
+      value: (
         <MuiLink
           href={d.endpointUrl}
           target="_blank"
           rel="noreferrer"
           variant="body2"
-          sx={{ fontFamily: "monospace", display: "inline-flex", alignItems: "center", gap: 0.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          sx={{ fontFamily: "monospace", display: "inline-flex", alignItems: "center", gap: 0.5, wordBreak: "break-all" }}
         >
           {d.endpointUrl} <ExternalLink size={13} aria-hidden />
         </MuiLink>
-      )}
-      <StatusChip label={d?.status ?? "Not deployed"} tone={card.kind === "success" ? "success" : card.kind === "error" ? "error" : "neutral"} />
-    </Stack>
+      ),
+    });
+  }
+  return (
+    <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1 }}>
+      <Stack
+        direction="row"
+        spacing={1.5}
+        sx={{ alignItems: "center", justifyContent: "space-between", px: 2, py: 1.25, borderBottom: facts.length ? 1 : 0, borderColor: "divider" }}
+      >
+        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+          {card.displayName}
+        </Typography>
+        <StatusChip label={d?.status ?? "Not deployed"} tone={card.kind === "success" ? "success" : card.kind === "error" ? "error" : "neutral"} />
+      </Stack>
+      {facts.map((fact) => (
+        <Stack key={fact.label} direction="row" spacing={2} sx={{ alignItems: "baseline", px: 2, py: 0.75 }}>
+          <Typography variant="overline" color="text.secondary" sx={{ width: 64, flexShrink: 0 }}>
+            {fact.label}
+          </Typography>
+          {fact.value}
+        </Stack>
+      ))}
+    </Box>
   );
 }
