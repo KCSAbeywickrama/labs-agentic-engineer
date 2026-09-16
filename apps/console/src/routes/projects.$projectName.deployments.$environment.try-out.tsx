@@ -17,19 +17,20 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { DeploymentDetailPage } from "../features/projects/components/DeploymentDetailPage";
+import { DeploymentTryOutPage } from "../features/projects/components/DeploymentTryOutPage";
 
 /**
- * One environment's deployment (ADR-0027). Keyed by ENVIRONMENT rather than a
- * deployment id because the platform keeps no deployment record — a release
- * binding is current state, so an environment has exactly one deployment to
- * show. The page itself rejects a segment that names no environment.
+ * Try Out — the environment's live components as things a person can act on
+ * (#779): visit the app, call the endpoints, sign in as a test user. Keyed by
+ * ENVIRONMENT: a release binding is current state, so an environment has
+ * exactly one deployment to try. The page rejects a segment naming no
+ * environment.
  */
-export const Route = createFileRoute("/projects/$projectName/deployments/$environment")({
-  component: DeploymentDetailRoute,
+export const Route = createFileRoute("/projects/$projectName/deployments/$environment/try-out")({
+  component: TryOutRoute,
 });
 
-function DeploymentDetailRoute() {
+function TryOutRoute() {
   const { projectName, environment } = Route.useParams();
-  return <DeploymentDetailPage projectName={projectName} environment={environment} />;
+  return <DeploymentTryOutPage projectName={projectName} environment={environment} />;
 }

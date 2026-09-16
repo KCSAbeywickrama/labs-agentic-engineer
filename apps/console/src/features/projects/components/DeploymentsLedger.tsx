@@ -35,7 +35,7 @@ import {
   milestoneFor,
   validationCell,
   type ValidationAvailability,
-  type EnvironmentRow,
+  type LedgerEntry,
 } from "../lib/deploymentLedger";
 
 type BuildSummary = components["schemas"]["BuildSummary"];
@@ -43,19 +43,21 @@ type BuildSummary = components["schemas"]["BuildSummary"];
 const COLUMNS = [
   { key: "version", label: "Version", width: 96 },
   { key: "milestone", label: "Milestone" },
-  { key: "environment", label: "Environment", width: 140 },
-  { key: "status", label: "Status", width: 170 },
-  { key: "validation", label: "Validation", width: 180 },
-  { key: "deployed", label: "Deployed", width: 150 },
+  { key: "environment", label: "Environment", width: 130 },
+  { key: "status", label: "Status", width: 150 },
+  { key: "validation", label: "Validation", width: 160 },
+  { key: "built", label: "Built", width: 140 },
+  { key: "deployed", label: "Deployed", width: 140 },
   { key: "open", label: "", width: 40 },
 ];
 
 /**
- * The deployments ledger (ADR-0027, artboard 1c): one row per environment
- * that runs something, the Builds ledger's own table so the two pages read as
- * one system. The platform keeps no deployment RECORD, so a row is the
- * environment's CURRENT deployment — the design's superseded and failed past
- * rows have no source, and the Duration column with them.
+ * The deployments ledger (ADR-0027, artboard 1c; #779): one row per VERSION an
+ * environment has run — development's whole version ledger, newest first, and
+ * production's current one — the Builds ledger's own table so the two pages
+ * read as one system. The platform keeps no deployment RECORD, so a past
+ * row carries what the build story knows (the milestone, when it was built)
+ * and claims no rollout stamp of its own; only the live row has one.
  */
 export function DeploymentsLedger({
   rows,
@@ -65,7 +67,7 @@ export function DeploymentsLedger({
   validationAvailability,
   onOpen,
 }: {
-  rows: EnvironmentRow[];
+  rows: LedgerEntry[];
   /** The version ledger, for the Milestone cell; undefined while loading. */
   builds: BuildSummary[] | undefined;
   /** deploy.validation — development's verdict lifecycle. */
@@ -74,7 +76,7 @@ export function DeploymentsLedger({
   /** The deployed version's own run read is out or failed: the cell holds a
    *  skeleton, or says Unavailable, rather than "Not run". */
   validationAvailability?: ValidationAvailability | undefined;
-  onOpen: (row: EnvironmentRow) => void;
+  onOpen: (row: LedgerEntry) => void;
 }) {
   return (
     <ListingTable.Container sx={{ width: "100%" }}>
@@ -87,7 +89,7 @@ export function DeploymentsLedger({
           Deployments
         </Typography>
         <Typography variant="caption" color="text.secondary">
-          what each environment runs now
+          every version that reached an environment, newest first
         </Typography>
       </Stack>
       {rows.length === 0 ? (
@@ -112,10 +114,19 @@ export function DeploymentsLedger({
           <ListingTable.Body>
             {rows.map((row) => (
               <LedgerRow
-                key={row.environment}
+                key={row.key}
                 row={row}
                 milestone={milestoneFor(row.version, builds)}
-                validation={validationCell(row.environment, validation, counts, validationAvailability)}
+                // The verdict cell is the LIVE development row's: the
+                // aggregate's validation names what runs there. A past
+                // version's verdict is its page's business.
+                validation={
+                  row.current
+                    ? validationCell(row.environment, validation, counts, validationAvailability)
+                    : row.environment === "development"
+                      ? null
+                      : validationCell(row.environment, validation, counts, validationAvailability)
+                }
                 onOpen={() => onOpen(row)}
               />
             ))}
@@ -132,7 +143,7 @@ function LedgerRow({
   validation,
   onOpen,
 }: {
-  row: EnvironmentRow;
+  row: LedgerEntry;
   milestone: string | undefined;
   validation: ReturnType<typeof validationCell>;
   onOpen: () => void;
@@ -143,7 +154,7 @@ function LedgerRow({
       hover
       clickable
       onClick={onOpen}
-      aria-label={`Open ${row.label} deployment`}
+      aria-label={`Open ${row.label}${row.version ? ` ${row.version}` : ""} deployment`}
       // A converging row tints so the moving environment is findable without
       // reading every status cell. alpha() over a theme colour, so it holds in
       // both schemes — a hardcoded near-white tint would vanish in dark mode.
@@ -206,6 +217,12 @@ function LedgerRow({
             —
           </Typography>
         )}
+      </ListingTable.Cell>
+
+      <ListingTable.Cell>
+        <Typography variant="body2" color="text.secondary">
+          {runStamp(row.builtAt) || "—"}
+        </Typography>
       </ListingTable.Cell>
 
       <ListingTable.Cell>

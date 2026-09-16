@@ -19,25 +19,17 @@
 import { useMemo, useState } from "react";
 import {
   Alert,
-  Box,
   Button,
-  Card,
-  CircularProgress,
-  Link as MuiLink,
   Skeleton,
   Snackbar,
   Stack,
-  Typography,
 } from "@wso2/oxygen-ui";
-import { Compass, GitHub } from "@wso2/oxygen-ui-icons-react";
+import { Compass } from "@wso2/oxygen-ui-icons-react";
 import { createLink, Link } from "@tanstack/react-router";
 import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
 import { StatusChip } from "../../../components/StatusChip";
-import type { components } from "../../../generated/aep-api";
-import { useBuildRuns, useBuilds } from "../../builds/api/queries";
-import { runStamp } from "../../builds/lib/format";
-import { mergedCycle } from "../../builds/lib/runView";
+import { useBuildRuns } from "../../builds/api/queries";
 import { isRegisteredExternal } from "../../marketplace/kind";
 import { useExternalResources } from "../../settings/api/queries";
 import { useDesignDependencies } from "../../spec/api/queries";
@@ -51,14 +43,10 @@ import {
 import { connectionTable, talksTo } from "../lib/deploymentDetail";
 import { deployedValidationState, } from "../lib/deploymentFlow";
 import {
-  commitUrl,
   environmentLabel,
   environmentRows,
-  milestoneFor,
   parseEnvironment,
-  shortSha,
   validationCell,
-  type EnvironmentRow,
 } from "../lib/deploymentLedger";
 import { groupDeploymentCards } from "../lib/deploymentRows";
 import { connectionRows, type ConnectionRow } from "../lib/promotion";
@@ -67,23 +55,19 @@ import { ConnectionValuesDialog } from "./ConnectionValuesDialog";
 import { ConnectionsTable } from "./ConnectionsTable";
 import { TryItOutCard, useTestUsers } from "./TryItOut";
 
-type Component = components["schemas"]["Component"];
-
 const LinkButton = createLink(Button);
-const RouterLink = createLink(MuiLink);
 
 /**
- * One environment's deployment (ADR-0027, artboard 1d; ADR-0032, the
- * Deployment Detail design): a summary card, then TRY IT OUT — every
- * component as a panel a person can act on: a web application is visited and
- * carries the test users that sign in to it, a service lists its endpoints
+ * TRY OUT (#779; ADR-0032, the Deployment Detail design) — the environment's
+ * live components as things a person can act on: a web application is visited
+ * and carries the test users that sign in to it, a service lists its endpoints
  * off its contract with a curl each — then the connections the environment
- * runs with. The route is keyed by ENVIRONMENT because that is the only
- * deployment identity the platform keeps: a release binding is current state,
- * so there is exactly one deployment per environment to show, and no earlier
- * one to name.
+ * runs with. What a deployment IS (its version, commit, verdict) is the
+ * version page's business (`DeploymentVersionPage`), not this one's. Keyed by
+ * ENVIRONMENT because a release binding is current state: there is exactly
+ * one deployment per environment to try.
  */
-export function DeploymentDetailPage({
+export function DeploymentTryOutPage({
   projectName,
   environment: segment,
 }: {
@@ -96,7 +80,6 @@ export function DeploymentDetailPage({
   const deployments = useComponentsDeployments(projectName, componentNames);
   const status = useProjectStatus(projectName);
   const deploy = status.data?.deploy;
-  const builds = useBuilds(projectName);
 
   // The version this environment runs — the aggregate names development's.
   const version =
@@ -138,11 +121,10 @@ export function DeploymentDetailPage({
   const [valuesTarget, setValuesTarget] = useState<ConnectionRow | null>(null);
   const [valuesSaved, setValuesSaved] = useState(false);
 
-  const title = environment
-    ? version
-      ? `${environmentLabel(environment)} · ${version}`
-      : environmentLabel(environment)
-    : "Deployment";
+  const title = "Deployment Try Out";
+  const subtitle = environment
+    ? `${projectName} · ${environmentLabel(environment)}${version ? ` · ${version}` : ""}`
+    : projectName;
   const backTo = {
     link: <Link to="/projects/$projectName/deployments" params={{ projectName }} />,
     label: "Back to Deployments",
@@ -177,7 +159,7 @@ export function DeploymentDetailPage({
     // title on it.
     return (
       <>
-        <PageHeader title={title} backTo={backTo} />
+        <PageHeader title={title} subtitle={subtitle} backTo={backTo} />
         <EmptyState
           icon={<Compass size={48} />}
           title={`No environment called ${segment}`}
@@ -199,7 +181,7 @@ export function DeploymentDetailPage({
   if (components.isPending || (componentNames.length > 0 && deployments.isPending)) {
     return (
       <>
-        <PageHeader title={title} backTo={backTo} />
+        <PageHeader title={title} subtitle={subtitle} backTo={backTo} />
         <Stack spacing={2} sx={{ mt: 2 }}>
           <Skeleton variant="rounded" height={140} />
           <Skeleton variant="rounded" height={220} />
@@ -211,7 +193,7 @@ export function DeploymentDetailPage({
   if (components.isError) {
     return (
       <>
-        <PageHeader title={title} backTo={backTo} />
+        <PageHeader title={title} subtitle={subtitle} backTo={backTo} />
         <Alert
           severity="error"
           action={<Button onClick={() => void components.refetch()}>Retry</Button>}
@@ -237,7 +219,7 @@ export function DeploymentDetailPage({
     // Retry of its own.
     return (
       <>
-        <PageHeader title={title} backTo={backTo} />
+        <PageHeader title={title} subtitle={subtitle} backTo={backTo} />
         {deployments.failedCount > 0 ? (
           <Alert severity="warning">
             Deployments for {deployments.failedCount} component
@@ -259,13 +241,8 @@ export function DeploymentDetailPage({
     );
   }
 
-  const byName = new Map<string, Component>();
-  for (const c of components.data?.items ?? []) byName.set(c.name, c);
   const types = new Map<string, string>();
   for (const c of components.data?.items ?? []) if (c.type) types.set(c.name, c.type);
-  const merged = mergedCycle(runs.data?.runs);
-  const sha = merged?.mergeSha ?? "";
-  const commitHref = commitUrl(status.data?.repoUrl, sha);
   const validationView = validationCell(
     environment,
     pageDeploy?.validation,
@@ -288,6 +265,7 @@ export function DeploymentDetailPage({
           too many (review round). */}
       <PageHeader
         title={title}
+        subtitle={subtitle}
         backTo={backTo}
         {...(validationView && !validationView.pending
           ? {
@@ -311,9 +289,9 @@ export function DeploymentDetailPage({
         </Alert>
       )}
       {runs.isError && (
-        // The run story is what names the commit, and — when this version is
-        // behind the build — its verdict. Without it neither is known, and
-        // the cells say so rather than settling on "—" and "Not run".
+        // When this version is behind the build, its verdict is its own run
+        // story's. Without it the chip says so rather than settling on
+        // "Not run".
         <Alert
           severity="warning"
           sx={{ mb: 2 }}
@@ -324,20 +302,6 @@ export function DeploymentDetailPage({
         </Alert>
       )}
       <Stack spacing={2}>
-        <SummaryCard
-          projectName={projectName}
-          row={row}
-          milestone={milestoneFor(version, builds.data)}
-          validation={validationView}
-          commit={
-            sha
-              ? { sha, ...(commitHref ? { href: commitHref } : {}) }
-              : runs.isPending && Boolean(version)
-                ? "loading"
-                : undefined
-          }
-        />
-
         <TryItOutCard
           projectName={projectName}
           cards={row.cards}
@@ -419,112 +383,5 @@ export function DeploymentDetailPage({
         </Alert>
       </Snackbar>
     </>
-  );
-}
-
-function SummaryCard({
-  projectName,
-  row,
-  milestone,
-  validation,
-  commit,
-}: {
-  projectName: string;
-  row: EnvironmentRow;
-  milestone: string | undefined;
-  validation: ReturnType<typeof validationCell>;
-  /** The merge that shipped this version, once the run story has answered. */
-  commit: { sha: string; href?: string } | "loading" | undefined;
-}) {
-  const cells: Array<{ label: string; value: React.ReactNode }> = [
-    { label: "Deployed", value: runStamp(row.deployedAt) || "—" },
-    { label: "Milestone", value: milestone ?? "—" },
-    {
-      label: "Validation",
-      value: validation?.pending ? (
-        <Skeleton variant="rounded" width={96} height={22} data-testid="validation-cell-skeleton" />
-      ) : validation ? (
-        <StatusChip
-          label={validation.label}
-          tone={validation.tone}
-          appearance="soft"
-          dot
-          {...(validation.spoken ? { spokenLabel: validation.spoken } : {})}
-        />
-      ) : (
-        "—"
-      ),
-    },
-    {
-      label: "Commit",
-      value:
-        commit === "loading" ? (
-          <CircularProgress size={14} aria-label="Loading the commit" />
-        ) : commit ? (
-          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-            <Box component="span" sx={{ fontFamily: "monospace" }}>
-              {shortSha(commit.sha)}
-            </Box>
-            {commit.href && (
-              <MuiLink
-                href={commit.href}
-                target="_blank"
-                rel="noreferrer"
-                variant="body2"
-                sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
-              >
-                <GitHub size={13} aria-hidden /> GitHub
-              </MuiLink>
-            )}
-          </Stack>
-        ) : (
-          "—"
-        ),
-    },
-  ];
-
-  return (
-    <Card variant="outlined" sx={{ p: 2.5, ...(row.status.live && { borderColor: "info.main" }) }}>
-      <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 0.5 }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-          {row.version ? `${row.label} · ${row.version}` : row.label}
-        </Typography>
-        <StatusChip label={row.status.label} tone={row.status.tone} appearance="soft" dot />
-        <Box sx={{ flex: 1 }} />
-        {row.version && (
-          <RouterLink
-            to="/projects/$projectName/builds/$tag"
-            params={{ projectName, tag: row.version }}
-            variant="body2"
-            sx={{ fontWeight: 500 }}
-          >
-            View the build that shipped this
-          </RouterLink>
-        )}
-      </Stack>
-      <Box
-        sx={{
-          display: "grid",
-          gap: 2.5,
-          mt: 2.5,
-          gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr", lg: "repeat(4, minmax(0, 1fr))" },
-        }}
-      >
-        {cells.map((c) => (
-          <Box key={c.label} sx={{ minWidth: 0 }}>
-            <Typography
-              variant="overline"
-              color="text.secondary"
-              sx={{ fontWeight: 700, letterSpacing: "0.07em" }}
-            >
-              {c.label}
-            </Typography>
-            <Typography component="div" variant="body2" sx={{ mt: 0.5, fontWeight: 500 }}>
-              {c.value}
-            </Typography>
-          </Box>
-        ))}
-      </Box>
-    </Card>
   );
 }

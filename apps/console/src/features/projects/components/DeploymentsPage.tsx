@@ -47,7 +47,7 @@ import {
   developmentConnections,
   promoteStep,
 } from "../lib/deploymentFlow";
-import { environmentRows, ledgerRows, milestoneFor } from "../lib/deploymentLedger";
+import { environmentRows, milestoneFor, versionLedgerRows } from "../lib/deploymentLedger";
 import { groupDeploymentCards } from "../lib/deploymentRows";
 import {
   connectionRows,
@@ -317,7 +317,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
         )}
 
         <DeploymentsLedger
-          rows={ledgerRows(rows)}
+          rows={versionLedgerRows(rows, builds.data)}
           builds={builds.data}
           validation={cardDeploy?.validation}
           counts={validation.counts}
@@ -325,10 +325,19 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
             deployedState.pending ? "pending" : deployedState.failed ? "failed" : undefined
           }
           onOpen={(row) =>
-            void navigate({
-              to: "/projects/$projectName/deployments/$environment",
-              params: { projectName, environment: row.environment },
-            })
+            // A version opens its own page; an environment whose version the
+            // platform does not name (production) opens its Try Out page.
+            void navigate(
+              row.version
+                ? {
+                    to: "/projects/$projectName/deployments/$environment/$version",
+                    params: { projectName, environment: row.environment, version: row.version },
+                  }
+                : {
+                    to: "/projects/$projectName/deployments/$environment/try-out",
+                    params: { projectName, environment: row.environment },
+                  },
+            )
           }
         />
       </Stack>

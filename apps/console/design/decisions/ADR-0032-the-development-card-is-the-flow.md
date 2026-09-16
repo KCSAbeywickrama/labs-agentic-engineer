@@ -119,11 +119,32 @@ only the Builds page names.
    is then the honest word; and a Registered External is matched by name
    regardless of case.
 
+7. **Two pages under an environment, and a ledger of versions
+   ([#779](https://github.com/wso2/labs-agentic-engineer/issues/779)).** The
+   environment page split: **Try Out** at `/deployments/$env/try-out` (the
+   panels, the endpoints, the test users, the connections — "Deployment Try
+   Out", the project and environment under it) and **a page per deployed
+   version** at `/deployments/$env/$version` — the milestone, when it was
+   built, the commit, the verdict with its report, a link to the build, and
+   what it runs there now when it is the live version, or the sentence that it
+   was superseded and by what. The bare `/deployments/$env` redirects to Try
+   Out. The board's ledger lists **every version that reached development**,
+   newest first — *Deployed* (the live one, with the binding's stamp) /
+   *Superseded* / *Building* / *Build failed* / *Cancelled* off the version
+   ledger — and production's current row; each opens its page. Every fact is a
+   read the console already makes (`list-builds`, `list-build-runs`, the
+   component/binding join). ADR-0027 decision 4 still holds: no rollout dates
+   are claimed for a past version, no Duration, no Redeploy — a deployment
+   RECORD remains a backend handshake, and these pages gain its rows without
+   being redone.
+
 ## Consequences
 
 - `EnvironmentCards` becomes the flow; `ConnectionsCard` is mounted by
-  nothing and goes. `DeploymentDetailPage` composes `TryItOutCard` (the
-  panels, the endpoints, the inline test users) and `ConnectionsTable`;
+  nothing and goes. `DeploymentTryOutPage` (the former `DeploymentDetailPage`)
+  composes `TryItOutCard` (the panels, the endpoints, the inline test users)
+  and `ConnectionsTable`; `DeploymentVersionPage` carries the summary card;
+  `versionLedgerRows` feeds the board's ledger;
   `ProjectSignInPanel` and `TestUsersDialog` stay for the row they share.
   `VerdictBanner` keeps its sentence and its link and moves inside step 2.
 - The Builds page and the Deployments page now both say *on hold* from the

@@ -482,7 +482,7 @@ describe("DeploymentsPage — environment board", () => {
     expect(screen.getByRole("group", { name: "Connections — 0 of 1 set" })).toBeInTheDocument();
     // The ledger: one row, development, with the milestone read off the
     // version ledger and a validation cell.
-    const row = screen.getByRole("row", { name: "Open Development deployment" });
+    const row = screen.getByRole("row", { name: "Open Development v1 deployment" });
     expect(within(row).getByText("v1")).toBeInTheDocument();
     expect(within(row).getByText("Milestone #3")).toBeInTheDocument();
     expect(within(row).getByText("validated")).toBeInTheDocument();
@@ -490,6 +490,39 @@ describe("DeploymentsPage — environment board", () => {
     expect(
       screen.queryByRole("row", { name: "Open Production deployment" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("lists every built version, newest first, and opens the version's page", () => {
+    mockDeploy = { version: "v1", status: "deployed", components: { total: 1, ready: 1 }, validation: "passed" };
+    mockBuilds = [
+      { tag: "v1", milestoneNumber: 1, status: "completed", startedAt: "2026-09-01T09:00:00Z", completedAt: "2026-09-01T10:00:00Z" },
+      { tag: "v2", milestoneNumber: 2, status: "in_progress", startedAt: "2026-09-14T09:00:00Z" },
+      { tag: "v0", milestoneNumber: 0, status: "failed", startedAt: "2026-08-20T09:00:00Z", completedAt: "2026-08-20T09:30:00Z" },
+    ];
+    mockBuildVersion = "v2";
+    mockRunsByTag = { v1: [judgedRun("v1", "passed")] };
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    const rows = screen.getAllByRole("row", { name: /^Open Development/ });
+    expect(rows.map((r) => r.getAttribute("aria-label"))).toEqual([
+      "Open Development v2 deployment",
+      "Open Development v1 deployment",
+      "Open Development v0 deployment",
+    ]);
+    expect(within(rows[0]!).getByText("Building")).toBeInTheDocument();
+    expect(within(rows[1]!).getByText("Deployed")).toBeInTheDocument();
+    expect(within(rows[2]!).getByText("Build failed")).toBeInTheDocument();
+    // Only the live row carries a verdict; a past version's is its page's.
+    expect(within(rows[1]!).getByText("validated")).toBeInTheDocument();
+    expect(within(rows[2]!).queryByText(/validated|Not run/)).not.toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Built" })).toBeInTheDocument();
+
+    fireEvent.click(rows[2]!);
+    expect(navigate).toHaveBeenCalledWith({
+      to: "/projects/$projectName/deployments/$environment/$version",
+      params: { projectName: "acme", environment: "development", version: "v0" },
+    });
   });
 
   it("opens the environment's page from its ledger row", () => {
@@ -502,10 +535,10 @@ describe("DeploymentsPage — environment board", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    fireEvent.click(screen.getByRole("row", { name: "Open Development deployment" }));
+    fireEvent.click(screen.getByRole("row", { name: "Open Development v1 deployment" }));
     expect(navigate).toHaveBeenCalledWith({
-      to: "/projects/$projectName/deployments/$environment",
-      params: { projectName: "acme", environment: "development" },
+      to: "/projects/$projectName/deployments/$environment/$version",
+      params: { projectName: "acme", environment: "development", version: "v1" },
     });
   });
 
@@ -540,7 +573,7 @@ describe("DeploymentsPage — environment board", () => {
 
     // The ledger's chip and step 1's title; the card header carries none.
     expect(screen.getAllByText("Deploying")).toHaveLength(2);
-    const row = screen.getByRole("row", { name: "Open Development deployment" });
+    const row = screen.getByRole("row", { name: "Open Development v2 deployment" });
     // A verdict is expected and has not arrived: the cell says so, and no
     // promotion is offered — with the reason beside the button.
     expect(within(row).getByText("Not run")).toBeInTheDocument();
@@ -932,7 +965,7 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
     expect(within(steps[0]!).getByRole("group", { name: "Connections — 1 of 1 set" })).toBeInTheDocument();
     expect(within(steps[0]!).getByText("Set")).toBeInTheDocument();
     const tryIt = within(steps[0]!).getByRole("link", { name: /Try it now/ });
-    expect(tryIt).toHaveAttribute("href", "/projects/acme/deployments/development");
+    expect(tryIt).toHaveAttribute("href", "/projects/acme/deployments/development/try-out");
     expect(tryIt).not.toHaveAttribute("aria-disabled", "true");
     expect(screen.getByText("Opens the deployment view: app, endpoints, test users")).toBeInTheDocument();
     expect(screen.getByText(/You can try them now while validation runs\./)).toBeInTheDocument();
@@ -1074,7 +1107,7 @@ describe("DeploymentsPage — the card's version (review round)", () => {
     expect(within(steps[2]!).getByText("Enabled once the value is set")).toBeInTheDocument();
     expect(screen.queryByText("Enabled when validation passes")).not.toBeInTheDocument();
     // …and the ledger's cell agrees with the card.
-    const row = screen.getByRole("row", { name: "Open Development deployment" });
+    const row = screen.getByRole("row", { name: "Open Development v1 deployment" });
     expect(within(row).getByText("v1")).toBeInTheDocument();
     expect(within(row).getByText("validated")).toBeInTheDocument();
   });
@@ -1124,7 +1157,7 @@ describe("DeploymentsPage — the card's version (review round)", () => {
     render(<DeploymentsPage projectName="acme" />);
 
     expect(screen.getByText(/The version's run story could not be loaded: runs down/)).toBeInTheDocument();
-    const row = screen.getByRole("row", { name: "Open Development deployment" });
+    const row = screen.getByRole("row", { name: "Open Development v1 deployment" });
     expect(within(row).getByText("Unavailable")).toBeInTheDocument();
     expect(screen.queryByText("Not run")).not.toBeInTheDocument();
     const flow = screen.getByRole("list", { name: "Deployment flow" });

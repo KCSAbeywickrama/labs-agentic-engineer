@@ -131,7 +131,7 @@ function TryItNow({
       <LinkButton
         variant="contained"
         disabled={disabled}
-        to="/projects/$projectName/deployments/$environment"
+        to="/projects/$projectName/deployments/$environment/try-out"
         params={{ projectName, environment: "development" }}
         endIcon={<ArrowRight size={16} aria-hidden />}
       >

@@ -222,6 +222,105 @@ export function ledgerRows(rows: EnvironmentRow[]): EnvironmentRow[] {
   return rows.filter((r) => r.cards.some((c) => c.deployment));
 }
 
+/**
+ * One row of the deployments ledger (#779): a VERSION in an environment, not
+ * only the environment's current one. Development gets a row per built
+ * version — the version ledger is the only record of what reached it, and
+ * every completed build auto-deploys there — while production, which the
+ * aggregate never names a version for, keeps its one row of what the binding
+ * says. A row knows where it opens: the version's page, or the environment's
+ * Try Out page when there is no version to name.
+ */
+export interface LedgerEntry {
+  key: string;
+  environment: EnvironmentKey;
+  label: string;
+  version?: string;
+  status: EnvironmentStatus;
+  /** True for the row the environment runs NOW — the one with a binding. */
+  current: boolean;
+  /** The build's finish stamp (the version ledger's), for every dev row. */
+  builtAt?: string;
+  /** The binding's stamp — the current row only; a past version has none the
+   *  platform recorded. */
+  deployedAt?: string;
+}
+
+/** What a past or unfinished version reads as on the ledger, off its build. */
+function buildRowStatus(build: BuildSummary): EnvironmentStatus {
+  switch (build.status) {
+    case "started":
+    case "in_progress":
+      return { label: "Building", tone: "info", live: true };
+    case "failed":
+      return { label: "Build failed", tone: "error", live: false };
+    case "cancelled":
+      return { label: "Cancelled", tone: "neutral", live: false };
+    default:
+      return { label: "Superseded", tone: "neutral", live: false };
+  }
+}
+
+/** Newest first — the order the version ledger is read in. */
+function newestFirst(a: BuildSummary, b: BuildSummary): number {
+  return (b.startedAt ?? "").localeCompare(a.startedAt ?? "");
+}
+
+export function versionLedgerRows(
+  rows: EnvironmentRow[],
+  builds: BuildSummary[] | undefined,
+): LedgerEntry[] {
+  const out: LedgerEntry[] = [];
+  const development = rows.find((r) => r.environment === "development");
+  const seen = new Set<string>();
+  for (const build of [...(builds ?? [])].sort(newestFirst)) {
+    if (seen.has(build.tag)) continue;
+    seen.add(build.tag);
+    // The aggregate's word: the version it names is the one development runs,
+    // and the row's status is the environment's own (which folds the bindings
+    // under it) — not the build's.
+    const current = development?.version === build.tag;
+    out.push({
+      key: `development:${build.tag}`,
+      environment: "development",
+      label: "Development",
+      version: build.tag,
+      status: current && development ? development.status : buildRowStatus(build),
+      current,
+      ...(build.completedAt ? { builtAt: build.completedAt } : {}),
+      ...(current && development?.deployedAt ? { deployedAt: development.deployedAt } : {}),
+    });
+  }
+  // A dev deployment whose version the ledger does not list (a version tagged
+  // before the ledger kept rows) still gets its row — it IS what runs there.
+  const devBound = development?.cards.some((c) => c.deployment) ?? false;
+  if (development && (devBound || development.version) && !(development.version && seen.has(development.version))) {
+    out.unshift({
+      key: `development:${development.version ?? "current"}`,
+      environment: "development",
+      label: "Development",
+      ...(development.version ? { version: development.version } : {}),
+      status: development.status,
+      current: true,
+      ...(development.deployedAt ? { deployedAt: development.deployedAt } : {}),
+    });
+  }
+  for (const row of rows) {
+    if (row.environment === "development") continue;
+    if (!row.cards.some((c) => c.deployment)) continue;
+    out.push({
+      key: `${row.environment}:${row.version ?? "current"}`,
+      environment: row.environment,
+      label: row.label,
+      ...(row.version ? { version: row.version } : {}),
+      status: row.status,
+      current: true,
+      ...(row.deployedAt ? { deployedAt: row.deployedAt } : {}),
+    });
+  }
+  return out;
+}
+
 /** "Milestone #3" for the version an environment runs, when the ledger knows it. */
 export function milestoneFor(
   version: string | undefined,
