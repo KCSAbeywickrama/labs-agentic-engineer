@@ -675,7 +675,7 @@ export function TryItOutCard({
           {testUsers && firstWebApp ? " · sign in with a test user below" : ""}
         </Typography>
       </Stack>
-      <Stack spacing={1.5} sx={{ p: 2 }}>
+      <Stack spacing={3} sx={{ p: 2 }}>
         {cards.map((card) => (
           <ComponentPanel
             key={card.componentName}
