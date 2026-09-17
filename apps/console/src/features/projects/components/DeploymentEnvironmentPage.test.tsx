@@ -550,8 +550,7 @@ describe("DeploymentEnvironmentPage — test users", () => {
     mockTestUsers = [
       {
         username: "test-viewer",
-        roleName: "Viewer",
-        coldStart: true,
+        roles: ["Viewer"],
         exists: true,
         owned: true,
         supplied: false,
@@ -574,7 +573,7 @@ describe("DeploymentEnvironmentPage — test users", () => {
     // the row folds them to Deployed — an app a test user can sign in to.
     mockDeploy = { version: "v1", status: "none", components: { total: 2, ready: 0 }, validation: "none" };
     mockTestUsers = [
-      { username: "test-viewer", roleName: "Viewer", coldStart: true, exists: true, owned: true, supplied: false },
+      { username: "test-viewer", roles: ["Viewer"], exists: true, owned: true, supplied: false },
     ];
     render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
     expect(screen.getByText("Sign in with a test user")).toBeInTheDocument();

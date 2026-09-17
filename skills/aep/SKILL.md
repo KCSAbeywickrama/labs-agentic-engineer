@@ -192,9 +192,10 @@ subagent you handed it to, keeps its status line current from start to done
 2. **Make the change it asks for**, holding to
    `references/component-contract.md` and the stack skills of every component it
    touches.
-3. **A `web-application` is finished by a walk, not a build.** Once its build is
-   clean, dispatch **one more subagent** for that component with exactly this
-   prompt, and nothing about how to walk:
+3. **A `web-application` is finished by a walk, not a build.** The moment its
+   builder reports clean — not when the rest of the wave has — dispatch **one
+   more subagent** for that component with exactly this prompt, and nothing
+   about how to walk:
 
    ```text
    Walk <component> at <App Path>. Load `mock-verification` and
@@ -317,10 +318,18 @@ component's wiring, review one that has come back — instead of spending the wh
 wave inside one blocked tool call. Short prompts are what make one message
 possible.
 
-**Wait for every one of them with the wait tool before you stage or commit
-anything.** A subagent that has not reported is not done, whatever the tree looks
-like: the files it is still writing are already on disk, so a commit taken early
-ships half an issue.
+**Wait for one at a time, and act on each report as it lands.** A wait placed on
+two builders in one turn returns when the slower one does, and the report that
+came back first sits unread while it builds. Do not guess which that will be —
+end the turn once the wave is dispatched and let each subagent's own settlement
+wake you, so the report you act on is whichever actually finished. If you do
+block, keep the window short: a long one can spend a sibling's entire build
+before you learn the other went clean. Either way, when a report lands, do what
+it unlocks before waiting again — a `web-application` that reports clean gets
+its walk dispatched then (step 3), with its siblings still building. Only the **commit** waits for the whole issue:
+a subagent that has not reported is not done, whatever the tree looks like, and
+the files it is still writing are already on disk, so a commit taken early ships
+half an issue.
 
 **Inside a subagent, every command runs in the foreground** — a subagent never
 backgrounds a shell call. A build left running in the background lets the
@@ -356,11 +365,14 @@ nothing else. Name **exactly these**, and nothing else:
    you** — "read this first; it is your contract". Copy the string; never retype
    or shorten it, and never invent one. Add that the path is outside the project:
    readable, while nothing may be written outside its App Paths;
-5. the stack skills it must load, by name — and that where a stack skill's own
-   flow contradicts the component contract, the contract wins (a stack skill may
-   end its flow at "open a PR", which this subagent may not do). In the same
-   line, that it loads **no other skill and not `aep`**: this prompt is its
-   whole procedure;
+5. the skills it must load, by name: every name in its component's
+   `skillsPinned` — the stack skill, the design system, and when the component
+   declares the auth dependency `thunder-authentication` and, for a service
+   behind the gateway, `api-management` — and that where a skill's own flow
+   contradicts the component contract, the contract wins (a stack skill may end
+   its flow at "open a PR", which this subagent may not do). In the same line,
+   that it loads **no other skill and not `aep`**: this prompt is its whole
+   procedure;
 6. **the artefacts only you could resolve** — and say which is which: the
    component's `workload.yaml` when you hold a resolved one, pasted verbatim and
    not to be changed; **or** that no wiring was resolved, so it authors the file

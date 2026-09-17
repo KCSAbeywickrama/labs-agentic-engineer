@@ -134,7 +134,10 @@ export function TestUsersInline({
   const [all, setAll] = useState(false);
   const q = query.trim().toLowerCase();
   const matching = logins.filter(
-    (l) => q === "" || l.username.toLowerCase().includes(q) || l.role.toLowerCase().includes(q),
+    (l) =>
+      q === "" ||
+      l.username.toLowerCase().includes(q) ||
+      l.roles.some((r) => r.toLowerCase().includes(q)),
   );
   const shown = all ? matching : matching.slice(0, USERS_SHOWN);
   return (
