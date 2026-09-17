@@ -59,10 +59,22 @@ test("findFreePort skips a port already published on the wildcard address", asyn
     // The precondition, asserted rather than assumed — if this ever stops
     // holding, the bug this test guards has changed shape and the test should
     // say so instead of passing for the wrong reason.
+    //
+    // It is per-KERNEL, and asserted per kernel rather than skipped. BSD (macOS)
+    // lets `127.0.0.1:P` bind while another process holds `0.0.0.0:P` — that is
+    // the trap this picker exists for, and where a developer meets it. Linux
+    // refuses the same bind with EADDRINUSE, so the trap cannot arise in CI at
+    // all. Both answers are correct for their kernel; an UNEXPECTED one is what
+    // must fail, on either. What the test actually guards — that the picker
+    // never hands out a port compose will be refused — is asserted
+    // unconditionally below, because it has to hold on both.
+    const loopbackBindsUnderWildcardHolder = process.platform !== "linux";
     assert.equal(
       await isPortFree(taken),
-      true,
-      "a loopback bind still succeeds against a wildcard holder — that is the whole trap",
+      loopbackBindsUnderWildcardHolder,
+      loopbackBindsUnderWildcardHolder
+        ? "a loopback bind still succeeds against a wildcard holder — that is the whole trap"
+        : "this kernel refuses a loopback bind under a wildcard holder, so the trap cannot arise here",
     );
     assert.equal(await isPortBusy(taken), true, "but something IS listening there");
 
