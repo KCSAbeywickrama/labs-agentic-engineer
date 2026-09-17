@@ -185,7 +185,7 @@ function TryItNow({
       <LinkButton
         variant={variant}
         disabled={disabled}
-        to="/projects/$projectName/deployments/$environment/try-out"
+        to="/projects/$projectName/deployments/$environment"
         params={{ projectName, environment }}
         onClick={(event: React.MouseEvent) => event.stopPropagation()}
         endIcon={<ArrowRight size={16} aria-hidden />}
@@ -673,7 +673,7 @@ export function EnvironmentFlowCard({
             sx={{ fontWeight: 700, letterSpacing: "-0.01em", minWidth: 0 }}
           >
             <NameLink
-              to="/projects/$projectName/deployments/$environment/try-out"
+              to="/projects/$projectName/deployments/$environment"
               params={{ projectName, environment: env.name }}
               onClick={(event: React.MouseEvent) => event.stopPropagation()}
               color="inherit"

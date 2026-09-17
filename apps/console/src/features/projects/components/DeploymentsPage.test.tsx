@@ -949,7 +949,7 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
     expect(within(steps[0]!).getByRole("group", { name: "Dependencies — 1 of 1 set" })).toBeInTheDocument();
     expect(within(steps[0]!).getByText("Set")).toBeInTheDocument();
     const tryIt = within(steps[0]!).getByRole("link", { name: /Try it now/ });
-    expect(tryIt).toHaveAttribute("href", "/projects/acme/deployments/development/try-out");
+    expect(tryIt).toHaveAttribute("href", "/projects/acme/deployments/development");
     expect(tryIt).not.toHaveAttribute("aria-disabled", "true");
     // The button stands alone, as the design draws it: no caption beside it,
     // and no prose above the version block restating the counts.

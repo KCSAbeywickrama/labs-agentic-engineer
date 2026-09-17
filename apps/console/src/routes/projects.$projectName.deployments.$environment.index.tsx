@@ -16,19 +16,21 @@
  * under the License.
  */
 
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
+import { DeploymentEnvironmentPage } from "../features/projects/components/DeploymentEnvironmentPage";
 
 /**
- * `/deployments/$environment` used to be the environment's page (ADR-0027).
- * The environment now has two: Try Out, and a page per deployed version
- * (#779). The bare URL keeps resolving — every link into it lands on Try Out.
+ * The environment's own page (§6). `/deployments/$environment` used to redirect
+ * to a separate Try Out page; the environment page now lives AT the bare URL,
+ * with Try Out as one of its sections. Keyed by ENVIRONMENT: a release binding
+ * is current state, so an environment has exactly one deployment to show. The
+ * page rejects a segment naming no environment.
  */
 export const Route = createFileRoute("/projects/$projectName/deployments/$environment/")({
-  beforeLoad: ({ params }) => {
-    throw redirect({
-      to: "/projects/$projectName/deployments/$environment/try-out",
-      params,
-      replace: true,
-    });
-  },
+  component: EnvironmentRoute,
 });
+
+function EnvironmentRoute() {
+  const { projectName, environment } = Route.useParams();
+  return <DeploymentEnvironmentPage projectName={projectName} environment={environment} />;
+}

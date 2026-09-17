@@ -19,52 +19,49 @@
 import { describe, expect, it, vi } from "vitest";
 
 // URL semantics only — the pages are stubbed out (see builds-routes.test.ts).
-vi.mock("../features/projects/components/DeploymentTryOutPage", () => ({
-  DeploymentTryOutPage: () => null,
+vi.mock("../features/projects/components/DeploymentEnvironmentPage", () => ({
+  DeploymentEnvironmentPage: () => null,
 }));
 vi.mock("../features/projects/components/DeploymentVersionPage", () => ({
   DeploymentVersionPage: () => null,
 }));
 
 import { Route as environmentIndexRoute } from "./projects.$projectName.deployments.$environment.index";
-import { Route as tryOutRoute } from "./projects.$projectName.deployments.$environment.try-out";
 import { Route as versionRoute } from "./projects.$projectName.deployments.$environment.$version";
 
-function redirectFrom(
-  fn: ((ctx: never) => unknown) | undefined,
-  ctx: unknown,
-): Record<string, unknown> | null {
-  try {
-    (fn as (c: unknown) => unknown)?.(ctx);
-    return null;
-  } catch (thrown) {
-    const options = (thrown as { options?: Record<string, unknown> }).options;
-    if (!options) throw thrown;
-    return options;
-  }
-}
+// Vite-native absence checks (the console tsconfig only carries vite/client
+// types, so node:fs would fail `tsc`) — same pattern as
+// settings.resources.absent.test.ts.
+const tryOutRouteFile = import.meta.glob(
+  "./projects.$projectName.deployments.$environment.try-out.tsx",
+);
+const routeTreeRaw = import.meta.glob("../generated/routeTree.gen.ts", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+
+const gen = Object.values(routeTreeRaw)[0] ?? "";
 
 /**
- * The routing half of #779: `/deployments/$environment` was the environment's
- * page and is now the way into its Try Out page, and a version has its own
- * page under it. The bare URL is in links, bookmarks and the flow's "Try it
- * now" of every build before this, so it must keep resolving.
+ * The routing half of §6 — the environment's own page. `/deployments/$environment`
+ * used to redirect to a Try Out page; the environment page now lives AT that URL,
+ * with Try Out as one of its four sections. The bare URL is what every card, link
+ * and bookmark already points at, so it must serve the page itself.
  */
-describe("deployment routes (#779)", () => {
-  it("sends the bare environment URL to Try Out, replacing the history entry", () => {
-    const options = redirectFrom(environmentIndexRoute.options.beforeLoad, {
-      params: { projectName: "acme", environment: "development" },
-    });
-    expect(options).toMatchObject({
-      to: "/projects/$projectName/deployments/$environment/try-out",
-      params: { projectName: "acme", environment: "development" },
-      replace: true,
-    });
+describe("deployment routes (§6)", () => {
+  it("serves the environment page at the bare environment URL, with no redirect", () => {
+    expect(environmentIndexRoute.options.component).toBeDefined();
+    expect(environmentIndexRoute.options.beforeLoad).toBeUndefined();
   });
 
-  it("mounts Try Out and the version page as their own routes, with no redirect of their own", () => {
-    expect(tryOutRoute.options.component).toBeDefined();
-    expect(tryOutRoute.options.beforeLoad).toBeUndefined();
+  it("no longer knows a try-out URL", () => {
+    expect(Object.keys(tryOutRouteFile)).toHaveLength(0);
+    expect(gen).not.toContain("try-out");
+    expect(gen).toContain("'/projects/$projectName/deployments/$environment/'");
+  });
+
+  it("mounts the version page as its own route, with no redirect of its own", () => {
     expect(versionRoute.options.component).toBeDefined();
     expect(versionRoute.options.beforeLoad).toBeUndefined();
   });

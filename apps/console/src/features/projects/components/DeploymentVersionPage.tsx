@@ -290,7 +290,7 @@ export function DeploymentVersionPage({
           current ? (
             <LinkButton
               variant="contained"
-              to="/projects/$projectName/deployments/$environment/try-out"
+              to="/projects/$projectName/deployments/$environment"
               params={{ projectName, environment }}
               endIcon={<ArrowRight size={16} aria-hidden />}
             >

@@ -251,7 +251,7 @@ describe("DeploymentVersionPage (#779)", () => {
     expect(screen.getByRole("link", { name: /web\.dev\.example/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Try out/ })).toHaveAttribute(
       "href",
-      "/projects/expense/deployments/development/try-out",
+      "/projects/expense/deployments/development",
     );
     // The live row's binding stamp is the one Deployed value the platform holds.
     expect(within(deployedCell()).queryByText("—")).toBeNull();

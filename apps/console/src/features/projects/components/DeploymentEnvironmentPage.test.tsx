@@ -232,7 +232,7 @@ vi.mock("./ComponentOpenApiDialog", () => ({
   },
 }));
 
-import { DeploymentTryOutPage } from "./DeploymentTryOutPage";
+import { DeploymentEnvironmentPage } from "./DeploymentEnvironmentPage";
 
 const devDeployments = (): Deployment[] => [
   {
@@ -308,16 +308,16 @@ beforeEach(() => {
   openApiDialog.mockClear();
 });
 
-describe("DeploymentTryOutPage", () => {
+describe("DeploymentEnvironmentPage", () => {
   it("is titled as the environment's Try Out page, with the project and environment under it", () => {
-    render(<DeploymentTryOutPage projectName="expense" environment="development" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
     expect(screen.getByRole("heading", { name: "Deployment Try Out" })).toBeInTheDocument();
     expect(screen.getByText("expense · Development · v1")).toBeInTheDocument();
     expect(screen.getByText("Try it out")).toBeInTheDocument();
   });
 
   it("gives each component its own way in", () => {
-    render(<DeploymentTryOutPage projectName="expense" environment="development" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
 
     expect(screen.getByText(/2 of 2 components live/)).toBeInTheDocument();
     // A web application is visited; a service opens its contract.
@@ -345,7 +345,7 @@ describe("DeploymentTryOutPage", () => {
       },
     ];
 
-    render(<DeploymentTryOutPage projectName="expense" environment="production" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="production" />);
 
     // The page is Try Out for the environment; what a deployment IS lives on
     // the version page now, so no summary card and no build link here.
@@ -362,7 +362,7 @@ describe("DeploymentTryOutPage", () => {
   it("is honest about an empty environment", () => {
     mockDeployments = [];
 
-    render(<DeploymentTryOutPage projectName="expense" environment="production" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="production" />);
 
     expect(
       screen.getByText(/Nothing deployed here yet — promote a validated version/),
@@ -375,7 +375,7 @@ describe("DeploymentTryOutPage", () => {
     mockDeployments = [];
     mockFailedCount = 2;
 
-    render(<DeploymentTryOutPage projectName="expense" environment="development" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
 
     expect(
       screen.getByText(/Deployments for 2 components could not be loaded/),
@@ -387,7 +387,7 @@ describe("DeploymentTryOutPage", () => {
     mockDeployments = [];
     mockFailedCount = 0;
 
-    render(<DeploymentTryOutPage projectName="expense" environment="development" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
 
     expect(
       screen.getByText(/Nothing deployed here yet — agents deploy to Development/),
@@ -396,7 +396,7 @@ describe("DeploymentTryOutPage", () => {
   });
 
   it("rejects a segment that names no environment", () => {
-    render(<DeploymentTryOutPage projectName="expense" environment="staging" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="staging" />);
 
     expect(screen.getByText("No environment called staging")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to Deployments" })).toHaveAttribute(
@@ -406,7 +406,7 @@ describe("DeploymentTryOutPage", () => {
   });
 });
 
-describe("DeploymentTryOutPage — test users", () => {
+describe("DeploymentEnvironmentPage — test users", () => {
   it("carries the test users when every component in development is live", () => {
     mockTestUsers = [
       {
@@ -418,7 +418,7 @@ describe("DeploymentTryOutPage — test users", () => {
         supplied: false,
       },
     ];
-    render(<DeploymentTryOutPage projectName="expense" environment="development" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
     // Inside the web app's panel, the accounts that sign in to it.
     expect(screen.getByText("Sign in with a test user")).toBeInTheDocument();
     expect(screen.getByText("1 account · one per role · Development only")).toBeInTheDocument();
@@ -438,7 +438,7 @@ describe("DeploymentTryOutPage — test users", () => {
     mockTestUsers = [
       { username: "test-viewer", roleName: "Viewer", coldStart: true, exists: true, owned: true, supplied: false },
     ];
-    render(<DeploymentTryOutPage projectName="expense" environment="development" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
     expect(screen.getByText("Sign in with a test user")).toBeInTheDocument();
     expect(screen.getByText("test-viewer")).toBeInTheDocument();
   });
@@ -446,24 +446,24 @@ describe("DeploymentTryOutPage — test users", () => {
   it("keeps the panel off a converging development, and off production", () => {
     mockDeploy = { ...mockDeploy, status: "deploying" };
     const { unmount } = render(
-      <DeploymentTryOutPage projectName="expense" environment="development" />,
+      <DeploymentEnvironmentPage projectName="expense" environment="development" />,
     );
     expect(screen.queryByText("Sign in with a test user")).toBeNull();
     unmount();
 
     mockDeploy = { ...mockDeploy, status: "deployed" };
     mockDeployments = devDeployments().map((d) => ({ ...d, environment: "production" }));
-    render(<DeploymentTryOutPage projectName="expense" environment="production" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="production" />);
     expect(screen.queryByText("Sign in with a test user")).toBeNull();
   });
 });
 
-describe("DeploymentTryOutPage — try it out (ADR-0032)", () => {
+describe("DeploymentEnvironmentPage — try it out (ADR-0032)", () => {
   it("lists a service's endpoints off its contract, with a curl for the deployed URL", async () => {
     const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
     Object.assign(navigator, { clipboard: { writeText } });
 
-    render(<DeploymentTryOutPage projectName="expense" environment="development" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
 
     const list = screen.getByRole("list", { name: "claims-api endpoints" });
     const rows = within(list).getAllByRole("listitem");
@@ -495,7 +495,7 @@ describe("DeploymentTryOutPage — try it out (ADR-0032)", () => {
   });
 
   it("filters the endpoints by method and by text", () => {
-    render(<DeploymentTryOutPage projectName="expense" environment="development" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
 
     fireEvent.click(screen.getByRole("button", { name: "DELETE" }));
     let rows = within(screen.getByRole("list", { name: "claims-api endpoints" })).getAllByRole("listitem");
@@ -513,7 +513,7 @@ describe("DeploymentTryOutPage — try it out (ADR-0032)", () => {
 
   it("holds a skeleton of the list while the contract loads", () => {
     mockContractPending = true;
-    render(<DeploymentTryOutPage projectName="expense" environment="development" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
     expect(screen.getByTestId("endpoints-skeleton")).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "claims-api endpoints" })).not.toBeInTheDocument();
     expect(screen.queryByText(/Loading endpoints/)).not.toBeInTheDocument();
@@ -521,14 +521,14 @@ describe("DeploymentTryOutPage — try it out (ADR-0032)", () => {
 
   it("says the contract could not be loaded rather than showing no endpoints", () => {
     mockContractError = true;
-    render(<DeploymentTryOutPage projectName="expense" environment="development" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
     expect(screen.getByText(/The contract could not be loaded: contract down/)).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "claims-api endpoints" })).not.toBeInTheDocument();
   });
 
   it("leads with the web app, whatever order the board hands the components in", () => {
     // The board lists claims-api first; the page a person opens comes first.
-    render(<DeploymentTryOutPage projectName="expense" environment="development" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
 
     const web = screen.getByRole("link", { name: "Visit approvals-web" });
     const service = screen.getByRole("button", { name: "Try claims-api API" });
@@ -541,7 +541,7 @@ describe("DeploymentTryOutPage — try it out (ADR-0032)", () => {
     const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
     Object.assign(navigator, { clipboard: { writeText } });
 
-    render(<DeploymentTryOutPage projectName="expense" environment="development" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
 
     expect(screen.getByRole("link", { name: "Visit approvals-web" })).toHaveAttribute(
       "href",
@@ -553,12 +553,12 @@ describe("DeploymentTryOutPage — try it out (ADR-0032)", () => {
   });
 });
 
-describe("DeploymentTryOutPage — the deployed version's own verdict (#776 review)", () => {
+describe("DeploymentEnvironmentPage — the deployed version's own verdict (#776 review)", () => {
   it("holds the validation cell while the deployed version's run story is out", () => {
     mockBuildVersion = "v2";
     mockRunsPending = true;
 
-    render(<DeploymentTryOutPage projectName="expense" environment="development" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
 
     // No header chip — a chip is a word, and there is none yet.
     expect(screen.queryByText(/^Validation · /)).not.toBeInTheDocument();
@@ -569,7 +569,7 @@ describe("DeploymentTryOutPage — the deployed version's own verdict (#776 revi
     mockBuildVersion = "v2";
     mockRunsError = true;
 
-    render(<DeploymentTryOutPage projectName="expense" environment="development" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
 
     expect(screen.getByText(/The version's run story could not be loaded: runs down/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -579,11 +579,11 @@ describe("DeploymentTryOutPage — the deployed version's own verdict (#776 revi
   });
 });
 
-describe("DeploymentTryOutPage — the environments read", () => {
+describe("DeploymentEnvironmentPage — the environments read", () => {
   it("says the list could not be read, with a Retry, instead of calling a real environment unknown", () => {
     mockEnvironmentsError = true;
 
-    render(<DeploymentTryOutPage projectName="expense" environment="production" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="production" />);
 
     expect(
       screen.getByText(/The platform's environments could not be read: gateway down/),
@@ -600,7 +600,7 @@ describe("DeploymentTryOutPage — the environments read", () => {
     // the instant this query starts, on every slow connection.
     mockEnvironmentsPending = true;
 
-    render(<DeploymentTryOutPage projectName="expense" environment="staging" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="staging" />);
 
     expect(screen.queryByText("No environment called staging")).not.toBeInTheDocument();
     // Taken at its word while the list is still out: the page waits (the
@@ -625,7 +625,7 @@ describe("DeploymentTryOutPage — the environments read", () => {
       },
     ];
 
-    render(<DeploymentTryOutPage projectName="expense" environment="production" />);
+    render(<DeploymentEnvironmentPage projectName="expense" environment="production" />);
 
     expect(screen.getByLabelText("Loading deployments")).toBeInTheDocument();
     expect(screen.queryByText(/Nothing deployed here yet/)).not.toBeInTheDocument();

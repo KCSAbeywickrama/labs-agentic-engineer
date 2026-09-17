@@ -377,7 +377,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
         validationUnavailable={deployedState.failed}
         onTryOut={(environment) =>
           void navigate({
-            to: "/projects/$projectName/deployments/$environment/try-out",
+            to: "/projects/$projectName/deployments/$environment",
             params: { projectName, environment },
           })
         }

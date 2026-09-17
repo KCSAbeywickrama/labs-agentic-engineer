@@ -61,7 +61,7 @@ const LinkButton = createLink(Button);
  * ENVIRONMENT because a release binding is current state: there is exactly
  * one deployment per environment to try.
  */
-export function DeploymentTryOutPage({
+export function DeploymentEnvironmentPage({
   projectName,
   environment: segment,
 }: {

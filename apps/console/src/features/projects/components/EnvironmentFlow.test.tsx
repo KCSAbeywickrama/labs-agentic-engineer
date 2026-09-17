@@ -293,7 +293,7 @@ describe("EnvironmentFlow", () => {
     );
     expect(screen.getByRole("link", { name: /Try it now/ })).toHaveAttribute(
       "href",
-      "/projects/expense/deployments/qa/try-out",
+      "/projects/expense/deployments/qa",
     );
   });
 
