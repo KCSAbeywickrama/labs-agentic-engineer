@@ -35,7 +35,11 @@ export function stepsFor(env: EnvironmentInfo): FlowStepSpec[] {
     steps.push({ kind: "validation", index: steps.length + 1 });
   }
   if (!isLast(env)) {
-    steps.push({ kind: "promote", index: steps.length + 1, promotesTo: env.promotesTo });
+    steps.push({
+      kind: "promote",
+      index: steps.length + 1,
+      ...(env.promotesTo ? { promotesTo: env.promotesTo } : {}),
+    });
   }
   return steps;
 }
