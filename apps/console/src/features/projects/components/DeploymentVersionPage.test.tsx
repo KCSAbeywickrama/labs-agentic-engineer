@@ -66,25 +66,11 @@ vi.mock("../api/queries", () => ({
   // serves. Two environments here because that is the pipeline these tests
   // describe, not because the console knows only two.
   useEnvironments: () => ({
-    data: [
-      {
-        name: "development",
-        displayName: "Development",
-        isProduction: false,
-        validation: "on",
-        position: 0,
-        promotesTo: "production",
-      },
-      {
-        name: "production",
-        displayName: "Production",
-        isProduction: true,
-        validation: "off",
-        position: 1,
-      },
-    ],
+    data: mockEnvironmentsError ? undefined : mockEnvironments,
     isPending: false,
-    isError: false,
+    isError: mockEnvironmentsError,
+    error: mockEnvironmentsError ? new Error("gateway down") : null,
+    refetch: mockEnvironmentsRefetch,
   }),
   useProjectComponents: () => ({
     data: { items: [{ name: "web", displayName: "Web", type: "web-application" }] },
@@ -187,7 +173,31 @@ const judged = (verdict: string): MilestoneRunView =>
     cycles: [{ id: "c1", kind: "coding", mergeSha: "4e8a0d6f1c2b3a4d", createdAt: "2026-09-10T09:00:00Z" }],
   }) as unknown as MilestoneRunView;
 
+// The platform's pipeline, in promotion order. Two environments because that
+// is the pipeline these tests describe, not because the console knows two.
+const mockEnvironments = [
+  {
+    name: "development",
+    displayName: "Development",
+    isProduction: false,
+    validation: "on" as const,
+    position: 0,
+    promotesTo: "production",
+  },
+  {
+    name: "production",
+    displayName: "Production",
+    isProduction: true,
+    validation: "off" as const,
+    position: 1,
+  },
+];
+let mockEnvironmentsError = false;
+const mockEnvironmentsRefetch = vi.fn();
+
 beforeEach(() => {
+  mockEnvironmentsError = false;
+  mockEnvironmentsRefetch.mockClear();
   mockDeploy = { version: "v2", status: "deployed", components: { total: 1, ready: 1 }, validation: "running" };
   mockDeployments = [
     { componentName: "web", environment: "development", status: "Ready", releaseName: "web-v2-4e8a0d6", endpointUrl: "https://web.dev.example", createdAt: "2026-09-12T10:00:00Z" },
@@ -382,5 +392,20 @@ describe("DeploymentVersionPage — connections (#779 review)", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(mockReadinessRefetch).toHaveBeenCalled();
+  });
+});
+
+describe("DeploymentVersionPage — the environments read", () => {
+  it("says the list could not be read, with a Retry, instead of calling a real environment unknown", () => {
+    mockEnvironmentsError = true;
+
+    render(<DeploymentVersionPage projectName="expense" environment="production" version="v2" />);
+
+    expect(
+      screen.getByText(/The platform's environments could not be read: gateway down/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No environment called production")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mockEnvironmentsRefetch).toHaveBeenCalled();
   });
 });

@@ -158,25 +158,11 @@ vi.mock("../api/queries", () => ({
   // serves. Two environments here because that is the pipeline these tests
   // describe, not because the console knows only two.
   useEnvironments: () => ({
-    data: [
-      {
-        name: "development",
-        displayName: "Development",
-        isProduction: false,
-        validation: "on",
-        position: 0,
-        promotesTo: "production",
-      },
-      {
-        name: "production",
-        displayName: "Production",
-        isProduction: true,
-        validation: "off",
-        position: 1,
-      },
-    ],
-    isPending: false,
-    isError: false,
+    data: mockEnvironmentsState === "ready" ? mockEnvironments : undefined,
+    isPending: mockEnvironmentsState === "pending",
+    isError: mockEnvironmentsState === "error",
+    error: mockEnvironmentsState === "error" ? new Error("gateway down") : null,
+    refetch: mockEnvironmentsRefetch,
   }),
   useSaveConnectionValues: () => ({
     mutate: mockMutate,
@@ -210,6 +196,28 @@ vi.mock("../api/queries", () => ({
 // stays blank until a test says what the platform holds.
 let mockReadiness: ProjectDependencyReadiness | undefined;
 let mockReadinessPending = false;
+
+// The platform's pipeline, in promotion order. Two environments because that
+// is the pipeline these tests describe, not because the console knows two.
+const mockEnvironments = [
+  {
+    name: "development",
+    displayName: "Development",
+    isProduction: false,
+    validation: "on" as const,
+    position: 0,
+    promotesTo: "production",
+  },
+  {
+    name: "production",
+    displayName: "Production",
+    isProduction: true,
+    validation: "off" as const,
+    position: 1,
+  },
+];
+let mockEnvironmentsState: "ready" | "pending" | "error" = "ready";
+const mockEnvironmentsRefetch = vi.fn();
 
 /** A run parked at the deploy gate, short of the named values. */
 function parkedRun(blocking: string[]): MilestoneRunView {
@@ -310,6 +318,8 @@ beforeEach(() => {
   mockBuildVersion = "v1";
   mockReadiness = undefined;
   mockReadinessPending = false;
+  mockEnvironmentsState = "ready";
+  mockEnvironmentsRefetch.mockClear();
   mockValidationPending = false;
   evidenceArgs.mockClear();
   navigate.mockClear();
@@ -1202,5 +1212,31 @@ describe("DeploymentsPage — the card's version (review round)", () => {
 
     expect(screen.getByText("Deploy failed · 0 of 1 components live")).toBeInTheDocument();
     expect(screen.queryByText(/^Running ·/)).not.toBeInTheDocument();
+  });
+});
+
+describe("DeploymentsPage — the environments read", () => {
+  it("waits rather than claiming nothing is deployed while the pipeline is still loading", () => {
+    mockEnvironmentsState = "pending";
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    // The board is one row per environment, so with the list still out the
+    // page knows nothing yet — and must not say the project is undeployed.
+    expect(screen.getByLabelText("Loading deployments")).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing deployed yet/)).not.toBeInTheDocument();
+  });
+
+  it("says the environments could not be read, with a Retry, rather than an empty board", () => {
+    mockEnvironmentsState = "error";
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.getByText(/The platform's environments could not be read: gateway down/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing deployed yet/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mockEnvironmentsRefetch).toHaveBeenCalled();
   });
 });

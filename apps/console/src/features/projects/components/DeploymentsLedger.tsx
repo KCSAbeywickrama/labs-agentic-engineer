@@ -124,9 +124,9 @@ export function DeploymentsLedger({
                 key={row.key}
                 row={row}
                 milestone={milestoneFor(row.version, builds)}
-                // The verdict cell is the LIVE development row's: the
-                // aggregate's validation names what runs there. A past
-                // version's verdict is its page's business.
+                // The verdict cell belongs to a LIVE row in the environment
+                // the aggregate speaks for: its validation names what runs
+                // there. A past version's verdict is its page's business.
                 validation={
                   row.current
                     ? validationCell(

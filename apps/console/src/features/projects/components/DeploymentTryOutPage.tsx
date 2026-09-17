@@ -128,8 +128,8 @@ export function DeploymentTryOutPage({
     ? environmentRows(board, environmentList, deploy).find((r) => r.environment === environment)
     : undefined;
   const bound = row?.cards.some((c) => c.deployment) ?? false;
-  // Test users live with the app they sign in to. Read only for a green
-  // development — the roles read stays idle until there is something to sign
+  // Test users live with the app they sign in to. Read only for a green first
+  // environment — the roles read stays idle until there is something to sign
   // in to, as it did on the board. Green is the row's own word, which folds
   // live bindings under a `none` aggregate to Deployed (deploymentLedger):
   // an app that is serving is one a test user can sign in to, whatever
@@ -145,6 +145,28 @@ export function DeploymentTryOutPage({
     (row?.total ?? 0) > 0 &&
     row?.live === row?.total;
   const testUsers = useTestUsers(projectName, Boolean(green));
+
+  // A failed read is not a verdict on the segment. Without this the page would
+  // tell the user there is no such environment — a permanent-sounding fact —
+  // when all that happened is that a request failed.
+  if (environments.isError) {
+    return (
+      <>
+        <PageHeader title={title} subtitle={subtitle} backTo={backTo} />
+        <Alert
+          severity="warning"
+          action={<Button onClick={() => void environments.refetch()}>Retry</Button>}
+        >
+          The platform's environments could not be read
+          {environments.error instanceof Error && environments.error.message
+            ? `: ${environments.error.message}`
+            : ""}
+          {" — this page cannot say what runs in "}
+          {segment} until they load.
+        </Alert>
+      </>
+    );
+  }
 
   if (!environment) {
     // An unknown segment is a dead end with a way out, not a blank page with a

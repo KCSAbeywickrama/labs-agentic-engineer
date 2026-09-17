@@ -98,14 +98,14 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
     [dependencies.data],
   );
   const connectionsKnown = !dependencies.isPending && !dependencies.isError;
-  // Whether the platform holds values for each external in development —
-  // the deploy gate's own read, so "Set" here means what the gate means.
   // The pipeline's environments, in promotion order — the board's own order.
   const environments = useEnvironments();
   const environmentList = environments.data ?? [];
   // Values are collected where they are first needed: the environment a build
   // lands in. An empty name keeps the read idle until the list arrives.
   const entryEnvironment = environmentList[0]?.name ?? "";
+  // Whether the platform holds values for each external THERE — the deploy
+  // gate's own read, so "Set" here means what the gate means.
   const readiness = useProjectDependencyReadiness(projectName, entryEnvironment);
   // Org catalog: Registered Externals (non-empty envCells) already hold
   // values on the org plane — Connections must not offer Configure / the
@@ -168,7 +168,15 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
     />
   );
 
-  if (components.isPending || (componentNames.length > 0 && deployments.isPending)) {
+  // The board is one row per environment the pipeline names, so it cannot be
+  // drawn — or honestly called empty — until that list is in. Without this the
+  // page would assert "Nothing deployed yet" over a deployed project for as
+  // long as the environments read takes.
+  if (
+    components.isPending ||
+    environments.isPending ||
+    (componentNames.length > 0 && deployments.isPending)
+  ) {
     return (
       <>
         {header}
@@ -193,6 +201,24 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           {components.error instanceof Error && components.error.message
             ? `: ${components.error.message}`
             : ""}
+        </Alert>
+      </>
+    );
+  }
+
+  if (environments.isError) {
+    return (
+      <>
+        {header}
+        <Alert
+          severity="error"
+          action={<Button onClick={() => void environments.refetch()}>Retry</Button>}
+        >
+          The platform's environments could not be read
+          {environments.error instanceof Error && environments.error.message
+            ? `: ${environments.error.message}`
+            : ""}
+          {" — the board has no environments to draw until they load."}
         </Alert>
       </>
     );
@@ -335,7 +361,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           }
           onOpen={(row) =>
             // A version opens its own page; an environment whose version the
-            // platform does not name (production) opens its Try Out page.
+            // platform names nowhere opens its Try Out page.
             void navigate(
               row.version
                 ? {

@@ -88,25 +88,11 @@ vi.mock("../api/queries", () => ({
   // serves. Two environments here because that is the pipeline these tests
   // describe, not because the console knows only two.
   useEnvironments: () => ({
-    data: [
-      {
-        name: "development",
-        displayName: "Development",
-        isProduction: false,
-        validation: "on",
-        position: 0,
-        promotesTo: "production",
-      },
-      {
-        name: "production",
-        displayName: "Production",
-        isProduction: true,
-        validation: "off",
-        position: 1,
-      },
-    ],
+    data: mockEnvironmentsError ? undefined : mockEnvironments,
     isPending: false,
-    isError: false,
+    isError: mockEnvironmentsError,
+    error: mockEnvironmentsError ? new Error("gateway down") : null,
+    refetch: mockEnvironmentsRefetch,
   }),
   useComponentOpenApi: (_p: string, componentName: string) => ({
     data:
@@ -267,7 +253,31 @@ const devDeployments = (): Deployment[] => [
   },
 ];
 
+// The platform's pipeline, in promotion order. Two environments because that
+// is the pipeline these tests describe, not because the console knows two.
+const mockEnvironments = [
+  {
+    name: "development",
+    displayName: "Development",
+    isProduction: false,
+    validation: "on" as const,
+    position: 0,
+    promotesTo: "production",
+  },
+  {
+    name: "production",
+    displayName: "Production",
+    isProduction: true,
+    validation: "off" as const,
+    position: 1,
+  },
+];
+let mockEnvironmentsError = false;
+const mockEnvironmentsRefetch = vi.fn();
+
 beforeEach(() => {
+  mockEnvironmentsError = false;
+  mockEnvironmentsRefetch.mockClear();
   mockDeploy = {
     version: "v1",
     status: "deployed",
@@ -564,5 +574,21 @@ describe("DeploymentTryOutPage — the deployed version's own verdict (#776 revi
     expect(mockRunsRefetch).toHaveBeenCalled();
     expect(screen.queryByText("Not run")).not.toBeInTheDocument();
     expect(screen.getByText("Validation · Unavailable")).toBeInTheDocument();
+  });
+});
+
+describe("DeploymentTryOutPage — the environments read", () => {
+  it("says the list could not be read, with a Retry, instead of calling a real environment unknown", () => {
+    mockEnvironmentsError = true;
+
+    render(<DeploymentTryOutPage projectName="expense" environment="production" />);
+
+    expect(
+      screen.getByText(/The platform's environments could not be read: gateway down/),
+    ).toBeInTheDocument();
+    // A failed read is not a verdict on the segment.
+    expect(screen.queryByText("No environment called production")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mockEnvironmentsRefetch).toHaveBeenCalled();
   });
 });

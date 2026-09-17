@@ -236,6 +236,19 @@ describe("environmentRows across N environments", () => {
     expect(rows[2]?.status.label).toBe("Nothing deployed");
   });
 
+  it("never re-derives the order — the list's own order is the board's", () => {
+    // Deliberately scrambled against `position`: the rows must come back in
+    // the order the argument came in, so a sort by position (or by name) is a
+    // failure, not an equivalent.
+    const scrambled = [envs[2]!, envs[0]!, envs[1]!];
+    const board = groupDeploymentCards([{ name: "api", displayName: "API", type: "service" }], []);
+    expect(environmentRows(board, scrambled, deploy()).map((r) => r.environment)).toEqual([
+      "production",
+      "development",
+      "staging",
+    ]);
+  });
+
   it("renders a single-environment pipeline without inventing a second", () => {
     const board = groupDeploymentCards([{ name: "api", displayName: "API", type: "service" }], []);
     const rows = environmentRows(board, [envs[0]!], deploy());

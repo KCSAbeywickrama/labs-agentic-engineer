@@ -143,6 +143,28 @@ export function DeploymentVersionPage({
     label: "Back to Deployments",
   };
 
+  // A failed read is not a verdict on the segment: the dead-end state below
+  // would report a transient API failure as a permanent fact about the
+  // platform.
+  if (environments.isError) {
+    return (
+      <>
+        <PageHeader title={title} backTo={backTo} />
+        <Alert
+          severity="warning"
+          action={<Button onClick={() => void environments.refetch()}>Retry</Button>}
+        >
+          The platform's environments could not be read
+          {environments.error instanceof Error && environments.error.message
+            ? `: ${environments.error.message}`
+            : ""}
+          {" — this page cannot say what "}
+          {segment} runs until they load.
+        </Alert>
+      </>
+    );
+  }
+
   if (!environment) {
     return (
       <>
