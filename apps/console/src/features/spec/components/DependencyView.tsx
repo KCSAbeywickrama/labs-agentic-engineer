@@ -187,7 +187,16 @@ export function DependencyView({
   // beside some other contract still gets one.
   const sdkFile = edge?.sdk && edge.sdk !== contractFile ? edge.sdk : "";
   const contractType = contract?.type ?? edge?.contractType;
-  const origin = originLabel(contract?.origin ?? edge?.contractOrigin, contract?.accepted);
+  const contractOrigin = contract?.origin ?? edge?.contractOrigin;
+  // The mark belongs to the DOCUMENT, not the resource: after Replace
+  // interface the copy keeps its `ref` while the interface becomes the
+  // project's own, and calling that one "from the organization" would
+  // contradict the origin shown right under it. A file written before the
+  // origin vocabulary records none, and a copy's document was the
+  // organization's — that is the reading it had, and it keeps it.
+  const contractFromRegistry =
+    contractOrigin === "registry" || (copied && contractOrigin === undefined);
+  const origin = originLabel(contractOrigin, contract?.accepted);
   // This project's copy first; a registry record carries its own.
   const provenance = file.provenance ?? resource.provenance;
   const provenanceSource = provenance?.sourceUrl ?? provenance?.registry;
@@ -360,7 +369,7 @@ export function DependencyView({
         <SectionHeading
           action={
             <Stack direction="row" spacing={1} alignItems="center">
-              {copied && <CopiedChip />}
+              {contractFromRegistry && <CopiedChip />}
               {canProvide && (
                 <Button size="small" variant="outlined" onClick={() => setProviding(true)}>
                   {hasInterface ? "Replace interface" : "Provide interface"}

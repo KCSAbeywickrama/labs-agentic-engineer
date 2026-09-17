@@ -109,10 +109,12 @@ function parseContract(
 ): { type: ResourceContractType; url: string } | null {
   if (!isPlainObject(value)) return null;
   if (typeof value.type !== "string" || !CONTRACT_TYPES.has(value.type)) return null;
-  if (typeof value.url !== "string" || value.url === "") return null;
+  // A blank address is no address: the form trims before it submits, so a
+  // whitespace-only URL would replace a real one and then vanish on the wire.
+  if (typeof value.url !== "string" || value.url.trim() === "") return null;
   // A draft never carries document bytes — an upload is the user's own act.
   if (hasFileRowFields(value)) return null;
-  return { type: value.type as ResourceContractType, url: value.url };
+  return { type: value.type as ResourceContractType, url: value.url.trim() };
 }
 
 export function parseRegisterDraft(input: unknown): RegisterDraft | null {
@@ -199,7 +201,10 @@ function applyKeys(
  */
 function applyContract(current: ContractRow, contract: RegisterDraft["contract"]): ContractRow {
   if (contract === undefined) return current;
-  if (current.fileName) return { ...current, type: contract.type };
+  // An uploaded file is the user's own act and outranks a draft. Its TYPE goes
+  // with it: the bytes on file are that format, and taking the draft's type
+  // would label the document as something it is not.
+  if (current.fileName) return current;
   return { ...current, type: contract.type, url: contract.url };
 }
 

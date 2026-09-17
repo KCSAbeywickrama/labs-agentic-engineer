@@ -358,18 +358,20 @@ Work each one in order:
 3. **Get the contract document on disk — for a named provider only.** A
    ladder, climbed in order:
    - **Point at the published document.** `web_search` for the provider's
-     published OpenAPI or GraphQL document, then write
+     published OpenAPI or GraphQL document, then write, INSIDE `resource`,
      `"contract": { "type": "openapi", "path": "openapi.yaml", "origin": "provider" }`
-     (or `graphql` / `schema.graphql`) and `"provenance": { "sourceUrl": "<its URL>" }`
-     — and STOP. Do NOT fetch the document and do NOT `addFile` it: the
+     (or `graphql` / `schema.graphql`), and `"provenance": { "sourceUrl": "<its URL>" }`
+     beside `resource` at the top level — and STOP. A `contract` written
+     anywhere but inside `resource` is refused. Do NOT fetch the document and
+     do NOT `addFile` it: the
      platform fetches it at save (https only, at most 5 MiB), lands it beside
      the definition and fills the hash. A document a user hands over goes
      through **Provide interface** on the definition and lands the same way.
    - **Derive** it from the provider's OWN developer reference when it names
      every operation the design calls with parameters and responses:
      `addFile` an `openapi.yaml` with an `x-aep-source: <page>` on every
-     operation, `contract.origin: "derived"`, `provenance.sourceUrl` = the
-     reference's root page. That needs no permission: the dependency reads
+     operation, `resource.contract.origin: "derived"`, `provenance.sourceUrl` =
+     the reference's root page. That needs no permission: the dependency reads
      resolved, flagged *derived*.
    - With no such documentation either, never guess during the design turn:
      leave `contract` unset, say so under **Needs your input**, and the

@@ -452,6 +452,9 @@ func TestProvisionForBuild_RegisteredExternal_AuthorsFromOrgCells(t *testing.T) 
 		PlatProv:          &fakePlatProv{},
 		Bindings:          &fakeBindings{},
 		CatalogValuePlane: plane,
+		// The RECORD is what makes the copy the organization's; the value
+		// plane only says which values it holds.
+		RTCatalog: &fakeRTCatalog{defs: []openchoreo.ExternalResourceDefinition{registeredStripe()}},
 	})
 
 	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v1", 0, []BuildProvisionInput{
@@ -659,5 +662,89 @@ func TestProvisionForBuild_RegisteredAfterRestart_AuthorsOrgSecretStorePath(t *t
 	}
 	if ext.calls != 0 {
 		t.Fatalf("Registered restart build must not Provision (project OpenBao), got %d", ext.calls)
+	}
+}
+
+// registeredStripe is the organization's record for the `stripe` name the
+// design copies (designWithDeps sets its ResourceRef).
+func registeredStripe(keys ...openchoreo.ExternalResourceConfigKey) openchoreo.ExternalResourceDefinition {
+	if keys == nil {
+		keys = []openchoreo.ExternalResourceConfigKey{{Key: "api_key", Secret: true}, {Key: "region"}}
+	}
+	return openchoreo.ExternalResourceDefinition{
+		Name:                    "stripe",
+		Scope:                   openchoreo.ExternalResourceScopeOrg,
+		Provider:                "Stripe",
+		Config:                  keys,
+		ConsumptionInstructions: "Use the shared account.",
+	}
+}
+
+// A registered resource can hold no configuration at all. Its record still
+// says whose it is, so the build binds the organization's type rather than
+// authoring a project twin nobody holds values for.
+func TestProvisionForBuild_RegisteredWithNoKeysStillBindsTheOrgType(t *testing.T) {
+	ext := &fakeExtProv{}
+	svc := NewService(Deps{
+		Issues:            newFakeIssues(nil),
+		Execs:             &fakeExecStore{},
+		Design:            fakeDesign{comps: designWithDeps()},
+		Repos:             fakeRepos{},
+		ExtProv:           ext,
+		PlatProv:          &fakePlatProv{},
+		Bindings:          &fakeBindings{},
+		CatalogValuePlane: NewMemoryValuePlane(), // nothing warmed: no cells anywhere
+		RTCatalog: &fakeRTCatalog{defs: []openchoreo.ExternalResourceDefinition{
+			registeredStripe([]openchoreo.ExternalResourceConfigKey{}...),
+		}},
+	})
+	fails, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v1", 0, []BuildProvisionInput{
+		{Component: "orders", Dependency: "stripe", Kind: "external-config"},
+	})
+	if err != nil || len(fails) != 0 {
+		t.Fatalf("ProvisionForBuild: err=%v fails=%+v", err, fails)
+	}
+	if ext.authorPreparedCalls != 1 || ext.calls != 0 {
+		t.Fatalf("a registered copy authors prepared values: prepared=%d provision=%d", ext.authorPreparedCalls, ext.calls)
+	}
+	if ext.authorLastER == nil || !ext.authorLastER.Registered {
+		t.Fatalf("the resource must be authored as the organization's: %+v", ext.authorLastER)
+	}
+}
+
+// The record's schema names the organization's type. A copy whose keys lag the
+// record must not author from its own: the schema is hashed into the type NAME,
+// so stale keys would bind a type the organization does not have.
+func TestProvisionForBuild_RegisteredTakesTheRecordsKeysNotTheCopys(t *testing.T) {
+	ext := &fakeExtProv{}
+	svc := NewService(Deps{
+		Issues:            newFakeIssues(nil),
+		Execs:             &fakeExecStore{},
+		Design:            fakeDesign{comps: designWithDeps()}, // copy still has api_key + region
+		Repos:             fakeRepos{},
+		ExtProv:           ext,
+		PlatProv:          &fakePlatProv{},
+		Bindings:          &fakeBindings{},
+		CatalogValuePlane: NewMemoryValuePlane(),
+		RTCatalog: &fakeRTCatalog{defs: []openchoreo.ExternalResourceDefinition{
+			// The organization renamed a key since the copy landed.
+			registeredStripe(openchoreo.ExternalResourceConfigKey{Key: "api_key", Secret: true},
+				openchoreo.ExternalResourceConfigKey{Key: "account_region"}),
+		}},
+	})
+	if _, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v1", 0, []BuildProvisionInput{
+		{Component: "orders", Dependency: "stripe", Kind: "external-config"},
+	}); err != nil {
+		t.Fatalf("ProvisionForBuild: %v", err)
+	}
+	if ext.authorLastER == nil {
+		t.Fatal("a registered copy authors prepared values")
+	}
+	got := make([]string, 0, len(ext.authorLastER.ConfigKeys))
+	for _, k := range ext.authorLastER.ConfigKeys {
+		got = append(got, k.Key)
+	}
+	if strings.Join(got, ",") != "api_key,account_region" {
+		t.Fatalf("authored keys = %v, want the record's schema", got)
 	}
 }

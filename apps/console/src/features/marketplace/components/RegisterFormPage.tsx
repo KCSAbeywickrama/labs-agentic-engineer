@@ -83,6 +83,7 @@ import {
 } from "./ResourceDocsFields";
 import {
   ContractFields,
+  contractRowError,
   contractWriteFromRow,
   emptyContractRow,
   rowFromContract,
@@ -389,7 +390,7 @@ export function RegisterFormPage({
       carriedEnvs,
       ...(envCells ? { envCells } : {}),
     });
-    if (invalid) {
+    if (invalid || contractRowError(contract)) {
       setAttemptedSubmit(true);
       return;
     }

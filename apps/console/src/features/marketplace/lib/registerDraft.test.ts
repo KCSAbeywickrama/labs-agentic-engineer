@@ -79,6 +79,12 @@ describe("parseRegisterDraft", () => {
   it("skips a contract of an unknown type, without a url, or carrying file bytes", () => {
     expect(parseRegisterDraft({ contract: { type: "bogus", url: "https://x/y" } })).toEqual({});
     expect(parseRegisterDraft({ contract: { type: "openapi" } })).toEqual({});
+    // A blank address is no address: the form trims before submitting, so a
+    // whitespace URL would replace a real one and then vanish on the wire.
+    expect(parseRegisterDraft({ contract: { type: "openapi", url: "   " } })).toEqual({});
+    expect(
+      parseRegisterDraft({ contract: { type: "openapi", url: "  https://x/y  " } }),
+    ).toEqual({ contract: { type: "openapi", url: "https://x/y" } });
     expect(
       parseRegisterDraft({
         contract: { type: "openapi", url: "https://x/y", content: "openapi: 3.1.0" },
@@ -186,29 +192,22 @@ describe("applyRegisterDraft", () => {
     });
   });
 
-  // An upload is the user's own act; a later proposal may retype it but never
-  // throws the file away.
-  it("keeps an uploaded contract file when a draft proposes a URL", () => {
-    const next = applyRegisterDraft(
-      snapshot({
-        contract: {
-          type: "openapi",
-          url: "",
-          fileName: "openapi.yaml",
-          content: "openapi: 3.1.0",
-          path: "",
-        },
-      }),
-      { contract: { type: "graphql", url: "https://example.com/schema.graphql" } },
-      { freezeName: false, freezeKeys: false },
-    );
-    expect(next.contract).toEqual({
-      type: "graphql",
+  // An upload is the user's own act, and its TYPE goes with the bytes: a draft
+  // may propose a different document, but it never relabels the file on file.
+  it("keeps an uploaded contract file, and its type, when a draft proposes a URL", () => {
+    const uploaded = {
+      type: "openapi" as const,
       url: "",
       fileName: "openapi.yaml",
       content: "openapi: 3.1.0",
       path: "",
-    });
+    };
+    const next = applyRegisterDraft(
+      snapshot({ contract: uploaded }),
+      { contract: { type: "graphql", url: "https://example.com/schema.graphql" } },
+      { freezeName: false, freezeKeys: false },
+    );
+    expect(next.contract).toEqual(uploaded);
   });
 
   it("applies URL resource-docs from the draft", () => {

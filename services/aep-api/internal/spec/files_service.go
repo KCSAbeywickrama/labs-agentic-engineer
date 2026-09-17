@@ -463,6 +463,18 @@ func (s *service) Apply(ctx context.Context, orgID, projectID string, req ApplyR
 		copies[p] = c
 	}
 	copyWarnings = append(copyWarnings, fetchWarnings...)
+	// A document the platform lands beside a definition is platform-authored:
+	// the request must not also write or delete it. Deletes are applied after
+	// writes, so a request that deleted one would commit a definition pointing
+	// at a document the same commit removed. `seen` already holds every
+	// explicitly named path.
+	for _, c := range copies {
+		for _, p := range sortedPaths(c.Files) {
+			if seen[p] {
+				return nil, nil, fmt.Errorf("%w: %s is written by the platform for this dependency and cannot be written or deleted in the same request", ErrPathInvalid, p)
+			}
+		}
+	}
 
 	var conflicts []Conflict
 	var files []FileMeta

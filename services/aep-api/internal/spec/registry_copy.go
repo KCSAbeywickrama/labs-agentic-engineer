@@ -123,8 +123,14 @@ func completeRegistryCopies(ctx context.Context, reg RegisteredResourceReader, o
 			continue
 		}
 		out[w.Path] = completedFile{Definition: completed, Files: files}
-		warnings = append(warnings, Warning{Path: w.Path, Code: WarningRegistryCopied,
-			Message: fmt.Sprintf("%q copied from the organization's registry: provider, config keys, consumption instructions and the contract document landed beside this file", def.Name)})
+		// A record with no document, or one of a type a project cannot code
+		// against, lands its block and no contract: say that, rather than
+		// promise a document the commit does not contain.
+		message := fmt.Sprintf("%q copied from the organization's registry: provider, config keys and consumption instructions landed here, and the organization holds no document to code against — the dependency reads needs-contract until one is provided", def.Name)
+		if len(files) > 0 {
+			message = fmt.Sprintf("%q copied from the organization's registry: provider, config keys, consumption instructions and the contract document landed beside this file", def.Name)
+		}
+		warnings = append(warnings, Warning{Path: w.Path, Code: WarningRegistryCopied, Message: message})
 	}
 	return out, warnings
 }

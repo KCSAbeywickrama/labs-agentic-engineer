@@ -253,6 +253,28 @@ func TestAssembleDesign_SdkContractPicksTheComponentsLanguage(t *testing.T) {
 	}
 }
 
+// A manifest that names packages for other languages only is not this
+// component's contract: it must read needs-contract rather than resolved with
+// nothing for the coding agent to install.
+func TestAssembleDesign_SdkManifestWithoutTheComponentsLanguageIsNoContract(t *testing.T) {
+	files := directoryDesignFiles()
+	files["dependencies/stripe/dependency.json"] = `{"name":"stripe","resource":{"name":"stripe","provider":"Stripe","contract":{"type":"sdk","path":"sdk.json"}}}`
+	files["dependencies/stripe/sdk.json"] = `{"packages":{"python":"pypi:stripe"}}`
+	delete(files, "dependencies/stripe/openapi.yaml")
+	d, err := AssembleDesign(files)
+	if err != nil {
+		t.Fatalf("AssembleDesign: %v", err)
+	}
+	stripe := d.Components[0].Dependencies[0] // the component is Go
+	if stripe.SDK != "" || stripe.Package != "" {
+		t.Fatalf("a manifest for another language is not this component's SDK: %+v", stripe)
+	}
+	status, _ := ComputeDependencyStatus(stripe, RegistryHit{}, OrgServiceHit{})
+	if status != DependencyStatusUnresolved {
+		t.Fatalf("status = %s, want unresolved (needs-contract)", status)
+	}
+}
+
 // The previous FLAT file shape still reads: it is lifted into the nested one
 // in memory, and the next split writes the new shape.
 func TestAssembleDesign_LiftsTheFlatFileShape(t *testing.T) {
@@ -450,5 +472,18 @@ func TestDependencyDefinitionJSON_RoundTripAndStrictness(t *testing.T) {
 	}
 	if _, err := parseDependencyDefinitionJSON("stripe", `{"name":"stripe","resource":{"name":"payments"}}`); err == nil {
 		t.Fatalf("resource.name must equal the dependency name")
+	}
+	// Anything after the document is a malformed file, including a stray
+	// closing delimiter — which reads as "no more elements", not as trailing
+	// content, to a decoder that only asks whether another element follows.
+	for _, trailing := range []string{
+		`{"name":"stripe","resource":{"name":"stripe"}}}`,
+		`{"name":"stripe","resource":{"name":"stripe"}}]`,
+		`{"name":"stripe","resource":{"name":"stripe"}} {"name":"other"}`,
+		`{"name":"stripe","resource":{"name":"stripe"}} garbage`,
+	} {
+		if _, err := parseDependencyDefinitionJSON("stripe", trailing); err == nil {
+			t.Fatalf("trailing content must be rejected: %s", trailing)
+		}
 	}
 }

@@ -291,3 +291,31 @@ func TestDependencyGate_PlatformFieldsPreservedThroughAWrite(t *testing.T) {
 		t.Fatalf("an altered record on a re-add must be refused")
 	}
 }
+
+// A file written before the nested shape carries its acceptance at the top
+// level as `assumed`. The fold calls preservePlatformFields on the RAW prior,
+// so it lifts that too — otherwise the first nested write over a flat file
+// silently drops what the user accepted.
+func TestPreservePlatformFields_LiftsAFlatPriorsAcceptance(t *testing.T) {
+	const path = "specs/design/dependencies/payment-provider/dependency.json"
+	flatPrior := `{"name":"payment-provider","provider":"Stripe","style":"rest-api","contract":"openapi.yaml","assumed":{"by":"admin","at":"2026-09-08T10:15:00Z","note":"proceed"}}`
+	write := `{"name":"payment-provider","resource":{"name":"payment-provider","provider":"Stripe","contract":{"type":"openapi","path":"openapi.yaml","origin":"assumed"}}}`
+
+	out := preservePlatformFields(path, write, &flatPrior)
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("result does not parse: %v\n%s", err, out)
+	}
+	res, _ := got["resource"].(map[string]any)
+	contract, _ := res["contract"].(map[string]any)
+	accepted, _ := contract["accepted"].(map[string]any)
+	if accepted["by"] != "admin" || accepted["note"] != "proceed" {
+		t.Fatalf("the user's acceptance must survive the shape change: %s", out)
+	}
+
+	// A flat prior with nothing accepted leaves the write exactly as written.
+	plainFlat := `{"name":"payment-provider","provider":"Stripe","contract":"openapi.yaml"}`
+	if out := preservePlatformFields(path, write, &plainFlat); out != write {
+		t.Fatalf("nothing to put back must leave the write alone:\n%s", out)
+	}
+}

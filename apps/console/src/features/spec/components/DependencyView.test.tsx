@@ -296,6 +296,27 @@ describe("DependencyView — a copy of a Registered External resource", () => {
     expect(screen.getByRole("button", { name: "Replace interface" })).toBeInTheDocument();
   });
 
+  // After Replace interface the copy keeps its `ref`, but the document on disk
+  // is the project's own. Marking it "from the organization" would contradict
+  // the origin shown right under it.
+  it("stops calling the interface the organization's once it has been replaced", () => {
+    renderView(
+      copy({ contract: { type: "openapi", path: "openapi.yaml", origin: "provider" } }),
+      stateOf({
+        status: "resolved",
+        resourceRef: "dhl-courier",
+        source: "org",
+        contract: "openapi.yaml",
+        contractOrigin: "provider",
+      }),
+    );
+    // The keys and the instructions are still the organization's; the document is not.
+    expect(screen.getAllByText("from the organization").length).toBe(2);
+    expect(
+      screen.queryByText("copied from the organization's registry"),
+    ).not.toBeInTheDocument();
+  });
+
   it("says when the organization has no resource of that name, and offers the way out", () => {
     const { onResolve } = renderView(
       copy(),

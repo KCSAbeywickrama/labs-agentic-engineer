@@ -2496,7 +2496,7 @@ type ResourceContract = contracts.ResourceContract
 // ResourceContractType The kind of document a resource's contract is.
 type ResourceContractType string
 
-// ResourceContractWriteDTO The resource's contract document on register/update. Exactly one of url (fetched by the platform, hashed and committed to the org docs repo — the URL is kept only as provenance) or fileName+content (uploaded). At most 5 MiB.
+// ResourceContractWriteDTO The resource's contract document on register/update. Exactly one of url (fetched by the platform, hashed and committed to the org docs repo — the URL is kept only as provenance) or fileName+content (uploaded). At most 5 MiB. Accepted shapes, enforced by the server (any other is a 400 naming the rule): `{type, url}` or `{type, fileName, content}` — never both forms, never type alone. The pair is not expressed as a JSON-Schema oneOf on purpose: the generators this contract feeds turn it into an unusable union (a `json.RawMessage` union field in Go, `unknown` in TypeScript) that hides the three plain fields callers actually set.
 type ResourceContractWriteDTO struct {
 	Content  string `json:"content,omitempty"`
 	FileName string `json:"fileName,omitempty"`

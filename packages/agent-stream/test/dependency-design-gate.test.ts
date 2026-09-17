@@ -194,6 +194,26 @@ test("config keys: an optional description, and a defaultValue on a non-secret k
   assert.equal(checkDependencyDesign(PATH, dep({}, { config: [{ key: "PAYMENT_API_KEY", credentialClass: "secret" }] }))?.code, "SCHEMA_VIOLATION");
 });
 
+// A file written before the nested shape carries its acceptance at the top
+// level as `assumed`. The gate reads the RAW prior, so it must lift that too:
+// otherwise the first nested write over a flat file drops what the user accepted.
+test("a flat prior's acceptance survives the first nested write", () => {
+  const accepted = { by: "admin", at: "2026-09-08T10:15:00Z", note: "proceed" };
+  const flatPrior = JSON.stringify({
+    name: "payment-provider",
+    provider: "Stripe",
+    style: "rest-api",
+    contract: "openapi.yaml",
+    assumed: accepted,
+  });
+  const restored = preservePlatformFields(PATH, dep({}, { contract: { ...CONTRACT, origin: "assumed" } }), flatPrior);
+  const got = JSON.parse(restored) as { resource: { contract: { accepted?: unknown } } };
+  assert.deepEqual(got.resource.contract.accepted, accepted);
+  // A flat prior with nothing accepted still leaves the write alone.
+  const plainFlat = JSON.stringify({ name: "payment-provider", provider: "Stripe", contract: "openapi.yaml" });
+  assert.equal(preservePlatformFields(PATH, dep(), plainFlat), dep());
+});
+
 test("an echoed record compares by value, whatever the key order", () => {
   const accepted = { by: "admin", at: "2026-09-08T10:15:00Z", note: "n" };
   const prior = bundle({ [PATH]: dep({}, { contract: { ...CONTRACT, origin: "assumed", accepted } }) });

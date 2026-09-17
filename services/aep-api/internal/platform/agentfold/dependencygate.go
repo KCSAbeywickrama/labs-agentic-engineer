@@ -87,7 +87,7 @@ func preservePlatformFields(path, content string, prior *string) string {
 	if json.Unmarshal([]byte(*prior), &before) != nil || json.Unmarshal([]byte(content), &next) != nil || next == nil {
 		return content
 	}
-	beforeRes, _ := before["resource"].(map[string]any)
+	beforeRes := priorResource(before)
 	nextRes, _ := next["resource"].(map[string]any)
 	if beforeRes == nil || nextRes == nil {
 		return content
@@ -566,4 +566,20 @@ func quoteAll(list []string) string {
 		q = append(q, fmt.Sprintf("%q", x))
 	}
 	return strings.Join(q, ", ")
+}
+
+// priorResource is the prior file's resource block. A file written before the
+// nested shape has none, and its acceptance record sits at the top level as
+// `assumed` — the codec lifts that when it DECODES, but the gate reads the raw
+// prior, so it lifts it here too. Without this, the first nested write over a
+// flat file silently drops the user's acceptance.
+func priorResource(before map[string]any) map[string]any {
+	if res, ok := before["resource"].(map[string]any); ok {
+		return res
+	}
+	assumed, ok := before["assumed"].(map[string]any)
+	if !ok || assumed == nil {
+		return nil
+	}
+	return map[string]any{"contract": map[string]any{"accepted": assumed}}
 }

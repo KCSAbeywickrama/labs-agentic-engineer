@@ -66,10 +66,24 @@ export function rowFromContract(contract: ResourceContract | undefined): Contrac
   return { ...emptyContractRow(), type: contract.type, path: contract.path };
 }
 
+export const EMPTY_CONTRACT_FILE =
+  "That file is empty. Choose the document itself, or remove it.";
+
+/**
+ * Why this block cannot be submitted, or undefined when it can. A chosen file
+ * with no bytes is the one case: it reads as "no document" on the wire, so
+ * submitting would quietly leave the record's document as it was.
+ */
+export function contractRowError(row: ContractRow): string | undefined {
+  if (row.fileName.trim() && !row.content) return EMPTY_CONTRACT_FILE;
+  return undefined;
+}
+
 /**
  * The write this block makes, or undefined when it makes none — the record's
  * document is then left as it is. An uploaded file wins over a URL: it is the
  * more recent thing the user did, and the two are exclusive on the wire.
+ * Callers gate on `contractRowError` first; an empty file never reaches here.
  */
 export function contractWriteFromRow(row: ContractRow): ResourceContractWriteDTO | undefined {
   const fileName = row.fileName.trim();
@@ -142,6 +156,11 @@ export function ContractFields({
         Optional. The one document consumers code against. Give a URL for the platform to
         fetch, or upload the file.
       </Typography>
+      {contractRowError(contract) ? (
+        <Typography variant="caption" color="error" sx={{ display: "block", mb: 1 }}>
+          {contractRowError(contract)}
+        </Typography>
+      ) : null}
       <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
         <TextField
           select
@@ -161,6 +180,7 @@ export function ContractFields({
           <>
             <Chip
               label={contract.fileName}
+              color={contractRowError(contract) ? "error" : "default"}
               onDelete={() => patch({ fileName: "", content: "" })}
               sx={{ maxWidth: "100%", "& .MuiChip-label": { overflow: "hidden" } }}
             />

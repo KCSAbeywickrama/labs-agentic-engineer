@@ -286,7 +286,23 @@ function checkSdkManifest(path: string, content: string): DependencyDesignProble
   return null;
 }
 
-type PriorShape = { resource?: { ref?: unknown; consumptionInstructions?: unknown; contract?: { accepted?: unknown } } } | null;
+type PriorResource = { ref?: unknown; consumptionInstructions?: unknown; contract?: { accepted?: unknown } };
+type PriorShape = { resource?: PriorResource; assumed?: unknown } | null;
+
+/**
+ * The prior file's resource block. A file written before the nested shape has
+ * none, and its acceptance record sits at the top level as `assumed` — the
+ * codec lifts that when it DECODES, but this gate reads the raw prior, so it
+ * lifts it here too. Without this, the first nested write over a flat file
+ * silently drops the user's acceptance.
+ */
+function priorResource(before: unknown): PriorResource | null {
+  const res = (before as PriorShape)?.resource;
+  if (typeof res === "object" && res !== null && !Array.isArray(res)) return res;
+  const assumed = (before as PriorShape)?.assumed;
+  if (typeof assumed !== "object" || assumed === null || Array.isArray(assumed)) return null;
+  return { contract: { accepted: assumed } };
+}
 
 /**
  * The platform's fields on a dependency's definition are not the agent's: the
@@ -311,8 +327,8 @@ export function preservePlatformFields(path: string, content: string, prior: str
   } catch {
     return content;
   }
-  const beforeRes = (before as PriorShape)?.resource;
-  if (typeof beforeRes !== "object" || beforeRes === null) return content;
+  const beforeRes = priorResource(before);
+  if (beforeRes === null) return content;
   if (typeof next !== "object" || next === null || Array.isArray(next)) return content;
   const nextRes = (next as { resource?: unknown }).resource;
   if (typeof nextRes !== "object" || nextRes === null || Array.isArray(nextRes)) return content;

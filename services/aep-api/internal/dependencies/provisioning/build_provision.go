@@ -271,17 +271,28 @@ func (s *Service) authorExternalPrepared(ctx context.Context, orgID, ocOrgID, pr
 		ConfigKeys:  keys,
 	}
 	byEnv := designPreparedValues(keys)
-	registered := false
 	// A copy (the definition names the registry) binds to the organization's
 	// type and takes the organization's values; a resource the project defined
-	// gets its own type and the design's defaults.
+	// gets its own type and the design's defaults. The RECORD decides, not the
+	// value plane: a registered resource whose values are not warmed — or that
+	// declares no keys at all — is still the organization's, and authoring a
+	// project type for it would strand the build on a type nobody holds values
+	// for.
 	if dep.ResourceRef != "" {
-		if cells := s.registeredEnvCells(ctx, orgID, in.Dependency); len(cells) > 0 {
-			byEnv = preparedValuesFromOrgCells(keys, cells)
-			registered = true
+		if def, ok := s.registeredCatalogDef(ctx, orgID, in.Dependency); ok && def.Registered() {
+			er.Registered = true
+			// The record's own schema names the organization's type. The copy's
+			// keys can lag it (the record gained or renamed one since the copy
+			// landed), and BuildExternalResourceType hashes the schema into the
+			// type NAME — so authoring from stale keys would bind to a type the
+			// organization does not have.
+			er.ConfigKeys = toConfigKeys(def.Config)
+			byEnv = designPreparedValues(er.ConfigKeys)
+			if cells := s.registeredEnvCells(ctx, orgID, in.Dependency); len(cells) > 0 {
+				byEnv = preparedValuesFromOrgCells(er.ConfigKeys, cells)
+			}
 		}
 	}
-	er.Registered = registered
 
 	// External dependencies do not mint config-collection gates. When the caller
 	// supplies an existing gate, reconcile it; never discover or create one here.
@@ -312,7 +323,7 @@ func (s *Service) authorExternalPrepared(ctx context.Context, orgID, ocOrgID, pr
 		return fmt.Errorf("%w: %w", dependencies.ErrProvisionFailed, perr)
 	}
 
-	if registered {
+	if er.Registered {
 		recordResourceInstances(s.catalogValuePlane, orgID, projectID, in.Dependency, byEnv)
 	}
 

@@ -51,7 +51,9 @@ package spec
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -238,7 +240,11 @@ func strictDecode[T any](raw string) (T, error) {
 	if err := dec.Decode(&out); err != nil {
 		return out, fmt.Errorf("decode %s: %w", DependencyDesignFile, err)
 	}
-	if dec.More() {
+	// More() answers "another element in the array or object being read", so a
+	// stray closing delimiter slips past it. Asking for one more value and
+	// requiring EOF is the whole-stream check.
+	var rest json.RawMessage
+	if err := dec.Decode(&rest); !errors.Is(err, io.EOF) {
 		return out, fmt.Errorf("decode %s: unexpected trailing content", DependencyDesignFile)
 	}
 	return out, nil
@@ -589,12 +595,24 @@ func hydrateExternalDependencies(d *DesignFile, files map[string]string) {
 					}
 					manifests[key] = m
 				}
-				// The manifest's presence is what "has its SDK" means.
-				if len(m.Packages) == 0 {
+				// Having its SDK means having a package the component can
+				// install. A manifest that names packages for other languages
+				// only is not this component's contract: setting SDK from it
+				// would read resolved while the coding agent has nothing to
+				// add to its manifest. A component with no language yet has
+				// nothing to select against, so the manifest still counts.
+				language := strings.ToLower(strings.TrimSpace(comp.Language))
+				pkg, named := m.Packages[language], false
+				if language != "" {
+					_, named = m.Packages[language]
+				} else {
+					named = len(m.Packages) > 0
+				}
+				if !named {
 					continue
 				}
 				dep.SDK = res.Contract.Path
-				dep.Package = m.Packages[strings.ToLower(strings.TrimSpace(comp.Language))]
+				dep.Package = pkg
 				if res.Contract.Origin == "" {
 					dep.ContractAssumed, dep.ContractDerived = m.Assumed, m.Derived
 				}
