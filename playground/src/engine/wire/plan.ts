@@ -19,10 +19,16 @@
 /**
  * WHAT `wire` WILL STAND UP, worked out before anything starts.
  *
- * A pure function of the design bundle: every component's `design.json` and the
- * project's `security.json`, in, and a `WirePlan` out. No AI reads these files
- * and none is asked to guess — the env var a Postgres host lands in is written
- * in `wiring.envBindings`, and a value that can be READ is never invented.
+ * A pure function of the project bundle: every component's `design.json`, its
+ * shipped `workload.yaml`, and the project's `security.json` in, a `WirePlan`
+ * out. No AI reads these files and none is asked to guess — the env var a
+ * Postgres host lands in is written in that component's `workload.yaml`, the
+ * same file the platform projects a deployed pod's environment from, and a
+ * value that can be READ is never invented.
+ *
+ * A dependency that binds NOTHING is unresolved, never silently fine. The
+ * difference is a service that refuses to plan versus one that starts, passes
+ * its health check, and 500s every query against `localhost:5432`.
  *
  * What the plan deliberately does NOT decide: whether anything is running,
  * whether a port is free, or what the keypair is. Those are session facts, so
@@ -34,6 +40,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
+import { parse } from "yaml";
 import type { ComponentDesign, Dependency } from "@aep/agent-stream";
 import { listComponents } from "../gates.js";
 
@@ -115,6 +122,12 @@ export interface WireSpecs {
   slug: string;
   designs: ComponentDesign[];
   security: SecurityDesign;
+  /**
+   * Each component's shipped `workload.yaml` bindings, by component name.
+   * `undefined` for a component that has none on disk — which means it was
+   * never built, and is reported as such rather than read as "needs nothing".
+   */
+  workloads: Record<string, WorkloadBindings | undefined>;
 }
 
 interface SecurityDesign {
@@ -127,6 +140,13 @@ export interface PlanOptions {
   secret?: (database: string) => string;
 }
 
+/**
+ * The `resourceType`s wired mode stands up itself, and therefore the ones whose
+ * bindings it must find. Anything else is already reported as unresolved by the
+ * dependency walk below, so it needs no second check.
+ */
+const STANDS_UP = new Set(["postgres-cnpg", "thunder-app"]);
+
 /** `onboarding-db` → `ONBOARDING_DB`, the shape `envBindings` keys are prefixed with. */
 function envPrefix(name: string): string {
   return name.toUpperCase().replace(/[^A-Z0-9]/g, "_");
@@ -137,12 +157,74 @@ function identifier(name: string): string {
   return name.replace(/[^a-zA-Z0-9_]/g, "_");
 }
 
-function bindingsOf(dependency: Dependency): Record<string, string> {
-  const wiring = dependency.wiring;
-  if (!wiring) return {};
-  if ("envBindings" in wiring) return wiring.envBindings;
-  if ("endpoint" in wiring) return wiring.endpoint.envBindings;
-  return {};
+/** Every `envBindings` block a component's `workload.yaml` declares, by dependency name. */
+export type WorkloadBindings = Record<string, Record<string, string>>;
+
+/**
+ * What a component's SHIPPED `workload.yaml` calls each dependency's values.
+ *
+ * This file is the authority for binding names, not `design.json`'s
+ * `wiring.envBindings`. Three reasons, and the third is the one that bit:
+ * `workload.yaml` is mandatory at the App Path root for every component the
+ * contract accepts; it is the artifact the platform itself projects env from,
+ * so reading it is what makes a wired container's environment the same shape a
+ * deployed pod gets; and `wiring` is a design-time field that a design can
+ * simply not carry — both projects generated on 2026-09-17 declared their
+ * dependencies with no `wiring` key at all, which read as "no variables
+ * needed" and started every service with an unconfigured database.
+ *
+ * Two shapes, because the platform models the two dependency kinds
+ * differently: `resources[].ref` names a platform resource, `endpoints[]`
+ * names a sibling component and prefixes it with the project slug.
+ */
+function readWorkloadBindings(projectDir: string, appPath: string): WorkloadBindings | undefined {
+  const file = join(projectDir, appPath, "workload.yaml");
+  if (!existsSync(file)) return undefined;
+  let doc: unknown;
+  try {
+    doc = parse(readFileSync(file, "utf8"));
+  } catch {
+    // Unparseable is NOT "absent": absent means the component was never built,
+    // while broken means somebody has to look at it. Returning undefined here
+    // would blame the wrong thing, so let it read as an empty declaration and
+    // let the per-dependency check below name the dependency that went unbound.
+    return {};
+  }
+  const dependencies = (doc as { dependencies?: unknown }).dependencies;
+  if (typeof dependencies !== "object" || dependencies === null) return {};
+  const bindings: WorkloadBindings = {};
+  const record = (name: unknown, envBindings: unknown): void => {
+    if (typeof name !== "string" || typeof envBindings !== "object" || envBindings === null) return;
+    const pairs = Object.entries(envBindings).filter(
+      (pair): pair is [string, string] => typeof pair[1] === "string",
+    );
+    if (pairs.length > 0) bindings[name] = Object.fromEntries(pairs);
+  };
+  const { resources, endpoints } = dependencies as { resources?: unknown; endpoints?: unknown };
+  for (const entry of Array.isArray(resources) ? resources : []) {
+    const { ref, envBindings } = (entry ?? {}) as { ref?: unknown; envBindings?: unknown };
+    record(ref, envBindings);
+  }
+  for (const entry of Array.isArray(endpoints) ? endpoints : []) {
+    const { component, envBindings } = (entry ?? {}) as { component?: unknown; envBindings?: unknown };
+    record(component, envBindings);
+  }
+  return bindings;
+}
+
+/**
+ * This dependency's binding names, matched by the component's own workload.
+ *
+ * An endpoint entry is written `<slug>-<component>` while the design names the
+ * dependency bare, so a suffix match is what joins them. Matching on the bare
+ * name FIRST keeps an exact declaration authoritative when both could apply.
+ */
+function bindingsOf(dependency: Dependency, workload: WorkloadBindings | undefined): Record<string, string> {
+  if (!workload) return {};
+  const exact = workload[dependency.name];
+  if (exact) return exact;
+  const suffix = Object.keys(workload).find((key) => key.endsWith(`-${dependency.name}`));
+  return suffix ? (workload[suffix] ?? {}) : {};
 }
 
 /**
@@ -201,8 +283,24 @@ export function buildWirePlan(specs: WireSpecs, options: PlanOptions = {}): Wire
 
     const env: Record<string, string> = {};
     const dependsOn: string[] = [];
+    const workload = specs.workloads[design.name];
     for (const dependency of design.dependencies ?? []) {
-      const bindings = bindingsOf(dependency);
+      const bindings = bindingsOf(dependency, workload);
+      // A dependency wire CAN stand up, that binds no variable, is unresolved.
+      // Standing it up anyway is the failure this guard exists for: compose
+      // starts the database, `dependsOn` orders it, the service boots against
+      // its own defaults, its health check passes because nothing there touches
+      // storage, and the first real query 500s. Every symptom points at the
+      // generated app, and none of them points here.
+      if (STANDS_UP.has(dependency.resourceType ?? "") && Object.keys(bindings).length === 0) {
+        plan.unresolved.push({
+          component: design.name,
+          dependency: dependency.name,
+          kind: dependency.kind,
+          ...(dependency.resourceType ? { resourceType: dependency.resourceType } : {}),
+        });
+        continue;
+      }
       if (dependency.kind === "platform-resource" && dependency.resourceType === "postgres-cnpg") {
         const database = databases.get(dependency.name) ?? {
           name: dependency.name,
@@ -313,16 +411,19 @@ function readRoles(security: SecurityDesign): WireRole[] {
 /** Read the design bundle off disk. The only I/O on the way to a plan. */
 export function readWireSpecs(projectDir: string, slug: string): WireSpecs {
   const designs: ComponentDesign[] = [];
+  const workloads: Record<string, WorkloadBindings | undefined> = {};
   for (const name of listComponents(projectDir)) {
     const file = join(projectDir, "specs/design/components", name, "design.json");
     if (!existsSync(file)) continue;
-    designs.push(JSON.parse(readFileSync(file, "utf8")) as ComponentDesign);
+    const design = JSON.parse(readFileSync(file, "utf8")) as ComponentDesign;
+    designs.push(design);
+    workloads[design.name] = readWorkloadBindings(projectDir, design.appPath);
   }
   const securityFile = join(projectDir, "specs/design/security.json");
   const security = existsSync(securityFile)
     ? (JSON.parse(readFileSync(securityFile, "utf8")) as SecurityDesign)
     : {};
-  return { slug, designs, security };
+  return { slug, designs, security, workloads };
 }
 
 /**

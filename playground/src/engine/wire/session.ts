@@ -56,7 +56,7 @@ import {
 } from "./plan.js";
 import { composeDocument, maskedPlan } from "./compose.js";
 import { entryUrl, findEntry, roleEntries, type RoleEntry } from "./roles.js";
-import { answers, isPortBusy, isPortFree, killListener, openBrowser } from "./runtime.js";
+import { answers, isPortAvailable, isPortBusy, killListener, openBrowser } from "./runtime.js";
 import {
   databaseSecret,
   ensureWireDir,
@@ -133,7 +133,7 @@ export async function wireCommand(
   const plan = buildWirePlan(readWireSpecs(projectDir, slug), {
     secret: (database) => databaseSecret(projectDir, database),
   });
-  await assignHostPorts(plan, isPortFree);
+  await assignHostPorts(plan, isPortAvailable);
 
   const blockers = planBlockers(plan, projectDir, options.skip ?? []);
   if (blockers.length > 0) {

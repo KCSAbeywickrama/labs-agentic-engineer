@@ -211,3 +211,50 @@ test("the same bundle plans the same way twice", async () => {
   const second = await assignHostPorts(plan(ONBOARDING, "onboarding"), allFree);
   assert.deepEqual(first, second);
 });
+
+/**
+ * The invariant that turns a 25-minute hunt into a one-line refusal.
+ *
+ * A component whose `workload.yaml` names no variable for a dependency wired
+ * mode STANDS UP is unresolved, not quietly fine. Without this, compose starts
+ * the database, `dependsOn` orders it, the service boots against its own
+ * defaults, its health check passes because nothing there touches storage, and
+ * the first real query 500s against `localhost:5432` — with every symptom
+ * pointing at the generated app and none of them pointing at the plan.
+ *
+ * Measured: both projects generated on 2026-09-17 declared their dependencies
+ * with no `wiring` key at all, so this is the live case, not a hypothetical.
+ */
+test("a dependency that binds no variable is unresolved, not a silently unconfigured service", async () => {
+  const specs = readWireSpecs(ONBOARDING, "onboarding");
+  // The component ships no bindings — what an unbuilt component, or one whose
+  // workload never declared them, looks like to the planner.
+  specs.workloads["onboarding-api"] = {};
+
+  const wire = await assignHostPorts(buildWirePlan(specs, { secret: () => "s3cret" }), allFree);
+
+  assert.deepEqual(
+    wire.unresolved.map((entry) => [entry.component, entry.dependency, entry.resourceType]),
+    [
+      ["onboarding-api", "onboarding-db", "postgres-cnpg"],
+      ["onboarding-api", "user-auth", "thunder-app"],
+    ],
+    "both stood-up dependencies must be reported, so the message names what to fix",
+  );
+  assert.deepEqual(
+    wire.services[0]?.env,
+    {},
+    "and nothing may be invented to fill the gap",
+  );
+});
+
+test("bindings come from workload.yaml, the file the platform itself projects from", async () => {
+  const specs = readWireSpecs(ONBOARDING, "onboarding");
+  const wire = await assignHostPorts(buildWirePlan(specs, { secret: () => "s3cret" }), allFree);
+
+  // The host is the compose service name, not localhost: the value is the
+  // plan's, the NAME it lands in is the workload's.
+  assert.equal(wire.services[0]?.env.ONBOARDING_DB_HOST, "onboarding-db");
+  assert.equal(wire.services[0]?.env.ONBOARDING_DB_DBNAME, "onboarding_db");
+  assert.equal(wire.services[0]?.env.USER_AUTH_ISSUER !== undefined, true);
+});

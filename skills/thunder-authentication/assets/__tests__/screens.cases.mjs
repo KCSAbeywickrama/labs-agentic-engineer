@@ -76,28 +76,40 @@ const { reachableScreens, hasScopedReach, SCREEN_ROUTES } = mod;
 
 const held = (...scopes) => new Set(scopes);
 
-// The Expense Tracker table is the fixture, and it has exactly the shape that
-// hides the bug: `submitclaim` is a form, so `loads: null`.
-test("the fixture still contains a loads:null screen — without one this file proves nothing", () => {
-  assert.ok(
-    SCREEN_ROUTES.some((s) => s.loads === null),
-    "expected at least one loads:null screen in the example table",
+// The Expense Tracker table is the fixture. `submitclaim` is a form with no
+// load call, and it names the operation its SUBMIT makes — which is the rule
+// this file exists to pin.
+test("a form with no load call still names an operation, never null", () => {
+  const form = SCREEN_ROUTES.find((s) => s.key === "submitclaim");
+  assert.ok(form, "expected the example table to keep a write-only form");
+  assert.equal(
+    form.loads,
+    "POST /me/claims",
+    "a form names the operation its submit makes, so the rail, the route and the button agree",
   );
 });
 
-test("a loads:null form stays reachable for any signed-in caller — that is the design", () => {
+test("a caller who cannot submit does not reach the form", () => {
   const reachable = reachableScreens(held(), true).map((s) => s.key);
+  assert.ok(
+    !reachable.includes("submitclaim"),
+    `a zero-scope caller must not reach a form they can never submit, got ${reachable}`,
+  );
+});
+
+test("a caller who CAN submit reaches the form", () => {
+  const reachable = reachableScreens(held("claims:submit"), true).map((s) => s.key);
   assert.ok(reachable.includes("submitclaim"), `expected the form to be reachable, got ${reachable}`);
 });
 
 test("NoAccess: a signed-in caller holding no scope has no scoped reach", () => {
-  // THE REGRESSION. `reachableScreens` is NOT empty here — the form is in it —
-  // so an App gating NoAccess on `reachable.length === 0` would drop this
-  // caller onto a form with an empty rail instead of the screen that explains
-  // they have nothing. Two independently generated apps did exactly that
-  // (2026-09-17, track-each-hire9665 and its re-run) and each walk patched it
-  // somewhere different.
-  assert.ok(reachableScreens(held(), true).length > 0, "precondition: the form keeps the list non-empty");
+  // Naming the form's submit operation removed the common way this went wrong:
+  // the form used to count as reach for a caller who could not submit it, so an
+  // App gating NoAccess on `reachable.length === 0` dropped that caller onto a
+  // form with an empty rail. Two independently generated apps did exactly that
+  // (2026-09-17) and each walk patched it somewhere different. The question is
+  // still asked separately, because a public or operation-free screen can keep
+  // the list non-empty on its own.
   assert.equal(hasScopedReach(held(), true), false);
 });
 

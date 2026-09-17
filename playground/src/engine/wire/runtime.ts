@@ -96,10 +96,19 @@ export function isPortFree(port: number): Promise<boolean> {
   });
 }
 
-/** Is something listening there — the other half of the question, asked of a port we do not own. */
-export function isPortBusy(port: number): Promise<boolean> {
+/**
+ * Both loopback addresses, because "localhost" is not one address.
+ *
+ * Vite binds `::1`; Docker publishes on the IPv4 wildcard; a plain Node server
+ * binds whichever it was told. A probe that knows only `127.0.0.1` calls a port
+ * free while the other family serves it, and the two servers then answer the
+ * same `localhost:<port>` URL depending on how the client resolves the name.
+ */
+const LOOPBACKS = ["127.0.0.1", "::1"] as const;
+
+function connects(port: number, host: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const socket = createConnection({ port, host: "127.0.0.1" });
+    const socket = createConnection({ port, host });
     const done = (busy: boolean): void => {
       socket.destroy();
       resolve(busy);
@@ -116,10 +125,43 @@ export function isPortBusy(port: number): Promise<boolean> {
   });
 }
 
+/** Is something listening there — the other half of the question, asked of a port we do not own. */
+export async function isPortBusy(port: number): Promise<boolean> {
+  for (const host of LOOPBACKS) {
+    if (await connects(port, host)) return true;
+  }
+  return false;
+}
+
+/**
+ * Can this session TAKE the port — the question every assignment actually
+ * means, and the one neither half answers alone.
+ *
+ * `isPortFree` binds `127.0.0.1`, and a loopback bind SUCCEEDS while another
+ * process holds the same port on the wildcard address — which is exactly how
+ * Docker publishes one. So a second `wire` session read 19090 as free, compose
+ * then asked for `0.0.0.0:19090`, and the daemon refused it with "port is
+ * already allocated" after the image had already been built. Measured, not
+ * hypothesised: two concurrent sessions on this machine, the first one's API
+ * still up and answering there.
+ *
+ * `isPortBusy` is the half that sees it — a connect to a published container
+ * port succeeds. The bind check stays too: a port nothing listens on yet can
+ * still be unbindable, and a service that is up but not yet accepting would
+ * pass a connect test alone.
+ *
+ * Both the dev-server port and every service's host port resolve through this,
+ * because a predicate used by one path and not the other is the same bug with
+ * a longer fuse.
+ */
+export async function isPortAvailable(port: number): Promise<boolean> {
+  return (await isPortFree(port)) && !(await isPortBusy(port));
+}
+
 /** The first free port from `from`, so two wired sessions never fight over one. */
 export async function findFreePort(from: number, to = from + 40): Promise<number> {
   for (let port = from; port <= to; port += 1) {
-    if (await isPortFree(port)) return port;
+    if (await isPortAvailable(port)) return port;
   }
   throw new Error(`no free port between ${String(from)} and ${String(to)}`);
 }

@@ -148,11 +148,13 @@ as one.
 
 ## 1 · Stand it up
 
-From the App Path:
-
 ```bash
-bash "$AEP_SKILLS_DIR/mock-verification/scripts/walk.sh" up
+cd <App Path> && bash "$AEP_SKILLS_DIR/mock-verification/scripts/walk.sh" up
 ```
+
+The `cd` is part of the command, not advice around it: the script keys its
+state off the working directory, so run from anywhere else it starts a second,
+unrelated server and hangs waiting for one that was never yours.
 
 It starts `npm run dev:mock` on a free port, reaps a stale server from an
 earlier attempt first, and prints `READY <url>`. The url is what you open;

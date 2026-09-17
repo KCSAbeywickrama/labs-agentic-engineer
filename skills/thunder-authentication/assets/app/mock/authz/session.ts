@@ -106,7 +106,14 @@ function activeRoleNames(): string[] {
     } catch {
       /* private mode */
     }
-    if (stored === null) return mockRoles.slice(0, 1).map((role) => role.name);
+    // NOBODY, not the first role in the catalog. A caller who never named a
+    // role has not signed in as anyone, and defaulting to the first one hands
+    // out whatever grants that role happens to hold — measured: entering with
+    // `?auth=out` landed on a full dashboard and issued a real gateway call
+    // carrying every scope of the first role, which made "nobody is signed in"
+    // impossible to walk. A default in an auth mock must fall towards no
+    // access, so the case that needs proving is the one you get for free.
+    if (stored === null) return [];
     asked = stored;
   }
   return asked

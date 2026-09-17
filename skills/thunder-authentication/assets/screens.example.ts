@@ -46,8 +46,10 @@ export interface ScreenRoute {
   readonly label: string;
   readonly path: string;
   /**
-   * The operation whose answer this screen renders on load; null = a signed-in
-   * screen with no load call (a form that only posts, say).
+   * The operation this screen exists to perform: the call it renders on load
+   * for a screen that reads, or the call its submit makes for a form that only
+   * writes. `null` is for a screen that needs NO operation at all — static
+   * content behind sign-in — and is rare.
    */
   readonly loads: OperationKey | null;
   /**
@@ -61,16 +63,24 @@ export interface ScreenRoute {
 /**
  * YOUR screens, in RAIL ORDER. One row per wireframe screen.
  *
- * `loads` is the operation whose answer the screen renders when it opens — the
- * list or the detail call, AT THE REACH THE SCREEN SHOWS: an every-row queue
- * loads `GET /claims`, a "mine" page loads `GET /me/claims`. A screen with no
- * load call at all — a form — is `loads: null`, reachable by any signed-in
- * caller, and gate its submit button with `<Can op="POST /me/claims">`. A
+ * `loads` is the operation the screen exists to perform, AT THE REACH THE
+ * SCREEN SHOWS: an every-row queue loads `GET /claims`, a "mine" page loads
+ * `GET /me/claims`.
+ *
+ * A FORM THAT ONLY WRITES NAMES THE OPERATION ITS SUBMIT MAKES. It has no load
+ * call, but it still has exactly one operation that makes opening it worth
+ * anything, and naming it here is what keeps the three answers in step: the
+ * rail shows the form, the route guards it, and `<Can>` enables the button,
+ * all from one fact. Leaving it `null` splits them — the caller reaches a form
+ * whose only control they can never use — and three separate mock walks have
+ * now called that a defect and patched it, in two different places.
+ *
+ * `null` is only for a screen that needs no operation at all, which is rare. A
  * screen in a flow with no `role` line is `public: true`.
  */
 export const SCREEN_ROUTES: readonly ScreenRoute[] = [
   { key: "myclaims", label: "My Claims", path: "/claims", loads: "GET /me/claims" },
-  { key: "submitclaim", label: "Submit Claim", path: "/submit", loads: null },
+  { key: "submitclaim", label: "Submit Claim", path: "/submit", loads: "POST /me/claims" },
   { key: "approvals", label: "Approvals", path: "/approvals", loads: "GET /claims" },
   { key: "reports", label: "Reports", path: "/reports", loads: "GET /reports" },
 ];
@@ -114,17 +124,16 @@ export function reachableScreens(
  * Does this caller reach anything their scopes actually earned them?
  *
  * This is the NoAccess question, and it is NOT "is `reachableScreens` empty".
- * A `loads: null` form is reachable by any signed-in caller by design — its
- * submit is gated separately — and a `public` screen by everyone. So an app
- * holding even one of either makes `reachableScreens` non-empty for a caller
- * with NO scopes at all, and the NoAccess screen, whose whole job is to
- * explain that situation, can never render.
+ * A `public` screen is reachable by everyone, and a `loads: null` screen by any
+ * signed-in caller, so an app holding either makes `reachableScreens`
+ * non-empty for a caller with NO scopes at all — and the NoAccess screen, whose
+ * whole job is to explain that situation, can never render.
  *
- * Measured, not hypothesised: two independently generated apps built from the
- * same spec both landed a zero-scope caller on a form with an empty rail, and
- * each walk patched it in a different place. Deciding it here keeps the two
- * answers — what goes in the rail, and whether there is anything to show —
- * from having to be kept in step by whoever copies this file.
+ * Naming a form's submit operation (see `SCREEN_ROUTES`) removed the common
+ * case of this: a form used to be `loads: null` and so counted as reach for a
+ * caller who could not submit it. What is left are genuinely operation-free
+ * screens and public ones, which is why this question still has to be asked
+ * separately from "is the rail empty".
  */
 export function hasScopedReach(scopes: ReadonlySet<string>, signedIn: boolean): boolean {
   return reachableScreens(scopes, signedIn).some((screen) => !screen.public && screen.loads !== null);

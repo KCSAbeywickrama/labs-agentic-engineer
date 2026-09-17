@@ -320,10 +320,13 @@ possible.
 
 **Wait for one at a time, and act on each report as it lands.** A wait placed on
 two builders in one turn returns when the slower one does, and the report that
-came back first sits unread while it builds. So wait on the one you expect
-first, and when it reports, do what that report unlocks before waiting again — a
-`web-application` that reports clean gets its walk dispatched then (step 3),
-with its siblings still building. Only the **commit** waits for the whole issue:
+came back first sits unread while it builds. Do not guess which that will be —
+end the turn once the wave is dispatched and let each subagent's own settlement
+wake you, so the report you act on is whichever actually finished. If you do
+block, keep the window short: a long one can spend a sibling's entire build
+before you learn the other went clean. Either way, when a report lands, do what
+it unlocks before waiting again — a `web-application` that reports clean gets
+its walk dispatched then (step 3), with its siblings still building. Only the **commit** waits for the whole issue:
 a subagent that has not reported is not done, whatever the tree looks like, and
 the files it is still writing are already on disk, so a commit taken early ships
 half an issue.
