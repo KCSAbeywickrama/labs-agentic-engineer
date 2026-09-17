@@ -65,6 +65,26 @@ const SCHEMA_VERSION = 2;
  */
 const VALUE_COMMAND = /\bget\s+(count|value|url|text)\b/;
 
+/**
+ * Each step's keyword with `And` / `But` / `*` resolved to the one it inherits.
+ *
+ * Gherkin says a continuation IS the keyword above it, and a scenario's deciding
+ * assertion is routinely the continuation — `Then the row appears` / `And it shows
+ * today's date`. Matching the raw keyword makes that `And` invisible to every rule
+ * below: it is not counted as an assertion, it cannot back a `passed`, it cannot
+ * name a `failed`, and it is never asked for `observed`. The Go reader resolves
+ * these the same way (`report.go`, `effectiveKeywords`); the two must agree or a
+ * report passes here and is read differently there.
+ */
+function effectiveKeywords(steps) {
+  let current = "";
+  return steps.map((st) => {
+    const k = (st.keyword ?? "").trim();
+    if (k !== "And" && k !== "But" && k !== "*" && k !== "") current = k;
+    return current;
+  });
+}
+
 /** Why this step's exit code is not the verdict, or "" when it is. */
 function needsObserved(step) {
   if (typeof step.exit === "number" && step.exit !== 0) return "the command exited nonzero";
@@ -176,7 +196,8 @@ for (const [i, s] of (entries ?? []).entries()) {
   tally[s.outcome] += 1;
 
   const steps = s.steps ?? [];
-  const thens = steps.filter((st) => st.keyword === "Then");
+  const keywords = effectiveKeywords(steps);
+  const thens = steps.filter((_, i) => keywords[i] === "Then");
   const settled = thens.filter((st) => st.command && typeof st.exit === "number");
 
   // Where the scenario is written, so a reader and a repair issue can reach it.
@@ -239,11 +260,18 @@ for (const [i, s] of (entries ?? []).entries()) {
   }
 
   // Wherever the exit code is not the verdict, record what the agent read.
-  for (const st of thens) {
-    if (!st.command) continue; // unreached; covered by the `blocked` rule above
+  // EVERY step, not only the assertions. A `When` settled by a value-returning
+  // command is where the run records what the system did — the 401 rule reads it,
+  // and `deciding()` falls back to it when no `Then` observed anything — so a
+  // `When` that exits nonzero or prints a value and says nothing is the same hole
+  // as a silent `Then`.
+  steps.forEach((st, i) => {
+    if (!st.command) return; // a step with no command is covered by the `blocked` rule
     const why = needsObserved(st);
-    if (why && !st.observed) errors.push(`${at}: a Then carries no \`observed\` and ${why}`);
-  }
+    if (why && !st.observed) {
+      errors.push(`${at}: a ${keywords[i] || st.keyword || "step"} carries no \`observed\` and ${why}`);
+    }
+  });
 }
 
 for (const [key, where] of expected) {
