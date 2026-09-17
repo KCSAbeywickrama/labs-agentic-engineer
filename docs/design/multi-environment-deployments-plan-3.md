@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A Settings tab showing the deployment pipeline as a horizontal strip, with a working validation switch, a working drag-to-reorder that does not persist, and add / edit-display-name built in their real positions and disabled.
+**Goal:** A Settings tab showing the deployment pipeline as a horizontal strip, with exactly one control: a working per-environment validation switch.
 
-**Architecture:** The strip reads the same `useEnvironments` list plan 1 built. The validation switch is the project's only platform write — a read-modify-write of one annotation on an OpenChoreo `Environment`. Reorder runs entirely on plan 1's pure `moveEnvironment`, held in component state, with the divergence from the platform's order shown explicitly rather than hidden.
+**Architecture:** The strip reads the same `useEnvironments` list plan 1 built. The validation switch is the project's only platform write — a read-modify-write of one annotation on an OpenChoreo `Environment`. Creating, renaming and reordering environments are **out of scope entirely** (spec D6, decided on a call 2026-09-17): not built, not drawn, not disabled-with-a-tooltip. They are platform-admin operations against OpenChoreo directly.
 
-**Tech Stack:** Go 1.25 (one BFF endpoint), TypeScript/React 19, Oxygen UI, React Query, native HTML5 drag-and-drop (**no new dependency** — the console has no dnd library and this does not add one), vitest.
+**Tech Stack:** Go 1.25 (one BFF endpoint), TypeScript/React 19, Oxygen UI, React Query, vitest. No drag-and-drop library, and no drag.
 
-**Spec:** [`docs/design/multi-environment-deployments.md`](multi-environment-deployments.md) §4.4, §7, §7.1 and §8. **Depends on plan 1** for `environments.ts` (especially `moveEnvironment`) and `useEnvironments`. Independent of plan 2.
+**Spec:** [`docs/design/multi-environment-deployments.md`](multi-environment-deployments.md) §4.4, §7 and §8. **Depends on plan 1** for `environments.ts` and `useEnvironments`. Independent of plan 2.
 
 ## Global Constraints
 
@@ -16,9 +16,7 @@ Everything in [plan 1's Global Constraints](multi-environment-deployments-plan-1
 
 - **One write, and only one.** `aep.wso2.com/validation` on an existing `Environment`. This project creates nothing, renames nothing, and never writes a `DeploymentPipeline`.
 - **The annotation write is read-modify-write** and must preserve every other annotation and the whole of `spec`. A write that blanks a field it did not understand is a defect, not a race.
-- **Disabled controls state their reason** — `Not supported yet` — reachable by screen reader, not only on mouse hover.
-- **Reorder never persists and never pretends to.** Divergence from the served order is always visible while it exists.
-- **No new npm dependency.** Drag uses the platform's own `draggable` + `dragstart` / `dragover` / `drop`.
+- **No control exists for anything but validation.** No add card, no edit pencil, no drag grip — not even disabled. A control that can never work invites the question every time it is seen.
 - Per CLAUDE.md, anything touching OpenChoreo primitives goes through **platform-design-expert** before merge. That applies to Tasks 2 and 3.
 
 ---
@@ -71,9 +69,21 @@ describe("EnvironmentsSection", () => {
     expect(screen.queryByTestId("production-flag")).not.toBeInTheDocument();
   });
 
-  it("names the pipeline it read, and says the console does not write it", () => {
+  it("names the pipeline it read, and says where environments are managed", () => {
     expect(screen.getByText(/default-pipeline/)).toBeInTheDocument();
-    expect(screen.getByText(/does not make those writes yet/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Environments are managed by a platform administrator/),
+    ).toBeInTheDocument();
+  });
+
+  it("offers no control but the validation switch", () => {
+    render(<EnvironmentsSection />);
+    // Not "disabled" — absent. A control that can never work invites the
+    // question every time it is seen.
+    expect(screen.queryByRole("button", { name: /Add environment/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /display name/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Not supported yet/)).not.toBeInTheDocument();
+    expect(document.querySelectorAll("[draggable]")).toHaveLength(0);
   });
 
   it("holds a skeleton while the list is out and offers a retry when it fails", () => {
@@ -312,189 +322,7 @@ git commit -m "console: the validation step is a switch, and the card follows it
 
 ---
 
-### Task 4: Drag to reorder, visibly unsaved
-
-**Files:**
-- Modify: `apps/console/src/features/settings/components/EnvironmentsSection.tsx`
-- Create: `apps/console/src/features/settings/components/EnvironmentsSection.reorder.test.tsx`
-
-**Interfaces:**
-- Consumes: plan 1's `moveEnvironment(list, from, to)` — **use it, do not reimplement position arithmetic under a pointer event.**
-- Produces: no exports; local component state `draft: EnvironmentInfo[] | null` where `null` means "unchanged from the platform's order".
-
-- [ ] **Step 1: Write the failing tests**
-
-```tsx
-const drag = (from: HTMLElement, to: HTMLElement) => {
-  fireEvent.dragStart(from);
-  fireEvent.dragOver(to);
-  fireEvent.drop(to);
-};
-
-describe("EnvironmentsSection — reorder", () => {
-  it("reorders the strip on drop", () => {
-    render(<EnvironmentsSection />);
-    drag(screen.getByTestId("env-setting-production"), screen.getByTestId("env-setting-development"));
-    expect(screen.getAllByTestId("env-setting-name").map((n) => n.textContent)).toEqual([
-      "Production", "Development", "Staging",
-    ]);
-  });
-
-  it("recomputes everything position implies — labels, promote targets, and who is last", () => {
-    render(<EnvironmentsSection />);
-    drag(screen.getByTestId("env-setting-production"), screen.getByTestId("env-setting-development"));
-    expect(screen.getByTestId("env-setting-production")).toHaveTextContent("First");
-    expect(screen.getByTestId("env-setting-production")).toHaveTextContent("Promote to Development");
-    // Staging is now last, so it loses its promote step.
-    expect(screen.getByTestId("env-setting-staging")).toHaveTextContent("Nothing to promote to");
-    expect(screen.getByTestId("env-setting-staging")).toHaveTextContent("Last");
-  });
-
-  it("says the order is unsaved, and only while it differs", () => {
-    render(<EnvironmentsSection />);
-    expect(screen.queryByText("Order changed — not saved yet")).not.toBeInTheDocument();
-    drag(screen.getByTestId("env-setting-production"), screen.getByTestId("env-setting-development"));
-    expect(screen.getByText("Order changed — not saved yet")).toBeInTheDocument();
-  });
-
-  it("Undo restores the platform's order and clears the notice", () => {
-    render(<EnvironmentsSection />);
-    drag(screen.getByTestId("env-setting-production"), screen.getByTestId("env-setting-development"));
-    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
-    expect(screen.getAllByTestId("env-setting-name").map((n) => n.textContent)).toEqual([
-      "Development", "Staging", "Production",
-    ]);
-    expect(screen.queryByText("Order changed — not saved yet")).not.toBeInTheDocument();
-  });
-
-  it("drags back to the original position and drops the notice without an Undo", () => {
-    render(<EnvironmentsSection />);
-    drag(screen.getByTestId("env-setting-production"), screen.getByTestId("env-setting-development"));
-    drag(screen.getByTestId("env-setting-production"), screen.getByTestId("env-setting-staging"));
-    expect(screen.queryByText("Order changed — not saved yet")).not.toBeInTheDocument();
-  });
-
-  it("offers Save order, disabled, with its reason", () => {
-    render(<EnvironmentsSection />);
-    drag(screen.getByTestId("env-setting-production"), screen.getByTestId("env-setting-development"));
-    const save = screen.getByRole("button", { name: "Save order" });
-    expect(save).toBeDisabled();
-    expect(save).toHaveAccessibleDescription(/Not supported yet/);
-  });
-
-  it("does not touch the served list — a refetch restores the platform's order", () => {
-    const { rerender } = render(<EnvironmentsSection />);
-    drag(screen.getByTestId("env-setting-production"), screen.getByTestId("env-setting-development"));
-    mockEnvironments = [...mockEnvironments];
-    rerender(<EnvironmentsSection />);
-    expect(screen.getAllByTestId("env-setting-name").map((n) => n.textContent)).toEqual([
-      "Development", "Staging", "Production",
-    ]);
-  });
-});
-```
-
-- [ ] **Step 2: Run and watch them fail**
-
-```bash
-cd apps/console && PATH=$HOME/.nvm/versions/node/v22.16.0/bin:$PATH pnpm exec vitest run src/features/settings/components/EnvironmentsSection.reorder.test.tsx
-```
-
-- [ ] **Step 3: Implement**
-
-State is one value: `draft`. `null` renders the served list; anything else renders the draft. On drop, compute `moveEnvironment(current, from, to)` and store it — **unless** the result matches the served order by name, in which case store `null`, which is what makes the last test pass without a special case for "dragged back".
-
-```tsx
-const served = environments.data ?? [];
-const [draft, setDraft] = useState<EnvironmentInfo[] | null>(null);
-const shown = draft ?? served;
-const sameAsServed = (list: EnvironmentInfo[]) =>
-  list.length === served.length && list.every((e, i) => e.name === served[i]?.name);
-
-const onDrop = (from: number, to: number) => {
-  const next = moveEnvironment(shown, from, to);
-  setDraft(sameAsServed(next) ? null : next);
-};
-```
-
-Every derived label — `First`/`Last`, the step list, the promote target — reads `shown`, never `served`, which is why reordering recomputes them for free.
-
-Each card gets `draggable`, `onDragStart` recording the index, `onDragOver` with `preventDefault` (without it the drop never fires), and `onDrop`. The grip is the visual affordance; keyboard reordering is **not** in scope and the grip is not focusable — noted as a gap in §Known gaps below rather than half-built.
-
-- [ ] **Step 4: Run and watch them pass**
-
-```bash
-cd apps/console && PATH=$HOME/.nvm/versions/node/v22.16.0/bin:$PATH pnpm run typecheck && pnpm exec vitest run src/features/settings && pnpm exec eslint src/features/settings
-```
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add apps/console/src/features/settings
-git commit -m "console: the pipeline reorders under the pointer, and says it is not saved"
-```
-
----
-
-### Task 5: Add and rename, built and disabled
-
-**Files:**
-- Modify: `apps/console/src/features/settings/components/EnvironmentsSection.tsx`
-- Modify: `apps/console/src/features/settings/components/EnvironmentsSection.test.tsx`
-
-- [ ] **Step 1: Write the failing tests**
-
-```tsx
-it("closes the strip with an Add card that states why it does nothing", () => {
-  render(<EnvironmentsSection />);
-  const add = screen.getByRole("button", { name: "Add environment" });
-  expect(add).toBeDisabled();
-  expect(add).toHaveAccessibleDescription(/Not supported yet/);
-});
-
-it("offers an edit-display-name control per card, disabled and reachable by screen reader", () => {
-  render(<EnvironmentsSection />);
-  const pencil = within(screen.getByTestId("env-setting-staging")).getByRole("button", {
-    name: "Edit Staging display name",
-  });
-  expect(pencil).toBeDisabled();
-  expect(pencil).toHaveAccessibleDescription(/Not supported yet/);
-});
-
-it("never offers to edit the environment's identity", () => {
-  render(<EnvironmentsSection />);
-  expect(screen.queryByRole("button", { name: /Rename staging$/ })).not.toBeInTheDocument();
-});
-```
-
-The last test is the guard for §8.2: `metadata.name` is immutable, so no control may ever suggest changing it.
-
-- [ ] **Step 2: Run and watch them fail**
-
-```bash
-cd apps/console && PATH=$HOME/.nvm/versions/node/v22.16.0/bin:$PATH pnpm exec vitest run src/features/settings
-```
-
-- [ ] **Step 3: Implement**
-
-A dashed `+` card at the end of the strip and a pencil in each card's top row. Both `disabled`, both carrying the reason via `aria-describedby` on a visually-hidden element as well as `title`, so the reason is not mouse-only. The pencil's accessible name says **display name**, never *name*.
-
-- [ ] **Step 4: Run and watch them pass**
-
-```bash
-cd apps/console && PATH=$HOME/.nvm/versions/node/v22.16.0/bin:$PATH pnpm exec vitest run src/features/settings
-```
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add apps/console/src/features/settings
-git commit -m "console: add and edit-display-name sit where they will live, disabled and saying so"
-```
-
----
-
-### Task 6: Verify the cascade is environment-scoped
+### Task 4: Verify the cascade is environment-scoped
 
 **Files:**
 - Read: the deployed-task cascade in `services/aep-api` (`cors.allowedOrigins` re-emission, `env-config.js` on SPA ReleaseBindings)
@@ -523,7 +351,7 @@ git commit -m "aep-api: pin the deployed cascade to the environment that deploye
 
 ---
 
-### Task 7: Documentation
+### Task 5: Documentation
 
 - [ ] **Step 1: Amend ADR-0033** with the settings tab: the pipeline is read, the validation annotation is the one write, reorder is a preview, add and rename are feasible and deferred, and rename can only ever mean the display name.
 
@@ -540,14 +368,24 @@ git commit -m "docs: the Deployment Environments tab, and what it deliberately d
 
 ## Known gaps, stated rather than half-built
 
-- **Keyboard reordering.** Drag is pointer-only. A keyboard user cannot reorder — which matters less than it would if the result persisted, since today it changes nothing. It must be built with the Save handler, not before it, and the grip is deliberately not focusable so nothing suggests otherwise.
-- **Reorder is not validated against the pipeline's shape.** `moveEnvironment` produces a linear order; a fan-out pipeline cannot be expressed by dragging. Since nothing saves, nothing can be corrupted — but the Save handler must reject or flatten deliberately, not assume linearity.
-- **Nothing warns on leaving with an unsaved order.** Deliberate: nothing was promised, so nothing is lost.
+- **The pipeline cannot be changed from the console at all.** Adding, renaming and
+  reordering an environment are platform-admin operations against OpenChoreo. The tab's
+  banner says so and names the pipeline it read, so a reader is never left wondering
+  where the controls went.
+- **`moveEnvironment` (plan 1) is now unused** — it was built for the drag this plan no
+  longer has. Correct and tested; `apps/*` is outside knip's scope so nothing fails.
+  The whole-branch review triages whether it stays.
+- **Renaming, if it ever arrives, can only change the display name** (§8.2) —
+  `metadata.name` is the identity every binding and workload points at.
 
 ## Self-review notes
 
-**Spec coverage.** §4.4 → Task 2. §7 → Tasks 1, 3, 5. §7.1 → Task 4. §8.1 → the disabled set in Tasks 4 and 5. §8.2 → Task 5's third test. §10's cascade → Task 6.
+**Spec coverage.** §4.4 → Task 2. §7 → Tasks 1 and 3. §8 → nothing builds those
+controls by design; §8's table survives as research, not as a plan. §10's cascade → Task 4.
 
-**Type consistency.** `moveEnvironment`, `stepsFor`, `isLast` and `EnvironmentInfo` are plan 1's, used here with the same signatures. `useSetEnvironmentValidation` is defined in Task 3 and used nowhere earlier. `draft`/`shown`/`served` are named identically in Task 4's tests and implementation.
+**Type consistency.** `stepsFor`, `isLast` and `EnvironmentInfo` are plan 1's, used here
+with the same signatures. `useSetEnvironmentValidation` is defined in Task 3 and used
+nowhere earlier.
 
-**Ordering constraint.** Task 3 needs Task 2's endpoint. Task 4 needs plan 1's `moveEnvironment`. Tasks 5 and 6 are independent of the rest and can run in any order after Task 1.
+**Ordering constraint.** Task 3 needs Task 2's endpoint. Tasks 4 and 5 are independent
+of the rest and can run in any order after Task 1.

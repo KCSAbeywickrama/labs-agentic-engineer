@@ -40,7 +40,7 @@ Three further asks came with the rework:
 | D3 | **This project is a console redesign.** The only platform write it makes is the validation annotation (D2). Promote stays unwired, exactly as today. Rollback is drawn and disabled. | The `ProjectReleaseBinding.spec.projectRelease` pin is platform-touching work with its own unanswered questions (§10). |
 | D4 | **Per-environment history shows only what exists.** Development lists the build ledger — genuinely every version that passed through it. Every other environment shows the version running now and a line saying no earlier history is recorded. | The platform records no deployment history (§4.3). Inventing rows would be a lie the page cannot back. |
 | D5 | **The per-version page is retired.** `/deployments/$env/$version` and `DeploymentVersionPage` are deleted; a past version is a row in Past deployments. | A superseded version's story is four facts, not a page. The row carries them, plus the (disabled) Roll back. |
-| D6 | **The settings tab is wired and mostly disabled.** The validation switch works. **Drag-to-reorder works as an interaction but does not persist** (§7.1). Add and edit-display-name are built in their real positions, disabled, with a *Not supported yet* tooltip. | Feasibility is proven (§8.1); only the risk of the writes is deferred. When approved, three handlers get bodies and no layout changes. |
+| D6 | **The settings tab reads the pipeline and toggles validation. Nothing else.** It lists the environments in promotion order and switches `aep.wso2.com/validation` per environment. It does **not** create environments, edit them, or reorder them — those controls are not built, not drawn, and not disabled-with-a-tooltip. | Decided on a call, 2026-09-17, superseding an earlier design that drew all three as disabled affordances. A control that can never work is worse than no control: it invites the question every time it is seen. The feasibility research behind the removed controls is kept in §8 so nobody re-litigates it. |
 | D7 | **"Connections" is renamed "dependencies"** everywhere in this surface. | One word for one concept; the design and the BFF already say dependency. |
 
 ## 3. The environment model
@@ -196,49 +196,29 @@ current row and the no-history line.
 
 ## 7. Settings › Deployment Environments
 
-A horizontal strip of small cards in promotion order, `→` between them, a dashed **+ Add
-environment** card at the end.
+A horizontal strip of small cards in promotion order, `→` between them. Read-only,
+with one control.
 
-Each card: a drag grip, an edit-display-name pencil, the display name with *Environment*
-faded, `First · 3 steps` / `Second · 2 steps` …, the steps themselves (a disabled validation
-step struck through), the **Run validation here** switch, and a *Production* flag read from
+Each card: the display name with *Environment* faded beside it, `First · 3 steps` /
+`Second · 2 steps` …, the steps themselves (a disabled validation step struck
+through), the **Run validation here** switch, and a *Production* flag read from
 `isProduction`.
 
-**Enabled:** the validation switch, and drag-to-reorder as an interaction (§7.1).
-**Disabled with a `Not supported yet` tooltip:** edit display name, add.
+**The only control is the validation switch.** There is no drag grip, no edit pencil,
+and no **+ Add environment** card. An environment is created, renamed and reordered
+by a platform admin against OpenChoreo directly; the console reads that and says so
+in a banner naming the pipeline it read.
 
-A banner names the pipeline the strip was read from and says the console does not make those
-writes yet.
+The step count remains a consequence, never a setting (§3.2): turning a switch on
+adds a step to that environment's settings card *and* its deployments card, from the
+same annotation.
 
-### 7.1 Drag-to-reorder, without persistence
-
-The grip is live: a card can be picked up and dropped into a new position, and the strip
-re-renders in that order — arrows, `First · 3 steps` / `Second · 2 steps` labels, and each
-card's *Promote to `<next>`* step all recompute, because they are all derived from position
-(§3.2). Dragging Production off the end genuinely moves the "no promote step" to whichever
-environment is now last. That is the whole value of building it now: the reorder logic and
-its consequences are exercised and tested before the write exists.
-
-**The result is explicitly unsaved.** The moment the order differs from the pipeline the
-console read, the strip shows a line — *Order changed — not saved yet* — with **Undo** and a
-**Save order** button that is disabled and carries the same *Not supported yet* tooltip.
-Leaving the tab or reloading restores the platform's order, and nothing warns about losing
-the change, because nothing was ever promised.
-
-Reordering is local to the settings tab. It never touches the Deployments page, which always
-renders the platform's order.
-
-**Why not a silent local reorder:** every other control on this page reflects platform state,
-so a reorder that looks identical to a saved one and then reverts on refresh reads as data
-loss. The unsaved line is what separates "this is a preview" from "this is the pipeline".
-
-**Implementation note:** reorder is a pure function over the environment list — `move(list,
-from, to)` — kept separate from the drag mechanics so the position arithmetic is unit-tested
-without simulating pointer events.
-
-## 8. Feasibility of the disabled controls
+## 8. Feasibility of the controls we deliberately do not build
 
 ### 8.1 Verified against the generated OpenChoreo client
+
+Kept because the research is real and settled. None of the first three are built
+(D6); this table exists so nobody re-opens the question of whether they *could* be.
 
 | Control | API | Verdict |
 |---|---|---|
@@ -292,9 +272,15 @@ label promises.
   move. What the follow-up must answer before it ships: what a half-repinned project looks
   like mid-flight; what happens to per-environment dependency values on a rollback; whether
   rolling back an environment that a later one already promoted off is legal.
-- **Add and rename are disabled; reorder drags but does not save.** All feasible (§8.1); the
-  risk of writing shared platform objects is what is deferred. Saving a reorder is the single
-  handler that turns §7.1 from a preview into a feature.
+- **Add, reorder and rename are not built at all** (D6) — not as controls, not as
+  disabled controls. They are feasible (§8.1); what is deferred is the risk of writing
+  shared platform objects, and the judgement that a console is the right place to do it.
+  Until then these are platform-admin operations against OpenChoreo directly.
+- **`moveEnvironment` in `lib/environments.ts` is now unused.** It was built and tested
+  in plan 1 to serve the drag-to-reorder D6 removed. It is correct and covered, and
+  `apps/*` is outside knip's scope so nothing fails because of it. Left in place for the
+  whole-branch review to triage — delete it, or keep it against the day reordering
+  is on the table.
 - **Fan-out pipelines render linearly** (§3.3).
 - **History starts empty** for every environment but development, and stays empty until
   promote records something.
