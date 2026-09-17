@@ -39,8 +39,10 @@ import type { ConnectionRow } from "../lib/promotion";
 // `EnvironmentInfo` and its own row.
 
 /** A fixed card width, so the cards are the same shape and the row scrolls
- *  rather than squeezing six environments into a viewport. */
-const CARD_WIDTH = 384;
+ *  rather than squeezing six environments into a viewport. Wide enough that a
+ *  component's name, its kind and its status sit on one line without wrapping —
+ *  the row is scrollable, so width costs nothing but a scroll. */
+const CARD_WIDTH = 460;
 
 /**
  * The flow while the pipeline is not known. It states NOTHING — not "no
