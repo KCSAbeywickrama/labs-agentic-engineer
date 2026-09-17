@@ -183,7 +183,11 @@ vi.mock("../api/queries", () => ({
     deployments: mockDeployments,
     failedCount: 0,
   }),
-  useProjectStatus: () => ({ data: status() }),
+  useProjectStatus: () => ({
+    data: mockStatusState === "ready" ? status() : undefined,
+    isPending: mockStatusState === "pending",
+    isError: mockStatusState === "error",
+  }),
   useProjectDependencyReadiness: () => ({
     data: mockReadiness,
     isPending: mockReadinessPending,
@@ -196,6 +200,8 @@ vi.mock("../api/queries", () => ({
 // stays blank until a test says what the platform holds.
 let mockReadiness: ProjectDependencyReadiness | undefined;
 let mockReadinessPending = false;
+// The status poll — the read the card's `version` comes off.
+let mockStatusState: "ready" | "pending" | "error" = "ready";
 
 // The platform's pipeline, in promotion order. Two environments because that
 // is the pipeline these tests describe, not because the console knows two.
@@ -320,6 +326,7 @@ beforeEach(() => {
   mockReadinessPending = false;
   mockEnvironmentsState = "ready";
   mockEnvironmentsRefetch.mockClear();
+  mockStatusState = "ready";
   mockValidationPending = false;
   evidenceArgs.mockClear();
   navigate.mockClear();
@@ -353,8 +360,6 @@ describe("DeploymentsPage — validation", () => {
     // Validation page's tile shares and must keep — nothing else on the card
     // restates it.
     expect(screen.queryByText(/Runs again/)).not.toBeInTheDocument();
-    // The ledger's cell names the lifecycle, not a verdict.
-    expect(screen.getByText("awaiting fix")).toBeInTheDocument();
   });
 
   // A SETTLED failure. The banner wrote its own sentence for these and led with the
@@ -495,88 +500,24 @@ describe("DeploymentsPage — environment board", () => {
     // The two cards, named as places.
     expect(screen.getByRole("heading", { name: "Development" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Production" })).toBeInTheDocument();
-    // The dev card's first step says what is live and invites the try; the
-    // aggregate's word on the rollout is the step's own title and the ledger
-    // row's chip — the card header carries no chip of its own, the rail
-    // already says it.
+    // The dev card's first step says what is live and invites the try, and
+    // its header carries the version with the milestone read off the version
+    // ledger.
+    const development = screen.getByTestId("environment-card-development");
     expect(screen.getByText(/1 of 1 components live.* You can try them now\./)).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Deployed" })).toBeInTheDocument();
-    expect(
-      screen.getAllByText("Deployed").filter((el) => el.closest("th") === null),
-    ).toHaveLength(2);
-    // Production is empty and stays so: the sentence and the gate, no lists.
-    expect(
-      screen.getByText("Nothing running yet. v1 is ready to promote once the missing value is set."),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Only a version whose validation has passed can be promoted here."),
-    ).toBeInTheDocument();
+    expect(within(development).getByText("v1 · Milestone #3")).toBeInTheDocument();
     // Development's group reads unknown values as not set while the
-    // readiness read is out.
-    expect(screen.getByRole("group", { name: "Connections — 0 of 1 set" })).toBeInTheDocument();
-    // The ledger: one row, development, with the milestone read off the
-    // version ledger and a validation cell.
-    const row = screen.getByRole("row", { name: "Open Development v1 deployment" });
-    expect(within(row).getByText("v1")).toBeInTheDocument();
-    expect(within(row).getByText("Milestone #3")).toBeInTheDocument();
-    expect(within(row).getByText("validated")).toBeInTheDocument();
-    // Nothing runs in production, so it has no ledger row.
-    expect(
-      screen.queryByRole("row", { name: "Open Production deployment" }),
-    ).not.toBeInTheDocument();
+    // readiness read is out — and it is Development's alone.
+    expect(within(development).getByRole("group", { name: "Connections — 0 of 1 set" })).toBeInTheDocument();
+    // Production is empty and stays so: it lists nothing, and its own card
+    // says what has to happen before anything runs there.
+    const production = screen.getByTestId("environment-card-production");
+    expect(within(production).getByText("Deploys when a version is promoted to Production.")).toBeInTheDocument();
+    expect(within(production).queryByRole("group", { name: /^Components/ })).not.toBeInTheDocument();
+    expect(within(production).queryByRole("group", { name: /^Connections/ })).not.toBeInTheDocument();
   });
 
-  it("lists every built version, newest first, and opens the version's page", () => {
-    mockDeploy = { version: "v1", status: "deployed", components: { total: 1, ready: 1 }, validation: "passed" };
-    mockBuilds = [
-      { tag: "v1", milestoneNumber: 1, status: "completed", startedAt: "2026-09-01T09:00:00Z", completedAt: "2026-09-01T10:00:00Z" },
-      { tag: "v2", milestoneNumber: 2, status: "in_progress", startedAt: "2026-09-14T09:00:00Z" },
-      { tag: "v0", milestoneNumber: 0, status: "failed", startedAt: "2026-08-20T09:00:00Z", completedAt: "2026-08-20T09:30:00Z" },
-    ];
-    mockBuildVersion = "v2";
-    mockRunsByTag = { v1: [judgedRun("v1", "passed")] };
-
-    render(<DeploymentsPage projectName="acme" />);
-
-    const rows = screen.getAllByRole("row", { name: /^Open Development/ });
-    expect(rows.map((r) => r.getAttribute("aria-label"))).toEqual([
-      "Open Development v2 deployment",
-      "Open Development v1 deployment",
-      "Open Development v0 deployment",
-    ]);
-    expect(within(rows[0]!).getByText("Building")).toBeInTheDocument();
-    expect(within(rows[1]!).getByText("Deployed")).toBeInTheDocument();
-    expect(within(rows[2]!).getByText("Build failed")).toBeInTheDocument();
-    // Only the live row carries a verdict; a past version's is its page's.
-    expect(within(rows[1]!).getByText("validated")).toBeInTheDocument();
-    expect(within(rows[2]!).queryByText(/validated|Not run/)).not.toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Built" })).toBeInTheDocument();
-
-    fireEvent.click(rows[2]!);
-    expect(navigate).toHaveBeenCalledWith({
-      to: "/projects/$projectName/deployments/$environment/$version",
-      params: { projectName: "acme", environment: "development", version: "v0" },
-    });
-  });
-
-  it("opens the environment's page from its ledger row", () => {
-    mockDeploy = {
-      version: "v1",
-      status: "deployed",
-      components: { total: 1, ready: 1 },
-      validation: "passed",
-    };
-
-    render(<DeploymentsPage projectName="acme" />);
-
-    fireEvent.click(screen.getByRole("row", { name: "Open Development v1 deployment" }));
-    expect(navigate).toHaveBeenCalledWith({
-      to: "/projects/$projectName/deployments/$environment/$version",
-      params: { projectName: "acme", environment: "development", version: "v1" },
-    });
-  });
-
-  it("upgrades the validation cell and banner with criteria counts", () => {
+  it("upgrades the validation banner with criteria counts", () => {
     mockDeploy = {
       version: "v1",
       status: "deployed",
@@ -587,7 +528,6 @@ describe("DeploymentsPage — environment board", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    expect(screen.getByText("12 / 12 passed")).toBeInTheDocument();
     // The tile's own sentence, word for word — the banner used to write its own,
     // which is how a settled FAILURE came to lead with the count that passed.
     expect(
@@ -595,7 +535,7 @@ describe("DeploymentsPage — environment board", () => {
     ).toBeInTheDocument();
   });
 
-  it("tints the ledger row and says Deploying while the rollout converges", () => {
+  it("says Deploying on the card while the rollout converges, and withholds promotion", () => {
     mockDeploy = {
       version: "v2",
       status: "deploying",
@@ -605,13 +545,12 @@ describe("DeploymentsPage — environment board", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    // The ledger's chip and step 1's title; the card header carries none.
-    expect(screen.getAllByText("Deploying")).toHaveLength(2);
-    const row = screen.getByRole("row", { name: "Open Development v2 deployment" });
-    // A verdict is expected and has not arrived: the cell says so, and no
-    // promotion is offered — with the reason beside the button.
-    expect(within(row).getByText("Not run")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Promote v2 to production/ })).toBeDisabled();
+    // The card's status chip and step 1's title both say it.
+    const development = screen.getByTestId("environment-card-development");
+    expect(within(development).getAllByText("Deploying").length).toBeGreaterThan(0);
+    // A verdict is expected and has not arrived, so no promotion is offered —
+    // with the reason beside the disabled button.
+    expect(screen.getByRole("button", { name: /Promote v2 to Production/ })).toBeDisabled();
     expect(screen.getByText("Unavailable until v2 deploys and validates")).toBeInTheDocument();
   });
 });
@@ -695,7 +634,7 @@ describe("DeploymentsPage — connections", () => {
     expect(screen.getByText("Platform-managed")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Configure shop-db" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Configure shop-auth" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Configure shop-auth for production" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Configure shop-auth for Production" })).toBeInTheDocument();
   });
 
   // Registered External: org catalog row with non-empty envCells — values live
@@ -838,7 +777,7 @@ describe("DeploymentsPage — promotion", () => {
     render(<DeploymentsPage projectName="acme" />);
 
     expect(
-      screen.getByRole("button", { name: /Promote v1 to production/ }),
+      screen.getByRole("button", { name: /Promote v1 to Production/ }),
     ).toBeDisabled();
   });
 
@@ -858,7 +797,7 @@ describe("DeploymentsPage — promotion", () => {
     render(<DeploymentsPage projectName="acme" />);
 
     expect(
-      screen.getByRole("button", { name: /Promote v1 to production/ }),
+      screen.getByRole("button", { name: /Promote v1 to Production/ }),
     ).toBeEnabled();
     expect(screen.getByText("Opens a dialog to confirm the promotion.")).toBeInTheDocument();
   });
@@ -875,14 +814,14 @@ describe("DeploymentsPage — promotion", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    const promote = screen.getByRole("button", { name: /Promote v1 to production/ });
+    const promote = screen.getByRole("button", { name: /Promote v1 to Production/ });
     expect(promote).toBeDisabled();
     expect(screen.getByText("1 value missing")).toBeInTheDocument();
-    expect(screen.getByText("stripe has no production value")).toBeInTheDocument();
+    expect(screen.getByText("stripe has no Production value")).toBeInTheDocument();
     expect(screen.getByText("Enabled once the value is set")).toBeInTheDocument();
 
-    // Named for production, so it is never mistaken for the dev re-collect.
-    fireEvent.click(screen.getByRole("button", { name: "Configure stripe for production" }));
+    // Named for the promotion target, so it is never mistaken for the dev re-collect.
+    fireEvent.click(screen.getByRole("button", { name: "Configure stripe for Production" }));
 
     const dialog = screen.getByRole("dialog");
     expect(
@@ -900,9 +839,9 @@ describe("DeploymentsPage — promotion", () => {
     // meanwhile, so the board is queried with hidden elements included; the
     // board's button precedes the portal in DOM order.
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByText("stripe has no production value")).not.toBeInTheDocument();
+    expect(screen.queryByText("stripe has no Production value")).not.toBeInTheDocument();
     expect(
-      screen.getAllByRole("button", { name: /Promote v1 to production/, hidden: true })[0],
+      screen.getAllByRole("button", { name: /Promote v1 to Production/, hidden: true })[0],
     ).toBeEnabled();
   });
 
@@ -917,7 +856,7 @@ describe("DeploymentsPage — promotion", () => {
     render(<DeploymentsPage projectName="acme" />);
 
     expect(
-      screen.getByRole("button", { name: /Promote v1 to production/ }),
+      screen.getByRole("button", { name: /Promote v1 to Production/ }),
     ).toBeDisabled();
   });
 
@@ -952,7 +891,7 @@ describe("DeploymentsPage — promotion", () => {
     expect(screen.queryByText(/has no production value/)).not.toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole("button", { name: /Promote v1 to production/ }),
+      screen.getByRole("button", { name: /Promote v1 to Production/ }),
     );
     const dialog = screen.getByRole("dialog");
     expect(
@@ -982,7 +921,7 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    const flow = screen.getByRole("list", { name: "Deployment flow" });
+    const flow = screen.getByRole("list", { name: "Development flow" });
     const steps = within(flow).getAllByRole("listitem");
     expect(steps.map((s) => s.getAttribute("aria-label"))).toEqual([
       "Step 1, Deployed",
@@ -1007,7 +946,7 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
     expect(within(steps[1]!).getByText("The validation agent is running.")).toBeInTheDocument();
     expect(within(steps[1]!).getByRole("link", { name: /View validations/ })).toBeInTheDocument();
     // Step 3 waits on validation, and says so.
-    expect(within(steps[2]!).getByRole("button", { name: /Promote v1 to production/ })).toBeDisabled();
+    expect(within(steps[2]!).getByRole("button", { name: /Promote v1 to Production/ })).toBeDisabled();
     expect(within(steps[2]!).getByText("Enabled when validation passes")).toBeInTheDocument();
     // The test users left the card for the environment page.
     expect(screen.queryByText(/Test users for agents/)).not.toBeInTheDocument();
@@ -1025,7 +964,7 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    const flow = screen.getByRole("list", { name: "Deployment flow" });
+    const flow = screen.getByRole("list", { name: "Development flow" });
     expect(within(flow).getByRole("listitem", { name: "Step 2, Validation, Passed · 25 of 25" })).toBeInTheDocument();
   });
 
@@ -1047,7 +986,7 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    const flow = screen.getByRole("list", { name: "Deployment flow" });
+    const flow = screen.getByRole("list", { name: "Development flow" });
     const steps = within(flow).getAllByRole("listitem");
     expect(steps[0]).toHaveAttribute("aria-label", "Step 1, Deploy, On hold");
     expect(screen.getByText("Needs a value for stripe before deploying")).toBeInTheDocument();
@@ -1066,9 +1005,10 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
     // Steps 2 and 3 are inactive with one line each.
     expect(within(steps[1]!).getByText("Runs automatically after deployment.")).toBeInTheDocument();
     expect(within(steps[2]!).getByText("Unavailable until v1 deploys and validates")).toBeInTheDocument();
-    // Production explains itself the same way.
+    // Production explains itself in its OWN card's first step: a version
+    // arrives there by promotion, never by a build landing in it.
     expect(
-      screen.getByText("Nothing running yet. v1 must deploy and validate in Development first."),
+      screen.getByText("Deploys when a version is promoted to Production."),
     ).toBeInTheDocument();
 
     // The notice's Configure is the dev re-collect for the blocking connection.
@@ -1091,7 +1031,7 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
     expect(screen.getByTestId("connections-skeleton")).toBeInTheDocument();
     // Step 3 cannot know what is missing yet, so it does not say nothing is.
     expect(screen.queryByText(/has no production value/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Promote v1 to production/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Promote v1 to Production/ })).not.toBeInTheDocument();
     expect(screen.getByTestId("promote-skeleton")).toBeInTheDocument();
     // …and step 1 is still the flow's first step, with its components.
     expect(screen.getByRole("group", { name: "Components — 1 of 1 live" })).toBeInTheDocument();
@@ -1133,17 +1073,15 @@ describe("DeploymentsPage — the card's version (review round)", () => {
     render(<DeploymentsPage projectName="acme" />);
 
     expect(evidenceArgs).toHaveBeenCalledWith("acme", "v1", "passed");
-    const flow = screen.getByRole("list", { name: "Deployment flow" });
+    const flow = screen.getByRole("list", { name: "Development flow" });
     const steps = within(flow).getAllByRole("listitem");
     expect(steps[1]).toHaveAttribute("aria-label", "Step 2, Validation, Passed");
     expect(screen.queryByText("Starts automatically now that the deployment is live.")).not.toBeInTheDocument();
     // Step 3 is v1's too: validated, so only the missing value stands in the way.
     expect(within(steps[2]!).getByText("Enabled once the value is set")).toBeInTheDocument();
     expect(screen.queryByText("Enabled when validation passes")).not.toBeInTheDocument();
-    // …and the ledger's cell agrees with the card.
-    const row = screen.getByRole("row", { name: "Open Development v1 deployment" });
-    expect(within(row).getByText("v1")).toBeInTheDocument();
-    expect(within(row).getByText("validated")).toBeInTheDocument();
+    // …and the card is headed by the version it is about.
+    expect(screen.getByText(/^v1 ·|^v1$/)).toBeInTheDocument();
   });
 
   it("says a failed run-story read rather than drawing the ordinary state over it", () => {
@@ -1176,11 +1114,10 @@ describe("DeploymentsPage — the card's version (review round)", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    expect(screen.getByTestId("validation-cell-skeleton")).toBeInTheDocument();
     expect(screen.queryByText("Not run")).not.toBeInTheDocument();
     expect(screen.getByTestId("validation-skeleton")).toBeInTheDocument();
     expect(screen.getByTestId("promote-skeleton")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Promote v1 to production/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Promote v1 to Production/ })).not.toBeInTheDocument();
   });
 
   it("says the verdict is unavailable, and withholds promotion, when the deployed version's run story fails", () => {
@@ -1191,14 +1128,12 @@ describe("DeploymentsPage — the card's version (review round)", () => {
     render(<DeploymentsPage projectName="acme" />);
 
     expect(screen.getByText(/The version's run story could not be loaded: runs down/)).toBeInTheDocument();
-    const row = screen.getByRole("row", { name: "Open Development v1 deployment" });
-    expect(within(row).getByText("Unavailable")).toBeInTheDocument();
     expect(screen.queryByText("Not run")).not.toBeInTheDocument();
-    const flow = screen.getByRole("list", { name: "Deployment flow" });
+    const flow = screen.getByRole("list", { name: "Development flow" });
     const steps = within(flow).getAllByRole("listitem");
     expect(within(steps[1]!).getByText("The run story could not be loaded, so this version's verdict is unknown.")).toBeInTheDocument();
     // An unknown verdict is not a permission to promote.
-    expect(within(steps[2]!).getByRole("button", { name: /Promote v1 to production/ })).toBeDisabled();
+    expect(within(steps[2]!).getByRole("button", { name: /Promote v1 to Production/ })).toBeDisabled();
     expect(within(steps[2]!).getByText("Unavailable until v1's run story loads")).toBeInTheDocument();
   });
 
@@ -1210,8 +1145,11 @@ describe("DeploymentsPage — the card's version (review round)", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    expect(screen.getByText("Deploy failed · 0 of 1 components live")).toBeInTheDocument();
-    expect(screen.queryByText(/^Running ·/)).not.toBeInTheDocument();
+    // The Production card is headed by ITS OWN status word, read off its own
+    // fold — a populated environment is not a running one.
+    const production = screen.getByTestId("environment-card-production");
+    expect(within(production).getAllByText("Deploy failed").length).toBeGreaterThan(0);
+    expect(within(production).queryByText("Running")).not.toBeInTheDocument();
   });
 });
 
@@ -1221,21 +1159,73 @@ describe("DeploymentsPage — the environments read", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    // The board is one row per environment, so with the list still out the
+    // The flow is one card per environment, so with the list still out the
     // page knows nothing yet — and must not say the project is undeployed.
-    expect(screen.getByLabelText("Loading deployments")).toBeInTheDocument();
+    expect(screen.getByTestId("environment-flow-skeleton")).toBeInTheDocument();
     expect(screen.queryByText(/Nothing deployed yet/)).not.toBeInTheDocument();
   });
 
-  it("says the environments could not be read, with a Retry, rather than an empty board", () => {
+  it("says the environments could not be read, with a Retry, rather than an empty flow", () => {
     mockEnvironmentsState = "error";
 
     render(<DeploymentsPage projectName="acme" />);
 
     expect(
-      screen.getByText(/The platform's environments could not be read: gateway down/),
+      screen.getByText(/The deployment pipeline could not be loaded: gateway down/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Nothing deployed yet/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mockEnvironmentsRefetch).toHaveBeenCalled();
+  });
+});
+
+describe("DeploymentsPage — the page is the pipeline", () => {
+  // The status poll is where `version` comes from, and `promote` is null
+  // without a version. Both an unsettled poll and a failed one leave the page
+  // not knowing — and neither is "nothing is deployed here".
+  it.each(["pending", "error"] as const)(
+    "withholds the promote step rather than denying a deployment while the status poll is %s",
+    (state) => {
+      mockStatusState = state;
+
+      render(<DeploymentsPage projectName="acme" />);
+
+      expect(screen.getByTestId("promote-skeleton")).toBeInTheDocument();
+      expect(
+        screen.queryByText("Available once a version is deployed to Development."),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it("is the flow and nothing under it — the version ledger has left the page", () => {
+    render(<DeploymentsPage projectName="expense" />);
+
+    expect(screen.getByTestId("environment-flow")).toBeInTheDocument();
+    expect(
+      screen.queryByText("every version this project built, newest first"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("holds a skeleton while the environment list is out, rather than guessing two cards", () => {
+    mockEnvironmentsState = "pending";
+
+    render(<DeploymentsPage projectName="expense" />);
+
+    expect(screen.getByTestId("environment-flow-skeleton")).toBeInTheDocument();
+    // Not one card, not two: the page does not know how many there are, so it
+    // names no environment at all.
+    expect(screen.queryByText("Development")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("environment-flow")).not.toBeInTheDocument();
+  });
+
+  it("says the pipeline could not be read, with a retry, rather than an empty page", () => {
+    mockEnvironmentsState = "error";
+
+    render(<DeploymentsPage projectName="expense" />);
+
+    expect(
+      screen.getByText(/The deployment pipeline could not be loaded/),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(mockEnvironmentsRefetch).toHaveBeenCalled();
   });

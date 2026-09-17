@@ -17,14 +17,7 @@
  */
 
 import { useMemo, useState } from "react";
-import {
-  Alert,
-  Box,
-  Button,
-  CircularProgress,
-  Snackbar,
-  Stack,
-} from "@wso2/oxygen-ui";
+import { Alert, Button, Snackbar } from "@wso2/oxygen-ui";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
@@ -48,7 +41,7 @@ import {
   developmentConnections,
   promoteStep,
 } from "../lib/deploymentFlow";
-import { environmentRows, milestoneFor, versionLedgerRows } from "../lib/deploymentLedger";
+import { environmentRows, milestoneFor } from "../lib/deploymentLedger";
 import { groupDeploymentCards } from "../lib/deploymentRows";
 import {
   connectionRows,
@@ -57,15 +50,19 @@ import {
   type ConnectionValues,
 } from "../lib/promotion";
 import { ConnectionValuesDialog } from "./ConnectionValuesDialog";
-import { DeploymentsLedger } from "./DeploymentsLedger";
-import { EnvironmentCards } from "./EnvironmentCards";
+import { EnvironmentFlow, EnvironmentFlowSkeleton } from "./EnvironmentFlow";
 import { PromoteDialog } from "./PromoteDialog";
 
 /**
- * Deployments as an ENVIRONMENT BOARD (ADR-0027) whose Development card is
- * the FLOW (ADR-0032): deployed → validated → promoted as three numbered
- * steps, each with its one action — then a ledger with one row per
- * environment that runs something, each opening the environment's own page.
+ * Deployments as the PIPELINE it is: one full-detail card per environment the
+ * platform names, left to right in promotion order (ADR-0027/0032), each card
+ * its own flow — deployed → validated → promoted — and each card opening that
+ * environment's own page. However many environments there are, one or six:
+ * nothing on this page counts them, and no sentence here names an environment
+ * the served list did not.
+ *
+ * The version ledger that used to sit under the board has left the page; past
+ * deployments belong to the environment they happened in.
  *
  * Data is the board's, plus two reads the Builds page already makes: the
  * newest run's story (for a run parked at the deploy gate — the "on hold"
@@ -180,9 +177,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
     return (
       <>
         {header}
-        <Box sx={{ display: "flex", justifyContent: "center", p: 6 }}>
-          <CircularProgress aria-label="Loading deployments" />
-        </Box>
+        <EnvironmentFlowSkeleton />
       </>
     );
   }
@@ -214,11 +209,11 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           severity="error"
           action={<Button onClick={() => void environments.refetch()}>Retry</Button>}
         >
-          The platform's environments could not be read
+          The deployment pipeline could not be loaded
           {environments.error instanceof Error && environments.error.message
             ? `: ${environments.error.message}`
             : ""}
-          {" — the board has no environments to draw until they load."}
+          {" — the flow has no environments to draw until they load."}
         </Alert>
       </>
     );
@@ -242,11 +237,15 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
     entryEnvironment,
   );
   const rows = environmentRows(board, environmentList, deploy);
-  const development = rows[0];
-  // The promotion TARGET, when the pipeline has one. A single-environment
-  // pipeline has none — and a card invented for it drew an empty title over
-  // an environment the platform never named.
-  const production = rows[1];
+  // The promotion TARGET, as the ENTRY environment's own `promotesTo` names
+  // it — never the next row along. A single-environment pipeline names none,
+  // and a step invented for it drew an empty title over an environment the
+  // platform never named. The flow card derives its target the same way, so
+  // the page and the card can never disagree about which one it is.
+  const promotesTo = environmentList[0]?.promotesTo;
+  const promoteTarget = promotesTo
+    ? rows.find((r) => r.environment === promotesTo)
+    : undefined;
   const componentTypes = new Map<string, string>();
   for (const c of components.data?.items ?? []) {
     if (c.type) componentTypes.set(c.name, c.type);
@@ -258,8 +257,8 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   const hold = parked && !behind ? parked : null;
   // An unknown verdict withholds promotion outright: `canPromote` would wave
   // an empty validation through.
-  const promoteIfKnown = production
-    ? promoteStep(cardDeploy, production, connections, liveValues, hold, version)
+  const promoteIfKnown = promoteTarget
+    ? promoteStep(cardDeploy, promoteTarget, connections, liveValues, hold, version)
     : null;
   const promote =
     promoteIfKnown && deployedState.failed ? promoteUnavailable(version) : promoteIfKnown;
@@ -316,64 +315,43 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           {" — a deployment on hold, or the deployed version's validation, cannot be read until it is."}
         </Alert>
       )}
-      <Stack spacing={2}>
-        {development && (
-          <EnvironmentCards
-            projectName={projectName}
-            development={development}
-            {...(production ? { production } : {})}
-            deploy={cardDeploy}
-            validation={validation}
-            version={version}
-            milestone={milestoneFor(version || undefined, builds.data)}
-            hold={hold}
-            componentTypes={componentTypes}
-            developmentConnections={devLines}
-            promote={promote}
-            pending={{
-              connections: dependencies.isPending || (readiness.isPending && !readiness.isError),
-              validation: validation.pending || deployedState.pending,
-              hold: Boolean(status.data?.build.version) && runs.isPending,
-            }}
-            validationUnavailable={deployedState.failed}
-            onPromote={() => {
-              setPromoteFocus(null);
-              setPromoteOpen(true);
-            }}
-            onConfigureDevelopment={setValuesTarget}
-            onConfigureProduction={(row) => {
-              setPromoteFocus(row.id);
-              setPromoteOpen(true);
-            }}
-          />
-        )}
-
-        <DeploymentsLedger
-          rows={versionLedgerRows(rows, builds.data)}
-          environments={environmentList}
-          builds={builds.data}
-          validation={cardDeploy?.validation}
-          counts={validation.counts}
-          validationAvailability={
-            deployedState.pending ? "pending" : deployedState.failed ? "failed" : undefined
-          }
-          onOpen={(row) =>
-            // A version opens its own page; an environment whose version the
-            // platform names nowhere opens its Try Out page.
-            void navigate(
-              row.version
-                ? {
-                    to: "/projects/$projectName/deployments/$environment/$version",
-                    params: { projectName, environment: row.environment, version: row.version },
-                  }
-                : {
-                    to: "/projects/$projectName/deployments/$environment/try-out",
-                    params: { projectName, environment: row.environment },
-                  },
-            )
-          }
-        />
-      </Stack>
+      <EnvironmentFlow
+        projectName={projectName}
+        environments={environmentList}
+        rows={rows}
+        deploy={cardDeploy}
+        validation={validation}
+        version={version}
+        milestone={milestoneFor(version || undefined, builds.data)}
+        hold={hold}
+        componentTypes={componentTypes}
+        connections={devLines}
+        promote={promote}
+        pending={{
+          // The status poll names `version`, and `promote` is null without
+          // one: an unsettled poll must not be read as "nothing is deployed".
+          deploy: status.isPending || status.isError,
+          connections: dependencies.isPending || (readiness.isPending && !readiness.isError),
+          validation: validation.pending || deployedState.pending,
+          hold: Boolean(status.data?.build.version) && runs.isPending,
+        }}
+        validationUnavailable={deployedState.failed}
+        onTryOut={(environment) =>
+          void navigate({
+            to: "/projects/$projectName/deployments/$environment/try-out",
+            params: { projectName, environment },
+          })
+        }
+        onPromote={() => {
+          setPromoteFocus(null);
+          setPromoteOpen(true);
+        }}
+        onConfigureConnection={setValuesTarget}
+        onConfigurePromoteTarget={(row) => {
+          setPromoteFocus(row.id);
+          setPromoteOpen(true);
+        }}
+      />
 
       {valuesTarget && (
         <ConnectionValuesDialog

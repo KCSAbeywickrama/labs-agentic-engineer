@@ -97,7 +97,7 @@ export function FlowStep({
   view,
   ringTone,
   last = false,
-  pinned = false,
+  grow = false,
   children,
 }: {
   step: number;
@@ -106,10 +106,16 @@ export function FlowStep({
    *  platform itself is moving (a rollout). */
   ringTone?: "info" | "warning";
   last?: boolean;
-  /** Push this step to the bottom of the rail. The flow's cards share a
-   *  height, so pinning each card's TRAILING step lines the promote rows up
-   *  across the whole pipeline however tall each card's lists make it. */
-  pinned?: boolean;
+  /** Absorb the card's spare height in THIS step, which stretches its rail
+   *  through the slack. The flow's cards share a height, so the step before
+   *  each card's trailing one grows and the trailing step lands on the card's
+   *  bottom — with the connector drawn the whole way down.
+   *
+   *  This is deliberately not `mt: "auto"` on the trailing step itself: that
+   *  put the slack in a MARGIN, which no rail is drawn through, so on every
+   *  card shorter than the tallest the connector visibly stopped and
+   *  restarted (measured at 476px of naked gap in `EnvironmentFlow.browser.test`). */
+  grow?: boolean;
   children?: React.ReactNode;
 }) {
   const inactive = view.state === "pending";
@@ -120,7 +126,7 @@ export function FlowStep({
       spacing={1.5}
       role="listitem"
       aria-label={spoken}
-      sx={{ alignItems: "stretch", ...(pinned && { mt: "auto" }) }}
+      sx={{ alignItems: "stretch", ...(grow && { flexGrow: 1 }) }}
     >
       <Stack sx={{ alignItems: "center", width: MARK, flexShrink: 0 }}>
         <Mark step={step} state={view.state} {...(ringTone ? { ringTone } : {})} />

@@ -40,8 +40,6 @@ import {
   deployedSentence,
   holdNotice,
   holdSentence,
-  productionLiveSentence,
-  productionSentence,
   validationStep,
   type ConnectionLine,
   type DeployHold,
@@ -65,66 +63,6 @@ const LinkButton = createLink(Button);
 /** The environment name as a real link: keyboard reachable, and openable
  *  in a new tab, which a click handler on the card alone is not. */
 const NameLink = createLink(UiLink);
-
-/** The card's frame: outlined, and edged in the environment's own colour only
- *  when it has something to say — green when serving, red when broken, blue
- *  while moving, amber while a person is holding it up. A quiet environment
- *  keeps the plain divider. */
-function EnvironmentCard({
-  row,
-  chip,
-  aside,
-  children,
-}: {
-  row: EnvironmentRow;
-  /** The header's chip; defaults to the environment's own status. `null`
-   *  draws none — the Development card's rail already says where the
-   *  version is, and a chip beside the title said it a second time. */
-  chip?: { label: string; tone: EnvironmentRow["status"]["tone"] } | null;
-  /** The header's right-hand fact — "v1 · Milestone #1". */
-  aside?: string;
-  children: React.ReactNode;
-}) {
-  const shown = chip === undefined ? { label: row.status.label, tone: row.status.tone } : chip;
-  const tone = (shown ?? row.status).tone;
-  return (
-    <Card
-      variant="outlined"
-      // Both cards fill the row's height, so the pair reads as one band
-      // whatever either of them has to say. Development is always the taller —
-      // it carries the whole flow — and letting Production stop short of it
-      // left the board looking half-drawn.
-      sx={{
-        height: "100%",
-        ...(tone !== "neutral" && {
-          borderColor: (t) => alpha(t.palette[tone === "primary" ? "primary" : tone].main, 0.35),
-        }),
-      }}
-    >
-      <CardContent sx={{ "&:last-child": { pb: 2.25 } }}>
-        <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 0.5 }}>
-          <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: "-0.01em" }}>
-            {row.label}
-          </Typography>
-          {shown && <StatusChip label={shown.label} tone={shown.tone} appearance="soft" dot />}
-          <Box sx={{ flex: 1 }} />
-          {aside ? (
-            <Typography variant="caption" color="text.secondary">
-              {aside}
-            </Typography>
-          ) : (
-            row.deployedAt && (
-              <Typography variant="caption" color="text.secondary">
-                {agoLabel(row.deployedAt)}
-              </Typography>
-            )
-          )}
-        </Stack>
-        {children}
-      </CardContent>
-    </Card>
-  );
-}
 
 /** "Try it now →" — the one primary action on the card, into the environment
  *  page where the app, the endpoints and the test users are. */
@@ -163,312 +101,9 @@ function TryItNow({
   );
 }
 
-/**
- * The two environment cards (ADR-0032): Development is the flow — deployed,
- * validated, promoted, as three numbered steps — and Production is the plain
- * summary of what runs there and what a promotion still needs.
- */
-export function EnvironmentCards({
-  projectName,
-  development,
-  production,
-  deploy,
-  validation,
-  version,
-  milestone,
-  hold,
-  componentTypes,
-  developmentConnections,
-  promote,
-  pending,
-  validationUnavailable = false,
-  onPromote,
-  onConfigureDevelopment,
-  onConfigureProduction,
-}: {
-  projectName: string;
-  development: EnvironmentRow;
-  /** The promotion TARGET's row — absent on a single-environment pipeline,
-   *  where there is no second card to draw rather than one with no name. */
-  production?: EnvironmentRow | undefined;
-  deploy?: DeployStage | undefined;
-  /** The dev deployment's validation evidence. */
-  validation: { verdict: string; repairing: boolean; counts?: ValidationCounts | undefined };
-  /** The version the card is about: the deployed one, or the build's while
-   *  nothing is deployed yet (a held version still has a name). */
-  version: string;
-  /** "Milestone #1", when the version ledger knows it. */
-  milestone?: string | undefined;
-  /** The newest run parked at the deploy gate, if it is. */
-  hold: DeployHold | null;
-  /** Component name → its type, for the "web app" / "service" captions. */
-  componentTypes: Map<string, string>;
-  /** The design's connections as they stand in development; null while the
-   *  dependencies read is out or failed — then no group and no blockers. */
-  developmentConnections: ConnectionLine[] | null;
-  /** Step 3, or null once production runs something. */
-  promote: PromoteStep | null;
-  /** Which of the reads behind the steps are still out. Each step holds a
-   *  skeleton for its own rather than painting a state it may take back a
-   *  second later — the card used to fill in one section at a time. */
-  pending: { connections: boolean; validation: boolean; hold: boolean };
-  /** The deployed version's run story could not be read: step 2 says the
-   *  verdict is unknown rather than painting one (the page shows the retry). */
-  validationUnavailable?: boolean;
-  onPromote: () => void;
-  onConfigureDevelopment: (row: ConnectionRow) => void;
-  onConfigureProduction: (row: ConnectionRow) => void;
-}) {
-  const deployed = deployStep(development, hold);
-  // While the run story is out a green step 1 may still turn into a hold, so
-  // its body waits; the header and the components (already read) stay.
-  const holdUnknown = pending.hold && !hold;
-  const validating = validationStep(deploy?.validation, validation.counts, deployed);
-  const bound = development.cards.some((c) => c.deployment);
-  const devLines = development.cards.map((c) =>
-    componentLine(c, componentTypes.get(c.componentName), hold),
-  );
-  const aside = version ? (milestone ? `${version} · ${milestone}` : version) : undefined;
-  const holdRow =
-    hold && developmentConnections
-      ? developmentConnections.find((l) => l.state === "missing" && l.configure)?.row
-      : undefined;
-
-  return (
-    <Box
-      sx={{
-        display: "grid",
-        gap: 2,
-        // stretch, not start: the two cards share a height (see EnvironmentCard).
-        alignItems: "stretch",
-        gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1.15fr) minmax(0, 1fr)" },
-      }}
-    >
-      <EnvironmentCard
-        row={development}
-        chip={null}
-        {...(aside ? { aside } : {})}
-      >
-        <Box role="list" aria-label="Deployment flow" sx={{ mt: 2 }}>
-          <FlowStep step={1} view={deployed} ringTone="info">
-            {hold && (
-              <>
-                {(() => {
-                  const notice = holdNotice(hold);
-                  return (
-                    <RunHoldNotice
-                      tone="warning"
-                      title={notice.title}
-                      body={notice.body}
-                      {...(holdRow
-                        ? {
-                            action: (
-                              <Button
-                                variant="contained"
-                                size="small"
-                                onClick={() => onConfigureDevelopment(holdRow)}
-                              >
-                                Configure
-                              </Button>
-                            ),
-                          }
-                        : {})}
-                    />
-                  );
-                })()}
-                <Typography variant="body2" color="text.secondary">
-                  {holdSentence(hold)}
-                </Typography>
-              </>
-            )}
-            {!hold && deployed.state === "done" && (
-              <Typography variant="body2" color="text.secondary">
-                {deployedSentence(development, deploy?.validation ?? "")}
-              </Typography>
-            )}
-            {!hold && deployed.state === "active" && (
-              <Typography variant="body2" color="text.secondary">
-                {development.live} of {development.total} components live — the rollout is still converging.
-              </Typography>
-            )}
-            {!hold && deployed.state === "error" && (
-              <Typography variant="body2" color="text.secondary">
-                A component's release failed — the environment page names which.
-              </Typography>
-            )}
-            {(bound || hold) && (
-              <ComponentsGroup
-                lines={devLines}
-                caption={
-                  hold
-                    ? `${development.live} of ${development.total} deployed · on hold`
-                    : `${development.live} of ${development.total} live`
-                }
-              />
-            )}
-            {pending.connections ? (
-              <Skeleton variant="rounded" height={88} data-testid="connections-skeleton" />
-            ) : (
-              developmentConnections &&
-              developmentConnections.length > 0 && (
-                <ConnectionsGroup
-                  lines={developmentConnections}
-                  caption={connectionsHeadline(developmentConnections)}
-                  onConfigure={onConfigureDevelopment}
-                />
-              )
-            )}
-            {holdUnknown ? (
-              <Skeleton variant="rounded" height={36} width={220} data-testid="try-skeleton" />
-            ) : (
-              (bound || hold) && (
-                <TryItNow
-                  projectName={projectName}
-                  environment={development.environment}
-                  disabled={Boolean(hold) || !bound}
-                />
-              )
-            )}
-          </FlowStep>
-
-          <FlowStep
-            step={2}
-            view={
-              validationUnavailable
-                ? {
-                    state: "pending",
-                    title: "Validation",
-                    note: "The run story could not be loaded, so this version's verdict is unknown.",
-                  }
-                : pending.validation
-                  ? { state: validating.state, title: "Validation" }
-                  : validating
-            }
-            last={promote === null}
-          >
-            {validationUnavailable ? null : pending.validation ? (
-              <Skeleton variant="rounded" height={52} data-testid="validation-skeleton" />
-            ) : (
-              deploy &&
-              validating.state !== "pending" && (
-                <VerdictBanner
-                projectName={projectName}
-                validation={deploy.validation}
-                verdict={validation.verdict}
-                repairing={validation.repairing}
-                  {...(validation.counts ? { counts: validation.counts } : {})}
-                />
-              )
-            )}
-          </FlowStep>
-
-          {(pending.connections || pending.validation) && promote !== null ? (
-            <FlowStep step={3} view={{ state: "pending", title: "Promote to Production" }} last>
-              <Skeleton variant="rounded" height={40} width={280} data-testid="promote-skeleton" />
-            </FlowStep>
-          ) : promote && (
-            <FlowStep step={3} view={promote} last>
-              {promote.missing.map((row) => (
-                <Stack
-                  key={row.id}
-                  direction="row"
-                  spacing={1.25}
-                  sx={(theme) => ({
-                    alignItems: "center",
-                    px: 1.5,
-                    py: 1,
-                    borderRadius: 1,
-                    border: `1px solid ${alpha(theme.palette.warning.main, 0.35)}`,
-                    bgcolor: alpha(theme.palette.warning.main, 0.06),
-                  })}
-                >
-                  <Box component={CircleAlert} size={16} aria-hidden sx={{ color: "warning.main", flexShrink: 0 }} />
-                  <Typography variant="body2" sx={{ flexGrow: 1, minWidth: 0 }}>
-                    {row.name} has no production value
-                  </Typography>
-                  <AccentPill
-                    aria-label={`Configure ${row.name} for production`}
-                    onClick={() => onConfigureProduction(row)}
-                  >
-                    Configure
-                  </AccentPill>
-                </Stack>
-              ))}
-              <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 1 }}>
-                {/* A disabled control swallows its title, so the reason lives
-                    beside it as a caption the reader always sees. */}
-                <Button
-                  variant="contained"
-                  disabled={!promote.enabled}
-                  onClick={onPromote}
-                  endIcon={<ArrowRight size={16} aria-hidden />}
-                >
-                  Promote {version} to production
-                </Button>
-                <Typography variant="caption" color="text.secondary">
-                  {promote.reason}
-                </Typography>
-              </Stack>
-            </FlowStep>
-          )}
-        </Box>
-      </EnvironmentCard>
-
-      {production && (
-      <EnvironmentCard row={production}>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          {production.cards.length > 0
-            ? productionLiveSentence(production)
-            : productionSentence(deploy, promote, hold, version)}
-        </Typography>
-        {/* An EMPTY production stays an empty state — the gate and nothing
-            else. What a promotion needs is step 3's business on the
-            Development card; listing components that are not there and
-            values that are not set drew a card full of dashes. */}
-        {production.cards.length > 0 ? (
-          <Stack spacing={1.25} sx={{ mt: 1.75 }}>
-            <ComponentsGroup
-              lines={production.cards.map((c) =>
-                componentLine(c, componentTypes.get(c.componentName), null),
-              )}
-              caption={`${production.live} of ${production.total} live`}
-            />
-          </Stack>
-        ) : (
-          <Stack
-            direction="row"
-            spacing={1.25}
-            sx={{
-              alignItems: "center",
-              mt: 1.75,
-              px: 1.5,
-              py: 1.25,
-              border: 1,
-              borderStyle: "dashed",
-              borderColor: "divider",
-              borderRadius: 1,
-              bgcolor: "action.hover",
-            }}
-          >
-            <Box component={Lock} size={14} aria-hidden sx={{ color: "text.secondary", flexShrink: 0 }} />
-            <Typography variant="body2" color="text.secondary">
-              Only a version whose validation has passed can be promoted here.
-            </Typography>
-          </Stack>
-        )}
-      </EnvironmentCard>
-      )}
-    </Box>
-  );
-}
-
 // ── One environment, as one item in the horizontal flow ─────────────────────
 //
-// NOT RENDERED BY ANY PAGE YET. `EnvironmentFlow` is its only consumer and
-// nothing imports that but its test; the LEGACY two-card `EnvironmentCards`
-// above is what the Deployments page still draws. Task 9 wires the flow into
-// the page and deletes the legacy half — until then, a change to the card a
-// reader sees goes above, not here.
+// This is the card the Deployments page draws, through `EnvironmentFlow`.
 
 /**
  * The reads the Deployments page makes once and the cards divide between
@@ -543,8 +178,9 @@ export interface EnvironmentFlowCardProps {
  * Deployment always, Validation only where the platform says this environment
  * validates, Promote only where something follows. The card carries exactly
  * ONE primary action — the furthest-along thing actually possible — and the
- * trailing step is pinned to its bottom, so the promote rows line up across
- * the pipeline however tall each card's component list makes it.
+ * trailing step sits on the card's bottom — the step above it absorbs the
+ * spare height and draws its rail through it — so the promote rows land on
+ * the pipeline's bottom edge however tall each card's component list makes it.
  */
 export function EnvironmentFlowCard({
   projectName,
@@ -593,8 +229,13 @@ export function EnvironmentFlowCard({
       ? { ...deployed, note: `Deploys when a version is promoted to ${row.label}.` }
       : deployed;
 
+  // The trailing step sits on the card's bottom whenever something follows
+  // this environment; the step BEFORE it absorbs the spare height, so the
+  // rail is drawn continuously down into it.
+  const growIndex = last ? -1 : steps.length - 2;
   const stepNodes = steps.map((step, i) => {
     const isTrailing = i === steps.length - 1;
+    const grow = i === growIndex;
     if (step.kind === "deployment") {
       return (
         <FlowStep
@@ -603,7 +244,7 @@ export function EnvironmentFlowCard({
           view={deployedView}
           ringTone="info"
           last={isTrailing}
-          pinned={isTrailing && !last}
+          grow={grow}
         >
           {hold && (
             <>
@@ -707,7 +348,7 @@ export function EnvironmentFlowCard({
               note: `${row.label} validates. The console reads a verdict only for the environment a build lands in.`,
             }}
             last={isTrailing}
-            pinned={isTrailing && !last}
+            grow={grow}
           />
         );
       }
@@ -728,7 +369,7 @@ export function EnvironmentFlowCard({
                 : validating
           }
           last={isTrailing}
-          pinned={isTrailing && !last}
+          grow={grow}
         >
           {detail.validationUnavailable ? null : pending.validation ? (
             <Skeleton variant="rounded" height={52} data-testid="validation-skeleton" />
@@ -763,7 +404,7 @@ export function EnvironmentFlowCard({
             note: `Promotion out of ${row.label} is not available in the console yet.`,
           }}
           last={isTrailing}
-          pinned={isTrailing}
+          grow={grow}
         />
       );
     }
@@ -780,7 +421,7 @@ export function EnvironmentFlowCard({
           step={step.index}
           view={{ state: "pending", title }}
           last={isTrailing}
-          pinned={isTrailing}
+          grow={grow}
         >
           <Skeleton variant="rounded" height={40} width={280} data-testid="promote-skeleton" />
         </FlowStep>
@@ -806,7 +447,7 @@ export function EnvironmentFlowCard({
                   : `Available once a version is deployed to ${row.label}.`,
           }}
           last={isTrailing}
-          pinned={isTrailing}
+          grow={grow}
         />
       );
     }
@@ -816,7 +457,7 @@ export function EnvironmentFlowCard({
         step={step.index}
         view={{ ...promote, title }}
         last={isTrailing}
-        pinned={isTrailing}
+        grow={grow}
       >
         {promote.missing.map((missing) => (
           <Stack
