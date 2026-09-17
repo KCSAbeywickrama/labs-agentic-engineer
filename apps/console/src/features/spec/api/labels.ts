@@ -71,8 +71,11 @@ export function fileLabel(path: string): string {
   // acceptance criteria. Each is named for what it covers, under a section
   // header that already says which phase it belongs to.
   const name = basename(path).replace(/\.(md|feature)$/, "");
-  // A `.feature` slug is a capability name the agent chose (`bought-items`), so it
-  // is title-cased into the sentence the rail already reads in. A requirement's
+  // A `.feature` slug is a capability name the agent chose (`bought-items`), so
+  // it is title-cased. The RAIL no longer shows these — one "Acceptance criteria"
+  // entry stands for the set, and the pane names each capability from its own
+  // `Feature:` heading — but a path still needs a label wherever one is asked
+  // for, such as the pane's "Waiting for the agent to write …". A requirement's
   // `<slug>.md` keeps its verbatim name: those are referenced by name in the PRD,
   // and re-casing one would stop the two matching.
   return path.endsWith(".feature") ? titleCase(name) : name;

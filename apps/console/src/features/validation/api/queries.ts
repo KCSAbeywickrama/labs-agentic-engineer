@@ -17,6 +17,7 @@
  */
 
 import { useQueries, useQuery } from "@tanstack/react-query";
+import { isAcceptanceFeaturePath } from "../../spec/api/mapping";
 import { fetchSpecFileContent, useSpecFiles } from "../../spec/api/queries";
 import { validationKeys } from "./keys";
 
@@ -28,7 +29,6 @@ import { validationKeys } from "./keys";
 // constant is the fallback for a run that recorded no path.
 export const CRITERIA_PATH = "specs/validation/validation-criteria.json";
 export const REPORT_PATH = "tests/acceptance/report.json";
-const ACCEPTANCE_RE = /^specs\/acceptance\/[^/]+\.feature$/;
 
 // Fetch one validation artifact's content. Reuses the spec Files reader
 // (path-agnostic; `sha` only feeds its cache key, never the request — we key our
@@ -108,7 +108,7 @@ export function useAcceptanceFeatures(projectName: string, enabled: boolean) {
   const files = useSpecFiles(projectName);
   const paths = (files.data ?? [])
     .map((f) => f.path)
-    .filter((p) => ACCEPTANCE_RE.test(p))
+    .filter(isAcceptanceFeaturePath)
     .sort();
 
   const contents = useQueries({

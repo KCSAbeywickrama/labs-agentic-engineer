@@ -63,20 +63,33 @@ so the deferral has expired.
    file path under each title does not (the lexicon forbids quoting a repo path,
    twice — the counts go there instead).
 
-6. **Nothing expands by default, and every row carries a chevron.** Which makes
+6. **The Spec rail carries ONE "Acceptance criteria" entry**, not one row per
+   capability, so both surfaces show the same set through the same renderer. It
+   is the first rail entry standing for N documents, which costs two small
+   things: `followSelection` routes an acceptance path to the entry (its own
+   contract is that follow-the-write can never land where a rail click would
+   not have gone), and the row's plan status is folded for a set — it pulses
+   while ANY capability is being written and is a ghost only when NOT ONE is
+   committed, since two written and a third planned is a real entry.
+
+   Reading N live documents needed `useYTextStrings`: the existing hook binds
+   one `Y.Text` and hooks cannot be called in a loop. Its snapshot is cached
+   because an uncached one is not a subtle bug but an immediate render loop.
+
+7. **Nothing expands by default, and every row carries a chevron.** Which makes
    the one clamped line under a non-passed row load-bearing: it is the only thing
    on the page saying why. It is the DECIDING step's `observed` —
    `deciding()` from `validation/report.go`, reused rather than re-derived, so
    the console's summary and a repair issue quote the same step.
 
-7. **`observed` outranks `command`.** The command is clamped to two lines of 11px
+8. **`observed` outranks `command`.** The command is clamped to two lines of 11px
    mono; `observed` gets body type and is never clamped. A real command runs to
    400 characters of `--fn` predicate and is often not a command at all (`n/a`,
    `(already signed in from prior scenario)`), while a blocked `observed` runs
    past 400 characters and is the only thing that lets a person settle "refuses
    correctly" against "broken". It is also why `blocked` files no repair issue.
 
-8. **Per-scenario live progress is not ported; it is retired.** The criterion
+9. **Per-scenario live progress is not ported; it is retired.** The criterion
    rows' live words (`Exploring…`, `Authoring…`, `Healing…`) were fed by
    `work_item` events from Playwright-shaped matchers ADR-0029 deleted, so
    `useValidationLive` folded nothing and `validationLiveLine` returned `""` on
@@ -100,8 +113,9 @@ so the deferral has expired.
   it bite harder than the two it was written for.
 - **The Spec pane's `.feature` files are read-only**, via `isStructuredFile`.
   That predicate is the whole fix for the editable-textarea bug.
-- **Reading the whole specification now takes a click per scenario.** An
-  *Expand all* control is the obvious answer and is deliberately not built yet.
+- **Per-capability navigation left the rail.** You can no longer jump straight to
+  a capability from the sidebar; the pane's search and its per-capability counts
+  replace it. Better at the job, but a real trade rather than a free win.
 - **The two oracles sit side by side** in the Spec rail's Validation section,
   because the branch still generates both as comparison arms. Left visible;
   hiding a generated artifact from its author is a separate call.

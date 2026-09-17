@@ -59,6 +59,18 @@ const GROUP_BY_FOLDER: Record<string, SpecGroup> = {
   acceptance: "validation",
 };
 
+/**
+ * One acceptance-criteria document, `specs/acceptance/<capability>.feature`.
+ *
+ * The single definition, because three places were carrying the same regex —
+ * the pane's read-only routing, the Validations page's oracle read, and the
+ * rail. A fourth copy is how one of them comes to disagree with the others
+ * about what an acceptance file is.
+ */
+export function isAcceptanceFeaturePath(path: string): boolean {
+  return /^specs\/acceptance\/[^/]+\.feature$/.test(path);
+}
+
 // Reference documents (#383) are transient turn inputs, never committed
 // (ADR-0017), so nothing under here should ever reach the spec view. The guard
 // stays anyway: projects created under the feature's v1 DID commit them, and

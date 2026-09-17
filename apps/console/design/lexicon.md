@@ -42,7 +42,7 @@ concept for *the agreed description of what we're building*.
 |---|---|---|
 | `REQUIREMENTS` | **Product requirements** | `specs/requirements/prd.md` |
 | `DESIGN` (not `DESIGNS` — one design, several files) | **Architecture** · **Domain model** · **Security** as rows, then the groups: **Flows**, then one per component | `specs/design/` |
-| `VALIDATION` | **Validation criteria**, then one per capability under **Acceptance criteria** — each labelled by its own capability | `specs/validation/validation-criteria.json` · `specs/acceptance/<slug>.feature` |
+| `VALIDATION` | **Validation criteria** · **Acceptance criteria** | `specs/validation/validation-criteria.json` · every `specs/acceptance/<slug>.feature` |
 
 **Security** is one rail entry, one page:
 
@@ -1124,7 +1124,22 @@ platform's rungs live in `validation_status_line.ts`, and two of them —
 issues…* — carry the same debt. `harness` is deliberately byte-identical to its
 fallback, so one phase reads the same sentence whichever source produced it.
 
-## The acceptance pane
+## The acceptance pane, and its one entry
+
+**One rail entry, not one per capability.** **Acceptance criteria** stands for
+every `specs/acceptance/<capability>.feature` at once, and the pane lists them
+all — the same set the Validations page shows. The capabilities are named inside
+it, as feature headings, never in the rail.
+
+That follows naming rule 3: the rail names what a project HAS, and a project has
+one set of acceptance criteria however many files carry it. It is also what makes
+the pane's filter worth having — a search that reaches every capability answers
+*where is this asserted*, where a search inside one file can only answer it once
+the reader has already guessed right.
+
+The cost is real: you can no longer jump to a capability from the rail. The
+pane's search and its per-capability counts replace that, and do it better, but
+the rail is shorter than it was.
 
 The Gherkin acceptance criteria, and — on the Validations page — the same tree
 with a run's answers on it. One renderer, two surfaces, exactly as the criteria
