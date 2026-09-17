@@ -40,7 +40,7 @@ Three further asks came with the rework:
 | D3 | **This project is a console redesign.** The only platform write it makes is the validation annotation (D2). Promote stays unwired, exactly as today. Rollback is drawn and disabled. | The `ProjectReleaseBinding.spec.projectRelease` pin is platform-touching work with its own unanswered questions (§10). |
 | D4 | **Per-environment history shows only what exists.** Development lists the build ledger — genuinely every version that passed through it. Every other environment shows the version running now and a line saying no earlier history is recorded. | The platform records no deployment history (§4.3). Inventing rows would be a lie the page cannot back. |
 | D5 | **The per-version page is retired.** `/deployments/$env/$version` and `DeploymentVersionPage` are deleted; a past version is a row in Past deployments. | A superseded version's story is four facts, not a page. The row carries them, plus the (disabled) Roll back. |
-| D6 | **The settings tab is wired and mostly disabled.** Add, reorder and edit-display-name are built in their real positions, disabled, with a *Not supported yet* tooltip. The validation switch works. | Feasibility is proven (§8.1); only the risk of the writes is deferred. When approved, three handlers get bodies and no layout changes. |
+| D6 | **The settings tab is wired and mostly disabled.** The validation switch works. **Drag-to-reorder works as an interaction but does not persist** (§7.1). Add and edit-display-name are built in their real positions, disabled, with a *Not supported yet* tooltip. | Feasibility is proven (§8.1); only the risk of the writes is deferred. When approved, three handlers get bodies and no layout changes. |
 | D7 | **"Connections" is renamed "dependencies"** everywhere in this surface. | One word for one concept; the design and the BFF already say dependency. |
 
 ## 3. The environment model
@@ -204,11 +204,37 @@ faded, `First · 3 steps` / `Second · 2 steps` …, the steps themselves (a dis
 step struck through), the **Run validation here** switch, and a *Production* flag read from
 `isProduction`.
 
-**Enabled:** the validation switch only.
-**Disabled with a `Not supported yet` tooltip:** drag to reorder, edit display name, add.
+**Enabled:** the validation switch, and drag-to-reorder as an interaction (§7.1).
+**Disabled with a `Not supported yet` tooltip:** edit display name, add.
 
 A banner names the pipeline the strip was read from and says the console does not make those
 writes yet.
+
+### 7.1 Drag-to-reorder, without persistence
+
+The grip is live: a card can be picked up and dropped into a new position, and the strip
+re-renders in that order — arrows, `First · 3 steps` / `Second · 2 steps` labels, and each
+card's *Promote to `<next>`* step all recompute, because they are all derived from position
+(§3.2). Dragging Production off the end genuinely moves the "no promote step" to whichever
+environment is now last. That is the whole value of building it now: the reorder logic and
+its consequences are exercised and tested before the write exists.
+
+**The result is explicitly unsaved.** The moment the order differs from the pipeline the
+console read, the strip shows a line — *Order changed — not saved yet* — with **Undo** and a
+**Save order** button that is disabled and carries the same *Not supported yet* tooltip.
+Leaving the tab or reloading restores the platform's order, and nothing warns about losing
+the change, because nothing was ever promised.
+
+Reordering is local to the settings tab. It never touches the Deployments page, which always
+renders the platform's order.
+
+**Why not a silent local reorder:** every other control on this page reflects platform state,
+so a reorder that looks identical to a saved one and then reverts on refresh reads as data
+loss. The unsaved line is what separates "this is a preview" from "this is the pipeline".
+
+**Implementation note:** reorder is a pure function over the environment list — `move(list,
+from, to)` — kept separate from the drag mechanics so the position arithmetic is unit-tested
+without simulating pointer events.
 
 ## 8. Feasibility of the disabled controls
 
@@ -217,7 +243,7 @@ writes yet.
 | Control | API | Verdict |
 |---|---|---|
 | Add environment | `CreateEnvironment(ns, body)` | Feasible. Spec is optional — `dataPlaneRef` defaults to a DataPlane named `default`. Add is really two writes: create the Environment, then weave it into `promotionPaths`. |
-| Reorder | `UpdateDeploymentPipeline(ns, name, body)` | Feasible. Rewrites `promotionPaths` beneath projects already bound and running. |
+| Reorder (**Save order**) | `UpdateDeploymentPipeline(ns, name, body)` | Feasible. Rewrites `promotionPaths` beneath projects already bound and running. The drag itself ships; only the save is deferred. |
 | Edit display name | `UpdateEnvironment(ns, name, body)` | Feasible **for the annotation only**. |
 | Run validation here | `UpdateEnvironment(ns, name, body)` | Feasible, and enabled. |
 
@@ -266,8 +292,9 @@ label promises.
   move. What the follow-up must answer before it ships: what a half-repinned project looks
   like mid-flight; what happens to per-environment dependency values on a rollback; whether
   rolling back an environment that a later one already promoted off is legal.
-- **Add / reorder / rename are disabled.** Feasible (§8.1); the risk of writing shared
-  platform objects is what is deferred.
+- **Add and rename are disabled; reorder drags but does not save.** All feasible (§8.1); the
+  risk of writing shared platform objects is what is deferred. Saving a reorder is the single
+  handler that turns §7.1 from a preview into a feature.
 - **Fan-out pipelines render linearly** (§3.3).
 - **History starts empty** for every environment but development, and stays empty until
   promote records something.
@@ -287,7 +314,11 @@ Per `docs/design/testing.md` and the repo's TDD practice.
 - **Page tests:** N-environment rendering at 1, 2 and 4 environments; card click reaching the
   environment page and inner buttons not triggering it; Past deployments showing real rows on
   development and the no-history line elsewhere; every disabled control carrying its tooltip.
-- **Settings:** the switch writing, and add/reorder/rename remaining inert.
+- **Settings:** the switch writing; add and rename remaining inert; and the reorder —
+  `move(list, from, to)` as a pure function, then the strip's derived consequences after a
+  drop (arrow order, position labels, each card's promote target, the "no promote step"
+  moving with the last position), the unsaved line appearing only when the order differs,
+  Undo restoring the platform order, and Save staying disabled.
 - **E2E (Playwright):** against the local cluster's real pipeline, which is
   development + production — so the N > 2 cases are covered by unit and page tests until a
   multi-environment pipeline exists locally.
