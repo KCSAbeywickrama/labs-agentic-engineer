@@ -66,7 +66,7 @@ import {
   useAuthz,
   useScopes,
 } from "./authz/gates";
-import { SCREEN_ROUTES, reachableScreens } from "./authz/screens";
+import { SCREEN_ROUTES, reachableScreens, hasScopedReach } from "./authz/screens";
 import { setForbiddenNavigator } from "./authz/client";
 import { signIn } from "./authz/session";
 import { AppShell } from "./shell/AppShell";
@@ -157,9 +157,16 @@ function SignedIn(): ReactElement {
 
   // NoAccess REPLACES the shell. It is returned here, above the <Routes> that
   // carry AppShell, so there is no rail to wrap it.
-  if (reachable.length === 0) return <NoAccess appName={APP_NAME} />;
+  //
+  // The question is `hasScopedReach`, not `reachable.length === 0`: a
+  // `loads: null` form is reachable by any signed-in caller and a `public`
+  // screen by everyone, so an app holding either would never show NoAccess to
+  // a caller with no scopes — it would drop them on a form with an empty rail
+  // instead. See the note on `hasScopedReach`.
+  if (!hasScopedReach(scopes, signedIn)) return <NoAccess appName={APP_NAME} />;
 
-  const landing = reachable[0].path;
+  // Safe: hasScopedReach just proved at least one scope-gated screen is here.
+  const landing = (reachable.find((s) => !s.public && s.loads !== null) ?? reachable[0]).path;
 
   return (
     <Routes>
