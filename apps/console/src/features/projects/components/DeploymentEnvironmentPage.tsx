@@ -53,6 +53,7 @@ import {
   milestoneUrl,
   validationCell,
 } from "../lib/deploymentLedger";
+import { historyFor } from "../lib/environmentHistory";
 import { findEnvironment } from "../lib/environments";
 import { groupDeploymentCards } from "../lib/deploymentRows";
 import { connectionRows, type ConnectionRow } from "../lib/promotion";
@@ -61,6 +62,7 @@ import { ConnectionValuesDialog } from "./ConnectionValuesDialog";
 import { DependenciesTable } from "./DependenciesTable";
 import { EnvironmentDeploymentSummary } from "./EnvironmentDeploymentSummary";
 import { PageSection } from "./PageSection";
+import { PastDeployments } from "./PastDeployments";
 import { TryItOutCard, useTestUsers } from "./TryItOut";
 
 const LinkButton = createLink(Button);
@@ -353,6 +355,14 @@ export function DeploymentEnvironmentPage({
     validationAvailability,
   );
 
+  // What has run here. `undefined` builds is a read that has not answered —
+  // `historyFor` reports that as pending rather than as an empty past, so the
+  // section never says "nothing ran here" over a slow or failed ledger.
+  const history = historyFor(
+    envInfo ?? { name: segment, displayName: envLabel, isProduction: false, validation: "off", position: -1 },
+    row,
+    builds.isError ? [] : builds.data,
+  );
   const readinessOut = envInfo?.position === 0 && readiness.isPending && !readiness.isError;
   const dependencyRows = connectionTable(
     connections,
@@ -455,16 +465,21 @@ export function DeploymentEnvironmentPage({
           </>
         )}
 
-        <PageSection
-          title="Past deployments"
-          caption={`what has run on ${envLabel}`}
-          index="04"
-          flush
-        >
-          <Typography variant="body2" color="text.secondary" sx={{ px: 2.25, py: 1.5 }}>
-            No earlier deployments are recorded for this environment.
-          </Typography>
-        </PageSection>
+        <PastDeployments
+          environmentLabel={envLabel}
+          view={history}
+          {...(status.data?.repoUrl ? { repoUrl: status.data.repoUrl } : {})}
+          validation={validationView}
+          {...(builds.isError
+            ? {
+                failed:
+                  builds.error instanceof Error && builds.error.message
+                    ? builds.error.message
+                    : "the read failed",
+                onRetry: () => void builds.refetch(),
+              }
+            : {})}
+        />
       </Stack>
 
       <ComponentOpenApiDialog

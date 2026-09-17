@@ -330,6 +330,37 @@ describe("DeploymentEnvironmentPage", () => {
     expect(screen.getByRole("button", { name: "Edit stripe values" })).toBeInTheDocument();
   });
 
+  it("lists what has run on the entry environment, from the version ledger", () => {
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
+    const section = screen.getByRole("region", { name: "Past deployments" });
+    expect(within(section).getByTestId("history-version").textContent).toBe("v1");
+    expect(within(section).getByText("Running now")).toBeInTheDocument();
+    expect(within(section).getByRole("button", { name: /Roll back/ })).toBeDisabled();
+    expect(
+      within(section).queryByText("No earlier deployments are recorded for this environment."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("admits a later environment has no recorded past, rather than borrowing one", () => {
+    mockDeployments = [
+      {
+        componentName: "claims-api",
+        environment: "production",
+        status: "Ready",
+        releaseName: "claims-api-prod",
+        createdAt: "2026-08-15T09:00:00Z",
+      },
+    ];
+    render(<DeploymentEnvironmentPage projectName="expense" environment="production" />);
+    const section = screen.getByRole("region", { name: "Past deployments" });
+    expect(
+      within(section).getByText("No earlier deployments are recorded for this environment."),
+    ).toBeInTheDocument();
+    // The entry environment's v1 is not this environment's past.
+    expect(within(section).queryByText("v1")).not.toBeInTheDocument();
+    expect(within(section).getByTestId("history-version").textContent).toBe("Unknown");
+  });
+
   it("gives each component its own way in", () => {
     render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
 
@@ -365,10 +396,11 @@ describe("DeploymentEnvironmentPage", () => {
     // borrows neither the entry environment's milestone nor its commit.
     expect(screen.getByRole("heading", { name: "Production Environment" })).toBeInTheDocument();
     expect(screen.getByText(/expense · running since /)).toBeInTheDocument();
-    expect(screen.getByText("Version unknown")).toBeInTheDocument();
-    expect(screen.queryByText("Milestone")).not.toBeInTheDocument();
-    expect(screen.queryByText("Commit")).not.toBeInTheDocument();
-    expect(screen.queryByText("Validation")).not.toBeInTheDocument();
+    const deployment = within(screen.getByRole("region", { name: "Deployment" }));
+    expect(deployment.getByText("Version unknown")).toBeInTheDocument();
+    expect(deployment.queryByText("Milestone")).not.toBeInTheDocument();
+    expect(deployment.queryByText("Commit")).not.toBeInTheDocument();
+    expect(deployment.queryByText("Validation")).not.toBeInTheDocument();
     expect(screen.getAllByText(/1 of 1 components live/).length).toBeGreaterThan(0);
     // Only the bound component is listed for production.
     expect(screen.queryByText("approvals-web")).not.toBeInTheDocument();
@@ -577,7 +609,11 @@ describe("DeploymentEnvironmentPage — the deployed version's own verdict (#776
 
     // A skeleton in the verdict cell, not a word: the read that would settle
     // it is still out.
-    expect(screen.getByTestId("validation-cell-skeleton")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("region", { name: "Deployment" })).getByTestId(
+        "validation-cell-skeleton",
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Not run")).not.toBeInTheDocument();
   });
 
@@ -593,7 +629,9 @@ describe("DeploymentEnvironmentPage — the deployed version's own verdict (#776
     expect(screen.queryByText("Not run")).not.toBeInTheDocument();
     // Section 1's verdict cell carries the word — there is no second copy of
     // it beside the title.
-    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("region", { name: "Deployment" })).getByText("Unavailable"),
+    ).toBeInTheDocument();
   });
 });
 
