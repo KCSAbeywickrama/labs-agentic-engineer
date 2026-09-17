@@ -141,7 +141,6 @@ export const projectStatuses: Record<
     hasDesign: false,
     hasTasks: false,
     specStatus: "pending",
-    designStatus: "pending",
     spec: { ...noSpec, agent: "working" },
     build: idleBuild,
     deploy: noDeploy,
@@ -155,7 +154,6 @@ export const projectStatuses: Record<
     hasDesign: true,
     hasTasks: false,
     specStatus: "draft",
-    designStatus: "in_progress",
     spec: { exists: true, version: "", dirty: false, design: true, agent: "" },
     build: idleBuild,
     deploy: noDeploy,
@@ -172,7 +170,6 @@ export const projectStatuses: Record<
     hasDesign: false,
     hasTasks: false,
     specStatus: "failed",
-    designStatus: "",
     spec: { ...noSpec, agent: "failed" },
     build: idleBuild,
     deploy: noDeploy,
@@ -186,7 +183,6 @@ export const projectStatuses: Record<
     hasDesign: false,
     hasTasks: false,
     specStatus: "failed",
-    designStatus: "failed",
     spec: { exists: true, version: "", dirty: false, design: false, agent: "" },
     build: idleBuild,
     deploy: noDeploy,
@@ -201,7 +197,6 @@ export const projectStatuses: Record<
     hasDesign: true,
     hasTasks: false,
     specStatus: "approved",
-    designStatus: "approved",
     spec: { exists: true, version: "v1", dirty: false, design: true, agent: "" },
     build: {
       version: "v1",
@@ -218,7 +213,6 @@ export const projectStatuses: Record<
     hasDesign: true,
     hasTasks: false,
     specStatus: "approved",
-    designStatus: "approved",
     spec: { exists: true, version: "v1", dirty: false, design: true, agent: "" },
     build: {
       version: "v1",
@@ -240,7 +234,6 @@ export const projectStatuses: Record<
     hasDesign: true,
     hasTasks: false,
     specStatus: "approved",
-    designStatus: "approved",
     spec: { exists: true, version: "v1", dirty: true, design: true, agent: "" },
     build: {
       version: "v1",
@@ -264,7 +257,6 @@ export const projectStatuses: Record<
     hasDesign: true,
     hasTasks: false,
     specStatus: "approved",
-    designStatus: "approved",
     spec: { exists: true, version: "v1", dirty: false, design: true, agent: "" },
     build: {
       version: "v1",
@@ -287,7 +279,6 @@ export const projectStatuses: Record<
     hasDesign: false,
     hasTasks: false,
     specStatus: "pending",
-    designStatus: "pending",
     spec: noSpec,
     build: idleBuild,
     deploy: noDeploy,
@@ -344,9 +335,9 @@ const deploymentsByScenario: Partial<
   deploying: {
     storefront: [
       {
-        name: "demo-shop-storefront-development",
+        name: "demo-shop-storefront-default",
         componentName: "storefront",
-        environment: "development",
+        environment: "default",
         status: "Progressing",
         releaseName: "demo-shop-storefront-a1b2c3",
         createdAt: "2026-07-12T05:04:00Z",
@@ -354,9 +345,9 @@ const deploymentsByScenario: Partial<
     ],
     "catalog-api": [
       {
-        name: "demo-shop-catalog-api-development",
+        name: "demo-shop-catalog-api-default",
         componentName: "catalog-api",
-        environment: "development",
+        environment: "default",
         status: "Ready",
         releaseName: "demo-shop-catalog-api-d4e5f6",
         endpointUrl: "https://catalog-api.dev.acme-aep.io",
@@ -365,9 +356,9 @@ const deploymentsByScenario: Partial<
     ],
     "orders-api": [
       {
-        name: "demo-shop-orders-api-development",
+        name: "demo-shop-orders-api-default",
         componentName: "orders-api",
-        environment: "development",
+        environment: "default",
         createdAt: "2026-07-12T05:05:30Z",
       },
     ],
@@ -375,9 +366,9 @@ const deploymentsByScenario: Partial<
   deployed: {
     storefront: [
       {
-        name: "demo-shop-storefront-development",
+        name: "demo-shop-storefront-default",
         componentName: "storefront",
-        environment: "development",
+        environment: "default",
         status: "Ready",
         releaseName: "demo-shop-storefront-a1b2c3",
         endpointUrl: "https://storefront.dev.acme-aep.io",
@@ -386,9 +377,9 @@ const deploymentsByScenario: Partial<
     ],
     "catalog-api": [
       {
-        name: "demo-shop-catalog-api-development",
+        name: "demo-shop-catalog-api-default",
         componentName: "catalog-api",
-        environment: "development",
+        environment: "default",
         status: "Ready",
         releaseName: "demo-shop-catalog-api-d4e5f6",
         endpointUrl: "https://catalog-api.dev.acme-aep.io",
@@ -399,9 +390,9 @@ const deploymentsByScenario: Partial<
     // all-settled while still showing the Undeployed chip.
     "orders-api": [
       {
-        name: "demo-shop-orders-api-development",
+        name: "demo-shop-orders-api-default",
         componentName: "orders-api",
-        environment: "development",
+        environment: "default",
         status: "Undeployed",
         createdAt: "2026-07-12T05:01:00Z",
       },
@@ -410,9 +401,9 @@ const deploymentsByScenario: Partial<
   "deploy-failed": {
     storefront: [
       {
-        name: "demo-shop-storefront-development",
+        name: "demo-shop-storefront-default",
         componentName: "storefront",
-        environment: "development",
+        environment: "default",
         status: "ReleaseFailed",
         releaseName: "demo-shop-storefront-a1b2c3",
         createdAt: "2026-07-12T05:04:00Z",
@@ -420,9 +411,9 @@ const deploymentsByScenario: Partial<
     ],
     "catalog-api": [
       {
-        name: "demo-shop-catalog-api-development",
+        name: "demo-shop-catalog-api-default",
         componentName: "catalog-api",
-        environment: "development",
+        environment: "default",
         status: "Ready",
         releaseName: "demo-shop-catalog-api-d4e5f6",
         endpointUrl: "https://catalog-api.dev.acme-aep.io",
@@ -433,9 +424,9 @@ const deploymentsByScenario: Partial<
     // mid-rollout picture (error + success + transitional).
     "orders-api": [
       {
-        name: "demo-shop-orders-api-development",
+        name: "demo-shop-orders-api-default",
         componentName: "orders-api",
-        environment: "development",
+        environment: "default",
         status: "Progressing",
         releaseName: "demo-shop-orders-api-g7h8i9",
         createdAt: "2026-07-12T05:01:00Z",
@@ -1404,34 +1395,91 @@ sequenceDiagram
 `;
 
 // The security design (#665): ONE document, and the Security rail entry reads
-// it alone. The roles it declares are the ones `fixtures/roles.ts` reconciles
-// against — `Compliance Admin` exists on the directory, `Viewer` does not yet
-// ("New at Build") — so the panel's live half has something to disagree with.
+// it alone. v2 — a permission catalog the roles grant from.
+//
+// Shaped on the canonical Expense Tracker fixture
+// (`packages/agent-stream/test/fixtures/security/expense-tracker.json`) and
+// renamed onto this project's own components, so the mock exercises the same
+// matrix the design pictures: two resources on two components, an own/any
+// split, a `read-all` widener, and one action (`catalog:export`) no role grants
+// — the matrix's "granted by nobody" row.
+//
+// Every state the Security page can reach is reachable from here, because none
+// of them is reachable on demand against a real identity provider:
+//
+//  - the three group badges, against `fixtures/roles.ts`: `Compliance` is
+//    absent from the live catalog ("New at Build"), `Administrators` is there
+//    but not the platform's ("Not ours"), `Finance` is the platform's and holds
+//    roles in two projects ("Reused");
+//  - `Shopper` is SELF-SERVICE — a user-kind column that is still a column, with
+//    no group and no promised login;
+//  - `Viewer` names no test user, so the panel promises `test-viewer` and the
+//    live half agrees;
+//  - `jsmith` holds TWO roles, which is what v2 changed;
+//  - `ledger-sync` is SERVICE-kind — no login, no group, its own list.
 const securityJson = `{
-  "version": 1,
-  "coldStartRole": "Compliance Admin",
-  "publicComponents": ["storefront"],
-  "roles": [
+  "version": 3,
+  "permissions": [
     {
-      "name": "Compliance Admin",
-      "description": "Approves and audits submitted claims.",
-      "stories": [1, 2],
-      "grantedBy": "Platform IdP",
-      "permissions": [
-        { "component": "orders-api", "actions": ["approve", "refund"] },
-        { "component": "storefront", "screens": ["Orders", "Audit log"] }
+      "resource": "orders",
+      "component": "orders-api",
+      "description": "Customer orders and the money moved against them",
+      "actions": [
+        { "handle": "read", "description": "See own orders" },
+        { "handle": "read-all", "description": "See every order" },
+        { "handle": "place", "description": "Place an order" },
+        { "handle": "approve", "description": "Approve a held order" },
+        { "handle": "refund", "description": "Refund a paid order" }
       ]
     },
     {
-      "name": "Viewer",
-      "description": "Reads the catalog and their own order history.",
-      "stories": [3],
-      "grantedBy": "Platform IdP",
-      "permissions": [{ "component": "catalog-api", "actions": ["read"] }]
+      "resource": "catalog",
+      "component": "catalog-api",
+      "description": "The product catalogue",
+      "actions": [
+        { "handle": "read", "description": "Browse the product catalogue" },
+        { "handle": "export", "description": "Download the catalogue as CSV" }
+      ]
     }
   ],
-  "testUsers": [{ "username": "test-compliance-admin", "role": "Compliance Admin" }],
-  "thunder": { "name": "demo-shop", "type": "browser" }
+  "groups": [
+    { "name": "Compliance", "description": "People who audit and approve orders" }
+  ],
+  "roles": [
+    {
+      "name": "Shopper",
+      "description": "Browses the catalogue and follows their own orders.",
+      "stories": [1, 2],
+      "grants": ["catalog:read", "orders:read", "orders:place"],
+      "enrolment": "self-service"
+    },
+    {
+      "name": "Compliance Admin",
+      "description": "Approves held orders, refunds paid ones and audits the rest.",
+      "stories": [3, 7],
+      "grants": ["orders:read", "orders:read-all", "orders:approve", "orders:refund"],
+      "assignTo": ["Compliance", "Administrators"],
+      "assignableBy": ["Compliance Admin"]
+    },
+    {
+      "name": "Viewer",
+      "description": "Reads the catalogue and every order, and changes nothing.",
+      "stories": [4],
+      "grants": ["catalog:read", "orders:read", "orders:read-all"],
+      "assignTo": ["Finance"]
+    },
+    {
+      "name": "ledger-sync",
+      "description": "Reconciles paid orders against the ledger nightly, with nobody signed in.",
+      "stories": [9],
+      "kind": "service",
+      "grants": ["orders:read-all"]
+    }
+  ],
+  "testUsers": [
+    { "username": "test-compliance-admin", "roles": ["Compliance Admin"] },
+    { "username": "jsmith", "roles": ["Compliance Admin", "Shopper"] }
+  ]
 }
 `;
 

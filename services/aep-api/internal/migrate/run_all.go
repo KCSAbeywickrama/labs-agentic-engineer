@@ -82,6 +82,18 @@ func BaseModels() []any {
 		&identity.IdPRole{},
 		&identity.TestUser{},
 		&identity.TestUserRef{},
+		// The project-OWNED half of the same record: the OAuth resource server
+		// one project's build created, and that project's own roles with the
+		// groups they were assigned to. Plain tables with composite primary keys
+		// and one extra unique index, all of it expressible as struct tags, so
+		// these need no Step either.
+		//
+		// There is deliberately NO data migration behind them. Nothing wrote a
+		// predecessor, and the rows are a cache of directory objects a rebuild
+		// recreates: an existing deployment gets two empty tables and the next
+		// build fills them.
+		&identity.IdPResourceServer{},
+		&identity.IdPRoleBinding{},
 	}
 }
 
@@ -202,6 +214,13 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// append-only. The backfill MUST precede the index creation — see
 		// milestone_run_kind.go.
 		ctxStep("milestone_run_kind", RunMilestoneRunKind),
+		// The identity tables move from one cluster-wide directory to one per
+		// (org, environment): new key columns, composite primary keys, and the
+		// platform-IdP era's rows discarded because they name directory objects
+		// on an instance builds no longer provision to. Ordered LAST because the
+		// list is append-only; it depends only on the AutoMigrate above it, which
+		// is where those three tables come from (BaseModels).
+		ctxStep("phase15_identity_per_environment", RunPhase15IdentityPerEnvironment),
 	}
 }
 

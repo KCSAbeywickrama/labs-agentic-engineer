@@ -20,12 +20,26 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ThunderApplicationSpec — desired OAuth application on the platform Thunder.
+// ThunderApplicationSpec — desired OAuth application on the Thunder that serves
+// the (organization, environment) this CR is rendered into.
 type ThunderApplicationSpec struct {
 	// DisplayName shown in the Thunder console. Defaults to the CR name.
 	DisplayName string `json:"displayName,omitempty"`
-	// Scopes is the space-separated OIDC scope set (e.g. "openid profile email group ou").
+	// Scopes is the space-separated scope set this client is expected to request
+	// — the OIDC scopes plus the project's API permission handles. The operator
+	// splits it and writes it to the application's
+	// inboundAuthConfig[oauth2].config.scopes (a JSON array on the wire).
+	//
+	// It is a truthful RECORD, not a gate: ThunderID 1.0.0 stores the list and
+	// never enforces it (spike P1 §6). What narrows a token is group → role →
+	// permissions, intersected with the resource server the request names.
 	Scopes string `json:"scopes,omitempty"`
+	// ValidityPeriod is the ACCESS token lifetime in seconds. Empty/zero leaves
+	// the operator's 24h default, which is what every app wants; a short value
+	// exists so a fixture app can exercise the silent renew in minutes instead
+	// of a day (spike P6 used 300).
+	// +kubebuilder:validation:Minimum=0
+	ValidityPeriod int `json:"validityPeriod,omitempty"`
 	// RedirectURIs is a comma-separated list of allowed OAuth redirect URIs.
 	// Platform-managed: aep-api patches it via binding environmentConfigs once
 	// the consuming SPA's public URL resolves. May be empty at creation.
@@ -42,8 +56,10 @@ type ThunderApplicationSpec struct {
 	// SecretRef points to the Kubernetes Secret key holding the pre-generated
 	// OAuth client secret. Required when clientType=confidential.
 	SecretRef *SecretKeyRef `json:"secretRef,omitempty"`
-	// NOTE (v1 scope): no instanceRef — the operator always targets the single
-	// platform Thunder. A future BYO field slots in here additively.
+	// NOTE: no instanceRef. The target Thunder is not a property of the app —
+	// it is a property of the (org, environment) the app is rendered into, and
+	// the operator resolves it from that environment's binding record. A future
+	// BYO-instance field slots in here additively.
 }
 
 // SecretKeyRef selects a key from a Kubernetes Secret in the same namespace
@@ -65,6 +81,18 @@ type ThunderApplicationStatus struct {
 	Ready bool `json:"ready"`
 	// ClientID is the OAuth client_id assigned by Thunder.
 	ClientID string `json:"clientId,omitempty"`
+	// Issuer is the OIDC issuer of the Thunder instance this application was
+	// registered on — the environment's own Thunder, resolved from the (org,
+	// environment) binding record. Published so a consumer reads WHERE the
+	// application lives instead of assuming one cluster-wide IdP.
+	Issuer string `json:"issuer,omitempty"`
+	// JWKSURL is that issuer's JWKS endpoint (issuer + /oauth2/jwks).
+	JWKSURL string `json:"jwksUrl,omitempty"`
+	// AdminURL is the in-cluster admin API base of the same instance. It is
+	// the operator's own record of where the application was created, so a
+	// later delete goes to that instance and not to whatever the binding
+	// happens to name by then.
+	AdminURL string `json:"adminUrl,omitempty"`
 	// Message carries a human-readable status/error detail.
 	Message string `json:"message,omitempty"`
 	// ObservedGeneration is the most recent generation observed by the controller.

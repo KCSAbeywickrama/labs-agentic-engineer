@@ -3,7 +3,7 @@
 > **L2 · a domain.** Part of the [aep-api architecture](../../README.md).
 
 Turn a prompt into a versioned requirements+design Spec stored as committed truth in git, let humans and
-agents co-edit it live, cut and read the `v<N>` Spec version, and steer authoring with the org's Skill
+agents co-edit it live, cut and read the named Spec version, and steer authoring with the org's Skill
 library. **Single write-authority over the git spec-content store and its version tags.**
 
 ```mermaid
@@ -14,7 +14,7 @@ flowchart LR
     SL["slices — genaiturns · files · tags · skills · collab"]
     CORE["artifacts store/versioning + turn engine + files + design + skills services"]
     SL --> CORE
-    CORE --> GIT[("git: prd.md · specs/design/** · v<N> tags · org-skills repo")]
+    CORE --> GIT[("git: prd.md · specs/design/** · version tags · org-skills repo")]
     CORE --> TURNS[("agent_turns")]
   end
   CORE -->|Workspace · GitOps engine| SC[[sourcecontrol]]
@@ -50,7 +50,7 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
 | `CredentialsRefreshService`-adjacent turn/tag reads | offers | delivery/build (SpecTagger, validation criteria) |
 
 ## Owns
-- git spec content (`prd.md`, `specs/design/**`), the annotated `v<N>` tag (the version store),
+- git spec content (`prd.md`, `specs/design/**`), the annotated version tag (the version store),
   the org-skills repo, `AgentTurn` (turn lifecycle) + the resumable-turn SSE broker (in-memory seam).
 - **One external dependency, one definition** (ADR-0027). An external dependency lives in
   `specs/design/dependencies/<name>/` — `dependency.json` (provider, style, config keys, open
@@ -157,7 +157,9 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   `v<N>-<M>` design tag, is not one — and versions are ORDERED by `TagInfo.CreatedAt`, never by a
   number parsed out of a name. A supplied name is used verbatim: a collision is `ErrVersionNameTaken`
   (the build maps it to 409), never a quietly different tag. Only a name the platform itself suggested
-  is recomputed past a racing pusher.
+  is recomputed past a racing pusher. Reads at a version apply the SAME name rule
+  (`ValidateVersionName`) rather than any shape test: a name that could never have been created
+  cannot be asked for either, and nothing walks out of `tags/` onto a branch.
 - **A name labels a snapshot; it does not make one.** `SaveSpec` still compares the whole `specs/` tree
   with the newest version's and reuses that version when they match — the requested name is ignored on
   that path, because cutting a second tag over an identical tree would spend a planning turn to change
@@ -208,6 +210,33 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
     disabled path does not reject every build. Membership is against the live catalog map, never
     a hardcoded type name (ADR-0007). Wiring derivation still treats an unknown type as "not
     derivable yet"; the membership pass is a separate gate before persist.
+- **A component `openapi.yaml` is judged against its two siblings, at save AND at build**
+  (`openapi_security_gate.go`). A component behind end-user sign-in declares the `oauth2` scheme and
+  the document default `security: [{oauth2: []}]`; each operation's `security` is absent, `[]`
+  (public), or ONE requirement object naming `oauth2` with at most one scope; every operation scope
+  and every `flows.*.scopes` key is a handle `specs/design/security.json` declares AND whose resource
+  THIS component owns; the five OIDC scopes (`openid profile email group ou`) are refused anywhere,
+  because one emitted as an API scope admits every signed-in account while looking guarded; an
+  `X-User-*` header parameter is `required: false` (the generated server binds parameters before the
+  auth middleware, so `required: true` answers 400 where the design promises 401) and a public
+  operation declares none at all. Code `INVALID_OPENAPI`, wording from the ONE vendored table
+  (`platform/securityspec/openapi-security-messages.json`) the agent's write gate renders from, so
+  the model never meets one rule in two wordings.
+  - **Protected is read off committed truth, never a type name**: `exposesAPI.auth =
+    end-user-required`, which design-save already derived from the CRT role marker (ADR-0007). No
+    cluster round-trip, and a new sign-in flavour needs no app-factory release. The agent's bundle
+    still keys on the literal `thunder-app` resourceType, so a renamed or aliased sign-in CRT is
+    protected here and unprotected there — recorded in the file header.
+  - **The gate and the gateway read the block ONCE** (`openapi_operations.go`). `OpenAPIOperations`
+    turns a protected spec into `(method, path, public | signedIn | scope)` for the deployment
+    projection (`projects.OperationsFromSpec`), and the gate's per-operation rules ARE that
+    function's structural half plus the two catalog rules. Two readings of `security` that can
+    disagree would be a silent authorization bug: the gate would pass a document the projection
+    then renders as something else, visible only as a 401 nobody can explain. Nothing else in
+    aep-api parses an OpenAPI `security` block.
+  - **A missing sibling narrows the check, it never refuses.** No `design.json` → no security verdict
+    (the premise is unknowable); no `security.json` → the structural rules still run and only catalog
+    membership and ownership wait. The build gate is the backstop that sees every file at the tag.
 - The `/collab/validate` oracle recovers the acting org from VERIFIED claims and refuses any room whose
   `spec-<org>-` prefix mismatches — never a hint of whether the room exists. Platform-wide rules (tenant
   gate, secrets fence) → [../../README.md](../../README.md).

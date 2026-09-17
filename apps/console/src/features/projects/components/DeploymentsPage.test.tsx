@@ -136,7 +136,6 @@ function status(): ProjectStatus {
     hasDesign: true,
     hasTasks: true,
     specStatus: "approved",
-    designStatus: "approved",
     spec: { exists: true, version: "v1", dirty: false, design: true, agent: "" },
     build: { version: "v1", status: "succeeded" },
     deploy: mockDeploy,
@@ -812,8 +811,7 @@ describe("DeploymentsPage — Test users", () => {
     mockTestUsers = [
       {
         username: "test-viewer",
-        roleName: "Viewer",
-        coldStart: true,
+        roles: ["Viewer"],
         exists: true,
         owned: true,
         supplied: false,
@@ -863,8 +861,7 @@ describe("DeploymentsPage — Test users", () => {
     mockTestUsers = [
       {
         username: "test-viewer",
-        roleName: "Viewer",
-        coldStart: true,
+        roles: ["Viewer"],
         exists: false,
         owned: false,
         supplied: false,
@@ -894,8 +891,7 @@ describe("DeploymentsPage — Test users", () => {
     mockTestUsers = [
       {
         username: "test-viewer",
-        roleName: "Viewer",
-        coldStart: true,
+        roles: ["Viewer"],
         exists: true,
         owned: true,
         supplied: false,
@@ -950,8 +946,7 @@ describe("DeploymentsPage — Test users", () => {
     mockTestUsers = [
       {
         username: "test-viewer",
-        roleName: "Viewer",
-        coldStart: true,
+        roles: ["Viewer"],
         exists: true,
         owned: true,
         supplied: false,

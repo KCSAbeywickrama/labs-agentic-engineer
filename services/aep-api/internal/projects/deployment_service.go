@@ -58,10 +58,10 @@ type DeploymentService struct {
 	// files computes the literal files a component needs mounted
 	// (env-config.js). Optional, same unmanaged-vs-empty rule.
 	files RuntimeFileProvider
-	// gatewayHost is host:port of the API gateway runtime, published to a
-	// consumer of a protected sibling as `<DEP>_GATEWAY_URL`. Empty leaves every
-	// consumer on the direct-Service lane (see gateway_address.go).
-	gatewayHost string
+	// gatewayHostOverride pins host:port of the API gateway runtime for every
+	// environment, overriding the per-(org, environment) derivation. Empty — the
+	// normal case — derives it (see gateway_address.go).
+	gatewayHostOverride string
 	// catalog, resourceClient, and thunder are the thunder-callback wait
 	// ports. Any nil (including a nil store) skips the wait so existing
 	// OC-only DeploymentState tests stay green without new wiring.
@@ -72,6 +72,27 @@ type DeploymentService struct {
 	// skips the gate, and the SAME gate is held by the status reader so the two
 	// cannot answer differently — see endpoint_wait.go.
 	endpoint *EndpointGate
+	// environments reads the environment gateway's assertion contract. Optional:
+	// nil composes every binding without one, which is the behaviour of an
+	// environment whose gateway publishes no verification half.
+	environments GatewayAssertionReader
+}
+
+// GatewayAssertionReader is the narrow Environment-annotation read the
+// deployment projection needs. Declared consumer-side so this feature depends on
+// the one method it uses rather than on the whole EnvironmentClient, which
+// openchoreo's satisfies structurally.
+type GatewayAssertionReader interface {
+	GetGatewayAssertion(ctx context.Context, orgID, environment string) (openchoreo.GatewayAssertion, error)
+}
+
+// envAuth is what a deploy pass resolves ONCE and every component in it shares:
+// whose tokens the gateway trusts, and how a service proves a request came
+// through that gateway. Both are properties of the (org, environment), so
+// asking per component would issue the same reads N times for the same answer.
+type envAuth struct {
+	Issuers   []string
+	Assertion openchoreo.GatewayAssertion
 }
 
 // ComponentEnvVarReader is the user's component config, consumer-side.
@@ -102,6 +123,16 @@ func (s *DeploymentService) SetIDPService(idp OrgPublisher) {
 	}
 }
 
+// SetGatewayAssertions wires the read that tells a service how to verify the
+// gateway's assertion. Optional: without it no component is handed a
+// verification half, and each keeps trusting only what the gateway's own
+// authentication already guaranteed.
+func (s *DeploymentService) SetGatewayAssertions(r GatewayAssertionReader) {
+	if s != nil {
+		s.environments = r
+	}
+}
+
 // SetConfigSources wires the two projections whose values ride the binding's
 // workload overrides.
 func (s *DeploymentService) SetConfigSources(envVars ComponentEnvVarReader, files RuntimeFileProvider) {
@@ -110,14 +141,14 @@ func (s *DeploymentService) SetConfigSources(envVars ComponentEnvVarReader, file
 	}
 }
 
-// SetAPIGatewayHost wires the address a consumer reaches a protected sibling's
-// managed API on. Empty (the zero value) publishes no gateway address at all,
-// which leaves consumers on the unauthenticated direct-Service lane — so the
-// composition root passes projects.DefaultAPIGatewayHost unless the deployment
-// overrides it.
-func (s *DeploymentService) SetAPIGatewayHost(host string) {
+// SetAPIGatewayHostOverride pins the address a consumer reaches a protected
+// sibling's managed API on, for every environment. Empty (the zero value) is the
+// normal case: the address is then derived per (org, environment), because the
+// platform runs one gateway per environment and no single literal addresses two
+// of them. The composition root passes API_GATEWAY_HOST straight through.
+func (s *DeploymentService) SetAPIGatewayHostOverride(host string) {
 	if s != nil {
-		s.gatewayHost = host
+		s.gatewayHostOverride = host
 	}
 }
 
@@ -151,14 +182,17 @@ func (s *DeploymentService) Deploy(ctx context.Context, orgID, projectID string,
 		return nil, nil
 	}
 
-	// Resolved ONCE for the pass: a project-wide fact, and asking per
-	// component would issue the same reads N times for the same answer.
-	issuers := s.resolveIssuers(ctx, orgID, design)
+	// Resolved ONCE for the pass: both are (org, environment) facts, and asking
+	// per component would issue the same reads N times for the same answer.
+	auth := envAuth{
+		Issuers:   s.resolveIssuers(ctx, orgID, design),
+		Assertion: s.resolveGatewayAssertion(ctx, orgID, design),
+	}
 
 	out := make([]delivery.ComponentDeploy, 0, len(targets))
 	var failures []error
 	for _, t := range targets {
-		outcome, derr := s.deployOne(ctx, orgID, projectID, t.Component, t.CommitSHA, design, issuers)
+		outcome, derr := s.deployOne(ctx, orgID, projectID, t.Component, t.CommitSHA, design, auth)
 		out = append(out, outcome)
 		if derr != nil {
 			failures = append(failures, fmt.Errorf("component %q: %w", t.Component, derr))
@@ -233,7 +267,7 @@ func (s *DeploymentService) Converge(ctx context.Context, orgID, projectID strin
 
 // deployOne cuts the release and writes the binding for a single component.
 func (s *DeploymentService) deployOne(ctx context.Context, orgID, projectID, componentName, commitSHA string,
-	design *spec.DesignFile, issuers []string) (delivery.ComponentDeploy, error) {
+	design *spec.DesignFile, auth envAuth) (delivery.ComponentDeploy, error) {
 	outcome := delivery.ComponentDeploy{Component: componentName, Environment: openchoreo.DevEnvironmentName}
 
 	comp := findDesignComponent(design, componentName)
@@ -267,15 +301,33 @@ func (s *DeploymentService) deployOne(ctx context.Context, orgID, projectID, com
 		ComponentName: componentName,
 		Environment:   openchoreo.DevEnvironmentName,
 		ReleaseName:   releaseName,
-		Issuers:       issuers,
-		EnvVars:       s.envVarsFor(ctx, orgID, projectID, componentName),
-		Files:         s.filesFor(ctx, orgID, projectID, componentName),
+		Issuers:       auth.Issuers,
+		// How a service proves the request reached it through the gateway. The
+		// zero value — an environment gateway with no published key — leaves the
+		// assertion off rather than handing over half a contract.
+		GatewayAssertion: auth.Assertion,
+		// The project's resource-server identifier: what a token minted for
+		// THIS project carries as `aud`, and therefore what the gateway checks
+		// to reject one minted for any other.
+		Audience: ProjectAudience(orgID, projectID),
+		EnvVars:  s.envVarsFor(ctx, orgID, projectID, componentName),
+		Files:    s.filesFor(ctx, orgID, projectID, componentName),
 		// The org IS the OC namespace components are created in, and that
 		// namespace is a segment of every managed API's gateway context path.
-		ComponentNamespace: orgID,
-		GatewayHost:        s.gatewayHost,
-		ProtectedSiblings:  ProtectedSiblingsOf(design, *comp),
+		ComponentNamespace:  orgID,
+		GatewayHostOverride: s.gatewayHostOverride,
+		ProtectedSiblings:   ProtectedSiblingsOf(design, *comp),
 	})
+	if desired.APIOperationsProblem != "" {
+		slog.WarnContext(ctx, "deployment: OpenAPI contract not projected onto gateway operations; "+
+			"the API keeps the trait's /* default (every operation needs a token, none needs a scope)",
+			"org", orgID, "project", projectID, "component", componentName,
+			"problem", desired.APIOperationsProblem)
+	}
+	for _, note := range desired.APIOperationsNotes {
+		slog.InfoContext(ctx, "deployment: operation left out of the gateway table",
+			"org", orgID, "project", projectID, "component", componentName, "note", note)
+	}
 	if err := s.components.ApplyReleaseBinding(ctx, orgID, projectID, desired.Binding); err != nil {
 		return outcome, fmt.Errorf("apply release binding: %w", permanentIfMissing(err))
 	}
@@ -454,6 +506,32 @@ func (s *DeploymentService) resolveIssuers(ctx context.Context, orgID string, de
 		return []string{profile.Issuer}
 	}
 	return nil
+}
+
+// resolveGatewayAssertion reads the environment gateway's verification half.
+//
+// Best-effort by the same contract as resolveIssuers, and for a stronger
+// reason: an environment whose gateway publishes no key is the NORMAL state of
+// every environment provisioned before assertions existed, and refusing to
+// deploy into one would make the feature a breaking change. A failure here logs
+// and composes a binding with no verification half, which is exactly what such
+// an environment gets anyway.
+func (s *DeploymentService) resolveGatewayAssertion(ctx context.Context, orgID string, design *spec.DesignFile) openchoreo.GatewayAssertion {
+	if s.environments == nil || !designHasProtectedAPI(design) {
+		return openchoreo.GatewayAssertion{}
+	}
+	assertion, err := s.environments.GetGatewayAssertion(ctx, orgID, openchoreo.DevEnvironmentName)
+	if err != nil {
+		slog.WarnContext(ctx, "deployment: gateway assertion unresolved; deploying without a verification half",
+			"orgID", orgID, "environment", openchoreo.DevEnvironmentName, "error", err)
+		return openchoreo.GatewayAssertion{}
+	}
+	if !assertion.Configured() {
+		slog.InfoContext(ctx, "deployment: environment gateway publishes no assertion key; "+
+			"protected services get no verification half",
+			"orgID", orgID, "environment", openchoreo.DevEnvironmentName)
+	}
+	return assertion
 }
 
 // designHasProtectedAPI reports whether any component would pin an issuer, so

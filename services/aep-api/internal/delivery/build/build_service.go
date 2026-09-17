@@ -16,7 +16,7 @@
 
 // Package build is the public build surface (contract: build-project /
 // list-project-builds / get-build-preflight). POST validates the whole spec,
-// cuts the single `v<N>` version tag, claims the version (supersede the
+// cuts the single version tag, claims the version (supersede the
 // previous milestone, mint this one, admit the run row that is the build
 // mutex) and returns the tag — the one button that turns an approved spec into a
 // delivery increment. Filling the milestone (gates, then the planning turn) is
@@ -175,7 +175,11 @@ type BuildSummary struct {
 	Status          string `json:"status" enum:"started,in_progress,completed,failed"`
 	// Reason is the run's terminal reason for a failed version (empty
 	// otherwise), surfaced beside the Failed badge in the console.
-	Reason      string     `json:"reason,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	// FailureCode is the failure class (delivery.RunFailure.Code) of a failed
+	// version when the platform recorded one — finer than Reason, which names
+	// the phase. Empty otherwise.
+	FailureCode string     `json:"failureCode,omitempty"`
 	StartedAt   time.Time  `json:"startedAt"`
 	CompletedAt *time.Time `json:"completedAt,omitempty"`
 	// WaitingReason says WHY an in-progress version is waiting rather than
@@ -304,7 +308,7 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 	unchanged := res.Status == spec.SpecSaveUnchanged
 
 	// The milestone plan path (§5). Its synchronous half claims the version —
-	// supersede the previous milestone, mint `v<N>`, admit the run row that IS
+	// supersede the previous milestone, mint the version, admit the run row that IS
 	// the build mutex — and its detached half plans the Tasks into it.
 	if s.plan != nil {
 		// The tag's story scope (#369) decides the milestone's identity: one

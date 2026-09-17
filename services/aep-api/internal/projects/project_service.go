@@ -54,15 +54,32 @@ type Service struct {
 	artifactSvc    spec.ArtifactService
 	execs          delivery.ExecutionRepository
 	skillsProv     skillsProvisioner
-	descriptors    descriptorWriter      // project descriptor stamp; may be nil
-	skillMirrorSvc skillMirror           // seeds .claude/skills into the new repo; may be nil
-	deprovisioner  resourceDeprovisioner // dependency provisioning teardown; may be nil
-	runReader      milestoneRunRows      // build/deploy stage reads + delete purge (status_stages.go)
-	bindingsReader bindingsReader        // deploy stage: OC release bindings (status_stages.go)
-	specTurns      specTurnRows          // spec stage: newest agent turn (status_stages.go); may be nil
-	runAbandoner   runAbandoner          // run-supervisor teardown on delete; may be nil
-	kickoff        kickoffStarter        // fires `/start` on create (#562); may be nil
-	endpointGate   *EndpointGate         // deploy stage: is a Ready binding reachable (status_stages.go); may be nil
+	descriptors    descriptorWriter       // project descriptor stamp; may be nil
+	skillMirrorSvc skillMirror            // seeds .claude/skills into the new repo; may be nil
+	deprovisioner  resourceDeprovisioner  // dependency provisioning teardown; may be nil
+	identityClean  identityTeardown       // identity-provider teardown on delete; may be nil
+	runReader      milestoneRunRows       // build/deploy stage reads + delete purge (status_stages.go)
+	bindingsReader bindingsReader         // deploy stage: OC release bindings (status_stages.go)
+	specTurns      specTurnRows           // spec stage: newest agent turn (status_stages.go); may be nil
+	runAbandoner   runAbandoner           // run-supervisor teardown on delete; may be nil
+	kickoff        kickoffStarter         // fires `/start` on create (#562); may be nil
+	cells          projectCellProvisioner // per-environment cell namespaces; may be nil
+	endpointGate   *EndpointGate          // deploy stage: is a Ready binding reachable (status_stages.go); may be nil
+}
+
+// projectCellProvisioner authors the ProjectReleaseBinding that gives a new
+// project its cell namespace in each environment its pipeline promotes
+// through. openchoreo.ProjectCellClient satisfies it.
+//
+// This is not an optional nicety. From OpenChoreo 1.2.0 creating a Project only
+// cuts a ProjectRelease — nothing is materialized in a data plane until a
+// binding pins that release to an environment. A project without one reports
+// Created=True and Ready=True and then fails every component deploy with
+// "namespace ... not found", so CreateProject treats a failure here as fatal
+// and compensates, rather than leaving that trap behind.
+type projectCellProvisioner interface {
+	PipelineEnvironments(ctx context.Context, namespace, pipelineName string) ([]string, error)
+	EnsureProjectReleaseBinding(ctx context.Context, namespace, projectName, environment string) error
 }
 
 // SetEndpointGate wires the reachability gate the deploy stage's counts are
@@ -103,6 +120,20 @@ func (s *Service) SetRunAbandoner(a runAbandoner) { s.runAbandoner = a }
 // SetResourceDeprovisioner at the composition root; nil is a no-op.
 type resourceDeprovisioner interface {
 	DeprovisionProject(ctx context.Context, orgID, projectID string) error
+}
+
+// identityTeardown is project_service's narrow consumer port for the identity
+// domain's project cleanup: on delete it removes the project's OAuth resource
+// server, its permission catalog and its `<project>/<Role>` roles from the
+// environment's identity provider, and forgets the platform's rows about them.
+//
+// Groups and accounts are NOT its business and it never touches them — they are
+// shared directory objects (ADR-0022), and a group two projects assigned a role
+// to outlives both. *identity.TeardownService satisfies this. Wired via
+// SetIdentityTeardown at the composition root; nil is a no-op, which is the
+// ordinary state of a stack with no reachable identity provider.
+type identityTeardown interface {
+	TeardownProject(ctx context.Context, orgID, projectID string) error
 }
 
 // skillsProvisioner is the narrow port for eagerly provisioning the org's
@@ -156,6 +187,13 @@ func (s *Service) SetSkillMirror(m skillMirror) { s.skillMirrorSvc = m }
 // starter is a documented no-op — the project is still perfectly usable, and
 // its spec card offers the kickoff as a CTA.
 func (s *Service) SetKickoffStarter(k kickoffStarter) { s.kickoff = k }
+
+// SetProjectCellProvisioner wires cell-namespace provisioning. Unlike the
+// setters above, a nil provisioner is NOT a benign no-op: every project created
+// while it is unset will be undeployable. CreateProject logs that at ERROR
+// rather than failing, because refusing to create projects at all would be the
+// worse failure — but a cluster in that state is misconfigured.
+func (s *Service) SetProjectCellProvisioner(c projectCellProvisioner) { s.cells = c }
 
 func NewProjectService(
 	client openchoreo.ProjectClient,
@@ -224,6 +262,27 @@ func (s *Service) CreateProject(ctx context.Context, orgName string, req *gen.Cr
 	project, err := s.client.CreateProject(ctx, orgName, req)
 	if err != nil {
 		return nil, translateHTTPError(err)
+	}
+
+	// Give the project its cell namespace in every environment its pipeline
+	// promotes through, before anything else is attached to it.
+	//
+	// FATAL, and compensating — the only other failure in this function that is
+	// (the repo-name conflict below). Both share a shape: retrying the create
+	// cannot fix them, because OpenChoreo now answers 409. Leaving the project
+	// in place instead would leave a project that looks healthy in every status
+	// it reports and cannot deploy a single component.
+	if s.cells != nil {
+		if cellErr := s.provisionProjectCells(ctx, orgName, project.Name, project.DeploymentPipeline); cellErr != nil {
+			if delErr := s.client.DeleteProject(ctx, orgName, project.Name); delErr != nil {
+				slog.ErrorContext(ctx, "failed to compensate project after cell provisioning failure",
+					"project", project.Name, "error", delErr)
+			}
+			return nil, cellErr
+		}
+	} else {
+		slog.ErrorContext(ctx, "project cell provisioner not wired — project will have no cell namespace and cannot deploy",
+			"org", orgName, "project", project.Name)
 	}
 
 	// Eagerly provision the org's shared skills repo (+ seed built-ins) so the
@@ -343,6 +402,14 @@ func (s *Service) SetResourceDeprovisioner(d resourceDeprovisioner) {
 	s.deprovisioner = d
 }
 
+// SetIdentityTeardown wires the identity-provider cleanup so a project delete
+// removes the authorization objects its builds created. A nil teardown is a
+// documented no-op: the objects then stand on the directory, as they did before
+// this step existed.
+func (s *Service) SetIdentityTeardown(t identityTeardown) {
+	s.identityClean = t
+}
+
 func (s *Service) DeleteProject(ctx context.Context, orgName, projectName string) error {
 	// Deprovision the project's OC Resource model FIRST — while its design (the
 	// dependency inventory) is still readable and before the OC Project delete,
@@ -350,6 +417,29 @@ func (s *Service) DeleteProject(ctx context.Context, orgName, projectName string
 	if s.deprovisioner != nil {
 		if err := s.deprovisioner.DeprovisionProject(ctx, orgName, projectName); err != nil {
 			slog.ErrorContext(ctx, "failed to deprovision project resources", "org", orgName, "project", projectName, "error", err)
+		}
+	}
+
+	// Then the project's half of the environment's identity provider: its
+	// resource server, that server's permission catalog and its
+	// `<project>/<Role>` roles, plus the platform's rows about them. Groups and
+	// accounts are shared and are deliberately left standing (ADR-0022).
+	//
+	// Before the OC delete for the same reason the deprovision above is: nothing
+	// downstream can reach these objects again. They are not OpenChoreo's, so
+	// the OC Project delete does not cascade to them, and no other endpoint
+	// removes them — a resource server left behind is invisible to everything
+	// this platform renders, and its `<project>/` roles would be adopted whole
+	// by a project later created under the same name.
+	//
+	// Best-effort, like the deprovision: an identity provider that cannot be
+	// reached must not strand the run supervisors, the repo row and the
+	// executions rows below. The identity domain logs each step it could not
+	// complete; this logs the joined result.
+	if s.identityClean != nil {
+		if err := s.identityClean.TeardownProject(ctx, orgName, projectName); err != nil {
+			slog.ErrorContext(ctx, "failed to remove the project's identity-provider objects — they stand on the directory",
+				"org", orgName, "project", projectName, "error", err)
 		}
 	}
 
@@ -519,4 +609,35 @@ func translateHTTPError(err error) error {
 		return ErrForbidden
 	}
 	return err
+}
+
+// provisionProjectCells creates the ProjectReleaseBinding for each environment
+// the project's deployment pipeline promotes through. Idempotent per
+// environment, so a partially-applied earlier attempt converges rather than
+// conflicting. The process write-target is that pipeline's source, resolved at
+// boot; this function does not union in extra names.
+//
+// A project with no resolvable pipeline is an error, not an empty list: the
+// caller compensates on error, and silently returning "zero environments" would
+// turn a misconfigured pipeline into the exact undeployable project this whole
+// path exists to prevent.
+func (s *Service) provisionProjectCells(ctx context.Context, orgName, projectName, pipelineName string) error {
+	if pipelineName == "" {
+		return fmt.Errorf("project %q has no deployment pipeline, cannot provision cell namespaces", projectName)
+	}
+	envs, err := s.cells.PipelineEnvironments(ctx, orgName, pipelineName)
+	if err != nil {
+		return fmt.Errorf("resolve environments for pipeline %q: %w", pipelineName, err)
+	}
+	if len(envs) == 0 {
+		return fmt.Errorf("deployment pipeline %q promotes through no environments", pipelineName)
+	}
+	for _, env := range envs {
+		if bindErr := s.cells.EnsureProjectReleaseBinding(ctx, orgName, projectName, env); bindErr != nil {
+			return fmt.Errorf("provision cell namespace for %q in %q: %w", projectName, env, bindErr)
+		}
+	}
+	slog.InfoContext(ctx, "project cell namespaces provisioned",
+		"org", orgName, "project", projectName, "environments", envs)
+	return nil
 }

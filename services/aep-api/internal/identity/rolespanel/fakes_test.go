@@ -35,15 +35,68 @@ import (
 // The one thing they do record is directory writes, because "did the directory
 // actually change?" is the other half of the rotate and delete assertions.
 
+// panelEnv is the environment fakeTargets resolves every org to — the one
+// identity provider these fakes model.
+const panelEnv = "default"
+
+// panelOrg is the org whose directory the role and account fixtures belong to.
+// It matches the org the component tests authenticate as; a fixture for any
+// other org would be a row on a directory those requests never reach, which is
+// what the fence tests below are for.
+const panelOrg = "acme"
+
+// scopeOf is the (org, environment) key, the same one the resolver hands the
+// panel.
+func scopeOf(orgID string) identity.Scope {
+	return identity.Scope{OrgID: orgID, Environment: panelEnv}
+}
+
+// fakeTargets is the identity.TargetResolver: every org resolves to the same
+// faked directory, under that org's default scope.
+type fakeTargets struct {
+	dir identity.Directory
+	// err, when set, is what Resolve answers — the environment with no identity
+	// provider bound to it. Scope keeps working, which is what lets the panel's
+	// read degrade instead of failing.
+	err error
+}
+
+func newFakeTargets(dir identity.Directory) *fakeTargets { return &fakeTargets{dir: dir} }
+
+func (f *fakeTargets) Scope(orgID string) identity.Scope { return scopeOf(orgID) }
+
+func (f *fakeTargets) Resolve(_ context.Context, orgID string) (identity.Target, error) {
+	if f.err != nil {
+		return identity.Target{}, f.err
+	}
+	return identity.Target{
+		OrgID: orgID, Environment: panelEnv,
+		Issuer:    "http://default-idp.amp.localhost:8080",
+		Directory: f.dir,
+	}, nil
+}
+
+var _ identity.TargetResolver = (*fakeTargets)(nil)
+
 // fakeStore is an in-memory identity.Store. Passwords are kept in the clear —
 // the real sealing is the ColumnCipher's job and is covered by the repository's
 // own tests; what matters here is WHICH password the panel stored.
+//
+// Every map is keyed by the SCOPE as well as the name, because the store is: a
+// fake that ignored the scope would let a panel reading the wrong environment's
+// rows pass.
 type fakeStore struct {
 	roles     map[string]identity.IdPRole
 	testUsers map[string]identity.TestUser
 	passwords map[string]string
-	// refs is keyed org/project → the rows that project references.
+	// refs is keyed scope/project → the rows that project references.
 	refs map[string][]identity.TestUserRef
+	// resourceServers and roleBindings are the PROJECT-OWNED half of the store.
+	// The panel reads neither — it serves the shared roles and test users — but
+	// the store is one interface, so the double models them rather than
+	// pretending a caller could not reach them. Both are keyed scope/project.
+	resourceServers map[string]identity.IdPResourceServer
+	roleBindings    map[string][]identity.IdPRoleBinding
 
 	// setPasswordErr makes the seal fail, which is how the half-applied rotate
 	// (directory written, store not) becomes reachable in a test.
@@ -56,46 +109,90 @@ func newFakeStore() *fakeStore {
 		testUsers: map[string]identity.TestUser{},
 		passwords: map[string]string{},
 		refs:      map[string][]identity.TestUserRef{},
+
+		resourceServers: map[string]identity.IdPResourceServer{},
+		roleBindings:    map[string][]identity.IdPRoleBinding{},
 	}
 }
 
-func refKey(orgID, projectID string) string { return orgID + "/" + projectID }
+func refKey(scope identity.Scope, projectID string) string { return scope.String() + "/" + projectID }
 
-// withRole records a role the platform created.
+// scopedKey joins the scope with a role name or username, exactly as the
+// composite primary key does.
+func scopedKey(scope identity.Scope, name string) string { return scope.String() + "|" + name }
+
+// withRole records a role the platform created on panelOrg's directory.
 func (s *fakeStore) withRole(name string) *fakeStore {
-	s.roles[strings.ToLower(name)] = identity.IdPRole{Name: name, ThunderGroupID: "grp-" + name}
+	scope := scopeOf(panelOrg)
+	s.roles[scopedKey(scope, strings.ToLower(name))] = identity.IdPRole{
+		OrgID: scope.OrgID, Environment: scope.Environment,
+		Name: name, ThunderGroupID: "grp-" + name,
+	}
 	return s
 }
 
-// withOwnedUser records an account the platform owns, with its sealed password.
+// withOwnedUser records an account the platform owns on panelOrg's directory,
+// with its sealed password.
 func (s *fakeStore) withOwnedUser(username, role, password string) *fakeStore {
-	s.testUsers[username] = identity.TestUser{
+	scope := scopeOf(panelOrg)
+	s.testUsers[scopedKey(scope, username)] = identity.TestUser{
+		OrgID: scope.OrgID, Environment: scope.Environment,
 		Username: username, ThunderUserID: "usr-" + username, RoleName: role,
 	}
-	s.passwords[username] = password
+	s.passwords[scopedKey(scope, username)] = password
 	return s
 }
 
 // withRef records that org/project's design references username. It is the ONLY
 // project-scoped fact in this domain, and therefore the whole org+project fence.
 func (s *fakeStore) withRef(orgID, projectID, username, role string) *fakeStore {
-	k := refKey(orgID, projectID)
+	scope := scopeOf(orgID)
+	k := refKey(scope, projectID)
 	s.refs[k] = append(s.refs[k], identity.TestUserRef{
-		OrgID: orgID, ProjectID: projectID, Username: username, RoleName: role,
+		OrgID: orgID, Environment: scope.Environment,
+		ProjectID: projectID, Username: username, RoleName: role,
 	})
 	return s
 }
 
-func (s *fakeStore) GetRole(_ context.Context, name string) (*identity.IdPRole, error) {
-	if r, ok := s.roles[strings.ToLower(name)]; ok {
+// withRoleBinding records that org/project's build assigned its role to a
+// group. An EMPTY group is the "recorded, assigned to nobody" marker a
+// self-service role carries, and the panel must not report it as a group.
+func (s *fakeStore) withRoleBinding(orgID, projectID, role, group, directoryRoleID string) *fakeStore {
+	scope := scopeOf(orgID)
+	k := refKey(scope, projectID)
+	s.roleBindings[k] = append(s.roleBindings[k], identity.IdPRoleBinding{
+		OrgID: orgID, Environment: scope.Environment, ProjectID: projectID,
+		Role: role, GroupName: group, DirectoryRoleID: directoryRoleID,
+	})
+	return s
+}
+
+// withResourceServer records the resource server an earlier build created for
+// a project. Without one the panel derives the identifier, which is the
+// never-built-yet case; with one, the recorded identifier wins.
+func (s *fakeStore) withResourceServer(orgID, projectID, identifier string) *fakeStore {
+	scope := scopeOf(orgID)
+	s.resourceServers[refKey(scope, projectID)] = identity.IdPResourceServer{
+		OrgID: orgID, Environment: scope.Environment, ProjectID: projectID,
+		Identifier: identifier, DirectoryID: "rs-" + projectID,
+	}
+	return s
+}
+
+func (s *fakeStore) GetRole(_ context.Context, scope identity.Scope, name string) (*identity.IdPRole, error) {
+	if r, ok := s.roles[scopedKey(scope, strings.ToLower(name))]; ok {
 		return &r, nil
 	}
 	return nil, nil
 }
 
-func (s *fakeStore) ListRoles(context.Context) ([]identity.IdPRole, error) {
+func (s *fakeStore) ListRoles(_ context.Context, scope identity.Scope) ([]identity.IdPRole, error) {
 	out := make([]identity.IdPRole, 0, len(s.roles))
 	for _, r := range s.roles {
+		if r.OrgID != scope.OrgID || r.Environment != scope.Environment {
+			continue
+		}
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -103,68 +200,65 @@ func (s *fakeStore) ListRoles(context.Context) ([]identity.IdPRole, error) {
 }
 
 func (s *fakeStore) UpsertRole(_ context.Context, role identity.IdPRole) error {
-	s.roles[strings.ToLower(role.Name)] = role
+	scope := identity.Scope{OrgID: role.OrgID, Environment: role.Environment}
+	s.roles[scopedKey(scope, strings.ToLower(role.Name))] = role
 	return nil
 }
 
-func (s *fakeStore) DeleteRole(_ context.Context, name string) error {
-	delete(s.roles, strings.ToLower(name))
-	return nil
-}
-
-func (s *fakeStore) GetTestUser(_ context.Context, username string) (*identity.TestUser, error) {
-	if u, ok := s.testUsers[username]; ok {
+func (s *fakeStore) GetTestUser(_ context.Context, scope identity.Scope, username string) (*identity.TestUser, error) {
+	if u, ok := s.testUsers[scopedKey(scope, username)]; ok {
 		return &u, nil
 	}
 	return nil, nil
 }
 
 func (s *fakeStore) UpsertTestUser(_ context.Context, user identity.TestUser, password string) error {
-	s.testUsers[user.Username] = user
-	s.passwords[user.Username] = password
+	scope := identity.Scope{OrgID: user.OrgID, Environment: user.Environment}
+	s.testUsers[scopedKey(scope, user.Username)] = user
+	s.passwords[scopedKey(scope, user.Username)] = password
 	return nil
 }
 
-func (s *fakeStore) UpdateTestUserFacts(_ context.Context, username, thunderUserID, roleName string) error {
-	u, ok := s.testUsers[username]
+func (s *fakeStore) UpdateTestUserFacts(_ context.Context, scope identity.Scope, username, thunderUserID, roleName string) error {
+	u, ok := s.testUsers[scopedKey(scope, username)]
 	if !ok {
 		return errors.New("no such account")
 	}
 	u.ThunderUserID, u.RoleName = thunderUserID, roleName
-	s.testUsers[username] = u
+	s.testUsers[scopedKey(scope, username)] = u
 	return nil
 }
 
-func (s *fakeStore) SetTestUserPassword(_ context.Context, username, password string) error {
+func (s *fakeStore) SetTestUserPassword(_ context.Context, scope identity.Scope, username, password string) error {
 	if s.setPasswordErr != nil {
 		return s.setPasswordErr
 	}
-	u, ok := s.testUsers[username]
+	u, ok := s.testUsers[scopedKey(scope, username)]
 	if !ok {
 		return errors.New("no such account")
 	}
 	now := time.Now().UTC()
 	u.RotatedAt = &now
-	s.testUsers[username] = u
-	s.passwords[username] = password
+	s.testUsers[scopedKey(scope, username)] = u
+	s.passwords[scopedKey(scope, username)] = password
 	return nil
 }
 
-func (s *fakeStore) RevealTestUserPassword(_ context.Context, username string) (string, error) {
-	p, ok := s.passwords[username]
+func (s *fakeStore) RevealTestUserPassword(_ context.Context, scope identity.Scope, username string) (string, error) {
+	p, ok := s.passwords[scopedKey(scope, username)]
 	if !ok || p == "" {
 		return "", identity.ErrNoPassword
 	}
 	return p, nil
 }
 
-func (s *fakeStore) DeleteTestUser(_ context.Context, username string) error {
-	delete(s.testUsers, username)
-	delete(s.passwords, username)
+func (s *fakeStore) DeleteTestUser(_ context.Context, scope identity.Scope, username string) error {
+	delete(s.testUsers, scopedKey(scope, username))
+	delete(s.passwords, scopedKey(scope, username))
 	for k, rows := range s.refs {
 		var kept []identity.TestUserRef
 		for _, r := range rows {
-			if r.Username != username {
+			if r.Username != username || r.OrgID != scope.OrgID || r.Environment != scope.Environment {
 				kept = append(kept, r)
 			}
 		}
@@ -173,13 +267,13 @@ func (s *fakeStore) DeleteTestUser(_ context.Context, username string) error {
 	return nil
 }
 
-func (s *fakeStore) ReplaceProjectRefs(_ context.Context, orgID, projectID string, refs []identity.TestUserRef) error {
-	s.refs[refKey(orgID, projectID)] = refs
+func (s *fakeStore) ReplaceProjectRefs(_ context.Context, scope identity.Scope, projectID string, refs []identity.TestUserRef) error {
+	s.refs[refKey(scope, projectID)] = refs
 	return nil
 }
 
-func (s *fakeStore) ListProjectRefs(_ context.Context, orgID, projectID string) ([]identity.TestUserRef, error) {
-	rows := append([]identity.TestUserRef(nil), s.refs[refKey(orgID, projectID)]...)
+func (s *fakeStore) ListProjectRefs(_ context.Context, scope identity.Scope, projectID string) ([]identity.TestUserRef, error) {
+	rows := append([]identity.TestUserRef(nil), s.refs[refKey(scope, projectID)]...)
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].RoleName != rows[j].RoleName {
 			return rows[i].RoleName < rows[j].RoleName
@@ -189,11 +283,15 @@ func (s *fakeStore) ListProjectRefs(_ context.Context, orgID, projectID string) 
 	return rows, nil
 }
 
-func (s *fakeStore) ProjectsReferencing(_ context.Context, orgID, username string) ([]identity.TestUserRef, error) {
+// ProjectsReferencing is SCOPE-fenced, mirroring the real store: it answers
+// both the names the panel lists and the count its delete warning carries,
+// which is sound only because an account exists on exactly one (org,
+// environment) directory.
+func (s *fakeStore) ProjectsReferencing(_ context.Context, scope identity.Scope, username string) ([]identity.TestUserRef, error) {
 	var out []identity.TestUserRef
 	for _, rows := range s.refs {
 		for _, r := range rows {
-			if r.OrgID == orgID && r.Username == username {
+			if r.OrgID == scope.OrgID && r.Environment == scope.Environment && r.Username == username {
 				out = append(out, r)
 			}
 		}
@@ -202,18 +300,113 @@ func (s *fakeStore) ProjectsReferencing(_ context.Context, orgID, username strin
 	return out, nil
 }
 
-// CountReferencing is org-BLIND on purpose, mirroring the real store: it is the
-// bare cross-org total that makes the delete warning true.
-func (s *fakeStore) CountReferencing(_ context.Context, username string) (int, error) {
-	n := 0
-	for _, rows := range s.refs {
-		for _, r := range rows {
-			if r.Username == username {
-				n++
+// ---- project-owned directory objects ---------------------------------------
+//
+// Converge semantics, mirroring the real store: a resource server upsert
+// replaces the project's one row, and a bindings replace makes the payload the
+// complete set for that project.
+
+func (s *fakeStore) UpsertResourceServer(_ context.Context, rs identity.IdPResourceServer) error {
+	scope := identity.Scope{OrgID: rs.OrgID, Environment: rs.Environment}
+	s.resourceServers[refKey(scope, rs.ProjectID)] = rs
+	return nil
+}
+
+func (s *fakeStore) GetResourceServer(_ context.Context, scope identity.Scope, projectID string) (*identity.IdPResourceServer, error) {
+	if rs, ok := s.resourceServers[refKey(scope, projectID)]; ok {
+		return &rs, nil
+	}
+	return nil, nil
+}
+
+func (s *fakeStore) DeleteResourceServer(_ context.Context, scope identity.Scope, projectID string) error {
+	delete(s.resourceServers, refKey(scope, projectID))
+	return nil
+}
+
+func (s *fakeStore) ReplaceRoleBindings(_ context.Context, scope identity.Scope, projectID string, bindings []identity.IdPRoleBinding) error {
+	rows := make([]identity.IdPRoleBinding, 0, len(bindings))
+	for _, b := range bindings {
+		b.OrgID, b.Environment, b.ProjectID = scope.OrgID, scope.Environment, projectID
+		rows = append(rows, b)
+	}
+	s.roleBindings[refKey(scope, projectID)] = rows
+	return nil
+}
+
+func (s *fakeStore) ListRoleBindings(_ context.Context, scope identity.Scope, projectID string) ([]identity.IdPRoleBinding, error) {
+	rows := append([]identity.IdPRoleBinding(nil), s.roleBindings[refKey(scope, projectID)]...)
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Role != rows[j].Role {
+			return rows[i].Role < rows[j].Role
+		}
+		return rows[i].GroupName < rows[j].GroupName
+	})
+	return rows, nil
+}
+
+// CountProjectsBindingGroup is SCOPE-fenced and counts DISTINCT projects, like
+// the real store. The empty group name is the "assigned to nobody" marker, not
+// a group, so it counts nothing.
+func (s *fakeStore) CountProjectsBindingGroup(_ context.Context, scope identity.Scope, groupName string) (int, error) {
+	if groupName == "" {
+		return 0, nil
+	}
+	projects := map[string]struct{}{}
+	for _, rows := range s.roleBindings {
+		for _, b := range rows {
+			if b.OrgID == scope.OrgID && b.Environment == scope.Environment && b.GroupName == groupName {
+				projects[b.ProjectID] = struct{}{}
 			}
 		}
 	}
-	return n, nil
+	return len(projects), nil
+}
+
+// CountProjectsBindingGroups is the same count for every group at once, keyed by
+// the LOWERCASED name — the key the store's GROUP BY produces.
+func (s *fakeStore) CountProjectsBindingGroups(_ context.Context, scope identity.Scope) (map[string]int, error) {
+	projects := map[string]map[string]struct{}{}
+	for _, rows := range s.roleBindings {
+		for _, b := range rows {
+			if b.OrgID != scope.OrgID || b.Environment != scope.Environment || b.GroupName == "" {
+				continue
+			}
+			key := strings.ToLower(b.GroupName)
+			if projects[key] == nil {
+				projects[key] = map[string]struct{}{}
+			}
+			projects[key][b.ProjectID] = struct{}{}
+		}
+	}
+	out := make(map[string]int, len(projects))
+	for key, ids := range projects {
+		out[key] = len(ids)
+	}
+	return out, nil
+}
+
+func (s *fakeStore) DeleteRoleBindings(_ context.Context, scope identity.Scope, projectID string) error {
+	delete(s.roleBindings, refKey(scope, projectID))
+	return nil
+}
+
+var _ identity.Store = (*fakeStore)(nil)
+
+// storedPassword / hasUser / hasRole are the read helpers the component tests
+// assert through, so no test has to spell the composite key.
+func (s *fakeStore) storedPassword(username string) string {
+	return s.passwords[scopedKey(scopeOf(panelOrg), username)]
+}
+
+func (s *fakeStore) hasUser(username string) bool {
+	_, ok := s.testUsers[scopedKey(scopeOf(panelOrg), username)]
+	return ok
+}
+
+func (s *fakeStore) hasRole(name string) bool {
+	_, ok := s.roles[scopedKey(scopeOf(panelOrg), strings.ToLower(name))]
+	return ok
 }
 
 // fakeDirectory is the identity provider. `deleted` records the user ids the
@@ -230,9 +423,14 @@ type fakeDirectory struct {
 	members      map[string][]string
 	accounts     map[string]identity.DirectoryAccount
 	passwordsSet map[string]string
-	deleted      []string
-	ops          []string
-	err          error
+	// rolePermissions is what each of the project's roles grants, keyed by the
+	// directory role id. It is the one project-owned verb the panel DOES reach
+	// for: a login's scopes are the union of its roles' grants and no table
+	// holds them.
+	rolePermissions map[string][]string
+	deleted         []string
+	ops             []string
+	err             error
 	// failRemoveMembers fails the un-enrol without failing anything else, so a
 	// test can prove the delete ABORTS rather than pressing on.
 	failRemoveMembers error
@@ -240,10 +438,11 @@ type fakeDirectory struct {
 
 func newFakeDirectory() *fakeDirectory {
 	return &fakeDirectory{
-		groups:       map[string]identity.DirectoryGroup{},
-		members:      map[string][]string{},
-		accounts:     map[string]identity.DirectoryAccount{},
-		passwordsSet: map[string]string{},
+		groups:          map[string]identity.DirectoryGroup{},
+		members:         map[string][]string{},
+		accounts:        map[string]identity.DirectoryAccount{},
+		passwordsSet:    map[string]string{},
+		rolePermissions: map[string][]string{},
 	}
 }
 
@@ -256,6 +455,15 @@ func (d *fakeDirectory) withGroup(name, description string, memberIDs ...string)
 
 func (d *fakeDirectory) withAccount(username string) *fakeDirectory {
 	d.accounts[username] = identity.DirectoryAccount{ID: "usr-" + username, Username: username}
+	return d
+}
+
+// withProjectRole puts one of the project's own roles on the directory, with
+// what it grants. Keyed by the directory role id, because that is the only
+// handle the panel has for a role: it reads the id off the platform's binding
+// row and asks the directory what that role grants.
+func (d *fakeDirectory) withProjectRole(roleID string, permissions ...string) *fakeDirectory {
+	d.rolePermissions[roleID] = permissions
 	return d
 }
 
@@ -407,6 +615,96 @@ func (d *fakeDirectory) danglingMembers() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// ---- the project-owned half of the port ------------------------------------
+//
+// The panel's surface is accounts and org groups: it reads and rotates test
+// users and lists the roles the platform recorded, and it never touches a
+// resource server, a catalog entry or a role assignment — those belong to the
+// build-time ensure. The verbs are implemented here only because the fake has
+// to satisfy the whole port, and each one REFUSES rather than pretending to
+// work, so a panel change that reached for one fails with a sentence instead of
+// quietly passing against a stub that answered nothing.
+
+var errNotThePanelsSurface = errors.New("fake directory: the panel does not use the project-owned directory verbs")
+
+func (d *fakeDirectory) EnsureResourceServer(context.Context, string, string) (identity.DirectoryID, error) {
+	return "", errNotThePanelsSurface
+}
+
+func (d *fakeDirectory) FindResourceServer(context.Context, string) (identity.DirectoryID, bool, error) {
+	return "", false, errNotThePanelsSurface
+}
+
+func (d *fakeDirectory) ListResources(context.Context, identity.DirectoryID) ([]identity.DirectoryResource, error) {
+	return nil, errNotThePanelsSurface
+}
+
+func (d *fakeDirectory) CreateResource(context.Context, identity.DirectoryID, string, string, string) (identity.DirectoryResource, error) {
+	return identity.DirectoryResource{}, errNotThePanelsSurface
+}
+
+func (d *fakeDirectory) UpdateResource(context.Context, identity.DirectoryID, identity.DirectoryID, string, string) error {
+	return errNotThePanelsSurface
+}
+
+func (d *fakeDirectory) DeleteResource(context.Context, identity.DirectoryID, identity.DirectoryID) error {
+	return errNotThePanelsSurface
+}
+
+func (d *fakeDirectory) ListActions(context.Context, identity.DirectoryID, identity.DirectoryID) ([]identity.DirectoryAction, error) {
+	return nil, errNotThePanelsSurface
+}
+
+func (d *fakeDirectory) CreateAction(context.Context, identity.DirectoryID, identity.DirectoryID, string, string, string) (identity.DirectoryAction, error) {
+	return identity.DirectoryAction{}, errNotThePanelsSurface
+}
+
+func (d *fakeDirectory) UpdateAction(context.Context, identity.DirectoryID, identity.DirectoryID, identity.DirectoryID, string, string) error {
+	return errNotThePanelsSurface
+}
+
+func (d *fakeDirectory) DeleteAction(context.Context, identity.DirectoryID, identity.DirectoryID, identity.DirectoryID) error {
+	return errNotThePanelsSurface
+}
+
+func (d *fakeDirectory) DeleteResourceServer(context.Context, identity.DirectoryID) error {
+	return errNotThePanelsSurface
+}
+
+func (d *fakeDirectory) EnsureRole(context.Context, identity.DirectoryID, string, string, identity.DirectoryID, []string) (identity.DirectoryID, error) {
+	return "", errNotThePanelsSurface
+}
+
+func (d *fakeDirectory) ListRoles(context.Context) ([]identity.RoleRef, error) {
+	return nil, errNotThePanelsSurface
+}
+
+// ListRolePermissions is implemented rather than refused: the panel reads a
+// login's scopes through it. A role the fixture did not seed answers nothing,
+// which is the "role is gone from the directory" case.
+func (d *fakeDirectory) ListRolePermissions(_ context.Context, role identity.DirectoryID) ([]string, error) {
+	if d.err != nil {
+		return nil, d.err
+	}
+	return append([]string(nil), d.rolePermissions[string(role)]...), nil
+}
+
+func (d *fakeDirectory) DeleteRole(context.Context, identity.DirectoryID) error {
+	return errNotThePanelsSurface
+}
+
+func (d *fakeDirectory) AssignRole(context.Context, identity.DirectoryID, identity.Principal) error {
+	return errNotThePanelsSurface
+}
+
+func (d *fakeDirectory) UnassignRole(context.Context, identity.DirectoryID, identity.Principal) error {
+	return errNotThePanelsSurface
+}
+
+func (d *fakeDirectory) ListRoleAssignments(context.Context, identity.DirectoryID) ([]identity.Principal, error) {
+	return nil, errNotThePanelsSurface
 }
 
 var _ identity.Directory = (*fakeDirectory)(nil)
