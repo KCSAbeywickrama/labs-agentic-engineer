@@ -301,21 +301,55 @@ func (s *Service) failProvisionRow(ctx context.Context, orgID, projectID string,
 	}
 }
 
-// ListOrgEnvironments returns OpenChoreo Environment names for the org
-// namespace. A nil lister or empty result is an empty slice (never nil),
-// never a 404.
-func (s *Service) ListOrgEnvironments(ctx context.Context, orgID string) ([]string, error) {
-	if s.environments == nil {
-		return []string{}, nil
+// titleFromName turns an OpenChoreo environment name into a readable label
+// when nobody has set openchoreo.dev/display-name: "staging-local" → "Staging Local".
+func titleFromName(name string) string {
+	parts := strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' })
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(p[:1]) + p[1:]
 	}
-	names, err := s.environments.ListNames(ctx, orgID)
+	return strings.Join(parts, " ")
+}
+
+// ListOrgEnvironments returns OpenChoreo Environments for the org namespace,
+// with the display-name fallback and the absent/unrecognised-is-off
+// validation default applied in this one place. A nil lister or empty
+// result is an empty slice (never nil), never a 404.
+func (s *Service) ListOrgEnvironments(ctx context.Context, orgID string) ([]EnvironmentInfo, error) {
+	if s.environments == nil {
+		return []EnvironmentInfo{}, nil
+	}
+	infos, err := s.environments.List(ctx, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("provisioning: list environments: %w", err)
 	}
-	if names == nil {
-		return []string{}, nil
+	out := make([]EnvironmentInfo, 0, len(infos))
+	for _, e := range infos {
+		if e.DisplayName == "" {
+			e.DisplayName = titleFromName(e.Name)
+		}
+		// Absent means off. Anything we do not recognise also means off —
+		// an unreadable annotation must not switch validation on.
+		if e.Validation != "on" {
+			e.Validation = "off"
+		}
+		out = append(out, e)
 	}
-	return names, nil
+	return out, nil
+}
+
+// environmentNames strips EnvironmentInfo down to bare names for the callers
+// that only need identifiers (env-cell synthesis, config-value bookkeeping) —
+// not the full DTO, which is Task 3's assembly in the handler.
+func environmentNames(infos []EnvironmentInfo) []string {
+	out := make([]string, 0, len(infos))
+	for _, e := range infos {
+		out = append(out, e.Name)
+	}
+	return out
 }
 
 // envList returns the environments to provision, defaulting to [development].

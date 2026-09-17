@@ -65,13 +65,15 @@ func (h *Handler) ListOrgEnvironments(ctx context.Context, _ gen.ListOrgEnvironm
 	if h.svc == nil {
 		return nil, errProvisioningUnavailable()
 	}
-	names, err := h.svc.ListOrgEnvironments(ctx, org)
+	envs, err := h.svc.ListOrgEnvironments(ctx, org)
 	if err != nil {
 		return nil, mapProvisionError(err)
 	}
-	out := make([]gen.EnvironmentDTO, 0, len(names))
-	for _, n := range names {
-		out = append(out, gen.EnvironmentDTO{Name: n})
+	// Name-only for now — DisplayName/IsProduction/Validation/Position/
+	// PromotesTo assembly and pipeline ordering is Task 3's.
+	out := make([]gen.EnvironmentDTO, 0, len(envs))
+	for _, e := range envs {
+		out = append(out, gen.EnvironmentDTO{Name: e.Name})
 	}
 	return gen.ListOrgEnvironments200JSONResponse(out), nil
 }

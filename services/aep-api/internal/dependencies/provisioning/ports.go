@@ -144,10 +144,20 @@ type OrgResourceDocs interface {
 	CommitUTF8(ctx context.Context, orgID, logicalName, fileName, content string) (path string, err error)
 }
 
-// EnvironmentLister lists OpenChoreo Environment names for the org namespace.
-// Empty org → empty slice, never nil error-for-empty.
+// EnvironmentInfo is one OpenChoreo environment as the BFF reads it: name,
+// display name, production flag, validation setting. It is a type alias to
+// openchoreo.EnvironmentInfo — this package already imports openchoreo, and
+// openchoreo cannot import back (this package imports it), so the shared
+// shape is defined there and aliased here under the name callers expect.
+type EnvironmentInfo = openchoreo.EnvironmentInfo
+
+// EnvironmentLister lists OpenChoreo Environments for the org namespace.
+// Empty org → empty slice, never nil error-for-empty. List is the richer
+// read (name, display name, isProduction, validation); ListNames stays only
+// until Task 3 migrates its last caller onto List, then it is deleted.
 type EnvironmentLister interface {
 	ListNames(ctx context.Context, orgID string) ([]string, error)
+	List(ctx context.Context, orgID string) ([]EnvironmentInfo, error)
 }
 
 // ProjectRef identifies one project (org + project id) for the cross-project

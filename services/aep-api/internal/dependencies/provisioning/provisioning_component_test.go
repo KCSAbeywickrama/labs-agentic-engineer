@@ -229,13 +229,27 @@ func (f *cValuePlane) PutInstances(orgID, name string, instances []provisioning.
 }
 
 // cEnvs fakes provisioning.EnvironmentLister — ListNames returns the
-// injected names (nil names is an empty list, not an error).
+// injected names (nil names is an empty list, not an error). List returns
+// the injected infos when set; otherwise it synthesizes bare-name infos from
+// names so the older, name-only fixtures in this file keep working unchanged.
 type cEnvs struct {
 	names []string
+	infos []provisioning.EnvironmentInfo
 }
 
 func (f *cEnvs) ListNames(context.Context, string) ([]string, error) {
 	return f.names, nil
+}
+
+func (f *cEnvs) List(context.Context, string) ([]provisioning.EnvironmentInfo, error) {
+	if f.infos != nil {
+		return f.infos, nil
+	}
+	out := make([]provisioning.EnvironmentInfo, 0, len(f.names))
+	for _, n := range f.names {
+		out = append(out, provisioning.EnvironmentInfo{Name: n})
+	}
+	return out, nil
 }
 
 func readyBindingWith(outputs ...string) *openchoreo.ResourceReleaseBinding {
@@ -941,6 +955,36 @@ func TestProvisioningComponent_ListOrgEnvironments_NamesFromOC(t *testing.T) {
 	}
 	if len(got) != 2 || got[0].Name != "default" || got[1].Name != "staging-local" {
 		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestProvisioning_EnvironmentInfo_AnnotationsAndFallbacks(t *testing.T) {
+	t.Parallel()
+	svc := provisioning.NewService(provisioning.Deps{
+		Environments: &cEnvs{infos: []provisioning.EnvironmentInfo{
+			{Name: "development", DisplayName: "Development", IsProduction: false, Validation: "on"},
+			{Name: "staging-local", DisplayName: "", IsProduction: false, Validation: ""},
+			{Name: "production", DisplayName: "Production", IsProduction: true, Validation: "off"},
+		}},
+	})
+	got, err := svc.ListOrgEnvironments(context.Background(), "acme")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("want 3 environments, got %d", len(got))
+	}
+	// An absent display-name annotation falls back to a titlecased name.
+	if got[1].DisplayName != "Staging Local" {
+		t.Errorf("display name fallback = %q, want %q", got[1].DisplayName, "Staging Local")
+	}
+	// An absent validation annotation is OFF — a new environment does not
+	// silently start running validation.
+	if got[1].Validation != "off" {
+		t.Errorf("absent validation annotation = %q, want %q", got[1].Validation, "off")
+	}
+	if !got[2].IsProduction {
+		t.Error("production environment lost its isProduction flag")
 	}
 }
 

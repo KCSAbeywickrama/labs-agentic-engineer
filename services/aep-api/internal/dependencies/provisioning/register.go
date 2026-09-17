@@ -154,10 +154,11 @@ func (s *Service) validateRegisterRequest(ctx context.Context, orgID string, req
 		return "", nil, nil, nil, nil, err
 	}
 
-	envNames, err = s.ListOrgEnvironments(ctx, orgID)
+	envInfos, err := s.ListOrgEnvironments(ctx, orgID)
 	if err != nil {
 		return "", nil, nil, nil, nil, err
 	}
+	envNames = environmentNames(envInfos)
 
 	valueByEnvKey = make(map[string]string, len(req.EnvValues))
 	for _, row := range req.EnvValues {

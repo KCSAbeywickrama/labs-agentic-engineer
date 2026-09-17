@@ -27,11 +27,31 @@ import (
 )
 
 // EnvironmentClient reads OpenChoreo Environments in an org namespace.
-// ListNames is the provisioning.EnvironmentLister surface; GetThunderBinding is
-// how aep-api finds the environment's own identity provider.
+// ListNames and List are the provisioning.EnvironmentLister surface (List is
+// the richer read; ListNames stays until its last caller migrates);
+// GetThunderBinding is how aep-api finds the environment's own identity
+// provider.
 type EnvironmentClient interface {
 	ListNames(ctx context.Context, orgID string) ([]string, error)
+	List(ctx context.Context, orgID string) ([]EnvironmentInfo, error)
 	GetThunderBinding(ctx context.Context, orgID, environment string) (ThunderBinding, error)
+}
+
+// EnvironmentInfo is one OpenChoreo Environment as the BFF reads it: name,
+// the openchoreo.dev/display-name annotation (empty when unset — the
+// provisioning service fills the titlecased fallback, not this client),
+// spec.isProduction, and the aep.wso2.com/validation annotation verbatim
+// (empty or unrecognised is normalized to "off" by the provisioning service,
+// not here — this type is a plain read, not a policy decision).
+//
+// provisioning.EnvironmentInfo is a type alias to this struct: this package
+// cannot import provisioning (provisioning already imports openchoreo), so
+// the shared shape lives here, on the client that reads it off the wire.
+type EnvironmentInfo struct {
+	Name         string
+	DisplayName  string
+	IsProduction bool
+	Validation   string
 }
 
 // Thunder binding annotations, written onto the Environment by
@@ -120,6 +140,37 @@ func (c *environmentClient) ListNames(ctx context.Context, orgID string) ([]stri
 // An environment with none is ErrNoThunderBinding, distinguished from every
 // transport failure, because the two need opposite responses: the first is
 // "provision one", the second is "retry".
+func (c *environmentClient) List(ctx context.Context, orgID string) ([]EnvironmentInfo, error) {
+	if strings.TrimSpace(orgID) == "" {
+		return []EnvironmentInfo{}, nil
+	}
+	resp, err := c.oc.ListEnvironmentsWithResponse(ctx, orgID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list environments: %w", err)
+	}
+	if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
+		return nil, handleErrorResponse(resp.StatusCode(), ErrorResponses{
+			JSON400: resp.JSON400,
+			JSON401: resp.JSON401,
+			JSON403: resp.JSON403,
+			JSON500: resp.JSON500,
+		})
+	}
+	infos := make([]EnvironmentInfo, 0, len(resp.JSON200.Items))
+	for _, item := range resp.JSON200.Items {
+		info := EnvironmentInfo{
+			Name:        item.Metadata.Name,
+			DisplayName: annotation(item.Metadata.Annotations, AnnotationKeyDisplayName),
+			Validation:  annotation(item.Metadata.Annotations, AnnotationKeyValidation),
+		}
+		if item.Spec != nil && item.Spec.IsProduction != nil {
+			info.IsProduction = *item.Spec.IsProduction
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
+}
+
 func (c *environmentClient) GetThunderBinding(ctx context.Context, orgID, environment string) (ThunderBinding, error) {
 	if strings.TrimSpace(orgID) == "" || strings.TrimSpace(environment) == "" {
 		return ThunderBinding{}, fmt.Errorf("get thunder binding: org and environment are both required")
