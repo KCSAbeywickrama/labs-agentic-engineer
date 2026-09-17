@@ -325,9 +325,35 @@ export function readWireSpecs(projectDir: string, slug: string): WireSpecs {
   return { slug, designs, security };
 }
 
+/**
+ * The app has to carry the wired half of mock mode, or `wire` is theatre.
+ *
+ * An app generated before `mock/wired.ts` existed — or one whose `mock/` was
+ * kept instead of re-copied — starts under `--mode mock` and answers every
+ * `/api` call from MSW, with the real service running beside it and never
+ * touched. The screens look right, the data is seed data, and nothing says so.
+ * That is the exact failure this verb exists to catch, so it is a blocker and
+ * the message is the fix.
+ */
+function webappBlockers(webapp: WireWebapp, projectDir: string): string[] {
+  const mock = join(projectDir, webapp.appPath, "mock");
+  const plugin = join(mock, "plugin.ts");
+  const carriesWired =
+    existsSync(join(mock, "wired.ts")) &&
+    existsSync(plugin) &&
+    readFileSync(plugin, "utf8").includes("AEP_WIRED_API");
+  if (carriesWired) return [];
+  return [
+    `${webapp.appPath}: mock mode here predates wired mode, so the app would answer its own API and the ` +
+      `service would go untouched. Re-copy the verbatim files from the react-webapp skill's assets ` +
+      `(mock-plugin.ts, mock-browser.ts, mock-badge.ts, mock-wired.ts) — see its references/mock-mode.md.`,
+  ];
+}
+
 /** Everything that would stop `wire` before it starts anything. */
 export function planBlockers(plan: WirePlan, projectDir: string, skip: string[] = []): string[] {
   const blockers: string[] = [];
+  if (plan.webapp) blockers.push(...webappBlockers(plan.webapp, projectDir));
   if (plan.services.length === 0 && plan.webapp === null) {
     blockers.push("no components to run — the design has no service and no web application");
   }

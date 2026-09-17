@@ -114,5 +114,27 @@ export async function startWiredDevServer(
     await group.stop();
     throw new Error(`the dev server did not answer on ${url} — see the log in .aep-playground/wire/logs/`);
   }
+
+  // The dev server itself says whether the wired branch engaged. Asking it is
+  // the only check that cannot be satisfied by a file that looks right: if this
+  // is false the page is being answered by MSW and the service is running for
+  // nobody, which is indistinguishable from working until the data is wrong.
+  if (!(await servesWiredEnv(url))) {
+    await group.stop();
+    throw new Error(
+      `${appPath} came up in plain mock mode — /env-config.js does not set window.__AEP_WIRED__. ` +
+        `Its mock/ files are older than wired mode; re-copy them from the react-webapp skill's assets.`,
+    );
+  }
   return { url, port, group };
+}
+
+/** Whether `/env-config.js` declares wired mode — the plugin's own answer. */
+async function servesWiredEnv(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${url}/env-config.js`);
+    return /__AEP_WIRED__\s*=\s*true/.test(await response.text());
+  } catch {
+    return false;
+  }
 }

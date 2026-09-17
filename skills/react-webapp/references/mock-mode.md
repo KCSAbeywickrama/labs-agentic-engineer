@@ -102,7 +102,9 @@ means taking the current asset and re-applying your app's own exports, below.
 `badge.ts` and `wired.ts` are copied **always** too: `browser.ts` imports the
 first and `plugin.ts` the second, so an app missing either does not start. Both
 turn themselves off — no roles in `security.json`, no badge; no `AEP_WIRED_API`,
-no wired mode.
+no wired mode. An app that keeps an older `mock/` is refused by `wire` rather
+than started, because the alternative is a page that answers its own API while
+the real service runs untouched beside it.
 
 If `$AEP_SKILLS_DIR` is unset, copy from `assets/` beside each skill's
 `SKILL.md`. `plugin.ts` and `browser.ts` are complete as they stand — a change

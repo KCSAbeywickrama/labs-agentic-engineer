@@ -125,11 +125,26 @@ test("a dependency wired mode cannot stand in for stops the run, and --skip is t
   assert.deepEqual(planBlockers(wire, TWO, ["stripe"]), []);
 });
 
+test("an app whose mock mode predates wired mode is refused, not quietly left on MSW", async () => {
+  const wire = await assignHostPorts(plan(ONBOARDING, "onboarding"), allFree);
+  assert.deepEqual(planBlockers(wire, ONBOARDING), [], "the fixture's app carries the wired asset");
+
+  // The same plan against a tree whose app has no `mock/wired.ts`. Without this
+  // the dev server answers `/api` from MSW, the service runs untouched, and
+  // every screen looks right — the one failure wired mode exists to catch, and
+  // the one every app generated before this existed would hit.
+  const blockers = planBlockers({ ...wire, services: [] }, join(FIXTURES, "two-services"));
+  assert.equal(blockers.length, 1);
+  assert.match(blockers[0] ?? "", /predates wired mode/);
+  assert.match(blockers[0] ?? "", /mock-wired\.ts/);
+});
+
 test("a service with no Dockerfile has not been built yet, and the plan says so", async () => {
   const wire = await assignHostPorts(plan(ONBOARDING, "onboarding"), allFree);
+  // Against a tree with nothing in it, so the app is missing too; this is about
+  // the service half.
   const blockers = planBlockers(wire, join(FIXTURES, "nothing-here"));
-  assert.equal(blockers.length, 1);
-  assert.match(blockers[0] ?? "", /no Dockerfile.*coding phase/);
+  assert.equal(blockers.filter((b) => /no Dockerfile.*coding phase/.test(b)).length, 1);
 });
 
 test("ports skip what is already taken", async () => {

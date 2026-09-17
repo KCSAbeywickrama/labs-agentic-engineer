@@ -82,6 +82,15 @@ starts anyway with that env unset.
 
 ## Consequences
 
+**An app whose `mock/` predates this is refused.** Checked twice: the plan looks
+for `mock/wired.ts` and the `AEP_WIRED_API` branch in `mock/plugin.ts` before
+anything is built, and the session asks the running dev server whether
+`/env-config.js` sets `__AEP_WIRED__`. Found by wiring a completed project:
+without the check it came up, printed `READY`, and served every screen from MSW
+with the service running for nobody — indistinguishable from working until the
+data is wrong. Every app generated before this change hits it, and the fix is
+the re-copy `references/mock-mode.md` already prescribes.
+
 `playground/AGENTS.md`'s scope line changes from "no image builds" to "builds
 and runs locally, never deploys". The one-way door is small: `wire` writes only
 inside `<project>/.aep-playground/wire/`, so a session leaves the project tree
