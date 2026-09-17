@@ -1148,14 +1148,27 @@ pane serves two (ADR-0029 replaced the compiled path on `vld-redesign`).
 | | |
 |---|---|
 | Description, under the heading, spec view only | *Each scenario is one concrete example of a rule your product must follow, taken from your requirements alone. After every deployment they are driven against the deployed system and the results appear under Validations. To change one, ask the agent.* |
-| A capability's label in the rail | the file's slug, **title-cased** — `bought-items.feature` reads **Bought items** |
-| A refusal | the **circled minus**, closing the sentence; tooltip *A negative scenario — the product refuses, rejects or limits.* |
+| A capability's name | its own `Feature:` heading, inside the pane — never the rail, which carries the one entry |
+| A refusal | the **`@negative` tag**, closing the sentence, in the accent tint |
+| A story reference | the **`@story-N` tag** on the rule, in quiet neutral |
 
-**The label is title-cased; a requirement's depth document is not.** Both are
-"feature files" and both fall to naming rule 2, but only one of them is
-referenced by name elsewhere: the PRD links `features/<slug>.md` by its
-filename, so re-casing that one would stop the two matching. A `.feature` slug
-is a capability name nothing else quotes, so it reads as the document tree says.
+**A refusal is marked on every scenario that is one**, including the ones that
+inherit `@negative` from a rule that is itself a prohibition — which is most of
+the interesting half of a spec. The rule and the feature drop the tag from their
+own lists for that reason: every scenario beneath them carries it, and repeating
+it one level up says the same thing twice.
+
+**The two tags differ by emphasis, not colour.** Every hue on the page is
+spoken for — four outcomes, plus `info` for the literals inside a step — and
+amber least of all is free: it would put a refusal SCENARIO in the same bucket
+as a BLOCKED one. So the accent goes to the tag a reviewer scans for, and the
+reference goes quiet.
+
+**The pane says nothing about the RUN** — no tally, no commit, no deployed URL,
+no isolation statement. The verdict tile above owns the numbers, and a second
+copy beneath it says them twice. The isolation statement is the one that costs
+something: the run is still held to it (a report that omits it fails its own
+contract check), the reader is simply not shown it.
 
 ### Finding one scenario among many
 

@@ -66,8 +66,6 @@ import {
   OUTCOME_ICON,
   outcomeLabel,
   outcomeTone,
-  tallySentence,
-  tallyOutcomes,
   type OutcomeTone,
 } from "./outcomes.js";
 import { tokenizeStep } from "./tokenize.js";
@@ -90,6 +88,9 @@ const MONO = "monospace";
 /** Radii the theme's 12px base cannot express as a multiple. */
 const R8 = "8px";
 const PILL = "20px";
+
+/** The refusal tag, as the authoring skill writes it. */
+const NEGATIVE_TAG = "@negative";
 
 /** The disclosure column. Every row has one, so it is never slack. */
 const CHEVRON = 20;
@@ -122,8 +123,21 @@ function Caret({ open, size = 16 }: { readonly open: boolean; readonly size?: nu
   );
 }
 
-/** A tag as the reference design draws it: a soft mono pill. */
-function TagPill({ tag }: { readonly tag: string }) {
+/**
+ * A tag, as a soft mono pill.
+ *
+ * `emphasis` is what tells the two kinds apart, and it is emphasis rather than
+ * hue because no hue is free here: success, error, warning and neutral are the
+ * four outcomes, `info` is the emphasised literals inside a step, and amber
+ * especially cannot be borrowed — it would put a refusal SCENARIO in the same
+ * visual bucket as a BLOCKED one, which is the pair ADR-0029 exists to keep
+ * apart.
+ *
+ * It lands the right way round. `@negative` is a property a reviewer scans for
+ * (all-happy-path is the commonest defect in a generated spec), so it keeps the
+ * accent; `@story-N` is a reference you look up deliberately, so it goes quiet.
+ */
+function TagPill({ tag, emphasis = false }: { readonly tag: string; readonly emphasis?: boolean }) {
   return (
     <Box
       component="span"
@@ -138,8 +152,9 @@ function TagPill({ tag }: { readonly tag: string }) {
         fontSize: "0.6875rem",
         fontWeight: 500,
         lineHeight: 1.5,
-        color: "primary.dark",
-        bgcolor: alpha(theme.palette.primary.main, 0.12),
+        ...(emphasis
+          ? { color: "primary.dark", bgcolor: alpha(theme.palette.primary.main, 0.12) }
+          : { color: "text.secondary", bgcolor: theme.palette.action.hover }),
       })}
     >
       {tag}
@@ -405,50 +420,51 @@ function ScenarioRow({ scenario, reported, hasRun, awaiting, open, onToggle }: S
         <Box sx={{ display: "flex", alignItems: "center", height: ROW_LINE, width: CHEVRON, flexShrink: 0 }}>
           <Caret open={open} size={14} />
         </Box>
-        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          <Typography variant="body2" sx={{ lineHeight: `${ROW_LINE}px` }}>
-            {scenario.name}
-          </Typography>
-          {(scenario.kind !== "Scenario" || scenario.tags.length > 0) && (
-            <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 0.75, mt: 0.25 }}>
-              {scenario.kind !== "Scenario" && (
-                <Box
-                  component="span"
-                  sx={{
-                    fontFamily: MONO,
-                    fontSize: "0.6875rem",
-                    fontWeight: 500,
-                    color: "text.secondary",
-                  }}
-                >
-                  {`${scenario.kind}:`}
-                </Box>
-              )}
-              {scenario.tags.map((t) => (
-                <TagPill key={t} tag={t} />
-              ))}
+        {/* The marks sit INSIDE the sentence, not in a column beside it: they
+            qualify it, and flowing with the text means they follow the last
+            word — onto line two when a long name wraps — so a name is never
+            truncated to hold a column's width. */}
+        <Typography
+          variant="body2"
+          sx={{ flexGrow: 1, minWidth: 0, lineHeight: `${ROW_LINE}px` }}
+        >
+          {scenario.name}
+          {scenario.kind !== "Scenario" && (
+            <Box
+              component="span"
+              sx={{
+                ml: 1,
+                fontFamily: MONO,
+                fontSize: "0.6875rem",
+                fontWeight: 500,
+                color: "text.secondary",
+              }}
+            >
+              {`${scenario.kind}:`}
             </Box>
           )}
-        </Box>
+          {/* `negative`, not the tags: @negative inherits Feature -> Rule ->
+              Scenario, so a scenario under a prohibition rule carries the
+              property without carrying the tag — 22 of this repo's 77 refusals
+              are that shape, and reading the raw tags showed them nothing. */}
+          {scenario.negative && (
+            <Box component="span" sx={{ ml: 1 }}>
+              <TagPill tag={NEGATIVE_TAG} emphasis />
+            </Box>
+          )}
+          {scenario.tags
+            .filter((t) => t !== NEGATIVE_TAG)
+            .map((t) => (
+              <Box key={t} component="span" sx={{ ml: 1 }}>
+                <TagPill tag={t} />
+              </Box>
+            ))}
+        </Typography>
         {showPill && (
           <Box sx={{ display: "flex", alignItems: "center", height: ROW_LINE, flexShrink: 0 }}>
             <OutcomePill outcome={reported?.outcome ?? NO_RESULT} />
           </Box>
         )}
-        <Box
-          component="span"
-          sx={{
-            flexShrink: 0,
-            minWidth: 58,
-            textAlign: "right",
-            lineHeight: `${ROW_LINE}px`,
-            fontSize: "0.6875rem",
-            color: "text.secondary",
-            opacity: 0.8,
-          }}
-        >
-          {`${steps.length} ${steps.length === 1 ? "step" : "steps"}`}
-        </Box>
       </ButtonBase>
 
       {/* With nothing open by default this is the only thing on the page saying
@@ -513,10 +529,16 @@ function RuleBand({
           >
             {rule.text}
           </Typography>
+          {/* References only. A rule that is ITSELF a prohibition carries
+              @negative, and every scenario under it inherits — so each row shows
+              the mark for itself and repeating it here says the same thing one
+              level up. */}
           <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexShrink: 0, height: ROW_LINE }}>
-            {rule.tags.map((t) => (
-              <TagPill key={t} tag={t} />
-            ))}
+            {rule.tags
+              .filter((t) => t !== NEGATIVE_TAG)
+              .map((t) => (
+                <TagPill key={t} tag={t} />
+              ))}
           </Box>
         </Box>
       )}
@@ -620,9 +642,11 @@ function FeatureGroup({
           </Typography>
         </Box>
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexShrink: 0, height: ROW_LINE }}>
-          {feature.tags.map((t) => (
-            <TagPill key={t} tag={t} />
-          ))}
+          {feature.tags
+            .filter((t) => t !== NEGATIVE_TAG)
+            .map((t) => (
+              <TagPill key={t} tag={t} />
+            ))}
         </Box>
         <Box
           component="span"
@@ -861,8 +885,6 @@ export function AcceptanceView({
           {`The last run's report could not be read (${reportError}), so this is the specification alone.`}
         </Alert>
       )}
-
-      {report !== undefined && <ReportProvenance report={report} />}
 
       <Box
         sx={{
@@ -1144,61 +1166,6 @@ function OrphanGroup({
           );
         })}
       </Box>
-    </Box>
-  );
-}
-
-function ReportProvenance({ report }: { readonly report: AcceptanceReport }) {
-  const [open, setOpen] = useState(false);
-  const facts = [report.commit?.slice(0, 7), report.baseUrl, report.generatedAt].filter(
-    (f): f is string => f !== undefined && f !== "",
-  );
-  const tally = tallySentence(tallyOutcomes(report.scenarios));
-
-  return (
-    <Box sx={{ mb: 2 }}>
-      <Box sx={{ display: "flex", alignItems: "flex-start", gap: 2 }}>
-        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-          {tally !== "" && (
-            <Typography variant="body2" sx={{ fontWeight: 500 }}>
-              {tally}
-            </Typography>
-          )}
-          <Typography
-            variant="caption"
-            sx={{
-              display: "block",
-              fontFamily: MONO,
-              color: "text.secondary",
-              opacity: 0.8,
-              wordBreak: "break-all",
-            }}
-          >
-            {facts.join(" · ")}
-          </Typography>
-        </Box>
-        {report.isolation !== undefined && (
-          <ButtonBase
-            onClick={() => setOpen((v) => !v)}
-            aria-expanded={open}
-            sx={{ flexShrink: 0, gap: 0.5, borderRadius: R8, px: 0.5, color: "text.secondary" }}
-          >
-            <Typography variant="caption">How the scenarios were kept apart</Typography>
-            <Caret open={open} />
-          </ButtonBase>
-        )}
-      </Box>
-      {report.isolation !== undefined && (
-        <Collapse in={open} unmountOnExit>
-          {/* A neutral tint with no border: a rule down a leading edge means
-              "this needs reading", and provenance is not that. */}
-          <Box sx={{ mt: 1, p: 2, borderRadius: R8, bgcolor: "action.hover" }}>
-            <Typography variant="body2" sx={{ color: "text.secondary" }}>
-              {report.isolation}
-            </Typography>
-          </Box>
-        </Collapse>
-      )}
     </Box>
   );
 }

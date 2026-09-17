@@ -147,6 +147,65 @@ describe("the specification alone", () => {
     expect(list().getByText("@negative")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "@negative" })).toBeInTheDocument();
   });
+
+  // @negative inherits Feature -> Rule -> Scenario, so a scenario under a
+  // prohibition rule HAS the property without carrying the tag. Reading the raw
+  // tags showed 22 of this repo's 77 refusals nothing at all — on the one mark
+  // whose job is "are the refusals covered".
+  it("marks a refusal that inherits the tag from its rule", () => {
+    const inherited: AcceptanceFeatureSource = {
+      path: "specs/acceptance/locked.feature",
+      content: [
+        "Feature: Locked items",
+        "",
+        "  @story-6 @negative",
+        "  Rule: A bought item cannot be changed",
+        "",
+        "    Scenario: Changing a bought item is refused",
+        "      Then the quantity is unchanged",
+      ].join("\n"),
+    };
+    render(<AcceptanceView features={[inherited]} />);
+
+    // Once, on the row — although the scenario's own tag list is empty, and
+    // although it is the RULE that carries the tag in the file.
+    expect(list().getAllByText("@negative")).toHaveLength(1);
+    // The rule band keeps its reference and drops the property.
+    expect(list().getByText("@story-6")).toBeInTheDocument();
+  });
+
+  // The step count held the flush-right column the outcome pill wants, answered
+  // no question a reader has, and on a blocked scenario counted steps that never
+  // ran.
+  it("prints no step count on a row", () => {
+    render(<AcceptanceView features={[BOUGHT]} report={report([BLOCKED, PASSED])} />);
+    expect(screen.queryByText(/\d+ steps?$/)).not.toBeInTheDocument();
+  });
+
+  // Emphasis, not hue: every hue on this page is spoken for, and amber
+  // especially would put a refusal SCENARIO in the same bucket as a BLOCKED one.
+  it("tells a refusal apart from a story reference", () => {
+    const tagged: AcceptanceFeatureSource = {
+      path: "specs/acceptance/tagged.feature",
+      content: [
+        "Feature: Tagged",
+        "",
+        "  @story-6",
+        "  Rule: A rule",
+        "",
+        "    @negative",
+        "    Scenario: A refusal",
+        "      Then nothing changes",
+      ].join("\n"),
+    };
+    render(<AcceptanceView features={[tagged]} />);
+
+    const negative = list().getByText("@negative");
+    const story = list().getByText("@story-6");
+    expect(getComputedStyle(negative).backgroundColor).not.toBe(
+      getComputedStyle(story).backgroundColor,
+    );
+  });
 });
 
 describe("joined against a run", () => {
@@ -219,12 +278,19 @@ describe("joined against a run", () => {
     expect(screen.getByText("Clearing bought items")).toBeInTheDocument();
   });
 
-  it("shows the run's provenance and keeps the isolation note behind a disclosure", () => {
+  // The tally belongs to the verdict that explains it, which the consumer
+  // renders above — a second copy here says the same numbers twice. The run's
+  // identity (commit, deploy URL, timestamp) and its isolation statement go with
+  // it: the run is still HELD to isolation by check-report.mjs, the reader is
+  // simply not shown it.
+  it("says nothing about the run itself — that belongs to the page", () => {
     render(<AcceptanceView features={[BOUGHT]} report={report([BLOCKED, PASSED])} />);
-    expect(screen.getByText(/4f2ad10/)).toBeInTheDocument();
-    expect(screen.queryByText("Each scenario created the list it asserts on.")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("How the scenarios were kept apart"));
-    expect(screen.getByText("Each scenario created the list it asserts on.")).toBeInTheDocument();
+
+    expect(screen.queryByText(/4f2ad10/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/How the scenarios were kept apart/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Each scenario created the list/)).not.toBeInTheDocument();
+    // And no tally: the page's verdict tile owns those numbers.
+    expect(screen.queryByText(/1 of 2 passed/)).not.toBeInTheDocument();
   });
 
   it("drops to the specification with a warning when the report cannot be read", () => {
@@ -244,7 +310,6 @@ describe("with nothing to show", () => {
 
 describe("the toolbar", () => {
   const search = () => screen.getByRole("textbox", { name: "Filter scenarios" });
-  const rows = () => list().getAllByRole("button", { expanded: false }).map((b) => b.textContent ?? "");
 
   it("narrows on a scenario name", () => {
     render(<AcceptanceView features={[BOUGHT, ADDING]} />);

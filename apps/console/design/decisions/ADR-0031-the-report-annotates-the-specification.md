@@ -107,6 +107,25 @@ so the deferral has expired.
   "negative" in readable text and doubles as a filter, where a glyph could only
   be looked at. All-happy-path is the commonest defect in a generated spec, and
   a reader can now select for it in one click.
+- **The view says nothing about the run itself.** No tally, no commit, no
+  deployed URL, no isolation statement — the run's identity belongs to the page
+  that owns the run, and the tally in particular was a rule this package broke
+  and then restored (`validation-view/design/README.md`: counts belong with the
+  verdict that explains them). The isolation statement is the one with a cost,
+  and the split is deliberate: the run is still HELD to it — `check-report.mjs`
+  fails a report that omits it — the reader is simply not shown it. The contract
+  enforces; the page stays quiet.
+- **The refusal mark reads the inherited property, not the raw tag.**
+  `@negative` inherits `Feature → Rule → Scenario`, so a scenario under a
+  prohibition rule has the property without carrying the tag — 22 of the repo's
+  77 refusals. Reading the tag list showed those nothing, on the one mark whose
+  job is "are the refusals covered". For the same reason a rule and a feature
+  drop `@negative` from their own lists: every scenario beneath them shows it.
+- **The tags differ by emphasis, not hue**, because no hue is free: four
+  outcomes take success/error/warning/neutral and `info` takes the literals
+  inside a step. Amber is the one that would actively mislead — a refusal
+  SCENARIO in the same visual bucket as a BLOCKED one, the pair this ADR's
+  decision 3 exists to keep apart.
 - **The outcome pill keeps a glyph the reference design does not have.**
   ADR-0016's rule — a mark so the set is told apart at a glance rather than read
   one at a time — is not something a restyle gets to drop, and four outcomes make

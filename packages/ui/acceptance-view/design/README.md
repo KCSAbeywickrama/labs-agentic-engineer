@@ -93,6 +93,18 @@ identical), `#FAFAFA → action.hover`, `rgba(0,0,0,.07) → divider`.
 toolbar on screen. There is no `position: sticky` anywhere in this console and
 none is needed here.
 
+**Nothing here describes the RUN.** No tally, no commit, no deploy URL, no
+isolation statement: this view renders the criteria and what was made of them,
+and the run's identity belongs to the page that owns the run. The tally
+especially — `validation-view`'s notes already say why, and this package briefly
+broke the rule: *"Counts belong with the verdict that explains them, which the
+consumer renders above; a second copy here says the same numbers twice."*
+`ValidationPage` prints them once, in its verdict tile.
+
+The isolation statement is the one with a real cost, so it is worth being plain:
+the run is still HELD to it — `check-report.mjs` fails a report that omits it —
+the reader is simply not shown it. The contract enforces; the page stays quiet.
+
 **`Rule:` survives, as a band inside each capability.** The reference design has
 no rule level at all — its sample data has no rule field, so it models generic
 Gherkin rather than deciding against ours. In this dialect `Rule:` is required,
@@ -130,7 +142,7 @@ height jumps the row.
 ## The row
 
 ```text
-›  Editing a bought item is refused  @negative        [⊘ Blocked]  3 steps
+›  Editing a bought item is refused  @negative        [⊘ Blocked]
    On a bought row the Edit button is not disabled, it is absent — …
 ```
 
@@ -142,6 +154,32 @@ height jumps the row.
   draws for tags. It began as an inline circled minus with visually-hidden text;
   the pill says the same thing in readable text AND doubles as a filter, which a
   glyph never could.
+- **The marks flow INSIDE the sentence**, in the same `Typography` as the name
+  rather than as a flex sibling, so they follow the last word — onto line two
+  when a long name wraps. That is what lets a name never be truncated: a column
+  would have to hold its width against a name running to 104 characters, and for
+  a specification you want the whole sentence. Right-aligning them against the
+  outcome pill buys a column of marks to scan, which is the weaker half of the
+  trade now that `@negative` is a filter chip in the toolbar.
+- **The refusal mark reads `scenario.negative`, never the raw tags.** `@negative`
+  inherits `Feature → Rule → Scenario`, so a scenario under a prohibition rule
+  has the property without carrying the tag — 22 of this repo's 77 refusals are
+  that shape, and reading the tags showed them nothing. For the same reason the
+  rule band and the feature header DROP `@negative` from their own tag lists:
+  every scenario beneath them shows it, so repeating it one level up says the
+  same thing twice.
+- **The two tag kinds differ by emphasis, not hue.** `@negative` keeps the accent
+  tint; `@story-N` goes neutral. No hue is free — success, error, warning and
+  neutral are the four outcomes and `info` is the emphasised literals in a step —
+  and amber especially cannot be borrowed, because it would put a refusal
+  SCENARIO in the same visual bucket as a BLOCKED one, the pair ADR-0029 exists
+  to keep apart. It lands the right way round: `@negative` is a property a
+  reviewer scans for, `@story-N` a reference looked up deliberately.
+- **No step count.** It held the flush-right column the outcome pill wants,
+  answered no question a reader has — a 3-step scenario is not better or riskier
+  than a 5-step one — and on a blocked scenario it counted steps that never ran.
+  The count that stays is `N of M` on the feature header, which says a filter is
+  hiding something.
 - **The outcome pill keeps its glyph** although the reference design's is
   text-only. ADR-0016 requires a mark on an outcome so the set can be told apart
   at a glance rather than read one at a time, and four outcomes make that bite
