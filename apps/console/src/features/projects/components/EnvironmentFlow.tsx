@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { Fragment, useLayoutEffect, useRef, useState } from "react";
+import { Fragment } from "react";
 import { Box, Skeleton, Stack } from "@wso2/oxygen-ui";
 import { ArrowRight } from "@wso2/oxygen-ui-icons-react";
 import type { EnvironmentRow } from "../lib/deploymentLedger";
@@ -45,67 +45,6 @@ import type { PromotionSource } from "../lib/deploymentFlow";
  *  and that a promote button and its reason caption share a row rather than
  *  stacking — the row is scrollable, so width costs nothing but a scroll. */
 const CARD_WIDTH = 600;
-
-/** The row never shrinks below this, however little room the page leaves it.
- *  Past this point a card's steps are more scrollbar than content, and a page
- *  that scrolls is the better of two bad answers. */
-const MIN_ROW_HEIGHT = 320;
-
-/** The element that would scroll if this page overflowed. The console's pages
- *  sit inside Oxygen's `PageContent`, which is itself height-bounded and owns
- *  the scroll — but this walks the chain rather than naming it, so the flow
- *  keeps working if a page ever mounts it somewhere else. */
-function scrollContainerOf(el: HTMLElement): HTMLElement {
-  for (let parent = el.parentElement; parent; parent = parent.parentElement) {
-    const overflowY = getComputedStyle(parent).overflowY;
-    if (overflowY === "auto" || overflowY === "scroll") return parent;
-  }
-  return document.documentElement;
-}
-
-/**
- * The row's height budget: everything its scroll container has left after
- * what sits above the row (the page header, a banner) and below it (the
- * content container's own padding). Bounding the row here is what keeps the
- * PAGE from scrolling — a card taller than the budget scrolls inside itself
- * instead of growing the document.
- *
- * Measured, never declared. A `calc(100vh - …)` would have to know the
- * shell's header, its footer, `PageContent`'s padding and whether the
- * project's repo-error banner is showing, and would be silently wrong the day
- * any of them changed.
- *
- * The answer does not depend on the height it sets, which is what keeps this
- * from oscillating: shrinking the row shrinks `scrollHeight` by exactly the
- * same amount, so `below` — and therefore the budget — comes out identical on
- * the next pass.
- */
-function useRowHeight(ref: React.RefObject<HTMLDivElement | null>) {
-  const [height, setHeight] = useState<number | null>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const scroller = scrollContainerOf(el);
-    const measure = () => {
-      const rect = el.getBoundingClientRect();
-      // Scroll-space coordinates, so an already-scrolled container measures
-      // the same as one at rest.
-      const top = rect.top - scroller.getBoundingClientRect().top + scroller.scrollTop;
-      const below = scroller.scrollHeight - (top + rect.height);
-      setHeight(Math.max(MIN_ROW_HEIGHT, Math.round(scroller.clientHeight - top - below)));
-    };
-    measure();
-    // The budget changes when the viewport does, and when the shell gives the
-    // page a different pane (the sidebar collapsing, the agent chat opening).
-    // Observing the scroller catches all three; jsdom has no ResizeObserver
-    // and no layout either, so there is nothing to observe there.
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(scroller);
-    return () => observer.disconnect();
-  }, [ref]);
-  return height;
-}
 
 /**
  * The flow while the pipeline is not known. It states NOTHING — not "no
@@ -185,8 +124,6 @@ export function EnvironmentFlow({
   onConfigurePromoteTarget,
   ...detail
 }: EnvironmentFlowProps) {
-  const rowRef = useRef<HTMLDivElement>(null);
-  const rowHeight = useRowHeight(rowRef);
   // No rows is not "no environments" — it is equally the shape of a read that
   // has not landed or did not come back. The flow refuses to say which, and
   // draws the same shimmer the page draws while it waits.
@@ -194,23 +131,20 @@ export function EnvironmentFlow({
 
   return (
     <Stack
-      ref={rowRef}
       data-testid="environment-flow"
       direction="row"
       spacing={0}
       sx={{
-        // stretch: every card takes the row's height, so the pinned trailing
-        // steps land on one line across the pipeline.
+        // stretch: every card takes the tallest card's height, so the pinned
+        // trailing steps land on one line across the pipeline.
         alignItems: "stretch",
         overflowX: "auto",
-        // The row is capped at what the page has left, and each card scrolls
-        // its own steps rather than growing the document. `maxHeight`, not
-        // `height`: a pipeline whose cards all fit takes only the room it
-        // needs instead of stretching one short card down the viewport.
-        ...(rowHeight !== null && { maxHeight: rowHeight }),
-        // Nothing may scroll vertically HERE — the cards are stretched to
-        // this row's height, so there is never anything to scroll to, and an
-        // `overflowX: auto` alone would compute the Y axis to `auto` too.
+        // The row is exactly as tall as its tallest card, so nothing here has
+        // anywhere to scroll to vertically — said explicitly because an
+        // `overflowX: auto` alone would compute the Y axis to `auto` too, and
+        // NOTHING in this flow scrolls inside itself: a card is as tall as
+        // its content, and a pipeline taller than the viewport scrolls the
+        // PAGE.
         overflowY: "hidden",
         // Room for the cards' shadow and the scrollbar.
         pb: 1.5,
@@ -237,18 +171,7 @@ export function EnvironmentFlow({
                 <Box component={ArrowRight} size={20} sx={{ color: "text.disabled" }} />
               </Stack>
             )}
-            <Box
-              sx={{
-                display: "flex",
-                flex: "0 0 auto",
-                width: CARD_WIDTH,
-                maxWidth: "100%",
-                // The card is bounded by the row, not by its own content —
-                // without this the flex item's automatic minimum size lets a
-                // tall card push past the cap it was given.
-                minHeight: 0,
-              }}
-            >
+            <Box sx={{ display: "flex", flex: "0 0 auto", width: CARD_WIDTH, maxWidth: "100%" }}>
               <EnvironmentFlowCard
                 projectName={projectName}
                 env={env}

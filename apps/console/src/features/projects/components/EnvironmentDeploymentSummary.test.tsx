@@ -108,28 +108,32 @@ describe("EnvironmentDeploymentSummary", () => {
     expect(screen.queryByText("v3")).not.toBeInTheDocument();
   });
 
-  it("says the version is unavailable, not unknown, when the read that names it failed", () => {
+  it("says the READ could not be done, not that the version is unavailable", () => {
     render(
       <EnvironmentDeploymentSummary {...props({ version: undefined, versionUnavailable: true })} />,
     );
-    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    const cell = screen.getByText(/Couldn't be read/);
+    expect(cell).toBeInTheDocument();
     expect(screen.queryByText("Version unknown")).not.toBeInTheDocument();
+    // The reason and the way out reach a screen reader, not only a mouse.
+    expect(cell.textContent).toContain("the project's status could not be read; retry above");
+    expect(cell).toHaveAttribute("title", expect.stringContaining("retry above"));
   });
 
-  it("says the milestone is missing, not absent, when the version ledger failed", () => {
+  it("says plainly that the milestone exists and could not be fetched, and where to retry", () => {
     render(
       <EnvironmentDeploymentSummary
         {...props({ milestoneNumber: undefined, milestoneHref: undefined, builtAt: undefined, ledgerUnavailable: true })}
       />,
     );
-    expect(
-      screen.getByText(/milestone and build time are missing — not absent/),
-    ).toBeInTheDocument();
+    const note = screen.getByText(/The version ledger could not be read/);
+    expect(note.textContent).toContain("They exist; the console could not fetch them");
+    expect(note.textContent).toContain("retry under Past deployments");
   });
 
   it("stays quiet about the ledger once it has answered", () => {
     render(<EnvironmentDeploymentSummary {...props({ ledgerUnavailable: false })} />);
-    expect(screen.queryByText(/missing — not absent/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/The version ledger could not be read/)).not.toBeInTheDocument();
   });
 
   it("draws a skeleton while the read that names the version is still out", () => {

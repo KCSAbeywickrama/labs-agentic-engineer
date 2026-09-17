@@ -408,7 +408,7 @@ describe("DeploymentEnvironmentPage", () => {
     // Omission means "no such fact" on this page, so silence here would read
     // as a later environment's page.
     expect(
-      deployment.getByText(/milestone and build time are missing — not absent/),
+      deployment.getByText(/They exist; the console could not fetch them — retry under Past/),
     ).toBeInTheDocument();
     // Not a skeleton for ever: nothing is coming on its own.
     expect(deployment.queryByTestId("deployment-summary-skeleton")).not.toBeInTheDocument();
@@ -431,7 +431,7 @@ describe("DeploymentEnvironmentPage", () => {
     // about a settled read, and this read never landed.
     expect(deployment.queryByTestId("deployment-summary-skeleton")).not.toBeInTheDocument();
     expect(deployment.queryByText("Version unknown")).not.toBeInTheDocument();
-    expect(deployment.getByText("Unavailable")).toBeInTheDocument();
+    expect(deployment.getByText(/Couldn't be read/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(mockStatusRefetch).toHaveBeenCalled();
   });

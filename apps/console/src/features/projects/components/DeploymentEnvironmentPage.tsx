@@ -204,9 +204,12 @@ export function DeploymentEnvironmentPage({
   // ledger read gates section 4.
   const entry = envInfo?.position === 0;
   const summaryPending = Boolean(entry && (status.isPending || builds.isPending));
-  // A FAILED read is not a pending one: nothing further is coming on its own,
-  // so it gets an alert with a Retry (below) instead of a skeleton that would
-  // shimmer for ever promising an answer.
+  // A FAILED read is not a pending one. Both queries do keep polling while
+  // they hold no data (their refetchInterval treats an errored read as "no
+  // data yet"), so an answer may well arrive — but a skeleton PROMISES an
+  // imminent one, and a read that just failed cannot promise that. So a
+  // failure says what happened and offers a Retry that asks again now,
+  // rather than shimmering indefinitely with nothing on screen to act on.
   const statusFailed = Boolean(entry && status.isError);
   const buildsFailed = Boolean(entry && builds.isError);
   const deployedStamp = runStamp(row?.deployedAt);

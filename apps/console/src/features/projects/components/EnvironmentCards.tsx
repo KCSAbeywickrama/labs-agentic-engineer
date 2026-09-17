@@ -290,9 +290,9 @@ export interface EnvironmentFlowCardProps {
  * spare height and draws its rail through it — so the promote rows land on
  * the pipeline's bottom edge however tall each card's component list makes it.
  *
- * The card is as tall as the row allows and no taller: the steps above the
- * trailing one scroll INSIDE the card, so a long component list costs a
- * scroll here rather than a scroll on the whole page.
+ * The card is as tall as its CONTENT — nothing inside it scrolls. A card
+ * whose lists run long makes the row, and with it the page, taller; that is
+ * the accepted cost of never hiding a step behind a scrollbar.
  */
 export function EnvironmentFlowCard({
   projectName,
@@ -640,20 +640,6 @@ export function EnvironmentFlowCard({
     );
   });
 
-  // The card is bounded by the row, so its steps must fit inside it. All but
-  // the trailing step scroll; the trailing one is anchored at the card's foot
-  // — it carries the primary action (Promote v1 to Staging), and an action a
-  // reader has to scroll a card to reach is worse than the page scroll this
-  // whole arrangement removes.
-  //
-  // Only where something FOLLOWS this environment, which is exactly where
-  // `growIndex` puts the slack: on the pipeline's last card the trailing step
-  // is just the last step, it holds no promote control, and anchoring it
-  // would strand the steps above it at the card's top with the rail stopped
-  // in mid-air between them.
-  const scrollingSteps = last ? stepNodes : stepNodes.slice(0, -1);
-  const pinnedStep = last ? null : stepNodes[stepNodes.length - 1];
-
   return (
     <Card
       variant="outlined"
@@ -672,11 +658,6 @@ export function EnvironmentFlowCard({
         display: "flex",
         flexDirection: "column",
         width: "100%",
-        // The row hands every card the same bounded height; `minHeight: 0`
-        // lets that bound actually apply, and `overflow: hidden` keeps the
-        // steps that scroll inside from painting over the card's own border.
-        minHeight: 0,
-        overflow: "hidden",
         cursor: "pointer",
         ...(tone !== "neutral" && {
           borderColor: (t) => alpha(t.palette[tone === "primary" ? "primary" : tone].main, 0.35),
@@ -684,21 +665,9 @@ export function EnvironmentFlowCard({
       }}
     >
       <CardContent
-        sx={{
-          display: "flex",
-          flexDirection: "column",
-          flexGrow: 1,
-          minHeight: 0,
-          "&:last-child": { pb: 2.25 },
-        }}
+        sx={{ display: "flex", flexDirection: "column", flexGrow: 1, "&:last-child": { pb: 2.25 } }}
       >
-        <Stack
-          direction="row"
-          spacing={1.5}
-          // The header never scrolls away: it is the only thing that says
-          // which environment the steps below belong to.
-          sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 0.5, flexShrink: 0 }}
-        >
+        <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 0.5 }}>
           {/* The name leads at full weight, with the word Environment small
               and muted beside it. A real link, so the card is reachable by
               keyboard and openable in a new tab. */}
@@ -724,33 +693,12 @@ export function EnvironmentFlowCard({
         <Box
           role="list"
           aria-label={`${row.label} flow`}
-          sx={{ mt: 2, display: "flex", flexDirection: "column", flexGrow: 1, minHeight: 0 }}
+          sx={{ mt: 2, display: "flex", flexDirection: "column", flexGrow: 1 }}
         >
-          {/* `role="none"` on both wrappers: the steps stay the LIST's own
-              items — a generic with a presentational role passes its children
-              through to the list that owns it — while the layout gets the two
-              boxes it needs, one that scrolls and one that does not. */}
-          <Box
-            role="none"
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              flexGrow: 1,
-              minHeight: 0,
-              overflowY: "auto",
-              overflowX: "hidden",
-            }}
-          >
-            {scrollingSteps}
-          </Box>
-          {pinnedStep && (
-            <Box role="none" sx={{ flexShrink: 0 }}>
-              {pinnedStep}
-            </Box>
-          )}
+          {stepNodes}
         </Box>
         {last && (
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 2, flexShrink: 0 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>
             Last environment in the pipeline — nothing to promote to.
           </Typography>
         )}

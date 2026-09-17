@@ -30,6 +30,20 @@ import { StatusChip } from "../../../components/StatusChip";
 import type { ValidationCounts } from "../../validation/lib/verdict";
 import { shortSha, type ValidationCell } from "../lib/deploymentLedger";
 
+/** Why the Version cell has no version to print, and where to ask again. */
+const VERSION_UNREAD_HINT =
+  "the project's status could not be read; retry above";
+
+/** Text for a screen reader that the layout has no room to print. */
+const visuallyHidden = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  overflow: "hidden",
+  clip: "rect(0 0 0 0)",
+  whiteSpace: "nowrap",
+} as const;
+
 export interface EnvironmentDeploymentSummaryProps {
   /** The version running here; absent when the read settled without one. */
   version?: string | undefined;
@@ -39,13 +53,16 @@ export interface EnvironmentDeploymentSummaryProps {
   pending: boolean;
   /** The version ledger FAILED. Without it this section has no milestone and
    *  no build time to show, and omission on this page means "no such fact" —
-   *  so it says what happened instead of going quiet. The Retry lives on
-   *  section 4, which reads the same query; two of one control on one screen
-   *  is one too many. */
+   *  so it says what happened instead of going quiet. The Retry button lives
+   *  on section 4, which reads the same query; two of one control on one
+   *  screen is one too many, so the sentence points at it. */
   ledgerUnavailable?: boolean | undefined;
-  /** The read that names the version FAILED. Not the same as pending (an
-   *  answer is not coming on its own) and not the same as a settled absence
-   *  ("Version unknown" would be a claim off a read that never landed). */
+  /** The read that names the version FAILED. Not a skeleton, because a
+   *  skeleton promises an imminent answer and this read did not land; and not
+   *  a settled absence either, because "Version unknown" would be a claim off
+   *  a read that never came back. (The query does keep polling on its own
+   *  while it holds no data — the Retry is there to ask again NOW, not to
+   *  restart something stopped.) */
   versionUnavailable?: boolean | undefined;
   /** The milestone this version's work lived in; only the entry environment
    *  can resolve it, so it is absent everywhere else. */
@@ -114,10 +131,23 @@ export function EnvironmentDeploymentSummary({
           variant="subtitle2"
           sx={{ fontWeight: 700 }}
           {...(versionUnavailable && !version
-            ? { color: "text.secondary", title: "the project's status could not be read" }
+            ? { color: "text.secondary", title: VERSION_UNREAD_HINT }
             : {})}
         >
-          {version || (versionUnavailable ? "Unavailable" : "Version unknown")}
+          {version ? (
+            version
+          ) : versionUnavailable ? (
+            // What failed is the READ, not the version — the version is
+            // whatever it is. The gloss carries the reason and the way out to
+            // a screen reader, as the inferred-stamp mark does in section 4;
+            // `title` is the mouse's extra copy of it, never the only one.
+            <>
+              Couldn&apos;t be read
+              <Box component="span" sx={visuallyHidden}>{` — ${VERSION_UNREAD_HINT}`}</Box>
+            </>
+          ) : (
+            "Version unknown"
+          )}
         </Typography>
       ),
     },
@@ -232,8 +262,9 @@ export function EnvironmentDeploymentSummary({
       </Box>
       {ledgerUnavailable && !milestoneNumber && (
         <Typography variant="caption" color="warning.main">
-          The version ledger could not be read, so this version's milestone and build time are
-          missing — not absent.
+          The version ledger could not be read, so this version&apos;s milestone and build time
+          are not shown. They exist; the console could not fetch them — retry under Past
+          deployments.
         </Typography>
       )}
       <Stack
