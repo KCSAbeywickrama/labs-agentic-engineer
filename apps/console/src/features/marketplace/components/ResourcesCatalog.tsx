@@ -256,6 +256,7 @@ export function ResourcesCatalog() {
       {body}
       <CatalogTypeDrawer
         {...(selection ?? { kind: null, resource: null })}
+        recordNames={records.map((r) => r.name)}
         open={selection !== null}
         onClose={() => setSelection(null)}
       />

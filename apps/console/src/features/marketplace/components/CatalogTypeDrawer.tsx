@@ -41,6 +41,7 @@ import {
   ParametersSection,
 } from "../../settings/components/resource-inspect-sections";
 import { isRegisteredExternal } from "../kind";
+import { encodePromoteTarget } from "../lib/promoteTarget";
 
 type PlatformResourceTypeDTO = components["schemas"]["PlatformResourceTypeDTO"];
 type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
@@ -51,6 +52,12 @@ type ResourceInstanceDTO = components["schemas"]["ResourceInstanceDTO"];
 export type CatalogTypeDrawerProps = {
   open: boolean;
   onClose: () => void;
+  /**
+   * Names the organization already holds a record for. A project's row of
+   * such a name cannot be promoted (the name is taken); the project reuses
+   * the record instead.
+   */
+  recordNames?: string[];
 } & (
   | { kind: "platform"; resource: PlatformResourceTypeDTO }
   | { kind: "external"; resource: ExternalResourceDTO }
@@ -62,6 +69,8 @@ export type CatalogTypeDrawerProps = {
 // the project (the person who curates the registry does the promoting).
 const PROJECT_EXTERNAL_ENV_NOTE =
   "Environment values are the project's. Promote the resource to hold them for the organization.";
+const NAME_ALREADY_A_RECORD_NOTE =
+  "The organization already holds a record with this name. Have the project reuse it instead.";
 
 function EnvCellsSection({ cells }: { cells: EnvValueCellDTO[] }) {
   return (
@@ -146,9 +155,11 @@ function InstancesSection({ instances }: { instances: ResourceInstanceDTO[] }) {
 
 function ExternalResourceBody({
   resource,
+  recordNames,
   onClose,
 }: {
   resource: ExternalResourceDTO;
+  recordNames: string[];
   onClose: () => void;
 }) {
   const navigate = useNavigate();
@@ -213,17 +224,23 @@ function ExternalResourceBody({
       ) : heldBy ? (
         <>
           <Divider sx={{ my: 2 }} />
-          <Button
-            variant="contained"
-            onClick={() => {
-              void navigate({
-                to: "/resources/register/form",
-                search: { promote: `${heldBy}/${resource.name}` },
-              });
-            }}
-          >
-            Promote to organization
-          </Button>
+          {recordNames.includes(resource.name) ? (
+            <Typography variant="body2" color="text.secondary">
+              {NAME_ALREADY_A_RECORD_NOTE}
+            </Typography>
+          ) : (
+            <Button
+              variant="contained"
+              onClick={() => {
+                void navigate({
+                  to: "/resources/register/form",
+                  search: { promote: encodePromoteTarget({ project: heldBy, name: resource.name }) },
+                });
+              }}
+            >
+              Promote to organization
+            </Button>
+          )}
         </>
       ) : null}
     </Box>
@@ -297,7 +314,11 @@ export function CatalogTypeDrawer(props: CatalogTypeDrawerProps) {
           </Typography>
         )}
         {props.kind === "external" && (
-          <ExternalResourceBody resource={props.resource} onClose={onClose} />
+          <ExternalResourceBody
+            resource={props.resource}
+            recordNames={props.recordNames ?? []}
+            onClose={onClose}
+          />
         )}
         {props.kind === "platform" && <PlatformResourceBody resource={props.resource} />}
       </Box>

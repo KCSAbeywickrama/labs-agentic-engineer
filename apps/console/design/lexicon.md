@@ -1562,27 +1562,38 @@ agent's catalog never sees them — but the organization can take one over from 
 
 | | |
 |---|---|
+| Section lead | *Resources a project defined for itself. Promote one to hold its values for the organization and let other projects reuse it.* |
 | Card caption | *held by \<project\>* |
 | Drawer note | *Environment values are the project's. Promote the resource to hold them for the organization.* |
 | Primary action | **Promote to organization** — opens the Register form pre-filled from the project's copy |
+| Name already a record | the button gives way to *The organization already holds a record with this name. Have the project reuse it instead.* |
 | Not offered | Edit, Delete (those act on records) |
 
 **Promote lives on the registry, not on the project.** The definition view and
 the overview's Dependencies panel offer no Promote: the person who curates the
 registry decides what the organization holds, and does it where the records are.
 
-**The Promote form is the Register form with the project's facts locked.** Name,
-provider, keys and the contract document come from the project's copy and cannot
-be edited here; the contract row reads *copied from \<project\>*. The person adds
-what only the organization can: **Consumption instructions** and a value for every
-environment. An environment the project already holds a value for is captioned
-*carried over from \<project\> unless you type a value*, and may stay blank. The
-submit says **Promote**; success returns to Resources, where the card now sits
-with the records and the project's own card is gone (its dependency is now a
-copy, reading **Registered**).
+**The Promote form is the Register form with the project's facts locked.** Its
+heading is **Promote to organization**, its lead *\<project\>'s \<name\> becomes
+the organization's. The project keeps a copy that reuses it.* Name, provider,
+keys and the contract document come from the project's copy and cannot be
+edited here; the description is pre-filled and may be reworded for the
+organization. The contract row reads *\<type\> · \<file\> · copied from
+\<project\>*, or *No document yet. \<project\> must provide one before the
+resource can be promoted.* The person adds what only the organization can:
+**Consumption instructions** and a value for every environment. An environment
+the project already holds every value for is captioned *Carried over from
+\<project\> unless you type a value*, and may stay blank. The submit says
+**Promote**; success returns to Resources, where the card now sits with the
+records and the project's own card is gone (its dependency is now a copy,
+reading **Registered**).
 
 | Refusal | Copy |
 |---|---|
 | The organization already registered the name | *external resource \<name\> is already registered — have the project reuse it instead* |
 | The project has no value and none was typed | *missing env value for key "\<key\>" in environment "\<env\>"* |
 | The dependency already reuses a record | *\<name\> already reuses the organization's record* |
+| The project never chose a provider | *\<name\> names no provider yet — choose one in the project first* |
+| The block declares no keys | *\<name\> declares no config keys — the organization has nothing to hold values for* |
+| The block names a document the project does not hold | *contract: \<name\> names \<file\> but the project holds no such document — provide it in the project first* |
+| A secret typed beside a carried-over environment | *environment "\<env\>": give every secret value, or leave them all to be carried over from the project* |

@@ -76,8 +76,8 @@ func (d *promoteDocs) ReadUTF8(_ context.Context, _, path string) (string, error
 
 const fxDocument = "openapi: 3.0.3\ninfo: {title: Open Exchange Rates, version: '1'}\npaths: {}\n"
 
-// fxOwnResource is team-expenses' own currency resource as PR 1 leaves it: an
-// inline block with a provider, two keys and a derived contract on disk.
+// fxOwnResource is a project's own currency resource: an inline block with a
+// provider, two keys and a derived contract on disk.
 func fxOwnResource() *spec.ProjectResource {
 	return &spec.ProjectResource{
 		Definition: spec.DependencyDefinition{
@@ -379,5 +379,26 @@ func TestListExternalResources_ListsAProjectsOwnResources(t *testing.T) {
 	// The reused stripe is the record's consumer, not a row of its own.
 	if len(views[0].Consumers) != 1 || views[0].Consumers[0].ComponentName != "expenses-api" {
 		t.Fatalf("record consumers = %+v", views[0].Consumers)
+	}
+}
+
+// A block that names a document the project does not hold would make a record
+// with no contract behind the project's back; it is refused until the project
+// provides the document.
+func TestPromoteExternalResource_RefusesAMissingDocument(t *testing.T) {
+	res := fxOwnResource()
+	res.Document = ""
+	f := newPromoteFixture(res, nil)
+	_, err := f.svc.PromoteExternalResource(context.Background(), "acme", "team-expenses", "fx-rates", promoteRequest(
+		gen.EnvValueWriteDTO{Environment: "development", Key: "OPENEXCHANGERATES_APP_ID", Value: "d"},
+		gen.EnvValueWriteDTO{Environment: "development", Key: "FX_BASE", Value: "USD"},
+		gen.EnvValueWriteDTO{Environment: "production", Key: "OPENEXCHANGERATES_APP_ID", Value: "p"},
+		gen.EnvValueWriteDTO{Environment: "production", Key: "FX_BASE", Value: "EUR"},
+	))
+	if apiStatus(t, err) != 400 || !strings.Contains(err.Error(), "openapi.yaml") {
+		t.Fatalf("want 400 naming the missing document, got %v", err)
+	}
+	if len(f.rt.defs) != 0 || len(f.promoter.rewrote) != 0 {
+		t.Fatalf("a refused promote must leave nothing behind")
 	}
 }

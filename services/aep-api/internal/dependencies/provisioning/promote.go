@@ -18,7 +18,6 @@ package provisioning
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -114,7 +113,13 @@ func (s *Service) PromoteExternalResource(ctx context.Context, orgID, projectID,
 
 	var contract *openchoreo.ResourceContractPointer
 	var provenance *openchoreo.ResourceRecordProvenance
-	if c := res.Contract; c != nil && pr.Document != "" {
+	if c := res.Contract; c != nil && c.Path != "" {
+		if pr.Document == "" {
+			// The block names a document that is not on disk: the dependency
+			// reads needs-contract in the project, and a record made from it
+			// would silently drop the contract. Refuse until the project has it.
+			return ExternalResourceView{}, apierr.BadRequest(fmt.Sprintf("contract: %q names %s but the project holds no such document — provide it in the project first", name, c.Path))
+		}
 		if len(pr.Document) > maxContractBytes {
 			return ExternalResourceView{}, apierr.BadRequest("contract: the project's document is larger than 5 MiB — trim it in the project first")
 		}
@@ -139,9 +144,14 @@ func (s *Service) PromoteExternalResource(ctx context.Context, orgID, projectID,
 	if err != nil {
 		return ExternalResourceView{}, apierr.BadRequest(err.Error())
 	}
-	record, _ := openchoreo.ExternalDefinitionFromRT(rt)
+	record, ok := openchoreo.ExternalDefinitionFromRT(rt)
+	if !ok {
+		return ExternalResourceView{}, fmt.Errorf("provisioning: the built type for %q does not read back as an external resource record", name)
+	}
 
-	cells, err := s.writeOrgValuePlane(ctx, orgID, name, keys, envNames, valueByEnvKey, carried)
+	cells, err := s.writeOrgValuePlane(ctx, orgID, orgValuePlaneWrite{
+		Name: name, Keys: keys, EnvNames: envNames, ValueByEnvKey: valueByEnvKey, CarriedFrom: carried,
+	})
 	if err != nil {
 		return ExternalResourceView{}, err
 	}
@@ -236,11 +246,11 @@ func (s *Service) projectBindingValues(ctx context.Context, orgID, projectID, na
 		return map[string]string{}
 	}
 	b, err := s.bindings.GetBinding(ctx, orgID, ocname.ExternalResourceBindingName(projectID, name, env))
-	if err != nil || b == nil || len(b.Spec.ResourceTypeEnvironmentConfigs) == 0 {
+	if err != nil {
 		return map[string]string{}
 	}
-	values := map[string]string{}
-	if err := json.Unmarshal(b.Spec.ResourceTypeEnvironmentConfigs, &values); err != nil {
+	values, err := bindingValues(b)
+	if err != nil {
 		return map[string]string{}
 	}
 	return values

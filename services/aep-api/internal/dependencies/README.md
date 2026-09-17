@@ -43,7 +43,7 @@ three services are sub-package slices that import only that root.
 
 | Slice | Ops / role | Reaches |
 |---|---|---|
-| `provisioning` | 9 HTTP ops: list/delete/collect-values external resources, list-workload-dependencies, project readiness, provision-platform, dependency-status, request/list org-service access + the `provision` gate lifecycle, watcher, teardown | root cores; delivery (provision execution rows); sourcecontrol (gate issues); `WorkloadDepSource` (deployed Workload consumer refs) |
+| `provisioning` | 11 HTTP ops: list/register/update/promote/delete/collect-values external resources, list-workload-dependencies, project readiness, provision-platform, dependency-status, request/list org-service access + the `provision` gate lifecycle, watcher, teardown | root cores; delivery (provision execution rows); sourcecontrol (gate issues); `WorkloadDepSource` (deployed Workload consumer refs) |
 | `mcpdiscovery` | the MCP discovery server (including `list_groups`, the design-time directory-group catalog, and `slice_openapi_spec`, which cuts the operations a design uses from a provider's whole document — fetched outside the model's context — with the provenance the dependency file records) + `ListPlatformResourceTypes` and `ListOrgEndpoints` HTTP reads; `list_external_resources` is RT-backed and lists Registered resources only (`scope: org`); a project's own type is not a catalog entry | root `ResourceTypeLister` / external RT catalog / endpoint catalog |
 | `runtimeconfig` | the SPA `env-config.js` convergence service + its watcher (no HTTP op) | root naming/markers; spec (design at HEAD); repositories (execution enumerate) |
 
@@ -68,7 +68,7 @@ slices.
 | ProjectNamer | needs | `openchoreo` project client — the project's display name, which becomes the sign-in client's `displayName` (suffixed `· <web app>` when the project has several). Best-effort: an unreadable name falls back to the project id rather than failing a provision |
 | RolesEnsurer | needs | `identity` — the build-time roles ensure. The roles gate calls it inside `ProvisionForBuild`, driven by the DESIGN at the tag rather than the drawer inputs, so a role added in a later version is still created. Reports a `RolesEnsureOutcome`, never an identity entity. The outcome carries each test account's login, which the gate publishes as its own comment on the ticket before closing it — that comment is where a validation agent reads the credentials it signs in with, and a failure to publish fails the build |
 | GroupCatalogLister | needs | `identity` — the groups already on the org environment's directory, behind the `list_groups` MCP tool. Read-only, with no write counterpart on this surface: groups are created at build time, never by a model |
-| the 11 public ops (provisioning 9 + mcpdiscovery `ListPlatformResourceTypes` and `ListOrgEndpoints`) | offers | the edge (`dependenciesHandlers`) |
+| the 13 public ops (provisioning 11 + mcpdiscovery `ListPlatformResourceTypes` and `ListOrgEndpoints`) | offers | the edge (`dependenciesHandlers`) |
 
 ## Owns
 - `ExternalResource` (an in-memory definition, NOT a DB row — see Persistence), `AccessRequest`, the

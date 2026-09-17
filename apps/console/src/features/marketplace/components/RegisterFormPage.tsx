@@ -754,7 +754,7 @@ export function RegisterFormPage({
                 <Typography variant="body2" color="text.secondary">
                   {contract.path
                     ? `${contract.type} · ${contract.path} · copied from ${promote.project}`
-                    : `No document — the copy will read needs-contract until ${promote.project} provides one.`}
+                    : `No document yet. ${promote.project} must provide one before the resource can be promoted.`}
                 </Typography>
               </Box>
             ) : (

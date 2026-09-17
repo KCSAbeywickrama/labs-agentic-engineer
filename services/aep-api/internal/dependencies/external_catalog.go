@@ -166,12 +166,29 @@ func (c *ExternalResourceCatalog) Delete(ctx context.Context, orgID, name string
 // Ensure get-or-creates the named ResourceType in orgID's namespace via
 // ResourceClient.EnsureResourceType. Register uses this to author the org
 // catalog RT without ApplyResource / EnsureBinding (no project instance).
+// Ensure lands the record's ResourceType. An org-scoped type's name is a
+// function of the logical name and the key schema, so a type of that name
+// that is NOT yet a record — one a project authored before the scope marker
+// existed — has the same schema and is adopted: it is rewritten as the record
+// rather than left squatting the name while Ensure reports success. A type
+// that already is a record is left as it is (Ensure is idempotent).
 func (c *ExternalResourceCatalog) Ensure(ctx context.Context, orgID string, rt *openchoreo.ResourceType) error {
 	if rt == nil {
 		return fmt.Errorf("external resource catalog: nil ResourceType")
 	}
-	_, err := c.rc.EnsureResourceType(ctx, orgID, rt)
-	return err
+	got, err := c.rc.EnsureResourceType(ctx, orgID, rt)
+	if err != nil {
+		return err
+	}
+	if got == nil {
+		return nil
+	}
+	if existing, ok := openchoreo.ExternalDefinitionFromRT(got); ok && !existing.Registered() {
+		if _, err := c.rc.UpdateResourceType(ctx, orgID, rt); err != nil {
+			return fmt.Errorf("external resource catalog: adopt %q as the record: %w", rt.Metadata.Name, err)
+		}
+	}
+	return nil
 }
 
 // Update replaces an existing namespaced ResourceType via

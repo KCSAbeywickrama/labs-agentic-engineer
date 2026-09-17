@@ -128,3 +128,51 @@ func TestRewriteAsRegistryCopy_LandsTheSameFileAReuseWould(t *testing.T) {
 		t.Fatalf("document write = %+v, want the record's bytes under the existing file's token", doc)
 	}
 }
+
+// The promise behind Promote: the file it leaves is the file a design turn
+// naming the record would have landed. Same record, same renderer, same bytes
+// (readOn aside — the two runs read the clock at different moments).
+func TestRewriteAsRegistryCopy_IsByteIdenticalToAFreshReuse(t *testing.T) {
+	t.Parallel()
+	rec := registeredCurrency()
+	files := designFilesWithDeps(`[{"kind":"external","name":"currency-service"}]`)
+	files["dependencies/currency-service/dependency.json"] = `{"name":"currency-service","resource":{"name":"currency-service","provider":"Open Exchange Rates","config":[{"key":"OPENEXCHANGERATES_APP_ID","secret":true}]}}`
+	fc := &contractReadingCommitter{fakeCommitter: fakeCommitter{}, files: files}
+	svc := newService(readsFor(t, files))
+	svc.fileCommitter = fc
+	if err := svc.RewriteAsRegistryCopy(context.Background(), "acme", "web", "currency-service", *rec); err != nil {
+		t.Fatalf("RewriteAsRegistryCopy: %v", err)
+	}
+	var promoted string
+	for _, w := range fc.writes {
+		if w.Path == stubPath {
+			promoted = w.Content
+		}
+	}
+
+	reg := fakeRegistry{records: map[string]*RegisteredResource{"currency-service": rec}}
+	copies, _ := completeRegistryCopies(context.Background(), reg, "acme", []WriteOp{stub()})
+	reused := copies[stubPath].Definition
+
+	if promoted == "" || reused == "" {
+		t.Fatalf("both paths must land a definition: promoted=%q reused=%q", promoted, reused)
+	}
+	if stripReadOn(promoted) != stripReadOn(reused) {
+		t.Fatalf("a promoted dependency must be the same bytes as a reused one:\n--- promoted\n%s\n--- reused\n%s", promoted, reused)
+	}
+	if copies[stubPath].Files[DesignDir+"/"+dependencyDirPrefix+"currency-service/openapi.yaml"] != rec.Document {
+		t.Fatalf("the document lands beside the copy on both paths")
+	}
+}
+
+func stripReadOn(s string) string {
+	lines := strings.Split(s, "\n")
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		if strings.Contains(l, `"readOn"`) {
+			continue
+		}
+		out = append(out, l)
+	}
+	return strings.Join(out, "\n")
+}

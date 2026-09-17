@@ -256,6 +256,26 @@ describe("CatalogTypeDrawer", () => {
     });
   });
 
+  // A name the organization already registered cannot be promoted: the row
+  // says so and points at reuse.
+  it("project's own resource whose name is already a record: no Promote, a reuse note", () => {
+    render(
+      <CatalogTypeDrawer
+        kind="external"
+        resource={projectExternal({ scope: "project", project: "demo-shop" })}
+        recordNames={["github"]}
+        open
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Promote to organization" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "The organization already holds a record with this name. Have the project reuse it instead.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   // A type from before the scope marker names no project: nothing to promote
   // from, and still nothing to edit or delete.
   it("project external without a project: the values note and no actions", () => {

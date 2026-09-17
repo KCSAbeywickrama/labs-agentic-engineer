@@ -107,46 +107,17 @@ func (s *Service) UpdateExternalResource(ctx context.Context, orgID, name string
 		return ExternalResourceView{}, apierr.BadRequest(err.Error())
 	}
 
-	cells := make([]EnvCell, 0, len(keys)*len(envNames))
-	for _, env := range envNames {
-		for _, k := range keys {
-			cells = append(cells, EnvCell{
-				Environment: env,
-				Key:         k.Key,
-				Status:      "configured",
-				Value:       valueByEnvKey[envValueKey(env, k.Key)],
-			})
-		}
-	}
-	vaultByEnv := map[string]string{}
+	existingVaultByEnv := map[string]string{}
 	for _, c := range currentCells {
 		if c.SecretStorePath != "" {
-			vaultByEnv[c.Environment] = c.SecretStorePath
+			existingVaultByEnv[c.Environment] = c.SecretStorePath
 		}
 	}
-	if s.orgSecrets != nil {
-		for _, env := range envNames {
-			secrets := map[string]string{}
-			for _, k := range keys {
-				if k.Secret {
-					secrets[k.Key] = valueByEnvKey[envValueKey(env, k.Key)]
-				}
-			}
-			if len(secrets) == 0 {
-				continue
-			}
-			vaultKey, err := s.orgSecrets.WriteOrgCatalogSecret(ctx, orgID, canonical+"-"+env, secrets)
-			if err != nil {
-				return ExternalResourceView{}, fmt.Errorf("provisioning: write org-catalog secret %q: %w", canonical+"-"+env, err)
-			}
-			if vaultKey != "" {
-				vaultByEnv[env] = vaultKey
-			}
-		}
-	}
-	stampSecretStorePath(cells, vaultByEnv)
-	if s.catalogValuePlane != nil {
-		s.catalogValuePlane.PutEnvCells(orgID, canonical, cells)
+	cells, err := s.writeOrgValuePlane(ctx, orgID, orgValuePlaneWrite{
+		Name: canonical, Keys: keys, EnvNames: envNames, ValueByEnvKey: valueByEnvKey, ExistingVaultByEnv: existingVaultByEnv,
+	})
+	if err != nil {
+		return ExternalResourceView{}, err
 	}
 	if err := s.rtCatalog.Update(ctx, orgID, rt); err != nil {
 		return ExternalResourceView{}, fmt.Errorf("provisioning: update external resource type %q: %w", canonical, err)
