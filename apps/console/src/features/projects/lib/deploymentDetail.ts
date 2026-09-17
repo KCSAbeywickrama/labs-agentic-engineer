@@ -17,15 +17,13 @@
  */
 
 // The environment page's "Try it out" and Connections surfaces (ADR-0032,
-// the Deployment Detail design): pure derivations over the component's
-// OpenAPI contract, the design's dependency graph and the readiness read.
-// Nothing here invents a fact the platform does not hold — the endpoints come
-// from the contract the platform serves, the curl carries a placeholder where
-// a token would go (the platform mints none), and a connection's VALUE is
-// never shown because nothing reads it back.
+// the Deployment Detail design): pure derivations over the design's dependency
+// graph and the readiness read. Nothing here invents a fact the platform does
+// not hold — a connection's VALUE is never shown because nothing reads it
+// back. A service's individual endpoints are not derived here at all: by
+// product decision they are not listed on the page, they are read in the
+// contract viewer.
 
-import type { Operation, ParsedOpenApi } from "@aep/ui-openapi-view";
-import type { StatusTone } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 import { developmentConnections, type ConnectionLine } from "./deploymentFlow";
 import type { EnvironmentInfo } from "./environments";
@@ -65,80 +63,6 @@ export function usedBy(
   }
   for (const list of by.values()) list.sort();
   return by;
-}
-
-// ── Endpoints ───────────────────────────────────────────────────────────────
-
-/** Every operation in the contract, in document order, deduped by id. */
-export function flattenEndpoints(parsed: ParsedOpenApi): Operation[] {
-  const seen = new Set<string>();
-  const out: Operation[] = [];
-  for (const section of parsed.sections) {
-    for (const op of section.endpoints) {
-      if (seen.has(op.id)) continue;
-      seen.add(op.id);
-      out.push(op);
-    }
-  }
-  return out;
-}
-
-/** The methods the contract uses, in the order a reader expects them. */
-const METHOD_ORDER: Operation["method"][] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
-
-export function methodsIn(ops: Operation[]): Operation["method"][] {
-  const present = new Set(ops.map((o) => o.method));
-  return METHOD_ORDER.filter((m) => present.has(m));
-}
-
-export function filterEndpoints(
-  ops: Operation[],
-  query: string,
-  method: Operation["method"] | "ALL",
-): Operation[] {
-  const q = query.trim().toLowerCase();
-  return ops.filter(
-    (op) =>
-      (method === "ALL" || op.method === method) &&
-      (q === "" ||
-        op.path.toLowerCase().includes(q) ||
-        op.summary.toLowerCase().includes(q) ||
-        op.name.toLowerCase().includes(q)),
-  );
-}
-
-/** A method's colour: the console's status tones, read as HTTP verbs. */
-export function methodTone(method: Operation["method"]): StatusTone {
-  switch (method) {
-    case "GET":
-      return "success";
-    case "POST":
-      return "warning";
-    case "PUT":
-    case "PATCH":
-      return "info";
-    case "DELETE":
-      return "error";
-    default:
-      return "neutral";
-  }
-}
-
-const BODY_METHODS = new Set<Operation["method"]>(["POST", "PUT", "PATCH"]);
-
-/**
- * A curl for the operation against the deployed URL. The Authorization line
- * carries a placeholder: the platform mints no token for a test user, so the
- * command says where one goes rather than pretending to have one.
- */
-export function curlFor(baseUrl: string, op: Operation): string {
-  const url = `${baseUrl.replace(/\/+$/, "")}${op.path}`;
-  const lines = [`curl -X ${op.method} '${url}'`, `-H 'Accept: application/json'`];
-  if (BODY_METHODS.has(op.method)) {
-    lines.push(`-H 'Content-Type: application/json'`, `-d '{}'`);
-  }
-  lines.push(`-H 'Authorization: Bearer <token>'`);
-  return lines.join(" \\\n  ");
 }
 
 // ── Connections ─────────────────────────────────────────────────────────────

@@ -60,24 +60,6 @@ const mockStatusRefetch = vi.fn();
 let mockComponentsPending = false;
 let mockFailedCount = 0;
 
-// The mock contract every service panel reads its endpoints from.
-const MOCK_SPEC = `openapi: 3.0.0
-info: { title: claims-api, version: 1.0.0 }
-paths:
-  /claims:
-    get:
-      summary: List claims
-      responses: { "200": { description: OK } }
-    post:
-      summary: File a claim
-      responses: { "201": { description: Created } }
-  /claims/{id}:
-    delete:
-      summary: Withdraw
-      responses: { "204": { description: Gone } }
-`;
-let mockContractError = false;
-let mockContractPending = false;
 type ProjectDependencyReadiness = components["schemas"]["ProjectDependencyReadiness"];
 let mockReadiness: ProjectDependencyReadiness | undefined;
 let mockReadinessPending = false;
@@ -95,16 +77,6 @@ vi.mock("../api/queries", () => ({
     isError: mockEnvironmentsError,
     error: mockEnvironmentsError ? new Error("gateway down") : null,
     refetch: mockEnvironmentsRefetch,
-  }),
-  useComponentOpenApi: (_p: string, componentName: string) => ({
-    data:
-      mockContractError || mockContractPending
-        ? undefined
-        : { componentName, componentType: "service", spec: MOCK_SPEC },
-    isPending: mockContractPending,
-    isError: mockContractError,
-    error: mockContractError ? new Error("contract down") : null,
-    refetch: vi.fn(),
   }),
   useProjectDependencyReadiness: () => ({
     data: mockReadinessPending || mockReadinessError ? undefined : mockReadiness,
@@ -322,8 +294,6 @@ beforeEach(() => {
   mockCounts = undefined;
   mockTestUsers = [];
   mockRolesPending = false;
-  mockContractError = false;
-  mockContractPending = false;
   mockReadiness = undefined;
   mockReadinessPending = false;
   mockReadinessError = false;
@@ -628,71 +598,36 @@ describe("DeploymentEnvironmentPage — test users", () => {
 });
 
 describe("DeploymentEnvironmentPage — try it out (ADR-0032)", () => {
-  it("lists a service's endpoints off its contract, with a curl for the deployed URL", async () => {
+  // A service panel is its identity, its URL and its Try API — by product
+  // decision its individual endpoints are not listed inline; a person reads
+  // them in the contract viewer Try API opens.
+  it("gives a service its URL and its Try API, and lists no endpoints inline", async () => {
     const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
     Object.assign(navigator, { clipboard: { writeText } });
 
     render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
 
-    const list = screen.getByRole("list", { name: "claims-api endpoints" });
-    const rows = within(list).getAllByRole("listitem");
-    expect(rows.map((r) => r.textContent)).toEqual([
-      expect.stringContaining("GET/claims List claims"),
-      expect.stringContaining("POST/claims File a claim"),
-      expect.stringContaining("DELETE/claims/{id} Withdraw"),
-    ]);
-    // The header counts them.
-    expect(screen.getByText(/· service · 3 endpoints/)).toBeInTheDocument();
-
-    fireEvent.click(within(rows[0]!).getByRole("button", { name: "Copy a curl for GET /claims" }));
-    await waitFor(() => expect(writeText).toHaveBeenCalled());
-    const curl = writeText.mock.calls[0]?.[0] as string;
-    expect(curl).toBe(
-      [
-        "curl -X GET 'https://api.dev.expense.localhost/claims/claims'",
-        "-H 'Accept: application/json'",
-        "-H 'Authorization: Bearer <token>'",
-      ].join(" \\\n  "),
+    expect(screen.getByRole("link", { name: /api.dev.expense.localhost\/claims/ })).toHaveAttribute(
+      "href",
+      "https://api.dev.expense.localhost/claims",
     );
-    // …and the chosen command expands under the list.
-    expect(screen.getByText(/curl -X GET 'https:\/\/api\.dev\.expense\.localhost\/claims\/claims'/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Copy the URL of claims-api" }));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith("https://api.dev.expense.localhost/claims"),
+    );
 
-    // No Try per row: the panel's own Try API is the one way into the viewer.
-    expect(within(rows[1]!).queryByRole("button", { name: /^Try / })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try claims-api API" }));
     expect(openApiDialog).toHaveBeenLastCalledWith("claims-api");
-  });
 
-  it("filters the endpoints by method and by text", () => {
-    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
-
-    fireEvent.click(screen.getByRole("button", { name: "DELETE" }));
-    let rows = within(screen.getByRole("list", { name: "claims-api endpoints" })).getAllByRole("listitem");
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.textContent).toContain("/claims/{id}");
-
-    fireEvent.click(screen.getByRole("button", { name: "All" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Search claims-api endpoints" }), {
-      target: { value: "file" },
-    });
-    rows = within(screen.getByRole("list", { name: "claims-api endpoints" })).getAllByRole("listitem");
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.textContent).toContain("File a claim");
-  });
-
-  it("holds a skeleton of the list while the contract loads", () => {
-    mockContractPending = true;
-    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
-    expect(screen.getByTestId("endpoints-skeleton")).toBeInTheDocument();
-    expect(screen.queryByRole("list", { name: "claims-api endpoints" })).not.toBeInTheDocument();
-    expect(screen.queryByText(/Loading endpoints/)).not.toBeInTheDocument();
-  });
-
-  it("says the contract could not be loaded rather than showing no endpoints", () => {
-    mockContractError = true;
-    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
-    expect(screen.getByText(/The contract could not be loaded: contract down/)).toBeInTheDocument();
-    expect(screen.queryByRole("list", { name: "claims-api endpoints" })).not.toBeInTheDocument();
+    // No inline list, no search, no method filter, no per-row curl — and no
+    // endpoint count in the header, which only a contract read could know.
+    expect(screen.queryByRole("list", { name: "claims-api endpoints" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: /Search claims-api endpoints/ })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Filter by method" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Copy a curl for/ })).toBeNull();
+    expect(screen.queryByTestId("endpoints-skeleton")).toBeNull();
+    expect(screen.getByText(/· service$/)).toBeInTheDocument();
+    expect(screen.queryByText(/endpoints?$/)).toBeNull();
   });
 
   it("leads with the web app, whatever order the board hands the components in", () => {

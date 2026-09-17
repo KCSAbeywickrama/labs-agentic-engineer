@@ -163,7 +163,7 @@ function VersionBlock({
 }
 
 /** "Try it now →" — the one primary action on the card, into the environment
- *  page where the app, the endpoints and the test users are. */
+ *  page where the app, the APIs and the test users are. */
 function TryItNow({
   projectName,
   environment,

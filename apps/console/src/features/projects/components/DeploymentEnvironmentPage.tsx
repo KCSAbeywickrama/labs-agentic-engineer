@@ -74,7 +74,7 @@ const LinkButton = createLink(Button);
  *   1. Deployment — what runs here now, and where it came from.
  *   2. Try it out — the live components as things a person can act on: a web
  *      application is visited and carries the test users that sign in to it, a
- *      service lists its endpoints off its contract with a curl each.
+ *      service names its URL and opens its contract in the viewer.
  *   3. Dependencies — what the design depends on, and whether this
  *      environment holds values for it.
  *   4. Past deployments — what has run here. There is no per-version page any
@@ -461,7 +461,6 @@ export function DeploymentEnvironmentPage({
         </PageSection>
 
         <TryItOutCard
-          projectName={projectName}
           cards={row.cards}
           types={types}
           talksTo={(name) => talksTo(dependencies.data, name)}

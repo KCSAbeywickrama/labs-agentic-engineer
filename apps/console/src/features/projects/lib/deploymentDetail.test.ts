@@ -17,18 +17,8 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { parseOpenApi } from "@aep/ui-openapi-view";
 import type { components } from "../../../generated/aep-api";
-import {
-  connectionTable,
-  curlFor,
-  filterEndpoints,
-  flattenEndpoints,
-  methodTone,
-  methodsIn,
-  talksTo,
-  usedBy,
-} from "./deploymentDetail";
+import { connectionTable, talksTo, usedBy } from "./deploymentDetail";
 import type { EnvironmentInfo } from "./environments";
 import type { ConnectionRow } from "./promotion";
 
@@ -52,28 +42,6 @@ const design: ComponentDependencies[] = [
   },
 ];
 
-const SPEC = `openapi: 3.0.0
-info: { title: expense-api, version: 1.0.0 }
-paths:
-  /expenses:
-    get:
-      summary: List expenses
-      responses: { "200": { description: OK } }
-    post:
-      summary: Create expense
-      responses: { "201": { description: Created } }
-  /expenses/{id}:
-    delete:
-      summary: Delete
-      responses: { "204": { description: Gone } }
-`;
-
-function ops() {
-  const parsed = parseOpenApi(SPEC);
-  if ("kind" in parsed) throw new Error("fixture spec did not parse");
-  return flattenEndpoints(parsed);
-}
-
 describe("the component graph", () => {
   it("names the components a web app talks to, and who uses each dependency", () => {
     expect(talksTo(design, "expense-web")).toEqual(["expense-api"]);
@@ -83,45 +51,6 @@ describe("the component graph", () => {
     expect(by.get("user-auth")).toEqual(["expense-api", "expense-web"]);
     expect(by.get("currency-service")).toEqual(["expense-api"]);
     expect(by.has("expense-api")).toBe(false);
-  });
-});
-
-describe("endpoints", () => {
-  it("flattens the contract in document order and knows its methods", () => {
-    const list = ops();
-    expect(list.map((o) => `${o.method} ${o.path}`)).toEqual([
-      "GET /expenses",
-      "POST /expenses",
-      "DELETE /expenses/{id}",
-    ]);
-    expect(methodsIn(list)).toEqual(["GET", "POST", "DELETE"]);
-  });
-
-  it("filters by method and by text across path and summary", () => {
-    const list = ops();
-    expect(filterEndpoints(list, "", "POST").map((o) => o.path)).toEqual(["/expenses"]);
-    expect(filterEndpoints(list, "delete", "ALL").map((o) => o.method)).toEqual(["DELETE"]);
-    expect(filterEndpoints(list, "{id}", "GET")).toEqual([]);
-  });
-
-  it("colours a verb by what it does", () => {
-    expect(methodTone("GET")).toBe("success");
-    expect(methodTone("POST")).toBe("warning");
-    expect(methodTone("PUT")).toBe("info");
-    expect(methodTone("DELETE")).toBe("error");
-    expect(methodTone("HEAD")).toBe("neutral");
-  });
-
-  it("writes a curl for the deployed URL with a token placeholder, and a body for a write", () => {
-    const [get, post] = ops();
-    expect(curlFor("https://api.dev.example/expense-api-http/", get!)).toBe(
-      [
-        "curl -X GET 'https://api.dev.example/expense-api-http/expenses'",
-        "-H 'Accept: application/json'",
-        "-H 'Authorization: Bearer <token>'",
-      ].join(" \\\n  "),
-    );
-    expect(curlFor("https://api.dev.example", post!)).toContain("-H 'Content-Type: application/json' \\\n  -d '{}'");
   });
 });
 
