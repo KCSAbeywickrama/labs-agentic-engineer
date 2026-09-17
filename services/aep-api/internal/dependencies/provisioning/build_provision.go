@@ -272,10 +272,16 @@ func (s *Service) authorExternalPrepared(ctx context.Context, orgID, ocOrgID, pr
 	}
 	byEnv := designPreparedValues(keys)
 	registered := false
-	if cells := s.registeredEnvCells(ctx, orgID, in.Dependency); len(cells) > 0 {
-		byEnv = preparedValuesFromOrgCells(keys, cells)
-		registered = true
+	// A copy (the definition names the registry) binds to the organization's
+	// type and takes the organization's values; a resource the project defined
+	// gets its own type and the design's defaults.
+	if dep.ResourceRef != "" {
+		if cells := s.registeredEnvCells(ctx, orgID, in.Dependency); len(cells) > 0 {
+			byEnv = preparedValuesFromOrgCells(keys, cells)
+			registered = true
+		}
 	}
+	er.Registered = registered
 
 	// External dependencies do not mint config-collection gates. When the caller
 	// supplies an existing gate, reconcile it; never discover or create one here.

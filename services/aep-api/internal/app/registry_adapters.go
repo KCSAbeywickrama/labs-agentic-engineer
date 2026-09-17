@@ -27,13 +27,33 @@ import (
 )
 
 // registeredResourceReader adapts the org resource registry — the OC-RT-backed
-// catalog plus the org docs repo — onto spec.RegisteredResourceReader, the
-// port the design write path copies a Registered External resource through.
-// spec names no feature type: the projection from the client's record shape
-// to the shared ResourceDefinition happens here.
+// catalog plus the org docs repo — onto the two ports the spec domain reads
+// it through: spec.ExternalResourceResolver (the design read's registry
+// lookup for a copy) and spec.RegisteredResourceReader (the design write's
+// copy source). spec names no feature type and the dependencies feature
+// names no spec type: the projection from the client's record shape to the
+// shared ResourceDefinition happens here, at the composition root.
 type registeredResourceReader struct {
 	catalog *dependencies.ExternalResourceCatalog
 	docs    provisioning.OrgResourceDocs
+}
+
+// Lookup is the design-read registry answer for `name`: Registered only when
+// the catalog holds an org-scoped record under that name — the type a
+// project's build authored for its own resource is not one — and, when that
+// record names a contract document, its hash.
+func (r registeredResourceReader) Lookup(ctx context.Context, orgID, name string) (spec.RegistryHit, error) {
+	if r.catalog == nil {
+		return spec.RegistryHit{}, nil
+	}
+	def, err := r.catalog.Get(ctx, orgID, name)
+	if err != nil {
+		return spec.RegistryHit{}, err
+	}
+	if def == nil || !def.Registered() {
+		return spec.RegistryHit{}, nil
+	}
+	return spec.RegistryHit{Registered: true, DocumentSHA256: def.DocumentSHA256()}, nil
 }
 
 func (r registeredResourceReader) RegisteredResource(ctx context.Context, orgID, name string) (*spec.RegisteredResource, error) {
@@ -78,3 +98,10 @@ func resourceDefinitionFromRecord(def openchoreo.ExternalResourceDefinition) spe
 	}
 	return res
 }
+
+// Compile-time checks: the adapter is what the composition root wires as
+// both spec ports.
+var (
+	_ spec.ExternalResourceResolver = registeredResourceReader{}
+	_ spec.RegisteredResourceReader = registeredResourceReader{}
+)

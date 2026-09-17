@@ -210,8 +210,8 @@ export function DependencyView({
   const refMissing = Boolean(edge?.resourceRef) && edge?.reason === "needs-input";
   // The organization's document moved on since this copy was taken. The FILE
   // cannot know it — the platform compares the copy's hash with the registry's
-  // and flags it on the read model. There is no Refresh action to offer yet:
-  // re-copying a resource is Promote's work, and both land together.
+  // and flags it on the read model. The view reports it; re-copying is not an
+  // action the definition offers.
   const stale = (edge?.flags ?? []).includes("stale");
 
   return (

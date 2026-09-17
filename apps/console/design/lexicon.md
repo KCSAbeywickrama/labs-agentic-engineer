@@ -768,9 +768,9 @@ the contract document's kind and is never stored — so the fact is phrased as a
 answer to *how do I use this*, in the three words a person already knows: **REST
 API**, **GraphQL**, **SDK**.
 
-**A contract is a whole document, so nothing is *Kept*.** The definition used to
-report which operations were sliced out of a fetched document; documents are now
-copied entire, and the line is gone rather than left saying something untrue.
+**A contract is a whole document, so nothing is *Kept*.** The definition never
+says which operations a document covers: the document is copied entire, and the
+coding agent takes what its component calls from it.
 
 **"from the organization", never "registered by the organization".** A copy of a
 Registered External resource names the PROVIDER like any other dependency —

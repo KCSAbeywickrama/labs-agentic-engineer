@@ -229,3 +229,14 @@ test("the platform's fields ride through a write that leaves them out", () => {
   assert.equal(dropped.resource.consumptionInstructions, undefined);
   assert.deepEqual(dropped.resource.contract.accepted, accepted);
 });
+
+test("an explicit null is never an optional field", () => {
+  for (const body of [
+    { name: "payment-provider", resource: { name: "payment-provider" }, provenance: null },
+    { name: "payment-provider", resource: { name: "payment-provider" }, suggestions: null },
+    { name: "payment-provider", resource: { name: "payment-provider", provider: "Stripe", contract: null } },
+    { name: "payment-provider", resource: { name: "payment-provider", provider: "Stripe", contract: { ...CONTRACT, accepted: null } } },
+  ]) {
+    assert.equal(checkDependencyDesign(PATH, JSON.stringify(body))?.code, "SCHEMA_VIOLATION", JSON.stringify(body));
+  }
+});

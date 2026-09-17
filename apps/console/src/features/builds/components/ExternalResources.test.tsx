@@ -141,9 +141,9 @@ describe("ExternalResources", () => {
     expect(screen.getByText("1 setting outstanding")).toBeInTheDocument();
   });
 
-  // A copy of a Registered External resource used to be absent from this list
-  // entirely: the keys were on its dependency page, and this page said nothing
-  // at all about where their values were. The row exists to answer that.
+  // A copy of a Registered External resource has keys on its dependency page
+  // but nothing to configure here: the row says where the values live, so the
+  // page never leaves that unanswered.
   it("lists a dependency whose values the organization holds, with nothing to press", () => {
     mockDesign = design(
       external("stripe", ["api_key"]),

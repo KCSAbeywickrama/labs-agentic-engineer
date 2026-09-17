@@ -446,13 +446,17 @@ func buildExternalResourceBinding(projectName, name, env, latestRelease, secretS
 	}, nil
 }
 
-// projectExternalTypeSpec is the type a PROJECT's build authors for a
-// resource it defined itself: scope project, the project folded into the
-// name, no instructions, no document — the record of a project resource is
-// the project's own dependency.json. It never counts as registered and is
-// never listed org-wide.
+// projectExternalTypeSpec is the type a PROJECT's build binds to. For a
+// resource the project defined itself: scope project, the project folded
+// into the name, no instructions, no document — the record of a project
+// resource is the project's own dependency.json; it never counts as
+// registered and is never listed org-wide. For a COPY of the organization's
+// registered resource (er.Registered): the organization's own type — scope
+// org, the bare name — so EnsureResourceType's get-or-create lands on the
+// record register authored (same keys ⇒ same name) instead of minting a
+// project type that would shadow it.
 func projectExternalTypeSpec(projectName string, er *ExternalResource) openchoreo.ExternalResourceTypeSpec {
-	return openchoreo.ExternalResourceTypeSpec{
+	ts := openchoreo.ExternalResourceTypeSpec{
 		Name:        er.Name,
 		Description: er.Description,
 		Provider:    er.Provider,
@@ -460,6 +464,10 @@ func projectExternalTypeSpec(projectName string, er *ExternalResource) openchore
 		Scope:       openchoreo.ExternalResourceScopeProject,
 		Project:     projectName,
 	}
+	if er.Registered {
+		ts.Scope, ts.Project = openchoreo.ExternalResourceScopeOrg, ""
+	}
+	return ts
 }
 
 func toRTConfigKeys(in []spec.ConfigKey) []openchoreo.ExternalResourceConfigKey {

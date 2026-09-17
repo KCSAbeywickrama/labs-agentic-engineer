@@ -58,9 +58,9 @@ type ValueState = components["schemas"]["ExternalDependencyValueState"];
 // ONE EXCEPTION to "readiness decides which rows exist": a dependency that
 // COPIES a Registered External resource (`resourceRef` set). Readiness omits it
 // because the project cannot supply it — its values are the organization's —
-// and leaving the row out meant the keys the design shows on the dependency
-// page simply vanished here, with nothing saying why. So the design alone
-// renders it, as a row that states where its values live and offers no button.
+// yet the dependency page shows its keys, so this page must say where their
+// values live. The design alone renders it, as a row that states that and
+// offers no button.
 
 /** How a row reads to a person: is there anything left to do about it? */
 export type ExternalResourceDisplay = "configured" | "needs-values" | "org-held";

@@ -210,8 +210,28 @@ func TestCompleteProviderDocuments_FetchesOnce(t *testing.T) {
 		t.Fatalf("a non-OpenAPI body must warn: out=%+v warnings=%+v", out, warnings)
 	}
 	// A registry copy already completed for the same path is not touched.
-	out, _ = completeProviderDocuments(context.Background(), fetch, []WriteOp{pending}, map[string]registryCopy{stubPath: {}})
+	out, _ = completeProviderDocuments(context.Background(), fetch, []WriteOp{pending}, map[string]completedFile{stubPath: {}})
 	if len(out) != 0 {
 		t.Fatalf("a path the registry copy completed must be skipped")
+	}
+}
+
+// A registered record whose document is not something a project can code
+// against (asyncapi, protobuf, documentation) lands its block without a
+// contract — the dependency then reads needs-contract — rather than a file
+// the project's own gates would refuse.
+func TestRenderRegistryCopy_UnsupportedDocumentTypeLandsNoContract(t *testing.T) {
+	rec := registeredCurrency()
+	rec.Resource.Contract = &ResourceContract{Type: DependencyContractTypeAsyncAPI, Path: "currency-service/asyncapi.yaml"}
+	body, files, err := renderRegistryCopy(DependencyDefinition{Name: "currency-service"}, *rec, time.Now())
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	def, err := parseDependencyDefinitionJSON("currency-service", body)
+	if err != nil || def.Resource.Contract != nil || len(files) != 0 || def.Provenance != nil {
+		t.Fatalf("an asyncapi record must land no project contract: %+v files=%d err=%v", def, len(files), err)
+	}
+	if def.Resource.Provider == "" || len(def.Resource.Config) == 0 {
+		t.Fatalf("the block itself must still be copied: %+v", def.Resource)
 	}
 }

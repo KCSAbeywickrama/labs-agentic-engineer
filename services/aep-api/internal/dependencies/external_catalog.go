@@ -19,7 +19,6 @@ package dependencies
 import (
 	"context"
 	"fmt"
-	"github.com/wso2/aep/aep-api/internal/spec"
 	"sort"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -78,6 +77,13 @@ func (c *ExternalResourceCatalog) List(ctx context.Context, orgID string) ([]ope
 		if !ok {
 			continue
 		}
+		// A project's own type is not a catalog entry: it belongs to its
+		// project, is never offered for reuse, and never makes a name taken.
+		// It is dropped BEFORE the per-name dedupe, or a project's newer type
+		// would shadow the organization's record of the same logical name.
+		if !def.Registered() {
+			continue
+		}
 		if cur, exists := chosenRT[def.Name]; !exists || newerExternalRT(rt, cur) {
 			chosenRT[def.Name] = rt
 			chosenDef[def.Name] = def
@@ -85,19 +91,15 @@ func (c *ExternalResourceCatalog) List(ctx context.Context, orgID string) ([]ope
 	}
 	out := make([]openchoreo.ExternalResourceDefinition, 0, len(chosenDef))
 	for _, def := range chosenDef {
-		// A project's own type is not a catalog entry: it belongs to its
-		// project, is never offered for reuse, and never makes a name taken.
-		if !def.Registered() {
-			continue
-		}
 		out = append(out, def)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
 
-// Get returns the named external resource's definition, or (nil, nil) when no
-// authored RT in orgID's namespace carries that logical name. The RT's own
+// Get returns the named REGISTERED external resource's definition, or
+// (nil, nil) when no org-scoped RT in orgID's namespace carries that logical
+// name (a project's own type does not count, exactly as in List). The RT's own
 // metadata.name is a hash of (name, schema) — see
 // openchoreo.ExternalResourceRTName — so it can never be derived from name
 // alone; listing every namespaced RT and matching on the recovered logical
@@ -117,8 +119,8 @@ func (c *ExternalResourceCatalog) Get(ctx context.Context, orgID, name string) (
 	for i := range rts {
 		rt := &rts[i]
 		def, ok := openchoreo.ExternalDefinitionFromRT(rt)
-		if !ok || def.Name != name {
-			continue
+		if !ok || def.Name != name || !def.Registered() {
+			continue // same rule as List: a project's type is not the record
 		}
 		if chosenRT == nil || newerExternalRT(rt, chosenRT) {
 			chosenRT, chosenDef = rt, def
@@ -182,25 +184,6 @@ func (c *ExternalResourceCatalog) Update(ctx context.Context, orgID string, rt *
 	}
 	_, err := c.rc.UpdateResourceType(ctx, orgID, rt)
 	return err
-}
-
-// Lookup is the design-read registry answer for `name`
-// (spec.ExternalResourceResolver): Registered only when the catalog holds an
-// org-scoped record under that name — the type a project's build authored
-// for its own resource is not one — and, when that record names a contract
-// document, its hash.
-func (c *ExternalResourceCatalog) Lookup(ctx context.Context, orgID, name string) (spec.RegistryHit, error) {
-	if c == nil {
-		return spec.RegistryHit{}, nil
-	}
-	def, err := c.Get(ctx, orgID, name)
-	if err != nil {
-		return spec.RegistryHit{}, err
-	}
-	if def == nil || !def.Registered() {
-		return spec.RegistryHit{}, nil
-	}
-	return spec.RegistryHit{Registered: true, DocumentSHA256: def.DocumentSHA256()}, nil
 }
 
 // newerExternalRT reports whether rt should be preferred over cur as the

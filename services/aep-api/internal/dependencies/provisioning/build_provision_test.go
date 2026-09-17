@@ -480,6 +480,40 @@ func TestProvisionForBuild_RegisteredExternal_AuthorsFromOrgCells(t *testing.T) 
 	if len(inst) != 1 || inst[0].Project != "proj" || inst[0].Environment != "default" {
 		t.Fatalf("instances after Registered author = %+v, want {proj, default}", inst)
 	}
+	// The copy binds to the ORGANIZATION's type — never a project-scoped one
+	// that would sit beside the record under the same logical name.
+	if ext.authorLastER == nil || !ext.authorLastER.Registered {
+		t.Fatalf("a registered copy must be authored against the org type, got %+v", ext.authorLastER)
+	}
+}
+
+// A project's OWN resource that happens to share a registered resource's
+// name (no ResourceRef) is not a copy: it takes the design's defaults and its
+// own project-scoped type, even when the org plane holds cells for that name.
+func TestProvisionForBuild_ProjectResourceIgnoresOrgCellsOfTheSameName(t *testing.T) {
+	plane := NewMemoryValuePlane()
+	plane.PutEnvCells("acme", "stripe", []EnvCell{{Environment: "default", Key: "region", Status: "configured", Value: "us"}})
+	comps := designWithDeps()
+	comps[0].Dependencies[0].ResourceRef = ""
+	ext := &fakeExtProv{}
+	svc := NewService(Deps{
+		Issues: newFakeIssues(nil), Execs: &fakeExecStore{}, Design: fakeDesign{comps: comps}, Repos: fakeRepos{},
+		ExtProv: ext, PlatProv: &fakePlatProv{}, Bindings: &fakeBindings{}, CatalogValuePlane: plane,
+	})
+	if _, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v1", 0, []BuildProvisionInput{
+		{Component: "orders", Dependency: "stripe", Kind: "external-config"},
+	}); err != nil {
+		t.Fatalf("ProvisionForBuild: %v", err)
+	}
+	if ext.authorLastER == nil || ext.authorLastER.Registered {
+		t.Fatalf("a project's own resource must not be authored as a copy: %+v", ext.authorLastER)
+	}
+	if got := ext.authorByEnv["default"]; got.Plain["region"] != "" {
+		t.Fatalf("org cells must not leak onto a project's own resource: %+v", got.Plain)
+	}
+	if len(plane.Instances("acme", "stripe")) != 0 {
+		t.Fatalf("a project's own resource records no org instance")
+	}
 }
 
 // fakeOrgSecrets is an OrgSecretWriter that returns a caller-chosen vault key

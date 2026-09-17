@@ -73,9 +73,11 @@ const (
 	WarningRegistryCopied      = "registry-copied"
 )
 
-// registryCopy is one completed stub: the dependency.json content that
-// replaces the stub, and the document written beside it (path → content).
-type registryCopy struct {
+// completedFile is one dependency file the platform completed at the write:
+// the dependency.json content that replaces what the agent wrote, and the
+// document landed beside it (path → content) — a registry copy, or a
+// provider's document fetched by URL.
+type completedFile struct {
 	Definition string
 	Files      map[string]string
 }
@@ -86,8 +88,8 @@ type registryCopy struct {
 // not complete. A dependency file that already carries its provider is not a
 // stub and is left alone — a refresh is an explicit act, never a side effect
 // of an unrelated save.
-func completeRegistryCopies(ctx context.Context, reg RegisteredResourceReader, orgID string, writes []WriteOp) (map[string]registryCopy, []Warning) {
-	out := map[string]registryCopy{}
+func completeRegistryCopies(ctx context.Context, reg RegisteredResourceReader, orgID string, writes []WriteOp) (map[string]completedFile, []Warning) {
+	out := map[string]completedFile{}
 	var warnings []Warning
 	for _, w := range writes {
 		dir, ok := dependencyFileDir(w.Path)
@@ -120,7 +122,7 @@ func completeRegistryCopies(ctx context.Context, reg RegisteredResourceReader, o
 				Message: fmt.Sprintf("the registered resource %q could not be rendered into this project: %v", def.Name, err)})
 			continue
 		}
-		out[w.Path] = registryCopy{Definition: completed, Files: files}
+		out[w.Path] = completedFile{Definition: completed, Files: files}
 		warnings = append(warnings, Warning{Path: w.Path, Code: WarningRegistryCopied,
 			Message: fmt.Sprintf("%q copied from the organization's registry: provider, config keys, consumption instructions and the contract document landed beside this file", def.Name)})
 	}
@@ -139,7 +141,12 @@ func renderRegistryCopy(stub DependencyDefinition, rec RegisteredResource, now t
 	res.Provenance = nil // the org copy's own provenance stays on the record; the project's is on the dependency
 	def := DependencyDefinition{Name: stub.Name, Resource: res}
 	files := map[string]string{}
-	if rec.Resource.Contract != nil && rec.Document != "" {
+	if rec.Resource.Contract != nil && rec.Document != "" && StyleForContractType(rec.Resource.Contract.Type) != "" {
+		// Only a document a project can code against becomes the project's
+		// contract (openapi, graphql, sdk). A registered asyncapi, protobuf or
+		// documentation record lands its block without one, and the dependency
+		// reads needs-contract — the truth, since nothing here is a contract
+		// the coding agent could build a client from.
 		file := path.Base(rec.Resource.Contract.Path)
 		if file == "" || file == "." || file == "/" {
 			return "", nil, fmt.Errorf("registry contract path %q names no file", rec.Resource.Contract.Path)
@@ -190,8 +197,8 @@ const (
 // definition as written with a warning; the dependency reads
 // needs-contract until the user provides the document (Provide interface)
 // or the agent writes one itself.
-func completeProviderDocuments(ctx context.Context, fetch func(context.Context, string) ([]byte, error), writes []WriteOp, alreadyCopied map[string]registryCopy) (map[string]registryCopy, []Warning) {
-	out := map[string]registryCopy{}
+func completeProviderDocuments(ctx context.Context, fetch func(context.Context, string) ([]byte, error), writes []WriteOp, alreadyCopied map[string]completedFile) (map[string]completedFile, []Warning) {
+	out := map[string]completedFile{}
 	var warnings []Warning
 	inBatch := map[string]bool{}
 	for _, w := range writes {
@@ -249,7 +256,7 @@ func completeProviderDocuments(ctx context.Context, fetch func(context.Context, 
 		if err != nil {
 			continue
 		}
-		out[w.Path] = registryCopy{Definition: string(rendered), Files: map[string]string{docPath: content}}
+		out[w.Path] = completedFile{Definition: string(rendered), Files: map[string]string{docPath: content}}
 		warnings = append(warnings, Warning{Path: w.Path, Code: WarningProviderDocumentFetched,
 			Message: fmt.Sprintf("the provider's document was fetched from %s and landed as %s", def.Provenance.SourceURL, c.Path)})
 	}

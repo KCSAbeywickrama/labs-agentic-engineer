@@ -211,6 +211,19 @@ func validateDependencyDesign(content, dirName string, prior *string) *designPro
 	if p := validateProvenance(res["provenance"], "resource.provenance"); p != nil {
 		return p
 	}
+	// zod's `.optional()` admits an absent field, never an explicit null; the
+	// fold must refuse the same nulls or a write would fold here that the
+	// agent's own gate had rejected.
+	for _, f := range []string{"provenance", "suggestions"} {
+		if v, present := obj[f]; present && v == nil {
+			return &designProblem{code: ErrSchemaViolation, message: f + ": must not be null — omit the field instead"}
+		}
+	}
+	for _, f := range []string{"provenance", "contract", "config"} {
+		if v, present := res[f]; present && v == nil {
+			return &designProblem{code: ErrSchemaViolation, message: "resource." + f + ": must not be null — omit the field instead"}
+		}
+	}
 	suggestions, hasSuggestions := obj["suggestions"]
 	if hasSuggestions {
 		if p := validateSuggestions(suggestions); p != nil {
@@ -234,7 +247,7 @@ func validateDependencyDesign(content, dirName string, prior *string) *designPro
 		return &designProblem{code: ErrSchemaViolation, message: `while "suggestions" are open, "resource.contract" and "resource.ref" stay unset — they describe the chosen service, and none is chosen yet.`}
 	}
 	if hasContract {
-		if p := validateContract(contractV, dirName); p != nil {
+		if p := validateContract(contractV); p != nil {
 			return p
 		}
 	}
@@ -247,7 +260,7 @@ func validateDependencyDesign(content, dirName string, prior *string) *designPro
 // validateContract checks a project contract object: `{ type, path, origin?,
 // accepted? }` with the path a bare file name in the dependency directory
 // that fits the type, and no URL form at all.
-func validateContract(v any, dirName string) *designProblem {
+func validateContract(v any) *designProblem {
 	obj, ok := v.(map[string]any)
 	if !ok {
 		return &designProblem{code: ErrSchemaViolation, message: "resource.contract: must be an object"}
@@ -279,10 +292,12 @@ func validateContract(v any, dirName string) *designProblem {
 			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf(`resource.contract.origin: %q is not an allowed value (registry, provider, derived, assumed)`, ov)}
 		}
 	}
+	if v, present := obj["accepted"]; present && v == nil {
+		return &designProblem{code: ErrSchemaViolation, message: "resource.contract.accepted: must not be null — omit the field instead"}
+	}
 	if p := validateAssumption(obj["accepted"], "resource.contract.accepted"); p != nil {
 		return p
 	}
-	_ = dirName
 	return nil
 }
 

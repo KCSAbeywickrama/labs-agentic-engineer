@@ -133,6 +133,12 @@ func TestDependencyGate_Parity(t *testing.T) {
 		{"suggestion description not a string", dep(withOpen(map[string]any{"suggestions": []any{map[string]any{"name": "a", "description": 1}}})), nil, false, "description: must be a string"},
 		{"suggestion carries a package", dep(withOpen(map[string]any{"suggestions": []any{map[string]any{"name": "a", "package": "npm:a"}}})), nil, false, "unknown property package"},
 		{"unknown resource property", dep(map[string]any{"resource.style": "rest-api"}), nil, false, "resource: unknown property style"},
+		// zod's optional() never admits null; the fold refuses the same.
+		{"null provenance", `{"name":"payment-provider","resource":{"name":"payment-provider"},"provenance":null}`, nil, false, "must not be null"},
+		{"null suggestions", `{"name":"payment-provider","resource":{"name":"payment-provider"},"suggestions":null}`, nil, false, "must not be null"},
+		{"null resource contract", `{"name":"payment-provider","resource":{"name":"payment-provider","provider":"Stripe","contract":null}}`, nil, false, "must not be null"},
+		{"absent accepted is fine", dep(map[string]any{"resource.contract": contract(map[string]any{"accepted": nil})}), nil, true, ""},
+		{"null accepted", `{"name":"payment-provider","resource":{"name":"payment-provider","provider":"Stripe","contract":{"type":"openapi","path":"openapi.yaml","accepted":null}}}`, nil, false, "must not be null"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
