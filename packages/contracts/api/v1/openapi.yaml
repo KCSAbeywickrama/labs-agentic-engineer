@@ -4949,11 +4949,38 @@ components:
       type: object
     EnvironmentDTO:
       additionalProperties: false
+      description: >-
+        One environment in the org's deployment pipeline, in promotion order.
+        `name` is the OpenChoreo Environment's immutable identity; everything
+        else is presentation or flow. `validation` says whether this
+        environment runs a validation step — absent on the object means "off".
       properties:
         name:
           type: string
+          description: Immutable OpenChoreo Environment name. Bindings and cell namespaces reference it.
+        displayName:
+          type: string
+          description: From the openchoreo.dev/display-name annotation; falls back to a titlecased name.
+        isProduction:
+          type: boolean
+          description: From Environment.spec.isProduction. Never inferred from the name.
+        validation:
+          type: string
+          enum: [on, off]
+          description: From the aep.wso2.com/validation annotation. Absent on the object means off.
+        position:
+          type: integer
+          format: int32
+          description: 0-based index in promotion order. The array is already ordered; this is a convenience.
+        promotesTo:
+          type: string
+          description: The next environment's name. Omitted on the last environment, which has no promote step.
       required:
       - name
+      - displayName
+      - isProduction
+      - validation
+      - position
       type: object
     RegisterExternalResourceRequest:
       additionalProperties: false
