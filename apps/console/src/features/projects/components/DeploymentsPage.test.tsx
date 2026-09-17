@@ -1194,6 +1194,14 @@ describe("DeploymentsPage — the page is the pipeline", () => {
       expect(
         screen.queryByText("Available once a version is deployed to Development."),
       ).not.toBeInTheDocument();
+      // Step 2 reads the VERDICT off the same poll, so it withholds too. It
+      // used to state a lifecycle position — "Starts automatically now that
+      // the deployment is live." — over a project whose validation had
+      // already passed or failed, while step 3 below it correctly shimmered.
+      expect(screen.getByTestId("validation-skeleton")).toBeInTheDocument();
+      expect(
+        screen.queryByText("Starts automatically now that the deployment is live."),
+      ).not.toBeInTheDocument();
     },
   );
 

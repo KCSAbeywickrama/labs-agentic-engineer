@@ -262,6 +262,9 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
     : null;
   const promote =
     promoteIfKnown && deployedState.failed ? promoteUnavailable(version) : promoteIfKnown;
+  // Pending and failed alike: neither supports a claim about the deploy
+  // aggregate, and every step that reads it must withhold rather than guess.
+  const statusUnsettled = status.isPending || status.isError;
   const devLines = connectionsKnown
     ? developmentConnections(connections, readiness.data, hold, registeredNames, catalogUnknown)
     : null;
@@ -330,9 +333,16 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
         pending={{
           // The status poll names `version`, and `promote` is null without
           // one: an unsettled poll must not be read as "nothing is deployed".
-          deploy: status.isPending || status.isError,
+          deploy: statusUnsettled,
           connections: dependencies.isPending || (readiness.isPending && !readiness.isError),
-          validation: validation.pending || deployedState.pending,
+          // The VERDICT is `status.data.deploy.validation`, so the status poll
+          // gates step 2 as much as it gates step 3. Neither flag below is
+          // true while the poll is out — `version` is "" so the evidence read
+          // never starts — and without the poll folded in, `validationStep`
+          // read an absent aggregate off a green step 1 and said "Starts
+          // automatically now that the deployment is live." over a project
+          // whose validation had already settled.
+          validation: validation.pending || deployedState.pending || statusUnsettled,
           hold: Boolean(status.data?.build.version) && runs.isPending,
         }}
         validationUnavailable={deployedState.failed}
