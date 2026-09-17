@@ -498,8 +498,10 @@ export function validationStep(
 export interface PromoteStep extends FlowStep {
   /** The button can be pressed: validation allows it and every value is set. */
   enabled: boolean;
-  /** The caption beside the button — why it is disabled, or what it opens. */
-  reason: string;
+  /** The caption beside the button, when it is disabled — why it isn't ready
+   *  yet. Absent once the button is enabled: what pressing it does is the
+   *  button's own label to say, not a caption's. */
+  reason?: string;
   /** Connections still missing a production value, one blocker line each. */
   missing: ConnectionRow[];
 }
@@ -562,7 +564,6 @@ export function promoteStep(
     ...base,
     state: "active",
     enabled: true,
-    reason: "Opens a dialog to confirm the promotion.",
   };
 }
 

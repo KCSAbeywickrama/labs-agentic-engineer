@@ -620,7 +620,7 @@ export function EnvironmentFlowCard({
         ))}
         <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 1 }}>
           {/* A disabled control swallows its title, so the reason lives beside
-              it as a caption the reader always sees. */}
+              it as a caption whenever there is one to give. */}
           <Button
             variant="contained"
             disabled={!promote.enabled}
@@ -632,9 +632,11 @@ export function EnvironmentFlowCard({
           >
             Promote {cardVersion} to {targetLabel}
           </Button>
-          <Typography variant="caption" color="text.secondary">
-            {promote.reason}
-          </Typography>
+          {promote.reason && (
+            <Typography variant="caption" color="text.secondary">
+              {promote.reason}
+            </Typography>
+          )}
         </Stack>
       </FlowStep>
     );

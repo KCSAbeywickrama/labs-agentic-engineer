@@ -809,7 +809,6 @@ describe("DeploymentsPage — promotion", () => {
     expect(
       screen.getByRole("button", { name: /Promote v1 to Production/ }),
     ).toBeEnabled();
-    expect(screen.getByText("Opens a dialog to confirm the promotion.")).toBeInTheDocument();
   });
 
   // ADR-0032: the missing value is step 3's blocker line, with Configure inline;
