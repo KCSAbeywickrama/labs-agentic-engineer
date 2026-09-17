@@ -196,10 +196,19 @@ export function DeploymentEnvironmentPage({
         ? { sha: mergeSha, ...(commitHref ? { href: commitHref } : {}) }
         : undefined;
   const milestoneHref = milestoneUrl(status.data?.repoUrl, build?.milestoneNumber);
-  // The status poll is what names the version. While it is out — or failed —
-  // the entry environment knows of no version, and "Version unknown" would be
-  // a settled claim it cannot make.
-  const statusUnsettled = Boolean(status.isPending || status.isError);
+  // The status poll is what names the version; the version ledger is what
+  // names its milestone and its build stamp. Section 1 OMITS a cell it cannot
+  // resolve, and omission on this page means "this environment has no such
+  // fact" — so an entry environment whose ledger has not answered must not
+  // render as one that has none. Both reads gate the section, exactly as the
+  // ledger read gates section 4.
+  const entry = envInfo?.position === 0;
+  const summaryPending = Boolean(entry && (status.isPending || builds.isPending));
+  // A FAILED read is not a pending one: nothing further is coming on its own,
+  // so it gets an alert with a Retry (below) instead of a skeleton that would
+  // shimmer for ever promising an answer.
+  const statusFailed = Boolean(entry && status.isError);
+  const buildsFailed = Boolean(entry && builds.isError);
   const deployedStamp = runStamp(row?.deployedAt);
   const builtAt = runStamp(build?.completedAt);
   const subtitle = environment
@@ -398,6 +407,23 @@ export function DeploymentEnvironmentPage({
           page shows what did.
         </Alert>
       )}
+      {statusFailed && (
+        // Without the status poll the page cannot name the version running
+        // here — and "Version unknown" is a claim about a settled read, which
+        // this is not.
+        <Alert
+          severity="warning"
+          sx={{ mb: 2 }}
+          action={<Button onClick={() => void status.refetch()}>Retry</Button>}
+        >
+          The project's status could not be read
+          {status.error instanceof Error && status.error.message
+            ? `: ${status.error.message}`
+            : ""}
+          {" — the version running in "}
+          {envLabel} cannot be named until it is.
+        </Alert>
+      )}
       {runs.isError && (
         // When this version is behind the build, its verdict is its own run
         // story's. Without it the chip says so rather than settling on
@@ -416,7 +442,9 @@ export function DeploymentEnvironmentPage({
           <EnvironmentDeploymentSummary
             {...(version ? { version } : {})}
             bound={bound}
-            pending={envInfo?.position === 0 && statusUnsettled}
+            pending={summaryPending}
+            versionUnavailable={statusFailed}
+            ledgerUnavailable={buildsFailed}
             {...(build?.milestoneNumber ? { milestoneNumber: build.milestoneNumber } : {})}
             {...(milestoneHref ? { milestoneHref } : {})}
             {...(commit ? { commit } : {})}
@@ -482,7 +510,7 @@ export function DeploymentEnvironmentPage({
           view={history}
           {...(status.data?.repoUrl ? { repoUrl: status.data.repoUrl } : {})}
           validation={validationView}
-          {...(builds.isError
+          {...(buildsFailed
             ? {
                 failed:
                   builds.error instanceof Error && builds.error.message

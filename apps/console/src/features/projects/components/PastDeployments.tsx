@@ -40,6 +40,11 @@ import { PageSection } from "./PageSection";
 const ROLLBACK_REASON =
   "Not supported yet — re-pinning an environment to an earlier version is not built.";
 
+/** What the `*` on a Deployed or Until stamp means. Spoken as well as
+ *  hovered — a `title` alone is a mouse-only explanation. */
+const INFERRED_HINT =
+  "build finish time — the platform recorded no rollout stamp for this version";
+
 const COLUMNS = [
   { key: "version", label: "Version", width: 96 },
   { key: "milestone", label: "Milestone", width: 130 },
@@ -156,7 +161,10 @@ export function PastDeployments({
             sx={{ px: 2.25, py: 1.25, borderTop: 1, borderColor: "divider" }}
           >
             Every version built lands here, so these rows come from the version ledger — the
-            platform keeps no deployment record of its own.
+            platform keeps no deployment record of its own. A time marked * is when that
+            version's BUILD finished, not when it started serving; a build that completed
+            but whose deploy failed or lagged would still show a time here. A past version's
+            verdict is not loaded — open its build to see it.
           </Typography>
         )}
       </>
@@ -260,29 +268,36 @@ function HistoryTableRow({
             {...(validation.spoken ? { spokenLabel: validation.spoken } : {})}
           />
         ) : (
-          // A superseded version's verdict is not something the console reads:
-          // the deploy aggregate names the version running NOW, and nothing
-          // else records a past one's. "Not recorded" is that, said plainly —
-          // a green tick borrowed from the live row would be a lie.
+          // A verdict for this version EXISTS — it is in the validation runs
+          // for its tag, the same read this page already makes for the live
+          // version. What is true is that the console did not ask: one run
+          // read per listed version is a page-load cost this section does not
+          // pay. So the cell says what it is — not loaded — rather than
+          // claiming the platform recorded nothing, and the footnote says
+          // where to go for it.
           <Typography variant="body2" color="text.secondary">
-            Not recorded
+            Not loaded
           </Typography>
         )}
       </ListingTable.Cell>
 
       <ListingTable.Cell>
-        <Typography variant="body2" color="text.secondary">
-          {runStamp(row.deployedAt) || "—"}
-        </Typography>
+        <Stamp
+          testId="history-deployed"
+          stamp={runStamp(row.deployedAt)}
+          inferred={Boolean(row.deployedAtInferred)}
+        />
       </ListingTable.Cell>
 
       <ListingTable.Cell>
         {row.current ? (
           <StatusChip label="Running now" tone="success" appearance="soft" dot />
         ) : (
-          <Typography data-testid="history-until" variant="body2" color="text.secondary">
-            {runStamp(row.until) || "—"}
-          </Typography>
+          <Stamp
+            testId="history-until"
+            stamp={runStamp(row.until)}
+            inferred={Boolean(row.untilInferred)}
+          />
         )}
       </ListingTable.Cell>
 
@@ -301,6 +316,52 @@ function HistoryTableRow({
         </Box>
       </ListingTable.Cell>
     </ListingTable.Row>
+  );
+}
+
+/**
+ * One time cell. A stamp the platform actually recorded is printed plainly; an
+ * INFERRED one carries a `*` and says what it is — to the eye through the
+ * mark, to a screen reader through the off-screen gloss, and to a mouse
+ * through the tooltip. Without the per-cell mark the column mixes two
+ * different facts in identical type and only a sentence far below distinguishes
+ * them.
+ */
+function Stamp({
+  testId,
+  stamp,
+  inferred,
+}: {
+  testId: string;
+  stamp: string;
+  inferred: boolean;
+}) {
+  if (!stamp) {
+    return (
+      <Typography data-testid={testId} variant="body2" color="text.secondary">
+        —
+      </Typography>
+    );
+  }
+  return (
+    <Typography
+      data-testid={testId}
+      variant="body2"
+      color="text.secondary"
+      {...(inferred ? { title: INFERRED_HINT } : {})}
+    >
+      {stamp}
+      {inferred && (
+        <>
+          <Box component="span" aria-hidden>
+            *
+          </Box>
+          <Box component="span" sx={visuallyHidden}>
+            {` (${INFERRED_HINT})`}
+          </Box>
+        </>
+      )}
+    </Typography>
   );
 }
 

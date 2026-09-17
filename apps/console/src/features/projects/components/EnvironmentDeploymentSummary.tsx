@@ -35,8 +35,18 @@ export interface EnvironmentDeploymentSummaryProps {
   version?: string | undefined;
   /** Something is bound to this environment. */
   bound: boolean;
-  /** The read that names the version is still out — claim nothing yet. */
+  /** The reads behind this section are still out — claim nothing yet. */
   pending: boolean;
+  /** The version ledger FAILED. Without it this section has no milestone and
+   *  no build time to show, and omission on this page means "no such fact" —
+   *  so it says what happened instead of going quiet. The Retry lives on
+   *  section 4, which reads the same query; two of one control on one screen
+   *  is one too many. */
+  ledgerUnavailable?: boolean | undefined;
+  /** The read that names the version FAILED. Not the same as pending (an
+   *  answer is not coming on its own) and not the same as a settled absence
+   *  ("Version unknown" would be a claim off a read that never landed). */
+  versionUnavailable?: boolean | undefined;
   /** The milestone this version's work lived in; only the entry environment
    *  can resolve it, so it is absent everywhere else. */
   milestoneNumber?: number | undefined;
@@ -73,6 +83,8 @@ export function EnvironmentDeploymentSummary({
   version,
   bound,
   pending,
+  versionUnavailable,
+  ledgerUnavailable,
   milestoneNumber,
   milestoneHref,
   commit,
@@ -98,8 +110,14 @@ export function EnvironmentDeploymentSummary({
     {
       label: "Version",
       value: (
-        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-          {version || "Version unknown"}
+        <Typography
+          variant="subtitle2"
+          sx={{ fontWeight: 700 }}
+          {...(versionUnavailable && !version
+            ? { color: "text.secondary", title: "the project's status could not be read" }
+            : {})}
+        >
+          {version || (versionUnavailable ? "Unavailable" : "Version unknown")}
         </Typography>
       ),
     },
@@ -212,6 +230,12 @@ export function EnvironmentDeploymentSummary({
           </Box>
         ))}
       </Box>
+      {ledgerUnavailable && !milestoneNumber && (
+        <Typography variant="caption" color="warning.main">
+          The version ledger could not be read, so this version's milestone and build time are
+          missing — not absent.
+        </Typography>
+      )}
       <Stack
         direction="row"
         spacing={1}

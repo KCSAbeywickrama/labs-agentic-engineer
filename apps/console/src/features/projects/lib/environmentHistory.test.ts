@@ -76,6 +76,23 @@ describe("historyFor", () => {
     expect(view.rows.map((r) => r.milestoneNumber)).toEqual([3, 2, 1]);
   });
 
+  it("marks a superseded row's stamp as the build's, and leaves the live one's alone", () => {
+    // The column carries two different facts — a binding stamp the platform
+    // recorded and a build-finish time inferred from it — and only the mark
+    // tells them apart.
+    const view = historyFor(first, rowRunning("v3"), [b("v1"), b("v2"), b("v3")]);
+    expect(view.rows[0]?.deployedAtInferred).toBeUndefined();
+    expect(view.rows[1]?.deployedAtInferred).toBe(true);
+    expect(view.rows[2]?.deployedAtInferred).toBe(true);
+  });
+
+  it("passes the mark down to the row each inferred stamp closes", () => {
+    const view = historyFor(first, rowRunning("v3"), [b("v1"), b("v2"), b("v3")]);
+    // v2 is closed by the live row's REAL stamp; v1 by v2's inferred one.
+    expect(view.rows[1]?.untilInferred).toBeUndefined();
+    expect(view.rows[2]?.untilInferred).toBe(true);
+  });
+
   it("closes each superseded row at the moment the next one deployed", () => {
     const view = historyFor(first, rowRunning("v3"), [b("v1"), b("v2"), b("v3")]);
     expect(view.rows[1]?.until).toBe(view.rows[0]?.deployedAt);
@@ -102,6 +119,18 @@ describe("historyFor", () => {
     const view = historyFor(first, rowRunning("v9"), [b("v1")]);
     expect(view.rows[0]).toMatchObject({ version: "v9", current: true });
     expect(view.rows.map((r) => r.version)).toEqual(["v9", "v1"]);
+  });
+
+  it("reads the milestone of a running version the ledger has not completed", () => {
+    // A version still building is not a PAST deployment, so it is filtered out
+    // of the fold — but it is what runs here, so it gets its row back. Its
+    // milestone is in the ledger either way, and section 1 reads it from the
+    // same place: the two must not print different answers for one version.
+    const view = historyFor(first, rowRunning("v3"), [
+      b("v1"),
+      b("v3", { status: "in_progress" }),
+    ]);
+    expect(view.rows[0]).toMatchObject({ version: "v3", current: true, milestoneNumber: 3 });
   });
 
   it("gives a later environment only what runs now, and says the rest is unrecorded", () => {

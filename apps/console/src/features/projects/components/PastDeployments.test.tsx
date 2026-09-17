@@ -39,6 +39,7 @@ const entryView: HistoryView = {
       version: "v2",
       milestoneNumber: 2,
       deployedAt: "2026-09-08T16:12:00Z",
+      deployedAtInferred: true,
       until: "2026-09-12T09:40:00Z",
       current: false,
     },
@@ -106,11 +107,80 @@ describe("PastDeployments", () => {
     }
   });
 
-  it("carries the verdict on the running row only, and claims none for a past one", () => {
+  it("carries the verdict on the running row only, and says a past one is not loaded", () => {
     render(<PastDeployments {...props()} />);
     expect(within(screen.getByRole("row", { name: /v3/ })).getByText("validated")).toBeInTheDocument();
+    // NOT "Not recorded": the verdict exists in that tag's validation runs.
+    // What is true is that this page did not ask for it.
+    const past = within(screen.getByRole("row", { name: /v2/ }));
+    expect(past.getByText("Not loaded")).toBeInTheDocument();
+    expect(past.queryByText("Not recorded")).not.toBeInTheDocument();
     expect(
-      within(screen.getByRole("row", { name: /v2/ })).getByText("Not recorded"),
+      screen.getByText(/A past version's verdict is not loaded — open its build to see it/),
+    ).toBeInTheDocument();
+  });
+
+  it("marks an inferred Deployed stamp, and says in the cell what it is", () => {
+    render(<PastDeployments {...props()} />);
+    const live = within(screen.getByRole("row", { name: /v3/ })).getByTestId("history-deployed");
+    const past = within(screen.getByRole("row", { name: /v2/ })).getByTestId("history-deployed");
+    // The live row's stamp is the binding's — printed plainly.
+    expect(live.textContent).not.toContain("*");
+    // The superseded row's is the build's finish time, marked and glossed.
+    expect(past.textContent).toContain("*");
+    expect(past.textContent).toContain("build finish time");
+    expect(past).toHaveAttribute("title", expect.stringContaining("build finish time"));
+  });
+
+  it("leaves an Until stamp unmarked when what closed the row was a real one", () => {
+    render(<PastDeployments {...props()} />);
+    const until = within(screen.getByRole("row", { name: /v2/ })).getByTestId("history-until");
+    expect(until.textContent).not.toContain("*");
+  });
+
+  it("marks an Until stamp that inherited an inferred one", () => {
+    render(
+      <PastDeployments
+        {...props({
+          view: {
+            unrecorded: false,
+            pending: false,
+            rows: [
+              {
+                key: "v2",
+                version: "v2",
+                deployedAt: "2026-09-08T16:12:00Z",
+                deployedAtInferred: true,
+                current: false,
+              },
+              {
+                key: "v1",
+                version: "v1",
+                deployedAt: "2026-09-02T11:05:00Z",
+                deployedAtInferred: true,
+                until: "2026-09-08T16:12:00Z",
+                untilInferred: true,
+                current: false,
+              },
+            ],
+          },
+        })}
+      />,
+    );
+    const until = within(screen.getByRole("row", { name: /v1/ })).getByTestId("history-until");
+    expect(until.textContent).toContain("*");
+    expect(until.textContent).toContain("build finish time");
+  });
+
+  it("names the stamp in the footnote, not just where the rows came from", () => {
+    render(<PastDeployments {...props()} />);
+    expect(
+      screen.getByText(
+        /A time marked \* is when that version's BUILD finished, not when it started serving/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/a build that completed but whose deploy failed or lagged/),
     ).toBeInTheDocument();
   });
 

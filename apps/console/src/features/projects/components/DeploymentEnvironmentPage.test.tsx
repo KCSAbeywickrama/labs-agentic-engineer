@@ -55,6 +55,8 @@ let mockDeploy: DeployStage = {
   validation: "passed",
 };
 let mockDeployments: Deployment[] = [];
+let mockStatusError = false;
+const mockStatusRefetch = vi.fn();
 let mockComponentsPending = false;
 let mockFailedCount = 0;
 
@@ -136,11 +138,17 @@ vi.mock("../api/queries", () => ({
     failedCount: mockFailedCount,
   }),
   useProjectStatus: () => ({
-    data: {
-      repoUrl: "https://github.com/acme/expense.git",
-      build: { version: mockBuildVersion, status: "succeeded" },
-      deploy: mockDeploy,
-    },
+    data: mockStatusError
+      ? undefined
+      : {
+          repoUrl: "https://github.com/acme/expense.git",
+          build: { version: mockBuildVersion, status: "succeeded" },
+          deploy: mockDeploy,
+        },
+    isPending: false,
+    isError: mockStatusError,
+    error: mockStatusError ? new Error("status down") : null,
+    refetch: mockStatusRefetch,
   }),
 }));
 
@@ -173,6 +181,15 @@ vi.mock("../../settings/api/queries", () => ({
   useExternalResources: () => ({ data: [], isPending: false, isError: false, refetch: vi.fn() }),
 }));
 
+type BuildSummary = components["schemas"]["BuildSummary"];
+const LEDGER: BuildSummary[] = [
+  { tag: "v1", milestoneNumber: 3, status: "completed", startedAt: "2026-08-14T16:20:00Z" },
+];
+let mockBuilds: BuildSummary[] = LEDGER;
+let mockBuildsPending = false;
+let mockBuildsError = false;
+const mockBuildsRefetch = vi.fn();
+
 let mockRuns: MilestoneRunView[] = [];
 let mockRunsPending = false;
 let mockRunsError = false;
@@ -180,9 +197,11 @@ let mockBuildVersion = "v1";
 const mockRunsRefetch = vi.fn();
 vi.mock("../../builds/api/queries", () => ({
   useBuilds: () => ({
-    data: [{ tag: "v1", milestoneNumber: 3, status: "completed", startedAt: "2026-08-14T16:20:00Z" }],
-    isPending: false,
-    isError: false,
+    data: mockBuildsPending || mockBuildsError ? undefined : mockBuilds,
+    isPending: mockBuildsPending,
+    isError: mockBuildsError,
+    error: mockBuildsError ? new Error("ledger down") : null,
+    refetch: mockBuildsRefetch,
   }),
   useBuildRuns: () => ({
     data: mockRunsPending || mockRunsError ? undefined : { runs: mockRuns },
@@ -287,6 +306,12 @@ beforeEach(() => {
     validation: "passed",
   };
   mockDeployments = devDeployments();
+  mockStatusError = false;
+  mockStatusRefetch.mockClear();
+  mockBuilds = LEDGER;
+  mockBuildsPending = false;
+  mockBuildsError = false;
+  mockBuildsRefetch.mockClear();
   mockComponentsPending = false;
   mockFailedCount = 0;
   mockRuns = [];
@@ -359,6 +384,103 @@ describe("DeploymentEnvironmentPage", () => {
     // The entry environment's v1 is not this environment's past.
     expect(within(section).queryByText("v1")).not.toBeInTheDocument();
     expect(within(section).getByTestId("history-version").textContent).toBe("Unknown");
+  });
+
+  it("holds section 1 while the version ledger is still out, rather than omitting its cells", () => {
+    // Omission MEANS "this environment has no such fact" on this page, so an
+    // entry environment whose ledger has not answered must not render as one
+    // that has no milestone and no build stamp.
+    mockBuildsPending = true;
+
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
+
+    const deployment = within(screen.getByRole("region", { name: "Deployment" }));
+    expect(deployment.getByTestId("deployment-summary-skeleton")).toBeInTheDocument();
+    expect(deployment.queryByText("Version unknown")).not.toBeInTheDocument();
+  });
+
+  it("says why section 1 has no milestone when the version ledger is down, and offers one Retry", () => {
+    mockBuildsError = true;
+
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
+
+    const deployment = within(screen.getByRole("region", { name: "Deployment" }));
+    // Omission means "no such fact" on this page, so silence here would read
+    // as a later environment's page.
+    expect(
+      deployment.getByText(/milestone and build time are missing — not absent/),
+    ).toBeInTheDocument();
+    // Not a skeleton for ever: nothing is coming on its own.
+    expect(deployment.queryByTestId("deployment-summary-skeleton")).not.toBeInTheDocument();
+    // One Retry for one query — section 4 carries it, and says what failed.
+    const history = within(screen.getByRole("region", { name: "Past deployments" }));
+    expect(history.getByText(/The version ledger could not be read: ledger down/)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mockBuildsRefetch).toHaveBeenCalled();
+  });
+
+  it("says the status read failed, with a Retry, instead of shimmering for ever or guessing", () => {
+    mockStatusError = true;
+
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
+
+    expect(screen.getByText(/The project's status could not be read: status down/)).toBeInTheDocument();
+    const deployment = within(screen.getByRole("region", { name: "Deployment" }));
+    // Neither a permanent skeleton nor "Version unknown" — that is a claim
+    // about a settled read, and this read never landed.
+    expect(deployment.queryByTestId("deployment-summary-skeleton")).not.toBeInTheDocument();
+    expect(deployment.queryByText("Version unknown")).not.toBeInTheDocument();
+    expect(deployment.getByText("Unavailable")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mockStatusRefetch).toHaveBeenCalled();
+  });
+
+  it("keeps a later environment's one true row when the build ledger is down", () => {
+    // Nothing on a later environment is read from the version ledger, so its
+    // failure has nothing to do with what runs there — and must not hide it
+    // behind a sentence claiming otherwise.
+    mockBuildsError = true;
+    mockDeployments = [
+      {
+        componentName: "claims-api",
+        environment: "production",
+        status: "Ready",
+        releaseName: "claims-api-prod",
+        createdAt: "2026-08-15T09:00:00Z",
+      },
+    ];
+
+    render(<DeploymentEnvironmentPage projectName="expense" environment="production" />);
+
+    const section = within(screen.getByRole("region", { name: "Past deployments" }));
+    expect(section.getByText("Running now")).toBeInTheDocument();
+    expect(
+      section.getByText("No earlier deployments are recorded for this environment."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/The version ledger could not be read/)).not.toBeInTheDocument();
+  });
+
+  it("gives one version one milestone, in section 1 and in section 4 alike", () => {
+    // A version still building is filtered out of the past-deployments fold
+    // and comes back as the running row — which used to arrive with no
+    // milestone while section 1 read one from the same ledger row.
+    mockBuilds = [
+      { tag: "v1", milestoneNumber: 3, status: "in_progress", startedAt: "2026-08-14T16:20:00Z" },
+    ];
+
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
+
+    expect(
+      within(screen.getByRole("region", { name: "Deployment" })).getByRole("link", {
+        name: "Milestone #3",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("region", { name: "Past deployments" })).getByRole("link", {
+        name: "Milestone #3",
+      }),
+    ).toBeInTheDocument();
   });
 
   it("gives each component its own way in", () => {

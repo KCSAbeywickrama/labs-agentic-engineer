@@ -108,6 +108,30 @@ describe("EnvironmentDeploymentSummary", () => {
     expect(screen.queryByText("v3")).not.toBeInTheDocument();
   });
 
+  it("says the version is unavailable, not unknown, when the read that names it failed", () => {
+    render(
+      <EnvironmentDeploymentSummary {...props({ version: undefined, versionUnavailable: true })} />,
+    );
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("Version unknown")).not.toBeInTheDocument();
+  });
+
+  it("says the milestone is missing, not absent, when the version ledger failed", () => {
+    render(
+      <EnvironmentDeploymentSummary
+        {...props({ milestoneNumber: undefined, milestoneHref: undefined, builtAt: undefined, ledgerUnavailable: true })}
+      />,
+    );
+    expect(
+      screen.getByText(/milestone and build time are missing — not absent/),
+    ).toBeInTheDocument();
+  });
+
+  it("stays quiet about the ledger once it has answered", () => {
+    render(<EnvironmentDeploymentSummary {...props({ ledgerUnavailable: false })} />);
+    expect(screen.queryByText(/missing — not absent/)).not.toBeInTheDocument();
+  });
+
   it("draws a skeleton while the read that names the version is still out", () => {
     render(<EnvironmentDeploymentSummary {...props({ pending: true })} />);
     expect(screen.getByTestId("deployment-summary-skeleton")).toBeInTheDocument();

@@ -43,9 +43,20 @@ export interface HistoryRow {
   milestoneNumber?: number;
   /** When it started running here. */
   deployedAt?: string;
+  /**
+   * `deployedAt` is the build's FINISH time, not a rollout stamp the platform
+   * recorded — every completed build auto-deploys to this environment, so the
+   * two are close, but they are not the same fact and the table must not print
+   * them as if they were. It can also be plain wrong: a build that completed
+   * and whose deploy then failed or lagged shows a time here for a rollout
+   * that did not happen when it says, or at all.
+   */
+  deployedAtInferred?: boolean;
   /** When it stopped — the moment its successor deployed. Absent on the
    *  running row, which is marked `current` instead. */
   until?: string;
+  /** The stamp that closed this row was itself inferred (see above). */
+  untilInferred?: boolean;
   current: boolean;
 }
 
@@ -112,33 +123,44 @@ export function historyFor(
     const current = Boolean(row?.version) && row?.version === build.tag;
     // The live row is dated by its BINDING — the one deploy stamp the
     // platform actually kept. A superseded row has none, so it is dated by
-    // the build that produced it: every completed build auto-deploys here,
-    // which is the whole reason this environment has a past to list at all.
-    const deployedAt = (current ? row?.deployedAt : undefined) ?? build.completedAt ?? undefined;
+    // the build that produced it, and MARKED as inferred: the column then
+    // carries two different facts, and only the mark tells them apart.
+    const bindingStamp = current ? row?.deployedAt : undefined;
+    const deployedAt = bindingStamp ?? build.completedAt ?? undefined;
     rows.push({
       key: build.tag,
       version: build.tag,
       milestoneNumber: build.milestoneNumber,
       ...(deployedAt ? { deployedAt } : {}),
+      ...(deployedAt && !bindingStamp ? { deployedAtInferred: true } : {}),
       current,
     });
   }
 
-  // A version the ledger no longer lists still IS what runs here.
+  // A version the ledger does not list as completed — one still building, or
+  // one the ledger lost — still IS what runs here. Its milestone comes from
+  // the ledger all the same: the build row exists whatever its status, and
+  // section 1 reads it the same way, so the two must not disagree.
   if (row?.version && !seen.has(row.version)) {
+    const build = builds.find((b) => b.tag === row.version);
     rows.unshift({
       key: row.version,
       version: row.version,
+      ...(build ? { milestoneNumber: build.milestoneNumber } : {}),
       ...(row.deployedAt ? { deployedAt: row.deployedAt } : {}),
       current: true,
     });
   }
 
-  // Each row ran until its successor — the row above it — deployed.
+  // Each row ran until its successor — the row above it — deployed, and
+  // inherits whether that stamp was a real one or an inferred one.
   for (let i = 1; i < rows.length; i += 1) {
-    const closedBy = rows[i - 1]?.deployedAt;
+    const closer = rows[i - 1];
     const self = rows[i];
-    if (self && closedBy) self.until = closedBy;
+    if (self && closer?.deployedAt) {
+      self.until = closer.deployedAt;
+      if (closer.deployedAtInferred) self.untilInferred = true;
+    }
   }
 
   return { rows, unrecorded: false, pending: false };
