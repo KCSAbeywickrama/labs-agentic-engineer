@@ -372,7 +372,7 @@ export function DeploymentVersionPage({
                 {" — each reads Unknown until it is."}
               </Alert>
             )}
-            <ConnectionsTable environment={environment} rows={table} onEdit={setValuesTarget} />
+            <ConnectionsTable environmentLabel={envLabel} rows={table} onEdit={setValuesTarget} />
           </>
         )}
       </Stack>

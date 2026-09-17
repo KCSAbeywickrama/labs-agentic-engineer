@@ -21,7 +21,6 @@ import { Info } from "@wso2/oxygen-ui-icons-react";
 import type { StatusTone } from "../../../components/StatusChip";
 import type { ConnectionTableRow } from "../lib/deploymentDetail";
 import type { ConnectionLine } from "../lib/deploymentFlow";
-import type { EnvironmentKey } from "../lib/deploymentLedger";
 import type { ConnectionRow } from "../lib/promotion";
 
 // The environment's Connections table (ADR-0032, the Deployment Detail
@@ -46,15 +45,16 @@ const TONE: Record<ConnectionLine["state"], StatusTone> = {
 const COLUMNS = "minmax(0, 1.1fr) 140px minmax(0, 1.3fr) 130px 88px";
 
 export function ConnectionsTable({
-  environment,
+  environmentLabel: label,
   rows,
   onEdit,
 }: {
-  environment: EnvironmentKey;
+  /** What to call the environment on screen — the pipeline's display name,
+   *  whatever it called it. */
+  environmentLabel: string;
   rows: ConnectionTableRow[];
   onEdit: (row: ConnectionRow) => void;
 }) {
-  const label = environment === "development" ? "Development" : "Production";
   return (
     <Card variant="outlined">
       <Stack
