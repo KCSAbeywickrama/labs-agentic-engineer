@@ -56,6 +56,14 @@ describe("labelOf", () => {
   });
 });
 
+describe("findEnvironment", () => {
+  it("finds an environment by name, and answers undefined for one the pipeline does not have", () => {
+    const list = [env({ name: "development" }), env({ name: "staging" })];
+    expect(findEnvironment(list, "staging")?.name).toBe("staging");
+    expect(findEnvironment(list, "uat")).toBeUndefined();
+  });
+});
+
 describe("moveEnvironment", () => {
   const list = [env({ name: "a" }), env({ name: "b" }), env({ name: "c" })];
 
