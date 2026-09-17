@@ -116,7 +116,22 @@ import { RegisterFormPage } from "./RegisterFormPage";
 
 function resetState() {
   environmentsState = {
-    data: [{ name: "development" }, { name: "staging-local" }],
+    data: [
+      {
+        name: "development",
+        displayName: "Development",
+        isProduction: false,
+        validation: "off",
+        position: 0,
+      },
+      {
+        name: "staging-local",
+        displayName: "Staging (Local)",
+        isProduction: false,
+        validation: "off",
+        position: 1,
+      },
+    ],
     isLoading: false,
     isError: false,
     refetch: vi.fn(),
