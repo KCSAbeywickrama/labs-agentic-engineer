@@ -49,6 +49,8 @@ export interface AcceptanceStep {
 
 export interface AcceptanceScenario {
   readonly name: string;
+  /** `Scenario`, `Scenario Outline` or `Example` — the keyword as written. */
+  readonly kind: string;
   readonly line: number;
   /** The scenario's OWN tags. Inherited ones are not copied down; see `negative`. */
   readonly tags: readonly string[];
@@ -184,6 +186,7 @@ export function parseFeatureFile(file: string, text: string): AcceptanceFeature 
       const scenarioSteps: AcceptanceStep[] = [];
       owning.scenarios.push({
         name: line.slice(keyword.length).trim(),
+        kind: keyword.slice(0, -1),
         line: index + 1,
         tags: own,
         negative: inherited.includes(NEGATIVE),

@@ -54,20 +54,29 @@ so the deferral has expired.
    denominator. `useValidationEvidence` (the deployments board) drops its oracle
    read entirely for the same reason.
 
-5. **Nothing expands by default, and every row carries a chevron.** Which makes
+5. **One card with a filter toolbar over a scrolling list**, following a UI
+   designer's reference widget. Its geometry is reproduced exactly; its colours
+   go through the theme, because it is light-only and the console is not. Two
+   things in it are ours rather than theirs: `Rule:` survives as a band (their
+   sample data has no rule field, so they modelled generic Gherkin rather than
+   deciding against our dialect, where the rule carries the `@story-N`), and the
+   file path under each title does not (the lexicon forbids quoting a repo path,
+   twice — the counts go there instead).
+
+6. **Nothing expands by default, and every row carries a chevron.** Which makes
    the one clamped line under a non-passed row load-bearing: it is the only thing
    on the page saying why. It is the DECIDING step's `observed` —
    `deciding()` from `validation/report.go`, reused rather than re-derived, so
    the console's summary and a repair issue quote the same step.
 
-6. **`observed` outranks `command`.** The command is clamped to two lines of 11px
+7. **`observed` outranks `command`.** The command is clamped to two lines of 11px
    mono; `observed` gets body type and is never clamped. A real command runs to
    400 characters of `--fn` predicate and is often not a command at all (`n/a`,
    `(already signed in from prior scenario)`), while a blocked `observed` runs
    past 400 characters and is the only thing that lets a person settle "refuses
    correctly" against "broken". It is also why `blocked` files no repair issue.
 
-7. **Per-scenario live progress is not ported; it is retired.** The criterion
+8. **Per-scenario live progress is not ported; it is retired.** The criterion
    rows' live words (`Exploring…`, `Authoring…`, `Healing…`) were fed by
    `work_item` events from Playwright-shaped matchers ADR-0029 deleted, so
    `useValidationLive` folded nothing and `validationLiveLine` returned `""` on
@@ -77,12 +86,18 @@ so the deferral has expired.
 
 ## Consequences
 
-- **`@negative` is inline, not a gutter column.** It began in the column
-  `validation-view` puts its method glyph in, and moved to the end of the
-  sentence so the chevron could take the left column — which every row needs and
-  the mark did not. The cost is real: refusals no longer line up to be scanned,
-  and all-happy-path is the commonest defect in a generated spec. The per-feature
-  count carries the fact; it is no longer visual.
+- **`@negative` is a tag pill, having been a gutter glyph and then an inline
+  one.** The gutter came first, in the column `validation-view` puts its method
+  glyph in; it moved inline so the chevron could take that column, which every
+  row needs and the mark did not; and it is now the pill the reference design
+  already draws for tags. That last move is the one that pays: the pill says
+  "negative" in readable text and doubles as a filter, where a glyph could only
+  be looked at. All-happy-path is the commonest defect in a generated spec, and
+  a reader can now select for it in one click.
+- **The outcome pill keeps a glyph the reference design does not have.**
+  ADR-0016's rule — a mark so the set is told apart at a glance rather than read
+  one at a time — is not something a restyle gets to drop, and four outcomes make
+  it bite harder than the two it was written for.
 - **The Spec pane's `.feature` files are read-only**, via `isStructuredFile`.
   That predicate is the whole fix for the editable-textarea bug.
 - **Reading the whole specification now takes a click per scenario.** An

@@ -123,6 +123,26 @@ describe("the shapes that fool a naive scanner", () => {
     expect(featureScenarios(f!).map((s) => s.scenario.name)).toEqual(["Written as an example"]);
   });
 
+  it("keeps the keyword each scenario was written with", () => {
+    // The row prints it for anything that is not a plain `Scenario`, so an
+    // outline reads as one rather than silently looking like a single case.
+    const f = parseFeatureFile("a.feature", [
+      "Feature: Keywords",
+      "  Rule: A rule",
+      "    Scenario: Written plainly",
+      "      Then it holds",
+      "    Scenario Outline: Written as an outline",
+      "      Then it holds for <case>",
+      "    Example: Written as an example",
+      "      Then it holds",
+    ].join("\n"));
+    expect(featureScenarios(f!).map((s) => s.scenario.kind)).toEqual([
+      "Scenario",
+      "Scenario Outline",
+      "Example",
+    ]);
+  });
+
   it("counts a Scenario Outline once and does not expand its Examples table", () => {
     const f = parseFeatureFile("a.feature", [
       "Feature: Outlines",

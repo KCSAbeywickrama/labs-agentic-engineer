@@ -18,7 +18,7 @@
 
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
 
@@ -1111,9 +1111,12 @@ describe("ValidationPage scenario rows", () => {
   it("chips each scenario with the report's own word", () => {
     renderWithScenarios();
 
-    expect(screen.getByText("Passed")).toBeInTheDocument();
-    expect(screen.getByText("Failed")).toBeInTheDocument();
-    expect(screen.getByText("Unjudgeable")).toBeInTheDocument();
+    // The outcome words appear twice over — once as a filter segment, once as a
+    // row's pill — so the assertion says which it means.
+    const list = within(screen.getByRole("region", { name: "Acceptance scenarios" }));
+    expect(list.getByText("Passed")).toBeInTheDocument();
+    expect(list.getByText("Failed")).toBeInTheDocument();
+    expect(list.getByText("Unjudgeable")).toBeInTheDocument();
   });
 
   // Nothing opens by itself, so the one line under a non-passed row is all the
@@ -1165,8 +1168,9 @@ describe("ValidationPage first attempt in flight", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Every acceptance scenario is being driven against the deployed system.",
     );
-    // Counted off the FEATURE FILES — there is no report to count yet.
-    expect(screen.getByText("3 scenarios")).toBeInTheDocument();
+    // Counted off the FEATURE FILES — there is no report to count yet. Scoped to
+    // the tile, because the view's own filter header prints the same total.
+    expect(within(screen.getByRole("alert")).getByText("3 scenarios")).toBeInTheDocument();
   });
 
   it("keeps the log one click away, and the way back from it", () => {
@@ -1192,7 +1196,7 @@ describe("ValidationPage first attempt in flight", () => {
 
     renderPage(undefined);
 
-    expect(screen.getByText("1 scenario")).toBeInTheDocument();
+    expect(within(screen.getByRole("alert")).getByText("1 scenario")).toBeInTheDocument();
   });
 
   // No feature files at this version — the state its run eventually settles as

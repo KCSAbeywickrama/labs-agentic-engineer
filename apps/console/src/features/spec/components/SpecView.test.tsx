@@ -1954,28 +1954,33 @@ describe("SpecView acceptance criteria", () => {
     expect(screen.getAllByText("Bought items")).toHaveLength(2);
     expect(screen.getByText("A bought item is locked from further edits")).toBeInTheDocument();
     expect(screen.getByText("Editing a bought item is refused")).toBeInTheDocument();
-    // Nothing on this pane takes typing: it is the specification, read-only like
-    // every other structured file.
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    // The document itself takes no typing: it is the specification, read-only
+    // like every other structured file. CollabTextArea rendered it as a
+    // multiline field, so a textarea anywhere on the pane is the regression.
+    expect(document.querySelector("textarea")).toBeNull();
+    // The one input is the view's own filter, which edits nothing.
+    expect(screen.getAllByRole("textbox")).toHaveLength(1);
+    expect(screen.getByRole("textbox")).toHaveAccessibleName("Filter scenarios");
   });
 
   it("opens a scenario's steps on a click, and not before", () => {
     render(<SpecView projectName="proj1" />);
 
-    expect(
-      screen.queryByText('Dev tries to change the quantity of "Eggs" to "2"'),
-    ).not.toBeInTheDocument();
+    // A step's literals are emphasised, which splits the sentence across spans.
+    const step = (text: string) => (_: string, el: Element | null) =>
+      el?.tagName === "SPAN" && el.textContent === text;
+    const when = 'Dev tries to change the quantity of "Eggs" to "2"';
+
+    expect(screen.queryByText(step(when))).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Editing a bought item is refused"));
-    expect(
-      screen.getByText('Dev tries to change the quantity of "Eggs" to "2"'),
-    ).toBeInTheDocument();
+    expect(screen.getByText(step(when))).toBeInTheDocument();
   });
 
-  // Marked in text as well as by the glyph — a Tooltip's aria-label lands on a
-  // bare span, where it is ignored.
-  it("names a refusal for a reader who cannot see the mark", () => {
+  // A refusal is marked by its own tag rather than a glyph, so it reads as text
+  // and doubles as a filter.
+  it("marks a refusal with its tag", () => {
     render(<SpecView projectName="proj1" />);
 
-    expect(screen.getByText("Negative scenario")).toBeInTheDocument();
+    expect(screen.getAllByText("@negative").length).toBeGreaterThan(0);
   });
 });

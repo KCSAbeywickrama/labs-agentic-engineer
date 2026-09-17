@@ -1142,6 +1142,38 @@ referenced by name elsewhere: the PRD links `features/<slug>.md` by its
 filename, so re-casing that one would stop the two matching. A `.feature` slug
 is a capability name nothing else quotes, so it reads as the document tree says.
 
+### Finding one scenario among many
+
+The pane carries a filter toolbar, and its words are the plainest available:
+
+| | |
+|---|---|
+| The search field | *Filter by scenario, step or capability* |
+| What it searches | the capability, the rule, the scenario, its tags and its steps — everything the row shows |
+| The outcome control | **All** plus the outcomes THIS run produced, and nothing else |
+| The tags | the file's own, `@negative` first, then the stories in order |
+| Clearing one | the field's own **×** |
+| Clearing all | **Reset** |
+| Bulk disclosure | **Expand all** / **Collapse all** |
+| While filtering | *12 of 15 scenarios match* |
+| Otherwise | *15 scenarios* |
+| Matching nothing | **No matching scenarios** · *Adjust the search term, the outcome or the tags.* · **Clear filters** |
+
+**A control that cannot change the answer is not offered.** The outcome options
+are derived from the run, so a run with nothing blocked carries no `Blocked`
+segment, and a run where every scenario came out the same way carries no control
+at all. An option whose every use selects the whole list is furniture, and
+furniture teaches a reader to stop looking at the toolbar.
+
+**`No result` is not offered while an attempt is in flight**, because an
+uncovered scenario shows no outcome at all then — the segment would select rows
+displaying nothing.
+
+**"Capability", not "file".** The search placeholder names what the reader sees;
+the thing being searched is the `Feature:` name, which is a capability. Naming
+rule 2 is why the pane shows no filename anywhere, and the same rule picks the
+word here.
+
 ### The four outcome words are the report's own
 
 **Taken verbatim from `report.json`, title-cased, and that is the decision.**

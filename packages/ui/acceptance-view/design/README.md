@@ -65,61 +65,134 @@ two more such pairs, so every outcome carries its own glyph.
 | `unjudgeable` | default | `CircleHelp` | An honest answer about truth living outside the running app — not a defect. |
 | *(absent)* | default | — | `No result`: the console's own word, because the scenario is absent from the report and the report has none for it. |
 
-## The row: chevron first, mark inline, chip flush right
+## One card, a toolbar and a scrolling list
+
+The layout follows a reference widget a UI designer produced. Its geometry is
+reproduced exactly — radii, paddings, sizes, weights — while every colour goes
+through the Oxygen theme, because the reference is light-only and
+`design-system.md` requires both schemes and forbids hex literals. The
+substitutions are one-for-one: `#FF7300 → primary.main`, `#181818 →
+text.primary`, `#9CA3AF → text.secondary`, `#0277BD → info.main` (already
+identical), `#FAFAFA → action.hover`, `rgba(0,0,0,.07) → divider`.
 
 ```text
-›  Editing a bought item is refused ⊖                        [⊘ Blocked]
+┌─ card ──────────────────────────────────────────────────────────┐
+│ [🔍 Filter by scenario, step or capability]     [⤢ Expand all]  │
+│ Filters  [All|Passed|Failed|Blocked]  @negative @story-1 …  Reset│
+│ 12 of 15 scenarios match                                         │
+├──────────────────────────────────────────────────────────────────┤
+│ ▾  Bought items                      @story-6 @story-7   4 of 4  │
+│      3 rules · 4 scenarios · 2 refusals                          │
+│      A bought item is locked from further edits        @story-6  │
+│      ▸ Editing a bought item is refused    @negative  [Blocked] 3│
+│          the Actions cell is a literal em dash and the row …     │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**The card owns the scroll**, not the page, and that is also what keeps the
+toolbar on screen. There is no `position: sticky` anywhere in this console and
+none is needed here.
+
+**`Rule:` survives, as a band inside each capability.** The reference design has
+no rule level at all — its sample data has no rule field, so it models generic
+Gherkin rather than deciding against ours. In this dialect `Rule:` is required,
+carries the `@story-N`, and is enforced to cover every PRD story, so the rule
+sentence is the product statement and the only story traceability there is.
+
+**The filters are derived, never fixed.** Outcome options come from the outcomes
+the report actually contains, so a run with nothing blocked shows no `Blocked`
+segment that could only ever empty the list, and a run where everything came out
+the same way gets no control at all. Tags come from the parsed files, `@negative`
+first and the stories in numeric order (a string sort puts `@story-10` between 1
+and 2). Both mirror the reference's own `ALL_TAGS` derivation.
+
+Three things the filter has to get right, each with a test:
+
+- **Filter on the outcome AS RENDERED.** A scenario the report does not cover has
+  no outcome at all; keying on `report.outcome` would drop every `No result` row
+  out of every segment, `All` included. `BuildsLedger` documents the same trap
+  for its own status filter.
+- **Every selected tag, not any.** Two tags narrow; they do not widen.
+- **No `No result` segment while an attempt is in flight**, because an uncovered
+  row carries no pill then — the segment would select rows showing no state.
+
+**Oxygen's `SearchBar` cannot carry a clear button**, which is why the field is a
+plain `TextField`: `SearchBar` hardcodes `endAdornment` *after* spreading
+`slotProps.input`, so anything passed in is overwritten with `undefined`, and
+the base component that does accept one is not re-exported from the package
+root. Both existing `SearchBar` sites in the console have no clear button, which
+is why nobody had hit it.
+
+The segmented control's `sx` is lifted from `WireframePanel.tsx`, comment
+included: its `height: 28` is exact rather than a floor, because the natural
+height jumps the row.
+
+## The row
+
+```text
+›  Editing a bought item is refused  @negative        [⊘ Blocked]  3 steps
    On a bought row the Edit button is not disabled, it is absent — …
 ```
 
 - **The chevron leads**, on every row including passed ones. It is what a reader
-  reaches for, so it earns the left column — and because every row has one, the
-  column is never slack. It also indents the scenarios under their rule by
-  `INDENT`, which reads as the tree it is.
-- **`INDENT` is derived** from `CHEVRON + the row gap`, so the column and
-  everything hanging off it — the reason line, the steps — cannot drift apart.
-  Same trick `validation-view` uses with `GUTTER`.
-- **The refusal mark closes the sentence.** `@negative` was a gutter glyph first,
-  in the column `validation-view` puts its method glyph in. It moved inline
-  because the gutter was empty on the rows that were not refusals while the
-  chevron had nowhere to go. The cost is real and worth stating: refusals no
-  longer line up in a scannable column, and "everything is a happy path" is the
-  commonest defect in a generated spec. The per-feature count (`3 rules · 4
-  scenarios · 3 refusals`) carries the fact; it is no longer visual.
-- **Tooltip AND visually-hidden text.** A `Tooltip` puts an `aria-label` on a bare
-  span, and an `aria-label` on a roleless element is ignored — the same trap
-  `StatusChip` documents for a Chip with no `onClick`.
+  reaches for, so it earns the left column, and because every row has one the
+  column is never slack. `INDENT` is derived from `CHEVRON + the row gap`, so the
+  column and everything hanging off it cannot drift apart.
+- **A refusal is its own tag**, rendered as the pill the reference design already
+  draws for tags. It began as an inline circled minus with visually-hidden text;
+  the pill says the same thing in readable text AND doubles as a filter, which a
+  glyph never could.
+- **The outcome pill keeps its glyph** although the reference design's is
+  text-only. ADR-0016 requires a mark on an outcome so the set can be told apart
+  at a glance rather than read one at a time, and four outcomes make that bite
+  harder than the two it was written for.
 - **Nothing opens by default.** Which makes the one clamped line under a
   non-passed row load-bearing: it is the only thing on the page saying *why*. It
-  is the **deciding step's** `observed`, and "deciding" is `deciding()` from
-  `validation/report.go` — first step with a nonzero exit, else first with
-  anything observed — so the console's summary and a repair issue quote the same
-  step.
+  is the **deciding step's** `observed` — `deciding()` from
+  `validation/report.go`, reused rather than re-derived, so the console's summary
+  and a repair issue quote the same step.
 
-## The step: three text roles, and only one of them is mono
+## The step box
 
 ```text
-Then   the quantity of "Eggs" is still "1"
-       agent-browser get count "tbody tr"
-       2 — the list holds "Milk" and " milk "                     exit 1
+Given   the list has a bought item named "Eggs"
+        POST /items
+When    Dev tries to change the quantity of "Eggs" to "2"
+        agent-browser snapshot -i
+        the Actions cell is a literal em dash and the row holds zero
+        buttons, inputs or links
+Then    the quantity of "Eggs" is still "1"              not reached
 ```
 
-- **13px** — the step. The specification sentence.
-- **11px mono, clamped to two lines** — the command. A real one runs to 400
-  characters of `--fn` predicate, and it is often not a command at all (`n/a`,
-  `(already signed in from prior scenario)`), so it is never dressed as a
-  terminal. Provenance, not payload.
-- **13px, never clamped** — `observed`. THE payload. A blocked one runs past 400
-  characters and is what a person reads to settle "refuses correctly" against
-  "broken". Caption type would bury the one thing the outcome cannot say.
+The box is mono, and the exception is deliberate:
+
+- **step text** — 13px mono, with its literals emphasised. A Gherkin step is a
+  sentence with data embedded in it, and the data is what makes it falsifiable;
+  the authoring skill insists on concrete values for exactly that reason, so a
+  reader scanning a spec is looking for them.
+- **command** — 11px mono, clamped to two lines, full text on hover. A real one
+  runs to 400 characters of `--fn` predicate, and it is often not a command at
+  all (`n/a`, `(already signed in from prior scenario)`), so it is never dressed
+  as a terminal. Provenance, not payload.
+- **`observed`** — 12px in the **body face**, never clamped. THE payload, and the
+  one thing in the box nobody typed: it is a sentence the agent wrote, and on a
+  blocked step it runs past 400 characters. Prose that long set in a monospace
+  is what makes a log unreadable.
 - **`exit` shows only when present AND nonzero.** Absent is not zero: the Go
-  struct uses `*int` for exactly this, and a blocked `Then` has neither. There is
-  no per-step success tick either — a green mark on every step would put one on
-  the very step that blocked a scenario, whose command succeeded at proving a
-  control was absent.
+  struct uses `*int` for this, and a blocked `Then` has neither. There is no
+  per-step success tick either — a green mark on every step would put one on the
+  very step that blocked a scenario, whose command succeeded at proving a control
+  was absent.
 - **Steps the report does not reach render de-emphasised, `not reached`**, so a
   blocked scenario visibly STOPS partway. That is the story the report tells and
   the raw JSON hides.
+
+**The emphasis is a regex, not a grammar.** `prismjs` ships a complete Gherkin
+language and is already in the tree — but only transitively, through an Oxygen
+component nothing here uses, so reaching for it means promoting a transitive
+dependency to a direct one. It would not help anyway: that grammar is anchored
+on `^Feature:` / `^Scenario:` / `^@tag` and has no notion of a bare step line,
+which is all `tokenize.ts` is ever handed.
 
 ## The join is identity, never the line
 
@@ -158,6 +231,11 @@ before.
 `AcceptanceView.test.tsx` covers the rendering in-package (jsdom via a per-file
 `// @vitest-environment jsdom` pragma, matching `validation-view`);
 `parseFeature.test.ts` pins the agreement with the checker; `report.test.ts`
-covers the tolerant parse and `decidingStep`; `outcomes.test.ts` the vocabulary.
+covers the tolerant parse and `decidingStep`; `outcomes.test.ts` the vocabulary;
+`tokenize.test.ts` proves the emphasis is lossless, since anything that failed to
+reassemble would be a step the reader is quietly shown wrong; `filter.test.ts`
+covers the three-way narrowing on its own, because a combination of filters is
+where this sort of thing goes wrong and a component test is a poor place to find
+out.
 `vitest.config.ts` scopes `include` to `src/` because `build` compiles the tests
 into `dist/` and the default glob would run those stale copies.
