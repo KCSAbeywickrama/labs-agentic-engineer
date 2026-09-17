@@ -400,12 +400,8 @@ export function ValidationPage({
 
   // The agent's own line, and now the only one.
   //
-  // The derived fallback that used to sit under this ("Checking the criteria, N of
-  // M answered…") counted criterion rows moving, and no row moves any more: the
-  // per-criterion work_item events it folded came from Playwright-shaped matchers
-  // the runner no longer has, so it resolved to "" on every run. Deleted rather
-  // than re-derived for scenarios, because per-scenario progress needs a source
-  // first — ADR-0029 already records that redesign as its own piece of work.
+  // There is no derived fallback beneath it: nothing emits per-scenario progress
+  // (ADR-0029).
   //
   // What survives is strictly the better evidence anyway: it comes from inside the
   // run, names what is happening rather than inferring it from which rows moved,

@@ -47,12 +47,11 @@ so the deferral has expired.
    four outcomes, ADR-0016's rule (two outlined chips must not differ by hue
    alone) now applies to every one of them.
 
-4. **The tally comes back, and it needs no join.** `ValidationPage` hardcoded
-   `undefined` because criteria and scenarios share no id. True of criteria;
-   false here — the acceptance run reports one entry per scenario in the feature
-   files, and its own checker fails the run otherwise, so the report is its own
-   denominator. `useValidationEvidence` (the deployments board) drops its oracle
-   read entirely for the same reason.
+4. **The tally needs no join.** The acceptance run reports one entry per
+   scenario in the feature files, and its own checker fails the run otherwise,
+   so the report is its own denominator — where criteria and scenarios shared no
+   id. `useValidationEvidence` (the deployments board) reads no oracle for the
+   same reason.
 
 5. **One card with a filter toolbar over a scrolling list**, following a UI
    designer's reference widget. Its geometry is reproduced exactly; its colours
@@ -99,14 +98,10 @@ so the deferral has expired.
 
 ## Consequences
 
-- **`@negative` is a tag pill, having been a gutter glyph and then an inline
-  one.** The gutter came first, in the column `validation-view` puts its method
-  glyph in; it moved inline so the chevron could take that column, which every
-  row needs and the mark did not; and it is now the pill the reference design
-  already draws for tags. That last move is the one that pays: the pill says
-  "negative" in readable text and doubles as a filter, where a glyph could only
-  be looked at. All-happy-path is the commonest defect in a generated spec, and
-  a reader can now select for it in one click.
+- **`@negative` is a tag pill, not a glyph.** The pill says "negative" in
+  readable text and doubles as a filter, where a glyph could only be looked at.
+  All-happy-path is the commonest defect in a generated spec, and a reader can
+  select for it in one click.
 - **The view says nothing about the run itself.** No tally, no commit, no
   deployed URL, no isolation statement — the run's identity belongs to the page
   that owns the run, and the tally in particular was a rule this package broke

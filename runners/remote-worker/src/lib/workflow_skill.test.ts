@@ -610,7 +610,6 @@ test("a skill's references, assets and scripts come along", async () => {
       path.join("aep", "references", "external-dependency-research.md"),
       path.join("aep", "references", "component-contract.md"),
       path.join("aep", "references", "workload-and-wiring.md"),
-      path.join("acceptance-run", "references", "agent-browser-host.md"),
       // The false-pass guard. It ships INSIDE the skill precisely so the mirror
       // carries it into the project clone — a validation pod has no checkout of
       // this repo, so a guard left at the repo root is a guard that never runs.

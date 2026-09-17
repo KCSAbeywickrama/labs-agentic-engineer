@@ -643,13 +643,7 @@ func TestValidationTaskLifecycle_AClosedTaskIsReopenedNotRefiled(t *testing.T) {
 }
 
 // The close comment is the ONLY edge between a repair issue and the run that
-// found it, and it points this way on purpose.
-//
-// The obvious alternative — `Part of #N` in each repair body — aims a coding
-// agent at the validation task, whose body is a brief for a different agent
-// ("drive every scenario", "do not modify `specs/`"). Named from here instead,
-// GitHub's own cross-reference puts the backlink in each repair issue's timeline,
-// where a person sees it and `gh issue view --comments` does not return it.
+// found it, and it points this way on purpose (ADR-0029).
 func TestCloseValidationIssue_NamesTheRepairWorkTheAttemptFiled(t *testing.T) {
 	ctx := context.Background()
 

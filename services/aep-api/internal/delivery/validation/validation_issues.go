@@ -204,13 +204,8 @@ func (s *Service) CloseValidationIssue(ctx context.Context, orgID, projectID str
 // to be able to tell them apart.
 //
 // Naming the repair issues here is the ONLY edge between a repair issue and the
-// run that found it, and it is deliberately on this end. Writing `Part of #N`
-// into a repair body would point a coding agent at THIS issue, whose body is a
-// task brief for a different agent — "drive every scenario", "do not modify
-// `specs/`" — so following the link would cost it context that is actively wrong
-// for its job. Named from here instead, GitHub's own cross-reference puts a
-// backlink in each repair issue's TIMELINE, which a person sees and
-// `gh issue view --comments` does not return.
+// run that found it, and it is deliberately on this end rather than in the repair
+// bodies — ADR-0029, "One defect, one issue".
 func closeComment(verdict string, repairs []int) string {
 	if verdict == "" {
 		return "Closing this validation task: the attempt ended without reaching a verdict. " +

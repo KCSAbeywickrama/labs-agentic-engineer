@@ -208,10 +208,9 @@ const FLOW_SUPPORTING_SKILLS: Record<string, string[]> = {
   // cached read costs a tenth of a re-prefill. Org-authored design skills stay
   // lazy: this map is flow wording and cannot know a given org's catalog.
   //
-  // Two oracles while the Gherkin path is under trial: `validation-criteria`
-  // writes the JSON criteria list, `acceptance-criteria` writes the Gherkin
-  // features. Both are authored from the PRD alone; only the features are
-  // executed. Deleting either one isolates the other path.
+  // Two oracles: `validation-criteria` writes the JSON criteria list,
+  // `acceptance-criteria` writes the Gherkin features. Both are authored from
+  // the PRD alone; only the features are executed (ADR-0029).
   design: ["grilling", "cell-design", "architecture", "security-design", "openapi-conventions", "wireframes", "validation-criteria", "acceptance-criteria"],
 };
 

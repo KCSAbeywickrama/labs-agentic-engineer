@@ -15,12 +15,21 @@ The incumbent validation phase compiles each `method: e2e` criterion from
 row joined to a spec file by an id — is the thing this branch removes.
 
 A playground experiment measured the alternative on one app, four ways (two oracles × two execution
-methods). Two results shaped this decision. The **oracle**, not the execution method, was what moved
-the verdicts: the same app judged against Gherkin scenarios and against the JSON criteria disagreed,
-while the same oracle executed two different ways agreed. And the agent path was about **40% cheaper
-on a first run** (9.6 min / 78k tokens against 16.4 / 129k) and roughly **4.5× more expensive by run
-eight**, because a compiled suite is authored once and replayed while an agent re-derives its path
-every time.
+methods), and established the result that shaped this decision: the **oracle**, not the execution
+method, is what moves the verdicts. The same app judged against Gherkin scenarios and against the JSON
+criteria disagreed, while the same oracle executed two different ways agreed.
+
+The economics were then measured on the platform itself, on two apps with both oracles minted blind in
+one design turn and both arms grading the same deployed artifact. On the larger app the agent path was
+**43% cheaper and 52% faster**, and — the result that matters more — its cost is **flat against oracle
+size** where the compiled path's scales with it: the agent arm grew 0.4% while its oracle nearly
+doubled, against 89% for the compiled arm, which writes a spec file per criterion. Coverage was equal
+to within one criterion.
+
+**Re-run economics remain unmeasured on both sides.** An earlier draft of this ADR asserted the agent
+path was "4.5× more expensive by run eight" on the reasoning that a compiled suite is authored once and
+replayed. That was an assumption presented as a finding, and it does not survive its own premise: the
+compiled path heals and rewrites its specs between runs, so "authored once" describes neither arm.
 
 ## Decision
 
@@ -131,7 +140,7 @@ names rather than one it introduces.
 ## Consequences
 
 - **The console renders the report raw.** *Superseded — the shaped view landed once there were real
-  reports to design against; see `apps/console/design/decisions/ADR-0031`.* The reasoning stands as
+  reports to design against; see `apps/console/design/decisions/ADR-0031-the-report-annotates-the-specification.md`.* The reasoning stands as
   the reason it waited: the acceptance run answers per scenario and the criteria are a different
   decomposition of the same requirement, so there is no id to join them on, and passing the report
   through the criteria-joining path would have rendered `Not validated` on every row — a verdict,

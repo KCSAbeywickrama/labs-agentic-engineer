@@ -142,11 +142,12 @@ is a happy path. A rule that only says what works has not been specified: the
 interesting half of `Only one round may be open at a time` is the second round
 being refused.
 
-For every rule, ask what it forbids, what it limits, and what it does when the
-input is wrong. Write those scenarios — but only where the requirement actually
-says so. A rule that genuinely refuses nothing (`the opener sees the
-consolidated order`) gets no refusal invented for it; inventing one is a worse
-defect than omitting it.
+For every rule, ask what it forbids, what it limits, who it shuts out — a
+capability the requirement puts behind sign-in has a case for someone who is not
+signed in — and what it does when the input is wrong. Write those scenarios — but
+only where the requirement actually says so. A rule that genuinely refuses
+nothing (`the opener sees the consolidated order`) gets no refusal invented for
+it; inventing one is a worse defect than omitting it.
 
 **Assert what the refusal DOES, not how the user hears about it.** A `Then`
 written as "is told X" presumes the product answers a rejected action with a

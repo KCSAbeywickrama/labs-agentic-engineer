@@ -58,14 +58,12 @@ type reportScenario struct {
 	Evidence reportEvidence `json:"evidence"`
 }
 
-// reportEvidence is the failure-time capture. It is the whole reason an
-// agent-driven run can say more than a compiled suite: the suite records that an
-// assertion lost, this records what the system was doing when it lost.
+// reportEvidence is the failure-time capture: what the system was doing when the
+// assertion lost.
 //
 // Network is the discriminating half. A request that left and came back 201 with
 // the page unchanged is a different defect from no request at all, and they need
-// opposite fixes — which is the distinction a repair agent could not previously
-// make from anything in the issue.
+// opposite fixes.
 //
 // An EMPTY Network slice is evidence: nothing left the page. An absent one is a
 // hole, and the checker refuses it. NotCaptured is the honest escape — set when
@@ -99,10 +97,9 @@ type reportStep struct {
 	Observed string `json:"observed"`
 }
 
-// id is the scenario's natural key. Gherkin carries no ids, and a tag scheme was
-// considered and rejected as machinery for this phase, so identity is what the
-// scenario IS. ASCII-joined on purpose: this string becomes a GitHub dedupe
-// label, which issue_service.go normalises and — past 50 chars — hashes.
+// id is the scenario's natural key: Gherkin carries no ids, so identity is what
+// the scenario IS. ASCII-joined on purpose — this string becomes a GitHub dedupe
+// label, which issue_service.go normalises and, past 50 chars, hashes.
 func (s reportScenario) id() string {
 	parts := make([]string, 0, 3)
 	for _, p := range []string{s.Feature, s.Rule, s.Scenario} {
@@ -121,16 +118,10 @@ func (s reportScenario) id() string {
 // and the deciding step has to be MARKED within it — and two steps of one
 // scenario can carry the same text.
 //
-// **`Then` is preferred over position, and that is load-bearing.** Only a `Then`
-// decides anything; a `When` may record what it saw on the way past. Taking the
-// first observation of any keyword let a `When` win on position alone — measured
-// on a real run, where every step exited 0 (the assertion was a value-returning
-// command) and the `When` had noted the POST it made, so the scenario was
-// reported as settled two steps before the one that actually lost. The marker
-// went on the wrong line, and ReportDigest — which fingerprints this step's
-// observation — described the request rather than the assertion, so a repair
-// that changed what the `Then` saw would have digested identically and stopped
-// the repair chain as "the same answer twice".
+// **A `Then` wins over position.** Only a `Then` decides anything; a `When` may
+// record what it saw on the way past, and taking the first observation of any
+// keyword let one win on position alone — which also fed ReportDigest the
+// request rather than the assertion.
 func (s reportScenario) deciding() int {
 	for i, st := range s.Steps {
 		if st.Exit != nil && *st.Exit != 0 {
@@ -188,10 +179,9 @@ type FailedScenario struct {
 	// Steps is the scenario's own Given/When/Then AS EXECUTED — every step, with
 	// the command that ran it and what that command said.
 	//
-	// Every step, not just the one that settled it. Only the whole trace
+	// Every step, not just the one that settled it: only the whole trace
 	// distinguishes "the `When` never happened" from "the `When` happened and the
-	// app disagreed with the `Then`", and those need opposite fixes. The report
-	// has carried all of it since schemaVersion 2; this used to discard it.
+	// app disagreed with the `Then`", and those need opposite fixes.
 	Steps []FailedStep
 	// Deciding indexes the step that settled the scenario, or -1.
 	Deciding int

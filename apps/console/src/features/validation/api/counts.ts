@@ -29,10 +29,8 @@ import { useValidationReport } from "./queries";
 // validation cycle's commit pinning the report read — packaged as one hook so the
 // two surfaces cannot resolve the run differently.
 //
-// It no longer reads the oracle. The acceptance report carries one entry per
-// scenario in the feature files (its own checker fails the run otherwise), so it
-// is its own denominator; the criteria path needed the oracle because a criterion
-// could be authored and never tested.
+// The report is its own denominator: it carries one entry per scenario in the
+// feature files, and its checker fails the run otherwise.
 
 // The states whose counts inform: a report was (or should have been) joined.
 //

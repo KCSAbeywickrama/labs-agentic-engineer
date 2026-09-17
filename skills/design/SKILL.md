@@ -149,10 +149,10 @@ turn — apply them directly, and load one only if you find you do not have it.
    - `validation-criteria` → `specs/validation/validation-criteria.json`
    - `acceptance-criteria` → `specs/acceptance/<slug>.feature`
 
-   Two documents, deliberately: the same requirement decomposed two ways while
-   the Gherkin path is under trial. Both are authored from the PRD alone, so
-   they are independent of each other and of everything above — emit them in
-   one step. A design that produced only one of them is incomplete.
+   Two documents, deliberately: the same requirement decomposed two ways. Both
+   are authored from the PRD alone, so they are independent of each other and of
+   everything above — emit them in one step. A design that produced only one of
+   them is incomplete.
 
 Order binds only where a step reads an earlier one's result: the cell before
 enrichment (the platform scaffolds each design.json from it),

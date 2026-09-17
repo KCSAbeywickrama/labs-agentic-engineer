@@ -294,18 +294,9 @@ func DedupeKeyUnwiredEndpoints(component string, missing []string) string {
 }
 
 // DedupeKeyValidationFix identifies the repair issue for one failed scenario, by
-// the SCENARIO alone. A defect has one identity, and every attempt that meets it
-// again resolves onto the same open issue rather than filing a second.
-//
-// The attempt used to be part of this key, to stop "the closed issue the last
-// repair produced" from suppressing a scenario that failed again. That hazard
-// does not exist: the host only ever dedupes onto an issue whose state is OPEN
-// (sourcecontrol/issue_service.go), so a closed repair issue suppresses nothing
-// and the next attempt files fresh work either way. What the attempt DID buy was
-// a duplicate — a second open issue for one defect — which is worse than noise
-// here, because the no-progress rule reads working-set SIZES: a scenario that
-// keeps failing would grow the set and read as negative progress. It is also
-// what supersede then carries forward, twice, into the next version.
+// the SCENARIO alone: a defect has one identity, so every attempt that meets it
+// again resolves onto the same open issue rather than filing a second beside it.
+// Why not the attempt too: ADR-0029, "One defect, one issue".
 func DedupeKeyValidationFix(scenarioID string) string {
 	return fmt.Sprintf("aep validation-fix %s", scenarioID)
 }
