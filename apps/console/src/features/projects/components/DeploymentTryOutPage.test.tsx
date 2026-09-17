@@ -88,8 +88,8 @@ vi.mock("../api/queries", () => ({
   // serves. Two environments here because that is the pipeline these tests
   // describe, not because the console knows only two.
   useEnvironments: () => ({
-    data: mockEnvironmentsError ? undefined : mockEnvironments,
-    isPending: false,
+    data: mockEnvironmentsError || mockEnvironmentsPending ? undefined : mockEnvironments,
+    isPending: mockEnvironmentsPending,
     isError: mockEnvironmentsError,
     error: mockEnvironmentsError ? new Error("gateway down") : null,
     refetch: mockEnvironmentsRefetch,
@@ -273,10 +273,12 @@ const mockEnvironments = [
   },
 ];
 let mockEnvironmentsError = false;
+let mockEnvironmentsPending = false;
 const mockEnvironmentsRefetch = vi.fn();
 
 beforeEach(() => {
   mockEnvironmentsError = false;
+  mockEnvironmentsPending = false;
   mockEnvironmentsRefetch.mockClear();
   mockDeploy = {
     version: "v1",
@@ -590,5 +592,21 @@ describe("DeploymentTryOutPage — the environments read", () => {
     expect(screen.queryByText("No environment called production")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(mockEnvironmentsRefetch).toHaveBeenCalled();
+  });
+
+  it("does not accuse a real environment of not existing while the environments read is still pending", () => {
+    // "staging" is not in the ready-state pipeline (development, production) —
+    // if the pending guard were dropped, the segment would read as unknown
+    // the instant this query starts, on every slow connection.
+    mockEnvironmentsPending = true;
+
+    render(<DeploymentTryOutPage projectName="expense" environment="staging" />);
+
+    expect(screen.queryByText("No environment called staging")).not.toBeInTheDocument();
+    // Taken at its word while the list is still out: the page falls through to
+    // its normal "nothing bound yet" reading of the segment, not a dead end.
+    expect(
+      screen.getByText(/Nothing deployed here yet — promote a validated version/),
+    ).toBeInTheDocument();
   });
 });
