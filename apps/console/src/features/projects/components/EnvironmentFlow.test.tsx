@@ -146,7 +146,7 @@ function props(
     componentTypes: new Map([["api", "service"]]),
     connections: [],
     promote: target ? promoteStep(deploy, target, [], {}, null, "v4") : null,
-    pending: { connections: false, validation: false, hold: false },
+    pending: { deploy: false, connections: false, validation: false, hold: false },
     onPromote: vi.fn(),
     onTryOut: vi.fn(),
     onConfigureConnection: vi.fn(),
@@ -166,6 +166,72 @@ describe("EnvironmentFlow", () => {
     const staging = within(screen.getByTestId("environment-card-staging"));
     expect(staging.queryByText("Validation")).not.toBeInTheDocument();
     expect(staging.getByText("Promote to Production")).toBeInTheDocument();
+  });
+
+  // The numbers are a CONSEQUENCE of stepsFor, not a constant: Staging skips
+  // validation, so its promote is step 2 where Development's is step 3.
+  it("numbers each card's steps off its own environment, not off a fixed three", () => {
+    render(<EnvironmentFlow {...props(threeEnvs)} />);
+    const development = within(screen.getByTestId("environment-card-development"));
+    expect(development.getByLabelText(/^Step 2, Validation/)).toBeInTheDocument();
+    expect(development.getByLabelText("Step 3, Promote to Staging")).toBeInTheDocument();
+    const staging = within(screen.getByTestId("environment-card-staging"));
+    expect(staging.getByLabelText("Step 2, Promote to Production")).toBeInTheDocument();
+    expect(staging.queryByLabelText(/^Step 3/)).not.toBeInTheDocument();
+  });
+
+  // The version comes off the status poll, a read the flow does not make and
+  // must not reason from the absence of: a null promote while it is out is
+  // "not known yet", never "nothing is deployed here".
+  it("withholds the promote step while the read that names the version is out", () => {
+    const base = props(threeEnvs);
+    render(
+      <EnvironmentFlow
+        {...base}
+        version=""
+        promote={null}
+        pending={{ ...base.pending, deploy: true }}
+      />,
+    );
+    const development = within(screen.getByTestId("environment-card-development"));
+    expect(development.getByTestId("promote-skeleton")).toBeInTheDocument();
+    expect(
+      development.queryByText(/Available once a version is deployed/),
+    ).not.toBeInTheDocument();
+  });
+
+  // A populated target is not a running one — a Staging whose bindings all
+  // failed must not be reported as running a version of its own.
+  it("does not call a failed target a running one", () => {
+    const base = props(threeEnvs);
+    const failing = new Map(board());
+    failing.set("staging", [
+      {
+        componentName: "api",
+        displayName: "API",
+        kind: "error" as const,
+        deployment: {
+          componentName: "api",
+          environment: "staging",
+          status: "DeploymentFailed",
+          createdAt: "2026-09-16T10:00:00Z",
+        },
+      },
+    ]);
+    render(
+      <EnvironmentFlow
+        {...base}
+        rows={environmentRows(failing, threeEnvs, base.deploy)}
+        promote={null}
+      />,
+    );
+    const development = within(screen.getByTestId("environment-card-development"));
+    expect(
+      development.queryByText("Staging runs a version of its own."),
+    ).not.toBeInTheDocument();
+    expect(
+      development.getByText("Staging has a deployment of its own — Deploy failed."),
+    ).toBeInTheDocument();
   });
 
   it("gives the last environment no promote step", () => {

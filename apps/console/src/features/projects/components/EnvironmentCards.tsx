@@ -463,6 +463,12 @@ export function EnvironmentCards({
 }
 
 // ── One environment, as one item in the horizontal flow ─────────────────────
+//
+// NOT RENDERED BY ANY PAGE YET. `EnvironmentFlow` is its only consumer and
+// nothing imports that but its test; the LEGACY two-card `EnvironmentCards`
+// above is what the Deployments page still draws. Task 9 wires the flow into
+// the page and deletes the legacy half — until then, a change to the card a
+// reader sees goes above, not here.
 
 /**
  * The reads the Deployments page makes once and the cards divide between
@@ -485,8 +491,31 @@ export interface EnvironmentFlowDetail {
   /** The entry environment's promote step; null when there is nothing to
    *  promote (no version yet, or the target already runs one). */
   promote: PromoteStep | null;
-  pending: { connections: boolean; validation: boolean; hold: boolean };
+  /** Which of the reads behind the steps are still out — or failed, which
+   *  supports no claim either. `deploy` is the status poll that names
+   *  `version`: while it is unsettled the card knows of no version, and a
+   *  step that reasoned from its absence would deny a live deployment. */
+  pending: { deploy: boolean; connections: boolean; validation: boolean; hold: boolean };
   validationUnavailable?: boolean | undefined;
+}
+
+/**
+ * The environment this card promotes INTO, as its own row describes it.
+ *
+ * `state` is deliberately not "a binding exists": a target whose components
+ * all failed, or were undeployed, is populated too, and calling that "runs a
+ * version" is the same mistake `productionLiveSentence` documents — a settled
+ * claim the fold does not support. Only a `success` fold is RUNNING.
+ */
+export interface FlowTarget {
+  /** What to call it on screen — its displayName, never a console constant. */
+  label: string;
+  /** empty: nothing is bound there. running: its fold is green. populated:
+   *  something is bound but the fold is not green (failed, converging,
+   *  undeployed) — there is something there, but not a running version. */
+  state: "empty" | "running" | "populated";
+  /** Its own status word, for the populated-but-not-running sentence. */
+  statusLabel: string;
 }
 
 export interface EnvironmentFlowCardProps {
@@ -499,10 +528,8 @@ export interface EnvironmentFlowCardProps {
   /** This is the pipeline's entry environment: the one the deploy aggregate,
    *  the validation evidence, the connections read and the hold speak for. */
   entry: boolean;
-  /** What to call `env.promotesTo` on screen; "" on the last environment. */
-  targetLabel: string;
-  /** The promotion target already runs something. */
-  targetRunning: boolean;
+  /** The environment `env.promotesTo` names; null on the last environment. */
+  target: FlowTarget | null;
   detail: EnvironmentFlowDetail;
   /** Open this environment's page. */
   onOpen: (environment: string) => void;
@@ -524,8 +551,7 @@ export function EnvironmentFlowCard({
   env,
   row,
   entry,
-  targetLabel,
-  targetRunning,
+  target,
   detail,
   onOpen,
   onPromote,
@@ -724,6 +750,7 @@ export function EnvironmentFlowCard({
 
     // Promote. The step's TITLE names the platform's next environment, never
     // a word the console chose.
+    const targetLabel = target?.label ?? "";
     const title = `Promote to ${targetLabel}`;
     if (!entry) {
       return (
@@ -740,7 +767,13 @@ export function EnvironmentFlowCard({
         />
       );
     }
-    if (pending.connections || pending.validation) {
+    // `pending.deploy` belongs here as much as the other two: `promote` is
+    // null while the card has no VERSION, and the version comes off the status
+    // poll. Without this gate an unsettled poll turned a null promote into
+    // "Available once a version is deployed to Development." directly beneath
+    // "1 of 1 components live" — the board denying a deployment it had just
+    // drawn.
+    if (pending.deploy || pending.connections || pending.validation) {
       return (
         <FlowStep
           key="promote"
@@ -754,16 +787,23 @@ export function EnvironmentFlowCard({
       );
     }
     if (!promote) {
+      // Nothing to promote, for one of two settled reasons. Both are read off
+      // rows the page already has — neither is a guess, and the version read
+      // behind the second has settled by the time this line is reached.
+      const state = target?.state ?? "empty";
       return (
         <FlowStep
           key="promote"
           step={step.index}
           view={{
-            state: targetRunning ? "settled" : "pending",
+            state: state === "empty" ? "pending" : "settled",
             title,
-            note: targetRunning
-              ? `${targetLabel} runs a version of its own.`
-              : `Available once a version is deployed to ${row.label}.`,
+            note:
+              state === "running"
+                ? `${targetLabel} runs a version of its own.`
+                : state === "populated"
+                  ? `${targetLabel} has a deployment of its own — ${target?.statusLabel}.`
+                  : `Available once a version is deployed to ${row.label}.`,
           }}
           last={isTrailing}
           pinned={isTrailing}

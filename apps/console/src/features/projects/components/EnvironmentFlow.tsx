@@ -21,7 +21,11 @@ import { Box, Skeleton, Stack } from "@wso2/oxygen-ui";
 import { ArrowRight } from "@wso2/oxygen-ui-icons-react";
 import type { EnvironmentRow } from "../lib/deploymentLedger";
 import { findEnvironment, labelOf, type EnvironmentInfo } from "../lib/environments";
-import { EnvironmentFlowCard, type EnvironmentFlowDetail } from "./EnvironmentCards";
+import {
+  EnvironmentFlowCard,
+  type EnvironmentFlowDetail,
+  type FlowTarget,
+} from "./EnvironmentCards";
 import type { ConnectionRow } from "../lib/promotion";
 
 // The Deployments board as the PIPELINE it actually is: one full-detail card
@@ -65,6 +69,31 @@ export interface EnvironmentFlowProps extends EnvironmentFlowDetail {
   onConfigurePromoteTarget: (row: ConnectionRow) => void;
 }
 
+/** The promotion target as its own row describes it — `null` on the last
+ *  environment, and on a `promotesTo` the served list does not name (which is
+ *  a pipeline the console cannot follow, not an empty environment). */
+function flowTarget(
+  environments: EnvironmentInfo[],
+  rows: EnvironmentRow[],
+  promotesTo: string | undefined,
+): FlowTarget | null {
+  if (!promotesTo) return null;
+  const env = findEnvironment(environments, promotesTo);
+  const row = rows.find((r) => r.environment === promotesTo);
+  if (!row) return null;
+  return {
+    label: labelOf(env, promotesTo),
+    // A binding is not a running version: a failed, converging or undeployed
+    // target is populated too (see `productionLiveSentence`).
+    state: !row.cards.some((c) => c.deployment)
+      ? "empty"
+      : row.status.tone === "success"
+        ? "running"
+        : "populated",
+    statusLabel: row.status.label,
+  };
+}
+
 export function EnvironmentFlow({
   projectName,
   environments,
@@ -99,8 +128,12 @@ export function EnvironmentFlow({
         // A row whose environment the list does not describe has no steps to
         // derive — `stepsFor` is the platform's answer, not a guess.
         if (!env) return null;
-        const target = env.promotesTo;
-        const next = rows[index + 1];
+        // The target is the environment `promotesTo` NAMES — not the next row
+        // along. They agree on a linear pipeline, but this file's whole
+        // contract is never assuming which environment is which, and a
+        // positional neighbour would let the card name one environment and
+        // report another's occupancy.
+        const target = flowTarget(environments, rows, env.promotesTo);
         return (
           <Fragment key={row.environment}>
             {index > 0 && (
@@ -116,11 +149,13 @@ export function EnvironmentFlow({
                 projectName={projectName}
                 env={env}
                 row={row}
-                entry={index === 0}
-                targetLabel={
-                  target ? labelOf(findEnvironment(environments, target), target) : ""
-                }
-                targetRunning={Boolean(next?.cards.some((c) => c.deployment))}
+                // The ENTRY environment is `position === 0` — the same test
+                // `deploymentLedger` uses to decide which row the deploy
+                // aggregate answers for. Two definitions of "entry" would let
+                // a card read the aggregate's version under a heading that
+                // says a different environment.
+                entry={env.position === 0}
+                target={target}
                 detail={detail}
                 onOpen={onTryOut}
                 onPromote={onPromote}
