@@ -92,7 +92,12 @@ agent-browser snapshot -i        # a control shows [disabled] when it is
   claims the action succeeded, the scenario is `blocked`. If it claims the system
   REFUSED, a disabled control is not that claim — a hidden control and a server
   that accepts the change look identical from the browser — so attempt it against
-  the API and settle there.
+  the API and settle on the app's OWN answer: a status whose body names the rule.
+  **A 401 is not one.** It comes from the gateway, which answers the same 401,
+  with the same body, for a missing permission, a missing token, an expired one
+  and a wrong audience alike — so it cannot tell you the app refused, only that
+  your request never reached it. A `When` that produced nothing but a 401 is
+  `unjudgeable`.
 - **Otherwise, prefer evidence over the exit code** — assert a state change only
   the action could have produced. `agent-browser network requests` shows whether
   the request actually left the page, which is the cheapest proof for anything
