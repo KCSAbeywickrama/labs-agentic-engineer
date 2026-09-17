@@ -24,13 +24,13 @@
  * uses (../pinned-pane.ts), so a line printed while you work lands above it and
  * the block stays where the eye left it.
  *
- * Rows and keys are worked out by pure functions here; the terminal is
- * `attachPanelKeys`'s problem. That split is what lets the key table be tested
- * without a TTY — and the key table is the part that must not drift from what
- * the panel says it does.
+ * Rows and keys are worked out by pure functions here; reading the keyboard is
+ * `session.ts`'s. That split is what lets the key table be tested without a
+ * TTY — and the key table is the part that must not drift from what the panel
+ * says it does.
  */
 
-import type { PaneRow } from "../pinned-pane.js";
+import { fit, type PaneRow } from "../pinned-pane.js";
 import type { RoleEntry } from "./roles.js";
 
 /** What the panel is looking at right now. */
@@ -86,20 +86,10 @@ const GLYPHS: Record<string, string> = {
   exited: "✗",
 };
 
-/**
- * One row, cut to fit. The floor is not paranoia: a terminal that reports 0
- * columns (a pty opened with no window size, which is how a test or a CI job
- * gets one) would otherwise slice every row to nothing or to a negative length.
- */
-function truncate(text: string, columns: number): string {
-  const width = Math.max(20, columns);
-  return text.length > width - 1 ? `${text.slice(0, width - 2)}…` : text;
-}
-
-/** The block, as the terminal will draw it. */
-export function panelRows(model: PanelModel, entries: RoleEntry[], columns: number): PaneRow[] {
+/** The block, as the terminal will draw it. `width` is the pane's, already floored. */
+export function panelRows(model: PanelModel, entries: RoleEntry[], width: number): PaneRow[] {
   const rows: PaneRow[] = [];
-  const rule = "─".repeat(Math.max(8, Math.min(Math.max(20, columns) - 1, 72)));
+  const rule = "─".repeat(Math.max(8, Math.min(width, 72)));
   rows.push({ text: rule, tone: "muted" });
 
   for (const service of model.services) {
@@ -121,9 +111,9 @@ export function panelRows(model: PanelModel, entries: RoleEntry[], columns: numb
   const numbered = numberedEntries(entries)
     .map((entry, index) => `${String(index + 1)} ${entry.label}`)
     .join("  ");
-  rows.push({ text: truncate(`  ${numbered}`, columns), tone: "muted" });
-  rows.push({ text: truncate("  s seed   r rebuild a service   l logs   q quit (tears everything down)", columns), tone: "muted" });
-  return rows.map((row) => ({ ...row, text: truncate(row.text, columns) }));
+  rows.push({ text: `  ${numbered}`, tone: "muted" });
+  rows.push({ text: "  s seed   r rebuild a service   l logs   q quit (tears everything down)", tone: "muted" });
+  return rows.map((row) => ({ ...row, text: fit(row.text, width) }));
 }
 
 /** The line a script waits for instead of watching a panel it cannot see. */

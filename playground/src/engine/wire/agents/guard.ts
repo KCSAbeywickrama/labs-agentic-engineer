@@ -55,8 +55,32 @@ export interface AgentBoundary {
   slug: string;
   /** The exact files this task may write. Empty for a read-only task. */
   mayWrite: string[];
-  /** Command prefixes Bash may start with. Empty forbids Bash entirely. */
-  mayRun: string[];
+  /**
+   * The one base URL Bash may `curl`. Absent forbids Bash entirely.
+   *
+   * A base URL rather than a command prefix, because a prefix cannot say the
+   * thing that matters: `curl ` admits any host, and `curl -o` writes any file,
+   * which walks straight through `mayWrite`.
+   */
+  mayCurl?: string;
+}
+
+/** Flags that turn `curl` from a reader into a writer, or into a second request. */
+const CURL_WRITES = [" -o", " --output", " -O", " --remote-name", " --upload-file", " -T", " --config", " -K"];
+
+/**
+ * Whether this is one `curl` at the session's own base URL, and nothing else.
+ *
+ * Shell metacharacters are refused outright: `;`, `&&`, a pipe or a redirect
+ * turn one allowed command into two, and the second is unconstrained. The model
+ * loses nothing it needs — it makes one call and reads the answer.
+ */
+export function isAllowedCurl(command: string, baseUrl: string): boolean {
+  const trimmed = command.trim();
+  if (!/^curl(\s|$)/.test(trimmed)) return false;
+  if (/[;|&><`$]|\n/.test(trimmed)) return false;
+  if (CURL_WRITES.some((flag) => trimmed.includes(flag))) return false;
+  return trimmed.includes(baseUrl);
 }
 
 /**
@@ -91,13 +115,14 @@ export function boundaryDenial(toolName: string, toolInput: unknown, boundary: A
 
   if (toolName === "Bash") {
     const command = String(asRecord(toolInput).command ?? "").trim();
-    if (boundary.mayRun.length === 0) {
+    if (!boundary.mayCurl) {
       return `${boundary.task} runs no commands. It reads what it was given and answers.`;
     }
-    if (!boundary.mayRun.some((prefix) => command.startsWith(prefix))) {
+    if (!isAllowedCurl(command, boundary.mayCurl)) {
       return (
-        `${boundary.task} may only run commands starting with: ${boundary.mayRun.join(" | ")}. ` +
-        `It may not start, stop or rebuild anything — the harness owns every process in this session.`
+        `${boundary.task} may run exactly one kind of command: a single \`curl\` against ${boundary.mayCurl}, ` +
+        `with no shell operators and no flag that writes a file. It may not start, stop or rebuild anything — ` +
+        `the harness owns every process in this session.`
       );
     }
     return undefined;
@@ -140,4 +165,17 @@ export function createBoundaryGuard(boundary: AgentBoundary, onDeny?: (reason: s
 /** Register one matcher per tool name: the matcher grammar is unspecified, and a silent non-match is not safe. */
 export function guardMatchers(guard: HookCallback): { matcher: string; hooks: HookCallback[] }[] {
   return [...WRITE_TOOLS, ...NEVER, "Bash"].map((tool) => ({ matcher: tool, hooks: [guard] }));
+}
+
+/**
+ * The tools this boundary would refuse anyway, dropped before the model is
+ * offered them. Derived rather than listed per task: a hook table and a hand-kept
+ * `disallowedTools` beside it drift, and the one that drifts open is the hook's.
+ */
+export function deniedTools(boundary: AgentBoundary): string[] {
+  return [
+    ...NEVER,
+    ...(boundary.mayWrite.length === 0 ? WRITE_TOOLS : []),
+    ...(boundary.mayCurl ? [] : ["Bash"]),
+  ];
 }

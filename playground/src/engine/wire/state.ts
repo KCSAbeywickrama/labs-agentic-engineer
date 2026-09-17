@@ -114,14 +114,9 @@ export function writeFileAtomic(file: string, contents: string): void {
  * The generated passwords, kept for as long as the project is.
  *
  * Postgres writes the password into the data directory when it first
- * initializes, so a password regenerated on the second run authenticates
- * against nothing: the service exits with `password authentication failed for
- * user`, which reads like a wiring bug in the generated app and is not one.
- * Measured exactly that way on the second `wire` of one project.
- *
- * 0600, beside the key. Not a secret worth protecting from anyone who can
- * already read the project — protected because it is a password and habits are
- * the thing that generalize.
+ * initializes, so a password regenerated on the next run authenticates against
+ * nothing and the service exits with `password authentication failed for user`
+ * — which reads like a bug in the generated app and is not one.
  */
 export function databaseSecret(projectDir: string, database: string): string {
   const file = wirePaths(projectDir).secrets;

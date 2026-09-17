@@ -123,15 +123,7 @@ interface SecurityDesign {
 }
 
 export interface PlanOptions {
-  /**
-   * The password for a database, by dependency name.
-   *
-   * Injected rather than generated here, and keyed by name, because it has to
-   * be STABLE for as long as the volume is: Postgres burns the password into
-   * the data directory the first time it initializes, so a freshly generated
-   * one on the second run makes the service fail to connect to its own data.
-   * `session.ts` keeps them beside the keypair; a test passes a constant.
-   */
+  /** The password for a database, by name. Injected because it must be stable — see `databaseSecret`. */
   secret?: (database: string) => string;
 }
 

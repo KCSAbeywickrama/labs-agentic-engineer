@@ -84,6 +84,16 @@ type WithCaller = IncomingMessage & { [CALLER]?: Caller | null };
 const BASE_SCOPES = ["openid", "profile", "email", "group", "ou"];
 
 /**
+ * Where the project's `security.json` is, for whoever needs it: the roles it
+ * declares (the badge) and the login name each one signs in as (the assertion).
+ * `AEP_WIRED_SECURITY` overrides it, so a project laid out differently moves
+ * both readers at once.
+ */
+export function securityPath(root: string): string {
+  return process.env.AEP_WIRED_SECURITY ?? path.resolve(root, "..", "specs", "design", "security.json");
+}
+
+/**
  * Wired mode's settings, or null for plain mock mode.
  *
  * `AEP_WIRED_KEY` is REQUIRED once `AEP_WIRED_API` is set rather than defaulted:
@@ -99,7 +109,7 @@ export function wiredFromEnv(root: string): WiredOptions | null {
   return {
     target,
     keyPath,
-    securityPath: process.env.AEP_WIRED_SECURITY ?? path.resolve(root, "..", "specs", "design", "security.json"),
+    securityPath: securityPath(root),
     issuer: process.env.AEP_WIRED_ISSUER ?? "aep-playground-wire",
     header: process.env.AEP_WIRED_HEADER ?? "x-jwt-assertion",
   };

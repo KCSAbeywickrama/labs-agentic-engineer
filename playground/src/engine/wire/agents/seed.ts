@@ -41,11 +41,11 @@ import type { WirePlan } from "../plan.js";
 export interface SeedRequest {
   projectDir: string;
   plan: WirePlan;
-  /** Where the calls go: the dev server (so they pass the gateway stand-in), or the service. */
+  /** Where the calls go: the dev server, or the service itself. */
   proxyUrl: string;
+  /** True when `proxyUrl` is the dev server, which enforces scopes in front of the service. */
+  proxied: boolean;
   tokensFile: string;
-  /** False keeps this to "replay what exists" — no model call is made. */
-  allowModel?: boolean;
   useApiKey?: boolean;
 }
 
@@ -58,9 +58,6 @@ export interface SeedResult {
 export async function runSeedAgent(request: SeedRequest): Promise<SeedResult> {
   const paths = wirePaths(request.projectDir);
   if (!existsSync(paths.seed)) {
-    if (request.allowModel === false) {
-      return { ok: false, summary: `no ${paths.seed} to replay, and this run may not write one` };
-    }
     const written = await writeSeedScript(request);
     if (!written.ok) return written;
   }
@@ -91,13 +88,12 @@ async function writeSeedScript(request: SeedRequest): Promise<SeedResult> {
       // docker, not npm, not psql — the database is reached the way a user
       // reaches it, through the API, so seeded rows go through the same
       // validation and the same business rules a person would hit.
-      mayRun: [`curl -sS -X`, `curl -sS`, `curl -s `, `curl `],
+      mayCurl: request.proxyUrl,
     },
     prompt: seedPrompt(request, tokens),
     cwd: request.projectDir,
     maxTurns: 40,
     transcriptDir: paths.agents,
-    disallowedTools: ["WebFetch", "WebSearch", "Task", "NotebookEdit"],
     ...(request.useApiKey ? { useApiKey: true } : {}),
   });
 
@@ -120,8 +116,10 @@ function seedPrompt(request: SeedRequest, tokens: string): string {
     "```",
     "",
     "The contracts are in specs/design/components/*/openapi.yaml and the roles and their grants are in",
-    "specs/design/security.json. Read them. The scopes are enforced in front of the service, so a call has to be",
-    "made as a role that holds the operation's scope.",
+    "specs/design/security.json. Read them.",
+    request.proxied
+      ? "The scopes are enforced in front of the service, so a call has to be made as a role that holds the operation's scope."
+      : "There is no gateway in front of this service — the token identifies the caller and nothing checks scopes, so keep to calls a role could legitimately make anyway.",
     "",
     "YOUR ONLY OUTPUT IS ONE FILE:",
     "",

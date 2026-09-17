@@ -50,17 +50,10 @@
 import { renderCrewBlock, type BlockRow, type CrewBlockOptions } from "./crew-block.js";
 import { buildCrew, type RunEventView } from "@aep/progress-view";
 import type { AgentTags } from "./agent-tags.js";
-import {
-  FALLBACK_COLUMNS,
-  FALLBACK_ROWS,
-  openPinnedPane,
-  type PaneOutput,
-} from "./pinned-pane.js";
+import { openPinnedPane, type PaneOutput } from "./pinned-pane.js";
 
 /** At most once a second, per the redraw discipline above. */
 const REBUILD_MS = 1000;
-
-export type { PaneOutput };
 
 export interface CrewPaneOptions {
   out: PaneOutput;
@@ -97,21 +90,13 @@ export interface CrewPane {
  */
 export function openCrewPane(opts: CrewPaneOptions): CrewPane {
   const pane = openPinnedPane(opts.out, opts.isTTY);
-  const out = opts.out;
   const now = opts.now ?? Date.now;
   let builtAt = -Infinity;
   let latest: readonly RunEventView[] = [];
 
   const rebuild = (): void => {
     const at = now();
-    const blockOpts: CrewBlockOptions = {
-      columns: out.columns ?? FALLBACK_COLUMNS,
-      // Two lines of headroom: the shell's own prompt has to fit under the block
-      // when the run ends, and a block exactly as tall as the screen scrolls
-      // itself off the top the moment anything else is printed.
-      maxRows: Math.max(3, (out.rows ?? FALLBACK_ROWS) - 2),
-      tag: opts.tag,
-    };
+    const blockOpts: CrewBlockOptions = { columns: pane.width(), maxRows: pane.height(), tag: opts.tag };
     const content: BlockRow[] = renderCrewBlock(buildCrew(latest, at), at, blockOpts);
     builtAt = at;
     pane.set(content);

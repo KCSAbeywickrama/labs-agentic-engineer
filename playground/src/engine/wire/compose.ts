@@ -76,9 +76,15 @@ interface ComposeService {
  *
  * `projectDir` is absolute and build contexts are resolved against it, so the
  * file can be run from the state dir (where it lives) without a relative path
- * pointing at nothing.
+ * pointing at nothing. `initSql` is the developer's optional schema file, passed
+ * only when it exists.
  */
-export function composeDocument(plan: WirePlan, gateway: GatewayIdentity, projectDir: string): string {
+export function composeDocument(
+  plan: WirePlan,
+  gateway: GatewayIdentity,
+  projectDir: string,
+  initSql?: string,
+): string {
   const services: Record<string, ComposeService> = {};
   const volumes: Record<string, Record<string, never>> = {};
 
@@ -90,7 +96,13 @@ export function composeDocument(plan: WirePlan, gateway: GatewayIdentity, projec
         POSTGRES_USER: database.user,
         POSTGRES_PASSWORD: database.password,
       },
-      volumes: [`${database.volume}:/var/lib/postgresql/data`],
+      // A schema the app does not create itself: Postgres runs everything in
+      // that directory once, when it initializes an empty data volume, so this
+      // takes effect on the first start and after `--fresh` and never again.
+      volumes: [
+        `${database.volume}:/var/lib/postgresql/data`,
+        ...(initSql ? [`${initSql}:/docker-entrypoint-initdb.d/init.sql:ro`] : []),
+      ],
       healthcheck: {
         test: ["CMD-SHELL", `pg_isready -U ${database.user}`],
         interval: "3s",

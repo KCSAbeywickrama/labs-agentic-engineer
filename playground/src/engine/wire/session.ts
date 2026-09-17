@@ -35,12 +35,12 @@
  * one thing that can be left running by mistake, rather than four.
  */
 
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { stdout as output } from "node:process";
 import * as clack from "@clack/prompts";
 import { projectSlug } from "../../ports/spec-workspace.js";
 import { loadProjectState, saveProjectState } from "../../state/project.js";
-import { openPinnedPane, FALLBACK_COLUMNS } from "../pinned-pane.js";
+import { openPinnedPane } from "../pinned-pane.js";
 import { ensureKeypair, mintAssertion, roleTokens, WIRE_HEADER, WIRE_ISSUER } from "./assertion.js";
 import type { WireSession } from "./state.js";
 import { composeDown, composeLogs, composePs, composeUp, composeUpOne, type ComposeTarget } from "./docker.js";
@@ -167,10 +167,19 @@ export async function wireCommand(
   writeFileAtomic(paths.tokens, JSON.stringify(tokens, null, 2));
 
   // --- 4 compose ------------------------------------------------------------
-  writeFileAtomic(paths.compose, composeDocument(plan, { ...keypair, issuer: WIRE_ISSUER, header: WIRE_HEADER }, projectDir));
+  writeFileAtomic(
+    paths.compose,
+    composeDocument(
+      plan,
+      { ...keypair, issuer: WIRE_ISSUER, header: WIRE_HEADER },
+      projectDir,
+      existsSync(paths.initSql) ? paths.initSql : undefined,
+    ),
+  );
   writeFileAtomic(paths.plan, JSON.stringify(maskedPlan(plan), null, 2));
   const target: ComposeTarget = { file: paths.compose, project: plan.composeProject };
 
+  for (const warning of staleVolumeWarnings(projectDir, plan, previous)) say(`  ⚠ ${warning}`);
   await reapStaleSession(previous, target, say);
   if (options.fresh) {
     say("  ↺ --fresh: dropping the database volume");
@@ -287,13 +296,13 @@ export async function wireCommand(
       // seed script carries its own bearer per call and a query string in the
       // base would ride into every one of them.
       const seedBase = running.dev?.url ?? `http://localhost:${String(primary.hostPort)}`;
-      const seeded = await seed(projectDir, plan, seedBase, options);
+      const seeded = await seed(projectDir, plan, seedBase, running.dev !== null);
       say(`  ${seeded}`);
     }
 
     // --- 9 panel ------------------------------------------------------------
     if (interactive) {
-      await panelLoop(projectDir, plan, running, entries, url, options);
+      await panelLoop(projectDir, plan, running, entries, url);
     } else if (!options.role && !options.silent) {
       // A script asked for this without naming a role and has nothing to hold
       // the session open with; saying so beats exiting as if it had worked.
@@ -345,6 +354,53 @@ async function reapStaleSession(
   }
 }
 
+/**
+ * The volume outlives the code, and nothing migrates it.
+ *
+ * A service edited since the last session may create its schema differently
+ * from the one already in the data directory, and the failure surfaces as a
+ * query against a column that is not there — which reads as an application bug.
+ * Saying it once, before the build, is the difference between that and `--fresh`.
+ */
+function staleVolumeWarnings(projectDir: string, plan: WirePlan, previous: WireSession | null): string[] {
+  if (!previous || plan.databases.length === 0) return [];
+  const lastStart = Date.parse(previous.startedAt);
+  if (Number.isNaN(lastStart)) return [];
+  return plan.services
+    .filter((service) => newestFileTime(`${projectDir}/${service.appPath}`) > lastStart)
+    .map(
+      (service) =>
+        `${service.appPath}/ has changed since this project's volume was last started — ` +
+        `if its schema moved, re-run with --fresh`,
+    );
+}
+
+/** The newest mtime in a tree, skipping what a build drops in it. */
+function newestFileTime(dir: string, depth = 4): number {
+  const skip = new Set(["node_modules", "target", "dist", ".git", "generated"]);
+  let newest = 0;
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    if (entry.name.startsWith(".") || skip.has(entry.name)) continue;
+    const full = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) {
+      if (depth > 0) newest = Math.max(newest, newestFileTime(full, depth - 1));
+    } else {
+      try {
+        newest = Math.max(newest, statSync(full).mtimeMs);
+      } catch {
+        // gone between the listing and the stat; nothing to compare
+      }
+    }
+  }
+  return newest;
+}
+
 function logFile(projectDir: string, name: string): string {
   return `${wirePaths(projectDir).logs}/${name}.log`;
 }
@@ -372,13 +428,13 @@ async function reportBringUpFailure(
 }
 
 /** The seed step: write the script once with a model, replay it every time after. */
-async function seed(projectDir: string, plan: WirePlan, proxyUrl: string, options: WireOptions): Promise<string> {
+async function seed(projectDir: string, plan: WirePlan, proxyUrl: string, proxied: boolean): Promise<string> {
   const result = await runSeedAgent({
     projectDir,
     plan,
     proxyUrl,
+    proxied,
     tokensFile: wirePaths(projectDir).tokens,
-    ...(options.noTriage ? { allowModel: false } : {}),
   });
   return result.summary;
 }
@@ -439,7 +495,6 @@ async function panelLoop(
   running: Running,
   entries: RoleEntry[],
   url: string | null,
-  options: WireOptions,
 ): Promise<void> {
   const pane = openPinnedPane(output, output.isTTY === true);
   const model: PanelModel = {
@@ -448,7 +503,7 @@ async function panelLoop(
     webapp: running.dev ? { url: running.dev.url, port: running.dev.port } : null,
   };
   const repaint = (): void => {
-    pane.set(panelRows(model, entries, output.columns ?? FALLBACK_COLUMNS));
+    pane.set(panelRows(model, entries, pane.width()));
   };
   repaint();
 
@@ -505,7 +560,7 @@ async function panelLoop(
             projectDir,
             plan,
             running.dev?.url ?? `http://localhost:${String(plan.services[0]?.hostPort ?? 0)}`,
-            options,
+            running.dev !== null,
           );
         }
       } finally {

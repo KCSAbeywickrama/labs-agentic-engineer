@@ -23,7 +23,7 @@
  */
 
 import * as clack from "@clack/prompts";
-import { designGate, tasksGate } from "../engine/gates.js";
+import { designGate, tasksGate, wireGate } from "../engine/gates.js";
 import { designStatus, listIssueSummaries, requirementsStatus } from "../state/status.js";
 
 export type MenuAction = "requirements" | "design" | "tasks" | "code" | "wire" | "chat" | "check" | "undo" | "quit";
@@ -70,13 +70,10 @@ export async function phaseMenu(projectDir: string, slug: string, skillCount: nu
         ? `4 Code           run — ${pending} pending, one session →`
         : "4 Code           ✓ all issues look resolved";
 
-  // `wire` runs what was built, so it is offered once there is something built
-  // to run — an issue the plan says is finished.
-  const resolved = issues.length - pending;
-  const wireLabel =
-    resolved > 0
-      ? "5 Wire           run it locally — pick a role, click through it with real data"
-      : "5 Wire           — needs a finished issue to run";
+  const wGate = wireGate(projectDir);
+  const wireLabel = wGate.ok
+    ? "5 Wire           run it locally — pick a role, click through it with real data"
+    : `5 Wire           ✗ blocked: ${wGate.reason}`;
 
   const choice = await clack.select<MenuAction>({
     message: `AEP playground — ${slug} (${projectDir}) · skills: ${skillCount} (working tree)`,

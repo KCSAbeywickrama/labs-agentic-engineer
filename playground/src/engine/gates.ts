@@ -94,3 +94,23 @@ export function tasksGate(projectDir: string): GateResult {
   }
   return ok;
 }
+
+/**
+ * `wire` runs what was built, so its gate is "is there anything built".
+ *
+ * The App Path of a service is the evidence, not an issue's `## Progress`: a
+ * component whose directory holds no Dockerfile has not been coded yet, and
+ * that is exactly what the plan would refuse on anyway — better said here,
+ * before a menu offers the verb.
+ */
+export function wireGate(projectDir: string): GateResult {
+  const components = listComponents(projectDir);
+  if (components.length === 0) return blocked("no components under specs/design/components/");
+  for (const name of components) {
+    const design = join(projectDir, "specs/design/components", name, "design.json");
+    if (!existsSync(design)) continue;
+    const appPath = (JSON.parse(readFileSync(design, "utf8")) as { appPath?: string }).appPath;
+    if (appPath && existsSync(join(projectDir, appPath, "Dockerfile"))) return ok;
+  }
+  return blocked("nothing built yet — run the coding phase first");
+}

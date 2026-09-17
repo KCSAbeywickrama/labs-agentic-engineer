@@ -27,13 +27,6 @@ So three things went unchecked until a deployment:
   them; nothing had ever verified that the service's own interceptor returns
   the caller's rows and 404s everybody else's.
 
-A prototype settled the shape before this was written (throwaway, one session,
-against a duplicate of a completed project): a compose-built backend behind a
-Vite dev server acting as the gateway let every role click through real data,
-and caught both planted defects. It also found three defects in a generated app
-that had passed its mock walk, including a contract gap no amount of mocking
-could have surfaced.
-
 ## Decision
 
 **One verb**, `pnpm play <dir> wire`, one foreground process, and the process
@@ -106,27 +99,32 @@ token's claims (including whether the deployed gateway's assertion carries
 platform env injection, `workload.yaml`, the webapp's nginx image and its `/api`
 proxy, and CORS at the gateway.
 
-### Deviations from the design document, and why
+### Four decisions the shape forced
 
-- **No standalone proxy for a project with no web application.** The design put
-  one in `engine/wire/proxy.ts`, importing the asset from `skills/`. Nothing in
-  this repo imports `skills/` and `knip.jsonc` says so explicitly; the
-  alternative — reimplementing the gateway stand-in and the contract projection
-  in the playground — is two copies of security-relevant logic. Such a project
-  gets a printed `curl` per role instead, each carrying a minted assertion. That
-  is identity, not the scope check, and it says so.
-- **The role badge is `react-webapp/assets/mock-badge.ts`, plain DOM**, not a
-  `.tsx` under `thunder-authentication`. `mock/browser.ts` mounts it and is
-  copied to every app, auth dependency or not, while the thunder tree arrives
-  only with an auth dependency; and a React component would drag JSX into a
-  plain-TS mock file. Its role list comes from `security.json` through
-  `/env-config.js`, the same channel the operation table already rides.
-- **Database passwords are stored, not regenerated.** Found by running `wire` a
-  second time: Postgres burns the password into the data directory at first
-  init, so a fresh password authenticates against nothing and the service exits
-  with `password authentication failed for user`, which reads like a defect in
-  the generated app. They live in `.aep-playground/wire/secrets.json` (0600).
-- **Triage gets 20 turns, not 8.** Measured: eight turns went on reading the
-  service's config, its database module and its Dockerfile, and the task ended
-  `error_max_turns` with nothing to say. The prompt was tightened to keep it
-  inside the project instead.
+**A project with no web application gets a printed `curl` per role, not a
+standalone proxy.** Standing the gateway up outside the dev server means either
+importing `skills/` — which `knip.jsonc` forbids in as many words — or keeping a
+second copy of the gateway stand-in and the contract projection, which is two
+copies of security-relevant logic. So such a project gets one `curl` per role
+carrying an assertion this side mints, valid for two hours because a person
+pastes it by hand, and the printed note says what it is: identity, not the scope
+check. The dev-server path stays the only place scopes are enforced.
+
+**Two processes mint the assertion, and one literal keeps them honest.**
+`mock/wired.ts` mints per request inside the dev server; `engine/wire/assertion.ts`
+mints for that `curl` table. They cannot share code — one is a verbatim app asset,
+the other is playground TypeScript — so a role's subject id is pinned as the same
+literal in both suites. Change the derivation and both fail.
+
+**The role badge is `react-webapp/assets/mock-badge.ts`, plain DOM.**
+`mock/browser.ts` mounts it and is copied to every app, auth dependency or not,
+while the `thunder-authentication` tree arrives only with an auth dependency; and
+a React component would drag JSX into a plain-TS mock file. Its role list rides
+`/env-config.js`, the channel the operation table already uses.
+
+**Database passwords are stored, not regenerated.** Postgres burns the password
+into the data directory at first init, so a fresh one authenticates against
+nothing and the service exits with `password authentication failed for user` —
+which reads like a defect in the generated app. They live in
+`.aep-playground/wire/secrets.json` (0600). Triage gets 20 turns for a related
+reason: eight was measured too few to reach any answer at all.

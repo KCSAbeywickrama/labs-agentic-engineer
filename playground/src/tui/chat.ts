@@ -33,7 +33,8 @@
 
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { chatTurn, codeCommand, tasksCommand, undoCommand, wirePhase, type PhaseOptions } from "../commands.js";
+import { chatTurn, codeCommand, tasksCommand, undoCommand, type PhaseOptions } from "../commands.js";
+import { wireCommand } from "../engine/wire/session.js";
 import { checkProject } from "../engine/check.js";
 import { loadRepoSkills } from "../kit/skills.js";
 import { collectAnswers } from "./questions.js";
@@ -72,7 +73,7 @@ async function runPhase(session: PlaygroundSession, intent: Extract<ChatIntent, 
       // Holds the terminal until you quit it, the same as from the CLI: the
       // session IS the process, so there is nothing to come back to chat for
       // until it is torn down.
-      const outcome = await wirePhase(dir, intent.arg !== undefined ? { role: intent.arg } : {}, confirmWireDir(dir));
+      const outcome = await wireCommand(dir, intent.arg !== undefined ? { role: intent.arg } : {}, confirmWireDir(dir));
       if (!outcome.ok) output.write(`  ✗ wire: ${outcome.detail ?? "failed"}\n`);
       return;
     }

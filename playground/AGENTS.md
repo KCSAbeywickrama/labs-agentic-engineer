@@ -293,30 +293,16 @@ pnpm play <dir> wire --role HRCoordinator --no-open   # for a script or an agent
 
 One verb, one foreground process, and **quitting is the cleanup**: `q`, Ctrl-C
 or SIGTERM takes the compose project and the dev server down, and a session that
-died hard is reaped by the next start, by compose project name. There is no
-`up`/`down`/`status`.
+died hard is reaped by the next start. There is no `up`/`down`/`status`.
 
-What it stands up, all from `specs/design/`: a Postgres container per
-`postgres-cnpg` dependency, every `type: service` component built from its own
-Dockerfile (all on 9090 inside the network, host ports mapped by compose), and
-the web application under `vite --mode mock` on the host. The dev server is the
-GATEWAY: it refuses an operation the role has no scope for, and mints the signed
-`x-jwt-assertion` the service verifies (`skills/react-webapp/assets/mock-wired.ts`).
-So the request path is production's with the two identity hops replaced, and
-what is proved before any push is the API-to-webapp agreement, the business
-rules against real persistence, and reach per role.
-
-Flags: `--role <name>` (`""` = signed in holding nothing), `--seed` (a script an
-agent writes once and the harness replays after), `--fresh` (drop the database
-volume — the remedy when the schema and the volume have diverged), `--no-open`,
-`--no-triage`, `--skip <dep>`, `--yes`. State lives in
+Flags: `--role <name>` (`""` = signed in holding nothing), `--seed`, `--fresh`
+(drop the database volume — the remedy when the schema and the volume have
+diverged), `--no-open`, `--no-triage`, `--skip <dep>`, `--yes`. State lives in
 `<project>/.aep-playground/wire/`.
 
-Two OPTIONAL agent tasks ride inside it, both hook-bounded on the rule *the
-agent proposes a file or text, the harness executes*: seeding writes exactly
-`seed.sh` and nothing else, and triage (on a failed bring-up) writes nothing at
-all. Neither is needed for `wire` to work, and neither writes application code —
-a defect found here becomes an issue and a coding run.
+What it stands up and why it is shaped this way is
+`design/decisions/ADR-0002-wired-mode.md`; the app's half of the contract is
+`skills/react-webapp/references/mock-mode.md`.
 
 ## Documented divergences from production (do not mistake for platform behavior)
 

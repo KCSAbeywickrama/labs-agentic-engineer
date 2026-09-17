@@ -35,7 +35,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { applyCodingCredential, codingCredential } from "../../coding-run.js";
-import { createBoundaryGuard, guardMatchers, type AgentBoundary } from "./guard.js";
+import { createBoundaryGuard, deniedTools, guardMatchers, type AgentBoundary } from "./guard.js";
 
 export interface AgentTaskRequest {
   boundary: AgentBoundary;
@@ -45,8 +45,6 @@ export interface AgentTaskRequest {
   maxTurns: number;
   /** Where the transcript lands: `<state>/wire/agents/`. */
   transcriptDir: string;
-  /** Tools the task has no use for, dropped before the hook ever sees them. */
-  disallowedTools?: string[];
   /** `--api-key`: authenticate with the API key rather than the developer's login. */
   useApiKey?: boolean;
 }
@@ -105,7 +103,9 @@ export async function runAgentTask(request: AgentTaskRequest): Promise<AgentTask
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         persistSession: false,
-        ...(request.disallowedTools ? { disallowedTools: request.disallowedTools } : {}),
+        // Derived from the boundary, so the list the model is offered and the
+        // list the hook enforces cannot disagree.
+        disallowedTools: deniedTools(request.boundary),
         env: taskEnv(request.useApiKey === true),
         hooks: { PreToolUse: guardMatchers(guard) },
       },

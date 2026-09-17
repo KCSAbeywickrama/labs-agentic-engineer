@@ -21,8 +21,7 @@
  *
  * Every one of them names the project explicitly (`-p`) rather than letting
  * compose derive it from a directory name. That name — `aep-wire-<slug>` — is
- * the handle a session that died hard leaves behind: `docker compose ls` shows
- * it, and the next start reaps it by name before it builds anything.
+ * the handle a session that died hard leaves behind for the next start to reap.
  */
 
 import { run, type RunResult } from "./runtime.js";

@@ -89,8 +89,7 @@ smoke.
   at `agent-browser set viewport 1280 600`, and click that action. A layout that
   only works on a tall window is a layout most laptops do not have, and the way
   it fails is silent: a sticky footer sits over the button, the content pane does
-  not scroll, and the click lands on the footer. Found exactly that way on a
-  component whose every other item passed. Set the viewport back afterwards.
+  not scroll, and the click lands on the footer. Set the viewport back afterwards.
 - **Deep entry**: load one nested route as a fresh page load in the address
   bar, not by clicking into it. Clicking never leaves the first document, so
   only this exercises the app booting at that URL — the path a bookmark, a

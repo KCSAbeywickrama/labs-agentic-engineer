@@ -57,8 +57,26 @@ export interface PaneOutput {
 }
 
 /** What a terminal is assumed to be when it will not say. */
-export const FALLBACK_COLUMNS = 100;
-export const FALLBACK_ROWS = 30;
+const FALLBACK_COLUMNS = 100;
+const FALLBACK_ROWS = 30;
+
+/**
+ * The widest a row may be: one column short of the terminal, and never under 20.
+ *
+ * One short because a row that reaches the last column wraps, and a wrapped row
+ * makes the block one physical line taller than the cursor arithmetic believes —
+ * the next erase then eats a line of the transcript. The floor covers a terminal
+ * that reports 0 columns, which is what a pty opened without a window size does.
+ */
+export function drawWidth(columns: number | undefined): number {
+  return Math.max(20, (columns ?? FALLBACK_COLUMNS) - 1);
+}
+
+/** Cut to width, saying so — a silently cut line reads as a line that ended. */
+export function fit(text: string, width: number): string {
+  if (width <= 0) return "";
+  return text.length <= width ? text : `${text.slice(0, Math.max(0, width - 1))}…`;
+}
 
 /** Cursor up N lines, then erase from the cursor to the end of the screen. */
 const up = (n: number): string => `\x1b[${String(n)}A`;
@@ -73,7 +91,19 @@ const TONE_CODES: Record<string, string> = {
   error: "31",
 };
 
+/**
+ * Two lines of headroom: the shell's own prompt has to fit under the block when
+ * the run ends, and a block exactly as tall as the screen scrolls itself off the
+ * top the moment anything else is printed.
+ */
+function blockHeight(rows: number | undefined): number {
+  return Math.max(3, (rows ?? FALLBACK_ROWS) - 2);
+}
+
 export interface PinnedPane {
+  /** The width a row must fit into, and the most rows the block may take. */
+  width(): number;
+  height(): number;
   /** One streamed line, printed above the block. */
   line(text: string): void;
   /** Replace what the block says and repaint it. */
@@ -85,6 +115,12 @@ export interface PinnedPane {
 /** A pane that only prints. What a piped run gets. */
 function plainPane(out: PaneOutput): PinnedPane {
   return {
+    width(): number {
+      return drawWidth(out.columns);
+    },
+    height(): number {
+      return blockHeight(out.rows);
+    },
     line(text: string): void {
       out.write(`${text}\n`);
     },
@@ -126,6 +162,12 @@ export function openPinnedPane(out: PaneOutput, isTTY: boolean): PinnedPane {
   };
 
   return {
+    width(): number {
+      return drawWidth(out.columns);
+    },
+    height(): number {
+      return blockHeight(out.rows);
+    },
     line(text: string): void {
       clear();
       out.write(`${text}\n`);

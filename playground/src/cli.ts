@@ -48,12 +48,12 @@ import {
   requirementsCommand,
   tasksCommand,
   undoCommand,
-  wirePhase,
   type CodeOptions,
   type PhaseOptions,
   type PhaseOutcome,
 } from "./commands.js";
 import { checkProject } from "./engine/check.js";
+import { wireCommand } from "./engine/wire/session.js";
 import { openSession, SKILLS_DIR } from "./engine/session.js";
 import { expandProjectPath, projectDirError } from "./paths.js";
 import { projectSlug } from "./ports/spec-workspace.js";
@@ -64,6 +64,7 @@ import { tasksScreen } from "./tui/tasks.js";
 import { ensureProjectDir } from "./tui/ensure-dir.js";
 import { readIdea, writeDescriptor } from "./state/descriptor.js";
 import { confirmCodingDir, confirmWireDir } from "./tui/consent.js";
+import type { WireOptions } from "./engine/wire/session.js";
 
 const COMMANDS = new Set(["requirements", "design", "tasks", "code", "wire", "chat", "check", "undo", "log", "menu"]);
 
@@ -157,6 +158,7 @@ async function runHeadless(
   command: string,
   projectDir: string,
   opts: CodeOptions,
+  wireOptions: WireOptions,
   commandArg?: string,
 ): Promise<number> {
   let outcome: PhaseOutcome;
@@ -178,7 +180,7 @@ async function runHeadless(
     case "wire":
       // The one verb that ends with a browser open and a panel up: it holds the
       // terminal until you quit, and tears everything down on the way out.
-      outcome = await wirePhase(projectDir, opts.wire ?? {}, confirmWireDir(projectDir));
+      outcome = await wireCommand(projectDir, wireOptions, confirmWireDir(projectDir));
       break;
     case "undo":
       outcome = undoCommand(projectDir, opts);
@@ -232,7 +234,7 @@ async function runHeadless(
 }
 
 /** Chat home: open the session, run the chat loop, hand off to the menu on `/menu`. */
-async function runChat(projectDir: string, opts: PhaseOptions): Promise<number> {
+async function runChat(projectDir: string, opts: PhaseOptions, wireOptions: WireOptions = {}): Promise<number> {
   const session = await openSession(projectDir, opts);
   let next: "menu" | "quit";
   try {
@@ -240,10 +242,10 @@ async function runChat(projectDir: string, opts: PhaseOptions): Promise<number> 
   } finally {
     await session.close();
   }
-  return next === "quit" ? 0 : runMenu(projectDir, opts);
+  return next === "quit" ? 0 : runMenu(projectDir, opts, wireOptions);
 }
 
-async function runMenu(projectDir: string, opts: PhaseOptions): Promise<number> {
+async function runMenu(projectDir: string, opts: PhaseOptions, wireOptions: WireOptions = {}): Promise<number> {
   clack.intro("AEP playground");
   for (;;) {
     const skillCount = loadRepoSkills(SKILLS_DIR).length;
@@ -252,13 +254,13 @@ async function runMenu(projectDir: string, opts: PhaseOptions): Promise<number> 
     if (action === "code") {
       // One session works the whole project (VS Code is the file browser —
       // no per-issue picking, no review detour).
-      await runHeadless("code", projectDir, opts);
+      await runHeadless("code", projectDir, opts, wireOptions);
       continue;
     }
     if (action === "tasks") {
       const tasksAction = await tasksScreen(projectDir);
-      if (tasksAction.kind === "plan") await runHeadless("tasks", projectDir, opts);
-      if (tasksAction.kind === "code") await runHeadless("code", projectDir, opts);
+      if (tasksAction.kind === "plan") await runHeadless("tasks", projectDir, opts, wireOptions);
+      if (tasksAction.kind === "code") await runHeadless("code", projectDir, opts, wireOptions);
       continue;
     }
     if (action === "chat") {
@@ -271,7 +273,7 @@ async function runMenu(projectDir: string, opts: PhaseOptions): Promise<number> 
       }
       continue;
     }
-    const code = await runHeadless(action, projectDir, opts);
+    const code = await runHeadless(action, projectDir, opts, wireOptions);
     if (code === 2) continue; // unwired action — back to the menu
   }
   clack.outro("bye");
@@ -325,18 +327,17 @@ async function main(): Promise<number> {
     // `log` defaults to the per-step view; --slow and --thinking narrow it.
     ...(values.slow ? { view: "slow" as const } : values.thinking ? { view: "thinking" as const } : {}),
     ...(values.run ? { run: values.run } : {}),
-    // `wire`'s own flags, kept in one bag so the phase options stay the spec
-    // phases' shape. `--role ""` is meaningful (signed in holding nothing), so
-    // presence is tested rather than truthiness.
-    wire: {
-      ...(values.role !== undefined ? { role: values.role } : {}),
-      ...(values.seed ? { seed: true } : {}),
-      ...(values.fresh ? { fresh: true } : {}),
-      ...(values["no-open"] ? { noOpen: true } : {}),
-      ...(values["no-triage"] ? { noTriage: true } : {}),
-      ...(values.skip ? { skip: values.skip } : {}),
-      ...(values.yes ? { yes: true } : {}),
-    },
+  };
+  // `--role ""` is meaningful — signed in holding nothing — so presence is
+  // tested rather than truthiness.
+  const wireOptions: WireOptions = {
+    ...(values.role !== undefined ? { role: values.role } : {}),
+    ...(values.seed ? { seed: true } : {}),
+    ...(values.fresh ? { fresh: true } : {}),
+    ...(values["no-open"] ? { noOpen: true } : {}),
+    ...(values["no-triage"] ? { noTriage: true } : {}),
+    ...(values.skip ? { skip: values.skip } : {}),
+    ...(values.yes ? { yes: true } : {}),
   };
 
   let [dirArg, command, commandArg] = positionals as [string | undefined, string | undefined, string | undefined];
@@ -388,9 +389,9 @@ async function main(): Promise<number> {
 
   // Chat is the home surface: `play <dir>` drops straight in; `play menu` opens
   // the dashboard; any other verb runs headless.
-  if (command === "menu") return runMenu(projectDir, opts);
-  if (command) return runHeadless(command, projectDir, opts, commandArg);
-  return runChat(projectDir, opts);
+  if (command === "menu") return runMenu(projectDir, opts, wireOptions);
+  if (command) return runHeadless(command, projectDir, opts, wireOptions, commandArg);
+  return runChat(projectDir, opts, wireOptions);
 }
 
 main().then(

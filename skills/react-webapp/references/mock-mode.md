@@ -437,32 +437,29 @@ memory for the rest of the run.
 
 ## Wired mode
 
-The same `dev:mock` server, with the API replaced by the REAL one: the
-playground's `pnpm play <dir> wire` builds the project's services from their own
-Dockerfiles under Docker Compose, starts this app, and points it at them. MSW
-never starts; every screen is answered by the service and its database.
+The same `dev:mock` server, with the API replaced by the REAL one. The
+playground's `wire` verb sets it up — see `playground/AGENTS.md` for what that
+does — and nothing about the app changes for it. What makes it work is already
+in the files copied above, driven by four variables:
 
-You do not set this up — `wire` sets it up — and nothing about the app changes
-for it. What makes it work is already in the files copied above:
+| Variable | Read by |
+|---|---|
+| `AEP_WIRED_API` | `mock/plugin.ts`: switches the mode on and proxies `/api` there |
+| `AEP_WIRED_KEY` | `mock/wired.ts`: the private key it signs the assertion with. Required once the first is set |
+| `AEP_WIRED_SECURITY` | `mock/wired.ts` and `mock/plugin.ts`; default `../specs/design/security.json` |
+| `AEP_WIRED_ISSUER`, `AEP_WIRED_HEADER` | `mock/wired.ts`; must match the service's `GATEWAY_ASSERTION_ISSUER` / `_HEADER` |
 
-| Variable | Set by | Read by |
-|---|---|---|
-| `AEP_WIRED_API` | `wire` — `http://localhost:<the service's mapped port>` | `mock/plugin.ts`: switches the mode on and proxies `/api` there |
-| `AEP_WIRED_KEY` | `wire` — the path to the assertion private key | `mock/wired.ts`: signs the assertion. Required once the first is set |
-| `AEP_WIRED_SECURITY` | optional; default `../specs/design/security.json` | `mock/wired.ts`: each role's `testUsers` row becomes the assertion's `username` |
-| `AEP_WIRED_ISSUER`, `AEP_WIRED_HEADER` | optional; default `aep-playground-wire`, `x-jwt-assertion` | `mock/wired.ts`: must match the service's `GATEWAY_ASSERTION_ISSUER` / `_HEADER` |
-
-The dev server becomes the gateway: it refuses an operation the role has no
+The dev server then IS the gateway: it refuses an operation the role has no
 handle for with a bare 401 before the service sees it (the reason lands in an
 `x-aep-wired-reason` response header and on the terminal), 404s a path no
 contract declares, and mints the signed `x-jwt-assertion` for everything it lets
 through. The browser's own mock bearer is stripped on the way out — the service
-must never see a caller-supplied identity.
+must never see a caller-supplied identity. MSW never starts.
 
 Roles switch from the badge in the corner, or from `?role=` as always. The badge
 says `wired` rather than `mock` so nobody mistakes real data for seed data.
 
-By hand, without `wire`, from the App Path:
+By hand, from the App Path:
 
 ```bash
 AEP_WIRED_API=http://localhost:19090 AEP_WIRED_KEY=/path/to/key.pem npm run dev:mock

@@ -47,7 +47,7 @@ import type { Plugin } from "vite";
 import { mockEnv } from "./env";
 import { projectOperations } from "./authz/contract";
 import type { MockOperation, MockOperationTable } from "./authz/gateway";
-import { wiredFromEnv, wiredMiddleware, wiredProxy, type WiredOptions } from "./wired";
+import { securityPath, wiredFromEnv, wiredMiddleware, wiredProxy, type WiredOptions } from "./wired";
 
 export interface MockModeOptions {
   /**
@@ -266,8 +266,7 @@ async function readOperationTable(
  */
 function readRoleNames(root: string): string[] | null {
   try {
-    const file = path.resolve(root, "..", "specs", "design", "security.json");
-    const security = JSON.parse(fs.readFileSync(file, "utf-8")) as { roles?: { name?: unknown }[] };
+    const security = JSON.parse(fs.readFileSync(securityPath(root), "utf-8")) as { roles?: { name?: unknown }[] };
     const names = (security.roles ?? [])
       .map((role) => role.name)
       .filter((name): name is string => typeof name === "string" && name !== "");

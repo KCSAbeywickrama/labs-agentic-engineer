@@ -53,18 +53,11 @@ export interface TriageResult {
 export async function runTriageAgent(request: TriageRequest): Promise<TriageResult> {
   const paths = wirePaths(request.projectDir);
   const result = await runAgentTask({
-    boundary: { task: "The triage task", slug: "triage", mayWrite: [], mayRun: [] },
+    boundary: { task: "The triage task", slug: "triage", mayWrite: [] },
     prompt: triagePrompt(request),
     cwd: request.projectDir,
-    // 20, not the 8 this was designed with: measured, a triage that reads the
-    // service's config, its database module and its Dockerfile spends eight
-    // turns before it has anything to say, and `error_max_turns` is a worse
-    // answer than none. The prompt below keeps it from wandering instead.
-    maxTurns: 20,
+    maxTurns: 20, // 8 was measured too few to reach an answer; see ADR-0002.
     transcriptDir: paths.agents,
-    // Read and Grep are what it needs; everything that changes anything is gone
-    // before the hook table is even consulted.
-    disallowedTools: ["Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "Task"],
     ...(request.useApiKey ? { useApiKey: true } : {}),
   });
 

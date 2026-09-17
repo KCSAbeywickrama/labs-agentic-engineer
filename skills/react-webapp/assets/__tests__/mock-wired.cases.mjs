@@ -231,10 +231,16 @@ test("a public operation is forwarded with no identity at all", () => {
   assert.ok(removed.includes("x-jwt-assertion"), "a replayed assertion must be cleared, not left to pass");
 });
 
-test("the same role is the same subject on every run", () => {
+// Pinned on the playground side too (playground/test/wire-session.test.ts): the
+// dev server mints this per request and `wire` mints one for its printed curl
+// table, and a role must be the same caller in both.
+const HRCOORDINATOR_SUBJECT = "672ff732-07fd-0a47-5c2f-f1217acca0af";
+
+test("the same role is the same subject on every run, and the same one the playground mints", () => {
   const caller = { role: "HRCoordinator", username: "test-hrcoordinator", scopes: ["tasks:read"] };
   const claims = (token) => JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8"));
   assert.equal(claims(mintAssertion(caller, OPTS)).sub, claims(mintAssertion(caller, OPTS)).sub);
+  assert.equal(claims(mintAssertion(caller, OPTS)).sub, HRCOORDINATOR_SUBJECT);
   assert.notEqual(
     claims(mintAssertion(caller, OPTS)).sub,
     claims(mintAssertion({ ...caller, role: "ITOnboardingStaff" }, OPTS)).sub,

@@ -38,7 +38,7 @@ import { decodeJwt, decodeProtectedHeader } from "jose";
 import { ensureKeypair, mintAssertion, roleTokens, subjectFor, WIRE_HEADER, WIRE_ISSUER } from "../src/engine/wire/assertion.js";
 import { entryUrl, findEntry, roleEntries } from "../src/engine/wire/roles.js";
 import { numberedEntries, panelRows, readyLine, resolveKey } from "../src/engine/wire/panel.js";
-import { boundaryDenial } from "../src/engine/wire/agents/guard.js";
+import { boundaryDenial, deniedTools } from "../src/engine/wire/agents/guard.js";
 import { needsInstall } from "../src/engine/wire/webapp.js";
 import { delay, isPortBusy, startGroup, stopGroup } from "../src/engine/wire/runtime.js";
 import { sessionProcessExists } from "../src/engine/wire/state.js";
@@ -75,7 +75,13 @@ test("the keypair is minted once and reused, and the assertion verifies against 
   assert.equal(decodeProtectedHeader(token).alg, "RS256");
   const claims = decodeJwt(token);
   assert.equal(claims.iss, WIRE_ISSUER);
+  // The same literal is pinned on the asset side (skills/react-webapp/assets/
+  // __tests__/mock-wired.cases.mjs). Two processes mint this assertion — the dev
+  // server per request, this one for the printed curl table — and a role has to
+  // be the same caller in both, or rows created through one are invisible to the
+  // other. If you change the derivation, both tests fail, which is the point.
   assert.equal(claims.sub, subjectFor("HRCoordinator"));
+  assert.equal(claims.sub, "672ff732-07fd-0a47-5c2f-f1217acca0af");
   assert.equal(claims.username, "test-hr");
   assert.equal(claims.ouHandle, "local");
   assert.equal(claims.scope, "openid profile email group ou tasks:read tasks:set-due-date");
@@ -178,8 +184,13 @@ test("a script waits for one line", () => {
 
 // --- the agent boundary -----------------------------------------------------
 
-const SEED = { task: "The seed task", slug: "seed", mayWrite: ["/p/.aep-playground/wire/seed.sh"], mayRun: ["curl "] };
-const TRIAGE = { task: "The triage task", slug: "triage", mayWrite: [], mayRun: [] };
+const SEED = {
+  task: "The seed task",
+  slug: "seed",
+  mayWrite: ["/p/.aep-playground/wire/seed.sh"],
+  mayCurl: "http://localhost:5173",
+};
+const TRIAGE = { task: "The triage task", slug: "triage", mayWrite: [] };
 
 test("the seed task may write exactly one file", () => {
   assert.equal(boundaryDenial("Write", { file_path: "/p/.aep-playground/wire/seed.sh" }, SEED), undefined);
@@ -192,8 +203,40 @@ test("the seed task may write exactly one file", () => {
 
 test("the seed task may only call the running app", () => {
   assert.equal(boundaryDenial("Bash", { command: "curl -sS http://localhost:5173/api/tasks" }, SEED), undefined);
-  assert.match(boundaryDenial("Bash", { command: "docker compose restart" }, SEED) ?? "", /may only run commands/);
-  assert.match(boundaryDenial("Bash", { command: "psql -c 'insert into tasks'" }, SEED) ?? "", /may only run commands/);
+  assert.equal(
+    boundaryDenial("Bash", { command: "curl -sS -X POST http://localhost:5173/api/new-hires -d '{}'" }, SEED),
+    undefined,
+  );
+  assert.match(boundaryDenial("Bash", { command: "docker compose restart" }, SEED) ?? "", /exactly one kind/);
+  assert.match(boundaryDenial("Bash", { command: "psql -c 'insert into tasks'" }, SEED) ?? "", /exactly one kind/);
+});
+
+test("a curl is not a way around the rest of the boundary", () => {
+  // Another host: the boundary is this session's app, not the network.
+  assert.match(boundaryDenial("Bash", { command: "curl https://example.com/x" }, SEED) ?? "", /exactly one kind/);
+  // `-o` makes curl a writer, which walks straight through `mayWrite`.
+  assert.match(
+    boundaryDenial("Bash", { command: "curl -o /p/onboarding-api/service.bal http://localhost:5173/x" }, SEED) ?? "",
+    /exactly one kind/,
+  );
+  // One allowed command plus a shell operator is two commands, and the second is not checked.
+  for (const suffix of ["; rm -rf /p", "&& docker compose down", "| tee /p/x", "> /p/x", "`whoami`"]) {
+    assert.match(
+      boundaryDenial("Bash", { command: `curl http://localhost:5173/api/tasks ${suffix}` }, SEED) ?? "",
+      /exactly one kind/,
+      suffix,
+    );
+  }
+});
+
+test("the tools a task may not use are derived from its boundary, not listed beside it", () => {
+  const seed = deniedTools(SEED);
+  assert.ok(!seed.includes("Bash"), "the seed task curls");
+  assert.ok(!seed.includes("Write"), "the seed task writes its script");
+  assert.ok(seed.includes("WebFetch") && seed.includes("Task"));
+
+  const triage = deniedTools(TRIAGE);
+  assert.ok(triage.includes("Bash") && triage.includes("Write") && triage.includes("Edit"));
 });
 
 test("the triage task writes nothing and runs nothing", () => {
