@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import type { RailPlanEntry } from "../lib/railSections";
 import { isAcceptanceFeaturePath, type SpecFileEntry } from "./mapping";
 
 /** What the content pane should render for the current sidebar selection. */
@@ -128,6 +129,72 @@ function isDsl(path: string): boolean {
  * entry (rendered as a diagram, not shown as text). Components and their files
  * are sorted by path for a stable tree.
  */
+/**
+ * What the Validation rail section is made of.
+ *
+ * It exists for the same reason `DesignSection` does: the section's shape is
+ * derived from the file list and the plan, and deriving it inline in the
+ * component put that reasoning in the middle of the rendering.
+ *
+ * The acceptance criteria are the whole reason it is not just a file list. One
+ * rail entry stands for EVERY `specs/acceptance/*.feature` (ADR-0031), so the
+ * section has to say both which files get an ordinary row AND whether that one
+ * standing-in entry belongs there. Deriving the two separately is how they come
+ * to disagree — a predicate changed on one side and not the other drops files
+ * out of the rail with nothing to catch it — so they are computed together,
+ * from one pass, here.
+ */
+export interface ValidationSection {
+  /** The rows that are one file each. The acceptance features are NOT among them. */
+  files: SpecFileEntry[];
+  /** Whether the single "Acceptance criteria" entry belongs in the rail. */
+  hasAcceptance: boolean;
+  /**
+   * The path the acceptance entry takes its plan status from, if any.
+   *
+   * `row` reads status from ONE path and this entry stands for many, so the two
+   * things it needs are folded into a single answer: it pulses while the agent
+   * is writing ANY capability, and it is a ghost only when NOT ONE is committed
+   * yet — with two written and a third planned the entry is real and has to
+   * stay clickable.
+   */
+  acceptanceStatusPath: string | undefined;
+}
+
+export function buildValidationSection(
+  /** Committed files UNION the plan's ghosts — everything that gets a row. */
+  allFiles: SpecFileEntry[],
+  /**
+   * Which of those paths actually exist yet.
+   *
+   * Both are needed and neither substitutes for the other: `allFiles` decides
+   * what is SHOWN, including a planned path holding its place, while this
+   * decides what has been WRITTEN. Deriving the second from the first counts a
+   * ghost as committed, and the entry stops being a ghost while nothing has
+   * been written at all.
+   */
+  committed: ReadonlySet<string>,
+  plan: readonly RailPlanEntry[],
+): ValidationSection {
+  const validation = allFiles.filter((f) => f.group === "validation");
+  const acceptanceFiles = validation.filter((f) => isAcceptanceFeaturePath(f.path));
+  const plannedPaths = plan
+    .filter((e) => isAcceptanceFeaturePath(e.path))
+    .map((e) => e.path);
+
+  const writing = plan.find(
+    (e) => e.status === "writing" && isAcceptanceFeaturePath(e.path),
+  )?.path;
+  const anyCommitted = acceptanceFiles.some((f) => committed.has(f.path));
+
+  return {
+    // The one filter, so nothing can hide a file the entry does not cover.
+    files: validation.filter((f) => !isAcceptanceFeaturePath(f.path)),
+    hasAcceptance: acceptanceFiles.length > 0 || plannedPaths.length > 0,
+    acceptanceStatusPath: writing ?? (anyCommitted ? undefined : plannedPaths[0]),
+  };
+}
+
 export function buildDesignSection(files: SpecFileEntry[]): DesignSection {
   const design = files.filter((f) => f.group === "designs");
   const hasCellDsl = design.some((f) => f.path === DESIGN_CELL_PATH);

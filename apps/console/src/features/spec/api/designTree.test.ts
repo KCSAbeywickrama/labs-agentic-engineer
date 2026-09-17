@@ -19,6 +19,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDesignSection,
+  buildValidationSection,
   componentOf,
   dependencyOf,
   followSelection,
@@ -26,6 +27,7 @@ import {
   isFlow,
   selectionKey,
 } from "./designTree";
+import type { RailPlanEntry } from "../lib/railSections";
 import type { SpecFileEntry } from "./mapping";
 
 // Full repo-relative paths, mirroring mapping.ts's current scheme
@@ -235,6 +237,86 @@ describe("followSelection — acceptance paths open the set", () => {
     expect(selectionKey({ kind: "acceptance" })).not.toBe(
       selectionKey({ kind: "file", path: "specs/acceptance/bought-items.feature" }),
     );
+  });
+});
+
+// The Validation section is not just a file list: ONE rail entry stands for
+// every specs/acceptance/*.feature (ADR-0031). Which files keep an ordinary row
+// and whether that standing-in entry appears are two halves of one fact, and
+// deriving them apart is how they come to disagree — so they are derived here,
+// together, and tested here rather than through the rail.
+describe("buildValidationSection", () => {
+  const file = (path: string): SpecFileEntry => ({ path, sha: "sha", group: "validation" });
+  const ghost = (path: string): SpecFileEntry => ({ path, sha: "", group: "validation" });
+  const CRITERIA = "specs/validation/validation-criteria.json";
+  const BOUGHT = "specs/acceptance/bought-items.feature";
+  const ADDING = "specs/acceptance/adding-items.feature";
+  const planned = (path: string, status: RailPlanEntry["status"]): RailPlanEntry => ({
+    path,
+    status,
+    section: "validation",
+  });
+
+  it("keeps the capabilities out of the rows and puts one entry in their place", () => {
+    const section = buildValidationSection(
+      [file(CRITERIA), file(BOUGHT), file(ADDING)],
+      new Set([CRITERIA, BOUGHT, ADDING]),
+      [],
+    );
+    expect(section.files.map((f) => f.path)).toEqual([CRITERIA]);
+    expect(section.hasAcceptance).toBe(true);
+  });
+
+  // The two halves agreeing is the whole point of deriving them together: every
+  // path dropped from `files` must be covered by the entry, or files vanish from
+  // the rail with nothing to catch it.
+  it("covers everything it hides", () => {
+    const all = [file(CRITERIA), file(BOUGHT), file(ADDING)];
+    const section = buildValidationSection(all, new Set(all.map((f) => f.path)), []);
+    const hidden = all.filter((f) => !section.files.includes(f));
+    expect(hidden.length).toBeGreaterThan(0);
+    expect(section.hasAcceptance).toBe(true);
+  });
+
+  it("offers no entry for a project that has none", () => {
+    const section = buildValidationSection([file(CRITERIA)], new Set([CRITERIA]), []);
+    expect(section.hasAcceptance).toBe(false);
+    expect(section.acceptanceStatusPath).toBeUndefined();
+  });
+
+  it("appears for a capability that is only planned, and not yet written", () => {
+    const section = buildValidationSection(
+      [file(CRITERIA), ghost(BOUGHT)],
+      new Set([CRITERIA]),
+      [planned(BOUGHT, "planned")],
+    );
+    expect(section.hasAcceptance).toBe(true);
+    // A ghost: the entry selects nothing yet, so the rail disables it.
+    expect(section.acceptanceStatusPath).toBe(BOUGHT);
+  });
+
+  // The case a refactor got wrong once: `allFiles` carries the ghosts, so
+  // deriving "committed" from it counts a planned path as written and the entry
+  // stops being a ghost while nothing exists at all.
+  it("is a ghost only while NOT ONE capability is written", () => {
+    const section = buildValidationSection(
+      [file(BOUGHT), ghost(ADDING)],
+      new Set([BOUGHT]),
+      [planned(ADDING, "planned")],
+    );
+    // Two written and a third planned is a real entry, so no status path.
+    expect(section.acceptanceStatusPath).toBeUndefined();
+  });
+
+  // `row` reads status from ONE path and this entry stands for many, so a write
+  // anywhere in the set pulses it.
+  it("pulses while the agent writes any capability", () => {
+    const section = buildValidationSection(
+      [file(BOUGHT), ghost(ADDING)],
+      new Set([BOUGHT]),
+      [planned(BOUGHT, "done"), planned(ADDING, "writing")],
+    );
+    expect(section.acceptanceStatusPath).toBe(ADDING);
   });
 });
 
