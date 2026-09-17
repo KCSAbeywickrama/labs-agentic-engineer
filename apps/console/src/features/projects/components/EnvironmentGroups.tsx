@@ -148,14 +148,10 @@ const CONNECTION_TONE: Record<ConnectionLine["state"], StatusTone> = {
 export function ConnectionsGroup({
   lines,
   caption,
-  environment,
   onConfigure,
 }: {
   lines: ConnectionLine[];
   caption: string;
-  /** Names the environment in the pill's accessible name, so the two cards'
-   *  Configures for one connection are two controls to a screen reader. */
-  environment: "development" | "production";
   onConfigure: (row: ConnectionRow) => void;
 }) {
   return (
@@ -173,12 +169,13 @@ export function ConnectionsGroup({
                 <Tooltip title="Configure">
                   <IconButton
                     size="small"
-                    aria-label={
-                      environment === "production"
-                        ? `Configure ${l.row.name} for production`
-                        : `Configure ${l.row.name}`
-                    }
-                    onClick={() => onConfigure(l.row)}
+                    aria-label={`Configure ${l.row.name}`}
+                    onClick={(event) => {
+                      // The whole environment card is a click target; a gear
+                      // inside it is not a way to navigate.
+                      event.stopPropagation();
+                      onConfigure(l.row);
+                    }}
                   >
                     <Settings size={15} />
                   </IconButton>

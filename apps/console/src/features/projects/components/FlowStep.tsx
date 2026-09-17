@@ -97,6 +97,7 @@ export function FlowStep({
   view,
   ringTone,
   last = false,
+  pinned = false,
   children,
 }: {
   step: number;
@@ -105,6 +106,10 @@ export function FlowStep({
    *  platform itself is moving (a rollout). */
   ringTone?: "info" | "warning";
   last?: boolean;
+  /** Push this step to the bottom of the rail. The flow's cards share a
+   *  height, so pinning each card's TRAILING step lines the promote rows up
+   *  across the whole pipeline however tall each card's lists make it. */
+  pinned?: boolean;
   children?: React.ReactNode;
 }) {
   const inactive = view.state === "pending";
@@ -115,7 +120,7 @@ export function FlowStep({
       spacing={1.5}
       role="listitem"
       aria-label={spoken}
-      sx={{ alignItems: "stretch" }}
+      sx={{ alignItems: "stretch", ...(pinned && { mt: "auto" }) }}
     >
       <Stack sx={{ alignItems: "center", width: MARK, flexShrink: 0 }}>
         <Mark step={step} state={view.state} {...(ringTone ? { ringTone } : {})} />

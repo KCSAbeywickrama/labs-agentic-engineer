@@ -243,14 +243,10 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   );
   const rows = environmentRows(board, environmentList, deploy);
   const development = rows[0];
-  const production = rows[1] ?? {
-    environment: environmentList[1]?.name ?? "",
-    label: environmentList[1]?.displayName ?? "",
-    cards: [],
-    status: { label: "Nothing deployed", tone: "neutral" as const, live: false },
-    live: 0,
-    total: 0,
-  };
+  // The promotion TARGET, when the pipeline has one. A single-environment
+  // pipeline has none — and a card invented for it drew an empty title over
+  // an environment the platform never named.
+  const production = rows[1];
   const componentTypes = new Map<string, string>();
   for (const c of components.data?.items ?? []) {
     if (c.type) componentTypes.set(c.name, c.type);
@@ -262,7 +258,9 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   const hold = parked && !behind ? parked : null;
   // An unknown verdict withholds promotion outright: `canPromote` would wave
   // an empty validation through.
-  const promoteIfKnown = promoteStep(cardDeploy, production, connections, liveValues, hold, version);
+  const promoteIfKnown = production
+    ? promoteStep(cardDeploy, production, connections, liveValues, hold, version)
+    : null;
   const promote =
     promoteIfKnown && deployedState.failed ? promoteUnavailable(version) : promoteIfKnown;
   const devLines = connectionsKnown
@@ -323,7 +321,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           <EnvironmentCards
             projectName={projectName}
             development={development}
-            production={production}
+            {...(production ? { production } : {})}
             deploy={cardDeploy}
             validation={validation}
             version={version}
