@@ -35,6 +35,7 @@ import { isRegisteredExternal } from "../../marketplace/kind";
 import { useValidationEvidence } from "../../validation/api/counts";
 import {
   useComponentsDeployments,
+  useEnvironments,
   useProjectComponents,
   useProjectDependencyReadiness,
   useProjectStatus,
@@ -99,7 +100,13 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   const connectionsKnown = !dependencies.isPending && !dependencies.isError;
   // Whether the platform holds values for each external in development —
   // the deploy gate's own read, so "Set" here means what the gate means.
-  const readiness = useProjectDependencyReadiness(projectName, "development");
+  // The pipeline's environments, in promotion order — the board's own order.
+  const environments = useEnvironments();
+  const environmentList = environments.data ?? [];
+  // Values are collected where they are first needed: the environment a build
+  // lands in. An empty name keeps the read idle until the list arrives.
+  const entryEnvironment = environmentList[0]?.name ?? "";
+  const readiness = useProjectDependencyReadiness(projectName, entryEnvironment);
   // Org catalog: Registered Externals (non-empty envCells) already hold
   // values on the org plane — Connections must not offer Configure / the
   // project values dialog for those names. While the catalog query is
@@ -206,12 +213,13 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   const board = groupDeploymentCards(
     components.data?.items ?? [],
     deployments.deployments,
+    entryEnvironment,
   );
-  const rows = environmentRows(board, deploy);
+  const rows = environmentRows(board, environmentList, deploy);
   const development = rows[0];
   const production = rows[1] ?? {
-    environment: "production" as const,
-    label: "Production",
+    environment: environmentList[1]?.name ?? "",
+    label: environmentList[1]?.displayName ?? "",
     cards: [],
     status: { label: "Nothing deployed", tone: "neutral" as const, live: false },
     live: 0,
@@ -318,6 +326,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
 
         <DeploymentsLedger
           rows={versionLedgerRows(rows, builds.data)}
+          environments={environmentList}
           builds={builds.data}
           validation={cardDeploy?.validation}
           counts={validation.counts}
@@ -352,7 +361,7 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
           }}
           projectName={projectName}
           connection={valuesTarget}
-          environment="development"
+          environment={entryEnvironment}
         />
       )}
       {deploy && (

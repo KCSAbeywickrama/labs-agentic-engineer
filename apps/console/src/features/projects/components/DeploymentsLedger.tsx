@@ -37,6 +37,7 @@ import {
   type ValidationAvailability,
   type LedgerEntry,
 } from "../lib/deploymentLedger";
+import { findEnvironment, type EnvironmentInfo } from "../lib/environments";
 
 type BuildSummary = components["schemas"]["BuildSummary"];
 
@@ -53,14 +54,16 @@ const COLUMNS = [
 
 /**
  * The deployments ledger (ADR-0027, artboard 1c; #779): one row per VERSION an
- * environment has run — development's whole version ledger, newest first, and
- * production's current one — the Builds ledger's own table so the two pages
+ * environment has run — the whole version ledger of the environment builds
+ * land in, newest first, and every later environment's current one — the
+ * Builds ledger's own table so the two pages
  * read as one system. The platform keeps no deployment RECORD, so a past
  * row carries what the build story knows (the milestone, when it was built)
  * and claims no rollout stamp of its own; only the live row has one.
  */
 export function DeploymentsLedger({
   rows,
+  environments,
   builds,
   validation,
   counts,
@@ -68,9 +71,13 @@ export function DeploymentsLedger({
   onOpen,
 }: {
   rows: LedgerEntry[];
+  /** The pipeline's environments — a row reads its own to know whether it has
+   *  a verdict to show at all. */
+  environments: EnvironmentInfo[];
   /** The version ledger, for the Milestone cell; undefined while loading. */
   builds: BuildSummary[] | undefined;
-  /** deploy.validation — development's verdict lifecycle. */
+  /** deploy.validation — the verdict lifecycle of the version the build
+   *  rolled out. */
   validation: string | undefined;
   counts?: ValidationCounts | undefined;
   /** The deployed version's own run read is out or failed: the cell holds a
@@ -122,10 +129,16 @@ export function DeploymentsLedger({
                 // version's verdict is its page's business.
                 validation={
                   row.current
-                    ? validationCell(row.environment, validation, counts, validationAvailability)
-                    : row.environment === "development"
-                      ? null
-                      : validationCell(row.environment, validation, counts, validationAvailability)
+                    ? validationCell(
+                        findEnvironment(environments, row.environment),
+                        validation,
+                        counts,
+                        validationAvailability,
+                      )
+                    : // A past version's verdict is its own page's business,
+                      // and no environment downstream of the build's has a
+                      // verdict to show here at all.
+                      null
                 }
                 onOpen={() => onOpen(row)}
               />

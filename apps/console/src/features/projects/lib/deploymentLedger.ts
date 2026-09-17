@@ -31,24 +31,27 @@ import type { StatusTone } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 import type { ValidationCounts } from "../../validation/lib/verdict";
 import type { DeploymentBoard, DeploymentCard } from "./deploymentRows";
+import { labelOf, type EnvironmentInfo } from "./environments";
 import { validationView } from "./pipeline";
 
 type DeployStage = components["schemas"]["DeployStage"];
 type BuildSummary = components["schemas"]["BuildSummary"];
 
-/** The two environments the platform deploys to, in promotion order. */
-export const ENVIRONMENTS = ["development", "production"] as const;
-export type EnvironmentKey = (typeof ENVIRONMENTS)[number];
+/**
+ * An environment is a NAME the platform's pipeline gave it — not one of two
+ * words the console knows. Which names exist, and in what order, is the
+ * environments list's answer (`useEnvironments`), never a constant here.
+ */
+export type EnvironmentKey = string;
 
-/** The route segment as an environment, or null for anything else. */
-export function parseEnvironment(segment: string): EnvironmentKey | null {
-  return (ENVIRONMENTS as readonly string[]).includes(segment)
-    ? (segment as EnvironmentKey)
-    : null;
-}
-
-export function environmentLabel(environment: EnvironmentKey): string {
-  return environment === "development" ? "Development" : "Production";
+/** What to call an environment on screen: its display name, falling back to
+ *  the raw name when the list does not know it (a URL naming a dead
+ *  environment still has to render something). */
+export function environmentLabel(
+  env: EnvironmentInfo | undefined,
+  name: EnvironmentKey,
+): string {
+  return labelOf(env, name);
 }
 
 export interface EnvironmentStatus {
@@ -80,18 +83,19 @@ function cardsStatus(cards: DeploymentCard[]): EnvironmentStatus {
  * What an environment says about itself — the card's chip and the ledger's
  * Status cell, one vocabulary (lexicon, *Deployments*).
  *
- * Development answers from the deploy AGGREGATE when it has one: that is the
- * platform's own word on the rollout, and it is what the Builds ledger's
- * "Deployed to development" reads too, so the two pages cannot disagree. The
- * aggregate names no other environment, so production (and development while
- * the status poll is still out) folds its bindings instead.
+ * The pipeline's FIRST environment answers from the deploy AGGREGATE when it
+ * has one: the aggregate tracks the rollout of a completed build, which lands
+ * there and nowhere else, and it is what the Builds ledger reads too, so the
+ * two pages cannot disagree. The aggregate names no other environment, so
+ * every later one (and the first while the status poll is still out) folds
+ * its bindings instead.
  */
 export function environmentStatus(
-  environment: EnvironmentKey,
+  env: EnvironmentInfo,
   cards: DeploymentCard[],
   deploy?: DeployStage | undefined,
 ): EnvironmentStatus {
-  if (environment === "development" && deploy) {
+  if (env.position === 0 && deploy) {
     switch (deploy.status) {
       case "deployed":
         return { label: "Deployed", tone: "success", live: false };
@@ -103,8 +107,9 @@ export function environmentStatus(
         // `none` is the aggregate's word for "no rollout it is tracking" — but
         // a binding that is Ready is deployed whatever the aggregate tracks
         // (a version deployed before the aggregate existed, or after its run
-        // settled). Live bindings under a `none` fold like production's do;
-        // only an empty environment reads "Nothing deployed".
+        // settled). Live bindings under a `none` fold like a later
+        // environment's do; only an empty environment reads "Nothing
+        // deployed".
         return cards.some((c) => c.deployment)
           ? cardsStatus(cards)
           : { label: "Nothing deployed", tone: "neutral", live: false };
@@ -173,7 +178,8 @@ export function agoLabel(iso: string, now: number = Date.now()): string {
 export interface EnvironmentRow {
   environment: EnvironmentKey;
   label: string;
-  /** The version running here; the aggregate names development's only. */
+  /** The version running here; the aggregate names the first environment's
+   *  only. */
   version?: string;
   cards: DeploymentCard[];
   status: EnvironmentStatus;
@@ -183,37 +189,33 @@ export interface EnvironmentRow {
 }
 
 /**
- * One row per environment. Development always has a row — every component
- * gets a card there, deployed or not, because absence is information on the
- * board — while production has one only once something is bound to it.
+ * One row per environment, in the order the environments list came in — the
+ * platform's promotion order, which this function never re-sorts. Every
+ * environment gets a row whether or not anything is bound to it: absence is
+ * information on the board, and an environment the pipeline names but nothing
+ * reaches is exactly what a reader needs to see.
  */
 export function environmentRows(
   board: DeploymentBoard,
+  environments: EnvironmentInfo[],
   deploy?: DeployStage | undefined,
 ): EnvironmentRow[] {
-  const rowOf = (
-    environment: EnvironmentKey,
-    cards: DeploymentCard[],
-  ): EnvironmentRow => {
+  return environments.map((env) => {
+    const cards = board.get(env.name) ?? [];
     const deployedAt = latestDeployedAt(cards);
     return {
-      environment,
-      label: environmentLabel(environment),
-      ...(environment === "development" && deploy?.version
-        ? { version: deploy.version }
-        : {}),
+      environment: env.name,
+      label: environmentLabel(env, env.name),
+      // The aggregate names one version: the one the build rolled out, in the
+      // environment a build lands in.
+      ...(env.position === 0 && deploy?.version ? { version: deploy.version } : {}),
       cards,
-      status: environmentStatus(environment, cards, deploy),
+      status: environmentStatus(env, cards, deploy),
       live: liveCount(cards),
       total: cards.length,
       ...(deployedAt ? { deployedAt } : {}),
     };
-  };
-  const rows = [rowOf("development", board.development)];
-  if (board.production.length > 0) {
-    rows.push(rowOf("production", board.production));
-  }
-  return rows;
+  });
 }
 
 /** The ledger lists environments that RUN something; an empty dev board is
@@ -224,12 +226,12 @@ export function ledgerRows(rows: EnvironmentRow[]): EnvironmentRow[] {
 
 /**
  * One row of the deployments ledger (#779): a VERSION in an environment, not
- * only the environment's current one. Development gets a row per built
- * version — the version ledger is the only record of what reached it, and
- * every completed build auto-deploys there — while production, which the
- * aggregate never names a version for, keeps its one row of what the binding
- * says. A row knows where it opens: the version's page, or the environment's
- * Try Out page when there is no version to name.
+ * only the environment's current one. The pipeline's FIRST environment gets a
+ * row per built version — the version ledger is the only record of what
+ * reached it, and every completed build auto-deploys there — while every
+ * later environment, which the aggregate never names a version for, keeps its
+ * one row of what the binding says. A row knows where it opens: the version's
+ * page, or the environment's Try Out page when there is no version to name.
  */
 export interface LedgerEntry {
   key: string;
@@ -271,48 +273,50 @@ export function versionLedgerRows(
   builds: BuildSummary[] | undefined,
 ): LedgerEntry[] {
   const out: LedgerEntry[] = [];
-  const development = rows.find((r) => r.environment === "development");
+  // Rows are in promotion order, so the first is where builds land — the one
+  // environment the version ledger can speak for.
+  const entry = rows[0];
+  if (!entry) return out;
   const seen = new Set<string>();
   for (const build of [...(builds ?? [])].sort(newestFirst)) {
     if (seen.has(build.tag)) continue;
     seen.add(build.tag);
-    // The aggregate's word: the version it names is the one development runs,
-    // and the row's status is the environment's own (which folds the bindings
-    // under it) — not the build's.
-    const current = development?.version === build.tag;
+    // The aggregate's word: the version it names is the one that environment
+    // runs, and the row's status is the environment's own (which folds the
+    // bindings under it) — not the build's.
+    const current = entry.version === build.tag;
     out.push({
-      key: `development:${build.tag}`,
-      environment: "development",
-      label: "Development",
+      key: `${entry.environment}:${build.tag}`,
+      environment: entry.environment,
+      label: entry.label,
       version: build.tag,
-      status: current && development ? development.status : buildRowStatus(build),
+      status: current ? entry.status : buildRowStatus(build),
       current,
       ...(build.completedAt ? { builtAt: build.completedAt } : {}),
-      ...(current && development?.deployedAt ? { deployedAt: development.deployedAt } : {}),
+      ...(current && entry.deployedAt ? { deployedAt: entry.deployedAt } : {}),
     });
   }
-  // A dev deployment whose version the ledger does not list (a version tagged
+  // A deployment whose version the ledger does not list (a version tagged
   // before the ledger kept rows) still gets its row — it IS what runs there.
-  const devBound = development?.cards.some((c) => c.deployment) ?? false;
-  if (development && (devBound || development.version) && !(development.version && seen.has(development.version))) {
+  const entryBound = entry.cards.some((c) => c.deployment);
+  if ((entryBound || entry.version) && !(entry.version && seen.has(entry.version))) {
     const row: LedgerEntry = {
-      key: `development:${development.version ?? "current"}`,
-      environment: "development",
-      label: "Development",
-      ...(development.version ? { version: development.version } : {}),
-      status: development.status,
+      key: `${entry.environment}:${entry.version ?? "current"}`,
+      environment: entry.environment,
+      label: entry.label,
+      ...(entry.version ? { version: entry.version } : {}),
+      status: entry.status,
       current: true,
-      ...(development.deployedAt ? { deployedAt: development.deployedAt } : {}),
+      ...(entry.deployedAt ? { deployedAt: entry.deployedAt } : {}),
     };
     // Newest first still holds for it: a version the ledger lost is usually an
     // OLD one, so it takes its place by when it was deployed, not the top.
     // With no stamp to read it goes first — the only version there is to name.
-    const at = development.deployedAt;
+    const at = entry.deployedAt;
     const before = at ? out.findIndex((r) => (r.builtAt ?? "") < at) : 0;
     out.splice(before === -1 ? out.length : before, 0, row);
   }
-  for (const row of rows) {
-    if (row.environment === "development") continue;
+  for (const row of rows.slice(1)) {
     if (!row.cards.some((c) => c.deployment)) continue;
     out.push({
       key: `${row.environment}:${row.version ?? "current"}`,
@@ -354,17 +358,19 @@ export type ValidationAvailability = "pending" | "failed";
 
 /**
  * The ledger's Validation cell — counts when the criteria/report join resolved
- * them, the shared verdict vocabulary otherwise. Only development is validated
- * (the check runs against the dev deployment), so production reads "—" and
- * a dev row with nothing to say yet reads "Not run".
+ * them, the shared verdict vocabulary otherwise. The verdict this cell renders
+ * is the deploy aggregate's, and the aggregate judges the run against the
+ * deployment a build lands in — the pipeline's FIRST environment. So every
+ * later environment reads "—" (there is no verdict of its own to read), and a
+ * first-environment row with nothing to say yet reads "Not run".
  */
 export function validationCell(
-  environment: EnvironmentKey,
+  env: EnvironmentInfo | undefined,
   validation: string | undefined,
   counts?: ValidationCounts,
   availability?: ValidationAvailability,
 ): ValidationCell | null {
-  if (environment !== "development") return null;
+  if (env?.position !== 0) return null;
   // An unread verdict is not "Not run" — that is a settled claim, and the
   // read that would settle it is still out, or failed (#776 review).
   if (availability === "pending") return { label: "", tone: "neutral", live: false, pending: true };

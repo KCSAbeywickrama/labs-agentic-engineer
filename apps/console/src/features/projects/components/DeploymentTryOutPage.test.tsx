@@ -84,6 +84,30 @@ const mockReadinessRefetch = vi.fn();
 const mockSaveValues = vi.fn();
 
 vi.mock("../api/queries", () => ({
+  // The platform's pipeline, in promotion order — what `useEnvironments`
+  // serves. Two environments here because that is the pipeline these tests
+  // describe, not because the console knows only two.
+  useEnvironments: () => ({
+    data: [
+      {
+        name: "development",
+        displayName: "Development",
+        isProduction: false,
+        validation: "on",
+        position: 0,
+        promotesTo: "production",
+      },
+      {
+        name: "production",
+        displayName: "Production",
+        isProduction: true,
+        validation: "off",
+        position: 1,
+      },
+    ],
+    isPending: false,
+    isError: false,
+  }),
   useComponentOpenApi: (_p: string, componentName: string) => ({
     data:
       mockContractError || mockContractPending
@@ -354,7 +378,7 @@ describe("DeploymentTryOutPage", () => {
     render(<DeploymentTryOutPage projectName="expense" environment="development" />);
 
     expect(
-      screen.getByText(/Nothing deployed here yet — agents deploy to development/),
+      screen.getByText(/Nothing deployed here yet — agents deploy to Development/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/could not be loaded/)).not.toBeInTheDocument();
   });

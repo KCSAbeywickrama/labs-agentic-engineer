@@ -28,7 +28,7 @@ import type { Operation, ParsedOpenApi } from "@aep/ui-openapi-view";
 import type { StatusTone } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 import { developmentConnections, type ConnectionLine } from "./deploymentFlow";
-import type { EnvironmentKey } from "./deploymentLedger";
+import type { EnvironmentInfo } from "./environments";
 import type { ConnectionRow } from "./promotion";
 
 type ComponentDependencies = components["schemas"]["ComponentDependencies"];
@@ -154,28 +154,30 @@ export interface ConnectionTableRow {
 }
 
 /**
- * The Connections table for one environment. In development the state comes
- * from the readiness read and Edit re-collects values (the board's own
- * surface); on production nothing reads values and nothing collects them here,
- * so every external reads as unknown with no Edit — the promote dialog on the
- * board is where production values go.
+ * The Connections table for one environment. Values are collected where they
+ * are FIRST needed — the pipeline's first environment, the one a build lands
+ * in: there the state comes from the readiness read and Edit re-collects them
+ * (the board's own surface). Downstream of it nothing reads values and nothing
+ * collects them here, so every external reads as unknown with no Edit — the
+ * promote dialog on the board is where a promoted environment's values go.
  */
 export function connectionTable(
   rows: ConnectionRow[],
   design: ComponentDependencies[] | null | undefined,
   readiness: ProjectDependencyReadiness | undefined,
-  environment: EnvironmentKey,
+  env: EnvironmentInfo | undefined,
   registeredNames: Set<string>,
   catalogUnknown: boolean,
 ): ConnectionTableRow[] {
+  const collectsValues = env?.position === 0;
   const lines = developmentConnections(
     rows,
-    environment === "development" ? readiness : undefined,
+    collectsValues ? readiness : undefined,
     null,
     registeredNames,
-    // Production offers no Edit at all — treating the catalog as unknown is
-    // the one switch that turns Configure off for every external.
-    environment === "development" ? catalogUnknown : true,
+    // A later environment offers no Edit at all — treating the catalog as
+    // unknown is the one switch that turns Configure off for every external.
+    collectsValues ? catalogUnknown : true,
   );
   const by = usedBy(design);
   return lines.map((line) => ({

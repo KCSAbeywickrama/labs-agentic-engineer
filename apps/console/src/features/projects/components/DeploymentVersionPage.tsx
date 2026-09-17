@@ -45,6 +45,7 @@ import { useValidationEvidence } from "../../validation/api/counts";
 import { answeredRun } from "../../validation/lib/runs";
 import {
   useComponentsDeployments,
+  useEnvironments,
   useProjectComponents,
   useProjectDependencyReadiness,
   useProjectStatus,
@@ -54,12 +55,11 @@ import {
   commitUrl,
   environmentLabel,
   environmentRows,
-  parseEnvironment,
   shortSha,
   validationCell,
-  type EnvironmentKey,
   type ValidationAvailability,
 } from "../lib/deploymentLedger";
+import { findEnvironment } from "../lib/environments";
 import { groupDeploymentCards, type DeploymentCard } from "../lib/deploymentRows";
 import { connectionRows, type ConnectionRow } from "../lib/promotion";
 import { ConnectionValuesDialog } from "./ConnectionValuesDialog";
@@ -92,7 +92,13 @@ export function DeploymentVersionPage({
   environment: string;
   version: string;
 }) {
-  const environment = parseEnvironment(segment);
+  // The environment is whatever the pipeline calls it; the environments list
+  // is the only authority on which names exist. While it loads the segment is
+  // taken at its word rather than called a dead end.
+  const environments = useEnvironments();
+  const environmentList = environments.data ?? [];
+  const envInfo = findEnvironment(environmentList, segment);
+  const environment = envInfo || environments.isPending ? segment : null;
   const builds = useBuilds(projectName);
   const runs = useBuildRuns(projectName, version);
   const status = useProjectStatus(projectName);
@@ -111,9 +117,11 @@ export function DeploymentVersionPage({
   // them. Production makes no readiness read — nothing collects values there.
   const dependencies = useDesignDependencies(projectName);
   const connections = useMemo(() => connectionRows(dependencies.data), [dependencies.data]);
+  // Values are collected where they are first needed — the environment a
+  // build lands in. Anywhere else the read stays idle.
   const readiness = useProjectDependencyReadiness(
     projectName,
-    environment === "development" ? "development" : "",
+    envInfo?.position === 0 ? segment : "",
   );
   const externalCatalog = useExternalResources();
   const catalogUnknown = externalCatalog.isPending || externalCatalog.isError;
@@ -142,7 +150,11 @@ export function DeploymentVersionPage({
         <EmptyState
           icon={<Compass size={48} />}
           title={`No environment called ${segment}`}
-          description="Deployments live in development and production."
+          description={
+            environmentList.length > 0
+              ? `Deployments live in ${environmentList.map((e) => e.displayName || e.name).join(", ")}.`
+              : "That environment is not one this platform deploys to."
+          }
           action={
             <LinkButton variant="contained" to="/projects/$projectName/deployments" params={{ projectName }}>
               Back to Deployments
@@ -153,6 +165,7 @@ export function DeploymentVersionPage({
     );
   }
 
+  const envLabel = environmentLabel(envInfo, segment);
   const build = builds.data?.find((b) => b.tag === version);
 
   if (builds.isPending) {
@@ -199,14 +212,22 @@ export function DeploymentVersionPage({
     );
   }
 
-  const board = groupDeploymentCards(components.data?.items ?? [], deployments.deployments);
-  const row = environmentRows(board, deploy).find((r) => r.environment === environment);
+  const board = groupDeploymentCards(
+    components.data?.items ?? [],
+    deployments.deployments,
+    environmentList[0]?.name ?? "",
+  );
+  const row = environmentRows(board, environmentList, deploy).find(
+    (r) => r.environment === environment,
+  );
   const bound = row?.cards.some((c) => c.deployment) ?? false;
   // Whether THIS version is what the environment runs now. The aggregate
-  // names development's; production names none, so it can only be "current"
-  // when it is the board's own row for it.
-  const liveVersion = environment === "development" ? deploy?.version || undefined : row?.version;
-  // The aggregate's word for development; production has only its bindings.
+  // names only the version a build rolled out, in the first environment;
+  // every later one names none, so it can only be "current" when it is the
+  // board's own row for it.
+  const liveVersion = envInfo?.position === 0 ? deploy?.version || undefined : row?.version;
+  // The aggregate's word for the first environment; a later one has only its
+  // bindings.
   // Either way it takes a binding to run: a version the aggregate names but
   // nothing is bound to is not what the environment runs, and the page says
   // so rather than offering Try Out over nothing.
@@ -220,15 +241,14 @@ export function DeploymentVersionPage({
     : runs.isPending
       ? "pending"
       : undefined;
-  const validationView = validationCell(environment, verdict || undefined, validation.counts, availability);
+  const validationView = validationCell(envInfo, verdict || undefined, validation.counts, availability);
   const chip = current && row ? row.status : versionStatus(build);
-  const readinessOut =
-    environment === "development" && readiness.isPending && !readiness.isError;
+  const readinessOut = envInfo?.position === 0 && readiness.isPending && !readiness.isError;
   const table = connectionTable(
     connections,
     dependencies.data,
     readiness.data,
-    environment,
+    envInfo,
     registeredNames,
     catalogUnknown,
   );
@@ -237,7 +257,7 @@ export function DeploymentVersionPage({
     <>
       <PageHeader
         title={title}
-        subtitle={`${projectName} · ${environmentLabel(environment)}`}
+        subtitle={`${projectName} · ${envLabel}`}
         backTo={backTo}
         actions={
           current ? (
@@ -271,7 +291,7 @@ export function DeploymentVersionPage({
       <Stack spacing={2}>
         <SummaryCard
           projectName={projectName}
-          environment={environment}
+          environmentLabel={envLabel}
           version={version}
           build={build}
           chip={chip}
@@ -303,7 +323,7 @@ export function DeploymentVersionPage({
         ) : (
           <Card variant="outlined" sx={{ p: 2.25 }}>
             <Typography variant="body2" color="text.secondary">
-              {notRunningSentence(environment, build, liveVersion, bound)}
+              {notRunningSentence(envLabel, build, liveVersion, bound)}
               {liveVersion && liveVersion !== version && (
                 <>
                   {" "}
@@ -345,7 +365,7 @@ export function DeploymentVersionPage({
                 severity="warning"
                 action={<Button onClick={() => void readiness.refetch()}>Retry</Button>}
               >
-                Whether Development holds values for these connections could not be read
+                Whether {envLabel} holds values for these connections could not be read
                 {readiness.error instanceof Error && readiness.error.message
                   ? `: ${readiness.error.message}`
                   : ""}
@@ -367,7 +387,7 @@ export function DeploymentVersionPage({
           }}
           projectName={projectName}
           connection={valuesTarget}
-          environment="development"
+          environment={environmentList[0]?.name ?? ""}
         />
       )}
       <Snackbar
@@ -399,12 +419,11 @@ function versionStatus(build: BuildSummary): { label: string; tone: "info" | "er
 }
 
 function notRunningSentence(
-  environment: EnvironmentKey,
+  env: string,
   build: BuildSummary,
   liveVersion: string | undefined,
   bound: boolean,
 ): string {
-  const env = environmentLabel(environment);
   switch (build.status) {
     case "started":
     case "in_progress":
@@ -423,7 +442,7 @@ function notRunningSentence(
 
 function SummaryCard({
   projectName,
-  environment,
+  environmentLabel: envLabel,
   version,
   build,
   chip,
@@ -432,7 +451,8 @@ function SummaryCard({
   deployedAt,
 }: {
   projectName: string;
-  environment: EnvironmentKey;
+  /** What to call the environment on screen — the pipeline's display name. */
+  environmentLabel: string;
   version: string;
   build: BuildSummary;
   chip: { label: string; tone: "info" | "error" | "neutral" | "success" | "warning" | "primary"; live: boolean };
@@ -498,7 +518,7 @@ function SummaryCard({
     <Card variant="outlined" sx={{ p: 2.5, ...(chip.live && { borderColor: "info.main" }) }}>
       <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 0.5 }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-          {environmentLabel(environment)} · {version}
+          {envLabel} · {version}
         </Typography>
         <StatusChip label={chip.label} tone={chip.tone} appearance="soft" dot />
         <Box sx={{ flex: 1 }} />

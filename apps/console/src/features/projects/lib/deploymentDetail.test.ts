@@ -29,6 +29,7 @@ import {
   talksTo,
   usedBy,
 } from "./deploymentDetail";
+import type { EnvironmentInfo } from "./environments";
 import type { ConnectionRow } from "./promotion";
 
 type ComponentDependencies = components["schemas"]["ComponentDependencies"];
@@ -141,12 +142,29 @@ describe("connectionTable", () => {
     provisioned: true,
   };
 
+  // The environments the pipeline serves, as the page reads them.
+  const development: EnvironmentInfo = {
+    name: "development",
+    displayName: "Development",
+    isProduction: false,
+    validation: "on",
+    position: 0,
+    promotesTo: "production",
+  };
+  const production: EnvironmentInfo = {
+    name: "production",
+    displayName: "Production",
+    isProduction: true,
+    validation: "off",
+    position: 1,
+  };
+
   it("joins type, users and keys onto the readiness state in development", () => {
     const rows = connectionTable(
       [currency, db],
       design,
       { configured: false, dependencies: [{ name: "currency-service", state: "unset", missingKeys: ["API_KEY"] }] },
-      "development",
+      development,
       new Set(),
       false,
     );
@@ -161,7 +179,7 @@ describe("connectionTable", () => {
       [currency, db],
       design,
       { configured: true, dependencies: [{ name: "currency-service", state: "configured", missingKeys: [] }] },
-      "production",
+      production,
       new Set(),
       false,
     );

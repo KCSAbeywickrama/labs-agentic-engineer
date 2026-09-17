@@ -154,6 +154,30 @@ let mockBuildVersion = "v1";
 const mockMutate = vi.fn();
 
 vi.mock("../api/queries", () => ({
+  // The platform's pipeline, in promotion order — what `useEnvironments`
+  // serves. Two environments here because that is the pipeline these tests
+  // describe, not because the console knows only two.
+  useEnvironments: () => ({
+    data: [
+      {
+        name: "development",
+        displayName: "Development",
+        isProduction: false,
+        validation: "on",
+        position: 0,
+        promotesTo: "production",
+      },
+      {
+        name: "production",
+        displayName: "Production",
+        isProduction: true,
+        validation: "off",
+        position: 1,
+      },
+    ],
+    isPending: false,
+    isError: false,
+  }),
   useSaveConnectionValues: () => ({
     mutate: mockMutate,
     isPending: false,

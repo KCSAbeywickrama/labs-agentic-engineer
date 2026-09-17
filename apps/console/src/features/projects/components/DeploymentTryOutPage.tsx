@@ -33,6 +33,7 @@ import { useDesignDependencies } from "../../spec/api/queries";
 import { useValidationEvidence } from "../../validation/api/counts";
 import {
   useComponentsDeployments,
+  useEnvironments,
   useProjectComponents,
   useProjectStatus,
 } from "../api/queries";
@@ -41,9 +42,9 @@ import { deployedValidationState, } from "../lib/deploymentFlow";
 import {
   environmentLabel,
   environmentRows,
-  parseEnvironment,
   validationCell,
 } from "../lib/deploymentLedger";
+import { findEnvironment } from "../lib/environments";
 import { groupDeploymentCards } from "../lib/deploymentRows";
 import { ComponentOpenApiDialog } from "./ComponentOpenApiDialog";
 import { TryItOutCard, useTestUsers } from "./TryItOut";
@@ -67,16 +68,24 @@ export function DeploymentTryOutPage({
   projectName: string;
   environment: string;
 }) {
-  const environment = parseEnvironment(segment);
+  // The environment is whatever the pipeline calls it; the list is the only
+  // authority on which names exist. While it is still loading the segment is
+  // taken at its word — a page that flashed "no such environment" on every
+  // load would be lying about what it knows.
+  const environments = useEnvironments();
+  const environmentList = environments.data ?? [];
+  const envInfo = findEnvironment(environmentList, segment);
+  const environment = envInfo || environments.isPending ? segment : null;
   const components = useProjectComponents(projectName);
   const componentNames = (components.data?.items ?? []).map((c) => c.name);
   const deployments = useComponentsDeployments(projectName, componentNames);
   const status = useProjectStatus(projectName);
   const deploy = status.data?.deploy;
 
-  // The version this environment runs — the aggregate names development's.
+  // The version this environment runs — the aggregate names only the one a
+  // build lands in, the first of the pipeline.
   const version =
-    environment === "development" && deploy?.version ? deploy.version : undefined;
+    envInfo?.position === 0 && deploy?.version ? deploy.version : undefined;
   // The version's run story, for the commit that shipped it. Tag-scoped and
   // DB-only; the Builds surfaces make the same read, so it is served from cache
   // whenever the reader came from there.
@@ -99,8 +108,9 @@ export function DeploymentTryOutPage({
   const [contractComponent, setContractComponent] = useState<string | null>(null);
 
   const title = "Deployment Try Out";
+  const envLabel = environmentLabel(envInfo, segment);
   const subtitle = environment
-    ? `${projectName} · ${environmentLabel(environment)}${version ? ` · ${version}` : ""}`
+    ? `${projectName} · ${envLabel}${version ? ` · ${version}` : ""}`
     : projectName;
   const backTo = {
     link: <Link to="/projects/$projectName/deployments" params={{ projectName }} />,
@@ -109,9 +119,13 @@ export function DeploymentTryOutPage({
 
   // Everything below needs the board; these are computed before the early
   // returns so the test-users read can be mounted unconditionally (a hook).
-  const board = groupDeploymentCards(components.data?.items ?? [], deployments.deployments);
+  const board = groupDeploymentCards(
+    components.data?.items ?? [],
+    deployments.deployments,
+    environmentList[0]?.name ?? "",
+  );
   const row = environment
-    ? environmentRows(board, deploy).find((r) => r.environment === environment)
+    ? environmentRows(board, environmentList, deploy).find((r) => r.environment === environment)
     : undefined;
   const bound = row?.cards.some((c) => c.deployment) ?? false;
   // Test users live with the app they sign in to. Read only for a green
@@ -120,8 +134,13 @@ export function DeploymentTryOutPage({
   // live bindings under a `none` aggregate to Deployed (deploymentLedger):
   // an app that is serving is one a test user can sign in to, whatever
   // rollout the aggregate is tracking.
+  // Behaviour preserved: the roles read stays where it has always been, the
+  // first environment of the pipeline. Whether that is because the test users
+  // belong to the deployment a build lands in, or because credentials are
+  // deliberately not offered downstream of it, the code does not say — both
+  // read as position 0 today (see task 6 report).
   const green =
-    environment === "development" &&
+    envInfo?.position === 0 &&
     row?.status.label === "Deployed" &&
     (row?.total ?? 0) > 0 &&
     row?.live === row?.total;
@@ -136,7 +155,11 @@ export function DeploymentTryOutPage({
         <EmptyState
           icon={<Compass size={48} />}
           title={`No environment called ${segment}`}
-          description="Deployments live in development and production."
+          description={
+            environmentList.length > 0
+              ? `Deployments live in ${environmentList.map((e) => e.displayName || e.name).join(", ")}.`
+              : "That environment is not one this platform deploys to."
+          }
           action={
             <LinkButton
               variant="contained"
@@ -197,16 +220,16 @@ export function DeploymentTryOutPage({
           <Alert severity="warning">
             Deployments for {deployments.failedCount} component
             {deployments.failedCount === 1 ? "" : "s"} could not be loaded, so
-            there is nothing this page can say about {environmentLabel(environment)}{" "}
+            there is nothing this page can say about {envLabel}{" "}
             yet. It keeps retrying.
           </Alert>
         ) : (
           <EmptyState
             compact
             description={
-              environment === "development"
-                ? "Nothing deployed here yet — agents deploy to development when a build merges."
-                : "Nothing deployed here yet — promote a validated version from development."
+              envInfo?.position === 0
+                ? `Nothing deployed here yet — agents deploy to ${envLabel} when a build merges.`
+                : "Nothing deployed here yet — promote a validated version from the environment before this one."
             }
           />
         )}
@@ -217,7 +240,7 @@ export function DeploymentTryOutPage({
   const types = new Map<string, string>();
   for (const c of components.data?.items ?? []) if (c.type) types.set(c.name, c.type);
   const validationView = validationCell(
-    environment,
+    envInfo,
     pageDeploy?.validation,
     validation.counts,
     validationAvailability,
