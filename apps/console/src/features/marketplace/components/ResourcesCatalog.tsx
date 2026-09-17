@@ -37,6 +37,7 @@ import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
 import type { components } from "../../../generated/aep-api";
 import { useExternalResources, usePlatformResourceTypes } from "../../settings/api/queries";
+import { isRegisteredExternal } from "../kind";
 import { CatalogTypeDrawer } from "./CatalogTypeDrawer";
 
 type PlatformResourceTypeDTO = components["schemas"]["PlatformResourceTypeDTO"];
@@ -52,6 +53,7 @@ const RegisterLink = createLink(Button);
 function CatalogCard({
   name,
   provider,
+  project,
   description,
   consumers,
   platform,
@@ -60,6 +62,8 @@ function CatalogCard({
   name: string;
   /** The concrete system an external resource is; platform types have none. */
   provider?: string | undefined;
+  /** The project that holds a resource of its own; a record has none. */
+  project?: string | undefined;
   description?: string | undefined;
   consumers?: ConsumerDTO[] | null | undefined;
   platform: boolean;
@@ -85,6 +89,11 @@ function CatalogCard({
             // different ("currency-service" / "Open Exchange Rates").
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
               {provider}
+            </Typography>
+          ) : null}
+          {project ? (
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+              held by {project}
             </Typography>
           ) : null}
           <Box sx={{ flexGrow: 1, minHeight: 0 }}>
@@ -125,6 +134,11 @@ export function ResourcesCatalog() {
 
   const platformItems = platform.data ?? [];
   const externalItems = external.data ?? [];
+  // The organization's records sit with the platform types; a project's own
+  // resources follow in their own section, each naming its project, so the
+  // organization can take one over (Promote) from here.
+  const records = externalItems.filter(isRegisteredExternal);
+  const heldByProjects = externalItems.filter((r) => !isRegisteredExternal(r));
 
   let body;
   if (platform.isLoading || external.isLoading) {
@@ -165,31 +179,62 @@ export function ResourcesCatalog() {
     );
   } else {
     body = (
-      <Grid container spacing={3}>
-        {platformItems.map((resource) => (
-          <Grid key={`platform:${resource.name}`} size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
-            <CatalogCard
-              name={resource.name}
-              description={resource.description}
-              consumers={resource.consumers}
-              platform
-              onOpen={() => setSelection({ kind: "platform", resource })}
-            />
-          </Grid>
-        ))}
-        {externalItems.map((resource) => (
-          <Grid key={`external:${resource.name}`} size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
-            <CatalogCard
-              name={resource.name}
-              provider={resource.provider}
-              description={resource.description}
-              consumers={resource.consumers}
-              platform={false}
-              onOpen={() => setSelection({ kind: "external", resource })}
-            />
-          </Grid>
-        ))}
-      </Grid>
+      <Stack spacing={4}>
+        <Grid container spacing={3}>
+          {platformItems.map((resource) => (
+            <Grid key={`platform:${resource.name}`} size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
+              <CatalogCard
+                name={resource.name}
+                description={resource.description}
+                consumers={resource.consumers}
+                platform
+                onOpen={() => setSelection({ kind: "platform", resource })}
+              />
+            </Grid>
+          ))}
+          {records.map((resource) => (
+            <Grid key={`external:${resource.name}`} size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
+              <CatalogCard
+                name={resource.name}
+                provider={resource.provider}
+                description={resource.description}
+                consumers={resource.consumers}
+                platform={false}
+                onOpen={() => setSelection({ kind: "external", resource })}
+              />
+            </Grid>
+          ))}
+        </Grid>
+        {heldByProjects.length > 0 ? (
+          <Box component="section" aria-labelledby="held-by-projects-heading">
+            <Typography id="held-by-projects-heading" variant="h6" sx={{ mb: 0.5 }}>
+              Held by projects
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Resources a project defined for itself. Promote one to hold its values for
+              the organization and let other projects reuse it.
+            </Typography>
+            <Grid container spacing={3}>
+              {heldByProjects.map((resource) => (
+                <Grid
+                  key={`external:${resource.project ?? ""}/${resource.name}`}
+                  size={{ xs: 12, sm: 6, md: 4, lg: 3 }}
+                >
+                  <CatalogCard
+                    name={resource.name}
+                    provider={resource.provider}
+                    project={resource.project}
+                    description={resource.description}
+                    consumers={resource.consumers}
+                    platform={false}
+                    onOpen={() => setSelection({ kind: "external", resource })}
+                  />
+                </Grid>
+              ))}
+            </Grid>
+          </Box>
+        ) : null}
+      </Stack>
     );
   }
 

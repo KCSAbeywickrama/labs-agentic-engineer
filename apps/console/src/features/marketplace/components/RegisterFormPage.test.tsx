@@ -72,11 +72,21 @@ let resourcesState: {
   isLoading: boolean;
   isError: boolean;
 };
+let promoteState: {
+  mutate: ReturnType<typeof vi.fn>;
+  isPending: boolean;
+  error: Error | null;
+};
+const promoteTarget = vi.fn<(project: string, name: string) => void>();
 
 vi.mock("../api/queries", () => ({
   useOrgEnvironments: () => environmentsState,
   useRegisterExternalResource: () => registerState,
   useUpdateExternalResource: () => updateState,
+  usePromoteExternalResource: (project: string, name: string) => {
+    promoteTarget(project, name);
+    return promoteState;
+  },
   useExternalResources: () => resourcesState,
 }));
 
@@ -150,6 +160,18 @@ function resetState() {
     isLoading: false,
     isError: false,
   };
+  promoteState = {
+    mutate: vi.fn(
+      (
+        _body: unknown,
+        opts?: { onSuccess?: () => void },
+      ) => {
+        opts?.onSuccess?.();
+      },
+    ),
+    isPending: false,
+    error: null,
+  };
 }
 
 function renderPage(ui: ReactElement) {
@@ -201,6 +223,41 @@ function registeredStripe(): ExternalResourceDTO {
       { type: "openapi", url: "https://example.com/stripe/openapi.yaml" },
     ],
   };
+}
+
+// team-expenses' own fx-rates: a provider, two keys, a derived document, and
+// development values the project already holds (a Promote carries them over).
+function heldFxRates(): ExternalResourceDTO {
+  return {
+    name: "fx-rates",
+    provider: "Open Exchange Rates",
+    scope: "project",
+    project: "team-expenses",
+    description: "Live foreign-exchange rates.",
+    contract: { type: "openapi", path: "openapi.yaml" },
+    config: [
+      { key: "OPENEXCHANGERATES_APP_ID", secret: true, description: "The App ID." },
+      { key: "FX_BASE", secret: false, description: "Base currency." },
+    ],
+    consumers: [{ projectId: "team-expenses", componentName: "expenses-api" }],
+    envCells: [
+      { environment: "development", key: "OPENEXCHANGERATES_APP_ID", status: "configured" },
+      { environment: "development", key: "FX_BASE", status: "configured" },
+      { environment: "staging-local", key: "OPENEXCHANGERATES_APP_ID", status: "unset" },
+      { environment: "staging-local", key: "FX_BASE", status: "unset" },
+    ],
+  };
+}
+
+function renderPromote() {
+  resourcesState = {
+    data: [heldFxRates()],
+    isLoading: false,
+    isError: false,
+  };
+  return renderPage(
+    <RegisterFormPage prompt="" promote={{ project: "team-expenses", name: "fx-rates" }} />,
+  );
 }
 
 function renderEdit() {
@@ -736,5 +793,81 @@ describe("RegisterFormPage edit mode", () => {
     expect(screen.getByTestId("chat-question-form")).toBeInTheDocument();
     expect(screen.getByText("Drafting the catalog form from your answers.")).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
+  });
+});
+
+// Promote is the Register form with the project's facts locked: the
+// organization adds instructions and values, and nothing else is up for
+// editing here.
+describe("RegisterFormPage promote mode", () => {
+  it("pre-fills and locks the project's facts, names the copied document, and closes the chat", () => {
+    renderPromote();
+
+    expect(screen.getByRole("heading", { name: "Promote to organization" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Name/)).toHaveValue("fx-rates");
+    expect(screen.getByLabelText(/^Name/)).toBeDisabled();
+    expect(screen.getByLabelText(/^Provider/)).toHaveValue("Open Exchange Rates");
+    expect(screen.getByLabelText(/^Provider/)).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Add key" })).not.toBeInTheDocument();
+    for (const keyField of screen.getAllByLabelText(/^Key/)) {
+      expect(keyField).toBeDisabled();
+    }
+    expect(screen.getByText("openapi · openapi.yaml · copied from team-expenses")).toBeInTheDocument();
+    expect(screen.queryByTestId("agent-chat-panel")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open agent chat" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Promote" })).toBeInTheDocument();
+    expect(promoteTarget).toHaveBeenCalledWith("team-expenses", "fx-rates");
+  });
+
+  it("marks the environments the project holds as carried over and requires the rest", () => {
+    renderPromote();
+
+    expect(
+      screen.getAllByText("Carried over from team-expenses unless you type a value").length,
+    ).toBe(2);
+    fireEvent.change(screen.getByLabelText(/Consumption instructions/), {
+      target: { value: "Call /latest.json once per conversion." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Promote" }));
+
+    expect(promoteState.mutate).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("staging-local · FX_BASE")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("development · FX_BASE")).not.toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("sends only what the organization adds: instructions, description and the typed values", () => {
+    renderPromote();
+
+    fireEvent.change(screen.getByLabelText(/Consumption instructions/), {
+      target: { value: "Call /latest.json once per conversion." },
+    });
+    fireEvent.change(screen.getByLabelText("staging-local · OPENEXCHANGERATES_APP_ID"), {
+      target: { value: "stg-app-id" },
+    });
+    fireEvent.change(screen.getByLabelText("staging-local · FX_BASE"), {
+      target: { value: "EUR" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Promote" }));
+
+    expect(registerState.mutate).not.toHaveBeenCalled();
+    expect(updateState.mutate).not.toHaveBeenCalled();
+    expect(promoteState.mutate).toHaveBeenCalledTimes(1);
+    expect(promoteState.mutate.mock.calls[0]?.[0]).toEqual({
+      consumptionInstructions: "Call /latest.json once per conversion.",
+      description: "Live foreign-exchange rates.",
+      envValues: [
+        { environment: "staging-local", key: "OPENEXCHANGERATES_APP_ID", value: "stg-app-id" },
+        { environment: "staging-local", key: "FX_BASE", value: "EUR" },
+      ],
+    });
+    expect(navigate).toHaveBeenCalledWith({ to: "/resources" });
+  });
+
+  it("blocks Promote until the project's row is known", () => {
+    resourcesState = { data: [], isLoading: false, isError: false };
+    renderPage(
+      <RegisterFormPage prompt="" promote={{ project: "team-expenses", name: "fx-rates" }} />,
+    );
+    expect(screen.getByRole("button", { name: "Promote" })).toBeDisabled();
   });
 });

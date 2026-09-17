@@ -226,6 +226,46 @@ describe("ResourcesCatalog", () => {
     expect(within(postgresCard as HTMLElement).queryByText("Stripe")).not.toBeInTheDocument();
   });
 
+  // A project's own resources are not records: they follow the records in
+  // their own section, each naming its project, so the organization can take
+  // one over from here.
+  it("lists a project's own resources under Held by projects, naming the project", () => {
+    resetState();
+    externalState = {
+      ...externalState,
+      data: [
+        externalResource({ provider: "Stripe", scope: "org" }),
+        externalResource({
+          name: "fx-rates",
+          provider: "Open Exchange Rates",
+          scope: "project",
+          project: "team-expenses",
+          envCells: [],
+        }),
+      ],
+    };
+
+    render(<ResourcesCatalog />);
+
+    const held = screen.getByRole("region", { name: "Held by projects" });
+    expect(within(held).getByText("fx-rates")).toBeInTheDocument();
+    expect(within(held).getByText("held by team-expenses")).toBeInTheDocument();
+    expect(within(held).queryByText("stripe")).not.toBeInTheDocument();
+    expect(screen.getByText("stripe")).toBeInTheDocument();
+  });
+
+  it("shows no Held by projects section when every external row is a record", () => {
+    resetState();
+    externalState = {
+      ...externalState,
+      data: [externalResource({ scope: "org" })],
+    };
+
+    render(<ResourcesCatalog />);
+
+    expect(screen.queryByRole("region", { name: "Held by projects" })).not.toBeInTheDocument();
+  });
+
   it("clamps a long card description to two lines and keeps the full text on title", () => {
     resetState();
     const long =

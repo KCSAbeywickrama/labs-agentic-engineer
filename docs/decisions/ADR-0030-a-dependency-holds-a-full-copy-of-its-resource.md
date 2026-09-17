@@ -82,10 +82,17 @@ resource, and it holds a full copy.**
    the rest of the ladder as before minus the style rule. A copy whose document
    hash no longer matches the registry's is flagged `stale`, a flag and not a
    status.
-6. **Scope is chosen late.** Every designed dependency is project level; no
-   question is asked at design or configure time. *Promote to organization*
-   (a later PR) moves the block into the registry and rewrites the copy's
-   `ref`.
+6. **Scope is chosen late, and promoted from the registry.** Every designed
+   dependency is project level; no question is asked at design or configure
+   time. The organization's Resources page lists a project's own resources
+   beside the records ("held by <project>"), and *Promote to organization*
+   lives on that row — not on the project's definition view: the person who
+   curates the registry decides what the organization holds, where the
+   records are. Promote takes the project's block as the record, adds
+   instructions and every environment's value (a value the project already
+   holds is carried over vault to vault), then rewrites the project's file
+   through the same renderer a fresh reuse runs, so the copy is byte-identical
+   to one a design turn would have landed.
 
 ## Alternatives considered
 

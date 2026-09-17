@@ -1148,6 +1148,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		CatalogValuePlane: catalogValuePlane,
 		OrgSecrets:        secretRefWriter,
 		OrgResourceDocs:   orgResourceDocs,
+		Promoter:          designService,
 		Roles:             rolesEnsurerOrNil(rolesEnsure),
 		Markers:           resourceTypeCatalog,
 		SecurityJSON:      securityJSONReader{art: artifactSvcGit},

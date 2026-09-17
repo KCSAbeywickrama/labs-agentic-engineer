@@ -59,6 +59,11 @@ export function validateRegisterForm(input: {
   envNames: string[];
   isEdit: boolean;
   envCells?: EnvValueCellDTO[];
+  /**
+   * Environments whose values may stay blank: on a Promote, the ones the
+   * project already holds a value for — the platform carries them over.
+   */
+  carriedEnvs?: string[];
 }): RegisterFormErrors | null {
   const errors: RegisterFormErrors = { keys: [], values: {} };
   let invalid = false;
@@ -104,6 +109,7 @@ export function validateRegisterForm(input: {
     for (const environment of input.envNames) {
       const filled = (input.values[envValueCellKey(environment, key)] ?? "").trim();
       if (filled) continue;
+      if (input.carriedEnvs?.includes(environment)) continue;
       if (
         input.isEdit &&
         cfg.secret &&

@@ -1871,6 +1871,13 @@ type EnvValueCellDTO struct {
 // EnvValueCellDTOStatus defines model for EnvValueCellDTO.Status.
 type EnvValueCellDTOStatus string
 
+// EnvValueWriteDTO One value of one config key in one environment, as written by a form.
+type EnvValueWriteDTO struct {
+	Environment string `json:"environment"`
+	Key         string `json:"key"`
+	Value       string `json:"value"`
+}
+
 // EnvVar defines model for EnvVar.
 type EnvVar struct {
 	Key   string `json:"key"`
@@ -1934,18 +1941,21 @@ type ExternalResourceDTO struct {
 	Description             string            `json:"description,omitempty"`
 
 	// EnvCells Org value plane. Present with one cell per config key × OpenChoreo Environment on a Registered External resource. Omitted or empty on a Project External resource. Secrets never include value.
-	EnvCells     []EnvValueCellDTO       `json:"envCells,omitempty"`
-	Instances    []ResourceInstanceDTO   `json:"instances,omitempty"`
-	Name         string                  `json:"name"`
+	EnvCells  []EnvValueCellDTO     `json:"envCells,omitempty"`
+	Instances []ResourceInstanceDTO `json:"instances,omitempty"`
+	Name      string                `json:"name"`
+
+	// Project The project that holds this resource; set on scope project only.
+	Project      string                  `json:"project,omitempty"`
 	Provenance   *ResourceProvenance     `json:"provenance,omitempty"`
 	Provider     string                  `json:"provider,omitempty"`
 	ResourceDocs []ResourceDocPointerDTO `json:"resourceDocs,omitempty"`
 
-	// Scope org — a Registered External resource; project — a type a project's build authored (listed only inside that project).
+	// Scope org — a Registered External resource, held by the organization; project — a project's own resource, listed with its project so the organization can promote it. Org-only readers (the design agent's catalog, Register's uniqueness check) never see project rows.
 	Scope ExternalResourceDTOScope `json:"scope,omitempty"`
 }
 
-// ExternalResourceDTOScope org — a Registered External resource; project — a type a project's build authored (listed only inside that project).
+// ExternalResourceDTOScope org — a Registered External resource, held by the organization; project — a project's own resource, listed with its project so the organization can promote it. Org-only readers (the design agent's catalog, Register's uniqueness check) never see project rows.
 type ExternalResourceDTOScope string
 
 // FileBundle A set of files read at ONE commit. commitSha names that commit; every entry's sha is a blob of that same tree.
@@ -2402,6 +2412,15 @@ type ProjectUsageList struct {
 	Projects []ProjectUsageCard `json:"projects"`
 }
 
+// PromoteExternalResourceRequest What the organization adds when it takes over a project's own resource: how its consumers should use it and a value for every key in every environment. Name, provider, keys, description and contract come from the project's copy. An environment left out of envValues is carried over from the project's own values when it has them.
+type PromoteExternalResourceRequest struct {
+	ConsumptionInstructions string `json:"consumptionInstructions"`
+
+	// Description Replaces the project's description when set.
+	Description string             `json:"description,omitempty"`
+	EnvValues   []EnvValueWriteDTO `json:"envValues,omitempty"`
+}
+
 // PromoteFromIssueRequest defines model for PromoteFromIssueRequest.
 type PromoteFromIssueRequest struct {
 	// ComponentName Component this issue is about
@@ -2463,12 +2482,8 @@ type RegisterExternalResourceRequest struct {
 	ConsumptionInstructions string                    `json:"consumptionInstructions"`
 	Contract                *ResourceContractWriteDTO `json:"contract,omitempty"`
 	Description             string                    `json:"description"`
-	EnvValues               []struct {
-		Environment string `json:"environment"`
-		Key         string `json:"key"`
-		Value       string `json:"value"`
-	} `json:"envValues"`
-	Name string `json:"name"`
+	EnvValues               []EnvValueWriteDTO        `json:"envValues"`
+	Name                    string                    `json:"name"`
 
 	// Provider The concrete system this resource is ("Open Exchange Rates").
 	Provider     string                `json:"provider"`
@@ -3668,6 +3683,9 @@ type UpdateComponentConfigJSONRequestBody = UpdateConfigBody
 
 // ProvisionPlatformResourceJSONRequestBody defines body for ProvisionPlatformResource for application/json ContentType.
 type ProvisionPlatformResourceJSONRequestBody = ProvisionBody
+
+// PromoteExternalResourceJSONRequestBody defines body for PromoteExternalResource for application/json ContentType.
+type PromoteExternalResourceJSONRequestBody = PromoteExternalResourceRequest
 
 // CollectExternalResourceValuesJSONRequestBody defines body for CollectExternalResourceValues for application/json ContentType.
 type CollectExternalResourceValuesJSONRequestBody = SaveValuesBody

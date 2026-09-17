@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/dependencies"
 	"github.com/wso2/aep/aep-api/internal/dependencies/provisioning"
 	"github.com/wso2/aep/aep-api/internal/spec"
@@ -67,40 +66,18 @@ func (r registeredResourceReader) RegisteredResource(ctx context.Context, orgID,
 	if def == nil || !def.Registered() {
 		return nil, nil
 	}
-	out := &spec.RegisteredResource{Resource: resourceDefinitionFromRecord(*def)}
+	document := ""
 	if def.Contract != nil && r.docs != nil {
 		doc, err := r.docs.ReadUTF8(ctx, orgID, def.Contract.Path)
 		if err != nil {
 			return nil, fmt.Errorf("read registered resource %q document: %w", name, err)
 		}
-		out.Document = doc
+		document = doc
 	}
-	return out, nil
+	rec := provisioning.RegisteredResourceFromRecord(*def, document)
+	return &rec, nil
 }
 
-// resourceDefinitionFromRecord projects the catalog's record onto the shared
-// resource shape. Values are never part of either.
-func resourceDefinitionFromRecord(def openchoreo.ExternalResourceDefinition) spec.ResourceDefinition {
-	res := spec.ResourceDefinition{
-		Name:                    def.Name,
-		Description:             def.Description,
-		Provider:                def.Provider,
-		ConsumptionInstructions: def.ConsumptionInstructions,
-	}
-	for _, k := range def.Config {
-		res.Config = append(res.Config, spec.ConfigKey{Key: k.Key, Secret: k.Secret, Description: k.Description, DefaultValue: k.DefaultValue})
-	}
-	if def.Contract != nil {
-		res.Contract = &spec.ResourceContract{Type: def.Contract.Type, Path: def.Contract.Path}
-	}
-	if def.Provenance != nil {
-		res.Provenance = &spec.ResourceProvenance{SourceURL: def.Provenance.SourceURL, SHA256: def.Provenance.SHA256, ReadOn: def.Provenance.ReadOn}
-	}
-	return res
-}
-
-// Compile-time checks: the adapter is what the composition root wires as
-// both spec ports.
 var (
 	_ spec.ExternalResourceResolver = registeredResourceReader{}
 	_ spec.RegisteredResourceReader = registeredResourceReader{}

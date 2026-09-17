@@ -109,13 +109,36 @@ export const seedExternalResources: ExternalResourceDTO[] = [
   {
     name: "github",
     provider: "GitHub",
-    // A type a project's build authored: no org value-plane cells, and the
-    // drawer says its values live on the project.
+    // A project's own resource: listed with its project under "Held by
+    // projects"; its values live on the project until the organization
+    // promotes it.
     scope: "project",
+    project: "demo-shop",
     description: "GitHub API token for repository access",
     config: [{ key: "token", secret: true, description: "Personal access token" }],
-    consumers: [],
+    consumers: [{ projectId: "demo-shop", componentName: "release-bot" }],
     envCells: [],
+  },
+  {
+    name: "fx-rates",
+    provider: "Open Exchange Rates",
+    scope: "project",
+    project: "team-expenses",
+    description: "Live foreign-exchange rates used to convert amounts to USD.",
+    contract: { type: "openapi", path: "openapi.yaml" },
+    config: [
+      { key: "OPENEXCHANGERATES_APP_ID", secret: true, description: "The App ID." },
+      { key: "FX_BASE", secret: false, description: "Base currency." },
+    ],
+    consumers: [{ projectId: "team-expenses", componentName: "expenses-api" }],
+    // The project holds development values (a Promote carries them over);
+    // staging-local has none yet.
+    envCells: [
+      { environment: "development", key: "OPENEXCHANGERATES_APP_ID", status: "configured" },
+      { environment: "development", key: "FX_BASE", status: "configured" },
+      { environment: "staging-local", key: "OPENEXCHANGERATES_APP_ID", status: "unset" },
+      { environment: "staging-local", key: "FX_BASE", status: "unset" },
+    ],
   },
 ];
 

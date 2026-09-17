@@ -519,7 +519,8 @@ func TestProvisionForBuild_ProjectResourceIgnoresOrgCellsOfTheSameName(t *testin
 // fakeOrgSecrets is an OrgSecretWriter that returns a caller-chosen vault key
 // without talking to SM-API. Tests assert the key is forwarded, not its format.
 type fakeOrgSecrets struct {
-	key string
+	key    string
+	copied []string // "fromVaultKey -> entity" per carried-over environment
 }
 
 func (f *fakeOrgSecrets) WriteOrgCatalogSecret(context.Context, string, string, map[string]string) (string, error) {
@@ -527,6 +528,11 @@ func (f *fakeOrgSecrets) WriteOrgCatalogSecret(context.Context, string, string, 
 }
 
 func (f *fakeOrgSecrets) OrgCatalogVaultKey(context.Context, string, string) (string, error) {
+	return f.key, nil
+}
+
+func (f *fakeOrgSecrets) CopyOrgCatalogSecret(_ context.Context, _, fromVaultKey, entityName string) (string, error) {
+	f.copied = append(f.copied, fromVaultKey+" -> "+entityName)
 	return f.key, nil
 }
 
@@ -569,11 +575,7 @@ func TestProvisionForBuild_RegisteredExternal_AuthorsOrgSecretStorePath(t *testi
 			{Key: "api_key", Description: "Secret API key", Secret: true},
 			{Key: "region", Description: "Account region"},
 		},
-		EnvValues: []struct {
-			Environment string `json:"environment"`
-			Key         string `json:"key"`
-			Value       string `json:"value"`
-		}{
+		EnvValues: []gen.EnvValueWriteDTO{
 			{Environment: "default", Key: "api_key", Value: "sk_live"},
 			{Environment: "default", Key: "region", Value: "us"},
 		},

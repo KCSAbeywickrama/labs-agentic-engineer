@@ -121,6 +121,19 @@ slices.
   existed is judged by its consumption instructions (the ADR-0021 rule), which stays the fallback.
   The process-local value plane is a cache: `synthesizeRegisteredEnvCells` rebuilds cells from the RT
   and its `OrgCatalogVaultKey` after a restart and does not re-write secrets.
+- **The HTTP list shows a project's own resources after the records; Promote turns one into a
+  record.** `ListExternalResources` appends a `scope: project` row per (project, dependency) whose
+  design holds an inline block (no `resource.ref`), read in the same design sweep that computes
+  consumers (`sweepProjectExternals`), with per-environment cell STATUS from the project's bindings
+  and never a value. The org-only readers above do not change. `PromoteExternalResource`
+  (`promote.go`) validates as Register — instructions, a value per key × environment, the name not
+  yet registered — with one difference: an environment the request leaves out is carried over from
+  the project's binding (plain keys from its values, secrets by `OrgSecretWriter.CopyOrgCatalogSecret`,
+  vault to vault). It commits the project's document under the record's name, writes the value plane,
+  ensures the `scope: org` type, then asks the design service (`ProjectResourcePromoter`) to rewrite the
+  project's file as a copy of the record through the same renderer the Apply-time copy uses. Order
+  matters: a failure after Ensure leaves a record the project does not reference yet, and the next
+  attempt reads "already registered — have the project reuse it instead".
 - **A gate's provisioning run keeps an execution row.** It is the one execution kind the milestone model
   still writes: admitted when the drawer submits, finished by the readiness watcher, and its terminal state
   is what closes the gate issue.

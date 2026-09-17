@@ -18,6 +18,7 @@
 
 import {
   Box,
+  Button,
   Chip,
   Divider,
   Drawer,
@@ -56,8 +57,11 @@ export type CatalogTypeDrawerProps = {
   | { kind: null; resource: null }
 );
 
+// A project's own resource: its values live on the project's builds. The
+// organization takes them over by promoting the resource — from here, not from
+// the project (the person who curates the registry does the promoting).
 const PROJECT_EXTERNAL_ENV_NOTE =
-  "Environment values for this Project External resource are set on the project Connection values dialog.";
+  "Environment values are the project's. Promote the resource to hold them for the organization.";
 
 function EnvCellsSection({ cells }: { cells: EnvValueCellDTO[] }) {
   return (
@@ -147,14 +151,21 @@ function ExternalResourceBody({
   resource: ExternalResourceDTO;
   onClose: () => void;
 }) {
+  const navigate = useNavigate();
   const config = resource.config ?? [];
   const consumers = resource.consumers ?? [];
   const docs = resource.resourceDocs ?? [];
   const instances = resource.instances ?? [];
   const registered = isRegisteredExternal(resource);
+  const heldBy = resource.project;
 
   return (
     <Box sx={{ mt: 2 }}>
+      {heldBy ? (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 2 }}>
+          held by {heldBy}
+        </Typography>
+      ) : null}
       {resource.provider && (
         <Box sx={{ mb: 2 }}>
           <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
@@ -194,10 +205,27 @@ function ExternalResourceBody({
           {PROJECT_EXTERNAL_ENV_NOTE}
         </Typography>
       )}
-      <ResourceDocsSection docs={docs} />
+      {registered ? <ResourceDocsSection docs={docs} /> : null}
       <ConsumersSection consumers={consumers} />
       {instances.length > 0 && <InstancesSection instances={instances} />}
-      <DeleteResourceSection resource={resource} consumers={consumers} onClose={onClose} />
+      {registered ? (
+        <DeleteResourceSection resource={resource} consumers={consumers} onClose={onClose} />
+      ) : heldBy ? (
+        <>
+          <Divider sx={{ my: 2 }} />
+          <Button
+            variant="contained"
+            onClick={() => {
+              void navigate({
+                to: "/resources/register/form",
+                search: { promote: `${heldBy}/${resource.name}` },
+              });
+            }}
+          >
+            Promote to organization
+          </Button>
+        </>
+      ) : null}
     </Box>
   );
 }

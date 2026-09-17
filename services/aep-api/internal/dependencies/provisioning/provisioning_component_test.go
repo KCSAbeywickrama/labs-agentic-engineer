@@ -375,11 +375,20 @@ func TestProvisioningComponent_ListExternalResources(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &got); err != nil {
 		t.Fatalf("body: %v\n%s", err, resp.Body.String())
 	}
-	if len(got) != 2 {
-		t.Fatalf("resources = %+v, want stripe and github", got)
+	// Two records from the RT catalog, plus one row for the project's OWN
+	// stripe: proj's design names a `stripe` with no `resource.ref`, so it is
+	// the project's resource (it never reused the record), listed with its
+	// project so the organization can see it beside the record of that name.
+	if len(got) != 3 {
+		t.Fatalf("resources = %+v, want stripe, github and proj's own stripe", got)
 	}
 	byName := make(map[string]gen.ExternalResourceDTO, len(got))
-	for _, r := range got {
+	var projectRow *gen.ExternalResourceDTO
+	for i, r := range got {
+		if r.Scope == gen.ExternalResourceDTOScopeProject && r.Project != "" {
+			projectRow = &got[i]
+			continue
+		}
 		byName[r.Name] = r
 	}
 	stripe, ok := byName["stripe"]
@@ -389,6 +398,9 @@ func TestProvisioningComponent_ListExternalResources(t *testing.T) {
 	github, ok := byName["github"]
 	if !ok {
 		t.Fatalf("resources = %+v, want the github Project External entry", got)
+	}
+	if projectRow == nil || projectRow.Name != "stripe" || projectRow.Project != "proj" || len(projectRow.Consumers) != 1 {
+		t.Fatalf("resources = %+v, want proj's own stripe as a scope-project row with its consumer", got)
 	}
 	if len(stripe.Config) != 2 || stripe.Config[0].Key != "api_key" || !stripe.Config[0].Secret {
 		t.Errorf("config schema = %+v", stripe.Config)
@@ -1006,11 +1018,7 @@ func registerBody() gen.RegisterExternalResourceJSONRequestBody {
 			{Key: "api_key", Description: "Secret API key", Secret: true},
 			{Key: "region", Description: "Account region", Secret: false},
 		},
-		EnvValues: []struct {
-			Environment string `json:"environment"`
-			Key         string `json:"key"`
-			Value       string `json:"value"`
-		}{
+		EnvValues: []gen.EnvValueWriteDTO{
 			{Environment: "default", Key: "api_key", Value: "sk_live"},
 			{Environment: "default", Key: "region", Value: "us"},
 			{Environment: "staging-local", Key: "api_key", Value: "sk_test"},
@@ -1499,16 +1507,8 @@ func TestProvisioningComponent_UpdateExternalResource_AcceptsFileRow(t *testing.
 	}
 }
 
-func envValue(env, key, value string) struct {
-	Environment string `json:"environment"`
-	Key         string `json:"key"`
-	Value       string `json:"value"`
-} {
-	return struct {
-		Environment string `json:"environment"`
-		Key         string `json:"key"`
-		Value       string `json:"value"`
-	}{Environment: env, Key: key, Value: value}
+func envValue(env, key, value string) gen.EnvValueWriteDTO {
+	return gen.EnvValueWriteDTO{Environment: env, Key: key, Value: value}
 }
 
 func keepIfEmptyUpdateBody() gen.RegisterExternalResourceJSONRequestBody {
@@ -1519,11 +1519,7 @@ func keepIfEmptyUpdateBody() gen.RegisterExternalResourceJSONRequestBody {
 		{Key: "api_key", Description: "Secret API key (rotated)", Secret: true},
 		{Key: "region", Description: "Account region (primary)", Secret: false},
 	}
-	body.EnvValues = []struct {
-		Environment string `json:"environment"`
-		Key         string `json:"key"`
-		Value       string `json:"value"`
-	}{
+	body.EnvValues = []gen.EnvValueWriteDTO{
 		envValue("default", "api_key", ""),
 		envValue("default", "region", "ap-southeast"),
 		envValue("staging-local", "api_key", ""),
@@ -1643,11 +1639,7 @@ func TestProvisioningComponent_UpdateExternalResource_400KeyMutation(t *testing.
 			name: "remove key",
 			mut: func(body *gen.RegisterExternalResourceJSONRequestBody) {
 				body.Config = body.Config[:1]
-				body.EnvValues = []struct {
-					Environment string `json:"environment"`
-					Key         string `json:"key"`
-					Value       string `json:"value"`
-				}{
+				body.EnvValues = []gen.EnvValueWriteDTO{
 					envValue("default", "api_key", "sk_live"),
 					envValue("staging-local", "api_key", "sk_test"),
 				}
@@ -1657,11 +1649,7 @@ func TestProvisioningComponent_UpdateExternalResource_400KeyMutation(t *testing.
 			name: "rename key",
 			mut: func(body *gen.RegisterExternalResourceJSONRequestBody) {
 				body.Config[0].Key = "secret_key"
-				body.EnvValues = []struct {
-					Environment string `json:"environment"`
-					Key         string `json:"key"`
-					Value       string `json:"value"`
-				}{
+				body.EnvValues = []gen.EnvValueWriteDTO{
 					envValue("default", "secret_key", "sk_live"),
 					envValue("default", "region", "us"),
 					envValue("staging-local", "secret_key", "sk_test"),

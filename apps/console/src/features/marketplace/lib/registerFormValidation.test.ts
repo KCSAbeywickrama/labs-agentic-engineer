@@ -89,4 +89,25 @@ describe("validateRegisterForm", () => {
       }),
     ).toBeNull();
   });
+
+  // On a Promote the platform carries an environment's values over from the
+  // project, so those fields may stay blank; every other environment still needs
+  // a value.
+  it("lets a carried-over environment stay blank and still requires the others", () => {
+    const input = {
+      ...filled,
+      values: {},
+      envNames: ["development", "production"],
+      carriedEnvs: ["development"],
+    };
+    const errors = validateRegisterForm(input);
+    expect(errors?.values[envValueCellKey("development", "GITHUB_TOKEN")]).toBeUndefined();
+    expect(errors?.values[envValueCellKey("production", "GITHUB_TOKEN")]).toBe(REQUIRED_FIELD);
+    expect(
+      validateRegisterForm({
+        ...input,
+        values: { [envValueCellKey("production", "GITHUB_TOKEN")]: "x" },
+      }),
+    ).toBeNull();
+  });
 });

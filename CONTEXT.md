@@ -224,11 +224,23 @@ secret), reference-only dependency (the project holds a full copy).
 **Project External resource**:
 An External resource defined inline in one project's design when nothing in
 the registry fits, or the user asks to reconsider. It belongs to that project:
-its environment values are the project's, and it is never listed for other
-projects, offered for reuse, or counted as a taken name. Every designed
-dependency is project level by default; **Promote to organization** makes it
-Registered later.
+its environment values are the project's, and it is never offered to other
+projects for reuse or counted as a taken name. The organization's Resources
+page lists it beside the records, **held by** its project, so the organization
+can see what projects define for themselves. Every designed dependency is
+project level by default; **Promote to organization** makes it Registered later.
 _Avoid_: unregistered external, local external, squatted name.
+
+**Promote to organization**:
+The act by which a Project External resource becomes a Registered External
+resource. Done from the organization's Resources page, never from the project:
+the organization takes the project's resource as its record — name, provider,
+keys, description, contract document — and adds consumption instructions and
+a value for every environment (a value the project already holds is carried
+over). The project's dependency then holds a copy of the record, `ref` kept,
+exactly as if it had reused it from the start.
+_Avoid_: publish, share, register the project's resource (Register is for a
+resource the organization defines from scratch).
 
 **Consumption instructions**:
 How a consuming project should use a Registered External resource — distinct

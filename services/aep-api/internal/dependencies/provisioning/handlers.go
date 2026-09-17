@@ -108,6 +108,22 @@ func (h *Handler) UpdateExternalResource(ctx context.Context, request gen.Update
 	return gen.UpdateExternalResource200JSONResponse(dtos[0]), nil
 }
 
+func (h *Handler) PromoteExternalResource(ctx context.Context, request gen.PromoteExternalResourceRequestObject) (gen.PromoteExternalResourceResponseObject, error) {
+	org := tenant.BoundOrgFromContext(ctx)
+	if h.svc == nil {
+		return nil, errProvisioningUnavailable()
+	}
+	if request.Body == nil {
+		return nil, apierr.BadRequest("request body is required")
+	}
+	view, err := h.svc.PromoteExternalResource(ctx, org, request.ProjectName, request.Name, *request.Body)
+	if err != nil {
+		return nil, mapProvisionError(err)
+	}
+	dtos := toExternalResourceDTOs([]ExternalResourceView{view})
+	return gen.PromoteExternalResource201JSONResponse(dtos[0]), nil
+}
+
 func (h *Handler) ListExternalResources(ctx context.Context, _ gen.ListExternalResourcesRequestObject) (gen.ListExternalResourcesResponseObject, error) {
 	org := tenant.BoundOrgFromContext(ctx)
 	if h.svc == nil {
@@ -338,6 +354,7 @@ func toExternalResourceDTOs(views []ExternalResourceView) []gen.ExternalResource
 			Description:             v.Description,
 			Provider:                v.Provider,
 			Scope:                   gen.ExternalResourceDTOScope(v.Scope),
+			Project:                 v.Project,
 			Config:                  keys,
 			Consumers:               consumers,
 			ConsumptionInstructions: v.ConsumptionInstructions,

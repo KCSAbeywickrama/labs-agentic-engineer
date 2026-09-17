@@ -32,6 +32,8 @@ import {
 type ApiError = components["schemas"]["Error"];
 type RegisterExternalResourceRequest =
   components["schemas"]["RegisterExternalResourceRequest"];
+type PromoteExternalResourceRequest =
+  components["schemas"]["PromoteExternalResourceRequest"];
 type ExternalResourceDTO = components["schemas"]["ExternalResourceDTO"];
 type EnvValueCellDTO = components["schemas"]["EnvValueCellDTO"];
 type ResourceDocWriteDTO = components["schemas"]["ResourceDocWriteDTO"];
@@ -238,6 +240,82 @@ export const marketplaceHandlers = [
     catalog.push(created);
     return HttpResponse.json(created, { status: 201 });
   }),
+
+  // Promote: the project's own row becomes the organization's record. An
+  // environment the body leaves out is carried over when the project holds
+  // it (its cells read configured), refused otherwise.
+  http.post(
+    "*/api/v1/projects/:project/dependencies/external-resources/:name/promote",
+    async ({ params, request }) => {
+      const project = String(params.project);
+      const name = String(params.name);
+      const body = (await request.json()) as PromoteExternalResourceRequest | null;
+      const catalog = externalResourceCatalog(scenario());
+      const idx = catalog.findIndex(
+        (r) => r.scope === "project" && r.project === project && r.name === name,
+      );
+      if (idx < 0) {
+        return errorJson(
+          { code: "not_found", message: `project ${project} has no external dependency ${name}` },
+          404,
+        );
+      }
+      if (catalog.some((r) => r.scope === "org" && r.name === name)) {
+        return errorJson(
+          {
+            code: "conflict",
+            message: `external resource ${name} is already registered — have the project reuse it instead`,
+          },
+          409,
+        );
+      }
+      if (!body || typeof body.consumptionInstructions !== "string" || body.consumptionInstructions.trim() === "") {
+        return errorJson({ code: "bad_request", message: "consumptionInstructions is required" }, 400);
+      }
+      const row = catalog[idx]!;
+      const submitted = new Map<string, string>();
+      for (const r of body.envValues ?? []) {
+        if (r.value.trim() !== "") submitted.set(`${r.environment}:${r.key}`, r.value);
+      }
+      const secretKeys = new Set((row.config ?? []).filter((k) => k.secret === true).map((k) => k.key));
+      const envCells: EnvValueCellDTO[] = [];
+      for (const env of seedOrgEnvironments.map((e) => e.name)) {
+        for (const cfg of row.config ?? []) {
+          const typed = submitted.get(`${env}:${cfg.key}`);
+          const carried = (row.envCells ?? []).some(
+            (c) => c.environment === env && c.key === cfg.key && c.status === "configured",
+          );
+          if (typed === undefined && !carried) {
+            return errorJson(
+              {
+                code: "bad_request",
+                message: `missing env value for key "${cfg.key}" in environment "${env}"`,
+              },
+              400,
+            );
+          }
+          const cell: EnvValueCellDTO = { environment: env, key: cfg.key, status: "configured" };
+          if (!secretKeys.has(cfg.key) && typed !== undefined) cell.value = typed;
+          envCells.push(cell);
+        }
+      }
+      const record: ExternalResourceDTO = {
+        name,
+        provider: row.provider ?? "",
+        scope: "org",
+        description: body.description?.trim() || row.description || "",
+        consumptionInstructions: body.consumptionInstructions.trim(),
+        config: row.config ?? [],
+        consumers: row.consumers ?? [],
+        envCells,
+        ...(row.contract
+          ? { contract: { type: row.contract.type, path: `${name}/${row.contract.path}` } }
+          : {}),
+      };
+      catalog.splice(idx, 1, record);
+      return HttpResponse.json(record, { status: 201 });
+    },
+  ),
 
   http.put("*/api/v1/dependencies/external-resources/:name", async ({ params, request }) => {
     const name = String(params.name);

@@ -75,7 +75,10 @@ the genai turn engine (runner/broker/sweeper), and the files / design / skills s
   record — block, document, provenance — and a `contract` of origin `provider` with a
   `provenance.sourceUrl` and no hash has its document fetched (https, 5 MiB) and landed beside it.
   Both read the registry / the URL BEFORE `Workspace.Mutate` and never fail the apply: a miss lands the
-  stub with a warning and the dependency reads needs-input / needs-contract.
+  stub with a warning and the dependency reads needs-input / needs-contract. **Promote reuses the
+  same renderer** (`promote.go`): `ReadProjectResource` hands the project's own block and document to
+  the registry side, and `RewriteAsRegistryCopy` lands `renderRegistryCopy` of a stub over the
+  existing files under their CAS tokens — so a promoted dependency and a reused one are the same bytes.
 - **The Skill library.** One flat authored library at repo-root `skills/`, COPY'd into the image and read
   at runtime from `config.SkillsDir` (default `/app/skills`) — not go:embed'd. A skill dir is `SKILL.md`
   plus the [Agent Skills standard structure](https://agentskills.io/specification) — `scripts/`,

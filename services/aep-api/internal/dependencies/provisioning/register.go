@@ -87,40 +87,9 @@ func (s *Service) RegisterExternalResource(ctx context.Context, orgID string, re
 		return ExternalResourceView{}, apierr.BadRequest(err.Error())
 	}
 
-	cells := make([]EnvCell, 0, len(keys)*len(envNames))
-	for _, env := range envNames {
-		for _, k := range keys {
-			cell := EnvCell{
-				Environment: env,
-				Key:         k.Key,
-				Status:      "configured",
-				Value:       valueByEnvKey[envValueKey(env, k.Key)],
-			}
-			cells = append(cells, cell)
-		}
-	}
-	vaultByEnv := map[string]string{}
-	if s.orgSecrets != nil {
-		for _, env := range envNames {
-			secrets := map[string]string{}
-			for _, k := range keys {
-				if k.Secret {
-					secrets[k.Key] = valueByEnvKey[envValueKey(env, k.Key)]
-				}
-			}
-			if len(secrets) == 0 {
-				continue
-			}
-			vaultKey, err := s.orgSecrets.WriteOrgCatalogSecret(ctx, orgID, name+"-"+env, secrets)
-			if err != nil {
-				return ExternalResourceView{}, fmt.Errorf("provisioning: write org-catalog secret %q: %w", name+"-"+env, err)
-			}
-			vaultByEnv[env] = vaultKey
-		}
-	}
-	stampSecretStorePath(cells, vaultByEnv)
-	if s.catalogValuePlane != nil {
-		s.catalogValuePlane.PutEnvCells(orgID, name, cells)
+	cells, err := s.writeOrgValuePlane(ctx, orgID, name, keys, envNames, valueByEnvKey, nil)
+	if err != nil {
+		return ExternalResourceView{}, err
 	}
 	// Ensure last: List treats the name as registered only after the RT exists.
 	// A failed Ensure must not 409 a retry solely because cells/secrets already landed.
@@ -316,4 +285,57 @@ func (s *Service) validateRegisterRequest(ctx context.Context, orgID string, req
 
 func envValueKey(env, key string) string {
 	return env + "\x00" + key
+}
+
+// writeOrgValuePlane lands one environment's values per config key on the
+// org value plane: a "configured" cell per key × environment, the secret keys
+// of each environment written to the org-catalog vault (or, for an environment
+// in carried, copied from the project's vault key), and the vault key stamped
+// on that environment's cells as secretStorePath. Register and Promote share
+// it; a nil orgSecrets leaves the paths empty (documented no-op).
+func (s *Service) writeOrgValuePlane(ctx context.Context, orgID, name string, keys []openchoreo.ExternalResourceConfigKey, envNames []string, valueByEnvKey map[string]string, carried map[string]string) ([]EnvCell, error) {
+	cells := make([]EnvCell, 0, len(keys)*len(envNames))
+	for _, env := range envNames {
+		for _, k := range keys {
+			cells = append(cells, EnvCell{
+				Environment: env,
+				Key:         k.Key,
+				Status:      "configured",
+				Value:       valueByEnvKey[envValueKey(env, k.Key)],
+			})
+		}
+	}
+	vaultByEnv := map[string]string{}
+	if s.orgSecrets != nil {
+		for _, env := range envNames {
+			entity := name + "-" + env
+			if from, ok := carried[env]; ok {
+				vaultKey, err := s.orgSecrets.CopyOrgCatalogSecret(ctx, orgID, from, entity)
+				if err != nil {
+					return nil, fmt.Errorf("provisioning: carry over the %q secret into the org catalog: %w", env, err)
+				}
+				vaultByEnv[env] = vaultKey
+				continue
+			}
+			secrets := map[string]string{}
+			for _, k := range keys {
+				if k.Secret {
+					secrets[k.Key] = valueByEnvKey[envValueKey(env, k.Key)]
+				}
+			}
+			if len(secrets) == 0 {
+				continue
+			}
+			vaultKey, err := s.orgSecrets.WriteOrgCatalogSecret(ctx, orgID, entity, secrets)
+			if err != nil {
+				return nil, fmt.Errorf("provisioning: write org-catalog secret %q: %w", entity, err)
+			}
+			vaultByEnv[env] = vaultKey
+		}
+	}
+	stampSecretStorePath(cells, vaultByEnv)
+	if s.catalogValuePlane != nil {
+		s.catalogValuePlane.PutEnvCells(orgID, name, cells)
+	}
+	return cells, nil
 }
