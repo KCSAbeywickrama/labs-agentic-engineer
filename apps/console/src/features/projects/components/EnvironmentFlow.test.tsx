@@ -165,7 +165,7 @@ describe("EnvironmentFlow", () => {
     render(<EnvironmentFlow {...props(threeEnvs)} />);
     const staging = within(screen.getByTestId("environment-card-staging"));
     expect(staging.queryByText("Validation")).not.toBeInTheDocument();
-    expect(staging.getByText("Promote to Production")).toBeInTheDocument();
+    expect(staging.getByLabelText("Step 2, Promote to Production")).toBeInTheDocument();
   });
 
   // The numbers are a CONSEQUENCE of stepsFor, not a constant: Staging skips
@@ -263,7 +263,7 @@ describe("EnvironmentFlow", () => {
   it("keeps Try it now primary and Promote unavailable while the verdict is unknown", () => {
     render(<EnvironmentFlow {...props(threeEnvs, { validation: "none" })} />);
     expect(screen.getByRole("link", { name: /Try it now/ })).toHaveClass("MuiButton-contained");
-    expect(screen.getByRole("button", { name: /Promote/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Promote v4 to Staging/ })).toBeDisabled();
   });
 
   it("opens the environment page from the card, and not from a button inside it", () => {
@@ -272,7 +272,7 @@ describe("EnvironmentFlow", () => {
     fireEvent.click(screen.getByTestId("environment-card-staging"));
     expect(onTryOut).toHaveBeenCalledWith("staging");
     onTryOut.mockClear();
-    fireEvent.click(screen.getByRole("button", { name: /Promote/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Promote v4 to Staging/ }));
     expect(onTryOut).not.toHaveBeenCalled();
   });
 
@@ -295,6 +295,54 @@ describe("EnvironmentFlow", () => {
       "href",
       "/projects/expense/deployments/qa/try-out",
     );
+  });
+
+  // Every element of the approved design's EMPTY card (the UAT/Production
+  // ones): a noun for a title, the chip that says what is there, the sentence
+  // that names what would fill it, a validation step that says it has not run,
+  // and a promote control drawn disabled rather than left out.
+  it("draws an empty environment the way the design does", () => {
+    render(<EnvironmentFlow {...props(threeEnvs)} />);
+    const staging = within(screen.getByTestId("environment-card-staging"));
+    expect(staging.getByText("Deployment")).toBeInTheDocument();
+    expect(staging.getByText("Nothing deployed")).toBeInTheDocument();
+    expect(
+      staging.getByText("Nothing running yet. v4 on Development is ready to promote here."),
+    ).toBeInTheDocument();
+    expect(staging.getByRole("button", { name: /^Promote to Production/ })).toBeDisabled();
+
+    // Production sits two hops from the only deployed version, so its own
+    // upstream (Staging) runs nothing and the sentence says what it takes.
+    const production = within(screen.getByTestId("environment-card-production"));
+    expect(
+      production.getByText("Nothing running yet. Only a version that reached Staging can be promoted here."),
+    ).toBeInTheDocument();
+  });
+
+  // Development validates, so its empty-state counterpart is the chip and the
+  // sentence on step 2 — never a blank step.
+  it("says a validation has not run rather than leaving the step bare", () => {
+    const validating: EnvironmentInfo[] = [
+      threeEnvs[0]!,
+      { ...threeEnvs[1]!, validation: "on" },
+      threeEnvs[2]!,
+    ];
+    render(<EnvironmentFlow {...props(validating)} />);
+    const staging = within(screen.getByTestId("environment-card-staging"));
+    expect(staging.getByLabelText("Step 2, Validation, Not run")).toBeInTheDocument();
+    expect(staging.getByText("Runs once something is deployed here.")).toBeInTheDocument();
+  });
+
+  // The card's header is the name and the word Environment — everything else
+  // the design puts inside the steps, where the reader is already looking.
+  it("keeps the header to the name and the word Environment", () => {
+    render(<EnvironmentFlow {...props(threeEnvs)} />);
+    const development = within(screen.getByTestId("environment-card-development"));
+    expect(development.getByRole("heading", { name: "Development" })).toBeInTheDocument();
+    expect(development.getByText("Environment")).toBeInTheDocument();
+    // The deployment's stamp belongs to the Deployed step's chip; the header
+    // carried a second copy of it as "2h ago".
+    expect(development.queryByText(/ago$/)).not.toBeInTheDocument();
   });
 
   // A single-environment pipeline is a real pipeline: one card, no arrow, no

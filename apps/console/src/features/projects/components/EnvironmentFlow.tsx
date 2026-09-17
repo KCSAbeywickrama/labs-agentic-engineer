@@ -27,6 +27,7 @@ import {
   type FlowTarget,
 } from "./EnvironmentCards";
 import type { ConnectionRow } from "../lib/promotion";
+import type { PromotionSource } from "../lib/deploymentFlow";
 
 // The Deployments board as the PIPELINE it actually is: one full-detail card
 // per environment, left to right in the platform's promotion order, with an
@@ -96,6 +97,22 @@ function flowTarget(
   };
 }
 
+/** The environment that promotes INTO `name`, and the version it runs — read
+ *  off the served list and the rows, never off position: the source is the
+ *  environment whose own `promotesTo` names this one. Null when nothing does
+ *  (the pipeline's entry), which is what keeps an entry card from claiming a
+ *  promotion would fill it. */
+function promotionSource(
+  environments: EnvironmentInfo[],
+  rows: EnvironmentRow[],
+  name: string,
+): PromotionSource | null {
+  const from = environments.find((e) => e.promotesTo === name);
+  if (!from) return null;
+  const row = rows.find((r) => r.environment === from.name);
+  return { label: labelOf(from, from.name), version: row?.version ?? "" };
+}
+
 export function EnvironmentFlow({
   projectName,
   environments,
@@ -158,6 +175,7 @@ export function EnvironmentFlow({
                 // says a different environment.
                 entry={env.position === 0}
                 target={target}
+                source={promotionSource(environments, rows, row.environment)}
                 detail={detail}
                 onOpen={onTryOut}
                 onPromote={onPromote}

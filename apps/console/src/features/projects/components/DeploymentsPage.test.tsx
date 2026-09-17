@@ -504,7 +504,8 @@ describe("DeploymentsPage — environment board", () => {
     // LEADS with the version, in the block under the Deployment step's title —
     // the milestone read off the version ledger, linked to its GitHub page.
     const development = screen.getByTestId("environment-card-development");
-    expect(screen.getByText(/1 of 1 components live.* You can try them now\./)).toBeInTheDocument();
+    // The count lives in the Components group's headline, not in prose above it.
+    expect(within(development).getByRole("group", { name: "Components — 1 of 1 live" })).toBeInTheDocument();
     const vm = within(development).getByTestId("version-block");
     expect(within(vm).getByText("Version v1")).toBeInTheDocument();
     expect(within(vm).getByRole("link", { name: "Milestone #3" })).toHaveAttribute(
@@ -517,7 +518,9 @@ describe("DeploymentsPage — environment board", () => {
     // Production is empty and stays so: it lists nothing, and its own card
     // says what has to happen before anything runs there.
     const production = screen.getByTestId("environment-card-production");
-    expect(within(production).getByText("Deploys when a version is promoted to Production.")).toBeInTheDocument();
+    expect(
+      within(production).getByText("Nothing running yet. v1 on Development is ready to promote here."),
+    ).toBeInTheDocument();
     expect(within(production).queryByRole("group", { name: /^Components/ })).not.toBeInTheDocument();
     expect(within(production).queryByRole("group", { name: /^Dependencies/ })).not.toBeInTheDocument();
     // …and a card with nothing bound carries no version block at all.
@@ -948,8 +951,12 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
     const tryIt = within(steps[0]!).getByRole("link", { name: /Try it now/ });
     expect(tryIt).toHaveAttribute("href", "/projects/acme/deployments/development/try-out");
     expect(tryIt).not.toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByText("Opens the deployment view: app, endpoints, test users")).toBeInTheDocument();
-    expect(screen.getByText(/You can try them now while validation runs\./)).toBeInTheDocument();
+    // The button stands alone, as the design draws it: no caption beside it,
+    // and no prose above the version block restating the counts.
+    expect(
+      screen.queryByText("Opens the deployment view: app, endpoints, test users"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/You can try them now/)).not.toBeInTheDocument();
     // Step 2 keeps the shared sentence and the one link.
     expect(within(steps[1]!).getByText("The validation agent is running.")).toBeInTheDocument();
     expect(within(steps[1]!).getByRole("link", { name: /View validations/ })).toBeInTheDocument();
@@ -1011,12 +1018,12 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
     // Try it now is drawn, and disabled.
     expect(within(steps[0]!).getByRole("link", { name: /Try it now/ })).toHaveAttribute("aria-disabled", "true");
     // Steps 2 and 3 are inactive with one line each.
-    expect(within(steps[1]!).getByText("Runs automatically after deployment.")).toBeInTheDocument();
+    expect(within(steps[1]!).getByText("Runs once something is deployed here.")).toBeInTheDocument();
     expect(within(steps[2]!).getByText("Unavailable until v1 deploys and validates")).toBeInTheDocument();
     // Production explains itself in its OWN card's first step: a version
     // arrives there by promotion, never by a build landing in it.
     expect(
-      screen.getByText("Deploys when a version is promoted to Production."),
+      screen.getByText("Nothing running yet. v1 on Development is ready to promote here."),
     ).toBeInTheDocument();
 
     // The notice's Configure is the dev re-collect for the blocking connection.

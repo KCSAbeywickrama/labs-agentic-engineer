@@ -25,7 +25,6 @@ import {
   deployHold,
   deployStep,
   deployedBehindBuild,
-  deployedSentence,
   deployedValidation,
   developmentConnections,
   holdNotice,
@@ -174,10 +173,6 @@ describe("deployStep", () => {
     expect(step.state).toBe("done");
     expect(step.title).toBe("Deployed");
     expect(step.chip?.tone).toBe("neutral");
-    expect(deployedSentence(row(), "running")).toMatch(
-      /^2 of 2 components live since .+\. You can try them now while validation runs\.$/,
-    );
-    expect(deployedSentence(row(), "passed")).toMatch(/You can try them now\.$/);
   });
 
   it("is on hold whatever the bindings say, when a run is parked", () => {
@@ -191,7 +186,26 @@ describe("deployStep", () => {
     expect(deployStep(row({ status: { label: "Deploy failed", tone: "error", live: false } }), null))
       .toMatchObject({ state: "error", title: "Deploy", chip: { label: "Deploy failed", tone: "error" } });
     expect(deployStep(row({ status: { label: "Nothing deployed", tone: "neutral", live: false }, cards: [], live: 0, total: 0 }), null))
-      .toMatchObject({ state: "pending", note: "Deploys automatically when a build merges." });
+      .toMatchObject({
+        state: "pending",
+        // The design's empty card: a noun for a title, a chip that says what
+        // is there, and one sentence about what would fill it.
+        title: "Deployment",
+        chip: { label: "Nothing deployed", tone: "neutral" },
+        note: "Nothing running yet. Deploys automatically when a build merges.",
+      });
+  });
+
+  // An empty environment says what would land in it — off the row of the
+  // environment that promotes INTO it, and never a version nobody reported.
+  it("names the version waiting upstream, or what it would take to have one", () => {
+    const empty = row({ status: { label: "Nothing deployed", tone: "neutral", live: false }, cards: [], live: 0, total: 0 });
+    expect(deployStep(empty, null, { label: "Staging", version: "v3" }).note).toBe(
+      "Nothing running yet. v3 on Staging is ready to promote here.",
+    );
+    expect(deployStep(empty, null, { label: "UAT", version: "" }).note).toBe(
+      "Nothing running yet. Only a version that reached UAT can be promoted here.",
+    );
   });
 });
 
@@ -257,9 +271,17 @@ describe("validationStep", () => {
   const done = deployStep(row(), null);
   it("waits until the deployment is live, and says why", () => {
     expect(validationStep("none", undefined, deployStep(row(), { blocking: [], dependents: {} })))
-      .toMatchObject({ state: "pending", note: "Runs automatically after deployment." });
+      .toMatchObject({
+        state: "pending",
+        chip: { label: "Not run", tone: "neutral" },
+        note: "Runs once something is deployed here.",
+      });
     expect(validationStep("none", undefined, done))
-      .toMatchObject({ state: "pending", note: "Starts automatically now that the deployment is live." });
+      .toMatchObject({
+        state: "pending",
+        chip: { label: "Not run", tone: "neutral" },
+        note: "Starts automatically now that the deployment is live.",
+      });
   });
   it("runs without the last attempt's numbers under this attempt's heading", () => {
     expect(validationStep("running", { total: 25, passed: 24, failed: 0, uncovered: 1 }, done))

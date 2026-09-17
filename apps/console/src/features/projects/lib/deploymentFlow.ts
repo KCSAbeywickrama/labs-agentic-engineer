@@ -130,7 +130,37 @@ export function stampLabel(iso: string | undefined): string {
   });
 }
 
-export function deployStep(row: EnvironmentRow, hold: DeployHold | null): FlowStep {
+/**
+ * The environment that promotes INTO this one, as its own row describes it —
+ * the only honest way for an empty card to say what would land here.
+ *
+ * Null on the pipeline's entry environment, where nothing promotes in and a
+ * build is what arrives.
+ */
+export interface PromotionSource {
+  /** Its displayName, never a console constant. */
+  label: string;
+  /** The version it runs; "" when it runs none — the card then says what it
+   *  takes to fill this environment rather than naming a version nobody
+   *  reported. */
+  version: string;
+}
+
+/** The sentence under an empty Deployment step: nothing runs here, and what it
+ *  would take for something to. */
+function emptyDeploymentNote(row: EnvironmentRow, source: PromotionSource | null): string {
+  if (row.status.label === "Undeployed") return "Every component is undeployed.";
+  if (!source) return "Nothing running yet. Deploys automatically when a build merges.";
+  return source.version
+    ? `Nothing running yet. ${source.version} on ${source.label} is ready to promote here.`
+    : `Nothing running yet. Only a version that reached ${source.label} can be promoted here.`;
+}
+
+export function deployStep(
+  row: EnvironmentRow,
+  hold: DeployHold | null,
+  source: PromotionSource | null = null,
+): FlowStep {
   if (hold) {
     return { state: "hold", title: "Deploy", chip: { label: "On hold", tone: "warning" } };
   }
@@ -154,22 +184,15 @@ export function deployStep(row: EnvironmentRow, hold: DeployHold | null): FlowSt
       ...(stamp ? { chip: { label: stamp, tone: "neutral" } } : {}),
     };
   }
+  // The empty card, as the design draws it: the step is a NOUN ("Deployment",
+  // not "Deploy" — nothing is being done), it carries a chip that says what is
+  // there, and one sentence that says what would fill it.
   return {
     state: "pending",
-    title: "Deploy",
-    note:
-      status.label === "Undeployed"
-        ? "Every component is undeployed."
-        : "Deploys automatically when a build merges.",
+    title: "Deployment",
+    chip: { label: "Nothing deployed", tone: "neutral" },
+    note: emptyDeploymentNote(row, source),
   };
-}
-
-/** The sentence under a green step 1. */
-export function deployedSentence(row: EnvironmentRow, validation: string): string {
-  const since = stampLabel(row.deployedAt);
-  const head = `${row.live} of ${row.total} components live${since ? ` since ${since}` : ""}.`;
-  const inFlight = validation === "running" || validation === "awaiting-fix";
-  return `${head} You can try them now${inFlight ? " while validation runs" : ""}.`;
 }
 
 /** The sentence under an on-hold step 1. A park that named nothing (an
@@ -439,10 +462,11 @@ export function validationStep(
     return {
       state: "pending",
       title: "Validation",
+      chip: { label: "Not run", tone: "neutral" },
       note:
         deployed.state === "done"
           ? "Starts automatically now that the deployment is live."
-          : "Runs automatically after deployment.",
+          : "Runs once something is deployed here.",
     };
   }
   const settled = known.state !== "active";

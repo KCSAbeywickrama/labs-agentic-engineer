@@ -27,9 +27,8 @@ import {
   Typography,
   alpha,
 } from "@wso2/oxygen-ui";
-import { ArrowRight, CircleAlert, Lock } from "@wso2/oxygen-ui-icons-react";
+import { ArrowRight, ArrowUpRight, CircleAlert } from "@wso2/oxygen-ui-icons-react";
 import { createLink } from "@tanstack/react-router";
-import { StatusChip } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 import { RunHoldNotice } from "../../builds/components/RunHoldNotice";
 import type { ValidationCounts } from "../../validation/lib/verdict";
@@ -37,15 +36,15 @@ import {
   componentLine,
   connectionsHeadline,
   deployStep,
-  deployedSentence,
   holdNotice,
   holdSentence,
   validationStep,
   type ConnectionLine,
   type DeployHold,
   type PromoteStep,
+  type PromotionSource,
 } from "../lib/deploymentFlow";
-import { agoLabel, shortSha, type EnvironmentRow } from "../lib/deploymentLedger";
+import { shortSha, type EnvironmentRow } from "../lib/deploymentLedger";
 import {
   isLast,
   stepsFor,
@@ -123,8 +122,15 @@ function VersionBlock({
           <Typography variant="body2" color="text.secondary">
             ·{" "}
             {milestoneHref ? (
-              <UiLink href={milestoneHref} target="_blank" rel="noreferrer" onClick={stop}>
+              <UiLink
+                href={milestoneHref}
+                target="_blank"
+                rel="noreferrer"
+                onClick={stop}
+                sx={{ display: "inline-flex", alignItems: "center", gap: 0.25 }}
+              >
                 {milestone}
+                <Box component={ArrowUpRight} size={13} aria-hidden sx={{ flexShrink: 0 }} />
               </UiLink>
             ) : (
               milestone
@@ -175,7 +181,7 @@ function TryItNow({
   variant?: "contained" | "outlined";
 }) {
   return (
-    <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 0.75 }}>
+    <Box>
       <LinkButton
         variant={variant}
         disabled={disabled}
@@ -186,10 +192,7 @@ function TryItNow({
       >
         Try it now
       </LinkButton>
-      <Typography variant="caption" color="text.secondary">
-        Opens the deployment view: app, endpoints, test users
-      </Typography>
-    </Stack>
+    </Box>
   );
 }
 
@@ -266,6 +269,10 @@ export interface EnvironmentFlowCardProps {
   entry: boolean;
   /** The environment `env.promotesTo` names; null on the last environment. */
   target: FlowTarget | null;
+  /** The environment that promotes INTO this one, and the version it runs;
+   *  null on the pipeline's entry environment. An empty card says what would
+   *  fill it, and can only do that from a row someone else read. */
+  source: PromotionSource | null;
   detail: EnvironmentFlowDetail;
   /** Open this environment's page. */
   onOpen: (environment: string) => void;
@@ -289,6 +296,7 @@ export function EnvironmentFlowCard({
   row,
   entry,
   target,
+  source,
   detail,
   onOpen,
   onPromote,
@@ -300,7 +308,7 @@ export function EnvironmentFlowCard({
   // A hold, the deploy aggregate's validation and the connections read all
   // answer for the entry environment. A later card must not repeat them.
   const hold = entry ? detail.hold : null;
-  const deployed = deployStep(row, hold);
+  const deployed = deployStep(row, hold, source);
   const holdUnknown = entry && pending.hold && !detail.hold;
   const bound = row.cards.some((c) => c.deployment);
   const lines = row.cards.map((c) => componentLine(c, componentTypes.get(c.componentName), hold));
@@ -317,14 +325,6 @@ export function EnvironmentFlowCard({
       : undefined;
   const tone = row.status.tone;
 
-  // `deployStep`'s pending note speaks for the environment a BUILD lands in.
-  // Nothing is built into a later environment — a version is promoted there —
-  // so the note is the card's own or it is false.
-  const deployedView =
-    deployed.state === "pending" && !entry && row.status.label !== "Undeployed"
-      ? { ...deployed, note: `Deploys when a version is promoted to ${row.label}.` }
-      : deployed;
-
   // The trailing step sits on the card's bottom whenever something follows
   // this environment; the step BEFORE it absorbs the spare height, so the
   // rail is drawn continuously down into it.
@@ -337,7 +337,7 @@ export function EnvironmentFlowCard({
         <FlowStep
           key="deployment"
           step={step.index}
-          view={deployedView}
+          view={deployed}
           ringTone="info"
           last={isTrailing}
           grow={grow}
@@ -391,11 +391,6 @@ export function EnvironmentFlowCard({
                 {holdSentence(hold)}
               </Typography>
             </>
-          )}
-          {!hold && deployed.state === "done" && (
-            <Typography variant="body2" color="text.secondary">
-              {deployedSentence(row, entry ? (deploy?.validation ?? "") : "")}
-            </Typography>
           )}
           {!hold && deployed.state === "active" && (
             <Typography variant="body2" color="text.secondary">
@@ -458,7 +453,10 @@ export function EnvironmentFlowCard({
             view={{
               state: "pending",
               title: "Validation",
-              note: `${row.label} validates. The console reads a verdict only for the environment a build lands in.`,
+              chip: { label: "Not run", tone: "neutral" },
+              note: bound
+                ? `${row.label} validates. The console reads a verdict only for the environment a build lands in.`
+                : "Runs once something is deployed here.",
             }}
             last={isTrailing}
             grow={grow}
@@ -506,6 +504,17 @@ export function EnvironmentFlowCard({
     // a word the console chose.
     const targetLabel = target?.label ?? "";
     const title = `Promote to ${targetLabel}`;
+    // A step the reader cannot act on still draws its control, disabled: the
+    // design's empty cards carry a greyed "Promote to X" so the row of
+    // promote buttons is unbroken across the pipeline. It names no version —
+    // there is none to name — which is exactly what the disabled state says.
+    const disabledPromote = (
+      <Box>
+        <Button variant="contained" disabled endIcon={<ArrowRight size={16} aria-hidden />}>
+          {title}
+        </Button>
+      </Box>
+    );
     if (!entry) {
       return (
         <FlowStep
@@ -518,7 +527,9 @@ export function EnvironmentFlowCard({
           }}
           last={isTrailing}
           grow={grow}
-        />
+        >
+          {disabledPromote}
+        </FlowStep>
       );
     }
     // `pending.deploy` belongs here as much as the other two: `promote` is
@@ -561,7 +572,9 @@ export function EnvironmentFlowCard({
           }}
           last={isTrailing}
           grow={grow}
-        />
+        >
+          {disabledPromote}
+        </FlowStep>
       );
     }
     return (
@@ -672,16 +685,6 @@ export function EnvironmentFlowCard({
           <Typography variant="caption" color="text.secondary">
             Environment
           </Typography>
-          <StatusChip label={row.status.label} tone={row.status.tone} appearance="soft" dot />
-          <Box sx={{ flex: 1 }} />
-          {/* The version and its milestone used to sit here as small grey
-              text. They lead the Deployment step now (`VersionBlock`), so the
-              header carries only how long ago this environment last changed. */}
-          {row.deployedAt && (
-            <Typography variant="caption" color="text.secondary">
-              {agoLabel(row.deployedAt)}
-            </Typography>
-          )}
         </Stack>
         <Box
           role="list"
@@ -691,26 +694,9 @@ export function EnvironmentFlowCard({
           {stepNodes}
         </Box>
         {last && (
-          <Stack
-            direction="row"
-            spacing={1.25}
-            sx={{
-              alignItems: "center",
-              mt: 2,
-              px: 1.5,
-              py: 1.25,
-              border: 1,
-              borderStyle: "dashed",
-              borderColor: "divider",
-              borderRadius: 1,
-              bgcolor: "action.hover",
-            }}
-          >
-            <Box component={Lock} size={14} aria-hidden sx={{ color: "text.secondary", flexShrink: 0 }} />
-            <Typography variant="body2" color="text.secondary">
-              Last environment in the pipeline — nothing to promote to.
-            </Typography>
-          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 2 }}>
+            Last environment in the pipeline — nothing to promote to.
+          </Typography>
         )}
       </CardContent>
     </Card>
