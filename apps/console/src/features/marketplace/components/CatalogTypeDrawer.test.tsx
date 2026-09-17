@@ -166,6 +166,28 @@ describe("CatalogTypeDrawer", () => {
     expect(screen.getByRole("button", { name: /edit/i })).toBeInTheDocument();
   });
 
+  // The provider says what the resource IS, and the contract is the one
+  // document a project copies when it reuses it — both are facts about the
+  // record rather than another docs row.
+  it("registered: names the provider and the contract document", () => {
+    render(
+      <CatalogTypeDrawer
+        kind="external"
+        resource={registeredExternal({
+          provider: "Stripe",
+          contract: { type: "openapi", path: "stripe/openapi.yaml" },
+        })}
+        open
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Provider")).toBeInTheDocument();
+    expect(screen.getByText("Stripe")).toBeInTheDocument();
+    expect(screen.getByText("Contract")).toBeInTheDocument();
+    expect(screen.getByText("stripe/openapi.yaml")).toBeInTheDocument();
+  });
+
   it("renders a path pointer as text without a file body", () => {
     render(
       <CatalogTypeDrawer

@@ -208,6 +208,24 @@ describe("ResourcesCatalog", () => {
     expect(screen.queryByRole("button", { name: /edit/i })).not.toBeInTheDocument();
   });
 
+  // The name is the organization's word for the resource; the provider is the
+  // system it actually is, and a card that shows only the name hides it.
+  it("names the provider on an external card, and platform types have none", () => {
+    resetState();
+    platformState = { ...platformState, data: [platformType()] };
+    externalState = {
+      ...externalState,
+      data: [externalResource({ provider: "Stripe" })],
+    };
+
+    render(<ResourcesCatalog />);
+
+    const stripeCard = screen.getByText("stripe").closest(".MuiCard-root");
+    expect(within(stripeCard as HTMLElement).getByText("Stripe")).toBeInTheDocument();
+    const postgresCard = screen.getByText("postgres-cnpg").closest(".MuiCard-root");
+    expect(within(postgresCard as HTMLElement).queryByText("Stripe")).not.toBeInTheDocument();
+  });
+
   it("clamps a long card description to two lines and keeps the full text on title", () => {
     resetState();
     const long =

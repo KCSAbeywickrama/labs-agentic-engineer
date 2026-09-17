@@ -927,6 +927,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// reconstruction/dedupe rule (dependencies.ExternalResourceCatalog) for both.
 	externalResourceRTCatalog := dependencies.NewExternalResourceCatalog(resourceClient)
 	params.MCPExternalResources = externalResourceRTCatalog
+	// The org docs repo: registered resources' contract documents. Register
+	// writes them; the design write path copies one into a project when a
+	// stub dependency names the resource (spec/registry_copy.go).
+	orgResourceDocs := provisioning.NewGitOrgResourceDocs(repoService, gitOpsService)
+	filesSvc.SetRegisteredResourceReader(registeredResourceReader{catalog: externalResourceRTCatalog, docs: orgResourceDocs})
 	// ops — the Incident RCA domain (P1, the first landed domain). Alerts
 	// (console issues #154, #155, BE handshake #156): the org-scoped store for
 	// RCA-agent reports the console's notification bell and Alerts list/stepper
@@ -1126,7 +1131,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		Environments:      environmentClient,
 		CatalogValuePlane: catalogValuePlane,
 		OrgSecrets:        secretRefWriter,
-		OrgResourceDocs:   provisioning.NewGitOrgResourceDocs(repoService, gitOpsService),
+		OrgResourceDocs:   orgResourceDocs,
 		Roles:             rolesEnsurerOrNil(rolesEnsure),
 		Markers:           resourceTypeCatalog,
 		SecurityJSON:      securityJSONReader{art: artifactSvcGit},

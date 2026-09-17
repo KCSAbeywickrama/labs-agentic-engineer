@@ -529,6 +529,7 @@ func TestProvisionForBuild_RegisteredExternal_AuthorsOrgSecretStorePath(t *testi
 	_, err := svc.RegisterExternalResource(context.Background(), "acme", gen.RegisterExternalResourceRequest{
 		Name:                    "stripe",
 		Description:             "Stripe payments",
+		Provider:                "Stripe",
 		ConsumptionInstructions: "Use the secret as Bearer.",
 		Config: []gen.ConfigKeyDTO{
 			{Key: "api_key", Description: "Secret API key", Secret: true},
@@ -596,6 +597,7 @@ func TestProvisionForBuild_RegisteredAfterRestart_AuthorsOrgSecretStorePath(t *t
 				{Key: "api_key", Secret: true},
 				{Key: "region"},
 			},
+			Provider:                "Stripe",
 			ConsumptionInstructions: "Use the secret as Bearer.",
 		}}},
 		ExtProv:           ext,

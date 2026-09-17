@@ -142,6 +142,10 @@ type OrgSecretWriter interface {
 // nil store returns a 500-class wrap.
 type OrgResourceDocs interface {
 	CommitUTF8(ctx context.Context, orgID, logicalName, fileName, content string) (path string, err error)
+	// ReadUTF8 reads one committed file back by its repo path
+	// (`<logicalName>/<fileName>`). The design write path copies a registered
+	// resource's contract document into a project through it.
+	ReadUTF8(ctx context.Context, orgID, path string) (content string, err error)
 }
 
 // EnvironmentLister lists OpenChoreo Environment names for the org namespace.

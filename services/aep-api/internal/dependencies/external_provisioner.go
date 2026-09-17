@@ -96,7 +96,7 @@ func (p *ExternalResourceProvisioner) Provision(
 	// SAME name (a stable get-or-create target), while a schema OR template
 	// change authors a fresh RT instead of silently reusing a stale same-named
 	// one on 409-conflict.
-	rt, err := openchoreo.BuildExternalResourceType(er.Name, er.Description, toRTConfigKeys(er.ConfigKeys), "", nil)
+	rt, err := openchoreo.BuildExternalResourceType(projectExternalTypeSpec(projectName, er))
 	if err != nil {
 		// A schema the builder refuses — no config key, an empty key — is an
 		// answer about the design, not a blip: no retry can change it.
@@ -179,7 +179,7 @@ func (p *ExternalResourceProvisioner) AuthorPreparedValues(
 	}
 
 	// 1. ResourceType (get-or-create; immutable once created).
-	rt, err := openchoreo.BuildExternalResourceType(er.Name, er.Description, toRTConfigKeys(er.ConfigKeys), "", nil)
+	rt, err := openchoreo.BuildExternalResourceType(projectExternalTypeSpec(projectName, er))
 	if err != nil {
 		// A schema the builder refuses — no config key, an empty key — is an
 		// answer about the design, not a blip: no retry can change it.
@@ -444,6 +444,22 @@ func buildExternalResourceBinding(projectName, name, env, latestRelease, secretS
 			ResourceTypeEnvironmentConfigs: json.RawMessage(raw),
 		},
 	}, nil
+}
+
+// projectExternalTypeSpec is the type a PROJECT's build authors for a
+// resource it defined itself: scope project, the project folded into the
+// name, no instructions, no document — the record of a project resource is
+// the project's own dependency.json. It never counts as registered and is
+// never listed org-wide.
+func projectExternalTypeSpec(projectName string, er *ExternalResource) openchoreo.ExternalResourceTypeSpec {
+	return openchoreo.ExternalResourceTypeSpec{
+		Name:        er.Name,
+		Description: er.Description,
+		Provider:    er.Provider,
+		Keys:        toRTConfigKeys(er.ConfigKeys),
+		Scope:       openchoreo.ExternalResourceScopeProject,
+		Project:     projectName,
+	}
 }
 
 func toRTConfigKeys(in []spec.ConfigKey) []openchoreo.ExternalResourceConfigKey {

@@ -18,13 +18,23 @@ package provisioning
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/gen"
 	"github.com/wso2/aep/aep-api/internal/platform/apierr"
+	"github.com/wso2/aep/aep-api/internal/spec"
 )
+
+// maxContractBytes caps a registered resource's contract document: the same
+// 5 MiB the project side accepts for a file (spec.maxFileBytes) and fetches
+// (FetchSpecFromURL). A larger document is refused with a message; the admin
+// uploads a trimmed one.
+const maxContractBytes = 5 << 20
 
 // RegisterExternalResource authors a Registered External resource on the org
 // catalog: an OpenChoreo ResourceType (Ensure only — no project Resource
@@ -33,6 +43,10 @@ import (
 // key is stored on those cells as SecretStorePath.
 func (s *Service) RegisterExternalResource(ctx context.Context, orgID string, req gen.RegisterExternalResourceRequest) (ExternalResourceView, error) {
 	name, keys, writes, envNames, valueByEnvKey, err := s.validateRegisterRequest(ctx, orgID, req)
+	if err != nil {
+		return ExternalResourceView{}, err
+	}
+	contractWrite, err := validateContractWrite(req.Contract)
 	if err != nil {
 		return ExternalResourceView{}, err
 	}
@@ -54,8 +68,21 @@ func (s *Service) RegisterExternalResource(ctx context.Context, orgID string, re
 	if err != nil {
 		return ExternalResourceView{}, err
 	}
-
-	rt, err := openchoreo.BuildExternalResourceType(name, strings.TrimSpace(req.Description), keys, strings.TrimSpace(req.ConsumptionInstructions), docs)
+	contract, provenance, err := s.commitResourceContract(ctx, orgID, name, contractWrite)
+	if err != nil {
+		return ExternalResourceView{}, err
+	}
+	rt, err := openchoreo.BuildExternalResourceType(openchoreo.ExternalResourceTypeSpec{
+		Name:                    name,
+		Description:             strings.TrimSpace(req.Description),
+		Keys:                    keys,
+		Scope:                   openchoreo.ExternalResourceScopeOrg,
+		Provider:                strings.TrimSpace(req.Provider),
+		Contract:                contract,
+		Provenance:              provenance,
+		ConsumptionInstructions: strings.TrimSpace(req.ConsumptionInstructions),
+		ResourceDocs:            docs,
+	})
 	if err != nil {
 		return ExternalResourceView{}, apierr.BadRequest(err.Error())
 	}
@@ -104,11 +131,117 @@ func (s *Service) RegisterExternalResource(ctx context.Context, orgID string, re
 	return ExternalResourceView{
 		Name:                    name,
 		Description:             strings.TrimSpace(req.Description),
+		Provider:                strings.TrimSpace(req.Provider),
 		Config:                  toConfigKeys(keys),
+		Contract:                contract,
+		Provenance:              provenance,
+		Scope:                   openchoreo.ExternalResourceScopeOrg,
 		ConsumptionInstructions: strings.TrimSpace(req.ConsumptionInstructions),
 		EnvCells:                cells,
 		ResourceDocs:            docs,
 	}, nil
+}
+
+// contractWrite is one validated contract-document write: a URL to fetch, or
+// a file name plus content to commit. Type is the document's kind.
+type contractWrite struct {
+	Type     string
+	URL      string
+	FileName string
+	Content  string
+}
+
+// validateContractWrite is the pure validator for the register/update
+// `contract` field: a type, and exactly one of url or fileName+content. A
+// nil field is allowed (a provider that publishes no document) and yields
+// nil.
+func validateContractWrite(in *gen.ResourceContractWriteDTO) (*contractWrite, error) {
+	if in == nil {
+		return nil, nil
+	}
+	t := strings.TrimSpace(string(in.Type))
+	if _, ok := resourceContractTypes[t]; !ok {
+		return nil, apierr.BadRequest(fmt.Sprintf("contract: unknown type %q", in.Type))
+	}
+	u, fileName, content := strings.TrimSpace(in.URL), strings.TrimSpace(in.FileName), in.Content
+	fileNameSet, contentSet := fileName != "", content != ""
+	if fileNameSet != contentSet {
+		return nil, apierr.BadRequest("contract: fileName and content must both be provided")
+	}
+	if (u != "") == fileNameSet {
+		return nil, apierr.BadRequest("contract: exactly one of url, or fileName+content, is required")
+	}
+	if u != "" {
+		return &contractWrite{Type: t, URL: u}, nil
+	}
+	if strings.ContainsAny(fileName, `/\`) || strings.Contains(fileName, "..") {
+		return nil, apierr.BadRequest("contract: fileName must be a single path segment")
+	}
+	if !utf8.ValidString(content) {
+		return nil, apierr.BadRequest("contract: content must be valid UTF-8")
+	}
+	if len(content) > maxContractBytes {
+		return nil, apierr.BadRequest("contract: the document is larger than 5 MiB — upload a trimmed one")
+	}
+	return &contractWrite{Type: t, FileName: fileName, Content: content}, nil
+}
+
+// resourceContractTypes is the ResourceContractWriteDTO.type enum.
+var resourceContractTypes = map[string]struct{}{
+	"openapi": {}, "graphql": {}, "sdk": {}, "asyncapi": {}, "protobuf": {}, "documentation": {},
+}
+
+// commitResourceContract lands the resource's contract document in the org
+// docs repo and returns the record's `{type, path}` pointer plus provenance.
+// A URL is fetched by the platform (https only, public hosts only, 5 MiB cap
+// — spec.FetchSpecFromURL's guards) and kept only as provenance: the record
+// never points at the internet. A nil write yields nil, nil.
+func (s *Service) commitResourceContract(ctx context.Context, orgID, logicalName string, w *contractWrite) (*openchoreo.ResourceContractPointer, *openchoreo.ResourceRecordProvenance, error) {
+	if w == nil {
+		return nil, nil, nil
+	}
+	if s.orgResourceDocs == nil {
+		return nil, nil, fmt.Errorf("provisioning: org resource docs store is not configured")
+	}
+	content, fileName, sourceURL := w.Content, w.FileName, ""
+	if w.URL != "" {
+		fetched, err := spec.FetchSpecFromURL(ctx, w.URL)
+		if err != nil {
+			return nil, nil, apierr.BadRequest("contract: could not fetch the document: " + err.Error())
+		}
+		if !utf8.Valid(fetched) {
+			return nil, nil, apierr.BadRequest("contract: the fetched document is not valid UTF-8")
+		}
+		content, sourceURL = string(fetched), w.URL
+		fileName = defaultContractFileName(w.Type)
+	}
+	path, err := s.orgResourceDocs.CommitUTF8(ctx, orgID, logicalName, fileName, content)
+	if err != nil {
+		return nil, nil, fmt.Errorf("provisioning: commit contract %q: %w", fileName, err)
+	}
+	sum := sha256.Sum256([]byte(content))
+	return &openchoreo.ResourceContractPointer{Type: w.Type, Path: path},
+		&openchoreo.ResourceRecordProvenance{SourceURL: sourceURL, SHA256: fmt.Sprintf("%x", sum), ReadOn: time.Now().UTC().Format(time.RFC3339)},
+		nil
+}
+
+// defaultContractFileName names a fetched document by its type, the way the
+// project side names its own contract files.
+func defaultContractFileName(contractType string) string {
+	switch contractType {
+	case "graphql":
+		return "schema.graphql"
+	case "sdk":
+		return "sdk.json"
+	case "asyncapi":
+		return "asyncapi.yaml"
+	case "protobuf":
+		return "service.proto"
+	case "documentation":
+		return "documentation.md"
+	default:
+		return "openapi.yaml"
+	}
 }
 
 func (s *Service) validateRegisterRequest(ctx context.Context, orgID string, req gen.RegisterExternalResourceRequest) (
@@ -128,6 +261,9 @@ func (s *Service) validateRegisterRequest(ctx context.Context, orgID string, req
 	}
 	if strings.TrimSpace(req.ConsumptionInstructions) == "" {
 		return "", nil, nil, nil, nil, apierr.BadRequest("consumptionInstructions is required")
+	}
+	if strings.TrimSpace(req.Provider) == "" {
+		return "", nil, nil, nil, nil, apierr.BadRequest("provider is required")
 	}
 	if len(req.Config) == 0 {
 		return "", nil, nil, nil, nil, apierr.BadRequest("config must have at least one key")

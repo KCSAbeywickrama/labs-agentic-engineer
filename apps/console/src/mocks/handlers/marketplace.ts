@@ -50,6 +50,7 @@ function errorJson(body: ApiError, status: number) {
 
 function missingRequired(body: RegisterExternalResourceRequest): boolean {
   if (typeof body.name !== "string" || body.name.trim() === "") return true;
+  if (typeof body.provider !== "string" || body.provider.trim() === "") return true;
   if (typeof body.description !== "string" || body.description.trim() === "") {
     return true;
   }
@@ -118,6 +119,24 @@ function pointersFromWrite(
   return { ok: true, pointers };
 }
 
+/** The file name a fetched contract lands under, by kind. */
+function contractFileFor(type: NonNullable<RegisterExternalResourceRequest["contract"]>["type"]): string {
+  switch (type) {
+    case "openapi":
+      return "openapi.yaml";
+    case "graphql":
+      return "schema.graphql";
+    case "sdk":
+      return "sdk.json";
+    case "asyncapi":
+      return "asyncapi.yaml";
+    case "protobuf":
+      return "service.proto";
+    default:
+      return "documentation.md";
+  }
+}
+
 function registeredFromRequest(
   body: RegisterExternalResourceRequest,
   resourceDocs?: ResourceDocPointerDTO[],
@@ -138,11 +157,26 @@ function registeredFromRequest(
   });
   return {
     name: body.name.trim(),
+    provider: body.provider,
+    scope: "org",
     description: body.description,
     consumptionInstructions: body.consumptionInstructions,
     config: body.config,
     consumers: [],
     envCells,
+    // The platform fetches or stores the document and keeps the address as
+    // provenance; the record itself only ever names a PATH.
+    ...(body.contract
+      ? {
+          contract: {
+            type: body.contract.type,
+            path: `${body.name.trim()}/${body.contract.fileName ?? contractFileFor(body.contract.type)}`,
+          },
+          ...(body.contract.url
+            ? { provenance: { sourceUrl: body.contract.url } }
+            : {}),
+        }
+      : {}),
     ...(resourceDocs && resourceDocs.length > 0 ? { resourceDocs } : {}),
   };
 }

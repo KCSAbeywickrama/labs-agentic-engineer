@@ -33,6 +33,9 @@ type ConfigKeySlice []spec.ConfigKey
 type ExternalResource struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	// Provider is the concrete system the resource is ("Open Exchange Rates"),
+	// carried onto the authored type's record annotation.
+	Provider string `json:"provider,omitempty"`
 	// ConfigKeys is the resource's key schema (which env-var keys, which are
 	// secret). This alone drives the OC ResourceType (no separate auth descriptor).
 	ConfigKeys ConfigKeySlice `json:"config"`

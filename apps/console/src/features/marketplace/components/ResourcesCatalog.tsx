@@ -51,12 +51,15 @@ const RegisterLink = createLink(Button);
 
 function CatalogCard({
   name,
+  provider,
   description,
   consumers,
   platform,
   onOpen,
 }: {
   name: string;
+  /** The concrete system an external resource is; platform types have none. */
+  provider?: string | undefined;
   description?: string | undefined;
   consumers?: ConsumerDTO[] | null | undefined;
   platform: boolean;
@@ -76,6 +79,14 @@ function CatalogCard({
             </Typography>
             {platform && <Chip size="small" label="Platform" />}
           </Stack>
+          {provider ? (
+            // The name is the organization's word for the resource; the
+            // provider is the system it actually is, and the two are often
+            // different ("currency-service" / "Open Exchange Rates").
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+              {provider}
+            </Typography>
+          ) : null}
           <Box sx={{ flexGrow: 1, minHeight: 0 }}>
             {description ? (
               <Typography
@@ -170,6 +181,7 @@ export function ResourcesCatalog() {
           <Grid key={`external:${resource.name}`} size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
             <CatalogCard
               name={resource.name}
+              provider={resource.provider}
               description={resource.description}
               consumers={resource.consumers}
               platform={false}

@@ -33,6 +33,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -958,6 +959,7 @@ func TestProvisioningComponent_ListExternalResources_DTOGrowth(t *testing.T) {
 	  {
 	    "name": "stripe",
 	    "description": "payments",
+	    "provider": "Stripe",
 	    "consumptionInstructions": "Use the secret key as Bearer.",
 	    "config": [{"key": "api_key", "secret": true}],
 	    "consumers": [{"projectId": "shop", "componentName": "checkout"}],
@@ -998,6 +1000,7 @@ func registerBody() gen.RegisterExternalResourceJSONRequestBody {
 	return gen.RegisterExternalResourceJSONRequestBody{
 		Name:                    "stripe",
 		Description:             "Stripe payments",
+		Provider:                "Stripe",
 		ConsumptionInstructions: "Use the secret as Bearer.",
 		Config: []gen.ConfigKeyDTO{
 			{Key: "api_key", Description: "Secret API key", Secret: true},
@@ -1040,6 +1043,15 @@ type recordingDocs struct {
 func (r *recordingDocs) CommitUTF8(_ context.Context, orgID, logicalName, fileName, content string) (string, error) {
 	r.commits = append(r.commits, struct{ orgID, logicalName, fileName, content string }{orgID, logicalName, fileName, content})
 	return logicalName + "/" + fileName, nil
+}
+
+func (r *recordingDocs) ReadUTF8(_ context.Context, _, path string) (string, error) {
+	for _, c := range r.commits {
+		if c.logicalName+"/"+c.fileName == path {
+			return c.content, nil
+		}
+	}
+	return "", fmt.Errorf("not found: %s", path)
 }
 
 func newRegisterHarnessWithDocs(t *testing.T, catalog *cRTCatalog, plane *cValuePlane, docs provisioning.OrgResourceDocs) *componenttest.Harness {

@@ -333,16 +333,25 @@ func toExternalResourceDTOs(views []ExternalResourceView) []gen.ExternalResource
 				Status:      inst.Status,
 			})
 		}
-		out = append(out, gen.ExternalResourceDTO{
+		dto := gen.ExternalResourceDTO{
 			Name:                    v.Name,
 			Description:             v.Description,
+			Provider:                v.Provider,
+			Scope:                   gen.ExternalResourceDTOScope(v.Scope),
 			Config:                  keys,
 			Consumers:               consumers,
 			ConsumptionInstructions: v.ConsumptionInstructions,
 			EnvCells:                envCells,
 			ResourceDocs:            docs,
 			Instances:               instances,
-		})
+		}
+		if v.Contract != nil {
+			dto.Contract = &gen.ResourceContract{Type: v.Contract.Type, Path: v.Contract.Path}
+		}
+		if v.Provenance != nil {
+			dto.Provenance = &gen.ResourceProvenance{SourceURL: v.Provenance.SourceURL, SHA256: v.Provenance.SHA256, ReadOn: v.Provenance.ReadOn}
+		}
+		out = append(out, dto)
 	}
 	return out
 }

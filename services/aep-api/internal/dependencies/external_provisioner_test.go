@@ -127,7 +127,7 @@ func TestProvision_OrchestratesResourceModel(t *testing.T) {
 
 	// ResourceType built from the schema + ensured, under the deterministic
 	// hash + version-pinned name.
-	wantRT := openchoreo.ExternalResourceRTName("openweather", toRTConfigKeys(er.ConfigKeys))
+	wantRT := openchoreo.ExternalResourceRTNameForProject("openweather", "weatherproj", toRTConfigKeys(er.ConfigKeys))
 	rtCalls := rc.EnsureResourceTypeCalls()
 	if len(rtCalls) != 1 || rtCalls[0].Rt.Metadata.Name != wantRT {
 		t.Fatalf("resourcetype not ensured under %q: %+v", wantRT, rtCalls)

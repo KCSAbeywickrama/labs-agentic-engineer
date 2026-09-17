@@ -155,6 +155,29 @@ function ExternalResourceBody({
 
   return (
     <Box sx={{ mt: 2 }}>
+      {resource.provider && (
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+            Provider
+          </Typography>
+          <Typography variant="body2">{resource.provider}</Typography>
+        </Box>
+      )}
+      {resource.contract && (
+        // The one document a project copies when it reuses this resource. The
+        // path is the org docs repo's, so it is a fact and not a link.
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+            Contract
+          </Typography>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Chip size="small" variant="outlined" label={resource.contract.type} />
+            <Typography component="code" variant="body2">
+              {resource.contract.path}
+            </Typography>
+          </Stack>
+        </Box>
+      )}
       {resource.consumptionInstructions && (
         <Box sx={{ mb: 2 }}>
           <Typography variant="subtitle2" sx={{ mb: 0.5 }}>

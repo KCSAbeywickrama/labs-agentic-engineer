@@ -74,7 +74,7 @@ func newExternalCatalogFixture(listErr error, rts ...openchoreo.ResourceType) *e
 // t.Fatalf).
 func mustBuildExternalRT(t *testing.T, name, description string, keys ...openchoreo.ExternalResourceConfigKey) openchoreo.ResourceType {
 	t.Helper()
-	rt, err := openchoreo.BuildExternalResourceType(name, description, keys, "", nil)
+	rt, err := openchoreo.BuildExternalResourceType(openchoreo.ExternalResourceTypeSpec{Name: name, Description: description, Keys: keys, Scope: openchoreo.ExternalResourceScopeOrg})
 	if err != nil {
 		t.Fatalf("build external RT fixture %q: %v", name, err)
 	}
@@ -442,11 +442,13 @@ func TestMCP_ListExternalResources_PortError(t *testing.T) {
 // list_external_resources with consumptionInstructions and resourceDocs pointers
 // — not secret values or file bodies. MCP view has no consumers field today.
 func TestMCP_ListExternalResources_RegisteredBeforeConsumers(t *testing.T) {
-	rt, err := openchoreo.BuildExternalResourceType("stripe", "Payments",
-		[]openchoreo.ExternalResourceConfigKey{{Key: "STRIPE_KEY", Secret: true}},
-		"Send the secret as Bearer.",
-		[]openchoreo.ResourceDoc{{Type: "openapi", URL: "https://example.com/stripe/openapi.yaml"}},
-	)
+	rt, err := openchoreo.BuildExternalResourceType(openchoreo.ExternalResourceTypeSpec{
+		Name: "stripe", Description: "Payments",
+		Keys:                    []openchoreo.ExternalResourceConfigKey{{Key: "STRIPE_KEY", Secret: true}},
+		Scope:                   openchoreo.ExternalResourceScopeOrg,
+		ConsumptionInstructions: "Send the secret as Bearer.",
+		ResourceDocs:            []openchoreo.ResourceDoc{{Type: "openapi", URL: "https://example.com/stripe/openapi.yaml"}},
+	})
 	if err != nil {
 		t.Fatalf("BuildExternalResourceType: %v", err)
 	}

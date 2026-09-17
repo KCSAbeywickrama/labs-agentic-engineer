@@ -44,7 +44,7 @@ three services are sub-package slices that import only that root.
 | Slice | Ops / role | Reaches |
 |---|---|---|
 | `provisioning` | 9 HTTP ops: list/delete/collect-values external resources, list-workload-dependencies, project readiness, provision-platform, dependency-status, request/list org-service access + the `provision` gate lifecycle, watcher, teardown | root cores; delivery (provision execution rows); sourcecontrol (gate issues); `WorkloadDepSource` (deployed Workload consumer refs) |
-| `mcpdiscovery` | the MCP discovery server (including `list_roles`, the design-time role catalog, and `slice_openapi_spec`, which cuts the operations a design uses from a provider's whole document — fetched outside the model's context — with the provenance the dependency file records) + `ListPlatformResourceTypes` and `ListOrgEndpoints` HTTP reads; `list_external_resources` is RT-backed (Registered at register Ensure and Project Externals with an authored RT), not provisioned-only | root `ResourceTypeLister` / external RT catalog / endpoint catalog |
+| `mcpdiscovery` | the MCP discovery server (including `list_roles`, the design-time role catalog, and `slice_openapi_spec`, which cuts the operations a design uses from a provider's whole document — fetched outside the model's context — with the provenance the dependency file records) + `ListPlatformResourceTypes` and `ListOrgEndpoints` HTTP reads; `list_external_resources` is RT-backed and lists Registered resources only (`scope: org`); a project's own type is not a catalog entry | root `ResourceTypeLister` / external RT catalog / endpoint catalog |
 | `runtimeconfig` | the SPA `env-config.js` convergence service + its watcher (no HTTP op) | root naming/markers; spec (design at HEAD); repositories (execution enumerate) |
 
 Each slice owns its service AND its HTTP handler (as delivery's `build` slice does); `httpapi` aggregates
@@ -110,10 +110,16 @@ slices.
   OrgSecretWriter (empty when that writer is unwired). Secret cell values are never copied into
   Plain. Project readiness iterates the design schema; stale binding keys cannot make a
   dependency configured.
-- **Consumption instructions on the ResourceType mark Registered** (ADR-0021). The process-local
-  org value plane is a cache: after aep-api restart, `registeredEnvCells` synthesizes configured
-  cells from the RT and `OrgCatalogVaultKey` reconstructs the org-catalog vault path — it does
-  not re-write secrets. Empty consumption instructions keep the row a Project External.
+- **The scope marker on the ResourceType says whose it is** (ADR-0021 amended). Register writes
+  `aep.wso2.com/scope: org` plus the record (`provider`, `contract {type,path}` into the org docs
+  repo, `provenance`, consumption instructions); a project's build writes `scope: project` and
+  `aep.wso2.com/project: <name>`, and folds the project into the type's NAME so it can never collide
+  with a registered type of the same logical name. Org-level reads — `ExternalResourceCatalog.List`,
+  Register's uniqueness check, `Delete` — see `scope: org` only: a project's resource belongs to its
+  project and is never offered for reuse or counted as a taken name. A type from before the marker
+  existed is judged by its consumption instructions (the ADR-0021 rule), which stays the fallback.
+  The process-local value plane is a cache: `synthesizeRegisteredEnvCells` rebuilds cells from the RT
+  and its `OrgCatalogVaultKey` after a restart and does not re-write secrets.
 - **A gate's provisioning run keeps an execution row.** It is the one execution kind the milestone model
   still writes: admitted when the drawer submits, finished by the readiness watcher, and its terminal state
   is what closes the gate issue.

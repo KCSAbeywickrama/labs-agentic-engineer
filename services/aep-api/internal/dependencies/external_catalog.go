@@ -19,6 +19,7 @@ package dependencies
 import (
 	"context"
 	"fmt"
+	"github.com/wso2/aep/aep-api/internal/spec"
 	"sort"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -61,7 +62,9 @@ func NewExternalResourceCatalog(rc openchoreo.ResourceClient) *ExternalResourceC
 // carry the same aep.wso2.com/external-name annotation. Without
 // deduping, one logical name could surface twice — so results are grouped by
 // the reconstructed logical name first, keeping only the newest RT per name
-// (see newerExternalRT) before sorting.
+// (see newerExternalRT) before sorting. Only REGISTERED resources are listed
+// (ExternalResourceDefinition.Registered): the type a project's build authors
+// for its own resource is scoped to that project.
 func (c *ExternalResourceCatalog) List(ctx context.Context, orgID string) ([]openchoreo.ExternalResourceDefinition, error) {
 	rts, err := c.rc.ListResourceTypes(ctx, orgID)
 	if err != nil {
@@ -82,6 +85,11 @@ func (c *ExternalResourceCatalog) List(ctx context.Context, orgID string) ([]ope
 	}
 	out := make([]openchoreo.ExternalResourceDefinition, 0, len(chosenDef))
 	for _, def := range chosenDef {
+		// A project's own type is not a catalog entry: it belongs to its
+		// project, is never offered for reuse, and never makes a name taken.
+		if !def.Registered() {
+			continue
+		}
 		out = append(out, def)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -143,7 +151,7 @@ func (c *ExternalResourceCatalog) Delete(ctx context.Context, orgID, name string
 	for i := range rts {
 		rt := &rts[i]
 		def, ok := openchoreo.ExternalDefinitionFromRT(rt)
-		if !ok || def.Name != name {
+		if !ok || def.Name != name || !def.Registered() {
 			continue
 		}
 		if err := c.rc.DeleteResourceType(ctx, orgID, rt.Metadata.Name); err != nil {
@@ -176,17 +184,23 @@ func (c *ExternalResourceCatalog) Update(ctx context.Context, orgID string, rt *
 	return err
 }
 
-// IsRegistered reports whether `name` is in the org's ResourceType-backed
-// catalog — the design-read registry-reuse hit (spec.ExternalResourceResolver).
-func (c *ExternalResourceCatalog) IsRegistered(ctx context.Context, orgID, name string) (bool, error) {
+// Lookup is the design-read registry answer for `name`
+// (spec.ExternalResourceResolver): Registered only when the catalog holds an
+// org-scoped record under that name — the type a project's build authored
+// for its own resource is not one — and, when that record names a contract
+// document, its hash.
+func (c *ExternalResourceCatalog) Lookup(ctx context.Context, orgID, name string) (spec.RegistryHit, error) {
 	if c == nil {
-		return false, nil
+		return spec.RegistryHit{}, nil
 	}
 	def, err := c.Get(ctx, orgID, name)
 	if err != nil {
-		return false, err
+		return spec.RegistryHit{}, err
 	}
-	return def != nil, nil
+	if def == nil || !def.Registered() {
+		return spec.RegistryHit{}, nil
+	}
+	return spec.RegistryHit{Registered: true, DocumentSHA256: def.DocumentSHA256()}, nil
 }
 
 // newerExternalRT reports whether rt should be preferred over cur as the

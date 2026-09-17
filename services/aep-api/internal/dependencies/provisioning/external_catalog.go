@@ -34,8 +34,15 @@ import (
 // production; tests inject a fake). Secret cell values are never copied
 // onto the wire DTO.
 type ExternalResourceView struct {
-	Name                    string
-	Description             string
+	Name        string
+	Description string
+	// Provider, Contract, Provenance and Scope are the record fields the
+	// type carries (see openchoreo.ExternalResourceDefinition). Scope is
+	// "org" for every row List returns.
+	Provider                string
+	Contract                *openchoreo.ResourceContractPointer
+	Provenance              *openchoreo.ResourceRecordProvenance
+	Scope                   string
 	Config                  []spec.ConfigKey
 	Consumers               []dependencies.ExternalResourceConsumer
 	ConsumptionInstructions string
@@ -106,6 +113,10 @@ func (s *Service) ListExternalResources(ctx context.Context, orgID string) ([]Ex
 		view := ExternalResourceView{
 			Name:                    def.Name,
 			Description:             def.Description,
+			Provider:                def.Provider,
+			Contract:                def.Contract,
+			Provenance:              def.Provenance,
+			Scope:                   viewScope(*def),
 			Config:                  toConfigKeys(def.Config),
 			Consumers:               consumersByName[strings.ToLower(def.Name)],
 			ConsumptionInstructions: def.ConsumptionInstructions,
@@ -121,11 +132,20 @@ func (s *Service) ListExternalResources(ctx context.Context, orgID string) ([]Ex
 }
 
 // isRegisteredExternalDef reports whether an RT-backed catalog row is a
-// Registered External (org value plane) rather than a Project External.
-// Register always writes consumption instructions; project provision
-// authors the RT with them empty (see ExternalResourceProvisioner).
+// Registered External (org value plane) rather than a Project External: the
+// scope marker decides, with consumption instructions as the fallback for a
+// type from before the marker existed (ADR-0021).
 func isRegisteredExternalDef(def openchoreo.ExternalResourceDefinition) bool {
-	return strings.TrimSpace(def.ConsumptionInstructions) != ""
+	return def.Registered()
+}
+
+// viewScope is the wire scope of a catalog row: the marker when present,
+// else what Registered() concludes.
+func viewScope(def openchoreo.ExternalResourceDefinition) string {
+	if def.Registered() {
+		return openchoreo.ExternalResourceScopeOrg
+	}
+	return openchoreo.ExternalResourceScopeProject
 }
 
 // HasOrgEnvCells reports whether `name` is a Registered External in this org

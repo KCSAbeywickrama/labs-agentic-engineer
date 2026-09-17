@@ -75,8 +75,34 @@ func (s *Service) UpdateExternalResource(ctx context.Context, orgID, name string
 	if err != nil {
 		return ExternalResourceView{}, err
 	}
+	// The contract document is replaced only when the request carries one;
+	// otherwise the record keeps its pointer and provenance.
+	contractWrite, err := validateContractWrite(req.Contract)
+	if err != nil {
+		return ExternalResourceView{}, err
+	}
+	contract, provenance := found.Contract, found.Provenance
+	if contractWrite != nil {
+		if contract, provenance, err = s.commitResourceContract(ctx, orgID, canonical, contractWrite); err != nil {
+			return ExternalResourceView{}, err
+		}
+	}
+	provider := strings.TrimSpace(req.Provider)
+	if provider == "" {
+		provider = found.Provider
+	}
 
-	rt, err := openchoreo.BuildExternalResourceType(canonical, strings.TrimSpace(req.Description), keys, strings.TrimSpace(req.ConsumptionInstructions), docs)
+	rt, err := openchoreo.BuildExternalResourceType(openchoreo.ExternalResourceTypeSpec{
+		Name:                    canonical,
+		Description:             strings.TrimSpace(req.Description),
+		Keys:                    keys,
+		Scope:                   openchoreo.ExternalResourceScopeOrg,
+		Provider:                provider,
+		Contract:                contract,
+		Provenance:              provenance,
+		ConsumptionInstructions: strings.TrimSpace(req.ConsumptionInstructions),
+		ResourceDocs:            docs,
+	})
 	if err != nil {
 		return ExternalResourceView{}, apierr.BadRequest(err.Error())
 	}
@@ -129,7 +155,11 @@ func (s *Service) UpdateExternalResource(ctx context.Context, orgID, name string
 	return ExternalResourceView{
 		Name:                    canonical,
 		Description:             strings.TrimSpace(req.Description),
+		Provider:                provider,
 		Config:                  toConfigKeys(keys),
+		Contract:                contract,
+		Provenance:              provenance,
+		Scope:                   openchoreo.ExternalResourceScopeOrg,
 		ConsumptionInstructions: strings.TrimSpace(req.ConsumptionInstructions),
 		EnvCells:                cells,
 		ResourceDocs:            docs,

@@ -26,6 +26,7 @@ import {
 
 const filled = {
   name: "github",
+  provider: "GitHub",
   description: "GitHub REST API",
   consumptionInstructions: "Call api.github.com with a bearer token.",
   keys: [{ key: "GITHUB_TOKEN", description: "PAT", secret: true }],
@@ -41,14 +42,16 @@ describe("validateRegisterForm", () => {
     expect(validateRegisterForm(filled)).toBeNull();
   });
 
-  it("flags empty name, description, and consumption instructions", () => {
+  it("flags empty name, provider, description, and consumption instructions", () => {
     const errors = validateRegisterForm({
       ...filled,
       name: "  ",
+      provider: " ",
       description: "",
       consumptionInstructions: "",
     });
     expect(errors?.name).toBe(REQUIRED_FIELD);
+    expect(errors?.provider).toBe(REQUIRED_FIELD);
     expect(errors?.description).toBe(REQUIRED_FIELD);
     expect(errors?.consumptionInstructions).toBe(REQUIRED_FIELD);
   });

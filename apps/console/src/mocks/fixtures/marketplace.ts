@@ -86,7 +86,11 @@ const stripeEnvCells: EnvValueCellDTO[] = [
 export const seedExternalResources: ExternalResourceDTO[] = [
   {
     name: "stripe",
+    provider: "Stripe",
+    scope: "org",
     description: "Stripe payments API",
+    contract: { type: "openapi", path: "stripe/openapi.yaml" },
+    provenance: { sourceUrl: "https://example.com/stripe/openapi.yaml", readOn: "2026-09-16" },
     config: [
       { key: "api_key", secret: true, description: "Secret API key" },
       { key: "region", secret: false, description: "Stripe account region" },
@@ -104,6 +108,10 @@ export const seedExternalResources: ExternalResourceDTO[] = [
   },
   {
     name: "github",
+    provider: "GitHub",
+    // A type a project's build authored: no org value-plane cells, and the
+    // drawer says its values live on the project.
+    scope: "project",
     description: "GitHub API token for repository access",
     config: [{ key: "token", secret: true, description: "Personal access token" }],
     consumers: [],

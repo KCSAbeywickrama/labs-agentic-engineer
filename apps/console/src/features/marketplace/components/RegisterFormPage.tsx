@@ -80,6 +80,13 @@ import {
   ResourceDocsFields,
   type ResourceDocRow,
 } from "./ResourceDocsFields";
+import {
+  ContractFields,
+  contractWriteFromRow,
+  emptyContractRow,
+  rowFromContract,
+  type ContractRow,
+} from "./ContractFields";
 
 type ConfigKeyDTO = components["schemas"]["ConfigKeyDTO"];
 type EnvValueCellDTO = components["schemas"]["EnvValueCellDTO"];
@@ -113,10 +120,12 @@ function cellStatus(
 
 function prefillFrom(record: ExternalResourceDTO): {
   name: string;
+  provider: string;
   description: string;
   consumptionInstructions: string;
   keys: ConfigKeyDTO[];
   values: Record<string, string>;
+  contract: ContractRow;
   docs: ResourceDocRow[];
 } {
   const keys = (record.config ?? []).map((k) => ({
@@ -133,10 +142,12 @@ function prefillFrom(record: ExternalResourceDTO): {
   }
   return {
     name: record.name,
+    provider: record.provider ?? "",
     description: record.description ?? "",
     consumptionInstructions: record.consumptionInstructions ?? "",
     keys,
     values,
+    contract: rowFromContract(record.contract),
     docs: rowsFromPointers(record.resourceDocs ?? []),
   };
 }
@@ -180,6 +191,7 @@ export function RegisterFormPage({
   const [description, setDescription] = useState(
     isEdit || seedRegister ? "" : prompt,
   );
+  const [provider, setProvider] = useState("");
   const [consumptionInstructions, setConsumptionInstructions] = useState("");
   const [keys, setKeys] = useState<ConfigKeyDTO[]>(
     isEdit || seedRegister
@@ -187,6 +199,7 @@ export function RegisterFormPage({
       : [{ key: "API_KEY", description: "API secret", secret: true }],
   );
   const [values, setValues] = useState<Record<string, string>>({});
+  const [contract, setContract] = useState<ContractRow>(emptyContractRow);
   const [docs, setDocs] = useState<ResourceDocRow[]>([]);
   const [prefilledName, setPrefilledName] = useState<string | null>(null);
 
@@ -202,18 +215,22 @@ export function RegisterFormPage({
   );
   const formRef = useRef({
     name,
+    provider,
     description,
     consumptionInstructions,
     keys,
     values,
+    contract,
     docs,
   });
   formRef.current = {
     name,
+    provider,
     description,
     consumptionInstructions,
     keys,
     values,
+    contract,
     docs,
   };
 
@@ -224,10 +241,12 @@ export function RegisterFormPage({
       freezeKeys: isEdit,
     });
     setName(next.name);
+    setProvider(next.provider);
     setDescription(next.description);
     setConsumptionInstructions(next.consumptionInstructions);
     setKeys(next.keys);
     setValues(next.values);
+    setContract(next.contract);
     setDocs(next.docs);
     setHeldQuestions(null);
     setAwaitingAgent(false);
@@ -278,10 +297,12 @@ export function RegisterFormPage({
     if (!editing || prefilledName === editing.name) return;
     const next = prefillFrom(editing);
     setName(next.name);
+    setProvider(next.provider);
     setDescription(next.description);
     setConsumptionInstructions(next.consumptionInstructions);
     setKeys(next.keys);
     setValues(next.values);
+    setContract(next.contract);
     setDocs(next.docs);
     setPrefilledName(editing.name);
   }, [editing, prefilledName]);
@@ -300,6 +321,7 @@ export function RegisterFormPage({
   const errors = attemptedSubmit
     ? validateRegisterForm({
         name,
+        provider,
         description,
         consumptionInstructions,
         keys,
@@ -329,6 +351,7 @@ export function RegisterFormPage({
     if (submitBlocked || submitPending) return;
     const invalid = validateRegisterForm({
       name,
+      provider,
       description,
       consumptionInstructions,
       keys,
@@ -342,8 +365,12 @@ export function RegisterFormPage({
       return;
     }
     const resourceDocs = writesFromRows(docs);
+    // No contract block filled in leaves the record's document alone — on a
+    // register there is none, and on an edit the one already on file stands.
+    const contractWrite = contractWriteFromRow(contract);
     const body = {
       name: name.trim(),
+      provider: provider.trim(),
       description: description.trim(),
       consumptionInstructions: consumptionInstructions.trim(),
       config: keys,
@@ -354,6 +381,7 @@ export function RegisterFormPage({
           value: values[envValueCellKey(environment, cfg.key)] ?? "",
         })),
       ),
+      ...(contractWrite ? { contract: contractWrite } : {}),
       ...(resourceDocs.length > 0 ? { resourceDocs } : {}),
     };
     const onSuccess = () => {
@@ -451,6 +479,16 @@ export function RegisterFormPage({
               required
               disabled={isEdit}
               {...fieldErr(errors?.name)}
+            />
+            <TextField
+              label="Provider"
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+              required
+              helperText={
+                errors?.provider ?? "The concrete system this is — Stripe, Open Exchange Rates."
+              }
+              error={Boolean(errors?.provider)}
             />
             <TextField
               label="Description"
@@ -646,6 +684,8 @@ export function RegisterFormPage({
               fullWidth
               {...fieldErr(errors?.consumptionInstructions)}
             />
+
+            <ContractFields contract={contract} onChange={setContract} />
 
             <ResourceDocsFields docs={docs} onChange={setDocs} />
 

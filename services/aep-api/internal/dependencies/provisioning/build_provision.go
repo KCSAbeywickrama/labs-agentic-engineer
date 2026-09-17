@@ -267,6 +267,7 @@ func (s *Service) authorExternalPrepared(ctx context.Context, orgID, ocOrgID, pr
 	er := &dependencies.ExternalResource{
 		Name:        in.Dependency,
 		Description: dep.Description,
+		Provider:    dep.Provider,
 		ConfigKeys:  keys,
 	}
 	byEnv := designPreparedValues(keys)

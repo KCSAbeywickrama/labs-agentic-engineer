@@ -26,6 +26,7 @@ export const REQUIRED_CONFIG_KEY = "Add at least one config key";
 
 export type RegisterFormErrors = {
   name?: string;
+  provider?: string;
   description?: string;
   consumptionInstructions?: string;
   configKeys?: string;
@@ -50,6 +51,7 @@ function cellConfigured(
 /** Field errors for a Register/Save click. Empty object keys mean that slot is valid. */
 export function validateRegisterForm(input: {
   name: string;
+  provider: string;
   description: string;
   consumptionInstructions: string;
   keys: ConfigKeyDTO[];
@@ -63,6 +65,13 @@ export function validateRegisterForm(input: {
 
   if (!input.name.trim()) {
     errors.name = REQUIRED_FIELD;
+    invalid = true;
+  }
+  // The concrete system this resource IS ("Open Exchange Rates"). A copy of
+  // this record names it on every project that reuses the resource, so it is
+  // never left to the name alone.
+  if (!input.provider.trim()) {
+    errors.provider = REQUIRED_FIELD;
     invalid = true;
   }
   if (!input.description.trim()) {

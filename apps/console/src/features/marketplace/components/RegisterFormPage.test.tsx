@@ -172,8 +172,10 @@ async function waitForComposerSeed() {
 function registeredStripe(): ExternalResourceDTO {
   return {
     name: "stripe",
+    provider: "Stripe",
     description: "Stripe payments API",
     consumptionInstructions: "Use the secret key as Bearer.",
+    contract: { type: "openapi", path: "stripe/openapi.yaml" },
     config: [
       { key: "api_key", secret: true, description: "Secret API key" },
       { key: "region", secret: false, description: "Stripe account region" },
@@ -213,6 +215,9 @@ function renderEdit() {
 function fillRequired() {
   fireEvent.change(screen.getByLabelText(/^Name/), {
     target: { value: "twilio" },
+  });
+  fireEvent.change(screen.getByLabelText(/^Provider/), {
+    target: { value: "Twilio" },
   });
   fireEvent.change(screen.getAllByLabelText(/^Description/)[0]!, {
     target: { value: "Twilio SMS" },
@@ -347,26 +352,67 @@ describe("RegisterFormPage", () => {
   it("navigates to /resources after a successful submit", () => {
     renderPage(<RegisterFormPage prompt="" />);
 
-    fireEvent.change(screen.getByLabelText(/^Name/), {
-      target: { value: "twilio" },
-    });
-    fireEvent.change(screen.getAllByLabelText(/^Description/)[0]!, {
-      target: { value: "Twilio SMS" },
-    });
-    fireEvent.change(screen.getByLabelText(/Consumption instructions/), {
-      target: { value: "Use the auth token as Bearer." },
-    });
-    fireEvent.change(screen.getByLabelText(/development/i), {
-      target: { value: "sk_dev" },
-    });
-    fireEvent.change(screen.getByLabelText(/staging-local/i), {
-      target: { value: "sk_stg" },
-    });
-
+    fillRequired();
     fireEvent.click(screen.getByRole("button", { name: "Register" }));
 
     expect(registerState.mutate).toHaveBeenCalledTimes(1);
+    expect(submittedBody().provider).toBe("Twilio");
     expect(navigate).toHaveBeenCalledWith({ to: "/resources" });
+  });
+
+  // The provider is what the resource IS; a copy of this record names it on
+  // every project that reuses it, so the form will not register without one.
+  it("refuses to submit without a provider", () => {
+    renderPage(<RegisterFormPage prompt="" />);
+
+    fillRequired();
+    fireEvent.change(screen.getByLabelText(/^Provider/), { target: { value: "  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    expect(registerState.mutate).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/^Provider/)).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("sends no contract when the block is left empty", () => {
+    renderPage(<RegisterFormPage prompt="" />);
+    fillRequired();
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    expect(submittedBody().contract).toBeUndefined();
+  });
+
+  it("sends the contract type and URL the block names", () => {
+    renderPage(<RegisterFormPage prompt="" />);
+    fillRequired();
+    fireEvent.change(screen.getByLabelText("Contract document URL"), {
+      target: { value: "https://example.com/openapi.yaml" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    expect(submittedBody().contract).toEqual({
+      type: "openapi",
+      url: "https://example.com/openapi.yaml",
+    });
+  });
+
+  it("sends an uploaded contract as fileName and content, never as a URL", async () => {
+    renderPage(<RegisterFormPage prompt="" />);
+    fillRequired();
+    const input = document.querySelector<HTMLInputElement>("input[type=file]");
+    expect(input).not.toBeNull();
+    fireEvent.change(input!, {
+      target: { files: [new File(["openapi: 3.1.0\n"], "openapi.yaml")] },
+    });
+    await waitFor(() => {
+      expect(screen.getByText("openapi.yaml")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    expect(submittedBody().contract).toEqual({
+      type: "openapi",
+      fileName: "openapi.yaml",
+      content: "openapi: 3.1.0\n",
+    });
   });
 
   it("Add doc defaults to Documentation", () => {
@@ -413,8 +459,11 @@ describe("RegisterFormPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add doc" }));
     fireEvent.click(screen.getByRole("button", { name: "File" }));
-    const input = document.querySelector<HTMLInputElement>("input[type=file]");
-    expect(input).not.toBeNull();
+    // The contract block has a picker of its own above the docs; the doc row's
+    // is the last one on the form.
+    const inputs = document.querySelectorAll<HTMLInputElement>("input[type=file]");
+    const input = inputs[inputs.length - 1];
+    expect(input).toBeDefined();
     fireEvent.change(input!, {
       target: { files: [new File(["# Hello\n"], "README.md")] },
     });
@@ -523,13 +572,19 @@ describe("RegisterFormPage", () => {
     act(() => {
       publishRegisterDraft(chatKeyFor("acme", MARKETPLACE_CHAT_PROJECT), {
         name: "stripe",
+        provider: "Stripe",
         description: "Payments API",
         consumptionInstructions: "Use the secret key as Bearer.",
         config: [{ key: "API_KEY", description: "Secret API key", secret: true }],
-        resourceDocs: [{ type: "openapi", url: "https://example.com/stripe/openapi.yaml" }],
+        contract: { type: "openapi", url: "https://example.com/stripe/openapi.yaml" },
+        resourceDocs: [{ type: "openapi", url: "https://example.com/stripe/docs.md" }],
       });
     });
     expect(screen.getByLabelText(/^Name/)).toHaveValue("stripe");
+    expect(screen.getByLabelText(/^Provider/)).toHaveValue("Stripe");
+    expect(screen.getByLabelText("Contract document URL")).toHaveValue(
+      "https://example.com/stripe/openapi.yaml",
+    );
     expect(screen.getAllByLabelText(/^Description/)[0]).toHaveValue("Payments API");
     expect(screen.getByLabelText(/Consumption instructions/i)).toHaveValue(
       "Use the secret key as Bearer.",
@@ -590,6 +645,13 @@ describe("RegisterFormPage edit mode", () => {
       screen.getAllByText("Leave blank to keep the current value").length,
     ).toBeGreaterThan(0);
     expect(screen.queryByText(/••••/)).not.toBeInTheDocument();
+  });
+
+  it("prefills the provider and names the document already on the record", () => {
+    renderEdit();
+
+    expect(screen.getByLabelText(/^Provider/)).toHaveValue("Stripe");
+    expect(screen.getByText("Current document: stripe/openapi.yaml")).toBeInTheDocument();
   });
 
   it("prefills non-secret env values from envCells", () => {
