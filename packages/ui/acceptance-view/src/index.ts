@@ -25,13 +25,7 @@ export type {
   AcceptanceScenario,
   AcceptanceStep,
 } from "./parseFeature.js";
-export {
-  decidingStep,
-  isReportParseError,
-  OUTCOMES,
-  parseAcceptanceReport,
-  scenarioKey,
-} from "./report.js";
+export { isReportParseError, OUTCOMES, parseAcceptanceReport } from "./report.js";
 export type {
   AcceptanceReport,
   KnownOutcome,
@@ -40,14 +34,5 @@ export type {
   ReportScenario,
   ReportStep,
 } from "./report.js";
-export {
-  NO_RESULT_LABEL,
-  NO_RESULT_NOTE,
-  OUTCOME_ICON,
-  OUTCOME_TONE,
-  outcomeLabel,
-  outcomeTone,
-  tallyOutcomes,
-  tallySentence,
-} from "./outcomes.js";
+export { outcomeTone, tallyOutcomes, tallySentence } from "./outcomes.js";
 export type { OutcomeTally, OutcomeTone } from "./outcomes.js";

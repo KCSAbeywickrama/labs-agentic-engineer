@@ -37,16 +37,12 @@
  */
 
 import { useQueries } from "@tanstack/react-query";
+import type { AcceptanceFeatureSource } from "@aep/ui-acceptance-view";
 import { isAcceptanceFeaturePath, type SpecFileEntry } from "../api/mapping";
 import { specKeys } from "../api/keys";
 import { fetchSpecFileContent } from "../api/queries";
 import type { CollabSpec } from "../collab/useCollabSpec";
 import { useYTextStrings } from "../collab/useYTextStrings";
-
-export interface AcceptanceFeatureSource {
-  path: string;
-  content: string;
-}
 
 export interface AcceptanceEntry {
   /** One per capability, path-ordered. Only the documents that have arrived. */

@@ -30,12 +30,11 @@ import (
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
-// validationCriteriaPath is the acceptance-oracle directory the validation
-// minter reads (kept in sync with validation.criteriaDirPath, which is
-// unexported).
-const validationCriteriaPath = "specs/acceptance"
+// acceptanceDirPath is the acceptance-oracle directory the validation minter
+// reads, kept in sync with validation.criteriaDirPath (unexported).
+const acceptanceDirPath = "specs/acceptance"
 
-// validationCriteria adapts the Files API to validation's CriteriaReader port:
+// acceptanceCriteria adapts the Files API to validation's CriteriaReader port:
 // it reads the `.feature` files under specs/acceptance/ at HEAD, reporting an
 // empty or absent directory as found=false with no error (the design agent has
 // not authored the oracle yet). Keeps the files feature out of the validation
@@ -43,12 +42,12 @@ const validationCriteriaPath = "specs/acceptance"
 //
 // Bundle rather than List-then-Read: it reads the whole directory at ONE commit,
 // so two files can never come from different states of the repo.
-type validationCriteria struct {
+type acceptanceCriteria struct {
 	files spec.FilesService
 }
 
-func (a validationCriteria) ReadAcceptanceCriteria(ctx context.Context, orgID, projectID string) ([]validation.AcceptanceFile, bool, error) {
-	bundle, rerr := a.files.Bundle(ctx, orgID, projectID, validationCriteriaPath, "")
+func (a acceptanceCriteria) ReadAcceptanceCriteria(ctx context.Context, orgID, projectID string) ([]validation.AcceptanceFile, bool, error) {
+	bundle, rerr := a.files.Bundle(ctx, orgID, projectID, acceptanceDirPath, "")
 	if rerr != nil {
 		if errors.Is(rerr, spec.ErrFileNotFound) {
 			return nil, false, nil
@@ -72,7 +71,7 @@ func (a validationCriteria) ReadAcceptanceCriteria(ctx context.Context, orgID, p
 // parse — a malformed oracle still means "there is something here to validate",
 // and refusing on it at the trigger would send the caller a shape error about a
 // file they may not have written. The mint parses, and skips one it cannot use.
-func (a validationCriteria) HasValidationCriteria(ctx context.Context, orgID, projectID string) (bool, error) {
+func (a acceptanceCriteria) HasValidationCriteria(ctx context.Context, orgID, projectID string) (bool, error) {
 	_, found, err := a.ReadAcceptanceCriteria(ctx, orgID, projectID)
 	return found, err
 }

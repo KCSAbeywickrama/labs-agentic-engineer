@@ -27,7 +27,6 @@ import { validationKeys } from "./keys";
 // The report's path is also carried on the RUN (RunValidation.reportPath), which
 // is authoritative — the runner writes the path it actually committed. This
 // constant is the fallback for a run that recorded no path.
-export const CRITERIA_PATH = "specs/validation/validation-criteria.json";
 export const REPORT_PATH = "tests/acceptance/report.json";
 
 // Fetch one validation artifact's content. Reuses the spec Files reader
@@ -57,15 +56,6 @@ function useValidationFile(
     queryFn: () =>
       fetchSpecFileContent(projectName, { path, sha: "", ...(ref ? { ref } : {}) }),
   });
-}
-
-/** The acceptance oracle (specs/validation/validation-criteria.json). */
-export function useValidationCriteria(
-  projectName: string,
-  version: string,
-  enabled: boolean,
-) {
-  return useValidationFile(projectName, CRITERIA_PATH, version, enabled);
 }
 
 /**
