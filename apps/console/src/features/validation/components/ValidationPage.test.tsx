@@ -18,7 +18,7 @@
 
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../../../generated/aep-api";
 
@@ -1445,5 +1445,66 @@ describe("ValidationPage agent status line", () => {
 
     expect(screen.getByText("Authoring the last three specs.")).toBeInTheDocument();
     expect(screen.getByTestId("working-pulse")).toBeInTheDocument();
+  });
+});
+
+// The header's controls are two 24px chips and two 32px buttons. Ordered
+// chips-then-buttons so the row does not dip in the middle — and with cancel
+// LAST, which is doing two jobs beyond the heights.
+describe("ValidationPage header controls", () => {
+  /** The action row itself, reached through a control known to be in it. */
+  function rowOf(control: HTMLElement): string[] {
+    const row = control.parentElement as HTMLElement;
+    return [...row.children].map((el) => el.textContent?.trim() ?? "");
+  }
+
+  function liveValidation() {
+    mockValidation = "running";
+    mockRun = { ...run({ cycles: [validationCycle] }), state: "running" };
+    mockFeatures.features = FEATURES;
+  }
+
+  it("groups the chips before the buttons, with cancel last", () => {
+    liveValidation();
+    renderPage(undefined);
+
+    const order = rowOf(screen.getByRole("button", { name: /Cancel run/ }));
+    const index = (label: string) => order.findIndex((t) => t.includes(label));
+
+    // issue · PR · View logs · Cancel run — 24px, 24px, 32px, 32px.
+    expect(index("#30")).toBe(0);
+    expect(index("View logs")).toBeGreaterThan(index("#30"));
+    expect(index("Cancel run")).toBe(order.length - 1);
+  });
+
+  // Header actions are right-aligned, so a control that disappears shifts
+  // everything to its left. Cancel exists only while a run is live, and last is
+  // the one position where its coming and going leaves the control people
+  // actually reach for exactly where it was.
+  it("keeps View logs put when the run stops being cancellable", () => {
+    liveValidation();
+    renderPage(undefined);
+    const live = rowOf(screen.getByRole("button", { name: /Cancel run/ }));
+    const fromEnd = (row: string[], label: string) =>
+      row.length - row.findIndex((t) => t.includes(label));
+    const before = fromEnd(live, "View logs");
+    cleanup();
+
+    mockValidation = "passed";
+    mockRun = run({
+      validation: { verdict: "passed", reportPath: "tests/acceptance/report.json" },
+      cycles: [validationCycle],
+    });
+    mockFeatures.features = FEATURES;
+    renderPage(undefined);
+
+    const settled = rowOf(screen.getByRole("button", { name: /View logs/ }));
+    expect(settled.some((t) => t.includes("Cancel run"))).toBe(false);
+    // Cancel was the only thing to its right, so View logs is now last — and
+    // every chip to its left has held its position.
+    expect(fromEnd(settled, "View logs")).toBe(before - 1);
+    expect(settled.findIndex((t) => t.includes("View logs"))).toBe(
+      live.findIndex((t) => t.includes("View logs")),
+    );
   });
 });

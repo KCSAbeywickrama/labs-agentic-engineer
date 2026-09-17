@@ -444,35 +444,10 @@ export function ValidationPage({
       {...(chip ? { status: chip } : {})}
       actions={
         <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-          {/* A validating run has the same escape hatch the Builds rail gives a
-              coding one — same endpoint, same hook, same wording, because it is
-              the same act on the same run. Absent unless validation is what keeps
-              the run alive: the whole point of cancel is that the unbounded wait
-              has no other expiry, and a run that has answered — or has not reached
-              the question yet — has nothing here left to expire. */}
-          {liveRun && (
-            <Button
-              size="small"
-              color="inherit"
-              variant="outlined"
-              startIcon={<X size={16} />}
-              disabled={cancelling}
-              onClick={() => {
-                setCancelRequestedFor(liveRun.id);
-                cancel.mutate(liveRun.id);
-              }}
-              sx={{
-                borderRadius: 999,
-                color: "text.primary",
-                borderColor: (t) => alpha(t.palette.text.primary, 0.3),
-                "&:hover": {
-                  borderColor: (t) => alpha(t.palette.text.primary, 0.55),
-                },
-              }}
-            >
-              {cancelling ? "Cancelling…" : "Cancel run"}
-            </Button>
-          )}
+          {/* Order is by FORM, then by permanence: the two GitHub chips (24px),
+              then the two buttons (32px). Alternating the heights dipped the row
+              in the middle, and grouping them also fixes two things the old
+              order got wrong — see the cancel button at the end. */}
           {/* Before the pull request, because the issue frames the work and the PR
               answers it — GitHub's own ordering. Absent when no cycle has minted an
               issue yet, and equally when the read that resolves its url failed:
@@ -519,6 +494,43 @@ export function ValidationPage({
                 View logs
               </Button>
             ))}
+          {/* A validating run has the same escape hatch the Builds rail gives a
+              coding one — same endpoint, same hook, same wording, because it is
+              the same act on the same run. Absent unless validation is what keeps
+              the run alive: the whole point of cancel is that the unbounded wait
+              has no other expiry, and a run that has answered — or has not reached
+              the question yet — has nothing here left to expire.
+
+              LAST, and that position is doing two jobs. These actions are
+              right-aligned, so a control that disappears shifts everything to its
+              left; being last is the one place this button's coming and going
+              leaves `View logs` — the control people actually reach for — exactly
+              where it was. And it keeps an immediate, unconfirmed cancel from
+              sitting against that same button. Its muted treatment is what stops
+              the end position reading as the primary action. */}
+          {liveRun && (
+            <Button
+              size="small"
+              color="inherit"
+              variant="outlined"
+              startIcon={<X size={16} />}
+              disabled={cancelling}
+              onClick={() => {
+                setCancelRequestedFor(liveRun.id);
+                cancel.mutate(liveRun.id);
+              }}
+              sx={{
+                borderRadius: 999,
+                color: "text.primary",
+                borderColor: (t) => alpha(t.palette.text.primary, 0.3),
+                "&:hover": {
+                  borderColor: (t) => alpha(t.palette.text.primary, 0.55),
+                },
+              }}
+            >
+              {cancelling ? "Cancelling…" : "Cancel run"}
+            </Button>
+          )}
         </Stack>
       }
     />

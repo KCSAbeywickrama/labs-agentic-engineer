@@ -1134,7 +1134,12 @@ function Shell({
 }) {
   return (
     <Box sx={{ height: "100%", overflow: "auto", ...(noPadding ? {} : { p: 3 }) }}>
-      <Box sx={fullWidth ? { maxWidth: 1080 } : { maxWidth: 1080, mx: "auto" }}>{children}</Box>
+      {/* `fullWidth` means NO CAP — the page owns its width, and no page in this
+          console caps its body: PageContent already supplies the outer cap and
+          the centring. Capping here anyway left the report card short of the
+          verdict tile above it, which is an Alert and uncapped. The 1080 is the
+          reference design's CARD width and belongs to the pane case only. */}
+      <Box sx={fullWidth ? undefined : { maxWidth: 1080, mx: "auto" }}>{children}</Box>
     </Box>
   );
 }

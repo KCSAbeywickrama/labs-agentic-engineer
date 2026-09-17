@@ -413,3 +413,24 @@ describe("the toolbar", () => {
   });
 });
 
+// The shell's width contract, which a restyle silently broke: `fullWidth` means
+// the PAGE owns its width, and capping it anyway left the report card short of
+// the verdict tile above it — an Alert, and uncapped.
+//
+// Testable without a layout engine, unlike most geometry here: emotion injects
+// its rules into document.head and jsdom's getComputedStyle resolves them.
+describe("how wide the view lets itself be", () => {
+  it("takes the width it is given when the page owns it", () => {
+    const { container } = render(<AcceptanceView features={[BOUGHT]} fullWidth />);
+    const inner = container.firstElementChild?.firstElementChild as HTMLElement;
+    expect(getComputedStyle(inner).maxWidth).toBe("");
+  });
+
+  it("centres a reading column when it owns its own width", () => {
+    const { container } = render(<AcceptanceView features={[BOUGHT]} />);
+    const inner = container.firstElementChild?.firstElementChild as HTMLElement;
+    expect(getComputedStyle(inner).maxWidth).toBe("1080px");
+    expect(getComputedStyle(inner).marginLeft).toBe("auto");
+  });
+});
+
