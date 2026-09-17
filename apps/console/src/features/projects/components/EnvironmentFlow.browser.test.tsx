@@ -22,12 +22,15 @@
 //   1. every card is as tall as the tallest, so the row reads as one band;
 //   2. each card's trailing step is pinned to the card's bottom, so the
 //      promote rows land on one line across the pipeline however tall each
-//      card's component and connection lists make it.
+//      card's component and connection lists make it;
+//   3. the row fits the room the page has left, so a tall entry card scrolls
+//      INSIDE its card and the PAGE never scrolls vertically.
 //
-// This lives in the BROWSER lane because both are layout computations —
-// `alignItems: stretch` on the row and `mt: "auto"` on the pinned step — and
-// jsdom has no layout engine. The default suite can only re-read the style
-// object, which is the thing under test.
+// This lives in the BROWSER lane because all three are layout computations —
+// `alignItems: stretch` on the row, the pinned trailing step, and a row
+// height measured off the page's own scroll container — and jsdom has no
+// layout engine. The default suite can only re-read the style object, which
+// is the thing under test.
 
 import type { ElementType, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -120,6 +123,69 @@ function renderFlow() {
   return envs.map((e) => screen.getByTestId(`environment-card-${e.name}`));
 }
 
+/** The viewport the page-fit tests reason about — a short-ish laptop pane,
+ *  which is where the page scroll the user complained about showed up. */
+const PAGE_HEIGHT = 720;
+
+/**
+ * The flow as the CONSOLE mounts it: inside a height-bounded, scrolling
+ * container (Oxygen's `PageContent` — `height: 100%; overflow: auto`) with a
+ * page header above it and the container's own padding below. That container
+ * is the thing that scrolls when the page scrolls, so it is the thing these
+ * tests measure; rendering the flow loose on the body would measure the test
+ * harness's iframe instead of the shape the shell actually gives it.
+ */
+function renderPage() {
+  const deploy: DeployStage = {
+    components: { ready: 6, total: 6 },
+    status: "deployed",
+    validation: "passed",
+    version: "v4",
+  };
+  const rows = environmentRows(lopsidedBoard(), envs, deploy);
+  const target = rows[1]!;
+  render(
+    <OxygenUIThemeProvider theme={OxygenTheme}>
+      <div
+        data-testid="page-scroller"
+        style={{
+          height: PAGE_HEIGHT,
+          width: 1400,
+          overflow: "auto",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <div style={{ padding: 64 }}>
+          <h1 style={{ margin: 0, height: 48 }}>Deployments</h1>
+          <EnvironmentFlow
+            projectName="expense"
+            environments={envs}
+            rows={rows}
+            deploy={deploy}
+            version="v4"
+            validation={{ verdict: "passed", repairing: false }}
+            hold={null}
+            componentTypes={new Map()}
+            connections={[]}
+            promote={promoteStep(deploy, target, [], {}, null, "v4")}
+            pending={{ deploy: false, connections: false, validation: false, hold: false }}
+            onPromote={vi.fn()}
+            onTryOut={vi.fn()}
+            onConfigureConnection={vi.fn()}
+            onConfigurePromoteTarget={vi.fn()}
+          />
+        </div>
+      </div>
+    </OxygenUIThemeProvider>,
+  );
+  return {
+    scroller: screen.getByTestId("page-scroller"),
+    row: screen.getByTestId("environment-flow"),
+    cards: envs.map((e) => screen.getByTestId(`environment-card-${e.name}`)),
+  };
+}
+
 afterEach(cleanup);
 
 describe("EnvironmentFlow layout", () => {
@@ -177,6 +243,81 @@ describe("EnvironmentFlow layout", () => {
         Math.round(gap),
         `${card.getAttribute("data-testid")}: rail stops ${Math.round(gap)}px above the next mark`,
       ).toBeLessThanOrEqual(6);
+    }
+  });
+});
+
+// ── The page fits ───────────────────────────────────────────────────────────
+//
+// The user's complaint, measured: at a realistic viewport the Deployments
+// page scrolled vertically, because the entry card carries a version block, a
+// components list, a dependencies list, a Try-it-now button, a validation
+// step and a promote step, and the row simply grew to hold it.
+//
+// The fix is a budget: the row takes what the page's scroll container has
+// left, and a card that does not fit scrolls its own steps. Every assertion
+// below is a real measurement in a real layout engine — there is no other way
+// to verify any of this, and the jsdom suite cannot see it at all.
+
+describe("EnvironmentFlow fits the page", () => {
+  it("leaves the page's scroll container nothing to scroll", () => {
+    const { scroller } = renderPage();
+    // A page that fits has no scrollable overflow at all. One pixel of
+    // rounding slack, and no more — the state being ruled out was hundreds.
+    expect(
+      scroller.scrollHeight - scroller.clientHeight,
+      `page overflows by ${scroller.scrollHeight - scroller.clientHeight}px ` +
+        `(scrollHeight ${scroller.scrollHeight}, clientHeight ${scroller.clientHeight})`,
+    ).toBeLessThanOrEqual(1);
+  });
+
+  it("makes the entry card scroll its own steps instead", () => {
+    const { cards } = renderPage();
+    // Without this the suite above proves nothing: a page that fits because
+    // the content happened to be short is not the behaviour under test. The
+    // entry card MUST be the one that overflows, and it must overflow
+    // INSIDE itself.
+    const stepArea = cards[0]!.querySelector('[role="list"] > [role="none"]')!;
+    expect(
+      stepArea.scrollHeight,
+      "the entry card's steps do not overflow — this fixture no longer tests anything",
+    ).toBeGreaterThan(stepArea.clientHeight);
+  });
+
+  it("keeps every card the same height inside the budget", () => {
+    const { cards, row } = renderPage();
+    const heights = cards.map((c) => Math.round(c.getBoundingClientRect().height));
+    expect(new Set(heights).size, `card heights: ${heights.join(", ")}`).toBe(1);
+    // …and the row really is the constrained thing, not merely the tallest
+    // card's height by coincidence.
+    expect(Math.round(row.getBoundingClientRect().height)).toBeLessThanOrEqual(PAGE_HEIGHT);
+  });
+
+  it("keeps each card's trailing step in view without scrolling the card", () => {
+    const { cards } = renderPage();
+    for (const card of cards) {
+      const promote = card.querySelector('[role="listitem"][aria-label*="Promote"]');
+      // The pipeline's last card has no promote step, by design.
+      if (!promote) continue;
+      const cardBox = card.getBoundingClientRect();
+      const box = promote.getBoundingClientRect();
+      const id = card.getAttribute("data-testid");
+      expect(box.height, `${id}: promote step has no height`).toBeGreaterThan(0);
+      expect(box.top, `${id}: promote step starts above the card`).toBeGreaterThanOrEqual(
+        Math.floor(cardBox.top),
+      );
+      expect(
+        Math.round(box.bottom),
+        `${id}: promote step ends ${Math.round(box.bottom - cardBox.bottom)}px past the card's foot`,
+      ).toBeLessThanOrEqual(Math.ceil(cardBox.bottom));
+      // And the button inside it is on screen too — pinning the step is only
+      // worth anything if the action it holds came with it.
+      const button = promote.querySelector("button")!;
+      const buttonBox = button.getBoundingClientRect();
+      expect(
+        Math.round(buttonBox.bottom),
+        `${id}: promote button sits past the card's foot`,
+      ).toBeLessThanOrEqual(Math.ceil(cardBox.bottom));
     }
   });
 });
