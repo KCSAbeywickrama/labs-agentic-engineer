@@ -34,6 +34,7 @@ import { openSession, type OpenOptions, type PlaygroundSession } from "./engine/
 import { pendingQuestions, type PendingQuestions } from "./engine/questions.js";
 import { runSpecTurn, type SpecTurnResult } from "./engine/turn.js";
 import { runCodingAgent } from "./engine/coding-run.js";
+import { wireCommand as runWire, type WireOptions } from "./engine/wire/session.js";
 import { renderLogView, resolveRunDir, type LogView } from "./engine/log-read.js";
 import { SKILLS_DIR } from "./engine/session.js";
 import { FsIssueStore, type FoldOutcome } from "./ports/issue-store.js";
@@ -173,6 +174,24 @@ export async function tasksCommand(projectDir: string, opts: PhaseOptions): Prom
   }
 }
 
+/**
+ * Phase 5 — `wire`: stand the generated project up and click through it.
+ *
+ * The only verb that runs the app rather than writing it, and the only one that
+ * ends where a person is (a browser) rather than in a file. It never deploys
+ * and never edits the project — a defect found here becomes an issue and a
+ * coding run, which keeps the coding skill the one thing that writes
+ * application code.
+ */
+export async function wirePhase(
+  projectDir: string,
+  opts: WireOptions,
+  confirmDir?: () => Promise<boolean>,
+): Promise<PhaseOutcome> {
+  const outcome = await runWire(projectDir, opts, confirmDir);
+  return outcome.ok ? { ok: true } : { ok: false, ...(outcome.detail ? { detail: outcome.detail } : {}) };
+}
+
 export interface CodeOptions extends PhaseOptions {
   /** `--restore`: restore the latest undo snapshot before this run. */
   restore?: boolean;
@@ -187,6 +206,8 @@ export interface CodeOptions extends PhaseOptions {
   /** `log` only: which view, and which archived run (default: the newest). */
   view?: LogView;
   run?: string;
+  /** `wire` only: its own flags, kept apart from the spec phases' options. */
+  wire?: WireOptions;
 }
 
 /**

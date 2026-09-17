@@ -51,16 +51,17 @@ import {
   type CrewPlanItem,
   type CrewState,
   type CrewTask,
-  type LineTone,
   type RunEventView,
 } from "@aep/progress-view";
 import type { AgentTags } from "./agent-tags.js";
+import type { PaneRow } from "./pinned-pane.js";
 
-/** One drawn line: its text, and the semantic weight the pane colours it by. */
-export interface BlockRow {
-  text: string;
-  tone: LineTone;
-}
+/**
+ * One drawn line: its text, and the semantic weight the pane colours it by.
+ * Defined by the pinned-pane mechanism (./pinned-pane.ts), which is what draws
+ * it; named here because this module is where rows are composed.
+ */
+export type BlockRow = PaneRow;
 
 export interface CrewBlockOptions {
   /** The terminal's width. Every row is truncated to fit inside it. */

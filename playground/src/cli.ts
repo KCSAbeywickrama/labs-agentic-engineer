@@ -48,6 +48,7 @@ import {
   requirementsCommand,
   tasksCommand,
   undoCommand,
+  wirePhase,
   type CodeOptions,
   type PhaseOptions,
   type PhaseOutcome,
@@ -62,9 +63,9 @@ import { chatLoop } from "./tui/chat.js";
 import { tasksScreen } from "./tui/tasks.js";
 import { ensureProjectDir } from "./tui/ensure-dir.js";
 import { readIdea, writeDescriptor } from "./state/descriptor.js";
-import { confirmCodingDir } from "./tui/consent.js";
+import { confirmCodingDir, confirmWireDir } from "./tui/consent.js";
 
-const COMMANDS = new Set(["requirements", "design", "tasks", "code", "chat", "check", "undo", "log", "menu"]);
+const COMMANDS = new Set(["requirements", "design", "tasks", "code", "wire", "chat", "check", "undo", "log", "menu"]);
 
 /** Bare `play`, `play help`, or `-h/--help` → the one-screen command reference. */
 function printUsage(): void {
@@ -78,17 +79,23 @@ function printUsage(): void {
       "  pnpm play <dir>                           open <dir> in chat (created if missing; /menu for the dashboard)",
       "  pnpm play <dir> requirements|design       generate or refine the spec",
       "  pnpm play <dir> tasks|code|check|undo      run a later step of the impl plan",
+      "  pnpm play <dir> wire                      run the generated app locally, as a role, in a browser",
       "  pnpm play <dir> log [--slow|--thinking]   read the last coding run in detail (developer view)",
       '  pnpm play <dir> chat "<message>"          one-shot headless chat turn',
       "",
       "Flags:",
       '  --idea "<text>"   the project idea — captured into specs/.agentic-engineer.toml',
       '  --target "<x>"    narrow the phase to one component/target',
-      "  --fresh           reset the conversation before the run",
+      "  --fresh           reset the conversation before the run (wire: drop the database volume)",
       "  --silent          suppress live turn rendering",
       "  --restore         restore the latest undo snapshot before the run",
       "  --yes             headless consent for the coding agent (bypass-permissions)",
       "  --host            (code) run the coding agent as a bare host process, not the runner image",
+      '  --role "<name>"   (wire) enter as this role without the picker (empty = signed in, no grants)',
+      "  --seed            (wire) seed data through the app once everything answers",
+      "  --no-open         (wire) print READY <url> instead of opening a browser",
+      "  --no-triage       (wire) do not ask a model to read the logs when a service fails",
+      "  --skip <dep>      (wire) start anyway with an unsupported dependency's env unset",
       "  --api-key         (code --host) authenticate with ANTHROPIC_API_KEY instead of your Claude login",
       "  --slow            (log) only the calls that took 3s or more, slowest first",
       "  --thinking        (log) the model's reasoning, the subagents' included, each block owner-labelled",
@@ -167,6 +174,11 @@ async function runHeadless(
       // One session works the whole project — the `aep` skill decides
       // discovery, ordering and fan-out (see its SKILL.md).
       outcome = await codeCommand(projectDir, opts, confirmCodingDir(projectDir));
+      break;
+    case "wire":
+      // The one verb that ends with a browser open and a panel up: it holds the
+      // terminal until you quit, and tears everything down on the way out.
+      outcome = await wirePhase(projectDir, opts.wire ?? {}, confirmWireDir(projectDir));
       break;
     case "undo":
       outcome = undoCommand(projectDir, opts);
@@ -284,6 +296,11 @@ async function main(): Promise<number> {
       slow: { type: "boolean" },
       thinking: { type: "boolean" },
       run: { type: "string" },
+      role: { type: "string" },
+      seed: { type: "boolean" },
+      "no-open": { type: "boolean" },
+      "no-triage": { type: "boolean" },
+      skip: { type: "string", multiple: true },
       help: { type: "boolean", short: "h" },
     },
     allowPositionals: true,
@@ -308,6 +325,18 @@ async function main(): Promise<number> {
     // `log` defaults to the per-step view; --slow and --thinking narrow it.
     ...(values.slow ? { view: "slow" as const } : values.thinking ? { view: "thinking" as const } : {}),
     ...(values.run ? { run: values.run } : {}),
+    // `wire`'s own flags, kept in one bag so the phase options stay the spec
+    // phases' shape. `--role ""` is meaningful (signed in holding nothing), so
+    // presence is tested rather than truthiness.
+    wire: {
+      ...(values.role !== undefined ? { role: values.role } : {}),
+      ...(values.seed ? { seed: true } : {}),
+      ...(values.fresh ? { fresh: true } : {}),
+      ...(values["no-open"] ? { noOpen: true } : {}),
+      ...(values["no-triage"] ? { noTriage: true } : {}),
+      ...(values.skip ? { skip: values.skip } : {}),
+      ...(values.yes ? { yes: true } : {}),
+    },
   };
 
   let [dirArg, command, commandArg] = positionals as [string | undefined, string | undefined, string | undefined];

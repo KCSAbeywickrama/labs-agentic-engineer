@@ -139,7 +139,11 @@ function user(): MockUser {
       name: `Mock ${who}`,
       email: `${slug}@example.test`,
     },
-    access_token: `mock:${scopes.map(encodeURIComponent).join(",")}`,
+    // `mock:<roles>;<scopes>` — the roles are named as well as resolved to
+    // grants, because the wired gateway (mock/wired.ts) mints an assertion whose
+    // `username` comes from the role's `testUsers` row and two roles can hold
+    // identical grants. gateway.ts's scopesFromToken reads past the segment.
+    access_token: `mock:${encodeURIComponent(names.join("+"))};${scopes.map(encodeURIComponent).join(",")}`,
     scope: [...BASE_SCOPES, ...scopes].join(" "),
     expires_at: Math.floor(Date.now() / 1000) + 3600,
     expired: false,
