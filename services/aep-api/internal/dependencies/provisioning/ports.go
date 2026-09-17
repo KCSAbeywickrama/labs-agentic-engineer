@@ -145,11 +145,17 @@ type OrgResourceDocs interface {
 }
 
 // EnvironmentInfo is one OpenChoreo environment as the BFF reads it: name,
-// display name, production flag, validation setting. It is a type alias to
-// openchoreo.EnvironmentInfo — this package already imports openchoreo, and
-// openchoreo cannot import back (this package imports it), so the shared
-// shape is defined there and aliased here under the name callers expect.
-type EnvironmentInfo = openchoreo.EnvironmentInfo
+// display name, production flag, validation setting. Owned here, like every
+// other domain type in this ports file (ProjectRef, EnvCell, ...) — the
+// openchoreo client has its own wire-mapping struct of the same shape, and
+// the composition root (internal/app) adapts between the two at the wiring
+// site instead of the two packages sharing a type.
+type EnvironmentInfo struct {
+	Name         string
+	DisplayName  string
+	IsProduction bool
+	Validation   string
+}
 
 // EnvironmentLister lists OpenChoreo Environments for the org namespace.
 // Empty org → empty slice, never nil error-for-empty. List is the richer

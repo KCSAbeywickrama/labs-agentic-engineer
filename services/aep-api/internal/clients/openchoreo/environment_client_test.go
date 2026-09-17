@@ -106,6 +106,214 @@ func TestEnvironmentClient_ListNames_NonOK(t *testing.T) {
 	}
 }
 
+func TestEnvironmentClient_List_ReadsAnnotationsAndIsProduction(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"items": []any{
+				map[string]any{
+					"metadata": map[string]any{
+						"name": "production",
+						"annotations": map[string]string{
+							"openchoreo.dev/display-name": "Production",
+							"aep.wso2.com/validation":     "on",
+						},
+					},
+					"spec": map[string]any{"isProduction": true},
+				},
+			},
+			"pagination": map[string]any{},
+		})
+	}))
+	defer srv.Close()
+
+	got, err := newTestEnvironmentClient(t, srv).List(context.Background(), "acme")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if gotPath != "/api/v1/namespaces/acme/environments" {
+		t.Fatalf("path = %q, want /api/v1/namespaces/acme/environments", gotPath)
+	}
+	want := EnvironmentInfo{
+		Name:         "production",
+		DisplayName:  "Production",
+		IsProduction: true,
+		Validation:   "on",
+	}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("List = %#v, want [%+v]", got, want)
+	}
+}
+
+func TestEnvironmentClient_List_DisplayNameAnnotationAbsent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"items": []any{
+				map[string]any{
+					"metadata": map[string]any{
+						"name": "staging-local",
+						"annotations": map[string]string{
+							"aep.wso2.com/validation": "on",
+						},
+					},
+					"spec": map[string]any{"isProduction": false},
+				},
+			},
+			"pagination": map[string]any{},
+		})
+	}))
+	defer srv.Close()
+
+	got, err := newTestEnvironmentClient(t, srv).List(context.Background(), "acme")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	// The client is a plain read: an absent display-name annotation is an
+	// empty string here. The titlecased fallback is provisioning.Service's
+	// job, not this client's.
+	if len(got) != 1 || got[0].DisplayName != "" {
+		t.Fatalf("List = %#v, want DisplayName empty", got)
+	}
+	if got[0].Validation != "on" {
+		t.Fatalf("List = %#v, want Validation=on", got)
+	}
+}
+
+func TestEnvironmentClient_List_ValidationAnnotationAbsent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"items": []any{
+				map[string]any{
+					"metadata": map[string]any{
+						"name": "staging-local",
+						"annotations": map[string]string{
+							"openchoreo.dev/display-name": "Staging Local",
+						},
+					},
+					"spec": map[string]any{"isProduction": false},
+				},
+			},
+			"pagination": map[string]any{},
+		})
+	}))
+	defer srv.Close()
+
+	got, err := newTestEnvironmentClient(t, srv).List(context.Background(), "acme")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	// The client is a plain read: an absent validation annotation is an
+	// empty string here. The absent/unrecognised-is-off default is
+	// provisioning.Service's job, not this client's.
+	if len(got) != 1 || got[0].Validation != "" {
+		t.Fatalf("List = %#v, want Validation empty", got)
+	}
+	if got[0].DisplayName != "Staging Local" {
+		t.Fatalf("List = %#v, want DisplayName=Staging Local", got)
+	}
+}
+
+func TestEnvironmentClient_List_SpecNil(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"items": []any{
+				map[string]any{
+					"metadata": map[string]any{"name": "sandbox"},
+				},
+			},
+			"pagination": map[string]any{},
+		})
+	}))
+	defer srv.Close()
+
+	got, err := newTestEnvironmentClient(t, srv).List(context.Background(), "acme")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 || got[0].IsProduction {
+		t.Fatalf("List = %#v, want IsProduction=false with spec entirely absent (no panic)", got)
+	}
+}
+
+func TestEnvironmentClient_List_IsProductionNil(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"items": []any{
+				map[string]any{
+					"metadata": map[string]any{"name": "sandbox"},
+					"spec":     map[string]any{},
+				},
+			},
+			"pagination": map[string]any{},
+		})
+	}))
+	defer srv.Close()
+
+	got, err := newTestEnvironmentClient(t, srv).List(context.Background(), "acme")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 || got[0].IsProduction {
+		t.Fatalf("List = %#v, want IsProduction=false with spec.isProduction absent (no panic)", got)
+	}
+}
+
+func TestEnvironmentClient_List_IsProductionTrue(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"items": []any{
+				map[string]any{
+					"metadata": map[string]any{"name": "production"},
+					"spec":     map[string]any{"isProduction": true},
+				},
+			},
+			"pagination": map[string]any{},
+		})
+	}))
+	defer srv.Close()
+
+	got, err := newTestEnvironmentClient(t, srv).List(context.Background(), "acme")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 || !got[0].IsProduction {
+		t.Fatalf("List = %#v, want IsProduction=true", got)
+	}
+}
+
+func TestEnvironmentClient_List_EmptyOrg(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		t.Errorf("empty org must not call OC, got %s %s", r.Method, r.URL.Path)
+	}))
+	defer srv.Close()
+
+	got, err := newTestEnvironmentClient(t, srv).List(context.Background(), "")
+	if err != nil {
+		t.Fatalf("List empty org: %v", err)
+	}
+	if got == nil || len(got) != 0 {
+		t.Fatalf("empty org = %#v, want non-nil empty slice", got)
+	}
+	if called {
+		t.Fatal("empty org must not hit OC")
+	}
+}
+
+func TestEnvironmentClient_List_NonOK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusForbidden, map[string]any{"error": "denied"})
+	}))
+	defer srv.Close()
+
+	_, err := newTestEnvironmentClient(t, srv).List(context.Background(), "acme")
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("want ErrForbidden, got %v", err)
+	}
+}
+
 // ---- the Thunder binding ----------------------------------------------------
 
 // The binding is read off the Environment's annotations, which is the only one

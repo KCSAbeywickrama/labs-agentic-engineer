@@ -31,6 +31,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/delivery/codingagent"
 	"github.com/wso2/aep/aep-api/internal/delivery/execution"
 	"github.com/wso2/aep/aep-api/internal/delivery/task"
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/dependencies/provisioning"
 	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/spec"
@@ -268,6 +269,36 @@ func (p provisionProjects) ListProjects(ctx context.Context, orgID string) ([]pr
 			continue
 		}
 		out = append(out, provisioning.ProjectRef{OrgID: rows[i].OrgID, ProjectID: rows[i].ProjectID})
+	}
+	return out, nil
+}
+
+// environmentLister adapts openchoreo.EnvironmentClient onto
+// provisioning.EnvironmentLister: the client's List returns its own
+// wire-mapping EnvironmentInfo (openchoreo owns the OC read — annotations,
+// spec.isProduction), and this adapter converts it field-by-field to the
+// service layer's own domain type. Keeps the two packages' types distinct
+// (see provisioning.EnvironmentInfo) without an import cycle, since only
+// this composition-root package needs to import both.
+type environmentLister struct{ client openchoreo.EnvironmentClient }
+
+func (e environmentLister) ListNames(ctx context.Context, orgID string) ([]string, error) {
+	return e.client.ListNames(ctx, orgID)
+}
+
+func (e environmentLister) List(ctx context.Context, orgID string) ([]provisioning.EnvironmentInfo, error) {
+	infos, err := e.client.List(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]provisioning.EnvironmentInfo, 0, len(infos))
+	for _, info := range infos {
+		out = append(out, provisioning.EnvironmentInfo{
+			Name:         info.Name,
+			DisplayName:  info.DisplayName,
+			IsProduction: info.IsProduction,
+			Validation:   info.Validation,
+		})
 	}
 	return out, nil
 }

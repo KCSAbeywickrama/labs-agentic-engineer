@@ -1129,7 +1129,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		Projects:          provisionProjects{repos: repoRepo},
 		Access:            dependencies.NewAccessRequestRepository(db),
 		Providers:         orgEndpointCatalog,
-		Environments:      environmentClient,
+		Environments:      environmentLister{client: environmentClient},
 		CatalogValuePlane: catalogValuePlane,
 		OrgSecrets:        secretRefWriter,
 		OrgResourceDocs:   provisioning.NewGitOrgResourceDocs(repoService, gitOpsService),

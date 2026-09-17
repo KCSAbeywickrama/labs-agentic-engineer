@@ -134,12 +134,11 @@ func (c *environmentClient) ListNames(ctx context.Context, orgID string) ([]stri
 	return names, nil
 }
 
-// GetThunderBinding reads the environment's identity-provider binding off its
-// annotations.
-//
-// An environment with none is ErrNoThunderBinding, distinguished from every
-// transport failure, because the two need opposite responses: the first is
-// "provision one", the second is "retry".
+// List is ListNames' richer sibling: the same OC read, but also mapping the
+// display-name and validation annotations and spec.isProduction onto each
+// row. It does not apply the display-name fallback or the
+// absent/unrecognised-is-off validation default — those are policy, applied
+// once in provisioning.Service.ListOrgEnvironments, not here.
 func (c *environmentClient) List(ctx context.Context, orgID string) ([]EnvironmentInfo, error) {
 	if strings.TrimSpace(orgID) == "" {
 		return []EnvironmentInfo{}, nil
@@ -171,6 +170,12 @@ func (c *environmentClient) List(ctx context.Context, orgID string) ([]Environme
 	return infos, nil
 }
 
+// GetThunderBinding reads the environment's identity-provider binding off its
+// annotations.
+//
+// An environment with none is ErrNoThunderBinding, distinguished from every
+// transport failure, because the two need opposite responses: the first is
+// "provision one", the second is "retry".
 func (c *environmentClient) GetThunderBinding(ctx context.Context, orgID, environment string) (ThunderBinding, error) {
 	if strings.TrimSpace(orgID) == "" || strings.TrimSpace(environment) == "" {
 		return ThunderBinding{}, fmt.Errorf("get thunder binding: org and environment are both required")
