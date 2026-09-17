@@ -420,8 +420,24 @@ describe("DeploymentVersionPage — the environments read", () => {
     render(<DeploymentVersionPage projectName="expense" environment="staging" version="v2" />);
 
     expect(screen.queryByText("No environment called staging")).not.toBeInTheDocument();
-    // Taken at its word while the list is still out: the page falls through to
-    // its normal "nothing runs here" reading of the segment, not a dead end.
-    expect(screen.getByText("Nothing runs in staging now.")).toBeInTheDocument();
+    // Taken at its word while the list is still out: the page waits (the
+    // board is one row per environment, so it cannot yet say whether this
+    // version is or is not running there).
+    expect(screen.getByLabelText("Loading deployment")).toBeInTheDocument();
+  });
+
+  it("waits rather than claiming nothing runs in a populated environment while the pipeline is still loading", () => {
+    // Production genuinely has this version bound — this is the case that
+    // exposes the lie: without the environments.isPending gate, `row` comes
+    // back undefined for EVERY environment (environmentRows maps over the
+    // as-yet-empty list), so a fully-deployed environment reads as not running.
+    mockEnvironmentsPending = true;
+    mockDeployments = mockDeployments.map((d) => ({ ...d, environment: "production" }));
+
+    render(<DeploymentVersionPage projectName="expense" environment="production" version="v2" />);
+
+    expect(screen.getByLabelText("Loading deployment")).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing runs in/)).not.toBeInTheDocument();
+    expect(screen.queryByText("No environment called production")).not.toBeInTheDocument();
   });
 });

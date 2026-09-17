@@ -603,10 +603,32 @@ describe("DeploymentTryOutPage — the environments read", () => {
     render(<DeploymentTryOutPage projectName="expense" environment="staging" />);
 
     expect(screen.queryByText("No environment called staging")).not.toBeInTheDocument();
-    // Taken at its word while the list is still out: the page falls through to
-    // its normal "nothing bound yet" reading of the segment, not a dead end.
-    expect(
-      screen.getByText(/Nothing deployed here yet — promote a validated version/),
-    ).toBeInTheDocument();
+    // Taken at its word while the list is still out: the page waits (the
+    // board is one row per environment, so it cannot yet say what is or
+    // is not bound to this one).
+    expect(screen.getByLabelText("Loading deployments")).toBeInTheDocument();
+  });
+
+  it("waits rather than claiming a populated environment has nothing deployed while the pipeline is still loading", () => {
+    // Production genuinely has something bound — this is the case that
+    // exposes the lie: without the environments.isPending gate, `row` comes
+    // back undefined for EVERY environment (environmentRows maps over the
+    // as-yet-empty list), so a fully-deployed environment reads as empty.
+    mockEnvironmentsPending = true;
+    mockDeployments = [
+      {
+        componentName: "claims-api",
+        environment: "production",
+        status: "Ready",
+        releaseName: "claims-api-prod",
+        createdAt: "2026-08-15T09:00:00Z",
+      },
+    ];
+
+    render(<DeploymentTryOutPage projectName="expense" environment="production" />);
+
+    expect(screen.getByLabelText("Loading deployments")).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing deployed here yet/)).not.toBeInTheDocument();
+    expect(screen.queryByText("No environment called production")).not.toBeInTheDocument();
   });
 });

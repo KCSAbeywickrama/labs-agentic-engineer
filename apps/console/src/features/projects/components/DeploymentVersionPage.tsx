@@ -190,11 +190,16 @@ export function DeploymentVersionPage({
   const envLabel = environmentLabel(envInfo, segment);
   const build = builds.data?.find((b) => b.tag === version);
 
-  if (builds.isPending) {
+  // The board is one row per environment the pipeline names, so whether THIS
+  // version is bound and running here cannot be drawn — or honestly called
+  // not running — until that list is in. Without this the page would assert
+  // "Nothing runs in <env> now" over a deployed environment for as long as
+  // the environments read takes.
+  if (builds.isPending || environments.isPending) {
     return (
       <>
         <PageHeader title={title} backTo={backTo} />
-        <Stack spacing={2} sx={{ mt: 2 }}>
+        <Stack spacing={2} sx={{ mt: 2 }} aria-label="Loading deployment">
           <Skeleton variant="rounded" height={140} />
           <Skeleton variant="rounded" height={160} />
         </Stack>

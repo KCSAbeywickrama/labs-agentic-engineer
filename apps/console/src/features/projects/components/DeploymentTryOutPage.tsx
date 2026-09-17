@@ -196,11 +196,19 @@ export function DeploymentTryOutPage({
     );
   }
 
-  if (components.isPending || (componentNames.length > 0 && deployments.isPending)) {
+  // The board is one row per environment the pipeline names, so a row for
+  // THIS one cannot be drawn — or honestly called empty — until that list is
+  // in. Without this the page would assert "Nothing deployed here yet" over
+  // a deployed environment for as long as the environments read takes.
+  if (
+    components.isPending ||
+    environments.isPending ||
+    (componentNames.length > 0 && deployments.isPending)
+  ) {
     return (
       <>
         <PageHeader title={title} subtitle={subtitle} backTo={backTo} />
-        <Stack spacing={2} sx={{ mt: 2 }}>
+        <Stack spacing={2} sx={{ mt: 2 }} aria-label="Loading deployments">
           <Skeleton variant="rounded" height={140} />
           <Skeleton variant="rounded" height={220} />
         </Stack>
