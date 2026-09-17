@@ -309,17 +309,17 @@ beforeEach(() => {
 });
 
 describe("DeploymentEnvironmentPage", () => {
-  it("is titled as the environment's Try Out page, with the project and environment under it", () => {
+  it("is titled as the environment itself, with the project and what runs here under it", () => {
     render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
-    expect(screen.getByRole("heading", { name: "Deployment Try Out" })).toBeInTheDocument();
-    expect(screen.getByText("expense · Development · v1")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Development Environment" })).toBeInTheDocument();
+    expect(screen.getByText(/expense · running v1 since /)).toBeInTheDocument();
     expect(screen.getByText("Try it out")).toBeInTheDocument();
   });
 
   it("gives each component its own way in", () => {
     render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
 
-    expect(screen.getByText(/2 of 2 components live/)).toBeInTheDocument();
+    expect(screen.getAllByText(/2 of 2 components live/).length).toBeGreaterThan(0);
     // A web application is visited; a service opens its contract.
     expect(screen.getByRole("link", { name: "Visit approvals-web" })).toHaveAttribute(
       "href",
@@ -347,14 +347,15 @@ describe("DeploymentEnvironmentPage", () => {
 
     render(<DeploymentEnvironmentPage projectName="expense" environment="production" />);
 
-    // The page is Try Out for the environment; what a deployment IS lives on
-    // the version page now, so no summary card and no build link here.
-    expect(screen.getByRole("heading", { name: "Deployment Try Out" })).toBeInTheDocument();
-    expect(screen.getByText("expense · Production")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("link", { name: "View the build that shipped this" }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByText(/1 of 1 components live/)).toBeInTheDocument();
+    // A later environment states its own version — which nothing names — and
+    // borrows neither the entry environment's milestone nor its commit.
+    expect(screen.getByRole("heading", { name: "Production Environment" })).toBeInTheDocument();
+    expect(screen.getByText(/expense · running since /)).toBeInTheDocument();
+    expect(screen.getByText("Version unknown")).toBeInTheDocument();
+    expect(screen.queryByText("Milestone")).not.toBeInTheDocument();
+    expect(screen.queryByText("Commit")).not.toBeInTheDocument();
+    expect(screen.queryByText("Validation")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/1 of 1 components live/).length).toBeGreaterThan(0);
     // Only the bound component is listed for production.
     expect(screen.queryByText("approvals-web")).not.toBeInTheDocument();
   });
@@ -560,8 +561,9 @@ describe("DeploymentEnvironmentPage — the deployed version's own verdict (#776
 
     render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
 
-    // No header chip — a chip is a word, and there is none yet.
-    expect(screen.queryByText(/^Validation · /)).not.toBeInTheDocument();
+    // A skeleton in the verdict cell, not a word: the read that would settle
+    // it is still out.
+    expect(screen.getByTestId("validation-cell-skeleton")).toBeInTheDocument();
     expect(screen.queryByText("Not run")).not.toBeInTheDocument();
   });
 
@@ -575,7 +577,9 @@ describe("DeploymentEnvironmentPage — the deployed version's own verdict (#776
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(mockRunsRefetch).toHaveBeenCalled();
     expect(screen.queryByText("Not run")).not.toBeInTheDocument();
-    expect(screen.getByText("Validation · Unavailable")).toBeInTheDocument();
+    // Section 1's verdict cell carries the word — there is no second copy of
+    // it beside the title.
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
   });
 });
 

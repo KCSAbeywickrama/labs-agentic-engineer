@@ -22,13 +22,15 @@ import {
   Button,
   Skeleton,
   Stack,
+  Typography,
 } from "@wso2/oxygen-ui";
 import { Compass } from "@wso2/oxygen-ui-icons-react";
 import { createLink, Link } from "@tanstack/react-router";
 import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
-import { StatusChip } from "../../../components/StatusChip";
-import { useBuildRuns } from "../../builds/api/queries";
+import { useBuildRuns, useBuilds } from "../../builds/api/queries";
+import { runStamp } from "../../builds/lib/format";
+import { mergedCycle } from "../../builds/lib/runView";
 import { useDesignDependencies } from "../../spec/api/queries";
 import { useValidationEvidence } from "../../validation/api/counts";
 import {
@@ -40,13 +42,18 @@ import {
 import { talksTo } from "../lib/deploymentDetail";
 import { deployedValidationState, } from "../lib/deploymentFlow";
 import {
+  buildFor,
+  commitUrl,
   environmentLabel,
   environmentRows,
+  milestoneUrl,
   validationCell,
 } from "../lib/deploymentLedger";
 import { findEnvironment } from "../lib/environments";
 import { groupDeploymentCards } from "../lib/deploymentRows";
 import { ComponentOpenApiDialog } from "./ComponentOpenApiDialog";
+import { EnvironmentDeploymentSummary } from "./EnvironmentDeploymentSummary";
+import { PageSection } from "./PageSection";
 import { TryItOutCard, useTestUsers } from "./TryItOut";
 
 const LinkButton = createLink(Button);
@@ -107,11 +114,17 @@ export function DeploymentEnvironmentPage({
 
   const [contractComponent, setContractComponent] = useState<string | null>(null);
 
-  const title = "Deployment Try Out";
   const envLabel = environmentLabel(envInfo, segment);
-  const subtitle = environment
-    ? `${projectName} · ${envLabel}${version ? ` · ${version}` : ""}`
-    : projectName;
+  // "Staging Environment" — the environment's own name is the page's title,
+  // the word Environment small beside it (the approved design, §6).
+  const title = (
+    <Stack direction="row" spacing={1} sx={{ alignItems: "baseline" }}>
+      <span>{envLabel}</span>
+      <Typography variant="body2" color="text.secondary">
+        Environment
+      </Typography>
+    </Stack>
+  );
   const backTo = {
     link: <Link to="/projects/$projectName/deployments" params={{ projectName }} />,
     label: "Back to Deployments",
@@ -128,6 +141,41 @@ export function DeploymentEnvironmentPage({
     ? environmentRows(board, environmentList, deploy).find((r) => r.environment === environment)
     : undefined;
   const bound = row?.cards.some((c) => c.deployment) ?? false;
+  // The version ledger — the milestone this version's work lived in, and the
+  // stamps its build recorded. It speaks for the environment a build LANDS
+  // in and no other, so a later environment reads none of it.
+  const builds = useBuilds(projectName);
+  const build = buildFor(version, builds.data);
+  const mergeSha = mergedCycle(runs.data?.runs)?.mergeSha ?? "";
+  const commitHref = commitUrl(status.data?.repoUrl, mergeSha);
+  const commit: { sha: string; href?: string } | "loading" | undefined = !version
+    ? undefined
+    : runs.isPending
+      ? "loading"
+      : mergeSha
+        ? { sha: mergeSha, ...(commitHref ? { href: commitHref } : {}) }
+        : undefined;
+  const milestoneHref = milestoneUrl(status.data?.repoUrl, build?.milestoneNumber);
+  // The status poll is what names the version. While it is out — or failed —
+  // the entry environment knows of no version, and "Version unknown" would be
+  // a settled claim it cannot make.
+  const statusUnsettled = Boolean(status.isPending || status.isError);
+  const deployedStamp = runStamp(row?.deployedAt);
+  const builtAt = runStamp(build?.completedAt);
+  const subtitle = environment
+    ? [
+        projectName,
+        version && deployedStamp
+          ? `running ${version} since ${deployedStamp}`
+          : version
+            ? `running ${version}`
+            : deployedStamp
+              ? `running since ${deployedStamp}`
+              : "",
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : projectName;
   // Test users live with the app they sign in to. Read only for a green first
   // environment — the roles read stays idle until there is something to sign
   // in to, as it did on the board. Green is the row's own word, which folds
@@ -269,36 +317,22 @@ export function DeploymentEnvironmentPage({
 
   const types = new Map<string, string>();
   for (const c of components.data?.items ?? []) if (c.type) types.set(c.name, c.type);
+  // The WORD, not the counts: section 1 shows the verdict and its counts as
+  // two things (the approved design), so the cell is asked for its label
+  // alone and the counts ride beside it.
   const validationView = validationCell(
     envInfo,
     pageDeploy?.validation,
-    validation.counts,
+    undefined,
     validationAvailability,
   );
 
   return (
     <>
-      {/* No status chip beside the title — the summary card just below
-          carries the same chip, and two of one fact in one screenful is one
-          too many (review round). */}
-      <PageHeader
-        title={title}
-        subtitle={subtitle}
-        backTo={backTo}
-        {...(validationView && !validationView.pending
-          ? {
-              actions: (
-                <StatusChip
-                  label={`Validation · ${validationView.label}`}
-                  tone={validationView.tone}
-                  appearance="soft"
-                  dot
-                  {...(validationView.spoken ? { spokenLabel: `Validation, ${validationView.spoken}` } : {})}
-                />
-              ),
-            }
-          : {})}
-      />
+      {/* No status chip beside the title — section 1 below carries the
+          verdict, and two of one fact in one screenful is one too many
+          (review round). */}
+      <PageHeader title={title} subtitle={subtitle} backTo={backTo} />
       {deployments.failedCount > 0 && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           Deployments for {deployments.failedCount} component
@@ -320,6 +354,23 @@ export function DeploymentEnvironmentPage({
         </Alert>
       )}
       <Stack spacing={2}>
+        <PageSection title="Deployment" caption="what runs here now" index="01">
+          <EnvironmentDeploymentSummary
+            {...(version ? { version } : {})}
+            bound={bound}
+            pending={envInfo?.position === 0 && statusUnsettled}
+            {...(build?.milestoneNumber ? { milestoneNumber: build.milestoneNumber } : {})}
+            {...(milestoneHref ? { milestoneHref } : {})}
+            {...(commit ? { commit } : {})}
+            validation={validationView}
+            {...(validation.counts ? { counts: validation.counts } : {})}
+            {...(builtAt ? { builtAt } : {})}
+            {...(deployedStamp ? { deployedAt: deployedStamp } : {})}
+            live={row.live}
+            total={row.total}
+          />
+        </PageSection>
+
         <TryItOutCard
           projectName={projectName}
           cards={row.cards}
