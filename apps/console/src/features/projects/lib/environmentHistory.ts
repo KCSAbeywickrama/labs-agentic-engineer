@@ -41,22 +41,13 @@ export interface HistoryRow {
   /** The milestone its work lived in — the version ledger's, so the entry
    *  environment's rows only. */
   milestoneNumber?: number;
-  /** When it started running here. */
-  deployedAt?: string;
   /**
-   * `deployedAt` is the build's FINISH time, not a rollout stamp the platform
-   * recorded — every completed build auto-deploys to this environment, so the
-   * two are close, but they are not the same fact and the table must not print
-   * them as if they were. It can also be plain wrong: a build that completed
-   * and whose deploy then failed or lagged shows a time here for a rollout
-   * that did not happen when it says, or at all.
+   * When it started running here — the BINDING's stamp, the one deploy time
+   * the platform actually recorded. Only the live row has one: a superseded
+   * version's binding is gone, and its build's finish time is a different
+   * fact, so the row carries no time rather than a guess dressed as one.
    */
-  deployedAtInferred?: boolean;
-  /** When it stopped — the moment its successor deployed. Absent on the
-   *  running row, which is marked `current` instead. */
-  until?: string;
-  /** The stamp that closed this row was itself inferred (see above). */
-  untilInferred?: boolean;
+  deployedAt?: string;
   current: boolean;
 }
 
@@ -121,18 +112,17 @@ export function historyFor(
     if (seen.has(build.tag)) continue;
     seen.add(build.tag);
     const current = Boolean(row?.version) && row?.version === build.tag;
-    // The live row is dated by its BINDING — the one deploy stamp the
-    // platform actually kept. A superseded row has none, so it is dated by
-    // the build that produced it, and MARKED as inferred: the column then
-    // carries two different facts, and only the mark tells them apart.
-    const bindingStamp = current ? row?.deployedAt : undefined;
-    const deployedAt = bindingStamp ?? build.completedAt ?? undefined;
+    // Only the live row is dated, and only by its BINDING — the one deploy
+    // stamp the platform actually kept. A superseded row's binding is gone
+    // and the platform kept nothing in its place, so the row is left
+    // undated: the build's finish time is when the BUILD ended, not when
+    // that version started or stopped serving.
+    const deployedAt = current ? row?.deployedAt : undefined;
     rows.push({
       key: build.tag,
       version: build.tag,
       milestoneNumber: build.milestoneNumber,
       ...(deployedAt ? { deployedAt } : {}),
-      ...(deployedAt && !bindingStamp ? { deployedAtInferred: true } : {}),
       current,
     });
   }
@@ -150,17 +140,6 @@ export function historyFor(
       ...(row.deployedAt ? { deployedAt: row.deployedAt } : {}),
       current: true,
     });
-  }
-
-  // Each row ran until its successor — the row above it — deployed, and
-  // inherits whether that stamp was a real one or an inferred one.
-  for (let i = 1; i < rows.length; i += 1) {
-    const closer = rows[i - 1];
-    const self = rows[i];
-    if (self && closer?.deployedAt) {
-      self.until = closer.deployedAt;
-      if (closer.deployedAtInferred) self.untilInferred = true;
-    }
   }
 
   return { rows, unrecorded: false, pending: false };

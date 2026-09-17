@@ -38,9 +38,6 @@ const entryView: HistoryView = {
       key: "v2",
       version: "v2",
       milestoneNumber: 2,
-      deployedAt: "2026-09-08T16:12:00Z",
-      deployedAtInferred: true,
-      until: "2026-09-12T09:40:00Z",
       current: false,
     },
   ],
@@ -61,18 +58,17 @@ const props = (over: Partial<PastDeploymentsProps> = {}): PastDeploymentsProps =
 });
 
 describe("PastDeployments", () => {
-  it("is section 4, named and captioned", () => {
+  it("is section 4, named — and says nothing beside the name", () => {
     render(<PastDeployments {...props()} />);
     expect(screen.getByRole("heading", { level: 3, name: "Past deployments" })).toBeInTheDocument();
-    expect(
-      screen.getByText("every version that ran on Development, newest first"),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/newest first/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/what runs on/)).not.toBeInTheDocument();
   });
 
   it("columns the table as the design does", () => {
     render(<PastDeployments {...props()} />);
     const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
-    expect(headers).toEqual(["Version", "Milestone", "Validation", "Deployed", "Until", ""]);
+    expect(headers).toEqual(["Version", "Milestone", "Validation", "Deployed", "Status", ""]);
   });
 
   it("lists the versions newest first, linking each milestone to GitHub", () => {
@@ -88,13 +84,14 @@ describe("PastDeployments", () => {
     );
   });
 
-  it("marks the running row and closes the superseded one", () => {
+  it("gives every row a status word — Running now, or Superseded", () => {
     render(<PastDeployments {...props()} />);
     const running = screen.getByRole("row", { name: /v3/ });
     expect(within(running).getByText("Running now")).toBeInTheDocument();
+    expect(within(running).queryByText("Superseded")).not.toBeInTheDocument();
     const past = screen.getByRole("row", { name: /v2/ });
     expect(within(past).queryByText("Running now")).not.toBeInTheDocument();
-    expect(within(past).getByTestId("history-until").textContent).not.toBe("—");
+    expect(within(past).getByText("Superseded")).toBeInTheDocument();
   });
 
   it("offers Roll back on every row, disabled, with the reason reachable by screen reader", () => {
@@ -115,73 +112,27 @@ describe("PastDeployments", () => {
     const past = within(screen.getByRole("row", { name: /v2/ }));
     expect(past.getByText("Not loaded")).toBeInTheDocument();
     expect(past.queryByText("Not recorded")).not.toBeInTheDocument();
-    expect(
-      screen.getByText(/A past version's verdict is not loaded — open its build to see it/),
-    ).toBeInTheDocument();
   });
 
-  it("marks an inferred Deployed stamp, and says in the cell what it is", () => {
+  it("dates the live row from the binding and leaves the superseded row undated", () => {
     render(<PastDeployments {...props()} />);
     const live = within(screen.getByRole("row", { name: /v3/ })).getByTestId("history-deployed");
+    expect(live.textContent?.trim()).not.toBe("—");
+    // The regression guard: a superseded version has no recorded deploy stamp,
+    // so the cell shows a dash — never a build finish time standing in for one,
+    // marked or otherwise.
     const past = within(screen.getByRole("row", { name: /v2/ })).getByTestId("history-deployed");
-    // The live row's stamp is the binding's — printed plainly.
-    expect(live.textContent).not.toContain("*");
-    // The superseded row's is the build's finish time, marked and glossed.
-    expect(past.textContent).toContain("*");
-    expect(past.textContent).toContain("build finish time");
-    expect(past).toHaveAttribute("title", expect.stringContaining("build finish time"));
+    expect(past.textContent?.trim()).toBe("—");
+    expect(past.textContent).not.toContain("*");
+    expect(past).not.toHaveAttribute("title");
   });
 
-  it("leaves an Until stamp unmarked when what closed the row was a real one", () => {
+  it("keeps the footnote off the section entirely", () => {
     render(<PastDeployments {...props()} />);
-    const until = within(screen.getByRole("row", { name: /v2/ })).getByTestId("history-until");
-    expect(until.textContent).not.toContain("*");
-  });
-
-  it("marks an Until stamp that inherited an inferred one", () => {
-    render(
-      <PastDeployments
-        {...props({
-          view: {
-            unrecorded: false,
-            pending: false,
-            rows: [
-              {
-                key: "v2",
-                version: "v2",
-                deployedAt: "2026-09-08T16:12:00Z",
-                deployedAtInferred: true,
-                current: false,
-              },
-              {
-                key: "v1",
-                version: "v1",
-                deployedAt: "2026-09-02T11:05:00Z",
-                deployedAtInferred: true,
-                until: "2026-09-08T16:12:00Z",
-                untilInferred: true,
-                current: false,
-              },
-            ],
-          },
-        })}
-      />,
-    );
-    const until = within(screen.getByRole("row", { name: /v1/ })).getByTestId("history-until");
-    expect(until.textContent).toContain("*");
-    expect(until.textContent).toContain("build finish time");
-  });
-
-  it("names the stamp in the footnote, not just where the rows came from", () => {
-    render(<PastDeployments {...props()} />);
-    expect(
-      screen.getByText(
-        /A time marked \* is when that version's BUILD finished, not when it started serving/,
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/a build that completed but whose deploy failed or lagged/),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/the platform keeps no deployment record of its own/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/BUILD finished/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/build finish time/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/open its build to see it/)).not.toBeInTheDocument();
   });
 
   it("holds the verdict cell while the read behind it is still out", () => {

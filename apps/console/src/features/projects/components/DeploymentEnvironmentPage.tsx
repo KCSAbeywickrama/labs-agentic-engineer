@@ -441,7 +441,7 @@ export function DeploymentEnvironmentPage({
         </Alert>
       )}
       <Stack spacing={2}>
-        <PageSection title="Deployment" caption="what runs here now">
+        <PageSection title="Deployment">
           <EnvironmentDeploymentSummary
             {...(version ? { version } : {})}
             bound={bound}

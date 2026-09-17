@@ -381,15 +381,9 @@ export function TryItOutCard({
   );
   const firstWebApp = ordered.find((c) => types.get(c.componentName) === "web-application");
   return (
-    // Section 2 of the environment page. The live count is section 1's fact,
-    // not repeated here; this caption says what the ORDER of the panels means
-    // — the thing a person opens leads, the services it calls follow.
-    <PageSection
-      title="Try it out"
-      caption={`web apps first, then services${
-        testUsers && firstWebApp ? " · sign in with a test user below" : ""
-      }`}
-    >
+    // Section 2 of the environment page. Web apps lead, the services they
+    // call follow — the thing a person opens first, first.
+    <PageSection title="Try it out">
       <Stack spacing={3}>
         {ordered.map((card) => (
           <ComponentPanel

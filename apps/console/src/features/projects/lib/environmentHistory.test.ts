@@ -72,31 +72,17 @@ describe("historyFor", () => {
     expect(view.unrecorded).toBe(false);
     expect(view.rows.map((r) => r.version)).toEqual(["v3", "v2", "v1"]);
     expect(view.rows[0]?.current).toBe(true);
-    expect(view.rows[0]?.until).toBeUndefined();
     expect(view.rows.map((r) => r.milestoneNumber)).toEqual([3, 2, 1]);
   });
 
-  it("marks a superseded row's stamp as the build's, and leaves the live one's alone", () => {
-    // The column carries two different facts — a binding stamp the platform
-    // recorded and a build-finish time inferred from it — and only the mark
-    // tells them apart.
+  it("leaves every superseded row undated — the platform recorded no stamp for it", () => {
+    // The regression guard: a build's finish time is when the BUILD ended, not
+    // when that version started or stopped serving, so it must never be
+    // substituted for a deploy stamp the platform never kept.
     const view = historyFor(first, rowRunning("v3"), [b("v1"), b("v2"), b("v3")]);
-    expect(view.rows[0]?.deployedAtInferred).toBeUndefined();
-    expect(view.rows[1]?.deployedAtInferred).toBe(true);
-    expect(view.rows[2]?.deployedAtInferred).toBe(true);
-  });
-
-  it("passes the mark down to the row each inferred stamp closes", () => {
-    const view = historyFor(first, rowRunning("v3"), [b("v1"), b("v2"), b("v3")]);
-    // v2 is closed by the live row's REAL stamp; v1 by v2's inferred one.
-    expect(view.rows[1]?.untilInferred).toBeUndefined();
-    expect(view.rows[2]?.untilInferred).toBe(true);
-  });
-
-  it("closes each superseded row at the moment the next one deployed", () => {
-    const view = historyFor(first, rowRunning("v3"), [b("v1"), b("v2"), b("v3")]);
-    expect(view.rows[1]?.until).toBe(view.rows[0]?.deployedAt);
-    expect(view.rows[2]?.until).toBe(view.rows[1]?.deployedAt);
+    expect(view.rows[0]?.deployedAt).toBe("2026-09-12T09:40:00Z");
+    expect(view.rows[1]?.deployedAt).toBeUndefined();
+    expect(view.rows[2]?.deployedAt).toBeUndefined();
   });
 
   it("dates the live row by its binding, not by when its build finished", () => {

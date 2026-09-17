@@ -154,7 +154,7 @@ promotion order, with `→` between them. The bottom ledger is removed entirely.
 - **Header:** display name at full weight, the word *Environment* small and grey beside it.
 - **Step 1 — Deployment.** Status chip and stamp; then a highlighted block with
   **Version vN · Milestone #N** (linking to GitHub) and built-at/commit; then the
-  Components list and the Dependencies list; then **Try it now**.
+  Components list and the Dependencies list; then **Try it out**.
 - **Step 2 — Validation** (only when the annotation says so). The verdict detail exactly as
   it reads today — counts, *View validations*, and the "no verdict — run validation again"
   line for cancelled.
@@ -168,8 +168,8 @@ promotion order, with `→` between them. The bottom ledger is removed entirely.
 - The trailing step is pinned to the card's bottom, so every promote row lines up across the
   pipeline and the slack falls in the middle.
 - **One primary action per card** — the furthest-along thing that is actually possible.
-  Promote takes primary the moment it is legal; until then Try it now holds it. A deployed
-  final environment keeps Try it now as primary, having no promote step.
+  Promote takes primary the moment it is legal; until then Try it out holds it. A deployed
+  final environment keeps Try it out as primary, having no promote step.
 - **The whole card is a click target** for the environment page. Because a card contains
   buttons it cannot be an `<a>` wrapper: it is a click handler on the card, a real link on
   the environment name for keyboard and middle-click, and `stopPropagation` on the inner

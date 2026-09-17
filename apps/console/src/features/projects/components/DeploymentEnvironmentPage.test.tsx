@@ -566,7 +566,6 @@ describe("DeploymentEnvironmentPage — test users", () => {
     expect(
       screen.getByRole("link", { name: "Open Thunder Console to add or remove real accounts" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/sign in with a test user below/)).toBeInTheDocument();
   });
 
   it("carries them under a `none` aggregate too, when every binding is live", () => {
@@ -637,8 +636,10 @@ describe("DeploymentEnvironmentPage — try it out (ADR-0032)", () => {
     const web = screen.getByRole("link", { name: "Visit approvals-web" });
     const service = screen.getByRole("button", { name: "Try claims-api API" });
     expect(web.compareDocumentPosition(service) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // The test users still ride in the web app's own panel.
-    expect(screen.getByText(/sign in with a test user below/)).toBeInTheDocument();
+    // The test users still ride in the web app's own panel — ahead of the
+    // services, not in a block of their own at the end.
+    const users = screen.getByText("Sign in with a test user");
+    expect(users.compareDocumentPosition(service) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("gives the web app its Visit, its URL copy, and who it talks to", async () => {

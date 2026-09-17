@@ -248,21 +248,21 @@ describe("EnvironmentFlow", () => {
     expect(screen.getByRole("button", { name: "Promote v4 to Staging" })).toBeInTheDocument();
   });
 
-  it("makes Promote primary and Try it now secondary once validation has passed", () => {
+  it("makes Promote primary and Try it out secondary once validation has passed", () => {
     render(<EnvironmentFlow {...props(threeEnvs, { validation: "passed" })} />);
     expect(screen.getByRole("button", { name: /Promote v4 to Staging/ })).toHaveClass(
       "MuiButton-contained",
     );
-    expect(screen.getByRole("link", { name: /Try it now/ })).toHaveClass("MuiButton-outlined");
+    expect(screen.getByRole("link", { name: /Try it out/ })).toHaveClass("MuiButton-outlined");
   });
 
   // The brief wrote this case as `cancelled`, which `canPromote` deliberately
   // treats as PROMOTABLE — a person stopped the judging, and that is theirs to
   // override. `none` is the contract's word for a verdict that is expected and
   // has not arrived: the unknown verdict the case is actually about.
-  it("keeps Try it now primary and Promote unavailable while the verdict is unknown", () => {
+  it("keeps Try it out primary and Promote unavailable while the verdict is unknown", () => {
     render(<EnvironmentFlow {...props(threeEnvs, { validation: "none" })} />);
-    expect(screen.getByRole("link", { name: /Try it now/ })).toHaveClass("MuiButton-contained");
+    expect(screen.getByRole("link", { name: /Try it out/ })).toHaveClass("MuiButton-contained");
     expect(screen.getByRole("button", { name: /Promote v4 to Staging/ })).toBeDisabled();
   });
 
@@ -279,7 +279,7 @@ describe("EnvironmentFlow", () => {
   // Every Try-it-now link names the card's OWN environment. A pipeline whose
   // entry environment is not called "development" must not send the reader to
   // a dead-end page.
-  it("links Try it now at the card's own environment, whatever it is called", () => {
+  it("links Try it out at the card's own environment, whatever it is called", () => {
     const renamed: EnvironmentInfo[] = [
       { ...threeEnvs[0]!, name: "qa", displayName: "QA" },
       ...threeEnvs.slice(1),
@@ -291,7 +291,7 @@ describe("EnvironmentFlow", () => {
         rows={environmentRows(new Map([["qa", board().get("development")!]]), renamed, base.deploy)}
       />,
     );
-    expect(screen.getByRole("link", { name: /Try it now/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Try it out/ })).toHaveAttribute(
       "href",
       "/projects/expense/deployments/qa",
     );

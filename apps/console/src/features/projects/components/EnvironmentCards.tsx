@@ -162,9 +162,9 @@ function VersionBlock({
   );
 }
 
-/** "Try it now →" — the one primary action on the card, into the environment
+/** "Try it out →" — the one primary action on the card, into the environment
  *  page where the app, the APIs and the test users are. */
-function TryItNow({
+function TryItOutAction({
   projectName,
   environment,
   disabled,
@@ -190,7 +190,7 @@ function TryItNow({
         onClick={(event: React.MouseEvent) => event.stopPropagation()}
         endIcon={<ArrowRight size={16} aria-hidden />}
       >
-        Try it now
+        Try it out
       </LinkButton>
     </Box>
   );
@@ -319,8 +319,8 @@ export function EnvironmentFlowCard({
   const steps = stepsFor(env);
   const last = isLast(env);
   // The one-primary rule: Promote takes it the moment it is legal; until then
-  // Try it now holds it. Only the entry environment has a promote control at
-  // all, so a deployed final environment keeps Try it now primary.
+  // Try it out holds it. Only the entry environment has a promote control at
+  // all, so a deployed final environment keeps Try it out primary.
   const promoteReady = entry && Boolean(promote?.enabled);
   const cardVersion = entry ? version : (row.version ?? "");
   const holdRow =
@@ -433,7 +433,7 @@ export function EnvironmentFlowCard({
             <Skeleton variant="rounded" height={36} width={220} data-testid="try-skeleton" />
           ) : (
             (bound || hold) && (
-              <TryItNow
+              <TryItOutAction
                 projectName={projectName}
                 environment={row.environment}
                 disabled={Boolean(hold) || !bound}

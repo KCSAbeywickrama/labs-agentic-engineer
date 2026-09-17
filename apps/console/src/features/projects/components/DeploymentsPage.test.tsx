@@ -914,7 +914,7 @@ describe("DeploymentsPage — promotion", () => {
 });
 
 describe("DeploymentsPage — the flow (ADR-0032)", () => {
-  it("reads top to bottom as deployed → validation → promote, with Try it now", () => {
+  it("reads top to bottom as deployed → validation → promote, with Try it out", () => {
     mockDeploy = {
       version: "v1",
       status: "deployed",
@@ -948,7 +948,7 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
     expect(within(steps[0]!).getByText("Live")).toBeInTheDocument();
     expect(within(steps[0]!).getByRole("group", { name: "Dependencies — 1 of 1 set" })).toBeInTheDocument();
     expect(within(steps[0]!).getByText("Set")).toBeInTheDocument();
-    const tryIt = within(steps[0]!).getByRole("link", { name: /Try it now/ });
+    const tryIt = within(steps[0]!).getByRole("link", { name: /Try it out/ });
     expect(tryIt).toHaveAttribute("href", "/projects/acme/deployments/development");
     expect(tryIt).not.toHaveAttribute("aria-disabled", "true");
     // The button stands alone, as the design draws it: no caption beside it,
@@ -1015,8 +1015,8 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
     expect(within(steps[0]!).getByRole("group", { name: "Components — 0 of 1 deployed · on hold" })).toBeInTheDocument();
     expect(within(steps[0]!).getByText("Needs stripe")).toBeInTheDocument();
     expect(within(steps[0]!).getByText("Missing")).toBeInTheDocument();
-    // Try it now is drawn, and disabled.
-    expect(within(steps[0]!).getByRole("link", { name: /Try it now/ })).toHaveAttribute("aria-disabled", "true");
+    // Try it out is drawn, and disabled.
+    expect(within(steps[0]!).getByRole("link", { name: /Try it out/ })).toHaveAttribute("aria-disabled", "true");
     // Steps 2 and 3 are inactive with one line each.
     expect(within(steps[1]!).getByText("Runs once something is deployed here.")).toBeInTheDocument();
     expect(within(steps[2]!).getByText("Unavailable until v1 deploys and validates")).toBeInTheDocument();
