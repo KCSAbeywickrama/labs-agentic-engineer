@@ -109,3 +109,23 @@ export function reachableScreens(
     return canCall(OPERATIONS[screen.loads], scopes, signedIn);
   });
 }
+
+/**
+ * Does this caller reach anything their scopes actually earned them?
+ *
+ * This is the NoAccess question, and it is NOT "is `reachableScreens` empty".
+ * A `loads: null` form is reachable by any signed-in caller by design — its
+ * submit is gated separately — and a `public` screen by everyone. So an app
+ * holding even one of either makes `reachableScreens` non-empty for a caller
+ * with NO scopes at all, and the NoAccess screen, whose whole job is to
+ * explain that situation, can never render.
+ *
+ * Measured, not hypothesised: two independently generated apps built from the
+ * same spec both landed a zero-scope caller on a form with an empty rail, and
+ * each walk patched it in a different place. Deciding it here keeps the two
+ * answers — what goes in the rail, and whether there is anything to show —
+ * from having to be kept in step by whoever copies this file.
+ */
+export function hasScopedReach(scopes: ReadonlySet<string>, signedIn: boolean): boolean {
+  return reachableScreens(scopes, signedIn).some((screen) => !screen.public && screen.loads !== null);
+}

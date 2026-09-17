@@ -192,9 +192,10 @@ subagent you handed it to, keeps its status line current from start to done
 2. **Make the change it asks for**, holding to
    `references/component-contract.md` and the stack skills of every component it
    touches.
-3. **A `web-application` is finished by a walk, not a build.** Once its build is
-   clean, dispatch **one more subagent** for that component with exactly this
-   prompt, and nothing about how to walk:
+3. **A `web-application` is finished by a walk, not a build.** The moment its
+   builder reports clean — not when the rest of the wave has — dispatch **one
+   more subagent** for that component with exactly this prompt, and nothing
+   about how to walk:
 
    ```text
    Walk <component> at <App Path>. Load `mock-verification` and
@@ -317,10 +318,15 @@ component's wiring, review one that has come back — instead of spending the wh
 wave inside one blocked tool call. Short prompts are what make one message
 possible.
 
-**Wait for every one of them with the wait tool before you stage or commit
-anything.** A subagent that has not reported is not done, whatever the tree looks
-like: the files it is still writing are already on disk, so a commit taken early
-ships half an issue.
+**Wait for one at a time, and act on each report as it lands.** A wait placed on
+two builders in one turn returns when the slower one does, and the report that
+came back first sits unread while it builds. So wait on the one you expect
+first, and when it reports, do what that report unlocks before waiting again — a
+`web-application` that reports clean gets its walk dispatched then (step 3),
+with its siblings still building. Only the **commit** waits for the whole issue:
+a subagent that has not reported is not done, whatever the tree looks like, and
+the files it is still writing are already on disk, so a commit taken early ships
+half an issue.
 
 **Inside a subagent, every command runs in the foreground** — a subagent never
 backgrounds a shell call. A build left running in the background lets the

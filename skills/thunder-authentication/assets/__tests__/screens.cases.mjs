@@ -1,0 +1,122 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+// The cases for ../screens.example.ts — the screen-reachability half of the
+// pattern, and in particular WHICH QUESTION DECIDES NoAccess.
+//
+// That file is a template: it imports `./core` and `./operations.gen`, which
+// only resolve once it has been copied into a generated app. So this assembles
+// the smallest app that makes it importable — the real `core.ts` and the
+// committed Expense Tracker `.gen` fixtures beside it, in a temp dir — rather
+// than re-implementing the rule and testing the re-implementation.
+//
+// NOT named *.test.mjs: importing .ts needs `--experimental-strip-types` on the
+// pinned Node, and the repo-wide runner passes no flags. ./screens.test.mjs is
+// the wrapper. Run directly with
+//
+//   node --experimental-strip-types --test screens.cases.mjs
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import path from "node:path";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const assets = path.dirname(here);
+
+/**
+ * The app's own imports are extensionless (`from "./core"`), which is what a
+ * bundler resolves and what every generated app therefore ships. Node's ESM
+ * resolver is not a bundler and needs the extension, so the harness adds it on
+ * the way into the temp dir. It rewrites how the modules FIND each other, never
+ * what they do — the rule under test is copied byte for byte.
+ */
+// `path.extname` is the wrong test here: "./operations.gen" has an "extension"
+// of ".gen" and would be left alone. Only a real module extension counts.
+const addExtensions = (src) =>
+  src.replace(/(from\s+")(\.\/[A-Za-z0-9_.-]+)(")/g, (m, a, spec, b) =>
+    /\.(ts|tsx|js|mjs|cjs|json)$/.test(spec) ? m : `${a}${spec}.ts${b}`,
+  );
+
+/** The smallest generated app that makes screens.example.ts importable. */
+function materialize() {
+  const dir = mkdtempSync(path.join(tmpdir(), "authz-screens-"));
+  const authz = path.join(dir, "src", "authz");
+  mkdirSync(authz, { recursive: true });
+  const put = (name, src) => writeFileSync(path.join(authz, name), addExtensions(src));
+
+  put("core.ts", readFileSync(path.join(assets, "app/src/authz/core.ts"), "utf8"));
+  // The fixtures are committed as .txt so the repo's own tsc never compiles a
+  // file that is an EXAMPLE of generated output rather than generated output.
+  put("roles.gen.ts", readFileSync(path.join(here, "expense-tracker.roles.gen.txt"), "utf8"));
+  put("operations.gen.ts", readFileSync(path.join(here, "expense-tracker.operations.gen.txt"), "utf8"));
+  put("screens.ts", readFileSync(path.join(assets, "screens.example.ts"), "utf8"));
+  return pathToFileURL(path.join(authz, "screens.ts")).href;
+}
+
+const mod = await import(materialize());
+const { reachableScreens, hasScopedReach, SCREEN_ROUTES } = mod;
+
+const held = (...scopes) => new Set(scopes);
+
+// The Expense Tracker table is the fixture, and it has exactly the shape that
+// hides the bug: `submitclaim` is a form, so `loads: null`.
+test("the fixture still contains a loads:null screen — without one this file proves nothing", () => {
+  assert.ok(
+    SCREEN_ROUTES.some((s) => s.loads === null),
+    "expected at least one loads:null screen in the example table",
+  );
+});
+
+test("a loads:null form stays reachable for any signed-in caller — that is the design", () => {
+  const reachable = reachableScreens(held(), true).map((s) => s.key);
+  assert.ok(reachable.includes("submitclaim"), `expected the form to be reachable, got ${reachable}`);
+});
+
+test("NoAccess: a signed-in caller holding no scope has no scoped reach", () => {
+  // THE REGRESSION. `reachableScreens` is NOT empty here — the form is in it —
+  // so an App gating NoAccess on `reachable.length === 0` would drop this
+  // caller onto a form with an empty rail instead of the screen that explains
+  // they have nothing. Two independently generated apps did exactly that
+  // (2026-09-17, track-each-hire9665 and its re-run) and each walk patched it
+  // somewhere different.
+  assert.ok(reachableScreens(held(), true).length > 0, "precondition: the form keeps the list non-empty");
+  assert.equal(hasScopedReach(held(), true), false);
+});
+
+test("NoAccess: one scope-gated screen is enough to have somewhere to go", () => {
+  assert.equal(hasScopedReach(held("claims:read"), true), true);
+});
+
+test("a visitor who is not signed in has no scoped reach", () => {
+  assert.equal(hasScopedReach(held(), false), false);
+});
+
+test("scoped reach never counts a public screen — it is reachable by everyone", () => {
+  const publicOnly = SCREEN_ROUTES.filter((s) => s.public);
+  for (const screen of publicOnly) {
+    assert.ok(
+      !reachableScreens(held(), true).filter((s) => !s.public && s.loads !== null).includes(screen),
+      "a public screen must not count toward scoped reach",
+    );
+  }
+  // Holding nothing, with public screens present, is still NoAccess.
+  assert.equal(hasScopedReach(held(), true), false);
+});
