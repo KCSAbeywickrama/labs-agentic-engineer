@@ -22,18 +22,16 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../features/projects/components/DeploymentEnvironmentPage", () => ({
   DeploymentEnvironmentPage: () => null,
 }));
-vi.mock("../features/projects/components/DeploymentVersionPage", () => ({
-  DeploymentVersionPage: () => null,
-}));
-
 import { Route as environmentIndexRoute } from "./projects.$projectName.deployments.$environment.index";
-import { Route as versionRoute } from "./projects.$projectName.deployments.$environment.$version";
 
 // Vite-native absence checks (the console tsconfig only carries vite/client
 // types, so node:fs would fail `tsc`) — same pattern as
 // settings.resources.absent.test.ts.
 const tryOutRouteFile = import.meta.glob(
   "./projects.$projectName.deployments.$environment.try-out.tsx",
+);
+const versionRouteFile = import.meta.glob(
+  "./projects.$projectName.deployments.$environment.$version.tsx",
 );
 const routeTreeRaw = import.meta.glob("../generated/routeTree.gen.ts", {
   query: "?raw",
@@ -61,8 +59,8 @@ describe("deployment routes (§6)", () => {
     expect(gen).toContain("'/projects/$projectName/deployments/$environment/'");
   });
 
-  it("mounts the version page as its own route, with no redirect of its own", () => {
-    expect(versionRoute.options.component).toBeDefined();
-    expect(versionRoute.options.beforeLoad).toBeUndefined();
+  it("knows no per-version URL — a superseded version is a row, not a page", () => {
+    expect(Object.keys(versionRouteFile)).toHaveLength(0);
+    expect(gen).not.toContain("deployments/$environment/$version");
   });
 });

@@ -26,12 +26,9 @@ import {
   environmentRows,
   environmentStatus,
   latestDeployedAt,
-  ledgerRows,
   milestoneFor,
   shortSha,
   validationCell,
-  versionLedgerRows,
-  type EnvironmentRow,
 } from "./deploymentLedger";
 
 type DeployStage = components["schemas"]["DeployStage"];
@@ -136,12 +133,11 @@ describe("environmentStatus", () => {
   });
 });
 
-describe("environmentRows / ledgerRows", () => {
+describe("environmentRows", () => {
   it("seats every environment the pipeline names, bound or not", () => {
     // Intent changed with the N-environment board (task 6): production used
     // to get a row only once something was bound to it. Absence is now
-    // information on the board, so it has a row either way — and the ledger,
-    // which lists environments that RUN something, still shows neither.
+    // information on the board, so it has a row either way.
     const rows = environmentRows(
       new Map([["development", [card({ kind: "notDeployed" })]]]),
       [development, production],
@@ -149,8 +145,7 @@ describe("environmentRows / ledgerRows", () => {
     );
     expect(rows.map((r) => r.environment)).toEqual(["development", "production"]);
     expect(rows[1]?.status.label).toBe("Nothing deployed");
-    // Nothing is bound anywhere, so the ledger has no row to show.
-    expect(ledgerRows(rows)).toEqual([]);
+    expect(rows.every((r) => r.cards.every((c) => !c.deployment))).toBe(true);
   });
 
   it("carries the first environment's version, the live count and the newest stamp", () => {
@@ -202,10 +197,6 @@ describe("environmentRows / ledgerRows", () => {
     // later environment's is a guess the console does not make.
     expect(prod?.version).toBeUndefined();
     expect(prod?.status.label).toBe("Deployed");
-    expect(ledgerRows(rows).map((r) => r.environment)).toEqual([
-      "development",
-      "production",
-    ]);
   });
 });
 
@@ -357,102 +348,3 @@ describe("shortSha / commitUrl", () => {
   });
 });
 
-describe("versionLedgerRows (#779)", () => {
-  const dev = (over: Partial<EnvironmentRow> = {}): EnvironmentRow => ({
-    environment: "development",
-    label: "Development",
-    version: "v2",
-    cards: [
-      {
-        componentName: "web",
-        displayName: "web",
-        kind: "success",
-        deployment: { componentName: "web", environment: "development", status: "Ready", createdAt: "2026-09-12T10:00:00Z" },
-      },
-    ],
-    status: { label: "Deployed", tone: "success", live: false },
-    live: 1,
-    total: 1,
-    deployedAt: "2026-09-12T10:00:00Z",
-    ...over,
-  });
-  const builds = [
-    { tag: "v1", milestoneNumber: 1, status: "completed" as const, startedAt: "2026-09-01T09:00:00Z", completedAt: "2026-09-01T10:00:00Z" },
-    { tag: "v3", milestoneNumber: 3, status: "in_progress" as const, startedAt: "2026-09-14T09:00:00Z" },
-    { tag: "v2", milestoneNumber: 2, status: "completed" as const, startedAt: "2026-09-10T09:00:00Z", completedAt: "2026-09-10T11:00:00Z" },
-  ];
-
-  it("lists every built version for development, newest first, the live one with its binding's stamp", () => {
-    const rows = versionLedgerRows([dev()], builds);
-    expect(rows.map((r) => [r.version, r.status.label, r.current, r.builtAt, r.deployedAt])).toEqual([
-      ["v3", "Building", false, undefined, undefined],
-      ["v2", "Deployed", true, "2026-09-10T11:00:00Z", "2026-09-12T10:00:00Z"],
-      ["v1", "Superseded", false, "2026-09-01T10:00:00Z", undefined],
-    ]);
-  });
-
-  it("reads a failed or cancelled build as such, never as superseded", () => {
-    const rows = versionLedgerRows(
-      [dev()],
-      [
-        ...builds,
-        { tag: "v0", milestoneNumber: 0, status: "failed" as const, startedAt: "2026-08-01T09:00:00Z", completedAt: "2026-08-01T09:30:00Z" },
-        { tag: "v0b", milestoneNumber: 0, status: "cancelled" as const, startedAt: "2026-08-02T09:00:00Z" },
-      ],
-    );
-    expect(rows.find((r) => r.version === "v0")?.status.label).toBe("Build failed");
-    expect(rows.find((r) => r.version === "v0b")?.status.label).toBe("Cancelled");
-  });
-
-  it("keeps a dev binding the ledger does not list, first, as the live row", () => {
-    const rows = versionLedgerRows([dev({ version: "v9" })], builds);
-    expect(rows[0]).toMatchObject({ version: "v9", current: true, status: { label: "Deployed" } });
-    expect(rows).toHaveLength(4);
-  });
-
-  it("places a legacy live version by its deploy stamp, so newer builds stay above it", () => {
-    const rows = versionLedgerRows(
-      [dev({ version: "v9", deployedAt: "2026-09-02T10:00:00Z" })],
-      builds.filter((b) => b.tag !== "v3"),
-    );
-    expect(rows.map((r) => r.version)).toEqual(["v2", "v9", "v1"]);
-    expect(rows[1]).toMatchObject({ current: true, status: { label: "Deployed" } });
-  });
-
-  it("adds production's current row only, without a version the aggregate never names", () => {
-    const prod: EnvironmentRow = {
-      environment: "production",
-      label: "Production",
-      cards: [
-        {
-          componentName: "web",
-          displayName: "web",
-          kind: "success",
-          deployment: { componentName: "web", environment: "production", status: "Ready", createdAt: "2026-09-13T10:00:00Z" },
-        },
-      ],
-      status: { label: "Deployed", tone: "success", live: false },
-      live: 1,
-      total: 1,
-      deployedAt: "2026-09-13T10:00:00Z",
-    };
-    const rows = versionLedgerRows([dev(), prod], builds);
-    const last = rows[rows.length - 1];
-    expect(last).toMatchObject({ environment: "production", current: true, deployedAt: "2026-09-13T10:00:00Z" });
-    expect(last?.version).toBeUndefined();
-    // …and an empty production has no row at all.
-    expect(versionLedgerRows([dev(), { ...prod, cards: [], live: 0, total: 0 }], builds).every((r) => r.environment === "development")).toBe(true);
-  });
-
-  it("lists nothing while nothing is built and nothing is bound", () => {
-    const empty: EnvironmentRow = {
-      environment: "development",
-      label: "Development",
-      cards: [],
-      status: { label: "Nothing deployed", tone: "neutral", live: false },
-      live: 0,
-      total: 0,
-    };
-    expect(versionLedgerRows([empty], [])).toEqual([]);
-  });
-});

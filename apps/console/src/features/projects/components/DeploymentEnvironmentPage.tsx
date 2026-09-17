@@ -68,14 +68,26 @@ import { TryItOutCard, useTestUsers } from "./TryItOut";
 const LinkButton = createLink(Button);
 
 /**
- * TRY OUT (#779; ADR-0032, the Deployment Detail design) — the environment's
- * live components as things a person can act on: a web application is visited
- * and carries the test users that sign in to it, a service lists its endpoints
- * off its contract with a curl each. The connections the environment runs
- * with are the version page's (#779 review). What a deployment IS (its version, commit, verdict) is the
- * version page's business (`DeploymentVersionPage`), not this one's. Keyed by
- * ENVIRONMENT because a release binding is current state: there is exactly
- * one deployment per environment to try.
+ * THE ENVIRONMENT PAGE (the multi-environment design, §6) — the one page under
+ * Deployments, in four sections and this order:
+ *
+ *   1. Deployment — what runs here now, and where it came from.
+ *   2. Try it out — the live components as things a person can act on: a web
+ *      application is visited and carries the test users that sign in to it, a
+ *      service lists its endpoints off its contract with a curl each.
+ *   3. Dependencies — what the design depends on, and whether this
+ *      environment holds values for it.
+ *   4. Past deployments — what has run here. There is no per-version page any
+ *      more; a superseded version is a row.
+ *
+ * Keyed by ENVIRONMENT because a release binding is current state: there is
+ * exactly one deployment per environment.
+ *
+ * Only the pipeline's ENTRY environment can resolve a version, a milestone, a
+ * commit, a verdict, dependency readiness or a past. A later environment
+ * omits each of them rather than showing the entry environment's under its own
+ * name, and every section says when a read is still out or failed rather than
+ * drawing an empty state that would be a claim.
  */
 export function DeploymentEnvironmentPage({
   projectName,
