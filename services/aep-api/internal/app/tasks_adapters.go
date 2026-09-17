@@ -28,10 +28,10 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/delivery/codingagent"
 	"github.com/wso2/aep/aep-api/internal/delivery/execution"
 	"github.com/wso2/aep/aep-api/internal/delivery/task"
-	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/dependencies/provisioning"
 	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/spec"
@@ -282,10 +282,6 @@ func (p provisionProjects) ListProjects(ctx context.Context, orgID string) ([]pr
 // this composition-root package needs to import both.
 type environmentLister struct{ client openchoreo.EnvironmentClient }
 
-func (e environmentLister) ListNames(ctx context.Context, orgID string) ([]string, error) {
-	return e.client.ListNames(ctx, orgID)
-}
-
 func (e environmentLister) List(ctx context.Context, orgID string) ([]provisioning.EnvironmentInfo, error) {
 	infos, err := e.client.List(ctx, orgID)
 	if err != nil {
@@ -301,6 +297,22 @@ func (e environmentLister) List(ctx context.Context, orgID string) ([]provisioni
 		})
 	}
 	return out, nil
+}
+
+// pipelineLister adapts openchoreo.ProjectCellClient onto
+// provisioning.PipelineLister: both methods already match the port's shape
+// 1:1 (both read plain names off the OC deployment-pipeline CRs), so this
+// adapter exists only to keep the provisioning package from depending on the
+// openchoreo client type directly — the same boundary environmentLister
+// draws for EnvironmentClient.
+type pipelineLister struct{ client openchoreo.ProjectCellClient }
+
+func (p pipelineLister) ListPipelineNames(ctx context.Context, orgID string) ([]string, error) {
+	return p.client.ListPipelineNames(ctx, orgID)
+}
+
+func (p pipelineLister) PipelineEnvironments(ctx context.Context, orgID, pipelineName string) ([]string, error) {
+	return p.client.PipelineEnvironments(ctx, orgID, pipelineName)
 }
 
 // identities projects organization.CredentialService.IdentityFor onto the
