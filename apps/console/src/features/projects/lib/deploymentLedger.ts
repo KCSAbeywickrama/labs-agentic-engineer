@@ -341,6 +341,16 @@ export function milestoneFor(
   return build ? `Milestone #${build.milestoneNumber}` : undefined;
 }
 
+/** The ledger entry a version's tag names, when the ledger knows it — the one
+ *  row that carries both the milestone number and the build's own stamps. */
+export function buildFor(
+  version: string | undefined,
+  builds: BuildSummary[] | undefined,
+): BuildSummary | undefined {
+  if (!version) return undefined;
+  return builds?.find((b) => b.tag === version);
+}
+
 export interface ValidationCell {
   label: string;
   tone: StatusTone;
@@ -412,4 +422,16 @@ export function commitUrl(repoUrl: string | undefined, sha: string): string | un
   if (!repoUrl || !sha) return undefined;
   const root = repoUrl.replace(/\/+$/, "").replace(/\.git$/, "");
   return `${root}/commit/${sha}`;
+}
+
+/** The milestone's page on the project's repository — the same `repoUrl`
+ *  normalisation `commitUrl` makes, so the two links can never disagree about
+ *  which repository they point at. */
+export function milestoneUrl(
+  repoUrl: string | undefined,
+  milestoneNumber: number | undefined,
+): string | undefined {
+  if (!repoUrl || !milestoneNumber) return undefined;
+  const root = repoUrl.replace(/\/+$/, "").replace(/\.git$/, "");
+  return `${root}/milestone/${milestoneNumber}`;
 }

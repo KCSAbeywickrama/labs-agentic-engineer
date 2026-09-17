@@ -179,10 +179,10 @@ export function holdSentence(hold: DeployHold): string {
   const n = hold.blocking.length;
   const what =
     n === 0
-      ? "its connection values are"
+      ? "its dependency values are"
       : n === 1
-        ? "one connection value is"
-        : `${n} connection values are`;
+        ? "one dependency value is"
+        : `${n} dependency values are`;
   return `Deployment is on hold until ${what} set. It continues automatically.`;
 }
 
@@ -195,7 +195,7 @@ export function holdNotice(hold: DeployHold): { title: string; body: string } {
     .sort();
   const title = named
     ? `Needs a value for ${named} before deploying`
-    : "Needs a connection value before deploying";
+    : "Needs a dependency value before deploying";
   const who =
     dependents.length > 0
       ? `${listNames(dependents)} depend${dependents.length === 1 ? "s" : ""} on it.`

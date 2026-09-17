@@ -155,7 +155,9 @@ export function ConnectionsGroup({
   onConfigure: (row: ConnectionRow) => void;
 }) {
   return (
-    <GroupList title="Connections" caption={caption}>
+    // "Dependencies" is what this surface calls them; the component and its
+    // props keep the contract's word.
+    <GroupList title="Dependencies" caption={caption}>
       {lines.map((l) => (
         <GroupRow
           key={l.row.id}

@@ -45,7 +45,7 @@ import {
   type DeployHold,
   type PromoteStep,
 } from "../lib/deploymentFlow";
-import { agoLabel, type EnvironmentRow } from "../lib/deploymentLedger";
+import { agoLabel, shortSha, type EnvironmentRow } from "../lib/deploymentLedger";
 import {
   isLast,
   stepsFor,
@@ -63,6 +63,98 @@ const LinkButton = createLink(Button);
 /** The environment name as a real link: keyboard reachable, and openable
  *  in a new tab, which a click handler on the card alone is not. */
 const NameLink = createLink(UiLink);
+
+/**
+ * The version the Deployment step is about, and where it came from — the
+ * card's most prominent fact, in a tinted block directly under the step's
+ * title (the header used to carry it as small grey text beside the name).
+ *
+ * Nothing here is ever stated as fact when it is not known. An unsettled read
+ * draws a skeleton; a settled read that names no version says so in words —
+ * "Version unknown" — and the second line is omitted outright when neither
+ * the build's stamp nor its commit came back, rather than printing a dash
+ * where a date or a sha should be.
+ */
+function VersionBlock({
+  version,
+  milestone,
+  milestoneHref,
+  builtAt,
+  commit,
+  pending,
+}: {
+  /** The version this card runs; empty when the read settled without one. */
+  version: string;
+  milestone?: string | undefined;
+  /** The entry version's milestone page on the project's repository; absent
+   *  when the repo URL or the milestone number is not known. */
+  milestoneHref?: string | undefined;
+  /** When the entry version's build finished, already formatted for display;
+   *  absent when the ledger has no stamp for it. */
+  builtAt?: string | undefined;
+  /** The commit the entry version shipped. `"loading"` while the run story is
+   *  still out; absent when it named none. */
+  commit?: { sha: string; href?: string | undefined } | "loading" | undefined;
+  /** The read that names the version is still out (or failed). */
+  pending: boolean;
+}) {
+  if (pending) {
+    return <Skeleton variant="rounded" height={56} data-testid="version-block-skeleton" />;
+  }
+  // "loading" is not a commit — the run story is still out, so the line stays
+  // silent about it rather than printing a placeholder sha.
+  const sha = commit && commit !== "loading" ? commit : undefined;
+  const stop = (event: React.MouseEvent) => event.stopPropagation();
+  return (
+    <Box
+      data-testid="version-block"
+      sx={(theme) => ({
+        px: 1.5,
+        py: 1,
+        borderRadius: 1,
+        bgcolor: alpha(theme.palette.text.primary, 0.04),
+      })}
+    >
+      <Stack direction="row" spacing={0.75} sx={{ alignItems: "baseline", flexWrap: "wrap" }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+          {version ? `Version ${version}` : "Version unknown"}
+        </Typography>
+        {milestone && (
+          <Typography variant="body2" color="text.secondary">
+            ·{" "}
+            {milestoneHref ? (
+              <UiLink href={milestoneHref} target="_blank" rel="noreferrer" onClick={stop}>
+                {milestone}
+              </UiLink>
+            ) : (
+              milestone
+            )}
+          </Typography>
+        )}
+      </Stack>
+      {(builtAt || sha) && (
+        <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.25 }}>
+          {builtAt && `Built ${builtAt}`}
+          {builtAt && sha && " · "}
+          {sha && (
+            <>
+              {"commit "}
+              {sha.href ? (
+                <UiLink href={sha.href} target="_blank" rel="noreferrer" onClick={stop}>
+                  {shortSha(sha.sha)}
+                </UiLink>
+              ) : (
+                <Box component="span" sx={{ fontFamily: "monospace" }}>
+                  {shortSha(sha.sha)}
+                </Box>
+              )}
+            </>
+          )}
+        </Typography>
+      )}
+    </Box>
+  );
+}
 
 /** "Try it now →" — the one primary action on the card, into the environment
  *  page where the app, the endpoints and the test users are. */
@@ -118,6 +210,15 @@ export interface EnvironmentFlowDetail {
   /** The version the ENTRY card is about: deployed, or building. */
   version: string;
   milestone?: string | undefined;
+  /** The entry version's milestone page on the project's repository; absent
+   *  when the repo URL or the milestone number is not known. */
+  milestoneHref?: string | undefined;
+  /** When the entry version's build finished, already formatted for display;
+   *  absent when the ledger has no stamp for it. */
+  builtAt?: string | undefined;
+  /** The commit the entry version shipped. `"loading"` while the run story is
+   *  still out; absent when it named none. */
+  commit?: { sha: string; href?: string | undefined } | "loading" | undefined;
   validation: { verdict: string; repairing: boolean; counts?: ValidationCounts | undefined };
   hold: DeployHold | null;
   componentTypes: Map<string, string>;
@@ -210,11 +311,6 @@ export function EnvironmentFlowCard({
   // all, so a deployed final environment keeps Try it now primary.
   const promoteReady = entry && Boolean(promote?.enabled);
   const cardVersion = entry ? version : (row.version ?? "");
-  const aside = cardVersion
-    ? entry && milestone
-      ? `${cardVersion} · ${milestone}`
-      : cardVersion
-    : undefined;
   const holdRow =
     hold && connections
       ? connections.find((l) => l.state === "missing" && l.configure)?.row
@@ -246,6 +342,23 @@ export function EnvironmentFlowCard({
           last={isTrailing}
           grow={grow}
         >
+          {(bound || hold) && (
+            <VersionBlock
+              version={cardVersion}
+              // The milestone, the build stamp and the commit answer for the
+              // version the deploy aggregate names — the ENTRY environment's.
+              // A later card states its own version and nothing more.
+              {...(entry
+                ? {
+                    ...(milestone ? { milestone } : {}),
+                    ...(detail.milestoneHref ? { milestoneHref: detail.milestoneHref } : {}),
+                    ...(detail.builtAt ? { builtAt: detail.builtAt } : {}),
+                    ...(detail.commit ? { commit: detail.commit } : {}),
+                  }
+                : {})}
+              pending={entry && pending.deploy}
+            />
+          )}
           {hold && (
             <>
               {(() => {
@@ -561,16 +674,13 @@ export function EnvironmentFlowCard({
           </Typography>
           <StatusChip label={row.status.label} tone={row.status.tone} appearance="soft" dot />
           <Box sx={{ flex: 1 }} />
-          {aside ? (
+          {/* The version and its milestone used to sit here as small grey
+              text. They lead the Deployment step now (`VersionBlock`), so the
+              header carries only how long ago this environment last changed. */}
+          {row.deployedAt && (
             <Typography variant="caption" color="text.secondary">
-              {aside}
+              {agoLabel(row.deployedAt)}
             </Typography>
-          ) : (
-            row.deployedAt && (
-              <Typography variant="caption" color="text.secondary">
-                {agoLabel(row.deployedAt)}
-              </Typography>
-            )
           )}
         </Stack>
         <Box

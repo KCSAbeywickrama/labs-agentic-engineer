@@ -164,7 +164,7 @@ describe("deployHold", () => {
   it("keeps a park the row could not name, rather than silencing it", () => {
     const hold = deployHold([run({ state: "waiting", waitingReason: "external-values" })], design);
     expect(hold).toEqual({ blocking: [], dependents: {} });
-    expect(holdNotice(hold!).title).toBe("Needs a connection value before deploying");
+    expect(holdNotice(hold!).title).toBe("Needs a dependency value before deploying");
   });
 });
 
@@ -327,12 +327,12 @@ describe("promoteStep", () => {
 describe("holdSentence", () => {
   it("counts the values owed, and says a park that named none without a count", () => {
     expect(holdSentence({ blocking: ["stripe"], dependents: {} }))
-      .toBe("Deployment is on hold until one connection value is set. It continues automatically.");
+      .toBe("Deployment is on hold until one dependency value is set. It continues automatically.");
     expect(holdSentence({ blocking: ["stripe", "sendgrid"], dependents: {} }))
-      .toBe("Deployment is on hold until 2 connection values are set. It continues automatically.");
+      .toBe("Deployment is on hold until 2 dependency values are set. It continues automatically.");
     // An older row, or a lost write: parked, and nothing named — not "0 values".
     expect(holdSentence({ blocking: [], dependents: {} }))
-      .toBe("Deployment is on hold until its connection values are set. It continues automatically.");
+      .toBe("Deployment is on hold until its dependency values are set. It continues automatically.");
   });
 });
 

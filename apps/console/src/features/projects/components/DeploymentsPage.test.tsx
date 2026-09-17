@@ -501,20 +501,27 @@ describe("DeploymentsPage — environment board", () => {
     expect(screen.getByRole("heading", { name: "Development" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Production" })).toBeInTheDocument();
     // The dev card's first step says what is live and invites the try, and
-    // its header carries the version with the milestone read off the version
-    // ledger.
+    // LEADS with the version, in the block under the Deployment step's title —
+    // the milestone read off the version ledger, linked to its GitHub page.
     const development = screen.getByTestId("environment-card-development");
     expect(screen.getByText(/1 of 1 components live.* You can try them now\./)).toBeInTheDocument();
-    expect(within(development).getByText("v1 · Milestone #3")).toBeInTheDocument();
+    const vm = within(development).getByTestId("version-block");
+    expect(within(vm).getByText("Version v1")).toBeInTheDocument();
+    expect(within(vm).getByRole("link", { name: "Milestone #3" })).toHaveAttribute(
+      "href",
+      "https://github.com/acme/demo/milestone/3",
+    );
     // Development's group reads unknown values as not set while the
     // readiness read is out — and it is Development's alone.
-    expect(within(development).getByRole("group", { name: "Connections — 0 of 1 set" })).toBeInTheDocument();
+    expect(within(development).getByRole("group", { name: "Dependencies — 0 of 1 set" })).toBeInTheDocument();
     // Production is empty and stays so: it lists nothing, and its own card
     // says what has to happen before anything runs there.
     const production = screen.getByTestId("environment-card-production");
     expect(within(production).getByText("Deploys when a version is promoted to Production.")).toBeInTheDocument();
     expect(within(production).queryByRole("group", { name: /^Components/ })).not.toBeInTheDocument();
-    expect(within(production).queryByRole("group", { name: /^Connections/ })).not.toBeInTheDocument();
+    expect(within(production).queryByRole("group", { name: /^Dependencies/ })).not.toBeInTheDocument();
+    // …and a card with nothing bound carries no version block at all.
+    expect(within(production).queryByTestId("version-block")).not.toBeInTheDocument();
   });
 
   it("upgrades the validation banner with criteria counts", () => {
@@ -928,14 +935,15 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
       "Step 2, Validation, Running",
       "Step 3, Promote to Production",
     ]);
-    // The header carries the version and its milestone.
-    expect(screen.getByText("v1 · Milestone #3")).toBeInTheDocument();
-    // Step 1: the components and the connections, then the one primary action.
+    // The Deployment step LEADS with the version and its milestone.
+    expect(within(steps[0]!).getByText("Version v1")).toBeInTheDocument();
+    expect(within(steps[0]!).getByRole("link", { name: "Milestone #3" })).toBeInTheDocument();
+    // Step 1: the components and the dependencies, then the one primary action.
     expect(within(steps[0]!).getByRole("group", { name: "Components — 1 of 1 live" })).toBeInTheDocument();
     expect(within(steps[0]!).getByText("Storefront")).toBeInTheDocument();
     expect(within(steps[0]!).getByText("web app")).toBeInTheDocument();
     expect(within(steps[0]!).getByText("Live")).toBeInTheDocument();
-    expect(within(steps[0]!).getByRole("group", { name: "Connections — 1 of 1 set" })).toBeInTheDocument();
+    expect(within(steps[0]!).getByRole("group", { name: "Dependencies — 1 of 1 set" })).toBeInTheDocument();
     expect(within(steps[0]!).getByText("Set")).toBeInTheDocument();
     const tryIt = within(steps[0]!).getByRole("link", { name: /Try it now/ });
     expect(tryIt).toHaveAttribute("href", "/projects/acme/deployments/development/try-out");
@@ -970,7 +978,7 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
 
   // Artboard 9c: the newest run is parked at the deploy gate. The board says so
   // where the reader is — until now only the Builds page named the park.
-  it("reads on hold when the run is parked on a connection value", () => {
+  it("reads on hold when the run is parked on a dependency value", () => {
     mockDeploy = {
       version: "v1",
       status: "none",
@@ -994,7 +1002,7 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
       screen.getByText("storefront depends on it. Deployment continues automatically once it is set."),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Deployment is on hold until one connection value is set. It continues automatically."),
+      screen.getByText("Deployment is on hold until one dependency value is set. It continues automatically."),
     ).toBeInTheDocument();
     // The component names what it waits on; the connection is Missing.
     expect(within(steps[0]!).getByRole("group", { name: "Components — 0 of 1 deployed · on hold" })).toBeInTheDocument();
@@ -1027,7 +1035,7 @@ describe("DeploymentsPage — the flow (ADR-0032)", () => {
 
     render(<DeploymentsPage projectName="acme" />);
 
-    expect(screen.queryByRole("group", { name: /^Connections/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /^Dependencies/ })).not.toBeInTheDocument();
     expect(screen.getByTestId("connections-skeleton")).toBeInTheDocument();
     // Step 3 cannot know what is missing yet, so it does not say nothing is.
     expect(screen.queryByText(/has no production value/)).not.toBeInTheDocument();
@@ -1080,8 +1088,8 @@ describe("DeploymentsPage — the card's version (review round)", () => {
     // Step 3 is v1's too: validated, so only the missing value stands in the way.
     expect(within(steps[2]!).getByText("Enabled once the value is set")).toBeInTheDocument();
     expect(screen.queryByText("Enabled when validation passes")).not.toBeInTheDocument();
-    // …and the card is headed by the version it is about.
-    expect(screen.getByText(/^v1 ·|^v1$/)).toBeInTheDocument();
+    // …and the Deployment step leads with the version it is about.
+    expect(screen.getByText("Version v1")).toBeInTheDocument();
   });
 
   it("says a failed run-story read rather than drawing the ordinary state over it", () => {
@@ -1236,5 +1244,120 @@ describe("DeploymentsPage — the page is the pipeline", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(mockEnvironmentsRefetch).toHaveBeenCalled();
+  });
+});
+
+// The version and its milestone LEAD the Deployment step (the design's `.vm`
+// block). Everything in it is read off a settled read or it is not said: an
+// unsettled status poll draws a skeleton, a settled poll that named no version
+// says so in words, and the second line is omitted outright rather than
+// printing a dash where a stamp or a sha should be.
+describe("DeploymentsPage — the version block", () => {
+  /** A merged coding cycle — the one record of the commit a version shipped. */
+  function mergedRun(sha: string): MilestoneRunView {
+    return {
+      id: "run-merged",
+      milestoneNumber: 3,
+      milestoneTitle: "v1",
+      kind: "dev",
+      origin: "spec-build",
+      state: "succeeded",
+      budgets: { cyclesTotal: 1, cycleCeiling: 8, fixCycles: 0, fixCeiling: 3, conflictCycles: 0, conflictCeiling: 2 },
+      cycles: [
+        { id: "cycle-1", kind: "coding", attempts: 1, mergeSha: sha, createdAt: "2026-09-16T12:00:00Z" },
+      ],
+      createdAt: "2026-09-16T11:00:00Z",
+    } as unknown as MilestoneRunView;
+  }
+
+  it("carries the build stamp and the commit, both linked to the project's repository", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "passed",
+    };
+    mockBuilds = [
+      {
+        tag: "v1",
+        milestoneNumber: 3,
+        status: "completed",
+        startedAt: "2026-09-16T11:00:00Z",
+        completedAt: "2026-09-16T12:10:00Z",
+      },
+    ];
+    mockRuns = [mergedRun("4e8a0d6f9c1b2a3d4e5f60718293a4b5c6d7e8f9")];
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    const vm = within(screen.getByTestId("environment-card-development")).getByTestId(
+      "version-block",
+    );
+    expect(within(vm).getByText("Version v1")).toBeInTheDocument();
+    expect(within(vm).getByRole("link", { name: "Milestone #3" })).toHaveAttribute(
+      "href",
+      "https://github.com/acme/demo/milestone/3",
+    );
+    // The stamp is locale-formatted, so the assertion is on the SHAPE of the
+    // line — "Built <something> · commit <short sha>" — and on the link.
+    expect(vm.textContent).toMatch(/Built .+ · commit 4e8a0d6/);
+    expect(within(vm).getByRole("link", { name: "4e8a0d6" })).toHaveAttribute(
+      "href",
+      "https://github.com/acme/demo/commit/4e8a0d6f9c1b2a3d4e5f60718293a4b5c6d7e8f9",
+    );
+  });
+
+  it("says Version unknown, and omits the second line, when the reads name neither", () => {
+    // Something IS bound — so the block renders — but the poll settled without
+    // a version, the ledger holds no build for it, and no cycle merged.
+    mockDeploy = {
+      version: "",
+      status: "none",
+      components: { total: 1, ready: 1 },
+      validation: "none",
+    };
+    mockBuildVersion = "";
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    const vm = within(screen.getByTestId("environment-card-development")).getByTestId(
+      "version-block",
+    );
+    expect(within(vm).getByText("Version unknown")).toBeInTheDocument();
+    // No dash, no empty stamp, no placeholder sha — the line is simply absent.
+    expect(vm.textContent).not.toMatch(/Built/);
+    expect(vm.textContent).not.toMatch(/commit/);
+    expect(within(vm).queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("omits the built line while the commit is still out rather than placeholding it", () => {
+    mockDeploy = {
+      version: "v1",
+      status: "deployed",
+      components: { total: 1, ready: 1 },
+      validation: "passed",
+    };
+    mockBuilds = [{ tag: "v1", milestoneNumber: 3, status: "completed", startedAt: "2026-09-16T11:00:00Z" }];
+    mockRunsPending = true;
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    const vm = within(screen.getByTestId("environment-card-development")).getByTestId(
+      "version-block",
+    );
+    expect(within(vm).getByText("Version v1")).toBeInTheDocument();
+    // The build has no completion stamp and the run story has not settled, so
+    // there is nothing true to put on the second line.
+    expect(vm.textContent).not.toMatch(/commit/);
+  });
+
+  it("skeletons the block while the status poll that names the version is unsettled", () => {
+    mockStatusState = "pending";
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(screen.getByTestId("version-block-skeleton")).toBeInTheDocument();
+    expect(screen.queryByText("Version unknown")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("version-block")).not.toBeInTheDocument();
   });
 });

@@ -22,6 +22,8 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { EmptyState } from "../../../components/EmptyState";
 import { PageHeader } from "../../../components/PageHeader";
 import { useBuildRuns, useBuilds } from "../../builds/api/queries";
+import { runStamp } from "../../builds/lib/format";
+import { mergedCycle } from "../../builds/lib/runView";
 import { useDesignDependencies } from "../../spec/api/queries";
 import { useExternalResources } from "../../settings/api/queries";
 import { isRegisteredExternal } from "../../marketplace/kind";
@@ -41,7 +43,13 @@ import {
   developmentConnections,
   promoteStep,
 } from "../lib/deploymentFlow";
-import { environmentRows, milestoneFor } from "../lib/deploymentLedger";
+import {
+  buildFor,
+  commitUrl,
+  environmentRows,
+  milestoneFor,
+  milestoneUrl,
+} from "../lib/deploymentLedger";
 import { groupDeploymentCards } from "../lib/deploymentRows";
 import {
   connectionRows,
@@ -265,6 +273,24 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
   // Pending and failed alike: neither supports a claim about the deploy
   // aggregate, and every step that reads it must withhold rather than guess.
   const statusUnsettled = status.isPending || status.isError;
+  // What the card's VERSION block states, all off reads the page already
+  // makes. The run story keyed on the card's own version — the newest run's
+  // when the deployed version IS the build version, the tag-scoped read
+  // otherwise — so the sha under "Version v1" can never be v2's merge.
+  const versionRuns = behind ? deployedRuns : runs;
+  const versionBuild = buildFor(version || undefined, builds.data);
+  const merged = mergedCycle(versionRuns.data?.runs);
+  const mergeSha = merged?.mergeSha ?? "";
+  const commitHref = commitUrl(status.data?.repoUrl, mergeSha);
+  // A run read still out is not "no commit": the block says nothing about it
+  // until it settles, rather than printing a placeholder.
+  const commit: { sha: string; href?: string } | "loading" | undefined = versionRuns.isPending
+    ? "loading"
+    : mergeSha
+      ? { sha: mergeSha, ...(commitHref ? { href: commitHref } : {}) }
+      : undefined;
+  const builtAt = runStamp(versionBuild?.completedAt) || undefined;
+  const milestoneHref = milestoneUrl(status.data?.repoUrl, versionBuild?.milestoneNumber);
   const devLines = connectionsKnown
     ? developmentConnections(connections, readiness.data, hold, registeredNames, catalogUnknown)
     : null;
@@ -326,6 +352,9 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
         validation={validation}
         version={version}
         milestone={milestoneFor(version || undefined, builds.data)}
+        {...(milestoneHref ? { milestoneHref } : {})}
+        {...(builtAt ? { builtAt } : {})}
+        {...(commit ? { commit } : {})}
         hold={hold}
         componentTypes={componentTypes}
         connections={devLines}
