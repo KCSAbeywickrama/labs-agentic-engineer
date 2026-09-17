@@ -389,7 +389,6 @@ export function TryItOutCard({
       caption={`web apps first, then services${
         testUsers && firstWebApp ? " · sign in with a test user below" : ""
       }`}
-      index="02"
     >
       <Stack spacing={3}>
         {ordered.map((card) => (

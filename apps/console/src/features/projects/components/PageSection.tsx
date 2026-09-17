@@ -20,28 +20,22 @@ import type { ReactNode } from "react";
 import { Box, Card, Stack, Typography } from "@wso2/oxygen-ui";
 
 /**
- * One numbered section of the environment page (the approved design, §6):
- * a bordered card whose head carries the section's NAME, a caption saying
- * what the section is for, and the section's place in the page's reading
- * order at the far right.
+ * One section of the environment page (the approved design, §6): a bordered
+ * card whose head carries the section's NAME and a caption saying what the
+ * section is for.
  *
- * The number is decorative — it repeats the order the reader already has from
- * the document itself — so it is `aria-hidden` rather than read out before
- * every heading. The heading is a real `h3`: the page title is the page's
- * only `h1`-level thing, and these four are its sections.
+ * The heading is a real `h3`: the page title is the page's only `h1`-level
+ * thing, and these four are its sections.
  */
 export function PageSection({
   title,
   caption,
-  index,
   flush = false,
   children,
 }: {
   title: string;
   /** What this section is for, in the head beside the name. */
   caption?: ReactNode;
-  /** "01" … "04" — the section's place in the page, shown small and grey. */
-  index: string;
   /** The body brings its own padding (a table runs edge to edge). */
   flush?: boolean;
   children: ReactNode;
@@ -67,14 +61,6 @@ export function PageSection({
             {caption}
           </Typography>
         )}
-        <Box sx={{ flex: 1 }} />
-        <Typography
-          aria-hidden
-          variant="caption"
-          sx={{ color: "text.disabled", fontWeight: 700, letterSpacing: "0.1em" }}
-        >
-          {index}
-        </Typography>
       </Stack>
       <Box sx={flush ? undefined : { p: 2 }}>{children}</Box>
     </Card>

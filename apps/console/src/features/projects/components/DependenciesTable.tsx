@@ -62,7 +62,6 @@ export function DependenciesTable({
     <PageSection
       title="Dependencies"
       caption={`${rows.length} dependenc${rows.length === 1 ? "y" : "ies"} · values for ${label}`}
-      index="03"
       flush
     >
       {rows.length === 0 ? (

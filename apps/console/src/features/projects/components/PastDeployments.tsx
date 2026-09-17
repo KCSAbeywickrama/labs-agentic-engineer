@@ -179,7 +179,6 @@ export function PastDeployments({
           ? `what runs on ${label} now`
           : `every version that ran on ${label}, newest first`
       }
-      index="04"
       flush
     >
       {body}
