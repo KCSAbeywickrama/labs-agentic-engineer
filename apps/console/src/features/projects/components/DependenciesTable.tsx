@@ -16,16 +16,19 @@
  * under the License.
  */
 
-import { Box, Button, Card, Stack, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Stack, Typography } from "@wso2/oxygen-ui";
 import { Info } from "@wso2/oxygen-ui-icons-react";
 import type { StatusTone } from "../../../components/StatusChip";
 import type { ConnectionTableRow } from "../lib/deploymentDetail";
 import type { ConnectionLine } from "../lib/deploymentFlow";
 import type { ConnectionRow } from "../lib/promotion";
+import { PageSection } from "./PageSection";
 
-// The environment's Connections table (ADR-0032, the Deployment Detail
-// design): what the design depends on, who uses it, the keys it carries, and
-// whether this environment holds values for it. The keys are MASKED, always —
+// The environment's Dependencies table (ADR-0032, the Deployment Detail
+// design; §6 section 3): what the design depends on, who uses it, the keys it
+// carries, and whether this environment holds values for it. The word is
+// "dependency" throughout — the design's own — where this surface used to say
+// "connection". The keys are MASKED, always —
 // nothing reads a value back, so the column says what is set rather than what
 // it is set to. Edit re-collects a Project External's values in development
 // (the board's own surface); a platform-provisioned connection carries no
@@ -44,7 +47,7 @@ const TONE: Record<ConnectionLine["state"], StatusTone> = {
 
 const COLUMNS = "minmax(0, 1.1fr) 140px minmax(0, 1.3fr) 130px 88px";
 
-export function ConnectionsTable({
+export function DependenciesTable({
   environmentLabel: label,
   rows,
   onEdit,
@@ -56,25 +59,18 @@ export function ConnectionsTable({
   onEdit: (row: ConnectionRow) => void;
 }) {
   return (
-    <Card variant="outlined">
-      <Stack
-        direction="row"
-        spacing={1.25}
-        sx={{ alignItems: "baseline", px: 2.25, py: 1.5, borderBottom: 1, borderColor: "divider" }}
-      >
-        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-          Connections
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          {rows.length} dependenc{rows.length === 1 ? "y" : "ies"} · values for {label}
-        </Typography>
-      </Stack>
+    <PageSection
+      title="Dependencies"
+      caption={`${rows.length} dependenc${rows.length === 1 ? "y" : "ies"} · values for ${label}`}
+      index="03"
+      flush
+    >
       {rows.length === 0 ? (
         <Typography variant="body2" color="text.secondary" sx={{ px: 2.25, py: 1.5 }}>
-          This design declares no connections.
+          This design declares no dependencies.
         </Typography>
       ) : (
-        <Box role="table" aria-label={`Connections on ${label}`}>
+        <Box role="table" aria-label={`Dependencies on ${label}`}>
           <Box
             role="row"
             sx={{
@@ -86,7 +82,7 @@ export function ConnectionsTable({
               bgcolor: "action.hover",
             }}
           >
-            {["Connection", "Type", `Keys on ${label}`, "Status", ""].map((h, i) => (
+            {["Dependency", "Type", `Keys on ${label}`, "Status", ""].map((h, i) => (
               <Typography
                 key={i}
                 role="columnheader"
@@ -186,9 +182,9 @@ export function ConnectionsTable({
       >
         <Box component={Info} size={13} aria-hidden sx={{ color: "text.secondary", flexShrink: 0 }} />
         <Typography variant="caption" color="text.secondary">
-          Changing a value re-provisions the connection on this environment. Secrets are sealed by the platform and never shown.
+          Changing a value re-provisions the dependency on this environment. Secrets are sealed by the platform and never shown.
         </Typography>
       </Stack>
-    </Card>
+    </PageSection>
   );
 }

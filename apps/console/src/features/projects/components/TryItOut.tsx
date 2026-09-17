@@ -22,7 +22,6 @@ import {
   Avatar,
   Box,
   Button,
-  Card,
   Chip,
   IconButton,
   Link as MuiLink,
@@ -56,6 +55,7 @@ import { cardChip } from "../lib/deploymentLedger";
 import type { DeploymentCard } from "../lib/deploymentRows";
 import { publishedTestUsers, type PublishedTestUser } from "../lib/publishedTestUsers";
 import { AccentPill } from "./AccentPill";
+import { PageSection } from "./PageSection";
 import { TestUserRow } from "./TestUsersDialog";
 
 // TRY IT OUT (ADR-0032, the Deployment Detail design): each live component
@@ -646,8 +646,6 @@ export function TryItOutCard({
   cards,
   types,
   talksTo,
-  live,
-  total,
   testUsers,
   onTryApi,
 }: {
@@ -655,8 +653,6 @@ export function TryItOutCard({
   cards: DeploymentCard[];
   types: Map<string, string>;
   talksTo: (componentName: string) => string[];
-  live: number;
-  total: number;
   /** The accounts, when this environment has them (a green development). */
   testUsers: TestUsersProps | null;
   onTryApi: (componentName: string) => void;
@@ -673,21 +669,17 @@ export function TryItOutCard({
   );
   const firstWebApp = ordered.find((c) => types.get(c.componentName) === "web-application");
   return (
-    <Card variant="outlined">
-      <Stack
-        direction="row"
-        spacing={1.25}
-        sx={{ alignItems: "baseline", px: 2.25, py: 1.5, borderBottom: 1, borderColor: "divider" }}
-      >
-        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-          Try it out
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          {live} of {total} components live
-          {testUsers && firstWebApp ? " · sign in with a test user below" : ""}
-        </Typography>
-      </Stack>
-      <Stack spacing={3} sx={{ p: 2 }}>
+    // Section 2 of the environment page. The live count is section 1's fact,
+    // not repeated here; this caption says what the ORDER of the panels means
+    // — the thing a person opens leads, the services it calls follow.
+    <PageSection
+      title="Try it out"
+      caption={`web apps first, then services${
+        testUsers && firstWebApp ? " · sign in with a test user below" : ""
+      }`}
+      index="02"
+    >
+      <Stack spacing={3}>
         {ordered.map((card) => (
           <ComponentPanel
             key={card.componentName}
@@ -705,6 +697,6 @@ export function TryItOutCard({
           </Box>
         )}
       </Stack>
-    </Card>
+    </PageSection>
   );
 }

@@ -63,7 +63,7 @@ import { findEnvironment } from "../lib/environments";
 import { groupDeploymentCards, type DeploymentCard } from "../lib/deploymentRows";
 import { connectionRows, type ConnectionRow } from "../lib/promotion";
 import { ConnectionValuesDialog } from "./ConnectionValuesDialog";
-import { ConnectionsTable } from "./ConnectionsTable";
+import { DependenciesTable } from "./DependenciesTable";
 
 type BuildSummary = components["schemas"]["BuildSummary"];
 
@@ -399,7 +399,7 @@ export function DeploymentVersionPage({
                 {" — each reads Unknown until it is."}
               </Alert>
             )}
-            <ConnectionsTable environmentLabel={envLabel} rows={table} onEdit={setValuesTarget} />
+            <DependenciesTable environmentLabel={envLabel} rows={table} onEdit={setValuesTarget} />
           </>
         )}
       </Stack>

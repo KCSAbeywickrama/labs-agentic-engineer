@@ -327,7 +327,7 @@ describe("DeploymentVersionPage — connections (#779 review)", () => {
 
     render(<DeploymentVersionPage projectName="expense" environment="development" version="v2" />);
 
-    const table = screen.getByRole("table", { name: "Connections on Development" });
+    const table = screen.getByRole("table", { name: "Dependencies on Development" });
     expect(screen.getByText("2 dependencies · values for Development")).toBeInTheDocument();
     const stripe = within(table).getByRole("row", { name: "stripe" });
     expect(within(stripe).getByText("used by claims-api")).toBeInTheDocument();
@@ -357,14 +357,14 @@ describe("DeploymentVersionPage — connections (#779 review)", () => {
   it("offers no Edit on production, where nothing collects values", () => {
     mockDeployments = mockDeployments.map((d) => ({ ...d, environment: "production" }));
     render(<DeploymentVersionPage projectName="expense" environment="production" version="v2" />);
-    expect(screen.getByRole("table", { name: "Connections on Production" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Dependencies on Production" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Edit / })).not.toBeInTheDocument();
   });
 
   it("holds the table back while the design read is out", () => {
     mockDependenciesPending = true;
     render(<DeploymentVersionPage projectName="expense" environment="development" version="v2" />);
-    expect(screen.queryByRole("table", { name: /^Connections/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: /^Dependencies/ })).not.toBeInTheDocument();
     expect(screen.getByTestId("connections-skeleton")).toBeInTheDocument();
     expect(screen.getByText("Running here now")).toBeInTheDocument();
   });
@@ -372,7 +372,7 @@ describe("DeploymentVersionPage — connections (#779 review)", () => {
   it("holds the table back while the readiness read is out, rather than calling every value Unknown", () => {
     mockReadinessPending = true;
     render(<DeploymentVersionPage projectName="expense" environment="development" version="v2" />);
-    expect(screen.queryByRole("table", { name: /^Connections/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: /^Dependencies/ })).not.toBeInTheDocument();
     expect(screen.getByTestId("connections-skeleton")).toBeInTheDocument();
     expect(screen.queryByText("Unknown")).not.toBeInTheDocument();
   });
@@ -381,13 +381,13 @@ describe("DeploymentVersionPage — connections (#779 review)", () => {
     mockReadinessPending = true;
     mockDeployments = mockDeployments.map((d) => ({ ...d, environment: "production" }));
     render(<DeploymentVersionPage projectName="expense" environment="production" version="v2" />);
-    expect(screen.getByRole("table", { name: "Connections on Production" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Dependencies on Production" })).toBeInTheDocument();
   });
 
   it("says a failed readiness read over the table, where Unknown is then the honest word", () => {
     mockReadinessError = true;
     render(<DeploymentVersionPage projectName="expense" environment="development" version="v2" />);
-    const table = screen.getByRole("table", { name: "Connections on Development" });
+    const table = screen.getByRole("table", { name: "Dependencies on Development" });
     expect(within(table).getByText("Unknown")).toBeInTheDocument();
     expect(
       screen.getByText(/Whether Development holds values for these connections could not be read: readiness down/),

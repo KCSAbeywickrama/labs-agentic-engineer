@@ -316,6 +316,20 @@ describe("DeploymentEnvironmentPage", () => {
     expect(screen.getByText("Try it out")).toBeInTheDocument();
   });
 
+  it("names the four sections in order, and calls them dependencies", () => {
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
+    const headings = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+    expect(headings).toEqual(["Deployment", "Try it out", "Dependencies", "Past deployments"]);
+    expect(screen.queryByText(/Connections/)).not.toBeInTheDocument();
+  });
+
+  it("lists the design's dependencies, with Edit where values are collected", () => {
+    render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
+    expect(screen.getByText("2 dependencies · values for Development")).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: "claims-db" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit stripe values" })).toBeInTheDocument();
+  });
+
   it("gives each component its own way in", () => {
     render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
 

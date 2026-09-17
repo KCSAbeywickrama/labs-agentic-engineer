@@ -16,11 +16,12 @@
  * under the License.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Alert,
   Button,
   Skeleton,
+  Snackbar,
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
@@ -31,15 +32,18 @@ import { PageHeader } from "../../../components/PageHeader";
 import { useBuildRuns, useBuilds } from "../../builds/api/queries";
 import { runStamp } from "../../builds/lib/format";
 import { mergedCycle } from "../../builds/lib/runView";
+import { isRegisteredExternal } from "../../marketplace/kind";
+import { useExternalResources } from "../../settings/api/queries";
 import { useDesignDependencies } from "../../spec/api/queries";
 import { useValidationEvidence } from "../../validation/api/counts";
 import {
   useComponentsDeployments,
   useEnvironments,
   useProjectComponents,
+  useProjectDependencyReadiness,
   useProjectStatus,
 } from "../api/queries";
-import { talksTo } from "../lib/deploymentDetail";
+import { connectionTable, talksTo } from "../lib/deploymentDetail";
 import { deployedValidationState, } from "../lib/deploymentFlow";
 import {
   buildFor,
@@ -51,7 +55,10 @@ import {
 } from "../lib/deploymentLedger";
 import { findEnvironment } from "../lib/environments";
 import { groupDeploymentCards } from "../lib/deploymentRows";
+import { connectionRows, type ConnectionRow } from "../lib/promotion";
 import { ComponentOpenApiDialog } from "./ComponentOpenApiDialog";
+import { ConnectionValuesDialog } from "./ConnectionValuesDialog";
+import { DependenciesTable } from "./DependenciesTable";
 import { EnvironmentDeploymentSummary } from "./EnvironmentDeploymentSummary";
 import { PageSection } from "./PageSection";
 import { TryItOutCard, useTestUsers } from "./TryItOut";
@@ -111,8 +118,27 @@ export function DeploymentEnvironmentPage({
   // The design's graph — who talks to whom. Its connections are the version
   // page's business (#779 review).
   const dependencies = useDesignDependencies(projectName);
+  const connections = useMemo(() => connectionRows(dependencies.data), [dependencies.data]);
+  // Values are collected where they are FIRST needed — the environment a
+  // build lands in. Anywhere else the read stays idle, and the table offers
+  // no Edit.
+  const readiness = useProjectDependencyReadiness(
+    projectName,
+    envInfo?.position === 0 ? segment : "",
+  );
+  const externalCatalog = useExternalResources();
+  const catalogUnknown = externalCatalog.isPending || externalCatalog.isError;
+  const registeredNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const resource of externalCatalog.data ?? []) {
+      if (isRegisteredExternal(resource)) names.add(resource.name);
+    }
+    return names;
+  }, [externalCatalog.data]);
 
   const [contractComponent, setContractComponent] = useState<string | null>(null);
+  const [valuesTarget, setValuesTarget] = useState<ConnectionRow | null>(null);
+  const [valuesSaved, setValuesSaved] = useState(false);
 
   const envLabel = environmentLabel(envInfo, segment);
   // "Staging Environment" — the environment's own name is the page's title,
@@ -327,6 +353,16 @@ export function DeploymentEnvironmentPage({
     validationAvailability,
   );
 
+  const readinessOut = envInfo?.position === 0 && readiness.isPending && !readiness.isError;
+  const dependencyRows = connectionTable(
+    connections,
+    dependencies.data,
+    readiness.data,
+    envInfo,
+    registeredNames,
+    catalogUnknown,
+  );
+
   return (
     <>
       {/* No status chip beside the title — section 1 below carries the
@@ -376,12 +412,59 @@ export function DeploymentEnvironmentPage({
           cards={row.cards}
           types={types}
           talksTo={(name) => talksTo(dependencies.data, name)}
-          live={row.live}
-          total={row.total}
           testUsers={green ? testUsers : null}
           onTryApi={setContractComponent}
         />
 
+        {/* Section 3. A failed design read says so rather than claiming the
+            design declares nothing; the readiness read holds the table too —
+            drawn before it answers, every external would read Unknown as if
+            that were settled — and a failed one says so over the table, since
+            Unknown is then the honest word. */}
+        {dependencies.isError ? (
+          <Alert
+            severity="warning"
+            action={<Button onClick={() => void dependencies.refetch()}>Retry</Button>}
+          >
+            The design's dependencies could not be loaded
+            {dependencies.error instanceof Error && dependencies.error.message
+              ? `: ${dependencies.error.message}`
+              : ""}
+          </Alert>
+        ) : dependencies.isPending || readinessOut ? (
+          <Skeleton variant="rounded" height={160} data-testid="dependencies-skeleton" />
+        ) : (
+          <>
+            {readiness.isError && (
+              <Alert
+                severity="warning"
+                action={<Button onClick={() => void readiness.refetch()}>Retry</Button>}
+              >
+                Whether {envLabel} holds values for these dependencies could not be read
+                {readiness.error instanceof Error && readiness.error.message
+                  ? `: ${readiness.error.message}`
+                  : ""}
+                {" — each reads Unknown until it is."}
+              </Alert>
+            )}
+            <DependenciesTable
+              environmentLabel={envLabel}
+              rows={dependencyRows}
+              onEdit={setValuesTarget}
+            />
+          </>
+        )}
+
+        <PageSection
+          title="Past deployments"
+          caption={`what has run on ${envLabel}`}
+          index="04"
+          flush
+        >
+          <Typography variant="body2" color="text.secondary" sx={{ px: 2.25, py: 1.5 }}>
+            No earlier deployments are recorded for this environment.
+          </Typography>
+        </PageSection>
       </Stack>
 
       <ComponentOpenApiDialog
@@ -389,6 +472,28 @@ export function DeploymentEnvironmentPage({
         componentName={contractComponent}
         onClose={() => setContractComponent(null)}
       />
+      {valuesTarget && (
+        <ConnectionValuesDialog
+          open
+          onClose={() => setValuesTarget(null)}
+          onSaved={() => {
+            setValuesTarget(null);
+            setValuesSaved(true);
+          }}
+          projectName={projectName}
+          connection={valuesTarget}
+          environment={environmentList[0]?.name ?? ""}
+        />
+      )}
+      <Snackbar
+        open={valuesSaved}
+        autoHideDuration={6000}
+        onClose={() => setValuesSaved(false)}
+      >
+        <Alert severity="success" onClose={() => setValuesSaved(false)}>
+          Values saved — the dependency re-provisions with them.
+        </Alert>
+      </Snackbar>
     </>
   );
 }
