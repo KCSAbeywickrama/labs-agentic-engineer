@@ -4953,7 +4953,9 @@ components:
         One environment in the org's deployment pipeline, in promotion order.
         `name` is the OpenChoreo Environment's immutable identity; everything
         else is presentation or flow. `validation` says whether this
-        environment runs a validation step — absent on the object means "off".
+        environment runs a validation step; it is always present in the
+        response, because an Environment whose annotation is missing or
+        unrecognised is served as "off".
       properties:
         name:
           type: string
@@ -4967,7 +4969,10 @@ components:
         validation:
           type: string
           enum: [on, off]
-          description: From the aep.wso2.com/validation annotation. Absent on the object means off.
+          description: >-
+            From the aep.wso2.com/validation annotation. Always present in the
+            response: when the annotation is missing or unrecognised on the
+            Environment, the server serves "off".
         position:
           type: integer
           format: int32

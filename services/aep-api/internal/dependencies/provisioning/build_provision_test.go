@@ -500,10 +500,6 @@ type fakeEnvs struct {
 	names []string
 }
 
-func (f fakeEnvs) ListNames(context.Context, string) ([]string, error) {
-	return f.names, nil
-}
-
 func (f fakeEnvs) List(context.Context, string) ([]EnvironmentInfo, error) {
 	out := make([]EnvironmentInfo, 0, len(f.names))
 	for _, n := range f.names {

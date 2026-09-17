@@ -1850,7 +1850,7 @@ type EnvVar struct {
 	Value string `json:"value"`
 }
 
-// EnvironmentDTO One environment in the org's deployment pipeline, in promotion order. `name` is the OpenChoreo Environment's immutable identity; everything else is presentation or flow. `validation` says whether this environment runs a validation step — absent on the object means "off".
+// EnvironmentDTO One environment in the org's deployment pipeline, in promotion order. `name` is the OpenChoreo Environment's immutable identity; everything else is presentation or flow. `validation` says whether this environment runs a validation step; it is always present in the response, because an Environment whose annotation is missing or unrecognised is served as "off".
 type EnvironmentDTO struct {
 	// DisplayName From the openchoreo.dev/display-name annotation; falls back to a titlecased name.
 	DisplayName string `json:"displayName"`
@@ -1867,11 +1867,11 @@ type EnvironmentDTO struct {
 	// PromotesTo The next environment's name. Omitted on the last environment, which has no promote step.
 	PromotesTo string `json:"promotesTo,omitempty"`
 
-	// Validation From the aep.wso2.com/validation annotation. Absent on the object means off.
+	// Validation From the aep.wso2.com/validation annotation. Always present in the response: when the annotation is missing or unrecognised on the Environment, the server serves "off".
 	Validation EnvironmentDTOValidation `json:"validation"`
 }
 
-// EnvironmentDTOValidation From the aep.wso2.com/validation annotation. Absent on the object means off.
+// EnvironmentDTOValidation From the aep.wso2.com/validation annotation. Always present in the response: when the annotation is missing or unrecognised on the Environment, the server serves "off".
 type EnvironmentDTOValidation string
 
 // Error Flat error envelope returned by every non-2xx response.

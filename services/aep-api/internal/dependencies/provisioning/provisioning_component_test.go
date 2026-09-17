@@ -228,17 +228,13 @@ func (f *cValuePlane) PutInstances(orgID, name string, instances []provisioning.
 	f.instances[orgID][name] = append([]provisioning.ResourceInstance(nil), instances...)
 }
 
-// cEnvs fakes provisioning.EnvironmentLister — ListNames returns the
-// injected names (nil names is an empty list, not an error). List returns
-// the injected infos when set; otherwise it synthesizes bare-name infos from
-// names so the older, name-only fixtures in this file keep working unchanged.
+// cEnvs fakes provisioning.EnvironmentLister — List returns the injected
+// infos when set; otherwise it synthesizes bare-name infos from the injected
+// names (nil names is an empty list, not an error), so the older, name-only
+// fixtures in this file keep working unchanged.
 type cEnvs struct {
 	names []string
 	infos []provisioning.EnvironmentInfo
-}
-
-func (f *cEnvs) ListNames(context.Context, string) ([]string, error) {
-	return f.names, nil
 }
 
 func (f *cEnvs) List(context.Context, string) ([]provisioning.EnvironmentInfo, error) {
@@ -940,7 +936,7 @@ func TestProvisioningComponent_ListWorkloadDependencies_ExternalFallsBackToTypeN
 func TestProvisioningComponent_ListOrgEnvironments_Empty(t *testing.T) {
 	t.Parallel()
 	svc := provisioning.NewService(provisioning.Deps{
-		Environments: &cEnvs{names: nil}, // implement ListNames → nil, nil
+		Environments: &cEnvs{names: nil}, // List → empty
 	})
 	h := newProvHarness(t, svc)
 	resp := h.AsOrg("acme").Get("/api/v1/dependencies/environments")

@@ -27,12 +27,12 @@ import (
 )
 
 // EnvironmentClient reads OpenChoreo Environments in an org namespace.
-// ListNames and List are the provisioning.EnvironmentLister surface (List is
-// the richer read; ListNames stays until its last caller migrates);
-// GetThunderBinding is how aep-api finds the environment's own identity
-// provider.
+// List returns this package's own wire-mapping EnvironmentInfo; the
+// environmentLister adapter in internal/app/tasks_adapters.go converts those
+// rows to provisioning's domain type to satisfy provisioning.EnvironmentLister,
+// so neither package depends on the other's type. GetThunderBinding is how
+// aep-api finds the environment's own identity provider.
 type EnvironmentClient interface {
-	ListNames(ctx context.Context, orgID string) ([]string, error)
 	List(ctx context.Context, orgID string) ([]EnvironmentInfo, error)
 	GetThunderBinding(ctx context.Context, orgID, environment string) (ThunderBinding, error)
 	GetGatewayAssertion(ctx context.Context, orgID, environment string) (GatewayAssertion, error)
@@ -45,9 +45,9 @@ type EnvironmentClient interface {
 // (empty or unrecognised is normalized to "off" by the provisioning service,
 // not here — this type is a plain read, not a policy decision).
 //
-// provisioning.EnvironmentInfo is a type alias to this struct: this package
-// cannot import provisioning (provisioning already imports openchoreo), so
-// the shared shape lives here, on the client that reads it off the wire.
+// provisioning has its own EnvironmentInfo; this one is the wire read, and
+// environmentLister in internal/app/tasks_adapters.go converts between them,
+// which keeps the two types — and the two packages — independent.
 type EnvironmentInfo struct {
 	Name         string
 	DisplayName  string
@@ -126,34 +126,11 @@ func NewEnvironmentClient(cfg Config) EnvironmentClient {
 	return &environmentClient{oc: oc}
 }
 
-func (c *environmentClient) ListNames(ctx context.Context, orgID string) ([]string, error) {
-	if strings.TrimSpace(orgID) == "" {
-		return []string{}, nil
-	}
-	resp, err := c.oc.ListEnvironmentsWithResponse(ctx, orgID, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list environments: %w", err)
-	}
-	if resp.StatusCode() != http.StatusOK || resp.JSON200 == nil {
-		return nil, handleErrorResponse(resp.StatusCode(), ErrorResponses{
-			JSON400: resp.JSON400,
-			JSON401: resp.JSON401,
-			JSON403: resp.JSON403,
-			JSON500: resp.JSON500,
-		})
-	}
-	names := make([]string, 0, len(resp.JSON200.Items))
-	for _, item := range resp.JSON200.Items {
-		names = append(names, item.Metadata.Name)
-	}
-	return names, nil
-}
-
-// List is ListNames' richer sibling: the same OC read, but also mapping the
-// display-name and validation annotations and spec.isProduction onto each
-// row. It does not apply the display-name fallback or the
-// absent/unrecognised-is-off validation default — those are policy, applied
-// once in provisioning.Service.ListOrgEnvironments, not here.
+// List reads the org's Environments and maps the display-name and validation
+// annotations and spec.isProduction onto each row. It does not apply the
+// display-name fallback or the absent/unrecognised-is-off validation default
+// — those are policy, applied once in
+// provisioning.Service.ListOrgEnvironments, not here.
 func (c *environmentClient) List(ctx context.Context, orgID string) ([]EnvironmentInfo, error) {
 	if strings.TrimSpace(orgID) == "" {
 		return []EnvironmentInfo{}, nil
