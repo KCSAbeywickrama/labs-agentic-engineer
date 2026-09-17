@@ -63,6 +63,22 @@ type fakeIssues struct {
 	// whole assertion in the race tests below: which of the two landed last is
 	// what decides whether the reconcile sweep starts another validation run.
 	lifecycle []string
+	// openByDedupe models the host's server-side dedupe: a create whose key is
+	// already carried by an OPEN issue files nothing and reports that issue back.
+	// Keyed the way the host keys it — by the caller's key, before the lossy
+	// label transform — because what this package has to get right is which key
+	// it composes, not how GitHub spells it.
+	openByDedupe map[string]int
+	// comments records every comment posted on an issue that was NOT being
+	// closed. A recurrence is the only thing this package comments, so an entry
+	// here is a defect that outlived a repair.
+	comments []issueComment
+}
+
+// issueComment is one posted comment, with the issue it landed on.
+type issueComment struct {
+	number int
+	body   string
 }
 
 // writer is the fake wearing the domain's issue-write surface, which is what
@@ -90,7 +106,10 @@ func (f *fakeIssues) setState(number int, state string) {
 	}
 }
 
-func (f *fakeIssues) CommentIssue(context.Context, string, string, int, string) error { return nil }
+func (f *fakeIssues) CommentIssue(_ context.Context, _, _ string, number int, body string) error {
+	f.comments = append(f.comments, issueComment{number: number, body: body})
+	return nil
+}
 
 func (f *fakeIssues) AddLabels(_ context.Context, _, _ string, number int, labels []string) error {
 	for _, l := range labels {
@@ -134,6 +153,15 @@ func (f *fakeIssues) ListMilestoneIssues(_ context.Context, _, _ string, filter 
 }
 
 func (f *fakeIssues) CreateIssue(_ context.Context, _, _ string, req sourcecontrol.CreateIssueRequest) (*sourcecontrol.IssueResult, error) {
+	// Ahead of the append, like the host: a deduped create files NOTHING, which is
+	// exactly what `created` has to stay empty to prove.
+	if n, ok := f.openByDedupe[req.DedupeKey]; ok && req.DedupeKey != "" {
+		return &sourcecontrol.IssueResult{
+			Number:  n,
+			URL:     fmt.Sprintf("https://example/issues/%d", n),
+			Deduped: true,
+		}, nil
+	}
 	f.created = append(f.created, req)
 	if f.numberless {
 		return &sourcecontrol.IssueResult{URL: "https://example/issues/unknown"}, nil
@@ -494,7 +522,7 @@ func TestValidationTaskLifecycle_ReopenThenCloseWalksOneIssue(t *testing.T) {
 	// The mint has to land in the fake's index, or the second attempt is looking at
 	// a milestone the platform never filed into.
 	iss.byMilestone = map[int][]sourcecontrol.IssueInfo{thisMilestone: {validationIssue(first)}}
-	if err := svc.CloseValidationIssue(ctx, "org", "proj", first, delivery.ValidationVerdictFailed); err != nil {
+	if err := svc.CloseValidationIssue(ctx, "org", "proj", first, delivery.ValidationVerdictFailed, nil); err != nil {
 		t.Fatalf("CloseValidationIssue(attempt 1): %v", err)
 	}
 
@@ -506,7 +534,7 @@ func TestValidationTaskLifecycle_ReopenThenCloseWalksOneIssue(t *testing.T) {
 	if second != first {
 		t.Fatalf("attempt 2 judged issue %d, attempt 1 judged %d — the task is the VERSION's handle", second, first)
 	}
-	if err := svc.CloseValidationIssue(ctx, "org", "proj", second, delivery.ValidationVerdictPassed); err != nil {
+	if err := svc.CloseValidationIssue(ctx, "org", "proj", second, delivery.ValidationVerdictPassed, nil); err != nil {
 		t.Fatalf("CloseValidationIssue(attempt 2): %v", err)
 	}
 
@@ -548,11 +576,11 @@ func TestValidationTaskLifecycle_CloseBeforeTheMergeStandsAndDoesNotDuplicate(t 
 	svc := newSvc(iss, fakeCriteria{raw: []byte(sampleCriteria), found: true})
 
 	// The run settles and closes the task…
-	if err := svc.CloseValidationIssue(ctx, "org", "proj", 7, ""); err != nil {
+	if err := svc.CloseValidationIssue(ctx, "org", "proj", 7, "", nil); err != nil {
 		t.Fatalf("CloseValidationIssue: %v", err)
 	}
 	// …and the same close is delivered again (an activity retry).
-	if err := svc.CloseValidationIssue(ctx, "org", "proj", 7, ""); err != nil {
+	if err := svc.CloseValidationIssue(ctx, "org", "proj", 7, "", nil); err != nil {
 		t.Fatalf("CloseValidationIssue(retry): %v", err)
 	}
 
@@ -611,5 +639,56 @@ func TestValidationTaskLifecycle_AClosedTaskIsReopenedNotRefiled(t *testing.T) {
 	// own summary comment is what makes the thread readable across attempts.
 	if len(iss.created) != 0 {
 		t.Fatal("the reopen rewrote the task's body")
+	}
+}
+
+// The close comment is the ONLY edge between a repair issue and the run that
+// found it, and it points this way on purpose.
+//
+// The obvious alternative — `Part of #N` in each repair body — aims a coding
+// agent at the validation task, whose body is a brief for a different agent
+// ("drive every scenario", "do not modify `specs/`"). Named from here instead,
+// GitHub's own cross-reference puts the backlink in each repair issue's timeline,
+// where a person sees it and `gh issue view --comments` does not return it.
+func TestCloseValidationIssue_NamesTheRepairWorkTheAttemptFiled(t *testing.T) {
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name    string
+		verdict string
+		repairs []int
+		want    string
+		absent  string
+	}{
+		{name: "one", verdict: "failed", repairs: []int{52}, want: "Filed #52 for the scenarios"},
+		{name: "two", verdict: "failed", repairs: []int{52, 53}, want: "Filed #52 and #53"},
+		{name: "three", verdict: "failed", repairs: []int{52, 53, 54}, want: "Filed #52, #53 and #54"},
+		// A green attempt files nothing, and must not say it filed nothing — the
+		// sentence exists to be followed, not to report an empty set.
+		{name: "none", verdict: "passed", absent: "Filed"},
+		// No verdict is its own sentence and carries no repair work by construction:
+		// the attempt never reached the mint.
+		{name: "no verdict", verdict: "", absent: "Filed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			iss := &fakeIssues{byMilestone: map[int][]sourcecontrol.IssueInfo{
+				thisMilestone: {validationIssue(7)},
+			}}
+			svc := newSvc(iss, fakeCriteria{raw: []byte(sampleCriteria), found: true})
+
+			if err := svc.CloseValidationIssue(ctx, "org", "proj", 7, tc.verdict, tc.repairs); err != nil {
+				t.Fatalf("CloseValidationIssue: %v", err)
+			}
+			if len(iss.closeComments) != 1 {
+				t.Fatalf("posted %d close comments; want 1", len(iss.closeComments))
+			}
+			got := iss.closeComments[0]
+			if tc.want != "" && !strings.Contains(got, tc.want) {
+				t.Errorf("close comment is missing %q:\n%s", tc.want, got)
+			}
+			if tc.absent != "" && strings.Contains(got, tc.absent) {
+				t.Errorf("close comment claims repair work where none was filed:\n%s", got)
+			}
+		})
 	}
 }

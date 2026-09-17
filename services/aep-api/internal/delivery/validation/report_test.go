@@ -205,14 +205,62 @@ func TestFailedScenarios(t *testing.T) {
 		if f.FeatureFile != "specs/acceptance/lists.feature" || f.Line != 24 {
 			t.Errorf("location = %s:%d", f.FeatureFile, f.Line)
 		}
-		if !strings.Contains(f.Text, "When Dan adds") || !strings.Contains(f.Text, "Then the list still has one item") {
-			t.Errorf("Text does not read as the scenario:\n%s", f.Text)
+		// EVERY step, not just the one that settled it: only the whole trace
+		// separates "the When never happened" from "the When happened and the app
+		// disagreed", and those need opposite fixes.
+		if len(f.Steps) != 2 {
+			t.Fatalf("Steps = %d; the whole trace has to survive the read", len(f.Steps))
 		}
-		if f.Step != "Then the list still has one item" {
-			t.Errorf("Step = %q", f.Step)
+		if f.Steps[0].Keyword != "When" || f.Steps[0].Command != "agent-browser click" {
+			t.Errorf("first step = %+v; want the When and the command that ran it", f.Steps[0])
 		}
-		if f.Observed != "the list held two items" {
-			t.Errorf("Observed = %q", f.Observed)
+		if f.Deciding != 1 {
+			t.Errorf("Deciding = %d; the nonzero exit is at index 1", f.Deciding)
+		}
+		if f.Steps[f.Deciding].Observed != "the list held two items" {
+			t.Errorf("deciding step observed %q", f.Steps[f.Deciding].Observed)
+		}
+	})
+
+	t.Run("the failure-time capture survives the read", func(t *testing.T) {
+		raw := `{"scenarios":[
+		  {"scenario":"Adding a duplicate","outcome":"failed",
+		   "steps":[{"keyword":"Then","text":"one item","command":"c","exit":1}],
+		   "evidence":{
+		     "network":[{"method":"POST","url":"/api/items","status":201}],
+		     "console":["TypeError: items.map is not a function"],
+		     "snapshot":"- list \"Milk\"\n- list \" milk \""}}
+		]}`
+		got := validation.FailedScenarios([]byte(raw))
+		if len(got) != 1 {
+			t.Fatalf("got %d failures, want 1", len(got))
+		}
+		e := got[0].Evidence
+		if len(e.Network) != 1 || e.Network[0].Status != 201 || e.Network[0].URL != "/api/items" {
+			t.Errorf("Network = %+v", e.Network)
+		}
+		if len(e.Console) != 1 || !strings.Contains(e.Console[0], "items.map") {
+			t.Errorf("Console = %v", e.Console)
+		}
+		if e.Snapshot == "" {
+			t.Error("the snapshot is the one piece kept out of the issue body; it has to reach the report read")
+		}
+	})
+
+	t.Run("an empty request list is a finding, not a blank", func(t *testing.T) {
+		// "nothing left the page" and "we did not look" are different answers, and
+		// only the first is evidence. The read must not flatten them.
+		raw := `{"scenarios":[
+		  {"scenario":"A","outcome":"failed",
+		   "steps":[{"keyword":"Then","text":"x","command":"c","exit":1}],
+		   "evidence":{"network":[],"console":[]}}
+		]}`
+		got := validation.FailedScenarios([]byte(raw))
+		if len(got) != 1 || len(got[0].Evidence.Network) != 0 {
+			t.Fatalf("got %+v", got)
+		}
+		if got[0].Evidence.NotCaptured != "" {
+			t.Error("an empty capture must not read as an absent one")
 		}
 	})
 
@@ -225,7 +273,7 @@ func TestFailedScenarios(t *testing.T) {
 		     "command":"agent-browser get count \".item\"","exit":0,"observed":"2"}]}
 		]}`
 		got := validation.FailedScenarios([]byte(raw))
-		if len(got) != 1 || got[0].Observed != "2" {
+		if len(got) != 1 || got[0].Deciding != 0 || got[0].Steps[0].Observed != "2" {
 			t.Fatalf("got %+v, want the observation to settle it", got)
 		}
 	})
@@ -294,4 +342,65 @@ func TestReportDigest(t *testing.T) {
 			t.Error("a fixed scenario read as the same answer")
 		}
 	})
+}
+
+// A scenario where NO step exits nonzero is the ordinary case, not an edge one:
+// the run skill tells the agent to settle assertions with value-returning
+// commands like `get count`, which exit 0 because the command RAN.
+//
+// This fixture is taken from a real p56 run. Every step exited 0, and the `When`
+// had recorded the POST it made on the way past — so "the first step carrying an
+// observation" picked the `When`, two steps before the `Then` that actually lost.
+// That put the trace marker on the wrong line and, worse, made ReportDigest
+// fingerprint the REQUEST rather than the ASSERTION: a repair that changed what
+// the `Then` saw would have digested identically and stopped the repair chain as
+// "the same answer twice".
+func TestFailedScenarios_ADecidingStepIsAThen(t *testing.T) {
+	raw := `{"scenarios":[
+	  {"scenario":"Adding a todo","outcome":"failed","steps":[
+	    {"keyword":"Given","text":"Priya is signed in","command":"(already signed in)","exit":0},
+	    {"keyword":"When","text":"she adds a todo","command":"agent-browser click @e4","exit":0,
+	     "observed":"POST /api/todos returned 201; the new row appeared"},
+	    {"keyword":"Then","text":"her list includes it","command":"agent-browser eval ...","exit":0,
+	     "observed":"false — no such row exists"}]}
+	]}`
+	got := validation.FailedScenarios([]byte(raw))
+	if len(got) != 1 {
+		t.Fatalf("got %d failures, want 1", len(got))
+	}
+	if got[0].Deciding != 2 {
+		t.Errorf("Deciding = %d (%q); the Then is what settles a scenario, not the first step that happened to observe something",
+			got[0].Deciding, got[0].Steps[got[0].Deciding].Keyword)
+	}
+}
+
+// `And` and `But` inherit the keyword above them — that is what Gherkin means by
+// them and what the run skill tells the agent they mean. A scenario whose
+// assertion is continued by `And` must still resolve to a Then, or the
+// continuation that actually settled it is invisible.
+func TestFailedScenarios_AContinuedThenStillDecides(t *testing.T) {
+	raw := `{"scenarios":[
+	  {"scenario":"Adding a todo","outcome":"failed","steps":[
+	    {"keyword":"When","text":"she adds a todo","command":"c","exit":0,"observed":"the POST was accepted"},
+	    {"keyword":"Then","text":"the row appears","command":"c","exit":0},
+	    {"keyword":"And","text":"it shows today's date","command":"c","exit":0,"observed":"the cell was empty"}]}
+	]}`
+	got := validation.FailedScenarios([]byte(raw))
+	if len(got) != 1 || got[0].Deciding != 2 {
+		t.Fatalf("Deciding = %+v; an `And` continuing a `Then` is still a Then", got)
+	}
+}
+
+// With nothing asserting, the scenario still has to be answerable rather than
+// silent — a reason recorded anywhere beats no reason at all.
+func TestFailedScenarios_FallsBackWhenNoThenObserved(t *testing.T) {
+	raw := `{"scenarios":[
+	  {"scenario":"A","outcome":"failed","steps":[
+	    {"keyword":"When","text":"she tries","command":"c","exit":0,"observed":"the control was absent"},
+	    {"keyword":"Then","text":"it holds","command":"c","exit":0}]}
+	]}`
+	got := validation.FailedScenarios([]byte(raw))
+	if len(got) != 1 || got[0].Deciding != 0 {
+		t.Fatalf("Deciding = %+v; want the only observation there was", got)
+	}
 }

@@ -122,6 +122,38 @@ agent-browser get url
 - **Assert exactly what the step claims.** An extra assertion turns an unrelated
   change into a false failure; a missing one makes the scenario vacuous.
 
+## When a scenario fails — capture before you move on
+
+A failing `Then` is the only moment the evidence exists. The page is open and the
+requests are still in the buffer; once you move to the next scenario none of it
+can be recovered, by you or by anyone reading the report later.
+
+So before moving on, record what the SYSTEM was doing — not just which assertion
+lost:
+
+```bash
+agent-browser network requests   # did the request leave, and what came back
+agent-browser errors             # anything the page threw
+agent-browser console            # and what it logged on the way
+agent-browser snapshot -i        # the page as it stands
+```
+
+Write them onto the scenario as `evidence` (shape below); `errors` and `console`
+share the one `console` field.
+
+**`network` is the one that earns its place.** A request that left and came back
+`201` with the list unchanged is a rendering defect; no request at all is a
+wiring defect. They are fixed in different files, and nothing else in the report
+separates them — the step trace reads identically for both.
+
+An **empty** `network` array is an answer: nothing left the page. Leaving the key
+out is not, and the checker refuses it. If the capture genuinely could not
+happen, say so rather than write something plausible:
+
+```json
+"evidence": { "notCaptured": "the page navigated away before it could be read" }
+```
+
 ## Outcomes — one per scenario
 
 | Outcome | Means |
@@ -173,7 +205,12 @@ files — every one, including those you could not run. Stamp `commit` with
         { "text": "the list still has exactly one item", "keyword": "Then",
           "command": "agent-browser get count \"[data-testid=item]\"",
           "exit": 0, "observed": "2 — the list holds \"Milk\" and \" milk \"" }
-      ]
+      ],
+      "evidence": {
+        "network": [{ "method": "POST", "url": "/api/items", "status": 201 }],
+        "console": ["TypeError: items.map is not a function"],
+        "snapshot": "- listitem \"Milk\"\n- listitem \" milk \""
+      }
     }
   ]
 }
@@ -202,8 +239,14 @@ node "$AEP_SKILLS_DIR/acceptance-run/scripts/check-report.mjs" "$(git rev-parse 
 It exits 2 on a contract breach and prints every one. A scenario in the feature
 files with no entry fails it, so one you could not manage must be reported
 `blocked` — never dropped. So does a `passed` whose `Then` carries no command
-that could have said no, and a step missing the `observed` its exit code does
-not supply. Fix the REPORT and run it again; never the feature files.
+that could have said no, a step missing the `observed` its exit code does not
+supply, and a `failed` scenario with no `evidence`. Fix the REPORT and run it
+again; never the feature files.
+
+The `evidence` rule is the one you cannot satisfy from your desk: if it fires,
+the honest fixes are to re-drive that scenario and capture, or to state why you
+could not. Writing a request you did not read would make the report say something
+nothing checked.
 
 ## Landing it — the branch name is a contract
 

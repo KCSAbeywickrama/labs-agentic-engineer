@@ -51,6 +51,38 @@ type reportScenario struct {
 	// unjudgeable.
 	Outcome string       `json:"outcome"`
 	Steps   []reportStep `json:"steps"`
+	// Evidence is what the agent read AT THE MOMENT the scenario failed, while
+	// the page was still open. Required on a `failed` scenario and absent
+	// everywhere else — the report checker holds the agent to that, because after
+	// the run the page is gone and nothing can be recovered.
+	Evidence reportEvidence `json:"evidence"`
+}
+
+// reportEvidence is the failure-time capture. It is the whole reason an
+// agent-driven run can say more than a compiled suite: the suite records that an
+// assertion lost, this records what the system was doing when it lost.
+//
+// Network is the discriminating half. A request that left and came back 201 with
+// the page unchanged is a different defect from no request at all, and they need
+// opposite fixes — which is the distinction a repair agent could not previously
+// make from anything in the issue.
+//
+// An EMPTY Network slice is evidence: nothing left the page. An absent one is a
+// hole, and the checker refuses it. NotCaptured is the honest escape — set when
+// the capture genuinely could not happen (the page had already navigated away),
+// so the gap is stated rather than filled with something plausible.
+type reportEvidence struct {
+	Network     []networkRequest `json:"network"`
+	Console     []string         `json:"console"`
+	Snapshot    string           `json:"snapshot"`
+	NotCaptured string           `json:"notCaptured"`
+}
+
+// networkRequest is one request the page made around the deciding step.
+type networkRequest struct {
+	Method string `json:"method"`
+	URL    string `json:"url"`
+	Status int    `json:"status"`
 }
 
 // reportStep is one Gherkin step as executed.
@@ -81,41 +113,71 @@ func (s reportScenario) id() string {
 	return strings.Join(parts, " / ")
 }
 
-// deciding returns the step that settled the scenario, and whether there was
-// one. A nonzero exit wins; otherwise the first step carrying an observation,
-// which is how a value-returning command (`get count`) records its verdict.
-func (s reportScenario) deciding() (reportStep, bool) {
-	for _, st := range s.Steps {
+// deciding returns the INDEX of the step that settled the scenario, or -1. A
+// nonzero exit wins; otherwise the first `Then` carrying an observation, which
+// is how a value-returning command (`get count`) records its verdict.
+//
+// An index rather than the step itself, because the whole trace is now rendered
+// and the deciding step has to be MARKED within it — and two steps of one
+// scenario can carry the same text.
+//
+// **`Then` is preferred over position, and that is load-bearing.** Only a `Then`
+// decides anything; a `When` may record what it saw on the way past. Taking the
+// first observation of any keyword let a `When` win on position alone — measured
+// on a real run, where every step exited 0 (the assertion was a value-returning
+// command) and the `When` had noted the POST it made, so the scenario was
+// reported as settled two steps before the one that actually lost. The marker
+// went on the wrong line, and ReportDigest — which fingerprints this step's
+// observation — described the request rather than the assertion, so a repair
+// that changed what the `Then` saw would have digested identically and stopped
+// the repair chain as "the same answer twice".
+func (s reportScenario) deciding() int {
+	for i, st := range s.Steps {
 		if st.Exit != nil && *st.Exit != 0 {
-			return st, true
+			return i
 		}
 	}
-	for _, st := range s.Steps {
+	keywords := s.effectiveKeywords()
+	for i, st := range s.Steps {
+		if keywords[i] == keywordThen && strings.TrimSpace(st.Observed) != "" {
+			return i
+		}
+	}
+	// No `Then` observed anything: fall back to whatever did, so a scenario that
+	// records its reason on a `When` is still answerable rather than silent.
+	for i, st := range s.Steps {
 		if strings.TrimSpace(st.Observed) != "" {
-			return st, true
+			return i
 		}
 	}
-	return reportStep{}, false
+	return -1
 }
 
-// text renders the scenario as it was written, so a repair issue can quote it
-// without a second read of the feature file.
-func (s reportScenario) text() string {
-	var b strings.Builder
-	for _, st := range s.Steps {
-		if st.Keyword != "" {
-			b.WriteString(st.Keyword)
-			b.WriteString(" ")
+const keywordThen = "Then"
+
+// effectiveKeywords resolves each step's keyword, carrying `And` / `But` / `*`
+// onto the one they inherit — which is what Gherkin means by them, and what the
+// run skill tells the agent they mean. Without this a `Then` continued by `And`
+// is invisible to any predicate asking which steps assert, and the assertion
+// that actually settled a scenario is routinely the continuation.
+func (s reportScenario) effectiveKeywords() []string {
+	out := make([]string, len(s.Steps))
+	current := ""
+	for i, st := range s.Steps {
+		switch k := strings.TrimSpace(st.Keyword); k {
+		case "And", "But", "*", "":
+			// inherits whatever came before, including "" at the top of a scenario
+		default:
+			current = k
 		}
-		b.WriteString(st.Text)
-		b.WriteString("\n")
+		out[i] = current
 	}
-	return strings.TrimRight(b.String(), "\n")
+	return out
 }
 
 // FailedScenario is one scenario the report says the app did not satisfy, with
-// everything a repair issue needs to name it — including the scenario text, so
-// the issue is answerable from one read.
+// everything a repair issue needs — so the issue is answerable from one read and
+// never sends its reader back to the specification or to another ticket.
 type FailedScenario struct {
 	ID          string
 	Feature     string
@@ -123,22 +185,46 @@ type FailedScenario struct {
 	Scenario    string
 	FeatureFile string
 	Line        int
-	// Text is the scenario's own Given/When/Then, as executed.
-	Text string
-	// Step is the step that settled it, and Observed what the agent saw there.
-	Step     string
+	// Steps is the scenario's own Given/When/Then AS EXECUTED — every step, with
+	// the command that ran it and what that command said.
+	//
+	// Every step, not just the one that settled it. Only the whole trace
+	// distinguishes "the `When` never happened" from "the `When` happened and the
+	// app disagreed with the `Then`", and those need opposite fixes. The report
+	// has carried all of it since schemaVersion 2; this used to discard it.
+	Steps []FailedStep
+	// Deciding indexes the step that settled the scenario, or -1.
+	Deciding int
+	// Evidence is what the run saw when it failed.
+	Evidence FailedEvidence
+}
+
+// FailedStep is one Gherkin step as executed.
+type FailedStep struct {
+	Keyword  string
+	Text     string
+	Command  string
+	Exit     *int
 	Observed string
 }
 
-// ReportDigest fingerprints WHAT A REPORT CONCLUDED, so two validation attempts
-// can be compared. Empty for an absent or unparseable report — there is nothing to
-// compare, and two empty digests must not read as "the same answer twice".
-//
-// It covers the criteria only: each one's id, status and failure message, sorted by
-// id. Explicitly NOT the file bytes. The runner generates the report with
-// `--commit "$(git rev-parse HEAD)"`, so a whole-file hash changes on every attempt
-// and would make an identical-answer check dead code that silently never fires.
-//
+// FailedEvidence is the failure-time capture, as the report recorded it.
+type FailedEvidence struct {
+	Network  []NetworkRequest
+	Console  []string
+	Snapshot string
+	// NotCaptured is why there is no capture, when the run said so explicitly.
+	// It is rendered rather than hidden: a stated gap is information, and the
+	// alternative to stating it is an agent inventing a plausible trace.
+	NotCaptured string
+}
+
+// NetworkRequest is one request the page made around the deciding step.
+type NetworkRequest struct {
+	Method string
+	URL    string
+	Status int
+}
 
 // ReportDigest fingerprints WHAT A REPORT CONCLUDED, so two validation attempts
 // can be compared. Empty for an absent or unparseable report — there is nothing to
@@ -169,8 +255,8 @@ func ReportDigest(raw []byte) string {
 	lines := make([]string, 0, len(doc.Scenarios))
 	for _, s := range doc.Scenarios {
 		observed := ""
-		if step, ok := s.deciding(); ok {
-			observed = step.Observed
+		if i := s.deciding(); i >= 0 {
+			observed = s.Steps[i].Observed
 		}
 		lines = append(lines, s.id()+"\x00"+s.Outcome+"\x00"+observed)
 	}
@@ -212,10 +298,22 @@ func FailedScenarios(raw []byte) []FailedScenario {
 			Scenario:    s.Scenario,
 			FeatureFile: s.FeatureFile,
 			Line:        s.Line,
-			Text:        s.text(),
+			Deciding:    s.deciding(),
+			Evidence: FailedEvidence{
+				Console:     s.Evidence.Console,
+				Snapshot:    s.Evidence.Snapshot,
+				NotCaptured: s.Evidence.NotCaptured,
+			},
 		}
-		if step, ok := s.deciding(); ok {
-			f.Step, f.Observed = strings.TrimSpace(step.Keyword+" "+step.Text), step.Observed
+		for _, st := range s.Steps {
+			f.Steps = append(f.Steps, FailedStep{
+				Keyword: st.Keyword, Text: st.Text,
+				Command: st.Command, Exit: st.Exit, Observed: st.Observed,
+			})
+		}
+		for _, r := range s.Evidence.Network {
+			f.Evidence.Network = append(f.Evidence.Network,
+				NetworkRequest{Method: r.Method, URL: r.URL, Status: r.Status})
 		}
 		out = append(out, f)
 	}

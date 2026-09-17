@@ -757,13 +757,24 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   one click from being asked again. Dropping the reference entirely is the trap: the auto-merge policy
   requires a pull request to name an armed issue in the milestone, so a body referencing nothing is read
   as somebody else's work, never merges, and every judgement settles `unreported`.
-- **One repair issue per failed criterion, never one omnibus issue.** The no-progress rule compares
+- **One repair issue per failed SCENARIO, never one omnibus issue.** The no-progress rule compares
   working-set SIZES, so repairing two of three failures has to read as progress; a single issue holding
   three failures could only be open or closed. They are `bug` + `src/validation`, dedupe-keyed on the
-  ATTEMPT's cycle id, so a retry within one attempt files nothing new while the next attempt files
-  fresh work. The `src/validation` source is what makes the chain CLOSE: the ordinary run that fixes them
-  reopens the version's validation task when its working set drains, so the same oracle judges the repair
-  without a human asking.
+  SCENARIO alone, so one defect keeps one issue however many attempts meet it: an attempt that finds a
+  scenario still failing resolves onto its open issue and leaves that attempt's evidence there as a
+  comment. The key carried the attempt once, to stop a scenario failing again from being suppressed by the
+  closed issue the last repair produced — which the host's dedupe cannot do, since it only ever matches an
+  OPEN issue. What it did produce was a duplicate, and a second open issue for one defect GROWS the set
+  the no-progress rule reads. The `src/validation` source is what makes the chain CLOSE: the ordinary run
+  that fixes them reopens the version's validation task when its working set drains, so the same oracle
+  judges the repair without a human asking.
+- **The repair issues are named in the validation task's CLOSE COMMENT, and nowhere else.** That is the
+  only edge between a repair issue and the run that found it, and it points that way deliberately. The
+  obvious alternative — `Part of #N` in each repair body — aims a coding agent at the validation task,
+  whose body is a brief written for the validation agent ("drive every scenario", "do not modify
+  `specs/`"); following it costs the reader context that is wrong for its job. Named from the task
+  instead, GitHub's own cross-reference puts a backlink in each repair issue's TIMELINE, which a person
+  sees and `gh issue view --comments` does not return. Repair bodies stay answerable from one read.
 - **A version can be judged more than once, and the NEWEST validating run owns its verdict.** Each
   attempt is its own validation run — started by the reconcile sweep off the open task, whether a dev run
   filed it at deployed-green or a task run REOPENED it having delivered a verdict-sourced repair, or by a

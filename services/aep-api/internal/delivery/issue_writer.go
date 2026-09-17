@@ -246,9 +246,9 @@ func (w *IssueWriter) SetMilestone(ctx context.Context, orgID, projectID string,
 //
 // Scoping is the other half of the contract, and it differs per key on purpose:
 // a fix is keyed to (component, commit) so the next version's failure is
-// genuinely new work; a repair is keyed to the ATTEMPT so a criterion that
-// fails again next attempt files fresh work; the validation issue is keyed to
-// the VERSION so a later version is never deduped onto an older one.
+// genuinely new work; a repair is keyed to the SCENARIO so one defect has one
+// issue however many attempts meet it; the validation issue is keyed to the
+// VERSION so a later version is never deduped onto an older one.
 
 // DedupeKeyFix identifies the fix issue for a component whose build stayed red
 // through its automatic re-trigger, by (component, commit).
@@ -293,13 +293,21 @@ func DedupeKeyUnwiredEndpoints(component string, missing []string) string {
 	return fmt.Sprintf("aep unwired-endpoints %s %s", component, strings.Join(missing, ","))
 }
 
-// DedupeKeyValidationFix identifies the repair issue for one failed acceptance
-// criterion, by (criterion, ATTEMPT). The cycle id is what makes a retried
-// activity file nothing while a criterion that fails again on the NEXT attempt
-// files fresh work rather than being suppressed by the closed issue the last
-// repair produced.
-func DedupeKeyValidationFix(criterionID, cycleID string) string {
-	return fmt.Sprintf("aep validation-fix %s %s", criterionID, cycleID)
+// DedupeKeyValidationFix identifies the repair issue for one failed scenario, by
+// the SCENARIO alone. A defect has one identity, and every attempt that meets it
+// again resolves onto the same open issue rather than filing a second.
+//
+// The attempt used to be part of this key, to stop "the closed issue the last
+// repair produced" from suppressing a scenario that failed again. That hazard
+// does not exist: the host only ever dedupes onto an issue whose state is OPEN
+// (sourcecontrol/issue_service.go), so a closed repair issue suppresses nothing
+// and the next attempt files fresh work either way. What the attempt DID buy was
+// a duplicate — a second open issue for one defect — which is worse than noise
+// here, because the no-progress rule reads working-set SIZES: a scenario that
+// keeps failing would grow the set and read as negative progress. It is also
+// what supersede then carries forward, twice, into the next version.
+func DedupeKeyValidationFix(scenarioID string) string {
+	return fmt.Sprintf("aep validation-fix %s", scenarioID)
 }
 
 // DedupeKeyValidationIssue identifies a VERSION's validation issue. Colon

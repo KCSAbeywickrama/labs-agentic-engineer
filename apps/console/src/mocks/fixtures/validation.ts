@@ -225,10 +225,21 @@ const CATALOGUE: FeatureSpec[] = [
 const DRIFTED = "A search that matches nothing explains itself";
 
 /** What a run made of one scenario, and the evidence it recorded step by step. */
-interface Evidence {
+interface Step {
   command?: string;
   exit?: number;
   observed?: string;
+}
+
+/**
+ * The failure-time capture — what the SYSTEM was doing when a scenario failed,
+ * read while the page was still open. Only a `failed` outcome carries one, and
+ * the checker requires it there: after the run neither half can be recovered.
+ */
+interface Capture {
+  network: { method: string; url: string; status: number }[];
+  console: string[];
+  snapshot?: string;
 }
 
 interface Outcome {
@@ -238,7 +249,9 @@ interface Outcome {
    * stops where it was stopped, and the steps past that point are specification
    * the run never reached.
    */
-  evidence: Evidence[];
+  steps: Step[];
+  /** Required on `failed`, meaningless anywhere else. */
+  capture?: Capture;
 }
 
 interface Artifacts {
@@ -345,13 +358,14 @@ function reportFor(
           outcome: outcome.outcome,
           // Only as far as the run got. The steps past the end are specification,
           // and the view renders them as never reached.
-          steps: outcome.evidence.map((e, i) => ({
+          steps: outcome.steps.map((e, i) => ({
             text: steps[i]?.text ?? "",
             keyword: steps[i]?.keyword ?? "",
             ...(e.command !== undefined ? { command: e.command } : {}),
             ...(e.exit !== undefined ? { exit: e.exit } : {}),
             ...(e.observed !== undefined ? { observed: e.observed } : {}),
           })),
+          ...(outcome.capture !== undefined ? { evidence: outcome.capture } : {}),
         };
       }),
     },
@@ -364,23 +378,23 @@ function reportFor(
 // a `wait` whose exit code IS the verdict, a `get count` that exits 0 because the
 // command RAN and therefore has to record the value the agent read, and a step
 // with no command at all, which has to say why.
-const found = (what: string): Evidence => ({
+const found = (what: string): Step => ({
   command: `agent-browser wait --text ${JSON.stringify(what)} --timeout 3000`,
   exit: 0,
 });
-const counted = (selector: string, observed: string): Evidence => ({
+const counted = (selector: string, observed: string): Step => ({
   command: `agent-browser get count ${JSON.stringify(selector)}`,
   exit: 0,
   observed,
 });
-const clicked = (name: string): Evidence => ({
+const clicked = (name: string): Step => ({
   command: `agent-browser find role button click --name ${JSON.stringify(name)}`,
   exit: 0,
 });
 
 const PASS_SEARCH: Outcome = {
   outcome: "passed",
-  evidence: [
+  steps: [
     { command: 'POST /products {"name":"Cedar Desk Lamp-vr8821","category":"Lighting"}', exit: 0 },
     { command: 'agent-browser find label "Search" fill "Cedar Desk"; agent-browser press Enter', exit: 0 },
     found("Cedar Desk Lamp-vr8821"),
@@ -388,7 +402,7 @@ const PASS_SEARCH: Outcome = {
 };
 const PASS_FILTER: Outcome = {
   outcome: "passed",
-  evidence: [
+  steps: [
     { command: "POST /products x2 (Lighting, Accessories)", exit: 0 },
     clicked("Accessories"),
     counted('[data-testid="product"]:not([data-category="Accessories"])', "0 — every row shown is in Accessories"),
@@ -396,7 +410,7 @@ const PASS_FILTER: Outcome = {
 };
 const PASS_PERSIST: Outcome = {
   outcome: "passed",
-  evidence: [
+  steps: [
     { command: "POST /cart/items {\"name\":\"Cedar Desk Lamp-vr8821\"}", exit: 0 },
     { command: "agent-browser close; agent-browser open https://demo-shop…/", exit: 0 },
     found("Cedar Desk Lamp-vr8821"),
@@ -404,7 +418,7 @@ const PASS_PERSIST: Outcome = {
 };
 const PASS_TOTAL: Outcome = {
   outcome: "passed",
-  evidence: [
+  steps: [
     { command: "agent-browser get count \"[data-testid=cart-row]\"", exit: 0, observed: "0 — the cart starts empty" },
     clicked("Add to cart"),
     found("42.00"),
@@ -412,7 +426,7 @@ const PASS_TOTAL: Outcome = {
 };
 const PASS_ORDER: Outcome = {
   outcome: "passed",
-  evidence: [
+  steps: [
     { command: 'POST /cart/items {"name":"Cedar Desk Lamp-vr8821"}', exit: 0 },
     clicked("Place order"),
     found("Cedar Desk Lamp-vr8821"),
@@ -422,7 +436,7 @@ const PASS_ORDER: Outcome = {
 // A refusal the shop gets WRONG: it accepts three of a product it has two of.
 const FAIL_STOCK: Outcome = {
   outcome: "failed",
-  evidence: [
+  steps: [
     { command: 'POST /products {"name":"Cedar Desk Lamp-vr8821","stock":2}', exit: 0 },
     {
       command: 'agent-browser find label "Quantity" fill "3"; agent-browser find role button click --name "Add to cart"',
@@ -435,6 +449,14 @@ const FAIL_STOCK: Outcome = {
       observed: '3 — the cart holds three of a product the shop has two of',
     },
   ],
+  // The request LEFT and the server said yes. That is what makes this a stock
+  // rule the shop does not enforce, rather than a form that failed to submit —
+  // and the step trace above reads identically for both.
+  capture: {
+    network: [{ method: "POST", url: "/cart/items", status: 201 }],
+    console: [],
+    snapshot: '- row "Cedar Desk Lamp-vr8821"\n  - textbox "Quantity": "3"',
+  },
 };
 
 // Blocked, not failed: the control the When needs is ABSENT, so the behaviour was
@@ -442,7 +464,7 @@ const FAIL_STOCK: Outcome = {
 // or the shop being broken, which is why no repair is filed for it.
 const BLOCKED_STOCK: Outcome = {
   outcome: "blocked",
-  evidence: [
+  steps: [
     { command: 'POST /products {"name":"Cedar Desk Lamp-vr8821","stock":2}', exit: 0 },
     {
       command: 'agent-browser snapshot -i',
@@ -455,7 +477,7 @@ const BLOCKED_STOCK: Outcome = {
 // Unjudgeable: the answer lives outside the running app. Honest, and not a defect.
 const UNJUDGEABLE_TLS: Outcome = {
   outcome: "unjudgeable",
-  evidence: [
+  steps: [
     { command: "agent-browser open https://demo-shop…/checkout/payment", exit: 0 },
     clicked("Pay"),
     {

@@ -33,7 +33,11 @@
 //     cannot be quietly dropped; it has to be reported `blocked`;
 //   - a `passed` scenario carries a Then step with a command and exit 0, so a
 //     pass cannot be asserted without something that could have said no;
-//   - a `failed` scenario carries a Then that actually failed;
+//   - a `failed` scenario carries a Then that actually failed, AND an `evidence`
+//     block saying what the page was doing at the time. That one is capture, not
+//     bookkeeping: after the run the page is gone, so a failure reported without
+//     it cannot be enriched later by anyone. The honest escape is stating the
+//     gap (`notCaptured`), never leaving it blank;
 //   - every step whose exit code does NOT settle it records what was `observed`.
 //     An exit code is the verdict only for a predicate like `wait`. `get count`
 //     exits 0 because the command RAN, so a pass resting on one is unauditable
@@ -198,6 +202,34 @@ for (const [i, s] of (entries ?? []).entries()) {
   // that prints a value cannot, so there the observed value is the evidence.
   if (s.outcome === "failed" && !settled.some((st) => st.exit !== 0) && !thens.some((st) => st.observed)) {
     errors.push(`${at}: failed but no Then records a nonzero exit or an observed value — what failed?`);
+  }
+
+  // A failure has to say what the SYSTEM was doing, not only which assertion
+  // lost. `POST /items → 201` with the list unchanged is a rendering defect; no
+  // request at all is a wiring defect — different files, and the trace alone
+  // cannot tell them apart.
+  //
+  // Checked HARD because the evidence is only obtainable while the page is still
+  // open. An `observed` can be re-read from a re-run; a network trace from a run
+  // that has ended cannot be re-read by anybody. `notCaptured` is the escape, and
+  // it exists so the honest answer is available — an agent cornered by a gate it
+  // cannot satisfy invents something plausible instead.
+  if (s.outcome === "failed") {
+    const ev = s.evidence;
+    const stated = typeof ev?.notCaptured === "string" && ev.notCaptured.trim() !== "";
+    if (!ev || typeof ev !== "object" || Array.isArray(ev)) {
+      errors.push(
+        `${at}: failed with no \`evidence\` — re-drive the scenario and record what the network ` +
+          `and console showed when it failed. If that cannot be captured, say why: ` +
+          `"evidence": { "notCaptured": "<reason>" }`,
+      );
+    } else if (!stated && !(Array.isArray(ev.network) && Array.isArray(ev.console))) {
+      errors.push(
+        `${at}: \`evidence\` needs \`network\` and \`console\` arrays — an EMPTY array is an ` +
+          `answer ("nothing left the page"), an absent one is a hole. Re-drive the scenario, or ` +
+          `state the gap with a non-empty \`notCaptured\`.`,
+      );
+    }
   }
 
   // A block has to say what stopped it, or an app that correctly refuses reads

@@ -149,7 +149,7 @@ function renderBody(doc, issueNumber) {
     "",
     "## Report",
     "- Commit `tests/acceptance/report.json` — one entry per scenario in the feature files, including the ones you could not drive.",
-    '- Check it before opening the PR: `node "$AEP_SKILLS_DIR/acceptance-run/scripts/check-report.mjs" "$(git rev-parse --show-toplevel)"`. It exits 2 if a scenario has no entry, or if a `passed` is not backed by a command that could have said no.',
+    '- Check it before opening the PR: `node "$AEP_SKILLS_DIR/acceptance-run/scripts/check-report.mjs" "$(git rev-parse --show-toplevel)"`. It exits 2 if a scenario has no entry, if a `passed` is not backed by a command that could have said no, or if a `failed` does not record what the page was doing when it failed.',
     "- Post a summary comment on this issue when done.",
     "",
     "---",

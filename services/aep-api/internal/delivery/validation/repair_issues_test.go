@@ -58,7 +58,7 @@ func TestMintRepairIssues_OnePerFailedScenario(t *testing.T) {
 	svc := newSvc(iss, fakeCriteria{raw: []byte(sampleCriteria), found: true})
 
 	filed, err := svc.MintRepairIssues(context.Background(), "org", "proj", thisMilestone,
-		[]byte(failedReport), "cycle-abc")
+		[]byte(failedReport))
 	if err != nil {
 		t.Fatalf("MintRepairIssues: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestMintRepairIssues_OnePerFailedScenario(t *testing.T) {
 	// where to read it. Nothing here needs a second read of the specification.
 	for _, want := range []string{
 		"The page greets the visitor by name", // the rule
-		"Then she is greeted by name",         // the scenario, as written
+		"**Then** she is greeted by name",     // the step, as executed
 		`the heading read "Hello, undefined"`, // what the agent observed
 		"specs/acceptance/greeting.feature:8", // where to read it
 	} {
@@ -107,40 +107,93 @@ func TestMintRepairIssues_OnePerFailedScenario(t *testing.T) {
 	}
 }
 
-// The dedupe key carries the ATTEMPT's cycle id, and that is load-bearing in two
-// directions at once.
-func TestMintRepairIssues_DedupeKeyIsScopedToTheAttempt(t *testing.T) {
+// The dedupe key names the SCENARIO and nothing else, which is what gives one
+// defect one issue however many attempts meet it.
+//
+// It used to carry the attempt as well, to stop a scenario that failed again from
+// being suppressed by "the closed issue the last repair produced". The host only
+// ever dedupes onto an OPEN issue, so that could not happen — and the attempt was
+// buying a duplicate instead: a second open issue for one defect, which reads as
+// NEGATIVE progress to a rule that compares working-set sizes.
+func TestMintRepairIssues_DedupeKeyIsScopedToTheScenario(t *testing.T) {
 	iss := &fakeIssues{}
 	svc := newSvc(iss, fakeCriteria{raw: []byte(sampleCriteria), found: true})
 	report := []byte(failedReport)
 
-	// Same attempt, called twice — a Temporal activity retry. The keys must match so
-	// the second pass files nothing new.
-	if _, err := svc.MintRepairIssues(context.Background(), "org", "proj", thisMilestone, report, "cycle-abc"); err != nil {
+	// Called twice — a Temporal activity retry. The keys must match so the second
+	// pass resolves onto what the first filed.
+	if _, err := svc.MintRepairIssues(context.Background(), "org", "proj", thisMilestone, report); err != nil {
 		t.Fatalf("first mint: %v", err)
 	}
 	firstKeys := dedupeKeys(iss)
 	iss.created = nil
 
-	if _, err := svc.MintRepairIssues(context.Background(), "org", "proj", thisMilestone, report, "cycle-abc"); err != nil {
+	if _, err := svc.MintRepairIssues(context.Background(), "org", "proj", thisMilestone, report); err != nil {
 		t.Fatalf("retry: %v", err)
 	}
 	if got := dedupeKeys(iss); !equalStrings(got, firstKeys) {
-		t.Errorf("a retry of the SAME attempt produced different keys:\n got %v\nwant %v", got, firstKeys)
+		t.Errorf("a retry produced different keys:\n got %v\nwant %v", got, firstKeys)
 	}
 
-	// The NEXT attempt is different work: the criterion failed again, after a repair,
-	// and the last attempt's issues are closed. Its keys must differ or the second
-	// attempt's repair work would be silently suppressed.
+	// Two failures in one report are two defects, and two keys. A shared key would
+	// let whichever was filed first swallow the other.
+	if len(firstKeys) != 2 {
+		t.Fatalf("keys = %v; want one per failed scenario", firstKeys)
+	}
+	if firstKeys[0] == firstKeys[1] {
+		t.Errorf("both failures share the dedupe key %q; one would never be filed", firstKeys[0])
+	}
+}
+
+// A scenario that is still failing when the next attempt runs already HAS an open
+// issue. The issue is the same work it always was, so nothing new is filed — but
+// its body describes the attempt that opened it, and a repair agent reads the
+// newest evidence. So the current attempt's observation goes on as a comment.
+func TestMintRepairIssues_RecurrenceCommentsRatherThanFilingAgain(t *testing.T) {
+	iss := &fakeIssues{}
+	svc := newSvc(iss, fakeCriteria{raw: []byte(sampleCriteria), found: true})
+
+	// Attempt 1 files both failures.
+	filed, err := svc.MintRepairIssues(context.Background(), "org", "proj", thisMilestone, []byte(failedReport))
+	if err != nil {
+		t.Fatalf("first attempt: %v", err)
+	}
+	keys := dedupeKeys(iss)
+
+	// The repair left the FIRST scenario broken, so its issue is still open when
+	// attempt 2 runs. The second one was fixed and its issue closed, which the host
+	// models by not matching it.
 	iss.created = nil
-	if _, err := svc.MintRepairIssues(context.Background(), "org", "proj", thisMilestone, report, "cycle-xyz"); err != nil {
+	iss.openByDedupe = map[string]int{keys[0]: 77}
+
+	refiled, err := svc.MintRepairIssues(context.Background(), "org", "proj", thisMilestone, []byte(failedReport))
+	if err != nil {
 		t.Fatalf("second attempt: %v", err)
 	}
-	for _, key := range dedupeKeys(iss) {
-		for _, prior := range firstKeys {
-			if key == prior {
-				t.Errorf("attempt 2 reused attempt 1's dedupe key %q; its repair work would never be filed", key)
-			}
+	if len(refiled) != len(filed) {
+		t.Fatalf("reported %v; every outstanding defect has to be counted, filed or not", refiled)
+	}
+	if len(iss.created) != 1 {
+		t.Fatalf("created %d issues; the still-open defect must not get a second one", len(iss.created))
+	}
+	if strings.Contains(iss.created[0].Title, "Greeting a known visitor") {
+		t.Error("a defect with an open issue was filed again")
+	}
+
+	if len(iss.comments) != 1 {
+		t.Fatalf("posted %d comments; the recurrence is the only one", len(iss.comments))
+	}
+	c := iss.comments[0]
+	if c.number != 77 {
+		t.Errorf("commented on #%d; want the open issue the mint resolved onto", c.number)
+	}
+	for _, want := range []string{
+		"Greeting a known visitor",            // which defect recurred
+		"failed again",                        // that it is a recurrence, not a first report
+		`the heading read "Hello, undefined"`, // this attempt's own evidence
+	} {
+		if !strings.Contains(c.body, want) {
+			t.Errorf("recurrence comment is missing %q:\n%s", want, c.body)
 		}
 	}
 }
@@ -157,29 +210,13 @@ func TestMintRepairIssues_NothingFailedFilesNothing(t *testing.T) {
 		"unparsable": `{`,
 	} {
 		filed, err := svc.MintRepairIssues(context.Background(), "org", "proj", thisMilestone,
-			[]byte(report), "cycle-abc")
+			[]byte(report))
 		if err != nil {
 			t.Errorf("%s: MintRepairIssues: %v", name, err)
 		}
 		if len(filed) != 0 || len(iss.created) != 0 {
 			t.Errorf("%s: filed %v; want nothing", name, filed)
 		}
-	}
-}
-
-// Without a cycle id two attempts would share a dedupe key, so the second
-// attempt's repair work would vanish. Refusing loudly beats filing work that
-// silently collides.
-func TestMintRepairIssues_RequiresACycleID(t *testing.T) {
-	iss := &fakeIssues{}
-	svc := newSvc(iss, fakeCriteria{raw: []byte(sampleCriteria), found: true})
-
-	if _, err := svc.MintRepairIssues(context.Background(), "org", "proj", thisMilestone,
-		[]byte(failedReport), "  "); err == nil {
-		t.Error("MintRepairIssues accepted a blank cycle id; the dedupe key needs it")
-	}
-	if len(iss.created) != 0 {
-		t.Errorf("filed %d issues before refusing", len(iss.created))
 	}
 }
 
@@ -192,7 +229,7 @@ func TestMintRepairIssues_NeedsNoOracle(t *testing.T) {
 	svc := newSvc(iss, fakeCriteria{found: false})
 
 	filed, err := svc.MintRepairIssues(context.Background(), "org", "proj", thisMilestone,
-		[]byte(failedReport), "cycle-abc")
+		[]byte(failedReport))
 	if err != nil {
 		t.Fatalf("MintRepairIssues: %v", err)
 	}
@@ -252,7 +289,7 @@ func TestMintRepairIssues_AgainstAProductionReport(t *testing.T) {
 	svc := newSvc(iss, fakeCriteria{found: false})
 
 	filed, err := svc.MintRepairIssues(context.Background(), "org", "proj", thisMilestone,
-		[]byte(productionReport), "cycle-real")
+		[]byte(productionReport))
 	if err != nil {
 		t.Fatalf("MintRepairIssues: %v", err)
 	}
@@ -262,7 +299,7 @@ func TestMintRepairIssues_AgainstAProductionReport(t *testing.T) {
 	body := iss.created[0].Body
 	for _, want := range []string{
 		"An item that duplicates one already on the list is rejected", // the rule
-		"Then the list still has exactly one item",                    // the scenario, as written
+		"**Then** the list still has exactly one item",                // the step, as executed
 		`2 — the list holds "Milk" and " milk "`,                      // the observation, which is the only evidence
 		"specs/acceptance/shopping-list.feature:27",                   // where to read it
 	} {
@@ -293,4 +330,103 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// evidenceReport is one failure carrying the failure-time capture: the request
+// left the page and came back 201, and the list still did not change. That is a
+// rendering defect, and the ONLY thing that says so is the network line.
+const evidenceReport = `{"schemaVersion":2,"commit":"abc123","scenarios":[
+  {"feature":"Lists","featureFile":"specs/acceptance/lists.feature","line":27,
+   "rule":"A duplicate is rejected","scenario":"Adding a duplicate","outcome":"failed",
+   "steps":[
+     {"keyword":"Given","text":"the list holds one item","command":"POST /lists"},
+     {"keyword":"When","text":"Dan adds it again","command":"agent-browser find role button click --name Add"},
+     {"keyword":"Then","text":"the list still has exactly one item",
+      "command":"agent-browser get count \".item\"","exit":0,"observed":"2 — the list holds both"}],
+   "evidence":{
+     "network":[{"method":"POST","url":"/api/items","status":201}],
+     "console":["TypeError: items.map is not a function"],
+     "snapshot":"- listitem \"Milk\"\n- listitem \" milk \""}}
+]}`
+
+// The body carries the WHOLE trace, not the one step that settled it.
+//
+// This is the distinction the issue could not previously make. A `When` whose
+// command never ran and a `When` that ran and left the app unchanged are opposite
+// defects — wiring versus rendering — and a body built from the deciding step
+// alone reads identically for both.
+func TestRepairIssueBody_CarriesTheWholeTraceAndTheCapture(t *testing.T) {
+	iss := &fakeIssues{}
+	svc := newSvc(iss, fakeCriteria{found: false})
+
+	if _, err := svc.MintRepairIssues(context.Background(), "org", "proj", thisMilestone,
+		[]byte(evidenceReport)); err != nil {
+		t.Fatalf("MintRepairIssues: %v", err)
+	}
+	body := iss.created[0].Body
+
+	for _, want := range []string{
+		"**Given** the list holds one item",                 // the setup ran…
+		"POST /lists",                                       // …and this is what ran it
+		"**When** Dan adds it again",                        // the action was attempted
+		"**Then** the list still has exactly one item",      // and this is what lost
+		"← settled here",                                    // which step decided it
+		"`POST /api/items` → 201",                           // the request left and was accepted
+		"console: `TypeError: items.map is not a function`", // and the page threw
+		"evidence.snapshot",                                 // where the bulky half lives
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body is missing %q:\n%s", want, body)
+		}
+	}
+
+	// The scenario is rendered ONCE. Quoting the Gherkin above the trace as well
+	// would print every step twice, which is how a body stops being read.
+	if strings.Contains(body, "```gherkin") {
+		t.Errorf("the scenario is quoted twice — as Gherkin and as a trace:\n%s", body)
+	}
+}
+
+// "Nothing left the page" is a finding, and it is the wiring half of the
+// distinction above. An empty list must therefore be SAID, not omitted — an
+// absent section reads as "we did not look".
+func TestRepairIssueBody_SaysWhenNoRequestLeftThePage(t *testing.T) {
+	report := strings.Replace(evidenceReport,
+		`"network":[{"method":"POST","url":"/api/items","status":201}]`, `"network":[]`, 1)
+
+	iss := &fakeIssues{}
+	svc := newSvc(iss, fakeCriteria{found: false})
+	if _, err := svc.MintRepairIssues(context.Background(), "org", "proj", thisMilestone,
+		[]byte(report)); err != nil {
+		t.Fatalf("MintRepairIssues: %v", err)
+	}
+	if !strings.Contains(iss.created[0].Body, "no request left the page") {
+		t.Errorf("an empty capture was rendered as nothing at all:\n%s", iss.created[0].Body)
+	}
+}
+
+// A run that could not capture says so in its own words. Stating the gap is the
+// whole point of the escape: the alternative to an honest "not captured" is an
+// agent inventing a plausible request to satisfy the checker.
+func TestRepairIssueBody_RendersAnHonestlyMissingCapture(t *testing.T) {
+	report := strings.Replace(evidenceReport,
+		`"network":[{"method":"POST","url":"/api/items","status":201}],
+     "console":["TypeError: items.map is not a function"],`,
+		`"notCaptured":"the page navigated away before it could be read",`, 1)
+
+	iss := &fakeIssues{}
+	svc := newSvc(iss, fakeCriteria{found: false})
+	if _, err := svc.MintRepairIssues(context.Background(), "org", "proj", thisMilestone,
+		[]byte(report)); err != nil {
+		t.Fatalf("MintRepairIssues: %v", err)
+	}
+	body := iss.created[0].Body
+	if !strings.Contains(body, "could not capture") ||
+		!strings.Contains(body, "navigated away before it could be read") {
+		t.Errorf("the stated gap did not reach the issue:\n%s", body)
+	}
+	// The trace is independent of the capture and must still be there.
+	if !strings.Contains(body, "**When** Dan adds it again") {
+		t.Errorf("a missing capture swallowed the trace:\n%s", body)
+	}
 }

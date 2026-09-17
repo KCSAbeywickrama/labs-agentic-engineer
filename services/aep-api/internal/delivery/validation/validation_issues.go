@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -185,11 +186,11 @@ func (s *Service) EnsureValidationIssue(ctx context.Context, orgID, projectID st
 // The comment is prose and nothing parses it. It exists so a human opening the
 // closed task can see which attempt closed it and why, without reading the run
 // timeline.
-func (s *Service) CloseValidationIssue(ctx context.Context, orgID, projectID string, issue int, verdict string) error {
+func (s *Service) CloseValidationIssue(ctx context.Context, orgID, projectID string, issue int, verdict string, repairs []int) error {
 	if issue <= 0 {
 		return nil
 	}
-	if err := s.writer.Close(ctx, orgID, projectID, issue, closeComment(verdict)); err != nil {
+	if err := s.writer.Close(ctx, orgID, projectID, issue, closeComment(verdict, repairs)); err != nil {
 		return fmt.Errorf("validation: close issue #%d: %w", issue, err)
 	}
 	slog.InfoContext(ctx, "validation: closed the version's validation task",
@@ -201,13 +202,44 @@ func (s *Service) CloseValidationIssue(ctx context.Context, orgID, projectID str
 // verdict is its own sentence rather than a blank: the attempt ended without one,
 // which is a different thing from a verdict of `inconclusive` and the reader has
 // to be able to tell them apart.
-func closeComment(verdict string) string {
+//
+// Naming the repair issues here is the ONLY edge between a repair issue and the
+// run that found it, and it is deliberately on this end. Writing `Part of #N`
+// into a repair body would point a coding agent at THIS issue, whose body is a
+// task brief for a different agent — "drive every scenario", "do not modify
+// `specs/`" — so following the link would cost it context that is actively wrong
+// for its job. Named from here instead, GitHub's own cross-reference puts a
+// backlink in each repair issue's TIMELINE, which a person sees and
+// `gh issue view --comments` does not return.
+func closeComment(verdict string, repairs []int) string {
 	if verdict == "" {
 		return "Closing this validation task: the attempt ended without reaching a verdict. " +
 			"The version is deployed and unjudged — trigger validation again to ask its criteria."
 	}
-	return fmt.Sprintf("Closing this validation task: the attempt concluded `%s`. "+
-		"Reopened automatically if the version is judged again.", verdict)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Closing this validation task: the attempt concluded `%s`. ", verdict)
+	if len(repairs) > 0 {
+		fmt.Fprintf(&b, "Filed %s for the scenarios that did not hold. ", issueRefs(repairs))
+	}
+	b.WriteString("Reopened automatically if the version is judged again.")
+	return b.String()
+}
+
+// issueRefs renders issue numbers as an English list of `#N` references —
+// "#7", "#7 and #9", "#7, #9 and #11".
+func issueRefs(numbers []int) string {
+	refs := make([]string, 0, len(numbers))
+	for _, n := range numbers {
+		refs = append(refs, "#"+strconv.Itoa(n))
+	}
+	switch len(refs) {
+	case 1:
+		return refs[0]
+	case 2:
+		return refs[0] + " and " + refs[1]
+	default:
+		return strings.Join(refs[:len(refs)-1], ", ") + " and " + refs[len(refs)-1]
+	}
 }
 
 // findValidationIssue returns the number of the milestone's validation task
@@ -306,7 +338,7 @@ func renderScope(files []AcceptanceFile, sum acceptanceSummary) string {
 		"",
 		"## Report",
 		fmt.Sprintf("- Commit `%s` — one entry per scenario in the feature files, including the ones you could not drive.", ReportFilePath),
-		"- Check it before opening the PR: `node \"$AEP_SKILLS_DIR/acceptance-run/scripts/check-report.mjs\" \"$(git rev-parse --show-toplevel)\"`. It exits 2 if a scenario has no entry, or if a `passed` is not backed by a command that could have said no.",
+		"- Check it before opening the PR: `node \"$AEP_SKILLS_DIR/acceptance-run/scripts/check-report.mjs\" \"$(git rev-parse --show-toplevel)\"`. It exits 2 if a scenario has no entry, if a `passed` is not backed by a command that could have said no, or if a `failed` does not record what the page was doing when it failed.",
 		"- Post a summary comment on this issue when done.",
 		"",
 		"---",

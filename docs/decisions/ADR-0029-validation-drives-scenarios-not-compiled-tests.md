@@ -51,6 +51,30 @@ be edited) from one too broken to perform it. Auto-filing would send a coding ru
 the requirement never asked for — a repair loop that makes the product worse, confidently. A person
 tells the two apart in seconds; the run reports and leaves it to them.
 
+### One defect, one issue
+
+A `failed` scenario becomes ordinary work: one issue per scenario, `bug` + `src/validation`, filed
+into the milestone the attempt judged. One per scenario rather than one omnibus issue because the
+no-progress rule compares working-set SIZES — repairing two of three failures has to read as progress,
+and a single issue holding three could only be open or closed.
+
+The dedupe key is the **scenario alone**. A scenario still failing when the next attempt runs already
+has an open issue, so the mint resolves onto it and leaves that attempt's evidence there as a comment
+instead of filing a second. The key carried the attempt as well at first, on the reasoning that a
+scenario failing again must not be suppressed by the closed issue the last repair produced — which the
+host's dedupe cannot do, because it only ever matches an issue whose state is OPEN. What the attempt
+actually bought was a duplicate, and a second open issue for one defect grows exactly the set the
+no-progress rule reads, so a defect that survived a repair registered as negative progress.
+
+**The link between a repair issue and the run that found it points from the task, not to it.** The
+validation task's close comment names the repair issues the attempt filed; the repair bodies reference
+nothing. `Part of #N` in a repair body would aim a coding agent at the validation task, whose body is a
+brief written for the validation agent — *drive every scenario*, *do not modify `specs/`* — so
+following it would cost the reader context that is wrong for its job. Named from the task instead,
+GitHub's own cross-reference puts a backlink in each repair issue's timeline, where a person sees it
+and `gh issue view --comments` does not return it. A repair issue stays answerable from one read, which
+is the property the whole body is built around.
+
 ### Evidence, not assertion
 
 A pass is only worth the thing that could have said no. Every `Then` records the command that settled
@@ -61,6 +85,37 @@ verdict**: a nonzero exit, a step with no command at all, or a value-returning c
 This is the single most important property of the approach and the one most easily lost. It is
 checked by a script the run invokes — deliberately not yet by the platform, which is an open question
 this branch does not close.
+
+### A failure carries what the system was doing
+
+The trace is not the only evidence worth having, and a compiled suite is structurally unable to
+produce the rest of it. A failing scenario records an `evidence` block captured **at the moment it
+failed, while the page is still open**: the requests around the deciding step, any console errors, and
+the page as the run saw it.
+
+`network` is the half that earns its place. A request that left and came back `201` with the list
+unchanged is a rendering defect; no request at all is a wiring defect. They are fixed in different
+files, and nothing else in the report separates them — the step trace reads identically for both. An
+EMPTY request list is therefore an answer, not a blank, and the checker distinguishes an empty array
+from an absent key.
+
+The repair issue renders the whole trace and the network and console lines. The **snapshot stays in
+the report** rather than the body: it is the one unbounded item, and after the pull request merges
+`tests/acceptance/report.json` is a file the coding agent already has checked out, so putting it in
+the body buys reachability nothing.
+
+Two things the run deliberately does **not** record. No screenshot — for an agent reader a textual
+accessibility snapshot is strictly more informative, and a binary needs somewhere to live. And **no
+root-cause hypothesis**: the validation agent never reads the source, so a causal claim from it is a
+guess about internals it has not seen, produced by the one party whose whole credibility rests on
+reporting only what a command settled. The repair agent, which is about to open the file, derives a
+better one in a single read. What the live run uniquely has is *observational* — `POST /items → 201`
+and the list still showing one item — and that is what is kept.
+
+The gate is hard (`exit 2`) with one escape: an explicit `notCaptured` naming the reason. The escape
+is not softness. The check runs after the page is gone, so an agent that did not capture can satisfy a
+gate with no escape only by re-driving the scenario or by inventing a plausible request — and a report
+that says something nothing checked is worse than one that states a gap.
 
 ### Isolation is functional, not a reset
 
