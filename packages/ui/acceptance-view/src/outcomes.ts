@@ -39,17 +39,28 @@ import { OUTCOMES, type ReportScenario } from "./report.js";
 export type OutcomeTone = "success" | "error" | "warning" | "default";
 
 /**
- * `blocked` is amber alone. ADR-0029 files no repair issue for it, precisely
- * because only a person can tell a product that correctly refuses an action
- * from one too broken to perform it — so it is the one row on the page that
- * carries a call to action. `unjudgeable` is neutral: an honest answer about
- * truth that lives outside the running app, not a defect.
+ * Amber means A PERSON HAS TO LOOK, and it covers both of the outcomes that
+ * are one: `blocked` (the app would not let the run do the thing) and
+ * `unjudgeable` (the answer is not in the app at all).
+ *
+ * They were split once, blocked amber and unjudgeable neutral, on the claim
+ * that blocked was the only row carrying a call to action. That claim does not
+ * survive the code: `FailedScenarios` returns `failed` alone, so NEITHER files
+ * a repair issue; the Go ladder pairs them in one arm (`case outcomeBlocked,
+ * outcomeUnjudgeable: uncovered = true`); and the page's own partial sentence
+ * already counts them together — "couldn't be settled against the deployed app
+ * — please check them yourself". Three layers of the system treat them alike,
+ * so the pills do too, and the glyph is what tells them apart.
+ *
+ * `No result` stays neutral, and that one is a real distinction: a scenario
+ * written since the run is the ordinary authoring loop, not something anybody
+ * has to act on.
  */
 export const OUTCOME_TONE: Readonly<Record<string, OutcomeTone>> = {
   passed: "success",
   failed: "error",
   blocked: "warning",
-  unjudgeable: "default",
+  unjudgeable: "warning",
 };
 
 export const OUTCOME_ICON: Readonly<Record<string, ComponentType<{ size?: number }>>> = {

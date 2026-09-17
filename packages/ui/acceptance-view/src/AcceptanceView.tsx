@@ -124,18 +124,21 @@ function Caret({ open, size = 16 }: { readonly open: boolean; readonly size?: nu
 }
 
 /**
- * A tag, as a soft mono pill.
+ * A tag.
  *
- * `emphasis` is what tells the two kinds apart, and it is emphasis rather than
- * hue because no hue is free here: success, error, warning and neutral are the
- * four outcomes, `info` is the emphasised literals inside a step, and amber
- * especially cannot be borrowed — it would put a refusal SCENARIO in the same
- * visual bucket as a BLOCKED one, which is the pair ADR-0029 exists to keep
- * apart.
+ * `emphasis` tells the two kinds apart, and it is a difference of FORM as much
+ * as colour. `@negative` is a property a reviewer scans for — all-happy-path is
+ * the commonest defect in a generated spec — so it is marked. `@story-N` is a
+ * citation: it points at a requirement, and a pill would dress a reference up as
+ * a discrete object you might click. It reads as what it is, quiet mono text.
  *
- * It lands the right way round. `@negative` is a property a reviewer scans for
- * (all-happy-path is the commonest defect in a generated spec), so it keeps the
- * accent; `@story-N` is a reference you look up deliberately, so it goes quiet.
+ * The marked one takes INFO, not the brand accent: orange says "the product's
+ * own thing", which a refusal is not, where blue says "an informational
+ * property", which it is. It shares `info.main` with the literals emphasised
+ * inside a step, and that is fine — a mark after a sentence and mono text inside
+ * an expanded box do not read as one signal. Amber is the hue it may never
+ * take: amber means a person has to look, and a refusal scenario is ordinary
+ * spec rather than something to act on.
  */
 function TagPill({ tag, emphasis = false }: { readonly tag: string; readonly emphasis?: boolean }) {
   return (
@@ -144,17 +147,20 @@ function TagPill({ tag, emphasis = false }: { readonly tag: string; readonly emp
       sx={(theme) => ({
         display: "inline-flex",
         alignItems: "center",
-        px: 1.25,
-        py: 0.25,
-        borderRadius: PILL,
         flexShrink: 0,
         fontFamily: MONO,
         fontSize: "0.6875rem",
         fontWeight: 500,
         lineHeight: 1.5,
         ...(emphasis
-          ? { color: "primary.dark", bgcolor: alpha(theme.palette.primary.main, 0.12) }
-          : { color: "text.secondary", bgcolor: theme.palette.action.hover }),
+          ? {
+              px: 1.25,
+              py: 0.25,
+              borderRadius: PILL,
+              color: "info.dark",
+              bgcolor: alpha(theme.palette.info.main, 0.12),
+            }
+          : { color: "text.secondary" }),
       })}
     >
       {tag}
@@ -406,7 +412,15 @@ function ScenarioRow({ scenario, reported, hasRun, awaiting, open, onToggle }: S
         onClick={onToggle}
         aria-expanded={open}
         sx={{
-          width: "100%",
+          // `calc(100% + 16px)`, NOT `100%`. The row bleeds its hover surface
+          // 8px past the text column on both sides (`mx: -1`) and pads back in
+          // (`px: 1`), so the content lines up with the rule band above it. At
+          // `width: 100%` the border box is already fixed, so the negative right
+          // margin widens nothing — it bleeds left only — and the right padding
+          // then eats 8px from a box sitting 8px short. That put this row's
+          // outcome pill 16px inboard of the rule's @story-N and the feature's
+          // count, which are the two things it has to line up with.
+          width: "calc(100% + 16px)",
           display: "flex",
           gap: ROW_GAP,
           alignItems: "flex-start",

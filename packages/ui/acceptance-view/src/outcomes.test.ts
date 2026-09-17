@@ -56,13 +56,20 @@ describe("outcomeLabel", () => {
 });
 
 describe("outcomeTone", () => {
-  it("gives blocked the only call to action on the page", () => {
-    // No repair issue is filed for it, so a person has to look.
+  // Amber means a person has to look, and both of these are that: no repair
+  // issue is filed for either (FailedScenarios returns `failed` alone), the Go
+  // ladder pairs them in one arm, and the partial sentence counts them
+  // together. They differ by glyph, not by hue.
+  it("gives both unsettled outcomes the same call to action", () => {
     expect(outcomeTone("blocked")).toBe("warning");
+    expect(outcomeTone("unjudgeable")).toBe("warning");
   });
 
-  it("leaves unjudgeable neutral, because it is an honest answer and not a defect", () => {
-    expect(outcomeTone("unjudgeable")).toBe("default");
+  // The one that genuinely needs no action: a scenario written since the run is
+  // the ordinary authoring loop, and colouring the expected state teaches a
+  // reader to discount the colour.
+  it("leaves a scenario the run never covered neutral", () => {
+    expect(outcomeTone("")).toBe("default");
   });
 
   it("keeps passed and failed on the two colours the console already uses", () => {

@@ -61,8 +61,8 @@ two more such pairs, so every outcome carries its own glyph.
 |---|---|---|---|
 | `passed` | success | `Check` | |
 | `failed` | error | `X` | |
-| `blocked` | **warning** | `Ban` | ADR-0029 files no repair issue for it, because only a person can tell a product that correctly refuses from one too broken to act. It is the one row on the page carrying a call to action. |
-| `unjudgeable` | default | `CircleHelp` | An honest answer about truth living outside the running app — not a defect. |
+| `blocked` | **warning** | `Ban` | Amber means A PERSON HAS TO LOOK. |
+| `unjudgeable` | **warning** | `CircleHelp` | The same, and they differ by glyph. Split once — blocked amber, unjudgeable neutral — on the claim that blocked was the only row with a call to action. The code disagrees three times over: `FailedScenarios` returns `failed` alone so NEITHER files a repair issue, the Go ladder pairs them in one arm, and the partial sentence counts them together. |
 | *(absent)* | default | — | `No result`: the console's own word, because the scenario is absent from the report and the report has none for it. |
 
 ## One card, a toolbar and a scrolling list
@@ -168,13 +168,25 @@ height jumps the row.
   rule band and the feature header DROP `@negative` from their own tag lists:
   every scenario beneath them shows it, so repeating it one level up says the
   same thing twice.
-- **The two tag kinds differ by emphasis, not hue.** `@negative` keeps the accent
-  tint; `@story-N` goes neutral. No hue is free — success, error, warning and
-  neutral are the four outcomes and `info` is the emphasised literals in a step —
-  and amber especially cannot be borrowed, because it would put a refusal
-  SCENARIO in the same visual bucket as a BLOCKED one, the pair ADR-0029 exists
-  to keep apart. It lands the right way round: `@negative` is a property a
-  reviewer scans for, `@story-N` a reference looked up deliberately.
+- **The two tag kinds differ in FORM, not just colour.** `@negative` is a
+  marked pill; `@story-N` is quiet mono text. That lands the right way round —
+  one is a property a reviewer scans for, the other a citation pointing at a
+  requirement, and a pill would dress a reference up as a discrete object you
+  might click. It also survives greyscale and colour-blindness, which a hue
+  difference alone would not.
+
+  **`@negative` takes `info`, not the brand accent** — orange says "the
+  product's own thing", which a refusal is not, where blue says "an
+  informational property", which it is. It shares `info.main` with the literals
+  emphasised inside a step, and that is fine: a mark after a sentence and mono
+  text inside an expanded box do not read as one signal. **Amber is the hue it
+  may never take**, because amber means a person has to look, and a refusal
+  scenario is ordinary spec rather than something to act on.
+
+  **What a pill means here is "marked", not "clickable".** The outcome pills are
+  pills and are not interactive either; the toolbar's filter chips are the only
+  clickable ones, and they are MUI `Chip`s. So the card reads: a pill is a state
+  or a property worth marking, text is a reference.
 - **No step count.** It held the flush-right column the outcome pill wants,
   answered no question a reader has — a 3-step scenario is not better or riskier
   than a 5-step one — and on a blocked scenario it counted steps that never ran.

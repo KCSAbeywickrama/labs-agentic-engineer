@@ -1149,8 +1149,8 @@ pane serves two (ADR-0029 replaced the compiled path on `vld-redesign`).
 |---|---|
 | Description, under the heading, spec view only | *Each scenario is one concrete example of a rule your product must follow, taken from your requirements alone. After every deployment they are driven against the deployed system and the results appear under Validations. To change one, ask the agent.* |
 | A capability's name | its own `Feature:` heading, inside the pane — never the rail, which carries the one entry |
-| A refusal | the **`@negative` tag**, closing the sentence, in the accent tint |
-| A story reference | the **`@story-N` tag** on the rule, in quiet neutral |
+| A refusal | the **`@negative` tag**, closing the sentence — a marked pill, informational blue |
+| A story reference | the **`@story-N` tag** on the rule — quiet mono text, no pill |
 
 **A refusal is marked on every scenario that is one**, including the ones that
 inherit `@negative` from a rule that is itself a prohibition — which is most of
@@ -1158,11 +1158,12 @@ the interesting half of a spec. The rule and the feature drop the tag from their
 own lists for that reason: every scenario beneath them carries it, and repeating
 it one level up says the same thing twice.
 
-**The two tags differ by emphasis, not colour.** Every hue on the page is
-spoken for — four outcomes, plus `info` for the literals inside a step — and
-amber least of all is free: it would put a refusal SCENARIO in the same bucket
-as a BLOCKED one. So the accent goes to the tag a reviewer scans for, and the
-reference goes quiet.
+**The two tags differ in form, not only colour.** `@negative` is a marked pill
+and `@story-N` is plain text, so the mark lands on the one a reviewer scans for
+and a citation is not dressed up as an object to click. `@negative` is
+informational blue rather than the brand accent — a refusal is a property of the
+scenario, not a thing the product is selling — and never amber, which on this
+page means a person has to look.
 
 **The pane says nothing about the RUN** — no tally, no commit, no deployed URL,
 no isolation statement. The verdict tile above owns the numbers, and a second
@@ -1217,6 +1218,7 @@ unrecognised outcome: count it as a gap, never as coverage.
 | A command said no | **`Failed`** |
 | The action could not be carried out at any interface, so the behaviour was never reached | **`Blocked`** |
 | The truth lives outside the running app — a stubbed backend, another system | **`Unjudgeable`** |
+| *(both of those)* | amber — **a person has to look** |
 | The last run has no entry for it | **`No result`** |
 
 **Every one of them carries a mark.** ADR-0016 gave `Passed` and `Failed` marks
@@ -1224,12 +1226,12 @@ because as outlined chips they would otherwise differ by hue alone, which is
 nothing to a red/green colour-blind reader. Four outcomes create two more such
 pairs, so the rule that exempted the others no longer applies to any of them.
 
-**`Blocked` is the only amber, and the only call to action.** No repair issue is
-filed for it, deliberately: the agent cannot tell an app that correctly refuses
-an action from one too broken to perform it, and auto-filing would send a coding
-run to add an affordance the requirement never asked for. A person tells the two
-apart in seconds. `Unjudgeable` stays neutral — it is an honest answer, not a
-defect, and colouring it would spend attention where nothing is wrong.
+**Amber is `Blocked` AND `Unjudgeable`, and it means a person has to look.** No
+repair issue is filed for either — the agent cannot tell an app that correctly
+refuses from one too broken to act, and it cannot reach the truth at all when
+that truth is in another system — so both wait on a reader. The platform agrees
+in three places: its ladder pairs them, neither is filed as a failure, and the
+partial sentence counts them together. They differ by glyph, not by hue.
 
 **`No result` is the console's own word**, and the only one here that is: the
 scenario is absent from the report, so the report has no word for it. It is

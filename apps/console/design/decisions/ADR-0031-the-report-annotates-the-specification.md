@@ -121,11 +121,17 @@ so the deferral has expired.
   77 refusals. Reading the tag list showed those nothing, on the one mark whose
   job is "are the refusals covered". For the same reason a rule and a feature
   drop `@negative` from their own lists: every scenario beneath them shows it.
-- **The tags differ by emphasis, not hue**, because no hue is free: four
-  outcomes take success/error/warning/neutral and `info` takes the literals
-  inside a step. Amber is the one that would actively mislead — a refusal
-  SCENARIO in the same visual bucket as a BLOCKED one, the pair this ADR's
-  decision 3 exists to keep apart.
+- **Amber means a person has to look, and it covers `blocked` AND
+  `unjudgeable`.** They were split once on the claim that blocked was the only
+  row with a call to action; the code disagrees three times over —
+  `FailedScenarios` returns `failed` alone so neither files a repair issue, the
+  verdict ladder pairs them in a single arm, and the partial sentence counts
+  them together. A glyph tells them apart, which is what glyphs are for.
+  `No result` stays neutral, and that distinction is real: a scenario authored
+  since the run is the ordinary loop, not something to act on.
+- **`@negative` takes `info`, and never amber.** The brand accent said "the
+  product's own thing" about what is really an informational property of a
+  scenario; amber would say a reader has to act on ordinary spec.
 - **The outcome pill keeps a glyph the reference design does not have.**
   ADR-0016's rule — a mark so the set is told apart at a glance rather than read
   one at a time — is not something a restyle gets to drop, and four outcomes make
