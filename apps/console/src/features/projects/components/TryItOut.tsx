@@ -188,7 +188,9 @@ export function TestUsersInline({
                   <ListingTable.Cell>Account</ListingTable.Cell>
                   <ListingTable.Cell sx={{ width: 240 }}>Password</ListingTable.Cell>
                   <ListingTable.Cell sx={{ width: 160 }}>Role</ListingTable.Cell>
-                  <ListingTable.Cell sx={{ width: 120 }}>Cold start</ListingTable.Cell>
+                  {/* "Cold start" was a v1 leftover — the cell has always
+                      held `login.scopes`, never a cold-start anything. */}
+                  <ListingTable.Cell sx={{ width: 140 }}>Scopes</ListingTable.Cell>
                 </ListingTable.Row>
               </ListingTable.Head>
               <ListingTable.Body>
