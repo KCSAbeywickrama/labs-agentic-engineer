@@ -123,12 +123,25 @@ test("a visitor who is not signed in has no scoped reach", () => {
 
 test("scoped reach never counts a public screen — it is reachable by everyone", () => {
   const publicOnly = SCREEN_ROUTES.filter((s) => s.public);
+  // The fixture has to CONTAIN one, or this test passes by describing nothing:
+  // a loop over an empty list asserts nothing at all, and the regression it is
+  // named for — a public screen counted as reach, so NoAccess never renders —
+  // would go straight through it.
+  assert.ok(publicOnly.length > 0, "the example table must keep a public screen for this to be a test");
   for (const screen of publicOnly) {
+    // Reachable by a caller holding nothing: that is what public means.
     assert.ok(
-      !reachableScreens(held(), true).filter((s) => !s.public && s.loads !== null).includes(screen),
-      "a public screen must not count toward scoped reach",
+      reachableScreens(held(), true).includes(screen),
+      `a public screen is reachable by everyone, ${screen.key} was not`,
+    );
+    // And reachable before sign-in, which is the other half of it.
+    assert.ok(
+      reachableScreens(held(), false).includes(screen),
+      `a public screen is reachable by a visitor, ${screen.key} was not`,
     );
   }
-  // Holding nothing, with public screens present, is still NoAccess.
+  // Yet holding nothing, with those public screens present, is still NoAccess —
+  // the rail is not empty and the caller has still earned nowhere to go.
   assert.equal(hasScopedReach(held(), true), false);
+  assert.ok(reachableScreens(held(), true).length > 0, "the public screen keeps the rail non-empty");
 });

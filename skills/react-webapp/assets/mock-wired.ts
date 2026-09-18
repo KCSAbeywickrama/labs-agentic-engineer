@@ -132,13 +132,22 @@ export function parseMockBearer(header: string | undefined): { role: string; sco
   if (!token.startsWith("mock:")) return null;
   const body = token.slice("mock:".length);
   const semi = body.indexOf(";");
-  const role = semi >= 0 ? decodeURIComponent(body.slice(0, semi)) : "";
-  const csv = semi >= 0 ? body.slice(semi + 1) : body;
-  const scopes = csv
-    .split(",")
-    .map((value) => decodeURIComponent(value).trim())
-    .filter(Boolean);
-  return { role, scopes };
+  // `decodeURIComponent` THROWS on malformed percent-encoding (`%zz`), and a
+  // throw here escapes into the middleware as a 500. Every other unusable token
+  // returns null and is answered as a refused session, which is what a caller
+  // holding a broken token should see; one bad escape must not be the single
+  // shape that reads as the mock being broken instead.
+  try {
+    const role = semi >= 0 ? decodeURIComponent(body.slice(0, semi)) : "";
+    const csv = semi >= 0 ? body.slice(semi + 1) : body;
+    const scopes = csv
+      .split(",")
+      .map((value) => decodeURIComponent(value).trim())
+      .filter(Boolean);
+    return { role, scopes };
+  } catch {
+    return null;
+  }
 }
 
 /**

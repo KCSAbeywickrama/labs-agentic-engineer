@@ -75,6 +75,7 @@ import { MyClaimsPage } from "./pages/MyClaims";
 import { SubmitClaimPage } from "./pages/SubmitClaim";
 import { ApprovalsPage } from "./pages/Approvals";
 import { ReportsPage } from "./pages/Reports";
+import { ExpensePolicyPage } from "./pages/ExpensePolicy";
 
 const APP_NAME = "Expense Tracker";
 
@@ -84,6 +85,7 @@ const PAGE_BY_KEY: Record<string, ReactElement> = {
   submitclaim: <SubmitClaimPage />,
   approvals: <ApprovalsPage />,
   reports: <ReportsPage />,
+  policy: <ExpensePolicyPage />,
 };
 
 /** The screens reachable before sign-in — routed above the guard, below. */

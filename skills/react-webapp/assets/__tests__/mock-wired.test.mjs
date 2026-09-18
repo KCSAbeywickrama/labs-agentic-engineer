@@ -47,5 +47,5 @@ test("mock/wired.ts: the gateway stand-in refuses, and signs what it forwards", 
   assert.equal(child.status, 0, `mock-wired.cases.mjs failed:\n${output}`);
   assert.match(output, /# pass (\d+)/);
   const passed = Number(/# pass (\d+)/.exec(output)[1]);
-  assert.ok(passed >= 13, `expected the case file to run its suite, saw ${passed} passing`);
+  assert.ok(passed >= 14, `expected the case file to run its suite, saw ${passed} passing`);
 });

@@ -166,6 +166,28 @@ test("nothing secret is written down or shown", async () => {
   assert.ok(!describePlan(wire).join("\n").includes("s3cret"));
 });
 
+test("a password is masked by where it came from, not by what the design named it", async () => {
+  // THE BINDING NAME BELONGS TO THE DESIGN, and nothing obliges it to look like
+  // a secret: `DB_PASS` carries no "PASSWORD", and a lowercase name does not
+  // match a case-sensitive pattern at all. Both are legal, and both used to put
+  // the real password into `plan.json` and into the triage agent's prompt. The
+  // planner knows better than any pattern can — it read the value out of the
+  // dependency's `password` output — so that is what decides.
+  const specs = readWireSpecs(ONBOARDING, "onboarding");
+  const api = specs.workloads["onboarding-api"];
+  assert.ok(api?.["onboarding-db"], "the fixture binds a database, or this test proves nothing");
+  api["onboarding-db"] = { ...api["onboarding-db"], password: "db_pass" };
+  const wire = await assignHostPorts(buildWirePlan(specs, { secret: () => "s3cret" }), allFree);
+
+  assert.equal(wire.services[0]?.env.db_pass, "s3cret", "the container still gets the real value");
+  assert.deepEqual(wire.services[0]?.secretEnv, ["db_pass"], "and the plan says which key holds it");
+
+  const masked = maskedPlan(wire);
+  assert.equal(masked.services[0]?.env.db_pass, "***");
+  assert.ok(!JSON.stringify(masked).includes("s3cret"), "nothing written down carries it");
+  assert.ok(!describePlan(wire).join("\n").includes("s3cret"), "and nothing shown does either");
+});
+
 test("the compose file the plan becomes", async () => {
   const wire = await assignHostPorts(plan(ONBOARDING, "onboarding"), allFree);
   const yaml = composeDocument(
