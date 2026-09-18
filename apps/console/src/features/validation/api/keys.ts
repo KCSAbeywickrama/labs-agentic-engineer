@@ -24,4 +24,14 @@ export const validationKeys = {
   // cache-buster that invalidates a stale criteria/report read.
   file: (name: string, path: string, version: string) =>
     [...projectKeys.detail(name), "validation", "file", path, version] as const,
+  // The validation ledger — one row per version.
+  list: (name: string) => [...projectKeys.detail(name), "validations"] as const,
+  // One version's validation history.
+  detail: (name: string, tag: string) =>
+    [...projectKeys.detail(name), "validations", tag] as const,
+  // One attempt's report and the criteria it was judged against. Keyed by the
+  // CYCLE because that is what the snapshot is of: a merged attempt's evidence
+  // never changes, which is what lets the query cache it forever.
+  snapshot: (name: string, tag: string, cycleId: string) =>
+    [...projectKeys.detail(name), "validations", tag, "cycles", cycleId] as const,
 };

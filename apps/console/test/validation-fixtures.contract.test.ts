@@ -30,7 +30,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { validationFiles, VALIDATION_SCENARIOS } from "../src/mocks/fixtures/validation";
+import {
+  validationDetail,
+  validationFiles,
+  validationLedger,
+  validationSnapshot,
+  VALIDATION_SCENARIOS,
+} from "../src/mocks/fixtures/validation";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const CHECKER = join(REPO, "skills/acceptance-run/scripts/check-report.mjs");
@@ -95,5 +101,54 @@ describe("the mock validation fixtures satisfy the run's own report contract", (
     const breaches = output.split("\n").filter((l) => l.trim().startsWith("x "));
     expect(breaches).toHaveLength(1);
     expect(breaches[0]).toContain("has no entry in the report");
+  });
+});
+
+/**
+ * The read-model fixtures describe the SAME run as the run-story ones.
+ *
+ * They are derived from it rather than written beside it, and this is what
+ * holds that true: a second hand-written set describing the same state is how
+ * the validation page and the deployments board came to disagree about one run
+ * in the first place (#423). A fixture that can contradict itself teaches the
+ * UI to render a state the platform cannot produce.
+ */
+describe("the validation read-model fixtures agree with the run story", () => {
+  it.each(VALIDATION_SCENARIOS)("%s reports the same state everywhere", (scenario) => {
+    const ledger = validationLedger(scenario);
+    const detail = validationDetail(scenario);
+    const current = ledger.validations.find((v) => v.tag === "v1");
+
+    expect(current?.state).toBe(scenario);
+    expect(detail.state).toBe(scenario);
+    expect(detail.milestoneNumber).toBe(current?.milestoneNumber);
+  });
+
+  // The ledger exists to make older versions reachable, so a fixture with one
+  // row would hide the feature it is there to show.
+  it("always offers more than the scenario's own version", () => {
+    const rows = validationLedger("passed").validations;
+    expect(rows.length).toBeGreaterThan(1);
+    // Including one never validated — the row a reader most needs to find.
+    expect(rows.some((r) => r.state === "none")).toBe(true);
+  });
+
+  it("carries only validation cycles, on runs that attempted one", () => {
+    for (const scenario of VALIDATION_SCENARIOS) {
+      for (const run of validationDetail(scenario).runs) {
+        expect(run.cycles.length).toBeGreaterThan(0);
+        for (const c of run.cycles) expect(c.kind).toBe("validation");
+      }
+    }
+  });
+
+  // A snapshot pairs a report with the criteria AT THE SAME COMMIT. An attempt
+  // still running has no commit, so it has criteria and no report — which is a
+  // different fact from an empty report and renders as a different screen.
+  it("pairs a report with a commit, or has neither", () => {
+    for (const scenario of VALIDATION_SCENARIOS) {
+      const snap = validationSnapshot(scenario);
+      expect(Boolean(snap.report)).toBe(Boolean(snap.commit));
+    }
   });
 });

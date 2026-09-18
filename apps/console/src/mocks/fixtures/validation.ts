@@ -943,3 +943,99 @@ export function validationStatusThread(
     ...(post.observed ? { observed: true } : {}),
   }));
 }
+
+// ---------------------------------------------------------------------------
+// The validation READ MODEL — the ledger, a version's history, one attempt's
+// evidence.
+//
+// Derived from the same scenario switch the run story uses, so flipping
+// `aep:mock:validation` moves every validation surface together. The alternative
+// — a second set of rows describing the same state — is how the page and the
+// board came to disagree about the same run in the first place.
+
+type ValidationList = components["schemas"]["ValidationList"];
+type ValidationSummary = components["schemas"]["ValidationSummary"];
+type ValidationDetail = components["schemas"]["ValidationDetail"];
+type ValidationSnapshot = components["schemas"]["ValidationSnapshot"];
+
+/** The attempts a scenario's run story holds, oldest first. */
+function attemptsOf(scenario: ValidationScenario, attempt: ValidationAttempt) {
+  const runs = validationRuns(scenario, attempt).runs ?? [];
+  return runs.flatMap((r) => (r.cycles ?? []).filter((c) => c.kind === "validation"));
+}
+
+/**
+ * The ledger. One row for the scenario's own version, plus the two older
+ * versions the build ledger carries — the point of the page is that they are
+ * all reachable, so a single-row fixture would hide the feature it exists for.
+ */
+export function validationLedger(
+  scenario: ValidationScenario,
+  attempt: ValidationAttempt = "first",
+): ValidationList {
+  const cycles = attemptsOf(scenario, attempt);
+  const newest = cycles[cycles.length - 1];
+  const current: ValidationSummary = {
+    tag: "v1",
+    milestoneNumber: 1,
+    state: scenario,
+    ...(newest?.createdAt ? { startedAt: newest.createdAt } : {}),
+    ...(newest?.endedAt ? { endedAt: newest.endedAt } : {}),
+  };
+  return {
+    validations: [
+      current,
+      // A version validated cleanly a while back, and one that was built but
+      // never validated — the row a reader most needs to be able to find.
+      {
+        tag: "v0.2",
+        milestoneNumber: 2,
+        state: "passed",
+        startedAt: "2026-04-02T09:12:00Z",
+        endedAt: "2026-04-02T09:31:00Z",
+      },
+      { tag: "v0.1", milestoneNumber: 3, state: "none" },
+    ],
+  };
+}
+
+/** One version's validation history, filtered as the server filters it. */
+export function validationDetail(
+  scenario: ValidationScenario,
+  attempt: ValidationAttempt = "first",
+  tag = "v1",
+): ValidationDetail {
+  const list = validationRuns(scenario, attempt);
+  const runs = (list.runs ?? [])
+    .map((r) => ({ ...r, cycles: (r.cycles ?? []).filter((c) => c.kind === "validation") }))
+    .filter((r) => r.cycles.length > 0);
+  return {
+    tag,
+    milestoneNumber: list.milestoneNumber,
+    state: scenario,
+    live: runs.some((r) => !TERMINAL_RUN_STATES.has(r.state)),
+    runs,
+  };
+}
+
+const TERMINAL_RUN_STATES = new Set(["succeeded", "failed", "cancelled", "blocked"]);
+
+/**
+ * One attempt's evidence: the report, and the criteria at the same commit.
+ *
+ * A running attempt has no commit and therefore no report — which is the state
+ * the scenario list's `running` first attempt puts the page in.
+ */
+export function validationSnapshot(
+  scenario: ValidationScenario,
+  attempt: ValidationAttempt = "first",
+  drifted = false,
+): ValidationSnapshot {
+  const files = validationFiles(scenario, attempt, drifted);
+  const report = files.find((f) => f.path === REPORT_PATH);
+  return {
+    commit: report ? "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" : "",
+    criteria: files.filter((f) => f.path !== REPORT_PATH),
+    ...(report ? { report: report.content } : {}),
+  };
+}

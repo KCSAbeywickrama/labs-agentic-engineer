@@ -16,9 +16,10 @@
  * under the License.
  */
 
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { isAcceptanceFeaturePath } from "../../spec/api/mapping";
-import { fetchSpecFileContent, useSpecFiles } from "../../spec/api/queries";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { client } from "../../../api/client";
+import { apiErrorMessage } from "../../../api/errors";
+import { fetchSpecFileContent } from "../../spec/api/queries";
 import { validationKeys } from "./keys";
 
 // The two files the Validation page joins, read through the Files API
@@ -82,49 +83,141 @@ export function useValidationReport(
   );
 }
 
+// ── The validation read model ────────────────────────────────────────────────
+//
+// Three reads that replaced the page's own derivation. The selections they
+// encode — which run answers for a version, which cycles are attempts, which
+// commit an attempt's evidence lives at — are the platform's, and the console
+// used to restate them; the surface that did read a newer non-validating run as
+// the version's answer and hid a real verdict (#423).
+
+// Same price as the run story: DB-only rows on the server, so a 5s poll while
+// something is moving is affordable.
+const VALIDATION_POLL_MS = 5_000;
+
+/** Is anything on this row still moving — the ledger's poll-stop. */
+function ledgerIsLive(rows: readonly { state: string }[]): boolean {
+  return rows.some((r) => r.state === "running" || r.state === "awaiting-fix" || r.state === "none");
+}
+
 /**
- * Every `specs/acceptance/<slug>.feature` — the oracle the run actually drives.
- *
- * Read at the BRANCH TIP, deliberately, while the report is pinned to the merge
- * commit of the attempt that wrote it. That asymmetry is the design: a scenario
- * authored since the run has no entry in the report and is shown as `No result`,
- * which is the ordinary authoring loop rather than a fault. Pinning both would
- * hide it; pinning neither would hand an older run the newest results.
- *
- * One query per file, because the Files API reads one path at a time. A project
- * carries a handful of capabilities, not hundreds.
+ * The validation ledger, newest version first — one row per version the
+ * platform has worked, including ones never validated.
  */
-export function useAcceptanceFeatures(projectName: string, enabled: boolean) {
-  const files = useSpecFiles(projectName);
-  const paths = (files.data ?? [])
-    .map((f) => f.path)
-    .filter(isAcceptanceFeaturePath)
-    .sort();
-
-  const contents = useQueries({
-    queries: paths.map((path) => ({
-      queryKey: validationKeys.file(projectName, path, "tip"),
-      enabled: enabled && files.isSuccess,
-      retry: false,
-      staleTime: 30_000,
-      queryFn: () => fetchSpecFileContent(projectName, { path, sha: "" }),
-    })),
-  });
-
-  return {
-    // Only the files that arrived. A half-loaded set still renders the
-    // capabilities it has, rather than blocking all of them on the slowest read.
-    features: contents
-      .map((q) => q.data)
-      .filter((d): d is NonNullable<typeof d> => d !== undefined)
-      .map((d) => ({ path: d.path, content: d.content })),
-    isPending: files.isPending || contents.some((q) => q.isPending),
-    isError: files.isError || (contents.length > 0 && contents.every((q) => q.isError)),
-    refetch: () => {
-      void files.refetch();
-      for (const q of contents) void q.refetch();
+export function useValidations(projectName: string) {
+  return useQuery({
+    queryKey: validationKeys.list(projectName),
+    queryFn: async () => {
+      const { data, error } = await client.GET("/projects/{projectName}/validations", {
+        params: { path: { projectName } },
+      });
+      if (error || data === undefined) {
+        throw new Error(apiErrorMessage(error, "Failed to load validations"));
+      }
+      return data.validations ?? [];
     },
-    /** No feature files at this version — the run will settle as `skipped`. */
-    isAbsent: files.isSuccess && paths.length === 0,
-  };
+    refetchInterval: (query) => {
+      const rows = query.state.data;
+      if (!rows) return VALIDATION_POLL_MS; // no data yet (or errored) — keep trying
+      return ledgerIsLive(rows) ? VALIDATION_POLL_MS : false;
+    },
+  });
+}
+
+/**
+ * One version's validation history: the runs that attempted it, newest first,
+ * each carrying its validation cycles only.
+ *
+ * Polls while a run is live on the milestone. `live` is the server's answer
+ * rather than something derived from the rows, and it is the same field the
+ * trigger is gated on — so the page cannot offer an action its own copy has
+ * just said is unnecessary.
+ */
+export function useValidation(projectName: string, tag: string | undefined) {
+  return useQuery({
+    queryKey: validationKeys.detail(projectName, tag ?? ""),
+    enabled: Boolean(tag),
+    queryFn: async () => {
+      const { data, error } = await client.GET("/projects/{projectName}/validations/{tag}", {
+        params: { path: { projectName, tag: tag ?? "" } },
+      });
+      if (error || data === undefined) {
+        throw new Error(apiErrorMessage(error, "Failed to load this version's validation"));
+      }
+      return data;
+    },
+    refetchInterval: (query) => (query.state.data?.live ? VALIDATION_POLL_MS : false),
+  });
+}
+
+/**
+ * One attempt's report and the acceptance criteria it was judged against, both
+ * at the same commit.
+ *
+ * `staleTime: Infinity` for a settled attempt: its evidence is pinned to a
+ * merge commit and cannot change, which is what makes re-opening an older
+ * attempt free. A running attempt is read at HEAD, so it follows the branch.
+ *
+ * `enabled` is the caller's: the newest attempt is fetched by the page because
+ * the verdict card needs its counts, and older attempts only when their section
+ * is opened.
+ */
+export function useValidationSnapshot(
+  projectName: string,
+  tag: string,
+  cycleId: string,
+  enabled: boolean,
+  settled: boolean,
+) {
+  return useQuery({
+    queryKey: validationKeys.snapshot(projectName, tag, cycleId),
+    enabled: enabled && Boolean(tag) && Boolean(cycleId),
+    // A missing snapshot is a deterministic answer the page renders in words,
+    // not a transient failure worth hammering.
+    retry: false,
+    staleTime: settled ? Infinity : 30_000,
+    queryFn: async () => {
+      const { data, error } = await client.GET(
+        "/projects/{projectName}/validations/{tag}/cycles/{cycleId}/report",
+        { params: { path: { projectName, tag, cycleId } } },
+      );
+      if (error || data === undefined) {
+        throw new Error(apiErrorMessage(error, "Failed to load this attempt's report"));
+      }
+      return data;
+    },
+  });
+}
+
+/**
+ * Ask a version's acceptance criteria again, against the system already
+ * deployed.
+ *
+ * The console gates this on ONE condition — a run already live on the milestone
+ * — and lets the server refuse the rest: open work on the version, and a
+ * version with no criteria. Those are the platform's rules, and its messages
+ * are better than a disabled menu item with no explanation.
+ *
+ * 202 means the run was started, not that it has a verdict, so success
+ * invalidates and lets the poll take over.
+ */
+export function useStartValidation(projectName: string, tag: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { error } = await client.POST(
+        "/projects/{projectName}/builds/{tag}/revalidate",
+        { params: { path: { projectName, tag } }, body: {} },
+      );
+      if (error) {
+        throw new Error(apiErrorMessage(error, "Failed to start validation"));
+      }
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: validationKeys.detail(projectName, tag) }),
+        queryClient.invalidateQueries({ queryKey: validationKeys.list(projectName) }),
+      ]);
+    },
+  });
 }

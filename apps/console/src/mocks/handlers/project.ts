@@ -55,8 +55,11 @@ import {
   VALIDATION_ATTEMPTS,
   VALIDATION_FILE_PATHS,
   VALIDATION_SCENARIOS,
+  validationDetail,
   validationFiles,
+  validationLedger,
   validationRuns,
+  validationSnapshot,
   validationStatusThread,
   type ValidationAttempt,
   type ValidationScenario,
@@ -310,6 +313,37 @@ export const projectHandlers = [
     // Keyed BY TAG: a run story stamped with another version's identity is a
     // fixture that contradicts its own envelope (see `runStory`).
     respond((s) => withCancellations(runStory(s, String(params.tag)))),
+  ),
+  // The validation ledger — one row per version, including versions never
+  // validated. Three rows even in the single-scenario fixtures, because the
+  // whole point of the page is that older versions are reachable.
+  http.get("*/api/v1/projects/:projectName/validations", () =>
+    respond(() =>
+      validationLedger(validationScenario() ?? "partial", validationAttempt()),
+    ),
+  ),
+  // One version's validation history, already filtered to the runs that
+  // attempted it and their validation cycles.
+  http.get("*/api/v1/projects/:projectName/validations/:tag", ({ params }) =>
+    respond(() =>
+      validationDetail(
+        validationScenario() ?? "partial",
+        validationAttempt(),
+        String(params.tag),
+      ),
+    ),
+  ),
+  // One attempt's report AND the criteria it was judged against, at one commit.
+  http.get(
+    "*/api/v1/projects/:projectName/validations/:tag/cycles/:cycleId/report",
+    () =>
+      respond(() =>
+        validationSnapshot(
+          validationScenario() ?? "partial",
+          validationAttempt(),
+          criteriaDrifted(),
+        ),
+      ),
   ),
   // A build session's fan-out. Derived from the cluster on the real server, so
   // the console only ever asks for a session whose merge landed — and asks per
