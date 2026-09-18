@@ -18,7 +18,10 @@ package projects
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -27,6 +30,14 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
+
+// ErrThunderApplicationAPIMissing is returned when the kube API this
+// process talks to does not serve ThunderApplication (HTTP 404 on the
+// CRD). Split-plane: CRs live on the data-plane cluster; aep-api on
+// the control-plane cluster 404s unless KUBE_API_BASE_URL points at
+// the dataplane. The wait still patches the SPA callback onto the
+// ResourceReleaseBinding; it just cannot observe the CR.
+var ErrThunderApplicationAPIMissing = errors.New("thunder application API not on this kube API")
 
 // ThunderApplicationView is the deploy-wait projection of a ThunderApplication
 // CR: the callback URL written on the spec, and whether that generation has
@@ -171,6 +182,9 @@ func (s *DeploymentService) applyThunderWait(ctx context.Context, orgID, project
 		}
 		cr, gerr := s.thunder.FindByResource(ctx, ocname.ExternalResourceName(projectID, dep.Name), openchoreo.DevEnvironmentName)
 		if gerr != nil {
+			if errors.Is(gerr, ErrThunderApplicationAPIMissing) {
+				continue
+			}
 			return fmt.Errorf("deployment: thunder wait: find ThunderApplication %q: %w", dep.Name, gerr)
 		}
 		if !thunderCRSatisfies(cr, callback) {
@@ -189,7 +203,42 @@ func thunderCRSatisfies(cr *ThunderApplicationView, callback string) bool {
 	if cr == nil {
 		return false
 	}
-	return cr.RedirectURIs == callback && cr.Ready && cr.ObservedGeneration >= cr.Generation
+	if !cr.Ready || cr.ObservedGeneration < cr.Generation {
+		return false
+	}
+	want := canonicalWebURL(callback)
+	for _, raw := range strings.Split(cr.RedirectURIs, ",") {
+		if canonicalWebURL(raw) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// canonicalWebURL strips default http(s) ports so OpenChoreo's
+// scheme://host:443/callback matches the CR/browser form host/callback.
+func canonicalWebURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	switch u.Scheme {
+	case "http", "https":
+	default:
+		return raw
+	}
+	port := u.Port()
+	omit := (u.Scheme == "https" && (port == "" || port == "443")) ||
+		(u.Scheme == "http" && (port == "" || port == "80"))
+	if !omit {
+		if port != "" {
+			u.Host = net.JoinHostPort(u.Hostname(), port)
+		}
+		return u.String()
+	}
+	u.Host = u.Hostname()
+	return u.String()
 }
 
 // componentExternalURL returns the first non-empty EndpointURL OC has
