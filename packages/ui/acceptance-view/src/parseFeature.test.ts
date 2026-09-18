@@ -22,7 +22,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { featureScenarios, parseFeatureFile } from "./parseFeature.js";
 
-const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+const __DIRNAME = dirname(fileURLToPath(import.meta.url));
+const REPO = resolve(__DIRNAME, "../../../..");
 const CHECKER = join(REPO, "skills/acceptance-run/scripts/check-report.mjs");
 
 /**
@@ -55,10 +56,16 @@ describe("agreement with the run's own checker", () => {
   // The report joins on identity, so a scenario the checker counts and this
   // parser does not would render as though the run had skipped it — and the
   // run's own contract gate would still be green. The two must not drift.
-  const files = featureFilesUnder(join(REPO, "playground/.projects"));
+  //
+  // Read from a COMMITTED corpus, not from a developer's playground: the files
+  // have to be there for every reader of this repo, and the shapes worth
+  // comparing on are the ones chosen for it — a comment, a docstring that
+  // quotes Gherkin, the `Example:` synonym, an outline, and a file declaring no
+  // feature at all — rather than whatever a local run happened to leave behind.
+  const files = featureFilesUnder(join(__DIRNAME, "__fixtures__"));
 
-  it("finds feature files to compare, so a moved playground fails loudly", () => {
-    expect(files.length).toBeGreaterThan(10);
+  it("has a corpus to compare on", () => {
+    expect(files.length).toBeGreaterThan(3);
   });
 
   it.each(files.map((f) => [f.slice(REPO.length + 1), f] as const))(
