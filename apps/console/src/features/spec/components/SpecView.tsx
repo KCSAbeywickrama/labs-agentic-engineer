@@ -502,6 +502,16 @@ export function SpecView({ projectName }: { projectName: string }) {
     () => computeDependencyStates(dependencies.data ?? []),
     [dependencies.data],
   );
+  // Which externals are COPIES of a Registered External resource. Preflight
+  // diffs names against the last tag and cannot tell the two apart, so the
+  // Build dialog takes it from the design read model.
+  const reusedExternals = useMemo(
+    () =>
+      Object.values(dependencyStates)
+        .filter((s) => Boolean(s.dependency.resourceRef))
+        .map((s) => s.dependency.name),
+    [dependencyStates],
+  );
   // The definition view's Resolve / Reconsider. The component is context for
   // the reconsider's prose only; the resolve is the skill command.
   const handleResolveFromDefinition = (name: string, intent: DependencyResolutionIntent) => {
@@ -1309,6 +1319,7 @@ export function SpecView({ projectName }: { projectName: string }) {
           specUnchanged={preview?.specUnchanged ?? false}
           changes={preview?.changes ?? []}
           takenVersions={tags.data?.tags ?? []}
+          reusedExternals={reusedExternals}
           submitting={buildPhase === "building"}
           onClose={() => setBuildDialog(null)}
           onBuild={runBuild}

@@ -247,6 +247,13 @@ SPA gates each one on the operation it loads.
 | `testUsers[].username` | Lowercase letters, digits, `.`, `_`, `-`. |
 | `testUsers[].roles` | One or more declared `kind: user` roles. The account is enrolled in every `assignTo` group of every role listed. |
 
+**A role that reaches rows by path gets two test users, not one.** Where a role
+grants a `/me/` operation, the thing worth proving is that one caller cannot see
+another's rows — and a single account per role makes that unprovable everywhere
+downstream: the mock walk, a wired run and validation alike can only ever check
+the caller against themselves. A second account is what gives the isolation
+something to fail against.
+
 Nothing else goes in the file. There is no `screens[]`, no `ownership`, no
 `coldStartRole`, no `publicComponents`, no `thunder` block, no `grantedBy`:
 which rows an operation reaches is its path, a component is protected because

@@ -56,7 +56,7 @@ function copyText(value: string): Promise<void> {
  * open the rest — the dialog can hold a dozen accounts and only the one asked
  * for is ever on screen.
  */
-function TestUserRow({
+export function TestUserRow({
   login,
   revealPassword,
 }: {
