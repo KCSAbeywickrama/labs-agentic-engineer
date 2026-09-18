@@ -144,6 +144,20 @@ type CatalogValuePlane interface {
 // and SecretStorePath then stays empty on the value plane.
 type OrgSecretWriter interface {
 	WriteOrgCatalogSecret(ctx context.Context, orgID, entityName string, data map[string]string) (vaultKey string, err error)
+	// CopyOrgCatalogSecret copies the secret fields a project holds at
+	// fromVaultKey (its own external resource's per-environment secret) into
+	// an org-catalog entity. Promote carries a value over this way so it
+	// never passes through a request.
+	CopyOrgCatalogSecret(ctx context.Context, orgID, fromVaultKey, entityName string) (vaultKey string, err error)
+}
+
+// ProjectResourcePromoter is the project side of Promote: it reads a project's
+// own external resource (the dependency file and the contract document beside
+// it) and, once the organization holds the record, rewrites that file as a
+// copy of the record. The design service satisfies it. Nil disables Promote.
+type ProjectResourcePromoter interface {
+	ReadProjectResource(ctx context.Context, orgID, projectID, name string) (*spec.ProjectResource, error)
+	RewriteAsRegistryCopy(ctx context.Context, orgID, projectID, name string, rec spec.RegisteredResource) error
 }
 
 // OrgResourceDocs commits UTF-8 resource-docs files into the per-org
@@ -152,6 +166,10 @@ type OrgSecretWriter interface {
 // nil store returns a 500-class wrap.
 type OrgResourceDocs interface {
 	CommitUTF8(ctx context.Context, orgID, logicalName, fileName, content string) (path string, err error)
+	// ReadUTF8 reads one committed file back by its repo path
+	// (`<logicalName>/<fileName>`). The design write path copies a registered
+	// resource's contract document into a project through it.
+	ReadUTF8(ctx context.Context, orgID, path string) (content string, err error)
 }
 
 // EnvironmentInfo is one OpenChoreo environment as the BFF reads it: name,

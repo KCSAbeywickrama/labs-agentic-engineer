@@ -61,6 +61,7 @@ type Service struct {
 	pipelines       PipelineLister
 	orgSecrets      OrgSecretWriter
 	orgResourceDocs OrgResourceDocs
+	promoter        ProjectResourcePromoter
 	// orgPublish commits the exposesAPI.orgPublished durability marker on a
 	// provider component when its access request is granted. Wired via a setter
 	// (SetOrgPublishMarker) at the composition root — it points BACK at the
@@ -139,6 +140,9 @@ type Deps struct {
 	Pipeline        PipelineLister
 	OrgSecrets      OrgSecretWriter
 	OrgResourceDocs OrgResourceDocs
+	// Promoter reads and rewrites a project's own resource for Promote.
+	// Nil disables Promote.
+	Promoter ProjectResourcePromoter
 	// Roles is the build-time roles ensure. Nil skips the roles gate.
 	Roles RolesEnsurer
 	// Markers is the CRT marker catalog the end-user-auth overlay keys on.
@@ -173,6 +177,7 @@ func NewService(d Deps) *Service {
 		roles:             d.Roles,
 		orgSecrets:        d.OrgSecrets,
 		orgResourceDocs:   d.OrgResourceDocs,
+		promoter:          d.Promoter,
 		markers:           d.Markers,
 		securityJSON:      d.SecurityJSON,
 		projectNames:      d.ProjectNames,
