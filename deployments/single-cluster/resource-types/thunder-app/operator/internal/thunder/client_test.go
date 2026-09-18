@@ -1008,6 +1008,9 @@ func TestOriginOf(t *testing.T) {
 		// It parses like any other https URI if it ever did, and pending.invalid
 		// is unroutable by construction.
 		{placeholderRedirectURI, "https://pending.invalid"},
+		{"http://[::1]:80/callback", "http://[::1]"},
+		{"https://[2001:db8::1]:443/callback", "https://[2001:db8::1]"},
+		{"http://[::1]:8080/callback", "http://[::1]:8080"},
 	}
 	for _, tc := range cases {
 		if got := OriginOf(tc.in); got != tc.want {
@@ -1025,6 +1028,9 @@ func TestCanonicalWebURL_StripsDefaultPorts(t *testing.T) {
 		{"https://app.example.com/callback", "https://app.example.com/callback"},
 		{"http://app.localhost:19080/callback", "http://app.localhost:19080/callback"},
 		{"myapp://callback", "myapp://callback"},
+		{"http://[::1]:80/callback", "http://[::1]/callback"},
+		{"https://[2001:db8::1]:443/callback", "https://[2001:db8::1]/callback"},
+		{"http://[::1]:8080/callback", "http://[::1]:8080/callback"},
 	}
 	for _, tc := range cases {
 		if got := CanonicalWebURL(tc.in); got != tc.want {

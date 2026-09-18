@@ -177,7 +177,9 @@ func OriginOf(redirectURI string) string {
 	host := u.Hostname()
 	port := u.Port()
 	if omitDefaultPort(u.Scheme, port) {
-		return u.Scheme + "://" + host
+		// Trim the :port suffix off u.Host so IPv6 literals keep their
+		// brackets. Hostname() strips them, which would emit http://::1.
+		return u.Scheme + "://" + strings.TrimSuffix(u.Host, ":"+port)
 	}
 	if port != "" {
 		return u.Scheme + "://" + net.JoinHostPort(host, port)
@@ -207,7 +209,7 @@ func CanonicalWebURL(raw string) string {
 	if !omitDefaultPort(u.Scheme, u.Port()) {
 		return raw
 	}
-	u.Host = u.Hostname()
+	u.Host = strings.TrimSuffix(u.Host, ":"+u.Port())
 	return u.String()
 }
 

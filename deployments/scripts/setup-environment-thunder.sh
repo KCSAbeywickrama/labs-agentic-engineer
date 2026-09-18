@@ -567,8 +567,12 @@ create_release() {
     fi
     hostport="${issuer#*://}"
     hostport="${hostport%%/*}"
-    if [[ "$hostport" == *:* ]]; then
-        gate_port="${hostport##*:}"
+    # Take an explicit port only from host:port or [ipv6]:port. A bare
+    # [2001:db8::1] matches *:* and would otherwise set gate_port to "1]".
+    if [[ "$hostport" =~ ^\[[^]]+\]:([0-9]+)$ ]]; then
+        gate_port="${BASH_REMATCH[1]}"
+    elif [[ "$hostport" =~ ^[^:]+:([0-9]+)$ ]]; then
+        gate_port="${BASH_REMATCH[1]}"
     fi
 
     # Ownership markers, on the namespace, written BEFORE the install: they are
