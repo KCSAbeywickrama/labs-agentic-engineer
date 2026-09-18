@@ -477,17 +477,20 @@ describe("SpecFileList — Acceptance criteria is one entry", () => {
     "specs/acceptance/adding-items.feature",
     "specs/acceptance/bought-items.feature",
     "specs/acceptance/shared-list-access.feature",
-    "specs/validation/validation-criteria.json",
   );
 
-  it("collapses every capability into one row, beside the criteria", () => {
+  // Every path here is an acceptance capability: the retired criteria document
+  // is the only other thing the validation folder holds, and the spec view drops
+  // it before the rail ever sees it (mapping.ts). That the entry does not
+  // swallow an ordinary validation file is `buildValidationSection`'s own
+  // invariant, tested against it directly in designTree.test.ts.
+  it("collapses every capability into one row", () => {
     const nav = renderValidation(THREE);
     const rows = within(nav)
       .getAllByRole("button")
       .map((b) => b.textContent);
 
     expect(rows).toContain("Acceptance criteria");
-    expect(rows).toContain("Validation criteria");
     for (const capability of ["Adding items", "Bought items", "Shared list access"]) {
       expect(rows, capability).not.toContain(capability);
     }
@@ -501,7 +504,7 @@ describe("SpecFileList — Acceptance criteria is one entry", () => {
   });
 
   it("is absent when the project has no acceptance criteria", () => {
-    const nav = renderValidation(validationEntries("specs/validation/validation-criteria.json"));
+    const nav = renderValidation([]);
     expect(within(nav).queryByText("Acceptance criteria")).not.toBeInTheDocument();
   });
 
@@ -542,7 +545,7 @@ describe("SpecFileList — Acceptance criteria is one entry", () => {
 
   it("is a disabled ghost before any capability has been written", () => {
     const nav = renderValidation(
-      validationEntries("specs/validation/validation-criteria.json"),
+      [],
       [{ path: "specs/acceptance/bought-items.feature", status: "planned", section: "validation" }],
     );
     // The attribute, not a click: MUI disables a ListItemButton with

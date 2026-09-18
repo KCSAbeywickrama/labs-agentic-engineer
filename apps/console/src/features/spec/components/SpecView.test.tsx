@@ -1467,6 +1467,22 @@ describe("SpecView follows the write (#576, ADR-0026)", () => {
     expect(screen.queryByText(/Waiting for the agent to write/)).not.toBeInTheDocument();
   });
 
+  // The follow is the ONE way a hidden document could still name itself. The
+  // design turn mints the retired validation criteria on every project and the
+  // spec view drops the path everywhere else (mapping.ts) — but the follow takes
+  // its path from the plan, not from the file list, so without a guard the pane
+  // announced "Waiting for the agent to write Validation criteria…" mid-turn:
+  // the one document just hidden, named, with no row to go back to.
+  it("does not follow a write into a document the view hides", () => {
+    render(<SpecView projectName="proj1" />);
+    act(() => {
+      planDeclared(chatKey, "t1", ["specs/validation/validation-criteria.json"]);
+      planFileWriting(chatKey, "t1", "specs/validation/validation-criteria.json");
+    });
+    expect(screen.queryByText(/Waiting for the agent to write/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Validation criteria/)).not.toBeInTheDocument();
+  });
+
   it("a new turn resets to following", () => {
     render(<SpecView projectName="proj1" />);
     act(() => planFileWriting(chatKey, "t1", CELL));
@@ -1841,6 +1857,10 @@ describe("designWarningIntro", () => {
 // the only sentence in the product that said what criteria were for lived on the
 // Validations page's empty state. This is the surface that gap was reported
 // against, so the description's presence here is the change's real coverage.
+// The criteria document is HIDDEN from the spec view (mapping.ts): nothing the
+// app produces can select it any more, so these reach `ValidationView` only
+// because they mock `useSpecFiles` directly. They stand with the renderer, until
+// the criteria+e2e path is removed and both go together.
 describe("SpecView validation criteria explanation", () => {
   const CRITERIA_JSON = JSON.stringify({
     requirements: [

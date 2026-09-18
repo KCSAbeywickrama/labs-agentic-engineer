@@ -22,7 +22,7 @@ yet a product word.
 
 1. **A section names the class; an artifact names the document.** An artifact label adds
    information, never repeats its header outright — `VALIDATION › Validation` fails this;
-   `REQUIREMENTS › Product requirements` and `VALIDATION › Validation criteria` do not.
+   `REQUIREMENTS › Product requirements` and `VALIDATION › Acceptance criteria` do not.
 2. **Filenames are never labels.** The user reads a document tree, not a repo.
 3. **Plural for things that accumulate over time, singular for the one a project has.**
    Builds, Deployments, Issues, Validations — Overview, Spec.
@@ -42,7 +42,14 @@ concept for *the agreed description of what we're building*.
 |---|---|---|
 | `REQUIREMENTS` | **Product requirements** | `specs/requirements/prd.md` |
 | `DESIGN` (not `DESIGNS` — one design, several files) | **Architecture** · **Domain model** · **Security** as rows, then the groups: **Flows**, then one per component | `specs/design/` |
-| `VALIDATION` | **Validation criteria** · **Acceptance criteria** | `specs/validation/validation-criteria.json` · every `specs/acceptance/<slug>.feature` |
+| `VALIDATION` | **Acceptance criteria** | every `specs/acceptance/<slug>.feature`, as ONE entry |
+
+The design turn also mints `specs/validation/validation-criteria.json`, the oracle of the
+retiring criteria+e2e path. **It is not in this table because the spec view hides it** — two
+oracles side by side, with nothing on screen to say which one the platform still grades against,
+is a reader's problem and not a naming one. The file stays committed and is read on GitHub. It
+comes back into the vocabulary only if that decision is reversed; otherwise it leaves with the
+criteria+e2e path.
 
 **Security** is one rail entry, one page:
 
@@ -1296,11 +1303,14 @@ that had already started, and narrated the *how* (a shared workspace, files chan
 on screen calls by those names. Its suggestions offered to draft requirements that exist. Both now
 open a conversation **about** the spec.
 
-**The document and its rows carry different names, on purpose.** The **Validation criteria** are
-the document; one row inside it is an **acceptance criterion**, which is what its `AC-` id says and
-what the term means everywhere else. Naming the document after one of its rows — the earlier
-*Acceptance criteria* label — cost the link between the criteria and the runs against them, and
-took a sentence of empty-state copy to restore. They share a root again, so nothing has to.
+**The document and its rows carry different names, on purpose.** Written when the **Validation
+criteria** were a rail entry: that document is plural, one row inside it is an **acceptance
+criterion** — what its `AC-` id says and what the term means everywhere else — and naming a
+document after one of its rows cost the link between the criteria and the runs against them, at a
+sentence of empty-state copy to restore. The rule stands; its example has moved. With the criteria
+document hidden, **Acceptance criteria** now names the Gherkin set under `specs/acceptance/` and
+nothing else, and the same discipline applies there: the entry is the set, a `Scenario:` inside it
+is one criterion.
 
 **Validations has two empty states, and only one narrates.** The page is version-scoped, so a
 version that was skipped — no criteria, or an incident run — is a different fact from a project
@@ -1378,8 +1388,8 @@ too, in the same message as the text it overrides.
 
 ### The rules it carries
 
-1. **Name things the way the UI names them.** *Architecture*, not `design.cell`. *Validation
-   criteria*, not `specs/validation/validation-criteria.json`. The mapping is the table under
+1. **Name things the way the UI names them.** *Architecture*, not `design.cell`. *Acceptance
+   criteria*, not `specs/acceptance/<slug>.feature`. The mapping is the table under
    [The spec workspace](#the-spec-workspace) — this file is its source, and the console skill is
    how it reaches the agent.
 2. **Never quote a repo path** to the user.

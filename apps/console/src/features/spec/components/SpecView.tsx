@@ -374,6 +374,13 @@ export function SpecView({ projectName }: { projectName: string }) {
   // the follow must still fire.
   useEffect(() => {
     if (!writingPath || !followingRef.current) return;
+    // Never follow a write into a document this view HIDES. There is no rail row
+    // to come back to and no renderer behind it, so the pane can only announce
+    // that it is waiting for something the reader cannot see — which is how the
+    // retired validation criteria would have named themselves mid-turn despite
+    // being hidden everywhere else. `specGroupOf` rather than that one path: the
+    // rule holds for every path the view drops, and stays right once it goes.
+    if (specGroupOf(writingPath) === null) return;
     setSelection(followSelection(writingPath));
   }, [planTurnId, writingPath]);
   const selectManually = (sel: SpecSelection) => {
@@ -525,8 +532,14 @@ export function SpecView({ projectName }: { projectName: string }) {
     /^specs\/design\/components\/[^/]+\/design\.json$/.test(
       selectedFile?.path ?? "",
     );
-  // The validation acceptance oracle renders as a read-only structured view —
+  // The RETIRED acceptance oracle, rendered as a read-only structured view —
   // like design.json, it never goes through the collab text editor.
+  //
+  // UNREACHABLE while the criteria path is hidden: `specGroupOf` drops that path
+  // (see mapping.ts), so `selectedFile` can never be it and nothing routes here.
+  // Kept rather than deleted because removing the viewer belongs to the
+  // criteria+e2e removal, which also takes the label and the
+  // `@aep/ui-validation-view` dependency; un-hiding is one line until then.
   const isValidationCriteriaFile =
     /^specs\/validation\/validation-criteria\.json$/.test(
       selectedFile?.path ?? "",
