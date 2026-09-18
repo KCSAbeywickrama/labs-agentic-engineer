@@ -994,6 +994,8 @@ func TestOriginOf(t *testing.T) {
 	}{
 		{"http://app.localhost:19080/callback", "http://app.localhost:19080"},
 		{"https://app.example.com/callback", "https://app.example.com"},
+		{"https://app.example.com:443/callback", "https://app.example.com"},
+		{"http://app.example.com:80/callback", "http://app.example.com"},
 		{"https://app.example.com", "https://app.example.com"},
 		{"  https://app.example.com/callback  ", "https://app.example.com"},
 		{"https://app.example.com/callback?x=1#f", "https://app.example.com"},
@@ -1011,6 +1013,33 @@ func TestOriginOf(t *testing.T) {
 		if got := OriginOf(tc.in); got != tc.want {
 			t.Errorf("OriginOf(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestCanonicalWebURL_StripsDefaultPorts(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"https://app.example.com:443/callback", "https://app.example.com/callback"},
+		{"http://app.example.com:80/callback", "http://app.example.com/callback"},
+		{"https://app.example.com/callback", "https://app.example.com/callback"},
+		{"http://app.localhost:19080/callback", "http://app.localhost:19080/callback"},
+		{"myapp://callback", "myapp://callback"},
+	}
+	for _, tc := range cases {
+		if got := CanonicalWebURL(tc.in); got != tc.want {
+			t.Errorf("CanonicalWebURL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestWireRedirectURIs_StripsDefaultPortAndDedups(t *testing.T) {
+	got := wireRedirectURIs([]string{
+		"https://app.example.com:443/callback",
+		"https://app.example.com/callback",
+	})
+	if len(got) != 1 || got[0] != "https://app.example.com/callback" {
+		t.Fatalf("wireRedirectURIs = %#v, want [https://app.example.com/callback]", got)
 	}
 }
 
