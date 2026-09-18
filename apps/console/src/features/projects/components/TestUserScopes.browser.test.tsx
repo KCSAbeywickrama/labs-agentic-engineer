@@ -227,13 +227,19 @@ describe("the test-users table, in a real browser", () => {
     // its two wrapped role names already make its row tall enough to hold the
     // button for free. Asserted as "the fullest account costs no more than
     // the emptiest" rather than as three equal numbers, which they are not.
+    //
+    // The bound is the MINIMUM, deliberately. `most` is itself a member of
+    // `costs`, so bounding it by the maximum asserts nothing -- it holds for
+    // every possible input, including the scope-count-dependent growth this
+    // line exists to catch. Bounded by the minimum it fails the moment the
+    // crowded account pays more than the emptiest one does.
     const most = costs[WITH_SCOPES.indexOf(CROWDED)]!;
     expect(
       most,
       `per-account cost: ${WITH_SCOPES.map(
         (u, i) => `${u.username} (${u.scopes.length}) ${costs[i]!.toFixed(2)}px`,
       ).join(", ")}`,
-    ).toBeLessThanOrEqual(Math.max(...costs) + 0.01);
+    ).toBeLessThanOrEqual(Math.min(...costs) + 0.01);
   });
 
   it("opens every one of the account's scopes in the dialog", async () => {
