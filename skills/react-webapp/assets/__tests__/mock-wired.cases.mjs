@@ -142,6 +142,16 @@ test("`?role=` is signed in holding nothing, which is not the same as no session
   assert.equal(parseMockBearer(undefined), null);
 });
 
+test("a malformed escape is a refused session, never a thrown one", () => {
+  // `decodeURIComponent` throws on a broken percent-escape, and a throw here
+  // leaves the middleware as a 500 — so the ONE unusable token that reads as
+  // "the mock is broken" rather than "your token is". Both halves are decoded,
+  // so both halves are tried.
+  assert.equal(parseMockBearer("Bearer mock:%zz;tasks%3Aread"), null, "a broken role");
+  assert.equal(parseMockBearer("Bearer mock:HRCoordinator;%zz"), null, "a broken scope");
+  assert.equal(parseMockBearer("Bearer mock:%"), null, "a truncated escape with no role segment");
+});
+
 test("the username is the role's testUsers row, and the role name when it has none", () => {
   assert.equal(usernameFor("HRCoordinator", securityPath), "test-hrcoordinator");
   assert.equal(usernameFor("Nobody", securityPath), "Nobody");

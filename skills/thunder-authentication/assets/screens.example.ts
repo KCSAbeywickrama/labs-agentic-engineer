@@ -83,6 +83,13 @@ export const SCREEN_ROUTES: readonly ScreenRoute[] = [
   { key: "submitclaim", label: "Submit Claim", path: "/submit", loads: "POST /me/claims" },
   { key: "approvals", label: "Approvals", path: "/approvals", loads: "GET /claims" },
   { key: "reports", label: "Reports", path: "/reports", loads: "GET /reports" },
+  // The public row. Here because `public` is the one field of this table whose
+  // shape an author has nothing to copy without it — and because it is the row
+  // that makes `hasScopedReach` a different question from "is the rail empty":
+  // it is reachable by everyone, so it keeps `reachableScreens` non-empty for a
+  // caller who has earned nothing, which is precisely the case NoAccess exists
+  // to name.
+  { key: "policy", label: "Expense Policy", path: "/policy", loads: null, public: true },
 ];
 
 // FAIL LOUDLY, at module load — the first render, every time, in dev, in the

@@ -106,11 +106,25 @@ export function tasksGate(projectDir: string): GateResult {
 export function wireGate(projectDir: string): GateResult {
   const components = listComponents(projectDir);
   if (components.length === 0) return blocked("no components under specs/design/components/");
+  // A design.json this cannot read is SKIPPED, never thrown on. A gate runs
+  // while the menu is being drawn, so a parse error here takes down the one
+  // surface a reader would have used to run the phase that rewrites the broken
+  // file — the unreadable component is reported instead, and only when no other
+  // component turned out to be built.
+  const unreadable: string[] = [];
   for (const name of components) {
-    const design = join(projectDir, "specs/design/components", name, "design.json");
+    const rel = `specs/design/components/${name}/design.json`;
+    const design = join(projectDir, rel);
     if (!existsSync(design)) continue;
-    const appPath = (JSON.parse(readFileSync(design, "utf8")) as { appPath?: string }).appPath;
+    let appPath: string | undefined;
+    try {
+      appPath = (JSON.parse(readFileSync(design, "utf8")) as { appPath?: string }).appPath;
+    } catch {
+      unreadable.push(rel);
+      continue;
+    }
     if (appPath && existsSync(join(projectDir, appPath, "Dockerfile"))) return ok;
   }
+  if (unreadable.length > 0) return blocked(`${unreadable[0] ?? ""} is not readable JSON — regenerate the design`);
   return blocked("nothing built yet — run the coding phase first");
 }

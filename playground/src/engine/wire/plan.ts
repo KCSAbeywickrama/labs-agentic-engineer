@@ -63,6 +63,15 @@ export interface WireService {
   hostPort: number;
   /** Everything the container gets besides the gateway trio, which `compose.ts` adds. */
   env: Record<string, string>;
+  /**
+   * The keys of `env` that hold a secret, named here because THIS is where it is
+   * known: a value is a secret because of the dependency output it came from,
+   * never because of the variable it landed in. The design names that variable,
+   * so `DB_PASS` or a lowercase `db_password` is entirely legal and reads as
+   * nothing in particular to a pattern — and the thing on the other side of the
+   * guess is a password written into `plan.json` and put in an agent prompt.
+   */
+  secretEnv: string[];
   /** Sibling services and databases that must be healthy first. */
   dependsOn: string[];
 }
@@ -146,6 +155,12 @@ export interface PlanOptions {
  * dependency walk below, so it needs no second check.
  */
 const STANDS_UP = new Set(["postgres-cnpg", "thunder-app"]);
+
+/**
+ * The dependency OUTPUTS whose value is a secret, whatever variable a design
+ * binds them to. The one list `secretEnv` is built from — see `WireService`.
+ */
+const SECRET_OUTPUTS = new Set(["password", "client_secret"]);
 
 /** `onboarding-db` → `ONBOARDING_DB`, the shape `envBindings` keys are prefixed with. */
 function envPrefix(name: string): string {
@@ -282,6 +297,7 @@ export function buildWirePlan(specs: WireSpecs, options: PlanOptions = {}): Wire
     }
 
     const env: Record<string, string> = {};
+    const secretEnv = new Set<string>();
     const dependsOn: string[] = [];
     const workload = specs.workloads[design.name];
     for (const dependency of design.dependencies ?? []) {
@@ -327,11 +343,15 @@ export function buildWirePlan(specs: WireSpecs, options: PlanOptions = {}): Wire
             );
           }
           env[variable] = value ?? "";
+          if (SECRET_OUTPUTS.has(output)) secretEnv.add(variable);
         }
         dependsOn.push(database.name);
       } else if (dependency.kind === "platform-resource" && dependency.resourceType === "thunder-app") {
         const values = thunderPlaceholders(allGrants);
-        for (const [output, variable] of Object.entries(bindings)) env[variable] = values[output] ?? "";
+        for (const [output, variable] of Object.entries(bindings)) {
+          env[variable] = values[output] ?? "";
+          if (SECRET_OUTPUTS.has(output)) secretEnv.add(variable);
+        }
       } else if (dependency.kind === "component") {
         // A sibling is reached by its compose service name, on the one port
         // every service listens on. The gateway URL a deployed call would use
@@ -356,6 +376,7 @@ export function buildWirePlan(specs: WireSpecs, options: PlanOptions = {}): Wire
       appPath: design.appPath,
       hostPort: 0, // assigned by assignHostPorts, which is the only thing that looks at the machine
       env,
+      secretEnv: [...secretEnv],
       dependsOn,
     });
   }

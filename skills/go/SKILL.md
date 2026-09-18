@@ -125,7 +125,7 @@ If `$AEP_SKILLS_DIR` is unset, copy from `assets/` next to this skill's
 **verbatim — there is no line to edit**, it imports only the standard library,
 and it adds nothing to `go.mod`.
 
-**Wire it in `main`, and make a missing key fatal:**
+**Wire it in `main`, and make a half-configured assertion fatal:**
 
 ```go
 verifier, err := auth.NewVerifierFromEnv()
@@ -141,9 +141,13 @@ handler := gen.HandlerWithOptions(gen.NewStrictHandler(srv, nil), gen.ChiServerO
 `r.Use` is correct here and there is no ordering trap: the verifier needs
 nothing from the generated wrapper. The platform sets
 `GATEWAY_ASSERTION_CERTIFICATE`, `GATEWAY_ASSERTION_ISSUER` and
-`GATEWAY_ASSERTION_HEADER` on the container; a service that starts on half of
-them cannot tell a real caller from a forged one, which is why a partial set is
-fatal rather than logged.
+`GATEWAY_ASSERTION_HEADER` on the container. A **partially set** trio is fatal:
+a service that starts on half of them cannot tell a real caller from a forged
+one, and that is a broken deployment rather than an unconfigured one. All three
+**absent** is the separate, temporary case an environment gateway provisioned
+before the backend-JWT keypair existed still lands in — the verifier starts
+without verifying anything, says so on every boot, and is tracked for removal in
+issue #789. Do not write code that depends on it.
 
 **Read identity from the verified caller, never from a header.**
 
@@ -179,9 +183,13 @@ status code either (`api-management` owns the rule; this is its Go shape).
 
 **Test through the real router.** Build the wired handler in the test —
 `gen.HandlerWithOptions(…)` with the verifier middleware, not the bare
-handlers. Mint the test's assertions with a throwaway RSA key and point
-`GATEWAY_ASSERTION_CERTIFICATE` at its self-signed certificate; nothing in the
-test talks to a gateway. Write four tests, by these names:
+handlers. Mint the test's assertions with a throwaway RSA key and set **all
+three** variables: `GATEWAY_ASSERTION_CERTIFICATE` to that key's self-signed
+certificate, and `GATEWAY_ASSERTION_ISSUER` and `GATEWAY_ASSERTION_HEADER` to
+the values the test's own assertions are minted with. The certificate alone is a
+partial trio, so `NewVerifierFromEnv` returns an error and the test fails before
+it has asserted anything. Nothing in the test talks to a gateway. Write four
+tests, by these names:
 
 - **`TestForgedAssertionIs401`** — the same request signed by a *different* key
   is rejected, and so is one with its payload edited after signing. This is the

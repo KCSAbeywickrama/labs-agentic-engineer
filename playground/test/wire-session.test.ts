@@ -269,15 +269,22 @@ test("a live session is told apart from one that died hard, by its own pid", () 
 
 test("node_modules built inside the runner image is not an install on this host", () => {
   const app = mkdtempSync(join(tmpdir(), "wire-app-"));
-  assert.equal(needsInstall(app, "darwin"), true, "nothing installed at all");
+  assert.equal(needsInstall(app, "darwin", "arm64"), true, "nothing installed at all");
 
   mkdirSync(join(app, "node_modules", "@rollup", "rollup-linux-x64-gnu"), { recursive: true });
-  assert.equal(needsInstall(app, "darwin"), true, "installed somewhere else");
-  assert.equal(needsInstall(app, "linux"), false, "installed here");
+  assert.equal(needsInstall(app, "darwin", "arm64"), true, "installed somewhere else");
+  assert.equal(needsInstall(app, "linux", "x64"), false, "installed here");
+
+  // ARCHITECTURE COUNTS, and the platform alone cannot answer this: a Linux x64
+  // install on a Linux arm64 host matches on "linux" and is still the wrong
+  // binary. Vite then dies on the missing optional dependency this whole check
+  // exists to pre-empt, so reading it as "installed here" is the one answer that
+  // must not happen.
+  assert.equal(needsInstall(app, "linux", "arm64"), true, "right platform, wrong architecture");
 
   const plain = mkdtempSync(join(tmpdir(), "wire-app-"));
   mkdirSync(join(plain, "node_modules"), { recursive: true });
-  assert.equal(needsInstall(plain, "darwin"), false, "no rollup: nothing platform-specific to get wrong");
+  assert.equal(needsInstall(plain, "darwin", "arm64"), false, "no rollup: nothing platform-specific to get wrong");
 });
 
 test("stopping a dev server reaps the processes underneath it", async () => {

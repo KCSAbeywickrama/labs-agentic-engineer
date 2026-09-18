@@ -286,7 +286,7 @@ platform-ready).
 
 ## `wire` — run it, as somebody
 
-```
+```bash
 pnpm play <dir> wire                     # plan → compose up → pick a role → browser → panel
 pnpm play <dir> wire --role HRCoordinator --no-open   # for a script or an agent: prints READY <url>
 ```
