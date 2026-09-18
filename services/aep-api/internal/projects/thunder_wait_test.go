@@ -415,6 +415,41 @@ func TestDeploymentState_ThunderGetErrorSurfaces(t *testing.T) {
 	assertRedirectPatch(t, h.rc, thunderWaitCallback, 1)
 }
 
+// Split-plane: the CRD is not on this kube API. The wait still patches the
+// callback onto the binding, then lets OpenChoreo Ready stand.
+func TestDeploymentState_ThunderAPIMissingIsReady(t *testing.T) {
+	t.Parallel()
+	h := newThunderWaitHarness(t, thunderWaitOpts{
+		component:  thunderWaitWeb,
+		designBody: webAppWithPlatformResource(thunderWaitWeb, thunderWaitDep, "thunder-app"),
+		origin:     thunderWaitOrigin,
+		thunderErr: ErrThunderApplicationAPIMissing,
+	})
+	ready, failed := h.state(t, thunderWaitWeb)
+	if !ready || failed {
+		t.Fatalf("ready/failed = %v/%v; missing ThunderApplication API must not block OC Ready", ready, failed)
+	}
+	assertRedirectPatch(t, h.rc, thunderWaitCallback, 1)
+}
+
+// OpenChoreo advertises https://host:443/; the CR / browser omit the default port.
+func TestDeploymentState_WebAppThunderDefaultPortCallbackMatches(t *testing.T) {
+	t.Parallel()
+	const origin = "https://web.example.com:443/"
+	const callback = "https://web.example.com:443/callback"
+	h := newThunderWaitHarness(t, webAppThunderOpts(origin, &ThunderApplicationView{
+		RedirectURIs:       "https://web.example.com/callback",
+		Ready:              true,
+		Generation:         2,
+		ObservedGeneration: 2,
+	}))
+	ready, failed := h.state(t, thunderWaitWeb)
+	if !ready || failed {
+		t.Fatalf("ready/failed = %v/%v; :443 callback must match portless CR", ready, failed)
+	}
+	assertRedirectPatch(t, h.rc, callback, 1)
+}
+
 func TestDeploymentState_FailedOCDoesNotConsultThunder(t *testing.T) {
 	t.Parallel()
 	h := newThunderWaitHarness(t, thunderWaitOpts{
