@@ -269,7 +269,13 @@ export async function waitForHttp(url: string, timeoutMs = 120_000): Promise<boo
       await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(Math.min(5_000, remaining)) });
       return true;
     } catch {
-      await delay(500);
+      // Clamped to what is left, same as the attempt's own abort signal above —
+      // otherwise this retry delay is the one thing in the loop the deadline
+      // does not bound, and the wait outlives what it said it would by up to
+      // 500ms on its last, failing attempt.
+      const left = deadline - Date.now();
+      if (left <= 0) break;
+      await delay(Math.min(500, left));
     }
   }
   return false;
