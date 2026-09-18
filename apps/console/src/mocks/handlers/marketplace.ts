@@ -42,7 +42,7 @@ type ResourceDocPointerDTO = components["schemas"]["ResourceDocPointerDTO"];
 function scenario(): MarketplaceScenario {
   return (
     (localStorage.getItem("aep:mock:marketplace") as MarketplaceScenario | null) ??
-    "empty"
+    "some"
   );
 }
 
