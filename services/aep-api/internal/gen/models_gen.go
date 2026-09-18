@@ -301,6 +301,24 @@ func (e EnvValueCellDTOStatus) Valid() bool {
 	}
 }
 
+// Defines values for EnvironmentDTOValidation.
+const (
+	Off EnvironmentDTOValidation = "off"
+	On  EnvironmentDTOValidation = "on"
+)
+
+// Valid indicates whether the value is a known member of the EnvironmentDTOValidation enum.
+func (e EnvironmentDTOValidation) Valid() bool {
+	switch e {
+	case Off:
+		return true
+	case On:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ExternalDependencyValueState.
 const (
 	ExternalDependencyValueStateConfigured     ExternalDependencyValueState = "configured"
@@ -1884,10 +1902,29 @@ type EnvVar struct {
 	Value string `json:"value"`
 }
 
-// EnvironmentDTO defines model for EnvironmentDTO.
+// EnvironmentDTO One environment in the org's deployment pipeline, in promotion order. `name` is the OpenChoreo Environment's immutable identity; everything else is presentation or flow. `validation` says whether this environment runs a validation step; it is always present in the response, because an Environment whose annotation is missing or unrecognised is served as "off".
 type EnvironmentDTO struct {
+	// DisplayName From the openchoreo.dev/display-name annotation; falls back to a titlecased name.
+	DisplayName string `json:"displayName"`
+
+	// IsProduction From Environment.spec.isProduction. Never inferred from the name.
+	IsProduction bool `json:"isProduction"`
+
+	// Name Immutable OpenChoreo Environment name. Bindings and cell namespaces reference it.
 	Name string `json:"name"`
+
+	// Position 0-based index in promotion order. The array is already ordered; this is a convenience.
+	Position int32 `json:"position"`
+
+	// PromotesTo The next environment's name. Omitted on the last environment, which has no promote step.
+	PromotesTo string `json:"promotesTo,omitempty"`
+
+	// Validation From the aep.wso2.com/validation annotation. Always present in the response: when the annotation is missing or unrecognised on the Environment, the server serves "off".
+	Validation EnvironmentDTOValidation `json:"validation"`
 }
+
+// EnvironmentDTOValidation From the aep.wso2.com/validation annotation. Always present in the response: when the annotation is missing or unrecognised on the Environment, the server serves "off".
+type EnvironmentDTOValidation string
 
 // Error Flat error envelope returned by every non-2xx response.
 type Error struct {

@@ -102,10 +102,11 @@ func (s *Service) PromoteExternalResource(ctx context.Context, orgID, projectID,
 		}
 	}
 
-	envNames, err := s.ListOrgEnvironments(ctx, orgID)
+	envInfos, err := s.ListOrgEnvironments(ctx, orgID)
 	if err != nil {
 		return ExternalResourceView{}, err
 	}
+	envNames := environmentNames(envInfos)
 	valueByEnvKey, carried, err := s.promotedValues(ctx, orgID, projectID, name, keys, envNames, req.EnvValues)
 	if err != nil {
 		return ExternalResourceView{}, err

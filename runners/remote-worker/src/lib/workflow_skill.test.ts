@@ -164,8 +164,11 @@ for (const rule of [
   // of one run's 55 minutes.
   "**Dispatch every builder of a wave in the background, in ONE turn.**",
   // What the deleted PreToolUse hook used to guarantee structurally: nothing is
-  // staged while a subagent is still writing.
-  "before you stage or commit\nanything",
+  // staged while a subagent is still writing. Only the COMMIT waits for the
+  // whole issue — a wait on the whole wave held one run's walk 13m36s past its
+  // builder's report while the lead sat blocked on the sibling service.
+  "**Wait for one at a time, and act on each report as it lands.**",
+  "Only the **commit** waits for the whole issue",
   // A subagent that backgrounds its own build reports "clean" while the command
   // runs on, and the run ends with it orphaned (probe 2's `sleep`, stopped at
   // session end).
@@ -177,7 +180,8 @@ for (const rule of [
   // will not let a web app be committed unwalked, and the literal dispatch
   // prompt. The procedure itself is `mock-verification`, asserted below.
   "**A `web-application` is finished by a walk, not a build.**",
-  "dispatch **one more subagent**",
+  "The moment its\n   builder reports clean",
+  "dispatch **one\n   more subagent**",
   "Walk <component> at <App Path>",
 ]) {
   test(`shared by both modes: ${rule.split("\n")[0]}`, () => {

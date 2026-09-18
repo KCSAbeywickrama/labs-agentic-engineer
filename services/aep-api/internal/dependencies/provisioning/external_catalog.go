@@ -136,10 +136,11 @@ func (s *Service) ListExternalResources(ctx context.Context, orgID string) ([]Ex
 	// Resources page can offer Promote on them. They are listed from the
 	// designs, not the RT catalog: a resource is a project's from the moment
 	// its design names one, built or not.
-	envNames, err := s.ListOrgEnvironments(ctx, orgID)
+	envInfos, err := s.ListOrgEnvironments(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
+	envNames := environmentNames(envInfos)
 	for i := range sweep.projectRows {
 		row := sweep.projectRows[i]
 		row.EnvCells = s.projectRowCells(ctx, orgID, row.Project, row.Name, row.Config, envNames)
@@ -256,8 +257,8 @@ func (s *Service) registeredEnvCells(ctx context.Context, orgID, name string) []
 // be derived from the request JWT.
 func (s *Service) synthesizeRegisteredEnvCells(ctx context.Context, orgID string, def openchoreo.ExternalResourceDefinition) []EnvCell {
 	envs := []string{defaultEnv()}
-	if names, err := s.ListOrgEnvironments(ctx, orgID); err == nil && len(names) > 0 {
-		envs = names
+	if infos, err := s.ListOrgEnvironments(ctx, orgID); err == nil && len(infos) > 0 {
+		envs = environmentNames(infos)
 	}
 	keys := toConfigKeys(def.Config)
 	if len(keys) == 0 {

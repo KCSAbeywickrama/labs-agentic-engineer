@@ -65,13 +65,25 @@ func (h *Handler) ListOrgEnvironments(ctx context.Context, _ gen.ListOrgEnvironm
 	if h.svc == nil {
 		return nil, errProvisioningUnavailable()
 	}
-	names, err := h.svc.ListOrgEnvironments(ctx, org)
+	infos, err := h.svc.ListOrgEnvironments(ctx, org)
 	if err != nil {
 		return nil, mapProvisionError(err)
 	}
-	out := make([]gen.EnvironmentDTO, 0, len(names))
-	for _, n := range names {
-		out = append(out, gen.EnvironmentDTO{Name: n})
+	// infos already arrives ordered and filtered by ListOrgEnvironments (the
+	// org's deployment pipeline, or OC's own list order when no pipeline
+	// resolves) — this loop only assembles the DTO. Position is the slice
+	// index; PromotesTo is copied verbatim, including the "" the service
+	// deliberately leaves on every environment when no pipeline resolved.
+	out := make([]gen.EnvironmentDTO, 0, len(infos))
+	for i, e := range infos {
+		out = append(out, gen.EnvironmentDTO{
+			Name:         e.Name,
+			DisplayName:  e.DisplayName,
+			IsProduction: e.IsProduction,
+			Validation:   gen.EnvironmentDTOValidation(e.Validation),
+			Position:     int32(i),
+			PromotesTo:   e.PromotesTo,
+		})
 	}
 	return gen.ListOrgEnvironments200JSONResponse(out), nil
 }

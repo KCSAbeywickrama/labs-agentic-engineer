@@ -445,16 +445,19 @@ once, here.** The screen table is yours to write from `wireframes.dsl`, in
 ```ts
 export const SCREEN_ROUTES: readonly ScreenRoute[] = [
   { key: "my-claims", label: "My Claims",    path: "/claims/mine", loads: "GET /me/claims" },
-  { key: "submit",    label: "Submit Claim", path: "/claims/new",  loads: null },
+  { key: "submit",    label: "Submit Claim", path: "/claims/new",  loads: "POST /me/claims" },
   { key: "approvals", label: "Approvals",    path: "/approvals",   loads: "GET /claims" },
 ];
 ```
 
-`loads` is the operation whose answer the screen renders when it opens — the
-list or the detail call, at the reach the screen shows: an every-row queue
-loads `GET /claims`, a "mine" page loads `GET /me/claims`. `loads: null` is a
-screen with no load call (a form), reachable by any signed-in caller. A screen
-in a flow with **no `role` line** is `public: true` and is routed above the
+`loads` is the operation the screen exists to perform, at the reach the screen
+shows: an every-row queue loads `GET /claims`, a "mine" page loads
+`GET /me/claims`. **A form that only writes names the operation its submit
+makes** — it has no load call, but naming its one operation is what keeps the
+rail, the route guard and the button enabled from the same fact; leaving it
+`null` lets a caller reach a form whose only control they can never use.
+`loads: null` is reserved for a screen that needs no operation at all, which is
+rare. A screen in a flow with **no `role` line** is `public: true` and is routed above the
 sign-in guard (§6). `reachableScreens(scopes, signedIn)` filters the table
 through `canCall`, and the rail, the landing redirect and `NoAccess` all read
 it.
@@ -497,7 +500,7 @@ redirects to the first **reachable** screen in `SCREEN_ROUTES` order.
 
 - `loads: "<operation>"` → `<RequireOperation op={…}>` around the route and
   `<Can op={…}>` around its nav item.
-- `loads: null` → any signed-in caller; no guard.
+- `loads: null` → any signed-in caller; no guard. Rare — a form names its submit operation instead.
 - `public: true` (a screen in a flow with no `role` line) → reachable before
   sign-in; keep it outside the sign-in gate entirely. `App.example.tsx` routes
   those screens **above** `SignedIn`, still inside `AuthzProvider` (so `<Can>`
@@ -546,7 +549,7 @@ verifies that signature. That is the whole of backend authentication.
 Both read the same three variables, which the platform sets on the container
 when the environment's gateway publishes a keypair:
 `GATEWAY_ASSERTION_CERTIFICATE`, `GATEWAY_ASSERTION_ISSUER`,
-`GATEWAY_ASSERTION_HEADER`. **A missing one stops the service from starting**,
+`GATEWAY_ASSERTION_HEADER`. **A partial trio stops the service from starting**,
 in both stacks, on purpose: a service that runs without them cannot tell a real
 caller from a forged one.
 
@@ -631,7 +634,7 @@ that skill already sets.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| The service will not start: `GATEWAY_ASSERTION_CERTIFICATE is not set` | Running outside a deployed cell, or in an environment whose gateway has no keypair | Locally, set the three variables from a throwaway keypair. In a cell this is fail-closed on purpose: the environment's gateway needs provisioning. |
+| The service will not start: `…must be set together or not at all` | Some of the three are set, not all | Set all three from a throwaway keypair locally; in a cell, the environment's gateway needs provisioning. |
 | Every request 401s right after a deploy | The environment's gateway was re-provisioned; this component still holds the previous certificate | Redeploy the component — the certificate rides its ReleaseBinding. |
 | A forged request is served as an anonymous caller | An unverifiable assertion was treated as "no caller" | A present-but-invalid assertion is always a 401. |
 | Signed-in user loops back to the login page forever, ~160 ms per cycle | `if (res.status === 401) signIn()` in the API client: the gateway answers 401 for a missing scope exactly as for a dead token | The 401 rule — 401 + `tokenIsValid()` ⇒ Forbidden; only an absent/expired token signs in. Copy `src/authz/client.ts` from the assets. |

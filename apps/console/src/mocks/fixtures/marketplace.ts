@@ -155,8 +155,20 @@ export const seedPlatformResourceTypes: PlatformResourceTypeDTO[] = [
 // OpenChoreo Environment names for Registered External env-value columns.
 // Pair is development + staging-local, not a hardcoded Dev/Staging/Production trio.
 export const seedOrgEnvironments: EnvironmentDTO[] = [
-  { name: "development" },
-  { name: "staging-local" },
+  {
+    name: "development",
+    displayName: "Development",
+    isProduction: false,
+    validation: "off",
+    position: 0,
+  },
+  {
+    name: "staging-local",
+    displayName: "Staging (Local)",
+    isProduction: false,
+    validation: "off",
+    position: 1,
+  },
 ];
 
 // In-memory catalog for GET list + POST register. Starts as a slice copy of

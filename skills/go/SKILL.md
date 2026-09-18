@@ -141,9 +141,9 @@ handler := gen.HandlerWithOptions(gen.NewStrictHandler(srv, nil), gen.ChiServerO
 `r.Use` is correct here and there is no ordering trap: the verifier needs
 nothing from the generated wrapper. The platform sets
 `GATEWAY_ASSERTION_CERTIFICATE`, `GATEWAY_ASSERTION_ISSUER` and
-`GATEWAY_ASSERTION_HEADER` on the container; a service that starts without them
-cannot tell a real caller from a forged one, which is why the error is fatal
-rather than logged.
+`GATEWAY_ASSERTION_HEADER` on the container; a service that starts on half of
+them cannot tell a real caller from a forged one, which is why a partial set is
+fatal rather than logged.
 
 **Read identity from the verified caller, never from a header.**
 
@@ -284,6 +284,6 @@ pool, err := pgxpool.New(ctx, os.Getenv("<DB_URL_ENV_VAR>"))
 | Create/POST 500s only when an optional list field is omitted (`[]` works) | Nil slice bound as `NULL` into a `NOT NULL` array column; its `DEFAULT` skipped because the INSERT lists it | Normalize nil→empty, or omit the column |
 | API reachable via SPA `/api` but not curl-able on the public gateway | Provider `visibility` is missing `external` (misread "not `external`" as the endpoint list) | List all three — `- project`, `- internal`, `- external` — on the service's own endpoint |
 | Every call 401s right after a deploy | The environment's gateway publishes a different key than the container holds — it was re-provisioned and this component was not redeployed | Redeploy the component; the certificate rides its ReleaseBinding |
-| The service will not start: `GATEWAY_ASSERTION_CERTIFICATE is not set` | Running outside a deployed cell, or in an environment whose gateway has no keypair | Locally, set the three variables from a throwaway keypair. In a cell, the environment's gateway needs provisioning — this is fail-closed on purpose |
+| The service will not start: `…must be set together or not at all` | Some of the three are set, not all | Locally, set all three from a throwaway keypair. In a cell, the environment's gateway needs provisioning |
 | A public operation 401s | A handler for a `security: []` operation called `RequireCaller` | A public handler reads no identity; the gateway sends no assertion with one |
 | Every caller looks anonymous | Read `X-User-Id` instead of the verified caller | `auth.RequireCaller(ctx)` — the headers are unsigned and prove nothing |
