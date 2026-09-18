@@ -467,9 +467,17 @@ func TestEnsureLeavesAPreExistingDirectoryGroupAlone(t *testing.T) {
 // test_users row belongs to somebody. It is refused, never adopted: no create,
 // no password reset, no enrolment. Otherwise a design naming `jsmith` would
 // reset a real person's login and hand it to a validation runner.
+//
+// A collision alone is not enough to refuse any more (see
+// TestEnsureRenamesAnAccountWhoseDeclaredNameIsTaken) — every numbered
+// alternate up to maxUsernameAttempts has to belong to somebody else too, so
+// this seeds all of them.
 func TestEnsureRefusesAnAccountThePlatformDoesNotOwn(t *testing.T) {
 	h := newHarness(rolesJSON(t, []string{"Viewer"}, userFixture{"jsmith", "Viewer"}))
 	person := h.dir.seedUser("jsmith")
+	for attempt := 2; attempt <= maxUsernameAttempts; attempt++ {
+		h.dir.seedUser(usernameCandidate("jsmith", attempt))
+	}
 
 	result := h.run(t)
 
@@ -509,6 +517,101 @@ func TestEnsureRefusesAnAccountThePlatformDoesNotOwn(t *testing.T) {
 	}
 	if !strings.Contains(result.Summary(), "jsmith") {
 		t.Fatalf("summary does not surface the refusal: %q", result.Summary())
+	}
+}
+
+// ---- 7b: renaming around a collision, instead of refusing -----------------
+
+// A collision with an account the platform does not own no longer needs a
+// human on its own: the ensure tries a numbered alternate first, and only
+// refuses once every alternate up to maxUsernameAttempts is ALSO somebody
+// else's. This is the shape the currency-convert573 incident surfaced — a
+// role-derived username ("test-user") already belonged to another project's
+// test account, recorded under a stale environment scope.
+func TestEnsureRenamesAnAccountWhoseDeclaredNameIsTaken(t *testing.T) {
+	h := newHarness(rolesJSON(t, []string{"Viewer"}, userFixture{"jsmith", "Viewer"}))
+	person := h.dir.seedUser("jsmith") // somebody else's account; jsmith-2 is free
+
+	result := h.run(t)
+
+	if result.HasRefusals() {
+		t.Fatalf("HasRefusals = true, want the collision resolved by a rename: %v", result.UsersRefused)
+	}
+	if !contains(result.UsersCreated, "jsmith-2") {
+		t.Fatalf("UsersCreated = %v, want jsmith-2", result.UsersCreated)
+	}
+	wantRenames := []UsernameRename{{Declared: "jsmith", Actual: "jsmith-2"}}
+	if !reflect.DeepEqual(result.UsersRenamed, wantRenames) {
+		t.Fatalf("UsersRenamed = %+v, want %+v", result.UsersRenamed, wantRenames)
+	}
+	if !strings.Contains(result.Summary(), "jsmith → jsmith-2") {
+		t.Fatalf("summary does not surface the rename: %q", result.Summary())
+	}
+	// jsmith itself is still completely untouched — the safety property this
+	// whole feature must not trade away for the convenience of a rename.
+	if n := h.dir.countOp("SetUserPassword"); n != 0 {
+		t.Fatalf("SetUserPassword called %d times on a real person's account", n)
+	}
+	if pw, held := h.dir.passwords[person.ID]; held {
+		t.Fatalf("a password was written for jsmith (%q)", pw)
+	}
+	if _, owned := h.store.user(testScope, "jsmith"); owned {
+		t.Fatalf("a test_users row was written for jsmith")
+	}
+	// jsmith-2 holds the role instead.
+	account, exists := h.dir.users["jsmith-2"]
+	if !exists {
+		t.Fatalf("jsmith-2 was not created")
+	}
+	if got := h.dir.memberSet(groupFor("Viewer")); !slices.Contains(got, account.ID) {
+		t.Fatalf("%s members = %v, want jsmith-2's account %q", groupFor("Viewer"), got, account.ID)
+	}
+	// The project references, and the gate publishes a login for, the ACTUAL
+	// account — under the role and scopes the DECLARED name would have carried.
+	if len(h.store.replaceCalls) != 1 || len(h.store.replaceCalls[0]) != 1 ||
+		h.store.replaceCalls[0][0].Username != "jsmith-2" {
+		t.Fatalf("refs = %v, want exactly one for jsmith-2", h.store.replaceCalls)
+	}
+	var cred *Credential
+	for i := range result.Credentials {
+		if result.Credentials[i].Username == "jsmith-2" {
+			cred = &result.Credentials[i]
+		}
+	}
+	if cred == nil {
+		t.Fatalf("no credential published for jsmith-2: %+v", result.Credentials)
+	}
+	if !contains(cred.Roles, "Viewer") {
+		t.Fatalf("jsmith-2's credential roles = %v, want Viewer", cred.Roles)
+	}
+	if cred.Password == "" {
+		t.Fatalf("jsmith-2 was published with no password")
+	}
+}
+
+// A rebuild of the same design must land on the SAME alternate, not probe
+// again and pick a different one — the ensure owns jsmith-2 now, and finds it
+// on attempt 2 exactly as the first build did.
+func TestEnsureRenameIsIdempotentAcrossRebuilds(t *testing.T) {
+	h := newHarness(rolesJSON(t, []string{"Viewer"}, userFixture{"jsmith", "Viewer"}))
+	h.dir.seedUser("jsmith")
+	first := h.run(t)
+	if !contains(first.UsersCreated, "jsmith-2") {
+		t.Fatalf("first build created %v, want jsmith-2", first.UsersCreated)
+	}
+	h.dir.calls = nil
+
+	second := h.run(t)
+
+	if !contains(second.UsersReused, "jsmith-2") {
+		t.Fatalf("second build = %v, want jsmith-2 reused", second.UsersReused)
+	}
+	if n := h.dir.countOp("CreateUser"); n != 0 {
+		t.Fatalf("CreateUser called %d times on a rebuild, want zero", n)
+	}
+	wantRenames := []UsernameRename{{Declared: "jsmith", Actual: "jsmith-2"}}
+	if !reflect.DeepEqual(second.UsersRenamed, wantRenames) {
+		t.Fatalf("UsersRenamed = %+v, want %+v", second.UsersRenamed, wantRenames)
 	}
 }
 
@@ -675,10 +778,16 @@ func TestEnsureRecreatesAVanishedRoleAndKeepsItsOriginalProvenance(t *testing.T)
 // Exactly one ref per USABLE planned user, with the supplied flag the console
 // renders. A refused account produces no ref: the project does not reference an
 // account the platform did not provision for it.
+//
+// Every numbered alternate up to maxUsernameAttempts is seeded too, so jsmith
+// is genuinely unresolvable here rather than renamed — see
+// TestEnsureRenamesAnAccountWhoseDeclaredNameIsTaken for that case.
 func TestEnsureWritesOneRefPerUsablePlannedUser(t *testing.T) {
 	h := newHarness(rolesJSON(t, []string{"Viewer", "Compliance Admin", "Auditor"},
 		userFixture{"test-viewer", "Viewer"}, userFixture{"jsmith", "Auditor"}))
-	h.dir.seedUser("jsmith") // refused: a real person's account
+	for attempt := 1; attempt <= maxUsernameAttempts; attempt++ {
+		h.dir.seedUser(usernameCandidate("jsmith", attempt)) // refused: a real person's account
+	}
 
 	h.run(t)
 
@@ -859,10 +968,17 @@ func TestEnsurePublishesOnlyRoleHoldingAccounts(t *testing.T) {
 // refused username — one that belongs to a real person — would put a password
 // beside somebody else's login in a ticket, for an account whose password the
 // platform never set.
+//
+// Every numbered alternate is also somebody else's, so jsmith is genuinely
+// unresolvable rather than renamed.
 func TestEnsurePublishesNoLoginForARefusedOrSkippedAccount(t *testing.T) {
 	h := newHarness(rolesJSON(t, []string{"Viewer"}, userFixture{"jsmith", "Viewer"}))
-	// A real person's account, already on the directory and not ours.
-	h.dir.users["jsmith"] = DirectoryAccount{ID: "usr-jsmith", Username: "jsmith"}
+	// A real person's account, already on the directory and not ours — and so
+	// is every numbered alternate up to the bound.
+	for attempt := 1; attempt <= maxUsernameAttempts; attempt++ {
+		name := usernameCandidate("jsmith", attempt)
+		h.dir.users[name] = DirectoryAccount{ID: "usr-" + name, Username: name}
+	}
 	result := h.run(t)
 
 	if !contains(result.UsersRefused, "jsmith") {
