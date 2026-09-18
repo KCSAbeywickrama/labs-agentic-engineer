@@ -183,10 +183,11 @@ func (s *Service) validateUpdateRequest(
 		return nil, nil, nil, nil, err
 	}
 
-	envNames, err = s.ListOrgEnvironments(ctx, orgID)
+	envInfos, err := s.ListOrgEnvironments(ctx, orgID)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+	envNames = environmentNames(envInfos)
 
 	currentByEnvKey := make(map[string]EnvCell, len(currentCells))
 	for _, c := range currentCells {

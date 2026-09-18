@@ -154,10 +154,50 @@ type OrgResourceDocs interface {
 	CommitUTF8(ctx context.Context, orgID, logicalName, fileName, content string) (path string, err error)
 }
 
-// EnvironmentLister lists OpenChoreo Environment names for the org namespace.
+// EnvironmentInfo is one OpenChoreo environment as the BFF reads it: name,
+// display name, production flag, validation setting. Owned here, like every
+// other domain type in this ports file (ProjectRef, EnvCell, ...) — the
+// openchoreo client has its own wire-mapping struct of the same shape, and
+// the composition root (internal/app) adapts between the two at the wiring
+// site instead of the two packages sharing a type.
+type EnvironmentInfo struct {
+	Name         string
+	DisplayName  string
+	IsProduction bool
+	Validation   string
+	// PromotesTo is the next environment's name in the deployment pipeline's
+	// promotion order, as resolved by ListOrgEnvironments. Empty means no known
+	// next step — either this is the last environment in a resolved pipeline,
+	// or the org has no pipeline the service can resolve (see PipelineLister):
+	// inventing a promotion chain the platform does not have would be worse
+	// than omitting it.
+	PromotesTo string
+}
+
+// EnvironmentLister lists OpenChoreo Environments for the org namespace.
 // Empty org → empty slice, never nil error-for-empty.
 type EnvironmentLister interface {
-	ListNames(ctx context.Context, orgID string) ([]string, error)
+	List(ctx context.Context, orgID string) ([]EnvironmentInfo, error)
+}
+
+// PipelineLister resolves a deployment pipeline's ordered environment names.
+// ListOrgEnvironments is org-scoped with no project in view, so it cannot
+// simply read a project's spec.deploymentPipelineRef — it resolves the org's
+// OWN pipeline by convention instead: the pipeline named "default" (the
+// platform's own setup convention), falling back to the sole pipeline in the
+// namespace when there is exactly one. ListPipelineNames answers that
+// resolution question; PipelineEnvironments then reads the chosen pipeline's
+// promotion order. openchoreo.ProjectCellClient satisfies both — the
+// composition root adapts it onto this port the same way it adapts
+// EnvironmentClient onto EnvironmentLister.
+type PipelineLister interface {
+	// ListPipelineNames returns the names of every DeploymentPipeline in the
+	// namespace, so the service can apply its "default" / sole-pipeline
+	// resolution convention.
+	ListPipelineNames(ctx context.Context, orgID string) ([]string, error)
+	// PipelineEnvironments returns the environment names the named pipeline
+	// promotes through, in promotion order.
+	PipelineEnvironments(ctx context.Context, orgID, pipelineName string) ([]string, error)
 }
 
 // ProjectRef identifies one project (org + project id) for the cross-project

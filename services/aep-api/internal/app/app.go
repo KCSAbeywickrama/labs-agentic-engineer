@@ -413,7 +413,12 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// ProjectReleaseBinding per environment does it now, and nothing creates
 	// those for us. Without this the project is created, reports Ready, and
 	// then fails every deploy with "namespace ... not found".
-	projectService.SetProjectCellProvisioner(openchoreo.NewProjectCellClient(ocConfig))
+	//
+	// Shared with provisioningSvc's Pipeline (below): the same client also
+	// resolves the org's own deployment pipeline for /dependencies/environments'
+	// promotion ordering, so it is built once here instead of twice.
+	projectCellClient := openchoreo.NewProjectCellClient(ocConfig)
+	projectService.SetProjectCellProvisioner(projectCellClient)
 	// Build/deploy stage sources for the status poll (#184): the milestone-run
 	// index (one row read) + the org-scoped release-binding list —
 	// consumer-side ports wired here so projects imports neither.
@@ -1137,7 +1142,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		Projects:          provisionProjects{repos: repoRepo},
 		Access:            dependencies.NewAccessRequestRepository(db),
 		Providers:         orgEndpointCatalog,
-		Environments:      environmentClient,
+		Environments:      environmentLister{client: environmentClient},
+		Pipeline:          pipelineLister{client: projectCellClient},
 		CatalogValuePlane: catalogValuePlane,
 		OrgSecrets:        secretRefWriter,
 		OrgResourceDocs:   provisioning.NewGitOrgResourceDocs(repoService, gitOpsService),
