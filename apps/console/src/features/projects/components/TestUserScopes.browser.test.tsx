@@ -159,15 +159,15 @@ const STRIPPED: PublishedTestUser[] = WITH_SCOPES.map((u) => ({
   scopes: [],
 }));
 
-/** Measured in this lane: a one-role row is 43.25px with scopes and 37.5px
- *  without; `jsmith`, whose two role names wrap, is 55.16px. The bound sits
- *  above all of them and is still a fifth of the ~350px a six-scope stacked
- *  list cost -- the number the cell was changed to fix. One extra LINE of
- *  handles would blow straight through it. */
+/** Measured in this lane: a one-role row is 43.25-43.75px with scopes and
+ *  36.5-37px without; `jsmith`, whose two role names wrap, is 54.16px. The
+ *  bound sits above all of them and is still a fifth of the ~350px a
+ *  six-scope stacked list cost -- the number the cell was changed to fix.
+ *  One extra LINE of handles would blow straight through it. */
 const ONE_LINE_MAX = 80;
 
-/** What the outlined button costs over the em dash it replaces, on the same
- *  account: 5.75px measured. Bounded rather than demanded to be zero -- a
+/** What the text button costs over the em dash it replaces, on the same
+ *  account: 6.75px measured. Bounded rather than demanded to be zero -- a
  *  control has a control's height. What matters is that it is a constant and
  *  not something the scope COUNT feeds. */
 const BUTTON_COST_MAX = 12;

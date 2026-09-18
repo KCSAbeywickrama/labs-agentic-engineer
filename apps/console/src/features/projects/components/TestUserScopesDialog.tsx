@@ -93,7 +93,7 @@ export function TestUserScopesCell({
     <>
       <Button
         size="small"
-        variant="outlined"
+        variant="text"
         aria-label={scopesButtonLabel(scopes.length, username)}
         onClick={() => {
           setOpen(true);
