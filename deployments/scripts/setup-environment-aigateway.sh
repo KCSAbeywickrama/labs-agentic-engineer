@@ -190,10 +190,11 @@ helm upgrade --install "$RELEASE" \
 
 echo ""
 echo "⏳ Waiting for the AI gateway to serve..."
-kubectl wait --for=condition=Available --timeout="$WAIT_TIMEOUT" \
-    "deployment/${RELEASE}-gw-controller" -n "$NS" --context "$CLUSTER_CONTEXT"
-kubectl wait --for=condition=Available --timeout="$WAIT_TIMEOUT" \
-    "deployment/${RELEASE}-gw-gateway-runtime" -n "$NS" --context "$CLUSTER_CONTEXT"
+# Both Deployments are created by the gateway operator AFTER this release is
+# installed, so they can still be absent when helm returns — wait for them to
+# exist before waiting for them to be Available.
+wait_for_deployment_available "$NS" "${RELEASE}-gw-controller" "$WAIT_TIMEOUT"
+wait_for_deployment_available "$NS" "${RELEASE}-gw-gateway-runtime" "$WAIT_TIMEOUT"
 
 # ── 6. The binding record ────────────────────────────────────────────────────
 # aep-api runs OUTSIDE the cluster, so the Environment's annotations are the one
