@@ -3089,3 +3089,97 @@ func TestAgentDeath_WithNoCancelRecordedStillSpendsTheRedispatch(t *testing.T) {
 	require.Equal(t, delivery.RunMaxRedispatchPerCycle, h.dispatchCount(),
 		"genuine agent death must still spend the whole re-dispatch budget")
 }
+
+// ---- agent death is told, not waited out ------------------------------------
+
+// TestAgentDeath_SignalEndsTheAttemptWithoutTheLandingDeadline is the whole
+// point of SigRunAgentDied. The landing wait is the only wait in the loop with
+// no poll behind it, so before this signal a cycle whose pod died after twenty
+// minutes still held the run for cycleLandingTimeout, re-dispatched, and held it
+// for another — four hours of wall clock, measured on a live OOMKill.
+//
+// What the signal must NOT change is the accounting: the budget is still spent
+// in full and the run still settles on redispatch-budget. Only the waiting goes.
+func TestAgentDeath_SignalEndsTheAttemptWithoutTheLandingDeadline(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1))
+	// What the pod-truth watcher leaves behind: the cycle closed, nothing landed.
+	h.factsAre(CycleFacts{CycleID: testCycleID, Ended: true})
+	// One death per attempt — the watcher classifies each dispatched pod.
+	h.signal(delivery.SigRunAgentDied, 20*time.Minute)
+	h.signal(delivery.SigRunAgentDied, 40*time.Minute)
+	start := h.env.Now()
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
+	require.Equal(t, delivery.RunMaxRedispatchPerCycle, h.dispatchCount(),
+		"a told death still spends the whole re-dispatch budget")
+	require.Less(t, h.env.Now().Sub(start), cycleLandingTimeout,
+		"the run must settle on the signal, not on the landing deadline")
+}
+
+// TestAgentDeath_WithoutTheSignalTheDeadlineStillSettlesTheRun is the twin, and
+// the property the whole signal vocabulary rests on: a lost signal costs
+// latency, never correctness. CycleFacts.Ended is the ground truth — it was
+// already computed and already read on every wake-up, and the loop simply never
+// looked at it — so the deadline still wakes the loop into the same verdict.
+func TestAgentDeath_WithoutTheSignalTheDeadlineStillSettlesTheRun(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1))
+	h.factsAre(CycleFacts{CycleID: testCycleID, Ended: true})
+	start := h.env.Now()
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
+	require.Equal(t, delivery.RunMaxRedispatchPerCycle, h.dispatchCount())
+	require.GreaterOrEqual(t, h.env.Now().Sub(start), 2*cycleLandingTimeout,
+		"with the signal lost the run falls back to the deadline it always had")
+}
+
+// TestAgentDeath_EndedIsNotALanding guards the ground-truth check itself. A
+// cycle can end for reasons that are not death, and reading `Ended` as "this
+// attempt is over" must not read it as "something landed" — a run that treated a
+// closed cycle as a merge would carry an empty SHA into the build stage.
+func TestAgentDeath_EndedIsNotALanding(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1))
+	h.factsAre(CycleFacts{CycleID: testCycleID, Ended: true})
+	h.signal(delivery.SigRunAgentDied, time.Second)
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonRedispatchBudget)
+	require.Equal(t, []FinishCycleInput{{CycleID: testCycleID}}, h.finishes,
+		"the cycle closes with no merge SHA — `Ended` is the end of an attempt, not a landing")
+	require.Empty(t, h.deploys, "a cycle that landed nothing never reaches the deploy stage")
+}
+
+// TestAgentDeath_CancelStillWinsOverAReapedPod is the regression this signal
+// could most easily reintroduce. Cancelling reaps the agent's Component, so the
+// watcher now SEES that pod die and signals death on a run the user just
+// stopped. The cancel stamp on the run row is the evidence and the death signal
+// is only a wake-up, so the order in awaitLanding's selector and the order of
+// the checks after it both have to keep cancel first.
+func TestAgentDeath_CancelStillWinsOverAReapedPod(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1))
+	h.factsAre(
+		// The boundary asks first, before anything is dispatched.
+		CycleFacts{CycleID: testCycleID},
+		// Then the landing wait, woken by the reaped pod's death.
+		CycleFacts{CycleID: testCycleID, Ended: true, CancelRequested: true},
+	)
+	h.signal(delivery.SigRunAgentDied, time.Second)
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateCancelled, "")
+	require.Equal(t, 1, h.dispatchCount(),
+		"a reaped pod's death must not buy a re-dispatch on a run the user cancelled")
+}

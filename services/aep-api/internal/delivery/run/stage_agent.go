@@ -76,6 +76,10 @@ const (
 	landingConflict
 	landingCancelled
 	landingTimeout
+	// landingAgentDied — the watcher closed this cycle's agent without a pull
+	// request. Appended rather than inserted because these are workflow-local
+	// and never serialized, so the numbering is free to grow.
+	landingAgentDied
 )
 
 // noAnchorIssue is the anchor a cycle over a whole WORKING SET passes: none. A
@@ -207,10 +211,13 @@ func (l *loop) dispatchUntilLanded(ctx workflow.Context, kind string, anchorIssu
 				return false, cycleConflict, nil
 			case landingTimeout:
 				expired = true
-			case landingMergeSignalled:
+			case landingMergeSignalled, landingAgentDied:
 				// Never act on the payload: a human's pull request merging during
 				// the cycle raises the same signal, and only the CYCLE RECORD says
-				// whether the agent's own work landed.
+				// whether the agent's own work landed. Death is read the same way
+				// and for the same reason — the facts read below is what ends the
+				// attempt, so a death signal that raced the agent's own merge
+				// costs one round trip and changes nothing.
 			}
 			facts, ferr := l.cycleFacts(ctx)
 			if ferr != nil {
@@ -230,6 +237,14 @@ func (l *loop) dispatchUntilLanded(ctx workflow.Context, kind string, anchorIssu
 				stopDeadline()
 				// Landed: the verdict is the next stage's, not this loop's.
 				return true, cycleNone, nil
+			}
+			// Ended with nothing to land: this attempt is over, whatever woke the
+			// wait. The GROUND TRUTH behind SigRunAgentDied, and the reason losing
+			// that signal costs latency rather than correctness — the deadline
+			// eventually wakes the loop into this same check. Checked last so a
+			// cycle the event plane closed on a merge is read as the merge it was.
+			if facts.Ended {
+				expired = true
 			}
 		}
 		stopDeadline()
@@ -254,6 +269,16 @@ func (l *loop) awaitLanding(ctx workflow.Context, deadline workflow.Future) land
 	sel.AddReceive(l.merged, func(c workflow.ReceiveChannel, _ bool) {
 		c.Receive(ctx, nil)
 		out = landingMergeSignalled
+	})
+	// AFTER cancel and merge, and that order is the whole care in this case.
+	// Selector.Select takes the first READY case in registration order, so a
+	// cancel whose reap killed the pod — indistinguishable from death out here —
+	// still reads as a cancel, and an agent that merged and then died on its way
+	// out still reads as a merge. Both re-confirm against the cycle record below
+	// regardless; this only decides which one gets asked first.
+	sel.AddReceive(l.agentDied, func(c workflow.ReceiveChannel, _ bool) {
+		c.Receive(ctx, nil)
+		out = landingAgentDied
 	})
 	// A workable or build signal during the coding phase is noise (an issue
 	// joined the milestone, a stale build reported). Drained so it cannot wake

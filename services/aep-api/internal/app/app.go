@@ -1452,7 +1452,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// logs and deletes no components — history is the observability plane's and
 	// deletion is retention's. Always on (no longer gated on cluster-gateway-proxy).
 	watchers = append(watchers, codingagent.NewJobWatcher(runtimeClient, runCycleRepo, asServiceIdentity).
-		WithRecorder(runRecorder))
+		WithRecorder(runRecorder).
+		WithAgentDeathNotifier(agentDeathNotifier{runs: milestoneRunRepo, supervisor: runSupervisor}))
 	slog.Info("codingagent.JobWatcher: enabled (OpenChoreo resource tree)")
 	// The milestone run supervisor's Temporal worker. Registered only when
 	// Temporal is configured (TEMPORAL_HOSTPORT set). The watcher dials in a

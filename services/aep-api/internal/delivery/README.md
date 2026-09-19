@@ -405,6 +405,14 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   to decide whether the agent's pull request landed — a human's pull request merging mid-cycle raises the
   identical signal. That is what makes a lost delivery cost latency rather than correctness, and it is why
   the wait state can be unbounded with cancel as its only expiry.
+- **Every wait has something behind its signal.** The gate has `waitPollInterval`, the build wait has
+  `buildPollInterval`, and the LANDING wait — the one with no poll at all — has `CycleFacts.Ended`, read on
+  every wake-up. That last one is why a dead agent is now told (`run-agent-died`, raised by the pod-truth
+  watcher through `codingagent.AgentDeathNotifier` and the composition root's `agentDeathNotifier`) rather
+  than waited out: the signal ends the attempt at once, the `Ended` read settles the run on
+  `cycleLandingTimeout` if the signal never arrives, and the verdict is the same either way. Before it, a
+  cycle whose pod OOMed after twenty minutes held its run for two hours, re-dispatched, and held it two
+  hours more — four hours of wall clock, settling `failed / redispatch-budget` all the same.
 - **The supervisor counts its own budgets.** They are workflow state, written OUT to the run row for the
   read model and never read back: a replay must reproduce the same decisions without a database. The one
   budget it does not count is the automatic build re-trigger — that is the event plane's, derived from the
