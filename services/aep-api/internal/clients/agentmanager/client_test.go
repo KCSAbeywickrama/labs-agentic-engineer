@@ -662,3 +662,98 @@ func TestEnsureProviderSkipsTheCredentialWriteWhenUnchanged(t *testing.T) {
 		})
 	}
 }
+
+// The tracing token comes back from a DIFFERENT call than the one whose name
+// suggests it. `…/tracing-token/regenerate` answers 200 with expiry metadata
+// and no value at all; only `…/token` discloses the token, and only once. A
+// mint pointed at the regenerate path therefore succeeds, stores nothing, and
+// leaves the agent exporting traces it cannot authenticate.
+func TestIssueTracingTokenReadsTheDisclosedValue(t *testing.T) {
+	var gotPath, gotQuery, gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/oauth2/token") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "t", "expires_in": 3600})
+			return
+		}
+		gotPath, gotQuery, gotMethod = r.URL.Path, r.URL.RawQuery, r.Method
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"token": "eyJhbGciOiJSUzI1NiJ9.payload.sig",
+			// snake_case, unlike every other response this client reads.
+			"expires_at": 1797335009, "issued_at": 1789559009,
+		})
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL, TokenURL: srv.URL + "/oauth2/token"})
+	got, err := c.IssueTracingToken(context.Background(), TracingTokenRef{
+		Org: "default", Project: "shop", Agent: "checkout-agent", Environment: "default",
+	})
+	if err != nil {
+		t.Fatalf("IssueTracingToken: %v", err)
+	}
+	if got.Token != "eyJhbGciOiJSUzI1NiJ9.payload.sig" {
+		t.Fatalf("token = %q", got.Token)
+	}
+	if got.ExpiresAt != 1797335009 {
+		t.Errorf("expiresAt = %d, want the disclosed expiry", got.ExpiresAt)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %s, want POST", gotMethod)
+	}
+	if want := "/orgs/default/projects/shop/agents/checkout-agent/token"; gotPath != want {
+		t.Errorf("path = %q, want %q", gotPath, want)
+	}
+	// Without the environment, amp-api answers 500 "Failed to generate token" —
+	// a server error for a missing parameter, so nothing about the response
+	// says the request was incomplete.
+	if got := gotQuery; got != "environment=default" {
+		t.Errorf("query = %q, want environment=default", got)
+	}
+}
+
+func TestIssueTracingTokenRefusesAnEmptyValue(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/oauth2/token") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "t", "expires_in": 3600})
+			return
+		}
+		// The regenerate endpoint's shape: valid JSON, 200, no token.
+		_ = json.NewEncoder(w).Encode(map[string]any{"expiresAt": 1797335009, "rotatedAt": 1789559009})
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL, TokenURL: srv.URL + "/oauth2/token"})
+	if _, err := c.IssueTracingToken(context.Background(), TracingTokenRef{
+		Org: "default", Project: "shop", Agent: "checkout-agent", Environment: "default",
+	}); err == nil {
+		t.Fatal("want an error when AMP discloses no token")
+	}
+}
+
+// The tracing token is gated by amp:agent:token-manage, which is a THIRD key
+// family: neither the provider key scope nor the agent model-key scope
+// authorises it, and the 403 body ("insufficient permissions") names none of
+// them.
+func TestIssueTracingTokenRequestsTheTokenManageScope(t *testing.T) {
+	var scopes string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/oauth2/token") {
+			_ = r.ParseForm()
+			scopes = r.PostFormValue("scope")
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "t", "expires_in": 3600})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"token": "t.o.k", "expires_at": 1})
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL, TokenURL: srv.URL + "/oauth2/token"})
+	if _, err := c.IssueTracingToken(context.Background(), TracingTokenRef{
+		Org: "default", Project: "shop", Agent: "checkout-agent", Environment: "default",
+	}); err != nil {
+		t.Fatalf("IssueTracingToken: %v", err)
+	}
+	if !strings.Contains(scopes, "amp:agent:token-manage") {
+		t.Errorf("requested scopes = %q, want the token-manage scope", scopes)
+	}
+}

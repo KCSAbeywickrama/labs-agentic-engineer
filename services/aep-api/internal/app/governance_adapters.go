@@ -122,6 +122,17 @@ func (s ampKeyStore) WriteAMPModelKey(ctx context.Context, ocOrgID, component, e
 	return s.writer.WriteAMPModelKey(ctx, ocOrgID, component, environment, apiKey, proxyURL)
 }
 
+func (s ampKeyStore) WriteAMPTracingToken(ctx context.Context, ocOrgID, component, environment, token string) error {
+	if s.writer == nil {
+		return nil
+	}
+	ctx, err := s.orgIdentity(ctx, ocOrgID)
+	if err != nil {
+		return err
+	}
+	return s.writer.WriteAMPTracingToken(ctx, ocOrgID, component, environment, token)
+}
+
 // orgIdentity attaches the org's OU id to the context as token claims.
 //
 // Returns the context unchanged when the org row carries no Thunder OU — the

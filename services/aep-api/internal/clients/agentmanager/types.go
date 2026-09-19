@@ -69,6 +69,11 @@ type Client interface {
 	ListModelKeys(ctx context.Context, in ModelKeyRef) ([]string, error)
 	IssueModelKey(ctx context.Context, in ModelKeyRef, keyName string) (IssuedKey, error)
 	RotateModelKey(ctx context.Context, in ModelKeyRef, keyName string) (IssuedKey, error)
+
+	// IssueTracingToken mints the credential an externally-hosted agent
+	// authenticates its OTLP export with. Unlike the two above it is NOT a
+	// stored key: see TracingToken.
+	IssueTracingToken(ctx context.Context, in TracingTokenRef) (TracingToken, error)
 }
 
 // EnsureProviderInput is one org's LLM provider, as AEP declares it.
@@ -179,6 +184,29 @@ type ModelKeyRef struct {
 type IssuedKey struct {
 	APIKey string
 	KeyID  string
+}
+
+// TracingTokenRef addresses the tracing credential of one agent in one
+// environment. There is no config id: the token is issued against the AGENT,
+// not against a model binding, which is why it survives a rebinding.
+type TracingTokenRef struct {
+	Org, Project, Agent string
+	Environment         string
+}
+
+// TracingToken is what an agent sends as `x-amp-api-key` when it POSTs spans to
+// <gateway>/otel/v1/traces.
+//
+// A SIGNED JWT, NOT A STORED KEY, and every decision around it follows from
+// that. Agent Manager signs it on demand and keeps no record: minting a second
+// one neither revokes the first nor accumulates anything to clean up, so unlike
+// a model key it can be re-minted freely. What it cannot do is outlive its own
+// exp (~90 days), which is why ExpiresAt is carried rather than discarded — it
+// is the only thing that says when a running agent will go quiet.
+type TracingToken struct {
+	Token string
+	// ExpiresAt is unix seconds, as AMP reports it.
+	ExpiresAt int64
 }
 
 // ErrProviderNotFound is the answer for an org with no provider yet — one that

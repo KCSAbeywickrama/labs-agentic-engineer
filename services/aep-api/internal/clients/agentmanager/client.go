@@ -40,6 +40,12 @@ const (
 	// binding, never against the shared provider, so this is the only key scope
 	// the govern stage needs.
 	scopeModelKey = "amp:agent:api-key-manage amp:agent:read amp:project:read amp:org:view"
+	// A THIRD KEY FAMILY. The tracing token is gated by neither of the two
+	// key-manage permissions above: `amp:agent:api-key-manage` authorises an
+	// agent's MODEL key and answers 403 on its tracing token. The body says
+	// "insufficient permissions" and names no scope, so the only way to tell
+	// the three apart is to have written them down.
+	scopeTracingToken = "amp:agent:token-manage amp:agent:read amp:project:read amp:org:view"
 )
 
 // PermanentError marks a response no retry can fix — a 4xx. The govern stage
@@ -445,6 +451,45 @@ func (c *client) IssueModelKey(ctx context.Context, in ModelKeyRef, keyName stri
 func (c *client) RotateModelKey(ctx context.Context, in ModelKeyRef, keyName string) (IssuedKey, error) {
 	return c.writeModelKey(ctx, http.MethodPut,
 		c.modelKeyPath(in)+"/"+url.PathEscape(keyName), keyName)
+}
+
+// IssueTracingToken mints this agent's OTLP credential.
+//
+// TWO ENDPOINTS LOOK LIKE THIS ONE AND ARE NOT IT.
+// `POST …/agents/{a}/tracing-token/regenerate` answers 200 with
+// {environmentName, expiresAt, rotatedAt} — expiry metadata and NO token. A
+// mint pointed there succeeds, stores nothing, and the agent exports spans it
+// cannot authenticate. Only `…/token` discloses the value, and Agent Manager's
+// own console says why it is read here and never again: "Copy it now as you
+// won't be able to see it again."
+//
+// `environment` is a QUERY parameter and is required. Omitted, amp-api answers
+// 500 "Failed to generate token" — a server error for an incomplete request,
+// so nothing in the response suggests the caller left something out.
+func (c *client) IssueTracingToken(ctx context.Context, in TracingTokenRef) (TracingToken, error) {
+	tok, err := c.token(ctx, scopeTracingToken)
+	if err != nil {
+		return TracingToken{}, err
+	}
+	path := fmt.Sprintf("/orgs/%s/projects/%s/agents/%s/token?environment=%s",
+		url.PathEscape(in.Org), url.PathEscape(in.Project),
+		url.PathEscape(in.Agent), url.QueryEscape(in.Environment))
+
+	// snake_case, unlike every other response this client reads.
+	var out struct {
+		Token     string `json:"token"`
+		ExpiresAt int64  `json:"expires_at"`
+	}
+	if err := c.do(ctx, tok, http.MethodPost, path, nil, &out); err != nil {
+		return TracingToken{}, err
+	}
+	if out.Token == "" {
+		// Same reasoning as writeModelKey: a credential we cannot read is
+		// worse than none, because the caller would store nothing and believe
+		// it had stored something.
+		return TracingToken{}, fmt.Errorf("agentmanager: POST %s returned no token", path)
+	}
+	return TracingToken{Token: out.Token, ExpiresAt: out.ExpiresAt}, nil
 }
 
 func (c *client) writeModelKey(ctx context.Context, method, path, name string) (IssuedKey, error) {

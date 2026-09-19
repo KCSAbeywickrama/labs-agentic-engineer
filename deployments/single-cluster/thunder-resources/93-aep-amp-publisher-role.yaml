@@ -43,6 +43,12 @@ permissions:
       # .../agents/{a}/model-configs/{c}/environments/{e}/api-keys answers 403
       # with only amp:llm-provider:api-key-manage.
       - "amp:agent:api-key-manage"
+      # The agent's TRACING token, which is a third key family again: an
+      # externally-hosted agent authenticates its OTLP export with
+      # `x-amp-api-key: <token>` against …/otel/v1/traces, and the token is
+      # minted per agent at registration. Without this scope the mint answers
+      # 403 and the agent emits no traces — silently, because nothing tries.
+      - "amp:agent:token-manage"
       - "amp:llm-provider-template:read"
       - "amp:gateway:read"
       - "amp:environment:read"

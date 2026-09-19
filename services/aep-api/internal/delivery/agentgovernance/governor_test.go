@@ -21,6 +21,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/agentmanager"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -43,6 +44,11 @@ type fakeAMP struct {
 	rotated    bool
 	calls      int
 	err        error
+
+	tracingRef    agentmanager.TracingTokenRef
+	tracingMints  int
+	tracingExpiry int64
+	tracingErr    error
 }
 
 // newFakeAMP is an Agent Manager that answers the way the real one does.
@@ -119,11 +125,34 @@ func (f *fakeAMP) RotateModelKey(context.Context, agentmanager.ModelKeyRef, stri
 	return agentmanager.IssuedKey{APIKey: "rotated-key", KeyID: "aep-checkout-agent-default"}, nil
 }
 
+func (f *fakeAMP) IssueTracingToken(_ context.Context, in agentmanager.TracingTokenRef) (agentmanager.TracingToken, error) {
+	f.calls++
+	f.tracingMints++
+	f.tracingRef = in
+	if f.tracingErr != nil {
+		return agentmanager.TracingToken{}, f.tracingErr
+	}
+	exp := f.tracingExpiry
+	if exp == 0 {
+		exp = time.Now().Add(90 * 24 * time.Hour).Unix()
+	}
+	return agentmanager.TracingToken{Token: "trace-jwt", ExpiresAt: exp}, nil
+}
+
 type fakeKeyStore struct {
 	stored   string
 	endpoint string
 	writes   int
 	err      error
+
+	tracingToken  string
+	tracingWrites int
+}
+
+func (f *fakeKeyStore) WriteAMPTracingToken(_ context.Context, _, _, _, token string) error {
+	f.tracingWrites++
+	f.tracingToken = token
+	return nil
 }
 
 func (f *fakeKeyStore) StoredAMPModelKey(context.Context, string, string, string) (string, error) {
@@ -587,5 +616,100 @@ func TestGovernorRemembersAFingerprintNotTheKey(t *testing.T) {
 		if strings.Contains(fp, "sk-ant") {
 			t.Errorf("pushedKey[%q] = %q — that is the key, not a fingerprint", org, fp)
 		}
+	}
+}
+
+// --- tracing token ------------------------------------------------------------
+
+// The deploy path mints the agent's OTLP credential and stores it beside the
+// model key, with the endpoint it authenticates against — the same "useless
+// apart" reasoning that puts the proxy URL in that secret.
+func TestGovernMintsAndStoresTheTracingToken(t *testing.T) {
+	amp, keys := newFakeAMP(), &fakeKeyStore{}
+	g := New(Deps{AMP: amp, Keys: keys, Bindings: fakeBindings{}, OrgKeys: &fakeOrgKey{}})
+
+	if _, err := g.GovernAgent(context.Background(), input()); err != nil {
+		t.Fatalf("GovernAgent: %v", err)
+	}
+	if keys.tracingToken != "trace-jwt" {
+		t.Errorf("stored tracing token = %q, want the minted one", keys.tracingToken)
+	}
+	// Issued against the AGENT record, not the model binding — the two are
+	// addressed by the same name but by different calls.
+	if amp.tracingRef.Agent != amp.agentIn.Name {
+		t.Errorf("tracing token issued for %q but the agent registered as %q",
+			amp.tracingRef.Agent, amp.agentIn.Name)
+	}
+	if amp.tracingRef.Environment != "default" {
+		t.Errorf("tracing ref environment = %q", amp.tracingRef.Environment)
+	}
+}
+
+// Converge re-runs the deploy path on a schedule. A token minted every sweep
+// would write the agent's secret forever — the same needless-write cost that
+// motivated the provider fingerprint.
+func TestGovernMintsTheTracingTokenOnceWhileItIsLive(t *testing.T) {
+	amp, keys := newFakeAMP("aep-checkout-agent-default"), &fakeKeyStore{stored: "amp-model-checkout-agent-default"}
+	g := New(Deps{AMP: amp, Keys: keys, Bindings: fakeBindings{}, OrgKeys: &fakeOrgKey{}})
+
+	for range 3 {
+		if _, err := g.GovernAgent(context.Background(), input()); err != nil {
+			t.Fatalf("GovernAgent: %v", err)
+		}
+	}
+	if amp.tracingMints != 1 {
+		t.Errorf("tracing mints = %d across three converges, want 1", amp.tracingMints)
+	}
+	if keys.tracingWrites != 1 {
+		t.Errorf("tracing writes = %d, want 1", keys.tracingWrites)
+	}
+}
+
+// A token that is about to expire is worth replacing while a deploy is in
+// flight to carry it: the agent goes quiet the moment it lapses, and nothing
+// reports that.
+func TestGovernReMintsTheTracingTokenAsItNearsExpiry(t *testing.T) {
+	amp, keys := newFakeAMP("aep-checkout-agent-default"), &fakeKeyStore{stored: "amp-model-checkout-agent-default"}
+	amp.tracingExpiry = time.Now().Add(24 * time.Hour).Unix()
+	g := New(Deps{AMP: amp, Keys: keys, Bindings: fakeBindings{}, OrgKeys: &fakeOrgKey{}})
+
+	for range 2 {
+		if _, err := g.GovernAgent(context.Background(), input()); err != nil {
+			t.Fatalf("GovernAgent: %v", err)
+		}
+	}
+	if amp.tracingMints != 2 {
+		t.Errorf("tracing mints = %d, want a re-mint inside the refresh window", amp.tracingMints)
+	}
+}
+
+// The build-time gate holds no rollout. Everything it does must be safe to
+// repeat with no deploy behind it, which is why it settles registration only.
+func TestEnsureRegistrationNeverMintsATracingToken(t *testing.T) {
+	amp, keys := newFakeAMP(), &fakeKeyStore{}
+	g := New(Deps{AMP: amp, Keys: keys, Bindings: fakeBindings{}, OrgKeys: &fakeOrgKey{}})
+
+	if _, err := g.EnsureRegistration(context.Background(), input()); err != nil {
+		t.Fatalf("EnsureRegistration: %v", err)
+	}
+	if amp.tracingMints != 0 {
+		t.Errorf("tracing mints = %d on the gate path, want 0", amp.tracingMints)
+	}
+}
+
+// TRACING IS NOT MODEL ACCESS. Without a model key the agent cannot answer at
+// all, so the deploy fails closed. Without a tracing token it runs correctly
+// and is merely unobserved — failing the deploy would trade a working agent for
+// a missing graph.
+func TestGovernSurvivesATracingTokenFailure(t *testing.T) {
+	amp, keys := newFakeAMP(), &fakeKeyStore{}
+	amp.tracingErr = errors.New("403 insufficient permissions")
+	g := New(Deps{AMP: amp, Keys: keys, Bindings: fakeBindings{}, OrgKeys: &fakeOrgKey{}})
+
+	if _, err := g.GovernAgent(context.Background(), input()); err != nil {
+		t.Fatalf("GovernAgent failed on a tracing error: %v", err)
+	}
+	if keys.writes != 1 {
+		t.Errorf("model key writes = %d, want the model key still stored", keys.writes)
 	}
 }

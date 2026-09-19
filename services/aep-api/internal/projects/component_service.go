@@ -141,6 +141,41 @@ const (
 	modelAPIKeyHeaderEnvVar = "MODEL_API_KEY_HEADER"
 	ampModelAPIKeyHeader    = "API-Key"
 
+	// The three variables Agent Manager's instrumentation contract defines for
+	// an externally-hosted agent. An agent exports spans by POSTing to
+	// ${AMP_OTEL_ENDPOINT}/v1/traces with `x-amp-api-key: ${AMP_AGENT_API_KEY}`.
+	//
+	// Composed ONLY when the agent has a stored tracing token — see
+	// ai_agent_model_access.go, which explains why naming an absent secret
+	// would stop the pod rather than merely stop the traces.
+	ampOTelEndpointEnvVar = "AMP_OTEL_ENDPOINT"
+	ampAgentAPIKeyEnvVar  = "AMP_AGENT_API_KEY"
+
+	// otelServiceNameEnvVar names the agent in every span it emits.
+	//
+	// PLATFORM-OWNED, like MODEL_NAME, and for a sharper reason than tidiness.
+	// OpenTelemetry's default resource is `unknown_service:node`, so an agent
+	// that does not set one emits traces indistinguishable from every other
+	// agent in the org — the spans are correct and the trace view is useless.
+	// The component name is the identity AEP already governs by, so it is the
+	// one the platform supplies rather than asking each generated agent to
+	// invent it.
+	//
+	// OTEL_SERVICE_NAME is OpenTelemetry's own standard variable, not an AEP
+	// invention: an SDK that runs resource detection picks it up with no code
+	// at all, and building.md has the agent read it explicitly for the SDKs
+	// that do not.
+	otelServiceNameEnvVar = "OTEL_SERVICE_NAME"
+
+	// TRACELOOP_TRACE_CONTENT is read by OpenLLMetry, whose default is to
+	// export prompts and completions. `false` keeps an agent's most sensitive
+	// traffic out of the trace store: spans still carry model, token counts and
+	// latency, which is what the platform's own observability needs. Turning it
+	// on is a per-deployment decision with a privacy review behind it, not a
+	// default inherited from the SDK.
+	traceloopTraceContentEnvVar = "TRACELOOP_TRACE_CONTENT"
+	traceloopTraceContentValue  = "false"
+
 	modelEndpointDefault = "https://api.anthropic.com/v1"
 	modelNameDefault     = "claude-sonnet-5"
 

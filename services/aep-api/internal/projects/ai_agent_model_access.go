@@ -67,7 +67,7 @@ func (s *componentService) ModelAccessEnvVars(ctx context.Context, ocOrgID, comp
 	// a credential scoped to this agent that can be revoked without touching any
 	// other. The govern stage put it there before this deploy composed.
 	if amp, ok := s.ampModelAccess(ctx, ocOrgID, component); ok {
-		return []openchoreo.WorkflowEnvVarRef{
+		governed := []openchoreo.WorkflowEnvVarRef{
 			// MODEL_ENDPOINT is a secretKeyRef rather than a literal, and not
 			// because the URL is secret. Agent Manager GENERATES a proxy path
 			// per agent, so the address cannot be derived here; it was written
@@ -96,7 +96,8 @@ func (s *componentService) ModelAccessEnvVars(ctx context.Context, ocOrgID, comp
 			// governed path is the only one that sets it; the direct path below
 			// leaves it unset and the agent uses the SDK's own default.
 			{Key: modelAPIKeyHeaderEnvVar, Value: ampModelAPIKeyHeader},
-		}, nil
+		}
+		return append(governed, s.ampTracingEnvVars(ctx, ocOrgID, component, amp.OTelEndpoint)...), nil
 	}
 
 	if s.modelKeyResolver == nil || s.secretRefClient == nil {
@@ -131,6 +132,55 @@ func (s *componentService) ModelAccessEnvVars(ctx context.Context, ocOrgID, comp
 			},
 		},
 	}, nil
+}
+
+// ampTracingEnvVars gives a governed agent what it needs to export traces, or
+// nothing at all.
+//
+// NOTHING AT ALL IS A REAL ANSWER, and the reason is why the tracing token has
+// a SecretReference of its own. Minting it is allowed to fail — an agent with
+// no token runs correctly and is merely unobserved — so an agent may be fully
+// governed and have no token stored. OpenChoreo's secretKeyRef has no
+// `optional` flag: naming a SecretReference that was never written does not
+// cost the agent its traces, it stops the container from starting. So the
+// existence of that reference is checked here, and all three variables are
+// composed together or not at all.
+//
+// The endpoint is a literal rather than a stored value: the binding already
+// carries it and it is not secret. It is used VERBATIM — the route is part of
+// the recorded value, so aep-api never has to know that AMP spells it /otel.
+func (s *componentService) ampTracingEnvVars(ctx context.Context, ocOrgID, component, otelEndpoint string) []openchoreo.WorkflowEnvVarRef {
+	refName := organization.AMPTracingTokenSecretRefName(component, openchoreo.DevEnvironmentName)
+	if _, err := s.secretRefClient.GetSecretReference(ctx, ocOrgID, refName); err != nil {
+		slog.InfoContext(ctx, "model access: no AMP tracing token stored for this agent; it will run without observability",
+			"org", ocOrgID, "component", component, "secretRef", refName)
+		return nil
+	}
+	if otelEndpoint == "" {
+		// An environment provisioned before the otel-endpoint annotation
+		// existed. It governs model traffic correctly and simply runs
+		// untraced — composing an empty AMP_OTEL_ENDPOINT would instead make
+		// the agent POST to a relative URL.
+		slog.InfoContext(ctx, "model access: the environment records no OTLP endpoint; the agent will run without observability",
+			"org", ocOrgID, "component", component)
+		return nil
+	}
+	return []openchoreo.WorkflowEnvVarRef{
+		{Key: ampOTelEndpointEnvVar, Value: strings.TrimSuffix(otelEndpoint, "/")},
+		{
+			Key: ampAgentAPIKeyEnvVar,
+			ValueFrom: &openchoreo.WorkflowEnvVarValueRef{
+				SecretKeyRef: &openchoreo.WorkflowSecretKeyRef{
+					Name: refName,
+					Key:  organization.AMPTracingTokenKey,
+				},
+			},
+		},
+		{Key: traceloopTraceContentEnvVar, Value: traceloopTraceContentValue},
+		// The component name, so spans say which agent produced them rather
+		// than arriving as OpenTelemetry's `unknown_service:node` default.
+		{Key: otelServiceNameEnvVar, Value: component},
+	}
 }
 
 // upsertModelAccessSecretReference points modelAccessSecretRefName — one per
@@ -224,6 +274,15 @@ type AIGatewayBindingReader interface {
 type ampModelAccessRef struct {
 	SecretRefName string
 	Property      string
+	// OTelEndpoint is where this environment ingests traces, taken verbatim
+	// from the binding record.
+	//
+	// NOT DERIVED FROM THE MODEL GATEWAY. AMP serves /otel from the API
+	// platform gateway — a different Service, on a different port, from the AI
+	// gateway that fronts the model proxies. Gluing the route onto the model
+	// gateway's address composes a URL that answers 404, which an agent reports
+	// as nothing at all.
+	OTelEndpoint string
 }
 
 // ampModelAccess answers whether this agent's model access is governed by Agent
@@ -260,13 +319,15 @@ func (s *componentService) ampModelAccess(ctx context.Context, ocOrgID, componen
 			"org", ocOrgID, "component", component, "secretRef", refName)
 		return ampModelAccessRef{}, false
 	}
-	// binding.Endpoint is deliberately NOT used as MODEL_ENDPOINT: it is the
-	// gateway's base address, while the agent must call its own proxy path
-	// under it. Resolving the binding still matters — it is what says this
-	// environment is governed at all.
-	_ = binding
+	// binding.Endpoint is deliberately NOT used for either variable below: it is
+	// the model gateway's base address, while MODEL_ENDPOINT is a per-agent
+	// proxy path read out of the stored secret and the OTLP endpoint is a
+	// different gateway entirely. Resolving the binding still matters — it is
+	// what says this environment is governed at all, and it carries the OTLP
+	// address.
 	return ampModelAccessRef{
 		SecretRefName: refName,
 		Property:      secretmanagersvc.SecretKeyAPIKey,
+		OTelEndpoint:  strings.TrimSpace(binding.OTelEndpoint),
 	}, true
 }

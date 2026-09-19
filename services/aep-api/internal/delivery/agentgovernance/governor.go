@@ -35,6 +35,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/agentmanager"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -63,6 +64,18 @@ type KeyStore interface {
 	// to. They travel together because they are useless apart: the key
 	// authenticates against that proxy alone.
 	WriteAMPModelKey(ctx context.Context, ocOrgID, component, environment, apiKey, proxyURL string) (string, string, error)
+	// WriteAMPTracingToken stores the agent's OTLP credential in a secret of
+	// ITS OWN, separate from the model key's.
+	//
+	// Separate because the two have different failure modes and composition
+	// has to tell them apart. A tracing token is optional — minting it can fail
+	// without stopping a deploy — so the deployment may only reference it when
+	// it is actually there. OpenChoreo's secretKeyRef has no `optional` flag,
+	// so a reference to a key that was never written does not degrade to "no
+	// traces", it stops the container from starting. One secret per credential
+	// lets composition ask the question it can actually answer: does this
+	// SecretReference exist?
+	WriteAMPTracingToken(ctx context.Context, ocOrgID, component, environment, token string) error
 }
 
 // ComponentKinds answers what kind each of a project's components is, so only
@@ -119,10 +132,29 @@ type Governor struct {
 	// deploy. A rotation still pushes immediately through the organization
 	// domain's own path, and changes the fingerprint here on the next deploy.
 	pushedKey map[string]string
+
+	// tracingExpiry remembers, per (org, component, environment), when the
+	// tracing token this process last minted runs out.
+	//
+	// IT CANNOT BE READ BACK, which is why it is remembered at all. The secret
+	// store is write-only (the OpenBao provider does not implement a value
+	// read), so nothing can ask what token an agent holds or when it lapses —
+	// the only moment the expiry is knowable is the mint that produced it.
+	//
+	// In memory, for the same reason and with the same trade as pushedKey: the
+	// first governed deploy after a restart mints once more than it strictly
+	// needed to. That costs nothing here — a tracing token is a signed JWT that
+	// Agent Manager keeps no record of, so a second one neither revokes the
+	// first nor accumulates anything to clean up. A model key would not
+	// tolerate the same treatment, which is exactly why the two reconcile
+	// differently.
+	tracingExpiry map[string]int64
 }
 
 // New builds the governor.
-func New(d Deps) *Governor { return &Governor{deps: d, pushedKey: map[string]string{}} }
+func New(d Deps) *Governor {
+	return &Governor{deps: d, pushedKey: map[string]string{}, tracingExpiry: map[string]int64{}}
+}
 
 // credentialChanged reports whether this org's key differs from the one this
 // process last wrote, and records the new one.
@@ -152,6 +184,7 @@ func (g *Governor) GovernAgent(ctx context.Context, in delivery.GovernAgentInput
 	if err := g.reconcileKey(ctx, reg, in); err != nil {
 		return delivery.GovernAgentOutcome{}, err
 	}
+	g.reconcileTracingToken(ctx, reg, in)
 	slog.InfoContext(ctx, "governance: agent registered with Agent Manager",
 		"org", in.OrgID, "project", in.ProjectID, "component", in.Component,
 		"environment", in.Environment, "provider", reg.provider.Handle)
@@ -381,6 +414,59 @@ func (g *Governor) reconcileKey(ctx context.Context, reg registration, in delive
 	}
 }
 
+// reconcileTracingToken gives the agent the credential its OTLP export
+// authenticates with, and the address to send spans to.
+//
+// IT NEVER FAILS THE DEPLOY. Model access is load-bearing — without a key the
+// agent cannot answer at all — but an agent with no tracing token runs
+// correctly and is merely unobserved. Failing here would trade a working agent
+// for a missing graph, so a failure is logged loudly and the deploy continues.
+// The loud log is the point: the one thing this must not do is go quiet, which
+// is precisely how a missing amp:agent:token-manage scope presents.
+func (g *Governor) reconcileTracingToken(ctx context.Context, reg registration, in delivery.GovernAgentInput) {
+	if !g.tracingTokenDue(in) {
+		return
+	}
+	issued, err := reg.amp.IssueTracingToken(ctx, agentmanager.TracingTokenRef{
+		Org:         in.OrgID,
+		Project:     in.ProjectID,
+		Agent:       reg.agentName,
+		Environment: in.Environment,
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "governance: could not mint the agent's tracing token — the agent will run without observability",
+			"org", in.OrgID, "component", in.Component, "environment", in.Environment, "error", err)
+		return
+	}
+	if err := g.deps.Keys.WriteAMPTracingToken(ctx, in.OrgID, in.Component, in.Environment, issued.Token); err != nil {
+		slog.WarnContext(ctx, "governance: could not store the agent's tracing token — the agent will run without observability",
+			"org", in.OrgID, "component", in.Component, "environment", in.Environment, "error", err)
+		return
+	}
+	g.recordTracingExpiry(in, issued.ExpiresAt)
+}
+
+// tracingTokenDue reports whether this agent needs a tracing token minted —
+// because this process has never minted one for it, or because the one it
+// minted is close enough to lapsing that a deploy in flight should carry a
+// fresh one rather than leave the agent to go quiet mid-life.
+func (g *Governor) tracingTokenDue(in delivery.GovernAgentInput) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	exp, ok := g.tracingExpiry[tracingKey(in)]
+	return !ok || time.Until(time.Unix(exp, 0)) < tracingRefreshWindow
+}
+
+func (g *Governor) recordTracingExpiry(in delivery.GovernAgentInput, expiresAt int64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.tracingExpiry[tracingKey(in)] = expiresAt
+}
+
+func tracingKey(in delivery.GovernAgentInput) string {
+	return in.OrgID + "/" + in.Component + "/" + in.Environment
+}
+
 // proxyEndpoint turns the proxy address Agent Manager generated into the base
 // URL an agent's SDK can be pointed at.
 //
@@ -487,6 +573,12 @@ const (
 	// modelAPIVersionPath is the version segment an Anthropic-shaped client
 	// expects on its base URL — see where the endpoint is composed.
 	modelAPIVersionPath = "/v1"
+
+	// tracingRefreshWindow is how close to expiry a tracing token may get
+	// before a deploy replaces it. Agent Manager issues them for about ninety
+	// days, so a fortnight leaves many ordinary deploys in which to roll over
+	// without ever minting on a schedule of its own.
+	tracingRefreshWindow = 14 * 24 * time.Hour
 
 	providerVersion = "v1.0"
 

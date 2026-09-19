@@ -465,6 +465,125 @@ platform stops setting the variable, and an agent written this way reverts to
 the SDK default with no change. An agent that hardcodes `API-Key` breaks on
 that day, and one that ignores the variable cannot be governed today.
 
+## Tracing
+
+When the platform sets `AMP_OTEL_ENDPOINT` and `AMP_AGENT_API_KEY`, export
+OpenTelemetry spans to it. When it does not — every ungoverned environment —
+export nothing and start normally. **Never fail startup over tracing.** An agent
+that will not boot because a trace collector is unreachable has traded the whole
+service for a graph.
+
+**The dependencies are already in the pinned list under "Layout"** — the four
+`@opentelemetry/*` packages below are part of every agent's `package.json`, not
+an addition you make here:
+
+```
+@opentelemetry/api
+@opentelemetry/sdk-trace-node
+@opentelemetry/exporter-trace-otlp-http
+@opentelemetry/resources
+```
+
+Write `src/tracing.ts` unconditionally. It is listed in the "Layout" tree, and
+it is inert when the platform sets no endpoint — the decision to export or not
+is made at runtime, below, never by omitting the file.
+
+```ts
+// tracing.ts — imported for side effects from the top of main.ts, before
+// anything creates a model client.
+import { trace } from "@opentelemetry/api";
+import { NodeTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { Resource } from "@opentelemetry/resources";
+
+const endpoint = process.env.AMP_OTEL_ENDPOINT;
+const apiKey = process.env.AMP_AGENT_API_KEY;
+
+export const tracer = trace.getTracer("agent");
+
+if (endpoint && apiKey) {
+  const provider = new NodeTracerProvider({
+    // SET THIS OR THE TRACES ARE ANONYMOUS. A provider built without a
+    // resource reports `service.name: unknown_service:node`, and every agent
+    // in the org looks identical in the trace view — spans all correct, view
+    // useless. The platform supplies the name in OTEL_SERVICE_NAME; a bare
+    // NodeTracerProvider does not run resource detection, so read it.
+    resource: new Resource({
+      "service.name": process.env.OTEL_SERVICE_NAME ?? "agent",
+    }),
+    spanProcessors: [
+      new BatchSpanProcessor(
+        new OTLPTraceExporter({
+          // The exporter appends nothing — AMP_OTEL_ENDPOINT is a base.
+          url: `${endpoint}/v1/traces`,
+          headers: { "x-amp-api-key": apiKey },
+        }),
+      ),
+    ],
+  });
+  provider.register();
+  // Without this the last spans of a turn die with the pod.
+  process.on("SIGTERM", () => {
+    void provider.shutdown().finally(() => process.exit(0));
+  });
+}
+```
+
+Wrap every model call:
+
+```ts
+import { tracer } from "./tracing.js";
+
+const model = process.env.MODEL_NAME ?? "claude-sonnet-5";
+
+const result = await tracer.startActiveSpan(`chat ${model}`, async (span) => {
+  try {
+    const r = await generateText({ model: modelClient, prompt });
+    span.setAttributes({
+      "gen_ai.system": "anthropic",
+      "gen_ai.request.model": model,
+      "gen_ai.usage.input_tokens": r.usage?.inputTokens ?? 0,
+      "gen_ai.usage.output_tokens": r.usage?.outputTokens ?? 0,
+    });
+    return r;
+  } catch (err) {
+    span.recordException(err as Error);
+    span.setStatus({ code: 2 }); // ERROR
+    throw err;
+  } finally {
+    span.end(); // a span never ended is a span never exported
+  }
+});
+```
+
+**Reading the variables into config is not instrumenting.** An agent that
+loads `AMP_OTEL_ENDPOINT` and never constructs an exporter emits nothing, and
+nothing about it looks broken — the pod is healthy, the turns succeed, and the
+trace store is simply empty. If you add the config entries, add the provider and
+the spans in the same change.
+
+**Instrument the model call by hand.** OpenLLMetry (`@traceloop/node-server-sdk`)
+does not auto-instrument the Vercel AI SDK: installing it produces a tracer that
+emits nothing for `generateText`, which reads as a broken collector rather than
+as a missing instrumentation. Wrap each model call in a span yourself, following
+the OpenTelemetry `gen_ai.*` semantic conventions:
+
+| attribute | value |
+|---|---|
+| `gen_ai.system` | `anthropic` |
+| `gen_ai.request.model` | `MODEL_NAME` |
+| `gen_ai.usage.input_tokens` | from the SDK result's `usage` |
+| `gen_ai.usage.output_tokens` | from the SDK result's `usage` |
+
+Name the span `chat <model>`, and record tool calls as child spans so a turn
+reads as one tree.
+
+**Respect `TRACELOOP_TRACE_CONTENT`.** When it is `false` — which is the
+platform default — never put prompts, completions, or tool arguments on a span.
+Model, token counts, latency and outcome are what the platform observes; message
+content is the agent's most sensitive traffic and exporting it is a decision with
+a privacy review behind it, not a default. Treat an unset value as `false`.
+
 ## Constraints
 
 **The allow-list is the security boundary.** An operation the design did not
@@ -560,6 +679,7 @@ Nothing from `specs/` ships in the component. The image contains compiled code.
     ├── prompt.ts         # GENERATED from the AFM body
     ├── tools.ts          # GENERATED from the dependency's openapi.yaml
     ├── config.ts         # env, read once
+    ├── tracing.ts        # OpenTelemetry setup — see "Tracing"
     ├── agent.ts          # the AI SDK loop
     └── main.ts           # HTTP surface + per-request credential context
 ```
@@ -567,14 +687,19 @@ Nothing from `specs/` ships in the component. The image contains compiled code.
 Mark both generated files as generated, and name the contract they came from —
 a reader must know to change the design rather than the code.
 
-**Dependencies are pinned. Use these majors exactly, and add nothing else:**
+**Dependencies are pinned. Use these majors exactly, and add nothing beyond
+this list:**
 
 ```json
 "dependencies": {
   "ai": "^7.0.2",
   "@ai-sdk/anthropic": "^4.0.0",
   "zod": "^4.3.6",
-  "pg": "^8.13.0"
+  "pg": "^8.13.0",
+  "@opentelemetry/api": "^1.9.0",
+  "@opentelemetry/sdk-trace-node": "^1.28.0",
+  "@opentelemetry/exporter-trace-otlp-http": "^0.55.0",
+  "@opentelemetry/resources": "^1.28.0"
 },
 "devDependencies": {
   "@types/node": "^25.5.0",
@@ -582,6 +707,10 @@ a reader must know to change the design rather than the code.
   "@types/pg": "^8.11.0"
 }
 ```
+
+The four `@opentelemetry/*` entries are required, not optional — `tracing.ts`
+imports them unconditionally and the build fails without them. They are inert
+at runtime when the platform sets no `AMP_OTEL_ENDPOINT`; see "Tracing".
 
 **Do not "check the latest" and choose for yourself.** The AI SDK's major
 versions are not compatible, and a run that resolves its own version lands one

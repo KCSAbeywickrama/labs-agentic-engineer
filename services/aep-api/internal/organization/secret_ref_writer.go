@@ -197,6 +197,77 @@ func (w *SecretRefWriter) WriteAMPModelKey(ctx context.Context, ocOrgID, compone
 	return secretRefName, secretmanagersvc.SecretKeyAPIKey, nil
 }
 
+// WriteAMPTracingToken stores one agent's OTLP credential — what it sends as
+// `x-amp-api-key` when it POSTs spans to the gateway's /otel route.
+//
+// ITS OWN SecretReference, not a property beside the model key, and the reason
+// is composition rather than tidiness. Minting this token is allowed to fail
+// without stopping a deploy: an agent with no tracing token runs correctly and
+// is merely unobserved. That is only true if the deployment can avoid
+// REFERENCING a token that was never written — and OpenChoreo's secretKeyRef
+// has no `optional` flag, so a reference to an absent key does not degrade to
+// "no traces", it stops the container from starting. A separate reference
+// turns the question composition must answer into one it can: does this
+// SecretReference exist?
+//
+// No endpoint rides along, unlike WriteAMPModelKey. The OTLP address is the
+// environment's gateway plus a fixed route — derivable by anything holding the
+// AI gateway binding, and not a secret — so composing it there costs one less
+// stored value that could go stale.
+//
+// Callers treat a failure here as non-fatal — see the governor's
+// reconcileTracingToken — so this returns a plain error and stamps nothing.
+func (w *SecretRefWriter) WriteAMPTracingToken(ctx context.Context, ocOrgID, component, environment, token string) error {
+	if !w.Enabled() {
+		return nil
+	}
+	for _, required := range []struct{ name, value string }{
+		{"ocOrgID", ocOrgID},
+		{"component", component},
+		{"environment", environment},
+		{"token", token},
+	} {
+		if strings.TrimSpace(required.value) == "" {
+			return fmt.Errorf("secret-ref writer: amp tracing token: %s required", required.name)
+		}
+	}
+	orgUUID, err := orgUUIDForSecretLocation(ctx)
+	if err != nil {
+		return fmt.Errorf("secret-ref writer: amp tracing token: %w", err)
+	}
+	loc := secretmanagersvc.SecretLocation{
+		OrgName:               orgUUID,
+		ControlPlaneNamespace: ocOrgID,
+		EntityName:            ampTracingTokenEntity(component, environment),
+		SecretKey:             secretmanagersvc.SecretKeyAPIKey,
+	}
+	if _, err := w.client.CreateSecret(ctx, loc, map[string]string{AMPTracingTokenKey: token}); err != nil {
+		return fmt.Errorf("secret-ref writer: amp tracing token upload: %w", err)
+	}
+	slog.InfoContext(ctx, "secret-ref writer: AMP tracing token stored",
+		"ocOrgId", ocOrgID,
+		"component", component,
+		"environment", environment)
+	return nil
+}
+
+// AMPTracingTokenKey is the property inside an agent's tracing secret holding
+// the token — what AMP_AGENT_API_KEY is composed from.
+const AMPTracingTokenKey = "tracingToken"
+
+// AMPTracingTokenSecretRefName is the SecretReference a deployment
+// secretKeyRefs to reach one agent's tracing token. Derived from (component,
+// environment) by both sides, exactly as AMPModelKeySecretRefName is.
+func AMPTracingTokenSecretRefName(component, environment string) string {
+	return secretmanagersvc.SecretLocation{
+		EntityName: ampTracingTokenEntity(component, environment),
+	}.SecretRefName()
+}
+
+func ampTracingTokenEntity(component, environment string) string {
+	return fmt.Sprintf("amp-tracing-%s-%s", component, environment)
+}
+
 // AMPModelURLKey is the property inside an agent's AMP secret holding the proxy
 // URL its key authenticates against — the value MODEL_ENDPOINT is composed from.
 const AMPModelURLKey = "url"

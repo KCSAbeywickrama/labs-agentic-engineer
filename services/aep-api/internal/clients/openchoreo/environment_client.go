@@ -80,6 +80,15 @@ type ThunderBinding struct {
 	SecretPath string
 	// Name is the binding record's own name, for logs and diagnostics.
 	Name string
+	// OTelEndpoint is where this environment ingests traces — the OTLP base an
+	// agent's exporter appends /v1/traces to.
+	//
+	// A DIFFERENT GATEWAY from Endpoint above, and that is the whole reason it
+	// is carried rather than derived. Model traffic goes to the AI gateway;
+	// AMP's trace route is served by the API platform gateway. Empty when the
+	// environment predates the annotation — tracing is then simply not
+	// composed, which is the safe direction.
+	OTelEndpoint string
 }
 
 type environmentClient struct {
@@ -196,6 +205,12 @@ const (
 	annAIGatewayGateway    = "aep.wso2.com/aigateway-gateway"
 	annAIGatewaySecretPath = "aep.wso2.com/aigateway-secret-path"
 	annAIGatewayBinding    = "aep.wso2.com/aigateway-binding"
+	// annOTelEndpoint is the environment's OTLP trace-ingest base, written by
+	// setup-environment-gateway.sh. It is NOT on the AI gateway: AMP serves
+	// /otel from the API PLATFORM gateway, a different Service on a different
+	// port in the same namespace, so it cannot be derived from the AI gateway
+	// endpoint. Posting spans to the AI gateway answers 404.
+	annOTelEndpoint = "aep.wso2.com/otel-endpoint"
 )
 
 // ErrNoAIGatewayBinding is the answer for an environment with no AI gateway.
@@ -231,6 +246,15 @@ type AIGatewayBinding struct {
 	SecretPath string
 	// Name is the binding record's own name, for logs and diagnostics.
 	Name string
+	// OTelEndpoint is where this environment ingests traces — the OTLP base an
+	// agent's exporter appends /v1/traces to.
+	//
+	// A DIFFERENT GATEWAY from Endpoint above, and that is the whole reason it
+	// is carried rather than derived. Model traffic goes to the AI gateway;
+	// AMP's trace route is served by the API platform gateway. Empty when the
+	// environment predates the annotation — tracing is then simply not
+	// composed, which is the safe direction.
+	OTelEndpoint string
 }
 
 // GetAIGatewayBinding reads the environment's AI gateway binding off its
@@ -262,6 +286,10 @@ func (c *environmentClient) GetAIGatewayBinding(ctx context.Context, orgID, envi
 // aiGatewayBindingFromAnnotations is the parse, split out so it can be tested
 // without a server.
 //
+// OTelEndpoint is deliberately NOT required: an environment set up before the
+// annotation existed still governs model traffic correctly, and the agent simply
+// runs untraced. Requiring it would turn a missing graph into a broken deploy.
+//
 // Endpoint, AdminURL and GatewayID are each required: without the endpoint an
 // agent has nowhere to send model traffic, without the admin URL nothing can be
 // registered, and without the gateway id a provider cannot be attached to
@@ -278,6 +306,7 @@ func aiGatewayBindingFromAnnotations(orgID, environment string, annotations map[
 		GatewayID:        strings.TrimSpace(annotations[annAIGatewayGateway]),
 		SecretPath:       strings.TrimSpace(annotations[annAIGatewaySecretPath]),
 		Name:             strings.TrimSpace(annotations[annAIGatewayBinding]),
+		OTelEndpoint:     strings.TrimSpace(annotations[annOTelEndpoint]),
 	}
 	if binding.Endpoint == "" || binding.AdminURL == "" || binding.GatewayID == "" {
 		return AIGatewayBinding{}, ErrNoAIGatewayBinding

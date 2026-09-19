@@ -18,6 +18,8 @@ package projects
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -218,17 +220,39 @@ func (f fakeAIGatewayBindings) GetAIGatewayBinding(context.Context, string, stri
 		Endpoint:  "http://ai-gateway.amp.localhost:8084",
 		AdminURL:  "http://api.amp.localhost:8080/api/v1",
 		GatewayID: "gw-uuid",
+		// A DIFFERENT host and port from Endpoint, deliberately: AMP serves
+		// /otel from the API platform gateway, and a test whose two addresses
+		// coincide cannot tell a correct composition from one that reused the
+		// model gateway.
+		OTelEndpoint: "http://api-platform-acme-development-gw-gateway-gateway-runtime.acme-development:22893/otel",
 	}, nil
 }
 
-// presentSecretRefClient reports that the agent's AMP key IS stored.
+// noOTelBindings is an environment provisioned before the otel-endpoint
+// annotation existed.
+type noOTelBindings struct{ fakeAIGatewayBindings }
+
+func (noOTelBindings) GetAIGatewayBinding(context.Context, string, string) (openchoreo.AIGatewayBinding, error) {
+	return openchoreo.AIGatewayBinding{
+		OrgID: "acme", Environment: openchoreo.DevEnvironmentName,
+		Endpoint:  "http://ai-gateway.amp.localhost:8084",
+		AdminURL:  "http://api.amp.localhost:8080/api/v1",
+		GatewayID: "gw-uuid",
+	}, nil
+}
+
+// presentSecretRefClient reports that every AMP SecretReference IS stored.
+//
+// askedFor records every lookup, not the last: composition asks after the model
+// key and then after the tracing token, and a single slot would silently hold
+// whichever came second.
 type presentSecretRefClient struct {
 	fakeSecretRefClient
-	askedFor string
+	askedFor []string
 }
 
 func (p *presentSecretRefClient) GetSecretReference(_ context.Context, _ string, name string) (*secretmanagersvc.SecretReference, error) {
-	p.askedFor = name
+	p.askedFor = append(p.askedFor, name)
 	return &secretmanagersvc.SecretReference{}, nil
 }
 
@@ -272,8 +296,8 @@ func TestModelAccessEnvVars_PrefersTheAMPBinding(t *testing.T) {
 	if ref.Name != want {
 		t.Errorf("MODEL_API_KEY refs %q, want the agent's own AMP key %q", ref.Name, want)
 	}
-	if sr.askedFor != want {
-		t.Errorf("looked up SecretReference %q, want %q — the writer and this reader must agree on one spelling", sr.askedFor, want)
+	if !slices.Contains(sr.askedFor, want) {
+		t.Errorf("looked up SecretReferences %q, want %q among them — the writer and this reader must agree on one spelling", sr.askedFor, want)
 	}
 	// The temporary header override (see modelAPIKeyHeaderEnvVar). Without it
 	// the agent sends `x-api-key` and Agent Manager's proxy rejects the turn.
@@ -346,4 +370,150 @@ func newModelAccessSvc(sr secretmanagersvc.OpenChoreoSecretReferenceClient) *com
 		}},
 		sr,
 	).(*componentService)
+}
+
+// --- Agent Manager tracing ----------------------------------------------------
+
+// selectiveSecretRefClient reports only the named SecretReferences as present,
+// which is what separates a governed agent that has a tracing token from one
+// that does not.
+type selectiveSecretRefClient struct {
+	fakeSecretRefClient
+	present map[string]bool
+	asked   []string
+}
+
+func (s *selectiveSecretRefClient) GetSecretReference(_ context.Context, _ string, name string) (*secretmanagersvc.SecretReference, error) {
+	s.asked = append(s.asked, name)
+	if s.present[name] {
+		return &secretmanagersvc.SecretReference{}, nil
+	}
+	return nil, secretmanagersvc.ErrNotFound
+}
+
+func tracingSvc(sr secretmanagersvc.OpenChoreoSecretReferenceClient) *componentService {
+	svc := NewComponentService(
+		&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
+		fakeKeyResolver{triplet: organization.SecretRefTriplet{
+			Name: "anthropic-default", KVPath: "user-app-secrets/acme/anthropic", Property: "api-key",
+		}},
+		sr,
+	).(*componentService)
+	svc.SetAIGatewayBindings(fakeAIGatewayBindings{})
+	return svc
+}
+
+// A governed agent whose tracing token was stored exports spans to its
+// environment's gateway, authenticated with a credential of its own.
+func TestModelAccessEnvVars_AddsTracingWhenTheTokenIsStored(t *testing.T) {
+	modelRef := organization.AMPModelKeySecretRefName("checkout-agent", openchoreo.DevEnvironmentName)
+	tracingRef := organization.AMPTracingTokenSecretRefName("checkout-agent", openchoreo.DevEnvironmentName)
+	sr := &selectiveSecretRefClient{present: map[string]bool{modelRef: true, tracingRef: true}}
+
+	got, err := tracingSvc(sr).ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+	if err != nil {
+		t.Fatalf("ModelAccessEnvVars: %v", err)
+	}
+	byKey := map[string]openchoreo.WorkflowEnvVarRef{}
+	for _, v := range got {
+		byKey[v.Key] = v
+	}
+
+	// A LITERAL, unlike MODEL_ENDPOINT — the OTLP address is not a secret and
+	// the binding already carries it.
+	//
+	// IT IS THE BINDING'S OWN VALUE, not the model gateway with a route glued
+	// on. AMP serves /otel from the API platform gateway; composing it from
+	// binding.Endpoint sends spans to the AI gateway, which answers 404. That
+	// shipped once and was caught only against a live cluster.
+	want := "http://api-platform-acme-development-gw-gateway-gateway-runtime.acme-development:22893/otel"
+	if got := byKey[ampOTelEndpointEnvVar].Value; got != want {
+		t.Errorf("AMP_OTEL_ENDPOINT = %q, want the binding's OTLP endpoint %q", got, want)
+	}
+	if strings.Contains(byKey[ampOTelEndpointEnvVar].Value, "ai-gateway") {
+		t.Error("AMP_OTEL_ENDPOINT points at the MODEL gateway — spans would 404")
+	}
+	ref := byKey[ampAgentAPIKeyEnvVar].ValueFrom
+	if ref == nil || ref.SecretKeyRef == nil {
+		t.Fatalf("AMP_AGENT_API_KEY = %+v, want a secretKeyRef", byKey[ampAgentAPIKeyEnvVar])
+	}
+	if ref.SecretKeyRef.Name != tracingRef {
+		t.Errorf("AMP_AGENT_API_KEY refs %q, want the agent's tracing secret %q", ref.SecretKeyRef.Name, tracingRef)
+	}
+	if ref.SecretKeyRef.Key != organization.AMPTracingTokenKey {
+		t.Errorf("AMP_AGENT_API_KEY key = %q, want %q", ref.SecretKeyRef.Key, organization.AMPTracingTokenKey)
+	}
+	// Without this every agent's spans arrive as `unknown_service:node` and a
+	// trace view cannot tell two agents apart.
+	if got := byKey[otelServiceNameEnvVar].Value; got != "checkout-agent" {
+		t.Errorf("OTEL_SERVICE_NAME = %q, want the component name", got)
+	}
+	// Prompts and completions are the agent's most sensitive traffic. Whether
+	// they are exported is a deliberate platform decision, not a default
+	// inherited from whatever the SDK ships with.
+	if got := byKey[traceloopTraceContentEnvVar].Value; got != "false" {
+		t.Errorf("TRACELOOP_TRACE_CONTENT = %q, want false", got)
+	}
+	// Tracing is additive: the agent still reaches its model exactly as before.
+	if byKey[modelAPIKeyEnvVar].ValueFrom == nil {
+		t.Error("MODEL_API_KEY missing — tracing must not displace model access")
+	}
+}
+
+// An environment provisioned before the otel-endpoint annotation existed still
+// governs model traffic correctly and simply runs untraced. Composing a
+// tracing block with no endpoint would point the agent at a relative URL.
+func TestModelAccessEnvVars_OmitsTracingWithoutAnOTLPEndpoint(t *testing.T) {
+	modelRef := organization.AMPModelKeySecretRefName("checkout-agent", openchoreo.DevEnvironmentName)
+	tracingRef := organization.AMPTracingTokenSecretRefName("checkout-agent", openchoreo.DevEnvironmentName)
+	sr := &selectiveSecretRefClient{present: map[string]bool{modelRef: true, tracingRef: true}}
+	svc := tracingSvc(sr)
+	svc.SetAIGatewayBindings(noOTelBindings{})
+
+	got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+	if err != nil {
+		t.Fatalf("ModelAccessEnvVars: %v", err)
+	}
+	for _, v := range got {
+		switch v.Key {
+		case ampOTelEndpointEnvVar, ampAgentAPIKeyEnvVar, traceloopTraceContentEnvVar, otelServiceNameEnvVar:
+			t.Errorf("%s composed with no OTLP endpoint recorded", v.Key)
+		}
+	}
+	byKey := map[string]openchoreo.WorkflowEnvVarRef{}
+	for _, v := range got {
+		byKey[v.Key] = v
+	}
+	if byKey[modelAPIKeyEnvVar].ValueFrom == nil {
+		t.Error("MODEL_API_KEY missing — model access must survive a missing OTLP endpoint")
+	}
+}
+
+// THE CRASH-LOOP GUARD. Minting a tracing token is allowed to fail, so an agent
+// may be governed and have no token. OpenChoreo's secretKeyRef carries no
+// `optional` flag: naming a SecretReference that was never written does not
+// cost the agent its traces, it stops the container from starting. A governed
+// agent with no tracing token must therefore compose NO tracing vars at all.
+func TestModelAccessEnvVars_OmitsTracingWhenNoTokenIsStored(t *testing.T) {
+	modelRef := organization.AMPModelKeySecretRefName("checkout-agent", openchoreo.DevEnvironmentName)
+	sr := &selectiveSecretRefClient{present: map[string]bool{modelRef: true}}
+
+	got, err := tracingSvc(sr).ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+	if err != nil {
+		t.Fatalf("ModelAccessEnvVars: %v", err)
+	}
+	for _, v := range got {
+		switch v.Key {
+		case ampOTelEndpointEnvVar, ampAgentAPIKeyEnvVar, traceloopTraceContentEnvVar, otelServiceNameEnvVar:
+			t.Errorf("%s composed with no tracing token stored — the pod would fail to start", v.Key)
+		}
+	}
+	// Still fully governed for model access.
+	byKey := map[string]openchoreo.WorkflowEnvVarRef{}
+	for _, v := range got {
+		byKey[v.Key] = v
+	}
+	if byKey[modelAPIKeyEnvVar].ValueFrom == nil {
+		t.Error("MODEL_API_KEY missing — a missing tracing token must not disturb model access")
+	}
 }

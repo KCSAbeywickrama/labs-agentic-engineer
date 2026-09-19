@@ -124,7 +124,7 @@ func (k liveOrgKey) AnthropicKeyValue(context.Context, string) (string, error) {
 // liveKeyStore keeps the issued key in memory: this test proves Agent Manager's
 // half, not SM-API's, and writing a real secret would need a cluster identity
 // the test does not have.
-type liveKeyStore struct{ stored, url string }
+type liveKeyStore struct{ stored, url, tracingToken string }
 
 func (s *liveKeyStore) StoredAMPModelKey(context.Context, string, string, string) (string, error) {
 	return "", nil
@@ -133,4 +133,9 @@ func (s *liveKeyStore) StoredAMPModelKey(context.Context, string, string, string
 func (s *liveKeyStore) WriteAMPModelKey(_ context.Context, _, _, _, apiKey, proxyURL string) (string, string, error) {
 	s.stored, s.url = apiKey, proxyURL
 	return "amp-model-live", "api-key", nil
+}
+
+func (s *liveKeyStore) WriteAMPTracingToken(_ context.Context, _, _, _, token string) error {
+	s.tracingToken = token
+	return nil
 }
