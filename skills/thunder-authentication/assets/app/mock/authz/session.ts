@@ -178,9 +178,10 @@ export async function signIn(): Promise<void> {
   window.location.assign(url.toString());
 }
 
-export async function handleCallback(): Promise<MockUser> {
-  return user();
-}
+// Resolves, and does nothing else: mock sign-in is a URL rewrite, so nothing
+// ever lands on /callback here. `void` to match src/authz/session.ts — the swap
+// is a bundler alias, so nothing type-checks the two against each other.
+export async function handleCallback(): Promise<void> {}
 
 /**
  * Signing out forgets the role. The persisted `?role=` stands in for the OIDC
