@@ -204,6 +204,10 @@ subagent you handed it to, keeps its status line current from start to done
    Report back the closing line and the numbered list.
    ```
 
+   **One walk at a time** — a live Chromium is the largest thing in the pod, so
+   a walk waits for the walk before it to report, however many web-apps the wave
+   has.
+
    The walk lands before the commit, so what it fixes ships with what it
    checked. An issue that moved no file the app loads skips this. One you are
    closing as **already satisfied** does not: that verdict is a claim about a
