@@ -1464,6 +1464,37 @@ func TestDeployNeverReady_ExpiresIntoADeployFailure(t *testing.T) {
 		"the components that never came up are the ones named")
 }
 
+// The expiry files WHY each component was still pending, not just that it was.
+//
+// A hold is how a healthy component waits on something the platform has not
+// finished, so a run that expires on one has no failure record anywhere else to
+// draw a cause from. Without this the issue reads "this component did not come
+// up" and nothing more, and the agent it wakes goes looking inside a container
+// that was working the whole time.
+func TestDeployExpiry_FilesWhyEachComponentWasPending(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(
+		workable(1, 1),
+		MilestoneSnapshot{},
+	)
+	const held = `waiting: dependency "user-auth" has not registered this component's sign-in callback`
+	h.deploymentsAre(CycleDeployState{
+		Expected: 1,
+		Pending:  []string{"order-service"},
+		Reasons:  map[string]string{"order-service": held},
+	})
+	h.deployMintsAre(nil)
+	h.merges(1)
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
+	require.Positive(t, h.deployMintCount(), "the expiry files fix work")
+	require.Equal(t, held, h.deployMints[0].Reasons["order-service"],
+		"the hold reason from the last poll reaches the issue the expiry mints")
+}
+
 // The deadline belongs to the STAGE, not to a wave.
 //
 // It is created once in deployCycle and passed into every wait, so a design that

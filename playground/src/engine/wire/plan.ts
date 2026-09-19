@@ -230,12 +230,25 @@ function readWorkloadBindings(projectDir: string, appPath: string): WorkloadBind
 /**
  * This dependency's binding names, matched by the component's own workload.
  *
+ * A platform resource's key is `resources[].ref`, and the design stamps that
+ * exact value on the dependency as `wiring.ref` (see ResourceWiring) — so that
+ * is the join, and it has to be tried FIRST. The ref is opaque: the platform
+ * mints `<truncated-slug>-<hash>`, which neither equals the dependency name nor
+ * ends with it, so a name-only match silently found nothing and every
+ * platform-resource read as "binds no variable" — which `wire` reports as
+ * "cannot stand in for", blocking any project with a database or an auth
+ * dependency.
+ *
  * An endpoint entry is written `<slug>-<component>` while the design names the
- * dependency bare, so a suffix match is what joins them. Matching on the bare
- * name FIRST keeps an exact declaration authoritative when both could apply.
+ * dependency bare, so a suffix match is what joins them. The bare name is tried
+ * before the suffix so an exact declaration stays authoritative when both could
+ * apply, and a design carrying no `wiring` at all still falls through to it.
  */
 function bindingsOf(dependency: Dependency, workload: WorkloadBindings | undefined): Record<string, string> {
   if (!workload) return {};
+  const wiring = dependency.wiring as { ref?: string } | undefined;
+  const byRef = wiring?.ref ? workload[wiring.ref] : undefined;
+  if (byRef) return byRef;
   const exact = workload[dependency.name];
   if (exact) return exact;
   const suffix = Object.keys(workload).find((key) => key.endsWith(`-${dependency.name}`));
