@@ -245,7 +245,7 @@ func (s *Service) completeReadyGate(ctx context.Context, orgID, projectID, depNa
 		// A provision run is already active for this gate (e.g. a concurrent settle).
 		return nil
 	}
-	ref := ocname.ExternalResourceBindingName(projectID, depName, defaultEnv)
+	ref := ocname.ExternalResourceBindingName(projectID, depName, defaultEnv())
 	if _, serr := s.execs.StartWithRun(ctx, row.ID, ref); serr != nil {
 		slog.WarnContext(ctx, "provisioning: start settle provision run failed", "execution", row.ID, "error", serr)
 	}
@@ -276,13 +276,31 @@ func (s *Service) authorExternalPrepared(ctx context.Context, orgID, ocOrgID, pr
 	er := &dependencies.ExternalResource{
 		Name:        in.Dependency,
 		Description: dep.Description,
+		Provider:    dep.Provider,
 		ConfigKeys:  keys,
 	}
 	byEnv := designPreparedValues(keys)
-	registered := false
-	if cells := s.registeredEnvCells(ctx, orgID, in.Dependency); len(cells) > 0 {
-		byEnv = preparedValuesFromOrgCells(keys, cells)
-		registered = true
+	// A copy (the definition names the registry) binds to the organization's
+	// type and takes the organization's values; a resource the project defined
+	// gets its own type and the design's defaults. The RECORD decides, not the
+	// value plane: a registered resource whose values are not warmed — or that
+	// declares no keys at all — is still the organization's, and authoring a
+	// project type for it would strand the build on a type nobody holds values
+	// for.
+	if dep.ResourceRef != "" {
+		if def, ok := s.registeredCatalogDef(ctx, orgID, in.Dependency); ok && def.Registered() {
+			er.Registered = true
+			// The record's own schema names the organization's type. The copy's
+			// keys can lag it (the record gained or renamed one since the copy
+			// landed), and BuildExternalResourceType hashes the schema into the
+			// type NAME — so authoring from stale keys would bind to a type the
+			// organization does not have.
+			er.ConfigKeys = toConfigKeys(def.Config)
+			byEnv = designPreparedValues(er.ConfigKeys)
+			if cells := s.registeredEnvCells(ctx, orgID, in.Dependency); len(cells) > 0 {
+				byEnv = preparedValuesFromOrgCells(er.ConfigKeys, cells)
+			}
+		}
 	}
 
 	// External dependencies do not mint config-collection gates. When the caller
@@ -314,12 +332,12 @@ func (s *Service) authorExternalPrepared(ctx context.Context, orgID, ocOrgID, pr
 		return fmt.Errorf("%w: %w", dependencies.ErrProvisionFailed, perr)
 	}
 
-	if registered {
+	if er.Registered {
 		recordResourceInstances(s.catalogValuePlane, orgID, projectID, in.Dependency, byEnv)
 	}
 
 	if execID != "" {
-		ref := result.BindingByEnv[defaultEnv]
+		ref := result.BindingByEnv[defaultEnv()]
 		if ref == "" {
 			ref = result.ResourceName
 		}
@@ -390,6 +408,6 @@ func designPreparedValues(keys []spec.ConfigKey) map[string]dependencies.Prepare
 		}
 	}
 	return map[string]dependencies.PreparedEnvValues{
-		defaultEnv: {Plain: plain},
+		defaultEnv(): {Plain: plain},
 	}
 }

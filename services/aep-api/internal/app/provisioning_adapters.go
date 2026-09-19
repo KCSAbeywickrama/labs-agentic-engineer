@@ -20,15 +20,38 @@ import (
 	"context"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/gen"
 	"github.com/wso2/aep/aep-api/internal/platform/securityspec"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
+// projectDisplayNamer resolves a project's display name for the end-user-auth
+// overlay, which uses it as the sign-in client's name. It reads OpenChoreo
+// directly rather than through the projects domain: the one fact needed is an
+// annotation the project client already returns, and routing a label lookup
+// through another domain's service would give provisioning a dependency on it.
+type projectDisplayNamer struct {
+	client interface {
+		GetProject(ctx context.Context, orgName, projectName string) (*gen.Project, error)
+	}
+}
+
+func (n projectDisplayNamer) ProjectDisplayName(ctx context.Context, orgID, projectID string) (string, error) {
+	project, err := n.client.GetProject(ctx, orgID, projectID)
+	if err != nil {
+		return "", err
+	}
+	if project == nil {
+		return "", nil
+	}
+	return project.DisplayName, nil
+}
+
 // securityJSONReader reads the project's security.json from the design bundle
-// for platform-resource provision overlay. Empty tag is HEAD (HTTP drawer);
-// a build's `v<N>` spec tag uses GetDesignAtSpecTag. GetDesignAtTag next door
-// parses `v<N>-<M>` design-revision tags and refuses a spec tag — identity
-// already works around this; this adapter does the same.
+// for platform-resource provision overlay. An empty tag is HEAD (the HTTP
+// drawer, which has no version); a build supplies the version tag it is
+// building, so the overlay is what THAT version declares rather than whatever
+// has been edited since.
 type securityJSONReader struct{ art spec.ArtifactService }
 
 func (r securityJSONReader) ReadSecurityJSON(ctx context.Context, orgID, projectID, tag string) ([]byte, error) {
@@ -39,7 +62,7 @@ func (r securityJSONReader) ReadSecurityJSON(ctx context.Context, orgID, project
 	if tag == "" {
 		files, err = r.art.ListDesignFiles(ctx, orgID, projectID)
 	} else {
-		files, err = r.art.GetDesignAtSpecTag(ctx, orgID, projectID, tag)
+		files, err = r.art.GetDesignAtTag(ctx, orgID, projectID, tag)
 	}
 	if err != nil {
 		return nil, err

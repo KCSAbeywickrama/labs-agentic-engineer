@@ -17,10 +17,13 @@
  */
 
 /**
- * The single location of the published JSON Schema artifact, shared by the
- * generator and the freshness test so they can never disagree. It lives in
+ * The single location of each published artifact, shared by the generator and
+ * the freshness test so they can never disagree. The JSON Schemas live in
  * `packages/contracts` — the cross-service contract home the Go BFF already
- * consumes (alongside `api/v1/openapi.yaml`).
+ * consumes (alongside `api/v1/openapi.yaml`). The security-gate message
+ * catalog lives beside its source module in `src/`, because it is not a
+ * contract the console reads: it is one file the BFF vendors so both gates say
+ * the same sentence.
  */
 
 import { dirname, join } from "node:path";
@@ -37,3 +40,17 @@ export const SECURITY_DESIGN_SCHEMA_ARTIFACT = join(schemasDir, "security-design
 export const PLAN_TASK_SCHEMA_ARTIFACT = join(schemasDir, "plan-task.schema.json");
 export const UPDATE_TASK_SCHEMA_ARTIFACT = join(schemasDir, "update-task.schema.json");
 export const AGENT_AFM_SCHEMA_ARTIFACT = join(schemasDir, "agent-afm.schema.json");
+
+export const SECURITY_DESIGN_MESSAGES_ARTIFACT = join(
+  here,
+  "..",
+  "src",
+  "security-design-messages.json",
+);
+
+export const OPENAPI_SECURITY_MESSAGES_ARTIFACT = join(
+  here,
+  "..",
+  "src",
+  "openapi-security-messages.json",
+);
