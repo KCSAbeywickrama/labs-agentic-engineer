@@ -101,8 +101,7 @@ type JobWatcher struct {
 
 	// deaths wakes the run supervisor when a cycle's agent ended without a pull
 	// request. Discovery belongs here for the same reason the recorder's does:
-	// this is the one pass that learns a pod died. nil → the run waits out its
-	// landing deadline, which is the behaviour every release before this had.
+	// this is the one pass that learns a pod died.
 	deaths AgentDeathNotifier
 
 	// asService lifts the tick into the service identity — the watcher has no
@@ -346,28 +345,16 @@ func (w *JobWatcher) failCycle(ctx context.Context, cycle *delivery.RunCycle, re
 	}
 	slog.InfoContext(ctx, "codingagent.JobWatcher: cycle agent terminal",
 		"cycle", cycle.ID, "run", cycle.RunID, "job", cycle.JobRef, "reason", reason)
-	// AFTER the durable write, and only on the branch that won it. Record, then
-	// signal — the same order the cancel surface uses, and what makes this a
-	// wake-up rather than the evidence: the run re-reads the cycle record it can
-	// only now see closed. Riding the once-only fence is also what keeps a second
-	// replica from waking the same run twice.
-	//
-	// Identity comes from the cycle being reconciled, not from `closed`: the
-	// write's return value answers "did I win the race", and cycleWatchStore
-	// promises nothing about which columns it carries.
-	w.notifyDeath(ctx, cycle, reason)
-}
-
-// notifyDeath wakes the run whose cycle just died. Best-effort by the port's
-// contract: a supervisor that cannot be reached costs the run its landing
-// deadline, which is exactly what it cost before this existed.
-func (w *JobWatcher) notifyDeath(ctx context.Context, cycle *delivery.RunCycle, reason string) {
-	if w.deaths == nil || cycle.RunID == "" {
-		return
-	}
-	if err := w.deaths.AgentDied(ctx, cycle.OrgID, cycle.RunID, cycle.ID, reason); err != nil {
-		slog.WarnContext(ctx, "codingagent.JobWatcher: agent-death notify failed (run waits out its landing deadline)",
-			"cycle", cycle.ID, "run", cycle.RunID, "reason", reason, "error", err)
+	// AFTER the durable write and only on the branch that won it: record, then
+	// signal, the order the cancel surface uses. Riding the once-only fence is
+	// also what keeps a second replica from waking the same run twice. Identity
+	// comes from the cycle being reconciled — cycleWatchStore promises nothing
+	// about which columns `closed` carries.
+	if w.deaths != nil && cycle.RunID != "" {
+		if err := w.deaths.AgentDied(ctx, cycle.OrgID, cycle.RunID, reason); err != nil {
+			slog.WarnContext(ctx, "codingagent.JobWatcher: agent-death notify failed (run waits out its landing deadline)",
+				"cycle", cycle.ID, "run", cycle.RunID, "error", err)
+		}
 	}
 }
 

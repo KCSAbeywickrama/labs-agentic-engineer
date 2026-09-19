@@ -407,12 +407,11 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   the wait state can be unbounded with cancel as its only expiry.
 - **Every wait has something behind its signal.** The gate has `waitPollInterval`, the build wait has
   `buildPollInterval`, and the LANDING wait — the one with no poll at all — has `CycleFacts.Ended`, read on
-  every wake-up. That last one is why a dead agent is now told (`run-agent-died`, raised by the pod-truth
-  watcher through `codingagent.AgentDeathNotifier` and the composition root's `agentDeathNotifier`) rather
-  than waited out: the signal ends the attempt at once, the `Ended` read settles the run on
-  `cycleLandingTimeout` if the signal never arrives, and the verdict is the same either way. Before it, a
-  cycle whose pod OOMed after twenty minutes held its run for two hours, re-dispatched, and held it two
-  hours more — four hours of wall clock, settling `failed / redispatch-budget` all the same.
+  every wake-up. That is why a dead agent is told (`run-agent-died`) rather than waited out, and why losing
+  that signal costs one `cycleLandingTimeout` and not the verdict. A cycle the watcher has CLOSED also ends
+  the dispatch loop rather than spending the re-dispatch budget: `NoteDispatch` and `FinishAgentFailed` are
+  both fenced on `ended_at IS NULL`, so a second attempt on a closed cycle can be neither recorded nor
+  watched. Measured before this: a pod that OOMed at 20m41s settled its run 4h00m later.
 - **The supervisor counts its own budgets.** They are workflow state, written OUT to the run row for the
   read model and never read back: a replay must reproduce the same decisions without a database. The one
   budget it does not count is the automatic build re-trigger — that is the event plane's, derived from the

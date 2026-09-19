@@ -192,10 +192,11 @@ subagent you handed it to, keeps its status line current from start to done
 2. **Make the change it asks for**, holding to
    `references/component-contract.md` and the stack skills of every component it
    touches.
-3. **A `web-application` is finished by a walk, not a build.** The moment its
-   builder reports clean — not when the rest of the wave has — dispatch **one
-   more subagent** for that component with exactly this prompt, and nothing
-   about how to walk:
+3. **A `web-application` is finished by a walk, not a build.** Once its builder
+   reports clean — not waiting on the rest of the wave — and **no other walk is
+   live**, dispatch **one more subagent** for that component with exactly this
+   prompt, and nothing about how to walk. One walk at a time: a live Chromium is
+   the largest thing in the pod.
 
    ```text
    Walk <component> at <App Path>. Load `mock-verification` and
@@ -203,10 +204,6 @@ subagent you handed it to, keeps its status line current from start to done
    <App Path>; never run `git`. Progress: `gh issue comment <N> --body "<line>"`.
    Report back the closing line and the numbered list.
    ```
-
-   **One walk at a time** — a live Chromium is the largest thing in the pod, so
-   a walk waits for the walk before it to report, however many web-apps the wave
-   has.
 
    The walk lands before the commit, so what it fixes ships with what it
    checked. An issue that moved no file the app loads skips this. One you are

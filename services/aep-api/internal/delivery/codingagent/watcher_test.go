@@ -123,7 +123,7 @@ func (c *watchedCycles) RecordUsage(_ context.Context, id string, u contracts.Ca
 // deathNotice is one AgentDied call, recorded whole so a test can assert the
 // run it would wake and not merely that something fired.
 type deathNotice struct {
-	orgID, runID, cycleID, reason string
+	orgID, runID, reason string
 }
 
 type recordingDeaths struct {
@@ -131,8 +131,8 @@ type recordingDeaths struct {
 	err     error
 }
 
-func (d *recordingDeaths) AgentDied(_ context.Context, orgID, runID, cycleID, reason string) error {
-	d.notices = append(d.notices, deathNotice{orgID, runID, cycleID, reason})
+func (d *recordingDeaths) AgentDied(_ context.Context, orgID, runID, reason string) error {
+	d.notices = append(d.notices, deathNotice{orgID, runID, reason})
 	return d.err
 }
 
@@ -190,7 +190,7 @@ func TestTick_FailedPodTellsTheRunItsAgentDied(t *testing.T) {
 
 	newTestWatcher(rt, cycles).WithAgentDeathNotifier(deaths).Tick(context.Background())
 
-	want := []deathNotice{{"acme", "run-1", "c2", "agent_failed:OOMKilled"}}
+	want := []deathNotice{{"acme", "run-1", "agent_failed:OOMKilled"}}
 	if !reflect.DeepEqual(deaths.notices, want) {
 		t.Fatalf("notices = %+v, want %+v", deaths.notices, want)
 	}

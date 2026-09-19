@@ -72,14 +72,13 @@ const (
 type landing int
 
 const (
-	landingMergeSignalled landing = iota
+	// landingSignalled — a fact arrived (a merge, an agent death). Which one is
+	// deliberately not distinguished: the cycle RECORD decides what happened, so
+	// every such wake leads to the same re-read.
+	landingSignalled landing = iota
 	landingConflict
 	landingCancelled
 	landingTimeout
-	// landingAgentDied — the watcher closed this cycle's agent without a pull
-	// request. Appended rather than inserted because these are workflow-local
-	// and never serialized, so the numbering is free to grow.
-	landingAgentDied
 )
 
 // noAnchorIssue is the anchor a cycle over a whole WORKING SET passes: none. A
@@ -211,13 +210,10 @@ func (l *loop) dispatchUntilLanded(ctx workflow.Context, kind string, anchorIssu
 				return false, cycleConflict, nil
 			case landingTimeout:
 				expired = true
-			case landingMergeSignalled, landingAgentDied:
+			case landingSignalled:
 				// Never act on the payload: a human's pull request merging during
-				// the cycle raises the same signal, and only the CYCLE RECORD says
-				// whether the agent's own work landed. Death is read the same way
-				// and for the same reason — the facts read below is what ends the
-				// attempt, so a death signal that raced the agent's own merge
-				// costs one round trip and changes nothing.
+				// the cycle raises the same signal as the agent's own, and only
+				// the CYCLE RECORD says which happened.
 			}
 			facts, ferr := l.cycleFacts(ctx)
 			if ferr != nil {
@@ -238,13 +234,20 @@ func (l *loop) dispatchUntilLanded(ctx workflow.Context, kind string, anchorIssu
 				// Landed: the verdict is the next stage's, not this loop's.
 				return true, cycleNone, nil
 			}
-			// Ended with nothing to land: this attempt is over, whatever woke the
-			// wait. The GROUND TRUTH behind SigRunAgentDied, and the reason losing
-			// that signal costs latency rather than correctness — the deadline
-			// eventually wakes the loop into this same check. Checked last so a
-			// cycle the event plane closed on a merge is read as the merge it was.
+			// Closed with nothing to land. The cycle is over, not merely this
+			// attempt: both writes a re-dispatch would make are fenced on
+			// `ended_at IS NULL`, so NoteDispatch could not record one and the
+			// watcher could not close one — the budget has nothing left to buy.
+			// The loop agrees with the store rather than spending a second
+			// deadline proving it.
+			//
+			// This is the GROUND TRUTH behind SigRunAgentDied, and why losing that
+			// signal costs latency rather than correctness: the deadline wakes the
+			// loop into this same check. Checked last so a cycle the event plane
+			// closed on a merge is read as the merge it was.
 			if facts.Ended {
-				expired = true
+				stopDeadline()
+				return false, cycleAgentDead, nil
 			}
 		}
 		stopDeadline()
@@ -256,7 +259,7 @@ func (l *loop) dispatchUntilLanded(ctx workflow.Context, kind string, anchorIssu
 // future is created once per ATTEMPT, so a spurious wake-up re-enters the wait
 // without extending the agent's allowance.
 func (l *loop) awaitLanding(ctx workflow.Context, deadline workflow.Future) landing {
-	out := landingMergeSignalled
+	out := landingSignalled
 	sel := workflow.NewSelector(ctx)
 	sel.AddReceive(l.cancel, func(c workflow.ReceiveChannel, _ bool) {
 		c.Receive(ctx, nil)
@@ -268,17 +271,14 @@ func (l *loop) awaitLanding(ctx workflow.Context, deadline workflow.Future) land
 	})
 	sel.AddReceive(l.merged, func(c workflow.ReceiveChannel, _ bool) {
 		c.Receive(ctx, nil)
-		out = landingMergeSignalled
+		out = landingSignalled
 	})
-	// AFTER cancel and merge, and that order is the whole care in this case.
-	// Selector.Select takes the first READY case in registration order, so a
-	// cancel whose reap killed the pod — indistinguishable from death out here —
-	// still reads as a cancel, and an agent that merged and then died on its way
-	// out still reads as a merge. Both re-confirm against the cycle record below
-	// regardless; this only decides which one gets asked first.
+	// After cancel: Select takes the first READY case in registration order, and
+	// cancelling REAPS the agent's pod, so a cancel would otherwise be read as
+	// the death it causes.
 	sel.AddReceive(l.agentDied, func(c workflow.ReceiveChannel, _ bool) {
 		c.Receive(ctx, nil)
-		out = landingAgentDied
+		out = landingSignalled
 	})
 	// A workable or build signal during the coding phase is noise (an issue
 	// joined the milestone, a stale build reported). Drained so it cannot wake

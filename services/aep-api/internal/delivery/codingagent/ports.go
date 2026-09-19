@@ -61,18 +61,13 @@ type DeployObserver interface {
 // without holding a workflow engine — the same split, and for the same reason,
 // as eventcore.RunSignaler.
 //
-// It takes primitives rather than the run row because the watcher has a CYCLE
-// in hand, not a run: resolving (org, run) to the row that carries the
-// milestone number and the run's kind is the composition root's job, and doing
-// it here would put a run-row read in a pod-truth loop that has no business
-// making one.
-//
-// Best-effort by contract, like every other wake in the system: the run
-// re-derives from CycleFacts.Ended at its landing deadline, so a notifier that
-// fails costs latency and never correctness. Wired at the composition root;
-// nil → the run settles on the deadline exactly as it did before.
+// It takes primitives rather than the run row because the watcher has a CYCLE in
+// hand: resolving (org, run) to the row that carries the milestone number and
+// the run's KIND — the workflow id's prefix, and a different vocabulary from a
+// cycle's kind — is the composition root's job. Best-effort; nil → the run
+// settles on its landing deadline as before.
 type AgentDeathNotifier interface {
-	AgentDied(ctx context.Context, orgID, runID, cycleID, reason string) error
+	AgentDied(ctx context.Context, orgID, runID, reason string) error
 }
 
 // SecretRef is one org credential's refs-only SM-API triplet.

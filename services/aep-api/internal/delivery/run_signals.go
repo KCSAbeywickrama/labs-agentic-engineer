@@ -86,19 +86,9 @@ const (
 	// pull request (OOMKilled, a non-zero exit, a startup that never came up, a
 	// Component that went away). Carries the classified reason in Message.
 	//
-	// A fact like the rest of the set, and emphatically not "re-dispatch": the
-	// loop re-reads the cycle record on waking and decides for itself, so a run
-	// whose agent merged a pull request in the same breath still finishes on the
-	// merge. What the signal buys is the WAIT. The landing wait is the one wait
-	// in the loop with no poll behind it — build terminals have buildPollInterval
-	// and the gate has waitPollInterval, but a dispatch that died had only
-	// cycleLandingTimeout, so a 20-minute OOM cost 2h, a re-dispatch, and another
-	// 2h before the run settled. Measured: 4h00m of wall clock for a cycle whose
-	// agent was gone after 20m41s.
-	//
-	// Losing it costs exactly what it used to cost, which is the property the
-	// whole set is built on: CycleFacts.Ended is the ground truth, read on every
-	// wake-up, so the deadline still settles the run without this.
+	// It ends the LANDING wait, the one wait in the loop with no poll behind it.
+	// Losing it costs that wait and nothing else: CycleFacts.Ended is the ground
+	// truth, and the landing deadline reaches the same verdict.
 	SigRunAgentDied = "run-agent-died"
 )
 

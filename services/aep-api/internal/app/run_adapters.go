@@ -331,7 +331,7 @@ type agentDeathNotifier struct {
 	supervisor *run.Supervisor
 }
 
-func (n agentDeathNotifier) AgentDied(ctx context.Context, orgID, runID, cycleID, reason string) error {
+func (n agentDeathNotifier) AgentDied(ctx context.Context, orgID, runID, reason string) error {
 	row, err := n.runs.GetByIDScoped(ctx, orgID, runID)
 	if err != nil {
 		return err
@@ -342,9 +342,8 @@ func (n agentDeathNotifier) AgentDied(ctx context.Context, orgID, runID, cycleID
 	if row == nil {
 		return nil
 	}
-	// The reason rides in Message, which is human-facing detail the loop never
-	// parses — the loop re-reads the cycle record for the fact itself. The cycle
-	// id is deliberately not in the payload for the same reason.
+	// The reason rides in Message, which the loop never parses: it re-reads the
+	// cycle record for the fact itself.
 	return n.supervisor.SignalRun(ctx, row, delivery.SigRunAgentDied, delivery.RunSignal{
 		Signal:          delivery.SigRunAgentDied,
 		MilestoneNumber: row.MilestoneNumber,
