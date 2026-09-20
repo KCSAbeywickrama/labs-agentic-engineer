@@ -6004,9 +6004,10 @@ components:
         and its delete removes it.
       properties:
         assignedTo:
-          description: The groups holding the role, in binding order. EMPTY is meaningful, not
-            missing data - it is the normal shape for a self-service role (the app's registration
-            flow assigns it per account) and for a service role (an application principal holds it).
+          description: The GROUPS holding the role, in binding order. EMPTY is meaningful, not
+            missing data - it is the normal shape for a self-service role (which carries no
+            assignTo, and whose test logins hold it as user principals instead) and for a service
+            role (an application principal holds it).
           items:
             $ref: '#/components/schemas/ProjectRoleAssignment'
           type: array
