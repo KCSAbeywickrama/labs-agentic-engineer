@@ -485,20 +485,31 @@ func renderCredentialsTrailer(outcome RolesEnsureOutcome) string {
 // project has one such resource — every protected component shares it by
 // declaring the same dependency name — so the first match is the answer.
 func (s *Service) signInClientID(ctx context.Context, orgID, projectID string) string {
+	clientID, _ := s.SignInCoordinates(ctx, orgID, projectID)
+	return clientID
+}
+
+// SignInCoordinates is the project's sign-in client and the resource server its
+// tokens are minted for, both read off the sign-in resource's resolved binding
+// (`client_id` / `resource`). The roles gate publishes the client id; the
+// identity minter signs test users in with both. Empty strings mean "no
+// sign-in resource, or its binding has not resolved" — never an error, because
+// neither consumer can act on one.
+func (s *Service) SignInCoordinates(ctx context.Context, orgID, projectID string) (clientID, resource string) {
 	if s == nil || s.design == nil || s.bindings == nil || s.markers == nil {
-		return ""
+		return "", ""
 	}
 	components, err := s.design.ReadDesignComponents(ctx, orgID, projectID)
 	if err != nil {
 		slog.DebugContext(ctx, "roles gate: no design to find the sign-in client on",
 			"project", projectID, "error", err)
-		return ""
+		return "", ""
 	}
 	byName, err := s.markers.MarkersByName(ctx)
 	if err != nil {
 		slog.DebugContext(ctx, "roles gate: no marker catalog to find the sign-in client with",
 			"project", projectID, "error", err)
-		return ""
+		return "", ""
 	}
 	for _, comp := range components {
 		for _, dep := range comp.Dependencies {
@@ -510,15 +521,18 @@ func (s *Service) signInClientID(ctx context.Context, orgID, projectID string) s
 			if berr != nil || binding == nil || binding.Status == nil {
 				slog.DebugContext(ctx, "roles gate: the sign-in resource's binding is not readable yet",
 					"project", projectID, "binding", name, "error", berr)
-				return ""
+				return "", ""
 			}
 			for _, out := range binding.Status.Outputs {
-				if out.Name == "client_id" {
-					return out.Value
+				switch out.Name {
+				case "client_id":
+					clientID = out.Value
+				case "resource":
+					resource = out.Value
 				}
 			}
-			return ""
+			return clientID, resource
 		}
 	}
-	return ""
+	return "", ""
 }

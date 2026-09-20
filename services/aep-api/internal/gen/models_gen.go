@@ -2075,6 +2075,12 @@ type InputFailure struct {
 
 // InvokeRequest One HTTP call to relay to a deployed component's gateway URL. The caller's own bearer is forwarded; a body-supplied Authorization is never accepted.
 type InvokeRequest struct {
+	// ActAs Relay the call AS one of this project's platform-owned test accounts instead of as the caller. The platform signs that account in to the project's own identity provider and forwards its token; the token never reaches the client, and no X-User-Id is set by the relay (the gateway derives it from the token). 404 when the username is not a test user the platform owns for this project; 503 when the platform is not configured to sign test users in.
+	ActAs struct {
+		// TestUser The test account's username, as security.json declares it.
+		TestUser string `json:"testUser"`
+	} `json:"actAs,omitempty"`
+
 	// Body Raw request body, passed through verbatim.
 	Body string `json:"body,omitempty"`
 

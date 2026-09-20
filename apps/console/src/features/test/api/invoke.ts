@@ -25,6 +25,13 @@ import { apiErrorMessage } from "../../../api/errors";
 export interface ChatTurn {
   conversationId?: string;
   message: string;
+  /**
+   * A platform-owned test account of this project to relay AS. The platform
+   * signs it in to the project's own identity provider and forwards its token;
+   * absent, the call goes out as the signed-in person, which a protected agent
+   * refuses (the console's sign-in is not the project's).
+   */
+  actAs?: string;
 }
 
 export interface ChatWireReply {
@@ -60,6 +67,7 @@ export async function sendChat(
         method: "POST",
         path: "/chat",
         contentType: "application/json",
+        ...(turn.actAs ? { actAs: { testUser: turn.actAs } } : {}),
         // An absent conversationId is omitted rather than sent as null: the
         // contract starts a new conversation on an omitted id.
         body: JSON.stringify(

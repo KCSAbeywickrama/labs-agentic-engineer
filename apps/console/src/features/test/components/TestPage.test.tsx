@@ -21,6 +21,7 @@
 import type { ElementType, ReactNode } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { components } from "../../../generated/aep-api";
 
 // Router replaced so PageHeader's back-link renders as a plain anchor — no
 // RouterProvider needed (mirrors DeploymentsPage.test.tsx).
@@ -81,6 +82,19 @@ vi.mock("../../projects/api/queries", () => ({
 // The typed client is stubbed at the API boundary (the pattern in
 // features/validation/api/queries.test.tsx) — the tester's whole contract is
 // the InvokeRequest it POSTs and the InvokeResponse it reads back.
+type ProjectTestUserState = components["schemas"]["ProjectTestUserState"];
+let mockTestUsers: ProjectTestUserState[] = [];
+/** A platform-owned, existing test account — the only kind the tester can act as. */
+function ownedTestUser(username: string, roles: string[] = [], scopes: string[] = []): ProjectTestUserState {
+  return { username, exists: true, owned: true, supplied: false, roles, scopes };
+}
+vi.mock("../../spec/api/roles", () => ({
+  useProjectRoles: () => ({
+    data: { directoryAvailable: true, roles: [], projectRoles: [], testUsers: mockTestUsers },
+    isPending: false,
+    isError: false,
+  }),
+}));
 const mockPOST = vi.fn();
 vi.mock("../../../api/client", () => ({
   client: { POST: (...args: unknown[]) => mockPOST(...args) },
@@ -96,6 +110,7 @@ function invokeCall(n: number) {
     path: string;
     contentType?: string;
     body?: string;
+    actAs?: { testUser: string };
   };
   return {
     ...body,
@@ -144,6 +159,7 @@ async function send(message: string) {
 }
 
 beforeEach(() => {
+  mockTestUsers = [];
   mockComponents = DEFAULT_COMPONENTS;
   mockDeployments = DEFAULT_DEPLOYMENTS;
   mockDeploymentsPending = false;
@@ -268,14 +284,14 @@ describe("TestPage — the chat tester", () => {
     expect(invokeCall(2).payload).toEqual({ message: "third" });
   });
 
-  it("hints at re-signing in when the gateway rejects the session", async () => {
+  it("names the fix when a protected agent refuses the caller and the project has no test user", async () => {
     mockPOST.mockResolvedValue(relayed(401, "unauthorized"));
 
     render(<TestPage projectName="acme" />);
     await send("hi");
 
     expect(
-      screen.getByText("This session can't reach the agent — sign in again?"),
+      screen.getByText(/requires the project's sign-in.*Declare a test user/),
     ).toBeInTheDocument();
   });
 
@@ -547,4 +563,36 @@ describe("TestPage — arriving from a Deployments link", () => {
 
     expect(screen.getByText("booking-agent")).toBeInTheDocument();
   });
+  // Acting as a test user: the invoke body names the account and nothing else
+  // about the turn changes. The first owned test user is the default, because a
+  // protected agent cannot be reached any other way from here.
+  it("relays as the project's first test user when the project has one", async () => {
+    mockTestUsers = [
+      ownedTestUser("test-engineer", ["Engineer"], ["triage:use"]),
+      ownedTestUser("test-admin", ["Admin"]),
+    ];
+    mockPOST.mockResolvedValue(chat("hi there", "conv-1"));
+    render(<TestPage projectName="acme" />);
+    await send("hi");
+    expect(invokeCall(0).actAs).toEqual({ testUser: "test-engineer" });
+    expect(invokeCall(0).payload).toEqual({ message: "hi" });
+    expect(screen.getByText(/as test-engineer/)).toBeInTheDocument();
+  });
+
+  it("relays as the caller when the project declares no test users", async () => {
+    mockPOST.mockResolvedValue(chat("hi there", "conv-1"));
+    render(<TestPage projectName="acme" />);
+    await send("hi");
+    expect(invokeCall(0).actAs).toBeUndefined();
+    expect(screen.queryByLabelText("Test as")).not.toBeInTheDocument();
+  });
+
+  it("names the test user when the gateway refuses its token", async () => {
+    mockTestUsers = [ownedTestUser("test-engineer")];
+    mockPOST.mockResolvedValue(relayed(401, "unauthorized"));
+    render(<TestPage projectName="acme" />);
+    await send("hi");
+    expect(screen.getByText(/refused test-engineer's token/)).toBeInTheDocument();
+  });
 });
+

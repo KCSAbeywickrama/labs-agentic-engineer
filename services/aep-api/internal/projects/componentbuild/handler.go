@@ -19,7 +19,9 @@ package componentbuild
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 	"github.com/wso2/aep/aep-api/internal/platform/apierr"
@@ -34,10 +36,19 @@ import (
 // it to the service as an explicit argument. projectName/componentName/buildName
 // path params are validated as DNS-label slugs (400 on malformed) before any
 // service (OC client / repo) is touched.
-type Handler struct{ comp projects.ComponentService }
+type Handler struct {
+	comp projects.ComponentService
+	// tokens signs a project's test account in so Invoke can relay AS it.
+	// Optional: nil answers actAs with 503, never with a relay as the caller —
+	// a request that asked to be somebody must not silently be somebody else.
+	tokens projects.TestUserTokens
+}
 
 // New returns the slice's handler.
 func New(comp projects.ComponentService) *Handler { return &Handler{comp: comp} }
+
+// SetTestUserTokens wires the test-account sign-in the actAs relay uses.
+func (h *Handler) SetTestUserTokens(t projects.TestUserTokens) { h.tokens = t }
 
 // --- Build operations --------------------------------------------------------
 
@@ -159,17 +170,48 @@ func (h *Handler) InvokeComponent(ctx context.Context, request gen.InvokeCompone
 	if token := auth.GetAuthToken(ctx); token != "" {
 		bearer = "Bearer " + token
 	}
+	// The VERIFIED subject, not anything the browser sent. An ai-agent scopes
+	// its conversation store by this identity and refuses a request without
+	// one, so the tester cannot reach an agent at all unless the relay carries
+	// it.
+	userID := auth.ActorFromContext(ctx)
+
+	// actAs: relay as one of the project's test accounts. The platform signs
+	// the account in and forwards ITS token; the caller's own bearer is not
+	// sent, and no X-User-Id either — the gateway derives the user from the
+	// token, and stamping the caller's subject over the test user's would
+	// attribute the turn to the wrong person. The caller stays who is
+	// authorised: this operation is behind the platform sign-in like every
+	// other, and the minter applies the same ownership guard as revealing the
+	// account's password.
+	// The generated field is a value, so "absent" and "empty" are one case:
+	// no test user named means relay as the caller, as before.
+	if username := strings.TrimSpace(request.Body.ActAs.TestUser); username != "" {
+		if h.tokens == nil || !h.tokens.Enabled() {
+			return nil, apierr.ServiceUnavailable("signing test users in is not configured on this platform")
+		}
+		token, err := h.tokens.Mint(ctx, org, request.ProjectName, username)
+		switch {
+		case err == nil:
+		case errors.Is(err, projects.ErrActAsNotFound):
+			return nil, apierr.NotFound("no such test user for this project")
+		case errors.Is(err, projects.ErrActAsUnavailable):
+			return nil, apierr.ServiceUnavailable("signing test users in is not configured for this project")
+		case errors.Is(err, projects.ErrActAsRefused):
+			return nil, apierr.BadGateway("the identity provider refused the test user's sign-in; rotate the account's password and try again")
+		default:
+			slog.ErrorContext(ctx, "invoke: test user sign-in failed", "project", request.ProjectName, "testUser", username, "error", err)
+			return nil, apierr.BadGateway("could not sign the test user in")
+		}
+		bearer, userID = "Bearer "+token, ""
+	}
 
 	result, err := h.comp.Invoke(ctx, org, request.ProjectName, request.ComponentName, projects.InvokeCall{
 		Method:      string(request.Body.Method),
 		Path:        request.Body.Path,
 		ContentType: request.Body.ContentType,
 		Body:        []byte(request.Body.Body),
-		// The VERIFIED subject, not anything the browser sent. An ai-agent
-		// scopes its conversation store by this identity and refuses a request
-		// without one, so the tester cannot reach an agent at all unless the
-		// relay carries it.
-	}, bearer, auth.ActorFromContext(ctx))
+	}, bearer, userID)
 	if err != nil {
 		switch {
 		case errors.Is(err, projects.ErrComponentNotFound):

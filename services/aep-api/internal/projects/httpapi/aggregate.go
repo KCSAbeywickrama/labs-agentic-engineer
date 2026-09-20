@@ -54,10 +54,14 @@ type Handlers struct {
 // unwired collaborator panics exactly as it did before (the edge assigns each
 // dep directly, no OrEmpty helper).
 func New(d projects.Deps) (*Handlers, error) {
+	build := componentbuild.New(d.ComponentSvc)
+	if d.TestUserTokens != nil {
+		build.SetTestUserTokens(d.TestUserTokens)
+	}
 	return &Handlers{
 		projectcrudHandler:     projectcrud.New(d.ProjectSvc),
 		componentreadHandler:   componentread.New(d.ComponentSvc),
-		componentbuildHandler:  componentbuild.New(d.ComponentSvc),
+		componentbuildHandler:  build,
 		componentconfigHandler: componentconfig.New(d.ConfigSvc),
 		activityfeedHandler:    activityfeed.New(d.ActivitySvc),
 		projectusageHandler:    projectusage.New(d.UsageSvc),

@@ -8796,6 +8796,14 @@ components:
         body:
           description: Raw request body, passed through verbatim.
           type: string
+        actAs:
+          description: Relay the call AS one of this project's platform-owned test accounts instead of as the caller. The platform signs that account in to the project's own identity provider and forwards its token; the token never reaches the client, and no X-User-Id is set by the relay (the gateway derives it from the token). 404 when the username is not a test user the platform owns for this project; 503 when the platform is not configured to sign test users in.
+          type: object
+          properties:
+            testUser:
+              description: The test account's username, as security.json declares it.
+              type: string
+          required: [testUser]
       required: [method, path]
       type: object
     InvokeResponse:

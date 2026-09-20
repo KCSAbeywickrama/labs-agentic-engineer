@@ -25,13 +25,19 @@ import {
   Button,
   CircularProgress,
   Divider,
+  MenuItem,
   Stack,
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
 import { Bot, User, Wrench } from "@wso2/oxygen-ui-icons-react";
 import { MarkdownView } from "../../../components/MarkdownView";
+import { publishedTestUsers } from "../../projects/lib/publishedTestUsers";
+import { useProjectRoles } from "../../spec/api/roles";
 import { sendChat } from "../api/invoke";
+
+/** No test user to act as: the relay goes out as the signed-in person. */
+const AS_CALLER = "";
 
 // What the tester holds, and all it holds (ADR-0020 / the Test tab spec): the
 // rendered transcript and the agent-issued conversationId. No message array is
@@ -79,6 +85,18 @@ export function AgentChatTester({
   const [notReachable, setNotReachable] = useState(false);
   const [invokeError, setInvokeError] = useState<string | null>(null);
 
+  // WHO the turn is sent as. A protected agent accepts only a token from the
+  // project's own identity provider, and the console's sign-in is not one — so
+  // the tester acts as one of the project's test users, the same accounts
+  // validation signs in with. The picker chooses WHICH one, never whether: a
+  // project with no test users has nothing to act as, and the relay goes out
+  // as the caller, which a protected agent will refuse — the notice below then
+  // names the one thing that fixes it.
+  const roles = useProjectRoles(projectName, true);
+  const testUsers = publishedTestUsers(roles.data?.testUsers ?? []);
+  const [actAs, setActAs] = useState<string | undefined>(undefined);
+  const chosen = actAs ?? testUsers[0]?.username ?? AS_CALLER;
+
   // Switching agents is a new conversation with a new correspondent: the old
   // id belongs to the old agent's store and would 404 against this one.
   useEffect(() => {
@@ -109,6 +127,7 @@ export function AgentChatTester({
     try {
       const result = await sendChat(projectName, componentName, {
         ...(conversationId ? { conversationId } : {}),
+        ...(chosen !== AS_CALLER ? { actAs: chosen } : {}),
         message,
       });
       switch (result.kind) {
@@ -131,7 +150,13 @@ export function AgentChatTester({
         case "session-expired":
           setEntries((prev) => [
             ...prev,
-            { kind: "notice", text: "This session can't reach the agent — sign in again?" },
+            {
+              kind: "notice",
+              text:
+                chosen === AS_CALLER
+                  ? "This agent requires the project's sign-in, which the console's session is not. Declare a test user in specs/design/security.json and rebuild; Try it then signs in as it."
+                  : `The agent refused ${chosen}'s token. Rotate that test user's password from the Security panel and try again.`,
+            },
           ]);
           break;
         case "upstream-error":
@@ -164,7 +189,7 @@ export function AgentChatTester({
     } finally {
       setSending(false);
     }
-  }, [componentName, conversationId, draft, projectName, sending]);
+  }, [chosen, componentName, conversationId, draft, projectName, sending]);
 
   const blocked = notReachable || deployKnowledge === "unreachable";
 
@@ -187,9 +212,32 @@ export function AgentChatTester({
             {componentName}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            Talks to the live agent, on the organisation&apos;s model key
+            {chosen === AS_CALLER
+              ? "Talks to the live agent, on the organisation's model key"
+              : `Talks to the live agent as ${chosen}, on the organisation's model key`}
           </Typography>
         </Box>
+        {testUsers.length > 0 && (
+          <TextField
+            select
+            size="small"
+            label="Test as"
+            value={chosen}
+            onChange={(e) => {
+              setActAs(e.target.value);
+              newConversation();
+            }}
+            sx={{ minWidth: 200 }}
+            inputProps={{ "aria-label": "Test as" }}
+          >
+            {testUsers.map((u) => (
+              <MenuItem key={u.username} value={u.username}>
+                {u.username}
+                {u.roles.length > 0 ? ` — ${u.roles.join(", ")}` : ""}
+              </MenuItem>
+            ))}
+          </TextField>
+        )}
         <Button size="small" onClick={newConversation}>
           New conversation
         </Button>

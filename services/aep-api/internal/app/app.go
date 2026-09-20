@@ -39,6 +39,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/clients/thunderapp"
+	"github.com/wso2/aep/aep-api/internal/clients/thunderflow"
 	"github.com/wso2/aep/aep-api/internal/clients/thundersvc"
 	"github.com/wso2/aep/aep-api/internal/config"
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -1067,12 +1068,21 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		},
 	)
 
+	// Try it "as a test user": the relay signs one of the project's test
+	// accounts in to the project's own identity provider and forwards its token.
+	// The minter is the identity domain's; the two adapters below bind it to
+	// where the sign-in client is read (provisioning, built later — hence the
+	// late-bound coordinates) and to the ThunderID flow protocol.
+	testUserCoords := &lateSignInCoords{}
+	testUserMinter := identity.NewTestUserTokenMinter(identityPanel, testUserCoords,
+		thunderflowSignIn{c: thunderflow.New(thunderflow.Config{})}, cfg.TryItCallbackURL)
 	projectsHandlers, err := projectshttpapi.New(projects.Deps{
-		ProjectSvc:   projectService,
-		ComponentSvc: componentService,
-		ConfigSvc:    configService,
-		UsageSvc:     usageService,
-		ActivitySvc:  activitySvc,
+		ProjectSvc:     projectService,
+		ComponentSvc:   componentService,
+		ConfigSvc:      configService,
+		TestUserTokens: testUserTokens{m: testUserMinter},
+		UsageSvc:       usageService,
+		ActivitySvc:    activitySvc,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("assemble projects domain: %w", err)
@@ -1187,6 +1197,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		SecurityJSON:      securityJSONReader{art: artifactSvcGit},
 		ProjectNames:      projectDisplayNamer{client: projectClient},
 	})
+	testUserCoords.svc = provisioningSvc
 	// Assemble the dependencies domain (P8): the provisioning slice (7 ops over
 	// provisioningSvc) + the resource-type-discovery slice (ListPlatformResourceTypes
 	// over the catalog). Both slices are nil-tolerant; the edge 503s when unwired.
