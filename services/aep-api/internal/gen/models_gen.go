@@ -2373,7 +2373,7 @@ type ProjectList struct {
 
 // ProjectRole One role THIS project owns on the identity provider. A different kind of object from ProjectRoleState, which is a SHARED org group. A project role is named `<project>/<Role>`, exactly one project creates it, and that project's builds converge it and its delete removes it.
 type ProjectRole struct {
-	// AssignedTo The groups holding the role, in binding order. EMPTY is meaningful, not missing data - it is the normal shape for a self-service role (the app's registration flow assigns it per account) and for a service role (an application principal holds it).
+	// AssignedTo The GROUPS holding the role, in binding order. EMPTY is meaningful, not missing data - it is the normal shape for a self-service role (which carries no assignTo, and whose test logins hold it as user principals instead) and for a service role (an application principal holds it).
 	AssignedTo []ProjectRoleAssignment `json:"assignedTo,omitempty"`
 
 	// DirectoryName The name the directory carries - `<project>/<Role>`. The prefix is the platform's ownership device; render `name`, not this.
