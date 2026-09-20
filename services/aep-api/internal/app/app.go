@@ -1163,6 +1163,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	platformProvisioner := dependencies.NewOCNativeProvisioner(resourceClient)
 	catalogValuePlane := provisioning.NewMemoryValuePlane()
 	provisioningSvc := provisioning.NewService(provisioning.Deps{
+		TryItCallbackURL:  cfg.TryItCallbackURL,
 		Issues:            issueService,
 		Execs:             executionRepo,
 		Design:            designComponents{store: artifactStore},
@@ -1342,6 +1343,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// this fails OPEN (defer + retry) when the catalog is unreachable: emission is
 	// a retried cascade hook, not a user-facing save gate.
 	runtimeConfigSvc.SetResourceCatalog(resourceTypeCatalog)
+	// The platform tester's callback rides the same patch as the SPAs' own
+	// callbacks, and is what lets an agent-only project be signed in to at all.
+	runtimeConfigSvc.SetTryItCallbackURL(cfg.TryItCallbackURL)
 	// The pre-build ensure is now the Component CR alone. env-config.js used to be
 	// emitted here too and could not land — the binding it writes to does not
 	// exist before the first build — so it is a deploy-stage input instead, pulled

@@ -165,6 +165,11 @@ services:
       GITHUB_APP_SLUG: "${GITHUB_APP_SLUG:-aep-platform}"
       GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
       BFF_PUBLIC_URL: "${BFF_PUBLIC_URL:-http://localhost:8090}"
+      # The platform tester's OAuth callback, registered on every project's
+      # sign-in resource so a client outside the project's components (the
+      # console's Try it, the validation agent) can complete a sign-in. The host
+      # need not serve anything for a browser under test to capture the code.
+      TRY_IT_CALLBACK_URL: "${TRY_IT_CALLBACK_URL:-http://tryit.aep.localhost:8095/callback}"
 
       # ── Inbound JWT verification (Thunder JWKS, audience prefix aep-*).
       JWKS_URL: "http://thunder.openchoreo.localhost:8080/oauth2/jwks"

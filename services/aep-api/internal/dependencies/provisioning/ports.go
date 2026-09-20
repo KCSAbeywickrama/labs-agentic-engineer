@@ -361,6 +361,25 @@ type RolesEnsureOutcome struct {
 	// for this `resource`, and asking for another one (or none) produces a
 	// token the gateway rejects.
 	ResourceIdentifier string
+	// ClientID is the OAuth client of the project's sign-in resource — the
+	// `user-auth` thunder-app every protected component shares. It is published
+	// beside the logins because a username and a password START no OAuth flow:
+	// the authorize leg names a CLIENT, and this project's one is resolved into
+	// components as `<DEP>_CLIENT_ID` and nowhere a reader of this ticket can
+	// see it. Publishing it is safe — it is a public PKCE client id, already
+	// shipped to every browser that loads the project's SPA, and it is carried
+	// on a ConfigMap, not a Secret.
+	//
+	// Empty when the project declares no sign-in resource, or its binding has
+	// not resolved yet: the trailer then omits the line rather than printing a
+	// blank that reads as "this project has no client".
+	ClientID string
+	// CallbackURL is the platform tester's redirect URI, registered on the
+	// sign-in resource by the deploy stage (runtimeconfig). Published because
+	// an authorize request has to name a registered redirect_uri, and for a
+	// project with no web app this is the only one there is. Empty when the
+	// platform has none configured.
+	CallbackURL string
 }
 
 // RolesCredential is one published test-account login.

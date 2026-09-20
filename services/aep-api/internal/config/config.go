@@ -93,6 +93,13 @@ type Config struct {
 	// the App-mode redirect after callback (302 → console settings page).
 	BFFPublicURL string
 
+	// TryItCallbackURL is the platform tester's OAuth callback, registered as a
+	// redirect URI on every project's sign-in resource so a client that is not
+	// one of the project's own components — the console's Try it, the
+	// validation agent, the tester app — can complete a sign-in there. One
+	// fixed URL for the whole platform. Empty disables the registration.
+	TryItCallbackURL string
+
 	// TaskTokenSigningKey is the PEM-encoded RSA private key used to sign
 	// Task JWTs. The matching public key is published at /auth/external/jwks.json.
 	TaskTokenSigningKey string

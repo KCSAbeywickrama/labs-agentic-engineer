@@ -64,6 +64,7 @@ func Load() (Config, error) {
 		TenantGateMode:           r.readOptionalString("TENANT_GATE_MODE", "enforce"),
 		OAuthStateSigningKey:     r.readOptionalString("OAUTH_STATE_SIGNING_KEY", ""),
 		BFFPublicURL:             r.readOptionalString("BFF_PUBLIC_URL", "http://localhost:8090"),
+		TryItCallbackURL:         r.readOptionalString("TRY_IT_CALLBACK_URL", ""),
 		BuildAuthRetryBudget:     r.readOptionalInt("BUILD_AUTH_RETRY_BUDGET", 3),
 		SkillsDir:                r.readOptionalString("SKILLS_DIR", "/app/skills"),
 		ThunderAdmin: ThunderAdminConfig{

@@ -99,6 +99,10 @@ type Service struct {
 	// securityJSON reads security.json at HEAD (empty tag) or a spec tag.
 	// Nil skips overlay.
 	securityJSON SecurityJSONReader
+	// tryItCallbackURL is the platform tester's OAuth callback, published in
+	// the roles gate beside the logins so a reader knows which redirect_uri to
+	// ask for. Empty omits the line.
+	tryItCallbackURL string
 }
 
 // OrgPublishMarker persists a provider component's deliberate publish decision.
@@ -127,6 +131,8 @@ func (s *Service) SetAgentRegistrar(r AgentRegistrar) { s.agents = r }
 // providers may be nil (a nil projects skips the cross-project consumer scan;
 // nil access / providers disable the access-request surface).
 type Deps struct {
+	// TryItCallbackURL is config.TryItCallbackURL — see Service.tryItCallbackURL.
+	TryItCallbackURL  string
 	Issues            IssueClient
 	Execs             ExecutionStore
 	Design            DesignReader
@@ -188,6 +194,7 @@ func NewService(d Deps) *Service {
 		markers:           d.Markers,
 		securityJSON:      d.SecurityJSON,
 		projectNames:      d.ProjectNames,
+		tryItCallbackURL:  strings.TrimSpace(d.TryItCallbackURL),
 	}
 }
 
