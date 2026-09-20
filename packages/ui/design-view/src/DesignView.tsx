@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -202,18 +202,24 @@ export type DependencyResolutionIntent = "resolve" | "reconsider";
 // DependencyCard: exactly one of the two renders, based on `isResolved`).
 //
 // Inert while a turn holds the room (`busyReason` non-empty): the one item
-// fires a turn, and the reason is the tooltip on the disabled button.
+// fires a turn, and the reason is the tooltip on the disabled button. A menu
+// already open when the turn starts closes, and its item stops firing, so
+// the anchor cannot outlive the gate and pop the menu back open later.
 function ReconsiderMenu({ dependencyName, onReconsider, busyReason }: {
   dependencyName: string;
   onReconsider: () => void;
   busyReason: string;
 }) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const inert = busyReason !== "";
+  useEffect(() => {
+    if (inert) setAnchorEl(null);
+  }, [inert]);
   const button = (
     <IconButton
       aria-label={`Actions for ${dependencyName}`}
       size="small"
-      disabled={busyReason !== ""}
+      disabled={inert}
       onClick={(e) => setAnchorEl(e.currentTarget)}
       sx={{ ml: "auto" }}
     >
@@ -222,23 +228,23 @@ function ReconsiderMenu({ dependencyName, onReconsider, busyReason }: {
   );
   return (
     <>
-      {busyReason === "" ? (
-        button
-      ) : (
+      {inert ? (
         // The span carries the tooltip: a disabled button swallows pointer events.
         <Tooltip title={busyReason}>
           <span style={{ marginLeft: "auto" }}>{button}</span>
         </Tooltip>
+      ) : (
+        button
       )}
       <Menu
         anchorEl={anchorEl}
-        open={anchorEl !== null}
+        open={anchorEl !== null && !inert}
         onClose={() => setAnchorEl(null)}
       >
         <MenuItem
           onClick={() => {
             setAnchorEl(null);
-            onReconsider();
+            if (!inert) onReconsider();
           }}
         >
           Discuss in chat & modify
