@@ -180,8 +180,9 @@ for (const rule of [
   // will not let a web app be committed unwalked, and the literal dispatch
   // prompt. The procedure itself is `mock-verification`, asserted below.
   "**A `web-application` is finished by a walk, not a build.**",
-  "The moment its\n   builder reports clean",
-  "dispatch **one\n   more subagent**",
+  "Once its builder\n   reports clean",
+  "dispatch **one more subagent** for that component",
+  "One walk at a time",
   "Walk <component> at <App Path>",
 ]) {
   test(`shared by both modes: ${rule.split("\n")[0]}`, () => {
