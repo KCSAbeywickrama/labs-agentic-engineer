@@ -705,21 +705,6 @@ step bar and no second progress indicator competing with the overview's cards. D
 [#527](https://github.com/wso2/labs-agentic-engineer/issues/527);
 [drawn here](https://claude.ai/code/artifact/fe3fc0c0-6ecd-49ed-9f75-ed65c2220cb1).
 
-**A reference between spec documents is a link, and it opens in place.** The PRD names its feature
-docs — depth lives in `features/<slug>.md` and the body stays lean — so the document is full of
-pointers to files sitting two rows away in the same rail. The shared schema parses a markdown link
-as an EXTERNAL one, which is wrong twice: a plain click inside the editor only places a caret, and
-a click that did follow the href would leave the console for a path it does not serve. A reference
-that resolves to a file the project HAS is styled as a link and selects that file; one naming a
-document nobody has written yet stays plain text, because a control that selects nothing is worse
-than prose. The link's text is the feature's **name** — the path is the href, never the label.
-
-**The PRD leads Requirements.** Everything else in that group elaborates it — a feature file is
-depth on a story the PRD defines — so the document the whole flow is written against cannot sit
-below its own footnotes. Path order alone puts `features/…` above `prd.md`, which
-[#579](https://github.com/wso2/labs-agentic-engineer/issues/579) made routine by giving `/expand` a
-lens on every story; the list pins the PRD instead, and everything behind it keeps path order.
-
 ### A dependency's group, and its definition
 
 Decided in [ADR-0028](decisions/ADR-0028-a-dependency-is-a-directory-in-the-rail.md). An
@@ -1448,7 +1433,6 @@ renaming; it needed to stop being visible.
 | start from an idea | `/start with <idea>` | fired at project creation ([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)); the idea rides along, cropped, so the user can see the agent is working from **their** words rather than a bare command ([#528](https://github.com/wso2/labs-agentic-engineer/issues/528)) |
 | add a feature | `/feature <idea>` | code lens on the story list — opens the aim box to collect the idea, and sends the command plus their words |
 | add an actor | `/actor <who>` | code lens on Actors — same collecting box |
-| go deeper on a feature | `/expand <story>` | code lens on the story, which carries itself as the subject |
 | answer an open question | `/settle <the point>` | code lens on the question |
 | take up the open questions | `/settle` over the section | code lens on **Open Questions** |
 | talk a line through | *Discuss* — no command; opens the aim box on the line, Enter sends Discuss | code lens on any bullet |
@@ -1503,12 +1487,6 @@ how a command is discovered at all, so it cannot hide; a twenty-story list with 
 line would be twenty controls competing with the prose they annotate. The flag itself never hides —
 an `*assumed*` run and an open question read as unsettled at rest, and only the control that acts
 on them waits for the pointer.
-
-That hover is what settled **`/expand` per story rather than one lens on the list**: a feature has
-no block of its own in the PRD — the contract keeps depth in feature files — so the nearest thing
-to "a feature" is the story line, and per-story is the only placement where the subject comes from
-the document instead of the user's memory. Decided against the rendered document, where the cost
-of per-line is a control that is only there while the pointer is.
 
 **The lens is a control beside the line, not the line made clickable.** The PRD is a collaborative
 editor: a line that fires a command on click is a line the user can no longer put a caret in.

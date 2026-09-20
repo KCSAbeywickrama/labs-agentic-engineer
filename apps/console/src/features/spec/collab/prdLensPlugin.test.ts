@@ -130,9 +130,7 @@ describe("the PRD's lens surface", () => {
       "Discuss",
       "Discuss",
       "+ Feature",
-      "Go deeper",
       "Discuss",
-      "Go deeper",
       "Discuss",
       "Agree",
       "Discuss",
@@ -154,8 +152,6 @@ describe("the PRD's lens surface", () => {
     expect(commands).toEqual([
       "/actor",
       "/feature",
-      "/expand As an Employee, I want to submit an expense with a receipt photo.",
-      "/expand As a Manager, I want to approve or reject an expense.",
       "/settle",
       "/settle Which accounting system do we export to?",
       "/settle What is the approval limit? Deferred — the user will decide next quarter.",
