@@ -319,8 +319,7 @@ here: they're the open `console` + `feature` issues.
   (contract: `TurnStatus.instruction` / `authorId` / `authorDisplayName`)
 - Spec view — the PRD is the interface: each PRD section carries a **code
   lens** firing the command that belongs there — `/actor` on Actors,
-  `/feature` on the story list, `/expand` on each story, `/settle` over Open
-  Questions — and every flagged line (an `*assumed*` decision, an open
+  `/feature` on the story list, `/settle` over Open Questions — and every flagged line (an `*assumed*` decision, an open
   question) carries its own `/settle`, so the subject comes from what the user
   clicked instead of their memory. Section lenses show at rest, line lenses on
   hover, and all of them go inert while an agent holds the turn. The lenses stay

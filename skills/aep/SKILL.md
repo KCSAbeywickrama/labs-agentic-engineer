@@ -192,10 +192,11 @@ subagent you handed it to, keeps its status line current from start to done
 2. **Make the change it asks for**, holding to
    `references/component-contract.md` and the stack skills of every component it
    touches.
-3. **A `web-application` is finished by a walk, not a build.** The moment its
-   builder reports clean — not when the rest of the wave has — dispatch **one
-   more subagent** for that component with exactly this prompt, and nothing
-   about how to walk:
+3. **A `web-application` is finished by a walk, not a build.** Once its builder
+   reports clean — not waiting on the rest of the wave — and **no other walk is
+   live**, dispatch **one more subagent** for that component with exactly this
+   prompt, and nothing about how to walk. One walk at a time: a live Chromium is
+   the largest thing in the pod.
 
    ```text
    Walk <component> at <App Path>. Load `mock-verification` and
