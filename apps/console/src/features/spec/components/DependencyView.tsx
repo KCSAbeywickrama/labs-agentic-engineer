@@ -41,11 +41,18 @@
  * in git outside the room, so the view reports them (`onCommitted`) for the
  * owner to bring the room's copy up to date. Question cards the flow asks
  * render on the spec view around this pane, so the user never leaves it.
+ *
+ * While a turn holds the room every one of those buttons goes inert, with
+ * the reason as its tooltip — the PRD's lenses do the same, from the same
+ * gate (`busyReason`). A resolve fired then would be refused as a second
+ * send; an upload or acceptance would land in the directory the agent may
+ * be writing at that moment. Reading is never gated: the file links stay
+ * live, since reading while the agent works is what the page is for.
  */
 
 import type React from "react";
 import { useMemo, useState } from "react";
-import { Alert, Box, Button, Chip, Stack, Typography } from "@wso2/oxygen-ui";
+import { Alert, Box, Button, Chip, Stack, Tooltip, Typography, type ButtonProps } from "@wso2/oxygen-ui";
 import { FileText, Plug, TriangleAlert } from "@wso2/oxygen-ui-icons-react";
 import { dependencyFilePath } from "../api/designTree";
 import { useAcceptDependencyAssumption } from "../api/queries";
@@ -88,6 +95,23 @@ function Fact({ label, value }: { label: string; value: string }) {
         {value}
       </Typography>
     </Box>
+  );
+}
+
+/**
+ * A button that changes the dependency — fires a turn or writes its
+ * directory — so it goes inert while a turn holds the room, and says why.
+ * The span carries the tooltip: a disabled button swallows pointer events.
+ * With no reason it is the button as it was.
+ */
+function GatedButton({ busyReason, ...props }: ButtonProps & { busyReason: string }) {
+  if (busyReason === "") return <Button {...props} />;
+  return (
+    <Tooltip title={busyReason}>
+      <span>
+        <Button {...props} disabled />
+      </span>
+    </Tooltip>
   );
 }
 
@@ -144,6 +168,7 @@ export function DependencyView({
   onResolve,
   onReconsider,
   onCommitted,
+  busyReason,
 }: {
   projectName: string;
   /** The directory's name — what components reference. */
@@ -159,6 +184,12 @@ export function DependencyView({
   onReconsider: (name: string) => void;
   /** A write landed in the dependency's directory outside the room. */
   onCommitted?: ((name: string) => void) | undefined;
+  /**
+   * Why a change to the dependency would be refused right now — a turn holds
+   * the room — or `""` when the buttons are live. The lenses' gate, verbatim,
+   * so the tooltip reads the same everywhere on the spec view.
+   */
+  busyReason: string;
 }) {
   const parsed = useMemo(() => parseDependencyDefinition(definition), [definition]);
   const accept = useAcceptDependencyAssumption(projectName);
@@ -254,18 +285,18 @@ export function DependencyView({
             // A reconsider is a conversation about a consumer's choice; with
             // no consumer there is nobody to reconsider for.
             state && state.usedBy.length > 0 && (
-              <Button variant="outlined" onClick={() => onReconsider(name)}>
+              <GatedButton busyReason={busyReason} variant="outlined" onClick={() => onReconsider(name)}>
                 Reconsider
-              </Button>
+              </GatedButton>
             )
           ) : (
             // While no provider is chosen the Provider section's button is the
             // way in, so the header does not repeat it.
             chosen &&
             !refMissing && (
-              <Button variant="contained" onClick={() => onResolve(name)}>
+              <GatedButton busyReason={busyReason} variant="contained" onClick={() => onResolve(name)}>
                 Resolve
-              </Button>
+              </GatedButton>
             )
           )}
         </Stack>
@@ -284,9 +315,9 @@ export function DependencyView({
             severity="warning"
             sx={{ mt: 2 }}
             action={
-              <Button size="small" onClick={() => onResolve(name)}>
+              <GatedButton busyReason={busyReason} size="small" onClick={() => onResolve(name)}>
                 Select a provider
-              </Button>
+              </GatedButton>
             }
           >
             The organization has no registered resource with this name
@@ -329,9 +360,14 @@ export function DependencyView({
           action={
             !chosen &&
             !stub && (
-              <Button variant="contained" size="small" onClick={() => onResolve(name)}>
+              <GatedButton
+                busyReason={busyReason}
+                variant="contained"
+                size="small"
+                onClick={() => onResolve(name)}
+              >
                 Select a provider
-              </Button>
+              </GatedButton>
             )
           }
         >
@@ -371,9 +407,14 @@ export function DependencyView({
             <Stack direction="row" spacing={1} alignItems="center">
               {contractFromRegistry && <CopiedChip />}
               {canProvide && (
-                <Button size="small" variant="outlined" onClick={() => setProviding(true)}>
+                <GatedButton
+                  busyReason={busyReason}
+                  size="small"
+                  variant="outlined"
+                  onClick={() => setProviding(true)}
+                >
                   {hasInterface ? "Replace interface" : "Provide interface"}
-                </Button>
+                </GatedButton>
               )}
             </Stack>
           }
@@ -391,13 +432,14 @@ export function DependencyView({
               document replaces it.
             </Typography>
             <Stack direction="row" spacing={1}>
-              <Button
+              <GatedButton
+                busyReason={busyReason}
                 variant="contained"
                 loading={accept.isPending}
                 onClick={() => accept.mutate({ depName: name }, { onSuccess: () => onCommitted?.(name) })}
               >
                 Accept the assumption
-              </Button>
+              </GatedButton>
               {hasInterface && (
                 <Button variant="text" onClick={() => onOpenFile(dependencyFilePath(name, contractFile))}>
                   Read it first
