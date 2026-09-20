@@ -81,10 +81,14 @@ package identity
 //     alone, which is the whole point: the login holds the project role without
 //     the platform putting a disposable account into an org group it does not
 //     own.
-//   - a role assigned to no group at all (self-service, service) is granted by
-//     neither, and an account whose every role is of that shape is not created:
-//     a standing credential for a login that holds nothing is worse than no
-//     credential. It is reported and skipped.
+//   - a role assigned to no group AT ALL — the self-service shape — is granted
+//     the same way, by binding the role to the account. It is the only way such
+//     a login can hold it, since the design gate refuses an assignTo on that
+//     role; ADR-0030's 2026-09-20 amendment holds the argument.
+//
+// An account that none of these would give a single role is not created: a
+// standing credential for a login that holds nothing is worse than no
+// credential. It is reported and skipped.
 //
 // Accounts still come before groups, because the IdP sets group membership only
 // when a group is CREATED. Knowing the member ids up front lets a brand-new role
@@ -170,16 +174,21 @@ type Result struct {
 	// UsersCreated/UsersReused name and the one Credentials publishes. See
 	// ensureUser.
 	UsersRenamed []UsernameRename
-	// UsersSkipped are accounts the design asked for whose roles assign to no
-	// org group at all — the self-service and service shapes, which nothing
-	// here enrols. They are deliberately not created: an account that would
+	// UsersSkipped are accounts the design asked for that nothing here would
+	// give a role. They are deliberately not created: an account that would
 	// hold no role is a standing credential for a login that holds nothing, and
 	// serving it to validation would be worse than serving nothing.
 	//
-	// A role assigned only to a group somebody else made does NOT land here: the
-	// account is created and the role is bound to it directly (see the file
-	// header, pass 1).
+	// An account whose role assigns to no org group, or only to a group
+	// somebody else made, does NOT land here: it is created and the role is
+	// bound to it directly (the file header, pass 1). What reaches this list is
+	// an account holding no role the plan declares.
 	UsersSkipped []string
+	// UsersBoundDirectly are the accounts holding a role as a USER principal on
+	// the directory rather than through an org group. Reported because a project
+	// role assigned straight to a person otherwise reads as somebody's hand
+	// edit. Which roles each one holds is the credentials table's Roles column.
+	UsersBoundDirectly []string
 	// Credentials are the logins for every account this project can sign in
 	// as after this run — the ones created here AND the ones reused from an
 	// earlier build. It is deliberately not "what changed": the validation
@@ -271,7 +280,8 @@ func (r Result) Summary() string {
 			strings.Join(parts, ", ")))
 	}
 	add("Test users refused (the declared username and every numbered alternate already belong to an account the platform does not own)", r.UsersRefused)
-	add("Test users not created (their roles are assigned to no org group)", r.UsersSkipped)
+	add("Test users not created (nothing in the design would give them a role)", r.UsersSkipped)
+	add("Test users bound straight to their role, as user principals (the role is assigned to no org group this platform enrols into)", r.UsersBoundDirectly)
 	add("Project roles", r.RolesConverged)
 	add("Project roles deleted (no longer declared at this version)", r.RolesDeleted)
 	if len(lines) == 0 {
@@ -443,9 +453,9 @@ func (s *EnsureService) ensure(ctx context.Context, target Target, projectID str
 		joins := enrolableGroups(planned, enrolable)
 		direct := directRoles(planned, assignTo, enrolable)
 		if len(joins) == 0 && len(direct) == 0 {
-			// Nothing would give this account a role: its roles assign to no
-			// group at all (the self-service shape). A standing credential for a
-			// login that holds nothing is worse than no credential, so it is not
+			// Nothing would give this account a role — every role it holds is
+			// one the plan does not declare. A standing credential for a login
+			// that holds nothing is worse than no credential, so it is not
 			// minted.
 			result.UsersSkipped = append(result.UsersSkipped, planned.Username)
 			continue
@@ -466,6 +476,12 @@ func (s *EnsureService) ensure(ctx context.Context, target Target, projectID str
 		}
 		for _, role := range direct {
 			directPrincipals[role] = append(directPrincipals[role], DirectoryID(account.ID))
+		}
+		if len(direct) > 0 {
+			// The ACTUAL username, the one the credential is published under: a
+			// renamed account reported under its declared name would name a
+			// login nobody can sign in as.
+			result.UsersBoundDirectly = append(result.UsersBoundDirectly, actualUsername)
 		}
 		// A reference is the statement "this account is the login for this role
 		// in this project", and the credential provider reads it as exactly
@@ -713,9 +729,11 @@ func (s *EnsureService) convergeRoles(
 		}
 		result.RolesConverged = append(result.RolesConverged, role.Name)
 		if len(role.AssignTo) == 0 {
-			// Recorded, assigned to nobody — the normal shape for a self-service
-			// role, whose accounts the registration flow assigns. The row still
-			// has to exist: it is what the delete path reads to find the role.
+			// No GROUP holds this role — the self-service shape. The row is
+			// still written with an empty group: it is what the delete path
+			// reads to find the role, and it is the honest record, since the
+			// role's principals are the test logins bound just above, not a
+			// group.
 			bindings = append(bindings, IdPRoleBinding{Role: role.Name, DirectoryRoleID: string(roleID)})
 			continue
 		}
@@ -888,14 +906,19 @@ func enrolableGroups(planned securityspec.PlannedUser, enrolable map[string]bool
 //
 // A role a group the platform owns already covers is NOT listed: enrolment
 // through that group grants it, and a second, direct principal would be a grant
-// the converge can never take back for no gain. A role assigning to no group at
-// all — the self-service and service shapes — is not listed either: nothing
-// here is meant to enrol it.
+// the converge can never take back for no gain.
+//
+// A role assigning to NO group is always listed. That is the self-service
+// shape, and the direct bind is the only way its login holds it.
+//
+// A role the plan does not declare is skipped. Pass 5 walks the DECLARED roles,
+// so a principal collected for one would never be bound, and the ticket would
+// report a binding that did not happen.
 func directRoles(planned securityspec.PlannedUser, assignTo map[string][]string, enrolable map[string]bool) []string {
 	var out []string
 	for _, role := range planned.Roles {
-		groups := assignTo[role]
-		if len(groups) == 0 {
+		groups, declared := assignTo[role]
+		if !declared {
 			continue
 		}
 		covered := false
