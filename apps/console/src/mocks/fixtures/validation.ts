@@ -36,6 +36,20 @@ type RunVerdict = NonNullable<
 // exists on a version whose run got that far (see handlers/project.ts).
 export type ValidationScenario = DeployStage["validation"];
 
+/**
+ * The three keys read together: what state the version is in, and — where the
+ * scenario alone cannot say — which attempt and which run reached it. One value
+ * rather than three arguments, because every read below must be told the same
+ * story or the page and the board disagree about one run again (#423).
+ */
+export interface ValidationStory {
+  scenario: ValidationScenario;
+  /** Which attempt a `running` scenario is on — see ValidationAttempt. */
+  attempt?: ValidationAttempt;
+  /** Which run reached the scenario's state — see ValidationOrigin. */
+  origin?: ValidationOrigin;
+}
+
 /** The switch's accepted values — also the list the handler validates against. */
 export const VALIDATION_SCENARIOS: ValidationScenario[] = [
   "none",
@@ -571,15 +585,12 @@ const ARTIFACTS: Record<ValidationScenario, Artifacts> = {
 
 /** The validation artifacts a scenario puts in the repo, as Files-API entries. */
 export function validationFiles(
-  scenario: ValidationScenario,
-  attempt: ValidationAttempt = "first",
+  story: ValidationStory,
   drifted = false,
 ): { path: string; content: string }[] {
-  // A repeat attempt is running OVER a failed one whose report is still committed —
-  // which is what its copy counts. A first attempt has the oracle and nothing else.
-  const { outcomes, reported } = isRepeat(scenario, attempt)
+  const { outcomes, reported } = previousReportStands(story)
     ? { outcomes: FAILED, reported: true }
-    : ARTIFACTS[scenario];
+    : ARTIFACTS[story.scenario];
   if (!outcomes) return [];
 
   // Only the SPECIFICATION moves: a report is written once and pinned, so drift can
@@ -703,7 +714,8 @@ function run(over: Partial<MilestoneRunView>): MilestoneRunView {
       cycleCeiling: 8,
       fixCycles: 0,
       conflictCycles: 0,
-      buildRetriggers: 1,
+      // A validation run has nothing to build, so nothing to retrigger.
+      buildRetriggers: over.kind === "validation" ? 0 : 1,
       validationCycles: cycles.filter((c) => c.kind === "validation").length,
     },
     validation: {},
@@ -848,21 +860,163 @@ const RUNNING_REPEAT: MilestoneRunView = run({
   ],
 });
 
-/** True when the scenario/attempt pair is the repeat-attempt shape. */
-function isRepeat(
-  scenario: ValidationScenario,
-  attempt: ValidationAttempt,
-): boolean {
-  return scenario === "running" && attempt === "repeat";
+/** True when the story is the repeat-attempt shape. */
+function isRepeat(story: ValidationStory): boolean {
+  return story.scenario === "running" && story.attempt === "repeat";
 }
 
-/** The version's run story for a validation scenario. */
-export function validationRuns(
-  scenario: ValidationScenario,
-  attempt: ValidationAttempt = "first",
-): BuildRunList {
-  const row = isRepeat(scenario, attempt) ? RUNNING_REPEAT : RUNS[scenario];
-  return { tag: "v1", milestoneNumber: 1, runs: [row] };
+// A version's state is its NEWEST run's, and every scenario above has exactly one
+// run: the version's own build, whose loop validated it. The other way a version
+// gets judged is the Revalidate trigger, which starts a run of kind `validation`
+// over a version an earlier run already built and judged — so a revalidated
+// version has a HISTORY, and both cards on its page have two runs to stack.
+//
+// Hence a third key, named for the run field it moves:
+//   localStorage.setItem('aep:mock:validation', 'passed')
+//   localStorage.setItem('aep:mock:validation-origin', 'revalidate')
+//
+// Under it the scenario describes the revalidation, and beneath that run sits the
+// version's dev run, which validated and failed both attempts — the `failed` story
+// exactly as it stands, and the kind of answer that sends someone to the trigger.
+//
+// Honoured only where a validation run can honestly settle in the scenario's
+// state. `none` and `awaiting-fix` are shapes of the DEV loop (a coding cycle in
+// flight), `skipped` is refused at the trigger, and a repeat attempt is a
+// self-heal only the dev loop performs — a validation run builds nothing, so it
+// repairs nothing. Those keep their single run whatever the key says, as every
+// scenario but `running` ignores the attempt key.
+export type ValidationOrigin = "spec-build" | "revalidate";
+
+/** The key's accepted values — also the list the handler validates against. */
+export const VALIDATION_ORIGINS: ValidationOrigin[] = ["spec-build", "revalidate"];
+
+// The dev run every revalidation sits on. Its two attempts keep their ids and
+// commits, so each of them reads the FAILED report at its own merge SHA while the
+// newest attempt reads the scenario's — which is the point of the snapshot read.
+const HISTORY_SCENARIO: ValidationScenario = "failed";
+const HISTORY = RUNS[HISTORY_SCENARIO];
+
+// A revalidation's cycles are validation cycles and nothing else: the workflow
+// has no working set and builds nothing (ValidationRunWorkflow). Ids follow the
+// build fixtures' second-run convention (`run0-cycle-1` in project.ts), and the
+// pull requests continue the dev run's numbering — they are the milestone's.
+function revalidationCycle(
+  n: number,
+  verdict: RunVerdict,
+  over: Partial<RunCycleView> = {},
+): RunCycleView {
+  return {
+    id: `run2-cycle-${String(n)}`,
+    kind: "validation",
+    attempts: 1,
+    branch: `aep/m1-r2c${String(n)}`,
+    prNumber: n + 6,
+    prUrl: `${REPO_URL}/pull/${String(n + 6)}`,
+    mergeSha: n === 1 ? "e3d9a04f6b17c825" : "41cf7d2be09a5136",
+    validationVerdict: verdict,
+    // The same issue as the dev run's attempts: a revalidation ADOPTS the
+    // version's validation task rather than minting one.
+    validationIssue: 30,
+    createdAt: "2026-07-12T14:02:00Z",
+    endedAt: "2026-07-12T14:19:00Z",
+    ...over,
+  };
+}
+
+// Two days after the dev run, so the two read as history and not as one morning.
+function revalidation(over: Partial<MilestoneRunView>): MilestoneRunView {
+  return run({
+    id: "run-v1-2",
+    kind: "validation",
+    origin: "revalidate",
+    createdAt: "2026-07-12T14:00:00Z",
+    startedAt: "2026-07-12T14:01:00Z",
+    endedAt: "2026-07-12T14:20:00Z",
+    ...over,
+  });
+}
+
+// One attempt, judged. A validation run settles on its first verdict: green for
+// the three that are honest reports, and `failed` after ONE cycle too — it files
+// the failure as repair work and stops, where the dev loop would have worked it.
+function judged(verdict: RunVerdict, over: Partial<MilestoneRunView> = {}): MilestoneRunView {
+  return revalidation({
+    validation: { verdict, issue: 30, reportPath: REPORT_PATH },
+    cycles: [revalidationCycle(1, verdict)],
+    ...over,
+  });
+}
+
+const REVALIDATIONS: Partial<Record<ValidationScenario, MilestoneRunView>> = {
+  passed: judged("passed"),
+  partial: judged("partial"),
+  inconclusive: judged("inconclusive"),
+  failed: judged("failed", { state: "failed", terminalReason: "validation-failed" }),
+  // The one verdict a validation run remedies itself, once: the agent merged
+  // without a report, so it is dispatched again, and a second silence settles it.
+  unreported: revalidation({
+    state: "failed",
+    terminalReason: "validation-unreported",
+    validation: { verdict: "unreported", issue: 30 },
+    cycles: [
+      revalidationCycle(1, "unreported"),
+      revalidationCycle(2, "unreported", {
+        createdAt: "2026-07-12T14:21:00Z",
+        endedAt: "2026-07-12T14:37:00Z",
+      }),
+    ],
+    endedAt: "2026-07-12T14:38:00Z",
+  }),
+  running: revalidation({
+    state: "running",
+    endedAt: null,
+    cycles: [
+      { id: "run2-cycle-1", kind: "validation", attempts: 1, createdAt: "2026-07-12T14:02:00Z" },
+    ],
+  }),
+  cancelled: revalidation({
+    state: "cancelled",
+    validation: {},
+    cycles: [
+      {
+        id: "run2-cycle-1",
+        kind: "validation",
+        attempts: 1,
+        validationIssue: 30,
+        createdAt: "2026-07-12T14:02:00Z",
+        endedAt: "2026-07-12T14:09:00Z",
+      },
+    ],
+    endedAt: "2026-07-12T14:09:00Z",
+  }),
+};
+
+/** The revalidation a story describes, or undefined where the key is ignored. */
+function revalidationOf(story: ValidationStory): MilestoneRunView | undefined {
+  if (story.origin !== "revalidate" || isRepeat(story)) return undefined;
+  return REVALIDATIONS[story.scenario];
+}
+
+// A report is overwritten by the next attempt to commit one, so an attempt that
+// has committed nothing — in flight, or stopped — leaves the PREVIOUS attempt's at
+// the branch tip: the failed attempt a repeat runs over, and the dev run's failed
+// attempt a revalidation runs over. Not `unreported`: that verdict IS the tip
+// having been read and no report found there.
+function previousReportStands(story: ValidationStory): boolean {
+  if (isRepeat(story)) return true;
+  return (
+    revalidationOf(story) !== undefined &&
+    (story.scenario === "running" || story.scenario === "cancelled")
+  );
+}
+
+/** The version's run story, newest run first as the server lists them. */
+export function validationRuns(story: ValidationStory): BuildRunList {
+  const revalidated = revalidationOf(story);
+  const runs = revalidated
+    ? [revalidated, HISTORY]
+    : [isRepeat(story) ? RUNNING_REPEAT : RUNS[story.scenario]];
+  return { tag: "v1", milestoneNumber: 1, runs };
 }
 
 // ---------------------------------------------------------------------------
@@ -958,9 +1112,9 @@ type ValidationSummary = components["schemas"]["ValidationSummary"];
 type ValidationDetail = components["schemas"]["ValidationDetail"];
 type ValidationSnapshot = components["schemas"]["ValidationSnapshot"];
 
-/** The attempts a scenario's run story holds, oldest first. */
-function attemptsOf(scenario: ValidationScenario, attempt: ValidationAttempt) {
-  const runs = validationRuns(scenario, attempt).runs ?? [];
+/** The attempts a story's runs hold, oldest first — the runs arrive newest first. */
+function attemptsOf(story: ValidationStory) {
+  const runs = [...(validationRuns(story).runs ?? [])].reverse();
   return runs.flatMap((r) => (r.cycles ?? []).filter((c) => c.kind === "validation"));
 }
 
@@ -969,16 +1123,13 @@ function attemptsOf(scenario: ValidationScenario, attempt: ValidationAttempt) {
  * versions the build ledger carries — the point of the page is that they are
  * all reachable, so a single-row fixture would hide the feature it exists for.
  */
-export function validationLedger(
-  scenario: ValidationScenario,
-  attempt: ValidationAttempt = "first",
-): ValidationList {
-  const cycles = attemptsOf(scenario, attempt);
+export function validationLedger(story: ValidationStory): ValidationList {
+  const cycles = attemptsOf(story);
   const newest = cycles[cycles.length - 1];
   const current: ValidationSummary = {
     tag: "v1",
     milestoneNumber: 1,
-    state: scenario,
+    state: story.scenario,
     ...(newest?.createdAt ? { startedAt: newest.createdAt } : {}),
     ...(newest?.endedAt ? { endedAt: newest.endedAt } : {}),
   };
@@ -1002,19 +1153,15 @@ export function validationLedger(
 }
 
 /** One version's validation history, filtered as the server filters it. */
-export function validationDetail(
-  scenario: ValidationScenario,
-  attempt: ValidationAttempt = "first",
-  tag = "v1",
-): ValidationDetail {
-  const list = validationRuns(scenario, attempt);
+export function validationDetail(story: ValidationStory, tag = "v1"): ValidationDetail {
+  const list = validationRuns(story);
   const runs = (list.runs ?? [])
     .map((r) => ({ ...r, cycles: (r.cycles ?? []).filter((c) => c.kind === "validation") }))
     .filter((r) => r.cycles.length > 0);
   return {
     tag,
     milestoneNumber: list.milestoneNumber,
-    state: scenario,
+    state: story.scenario,
     live: runs.some((r) => !TERMINAL_RUN_STATES.has(r.state)),
     // The scenario's own version is the deployed one; the two older rows in the
     // ledger are not. Without a NOT-deployed version in the fixtures the
@@ -1032,13 +1179,21 @@ const TERMINAL_RUN_STATES = new Set(["succeeded", "failed", "cancelled", "blocke
  *
  * A running attempt has no commit and therefore no report — which is the state
  * the scenario list's `running` first attempt puts the page in.
+ *
+ * The cycle matters only under a revalidation, where the dev run's attempts are
+ * read at THEIR commits and what they committed is the failed report. Every
+ * attempt of a single-run story shares the scenario's, as it always has.
  */
 export function validationSnapshot(
-  scenario: ValidationScenario,
-  attempt: ValidationAttempt = "first",
+  story: ValidationStory,
   drifted = false,
+  cycleId?: string,
 ): ValidationSnapshot {
-  const files = validationFiles(scenario, attempt, drifted);
+  const historical =
+    revalidationOf(story) !== undefined && HISTORY.cycles.some((c) => c.id === cycleId);
+  const files = historical
+    ? validationFiles({ scenario: HISTORY_SCENARIO })
+    : validationFiles(story, drifted);
   const report = files.find((f) => f.path === REPORT_PATH);
   return {
     commit: report ? "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" : "",
