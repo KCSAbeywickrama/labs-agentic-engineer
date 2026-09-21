@@ -52,10 +52,9 @@ export interface Attempt {
   cycle: RunCycleView;
   /** The run the attempt belongs to — what the page cancels and copies. */
   runId: string;
-  /** Which run, counted from the oldest, or undefined when there is only one. */
-  runNumber?: number | undefined;
-  /** The cycle's position within its run, counted from the oldest. */
-  ordinal: number;
+  /** Which judging of the version this is, counted from the oldest across
+   *  every run — the number a reader refers to it by. */
+  number: number;
 }
 
 /**
@@ -187,7 +186,7 @@ function AttemptSection({
   /** Supplied for the newest attempt, which the page fetches for its card. */
   snapshot?: ReturnType<typeof useValidationSnapshot>;
 }) {
-  const { cycle, runNumber, ordinal } = attempt;
+  const { cycle, number } = attempt;
   const settled = Boolean(cycle.endedAt);
   // Older attempts fetch on open, following the build page's per-build log.
   // The hook stays unconditional and `enabled` gates it, which is this
@@ -201,10 +200,9 @@ function AttemptSection({
   );
   const query = snapshot ?? own;
 
-  // ONE string for the heading and for the pull request's accessible name —
-  // two runs each hold a "Cycle 1", so the link has to say which box it is in.
-  const label =
-    runNumber === undefined ? `Cycle ${ordinal}` : `Run ${runNumber} · Cycle ${ordinal}`;
+  // ONE string for the heading and for the pull request's accessible name, so
+  // the link says which box it is in and the two cannot drift apart.
+  const label = `Attempt ${String(number)}`;
   const chip = validationChip(cycle.validationVerdict || "");
 
   return (

@@ -109,10 +109,10 @@ export function ValidationMilestonePage({
   const detail = useValidation(projectName, tag);
   const data = detail.data;
 
-  // Attempts, newest first, flattened out of the runs. The ordinals count from
-  // the OLDEST within each run and the run numbers from the oldest run, so the
-  // numbers descend down the page (ADR-0017) — the same rule the log below
-  // follows, which is what lets the two lists be read as one history.
+  // Attempts, newest first, flattened out of the runs and numbered from the
+  // OLDEST across the whole version, so the numbers descend down the page
+  // (ADR-0017) — the same rule the log below follows, which is what lets the
+  // two lists be read as one history.
   const attempts = useMemo(() => flattenAttempts(data?.runs ?? []), [data?.runs]);
   const newest = attempts[0];
 
@@ -233,6 +233,14 @@ export function ValidationMilestonePage({
   // Newest first, so the log's runs match the report's ordering above it.
   const feedRuns = [...data.runs];
   const [newestRun, ...olderRuns] = feedRuns;
+  // Each feed heads its boxes "Attempt N" with N counted across the version, so
+  // a feed needs to know how many attempts the runs OLDER than its own hold.
+  // Read off the detail rather than the stream: the older runs are settled, so
+  // their count cannot move under a live feed.
+  const attemptLabel = (runIndex: number) => {
+    const before = attemptsBefore(feedRuns, runIndex);
+    return (ordinal: number) => `Attempt ${String(before + ordinal)}`;
+  };
 
   return (
     <>
@@ -274,7 +282,7 @@ export function ValidationMilestonePage({
                   projectName={projectName}
                   runId={newestRun.id}
                   cycleKinds={VALIDATION_CYCLE}
-                  {...(feedRuns.length > 1 ? { runNumber: feedRuns.length } : {})}
+                  label={attemptLabel(0)}
                   expandNewest
                 />
               )}
@@ -288,8 +296,7 @@ export function ValidationMilestonePage({
                     projectName={projectName}
                     runId={run.id}
                     cycleKinds={VALIDATION_CYCLE}
-                    // Counted from the OLDEST; the newest above is feedRuns.length.
-                    runNumber={feedRuns.length - 1 - j}
+                    label={attemptLabel(j + 1)}
                     expandNewest={false}
                   />
                 ))}
@@ -320,26 +327,30 @@ function emptyReason(state: string, live: boolean): string {
   return "Nothing validated yet. Run validation to check this version against its acceptance criteria.";
 }
 
-/** One attempt per validation cycle, newest first, numbered from the oldest. */
+/**
+ * One attempt per validation cycle, newest first, numbered from the oldest
+ * across the whole version. Which run an attempt sat in is not part of its
+ * name: since validation became its own run, an attempt IS a run, and a run
+ * holding two attempts is the platform dispatching again after an agent merged
+ * without a report — a remedy, not a distinction a reader needs in a heading.
+ */
 function flattenAttempts(runs: readonly MilestoneRunView[]): Attempt[] {
-  const multiRun = runs.length > 1;
   // Runs arrive newest first and each run's cycles in dispatch order, so the
   // runs are kept as they come and only each run's cycles are walked backwards.
   // Reversing the whole flattened list instead would put the OLDER run's
   // attempts on top — the run order is already right, the cycle order is not.
-  return runs.flatMap((run, runIndex) =>
-    (run.cycles ?? [])
-      .map(
-        (cycle, i): Attempt => ({
-          cycle,
-          // The number counts from the oldest run.
-          ...(multiRun ? { runNumber: runs.length - runIndex } : {}),
-          ordinal: i + 1,
-          runId: run.id,
-        }),
-      )
-      .reverse(),
-  );
+  return runs.flatMap((run, runIndex) => {
+    const before = attemptsBefore(runs, runIndex);
+    return (run.cycles ?? [])
+      .map((cycle, i): Attempt => ({ cycle, number: before + i + 1, runId: run.id }))
+      .reverse();
+  });
+}
+
+/** How many attempts the runs OLDER than the one at `index` hold. Runs arrive
+ *  newest first, so those are the ones after it. */
+function attemptsBefore(runs: readonly MilestoneRunView[], index: number): number {
+  return runs.slice(index + 1).reduce((n, run) => n + (run.cycles ?? []).length, 0);
 }
 
 function ValidationActions({

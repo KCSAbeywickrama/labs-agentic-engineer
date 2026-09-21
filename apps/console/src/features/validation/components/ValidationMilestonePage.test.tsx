@@ -291,7 +291,11 @@ describe("ValidationMilestonePage", () => {
     // within it first — the same reading order as the log card below it.
     // Reversing the flattened list once got the cycles right and the runs
     // wrong, which only a version with more than one run could show.
-    it("orders the reports newest first across runs", () => {
+    //
+    // A heading is "Attempt N", counted from the oldest across the version.
+    // Which run held it is not in the name: an attempt IS a run since
+    // validation became its own workflow, and "cycle" is the loop's word.
+    it("numbers the attempts across runs and orders them newest first", () => {
       mockDetail = detail({
         runs: [
           run({
@@ -315,14 +319,47 @@ describe("ValidationMilestonePage", () => {
       const headings = Array.from(
         container.querySelectorAll(".MuiAccordionSummary-root .MuiTypography-subtitle2"),
       ).map((el) => el.textContent);
-      expect(headings).toEqual([
-        "Run 2 · Cycle 2",
-        "Run 2 · Cycle 1",
-        "Run 1 · Cycle 2",
-        "Run 1 · Cycle 1",
-      ]);
+      expect(headings).toEqual(["Attempt 4", "Attempt 3", "Attempt 2", "Attempt 1"]);
       // And the newest attempt is the one whose snapshot the page fetches.
       expect(snapshotCalls.filter((c) => c.enabled).map((c) => c.cycleId)).toEqual(["r2-new"]);
+    });
+
+    // The log card heads its boxes the same way, but each run's feed only
+    // knows its own cycles, so the page hands every feed a label that carries
+    // the count of attempts in the runs older than it.
+    it("hands each log feed the attempt numbers its run continues from", () => {
+      mockDetail = detail({
+        state: "running",
+        live: true,
+        runs: [
+          run({ id: "r3", state: "running", cycles: [runningCycle("r3-only")] }),
+          run({ id: "r2", cycles: [cycle({ id: "r2-only", validationVerdict: "failed" })] }),
+          run({
+            id: "r1",
+            cycles: [
+              cycle({ id: "r1-old", validationVerdict: "unreported" }),
+              cycle({ id: "r1-new", validationVerdict: "unreported" }),
+            ],
+          }),
+        ],
+      });
+      render(<ValidationMilestonePage projectName="p" tag="v1" />);
+
+      type FeedProps = { runId: string; runNumber?: number; label: (ordinal: number) => string };
+      const feeds = (runFeed.mock.calls as [FeedProps][]).map(([props]) => [
+        props.runId,
+        props.label(1),
+        props.label(2),
+      ]);
+      expect(feeds).toEqual([
+        ["r3", "Attempt 4", "Attempt 5"],
+        ["r2", "Attempt 3", "Attempt 4"],
+        ["r1", "Attempt 1", "Attempt 2"],
+      ]);
+      // No feed is told a run number: the attempt number is the whole heading.
+      for (const [props] of runFeed.mock.calls as [FeedProps][]) {
+        expect(props.runNumber).toBeUndefined();
+      }
     });
 
     // The ordinary case is one attempt, and a rule over a single entry marks
@@ -364,7 +401,7 @@ describe("ValidationMilestonePage", () => {
       // has no report and its lead can only say the count-free sentence. (The
       // verdict card above says the counted one for the newest attempt, which
       // is what an unscoped text query would find instead.)
-      fireEvent.click(screen.getByText("Cycle 1"));
+      fireEvent.click(screen.getByText("Attempt 1"));
 
       // One line, numbers first, on the older attempt's own lead.
       const lead = screen.getByText(

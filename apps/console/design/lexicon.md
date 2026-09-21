@@ -1208,6 +1208,28 @@ acceptance scenario declares nothing — every one of them is driven — so the
 verdict copy says **couldn't be settled against the deployed app** and asks the
 reader to **check them yourself**.
 
+### A version's attempts, on the Validation page
+
+The page holds one section per time the version was judged, on both of its
+cards. The words name what a reader wants to know — how many times, which one,
+what it concluded — and nothing about the loop that produced them.
+
+| | |
+|---|---|
+| One judging of the version | an **attempt** — `Attempt 3`, counted from the oldest across every run |
+| The rest, under the newest | **`EARLIER ATTEMPTS OF V1`** |
+| How many, on the card | *3 attempts · last 14 Aug, 16:52* |
+| An attempt whose agent merged and delivered no report | its **`Unreported`** chip, and *This run produced no report* when opened |
+| An attempt that never landed | *This attempt never landed, so it has no report.* |
+| An agent started again for the same work | *started 2 times* — never "2 attempts" |
+
+**Never `cycle`, never `Run N`.** Both are the platform's words for how the
+work was scheduled. Since validation became its own run, an attempt IS a run, and
+a run holding two attempts is the platform dispatching again after an agent
+merged without a report — a remedy, not a distinction a reader needs in a
+heading. The number is version-wide for the same reason: it is the one a reader
+refers to, and it must not restart at 1 because the platform opened a new run.
+
 ## What a change invalidates
 
 **Numbered decisions, precise where the link was recorded, coarse where it was not.**
