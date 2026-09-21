@@ -59,23 +59,22 @@ interface ErrorBoundaryProps {
 
 interface ErrorBoundaryState {
   error: Error | null;
-  componentStack: string | null;
   /** Automatic retries spent on the current run of failures. */
   attempts: number;
-  /** An automatic retry is scheduled. */
-  retryPending: boolean;
 }
 
-const CLEAR: ErrorBoundaryState = {
-  error: null,
-  componentStack: null,
-  attempts: 0,
-  retryPending: false,
-};
+const CLEAR: ErrorBoundaryState = { error: null, attempts: 0 };
 
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   override state: ErrorBoundaryState = CLEAR;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  // Kept off React state on purpose. componentDidCatch must not setState:
+  // React DevTools' "force error" re-applies the error on EVERY render of the
+  // boundary, so a catch that re-renders the boundary loops until React
+  // throws "Maximum update depth exceeded" — past this boundary, into the
+  // router's top-level catch. The stack is read lazily by the fallback's
+  // Details toggle instead, which re-renders only the fallback.
+  private componentStack: string | null = null;
 
   static getDerivedStateFromError(error: unknown): Partial<ErrorBoundaryState> {
     return { error: error instanceof Error ? error : new Error(String(error)) };
@@ -85,16 +84,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     // The one place the stack is recorded. Logged, not swallowed: without
     // this the fallback would hide the very evidence needed to fix the cause.
     console.error(`[console] ${this.props.label} failed to render`, error, info.componentStack);
-    const componentStack = info.componentStack ?? null;
+    this.componentStack = info.componentStack ?? null;
     const delay = RETRY_DELAYS_MS[this.state.attempts];
-    if (delay === undefined) {
-      this.setState({ componentStack, retryPending: false });
-      return;
-    }
-    this.setState({ componentStack, retryPending: true });
+    if (delay === undefined) return;
     this.timer = setTimeout(() => {
       this.timer = null;
-      this.setState((s) => ({ error: null, componentStack: null, attempts: s.attempts + 1, retryPending: false }));
+      this.setState((s) => ({ error: null, attempts: s.attempts + 1 }));
     }, delay);
   }
 
@@ -113,18 +108,23 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   private reset = () => {
     this.clearTimer();
+    this.componentStack = null;
     this.setState(CLEAR);
   };
 
+  private readComponentStack = () => this.componentStack;
+
   override render() {
-    const { error, componentStack, retryPending } = this.state;
+    const { error, attempts } = this.state;
     if (!error) return this.props.children;
     return (
       <ErrorFallback
         label={this.props.label}
         error={error}
-        componentStack={componentStack}
-        retryPending={retryPending}
+        readComponentStack={this.readComponentStack}
+        // Derived, not stored: componentDidCatch schedules a retry exactly
+        // when an attempt is left (see RETRY_DELAYS_MS).
+        retryPending={attempts < RETRY_DELAYS_MS.length}
         onRetry={this.reset}
         fill={this.props.fill ?? false}
         sx={this.props.fallbackSx}
@@ -136,7 +136,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 function ErrorFallback({
   label,
   error,
-  componentStack,
+  readComponentStack,
   retryPending,
   onRetry,
   fill,
@@ -144,14 +144,15 @@ function ErrorFallback({
 }: {
   label: string;
   error: Error;
-  componentStack: string | null;
+  /** Read when Details opens: the stack lands after the first fallback render. */
+  readComponentStack: () => string | null;
   retryPending: boolean;
   onRetry: () => void;
   fill: boolean;
   sx?: SxProps<Theme> | undefined;
 }) {
   const [showDetails, setShowDetails] = useState(false);
-  const details = [error.stack ?? `${error.name}: ${error.message}`, componentStack?.trim()]
+  const details = [error.stack ?? `${error.name}: ${error.message}`, showDetails ? readComponentStack()?.trim() : null]
     .filter(Boolean)
     .join("\n\nComponent stack:\n");
   return (

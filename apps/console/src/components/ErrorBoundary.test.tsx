@@ -18,6 +18,7 @@
 
 // @vitest-environment jsdom
 
+import { Profiler } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -63,6 +64,24 @@ describe("ErrorBoundary", () => {
     expect(screen.queryByText(/canvas exploded/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Details" }));
     expect(screen.getByText(/Error: canvas exploded/)).toBeInTheDocument();
+    expect(screen.getByText(/Component stack:[\s\S]*Flaky/)).toBeInTheDocument();
+  });
+
+  it("commits once per catch: componentDidCatch never re-renders the boundary", () => {
+    // React DevTools' "force error" re-raises on the BOUNDARY each time it
+    // renders, so a catch that setStates the boundary loops into "Maximum
+    // update depth exceeded" and escapes to the router's catch. Guarded by
+    // counting commits: a catch must cost exactly one.
+    const onRender = vi.fn();
+    render(
+      <Profiler id="boundary" onRender={onRender}>
+        <ErrorBoundary label="The chat panel">
+          <Flaky />
+        </ErrorBoundary>
+      </Profiler>,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/Retrying automatically/);
+    expect(onRender).toHaveBeenCalledTimes(1);
   });
 
   it("retries on its own after a wait, and stops once the attempts run out", () => {
