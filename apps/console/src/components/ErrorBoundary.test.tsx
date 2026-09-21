@@ -118,6 +118,54 @@ describe("ErrorBoundary", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("gives the automatic attempts back once a recovered section has stayed up", () => {
+    const { rerender } = render(
+      <ErrorBoundary label="The chat panel">
+        <Flaky />
+      </ErrorBoundary>,
+    );
+    // The first attempt recovers: one attempt spent.
+    failing = false;
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(screen.getByText("content")).toBeInTheDocument();
+
+    // Stays up past the settle window, then fails again for an unrelated
+    // reason: it must get the full two attempts, not the one left over.
+    act(() => vi.advanceTimersByTime(10_000));
+    failing = true;
+    rerender(
+      <ErrorBoundary label="The chat panel">
+        <Flaky text="again" />
+      </ErrorBoundary>,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/Retrying automatically/);
+    act(() => vi.advanceTimersByTime(2_000));
+    // Still retrying after the first wait: the second attempt was available.
+    expect(screen.getByRole("alert")).toHaveTextContent(/Retrying automatically/);
+  });
+
+  it("does not give attempts back while the section keeps failing inside the settle window", () => {
+    const { rerender } = render(
+      <ErrorBoundary label="The chat panel">
+        <Flaky />
+      </ErrorBoundary>,
+    );
+    failing = false;
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(screen.getByText("content")).toBeInTheDocument();
+    // Fails again before the window closes: same run, one attempt left.
+    act(() => vi.advanceTimersByTime(3_000));
+    failing = true;
+    rerender(
+      <ErrorBoundary label="The chat panel">
+        <Flaky text="again" />
+      </ErrorBoundary>,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/Retrying automatically/);
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/Retrying automatically/);
+  });
+
   it("clears on new input via resetKey, with the automatic attempts restored", () => {
     const { rerender } = render(
       <ErrorBoundary label="The wireframe canvas" resetKey="scene-1">

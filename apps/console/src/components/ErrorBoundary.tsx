@@ -44,6 +44,12 @@ import { EmptyState } from "./EmptyState";
 
 /** Waits before each automatic retry; the list's length is the attempt cap. */
 const RETRY_DELAYS_MS: readonly number[] = [2_000, 5_000];
+/**
+ * How long a recovered section must stay up before its automatic attempts
+ * are given back. Without this a boundary that recovered once would meet
+ * the next, unrelated failure with fewer attempts, and eventually none.
+ */
+const SETTLE_MS = 10_000;
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -81,6 +87,7 @@ const CLEAR: ErrorBoundaryState = { error: null, attempts: 0 };
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   override state: ErrorBoundaryState = CLEAR;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private settleTimer: ReturnType<typeof setTimeout> | null = null;
   // Kept off React state on purpose. componentDidCatch must not setState:
   // React DevTools' "force error" re-applies the error on EVERY render of the
   // boundary, so a catch that re-renders the boundary loops until React
@@ -98,6 +105,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     // this the fallback would hide the very evidence needed to fix the cause.
     console.error(`[console] ${this.props.label} failed to render`, error, info.componentStack);
     this.componentStack = info.componentStack ?? null;
+    // A failure inside the settle window is the same run, not a new one.
+    this.clearSettleTimer();
     const delay = RETRY_DELAYS_MS[this.state.attempts];
     if (delay === undefined) return;
     this.timer = setTimeout(() => {
@@ -106,12 +115,22 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     }, delay);
   }
 
-  override componentDidUpdate(prev: ErrorBoundaryProps) {
+  override componentDidUpdate(prev: ErrorBoundaryProps, prevState: ErrorBoundaryState) {
     if (prev.resetKey !== this.props.resetKey && this.state.error) this.reset();
+    // A commit with no error after one with an error means the children
+    // rendered. If they stay up for SETTLE_MS, the run of failures is over.
+    if (prevState.error && !this.state.error && this.state.attempts > 0) {
+      this.clearSettleTimer();
+      this.settleTimer = setTimeout(() => {
+        this.settleTimer = null;
+        this.setState({ attempts: 0 });
+      }, SETTLE_MS);
+    }
   }
 
   override componentWillUnmount() {
     this.clearTimer();
+    this.clearSettleTimer();
   }
 
   private clearTimer() {
@@ -119,8 +138,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     this.timer = null;
   }
 
+  private clearSettleTimer() {
+    if (this.settleTimer) clearTimeout(this.settleTimer);
+    this.settleTimer = null;
+  }
+
   private reset = () => {
     this.clearTimer();
+    this.clearSettleTimer();
     this.componentStack = null;
     this.setState(CLEAR);
   };
