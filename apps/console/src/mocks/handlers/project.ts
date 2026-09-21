@@ -54,7 +54,6 @@ import {
   ACCEPTANCE_PATHS,
   VALIDATION_ATTEMPTS,
   VALIDATION_FILE_PATHS,
-  VALIDATION_ORIGINS,
   VALIDATION_SCENARIOS,
   validationDetail,
   validationFiles,
@@ -63,7 +62,6 @@ import {
   validationSnapshot,
   validationStatusThread,
   type ValidationAttempt,
-  type ValidationOrigin,
   type ValidationScenario,
   type ValidationStory,
 } from "../fixtures/validation";
@@ -138,39 +136,27 @@ function validationScenario(): ValidationScenario | null {
 
 // The story the validation keys pick together, or null when the project
 // scenario's own fixtures should stand. The scenario key is the switch: the
-// attempt and origin keys narrow it and mean nothing on their own.
+// attempt key narrows it and means nothing on its own.
 function validationStory(): ValidationStory | null {
   const scenario = validationScenario();
-  return scenario
-    ? { scenario, attempt: validationAttempt(), origin: validationOrigin() }
-    : null;
+  return scenario ? { scenario, attempt: validationAttempt() } : null;
 }
 
 // The story a validation read answers with when no override is set: the project
 // scenario's own verdict, which is `partial` on the settled run.
 const DEFAULT_STORY: ValidationStory = { scenario: "partial" };
 
-// Which attempt a `running` scenario is on (aep:mock:validation-attempt). It splits
-// the one scenario the switch cannot: `deploy.validation` is `running` for both a
-// first attempt and a repeat, and only the repeat carries a verdict to render.
-// Ignored by every other scenario, and by an unknown value.
+// Whether the newest attempt is the version's first or a repeat over a failed
+// one (aep:mock:validation-attempt). A repeat is the one story the platform
+// produces beyond a single attempt — dev run, failed attempt, repair, the
+// scenario's attempt — and what gives both cards on the page a history to
+// stack. Ignored where a validation run has no shape for the scenario, and by
+// an unknown value; the fixture says which.
 function validationAttempt(): ValidationAttempt {
   const raw = localStorage.getItem("aep:mock:validation-attempt");
   return raw && VALIDATION_ATTEMPTS.includes(raw as ValidationAttempt)
     ? (raw as ValidationAttempt)
     : "first";
-}
-
-// Which run reached the scenario's state (aep:mock:validation-origin): the
-// version's own build, or a revalidation over it — which is the one story that
-// gives the version a second run, and both cards on its page a history to
-// stack. Ignored where a validation run has no honest shape for the scenario;
-// the fixture says which.
-function validationOrigin(): ValidationOrigin {
-  const raw = localStorage.getItem("aep:mock:validation-origin");
-  return raw && VALIDATION_ORIGINS.includes(raw as ValidationOrigin)
-    ? (raw as ValidationOrigin)
-    : "spec-build";
 }
 
 // Whether the repo should read as having no acceptance oracle at all
@@ -355,8 +341,8 @@ export const projectHandlers = [
     respond(() => validationDetail(validationStory() ?? DEFAULT_STORY, String(params.tag))),
   ),
   // One attempt's report AND the criteria it was judged against, at one commit —
-  // the cycle's own, which is what tells a history attempt's report from the
-  // newest's under a revalidation.
+  // the cycle's own, which is what tells a failed first attempt's report from
+  // the repeat's.
   http.get(
     "*/api/v1/projects/:projectName/validations/:tag/cycles/:cycleId/report",
     ({ params }) =>
@@ -406,8 +392,8 @@ export const projectHandlers = [
       // and the validation cycle a reader had selected was not the one
       // narrating itself.
       //
-      // The run ASKED FOR where the list knows it — a revalidated version holds
-      // two, and each one's feed narrates its own cycles — else the newest:
+      // The run ASKED FOR where the list knows it — a judged version holds
+      // several, and each one's feed narrates its own cycles — else the newest:
       // `buildRunsForTag` restamps run ids per version so a run story cannot
       // contradict its envelope, and the console then asks for an id this list
       // has never heard of. Cancellation is likewise checked against the

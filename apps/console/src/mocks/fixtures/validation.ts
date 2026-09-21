@@ -22,8 +22,8 @@ type RunVerdict = NonNullable<
 //   localStorage.setItem('aep:mock:validation', 'failed')
 //   localStorage.removeItem('aep:mock:validation')   // back to the project scenario
 //
-// Two companion keys narrow the `running` scenario further — which ATTEMPT is in
-// flight (see ValidationAttempt below) and whether the repo has an oracle at all:
+// Two companion keys narrow it — whether the newest attempt is a REPEAT over a
+// failed one (see ValidationAttempt below) and whether the repo has an oracle at all:
 //   localStorage.setItem('aep:mock:validation-criteria', 'missing')
 // which drops every specs/acceptance/*.feature from the file list, so the page sees
 // a version whose spec authored none (handlers/project.ts). The same key also takes:
@@ -37,17 +37,15 @@ type RunVerdict = NonNullable<
 export type ValidationScenario = DeployStage["validation"];
 
 /**
- * The three keys read together: what state the version is in, and — where the
- * scenario alone cannot say — which attempt and which run reached it. One value
- * rather than three arguments, because every read below must be told the same
+ * The two keys read together: what state the version is in, and — where the
+ * scenario alone cannot say — whether a failed attempt came before it. One value
+ * rather than two arguments, because every read below must be told the same
  * story or the page and the board disagree about one run again (#423).
  */
 export interface ValidationStory {
   scenario: ValidationScenario;
-  /** Which attempt a `running` scenario is on — see ValidationAttempt. */
+  /** Whether the newest attempt is the first or a repeat — see ValidationAttempt. */
   attempt?: ValidationAttempt;
-  /** Which run reached the scenario's state — see ValidationOrigin. */
-  origin?: ValidationOrigin;
 }
 
 /** The switch's accepted values — also the list the handler validates against. */
@@ -617,12 +615,22 @@ export const VALIDATION_FILE_PATHS = [...ACCEPTANCE_PATHS, REPORT_PATH];
 // The run story behind each verdict
 // ---------------------------------------------------------------------------
 
-// The cycles are not decoration: the page reads the report at the LAST validation
-// cycle's mergeSha, the deployments chip is derived from whether the LATEST cycle
-// is an in-flight validation one, and `awaiting-fix` exists only because a coding
-// cycle follows a failed attempt. A verdict with the wrong cycles renders the
-// wrong page.
+// Validation is its own run. The DEV run delivers the version — coding cycles
+// only — and mints its validation task at deployed-green, settling with an EMPTY
+// verdict: delivered, not yet judged. A VALIDATION run (kind `validation`, origin
+// `revalidate` whether the sweep started it off that task or a person clicked)
+// judges it in one cycle, or two when the agent merged without a report and the
+// platform dispatched again. A failed verdict files one repair issue per failed
+// criterion, an ordinary TASK run works them, and the sweep judges again. So a
+// version's story is its dev run followed by one validation run per attempt, and
+// every read takes the version's answer off the newest of those.
+//
+// The cycles are not decoration: the page reads each attempt's report at its own
+// cycle's mergeSha, the deployments chip is derived from whether the newest
+// validation cycle is still open, and the attempt count is the number of
+// validation runs. A verdict with the wrong runs renders the wrong page.
 
+// The dev run's one coding cycle: the increment, merged.
 const CODING_1: RunCycleView = {
   id: "cycle-1",
   kind: "coding",
@@ -660,10 +668,19 @@ const CODING_IN_FLIGHT: RunCycleView = {
   createdAt: "2026-07-10T10:05:00Z",
 };
 
+// One merge SHA per cycle number, so two attempts never claim one commit.
+const MERGE_SHA: Record<number, string> = {
+  2: "5c0de1a77b3f2049",
+  3: "c2f7e19b04d6a583",
+  4: "7ab41c90ee31d5f0",
+  5: "e3d9a04f6b17c825",
+};
+
+// A judging that landed: merged its pull request and recorded a verdict.
 function validationCycle(
   n: number,
   verdict: RunVerdict,
-  over: Partial<RunCycleView> = {},
+  at: { createdAt: string; endedAt: string },
 ): RunCycleView {
   return {
     id: `cycle-${String(n)}`,
@@ -672,25 +689,17 @@ function validationCycle(
     branch: `aep/m1-c${String(n)}`,
     prNumber: n + 2,
     prUrl: `${REPO_URL}/pull/${String(n + 2)}`,
-    mergeSha: n === 2 ? "5c0de1a77b3f2049" : "7ab41c90ee31d5f0",
+    mergeSha: MERGE_SHA[n] ?? "0000000000000000",
     validationVerdict: verdict,
     // `validationTask` in project.ts — the one issue list-tasks hides and get-task
-    // still answers for. Every validation cycle carries the SAME number because the
-    // platform reopens the version's issue for a repeat attempt rather than minting
-    // a second one, so a per-cycle number here would misdescribe the real thing.
+    // still answers for. Every attempt carries the SAME number because a
+    // validation run ADOPTS the version's task — the sweep reopens it after a
+    // repair rather than minting a second one — so a per-attempt number here
+    // would misdescribe the real thing.
     validationIssue: 30,
-    createdAt: "2026-07-10T09:45:00Z",
-    endedAt: "2026-07-10T10:02:00Z",
-    ...over,
+    ...at,
   };
 }
-
-const VALIDATION_IN_FLIGHT: RunCycleView = {
-  id: "cycle-2",
-  kind: "validation",
-  attempts: 1,
-  createdAt: "2026-07-10T09:45:00Z",
-};
 
 // The two counters the server DERIVES from the cycle ledger — the supervisor bumps
 // them as it appends cycles, so a fixture that states them by hand states them
@@ -722,300 +731,274 @@ function run(over: Partial<MilestoneRunView>): MilestoneRunView {
     cycles,
     createdAt: "2026-07-10T09:12:00Z",
     startedAt: "2026-07-10T09:13:00Z",
-    endedAt: "2026-07-10T10:41:00Z",
+    endedAt: "2026-07-10T09:43:00Z",
     ...over,
   };
 }
 
-// A run that answered on its first attempt.
-function firstAttemptRun(verdict: RunVerdict): MilestoneRunView {
-  return run({
-    validation: { verdict, issue: 30, reportPath: REPORT_PATH },
-    cycles: [CODING_1, validationCycle(2, verdict)],
-  });
+// The version's dev run: delivered on one coding cycle, deployed green, its
+// validation task minted, settled with no verdict of its own. Every judged
+// scenario stands on it.
+const DEV_RUN = run({});
+
+// Where an attempt sits in the version's morning. The first is judged as soon
+// as the dev run settles; the second comes after the repair, so a repeat story
+// reads dev → attempt 1 → repair → attempt 2 down the page.
+interface AttemptSlot {
+  runId: string;
+  /** The cycle number its judging takes — the next number is the re-dispatch. */
+  cycle: number;
+  createdAt: string;
+  startedAt: string;
+  cycleStart: string;
+  cycleEnd: string;
+  endedAt: string;
+  /** When a person stopped it, for `cancelled`. */
+  stoppedAt: string;
+  /** The re-dispatch after `unreported`, and when the run gave up. */
+  againStart: string;
+  againEnd: string;
+  againEndedAt: string;
 }
 
-// A run that spent BOTH attempts on the same answer: attempt 1 failed, the
-// platform filed the failure as ordinary work, a coding cycle worked it, and
-// attempt 2 came back the same. Spending the attempts is what settles the run —
-// the first failure alone does not.
-function exhaustedRun(
-  verdict: RunVerdict,
-  terminalReason: string,
-  reportPath: boolean,
-): MilestoneRunView {
-  return run({
-    state: "failed",
-    terminalReason,
-    validation: {
-      verdict,
-      issue: 30,
-      // The server omits the path for `unreported`: advertising one would send the
-      // client to a 404 to rediscover what the verdict already said.
-      ...(reportPath ? { reportPath: REPORT_PATH } : {}),
-    },
-    cycles: [
-      CODING_1,
-      validationCycle(2, verdict),
-      CODING_3,
-      validationCycle(4, verdict, {
-        createdAt: "2026-07-10T10:24:00Z",
-        endedAt: "2026-07-10T10:40:00Z",
-      }),
-    ],
-  });
-}
-
-const RUNS: Record<ValidationScenario, MilestoneRunView> = {
-  passed: firstAttemptRun("passed"),
-  partial: firstAttemptRun("partial"),
-  inconclusive: firstAttemptRun("inconclusive"),
-  failed: exhaustedRun("failed", "validation-failed", true),
-  unreported: exhaustedRun("unreported", "validation-unreported", false),
-  // Nothing to validate: the run never dispatched a validation cycle, so there is
-  // no cycle to read a report at and the verdict is the workflow's, not a report's.
-  skipped: run({ validation: { verdict: "skipped" } }),
-  // Live, with the validation cycle itself in flight. No verdict yet — the chip is
-  // `running` because the LATEST cycle is an unfinished validation one, which is
-  // the only place that fact is knowable.
-  running: run({
-    state: "running",
-    endedAt: null,
-    cycles: [CODING_1, VALIDATION_IN_FLIGHT],
-  }),
-  // Live, mid self-heal: a real `failed` verdict from attempt 1, an attempt still
-  // in budget, and an ordinary coding cycle in flight against the repair issues.
-  // The verdict is deliberately NOT hidden — the run row carries it, which is what
-  // the deployments board turns into `awaiting-fix` rather than a terminal `failed`.
-  "awaiting-fix": run({
-    state: "running",
-    endedAt: null,
-    validation: { verdict: "failed", issue: 30, reportPath: REPORT_PATH },
-    cycles: [CODING_1, validationCycle(2, "failed"), CODING_IN_FLIGHT],
-  }),
-  // A person STOPPED the judging. The validation cycle was opened and closed with
-  // no merge SHA — what the agent stage records for a dispatch that produced
-  // nothing — so the run settles carrying no verdict at all. Kind and origin are
-  // the validation run's own, and that is the whole distinction this scenario
-  // exists to show: only a run of THAT kind reads as `cancelled`, because a
-  // cancelled dev run is an abandoned increment and means something else.
-  cancelled: run({
-    kind: "validation",
-    origin: "revalidate",
-    state: "cancelled",
-    validation: {},
-    cycles: [
-      {
-        id: "cycle-2",
-        kind: "validation",
-        attempts: 1,
-        validationIssue: 30,
-        createdAt: "2026-07-10T09:45:00Z",
-        endedAt: "2026-07-10T09:52:00Z",
-      },
-    ],
-  }),
-  // The run is live and has not reached validation at all — the state every run
-  // spends most of its life in.
-  none: run({
-    state: "running",
-    endedAt: null,
-    cycles: [CODING_1, CODING_IN_FLIGHT],
-  }),
+const ATTEMPT_1: AttemptSlot = {
+  runId: "run-v1-2",
+  cycle: 2,
+  createdAt: "2026-07-10T09:44:00Z",
+  startedAt: "2026-07-10T09:45:00Z",
+  cycleStart: "2026-07-10T09:45:00Z",
+  cycleEnd: "2026-07-10T10:02:00Z",
+  endedAt: "2026-07-10T10:03:00Z",
+  stoppedAt: "2026-07-10T09:52:00Z",
+  againStart: "2026-07-10T10:05:00Z",
+  againEnd: "2026-07-10T10:20:00Z",
+  againEndedAt: "2026-07-10T10:21:00Z",
 };
 
-// `running` is the one scenario with TWO honest shapes, because the loop repeats:
-// a first attempt (no verdict yet, nothing to report) and a repeat attempt (the
-// previous attempt's verdict still on the row, its report still committed). They
-// render differently — only the repeat has a verdict tile, and only its copy marks
-// its numbers as the last attempt's — and `deploy.validation` is `running` for both,
-// so no value of the scenario switch can tell them apart.
-//
-// Hence a second devtools key rather than an eleventh scenario:
-//   localStorage.setItem('aep:mock:validation', 'running')
+const ATTEMPT_2: AttemptSlot = {
+  runId: "run-v1-4",
+  cycle: 4,
+  createdAt: "2026-07-10T10:23:00Z",
+  startedAt: "2026-07-10T10:24:00Z",
+  cycleStart: "2026-07-10T10:24:00Z",
+  cycleEnd: "2026-07-10T10:40:00Z",
+  endedAt: "2026-07-10T10:41:00Z",
+  stoppedAt: "2026-07-10T10:31:00Z",
+  againStart: "2026-07-10T10:43:00Z",
+  againEnd: "2026-07-10T10:58:00Z",
+  againEndedAt: "2026-07-10T10:59:00Z",
+};
+
+// The scenarios a validation run can settle in — every verdict, plus the two
+// lifecycle states that are the run's own. `none` and `skipped` are the dev
+// run's to say, and `awaiting-fix` is a repair, not a judging.
+type Judged = Exclude<ValidationScenario, "none" | "skipped" | "awaiting-fix">;
+const JUDGED: readonly ValidationScenario[] = [
+  "passed",
+  "partial",
+  "inconclusive",
+  "failed",
+  "unreported",
+  "running",
+  "cancelled",
+];
+
+function isJudged(scenario: ValidationScenario): scenario is Judged {
+  return JUDGED.includes(scenario);
+}
+
+/**
+ * One attempt: the validation run that reached `scenario`, in its slot. The
+ * shapes are ValidationRunWorkflow's, not the dev loop's.
+ */
+function attempt(scenario: Judged, slot: AttemptSlot): MilestoneRunView {
+  const base: Partial<MilestoneRunView> = {
+    id: slot.runId,
+    kind: "validation",
+    origin: "revalidate",
+    createdAt: slot.createdAt,
+    startedAt: slot.startedAt,
+    endedAt: slot.endedAt,
+  };
+  const judging = (verdict: RunVerdict) =>
+    validationCycle(slot.cycle, verdict, { createdAt: slot.cycleStart, endedAt: slot.cycleEnd });
+
+  switch (scenario) {
+    case "passed":
+    case "partial":
+    case "inconclusive":
+      // Honest reports, incomplete or not: the run settles green on them.
+      return run({
+        ...base,
+        validation: { verdict: scenario, issue: 30, reportPath: REPORT_PATH },
+        cycles: [judging(scenario)],
+      });
+    case "failed":
+      // A real assertion loss. ONE cycle: the run files the failure as repair
+      // work and stops, where the dev loop used to work it in place.
+      return run({
+        ...base,
+        state: "failed",
+        terminalReason: "validation-failed",
+        validation: { verdict: "failed", issue: 30, reportPath: REPORT_PATH },
+        cycles: [judging("failed")],
+      });
+    case "unreported":
+      // The one verdict the run remedies itself, once: the agent merged without
+      // a report, so it was dispatched again, and a second silence settled it.
+      // The server omits the path: advertising one would send the client to a
+      // 404 to rediscover what the verdict already said.
+      return run({
+        ...base,
+        state: "failed",
+        terminalReason: "validation-unreported",
+        validation: { verdict: "unreported", issue: 30 },
+        cycles: [
+          judging("unreported"),
+          validationCycle(slot.cycle + 1, "unreported", {
+            createdAt: slot.againStart,
+            endedAt: slot.againEnd,
+          }),
+        ],
+        endedAt: slot.againEndedAt,
+      });
+    case "running":
+      // Live, the judging itself in flight. No verdict yet — the chip is
+      // `running` because the newest validation cycle is unfinished, which is
+      // the only place that fact is knowable.
+      return run({
+        ...base,
+        state: "running",
+        endedAt: null,
+        cycles: [
+          { id: `cycle-${String(slot.cycle)}`, kind: "validation", attempts: 1, createdAt: slot.cycleStart },
+        ],
+      });
+    case "cancelled":
+      // A person STOPPED the judging. The cycle was opened and closed with no
+      // merge SHA — what the agent stage records for a dispatch that produced
+      // nothing — so the run settles carrying no verdict at all.
+      return run({
+        ...base,
+        state: "cancelled",
+        cycles: [
+          {
+            id: `cycle-${String(slot.cycle)}`,
+            kind: "validation",
+            attempts: 1,
+            validationIssue: 30,
+            createdAt: slot.cycleStart,
+            endedAt: slot.stoppedAt,
+          },
+        ],
+        endedAt: slot.stoppedAt,
+      });
+  }
+}
+
+// The repair between two attempts: the failed verdict filed one issue per failed
+// criterion, and an ordinary task run worked them. What routes a repair back to
+// a judging is the version's validation task, which the sweep reopens once the
+// repair lands.
+const REPAIR_RUN = run({
+  id: "run-v1-3",
+  kind: "task",
+  origin: "incident-adoption",
+  cycles: [CODING_3],
+  createdAt: "2026-07-10T10:04:00Z",
+  startedAt: "2026-07-10T10:04:00Z",
+  endedAt: "2026-07-10T10:22:00Z",
+});
+
+// The first attempt failed and its repair was worked. Every repeat story stands
+// on these, and every read that walks the older attempts finds the failed one.
+const FAILED_ATTEMPT_1 = attempt("failed", ATTEMPT_1);
+
+/** A version's runs, newest first as the server lists them, on a first attempt. */
+const STORIES: Record<ValidationScenario, MilestoneRunView[]> = {
+  passed: [attempt("passed", ATTEMPT_1), DEV_RUN],
+  partial: [attempt("partial", ATTEMPT_1), DEV_RUN],
+  inconclusive: [attempt("inconclusive", ATTEMPT_1), DEV_RUN],
+  failed: [FAILED_ATTEMPT_1, DEV_RUN],
+  unreported: [attempt("unreported", ATTEMPT_1), DEV_RUN],
+  running: [attempt("running", ATTEMPT_1), DEV_RUN],
+  cancelled: [attempt("cancelled", ATTEMPT_1), DEV_RUN],
+  // Nothing to validate: no acceptance oracle, so no validation task was minted
+  // and nothing will ever judge this version. The dev run says so itself — the
+  // one verdict it records — because an empty one would read as "any moment now"
+  // forever.
+  skipped: [run({ validation: { verdict: "skipped" } })],
+  // The dev run is live and has not delivered yet — the state every version
+  // spends most of its life in. No validation run exists to be judged by.
+  none: [
+    run({
+      state: "running",
+      endedAt: null,
+      cycles: [CODING_1, CODING_IN_FLIGHT],
+    }),
+  ],
+  // Mid-repair: the first attempt failed, and the task run working its repair
+  // issues is in flight. The failed report stays committed, which is what lets
+  // the page show WHAT is being fixed while the fix is.
+  //
+  // What the platform's own derivation says of this shape today is `failed`:
+  // the aggregate reads the newest VALIDATION run, which is terminal, and only
+  // a live run holding a fatal verdict reads `awaiting-fix` — a shape the dev
+  // loop had before validation became its own run. So this state reaches the
+  // console only through the scenario override. Whether the platform should
+  // say `awaiting-fix` here again is an open question on its side; the run
+  // story is honest either way.
+  "awaiting-fix": [
+    run({
+      id: "run-v1-3",
+      kind: "task",
+      origin: "incident-adoption",
+      state: "running",
+      endedAt: null,
+      cycles: [CODING_IN_FLIGHT],
+      createdAt: "2026-07-10T10:04:00Z",
+      startedAt: "2026-07-10T10:04:00Z",
+    }),
+    FAILED_ATTEMPT_1,
+    DEV_RUN,
+  ],
+};
+
+// A version is judged as many times as it takes, and the scenario switch only
+// says how the NEWEST attempt ended. The attempt key says whether that was the
+// version's first judging or a repeat over a failed one whose repair was worked
+// — the story that gives the page a history to stack, and the only one the
+// platform produces beyond a single attempt:
+//   localStorage.setItem('aep:mock:validation', 'passed')
 //   localStorage.setItem('aep:mock:validation-attempt', 'repeat')
 //
-// It is read only for `running`; every other scenario has one shape and ignores it.
+// A repeat is dev run → attempt 1 (failed) → repair → attempt 2 (the scenario).
+// Read for every scenario a validation run can settle in; `none`, `skipped` and
+// `awaiting-fix` have one shape each and ignore it.
 export type ValidationAttempt = "first" | "repeat";
 
 /** The key's accepted values — also the list the handler validates against. */
 export const VALIDATION_ATTEMPTS: ValidationAttempt[] = ["first", "repeat"];
 
-// Attempt 1 merged and failed, a coding cycle repaired it, attempt 2 is in flight
-// against the fixed system. The in-flight cycle is re-id'd because
-// VALIDATION_IN_FLIGHT is hardcoded `cycle-2`, which the merged attempt owns here.
-const RUNNING_REPEAT: MilestoneRunView = run({
-  state: "running",
-  endedAt: null,
-  validation: { verdict: "failed", issue: 30, reportPath: REPORT_PATH },
-  cycles: [
-    CODING_1,
-    validationCycle(2, "failed"),
-    CODING_3,
-    {
-      ...VALIDATION_IN_FLIGHT,
-      id: "cycle-4",
-      createdAt: "2026-07-10T10:24:00Z",
-    },
-  ],
-});
-
-/** True when the story is the repeat-attempt shape. */
+/** True when the story is a repeat attempt — which only a judged scenario can be. */
 function isRepeat(story: ValidationStory): boolean {
-  return story.scenario === "running" && story.attempt === "repeat";
+  return story.attempt === "repeat" && isJudged(story.scenario);
 }
 
-// A version's state is its NEWEST run's, and every scenario above has exactly one
-// run: the version's own build, whose loop validated it. The other way a version
-// gets judged is the Revalidate trigger, which starts a run of kind `validation`
-// over a version an earlier run already built and judged — so a revalidated
-// version has a HISTORY, and both cards on its page have two runs to stack.
-//
-// Hence a third key, named for the run field it moves:
-//   localStorage.setItem('aep:mock:validation', 'passed')
-//   localStorage.setItem('aep:mock:validation-origin', 'revalidate')
-//
-// Under it the scenario describes the revalidation, and beneath that run sits the
-// version's dev run, which validated and failed both attempts — the `failed` story
-// exactly as it stands, and the kind of answer that sends someone to the trigger.
-//
-// Honoured only where a validation run can honestly settle in the scenario's
-// state. `none` and `awaiting-fix` are shapes of the DEV loop (a coding cycle in
-// flight), `skipped` is refused at the trigger, and a repeat attempt is a
-// self-heal only the dev loop performs — a validation run builds nothing, so it
-// repairs nothing. Those keep their single run whatever the key says, as every
-// scenario but `running` ignores the attempt key.
-export type ValidationOrigin = "spec-build" | "revalidate";
-
-/** The key's accepted values — also the list the handler validates against. */
-export const VALIDATION_ORIGINS: ValidationOrigin[] = ["spec-build", "revalidate"];
-
-// The dev run every revalidation sits on. Its two attempts keep their ids and
-// commits, so each of them reads the FAILED report at its own merge SHA while the
-// newest attempt reads the scenario's — which is the point of the snapshot read.
-const HISTORY_SCENARIO: ValidationScenario = "failed";
-const HISTORY = RUNS[HISTORY_SCENARIO];
-
-// A revalidation's cycles are validation cycles and nothing else: the workflow
-// has no working set and builds nothing (ValidationRunWorkflow). Ids follow the
-// build fixtures' second-run convention (`run0-cycle-1` in project.ts), and the
-// pull requests continue the dev run's numbering — they are the milestone's.
-function revalidationCycle(
-  n: number,
-  verdict: RunVerdict,
-  over: Partial<RunCycleView> = {},
-): RunCycleView {
-  return {
-    id: `run2-cycle-${String(n)}`,
-    kind: "validation",
-    attempts: 1,
-    branch: `aep/m1-r2c${String(n)}`,
-    prNumber: n + 6,
-    prUrl: `${REPO_URL}/pull/${String(n + 6)}`,
-    mergeSha: n === 1 ? "e3d9a04f6b17c825" : "41cf7d2be09a5136",
-    validationVerdict: verdict,
-    // The same issue as the dev run's attempts: a revalidation ADOPTS the
-    // version's validation task rather than minting one.
-    validationIssue: 30,
-    createdAt: "2026-07-12T14:02:00Z",
-    endedAt: "2026-07-12T14:19:00Z",
-    ...over,
-  };
-}
-
-// Two days after the dev run, so the two read as history and not as one morning.
-function revalidation(over: Partial<MilestoneRunView>): MilestoneRunView {
-  return run({
-    id: "run-v1-2",
-    kind: "validation",
-    origin: "revalidate",
-    createdAt: "2026-07-12T14:00:00Z",
-    startedAt: "2026-07-12T14:01:00Z",
-    endedAt: "2026-07-12T14:20:00Z",
-    ...over,
-  });
-}
-
-// One attempt, judged. A validation run settles on its first verdict: green for
-// the three that are honest reports, and `failed` after ONE cycle too — it files
-// the failure as repair work and stops, where the dev loop would have worked it.
-function judged(verdict: RunVerdict, over: Partial<MilestoneRunView> = {}): MilestoneRunView {
-  return revalidation({
-    validation: { verdict, issue: 30, reportPath: REPORT_PATH },
-    cycles: [revalidationCycle(1, verdict)],
-    ...over,
-  });
-}
-
-const REVALIDATIONS: Partial<Record<ValidationScenario, MilestoneRunView>> = {
-  passed: judged("passed"),
-  partial: judged("partial"),
-  inconclusive: judged("inconclusive"),
-  failed: judged("failed", { state: "failed", terminalReason: "validation-failed" }),
-  // The one verdict a validation run remedies itself, once: the agent merged
-  // without a report, so it is dispatched again, and a second silence settles it.
-  unreported: revalidation({
-    state: "failed",
-    terminalReason: "validation-unreported",
-    validation: { verdict: "unreported", issue: 30 },
-    cycles: [
-      revalidationCycle(1, "unreported"),
-      revalidationCycle(2, "unreported", {
-        createdAt: "2026-07-12T14:21:00Z",
-        endedAt: "2026-07-12T14:37:00Z",
-      }),
-    ],
-    endedAt: "2026-07-12T14:38:00Z",
-  }),
-  running: revalidation({
-    state: "running",
-    endedAt: null,
-    cycles: [
-      { id: "run2-cycle-1", kind: "validation", attempts: 1, createdAt: "2026-07-12T14:02:00Z" },
-    ],
-  }),
-  cancelled: revalidation({
-    state: "cancelled",
-    validation: {},
-    cycles: [
-      {
-        id: "run2-cycle-1",
-        kind: "validation",
-        attempts: 1,
-        validationIssue: 30,
-        createdAt: "2026-07-12T14:02:00Z",
-        endedAt: "2026-07-12T14:09:00Z",
-      },
-    ],
-    endedAt: "2026-07-12T14:09:00Z",
-  }),
-};
-
-/** The revalidation a story describes, or undefined where the key is ignored. */
-function revalidationOf(story: ValidationStory): MilestoneRunView | undefined {
-  if (story.origin !== "revalidate" || isRepeat(story)) return undefined;
-  return REVALIDATIONS[story.scenario];
-}
-
-// A report is overwritten by the next attempt to commit one, so an attempt that
-// has committed nothing — in flight, or stopped — leaves the PREVIOUS attempt's at
-// the branch tip: the failed attempt a repeat runs over, and the dev run's failed
-// attempt a revalidation runs over. Not `unreported`: that verdict IS the tip
-// having been read and no report found there.
+// A report is overwritten by the next attempt to commit one, so a repeat attempt
+// that has committed nothing yet — in flight, or stopped — leaves the FIRST
+// attempt's failed report at the branch tip. Not `unreported`: that verdict IS
+// the tip having been read and no report found there.
 function previousReportStands(story: ValidationStory): boolean {
-  if (isRepeat(story)) return true;
-  return (
-    revalidationOf(story) !== undefined &&
-    (story.scenario === "running" || story.scenario === "cancelled")
-  );
+  return isRepeat(story) && (story.scenario === "running" || story.scenario === "cancelled");
 }
 
 /** The version's run story, newest run first as the server lists them. */
 export function validationRuns(story: ValidationStory): BuildRunList {
-  const revalidated = revalidationOf(story);
-  const runs = revalidated
-    ? [revalidated, HISTORY]
-    : [isRepeat(story) ? RUNNING_REPEAT : RUNS[story.scenario]];
+  const runs =
+    isRepeat(story) && isJudged(story.scenario)
+      ? [attempt(story.scenario, ATTEMPT_2), REPAIR_RUN, FAILED_ATTEMPT_1, DEV_RUN]
+      : STORIES[story.scenario];
   return { tag: "v1", milestoneNumber: 1, runs };
 }
 
@@ -1180,9 +1163,9 @@ const TERMINAL_RUN_STATES = new Set(["succeeded", "failed", "cancelled", "blocke
  * A running attempt has no commit and therefore no report — which is the state
  * the scenario list's `running` first attempt puts the page in.
  *
- * The cycle matters only under a revalidation, where the dev run's attempts are
- * read at THEIR commits and what they committed is the failed report. Every
- * attempt of a single-run story shares the scenario's, as it always has.
+ * The cycle matters only on a repeat, where the first attempt is read at ITS
+ * commit and what it committed is the failed report. Every attempt of a
+ * first-attempt story shares the scenario's, as it always has.
  */
 export function validationSnapshot(
   story: ValidationStory,
@@ -1190,10 +1173,8 @@ export function validationSnapshot(
   cycleId?: string,
 ): ValidationSnapshot {
   const historical =
-    revalidationOf(story) !== undefined && HISTORY.cycles.some((c) => c.id === cycleId);
-  const files = historical
-    ? validationFiles({ scenario: HISTORY_SCENARIO })
-    : validationFiles(story, drifted);
+    isRepeat(story) && FAILED_ATTEMPT_1.cycles.some((c) => c.id === cycleId);
+  const files = historical ? validationFiles({ scenario: "failed" }) : validationFiles(story, drifted);
   const report = files.find((f) => f.path === REPORT_PATH);
   return {
     commit: report ? "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" : "",

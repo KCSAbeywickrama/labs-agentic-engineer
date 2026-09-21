@@ -138,8 +138,8 @@ describe("the validation read-model fixtures agree with the run story", () => {
 
   it("carries only validation cycles, on runs that attempted one", () => {
     for (const scenario of VALIDATION_SCENARIOS) {
-      for (const origin of ["spec-build", "revalidate"] as const) {
-        for (const run of validationDetail({ scenario, origin }).runs) {
+      for (const attempt of ["first", "repeat"] as const) {
+        for (const run of validationDetail({ scenario, attempt }).runs) {
           expect(run.cycles.length).toBeGreaterThan(0);
           for (const c of run.cycles) expect(c.kind).toBe("validation");
         }
@@ -167,14 +167,14 @@ describe("the validation read-model fixtures agree with the run story", () => {
 });
 
 /**
- * A revalidated version is the one story with a HISTORY: the trigger starts a
- * validation run over a version its dev run already built and judged. It is
- * what the page's two-block cards and their newest-first order exist for, and
- * without it neither could be seen in mock mode — every other story is one run.
+ * The run story is the SPLIT platform's: a dev run delivers and never judges,
+ * and every attempt is a validation run of its own. A repeat attempt is the one
+ * story with a history — dev run, failed attempt, repair, the scenario's attempt
+ * — and what the page's two-block cards and their attempt numbers exist for.
  */
-describe("a revalidated version", () => {
-  // Where a validation run can honestly settle in the scenario's state.
-  const revalidated: ValidationScenario[] = [
+describe("the run story is one validation run per attempt", () => {
+  // Where a validation run can settle in the scenario's state.
+  const judged: ValidationScenario[] = [
     "passed",
     "partial",
     "inconclusive",
@@ -183,69 +183,101 @@ describe("a revalidated version", () => {
     "running",
     "cancelled",
   ];
-  const story = (scenario: ValidationScenario): ValidationStory => ({ scenario, origin: "revalidate" });
+  const repeat = (scenario: ValidationScenario): ValidationStory => ({ scenario, attempt: "repeat" });
 
-  it.each(revalidated)("%s stacks the dev run beneath the revalidation, newest first", (scenario) => {
-    const runs = validationRuns(story(scenario)).runs ?? [];
+  it.each(judged)("%s is judged by a validation run over a dev run that never was", (scenario) => {
+    const runs = validationRuns({ scenario }).runs ?? [];
     expect(runs).toHaveLength(2);
     const [newest, dev] = runs;
     expect(newest?.kind).toBe("validation");
     expect(newest?.origin).toBe("revalidate");
-    expect(dev?.kind).toBe("dev");
-    expect(String(newest?.createdAt) > String(dev?.createdAt)).toBe(true);
     // A validation run builds nothing, so its cycles are all judgements.
     for (const c of newest?.cycles ?? []) expect(c.kind).toBe("validation");
-    // The state is still the scenario's — it is the newest run's to set.
-    expect(validationDetail(story(scenario)).state).toBe(scenario);
+    // The dev run delivered and settled with no verdict of its own.
+    expect(dev?.kind).toBe("dev");
+    expect(dev?.validation.verdict).toBeUndefined();
+    expect(dev?.cycles.some((c) => c.kind === "validation")).toBe(false);
+    expect(String(newest?.createdAt) > String(dev?.createdAt)).toBe(true);
+  });
+
+  // The only scenarios where a run holds two judgings: `unreported` is the one
+  // verdict the run remedies itself, by dispatching once more.
+  it("dispatches again only after an unreported attempt", () => {
+    for (const scenario of judged) {
+      const [newest] = validationRuns({ scenario }).runs ?? [];
+      expect(newest?.cycles.length).toBe(scenario === "unreported" ? 2 : 1);
+    }
+  });
+
+  it.each(judged)("%s on a repeat stacks dev, failed attempt, repair, then the attempt", (scenario) => {
+    const runs = validationRuns(repeat(scenario)).runs ?? [];
+    expect(runs.map((r) => r.kind)).toEqual(["validation", "task", "validation", "dev"]);
+    expect(runs[2]?.validation.verdict).toBe("failed");
+    // Newest first, and the dates agree with the order.
+    const created = runs.map((r) => String(r.createdAt));
+    expect([...created].sort().reverse()).toEqual(created);
+    // The state is still the scenario's — it is the newest attempt's to set.
+    expect(validationDetail(repeat(scenario)).state).toBe(scenario);
   });
 
   // The console keys sections and the one-open rule on the cycle id, so two
   // runs sharing one would open two attempts at once.
-  it.each(revalidated)("%s never reuses a cycle id across its runs", (scenario) => {
-    const ids = (validationRuns(story(scenario)).runs ?? []).flatMap((r) =>
+  it.each(judged)("%s never reuses a cycle id across its runs", (scenario) => {
+    const ids = (validationRuns(repeat(scenario)).runs ?? []).flatMap((r) =>
       r.cycles.map((c) => c.id),
     );
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  // Each attempt reads its report at ITS commit. The dev run's attempts failed,
-  // the revalidation reached the scenario's verdict, and a reader opening both
-  // must see two different reports — or the history is decoration.
-  it("reads a history attempt at its own commit, not the branch tip", () => {
-    const passed = story("passed");
-    const newest = validationSnapshot(passed, false, "run2-cycle-1");
-    const history = validationSnapshot(passed, false, "cycle-2");
-    expect(newest.report).toBe(validationSnapshot(passed).report);
-    expect(history.report).toBeDefined();
-    expect(history.report).not.toBe(newest.report);
-    expect(history.report).toBe(validationSnapshot({ scenario: "failed" }).report);
+  // Each attempt reads its report at ITS commit. The first attempt failed, the
+  // repeat reached the scenario's verdict, and a reader opening both must see
+  // two different reports — or the history is decoration.
+  it("reads the failed first attempt at its own commit, not the branch tip", () => {
+    const story = repeat("passed");
+    const newest = validationSnapshot(story, false, "cycle-4");
+    const first = validationSnapshot(story, false, "cycle-2");
+    expect(newest.report).toBe(validationSnapshot(story).report);
+    expect(first.report).toBeDefined();
+    expect(first.report).not.toBe(newest.report);
+    expect(first.report).toBe(validationSnapshot({ scenario: "failed" }).report);
   });
 
-  // The ledger row dates the version's LATEST attempt, which is the
-  // revalidation's — not the dev run's, which happens to be listed last.
-  it("dates the ledger row by the revalidation", () => {
-    const row = validationLedger(story("passed")).validations.find((v) => v.tag === "v1");
-    expect(row?.endedAt).toBe("2026-07-12T14:19:00Z");
+  // The ledger row dates the version's LATEST attempt, which is the repeat's —
+  // not the first's, which happens to be listed after it.
+  it("dates the ledger row by the newest attempt", () => {
+    const row = validationLedger(repeat("passed")).validations.find((v) => v.tag === "v1");
+    expect(row?.endedAt).toBe("2026-07-10T10:40:00Z");
   });
 
-  // An attempt that committed nothing leaves the dev run's report at the tip,
-  // which is what the Spec view then shows — the same rule as a repeat attempt.
-  it("keeps the dev run's report at the tip while the revalidation is unsettled", () => {
+  // An attempt that committed nothing leaves the first attempt's report at the
+  // tip, which is what the Spec view then shows.
+  it("keeps the failed report at the tip while the repeat is unsettled", () => {
     for (const scenario of ["running", "cancelled"] as const) {
-      const report = validationFiles(story(scenario)).find((f) => f.path === "tests/acceptance/report.json");
+      const report = validationFiles(repeat(scenario)).find((f) => f.path === "tests/acceptance/report.json");
       expect(report?.content).toBe(validationSnapshot({ scenario: "failed" }).report);
     }
+    // A first attempt in flight has the oracle and nothing else.
+    expect(validationFiles({ scenario: "running" }).some((f) => f.path === "tests/acceptance/report.json")).toBe(false);
   });
 
-  // The dev loop's own shapes, a version the trigger refuses, and a self-heal
-  // repeat: none is a state a validation run can be in, so the key is ignored
-  // rather than honoured with a run the platform could never produce.
-  it("is ignored where a validation run has no honest shape", () => {
-    for (const scenario of ["none", "awaiting-fix", "skipped"] as const) {
-      expect(validationRuns(story(scenario)).runs).toHaveLength(1);
+  // The dev loop's own shapes and a version the trigger refuses: none is a state
+  // a validation run can be in, so the key is ignored rather than honoured with
+  // a run the platform could never produce.
+  it("ignores the attempt key where no validation run has a shape", () => {
+    for (const scenario of ["none", "skipped", "awaiting-fix"] as const) {
+      expect(validationRuns(repeat(scenario)).runs).toEqual(validationRuns({ scenario }).runs);
     }
-    expect(
-      validationRuns({ scenario: "running", attempt: "repeat", origin: "revalidate" }).runs,
-    ).toHaveLength(1);
+  });
+
+  // Mid-repair is a live TASK run over a failed attempt, not a dev run with a
+  // verdict on it — the shape the platform has since validation became its own
+  // run, whatever its derivation currently calls it.
+  it("shapes awaiting-fix as a live repair over a failed attempt", () => {
+    const runs = validationRuns({ scenario: "awaiting-fix" }).runs ?? [];
+    expect(runs.map((r) => [r.kind, r.state])).toEqual([
+      ["task", "running"],
+      ["validation", "failed"],
+      ["dev", "succeeded"],
+    ]);
   });
 });
