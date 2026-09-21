@@ -477,7 +477,15 @@ into the runner pod at `/app/skills` for live skill edits (see
   covers the JVM's own `hs_err_pid*.log`, which no rlimit suppresses), and
   neither is redundant with the patterns `skills/aep/SKILL.md` names — that is
   the only copy a reader meets when they wonder why `core` is not in
-  `git status`.
+  `git status`. **The SHAPE of each pattern is load-bearing, and getting it
+  wrong costs more than the dump does.** A crash picks names people pick too:
+  the list read `core` + `core.*` until 2026-09-19, which ignored `core.ts`,
+  `core.css` and every `src/core/` directory — so a live run built two
+  components that `git add -A` skipped in silence and never committed them. The
+  patterns are now `core` / `!core/` / `core.[0-9]*`, argued at the constant and
+  proven against a real `git init` in `workspace.test.ts`, which asserts the
+  NEGATIVE cases (a `core.ts` and a `src/core/` still stage) beside the positive
+  one. Both copies have to move together.
 - **One image**, `remote-worker/Dockerfile`, serves BOTH task kinds
   (`AEP_TASK_KIND=implementation` and `=validation`). It is Debian-based
   because Playwright's browsers are glibc-linked; do not reintroduce a second,

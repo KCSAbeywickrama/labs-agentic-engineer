@@ -331,6 +331,7 @@ async function main(): Promise<number> {
   // `--role ""` is meaningful — signed in holding nothing — so presence is
   // tested rather than truthiness.
   const wireOptions: WireOptions = {
+    ...(values.silent ? { silent: true } : {}),
     ...(values.role !== undefined ? { role: values.role } : {}),
     ...(values.seed ? { seed: true } : {}),
     ...(values.fresh ? { fresh: true } : {}),

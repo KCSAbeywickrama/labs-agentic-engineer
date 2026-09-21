@@ -250,15 +250,32 @@ export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Wait until a URL answers at all — a status, any status, is proof the server is up. */
+/**
+ * Wait until a URL answers at all — a status, any status, is proof the server is up.
+ *
+ * Every attempt carries its own abort signal, because the deadline in the loop
+ * condition cannot cancel a request already in flight: a listener that accepts
+ * the connection and then never writes a response leaves `fetch` pending
+ * forever, and the loop never comes back round to notice its own timeout. A
+ * server that is up but slow is the case the per-attempt cap is sized for, and
+ * it is clamped to what is left so the whole wait still ends when it said it
+ * would.
+ */
 export async function waitForHttp(url: string, timeoutMs = 120_000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      await fetch(url, { redirect: "manual" });
+      const remaining = Math.max(1, deadline - Date.now());
+      await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(Math.min(5_000, remaining)) });
       return true;
     } catch {
-      await delay(500);
+      // Clamped to what is left, same as the attempt's own abort signal above —
+      // otherwise this retry delay is the one thing in the loop the deadline
+      // does not bound, and the wait outlives what it said it would by up to
+      // 500ms on its last, failing attempt.
+      const left = deadline - Date.now();
+      if (left <= 0) break;
+      await delay(Math.min(500, left));
     }
   }
   return false;

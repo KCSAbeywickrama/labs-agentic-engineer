@@ -53,7 +53,11 @@ function withResource(resource: Record<string, unknown>, rest: Record<string, un
   return { resource: { name: "dhl-courier", ...resource }, ...rest };
 }
 
-function renderView(definition: Record<string, unknown>, state: DependencyState | undefined) {
+function renderView(
+  definition: Record<string, unknown>,
+  state: DependencyState | undefined,
+  busyReason = "",
+) {
   const onResolve = vi.fn();
   const onReconsider = vi.fn();
   const onOpenFile = vi.fn();
@@ -69,6 +73,7 @@ function renderView(definition: Record<string, unknown>, state: DependencyState 
         onResolve={onResolve}
         onReconsider={onReconsider}
         onCommitted={onCommitted}
+        busyReason={busyReason}
       />
     </OxygenUIThemeProvider>,
   );
@@ -207,6 +212,7 @@ describe("DependencyView", () => {
           onOpenFile={() => {}}
           onResolve={() => {}}
           onReconsider={() => {}}
+          busyReason=""
         />
       </OxygenUIThemeProvider>,
     );
@@ -225,6 +231,7 @@ describe("DependencyView", () => {
           onOpenFile={() => {}}
           onResolve={() => {}}
           onReconsider={() => {}}
+          busyReason=""
         />
       </OxygenUIThemeProvider>,
     );
@@ -380,5 +387,68 @@ describe("DependencyView — when a document is not the next step", () => {
       stateOf({ status: "resolved" }, { usedBy: [] }),
     );
     expect(screen.queryByRole("button", { name: "Reconsider" })).not.toBeInTheDocument();
+  });
+});
+
+// The same gate as the PRD's lenses: while a turn holds the room nothing here
+// may fire another or write the dependency's directory, and the reason is on
+// the button. Reading is never gated.
+describe("DependencyView — while a turn holds the room", () => {
+  const BUSY = "An agent is still working — this is available once it finishes";
+
+  it("disables Reconsider and Replace interface, says why, and keeps the file link live", () => {
+    const { onReconsider, onOpenFile } = renderView(
+      withResource({ provider: "DHL", contract: { type: "openapi", path: "openapi.yaml", origin: "provider" } }),
+      stateOf({ status: "resolved", contract: "openapi.yaml" }),
+      BUSY,
+    );
+    const reconsider = screen.getByRole("button", { name: "Reconsider" });
+    expect(reconsider).toBeDisabled();
+    fireEvent.click(reconsider);
+    expect(onReconsider).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Replace interface" })).toBeDisabled();
+    // MUI puts a string title on the wrapped span as its accessible label.
+    expect(screen.getAllByLabelText(BUSY)).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "openapi.yaml" }));
+    expect(onOpenFile).toHaveBeenCalledWith("specs/design/dependencies/dhl-courier/openapi.yaml");
+  });
+
+  it("disables Resolve, Replace interface and Accept the assumption on an unresolved dependency", () => {
+    const { onResolve } = renderView(
+      withResource({ provider: "DHL", contract: { type: "openapi", path: "openapi.yaml", origin: "assumed" } }),
+      stateOf({ status: "unresolved", reason: "needs-acceptance", contract: "openapi.yaml" }),
+      BUSY,
+    );
+    for (const name of ["Resolve", "Replace interface", "Accept the assumption"]) {
+      expect(screen.getByRole("button", { name }), name).toBeDisabled();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Resolve" }));
+    expect(onResolve).not.toHaveBeenCalled();
+    expect(screen.getAllByLabelText(BUSY)).toHaveLength(3);
+    // Read it first is a link into the file, so it stays live.
+    expect(screen.getByRole("button", { name: "Read it first" })).toBeEnabled();
+  });
+
+  it("disables Select a provider while none is chosen", () => {
+    const { onResolve } = renderView(
+      { resource: { name: "dhl-courier" }, suggestions: [{ name: "DHL" }] },
+      stateOf({ status: "unresolved", reason: "needs-input" }),
+      BUSY,
+    );
+    const select = screen.getByRole("button", { name: "Select a provider" });
+    expect(select).toBeDisabled();
+    fireEvent.click(select);
+    expect(onResolve).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(BUSY)).toBeInTheDocument();
+  });
+
+  it("with an empty reason the buttons are live and carry no tooltip", () => {
+    const { onResolve } = renderView(
+      withResource({ provider: "DHL" }),
+      stateOf({ status: "unresolved", reason: "needs-contract" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Resolve" }));
+    expect(onResolve).toHaveBeenCalledWith("dhl-courier");
+    expect(screen.queryByLabelText(BUSY)).not.toBeInTheDocument();
   });
 });

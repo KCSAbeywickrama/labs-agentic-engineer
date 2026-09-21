@@ -227,6 +227,27 @@ export function DeploymentsPage({ projectName }: { projectName: string }) {
     );
   }
 
+  // Settled and empty: the environments read came back, and named nothing. The
+  // flow is one card per environment, so it has no cards to draw — and it
+  // cannot say so itself, because `rows.length === 0` is equally the shape of a
+  // read still out or one that came back empty, which is why the flow answers
+  // both with the same shimmer. The page holds the query and knows which: not
+  // pending (checked above), not errored (checked above), and empty. So the
+  // page says it, and the reader stops waiting for a board that is never
+  // coming. Only the environments list is named here — nothing on this page is
+  // in a position to say WHY the platform has none.
+  if (environmentList.length === 0) {
+    return (
+      <>
+        {header}
+        <EmptyState
+          compact
+          description="This organization has no deployment environments yet. Components deploy into environments, so there is no pipeline to draw until the platform has one."
+        />
+      </>
+    );
+  }
+
   if (componentNames.length === 0) {
     return (
       <>

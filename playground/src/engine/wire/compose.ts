@@ -151,16 +151,30 @@ export function maskedPlan(plan: WirePlan): WirePlan {
     databases: plan.databases.map((database) => ({ ...database, password: "***" })),
     services: plan.services.map((service) => ({
       ...service,
-      env: Object.fromEntries(Object.entries(service.env).map(([key, value]) => [key, maskValue(key, value)])),
+      env: Object.fromEntries(
+        Object.entries(service.env).map(([key, value]) => [
+          key,
+          maskValue(key, value, service.secretEnv),
+        ]),
+      ),
     })),
   };
 }
 
 /**
- * A value is masked by the NAME it arrives under, not by looking at it: a
- * password that happens to look like a word is still a password, and the
- * binding names come from the design rather than from this file.
+ * A value is masked by PROVENANCE first and by its name second.
+ *
+ * `secretEnv` is the authority: the planner knows a value is a password because
+ * of the dependency output it read it from, and that is true whatever the design
+ * chose to call the variable. The name pattern stays as a second net for
+ * everything the planner did not mint — a variable a design set by hand, a
+ * future dependency kind nobody has classified yet — but it is a net, not the
+ * rule. It is deliberately not the rule because it cannot be one: it is
+ * case-sensitive and matches `PASSWORD` literally, so `DB_PASS` and
+ * `db_password` both walk straight through it, and what walks through is written
+ * to `plan.json` and handed to the triage agent.
  */
-function maskValue(key: string, value: string): string {
+function maskValue(key: string, value: string, secretEnv: readonly string[]): string {
+  if (secretEnv.includes(key)) return "***";
   return /PASSWORD|SECRET|CERTIFICATE|TOKEN|KEY$/.test(key) ? "***" : value;
 }

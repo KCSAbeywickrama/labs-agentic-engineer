@@ -712,21 +712,6 @@ step bar and no second progress indicator competing with the overview's cards. D
 [#527](https://github.com/wso2/labs-agentic-engineer/issues/527);
 [drawn here](https://claude.ai/code/artifact/fe3fc0c0-6ecd-49ed-9f75-ed65c2220cb1).
 
-**A reference between spec documents is a link, and it opens in place.** The PRD names its feature
-docs — depth lives in `features/<slug>.md` and the body stays lean — so the document is full of
-pointers to files sitting two rows away in the same rail. The shared schema parses a markdown link
-as an EXTERNAL one, which is wrong twice: a plain click inside the editor only places a caret, and
-a click that did follow the href would leave the console for a path it does not serve. A reference
-that resolves to a file the project HAS is styled as a link and selects that file; one naming a
-document nobody has written yet stays plain text, because a control that selects nothing is worse
-than prose. The link's text is the feature's **name** — the path is the href, never the label.
-
-**The PRD leads Requirements.** Everything else in that group elaborates it — a feature file is
-depth on a story the PRD defines — so the document the whole flow is written against cannot sit
-below its own footnotes. Path order alone puts `features/…` above `prd.md`, which
-[#579](https://github.com/wso2/labs-agentic-engineer/issues/579) made routine by giving `/expand` a
-lens on every story; the list pins the PRD instead, and everything behind it keeps path order.
-
 ### A dependency's group, and its definition
 
 Decided in [ADR-0028](decisions/ADR-0028-a-dependency-is-a-directory-in-the-rail.md). An
@@ -925,6 +910,16 @@ there to compare against. Nothing is stored, so nothing can fall out of sync, an
 answerable for projects that predate the check. Coarse on purpose: it reports that the requirements
 moved, never which components are affected. Over-marking costs one re-derivation the agent mostly
 no-ops through; under-marking ships a design the user has already changed their mind about.
+
+**That recorded commit is only true because the send lands the room first.** The agent reads the
+live doc; the recorded commit is the committed one, and the committer is up to a minute behind. An
+edit made just before Enter — agreeing with an `*assumed*` flag, rewriting a sentence — is therefore
+in what the agent reads and not in what the platform recorded, and it lands afterwards looking
+exactly like the requirements moving after the design: the project reports stale requirements the
+moment it finishes designing, with nobody having touched them. So a send flushes the room before it
+dispatches, which is the same forced flush Build awaits, on the other side of the turn. Best-effort:
+if the committer cannot land, the message still goes — the flush-failure banner owns that, and the
+worst a skipped flush costs is the reading the turn would have had anyway.
 
 ### Artifact state
 
@@ -1454,7 +1449,6 @@ renaming; it needed to stop being visible.
 | start from an idea | `/start with <idea>` | fired at project creation ([#522](https://github.com/wso2/labs-agentic-engineer/issues/522)); the idea rides along, cropped, so the user can see the agent is working from **their** words rather than a bare command ([#528](https://github.com/wso2/labs-agentic-engineer/issues/528)) |
 | add a feature | `/feature <idea>` | code lens on the story list — opens the aim box to collect the idea, and sends the command plus their words |
 | add an actor | `/actor <who>` | code lens on Actors — same collecting box |
-| go deeper on a feature | `/expand <story>` | code lens on the story, which carries itself as the subject |
 | answer an open question | `/settle <the point>` | code lens on the question |
 | take up the open questions | `/settle` over the section | code lens on **Open Questions** |
 | talk a line through | *Discuss* — no command; opens the aim box on the line, Enter sends Discuss | code lens on any bullet |
@@ -1463,8 +1457,10 @@ renaming; it needed to stop being visible.
 ([#652](https://github.com/wso2/labs-agentic-engineer/issues/652)). An assumption is a decision
 the agent already made, and the user's response to it is a judgement, not a request — so the line
 carries **Agree · Discuss**. *Agree* is a **direct edit**: it strips the flag and keeps the decision —
-no agent turn, no model, one undo — and it stays live while an agent holds the turn, which is exactly
-when a reviewer is reading flagged lines. *Discuss* opens the aim box on the line. Two, deliberately:
+no agent turn, no model, one undo — and it stays live while an agent holds the turn, which is
+exactly when a reviewer is reading flagged lines. It takes the space before the flag with it, so a
+flag written inside the sentence it qualifies (`… on a schedule *assumed*.`) leaves no gap before
+the full stop: the leftover is a change to the requirements, and it reaches git on the next flush. *Discuss* opens the aim box on the line. Two, deliberately:
 a line with four controls on it stops reading as a line. *Remove* and *Reopen* were built and cut for
 that reason — dropping or reopening a decision is a sentence away in Discuss, and the editor deletes a
 bullet as well as any control could. The word is **Agree**, not *Accept* — *Accept* is what the
@@ -1507,12 +1503,6 @@ how a command is discovered at all, so it cannot hide; a twenty-story list with 
 line would be twenty controls competing with the prose they annotate. The flag itself never hides —
 an `*assumed*` run and an open question read as unsettled at rest, and only the control that acts
 on them waits for the pointer.
-
-That hover is what settled **`/expand` per story rather than one lens on the list**: a feature has
-no block of its own in the PRD — the contract keeps depth in feature files — so the nearest thing
-to "a feature" is the story line, and per-story is the only placement where the subject comes from
-the document instead of the user's memory. Decided against the rendered document, where the cost
-of per-line is a control that is only there while the pointer is.
 
 **The lens is a control beside the line, not the line made clickable.** The PRD is a collaborative
 editor: a line that fires a command on click is a line the user can no longer put a caret in.
