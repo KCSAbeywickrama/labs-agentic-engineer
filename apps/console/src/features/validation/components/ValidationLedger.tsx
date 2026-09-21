@@ -130,7 +130,7 @@ export function ValidationLedger({ projectName }: { projectName: string }) {
   const header = (actions?: React.ReactNode) => (
     <PageHeader
       title="Validation"
-      subtitle="Every version of your spec, and what its acceptance criteria concluded against the deployed system."
+      subtitle="Every version of your spec is validated against its acceptance criteria on the deployed system."
       backTo={backTo}
       {...(actions ? { actions } : {})}
     />
