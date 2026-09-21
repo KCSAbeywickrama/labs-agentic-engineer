@@ -385,6 +385,22 @@ func isInternalComponent(annotations, labels map[string]string) bool {
 	return labels[annotationInternal] == "true"
 }
 
+// agentManagerMarkerTypeName is the component type Agent Manager creates when
+// AEP registers an agent with it as externally hosted (agentmanager.client's
+// `external-agent-api` registration). It is AMP's own record of the agent, not
+// a second component of the user's: it never deploys, and it carries the same
+// display name as the real `deployment/ai-agent`, so a listing that kept it
+// would show a duplicate that reads as "not deployed" forever.
+const agentManagerMarkerTypeName = "proxy/external-agent-api"
+
+// isAgentManagerMarker reports whether a component is Agent Manager's marker
+// for an agent AEP already lists under its real type. Kept separate from
+// isInternalComponent: that one is the platform's own scaffolding, written and
+// reaped by AEP; this one is another product's record, only ever read.
+func isAgentManagerMarker(spec *ocgen.ComponentSpec) bool {
+	return spec != nil && spec.ComponentType.Name == agentManagerMarkerTypeName
+}
+
 // internalMarkerLabels is the label set that marks an object as the platform's
 // own ephemeral scaffolding rather than one of the user's components. One
 // spelling for the pair, because the writer (EnsureReleaseBinding) and the
@@ -429,7 +445,7 @@ func (c *componentClient) ListComponents(ctx context.Context, orgName, projectNa
 		if comp.Metadata.Labels != nil {
 			lbls = *comp.Metadata.Labels
 		}
-		if isInternalComponent(ann, lbls) {
+		if isInternalComponent(ann, lbls) || isAgentManagerMarker(comp.Spec) {
 			continue
 		}
 		items = append(items, componentToModel(comp))
