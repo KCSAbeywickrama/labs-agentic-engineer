@@ -97,6 +97,24 @@ const cycle = (over: Partial<RunCycleView> = {}): RunCycleView =>
     ...over,
   }) as RunCycleView;
 
+/**
+ * An attempt still in flight: no end, no commit, and NO VERDICT — the three
+ * absences together are what a running cycle is. Its own literal rather than an
+ * override, because `exactOptionalPropertyTypes` refuses an explicit undefined
+ * and the verdict has to be missing, not empty.
+ */
+const runningCycle = (id: string): RunCycleView =>
+  ({
+    id,
+    kind: "validation",
+    attempts: 1,
+    createdAt: "2026-08-14T17:00:00Z",
+    endedAt: null,
+    mergeSha: "",
+    validationIssue: 7,
+    recording: "recording",
+  }) as RunCycleView;
+
 const run = (over: Partial<MilestoneRunView> = {}): MilestoneRunView =>
   ({
     id: "r1",
@@ -117,6 +135,7 @@ const detail = (over: Partial<ValidationDetail> = {}): ValidationDetail => ({
   milestoneNumber: 1,
   state: "passed",
   live: false,
+  deployed: true,
   runs: [run()],
   ...over,
 });
@@ -142,8 +161,8 @@ describe("ValidationMilestonePage", () => {
   // forever, the agent's recording is pruned at 30 days (ADR-0027).
   it("puts the report above the log", () => {
     render(<ValidationMilestonePage projectName="p" tag="v1" />);
-    const report = screen.getByText("Acceptance report");
-    const log = screen.getByText("Validation log");
+    const report = screen.getByText("Acceptance reports");
+    const log = screen.getByText("Validation logs");
     expect(report.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
@@ -203,6 +222,147 @@ describe("ValidationMilestonePage", () => {
     });
   });
 
+  describe("the history boundary", () => {
+    const twoAttempts = () =>
+      detail({
+        runs: [
+          run({
+            cycles: [
+              cycle({ id: "old", validationVerdict: "failed" }),
+              cycle({ id: "new" }),
+            ],
+          }),
+        ],
+      });
+
+    // One wording on both cards. "Attempts" rather than "runs" because a
+    // self-heal repeat opens a second attempt on the SAME run — as here, where
+    // one run holds both attempts, so only the report card has history to mark.
+    it("marks the report card's history for two attempts on one run", () => {
+      mockDetail = twoAttempts();
+      render(<ValidationMilestonePage projectName="p" tag="v1" />);
+      expect(screen.getAllByText("EARLIER ATTEMPTS OF V1")).toHaveLength(1);
+    });
+
+    // Two RUNS: the log card now has an older run to group under its own
+    // caption, and it is mounted because the version is live.
+    it("marks both cards when the history spans runs", () => {
+      mockDetail = detail({
+        state: "running",
+        live: true,
+        runs: [
+          run({ id: "r2", state: "running", cycles: [runningCycle("new")] }),
+          run({ id: "r1", cycles: [cycle({ id: "old", validationVerdict: "failed" })] }),
+        ],
+      });
+      render(<ValidationMilestonePage projectName="p" tag="v1" />);
+      expect(screen.getAllByText("EARLIER ATTEMPTS OF V1")).toHaveLength(2);
+    });
+
+    // MUI rounds an accordion's corners by :first-of-type / :last-of-type among
+    // its SIBLINGS. The newest attempt therefore lives alone in its own parent
+    // (all four corners), and every older attempt shares one parent (one fitted
+    // block). Splicing the caption into a single flat list gave the newest a
+    // square bottom and the first older one a square top.
+    it("keeps the newest attempt apart and the older ones together", () => {
+      mockDetail = detail({
+        runs: [
+          run({
+            cycles: [
+              cycle({ id: "oldest", validationVerdict: "failed" }),
+              cycle({ id: "old", validationVerdict: "failed" }),
+              cycle({ id: "new" }),
+            ],
+          }),
+        ],
+      });
+      const { container } = render(<ValidationMilestonePage projectName="p" tag="v1" />);
+      const [newest, ...older] = Array.from(container.querySelectorAll(".MuiAccordion-root"));
+
+      expect(older).toHaveLength(2);
+      expect(older[0]!.parentElement).toBe(older[1]!.parentElement);
+      expect(newest!.parentElement).not.toBe(older[0]!.parentElement);
+      // The caption belongs to the history block, not to the seam between.
+      expect(older[0]!.parentElement!.textContent).toContain("EARLIER ATTEMPTS OF V1");
+    });
+
+    // The ordinary case is one attempt, and a rule over a single entry marks
+    // nothing.
+    it("draws no rule for a version with one attempt", () => {
+      render(<ValidationMilestonePage projectName="p" tag="v1" />);
+      expect(screen.queryByText(/EARLIER ATTEMPTS/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("an expanded attempt", () => {
+    // The sentence has a counted form and a count-free one; it was being handed
+    // `undefined` and so always read the poorer of the two, although the report
+    // it needed was already fetched.
+    it("leads with the counted sentence and the tally", () => {
+      mockSnapshot = {
+        report: JSON.stringify({
+          schemaVersion: 2,
+          scenarios: [
+            { feature: "F", rule: "R", scenario: "a", outcome: "passed", steps: [] },
+            { feature: "F", rule: "R", scenario: "b", outcome: "passed", steps: [] },
+          ],
+        }),
+        criteria: [],
+      };
+      mockDetail = detail({
+        runs: [
+          run({
+            cycles: [
+              cycle({ id: "old", validationVerdict: "passed" }),
+              cycle({ id: "new" }),
+            ],
+          }),
+        ],
+      });
+      render(<ValidationMilestonePage projectName="p" tag="v1" />);
+
+      // Older attempts fetch on EXPAND, so until this click the older section
+      // has no report and its lead can only say the count-free sentence. (The
+      // verdict card above says the counted one for the newest attempt, which
+      // is what an unscoped text query would find instead.)
+      fireEvent.click(screen.getByText("Cycle 1"));
+
+      // One line, numbers first, on the older attempt's own lead.
+      const lead = screen.getByText(
+        (_, el) =>
+          el?.tagName === "P" &&
+          el.textContent === "2 passed — All 2 scenarios were settled and passed.",
+      );
+      expect(lead.querySelector("span")?.textContent).toBe("2 passed");
+    });
+  });
+
+  // The old page showed the previous attempt's counts marked "(last attempt)"
+  // because it had one report on screen and no history. The history is now
+  // directly below, so the card says nothing about the previous attempt — and
+  // this pins it, because it currently falls out of WHICH verdict the card is
+  // fed rather than from a decision anything states.
+  it("shows no stale numbers while an attempt is running", () => {
+    mockSnapshot = { report: null, criteria: [] };
+    mockDetail = detail({
+      state: "running",
+      live: true,
+      runs: [
+        run({
+          state: "running",
+          cycles: [
+            cycle({ id: "old", validationVerdict: "failed" }),
+            runningCycle("running"),
+          ],
+        }),
+      ],
+    });
+    render(<ValidationMilestonePage projectName="p" tag="v1" />);
+
+    expect(screen.queryByText(/last attempt/)).not.toBeInTheDocument();
+    expect(screen.getByText("The validation agent is running.")).toBeInTheDocument();
+  });
+
   describe("the actions menu", () => {
     const open = () => fireEvent.click(screen.getByLabelText("Validation actions"));
 
@@ -228,8 +388,21 @@ describe("ValidationMilestonePage", () => {
       expect(startMutate).toHaveBeenCalled();
     });
 
-    it("refuses only while a run is live on the milestone", () => {
+    it("refuses while a run is live on the milestone", () => {
       mockDetail = detail({ state: "running", live: true });
+      render(<ValidationMilestonePage projectName="p" tag="v1" />);
+      open();
+      fireEvent.click(screen.getByText("Run validation again"));
+      expect(startMutate).not.toHaveBeenCalled();
+    });
+
+    // A revalidation drives whatever is SERVING — the runner resolves its
+    // endpoints from the cluster at request time — so asking an older version
+    // would judge code that version never shipped, and file the verdict AND any
+    // repair work on its milestone. The server refuses it too; this stops a
+    // reader finding out by clicking.
+    it("refuses a version that is not the deployed one", () => {
+      mockDetail = detail({ deployed: false });
       render(<ValidationMilestonePage projectName="p" tag="v1" />);
       open();
       fireEvent.click(screen.getByText("Run validation again"));

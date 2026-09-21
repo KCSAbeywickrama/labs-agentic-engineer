@@ -336,6 +336,57 @@ func TestDetailReportsAwaitingFixWhileTheLoopRepairs(t *testing.T) {
 	}
 }
 
+// `deployed` is what lets the console stop offering a revalidation it cannot
+// honestly make: the runner drives whatever is serving, so only the deployed
+// version can be judged. It is a comparison across the PROJECT's rows — a
+// milestone cannot tell from its own rows whether something newer has shipped.
+func TestDetailReportsWhetherThisVersionIsTheDeployedOne(t *testing.T) {
+	rows := []delivery.MilestoneRun{
+		devRun("r9", 9, "v9", delivery.RunStateSucceeded, delivery.ValidationVerdictPassed),
+		devRun("r1", 1, "v1", delivery.RunStateSucceeded, delivery.ValidationVerdictPassed),
+	}
+	cycles := map[string][]delivery.RunCycle{
+		"r9": {vCycle("c9", "r9", 20, ptr(at(22)), "sha9", delivery.ValidationVerdictPassed)},
+		"r1": {vCycle("c1", "r1", 5, ptr(at(8)), "sha1", delivery.ValidationVerdictPassed)},
+	}
+
+	newest, err := reads(rows, cycles, nil).ValidationForTag(context.Background(), vOrg, vProject, "v9")
+	if err != nil {
+		t.Fatalf("detail: %v", err)
+	}
+	if !newest.Deployed {
+		t.Fatal("the newest succeeded version is the deployed one")
+	}
+
+	older, err := reads(rows, cycles, nil).ValidationForTag(context.Background(), vOrg, vProject, "v1")
+	if err != nil {
+		t.Fatalf("detail: %v", err)
+	}
+	if older.Deployed {
+		t.Fatal("a superseded version is not deployed, and must not offer a revalidation")
+	}
+}
+
+// A running newer version does not unseat the live one — `deployed` follows the
+// newest SUCCEEDED dev run. Otherwise the only judgeable version would go
+// unofferable for the whole of every build.
+func TestDetailKeepsTheDeployedFlagWhileANewerVersionBuilds(t *testing.T) {
+	rows := []delivery.MilestoneRun{
+		devRun("r9", 9, "v9", delivery.RunStateRunning, ""),
+		devRun("r1", 1, "v1", delivery.RunStateSucceeded, delivery.ValidationVerdictPassed),
+	}
+	cycles := map[string][]delivery.RunCycle{
+		"r1": {vCycle("c1", "r1", 5, ptr(at(8)), "sha1", delivery.ValidationVerdictPassed)},
+	}
+	out, err := reads(rows, cycles, nil).ValidationForTag(context.Background(), vOrg, vProject, "v1")
+	if err != nil {
+		t.Fatalf("detail: %v", err)
+	}
+	if !out.Deployed {
+		t.Fatal("a building v9 does not unseat a live v1")
+	}
+}
+
 func TestDetailIsNotFoundForAVersionNoRunEverWorked(t *testing.T) {
 	_, err := reads(nil, nil, nil).ValidationForTag(context.Background(), vOrg, vProject, "v9")
 	if !errors.Is(err, runread.ErrTagNotFound) {

@@ -188,3 +188,23 @@ func AnsweringRunOnMilestone(rows []MilestoneRun, milestoneNumber int) *Mileston
 	dev := NewestRunOfKindOnMilestone(rows, milestoneNumber, RunKindDev)
 	return NewestValidatingOnMilestone(rows, dev)
 }
+
+// DeployedRun returns the run that last finished delivering a version — the
+// newest SUCCEEDED dev run, or nil when the project has never completed one.
+//
+// "Deployed" is a fact about runs rather than about the cluster: a running v2
+// does not unseat a live v1, so the newest run is the wrong answer and only a
+// succeeded one counts. It is what `deploy.version` reports, and what a
+// revalidation is allowed to judge — the runner resolves its endpoints from the
+// cluster at request time, so any other version would be judged against code it
+// never shipped.
+//
+// rows must be newest-first, which the repository's list reads guarantee.
+func DeployedRun(rows []MilestoneRun) *MilestoneRun {
+	for i := range rows {
+		if rows[i].Kind == RunKindDev && rows[i].State == RunStateSucceeded {
+			return &rows[i]
+		}
+	}
+	return nil
+}

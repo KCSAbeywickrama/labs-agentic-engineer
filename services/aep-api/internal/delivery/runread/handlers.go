@@ -214,6 +214,11 @@ func mapRunError(err error) error {
 		return apierr.NotFound("run not found")
 	case errors.Is(err, ErrCycleNotFound):
 		return apierr.NotFound("cycle not found")
+	case errors.Is(err, delivery.ErrVersionNotDeployed):
+		// "Not in this state" like the two below, and it clears the same way — deploy
+		// this version and it becomes validatable. A 409 rather than a 422 for that
+		// reason: the request is not malformed, the project is simply somewhere else.
+		return apierr.Conflict(err.Error())
 	case errors.Is(err, delivery.ErrRunAlreadyLive), errors.Is(err, delivery.ErrMilestoneHasOpenWork):
 		// Both mean "not in this state" rather than "not allowed", and both clear on
 		// their own — the live run settles, the open work gets worked. The message is

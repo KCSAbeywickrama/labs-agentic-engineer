@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Accordion,
   AccordionDetails,
@@ -28,14 +28,21 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ChevronDown } from "@wso2/oxygen-ui-icons-react";
-import { AcceptanceView } from "@aep/ui-acceptance-view";
+import {
+  AcceptanceView,
+  isReportParseError,
+  parseAcceptanceReport,
+  tallyOutcomes,
+  tallySentence,
+} from "@aep/ui-acceptance-view";
 import { GitHubRefChip } from "../../../components/GitHubRefChip";
 import { LogSection } from "../../../components/LogSection";
+import { SectionCaption } from "../../../components/SectionCaption";
 import { StatusChip } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 import { runStamp } from "../../builds/lib/format";
 import { validationChip } from "../lib/chip";
-import { verdictSentence } from "../lib/verdict";
+import { countsFromScenarios, verdictCounts, verdictSentence } from "../lib/verdict";
 import { useValidationSnapshot } from "../api/queries";
 
 type RunCycleView = components["schemas"]["RunCycleView"];
@@ -91,7 +98,8 @@ export function ReportCard({
   // Three-valued, like the log's: undefined follows the newest, null is the
   // reader having closed everything, a string is their pick.
   const [chosen, setChosen] = useState<string | null | undefined>(undefined);
-  const newestId = attempts[0]?.cycle.id ?? null;
+  const [newest, ...older] = attempts;
+  const newestId = newest?.cycle.id ?? null;
   const openId = chosen === undefined ? newestId : chosen;
 
   const meta =
@@ -101,26 +109,59 @@ export function ReportCard({
 
   return (
     <LogSection
-      title="Acceptance report"
+      title="Acceptance reports"
       {...(meta ? { meta: <Typography variant="caption" color="text.secondary">{meta}</Typography> } : {})}
     >
-      <Stack spacing={0}>
-        {attempts.map((attempt, i) => (
-          <AttemptSection
-            key={attempt.cycle.id}
-            projectName={projectName}
-            tag={tag}
-            attempt={attempt}
-            expanded={openId === attempt.cycle.id}
-            onToggle={(open) => setChosen(open ? attempt.cycle.id : null)}
-            // The newest attempt's sentence is already in the verdict card at
-            // the top of the page; repeating it here would say the same thing
-            // twice on one screen.
-            leadSentence={i > 0}
-            state={i === 0 ? state : attempt.cycle.validationVerdict || ""}
-            {...(i === 0 ? { snapshot: newestSnapshot } : {})}
-          />
-        ))}
+      <Stack spacing={2}>
+        {/* Two blocks, not one list. MUI rounds an Accordion's corners by
+            :first-of-type and :last-of-type AMONG ITS SIBLINGS, so consecutive
+            accordions in one parent read as a single fitted card — top of the
+            first rounded, bottom of the last, everything between square. The
+            newest attempt sits alone in its own parent so it keeps all four
+            corners; the history sits together in another so it reads as one
+            block under its caption. One flat list with the caption spliced in
+            gave the newest attempt square bottom corners and the first older
+            one square top corners, with a label stuck through the seam. */}
+        <Box>
+          {newest && (
+            <AttemptSection
+              projectName={projectName}
+              tag={tag}
+              attempt={newest}
+              expanded={openId === newest.cycle.id}
+              onToggle={(open) => setChosen(open ? newest.cycle.id : null)}
+              // The newest attempt's sentence is already in the verdict card at
+              // the top of the page; repeating it here would say the same thing
+              // twice on one screen.
+              leadSentence={false}
+              state={state}
+              snapshot={newestSnapshot}
+            />
+          )}
+        </Box>
+        {older.length > 0 && (
+          <Box>
+            {/* "Attempts" rather than "runs": a self-heal repeat opens a second
+                attempt on the same run, so a milestone can hold one run with
+                three of them. Inside the group's own Box so the caption keeps
+                its bottom margin — a Stack with spacing zeroes its children's
+                margins — and sits closer to what it labels than to what it
+                separates from. */}
+            <SectionCaption>EARLIER ATTEMPTS OF {tag.toUpperCase()}</SectionCaption>
+            {older.map((attempt) => (
+              <AttemptSection
+                key={attempt.cycle.id}
+                projectName={projectName}
+                tag={tag}
+                attempt={attempt}
+                expanded={openId === attempt.cycle.id}
+                onToggle={(open) => setChosen(open ? attempt.cycle.id : null)}
+                leadSentence
+                state={attempt.cycle.validationVerdict || ""}
+              />
+            ))}
+          </Box>
+        )}
       </Stack>
     </LogSection>
   );
@@ -235,6 +276,24 @@ function AttemptBody({
   state: string;
   leadSentence: boolean;
 }) {
+  // The attempt's own numbers, off the report this section already fetched.
+  //
+  // Parsed here rather than reached for inside AcceptanceView: the lead line's
+  // copy names RUN concepts the shared view package knows nothing about, and a
+  // second JSON.parse of a few-KB file in a useMemo is a cheaper price than
+  // teaching that package about runs — the trade the retired useParsedReport
+  // documented. Before the early returns, because hooks cannot follow them.
+  const raw = query.data?.report;
+  const evidence = useMemo(() => {
+    if (!raw) return undefined;
+    const parsed = parseAcceptanceReport(raw);
+    if (isReportParseError(parsed)) return undefined;
+    return {
+      counts: countsFromScenarios(parsed.scenarios),
+      tally: tallySentence(tallyOutcomes(parsed.scenarios)),
+    };
+  }, [raw]);
+
   // An attempt that ended without landing has no snapshot to fetch, and the
   // server answers 404 for it. Said here rather than left to the error state,
   // because "this attempt never finished" and "the report could not be read"
@@ -263,11 +322,24 @@ function AttemptBody({
 
   const snapshot = query.data;
   const awaiting = !snapshot?.report;
+  const tally = verdictCounts(evidence?.tally ?? "", state);
   return (
     <Stack spacing={1.5}>
       {leadSentence && (
+        // One line: the numbers lead in bold, the sentence explains them. The
+        // counts are also what make the sentence say anything — given them,
+        // verdictSentence switches from "Every scenario was settled and passed"
+        // to "All 9 scenarios were settled and passed".
         <Typography variant="body2" color="text.secondary">
-          {verdictSentence(cycle.validationVerdict || "", undefined, state)}
+          {tally && (
+            <>
+              <Box component="span" sx={{ fontWeight: 600, color: "text.primary" }}>
+                {tally}
+              </Box>
+              {" — "}
+            </>
+          )}
+          {verdictSentence(cycle.validationVerdict || "", evidence?.counts, state)}
         </Typography>
       )}
       <AcceptanceView

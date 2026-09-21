@@ -16,9 +16,10 @@
  * under the License.
  */
 
-import { Fragment, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Alert,
+  Box,
   Button,
   CircularProgress,
   Divider,
@@ -27,6 +28,7 @@ import {
   MenuItem,
   Stack,
   Tooltip,
+  type Theme,
 } from "@wso2/oxygen-ui";
 import { Copy, Ellipsis, GitHub, Play, X } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "@tanstack/react-router";
@@ -44,7 +46,6 @@ import type { components } from "../../../generated/aep-api";
 import { useCancelRun } from "../../builds/api/queries";
 import { RunFeed } from "../../builds/components/RunFeed";
 import { useTicker } from "../../builds/hooks/useTicker";
-import { useProjectStatus } from "../../projects/api/queries";
 import { useTask } from "../../tasks/api/queries";
 import { statusLine } from "../../tasks/lib/statusLine";
 import { useStartValidation, useValidation, useValidationSnapshot } from "../api/queries";
@@ -58,6 +59,34 @@ type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 
 /** Only validation cycles reach this page; the server filtered the rest. */
 const VALIDATION_CYCLE = ["validation"] as const;
+
+/**
+ * Makes several runs' cycle boxes read as ONE block.
+ *
+ * MUI rounds an Accordion's corners by :first-of-type and :last-of-type among
+ * its SIBLINGS, so consecutive accordions in one parent already fit together —
+ * which is exactly how the report card's older attempts get their silhouette,
+ * with no help. The log card cannot lean on that: each run is a RunFeed, and a
+ * RunFeed wraps its cycles in a Box of its own, so two runs' cycles are never
+ * siblings and every run rounds itself. This wrapper takes the decision back:
+ * square every cycle inside it, then round only the first cycle of the first
+ * run and the last cycle of the last run.
+ *
+ * It reaches into RunFeed's shape (a Box holding Accordions) rather than
+ * changing RunFeed, which is shared with the builds page and is its own PR to
+ * touch. The direct-child `div` selectors skip the caption, which is a span.
+ */
+const groupedCycleCorners = (theme: Theme) => ({
+  "& .MuiAccordion-root": { borderRadius: 0 },
+  "& > div:first-of-type .MuiAccordion-root:first-of-type": {
+    borderTopLeftRadius: theme.shape.borderRadius,
+    borderTopRightRadius: theme.shape.borderRadius,
+  },
+  "& > div:last-of-type .MuiAccordion-root:last-of-type": {
+    borderBottomLeftRadius: theme.shape.borderRadius,
+    borderBottomRightRadius: theme.shape.borderRadius,
+  },
+});
 
 /**
  * One version's validation: what it concluded, every attempt's report, and the
@@ -203,6 +232,7 @@ export function ValidationMilestonePage({
   const live = state === "running" || state === "awaiting-fix";
   // Newest first, so the log's runs match the report's ordering above it.
   const feedRuns = [...data.runs];
+  const [newestRun, ...olderRuns] = feedRuns;
 
   return (
     <>
@@ -233,20 +263,38 @@ export function ValidationMilestonePage({
             version opens no SSE connection until the reader asks for one —
             which matters most on an old version, whose recording is likely
             gone anyway. */}
-        <LogSection title="Validation log" defaultOpen={live}>
+        <LogSection title="Validation logs" defaultOpen={live}>
           <Stack spacing={2}>
-            {feedRuns.map((run, i) => (
-              <Fragment key={run.id}>
-                {i === 1 && <SectionCaption>EARLIER VALIDATION RUNS</SectionCaption>}
+            {/* The same two blocks as the report card above: the newest run alone
+                so its cycles keep all four corners, then every older run together
+                under the caption so they read as one fitted block. */}
+            <Box>
+              {newestRun && (
                 <RunFeed
                   projectName={projectName}
-                  runId={run.id}
+                  runId={newestRun.id}
                   cycleKinds={VALIDATION_CYCLE}
-                  {...(feedRuns.length > 1 ? { runNumber: feedRuns.length - i } : {})}
-                  expandNewest={i === 0}
+                  {...(feedRuns.length > 1 ? { runNumber: feedRuns.length } : {})}
+                  expandNewest
                 />
-              </Fragment>
-            ))}
+              )}
+            </Box>
+            {olderRuns.length > 0 && (
+              <Box sx={groupedCycleCorners}>
+                <SectionCaption>EARLIER ATTEMPTS OF {tag.toUpperCase()}</SectionCaption>
+                {olderRuns.map((run, j) => (
+                  <RunFeed
+                    key={run.id}
+                    projectName={projectName}
+                    runId={run.id}
+                    cycleKinds={VALIDATION_CYCLE}
+                    // Counted from the OLDEST; the newest above is feedRuns.length.
+                    runNumber={feedRuns.length - 1 - j}
+                    expandNewest={false}
+                  />
+                ))}
+              </Box>
+            )}
           </Stack>
         </LogSection>
       </Stack>
@@ -313,15 +361,21 @@ function ValidationActions({
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const start = useStartValidation(projectName, tag);
   const cancel = useCancelRun(projectName, tag);
-  const status = useProjectStatus(projectName);
   const close = () => setAnchor(null);
 
-  // ONE condition the console checks. The endpoint refuses three things — a
-  // live run, open work on the version, and a version with no criteria — and
-  // only the first is something the console knows for certain. Gating on the
-  // verdict too would be inventing a rule the API does not have: re-asking a
-  // passed version is exactly what this endpoint is for.
-  const blocked = detail.live || start.isPending;
+  // TWO conditions, and both are facts the server hands over rather than rules
+  // the console invents. A revalidation drives whatever is SERVING — the runner
+  // resolves its endpoints from the cluster at request time — so only the
+  // deployed version can be judged; asking an older one would test code that
+  // version never shipped and file the verdict, and any repair work, on its
+  // milestone. The endpoint refuses it too; this only stops a reader finding
+  // out by clicking.
+  //
+  // The other refusals (open work, no criteria) stay the server's. Gating on
+  // the VERDICT would be a rule the API does not have: re-asking a passed
+  // version is exactly what this endpoint is for.
+  const notDeployed = !detail.deployed;
+  const blocked = detail.live || notDeployed || start.isPending;
   // "again" only once something has actually answered. It reads wrong on a
   // version that has never been validated, which is a state this page now
   // reaches routinely.
@@ -339,7 +393,7 @@ function ValidationActions({
         <Ellipsis size={16} />
       </IconButton>
       <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={close}>
-        <Tooltip title={detail.live ? "A run is already working this version." : ""}>
+        <Tooltip title={triggerRefusal(detail)}>
           {/* A span, because a disabled MenuItem swallows the hover the tooltip
               needs — and a disabled item with no reason is a dead control. */}
           <span>
@@ -403,7 +457,21 @@ function ValidationActions({
           Copy run ID
         </MenuItem>
       </Menu>
-      {status.isError && null}
     </>
   );
+}
+
+/**
+ * Why the trigger is disabled, or "" when it is not.
+ *
+ * A disabled item with no reason is a dead control, and these two are the only
+ * refusals the console can state before the call — the rest come back as the
+ * server's own sentences in the page's error slot.
+ */
+function triggerRefusal(detail: ValidationDetail): string {
+  if (detail.live) return "A run is already working this version.";
+  if (!detail.deployed) {
+    return "Only the deployed version can be validated — this one is not what is running.";
+  }
+  return "";
 }

@@ -145,6 +145,14 @@ describe("the validation read-model fixtures agree with the run story", () => {
   // A snapshot pairs a report with the criteria AT THE SAME COMMIT. An attempt
   // still running has no commit, so it has criteria and no report — which is a
   // different fact from an empty report and renders as a different screen.
+  // The ledger's older rows exist so an old version is READABLE; `deployed`
+  // marks the one that is also revalidatable. A fixture set where every version
+  // is deployed would leave the gate untestable by hand.
+  it("marks exactly the scenario's own version as deployed", () => {
+    expect(validationDetail("passed").deployed).toBe(true);
+    expect(validationDetail("passed", "first", "v0.2").deployed).toBe(false);
+  });
+
   it("pairs a report with a commit, or has neither", () => {
     for (const scenario of VALIDATION_SCENARIOS) {
       const snap = validationSnapshot(scenario);

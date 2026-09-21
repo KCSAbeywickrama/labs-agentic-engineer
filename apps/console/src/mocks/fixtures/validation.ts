@@ -987,6 +987,8 @@ export function validationLedger(
       current,
       // A version validated cleanly a while back, and one that was built but
       // never validated — the row a reader most needs to be able to find.
+      // Validated cleanly a while back, and since superseded — the row that
+      // proves an older version is readable but NOT revalidatable.
       {
         tag: "v0.2",
         milestoneNumber: 2,
@@ -1014,6 +1016,11 @@ export function validationDetail(
     milestoneNumber: list.milestoneNumber,
     state: scenario,
     live: runs.some((r) => !TERMINAL_RUN_STATES.has(r.state)),
+    // The scenario's own version is the deployed one; the two older rows in the
+    // ledger are not. Without a NOT-deployed version in the fixtures the
+    // revalidate gate cannot be seen to work at all — every page would offer
+    // the trigger and the disabled state would exist only in tests.
+    deployed: tag === "v1",
     runs,
   };
 }

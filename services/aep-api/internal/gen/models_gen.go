@@ -3469,7 +3469,11 @@ type ValidationCriteriaFile struct {
 // ValidationDetail One version's validation history, already filtered to what asks the question.
 // `runs` holds only runs whose KIND validates (delivery.RunValidates — a task run never does), and each run's `cycles` holds only its VALIDATION cycles. Both filters are applied here rather than by the client: they are the platform's own rules, and the surface that re-derived them read a newer non-validating run as the version's answer and hid a real verdict. The views are the same MilestoneRunView and RunCycleView the run story serves, so one projection describes a cycle everywhere.
 type ValidationDetail struct {
-	// Live A run is in flight on this milestone. It is the ONE condition the console gates the validation trigger on; every other refusal (open work, no criteria) belongs to revalidate-build, which owns them and says so in its error. It also decides whether an unvalidated version reads as "a verdict is coming" or "nothing will come unless you ask", which must not disagree with whether the trigger is offered.
+	// Deployed This version is the one currently deployed — the only version a revalidation can honestly judge.
+	// A revalidation drives whatever is serving RIGHT NOW: the runner's endpoint URLs are resolved from OpenChoreo at request time and its criteria come from the branch tip, neither pinned to the version the run is filed under. So asking an older version's criteria judges code that version never shipped, records the verdict on its milestone, and — with the default attempt budget — files one repair issue per failed scenario there too. revalidate-build refuses it; this flag is what lets the console stop offering it, rather than letting a reader discover the refusal by clicking.
+	Deployed bool `json:"deployed"`
+
+	// Live A run is in flight on this milestone. With `deployed` it makes the two conditions the console gates the validation trigger on; the remaining refusals (open work, no criteria) belong to revalidate-build, which owns them and says so in its error. It also decides whether an unvalidated version reads as "a verdict is coming" or "nothing will come unless you ask", which must not disagree with whether the trigger is offered.
 	Live            bool  `json:"live"`
 	MilestoneNumber int64 `json:"milestoneNumber"`
 

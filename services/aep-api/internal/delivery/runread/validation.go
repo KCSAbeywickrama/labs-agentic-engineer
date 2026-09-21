@@ -188,10 +188,15 @@ func (r *ValidationReads) ValidationForTag(ctx context.Context, orgID, projectID
 	if err != nil {
 		return nil, err
 	}
+	deployed, err := r.isDeployed(ctx, orgID, projectID, number)
+	if err != nil {
+		return nil, err
+	}
 
 	out := &gen.ValidationDetail{
 		Tag:             tag,
 		MilestoneNumber: int64(number),
+		Deployed:        deployed,
 		Runs:            make([]gen.MilestoneRunView, 0, len(rows)),
 	}
 	answering := delivery.AnsweringRunOnMilestone(rows, number)
@@ -229,6 +234,24 @@ func (r *ValidationReads) ValidationForTag(ctx context.Context, orgID, projectID
 	}
 	out.State = gen.ValidationState(state)
 	return out, nil
+}
+
+// isDeployed reports whether this milestone holds the version currently
+// serving — the one condition, beside a live run, that decides whether a
+// revalidation may be offered.
+//
+// It reads the project's rows rather than this milestone's: "deployed" is a
+// comparison, and a milestone cannot tell from its own rows whether something
+// newer has since shipped. The rule itself is delivery's (DeployedRun), shared
+// with the status aggregate so the page and the overview cannot disagree about
+// which version is live.
+func (r *ValidationReads) isDeployed(ctx context.Context, orgID, projectID string, milestoneNumber int) (bool, error) {
+	rows, err := r.runs.ListByProject(ctx, orgID, projectID)
+	if err != nil {
+		return false, err
+	}
+	deployed := delivery.DeployedRun(rows)
+	return deployed != nil && deployed.MilestoneNumber == milestoneNumber, nil
 }
 
 // milestoneRuns resolves a tag to its milestone and that milestone's runs,
