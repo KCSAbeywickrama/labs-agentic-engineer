@@ -20,7 +20,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ValidationMilestonePage } from "../features/validation/components/ValidationMilestonePage";
 
 /** One version's validation: its verdict, every attempt's report, and the log. */
-export const Route = createFileRoute("/projects/$projectName/validation/$tag")({
+export const Route = createFileRoute("/projects/$projectName/validations/$tag")({
   component: ValidationMilestoneRoute,
 });
 

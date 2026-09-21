@@ -129,7 +129,7 @@ export function ValidationLedger({ projectName }: { projectName: string }) {
 
   const header = (actions?: React.ReactNode) => (
     <PageHeader
-      title="Validation"
+      title="Validations"
       subtitle="Every version of your spec is validated against its acceptance criteria on the deployed system."
       backTo={backTo}
       {...(actions ? { actions } : {})}
@@ -238,7 +238,7 @@ export function ValidationLedger({ projectName }: { projectName: string }) {
                   row={row}
                   onOpen={() =>
                     void navigate({
-                      to: "/projects/$projectName/validation/$tag",
+                      to: "/projects/$projectName/validations/$tag",
                       params: { projectName, tag: row.tag },
                     })
                   }

@@ -28,26 +28,28 @@ import { describe, expect, it } from "vitest";
 const CONSOLE = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
- * Validation's URL contract, read off the tree the router is actually built
+ * Validations' URL contract, read off the tree the router is actually built
  * from — the route modules themselves carry only what `createFileRoute` was
  * handed, so their paths are not assertable in isolation.
  *
- * It gained a level: one page pinned to the newest milestone became a ledger
- * with a page per version. What must not break silently is the old link —
- * every `/validation` in a bookmark, a comment or a notification.
+ * The URL follows the name: `/validations`, plural, beside `/builds` and
+ * `/deployments` and matching the API path the page reads. The singular
+ * `/validation` — first a page pinned to the newest milestone, then the
+ * ledger — was deliberately not kept: nothing outside the console ever linked
+ * to it, and a redirect would exist only for a developer's own bookmarks.
  */
 describe("the validation routes", () => {
   const tree = readFileSync(join(CONSOLE, "src/generated/routeTree.gen.ts"), "utf8");
 
-  it("serves the ledger and the per-version page", () => {
-    expect(tree).toContain("/projects/$projectName/validation/");
-    expect(tree).toContain("/projects/$projectName/validation/$tag");
+  it("serves the ledger and the per-version page under /validations", () => {
+    expect(tree).toContain("/projects/$projectName/validations/");
+    expect(tree).toContain("/projects/$projectName/validations/$tag");
   });
 
-  // The flat route is gone — it WAS the page pinned to the newest milestone.
-  // Old links resolve to the ledger, which is a better answer to "show me
-  // validation" than the newest version alone was.
-  it("no longer serves a validation page without a version", () => {
-    expect(tree).not.toContain("projects.$projectName.validation.tsx");
+  // Exact route ids, so `/validations/` cannot satisfy them.
+  it("serves nothing at the singular address", () => {
+    expect(tree).not.toContain("'/validation/'");
+    expect(tree).not.toContain("'/validation/$tag'");
+    expect(tree).not.toContain("'/projects/$projectName/validation'");
   });
 });

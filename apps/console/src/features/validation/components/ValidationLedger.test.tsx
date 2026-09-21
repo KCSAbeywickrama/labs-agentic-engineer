@@ -94,7 +94,7 @@ describe("ValidationLedger", () => {
     render(<ValidationLedger projectName="p" />);
     fireEvent.click(screen.getByText("v1"));
     expect(navigate).toHaveBeenCalledWith({
-      to: "/projects/$projectName/validation/$tag",
+      to: "/projects/$projectName/validations/$tag",
       params: { projectName: "p", tag: "v1" },
     });
   });

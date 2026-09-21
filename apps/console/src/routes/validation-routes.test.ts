@@ -26,19 +26,16 @@ vi.mock("../features/validation/components/ValidationMilestonePage", () => ({
   ValidationMilestonePage: () => null,
 }));
 
-import { Route as validationIndexRoute } from "./projects.$projectName.validation.index";
-import { Route as validationTagRoute } from "./projects.$projectName.validation.$tag";
+import { Route as validationIndexRoute } from "./projects.$projectName.validations.index";
+import { Route as validationTagRoute } from "./projects.$projectName.validations.$tag";
 
 /**
- * Validation gained a level: it was one page pinned to the newest milestone,
- * and it is now a ledger with a page per version.
- *
- * The contract worth pinning is what happens to the OLD links. Every
- * `/validation` and `/validation?view=logs` in a bookmark, a comment or a
- * notification still resolves — to the ledger, which answers "show me
- * validation" better than the newest version alone ever did.
+ * Validations is a ledger with a page per version, at `/validations` — plural,
+ * like `/builds` and `/deployments` beside it. The singular `/validation` it
+ * replaced is gone rather than redirected: nothing outside the console ever
+ * linked to it, so the only links to break are a developer's own bookmarks.
  */
-describe("/projects/$projectName/validation — the ledger", () => {
+describe("/projects/$projectName/validations — the ledger", () => {
   // `?view=logs` toggled the old page between the report and the log. Both now
   // sit on the version page, so the param has nothing left to select and is
   // dropped rather than carried as dead state in every shared URL.
@@ -50,15 +47,14 @@ describe("/projects/$projectName/validation — the ledger", () => {
     expect(parse?.({ view: "report", other: 1 })).toEqual({});
   });
 
-  // Old links land on the ledger rather than being redirected: a list of every
-  // version answers "show me validation" better than the newest one did, so
-  // there is nothing for a beforeLoad to do.
+  // Nothing arrives here by an old address, so there is nothing for a
+  // beforeLoad to do.
   it("redirects nothing", () => {
     expect(validationIndexRoute.options.beforeLoad).toBeUndefined();
   });
 });
 
-describe("/projects/$projectName/validation/$tag — one version", () => {
+describe("/projects/$projectName/validations/$tag — one version", () => {
   // Unlike /builds/$tag — where a numeric segment is a legacy task link — this
   // segment has never been anything but a version tag.
   it("needs no legacy redirect", () => {

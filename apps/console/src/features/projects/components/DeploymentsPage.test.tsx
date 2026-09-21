@@ -463,7 +463,7 @@ describe("DeploymentsPage — validation", () => {
     // "Awaiting fix" with no subject in a card about deployments, and carried less
     // than the row it duplicated.
     const link = screen.getByRole("link", { name: /View validations/ });
-    expect(link).toHaveAttribute("href", "/projects/acme/validation");
+    expect(link).toHaveAttribute("href", "/projects/acme/validations");
     expect(link).not.toHaveAttribute("target");
   });
 

@@ -157,8 +157,8 @@ export function ValidationMilestonePage({
   const [actionError, setActionError] = useState<string | null>(null);
 
   const backTo = {
-    link: <Link to="/projects/$projectName/validation" params={{ projectName }} />,
-    label: "Back to Validation",
+    link: <Link to="/projects/$projectName/validations" params={{ projectName }} />,
+    label: "Back to Validations",
   };
   const chip = validationChip(state);
 

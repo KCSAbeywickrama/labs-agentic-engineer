@@ -22,14 +22,15 @@ import { ValidationLedger } from "../features/validation/components/ValidationLe
 /**
  * The validation ledger — one row per version.
  *
- * This route used to BE the validation page, pinned to the newest milestone
- * with no way to reach any other. Old links land here rather than redirecting:
- * a list of every version is a better answer to "show me validation" than the
- * newest one was, and `?view=logs` — the page's old report/log toggle — is
+ * `/validations`, plural, like `/builds` and `/deployments` beside it and the
+ * API path it reads: the page is the ledger of every version's validations,
+ * which is the thing that accumulates (lexicon, naming rule 3). The singular
+ * `/validation` it replaced is not redirected — nothing outside the console
+ * ever linked to it — and `?view=logs`, that page's old report/log toggle, is
  * dropped by validateSearch rather than honoured, because the two now sit on
  * one page.
  */
-export const Route = createFileRoute("/projects/$projectName/validation/")({
+export const Route = createFileRoute("/projects/$projectName/validations/")({
   validateSearch: (): Record<string, never> => ({}),
   component: ValidationLedgerRoute,
 });
