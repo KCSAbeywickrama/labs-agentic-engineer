@@ -286,6 +286,45 @@ describe("ValidationMilestonePage", () => {
       expect(older[0]!.parentElement!.textContent).toContain("EARLIER ATTEMPTS OF V1");
     });
 
+    // Runs arrive newest first with their cycles in dispatch order. The report
+    // list has to descend the whole way — newest run on top, newest attempt
+    // within it first — the same reading order as the log card below it.
+    // Reversing the flattened list once got the cycles right and the runs
+    // wrong, which only a version with more than one run could show.
+    it("orders the reports newest first across runs", () => {
+      mockDetail = detail({
+        runs: [
+          run({
+            id: "r2",
+            cycles: [
+              cycle({ id: "r2-old", validationVerdict: "failed" }),
+              cycle({ id: "r2-new" }),
+            ],
+          }),
+          run({
+            id: "r1",
+            cycles: [
+              cycle({ id: "r1-old", validationVerdict: "failed" }),
+              cycle({ id: "r1-new", validationVerdict: "failed" }),
+            ],
+          }),
+        ],
+      });
+      const { container } = render(<ValidationMilestonePage projectName="p" tag="v1" />);
+
+      const headings = Array.from(
+        container.querySelectorAll(".MuiAccordionSummary-root .MuiTypography-subtitle2"),
+      ).map((el) => el.textContent);
+      expect(headings).toEqual([
+        "Run 2 · Cycle 2",
+        "Run 2 · Cycle 1",
+        "Run 1 · Cycle 2",
+        "Run 1 · Cycle 1",
+      ]);
+      // And the newest attempt is the one whose snapshot the page fetches.
+      expect(snapshotCalls.filter((c) => c.enabled).map((c) => c.cycleId)).toEqual(["r2-new"]);
+    });
+
     // The ordinary case is one attempt, and a rule over a single entry marks
     // nothing.
     it("draws no rule for a version with one attempt", () => {

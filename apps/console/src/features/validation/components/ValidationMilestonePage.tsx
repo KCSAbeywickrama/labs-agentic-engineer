@@ -323,21 +323,23 @@ function emptyReason(state: string, live: boolean): string {
 /** One attempt per validation cycle, newest first, numbered from the oldest. */
 function flattenAttempts(runs: readonly MilestoneRunView[]): Attempt[] {
   const multiRun = runs.length > 1;
-  const out: Attempt[] = [];
-  runs.forEach((run, runIndex) => {
-    const cycles = run.cycles ?? [];
-    cycles.forEach((cycle, i) => {
-      out.push({
-        cycle,
-        // Runs arrive newest first; the number counts from the oldest.
-        ...(multiRun ? { runNumber: runs.length - runIndex } : {}),
-        ordinal: i + 1,
-        runId: run.id,
-      });
-    });
-  });
-  // Newest attempt first, across runs: a version's attempts can span several.
-  return out.reverse();
+  // Runs arrive newest first and each run's cycles in dispatch order, so the
+  // runs are kept as they come and only each run's cycles are walked backwards.
+  // Reversing the whole flattened list instead would put the OLDER run's
+  // attempts on top — the run order is already right, the cycle order is not.
+  return runs.flatMap((run, runIndex) =>
+    (run.cycles ?? [])
+      .map(
+        (cycle, i): Attempt => ({
+          cycle,
+          // The number counts from the oldest run.
+          ...(multiRun ? { runNumber: runs.length - runIndex } : {}),
+          ordinal: i + 1,
+          runId: run.id,
+        }),
+      )
+      .reverse(),
+  );
 }
 
 function ValidationActions({
