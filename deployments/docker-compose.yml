@@ -480,6 +480,29 @@ services:
       VITE_THUNDER_URL: "${PUBLIC_THUNDER_URL}"
       VITE_THUNDER_CLIENT_ID: "${VITE_THUNDER_CLIENT_ID:-aep-console-client}"
       VITE_THUNDER_SCOPES: "${VITE_THUNDER_SCOPES:-openid profile email}"
+      VITE_TRY_IT_URL: "${VITE_TRY_IT_URL:-http://tryit.aep.localhost:8095}"
+    networks:
+      - aep
+
+  # ---------------------------------------------------------------------------
+  # tryit — the platform's test app (apps/tryit). A static SPA the console
+  # opens in a new tab; it signs in on the PROJECT's identity provider as one
+  # of the project's test users and talks to a component's public gateway URL
+  # directly. It never calls aep-api. Its origin here is the one aep-api's
+  # TRY_IT_CALLBACK_URL names: the platform registers
+  # http://tryit.aep.localhost:8095/callback on every project's sign-in
+  # client, so the two must move together.
+  # ---------------------------------------------------------------------------
+  tryit:
+    build:
+      context: ..
+      dockerfile: apps/tryit/Dockerfile
+    container_name: aep-tryit
+    ports:
+      - "8095:3000"
+    environment:
+      # Where a token may be sent: the environments' public gateway vhosts.
+      TRY_IT_GATEWAY_HOSTS: "${TRY_IT_GATEWAY_HOSTS:-openchoreoapis.localhost}"
     networks:
       - aep
 
