@@ -55,7 +55,20 @@ interface ErrorBoundaryProps {
   fill?: boolean;
   /** Extra sizing for the fallback when the children set their own (the chat panel's width). */
   fallbackSx?: SxProps<Theme>;
+  /**
+   * What the fallback says once the automatic attempts are spent. A section
+   * defaults to advice; the app-level boundary passes the "contact your
+   * administrator" line, since nothing above it can recover.
+   */
+  exhaustedMessage?: string;
+  /**
+   * Also offer "Reload page". For the app-level boundary: the commonest
+   * whole-app failure is a stale bundle after a deploy, which only a reload fixes.
+   */
+  offerReload?: boolean;
 }
+
+const DEFAULT_EXHAUSTED_MESSAGE = "Try again, or reload the page if it keeps happening.";
 
 interface ErrorBoundaryState {
   error: Error | null;
@@ -128,6 +141,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         onRetry={this.reset}
         fill={this.props.fill ?? false}
         sx={this.props.fallbackSx}
+        exhaustedMessage={this.props.exhaustedMessage ?? DEFAULT_EXHAUSTED_MESSAGE}
+        offerReload={this.props.offerReload ?? false}
       />
     );
   }
@@ -141,6 +156,8 @@ function ErrorFallback({
   onRetry,
   fill,
   sx,
+  exhaustedMessage,
+  offerReload,
 }: {
   label: string;
   error: Error;
@@ -150,6 +167,8 @@ function ErrorFallback({
   onRetry: () => void;
   fill: boolean;
   sx?: SxProps<Theme> | undefined;
+  exhaustedMessage: string;
+  offerReload: boolean;
 }) {
   const [showDetails, setShowDetails] = useState(false);
   const details = [error.stack ?? `${error.name}: ${error.message}`, showDetails ? readComponentStack()?.trim() : null]
@@ -172,13 +191,18 @@ function ErrorFallback({
         description={
           retryPending
             ? `${label} hit an error while rendering. Retrying automatically…`
-            : `${label} hit an error while rendering. Try again, or reload the page if it keeps happening.`
+            : `${label} hit an error while rendering. ${exhaustedMessage}`
         }
         action={
-          <Box sx={{ display: "flex", gap: 1, justifyContent: "center" }}>
+          <Box sx={{ display: "flex", gap: 1, justifyContent: "center", flexWrap: "wrap" }}>
             <Button variant="contained" onClick={onRetry}>
               Try again
             </Button>
+            {offerReload && (
+              <Button variant="outlined" onClick={() => window.location.reload()}>
+                Reload page
+              </Button>
+            )}
             <Button variant="text" onClick={() => setShowDetails((v) => !v)} aria-expanded={showDetails}>
               {showDetails ? "Hide details" : "Details"}
             </Button>

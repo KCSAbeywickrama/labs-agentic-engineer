@@ -148,6 +148,43 @@ describe("ErrorBoundary", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/Retrying automatically/);
   });
 
+  it("says what the caller wants once the attempts are spent, and can offer a reload", () => {
+    // The app-level boundary: nothing above it can recover, so the exhausted
+    // line hands the reader to an administrator and a reload is on offer.
+    const reload = vi.fn();
+    vi.stubGlobal("location", { ...window.location, reload });
+    try {
+      render(
+        <ErrorBoundary label="The console" exhaustedMessage="Unable to recover. Please contact your administrator." offerReload>
+          <Flaky />
+        </ErrorBoundary>,
+      );
+      expect(screen.queryByText(/Unable to recover/)).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(2_000));
+      act(() => vi.advanceTimersByTime(5_000));
+      expect(screen.getByRole("alert")).toHaveTextContent(/Unable to recover\. Please contact your administrator\./);
+
+      fireEvent.click(screen.getByRole("button", { name: "Reload page" }));
+      expect(reload).toHaveBeenCalledTimes(1);
+
+      // Manual retry still works after the automatic attempts are spent.
+      failing = false;
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      expect(screen.getByText("content")).toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("offers no reload for a section", () => {
+    render(
+      <ErrorBoundary label="The page">
+        <Flaky />
+      </ErrorBoundary>,
+    );
+    expect(screen.queryByRole("button", { name: "Reload page" })).not.toBeInTheDocument();
+  });
+
   it("Try again re-renders the children on demand", () => {
     render(
       <ErrorBoundary label="The page">
