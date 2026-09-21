@@ -318,8 +318,8 @@ const builtComponents: ComponentList = {
       type: "service",
       status: "active",
     },
-    // The one component type with a tester today (Test tab, first cut) —
-    // without an ai-agent here the tab can only demo its empty state.
+    // An ai-agent, so the Deployments page's Try it out card has an agent panel
+    // (the one that opens in the platform's test app) to demo.
     {
       name: "booking-agent",
       displayName: "Booking Agent",

@@ -36,7 +36,6 @@ import {
   CircleAlert,
   CircleCheck,
   FileText,
-  FlaskConical,
   FolderOpen,
   LayoutDashboard,
   ListChecks,
@@ -82,7 +81,6 @@ function activeItemFor(pathname: string, inProject: boolean): string {
     case "spec":
     case "builds":
     case "deployments":
-    case "try-it":
     case "validation":
     case "issues":
       return section;
@@ -344,20 +342,6 @@ export function AppLayout() {
                     <Rocket />
                   </Sidebar.ItemIcon>
                   <Sidebar.ItemLabel>Deployments</Sidebar.ItemLabel>
-                </Sidebar.Item>
-                <Sidebar.Item
-                  id="try-it"
-                  link={
-                    <Link
-                      to="/projects/$projectName/try-it"
-                      params={{ projectName }}
-                    />
-                  }
-                >
-                  <Sidebar.ItemIcon>
-                    <FlaskConical />
-                  </Sidebar.ItemIcon>
-                  <Sidebar.ItemLabel>Try it</Sidebar.ItemLabel>
                 </Sidebar.Item>
                 <Sidebar.Item
                   id="validation"
