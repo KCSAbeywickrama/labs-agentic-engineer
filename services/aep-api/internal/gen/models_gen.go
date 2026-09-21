@@ -358,33 +358,6 @@ func (e ExternalResourceDTOScope) Valid() bool {
 	}
 }
 
-// Defines values for InvokeRequestMethod.
-const (
-	DELETE InvokeRequestMethod = "DELETE"
-	GET    InvokeRequestMethod = "GET"
-	PATCH  InvokeRequestMethod = "PATCH"
-	POST   InvokeRequestMethod = "POST"
-	PUT    InvokeRequestMethod = "PUT"
-)
-
-// Valid indicates whether the value is a known member of the InvokeRequestMethod enum.
-func (e InvokeRequestMethod) Valid() bool {
-	switch e {
-	case DELETE:
-		return true
-	case GET:
-		return true
-	case PATCH:
-		return true
-	case POST:
-		return true
-	case PUT:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for MilestoneRunViewKind.
 const (
 	MilestoneRunViewKindDev        MilestoneRunViewKind = "dev"
@@ -2073,40 +2046,6 @@ type InputFailure struct {
 	Reason     string `json:"reason"`
 }
 
-// InvokeRequest One HTTP call to relay to a deployed component's gateway URL. The caller's own bearer is forwarded; a body-supplied Authorization is never accepted.
-type InvokeRequest struct {
-	// ActAs Relay the call AS one of this project's platform-owned test accounts instead of as the caller. The platform signs that account in to the project's own identity provider and forwards its token; the token never reaches the client, and no X-User-Id is set by the relay (the gateway derives it from the token). 404 when the username is not a test user the platform owns for this project; 503 when the platform is not configured to sign test users in.
-	ActAs struct {
-		// TestUser The test account's username, as security.json declares it.
-		TestUser string `json:"testUser"`
-	} `json:"actAs,omitempty"`
-
-	// Body Raw request body, passed through verbatim.
-	Body string `json:"body,omitempty"`
-
-	// ContentType Content-Type for the upstream request body, when body is set.
-	ContentType string `json:"contentType,omitempty"`
-
-	// Method HTTP method for the upstream call.
-	Method InvokeRequestMethod `json:"method"`
-
-	// Path Path joined onto the component's gateway URL (e.g. /chat). Normalised; `..` and absolute URLs are rejected.
-	Path string `json:"path"`
-}
-
-// InvokeRequestMethod HTTP method for the upstream call.
-type InvokeRequestMethod string
-
-// InvokeResponse The upstream component's raw response, relayed. status is the UPSTREAM status — the invoke call itself returns 200 whenever the relay happened.
-type InvokeResponse struct {
-	Body        string `json:"body"`
-	ContentType string `json:"contentType,omitempty"`
-	Status      int    `json:"status"`
-
-	// Truncated True when the upstream body exceeded the relay's 1 MiB cap and was cut.
-	Truncated bool `json:"truncated"`
-}
-
 // IssueComment One comment on an issue, exactly as GitHub holds it. The platform stores none of this — it is read live on every request, so GitHub stays the only copy. The platform's notes TO THE AGENT are excluded (a resolved-dependency block, a provisioning note, a closing line — written for a reader that is not a person); what remains is what a human wrote, what an agent said, and what the platform observed of a run. Author cannot separate them and is not meant to — the platform comments through the org's own credential and the coding runner is handed that same credential, so all three arrive under one login. `observed` is what separates a machine's report of a tool call from somebody's judgement about the work.
 type IssueComment struct {
 	// Author The commenter's GitHub login. Empty when the account is gone — GitHub answers a null author for a deleted user, which is a fact about the comment, not a read failure.
@@ -2430,8 +2369,17 @@ type ProjectRolesView struct {
 	// Roles The WHOLE directory catalog, name-ordered — not just this project's roles. Roles are shared, so the panel shows which existing role a design reuses. Empty when directoryAvailable is false.
 	Roles []ProjectRoleState `json:"roles,omitempty"`
 
+	// SignIn Absent when the project declares no sign-in resource or its binding has not resolved yet.
+	SignIn *ProjectSignIn `json:"signIn,omitempty"`
+
 	// TestUsers The test accounts THIS project's design references, role-ordered.
 	TestUsers []ProjectTestUserState `json:"testUsers,omitempty"`
+}
+
+// ProjectSignIn How a client outside a project's own components signs in to it - the issuer to sign in AT and the public OAuth client to sign in AS. Both are public. Absent from a view when the project declares no sign-in resource or its binding has not resolved yet.
+type ProjectSignIn struct {
+	ClientID string `json:"clientId"`
+	Issuer   string `json:"issuer"`
 }
 
 // ProjectStatus Computed SDLC phase and artifact states.
@@ -3784,9 +3732,6 @@ type UpdateComponentConfigJSONRequestBody = UpdateConfigBody
 
 // ProvisionPlatformResourceJSONRequestBody defines body for ProvisionPlatformResource for application/json ContentType.
 type ProvisionPlatformResourceJSONRequestBody = ProvisionBody
-
-// InvokeComponentJSONRequestBody defines body for InvokeComponent for application/json ContentType.
-type InvokeComponentJSONRequestBody = InvokeRequest
 
 // PromoteExternalResourceJSONRequestBody defines body for PromoteExternalResource for application/json ContentType.
 type PromoteExternalResourceJSONRequestBody = PromoteExternalResourceRequest

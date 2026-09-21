@@ -140,9 +140,6 @@ func (s *stubComponentSvc) ListDeployments(context.Context, string, string, stri
 func (s *stubComponentSvc) GetComponentOpenAPI(context.Context, string, string, string) (*gen.ComponentOpenAPI, error) {
 	panic("stubComponentSvc: GetComponentOpenAPI not expected")
 }
-func (s *stubComponentSvc) Invoke(context.Context, string, string, string, InvokeCall, string, string) (InvokeResult, error) {
-	panic("stubComponentSvc: Invoke not expected")
-}
 func (s *stubComponentSvc) TriggerBuild(context.Context, string, string, string) (*gen.WorkflowRun, error) {
 	panic("stubComponentSvc: TriggerBuild not expected")
 }

@@ -3319,48 +3319,7 @@ paths:
       summary: Update a custom skill
       tags:
       - Skills
-  /projects/{projectName}/components/{componentName}/invoke:
-    post:
-      operationId: invoke-component
-      parameters:
-      - description: Project name (DNS-label slug)
-        in: path
-        name: projectName
-        required: true
-        schema:
-          description: Project name (DNS-label slug)
-          type: string
-      - description: Component name (DNS-label slug)
-        in: path
-        name: componentName
-        required: true
-        schema:
-          description: Component name (DNS-label slug)
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/InvokeRequest'
-        required: true
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/InvokeResponse'
-          description: OK
-        default:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-          description: Error
-      security:
-      - userJWT: []
-      summary: Invoke a deployed component through its gateway URL, as the caller
-      tags:
-      - Components
+
 components:
   schemas:
     ConversationMessage:
@@ -6138,6 +6097,18 @@ components:
       - name
       - platformCreated
       type: object
+    ProjectSignIn:
+      additionalProperties: false
+      description: How a client outside a project's own components signs in to it - the issuer to
+        sign in AT and the public OAuth client to sign in AS. Both are public. Absent from a view
+        when the project declares no sign-in resource or its binding has not resolved yet.
+      properties:
+        issuer:
+          type: string
+        clientId:
+          type: string
+      required: [issuer, clientId]
+      type: object
     ProjectRolesView:
       additionalProperties: false
       description: The Security panel's read model.
@@ -6173,6 +6144,12 @@ components:
             scoped to an environment at all, which is the same condition that empties every other
             field.
           type: string
+        signIn:
+          allOf:
+          - $ref: '#/components/schemas/ProjectSignIn'
+          description: Absent when the project declares no sign-in resource or its binding has not
+            resolved yet.
+          x-go-type-skip-optional-pointer: false
         testUsers:
           description: The test accounts THIS project's design references, role-ordered.
           items:
@@ -8781,46 +8758,7 @@ components:
       - operation
       - status
       type: object
-    InvokeRequest:
-      description: One HTTP call to relay to a deployed component's gateway URL. The caller's own bearer is forwarded; a body-supplied Authorization is never accepted.
-      properties:
-        method:
-          description: HTTP method for the upstream call.
-          enum: [GET, POST, PUT, PATCH, DELETE]
-          type: string
-        path:
-          description: Path joined onto the component's gateway URL (e.g. /chat). Normalised; `..` and absolute URLs are rejected.
-          type: string
-        contentType:
-          description: Content-Type for the upstream request body, when body is set.
-          type: string
-        body:
-          description: Raw request body, passed through verbatim.
-          type: string
-        actAs:
-          description: Relay the call AS one of this project's platform-owned test accounts instead of as the caller. The platform signs that account in to the project's own identity provider and forwards its token; the token never reaches the client, and no X-User-Id is set by the relay (the gateway derives it from the token). 404 when the username is not a test user the platform owns for this project; 503 when the platform is not configured to sign test users in.
-          type: object
-          properties:
-            testUser:
-              description: The test account's username, as security.json declares it.
-              type: string
-          required: [testUser]
-      required: [method, path]
-      type: object
-    InvokeResponse:
-      description: The upstream component's raw response, relayed. status is the UPSTREAM status — the invoke call itself returns 200 whenever the relay happened.
-      properties:
-        status:
-          type: integer
-        contentType:
-          type: string
-        body:
-          type: string
-        truncated:
-          description: True when the upstream body exceeded the relay's 1 MiB cap and was cut.
-          type: boolean
-      required: [status, body, truncated]
-      type: object
+
   securitySchemes:
     userJWT:
       bearerFormat: JWT

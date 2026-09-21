@@ -65,19 +65,11 @@ type ComponentService interface {
 	// Deploy (read-only — autoDeploy on the Component drives the chain)
 	ListDeployments(ctx context.Context, orgName, projectName, componentName string) (*gen.DeploymentList, error)
 
-	// OpenAPI for the Test tab. Reads the spec from
-	// `specs/design/components/<name>/openapi.yaml`. The Test tab's
-	// swagger-ui invokes the deployed endpoint directly; CORS is enabled
-	// on the service ClusterComponentType's HTTPRoute.
+	// OpenAPI for the Deployments page's Try API dialog. Reads the spec from
+	// `specs/design/components/<name>/openapi.yaml`. The dialog's swagger-ui
+	// invokes the deployed endpoint directly; CORS is enabled on the service
+	// ClusterComponentType's HTTPRoute.
 	GetComponentOpenAPI(ctx context.Context, orgName, projectName, componentName string) (*gen.ComponentOpenAPI, error)
-
-	// Invoke relays one HTTP call to componentName's deployed gateway URL, as
-	// the caller (bearer). See component_invoke.go for the guardrails — this
-	// is a scoped relay for testing your OWN project's components, not a
-	// general egress proxy. Any component type may be invoked (unlike
-	// GetComponentOpenAPI, which is service-only): an ai-agent today, a
-	// service later for the API tester.
-	Invoke(ctx context.Context, orgName, projectName, componentName string, in InvokeCall, bearer, userID string) (InvokeResult, error)
 
 	// Build (workflow runs)
 	TriggerBuild(ctx context.Context, orgName, projectName, componentName string) (*gen.WorkflowRun, error)
@@ -209,15 +201,6 @@ type componentService struct {
 	// yet).
 	modelKeyResolver AnthropicKeyResolver
 	secretRefClient  secretmanagersvc.OpenChoreoSecretReferenceClient
-
-	// invokeTimeout backs Invoke (component_invoke.go). Defaulted lazily
-	// (<= 0 -> invokeDefaultTimeout) rather than a param on
-	// NewComponentService, so the existing call sites stay untouched; tests
-	// that need a short timeout construct componentService directly
-	// (whitebox, same package). Invoke builds its own *http.Client instead of
-	// taking one here, so the no-follow-redirects policy cannot be swapped
-	// out by a caller.
-	invokeTimeout time.Duration
 }
 
 // NewComponentService builds the component service. repoSvc, buildCredSvc,

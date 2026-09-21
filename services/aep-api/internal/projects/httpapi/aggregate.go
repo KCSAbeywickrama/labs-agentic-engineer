@@ -55,9 +55,6 @@ type Handlers struct {
 // dep directly, no OrEmpty helper).
 func New(d projects.Deps) (*Handlers, error) {
 	build := componentbuild.New(d.ComponentSvc)
-	if d.TestUserTokens != nil {
-		build.SetTestUserTokens(d.TestUserTokens)
-	}
 	return &Handlers{
 		projectcrudHandler:     projectcrud.New(d.ProjectSvc),
 		componentreadHandler:   componentread.New(d.ComponentSvc),

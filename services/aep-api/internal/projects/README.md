@@ -32,7 +32,7 @@ services (`Service`, `ComponentService`, `ConfigService`, `DeploymentService`) l
 |---|---|---|
 | `projectcrud` | list / create / get / delete project + get-project-status (the Stage aggregate) | `*Service` |
 | `componentread` | list-components / get-component | `ComponentService` |
-| `componentbuild` | trigger-build / list-builds / build-logs / list-deployments / component-openapi / invoke-component | `ComponentService` |
+| `componentbuild` | trigger-build / list-builds / build-logs / list-deployments / component-openapi | `ComponentService` |
 | `componentconfig` | get / update component env-config | `ConfigService` |
 | `projectusage` | list-project-usage (org-wide per-project usage cards, #291) | `*UsageService` — folds spec-turn + coding-execution per-project usage, labels by live projects, orders by stamped cost |
 
@@ -218,44 +218,5 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
   always designed to show. A slug deleted and recreated therefore renders TWO cards — the live project
   billed only for its own work, and the incarnation that spent the rest — because a slug is not an
   identity. Spec-turn spend carries no lifetime marker and sits whole on whichever card is current.
-- **The invoke relay is scoped egress, not a proxy.** `invoke-component` makes ONE call to a component's
-  own gateway URL, as the caller, because the console's Test tab runs in a browser that cannot call that
-  gateway directly — the CORS allowlist names the project's web app, not the console. Every guardrail on it
-  is load-bearing, and each one is the fix for a specific way the route becomes SSRF: the component must
-  appear in the CALLER'S OWN project design (404 before any egress); the path is validated
-  (`validateInvokePath`) against absolute URLs, `..` traversal, and scheme-relative `//`, after repeated
-  percent-decoding and a valid-UTF-8/no-control-character check, because a single-pass substring test sees
-  through neither `%2e%2e` nor an overlong `%c0%ae`; redirects are RELAYED, never followed, since a 3xx is
-  the component's answer and following one would send the caller's bearer to an address nothing validated;
-  only Content-Type/Accept/Authorization are ever sent upstream, so the request is built from scratch rather
-  than forwarded; and request/response caps plus a timeout keep it from becoming an amplifier. The caller's
-  bearer is forwarded exactly as given — the relay never mints or upgrades a credential, so an unauthorised
-  caller gets the gateway's own 401 rather than our access. **Gateway-only is the point:** the URL comes
-  from the component's deployment endpoint, and it is that gateway which validates the bearer and injects
-  the `x-user-id` the agent gates on. A relay pointed at a pod address would bypass the identity hop.
-  **Resolution is environment-SCOPED**: `ListDeployments` returns one entry per environment, so the
-  endpoint is chosen by NAME (`development`), never by list order, and an environment with no gateway
-  URL is `ErrNotReachable` rather than a fallback to another one. Ordering is not a contract: picking
-  the first listed made which deployment a caller reached depend on upstream ordering, and a tester
-  could relay a real bearer to production while presenting the answer as development's.
-- **KNOWN LIMITATION — the relayed bearer is the caller's PLATFORM token, and it
-  travels further than this domain.** `invoke-component` forwards the caller's
-  Thunder token to the component, and a generated ai-agent then forwards
-  `Authorization` unchanged to every tool provider its design lists
-  (`skills/agent-building`: "Authorization belongs to the provider"). That is
-  the on-behalf-of model working as designed — it is how a provider enforces
-  the CALLER'S permissions rather than the agent's. The exposure is that the
-  component gateway policy for these components is `issuers: [], audiences: []`
-  (signature only), so a token is not bound to the component it was sent to: a
-  tool provider that receives one can replay it anywhere else that trusts the
-  same signer. A design naming a tool base URL the platform does not control
-  therefore receives a usable platform credential on every turn.
-  ACCEPTED for now, deliberately: the Test tab is the first thing that makes
-  this reachable with a real user's token from the console, but it did not
-  create it, and the fix is not local to this domain. The fix is to give an
-  agent **its own identity** rather than borrowing the user's — an
-  audience-scoped token minted for one component, plus `audiences` set on the
-  gateway policy — which is a Thunder-side change. Until then, treat a tool's
-  base URL in a design as security-relevant input.
 
 - Platform-wide rules (tenant gate, secrets fence, feature-free domains) → [../../README.md](../../README.md).

@@ -32,9 +32,6 @@ type Deps struct {
 	ComponentSvc ComponentService
 	// ConfigSvc is the component env-var config service behind the two config ops.
 	ConfigSvc ConfigService
-	// TestUserTokens signs a project's test account in so invoke-component can
-	// relay AS it (actAs). Optional: unwired, actAs answers 503.
-	TestUserTokens TestUserTokens
 	// UsageSvc is the org-wide agent-usage roll-up behind list-project-usage
 	// (#291): the Settings → Usage page's per-project cost cards.
 	UsageSvc *UsageService

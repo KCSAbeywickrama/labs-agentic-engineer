@@ -19,13 +19,9 @@ package componentbuild
 import (
 	"context"
 	"errors"
-	"log/slog"
-	"net/http"
-	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 	"github.com/wso2/aep/aep-api/internal/platform/apierr"
-	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 	"github.com/wso2/aep/aep-api/internal/projects"
 )
@@ -38,17 +34,10 @@ import (
 // service (OC client / repo) is touched.
 type Handler struct {
 	comp projects.ComponentService
-	// tokens signs a project's test account in so Invoke can relay AS it.
-	// Optional: nil answers actAs with 503, never with a relay as the caller —
-	// a request that asked to be somebody must not silently be somebody else.
-	tokens projects.TestUserTokens
 }
 
 // New returns the slice's handler.
 func New(comp projects.ComponentService) *Handler { return &Handler{comp: comp} }
-
-// SetTestUserTokens wires the test-account sign-in the actAs relay uses.
-func (h *Handler) SetTestUserTokens(t projects.TestUserTokens) { h.tokens = t }
 
 // --- Build operations --------------------------------------------------------
 
@@ -111,7 +100,7 @@ func (h *Handler) ListDeployments(ctx context.Context, request gen.ListDeploymen
 	return gen.ListDeployments200JSONResponse(*list), nil
 }
 
-// --- OpenAPI spec (drives the Test tab) ----------------------------------------
+// --- OpenAPI spec (drives the Try API dialog) ----------------------------------------
 // Read from specs/design/components/<name>/openapi.yaml. Service components
 // have a guaranteed OpenAPI 3.0 doc; non-service components return 409 with
 // the componentType so the UI can render a typed empty state.
@@ -139,104 +128,4 @@ func (h *Handler) GetComponentOpenapi(ctx context.Context, request gen.GetCompon
 		return nil, projects.MapComponentError(err, "failed to get OpenAPI spec")
 	}
 	return gen.GetComponentOpenapi200JSONResponse(*spec), nil
-}
-
-// --- Invoke (drives the Test tab's "call the running component" action) -----
-// Relays one HTTP call to componentName's deployed gateway URL, as the
-// caller — see projects.componentService.Invoke for the guardrails (project
-// scoping, path validation, header hygiene, size/timeout caps). This handler's
-// only jobs are: recover the caller's raw bearer from the context carrier
-// ExtractAuthToken stashed it under (the contract does NOT declare an
-// Authorization header param on this operation, so oapi-codegen's strict
-// request object carries no Params.Authorization the way GetSpecCollabSession's
-// does — auth.GetAuthToken(ctx) is the established repo mechanism for exactly
-// this: the raw bearer, stripped of "Bearer ", read back out of the context
-// the global ExtractAuthToken middleware always populates), translate the wire
-// request/response, and map the domain sentinels to their HTTP statuses.
-func (h *Handler) InvokeComponent(ctx context.Context, request gen.InvokeComponentRequestObject) (gen.InvokeComponentResponseObject, error) {
-	org := tenant.BoundOrgFromContext(ctx)
-	if err := projects.RequireComponentSlugs(request.ProjectName, request.ComponentName); err != nil {
-		return nil, err
-	}
-	if request.Body == nil {
-		return nil, apierr.BadRequest("request body required")
-	}
-
-	// The context carrier holds the token with "Bearer " already stripped
-	// (see auth.ExtractAuthToken); re-attach it here so componentService.Invoke
-	// sets the upstream Authorization header verbatim, exactly as the caller's
-	// own browser would have sent it.
-	bearer := ""
-	if token := auth.GetAuthToken(ctx); token != "" {
-		bearer = "Bearer " + token
-	}
-	// The VERIFIED subject, not anything the browser sent. An ai-agent scopes
-	// its conversation store by this identity and refuses a request without
-	// one, so the tester cannot reach an agent at all unless the relay carries
-	// it.
-	userID := auth.ActorFromContext(ctx)
-
-	// actAs: relay as one of the project's test accounts. The platform signs
-	// the account in and forwards ITS token; the caller's own bearer is not
-	// sent, and no X-User-Id either — the gateway derives the user from the
-	// token, and stamping the caller's subject over the test user's would
-	// attribute the turn to the wrong person. The caller stays who is
-	// authorised: this operation is behind the platform sign-in like every
-	// other, and the minter applies the same ownership guard as revealing the
-	// account's password.
-	// The generated field is a value, so "absent" and "empty" are one case:
-	// no test user named means relay as the caller, as before.
-	if username := strings.TrimSpace(request.Body.ActAs.TestUser); username != "" {
-		if h.tokens == nil || !h.tokens.Enabled() {
-			return nil, apierr.ServiceUnavailable("signing test users in is not configured on this platform")
-		}
-		token, err := h.tokens.Mint(ctx, org, request.ProjectName, username)
-		switch {
-		case err == nil:
-		case errors.Is(err, projects.ErrActAsNotFound):
-			return nil, apierr.NotFound("no such test user for this project")
-		case errors.Is(err, projects.ErrActAsUnavailable):
-			return nil, apierr.ServiceUnavailable("signing test users in is not configured for this project")
-		case errors.Is(err, projects.ErrActAsRefused):
-			return nil, apierr.BadGateway("the identity provider refused the test user's sign-in; rotate the account's password and try again")
-		default:
-			slog.ErrorContext(ctx, "invoke: test user sign-in failed", "project", request.ProjectName, "testUser", username, "error", err)
-			return nil, apierr.BadGateway("could not sign the test user in")
-		}
-		bearer, userID = "Bearer "+token, ""
-	}
-
-	result, err := h.comp.Invoke(ctx, org, request.ProjectName, request.ComponentName, projects.InvokeCall{
-		Method:      string(request.Body.Method),
-		Path:        request.Body.Path,
-		ContentType: request.Body.ContentType,
-		Body:        []byte(request.Body.Body),
-	}, bearer, userID)
-	if err != nil {
-		switch {
-		case errors.Is(err, projects.ErrComponentNotFound):
-			return nil, apierr.NotFound("component not found")
-		case errors.Is(err, projects.ErrNotReachable):
-			// The contract's Error schema is {code, message, details} — it has
-			// no `reason` field, so this cannot literally carry
-			// {reason:"not-reachable"} as sketched in the design. "not-reachable"
-			// rides as the message instead, which is the closest honest shape
-			// the contract allows; see the task report for the flagged
-			// divergence.
-			return nil, apierr.New(http.StatusConflict, apierr.CodeConflict, "not-reachable", nil)
-		case errors.Is(err, projects.ErrBadPath):
-			return nil, apierr.BadRequest("invalid path")
-		case errors.Is(err, projects.ErrBodyTooLarge):
-			return nil, apierr.New(http.StatusRequestEntityTooLarge, apierr.CodeBadRequest, "request body too large", nil)
-		case errors.Is(err, projects.ErrUpstreamTimeout):
-			return nil, apierr.New(http.StatusGatewayTimeout, apierr.CodeGatewayTimeout, "upstream component timed out", nil)
-		}
-		return nil, projects.MapComponentError(err, "failed to invoke component")
-	}
-	return gen.InvokeComponent200JSONResponse(gen.InvokeResponse{
-		Status:      result.Status,
-		ContentType: result.ContentType,
-		Body:        string(result.Body),
-		Truncated:   result.Truncated,
-	}), nil
 }

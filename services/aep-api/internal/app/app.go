@@ -39,7 +39,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/clients/thunderapp"
-	"github.com/wso2/aep/aep-api/internal/clients/thunderflow"
 	"github.com/wso2/aep/aep-api/internal/clients/thundersvc"
 	"github.com/wso2/aep/aep-api/internal/config"
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -656,6 +655,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			"environment", openchoreo.DevEnvironmentName, "adminRoute", cfg.ThunderEnvAdminRoute)
 	}
 	identityPanel := identity.NewPanelService(identityTargets, identityStore)
+	// The sign-in client is read where provisioning owns it (built later —
+	// hence late-bound); the panel publishes it so the test app can sign in.
+	testUserCoords := &lateSignInCoords{}
+	identityPanel.SetSignInCoordinates(testUserCoords)
 
 	// The other end of the ensure: a project delete removes the authorization
 	// objects its builds created — the resource server, its permission catalog
@@ -1068,21 +1071,12 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		},
 	)
 
-	// Try it "as a test user": the relay signs one of the project's test
-	// accounts in to the project's own identity provider and forwards its token.
-	// The minter is the identity domain's; the two adapters below bind it to
-	// where the sign-in client is read (provisioning, built later — hence the
-	// late-bound coordinates) and to the ThunderID flow protocol.
-	testUserCoords := &lateSignInCoords{}
-	testUserMinter := identity.NewTestUserTokenMinter(identityPanel, testUserCoords,
-		thunderflowSignIn{c: thunderflow.New(thunderflow.Config{})}, cfg.TryItCallbackURL)
 	projectsHandlers, err := projectshttpapi.New(projects.Deps{
-		ProjectSvc:     projectService,
-		ComponentSvc:   componentService,
-		ConfigSvc:      configService,
-		TestUserTokens: testUserTokens{m: testUserMinter},
-		UsageSvc:       usageService,
-		ActivitySvc:    activitySvc,
+		ProjectSvc:   projectService,
+		ComponentSvc: componentService,
+		ConfigSvc:    configService,
+		UsageSvc:     usageService,
+		ActivitySvc:  activitySvc,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("assemble projects domain: %w", err)
