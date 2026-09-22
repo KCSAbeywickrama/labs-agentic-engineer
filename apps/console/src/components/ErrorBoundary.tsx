@@ -107,6 +107,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     this.componentStack = info.componentStack ?? null;
     // A failure inside the settle window is the same run, not a new one.
     this.clearSettleTimer();
+    // One retry timer at a time. A resetKey change that lands in the same
+    // commit as a catch runs componentDidUpdate (and its reset) BEFORE this
+    // hook, so the timer scheduled here would outlive that reset and the
+    // catch on the re-rendered children would add a second one.
+    this.clearTimer();
     const delay = RETRY_DELAYS_MS[this.state.attempts];
     if (delay === undefined) return;
     this.timer = setTimeout(() => {
@@ -116,7 +121,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   override componentDidUpdate(prev: ErrorBoundaryProps, prevState: ErrorBoundaryState) {
-    if (prev.resetKey !== this.props.resetKey && this.state.error) this.reset();
+    // New input ends the run of failures whether or not one is showing: a
+    // recovered section still inside its settle window would otherwise carry
+    // the spent count into the next input. Guarded so a key that changes
+    // every flush (the canvas scene) costs no commit when there is nothing
+    // to reset.
+    if (prev.resetKey !== this.props.resetKey && (this.state.error || this.state.attempts > 0)) this.reset();
     // A commit with no error after one with an error means the children
     // rendered. If they stay up for SETTLE_MS, the run of failures is over.
     if (prevState.error && !this.state.error && this.state.attempts > 0) {

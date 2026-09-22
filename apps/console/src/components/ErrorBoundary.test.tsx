@@ -166,6 +166,33 @@ describe("ErrorBoundary", () => {
     expect(screen.getByRole("alert")).not.toHaveTextContent(/Retrying automatically/);
   });
 
+  it("new input inside the settle window also gives the attempts back", () => {
+    const { rerender } = render(
+      <ErrorBoundary label="The wireframe canvas" resetKey="scene-1">
+        <Flaky />
+      </ErrorBoundary>,
+    );
+    // Recovers on the first attempt, so one is spent and the settle window is open.
+    failing = false;
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(screen.getByText("content")).toBeInTheDocument();
+
+    // A new scene lands before the window closes, then fails: full attempts.
+    rerender(
+      <ErrorBoundary label="The wireframe canvas" resetKey="scene-2">
+        <Flaky text="scene two" />
+      </ErrorBoundary>,
+    );
+    failing = true;
+    rerender(
+      <ErrorBoundary label="The wireframe canvas" resetKey="scene-3">
+        <Flaky />
+      </ErrorBoundary>,
+    );
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(screen.getByRole("alert")).toHaveTextContent(/Retrying automatically/);
+  });
+
   it("clears on new input via resetKey, with the automatic attempts restored", () => {
     const { rerender } = render(
       <ErrorBoundary label="The wireframe canvas" resetKey="scene-1">

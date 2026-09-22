@@ -287,7 +287,7 @@ export function WireframePanel({
           next flush or a newly committed sha retries on its own, so during a
           generation a caught frame clears with the next one. */}
       <ErrorBoundary
-        label="The wireframe canvas"
+        label={mode === "prototype" ? "The prototype" : "The wireframe canvas"}
         resetKey={`${mode}:${hasLiveContent ? liveScene : `${sha}:${scene}`}`}
         fill
       >
