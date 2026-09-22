@@ -442,17 +442,27 @@ describe("ValidationMilestonePage", () => {
   describe("the actions menu", () => {
     const open = () => fireEvent.click(screen.getByLabelText("Validation actions"));
 
-    it('drops "again" until something has answered', () => {
+    it('says "Run validation" until something has answered', () => {
       mockDetail = detail({ state: "none", live: false, runs: [] });
       render(<ValidationMilestonePage projectName="p" tag="v1" />);
       open();
       expect(screen.getByText("Run validation")).toBeInTheDocument();
     });
 
-    it('says "again" once an attempt has produced a verdict', () => {
+    it('says "Revalidate" once an attempt has produced a verdict', () => {
       render(<ValidationMilestonePage projectName="p" tag="v1" />);
       open();
-      expect(screen.getByText("Run validation again")).toBeInTheDocument();
+      expect(screen.getByText("Revalidate")).toBeInTheDocument();
+    });
+
+    // The same order as the builds menu — cancel, then (re)start, then the
+    // links — so a reader who learned one finds the same item in the same
+    // place on the other.
+    it("leads with cancel, as the builds menu does", () => {
+      render(<ValidationMilestonePage projectName="p" tag="v1" />);
+      open();
+      const names = screen.getAllByRole("menuitem").map((el) => el.textContent);
+      expect(names.slice(0, 2)).toEqual(["Cancel run", "Revalidate"]);
     });
 
     // The console checks ONE condition. Gating on the verdict too would invent
@@ -460,7 +470,7 @@ describe("ValidationMilestonePage", () => {
     it("offers a re-run on a version that already passed", () => {
       render(<ValidationMilestonePage projectName="p" tag="v1" />);
       open();
-      fireEvent.click(screen.getByText("Run validation again"));
+      fireEvent.click(screen.getByText("Revalidate"));
       expect(startMutate).toHaveBeenCalled();
     });
 
@@ -468,7 +478,7 @@ describe("ValidationMilestonePage", () => {
       mockDetail = detail({ state: "running", live: true });
       render(<ValidationMilestonePage projectName="p" tag="v1" />);
       open();
-      fireEvent.click(screen.getByText("Run validation again"));
+      fireEvent.click(screen.getByText("Revalidate"));
       expect(startMutate).not.toHaveBeenCalled();
     });
 
@@ -481,7 +491,7 @@ describe("ValidationMilestonePage", () => {
       mockDetail = detail({ deployed: false });
       render(<ValidationMilestonePage projectName="p" tag="v1" />);
       open();
-      fireEvent.click(screen.getByText("Run validation again"));
+      fireEvent.click(screen.getByText("Revalidate"));
       expect(startMutate).not.toHaveBeenCalled();
     });
 
@@ -502,7 +512,7 @@ describe("ValidationMilestonePage", () => {
     it("surfaces a refusal from the server in the page's one error slot", () => {
       render(<ValidationMilestonePage projectName="p" tag="v1" />);
       open();
-      fireEvent.click(screen.getByText("Run validation again"));
+      fireEvent.click(screen.getByText("Revalidate"));
       const onError = startMutate.mock.calls[0]?.[1]?.onError as (e: Error) => void;
       act(() => {
         onError(new Error("this version still has open work"));

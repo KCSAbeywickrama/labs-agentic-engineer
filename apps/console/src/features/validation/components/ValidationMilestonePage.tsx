@@ -30,7 +30,7 @@ import {
   Tooltip,
   type Theme,
 } from "@wso2/oxygen-ui";
-import { Copy, Ellipsis, GitHub, Play, X } from "@wso2/oxygen-ui-icons-react";
+import { Copy, Ellipsis, GitHub, Play, RotateCw, X } from "@wso2/oxygen-ui-icons-react";
 import { Link } from "@tanstack/react-router";
 import {
   isReportParseError,
@@ -389,10 +389,13 @@ function ValidationActions({
   // version is exactly what this endpoint is for.
   const notDeployed = !detail.deployed;
   const blocked = detail.live || notDeployed || start.isPending;
-  // "again" only once something has actually answered. It reads wrong on a
-  // version that has never been validated, which is a state this page now
-  // reaches routinely.
-  const startLabel = hasVerdict ? "Run validation again" : "Run validation";
+  // "Revalidate" only once something has actually answered — the platform's
+  // own word for the trigger, and wrong on a version nothing has judged yet,
+  // which is a state this page reaches routinely. The icon says the same
+  // thing the word does: a start, or a retry — and a retry turns forward,
+  // clockwise; the counter-clockwise arrow is undo.
+  const startLabel = hasVerdict ? "Revalidate" : "Run validation";
+  const StartIcon = hasVerdict ? RotateCw : Play;
   // ADR-0016 decision 7: cancel follows the LIFECYCLE, not run liveness.
   const cancellable = detail.state === "running" || detail.state === "awaiting-fix";
 
@@ -406,6 +409,25 @@ function ValidationActions({
         <Ellipsis size={16} />
       </IconButton>
       <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={close}>
+        {/* Cancel, then (re)start, then the links — the builds menu's order,
+            so a reader who learned one menu finds the same item in the same
+            place on the other. */}
+        <MenuItem
+          disabled={!cancellable || !runId || cancel.isPending}
+          onClick={() => {
+            if (!cancellable || cancel.isPending) return;
+            if (runId) {
+              cancel.mutate(runId, {
+                onError: (e) => onError(e instanceof Error ? e.message : String(e)),
+              });
+            }
+            close();
+          }}
+        >
+          <X size={15} style={{ marginRight: 10 }} />
+          Cancel run
+        </MenuItem>
+
         <Tooltip title={triggerRefusal(detail)}>
           {/* A span, because a disabled MenuItem swallows the hover the tooltip
               needs — and a disabled item with no reason is a dead control. */}
@@ -424,27 +446,11 @@ function ValidationActions({
                 close();
               }}
             >
-              <Play size={15} style={{ marginRight: 10 }} />
+              <StartIcon size={15} style={{ marginRight: 10 }} />
               {startLabel}
             </MenuItem>
           </span>
         </Tooltip>
-
-        <MenuItem
-          disabled={!cancellable || !runId || cancel.isPending}
-          onClick={() => {
-            if (!cancellable || cancel.isPending) return;
-            if (runId) {
-              cancel.mutate(runId, {
-                onError: (e) => onError(e instanceof Error ? e.message : String(e)),
-              });
-            }
-            close();
-          }}
-        >
-          <X size={15} style={{ marginRight: 10 }} />
-          Cancel run
-        </MenuItem>
 
         <Divider />
 
