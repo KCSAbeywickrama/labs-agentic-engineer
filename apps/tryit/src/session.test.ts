@@ -59,6 +59,8 @@ describe("displayName", () => {
     expect(displayName({ sub: "01a0-uuid", email: "t@x.io", preferred_username: "test-user" })).toBe("test-user");
     expect(displayName({ sub: "01a0-uuid", name: "Test User" })).toBe("Test User");
     expect(displayName({ sub: "01a0-uuid", email: "t@x.io" })).toBe("t@x.io");
+    // A platform-minted test user: the username is the email's local part.
+    expect(displayName({ sub: "01a0-uuid", email: "test-engineer@test-users.invalid" })).toBe("test-engineer");
     expect(displayName({ sub: "01a0-uuid" })).toBe("01a0-uuid");
     expect(displayName({})).toBeNull();
   });

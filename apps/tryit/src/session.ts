@@ -51,13 +51,25 @@ export function managerSettings(launch: Launch, origin: string): UserManagerSett
   };
 }
 
+/**
+ * The domain the platform gives a test user's email — `<username>@` this
+ * (aep-api identity/ensure.go, testUserEmail). Thunder's userinfo carries the
+ * email and no username claim, so the username is read back off it.
+ */
+const TEST_USER_EMAIL_DOMAIN = "@test-users.invalid";
+
 /** The most useful name a profile carries; `sub` (a UUID) only as the last resort. */
 export function displayName(profile: Record<string, unknown>): string | null {
-  for (const claim of ["preferred_username", "username", "name", "email", "sub"]) {
+  for (const claim of ["preferred_username", "username", "name"]) {
     const value = profile[claim];
     if (typeof value === "string" && value.length > 0) return value;
   }
-  return null;
+  const email = profile.email;
+  if (typeof email === "string" && email.length > 0) {
+    return email.endsWith(TEST_USER_EMAIL_DOMAIN) ? email.slice(0, -TEST_USER_EMAIL_DOMAIN.length) : email;
+  }
+  const sub = profile.sub;
+  return typeof sub === "string" && sub.length > 0 ? sub : null;
 }
 
 export interface Session {
