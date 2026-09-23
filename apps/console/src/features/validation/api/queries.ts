@@ -20,6 +20,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { client } from "../../../api/client";
 import { apiErrorMessage } from "../../../api/errors";
 import { fetchSpecFileContent } from "../../spec/api/queries";
+import { validationIsLive } from "../lib/lifecycle";
 import { validationKeys } from "./keys";
 
 // The two files the Validation page joins, read through the Files API
@@ -94,11 +95,14 @@ export function useValidationReport(
 // Same price as the run story: DB-only rows on the server, so a 5s poll while
 // something is moving is affordable.
 const VALIDATION_POLL_MS = 5_000;
-
-/** Is anything on this row still moving — the ledger's poll-stop. */
-function ledgerIsLive(rows: readonly { state: string }[]): boolean {
-  return rows.some((r) => r.state === "running" || r.state === "awaiting-fix" || r.state === "none");
-}
+// …and when nothing is, the ledger SLOWS rather than stops. A version the
+// platform has not judged is not a version it never will: the sweep starts a
+// validation run of its own once a build deploys, and a repair landing puts a
+// settled row back in flight. Neither is visible in the rows this page holds,
+// so a poll-stop keyed on them would leave a reader watching a stale table
+// until they navigated. The same two-speed rule the project-status badge
+// already runs on every project route, at the same idle cadence.
+const VALIDATION_IDLE_POLL_MS = 30_000;
 
 /**
  * The validation ledger, newest version first — one row per version the
@@ -119,7 +123,9 @@ export function useValidations(projectName: string) {
     refetchInterval: (query) => {
       const rows = query.state.data;
       if (!rows) return VALIDATION_POLL_MS; // no data yet (or errored) — keep trying
-      return ledgerIsLive(rows) ? VALIDATION_POLL_MS : false;
+      return rows.some((r) => validationIsLive(r.state))
+        ? VALIDATION_POLL_MS
+        : VALIDATION_IDLE_POLL_MS;
     },
   });
 }
@@ -193,10 +199,11 @@ export function useValidationSnapshot(
  * Ask a version's acceptance criteria again, against the system already
  * deployed.
  *
- * The console gates this on ONE condition — a run already live on the milestone
- * — and lets the server refuse the rest: open work on the version, and a
- * version with no criteria. Those are the platform's rules, and its messages
- * are better than a disabled menu item with no explanation.
+ * The console gates this on the two conditions it can answer from the detail
+ * read — a run already live on the milestone, and a version that is not the
+ * deployed one — and lets the server refuse the rest: open work on the version,
+ * and a version with no criteria. Those are the platform's rules, and its
+ * messages are better than a disabled menu item with no explanation.
  *
  * 202 means the run was started, not that it has a verdict, so success
  * invalidates and lets the poll take over.

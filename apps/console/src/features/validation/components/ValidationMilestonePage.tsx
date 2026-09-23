@@ -50,6 +50,7 @@ import { useTask } from "../../tasks/api/queries";
 import { statusLine } from "../../tasks/lib/statusLine";
 import { useStartValidation, useValidation, useValidationSnapshot } from "../api/queries";
 import { validationChip } from "../lib/chip";
+import { validationIsLive } from "../lib/lifecycle";
 import { countsFromScenarios } from "../lib/verdict";
 import { ReportCard, type Attempt } from "./ReportCard";
 import { ValidationSummaryCard } from "./ValidationSummaryCard";
@@ -229,7 +230,7 @@ export function ValidationMilestonePage({
     );
   }
 
-  const live = state === "running" || state === "awaiting-fix";
+  const live = validationIsLive(state);
   // Newest first, so the log's runs match the report's ordering above it.
   const feedRuns = [...data.runs];
   const [newestRun, ...olderRuns] = feedRuns;
@@ -397,7 +398,7 @@ function ValidationActions({
   const startLabel = hasVerdict ? "Revalidate" : "Run validation";
   const StartIcon = hasVerdict ? RotateCw : Play;
   // ADR-0016 decision 7: cancel follows the LIFECYCLE, not run liveness.
-  const cancellable = detail.state === "running" || detail.state === "awaiting-fix";
+  const cancellable = validationIsLive(detail.state);
 
   return (
     <>

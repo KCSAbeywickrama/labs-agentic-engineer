@@ -39,6 +39,7 @@ import { useTicker } from "../../builds/hooks/useTicker";
 import { runStamp } from "../../builds/lib/format";
 import { buildDuration } from "../../builds/lib/ledger";
 import { validationChip } from "../lib/chip";
+import { validationIsLive } from "../lib/lifecycle";
 import { useValidations } from "../api/queries";
 
 type ValidationSummary = components["schemas"]["ValidationSummary"];
@@ -77,7 +78,7 @@ type StateFilter = (typeof STATE_FILTERS)[number]["value"];
 function matchesFilter(row: ValidationSummary, filter: StateFilter): boolean {
   switch (filter) {
     case "live":
-      return row.state === "running" || row.state === "awaiting-fix";
+      return validationIsLive(row.state);
     case "passed":
       return row.state === "passed" || row.state === "partial";
     case "failed":
@@ -258,7 +259,7 @@ function LedgerRow({ row, onOpen }: { row: ValidationSummary; onOpen: () => void
   // of the same enum. `null` is the states with nothing to say — `none` is the
   // only one that reaches a row, and it says so in words instead.
   const chip = validationChip(row.state);
-  const live = row.state === "running" || row.state === "awaiting-fix";
+  const live = validationIsLive(row.state);
 
   return (
     <ListingTable.Row

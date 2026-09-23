@@ -478,7 +478,7 @@ function ScenarioRow({ scenario, reported, hasRun, awaiting, open, onToggle }: S
               </Box>
             ))}
         </Typography>
-        {(showPill || waiting) && (
+        {hasRun && (
           <Box sx={{ display: "flex", alignItems: "center", height: ROW_LINE, flexShrink: 0 }}>
             {showPill ? (
               <OutcomePill outcome={reported?.outcome ?? NO_RESULT} />

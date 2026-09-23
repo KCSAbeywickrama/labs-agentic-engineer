@@ -182,8 +182,11 @@ func NewestRunOfKindOnMilestone(rows []MilestoneRun, milestoneNumber int, kind s
 // AnsweringRunOnMilestone is the run whose verdict is a version's answer: the
 // newest run that judged it, or the dev run that delivered it when nothing has.
 //
-// The two-step is the rule, and writing it once is the point — a surface that
-// spelled it out for itself read the wrong row and hid a real verdict.
+// The two-step is the rule, and a surface that spelled it out for itself read
+// the wrong row and hid a real verdict (#423). Callers that already hold the
+// dev run compose the halves directly — the status aggregate does, since it
+// reads that row for the build stage anyway — so this is the shorthand for
+// everyone else, not a funnel.
 func AnsweringRunOnMilestone(rows []MilestoneRun, milestoneNumber int) *MilestoneRun {
 	dev := NewestRunOfKindOnMilestone(rows, milestoneNumber, RunKindDev)
 	return NewestValidatingOnMilestone(rows, dev)
@@ -194,8 +197,8 @@ func AnsweringRunOnMilestone(rows []MilestoneRun, milestoneNumber int) *Mileston
 //
 // "Deployed" is a fact about runs rather than about the cluster: a running v2
 // does not unseat a live v1, so the newest run is the wrong answer and only a
-// succeeded one counts. It is what `deploy.version` reports, and what a
-// revalidation is allowed to judge — the runner resolves its endpoints from the
+// succeeded one counts. It is the same rule `deploy.version` reports, and what
+// a revalidation is allowed to judge — the runner resolves its endpoints from the
 // cluster at request time, so any other version would be judged against code it
 // never shipped.
 //

@@ -242,9 +242,9 @@ func (r *ValidationReads) ValidationForTag(ctx context.Context, orgID, projectID
 //
 // It reads the project's rows rather than this milestone's: "deployed" is a
 // comparison, and a milestone cannot tell from its own rows whether something
-// newer has since shipped. The rule itself is delivery's (DeployedRun), shared
-// with the status aggregate so the page and the overview cannot disagree about
-// which version is live.
+// newer has since shipped. The rule itself is delivery's (DeployedRun), beside
+// the verdict vocabulary rather than here, so the answer this flag gives and
+// the one the trigger is refused by come from one place.
 func (r *ValidationReads) isDeployed(ctx context.Context, orgID, projectID string, milestoneNumber int) (bool, error) {
 	rows, err := r.runs.ListByProject(ctx, orgID, projectID)
 	if err != nil {

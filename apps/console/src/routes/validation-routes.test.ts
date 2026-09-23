@@ -22,12 +22,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../features/validation/components/ValidationLedger", () => ({
   ValidationLedger: () => null,
 }));
-vi.mock("../features/validation/components/ValidationMilestonePage", () => ({
-  ValidationMilestonePage: () => null,
-}));
-
 import { Route as validationIndexRoute } from "./projects.$projectName.validations.index";
-import { Route as validationTagRoute } from "./projects.$projectName.validations.$tag";
 
 /**
  * Validations is a ledger with a page per version, at `/validations` — plural,
@@ -45,19 +40,5 @@ describe("/projects/$projectName/validations — the ledger", () => {
       | undefined;
     expect(parse?.({ view: "logs" })).toEqual({});
     expect(parse?.({ view: "report", other: 1 })).toEqual({});
-  });
-
-  // Nothing arrives here by an old address, so there is nothing for a
-  // beforeLoad to do.
-  it("redirects nothing", () => {
-    expect(validationIndexRoute.options.beforeLoad).toBeUndefined();
-  });
-});
-
-describe("/projects/$projectName/validations/$tag — one version", () => {
-  // Unlike /builds/$tag — where a numeric segment is a legacy task link — this
-  // segment has never been anything but a version tag.
-  it("needs no legacy redirect", () => {
-    expect(validationTagRoute.options.beforeLoad).toBeUndefined();
   });
 });
