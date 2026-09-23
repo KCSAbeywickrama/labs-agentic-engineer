@@ -61,6 +61,14 @@ const GROUP_BY_FOLDER: Record<string, SpecGroup> = {
 // #427 was opened to fix.
 const REFERENCES_PREFIX = "specs/requirements/references/";
 
+// The agent-scenarios file is the BUILD's input — the conversations the
+// evaluation harness runs a generated agent through — not a document a person
+// reads or edits. Every requirement it exercises is already visible as the
+// validation criteria it cites, so listing it would show the same oracle twice,
+// once in a shape written for a machine. Hidden here, in the one folder rule,
+// so neither the file list nor a declared plan's ghost row ever shows it.
+const AGENT_SCENARIOS_PATH = "specs/validation/agent-scenarios.json";
+
 /**
  * The spec-view group a path would belong to, or null for a path the view
  * hides. The declared plan (#576) sorts its entries into rail sections with
@@ -79,6 +87,7 @@ export function specGroupOf(path: string): SpecGroup | null {
   if (segments[0] !== "specs" || segments.length < 3) return null;
   if (segments[segments.length - 1] === "") return null;
   if (path.startsWith(REFERENCES_PREFIX)) return null;
+  if (path === AGENT_SCENARIOS_PATH) return null;
   return GROUP_BY_FOLDER[segments[1] ?? ""] ?? null;
 }
 

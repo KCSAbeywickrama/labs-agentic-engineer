@@ -17,7 +17,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { toSpecEntries, toSpecEntry } from "./mapping";
+import { specGroupOf, toSpecEntries, toSpecEntry } from "./mapping";
 
 describe("toSpecEntry", () => {
   it("keeps the full specs/ path and derives the group from the folder", () => {
@@ -63,6 +63,15 @@ describe("toSpecEntry", () => {
       sha: "d4",
       group: "designs",
     });
+  });
+
+  it("hides the agent-scenarios file — the build's evaluation input, not a document", () => {
+    expect(toSpecEntry({ path: "specs/validation/agent-scenarios.json", sha: "s1" })).toBeNull();
+    expect(specGroupOf("specs/validation/agent-scenarios.json")).toBeNull();
+    // The criteria beside it stay: they are the oracle a person reads.
+    expect(toSpecEntry({ path: "specs/validation/validation-criteria.json", sha: "s2" })?.group).toBe(
+      "validation",
+    );
   });
 
   it("hides files outside the known folders (#113 decision 3)", () => {
