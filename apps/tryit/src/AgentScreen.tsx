@@ -160,11 +160,7 @@ export function AgentScreen({
               input: { disableUnderline: true, sx: { px: 2, pt: 1.5, pb: 0.5, fontSize: 15 } },
             }}
           />
-          <Stack direction="row" sx={{ alignItems: "center", px: 1.5, py: 1 }}>
-            <Typography variant="caption" color="text.secondary">
-              Enter to send · Shift+Enter for a new line
-            </Typography>
-            <Box sx={{ flexGrow: 1 }} />
+          <Stack direction="row" sx={{ justifyContent: "flex-end", px: 1.5, py: 1 }}>
             <Button
               type="submit"
               variant="contained"
