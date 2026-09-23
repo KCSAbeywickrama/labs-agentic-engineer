@@ -17,7 +17,7 @@
  */
 
 import { useState } from "react";
-import { Alert, Avatar, Box, Button, Chip, CircularProgress, Divider, Paper, Stack, TextField, Typography } from "@wso2/oxygen-ui";
+import { Alert, Avatar, Box, Button, Chip, CircularProgress, Divider, IconButton, Paper, Stack, TextField, Typography } from "@wso2/oxygen-ui";
 import { Bot, LogOut, RefreshCw, Send, User, Wrench } from "@wso2/oxygen-ui-icons-react";
 import { sendTurn, type ToolCall, type TurnResult } from "./chat";
 import type { Launch } from "./launch";
@@ -132,9 +132,14 @@ export function AgentScreen({
           sx={{
             maxWidth: 760,
             mx: "auto",
-            borderRadius: 2,
+            display: "flex",
+            alignItems: "flex-end",
+            gap: 1,
+            pl: 2,
+            pr: 1,
+            py: 0.75,
+            borderRadius: 3,
             borderColor: "divider",
-            overflow: "hidden",
             "&:focus-within": { borderColor: "primary.main" },
           }}
         >
@@ -150,27 +155,30 @@ export function AgentScreen({
             }}
             placeholder={`Message ${launch.component}`}
             multiline
-            minRows={2}
             maxRows={8}
             fullWidth
             variant="standard"
             disabled={sending}
             slotProps={{
               htmlInput: { "aria-label": "Message" },
-              input: { disableUnderline: true, sx: { px: 2, pt: 1.5, pb: 0.5, fontSize: 15 } },
+              input: { disableUnderline: true, sx: { py: 0.75, fontSize: 15 } },
             }}
           />
-          <Stack direction="row" sx={{ justifyContent: "flex-end", px: 1.5, py: 1 }}>
-            <Button
-              type="submit"
-              variant="contained"
-              size="small"
-              disabled={sending || draft.trim() === ""}
-              endIcon={<Send size={14} aria-hidden />}
-            >
-              Send
-            </Button>
-          </Stack>
+          <IconButton
+            type="submit"
+            aria-label="Send"
+            disabled={sending || draft.trim() === ""}
+            sx={{
+              bgcolor: "primary.main",
+              color: "primary.contrastText",
+              "&:hover": { bgcolor: "primary.dark" },
+              "&.Mui-disabled": { bgcolor: "action.disabledBackground", color: "action.disabled" },
+              width: 36,
+              height: 36,
+            }}
+          >
+            <Send size={16} aria-hidden />
+          </IconButton>
         </Paper>
       </Box>
     </Box>
