@@ -66,6 +66,48 @@ func (a acceptanceCriteria) ReadAcceptanceCriteria(ctx context.Context, orgID, p
 	return out, len(out) > 0, nil
 }
 
+// ReportAt satisfies runread's ValidationSnapshotReader: the report the
+// validation runner committed, read at one commit.
+//
+// A missing file is found=false rather than an error. An attempt whose verdict
+// is `unreported` is precisely one that committed nothing, and the console
+// renders that as its own sentence; surfacing it as a read failure would make a
+// known-absent report look like a broken platform.
+func (a acceptanceCriteria) ReportAt(ctx context.Context, orgID, projectID, at string) (string, bool, error) {
+	fc, err := a.files.ReadAt(ctx, orgID, projectID, validation.ReportFilePath, at)
+	if err != nil {
+		if errors.Is(err, spec.ErrFileNotFound) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return fc.Content, true, nil
+}
+
+// CriteriaAt satisfies runread's ValidationSnapshotReader: the acceptance
+// oracle as it stood at one commit.
+//
+// Bundle, like the HEAD read above, so every file comes from ONE state of the
+// repo. An absent directory is an empty slice: a version whose oracle was never
+// authored is an ordinary state and the page says so in words, not by failing.
+func (a acceptanceCriteria) CriteriaAt(ctx context.Context, orgID, projectID, at string) ([]gen.ValidationCriteriaFile, error) {
+	bundle, err := a.files.Bundle(ctx, orgID, projectID, acceptanceDirPath, at)
+	if err != nil {
+		if errors.Is(err, spec.ErrFileNotFound) {
+			return []gen.ValidationCriteriaFile{}, nil
+		}
+		return nil, err
+	}
+	out := make([]gen.ValidationCriteriaFile, 0, len(bundle.Files))
+	for _, fc := range bundle.Files {
+		if !strings.HasSuffix(fc.Path, ".feature") {
+			continue
+		}
+		out = append(out, gen.ValidationCriteriaFile{Path: fc.Path, Content: fc.Content})
+	}
+	return out, nil
+}
+
 // HasValidationCriteria satisfies the event plane's ValidationOracle: the same
 // read, reduced to the yes/no the revalidate guard asks. Deliberately does not
 // parse — a malformed oracle still means "there is something here to validate",
