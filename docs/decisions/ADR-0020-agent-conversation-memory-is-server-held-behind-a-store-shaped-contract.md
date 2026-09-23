@@ -51,12 +51,52 @@ reach into another component's tables, and the platform's data-ownership rule
 holds at table granularity regardless of which physical database a table
 lives in.
 
-Full reasoning, the rejected alternatives, and the schema and turn-flow
-prescribed to the generated agent are recorded in
-`docs/superpowers/specs/2026-08-18-agent-server-memory-design.md`. The
-console's Test tab chat tester, the first caller built against this contract,
-is specified in
-`docs/superpowers/specs/2026-08-18-component-test-tab-design.md`.
+The schema and turn flow prescribed to the generated agent live in the
+`agent-building` skill (`references/building.md`, "Conversation store"). The
+first caller built against this contract was the console's Test tab chat
+tester, since retired in favour of the platform's test app (`apps/tryit`),
+which speaks the same `/chat` contract as the project's test user.
+
+## Alternatives considered
+
+The first cut is **per-agent Postgres, accessed directly** (option 3 below).
+Four shapes were weighed for where conversations live:
+
+1. **A conversation-store service over one shared database** — rejected: every
+   org's end-user conversations separated only logically, in a database the
+   platform owns; wrong for end-user data.
+2. **A store service over a per-project database shared with the project's
+   services** — rejected: dual-ownership databases and migration fan-out.
+3. **A per-agent database, accessed directly by the generated agent** —
+   accepted as the first cut. Cheapest real step: the `postgres-cnpg`
+   ClusterResourceType exists and platform-resource wiring is generic, so
+   provisioning and env injection needed no platform change, for the dedicated
+   and the shared-by-name form alike.
+4. **A per-project database with no store, every component reading it** —
+   rejected: it breaks component data ownership. What was wrong there was
+   components reaching into each other's data, not sharing a Postgres process
+   — which is why the shared-instance form of option 3 is allowed at table
+   granularity.
+
+Storage is `postgres-cnpg` (a CloudNativePG cluster with a volume), not the
+emptyDir `postgres` type: conversations survive a pod restart, at the cost of
+composing the DSN from `host`/`port`/`dbname`/`user`/`password` outputs.
+
+Memory is a **capability, not a dependency choice** — the AFM says
+`memory: { type: "server" }` — but the first cut's database IS declared, because
+that is how provisioning works today. When the store service lands the
+dependency disappears and the capability is granted by component type, as model
+access already is (ADR-0016).
+
+## Accepted limitations of the first cut
+
+| Limitation | Resolved by |
+|---|---|
+| User fencing lives in generated SQL | the store service enforcing it platform-side |
+| One Postgres per agent (~200–300 Mi of node), unless shared by name | the store consolidating to one database per org |
+| A shared instance shares its restart and resize blast radius | the org's accepted trade in choosing the shared form; the store removes it |
+| No cross-agent platform surface (retention, delete-my-data) | the store's API |
+| A schema change means regenerating agents | the store owning the schema |
 
 ## Consequences
 
@@ -76,6 +116,9 @@ is specified in
   persistence, user fencing, schema migration, and cross-agent operations
   (retention, delete-my-data) itself — because that code is generated per
   build and those concerns need to live in code the platform owns, once,
-  outside any single agent's trust domain. The full option analysis for that
-  service (rejected shared-DB and per-project-DB shapes included) is in the
-  design spec above; this ADR does not reproduce it.
+  outside any single agent's trust domain. Org is the isolation line because it
+  is already the platform's trust boundary (keys, Thunder OUs); the design
+  agent's own store (`services/agents/src/store/`) is the proven prototype —
+  the same JSONB aggregate, load-append-save and org fence — and the end state
+  is that store, extracted and given an end-user fence. The shapes rejected on
+  the way are under *Alternatives considered*.
