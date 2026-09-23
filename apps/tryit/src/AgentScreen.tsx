@@ -129,7 +129,14 @@ export function AgentScreen({
       >
         <Paper
           variant="outlined"
-          sx={{ maxWidth: 760, mx: "auto", p: 1, display: "flex", gap: 1, alignItems: "flex-end", borderColor: "text.disabled", borderRadius: 2 }}
+          sx={{
+            maxWidth: 760,
+            mx: "auto",
+            borderRadius: 2,
+            borderColor: "divider",
+            overflow: "hidden",
+            "&:focus-within": { borderColor: "primary.main" },
+          }}
         >
           <TextField
             id="tryit-message"
@@ -141,18 +148,33 @@ export function AgentScreen({
                 void send();
               }
             }}
-            placeholder={`Message ${launch.component} — Enter to send, Shift+Enter for a new line`}
+            placeholder={`Message ${launch.component}`}
             multiline
             minRows={2}
             maxRows={8}
             fullWidth
             variant="standard"
             disabled={sending}
-            slotProps={{ htmlInput: { "aria-label": "Message" }, input: { disableUnderline: true, sx: { px: 1, py: 0.5 } } }}
+            slotProps={{
+              htmlInput: { "aria-label": "Message" },
+              input: { disableUnderline: true, sx: { px: 2, pt: 1.5, pb: 0.5, fontSize: 15 } },
+            }}
           />
-          <Button type="submit" variant="contained" disabled={sending || draft.trim() === ""} endIcon={<Send size={14} aria-hidden />} sx={{ flexShrink: 0 }}>
-            Send
-          </Button>
+          <Stack direction="row" sx={{ alignItems: "center", px: 1.5, py: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              Enter to send · Shift+Enter for a new line
+            </Typography>
+            <Box sx={{ flexGrow: 1 }} />
+            <Button
+              type="submit"
+              variant="contained"
+              size="small"
+              disabled={sending || draft.trim() === ""}
+              endIcon={<Send size={14} aria-hidden />}
+            >
+              Send
+            </Button>
+          </Stack>
         </Paper>
       </Box>
     </Box>
