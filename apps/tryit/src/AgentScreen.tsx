@@ -74,7 +74,7 @@ export function AgentScreen({
       <Stack
         direction="row"
         spacing={1.5}
-        sx={{ alignItems: "center", px: 2, py: 1.5, borderBottom: 1, borderColor: "divider", flexWrap: "wrap", rowGap: 1 }}
+        sx={{ alignItems: "center", px: 2, py: 1.5, borderBottom: 1, borderColor: "divider", bgcolor: "background.paper", flexWrap: "wrap", rowGap: 1 }}
       >
         <Avatar sx={{ width: 32, height: 32, bgcolor: "action.hover", color: "text.primary" }}>
           <Bot size={18} aria-hidden />
@@ -125,9 +125,12 @@ export function AgentScreen({
           event.preventDefault();
           void send();
         }}
-        sx={{ px: 2, py: 1.5 }}
+        sx={{ px: 2, py: 2, bgcolor: "background.paper" }}
       >
-        <Stack direction="row" spacing={1} sx={{ maxWidth: 760, mx: "auto", alignItems: "flex-end" }}>
+        <Paper
+          variant="outlined"
+          sx={{ maxWidth: 760, mx: "auto", p: 1, display: "flex", gap: 1, alignItems: "flex-end", borderColor: "text.disabled", borderRadius: 2 }}
+        >
           <TextField
             id="tryit-message"
             value={draft}
@@ -138,18 +141,19 @@ export function AgentScreen({
                 void send();
               }
             }}
-            placeholder={`Message ${launch.component}`}
+            placeholder={`Message ${launch.component} — Enter to send, Shift+Enter for a new line`}
             multiline
-            maxRows={6}
+            minRows={2}
+            maxRows={8}
             fullWidth
-            size="small"
+            variant="standard"
             disabled={sending}
-            slotProps={{ htmlInput: { "aria-label": "Message" } }}
+            slotProps={{ htmlInput: { "aria-label": "Message" }, input: { disableUnderline: true, sx: { px: 1, py: 0.5 } } }}
           />
-          <Button type="submit" variant="contained" disabled={sending || draft.trim() === ""} endIcon={<Send size={14} aria-hidden />}>
+          <Button type="submit" variant="contained" disabled={sending || draft.trim() === ""} endIcon={<Send size={14} aria-hidden />} sx={{ flexShrink: 0 }}>
             Send
           </Button>
-        </Stack>
+        </Paper>
       </Box>
     </Box>
   );

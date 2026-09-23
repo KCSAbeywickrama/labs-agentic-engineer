@@ -18,7 +18,7 @@
 
 import { describe, expect, it } from "vitest";
 import { WebStorageStateStore } from "oidc-client-ts";
-import { managerSettings } from "./session";
+import { displayName, managerSettings } from "./session";
 
 const launch = {
   project: "p",
@@ -47,9 +47,19 @@ describe("managerSettings", () => {
     expect(settings.extraTokenParams).toEqual({ resource: launch.resource });
   });
 
-  it("keeps the session per tab and reads no userinfo", () => {
+  it("keeps the session per tab and reads userinfo for the person's name", () => {
     expect(settings.userStore).toBeInstanceOf(WebStorageStateStore);
-    expect(settings.loadUserInfo).toBe(false);
+    expect(settings.loadUserInfo).toBe(true);
     expect(settings.automaticSilentRenew).toBe(false);
+  });
+});
+
+describe("displayName", () => {
+  it("prefers a username, then a name, then an email, and shows the id only as a last resort", () => {
+    expect(displayName({ sub: "01a0-uuid", email: "t@x.io", preferred_username: "test-user" })).toBe("test-user");
+    expect(displayName({ sub: "01a0-uuid", name: "Test User" })).toBe("Test User");
+    expect(displayName({ sub: "01a0-uuid", email: "t@x.io" })).toBe("t@x.io");
+    expect(displayName({ sub: "01a0-uuid" })).toBe("01a0-uuid");
+    expect(displayName({})).toBeNull();
   });
 });

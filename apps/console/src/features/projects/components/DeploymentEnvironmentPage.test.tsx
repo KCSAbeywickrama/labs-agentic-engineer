@@ -706,7 +706,7 @@ describe("DeploymentEnvironmentPage — try it out (ADR-0032)", () => {
       expect(query.get("issuer")).toBe("http://default-idp.amp.localhost:8080");
       expect(query.get("client_id")).toBe("aep-dp-x-r-y");
       expect(query.get("resource")).toBe("https://aep.wso2.com/orgs/acme/projects/expense");
-      expect(query.get("scopes")).toBe("openid triage:use");
+      expect(query.get("scopes")).toBe("openid profile email triage:use");
       expect(query.get("endpoint")).toBe("https://gw.dev.expense.localhost/expense-triage-http");
       expect(link).toHaveAttribute("target", "_blank");
       // The accounts still render once, in the web app's panel, not again in the agent's.

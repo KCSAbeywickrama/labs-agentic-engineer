@@ -363,7 +363,9 @@ function ComponentPanel({
               issuer: testUsers.signIn.issuer,
               clientId: testUsers.signIn.clientId,
               resource: testUsers.signIn.resource,
-              scopes: ["openid", ...new Set(testUsers.logins.flatMap((login) => login.scopes))],
+              // profile + email so the test app can show WHO is signed in — the
+              // ID token's `sub` is a UUID. Both are public claims of a test user.
+              scopes: ["openid", "profile", "email", ...new Set(testUsers.logins.flatMap((login) => login.scopes))],
               endpoint: d.endpointUrl,
             })}
             target="_blank"

@@ -45,8 +45,19 @@ export function managerSettings(launch: Launch, origin: string): UserManagerSett
     // verifier across the redirect, which is all the redirect needs.
     userStore: new WebStorageStateStore({ store: window.sessionStorage }),
     automaticSilentRenew: false,
-    loadUserInfo: false,
+    // The ID token carries no username — `sub` is a UUID (measured in the
+    // thunder-authentication reference app). userinfo fills the profile claims.
+    loadUserInfo: true,
   };
+}
+
+/** The most useful name a profile carries; `sub` (a UUID) only as the last resort. */
+export function displayName(profile: Record<string, unknown>): string | null {
+  for (const claim of ["preferred_username", "username", "name", "email", "sub"]) {
+    const value = profile[claim];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return null;
 }
 
 export interface Session {
@@ -86,8 +97,7 @@ export function createSession(launch: Launch): Session {
     accessToken: async () => (await current())?.access_token ?? null,
     username: async () => {
       const user = await current();
-      const claim = user?.profile.preferred_username ?? user?.profile.sub;
-      return typeof claim === "string" ? claim : null;
+      return user ? displayName(user.profile) : null;
     },
     signOut: () => manager.removeUser(),
   };
