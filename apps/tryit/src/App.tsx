@@ -105,7 +105,7 @@ export function App() {
       <Shell>
         <Alert severity="info">
           <AlertTitle>Open this app from the console</AlertTitle>
-          On a project's deployment page, under Try it out, choose <strong>Open in test app</strong> on an
+          On a project's deployment page, under Try it out, choose <strong>Try agent</strong> on an
           agent. The console hands this app the project's sign-in and the agent's address; there is
           nothing to configure here.
         </Alert>

@@ -676,7 +676,7 @@ describe("DeploymentEnvironmentPage — try it out (ADR-0032)", () => {
   // An agent has no page of its own, so the platform's test app is its page:
   // the console hands it everything public it needs to sign a person in as
   // one of the project's test users and reach the agent's gateway URL.
-  describe("an agent opens in the test app", () => {
+  describe("an agent is tried in the test app", () => {
     const agent = (): Deployment => ({
       componentName: "triage",
       environment: "development",
@@ -697,7 +697,7 @@ describe("DeploymentEnvironmentPage — try it out (ADR-0032)", () => {
       mockSignIn = { issuer: "http://default-idp.amp.localhost:8080", clientId: "aep-dp-x-r-y" };
       render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
 
-      const link = screen.getByRole("link", { name: "Open triage in the test app" });
+      const link = screen.getByRole("link", { name: "Try triage" });
       const href = new URL(link.getAttribute("href") ?? "");
       expect(href.origin).toBe("http://tryit.aep.localhost:8095");
       const query = new URLSearchParams(href.hash.slice("#/agent?".length));
@@ -715,13 +715,13 @@ describe("DeploymentEnvironmentPage — try it out (ADR-0032)", () => {
 
     it("offers no launch the app could not honour: no sign-in client, or no account to sign in as", () => {
       render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
-      expect(screen.queryByRole("link", { name: "Open triage in the test app" })).toBeNull();
+      expect(screen.queryByRole("link", { name: "Try triage" })).toBeNull();
 
       cleanup();
       mockSignIn = { issuer: "http://default-idp.amp.localhost:8080", clientId: "aep-dp-x-r-y" };
       mockTestUsers = [];
       render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
-      expect(screen.queryByRole("link", { name: "Open triage in the test app" })).toBeNull();
+      expect(screen.queryByRole("link", { name: "Try triage" })).toBeNull();
     });
   });
 });

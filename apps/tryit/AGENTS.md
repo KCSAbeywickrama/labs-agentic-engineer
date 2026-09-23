@@ -1,7 +1,7 @@
 # AGENTS.md — apps/tryit
 
 `@aep/tryit`: the platform's **test app**. A static SPA the console opens in a
-new tab from a deployment's Try it out card ("Open in test app" on an agent).
+new tab from a deployment's Try it out card ("Try agent" on an agent).
 It signs a person in on the **project's** identity provider as one of the
 project's test users and talks to the component's public gateway URL directly.
 

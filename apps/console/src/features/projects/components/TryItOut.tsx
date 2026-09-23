@@ -368,10 +368,10 @@ function ComponentPanel({
             })}
             target="_blank"
             rel="noreferrer"
-            aria-label={`Open ${card.displayName} in the test app`}
+            aria-label={`Try ${card.displayName}`}
             endIcon={<ExternalLink size={13} aria-hidden />}
           >
-            Open in test app
+            Try agent
           </Button>
         )}
         {/* Only a SERVING service is worth trying — an undeployed or failed
