@@ -33,7 +33,12 @@ import { Copy, ExternalLink, FlaskConical } from "@wso2/oxygen-ui-icons-react";
 import { StatusChip } from "../../../components/StatusChip";
 import { env } from "../../../config/env";
 import { thunderUsersConsoleHref } from "../../../config/thunderConsole";
-import { resourceServerOf, useProjectRoles, useRevealTestUserPassword } from "../../spec/api/roles";
+import {
+  resourceServerOf,
+  useProjectRoles,
+  useRevealTestUserPassword,
+  type ProjectSignIn,
+} from "../../spec/api/roles";
 import { cardChip } from "../lib/deploymentLedger";
 import type { DeploymentCard } from "../lib/deploymentRows";
 import { publishedTestUsers, type PublishedTestUser } from "../lib/publishedTestUsers";
@@ -266,7 +271,7 @@ export interface TestUsersProps {
    * only when the project has a sign-in client and a resource server — the two
    * facts the test app cannot learn on its own.
    */
-  signIn?: { issuer: string; clientId: string; resource: string };
+  signIn?: ProjectSignIn & { resource: string };
   loadState: "ready" | "pending" | "error";
   thunderUrl: string;
   revealPassword: (username: string) => Promise<string>;
@@ -428,8 +433,7 @@ export function TryItOutCard({
     [cards, types],
   );
   const firstWebApp = ordered.find((c) => types.get(c.componentName) === "web-application");
-  // The accounts render inside the first web app's panel; an agent's panel
-  // gets them too, for the launch into the test app, and renders no list.
+  // An agent's panel gets the accounts too — for the launch, not for a list.
   const withAccounts = (card: DeploymentCard) =>
     card === firstWebApp || types.get(card.componentName) === "ai-agent";
   return (

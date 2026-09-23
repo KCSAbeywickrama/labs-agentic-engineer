@@ -199,6 +199,14 @@ function Notice({ result, endpoint }: { result: Exclude<TurnResult, { kind: "rep
           test user's password from the console's Security panel.
         </Alert>
       );
+    case "forbidden":
+      return (
+        <Alert severity="warning">
+          This test user is not allowed to use the agent: its roles do not grant a scope the agent
+          requires. Check the role's grants in specs/design/security.json and rebuild, or sign in as a
+          different test user.
+        </Alert>
+      );
     case "upstream":
       return (
         <Alert severity="error">

@@ -34,6 +34,6 @@ func (l *lateSignInCoords) SignInCoordinates(ctx context.Context, orgID, project
 	if l.svc == nil {
 		return identity.SignInCoords{}, nil
 	}
-	clientID, resource, issuer := l.svc.SignInCoordinates(ctx, orgID, projectID)
-	return identity.SignInCoords{ClientID: clientID, Resource: resource, Issuer: issuer}, nil
+	c := l.svc.SignInCoordinates(ctx, orgID, projectID)
+	return identity.SignInCoords{ClientID: c.ClientID, Resource: c.Resource, Issuer: c.Issuer}, nil
 }

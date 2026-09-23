@@ -152,7 +152,7 @@ func (s *Service) ensureRolesGate(ctx context.Context, orgID, projectID, tag str
 	// ensure because it costs a binding read and is pointless if the ensure
 	// failed, and best-effort because a missing client makes the ticket less
 	// useful, never wrong — the trailer just omits the line.
-	outcome.ClientID = s.signInClientID(ctx, orgID, projectID)
+	outcome.ClientID = s.SignInCoordinates(ctx, orgID, projectID).ClientID
 	outcome.CallbackURL = s.tryItCallbackURL
 
 	if perr := s.publishTestUserLogins(ctx, orgID, projectID, number, outcome); perr != nil {
@@ -469,8 +469,20 @@ func renderCredentialsTrailer(outcome RolesEnsureOutcome) string {
 	return b.String()
 }
 
-// signInClientID is the OAuth client of the project's sign-in resource, read
-// off the same resolved binding the runtime reads `<DEP>_CLIENT_ID` from.
+// SignInClient is a project's sign-in as a client outside it performs it: the
+// OAuth client to sign in AS, the resource server the token is minted for, and
+// the issuer that mints it — the sign-in resource's binding outputs
+// (`client_id` / `resource` / `issuer`). Zero when the project declares no
+// sign-in resource or its binding has not resolved.
+type SignInClient struct {
+	ClientID string
+	Resource string
+	Issuer   string
+}
+
+// SignInCoordinates reads the project's SignInClient off the same resolved
+// binding the runtime reads `<DEP>_CLIENT_ID` from. The roles gate publishes
+// the client id; the roles panel publishes all three for the test app.
 //
 // BEST EFFORT, by design. Every step is a reason to have no client rather than
 // a failure: a project may declare no sign-in resource at all, the marker
@@ -484,33 +496,21 @@ func renderCredentialsTrailer(outcome RolesEnsureOutcome) string {
 // the platform itself keys the sign-in overlay on (see deriveEndUserAuth). One
 // project has one such resource — every protected component shares it by
 // declaring the same dependency name — so the first match is the answer.
-func (s *Service) signInClientID(ctx context.Context, orgID, projectID string) string {
-	clientID, _, _ := s.SignInCoordinates(ctx, orgID, projectID)
-	return clientID
-}
-
-// SignInCoordinates is the project's sign-in client, the resource server its
-// tokens are minted for, and the issuer that mints them, all read off the
-// sign-in resource's resolved binding (`client_id` / `resource` / `issuer`).
-// The roles gate publishes the client id; the identity minter signs test users
-// in with the first two; the roles panel publishes all three for the test app.
-// Empty strings mean "no sign-in resource, or its binding has not resolved" —
-// never an error, because no consumer can act on one.
-func (s *Service) SignInCoordinates(ctx context.Context, orgID, projectID string) (clientID, resource, issuer string) {
+func (s *Service) SignInCoordinates(ctx context.Context, orgID, projectID string) SignInClient {
 	if s == nil || s.design == nil || s.bindings == nil || s.markers == nil {
-		return "", "", ""
+		return SignInClient{}
 	}
 	components, err := s.design.ReadDesignComponents(ctx, orgID, projectID)
 	if err != nil {
 		slog.DebugContext(ctx, "roles gate: no design to find the sign-in client on",
 			"project", projectID, "error", err)
-		return "", "", ""
+		return SignInClient{}
 	}
 	byName, err := s.markers.MarkersByName(ctx)
 	if err != nil {
 		slog.DebugContext(ctx, "roles gate: no marker catalog to find the sign-in client with",
 			"project", projectID, "error", err)
-		return "", "", ""
+		return SignInClient{}
 	}
 	for _, comp := range components {
 		for _, dep := range comp.Dependencies {
@@ -522,20 +522,21 @@ func (s *Service) SignInCoordinates(ctx context.Context, orgID, projectID string
 			if berr != nil || binding == nil || binding.Status == nil {
 				slog.DebugContext(ctx, "roles gate: the sign-in resource's binding is not readable yet",
 					"project", projectID, "binding", name, "error", berr)
-				return "", "", ""
+				return SignInClient{}
 			}
+			var c SignInClient
 			for _, out := range binding.Status.Outputs {
 				switch out.Name {
 				case "client_id":
-					clientID = out.Value
+					c.ClientID = out.Value
 				case "resource":
-					resource = out.Value
+					c.Resource = out.Value
 				case "issuer":
-					issuer = out.Value
+					c.Issuer = out.Value
 				}
 			}
-			return clientID, resource, issuer
+			return c
 		}
 	}
-	return "", "", ""
+	return SignInClient{}
 }

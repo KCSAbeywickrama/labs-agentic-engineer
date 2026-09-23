@@ -286,8 +286,7 @@ type client struct {
 
 	mu          sync.RWMutex
 	cachedToken string
-	// tokenExpiry carries NO monotonic reading (see getSystemToken): the
-	// comparison against it is a wall-clock comparison, on purpose.
+	// tokenExpiry is wall-clock time; see systemTokenExpiry.
 	tokenExpiry time.Time
 	tokenSfg    singleflight.Group
 	// now is the clock the cache is judged by; tests substitute it.
@@ -396,15 +395,7 @@ func SystemResourceIdentifier(issuer string) string {
 // getSystemToken returns a cached system token or fetches a new one.
 // Fast path: RLock + cache hit. Slow path: singleflight dedupe so
 // concurrent callers share one round-trip.
-//
-// Validity is judged on the WALL clock, against the token's own `exp` when it
-// carries one. Go's time.Now() also holds a monotonic reading, and Before()
-// prefers it when both sides have one — which is exactly wrong here: Thunder
-// judges the token by wall time, and a process that was paused (its VM asleep)
-// sees its monotonic clock stand still while the wall clock, and the token's
-// expiry, run on. Stored without a monotonic reading (Round(0)), the expiry
-// forces a wall-clock comparison, and the token's `exp` is the server's own
-// verdict rather than a duration this side has to count down correctly.
+// Validity is judged by systemTokenExpiry: wall-clock, against the token's own exp.
 func (c *client) getSystemToken(ctx context.Context) (string, error) {
 	c.mu.RLock()
 	if c.cachedToken != "" && c.now().Before(c.tokenExpiry) {
@@ -492,8 +483,15 @@ func (c *client) fetchSystemToken(ctx context.Context) (string, int, error) {
 
 // systemTokenExpiry is when the cache stops trusting a token: the earlier of
 // the token's own `exp` and now+expires_in, less a skew — so a renew is in
-// flight before Thunder starts refusing it. The result carries no monotonic
-// reading; see getSystemToken for why that is load-bearing.
+// flight before Thunder starts refusing it.
+//
+// The result carries NO monotonic reading (Round(0)), which makes every later
+// Before() a wall-clock comparison. time.Now() also holds a monotonic reading
+// and Before() prefers it when both sides have one — exactly wrong here:
+// Thunder judges the token by wall time, and a process that was paused (its VM
+// asleep) sees its monotonic clock stand still while the wall clock, and the
+// token's expiry, run on. The token's own `exp` is the server's verdict rather
+// than a duration this side has to count down correctly.
 func systemTokenExpiry(token string, expiresIn int, now time.Time) time.Time {
 	const skew = 30 * time.Second
 	now = now.Round(0)

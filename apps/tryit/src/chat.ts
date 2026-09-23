@@ -19,8 +19,10 @@
 /** What one turn to the agent came back as. */
 export type TurnResult =
   | { kind: "reply"; conversationId: string; text: string; toolCalls: ToolCall[] }
-  /** The gateway or the agent refused the token (401/403). */
+  /** The gateway or the agent did not accept the token (401). */
   | { kind: "refused" }
+  /** The token was accepted but lacks a scope the agent requires (403). */
+  | { kind: "forbidden" }
   /** The agent answered, but not with a reply. */
   | { kind: "upstream"; status: number; body: string }
   /** No answer at all: wrong URL, CORS, or the gateway is down. */
@@ -51,7 +53,8 @@ export async function sendTurn(endpoint: string, token: string, turn: Turn): Pro
   } catch (error) {
     return { kind: "unreachable", message: error instanceof Error ? error.message : String(error) };
   }
-  if (response.status === 401 || response.status === 403) return { kind: "refused" };
+  if (response.status === 401) return { kind: "refused" };
+  if (response.status === 403) return { kind: "forbidden" };
   const body = await response.text();
   if (response.status !== 200) return { kind: "upstream", status: response.status, body };
   let parsed: { conversationId?: string; text?: string; toolCalls?: unknown[] };

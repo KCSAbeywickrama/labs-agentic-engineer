@@ -19,6 +19,7 @@ package openchoreo
 import (
 	"context"
 	"fmt"
+	"github.com/wso2/aep/aep-api/internal/clients/agentmanager"
 	"net/http"
 	"strings"
 	"time"
@@ -391,7 +392,7 @@ func isInternalComponent(annotations, labels map[string]string) bool {
 // a second component of the user's: it never deploys, and it carries the same
 // display name as the real `deployment/ai-agent`, so a listing that kept it
 // would show a duplicate that reads as "not deployed" forever.
-const agentManagerMarkerTypeName = "proxy/external-agent-api"
+const agentManagerMarkerTypeName = "proxy/" + agentmanager.ExternalAgentAPIType
 
 // isAgentManagerMarker reports whether a component is Agent Manager's marker
 // for an agent AEP already lists under its real type. Kept separate from

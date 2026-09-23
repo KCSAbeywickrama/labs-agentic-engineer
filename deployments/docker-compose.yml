@@ -485,13 +485,8 @@ services:
       - aep
 
   # ---------------------------------------------------------------------------
-  # tryit — the platform's test app (apps/tryit). A static SPA the console
-  # opens in a new tab; it signs in on the PROJECT's identity provider as one
-  # of the project's test users and talks to a component's public gateway URL
-  # directly. It never calls aep-api. Its origin here is the one aep-api's
-  # TRY_IT_CALLBACK_URL names: the platform registers
-  # http://tryit.aep.localhost:8095/callback on every project's sign-in
-  # client, so the two must move together.
+  # tryit — the platform's test app (apps/tryit/AGENTS.md). Its origin is the
+  # one aep-api's TRY_IT_CALLBACK_URL names; the two move together.
   # ---------------------------------------------------------------------------
   tryit:
     build:

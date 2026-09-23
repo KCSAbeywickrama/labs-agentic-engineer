@@ -391,20 +391,12 @@ RUN npm ci --include=optional \
 # a promptfoo the tests never saw, and a score nobody can reproduce.
 ENV AEP_AGENT_EVAL_HOME=/opt/aep/agent-eval
 COPY --from=agent-eval package.json package-lock.json ${AEP_AGENT_EVAL_HOME}/
-# --omit=optional: promptfoo declares every model-provider integration it can
-# drive (OpenAI Codex, the Claude agent SDK, ONNX runtime, Azure, PDF/SQL
-# assertion helpers, ...) as an optionalDependency. The harness uses none of
-# them — its judge is the Anthropic Messages API, a regular dependency — and
-# together they were ~2.3 GB of this layer's 2.5 GB. Measured on 0.122.2:
-# 2,418 MB / 548 packages by default, 267 MB / 329 with optionals omitted;
-# `promptfoo eval` and the llm-rubric judge both still run.
-#
-# One optional the harness DOES need: libsql's native binding for this
-# platform, which promptfoo's SQLite layer loads at startup and refuses to
-# start without. It is installed by name at the version the lockfile already
-# pins (read off the installed `libsql`), so the tree stays as reproducible as
-# `npm ci`. Declaring it as a regular dependency instead would break the
-# workspace install on macOS (npm refuses a foreign-platform native package).
+# --omit=optional: promptfoo's optional dependencies are its model-provider
+# SDKs, none of which the harness uses (its judge is the Anthropic Messages
+# API, a regular dependency). The one optional it cannot start without —
+# libsql's native binding for this platform — is added back by name at the
+# lockfile's version. Numbers, and why it is not a regular dependency:
+# packages/agent-eval/design/running-in-a-build-pod.md.
 ARG TARGETARCH
 RUN cd "$AEP_AGENT_EVAL_HOME" \
     && npm ci --omit=dev --omit=optional --no-audit --no-fund \

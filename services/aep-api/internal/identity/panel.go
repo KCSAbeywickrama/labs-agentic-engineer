@@ -197,7 +197,7 @@ type PanelView struct {
 // fact, and the console keeps offering the test app while the admin half of
 // the panel says "unknown". The directory's issuer is only a fallback for a
 // binding that predates the `issuer` output.
-func (s *PanelService) signIn(ctx context.Context, scope Scope, orgID, projectID string, target Target, terr error) *SignInInfo {
+func (s *PanelService) signIn(ctx context.Context, scope Scope, orgID, projectID, fallbackIssuer string) *SignInInfo {
 	if s.coords == nil {
 		return nil
 	}
@@ -208,8 +208,8 @@ func (s *PanelService) signIn(ctx context.Context, scope Scope, orgID, projectID
 		return nil
 	}
 	issuer := c.Issuer
-	if issuer == "" && terr == nil {
-		issuer = target.Issuer
+	if issuer == "" {
+		issuer = fallbackIssuer
 	}
 	if c.ClientID == "" || issuer == "" {
 		return nil
@@ -241,9 +241,8 @@ type SignInInfo struct {
 	ClientID string
 }
 
-// SetSignInCoordinates wires the reader of the project's sign-in client. It is
-// late-bound because the reader lives in provisioning, which is built after the
-// panel. Without it the view carries no SignIn block.
+// SetSignInCoordinates wires the reader of the project's sign-in client.
+// Optional: without it the view carries no SignIn block.
 func (s *PanelService) SetSignInCoordinates(c SignInCoordinates) { s.coords = c }
 
 // NewPanelService builds the panel. The store is required; the resolver may be
@@ -331,7 +330,12 @@ func (s *PanelService) View(ctx context.Context, orgID, projectID string) (Panel
 		return PanelView{}, err
 	}
 	view.ResourceServer = identifier
-	view.SignIn = s.signIn(ctx, scope, orgID, projectID, target, terr)
+	// The directory's issuer only backs a binding that predates the `issuer` output.
+	fallbackIssuer := ""
+	if terr == nil {
+		fallbackIssuer = target.Issuer
+	}
+	view.SignIn = s.signIn(ctx, scope, orgID, projectID, fallbackIssuer)
 	projectRoles, err := s.projectRoles(ctx, scope, projectID, identifier, directory, bindings)
 	if err != nil {
 		return PanelView{}, err

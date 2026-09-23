@@ -24,14 +24,9 @@ import type { Launch } from "./launch";
  * the project's public client, requesting a token for the project's resource
  * server. Every value comes off the launch URL; the app owns none of them.
  *
- * Adapted from skills/thunder-authentication/assets/app/src/authz/session.ts,
- * where the three-leg rule was measured against oidc-client-ts 3.5.0:
- * `resource` rides exactly one leg by itself.
- *   1. authorize    `settings.resource`.
- *   2. code→token   only through `extraTokenParams`.
- *   3. renew        only as an argument to `signinSilent(args)`.
- * Miss one and the token comes back with the identity provider's default
- * audience, which the gateway refuses on `aud` before it reads a scope.
+ * `resource` is set on all three legs (settings, extraTokenParams, and every
+ * signinSilent call) — oidc-client-ts carries it on only one by itself. Why,
+ * measured: skills/thunder-authentication/assets/app/src/authz/session.ts.
  */
 export function managerSettings(launch: Launch, origin: string): UserManagerSettings {
   return {

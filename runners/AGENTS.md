@@ -482,8 +482,9 @@ into the runner pod at `/app/skills` for live skill edits (see
   one builder and not another differs between local and cloud rather than
   failing. It installs with `npm ci` from `packages/agent-eval/package-lock.json`
   — the same two-lockfile rule as `/app` — and runs from source under `tsx`. It
-  is the largest layer in the image (~2.3 GB: promptfoo pulls every provider's
-  SDK), which is why it sits before the runner's sources rather than after them.
+  installs promptfoo with `--omit=optional` (its optional provider SDKs are not
+  the harness's; ~0.3 GB instead of ~2.5 GB — `packages/agent-eval/design/running-in-a-build-pod.md`)
+  and sits before the runner's sources so a source edit does not re-run it.
 - **`AEP_EVAL_ANTHROPIC_API_KEY` is a THIRD credential on the pod** — the org's
   default Anthropic key, for the evaluation step's agent and judge. It is not
   `ANTHROPIC_API_KEY` because that name belongs to Claude Code, which ranks it

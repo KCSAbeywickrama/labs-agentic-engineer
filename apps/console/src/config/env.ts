@@ -63,9 +63,7 @@ export const env = {
   thunderUrl: getEnv("VITE_THUNDER_URL") || "http://localhost:8097",
   thunderClientId: getEnv("VITE_THUNDER_CLIENT_ID") || "aep-console-client",
   thunderScopes: getEnv("VITE_THUNDER_SCOPES") || "openid profile email",
-  // The platform's test app (apps/tryit). Its /callback is the redirect URI
-  // the platform registers on every project's sign-in client, so this origin
-  // and the API's TRY_IT_CALLBACK_URL name the same deployment.
+  // The platform's test app (apps/tryit); same origin as aep-api's TRY_IT_CALLBACK_URL.
   tryItUrl: getEnv("VITE_TRY_IT_URL") || "http://tryit.aep.localhost:8095",
   // Empty outside WSO2 Cloud — presence of this URL is the gate for the
   // first-login billing activation call (GET …/organization?product=…).

@@ -655,8 +655,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			"environment", openchoreo.DevEnvironmentName, "adminRoute", cfg.ThunderEnvAdminRoute)
 	}
 	identityPanel := identity.NewPanelService(identityTargets, identityStore)
-	// The sign-in client is read where provisioning owns it (built later —
-	// hence late-bound); the panel publishes it so the test app can sign in.
+	// Late-bound: provisioning, which owns the sign-in binding, is built below.
 	testUserCoords := &lateSignInCoords{}
 	identityPanel.SetSignInCoordinates(testUserCoords)
 

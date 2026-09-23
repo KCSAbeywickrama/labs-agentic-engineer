@@ -58,6 +58,11 @@ describe("sendTurn", () => {
     expect(await sendTurn("http://gw", "tok", { message: "hi" })).toEqual({ kind: "refused" });
   });
 
+  it("tells a missing scope apart from a refused token", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("forbidden", { status: 403 })));
+    expect(await sendTurn("http://gw", "tok", { message: "hi" })).toEqual({ kind: "forbidden" });
+  });
+
   it("carries any other upstream status with its body", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("boom", { status: 500 })));
     expect(await sendTurn("http://gw", "tok", { message: "hi" })).toEqual({

@@ -45,7 +45,7 @@ export type ProjectRoleAssignment =
 export type ProjectTestUserState =
   components["schemas"]["ProjectTestUserState"];
 export type TestUserPassword = components["schemas"]["TestUserPassword"];
-type ProjectSignIn = components["schemas"]["ProjectSignIn"];
+export type ProjectSignIn = components["schemas"]["ProjectSignIn"];
 
 /**
  * The panel's live state, with the nullable wire arrays normalised away.

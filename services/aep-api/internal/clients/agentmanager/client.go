@@ -26,6 +26,12 @@ import (
 	"net/url"
 )
 
+// ExternalAgentAPIType is Agent Manager's agent type for an agent AEP hosts
+// itself. Registering one makes AMP create its own OpenChoreo component of type
+// "proxy/"+ExternalAgentAPIType — AMP's record of the agent, which component
+// listings drop (openchoreo.isAgentManagerMarker).
+const ExternalAgentAPIType = "external-agent-api"
+
 // The scope sets each call family needs. Narrow on purpose: a token is cached
 // per set, and asking for everything everywhere would hand every request the
 // broadest credential this client can hold.
@@ -296,7 +302,7 @@ func (c *client) EnsureAgent(ctx context.Context, in EnsureAgentInput) (AgentRef
 	body := map[string]any{
 		"name": in.Name, "displayName": in.DisplayName, "description": in.Description,
 		"provisioning": map[string]any{"type": "external"},
-		"agentType":    map[string]any{"type": "external-agent-api", "subType": "custom-api"},
+		"agentType":    map[string]any{"type": ExternalAgentAPIType, "subType": "custom-api"},
 	}
 	var created struct {
 		Name string `json:"name"`
