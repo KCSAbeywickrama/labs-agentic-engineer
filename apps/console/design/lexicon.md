@@ -1050,9 +1050,9 @@ runner, the report generator and the per-criterion spec path all key on it — a
 no row spells it out, because a row marks the method rather than naming it. That
 shuts naming rule 4's oldest hole here: `E2E` was never a copy decision, it was
 agent-authored JSON rendered verbatim, and an acronym can no longer reach a row
-even by accident. The display name **`auto`** survives where prose needs a word
-for the same thing — the Validations pending tile and its tally — and is not a
-row's vocabulary.
+even by accident. No prose spells it out either since Validations became a version
+ledger: the pending tile that needed a word for it is gone, so the stored value
+reaches no reader at all.
 
 **The agent glyph is the console's own.** `Sparkles` at `primary.main` is what
 the agent chat, the "ask the agent" action and the nav already mean *the agent*
@@ -1208,7 +1208,7 @@ acceptance scenario declares nothing — every one of them is driven — so the
 verdict copy says **couldn't be settled against the deployed app** and asks the
 reader to **check them yourself**.
 
-### A version's attempts, on the Validation page
+### A version's attempts, on the Validations page
 
 The page holds one section per time the version was judged, on both of its
 cards. The words name what a reader wants to know — how many times, which one,
@@ -1229,6 +1229,27 @@ a run holding two attempts is the platform dispatching again after an agent
 merged without a report — a remedy, not a distinction a reader needs in a
 heading. The number is version-wide for the same reason: it is the one a reader
 refers to, and it must not restart at 1 because the platform opened a new run.
+
+### The rest of the Validations vocabulary
+
+The page is **Validations**, plural (naming rule 3) — a ledger of every version, and a page per
+version under it.
+
+| | |
+|---|---|
+| The ledger's columns | **Version · Milestone · Verdict · Duration · Last validated** |
+| Its state filter | **All states · In progress · Validated · Needs attention · Not validated** |
+| The two cards on a version | **Acceptance reports** · **Validation logs** |
+| Ask the criteria again | **Revalidate**, or **Run validation** before anything has answered |
+| Stop the judging | **Cancel run** |
+
+**The cards are plural because each holds one section per attempt** (rule 3 again); singular titles
+read as though a version had one document. **`Revalidate` waits for a verdict** — it is the
+platform's own word for the trigger, and it misdescribes a version nothing has judged, which this
+page reaches routinely. **`Validated` and `Needs attention` filter by what a reader is looking
+for**, not by the verdict enum: `Needs attention` gathers every non-green answer, because a reader
+scanning a ledger wants the rows to act on rather than the distinction between `failed` and
+`inconclusive` — that distinction is on the row itself, in the verdict chip.
 
 ## What a change invalidates
 
@@ -1341,8 +1362,10 @@ five surfaces fill themselves.
 |---|---|---|
 | Builds | **No builds yet.** A build hands your design to coding agents, which write your components and open pull requests. | **Go to the spec** |
 | Deployments | **Nothing deployed yet.** Your components run here once they are built — each environment shows what is live and where to reach it. | — |
-| Validations *(never validated)* | **Nothing validated yet.** After a deployment, the deployed system is checked against the **validation criteria** in your spec. Results appear here. | — |
-| Validations *(version skipped)* | **This version was not validated** — it has no validation criteria, or it was an incident run, which gets no validation cycle. | — |
+| Validations *(no version built)* | **Nothing to validate yet.** Once a version is built and deployed, the deployed system is driven against the **acceptance criteria** in your spec. Results appear here. | **Go to Builds** |
+| Validations *(a version, nothing running)* | **Nothing validated yet.** Run validation to check this version against its acceptance criteria. | — |
+| Validations *(a version, a run working it)* | **Nothing validated yet.** After a deployment, the deployed system is validated against the **acceptance criteria** in your spec. Results appear here. | — |
+| Validations *(version skipped)* | **This version has no acceptance criteria, so there is nothing to validate against.** | — |
 | Components *(overview)* | **No components yet.** Components are the services and apps your design is made of — they appear as agents build them. | — |
 | Architecture *(overview)* | **No architecture yet.** Once the agent designs your app, its components and the connections between them are drawn here. | — |
 | Chat | **Hi! I'm your Agent.** This is where we talk through what you're building. Ask about a decision, change what's in scope, or take up anything I marked as assumed. | the composer, plus three suggestions |
@@ -1365,11 +1388,14 @@ document hidden, **Acceptance criteria** now names the Gherkin set under `specs/
 nothing else, and the same discipline applies there: the entry is the set, a `Scenario:` inside it
 is one criterion.
 
-**Validations has two empty states, and only one narrates.** The page is version-scoped, so a
-version that was skipped — no criteria, or an incident run — is a different fact from a project
-that has never validated. The *version skipped* sentence explains **why** the page is empty
-without saying how to fill it, so it conforms as written
-([#577](https://github.com/wso2/labs-agentic-engineer/issues/577)).
+**Validations has four empty states, and only the first offers an action.** The ledger and the
+version page are different surfaces: a project with no built version cannot validate anything, and
+is sent to Builds. On a version, three facts stay apart — a run is working it (wait), nothing is
+(the trigger is there), or it has no criteria at all (nothing ever will). The last two explain
+**why** the page is empty without saying how to fill it, so they conform as written
+([#577](https://github.com/wso2/labs-agentic-engineer/issues/577)). The split on *a run working
+it* is the same boolean that enables the trigger, so the sentence and the control cannot
+contradict each other.
 
 **Retired from these strings**: *published* / *publish the plan* / *the published design* (there is
 no publish step — Build is the act), *plan* (not a term in this file), *AEP*.
