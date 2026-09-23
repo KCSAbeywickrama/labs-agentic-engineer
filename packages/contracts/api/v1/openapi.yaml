@@ -3359,14 +3359,13 @@ paths:
   /projects/{projectName}/validations/{tag}:
     get:
       description: >-
-        One version's validation history — every run that could produce a verdict, newest first,
-        each carrying its VALIDATION cycles only. Coding, fix and conflict cycles are filtered out
-        here rather than by the client: which kinds ask the criteria is the platform's answer
-        (delivery.RunValidates), and a client re-deriving it is a second place for that rule to
-        drift from the supervisor.
+        One version's validation history — every run that attempted it, newest first, each
+        carrying its VALIDATION cycles only. Coding, fix and conflict cycles are filtered out
+        here rather than by the client: which cycles ask the criteria is the platform's answer,
+        and a client re-deriving it is a second place for that rule to drift from the supervisor.
 
-        `live` is the one condition the console gates its trigger on; every other refusal belongs
-        to revalidate-build, which owns them.
+        `live` and `deployed` are the two conditions the console gates its trigger on; every other
+        refusal belongs to revalidate-build, which owns them.
       operationId: get-validation
       parameters:
       - description: Project name (DNS-label slug)
@@ -8774,12 +8773,14 @@ components:
       description: >-
         One version's validation history, already filtered to what asks the question.
 
-        `runs` holds only runs whose KIND validates (delivery.RunValidates — a task run never does),
-        and each run's `cycles` holds only its VALIDATION cycles. Both filters are applied here
-        rather than by the client: they are the platform's own rules, and the surface that
-        re-derived them read a newer non-validating run as the version's answer and hid a real
-        verdict. The views are the same MilestoneRunView and RunCycleView the run story serves, so
-        one projection describes a cycle everywhere.
+        `runs` holds only runs that ATTEMPTED validation — ones holding at least one VALIDATION
+        cycle, which is the fact rather than the kind: a task run never holds one, and a run that
+        did ask the criteria is listed whatever its kind says it was for. Each run's `cycles`
+        holds only its VALIDATION cycles. Both filters are applied here rather than by the client:
+        they are the platform's own rules, and the surface that re-derived them read a newer
+        non-validating run as the version's answer and hid a real verdict. The views are the same
+        MilestoneRunView and RunCycleView the run story serves, so one projection describes a
+        cycle everywhere.
       properties:
         deployed:
           description: >-

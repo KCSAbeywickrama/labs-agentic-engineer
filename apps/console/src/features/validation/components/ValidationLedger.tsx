@@ -58,12 +58,16 @@ type ValidationSummary = components["schemas"]["ValidationSummary"];
  * thing this page has to say.
  */
 
+// `predicate` is the label as the empty-state sentence needs it — "No versions
+// are …". Most labels already read as one lowercased; "Needs attention" is a
+// noun phrase and does not, which is why the sentence carries its own wording
+// rather than lowercasing the menu's.
 const STATE_FILTERS = [
-  { value: "all", label: "All states" },
-  { value: "live", label: "In progress" },
-  { value: "passed", label: "Validated" },
-  { value: "failed", label: "Needs attention" },
-  { value: "unvalidated", label: "Not validated" },
+  { value: "all", label: "All states", predicate: "listed" },
+  { value: "live", label: "In progress", predicate: "in progress" },
+  { value: "passed", label: "Validated", predicate: "validated" },
+  { value: "failed", label: "Needs attention", predicate: "in need of attention" },
+  { value: "unvalidated", label: "Not validated", predicate: "not validated" },
 ];
 
 type StateFilter = (typeof STATE_FILTERS)[number]["value"];
@@ -214,7 +218,7 @@ export function ValidationLedger({ projectName }: { projectName: string }) {
         <EmptyState
           compact
           bordered
-          description={`No versions are ${(STATE_FILTERS.find((o) => o.value === filter)?.label ?? filter).toLowerCase()}. Clear the filter to see every version.`}
+          description={`No versions are ${STATE_FILTERS.find((o) => o.value === filter)?.predicate ?? filter}. Clear the filter to see every version.`}
           action={<Button onClick={() => setFilter("all")}>Clear filter</Button>}
         />
       ) : (

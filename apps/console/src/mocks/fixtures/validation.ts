@@ -1095,61 +1095,120 @@ type ValidationSummary = components["schemas"]["ValidationSummary"];
 type ValidationDetail = components["schemas"]["ValidationDetail"];
 type ValidationSnapshot = components["schemas"]["ValidationSnapshot"];
 
-/** The attempts a story's runs hold, oldest first — the runs arrive newest first. */
-function attemptsOf(story: ValidationStory) {
-  const runs = [...(validationRuns(story).runs ?? [])].reverse();
-  return runs.flatMap((r) => (r.cycles ?? []).filter((c) => c.kind === "validation"));
-}
+// v0.2's one judging, months before the morning the scenario describes. Its own
+// literal rather than `attempt()`, whose slots, cycle numbers and branch names
+// all belong to v1 — two versions sharing a cycle id would open two attempts at
+// once, since the page keys its sections on it.
+const OLDER_PASSED_ATTEMPT: MilestoneRunView = {
+  id: "run-v0.2-2",
+  milestoneNumber: 2,
+  milestoneTitle: "v0.2",
+  kind: "validation",
+  origin: "revalidate",
+  state: "succeeded",
+  budgets: {
+    cyclesTotal: 1,
+    cycleCeiling: 8,
+    fixCycles: 0,
+    conflictCycles: 0,
+    buildRetriggers: 0,
+    validationCycles: 1,
+  },
+  validation: { verdict: "passed", issue: 22, reportPath: REPORT_PATH },
+  cycles: [
+    {
+      id: "cycle-v0.2-2",
+      kind: "validation",
+      attempts: 1,
+      branch: "aep/m2-c2",
+      prNumber: 2,
+      prUrl: `${REPO_URL}/pull/2`,
+      mergeSha: "b71c4e08d95a2f36",
+      validationVerdict: "passed",
+      validationIssue: 22,
+      createdAt: "2026-04-02T09:12:00Z",
+      endedAt: "2026-04-02T09:31:00Z",
+    },
+  ],
+  createdAt: "2026-04-02T09:11:00Z",
+  startedAt: "2026-04-02T09:12:00Z",
+  endedAt: "2026-04-02T09:32:00Z",
+};
 
 /**
- * The ledger. One row for the scenario's own version, plus the two older
- * versions the build ledger carries — the point of the page is that they are
- * all reachable, so a single-row fixture would hide the feature it exists for.
+ * The versions behind the scenario's own, with the history each one has.
+ *
+ * They are the point of the page: a ledger exists so an older version is
+ * reachable, and the revalidate gate can only be seen to work against a version
+ * that is not deployed. Their runs are here rather than only their summary rows
+ * because the rows are CLICKABLE — a row whose page answered with the current
+ * version's attempts would make the fixture contradict itself on the one
+ * feature the page was built for.
+ *
+ * v0.1 has no runs at all — a version built and never judged. Its dev run holds
+ * no validation cycle, which is exactly what the detail read filters out.
  */
-export function validationLedger(story: ValidationStory): ValidationList {
-  const cycles = attemptsOf(story);
+const OLDER_VERSIONS: {
+  tag: string;
+  milestoneNumber: number;
+  scenario: ValidationScenario;
+  runs: MilestoneRunView[];
+}[] = [
+  { tag: "v0.2", milestoneNumber: 2, scenario: "passed", runs: [OLDER_PASSED_ATTEMPT] },
+  { tag: "v0.1", milestoneNumber: 3, scenario: "none", runs: [] },
+];
+
+/** The attempts a run list holds, oldest first — the runs arrive newest first. */
+function attemptsIn(runs: readonly MilestoneRunView[]) {
+  return [...runs]
+    .reverse()
+    .flatMap((r) => (r.cycles ?? []).filter((c) => c.kind === "validation"));
+}
+
+/** One ledger row, dated by the version's NEWEST attempt as the server dates it. */
+function summaryOf(
+  tag: string,
+  milestoneNumber: number,
+  state: ValidationScenario,
+  runs: readonly MilestoneRunView[],
+): ValidationSummary {
+  const cycles = attemptsIn(runs);
   const newest = cycles[cycles.length - 1];
-  const current: ValidationSummary = {
-    tag: "v1",
-    milestoneNumber: 1,
-    state: story.scenario,
+  return {
+    tag,
+    milestoneNumber,
+    state,
     ...(newest?.createdAt ? { startedAt: newest.createdAt } : {}),
     ...(newest?.endedAt ? { endedAt: newest.endedAt } : {}),
   };
+}
+
+/** The ledger. The scenario's own version, then the ones before it. */
+export function validationLedger(story: ValidationStory): ValidationList {
   return {
     validations: [
-      current,
-      // A version validated cleanly a while back, and one that was built but
-      // never validated — the row a reader most needs to be able to find.
-      // Validated cleanly a while back, and since superseded — the row that
-      // proves an older version is readable but NOT revalidatable.
-      {
-        tag: "v0.2",
-        milestoneNumber: 2,
-        state: "passed",
-        startedAt: "2026-04-02T09:12:00Z",
-        endedAt: "2026-04-02T09:31:00Z",
-      },
-      { tag: "v0.1", milestoneNumber: 3, state: "none" },
+      summaryOf("v1", 1, story.scenario, validationRuns(story).runs ?? []),
+      ...OLDER_VERSIONS.map((v) => summaryOf(v.tag, v.milestoneNumber, v.scenario, v.runs)),
     ],
   };
 }
 
 /** One version's validation history, filtered as the server filters it. */
 export function validationDetail(story: ValidationStory, tag = "v1"): ValidationDetail {
+  const older = OLDER_VERSIONS.find((v) => v.tag === tag);
   const list = validationRuns(story);
-  const runs = (list.runs ?? [])
+  const runs = (older ? older.runs : (list.runs ?? []))
     .map((r) => ({ ...r, cycles: (r.cycles ?? []).filter((c) => c.kind === "validation") }))
     .filter((r) => r.cycles.length > 0);
   return {
     tag,
-    milestoneNumber: list.milestoneNumber,
-    state: story.scenario,
+    milestoneNumber: older?.milestoneNumber ?? list.milestoneNumber,
+    state: older?.scenario ?? story.scenario,
     live: runs.some((r) => !TERMINAL_RUN_STATES.has(r.state)),
-    // The scenario's own version is the deployed one; the two older rows in the
-    // ledger are not. Without a NOT-deployed version in the fixtures the
-    // revalidate gate cannot be seen to work at all — every page would offer
-    // the trigger and the disabled state would exist only in tests.
+    // The scenario's own version is the deployed one; the older rows are not.
+    // Without a NOT-deployed version in the fixtures the revalidate gate cannot
+    // be seen to work at all — every page would offer the trigger and the
+    // disabled state would exist only in tests.
     deployed: tag === "v1",
     runs,
   };
@@ -1163,18 +1222,31 @@ const TERMINAL_RUN_STATES = new Set(["succeeded", "failed", "cancelled", "blocke
  * A running attempt has no commit and therefore no report — which is the state
  * the scenario list's `running` first attempt puts the page in.
  *
- * The cycle matters only on a repeat, where the first attempt is read at ITS
- * commit and what it committed is the failed report. Every attempt of a
- * first-attempt story shares the scenario's, as it always has.
+ * Read at the ATTEMPT's own commit, never at the branch tip: on a repeat the
+ * first attempt is answered with what it committed, the failed report, and the
+ * repeat itself only with what it has committed — nothing, while it is in
+ * flight. That is what `previousReportStands` is NOT for: it models the tip,
+ * which is the Spec view's question and not this one.
+ *
+ * An older version answers from its own verdict, and drift does not reach it:
+ * its commit is pinned, and only the tip can move.
  */
 export function validationSnapshot(
   story: ValidationStory,
   drifted = false,
   cycleId?: string,
+  tag = "v1",
 ): ValidationSnapshot {
+  const older = OLDER_VERSIONS.find((v) => v.tag === tag);
   const historical =
     isRepeat(story) && FAILED_ATTEMPT_1.cycles.some((c) => c.id === cycleId);
-  const files = historical ? validationFiles({ scenario: "failed" }) : validationFiles(story, drifted);
+  // Whose artifacts this attempt committed. A pinned commit is also the one
+  // drift cannot reach — only the tip moves.
+  const pinned: { scenario: ValidationScenario } | undefined =
+    older ?? (historical ? { scenario: "failed" } : undefined);
+  const files = pinned
+    ? validationFiles({ scenario: pinned.scenario })
+    : validationFiles({ scenario: story.scenario }, drifted);
   const report = files.find((f) => f.path === REPORT_PATH);
   return {
     commit: report ? "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c" : "",

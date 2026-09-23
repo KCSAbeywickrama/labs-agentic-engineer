@@ -147,7 +147,14 @@ describe("ValidationLedger", () => {
     fireEvent.mouseDown(screen.getByRole("combobox"));
     fireEvent.click(screen.getByRole("option", { name: "Needs attention" }));
 
-    expect(screen.getByText(/Clear the filter/)).toBeInTheDocument();
+    // The whole sentence, not just the action: the filter's menu label is a
+    // noun phrase, and reading it back into "No versions are …" is how this
+    // line came to say "No versions are needs attention".
+    expect(
+      screen.getByText(
+        "No versions are in need of attention. Clear the filter to see every version.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Nothing to validate yet")).not.toBeInTheDocument();
   });
 

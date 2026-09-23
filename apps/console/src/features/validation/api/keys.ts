@@ -30,8 +30,17 @@ export const validationKeys = {
   detail: (name: string, tag: string) =>
     [...projectKeys.detail(name), "validations", tag] as const,
   // One attempt's report and the criteria it was judged against. Keyed by the
-  // CYCLE because that is what the snapshot is of: a merged attempt's evidence
-  // never changes, which is what lets the query cache it forever.
-  snapshot: (name: string, tag: string, cycleId: string) =>
-    [...projectKeys.detail(name), "validations", tag, "cycles", cycleId] as const,
+  // CYCLE and by WHICH COMMIT it is read at: an attempt in flight is answered
+  // from the branch tip, the same attempt once merged from its own commit. Two
+  // contents, so two entries — sharing one, the tip's empty answer is what the
+  // settled read caches forever.
+  snapshot: (name: string, tag: string, cycleId: string, settled: boolean) =>
+    [
+      ...projectKeys.detail(name),
+      "validations",
+      tag,
+      "cycles",
+      cycleId,
+      settled ? "merged" : "head",
+    ] as const,
 };

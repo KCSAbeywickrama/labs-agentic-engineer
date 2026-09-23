@@ -158,6 +158,29 @@ describe("the validation read-model fixtures agree with the run story", () => {
     expect(validationDetail({ scenario: "passed" }, "v0.2").deployed).toBe(false);
   });
 
+  // Every row is a link. A ledger whose rows all open the same page would be
+  // three copies of one version, and the older rows exist precisely to prove
+  // they are not — so each row's page has to answer for the row.
+  it("opens each ledger row onto that version's own history", () => {
+    for (const scenario of VALIDATION_SCENARIOS) {
+      for (const row of validationLedger({ scenario }).validations) {
+        const detail = validationDetail({ scenario }, row.tag);
+        expect(detail.tag).toBe(row.tag);
+        expect(detail.state).toBe(row.state);
+        expect(detail.milestoneNumber).toBe(row.milestoneNumber);
+      }
+    }
+  });
+
+  // An older version's attempt is read at ITS commit, so its report is the one
+  // its own verdict implies — not whatever the scenario key currently says.
+  it("answers an older version's attempt with that version's report", () => {
+    for (const scenario of VALIDATION_SCENARIOS) {
+      const snap = validationSnapshot({ scenario }, false, "cycle-v0.2-2", "v0.2");
+      expect(snap.report).toBe(validationSnapshot({ scenario: "passed" }).report);
+    }
+  });
+
   it("pairs a report with a commit, or has neither", () => {
     for (const scenario of VALIDATION_SCENARIOS) {
       const snap = validationSnapshot({ scenario });
@@ -258,6 +281,17 @@ describe("the run story is one validation run per attempt", () => {
     }
     // A first attempt in flight has the oracle and nothing else.
     expect(validationFiles({ scenario: "running" }).some((f) => f.path === "tests/acceptance/report.json")).toBe(false);
+  });
+
+  // The repeat reads at its OWN commit, and an attempt in flight or stopped has
+  // committed nothing. The first attempt's failed report still stands at the
+  // tip — that is the Spec view's answer (above), and not this one's.
+  it("gives an unsettled repeat attempt no report of its own", () => {
+    for (const scenario of ["running", "cancelled"] as const) {
+      const snap = validationSnapshot(repeat(scenario), false, "cycle-4");
+      expect(snap.report).toBeUndefined();
+      expect(snap.commit).toBe("");
+    }
   });
 
   // The dev loop's own shapes and a version the trigger refuses: none is a state

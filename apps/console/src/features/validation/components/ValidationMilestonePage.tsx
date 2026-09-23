@@ -397,6 +397,12 @@ function ValidationActions({
   // clockwise; the counter-clockwise arrow is undo.
   const startLabel = hasVerdict ? "Revalidate" : "Run validation";
   const StartIcon = hasVerdict ? RotateCw : Play;
+  const startFace = (
+    <>
+      <StartIcon size={15} style={{ marginRight: 10 }} />
+      {startLabel}
+    </>
+  );
   // ADR-0016 decision 7: cancel follows the LIFECYCLE, not run liveness.
   const cancellable = validationIsLive(detail.state);
 
@@ -429,29 +435,29 @@ function ValidationActions({
           Cancel run
         </MenuItem>
 
-        <Tooltip title={triggerRefusal(detail)}>
-          {/* A span, because a disabled MenuItem swallows the hover the tooltip
-              needs — and a disabled item with no reason is a dead control. */}
-          <span>
-            <MenuItem
-              disabled={blocked}
-              onClick={() => {
-                // Guarded as well as disabled: MUI renders a disabled MenuItem
-                // as an `li` with `aria-disabled` and blocks the click through
-                // `pointer-events: none`, so the handler is one stylesheet away
-                // from firing on a version that already has a run working it.
-                if (blocked) return;
-                start.mutate(undefined, {
-                  onError: (e) => onError(e instanceof Error ? e.message : String(e)),
-                });
-                close();
-              }}
-            >
-              <StartIcon size={15} style={{ marginRight: 10 }} />
-              {startLabel}
-            </MenuItem>
-          </span>
-        </Tooltip>
+        {/* Wrapped ONLY while refused. MenuList walks its own children to move
+            focus, so a permanent tooltip span between it and the item takes the
+            page's main action off the keyboard entirely; a refused item is not
+            focusable anyway, and the span is what lets it still explain
+            itself — a disabled MenuItem swallows the hover the tooltip needs. */}
+        {blocked ? (
+          <Tooltip title={triggerRefusal(detail)}>
+            <span>
+              <MenuItem disabled>{startFace}</MenuItem>
+            </span>
+          </Tooltip>
+        ) : (
+          <MenuItem
+            onClick={() => {
+              start.mutate(undefined, {
+                onError: (e) => onError(e instanceof Error ? e.message : String(e)),
+              });
+              close();
+            }}
+          >
+            {startFace}
+          </MenuItem>
+        )}
 
         <Divider />
 

@@ -342,7 +342,8 @@ export const projectHandlers = [
   ),
   // One attempt's report AND the criteria it was judged against, at one commit —
   // the cycle's own, which is what tells a failed first attempt's report from
-  // the repeat's.
+  // the repeat's. The tag as well, so an older version answers with its own
+  // verdict rather than with the scenario's.
   http.get(
     "*/api/v1/projects/:projectName/validations/:tag/cycles/:cycleId/report",
     ({ params }) =>
@@ -351,6 +352,7 @@ export const projectHandlers = [
           validationStory() ?? DEFAULT_STORY,
           criteriaDrifted(),
           String(params.cycleId),
+          String(params.tag),
         ),
       ),
   ),

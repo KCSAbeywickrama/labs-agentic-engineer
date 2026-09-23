@@ -134,10 +134,13 @@ export function useValidations(projectName: string) {
  * One version's validation history: the runs that attempted it, newest first,
  * each carrying its validation cycles only.
  *
- * Polls while a run is live on the milestone. `live` is the server's answer
- * rather than something derived from the rows, and it is the same field the
- * trigger is gated on — so the page cannot offer an action its own copy has
- * just said is unnecessary.
+ * `live` is the server's answer rather than something derived from the rows,
+ * and it is the same field the trigger is gated on — so the page cannot offer
+ * an action its own copy has just said is unnecessary. It picks the cadence
+ * too, on the ledger's two-speed rule and for the ledger's reason: this is the
+ * DEPLOYED version's page, which is exactly where the sweep's own validation
+ * run lands, so a page that stopped would sit on a stale verdict while still
+ * offering Revalidate.
  */
 export function useValidation(projectName: string, tag: string | undefined) {
   return useQuery({
@@ -152,7 +155,8 @@ export function useValidation(projectName: string, tag: string | undefined) {
       }
       return data;
     },
-    refetchInterval: (query) => (query.state.data?.live ? VALIDATION_POLL_MS : false),
+    refetchInterval: (query) =>
+      query.state.data?.live ? VALIDATION_POLL_MS : VALIDATION_IDLE_POLL_MS,
   });
 }
 
@@ -162,7 +166,9 @@ export function useValidation(projectName: string, tag: string | undefined) {
  *
  * `staleTime: Infinity` for a settled attempt: its evidence is pinned to a
  * merge commit and cannot change, which is what makes re-opening an older
- * attempt free. A running attempt is read at HEAD, so it follows the branch.
+ * attempt free. A running attempt is read at HEAD, so it follows the branch —
+ * and is a different read of the same cycle, which is why `settled` is in the
+ * key as well as in the stale time.
  *
  * `enabled` is the caller's: the newest attempt is fetched by the page because
  * the verdict card needs its counts, and older attempts only when their section
@@ -176,7 +182,7 @@ export function useValidationSnapshot(
   settled: boolean,
 ) {
   return useQuery({
-    queryKey: validationKeys.snapshot(projectName, tag, cycleId),
+    queryKey: validationKeys.snapshot(projectName, tag, cycleId, settled),
     enabled: enabled && Boolean(tag) && Boolean(cycleId),
     // A missing snapshot is a deterministic answer the page renders in words,
     // not a transient failure worth hammering.

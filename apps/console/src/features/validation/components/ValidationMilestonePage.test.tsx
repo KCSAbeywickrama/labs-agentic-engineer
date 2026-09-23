@@ -465,6 +465,18 @@ describe("ValidationMilestonePage", () => {
       expect(names.slice(0, 2)).toEqual(["Cancel run", "Revalidate"]);
     });
 
+    // MUI's MenuList focuses and arrows between its OWN children, so an item
+    // wrapped in a tooltip span is one it walks straight past — the page's main
+    // action was clickable and unreachable by keyboard. Cancel is disabled on a
+    // settled version, which makes this the first item the menu can land on.
+    it("puts the start item in the keyboard's path", () => {
+      render(<ValidationMilestonePage projectName="p" tag="v1" />);
+      open();
+      expect(document.activeElement).toBe(
+        screen.getByRole("menuitem", { name: "Revalidate" }),
+      );
+    });
+
     // The console checks ONE condition. Gating on the verdict too would invent
     // a rule the API does not have — re-asking a passed version is the point.
     it("offers a re-run on a version that already passed", () => {
