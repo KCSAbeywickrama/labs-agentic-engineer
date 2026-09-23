@@ -34,6 +34,14 @@ var (
 	// The loop would dispatch a coding cycle for it before validating, which is a
 	// build resumed rather than a version re-judged.
 	ErrMilestoneHasOpenWork = errors.New("this version still has open work — the run would build it, not just re-check it")
+	// ErrVersionNotDeployed means the version asked for is not the one currently
+	// serving. A revalidation drives whatever is deployed RIGHT NOW — the runner's
+	// endpoints resolve from the cluster at request time and its criteria come
+	// from the branch tip, neither pinned to the run's own version — so judging an
+	// older version would test code that version never shipped, record the verdict
+	// on its milestone, and file repair work there. Refused rather than run: the
+	// result would be a verdict nobody can trust, filed where nobody is looking.
+	ErrVersionNotDeployed = errors.New("only the deployed version can be validated — this one is not what is running")
 	// ErrNoValidationCriteria means the version has no oracle to validate against.
 	// Refused rather than run: a run with nothing to validate concludes `skipped`,
 	// and because the newest run owns the version's verdict that would replace a

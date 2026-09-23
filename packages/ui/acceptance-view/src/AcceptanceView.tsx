@@ -404,7 +404,11 @@ function ScenarioRow({ scenario, reported, hasRun, awaiting, open, onToggle }: S
     reported !== undefined && reported.outcome !== "passed"
       ? decidingStep(reported)?.observed
       : undefined;
-  const showPill = hasRun && !(reported === undefined && awaiting);
+  // An attempt is in flight and this scenario has no entry yet, so it is not a
+  // scenario the run declined to cover — it gets a placeholder rather than
+  // `No result`, which would be a verdict the run has not reached.
+  const waiting = hasRun && reported === undefined && awaiting;
+  const showPill = hasRun && !waiting;
 
   return (
     <Box sx={{ py: 1 }}>
@@ -474,9 +478,25 @@ function ScenarioRow({ scenario, reported, hasRun, awaiting, open, onToggle }: S
               </Box>
             ))}
         </Typography>
-        {showPill && (
+        {hasRun && (
           <Box sx={{ display: "flex", alignItems: "center", height: ROW_LINE, flexShrink: 0 }}>
-            <OutcomePill outcome={reported?.outcome ?? NO_RESULT} />
+            {showPill ? (
+              <OutcomePill outcome={reported?.outcome ?? NO_RESULT} />
+            ) : (
+              // A dash, not a `Pending` chip. The report lands all at once —
+              // ADR-0029 retired per-scenario progress — so every row would say
+              // the same word simultaneously and none would ever change on its
+              // own. A progress-list grammar promises row-by-row updates that
+              // never come; a dash says only that the column has no value yet,
+              // which is the house idiom for exactly that.
+              <Box
+                component="span"
+                aria-label="Awaiting this run's result"
+                sx={{ color: "text.disabled", fontSize: "0.6875rem", px: 1.25 }}
+              >
+                —
+              </Box>
+            )}
           </Box>
         )}
       </ButtonBase>

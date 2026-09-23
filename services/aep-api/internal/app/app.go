@@ -1231,6 +1231,13 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// which is why it is its own endpoint rather than a field on the run read.
 	runCycleBuilds := runread.NewCycleBuilds(milestoneRunRepo, runCycleRepo,
 		runreadProjectBuilds{oc: componentClient})
+	// The validation read model. It reads the same rows as the run story and the
+	// same Files API the validation minter reads the oracle through, so an
+	// attempt's snapshot and the mint that judged it cannot disagree about which
+	// files are the oracle.
+	validationReads := runread.NewValidationReads(milestoneRunRepo, runCycleRepo,
+		acceptanceCriteria{files: filesSvc}).
+		WithRecordings(agentProgressReader)
 
 	deliveryDeps := deliveryhttpapi.Deps{
 		BuildSvc:      buildSvc,
@@ -1248,6 +1255,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			WithCycleReaper(codingagent.NewCycleReaper(componentClient, runCycleRepo).
 				WithRecorder(runRecorder)),
 		RunCycleBuilds: runCycleBuilds,
+		RunValidation:  validationReads,
 	}
 	// WritePublisher stamps secret_ref_name onto the org's IDP profile;
 	// without a SecretsProvider, ProvisionPublisherForBuild fails closed and

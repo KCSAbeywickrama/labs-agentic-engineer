@@ -1,4 +1,4 @@
-# ADR-0034 — An agent's behaviour is evaluated during its build, from requirement-derived scenarios
+# ADR-0035 — An agent's behaviour is evaluated during its build, from requirement-derived scenarios
 
 **Status:** Accepted · 2026-08-23 · **shipped dormant** as of 2026-09-23: the
 harness and the scenario file exist, and every build skips evaluation because

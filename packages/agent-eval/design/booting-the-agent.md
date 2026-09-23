@@ -2,7 +2,7 @@
 
 ## A child process, where the spec says "in-process"
 
-The original design (ADR-0034, decision 2 records the outcome) said to
+The original design (ADR-0035, decision 2 records the outcome) said to
 **boot the agent in-process** with a real model and an in-memory
 conversation store. `bootAgent` boots it as a locally spawned **child process**
 instead, on an ephemeral port.
