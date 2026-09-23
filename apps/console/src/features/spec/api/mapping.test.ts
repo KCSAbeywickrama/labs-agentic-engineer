@@ -17,7 +17,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { toSpecEntries, toSpecEntry } from "./mapping";
+import { specGroupOf, toSpecEntries, toSpecEntry } from "./mapping";
 
 describe("toSpecEntry", () => {
   it("keeps the full specs/ path and derives the group from the folder", () => {
@@ -93,5 +93,34 @@ describe("toSpecEntries", () => {
         { path: "specs/validation/plan.md", sha: "c3" },
       ]).map((e) => e.path),
     ).toEqual(["specs/requirements/prd.md", "specs/validation/plan.md"]);
+  });
+
+  // The acceptance criteria file under its own folder, deliberately in the SAME
+  // group as the rest of the validation phase: validation is the phase, an
+  // acceptance criterion the unit it grades, and a separate group would put two
+  // headers on one phase.
+  it("files the acceptance criteria under validation, not a fourth section", () => {
+    expect(
+      toSpecEntries([
+        { path: "specs/acceptance/bought-items.feature", sha: "a" },
+        { path: "specs/validation/plan.md", sha: "b" },
+      ]).map((e) => e.group),
+    ).toEqual(["validation", "validation"]);
+  });
+
+  // The retired criteria+e2e oracle. The design turn still mints it, so it
+  // reaches this mapping on every project; the spec view drops it rather than
+  // offer a second oracle beside the Gherkin one with nothing to tell them
+  // apart. Dropped HERE because this one rule feeds both of the view's lists —
+  // the committed files and the declared plan's entries — so the row, the ghost,
+  // the section counter and the section's state all go with it.
+  it("hides the retired validation criteria, keeping the rest of the folder", () => {
+    expect(
+      toSpecEntries([
+        { path: "specs/validation/validation-criteria.json", sha: "a" },
+        { path: "specs/validation/plan.md", sha: "b" },
+      ]).map((e) => e.path),
+    ).toEqual(["specs/validation/plan.md"]);
+    expect(specGroupOf("specs/validation/validation-criteria.json")).toBeNull();
   });
 });
