@@ -56,8 +56,15 @@ describe("the runner image carries the agent-evaluation harness", () => {
     // grading agents against a promptfoo the tests never saw.
     assert.match(
       DOCKERFILE,
-      /npm ci --omit=dev/,
-      "the harness needs its own dependency tree, installed from its lockfile — promptfoo is not a runner dependency",
+      /npm ci --omit=dev --omit=optional/,
+      "the harness needs its own dependency tree, installed from its lockfile — promptfoo is not a runner dependency, and its optional provider SDKs (~2.3 GB) are not the harness's",
+    );
+    // The one optional the harness cannot start without: promptfoo's SQLite
+    // layer loads libsql's native binding at startup.
+    assert.match(
+      DOCKERFILE,
+      /@libsql\/linux-\$\{LIBSQL_ARCH\}-gnu@\$\{LIBSQL_VERSION\}/,
+      "omitting optionals drops libsql's platform binding; it has to be installed back by name at the lockfile's version",
     );
     assert.match(
       DOCKERFILE,

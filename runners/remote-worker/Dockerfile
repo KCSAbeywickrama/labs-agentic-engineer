@@ -379,9 +379,8 @@ RUN npm ci --include=optional \
 # the worst of the two — a step that looks wired and silently is not.
 #
 # Its dependency tree is INSTALLED BEFORE the runner's sources are copied, so a
-# runner source edit does not re-run it. It is the single largest layer in this
-# file (promptfoo pulls every model provider's SDK), and paying it again on
-# every source change would dominate the dev rebuild.
+# runner source edit does not re-run it, and paying it again on every source
+# change would slow the dev rebuild.
 #
 # npm rather than pnpm, from packages/agent-eval/package-lock.json — the same
 # two-lockfile arrangement /app already lives under: pnpm's lockfile covers the
@@ -392,8 +391,28 @@ RUN npm ci --include=optional \
 # a promptfoo the tests never saw, and a score nobody can reproduce.
 ENV AEP_AGENT_EVAL_HOME=/opt/aep/agent-eval
 COPY --from=agent-eval package.json package-lock.json ${AEP_AGENT_EVAL_HOME}/
+# --omit=optional: promptfoo declares every model-provider integration it can
+# drive (OpenAI Codex, the Claude agent SDK, ONNX runtime, Azure, PDF/SQL
+# assertion helpers, ...) as an optionalDependency. The harness uses none of
+# them — its judge is the Anthropic Messages API, a regular dependency — and
+# together they were ~2.3 GB of this layer's 2.5 GB. Measured on 0.122.2:
+# 2,418 MB / 548 packages by default, 267 MB / 329 with optionals omitted;
+# `promptfoo eval` and the llm-rubric judge both still run.
+#
+# One optional the harness DOES need: libsql's native binding for this
+# platform, which promptfoo's SQLite layer loads at startup and refuses to
+# start without. It is installed by name at the version the lockfile already
+# pins (read off the installed `libsql`), so the tree stays as reproducible as
+# `npm ci`. Declaring it as a regular dependency instead would break the
+# workspace install on macOS (npm refuses a foreign-platform native package).
+ARG TARGETARCH
 RUN cd "$AEP_AGENT_EVAL_HOME" \
-    && npm ci --omit=dev --no-audit --no-fund \
+    && npm ci --omit=dev --omit=optional --no-audit --no-fund \
+    && case "$TARGETARCH" in amd64) LIBSQL_ARCH=x64 ;; arm64) LIBSQL_ARCH=arm64 ;; \
+         *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; esac \
+    && LIBSQL_VERSION="$(node -p "require('./node_modules/libsql/package.json').version")" \
+    && npm install --no-save --omit=dev --omit=optional --no-audit --no-fund \
+         "@libsql/linux-${LIBSQL_ARCH}-gnu@${LIBSQL_VERSION}" \
     && chmod -R a+rX "$AEP_AGENT_EVAL_HOME"
 
 # .dockerignore excludes node_modules/dist/.git/etc so we never ship a

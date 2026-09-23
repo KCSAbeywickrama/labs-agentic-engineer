@@ -32,9 +32,15 @@ carries one. **Bump a dependency and both have to move**
 an out-of-sync lockfile during an image build; the quiet one is a pod grading
 agents against a promptfoo the tests never saw, and a score nobody can reproduce.
 
-It is a large install — promptfoo pulls every model provider's SDK, and the
-layer measured **~2.3 GB**. It sits deliberately BEFORE the runner's own sources
-in the Dockerfile so a runner source edit does not re-run it.
+promptfoo declares every model-provider integration it can drive as an
+`optionalDependency`; installed by default they made the layer **~2.5 GB**, of
+which the harness used nothing but the Anthropic Messages SDK (a regular
+dependency). The image therefore installs with `--omit=optional` (**~0.3 GB**),
+then adds back the one optional the harness cannot start without: libsql's
+native binding for the image platform, which promptfoo's SQLite layer loads at
+startup, pinned to the version the lockfile carries. The layer still sits
+BEFORE the runner's own sources in the Dockerfile so a runner source edit does
+not re-run it.
 
 ## The credential arrives under a different name
 
