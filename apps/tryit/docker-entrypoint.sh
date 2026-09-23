@@ -16,7 +16,7 @@
 
 set -e
 
-echo "AEP Test App — Initializing runtime configuration..."
+echo "Try it — Initializing runtime configuration..."
 
 # window._env_ keys the SPA reads (src/env.ts). The sign-in and the endpoint
 # arrive in the LAUNCH URL, from the console; the one thing that must NOT come

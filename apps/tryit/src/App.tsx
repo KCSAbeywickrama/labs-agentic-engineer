@@ -105,8 +105,8 @@ export function App() {
       <Shell>
         <Alert severity="info">
           <AlertTitle>Open this app from the console</AlertTitle>
-          On a project's deployment page, under Try it out, choose <strong>Try agent</strong> on an
-          agent. The console hands this app the project's sign-in and the agent's address; there is
+          In the console, open the project's <strong>Deployments</strong> page and, under Try it out,
+          choose <strong>Try agent</strong> on an agent. The console hands this app the project's sign-in and the agent's address; there is
           nothing to configure here.
         </Alert>
       </Shell>
@@ -154,8 +154,9 @@ function SignInCard({ launch, session, phase }: { launch: Launch; session: Sessi
             {launch.component}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            This agent needs the project's sign-in. Sign in as one of the project's test users; their
-            passwords are in the console's Try it out panel.
+            This agent needs the project's sign-in. Sign in as one of the project's test users. Their
+            usernames and passwords are in the console, under <strong>Deployments → Try it out</strong>
+            (reveal the password next to the user).
           </Typography>
         </Stack>
         {phase.kind === "callback-failed" && (

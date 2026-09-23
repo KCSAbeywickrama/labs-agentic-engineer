@@ -196,7 +196,7 @@ function Notice({ result, endpoint }: { result: Exclude<TurnResult, { kind: "rep
       return (
         <Alert severity="warning">
           The agent refused the test user's token. Sign out and in again; if it still refuses, rotate the
-          test user's password from the console's Security panel.
+          test user's password in the console (Deployments → Try it out) and sign in with the new one.
         </Alert>
       );
     case "forbidden":
