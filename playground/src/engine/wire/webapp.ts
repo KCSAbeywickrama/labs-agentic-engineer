@@ -50,12 +50,21 @@ export interface WiredEnv {
  * app rather than a foreign install. Checking `@rollup` for this platform's
  * package is the cheapest true test of "were these deps installed here".
  */
-export function needsInstall(appPath: string, hostPlatform: string = process.platform): boolean {
+export function needsInstall(
+  appPath: string,
+  hostPlatform: string = process.platform,
+  hostArch: string = process.arch,
+): boolean {
   if (!existsSync(join(appPath, "node_modules"))) return true;
   const rollup = join(appPath, "node_modules", "@rollup");
   if (!existsSync(rollup)) return false; // not a rollup app: nothing platform-specific to get wrong
   try {
-    return !readdirSync(rollup).some((entry) => entry.includes(hostPlatform));
+    // PLATFORM AND ARCHITECTURE, because rollup's packages are named for both
+    // (`rollup-darwin-arm64`, `rollup-linux-x64-gnu`) and the platform alone
+    // matches across the pair: an x64 install on an arm64 Mac reads as this
+    // machine's, and Vite then dies on exactly the missing module this check is
+    // here to pre-empt.
+    return !readdirSync(rollup).some((entry) => entry.includes(`${hostPlatform}-${hostArch}`));
   } catch {
     return true;
   }

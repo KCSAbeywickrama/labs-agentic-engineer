@@ -158,7 +158,12 @@ vi.mock("../api/queries", () => ({
   // serves. Two environments here because that is the pipeline these tests
   // describe, not because the console knows only two.
   useEnvironments: () => ({
-    data: mockEnvironmentsState === "ready" ? mockEnvironments : undefined,
+    data:
+      mockEnvironmentsState === "ready"
+        ? mockEnvironments
+        : mockEnvironmentsState === "empty"
+          ? []
+          : undefined,
     isPending: mockEnvironmentsState === "pending",
     isError: mockEnvironmentsState === "error",
     error: mockEnvironmentsState === "error" ? new Error("gateway down") : null,
@@ -222,7 +227,7 @@ const mockEnvironments = [
     position: 1,
   },
 ];
-let mockEnvironmentsState: "ready" | "pending" | "error" = "ready";
+let mockEnvironmentsState: "ready" | "pending" | "error" | "empty" = "ready";
 const mockEnvironmentsRefetch = vi.fn();
 
 /** A run parked at the deploy gate, short of the named values. */
@@ -1190,6 +1195,29 @@ describe("DeploymentsPage — the environments read", () => {
     expect(screen.queryByText(/Nothing deployed yet/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(mockEnvironmentsRefetch).toHaveBeenCalled();
+  });
+
+  // The state that shimmered forever: the read SUCCEEDED and named no
+  // environment. `rows.length === 0` looks identical to a read still out, so
+  // the flow drew its skeleton and never settled — "loading" and "empty" were
+  // the same picture, and the reader could not tell which.
+  it("says the platform has no environments once the read has settled empty", () => {
+    mockEnvironmentsState = "empty";
+
+    render(<DeploymentsPage projectName="acme" />);
+
+    expect(
+      screen.getByText(/This organization has no deployment environments yet/),
+    ).toBeInTheDocument();
+    // Settled, not waiting: no shimmer, and no error either.
+    expect(screen.queryByTestId("environment-flow-skeleton")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("environment-flow")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/The deployment pipeline could not be loaded/),
+    ).not.toBeInTheDocument();
+    // And it does not reach past what it knows: the project has components,
+    // so "Nothing deployed yet" would be a different (and wrong) claim.
+    expect(screen.queryByText(/Nothing deployed yet/)).not.toBeInTheDocument();
   });
 });
 

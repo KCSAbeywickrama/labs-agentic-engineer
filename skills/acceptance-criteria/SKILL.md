@@ -20,17 +20,8 @@ becomes a check the product was never asked to pass.
 
 ## Input — the requirement ONLY
 
-Read **both**:
-
-- `specs/requirements/prd.md` — the numbered User Stories are the spine, and the
-  Actors section names the people your scenarios are about.
-- `specs/requirements/features/<slug>.md` — every feature file the PRD links to.
-
-**Read the feature files. They are not optional.** The PRD body is deliberately
-lean and pushes depth into them; a scenario written from a one-line story and
-nothing else is measurably worse than one written with the depth in hand. If a
-story links a feature file and you did not open it, you are not ready to write
-its rules.
+Read `specs/requirements/prd.md` — the numbered User Stories are the spine, and
+the Actors section names the people your scenarios are about.
 
 **Do not read** the design bundle (`design.cell`, `domain-model.md`, `flows/`),
 `openapi.yaml`, wireframes, or any source code. The specification must be

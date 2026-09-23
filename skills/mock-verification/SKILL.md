@@ -125,6 +125,7 @@ other: the plan once, one line per item as it settles, the close once.
 Mock verification: <component> — <N> items
 1. <Screen> (<role>): <its controls>; -> <the screens its arrows name>
 2. <Screen>: ...
+<N-4>. Roles
 <N-3>. Session
 <N-2>. Probes
 <N-1>. Short window

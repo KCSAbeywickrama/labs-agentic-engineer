@@ -29,9 +29,10 @@ type ApiError = components["schemas"]["Error"];
 // states). Toggle in the browser devtools:
 //   localStorage.setItem('aep:mock:marketplace', 'empty' | 'some' | 'error')
 // Shared by Resources catalog GETs, Marketplace Endpoints GETs, and register.
-// "empty": no platform types, external resources, org environments, or endpoints (default).
+// "empty": no platform types, external resources, org environments, or endpoints.
 // "some": postgres-cnpg, Registered External stripe, Project External github,
-//         org environments development + staging-local, and seed org endpoints.
+//         org environments development + staging-local, and seed org endpoints (default,
+//         so mock mode shows a working environment pipeline out of the box).
 // "error": GET list endpoints fail (load-error state). POST register still uses the
 //         in-memory catalog.
 export type MarketplaceScenario = "empty" | "some" | "error";

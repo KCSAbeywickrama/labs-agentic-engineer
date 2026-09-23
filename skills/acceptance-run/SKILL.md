@@ -182,6 +182,15 @@ truth that lives outside the running app — a number a stubbed backend invents,
 side effect in another system. It is an honest answer and always better than
 guessing; never report `passed` because a scenario looked plausible.
 
+**Identity-provider affordances are not this app's.** Signing up, resetting a
+password, MFA, social login and the sign-in page's own markup belong to the
+identity provider, and no generated app renders them (`authorization-model`
+invariant 11). A `Then` about one of them is `unjudgeable`, never `failed` — a
+platform matter, not an application defect. A `Given` or `When` that merely
+passes through one — "a new user signs up, then…" — is carried out by signing in
+with the published test login instead, and the rest of the scenario is judged as
+written.
+
 ## The report
 
 Write `tests/acceptance/report.json`. One entry per scenario in the feature

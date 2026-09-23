@@ -192,10 +192,11 @@ subagent you handed it to, keeps its status line current from start to done
 2. **Make the change it asks for**, holding to
    `references/component-contract.md` and the stack skills of every component it
    touches.
-3. **A `web-application` is finished by a walk, not a build.** The moment its
-   builder reports clean — not when the rest of the wave has — dispatch **one
-   more subagent** for that component with exactly this prompt, and nothing
-   about how to walk:
+3. **A `web-application` is finished by a walk, not a build.** Once its builder
+   reports clean — not waiting on the rest of the wave — and **no other walk is
+   live**, dispatch **one more subagent** for that component with exactly this
+   prompt, and nothing about how to walk. One walk at a time: a live Chromium is
+   the largest thing in the pod.
 
    ```text
    Walk <component> at <App Path>. Load `mock-verification` and
@@ -240,17 +241,30 @@ subagent you handed it to, keeps its status line current from start to done
    untracked, in a tree you are staging from. Nothing lists it, `git status`
    shows one unfamiliar name among your own files, and a single `git add -A`
    puts it in the pull request for good. These belong at the top of the
-   repo-root `.gitignore` of every project, unanchored on purpose — they can
-   land in any directory, and unlike `target/` there is no component that wants
-   one committed:
+   repo-root `.gitignore` of every project. They are the one category that stays
+   unanchored: a crash lands wherever the process was running, and unlike
+   `target/` there is no component that wants one committed.
 
    ```gitignore
    # crash artefacts — never wanted, in any component
    core
-   core.*
+   !core/
+   core.[0-9]*
    hs_err_pid*.log
    replay_pid*.log
    ```
+
+   **Copy those five lines exactly.** Unanchored is not the same as loose, and
+   the shapes matter more here than anywhere else in the file: a crash picks
+   names people pick too. `core.[0-9]*` is the kernel's `core.%p` dump and
+   nothing else — a plain `core.*` would swallow `core.ts`, `core.css` and
+   `core.go`, and `src/authz/core.ts` exists in every web app you generate.
+   `!core/` re-includes a *directory* named core, which the bare `core` line
+   above it would otherwise ignore whole; the trailing slash is the only thing
+   separating `src/core/` from a dump file, so do not tidy that line away. A
+   `.gitignore` that eats real source is worse than none: the files vanish from
+   `git status`, `git add -A` skips them in silence, and a component you built
+   is simply not in the commit.
 5. Re-derive the working set (§1) and pick the next issue.
 
 **Say why before you throw work away.** Before deleting or wholesale-rewriting a
