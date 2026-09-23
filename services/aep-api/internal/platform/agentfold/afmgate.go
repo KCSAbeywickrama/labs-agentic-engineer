@@ -50,8 +50,7 @@ package agentfold
 // afmgate_test.go's TestValidateAgentAfm_LiveFixture guards the type of drift
 // that motivated the map-based rewrite: it runs an actual AFM document that
 // the platform's own design flow produced
-// (playground/.projects/lunch-design/specs/design/components/lunch-chat-agent/agent.afm.md)
-// through this gate.
+// (testdata/lunch-chat-agent.afm.md) through this gate.
 
 import (
 	"fmt"

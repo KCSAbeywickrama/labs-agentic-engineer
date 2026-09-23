@@ -245,7 +245,7 @@ func TestAnthropicEffectiveKey_DB(t *testing.T) {
 
 func TestAnthropicDefaultKeyRef_DB(t *testing.T) {
 	t.Parallel()
-	svc, _ := anthropicDBService(t, http.StatusOK)
+	svc, _, repo := anthropicRoleService(t, http.StatusOK)
 	ctx := context.Background()
 
 	// No org row → NotFoundError, same "not connected yet" contract as
@@ -255,14 +255,18 @@ func TestAnthropicDefaultKeyRef_DB(t *testing.T) {
 		t.Fatalf("absent org: got %v, want *organization.NotFoundError", err)
 	}
 
-	// Connected → the vault triplet, not the key's bytes.
+	// Connected and mirrored → the vault triplet, not the key's bytes. No
+	// SecretRefWriter is wired here, so the mirror's columns are stamped the
+	// way the ResolveCodingSecretRef tests stamp them.
 	anthropicMustConnect(t, svc, "acme", anthropicUnitKey)
+	stampTriplet(t, repo, "acme", organization.AnthropicRoleDefault,
+		"acme-anthropic", "user-app-secrets/wc-acme/acme-anthropic", "api-key")
 	triplet, err := svc.DefaultKeyRef(ctx, "acme")
 	if err != nil {
 		t.Fatalf("DefaultKeyRef after connect: %v", err)
 	}
-	if triplet.KVPath == "" || triplet.Property == "" {
-		t.Fatalf("triplet missing coordinates: %+v", triplet)
+	if triplet.KVPath != "user-app-secrets/wc-acme/acme-anthropic" || triplet.Property != "api-key" {
+		t.Fatalf("DefaultKeyRef must return the stamped default triplet, got %+v", triplet)
 	}
 }
 

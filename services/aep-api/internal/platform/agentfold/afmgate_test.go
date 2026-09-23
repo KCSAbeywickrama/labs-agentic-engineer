@@ -17,9 +17,7 @@
 package agentfold
 
 import (
-	"os"
-	"path/filepath"
-	"runtime"
+	_ "embed"
 	"strings"
 	"testing"
 )
@@ -57,41 +55,21 @@ You help teammates order lunch.
 - Confirm before adding anything.
 `
 
-// liveAfmFixture locates a real agent.afm.md the platform's own design flow
-// produced. Reading the live file (instead of a copy pasted into this test)
-// means a future edit to that document exercises this gate automatically —
-// the whole point being that this gate must never reject the platform's own
-// output.
-func liveAfmFixture(t *testing.T) string {
-	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	// thisFile: services/aep-api/internal/platform/agentfold/afmgate_test.go
-	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..", "..")
-	path := filepath.Join(repoRoot, "playground", ".projects", "lunch-design", "specs", "design",
-		"components", "lunch-chat-agent", "agent.afm.md")
-	content, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("reading live fixture %s: %v", path, err)
-	}
-	return string(content)
-}
+// liveAfmFixture is a real agent.afm.md the platform's own design flow
+// produced (the lunch-design playground project's lunch-chat-agent), kept as
+// testdata because playground/.projects is not tracked. A real document rather
+// than one written for this test is the point: this gate must never reject the
+// platform's own output. Embedded, so a fixture edit invalidates a cached PASS.
+//
+//go:embed testdata/lunch-chat-agent.afm.md
+var liveAfmFixture string
 
 // TestValidateAgentAfm_LiveFixture guards the class of bug a struct-plus-
 // KnownFields decode produced: it hard-rejected x-aep.memory, x-aep.identity
 // and interfaces[].exposure, which the platform's own AFM generator emits
-// (see the file this reads). The fixture is read from disk at test time
-// (os.ReadFile), not embedded, so the file's content is invisible to the Go
-// build cache's input hash — a fixture edit does NOT invalidate a cached
-// PASS. Always run this test (and this package) with `go test -count=1` to
-// force re-execution; see afmgate_test.go's TestValidateAgentAfm_LiveFixture
-// for why a plain `go test` can report a stale result.
+// (see liveAfmFixture).
 func TestValidateAgentAfm_LiveFixture(t *testing.T) {
-	live := liveAfmFixture(t)
-
-	if problem := validateAgentAfm(live, "lunch-chat-agent"); problem != nil {
+	if problem := validateAgentAfm(liveAfmFixture, "lunch-chat-agent"); problem != nil {
 		t.Fatalf("want the live fixture accepted — it exercises x-aep.memory, x-aep.identity "+
 			"and interfaces[].exposure, all real optional zod fields — got %q", problem.message)
 	}
