@@ -212,7 +212,7 @@ tagged `[#1]`/`[#2]` — and **on a terminal** the crew sits pinned under them:
     ☑ Build onboarding-webapp
     ▸ Walk onboarding-webapp in mock mode
     ✓ #1 Build onboarding-webapp React SPA  build clean  completed · 41m11s · 162 tools
-    ● #3 Walk onboarding-webapp in mock mode (background)  npx playwright test…  42.0s · ♥ 4.0s
+    ● #3 Walk onboarding-webapp in mock mode (background)  agent-browser open…   42.0s · ♥ 4.0s
       ⟳ npm run dev:mock                                                     running 41.5s
 ```
 

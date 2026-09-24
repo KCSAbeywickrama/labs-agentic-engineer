@@ -559,8 +559,9 @@ const validationTaskKind = "validation"
 // agent only as prose inside AEP_PROMPT.
 const envValidationIssue = "AEP_VALIDATION_ISSUE"
 
-// validationDeadlineSeconds bounds a validation run (2h): browser boot + live
-// exploration + authoring/healing e2e specs is longer than a coding run.
+// validationDeadlineSeconds bounds a validation run (2h): a browser boots once
+// and every scenario in specs/validation/acceptance/ is then driven through it
+// in sequence, which is longer than a coding run.
 const validationDeadlineSeconds int64 = 7200
 
 // codingDeadlineSeconds bounds an ordinary coding run (3h). A coding cycle no

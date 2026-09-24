@@ -121,6 +121,7 @@ codingAgentRunner:
   # from the per-org `coding-agent` ComponentType.
   # The release pipeline pins this to ghcr.io/wso2/aep/remote-worker:<version>;
   # empty disables coding dispatch (it fails loudly).
+  # Never older than aep-api — see docs/developer-guide/releasing.md.
   image: "ghcr.io/wso2/aep/remote-worker:latest"
   # The OpenCode variant: the same Dockerfile's runner-opencode stage (the
   # image above plus the pinned OpenCode binary), used for organizations whose

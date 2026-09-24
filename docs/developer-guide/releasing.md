@@ -32,6 +32,16 @@ launch nowhere; native arm64 builds (every Apple-silicon bring-up) do. The
 emulated arm64 build itself is exercised before a release by the `Images`
 workflow, which builds `remote-worker` for both platforms on its PR.
 
+**Publish `remote-worker` before `aep-api`, and never the other way round.** The
+two speak a private contract (`packages/contracts/api/internal/v1`) that is
+versioned with this repo and deliberately not kept backward compatible, so a
+runner older than the aep-api dispatching it can reject the payload in its
+preflight and kill the validation run before it starts. A rollout alone is safe
+— `AGENT_RUNNER_IMAGE` is an env var on the aep-api pod, so each pod dispatches
+the tag its own release carries — but the chart's default is the floating
+`remote-worker:latest`, which is what lets a new caller meet an old image. Pin
+both to the same version, or publish the runner first.
+
 Layer cache lives in GHCR under `ghcr.io/wso2/aep/buildcache/<image>` rather than
 the Actions cache, which is capped at 10 GB per repository and which CI's own
 entries already fill. It is `mode=max`, so intermediate build stages are

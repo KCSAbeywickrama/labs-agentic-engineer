@@ -1,5 +1,12 @@
 # ADR-0012 — One Debian runner image serves both task kinds
 
+**Status:** Accepted; its **Playwright half is superseded** by
+[ADR-0029](ADR-0029-validation-drives-scenarios-not-compiled-tests.md). Nothing in the image runs
+`playwright test` any more and no `tests/e2e/package.json` is authored, so `AEP_PLAYWRIGHT_VERSION`
+is no longer a contract with anything. The one-Debian-image decision itself stands, and so does its
+reason: `agent-browser` launches the chromium `@playwright/test` installs, and that build is still
+glibc-linked.
+
 The remote-worker runner dispatches two task kinds, `implementation` and
 `validation` (`AEP_TASK_KIND`), from the same one-shot pod entry point
 (`runners/remote-worker/src/oneshot.ts`). Validation authors and executes e2e

@@ -136,7 +136,7 @@ export function runCycleEvents(
     return [
       lead({ kind: "run_started", taskKind: "validation", runtime: "claude-code", model: "claude-opus-4" }),
       lead({ kind: "agent_started", role: "validator", model: "claude-opus-4" }),
-      lead({ kind: "tool_use", tool: "Read", summary: "specs/validation/validation-criteria.json", toolUseId: "v0" }),
+      lead({ kind: "tool_use", tool: "Read", summary: "specs/validation/acceptance/checkout.feature", toolUseId: "v0" }),
       lead({ kind: "tool_result", tool: "Read", ok: true, durationMs: 120, toolUseId: "v0" }),
       // The per-criterion story, which is what the Validation page's rows are
       // painted from — and which renders as NO row here, on purpose. Only for an
@@ -147,7 +147,7 @@ export function runCycleEvents(
         : CRITERION_LIFECYCLE.map(([itemId, itemStatus]) =>
             lead({ kind: "work_item", source: "criterion", itemId, itemStatus: itemStatus as NonNullable<RunEvent["itemStatus"]> }),
           )),
-      lead({ kind: "tool_use", tool: "Bash", summary: "pnpm playwright test", toolUseId: "v1" }),
+      lead({ kind: "tool_use", tool: "Bash", summary: "agent-browser snapshot -i", toolUseId: "v1" }),
       lead({ kind: "heartbeat", waitingOn: "tool", ref: "v1", elapsedMs: 42_000 }),
       lead({ kind: "tool_result", tool: "Bash", ok: true, durationMs: 61_400, toolUseId: "v1" }),
       lead({ kind: "git_commit", sha: "7ab41c90ee31d5f0", files: 4 }),

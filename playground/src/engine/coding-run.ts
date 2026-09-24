@@ -550,7 +550,7 @@ interface Invocation {
 export function hostInvocation(opts: CodingRunOptions, runDir: string): Invocation {
   // Host mode has no image, so every tool a skill names comes off the developer's
   // own machine — which is exactly what --host already means for `bal`, `go` and
-  // `playwright-cli`, and now for `bal library` too: it is a `bal` tool, resolved
+  // `agent-browser`, and now for `bal library` too: it is a `bal` tool, resolved
   // out of `~/.ballerina`, so there is no PATH entry to point anywhere. What that
   // resolves to is reported by `hostToolAdvice`, not patched here.
   const env: NodeJS.ProcessEnv = {
