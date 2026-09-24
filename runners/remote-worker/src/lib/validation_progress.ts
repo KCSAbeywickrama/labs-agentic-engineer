@@ -52,6 +52,7 @@
  */
 
 import type { RunEvent } from "./progress/emitter.js";
+import type { ObservedCall } from "../runtime/port.js";
 
 /**
  * What a criterion's row may say, as the committed contract spells it.
@@ -115,13 +116,6 @@ const TEST_RUN = /\b(?:npm|pnpm|yarn)\s+(?:run\s+)?test\b|\bplaywright\s+test\b/
 
 /** A spec file with a body — Playwright's own entry point, however it is spelled. */
 const HAS_TEST_BLOCK = /\btest\s*(?:\.\w+)*\s*\(/;
-
-/**
- * Tools whose input names a file the agent is authoring. Exported because the
- * issue's status line watches the same set (validation_status_line.ts), and two
- * copies would let one grow a tool the other never sees.
- */
-export const WRITE_TOOLS = new Set(["Write", "Edit", "NotebookEdit"]);
 
 interface ItemState {
   last: ProgressItemStatus;
@@ -194,12 +188,6 @@ export class ValidationProgressState {
   }
 }
 
-function inputString(toolInput: unknown, key: string): string {
-  if (!toolInput || typeof toolInput !== "object") return "";
-  const v = (toolInput as Record<string, unknown>)[key];
-  return typeof v === "string" ? v : "";
-}
-
 function matchAll(re: RegExp, text: string): string[] {
   // Fresh lastIndex per call: these are module-level /g regexes and a leftover
   // index silently skips the first match of the next call.
@@ -217,20 +205,18 @@ function matchAll(re: RegExp, text: string): string[] {
  * Separated from the hook plumbing so the whole derivation is testable against
  * plain objects — no SDK, no session, no workspace.
  */
-export function validationProgressUpdates(
-  toolName: string,
-  toolInput: unknown,
-  state: ValidationProgressState,
-): ProgressItemUpdate[] {
-  if (toolName === "Bash") {
-    const command = inputString(toolInput, "command");
-    if (!TEST_RUN.test(command)) return [];
-    return matchAll(SPEC_MENTION, command).map((itemId) => ({ itemId, status: "running" as const }));
+export function validationProgressUpdates(call: ObservedCall, state: ValidationProgressState): ProgressItemUpdate[] {
+  if (call.kind === "shell") {
+    if (!TEST_RUN.test(call.command)) return [];
+    return matchAll(SPEC_MENTION, call.command).map((itemId) => ({ itemId, status: "running" as const }));
   }
 
-  if (!WRITE_TOOLS.has(toolName)) return [];
+  // Only the authoring calls name a file the agent is writing. Which of a
+  // runtime's tools those are is the adapter's to say (`ObservedCall`), so this
+  // reads the same on every runtime.
+  if (call.kind !== "write" && call.kind !== "edit") return [];
 
-  const filePath = inputString(toolInput, "file_path") || inputString(toolInput, "notebook_path");
+  const filePath = call.path;
   if (filePath === "") return [];
 
   if (PLAN_PATH.test(filePath)) {
@@ -239,7 +225,7 @@ export function validationProgressUpdates(
     // yet: SKILL.md has a re-validation APPEND to this file, and re-announcing
     // a criterion already being authored as `planned` would walk its row
     // backwards.
-    return matchAll(PLAN_SECTION, inputString(toolInput, "content"))
+    return matchAll(PLAN_SECTION, call.kind === "write" ? call.content : "")
       .filter((itemId) => state.status(itemId) === undefined)
       .map((itemId) => ({ itemId, status: "planned" as const }));
   }
@@ -248,15 +234,15 @@ export function validationProgressUpdates(
   if (!spec?.[1]) return [];
   const itemId = spec[1];
 
-  // `Write` hands over the whole file, so a stub — the mandatory `// spec:`
+  // A `write` hands over the whole file, so a stub — the mandatory `// spec:`
   // header with no test body yet — is visible as such. That is the skill's
   // marker for "this criterion has been picked up and is being explored
   // against the live app", which is otherwise the longest unobservable stretch
   // of the run.
   //
-  // `Edit` carries old_string/new_string, never the result, so it cannot be
+  // An `edit` carries the replaced text, never the result, so it cannot be
   // classified this way and always counts as work on the body.
-  if (toolName === "Write" && !HAS_TEST_BLOCK.test(inputString(toolInput, "content"))) {
+  if (call.kind === "write" && !HAS_TEST_BLOCK.test(call.content)) {
     return [{ itemId, status: "exploring" }];
   }
 
@@ -287,11 +273,11 @@ export interface ValidationProgressTracker {
    * the ones the run needs, and a progress feature that could block a write
    * would be a worse bargain than no progress feature.
    *
-   * Plain arguments rather than a runtime's hook shape: which mechanism
-   * delivers a call is the adapter's business, and this module has no reason to
-   * know one runtime's hook grammar.
+   * The call in the port's vocabulary (`ObservedCall`), never a runtime's tool
+   * name or hook shape: which tool a runtime writes files with, and how it
+   * spells the path, is its adapter's business.
    */
-  observe(toolName: string, toolInput: unknown, toolUseId: string): void;
+  observe(call: ObservedCall, toolUseId: string): void;
   /** Called when a tool call settles, with the `ok` that reaches the feed. */
   settle(toolUseId: string, ok: boolean): void;
   /**
@@ -327,8 +313,8 @@ export function createValidationProgressTracker(
   return {
     state,
 
-    observe: (toolName, toolInput, toolUseId) => {
-      const updates = validationProgressUpdates(toolName, toolInput, state);
+    observe: (call, toolUseId) => {
+      const updates = validationProgressUpdates(call, state);
       if (updates.length === 0) return;
 
       // Remembered BEFORE publishing, and keyed by the tool call, because the

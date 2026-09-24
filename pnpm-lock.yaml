@@ -613,6 +613,9 @@ importers:
       jose:
         specifier: ^5.9.0
         version: 5.10.0
+      remote-worker:
+        specifier: workspace:*
+        version: link:../runners/remote-worker
       smol-toml:
         specifier: ^1.7.1
         version: 1.7.1
@@ -632,6 +635,9 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.3.247
         version: 0.3.247(@anthropic-ai/sdk@0.93.0(zod@4.4.3))(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(zod@4.4.3)
+      '@opencode-ai/sdk':
+        specifier: 1.18.32
+        version: 1.18.32
       tsx:
         specifier: ^4.21.0
         version: 4.22.4
@@ -645,6 +651,9 @@ importers:
       '@types/node':
         specifier: ^25.5.0
         version: 25.9.4
+      esbuild:
+        specifier: 0.28.1
+        version: 0.28.1
 
   services/aep-mcp-server:
     dependencies:
@@ -1747,6 +1756,9 @@ packages:
 
   '@open-draft/until@2.1.0':
     resolution: {integrity: sha512-U69T3ItWHvLwGg5eJ0n3I62nWuE6ilHlmz7zM0npLBRvPRd7e6NYmg54vvRtP5mZG7kZqZCFVdsTWo7BPtBujg==}
+
+  '@opencode-ai/sdk@1.18.32':
+    resolution: {integrity: sha512-Wi3WtH/cLA3C0ga05lyDb7zac+SzbST9MPwCve1Ffod0xwzHdy9G2gnxvMAR4RBRhKJS32Rgk2cR+fxBhAVSQw==}
 
   '@opentelemetry/api@1.9.1':
     resolution: {integrity: sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q==}
@@ -7133,6 +7145,10 @@ snapshots:
       outvariant: 1.4.3
 
   '@open-draft/until@2.1.0': {}
+
+  '@opencode-ai/sdk@1.18.32':
+    dependencies:
+      cross-spawn: 7.0.6
 
   '@opentelemetry/api@1.9.1':
     optional: true

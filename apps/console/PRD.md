@@ -499,8 +499,10 @@ here: they're the open `console` + `feature` issues.
   [#562](https://github.com/wso2/labs-agentic-engineer/issues/562), which fires
   the kickoff at creation and leaves the CTA as a resumption affordance.*
 - Onboarding — first-time credentials wizard for the default org (hard gate on
-  incomplete `GET /config`): GitHub PAT + Anthropic key, then auto skills-repo
-  bootstrap via extended `/skills/sync` —
+  incomplete `GET /config`): GitHub PAT, then the settings' AI agents card
+  (only the Anthropic key required; model and coding agent prefilled with the
+  platform defaults; a disconnected key re-gates with "Your Anthropic key was
+  disconnected"), then auto skills-repo bootstrap via extended `/skills/sync` —
   [#102](https://github.com/wso2/labs-agentic-engineer/issues/102)
   (BE handshake [#171](https://github.com/wso2/labs-agentic-engineer/issues/171);
   ADR-0009)
@@ -512,11 +514,16 @@ here: they're the open `console` + `feature` issues.
   (browse/search/import/sync; no in-console authoring) —
   [#96](https://github.com/wso2/labs-agentic-engineer/issues/96) (BE
   handshake: [#100](https://github.com/wso2/labs-agentic-engineer/issues/100))
-- Settings → Anthropic, coding-agent key — bill the coding agent to a separate
-  credential (another API key, or a `claude setup-token` token that bills a
-  Claude subscription) while everything else keeps the org's key. "Reuse the key
-  above" is the default and is the ABSENCE of a second key, not a stored mode
-  (ADR-0016)
+- Settings → AI agents — one card, one Save: the model every agent uses
+  (requirements to coding), the org's Anthropic API key (a new key rides the
+  Save and is validated server-side; disconnect is its own confirmed action and
+  takes the subscription with it), and the coding agent as Claude Code | OpenCode
+  tiles. Only the Claude Code tile offers "Bill coding to a Claude subscription"
+  (a `claude setup-token` token); choosing OpenCode warns in the tile that
+  saving deletes a stored token, and the Save deletes it. The separate coding
+  API key is gone from the UI, and a legacy one reads as none. The card→`/config`
+  section mapping lives in one adapter, `features/settings/aiSettings.ts`
+  (root ADR-0028; replaces the UI of the root ADR-0016 coding-agent key)
 - Settings → Skills legacy parity — per-tab routes, categorised catalogue
   (org/platform/custom/imported), MD viewer + monospace editor with preview,
   upload-only import with pull-request guidance —

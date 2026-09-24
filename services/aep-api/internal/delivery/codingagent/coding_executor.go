@@ -250,7 +250,16 @@ func (e *CodingExecutor) launchAgent(ctx context.Context, in agentLaunch) (strin
 // only platform credential (local and cloud).
 func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo *sourcecontrol.GitRepository,
 	name, email, login string) (string, error) {
-	anthropicSR, githubSR, err := e.resolveRunnerSecretRefs(ctx, in.orgID)
+	// The organization's agent setting, copied onto THIS run. Copied, not
+	// referenced: a change applies from the next cycle, and a run that re-read
+	// the setting halfway through would produce a feed whose model names
+	// disagree with the tokens they were billed for. Read first because the
+	// runtime decides which credential the run may mount.
+	agent, err := e.codingAgentEnv(ctx, in.orgID)
+	if err != nil {
+		return "", err
+	}
+	anthropicSR, githubSR, err := e.resolveRunnerSecretRefs(ctx, in.orgID, agent.Runtime)
 	if err != nil {
 		return "", err
 	}
@@ -283,16 +292,12 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		// and duplicating it here would let the two drift apart silently.
 		"AEP_RUN_DEADLINE_SECONDS": strconv.FormatInt(disp.deadline, 10),
 	}
-	// The organization's coding-agent setting, copied onto THIS run. Copied, not
-	// referenced: a change applies from the next cycle, and a run that re-read
-	// the setting halfway through would produce a feed whose model names
-	// disagree with the tokens they were billed for.
-	runtimeName, model, err := e.codingAgentEnv(ctx, in.orgID)
+	env[envAgentRuntime] = string(agent.Runtime)
+	env[envAgentModel] = agent.Model
+	anthropicEnvVar, err := anthropicEnvVarFor(in.orgID, agent.Runtime, anthropicSR.EnvVar)
 	if err != nil {
 		return "", err
 	}
-	env[envAgentRuntime] = runtimeName
-	env[envAgentModel] = model
 	// Only a validation cycle is issue-anchored, so only it can name an issue.
 	// Absent rather than "0" for every other kind: the runner reads presence, and
 	// a stamped zero would be a number it has to know is not one.
@@ -300,7 +305,7 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		env[envValidationIssue] = strconv.Itoa(disp.validationIssue)
 	}
 	secretEnv := []SecretEnvRef{
-		{Key: anthropicEnvVarOrDefault(anthropicSR.EnvVar), SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
+		{Key: anthropicEnvVar, SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
 		{Key: envGitHubToken, SecretName: githubSR.SecretRefName, SecretKey: githubSR.Property},
 	}
 	pub, tokenURL, err := e.publisherSecretEnv(ctx, in.orgID)
@@ -318,6 +323,7 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		MilestoneTitle:        disp.milestoneTitle,
 		Kind:                  disp.taskKind,
 		RunName:               codingAgentRunNameFor(in.projectID, in.correlationID),
+		Runtime:               agent.Runtime,
 		ActiveDeadlineSeconds: int(disp.deadline),
 		Env:                   env,
 		SecretEnv:             secretEnv,
@@ -381,17 +387,17 @@ func (e *CodingExecutor) RetryAuthFailedBuild(ctx context.Context, row *delivery
 
 // resolveRunnerSecretRefs resolves the two credentials every coding run mounts.
 //
-// The Anthropic side asks the organization domain WHICH key this org's coding
-// runs bill — its coding-agent key when it configured one, its default key
-// otherwise — and mounts whatever comes back under the variable name that came
-// back WITH it, since a Claude Code OAuth token has to arrive as
-// CLAUDE_CODE_OAUTH_TOKEN rather than ANTHROPIC_API_KEY. The runner therefore
-// needs no notion of the split at all; it reads whichever of the two is
-// present, exactly as Claude Code always has. The resolver fails
-// closed on a configured-but-unusable coding key, so a run never silently bills
-// the default key an org deliberately scoped away from its coding agent.
-func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID string) (SecretRef, SecretRef, error) {
-	triplet, err := e.anthropicKey.ResolveCodingSecretRef(ctx, orgID)
+// The Anthropic side asks the organization domain WHICH credential a run on
+// runtime bills — its Claude subscription when it has one and the runtime is
+// Claude Code, its API key otherwise — and mounts whatever comes back under the
+// variable name that came back WITH it, since a subscription token has to
+// arrive as CLAUDE_CODE_OAUTH_TOKEN rather than ANTHROPIC_API_KEY. The runner
+// therefore needs no notion of the choice at all; it reads whichever of the two
+// is present. The resolver fails closed on a configured-but-unusable
+// subscription, so a run never silently bills API credits an org chose to
+// replace with its plan.
+func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID string, runtime orgconfig.AgentRuntime) (SecretRef, SecretRef, error) {
+	triplet, err := e.anthropicKey.ResolveCodingSecretRef(ctx, orgID, runtime)
 	if err != nil {
 		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: %w", err)
 	}
@@ -420,7 +426,7 @@ func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID stri
 	return anthropicSR, githubSR, nil
 }
 
-// codingAgentEnv resolves the runtime and model this run is launched with.
+// codingAgentEnv resolves the runtime and models this run is launched with.
 //
 // A missing resolver, or an org that never chose, both mean the platform
 // defaults — which is what every dispatch carried before the setting existed, so
@@ -428,20 +434,34 @@ func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID stri
 // is different and fails the dispatch: the org did choose something, we cannot
 // read what, and launching on the defaults would bill it for a model it moved
 // off without ever saying so.
-func (e *CodingExecutor) codingAgentEnv(ctx context.Context, orgID string) (string, string, error) {
+func (e *CodingExecutor) codingAgentEnv(ctx context.Context, orgID string) (orgconfig.AgentsProjection, error) {
 	if e.codingAgent == nil {
-		return orgconfig.DefaultAgentRuntime, orgconfig.DefaultCodingAgentModel, nil
+		return orgconfig.DefaultAgents(), nil
 	}
 	proj, err := e.codingAgent.Effective(ctx, orgID)
 	if err != nil {
-		return "", "", fmt.Errorf("coding dispatch: coding-agent setting for org %q: %w", orgID, err)
+		return orgconfig.AgentsProjection{}, fmt.Errorf("coding dispatch: coding-agent setting for org %q: %w", orgID, err)
 	}
-	return proj.Runtime, proj.Model, nil
+	return proj, nil
+}
+
+// anthropicEnvVarFor names the Job's Anthropic SecretEnv entry, failing closed
+// when an OpenCode run did not resolve to an API key. The resolver never hands
+// OpenCode a subscription, so this guards the one thing that must not happen
+// even if that ever changes: a run mounting a credential its runtime cannot
+// present.
+func anthropicEnvVarFor(orgID string, runtime orgconfig.AgentRuntime, resolved string) (string, error) {
+	if runtime == orgconfig.AgentRuntimeOpenCode && resolved != envAnthropicAPIKey {
+		return "", fmt.Errorf(
+			"coding dispatch: org %q runs on OpenCode, which authenticates with an Anthropic API key only, "+
+				"but its coding credential resolves to %q", orgID, resolved)
+	}
+	return anthropicEnvVarOrDefault(resolved), nil
 }
 
 // anthropicEnvVarOrDefault names the Job's Anthropic SecretEnv entry from
 // organization.SecretRefTriplet.EnvVar (ANTHROPIC_API_KEY or
-// CLAUDE_CODE_OAUTH_TOKEN — ADR-0016), falling back to the runner's default
+// CLAUDE_CODE_OAUTH_TOKEN — ADR-0034), falling back to the runner's default
 // only if a resolver ever returns the zero value.
 func anthropicEnvVarOrDefault(envVar string) string {
 	if envVar == "" {

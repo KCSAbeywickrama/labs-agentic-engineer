@@ -126,10 +126,6 @@ type ExecutionReader interface {
 	ListByIssueScoped(ctx context.Context, orgID, repo string, issueNumber int) ([]delivery.Execution, error)
 }
 
-// AnthropicKeyResolver resolves the org's effective Anthropic key. Empty key +
-// nil error means "org has none" → the plan turn raises ErrNoAnthropicKey.
-type AnthropicKeyResolver func(ctx context.Context, orgID string) (string, error)
-
 // TurnClient is the agents-service turn client — the plan turn POSTs a
 // toolset:"task-plan" turn and streams raw StreamPart frames back for the tap.
 type TurnClient interface {

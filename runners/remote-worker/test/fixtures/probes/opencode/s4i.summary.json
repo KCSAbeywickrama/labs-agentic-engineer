@@ -1,0 +1,54 @@
+{
+  "events": {
+    "server.connected": 1,
+    "session.created": 1,
+    "session.updated": 4,
+    "message.updated": 6,
+    "message.part.updated": 5,
+    "session.status": 4,
+    "session.diff": 2,
+    "plugin.added": 45,
+    "catalog.updated": 2,
+    "reference.updated": 1,
+    "integration.updated": 1,
+    "message.part.delta": 6,
+    "session.idle": 1
+  },
+  "parts": {
+    "text": 3,
+    "step-start": 1,
+    "step-finish": 1
+  },
+  "tools": {},
+  "children": [],
+  "perms": [],
+  "errors": [],
+  "usage": {
+    "anthropic/claude-haiku-4-5": {
+      "messages": 1,
+      "input": 2,
+      "output": 31,
+      "reasoning": 0,
+      "cacheRead": 0,
+      "cacheWrite": 8086,
+      "cost": 0.0102645,
+      "sessions": 1
+    }
+  },
+  "todos": 0,
+  "rootLastText": "(1) `GLOSSARY-MARKER-9931`\n\n(2) The fan-out tool is called `task`",
+  "childrenApi": [],
+  "outcome": "settled",
+  "durationMs": 8356,
+  "eventCount": 79,
+  "sessions": [
+    {
+      "id": "ses_f36007bf5ffe62XHz1yV3FNS8q (root)",
+      "busy": false,
+      "title": "probe s4i",
+      "created": 1310,
+      "idleAt": 4175
+    }
+  ],
+  "bgJobsLeft": []
+}

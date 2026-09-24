@@ -272,10 +272,11 @@ test("systemPromptAppend: the glossary names the fan-out, wait and task-list too
   assert.match(glossary, /`run_in_background: true`/);
   assert.match(glossary, /wait tool.*`TaskOutput`/);
   assert.match(glossary, /task list.*`TaskCreate`/);
-  // The skill says "the fast model" and "the default one" and leaves the aliases
-  // to this table; a lead that guesses one spends a turn on a schema error.
-  assert.match(glossary, /`haiku` \(the fast model\)/);
-  assert.match(glossary, /`sonnet` \(the default\)/);
+  // The skill says "the fast model" and "the default one" and leaves the alias
+  // to this table; a lead that guesses one spends a turn on a schema error. The
+  // run has one model, so both words name the same alias.
+  assert.match(glossary, /the fast model and the default one are both `sonnet`/);
+  assert.doesNotMatch(glossary, /haiku/);
   // And ONLY models the platform can price. modelcost.SumCost is all-or-nothing:
   // one slice whose model has no rate row makes the whole cycle's cost null. So
   // offering an alias with no seeded rate turns the skill's own "pick the model
@@ -329,7 +330,7 @@ function layoutFor(workspace: string): WorkspaceLayout {
   };
 }
 
-const silentLog: TaskLog = { write: () => {}, close: () => {}, dir: os.tmpdir() };
+const silentLog: TaskLog = { write: () => {}, close: () => {}, dir: fs.mkdtempSync(path.join(os.tmpdir(), "aep-logs-")) };
 
 /**
  * A runtime that records what it was asked to run and then ends at once.
@@ -349,6 +350,7 @@ function recordingRuntime(): { runtime: Runtime; calls: { prompt: string; policy
       return {
         stream: { messages: (async function* () {})(), stopTask: async () => {} },
         translate: () => [],
+        classify: () => ({ kind: "activity" }),
         artifacts: async () => [],
         close: async () => {},
       };
@@ -447,6 +449,43 @@ test("startCodingRun: the preloaded appendix ends with the runtime's own glossar
 
   assert.match(policy.skills.preloadBodies, /WORKFLOW BODY/);
   assert.ok(policy.skills.preloadBodies.endsWith("GLOSSARY"));
+});
+
+test("startCodingRun: names what the lead was given on the feed, and keeps the exact appendix beside runtime.log", async () => {
+  const workspace = mirrorWorkspace();
+  const logDir = fs.mkdtempSync(path.join(os.tmpdir(), "aep-logs-"));
+  const { runtime, calls } = recordingRuntime();
+  const lines: string[] = [];
+  const original = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string) => (lines.push(String(chunk)), true)) as typeof process.stdout.write;
+  try {
+    const started = await startCodingRun(
+      dispatch(),
+      layoutFor(workspace),
+      { ...silentLog, dir: logDir },
+      { availableSkillNames: ["aep", "ballerina", "go"], pinnedBodies: "PINNED", pinnedSkillNames: ["ballerina"] },
+      undefined,
+      runtime,
+    );
+    await started.completion;
+  } finally {
+    process.stdout.write = original;
+  }
+  try {
+    const notices = lines
+      .flatMap((l) => l.split("\n"))
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as { kind: string; detail?: string })
+      .filter((e) => e.kind === "notice" && e.detail?.startsWith("[skills]"));
+    assert.deepEqual(
+      notices.map((n) => n.detail),
+      ["[skills] workflow: aep · pinned: ballerina · 3 available: aep, ballerina, go"],
+    );
+    assert.equal(fs.readFileSync(path.join(logDir, "prompt-appendix.md"), "utf8"), calls[0].policy.skills.preloadBodies);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(logDir, { recursive: true, force: true });
+  }
 });
 
 // A run cannot derive its own project root, and a run that guessed built a whole

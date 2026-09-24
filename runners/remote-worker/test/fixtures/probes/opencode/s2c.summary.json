@@ -1,0 +1,166 @@
+{
+  "events": {
+    "server.connected": 1,
+    "session.created": 5,
+    "session.updated": 36,
+    "message.updated": 79,
+    "message.part.updated": 109,
+    "session.status": 46,
+    "session.diff": 23,
+    "plugin.added": 45,
+    "catalog.updated": 2,
+    "reference.updated": 1,
+    "integration.updated": 1,
+    "message.part.delta": 32,
+    "todo.updated": 4,
+    "file.edited": 4,
+    "file.watcher.updated": 4,
+    "session.idle": 7,
+    "server.heartbeat": 2
+  },
+  "parts": {
+    "text": 28,
+    "step-start": 16,
+    "tool": 40,
+    "step-finish": 16,
+    "patch": 9
+  },
+  "tools": {
+    "task:pending": 4,
+    "task:running": 8,
+    "task:completed": 4,
+    "todowrite:pending": 4,
+    "write:pending": 4,
+    "todowrite:running": 4,
+    "todowrite:completed": 4,
+    "write:running": 4,
+    "write:completed": 4
+  },
+  "children": [
+    {
+      "id": "ses_f36018009ffeUfk7VXkY2lu749",
+      "parentID": "ses_f36018c2cffe2fFR3iftXnelmY",
+      "title": "alpha task (@general-fast subagent)",
+      "at": 4437,
+      "report": "REPORT: alpha done.",
+      "messages": 3
+    },
+    {
+      "id": "ses_f36017e99ffe33Y102pbBGxhgz",
+      "parentID": "ses_f36018c2cffe2fFR3iftXnelmY",
+      "title": "beta task (@general-fast subagent)",
+      "at": 4780,
+      "report": "REPORT: beta done.",
+      "messages": 3
+    },
+    {
+      "id": "ses_f36017c58ffe4olQzYKn5G3tn4",
+      "parentID": "ses_f36018c2cffe2fFR3iftXnelmY",
+      "title": "gamma task (@general-fast subagent)",
+      "at": 5369,
+      "report": "REPORT: gamma done.",
+      "messages": 4
+    },
+    {
+      "id": "ses_f3601755bffepGXISWt86vBLm9",
+      "parentID": "ses_f36017c58ffe4olQzYKn5G3tn4",
+      "title": "Create gamma-child file (@general-fast subagent)",
+      "at": 7163,
+      "report": "CHILD DONE.",
+      "messages": 3
+    }
+  ],
+  "perms": [],
+  "errors": [],
+  "usage": {
+    "anthropic/claude-haiku-4-5": {
+      "messages": 16,
+      "input": 67,
+      "output": 1598,
+      "reasoning": 0,
+      "cacheRead": 115047,
+      "cacheWrite": 19523,
+      "cost": 0.04396545000000001,
+      "sessions": 5
+    }
+  },
+  "todos": 4,
+  "rootLastText": "ALL DONE.",
+  "childrenApi": [
+    {
+      "id": "ses_f36018009ffeUfk7VXkY2lu749",
+      "parentID": "ses_f36018c2cffe2fFR3iftXnelmY",
+      "title": "alpha task (@general-fast subagent)",
+      "summary": {
+        "additions": 0,
+        "deletions": 0,
+        "files": 0
+      }
+    },
+    {
+      "id": "ses_f36017e99ffe33Y102pbBGxhgz",
+      "parentID": "ses_f36018c2cffe2fFR3iftXnelmY",
+      "title": "beta task (@general-fast subagent)",
+      "summary": {
+        "additions": 0,
+        "deletions": 0,
+        "files": 0
+      }
+    },
+    {
+      "id": "ses_f36017c58ffe4olQzYKn5G3tn4",
+      "parentID": "ses_f36018c2cffe2fFR3iftXnelmY",
+      "title": "gamma task (@general-fast subagent)",
+      "summary": {
+        "additions": 0,
+        "deletions": 0,
+        "files": 0
+      }
+    }
+  ],
+  "outcome": "settled",
+  "durationMs": 25797,
+  "eventCount": 401,
+  "sessions": [
+    {
+      "id": "ses_f36018c2cffe2fFR3iftXnelmY (root)",
+      "busy": false,
+      "title": "probe s2c",
+      "created": 1315,
+      "idleAt": 17458
+    },
+    {
+      "id": "ses_f36018009ffeUfk7VXkY2lu749",
+      "parentID": "ses_f36018c2cffe2fFR3iftXnelmY",
+      "busy": false,
+      "title": "alpha task (@general-fast subagent)",
+      "created": 4437,
+      "idleAt": 7331
+    },
+    {
+      "id": "ses_f36017e99ffe33Y102pbBGxhgz",
+      "parentID": "ses_f36018c2cffe2fFR3iftXnelmY",
+      "busy": false,
+      "title": "beta task (@general-fast subagent)",
+      "created": 4780,
+      "idleAt": 8237
+    },
+    {
+      "id": "ses_f36017c58ffe4olQzYKn5G3tn4",
+      "parentID": "ses_f36018c2cffe2fFR3iftXnelmY",
+      "busy": false,
+      "title": "gamma task (@general-fast subagent)",
+      "created": 5369,
+      "idleAt": 14996
+    },
+    {
+      "id": "ses_f3601755bffepGXISWt86vBLm9",
+      "parentID": "ses_f36017c58ffe4olQzYKn5G3tn4",
+      "busy": false,
+      "title": "Create gamma-child file (@general-fast subagent)",
+      "created": 7163,
+      "idleAt": 11164
+    }
+  ],
+  "bgJobsLeft": []
+}

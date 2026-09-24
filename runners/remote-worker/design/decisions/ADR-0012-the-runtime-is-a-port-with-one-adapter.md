@@ -1,6 +1,7 @@
 # ADR-0012 — The runtime is a port, and it has one adapter
 
-**Status:** accepted · 2026-09-07
+**Status:** accepted · 2026-09-07 · Amended 2026-09-22 (the loop reads a
+classifier, last section); second adapter in ADR-0015
 **Supersedes nothing.** Extends ADR-0002 (run observability) and ADR-0014 (the
 tool glossary), which each carved out one half of this seam before it existed.
 
@@ -16,7 +17,7 @@ for. It was scattered:
   to Claude Code's hook grammar, `settingSources`, `strictMcpConfig`,
   `permissionMode`, and a loopback MCP proxy that exists solely because this
   SDK's HTTP MCP config only accepts a static `Authorization` header.
-- `progress/claude_adapter.ts` translated its messages.
+- `runtime/claude/translate.ts` translated its messages.
 - `lib/tool_glossary.ts` bound the workflow's role names to its tool names.
 
 Only the last two were labelled as runtime-specific. `runner.ts` was where a
@@ -84,24 +85,25 @@ it, and each is recorded at its field in `port.ts`.
    runtime's convention.
 
 6. **`RuntimeSession.events(): AsyncIterable<RunEventInput>` → `stream` +
-   `translate`.** This is the largest deviation and the only one that gives
-   something up. The repo cannot express a run as a flat event stream without
+   `translate` + `classify`.** This is the largest deviation and the only one
+   that gives something up. The repo cannot express a run as a flat event stream without
    changing what the watchdog is told, and that contract is measured:
 
    - `watchdog.observe([])` RESETS the idle clock, and a heartbeat dropped by the
      rate limiter produces no event at all. "Route on the events that came back"
      silently converts every rate-limited wait into activity — the exact stall
-     the heartbeat exists to report. `run_loop.ts` therefore routes by MESSAGE
-     TYPE, and says so.
+     the heartbeat exists to report. `run_loop.ts` therefore routes by MESSAGE,
+     not by event, and says so.
    - `observeRetry` and `observeStream` are two different non-activity signals,
      and the watchdog needs both to name a stall's cause. A flat event stream
      collapses them into "a notice arrived".
-   - every raw message is written to `claude.log`, which a flat event stream no
+   - every raw message is written to `runtime.log`, which a flat event stream no
      longer carries.
 
    So the session exposes the run at the level `consumeRun` reads it. Collapsing
    those into a flat event stream is a real improvement and a real risk; it is a
    change to the WATCHDOG's contract, not to this port, and it was not made here.
+   How the loop tells one message from another is the amendment below.
 
 Also dropped: `RuntimeArtifact.kind: "task_output"` — nothing produces one (a
 task's output reaches the feed as `agent_settled.report`), and a kind with no
@@ -162,3 +164,32 @@ adapter to mean anything.
   ignored, so awaiting buys ordering and never a veto. Pinned in
   `runtime/claude/runtime.test.ts` (`watchHook`), because losing the `await`
   breaks nothing a type-checker or a unit test of the line itself would see.
+
+## Amendment (2026-09-22): the loop reads a classifier, not a message shape
+
+`RuntimeSession.classify(message) → MessageClass` answers every question
+`consumeRun` asks of a message, and the loop branches on the class and on
+nothing else — no `type`/`subtype` test outside a runtime's own directory. The
+classes are closed and are the loop's own vocabulary: `retry`, `stall_signal`,
+`model_wait {streaming}`, `tool_progress`, `turn_end`,
+`task_bookkeeping {started?, ended?}`, `init {resolvedSkills}`, `noise`,
+`activity` (their treatment is documented at `MessageClass` in `port.ts`). The
+watchdog is told what decision 6 requires; only who decides moved.
+
+- **One class per message.** `turn_end`, `task_bookkeeping` and `init` are each
+  handled as `activity` plus the one step that is theirs.
+- **`noise` is recorded and nothing else** — not translated, not activity, not
+  proof of life. A message about the server rather than the run would otherwise
+  reset the idle clock.
+- **The classifier is per session and may keep state** (Claude Code's rate-limit
+  dedupe: a repeated sentence is `activity`, not a `stall_signal`).
+- **The live-task set is the loop's; which words open and close a task are the
+  classifier's.** `task_bookkeeping` carries the id that entered or left it.
+- **What is not a runtime's is shared, not copied:** `apiRetryLine` is the
+  loop's; the shell rewrite, failed-output diagnosis and line deltas are
+  `lib/progress/tool_rows.ts`; the field caps and heartbeat limiter are
+  `lib/progress/adapter_common.ts`. Each takes facts a translator extracted,
+  never a message.
+
+`lib/run_loop.replay.test.ts` pins the loop's whole transcript over both probe
+recordings (`test/fixtures/probe*.loop.ndjson`).

@@ -184,7 +184,7 @@ is captured to `playground/.devtools/generations.json` (gitignored). Inspect
 with `npx @ai-sdk/devtools` (port 4983). Opt out per run with
 `AGENT_DEVTOOLS=false pnpm play …`. The coding agent is an Agent SDK session,
 not an AI SDK model — its full transcript is the run's
-`.aep-playground/runs/<ts>/…/claude.log` instead.
+`.aep-playground/runs/<ts>/…/runtime.log` instead.
 
 Beside it, `agent-sessions/` is the runtime's own scratch — the lead's
 transcript, a fanned-out subagent's, and the output files its backgrounded tasks
@@ -251,6 +251,48 @@ wrapped row makes the block one physical line taller than the cursor arithmetic
 believes, and the next erase would eat the transcript instead. The failure mode is
 "the block is short", never "the transcript is mangled". Closing takes the block
 down and leaves the merged end-of-run pass with no residue above it.
+
+## Choosing the coding-agent runtime
+
+The runtime is the platform's own organization setting, read from your shell and
+forwarded into the container by name exactly as a dispatch stamps it onto a pod:
+
+```
+# Claude Code (the default) — nothing to set
+pnpm play /abs/path/to/project code --yes
+
+# OpenCode, on haiku
+AEP_AGENT_RUNTIME=opencode AEP_AGENT_MODEL=claude-haiku-4-5 \
+  pnpm play /abs/path/to/project code --yes
+```
+
+Images, defaults and OpenCode's mode and credential limits are in `play --help`;
+each runtime's entry is one `RUNTIME_PROFILES` record (`src/engine/coding-run.ts`),
+and an unknown `AEP_AGENT_RUNTIME` is refused by the runner's own parser.
+
+Only `local.ts` and the skill library are mounted over the image: **the runner's
+own `src/` is the image's**, so a change to the runner (either runtime's adapter)
+is not in a playground run until `FORCE=1 make build-runner`.
+
+What a run leaves in `<project>/.aep-playground/runs/<stamp>-code/`, and what to
+read in it:
+
+| File | Claude Code | OpenCode |
+|---|---|---|
+| `progress.ndjson` | the run events v2 feed, as the console gets it; before the session, a `[skills] workflow: … · pinned: … · N available: …` notice | same contract — `run_started.runtime` is `opencode`, every `agent_started` says `background: false`, `run_settled.usage.models[]` per model |
+| `.logs/runtime.log` | every raw SDK message | every raw bus event, plus the adapter's own `aep.skills` (first line: the skills the server discovered) and `aep.tick`; per-token deltas are never logged |
+| `.logs/claude-debug.log`, `claude-stderr.log` | the CLI's debug log and stderr | — |
+| `.logs/opencode.stderr` | — | the server's `DEBUG` log (`--print-logs`); plugin loading, permission evaluation and provider errors are here |
+| `.logs/opencode.config.json` | — | the exact config the server was started with (no credential in it) |
+| `.logs/prompt-appendix.md` | the exact appendix the lead got (workflow → pinned skills → glossary), preset `append` | same text, the `instructions` file |
+| `.logs/session-context.jsonl` | one line per session: `{session, agent, appendix}` (`lead` from the start, subagents from `SubagentStart`), and `{session, skill}` per `Skill` call | same shape, from the guard plugin: `appendix` is observed in each session's first system prompt (`aep` true, `general*` false) |
+| `agent-sessions/final/` | the SDK's session transcripts | OpenCode's data dir: `opencode.db` (sqlite: every session's messages and parts) and its own logs |
+
+A run that fails its start-time assertions (guard plugin not loaded, a tool
+hidden by a permission rule, the background flag leaked) never sends a prompt:
+it ends with an `error` notice naming the problem and a failed settle.
+`play <dir> log` parses Claude Code's message shapes; for an OpenCode run read
+`progress.ndjson` and `runtime.log` directly.
 
 ## Fidelity contract
 

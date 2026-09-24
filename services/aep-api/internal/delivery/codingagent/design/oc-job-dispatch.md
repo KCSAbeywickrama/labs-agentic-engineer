@@ -117,6 +117,15 @@ only and break the next dispatch of every existing one. Deliberately not a `Clus
 wso2cloud's org-default-resources bootstrap: the BFF owns the template, so it
 owns its upgrades.
 
+One type serves both coding-agent runtimes. It carries a `runtime` parameter
+(enum `claude-code | opencode`, default `claude-code`) that renders as the
+`aep.wso2.com/runtime` label on the Job and on its pod, merged over
+`metadata.labels` / `metadata.podSelectors` with `oc_merge` so the observer's
+pod selectors stay intact. The pods otherwise differ only in their image, which
+the Workload carries, so a second type would duplicate every pin below for one
+string. The convergence above is what rolls a changed body out: the next
+dispatch into an org whose stored type lacks the parameter updates it in place.
+
 The type pins the cost envelope rather than trusting callers: `backoffLimit: 0`
 (the runner pushes commits and opens pull requests — a silent retry would repeat
 side effects), `activeDeadlineSeconds` (a coding cycle passes 3h — it ends with a browser
@@ -136,16 +145,29 @@ not stated here; duplicating it would let the two drift apart silently.
 
 ## The org's runtime and model ride on the same env
 
-`AEP_AGENT_RUNTIME` and `AEP_AGENT_MODEL` carry the organization's `codingAgent`
-setting (ADR-0028) onto every cycle, beside the credential ref ADR-0016 already
-resolves. They are **copied, not referenced**: a change applies from the next
-cycle, because a run that re-read the setting halfway through would leave a feed
+`AEP_AGENT_RUNTIME` and `AEP_AGENT_MODEL` carry the
+organization's `agents` setting (ADR-0028) onto every cycle, beside the
+credential ref. The setting is read FIRST, because the runtime decides the
+credential: `ResolveCodingSecretRef(org, runtime)` returns the org's Claude
+subscription (mounted as `CLAUDE_CODE_OAUTH_TOKEN`) only when the runtime is
+Claude Code, and its API key (`ANTHROPIC_API_KEY`) otherwise; exactly one of the
+two reaches the run (ADR-0034). They are **copied, not referenced**: a
+change applies from the next cycle, because a run that re-read the setting halfway through would leave a feed
 whose model names disagree with the tokens they were billed for. An org that
 never opened the setting gets the platform defaults, which is exactly what every
 dispatch carried before it existed — but a resolver that ERRORS fails the
 dispatch rather than falling back, since the org did choose something and
 launching on the defaults would bill it for a model it moved off without ever
 saying so.
+
+The runtime also picks the image: `AGENT_RUNNER_IMAGE` for Claude Code,
+`AGENT_RUNNER_IMAGE_OPENCODE` for OpenCode (two tags from one Dockerfile). Neither
+has a built-in default; an OpenCode cycle with no OpenCode image fails its
+dispatch naming the variable rather than starting on an image with no OpenCode
+binary. The dispatcher stamps the same runtime as the Component's `runtime`
+parameter and as the `aep.wso2.com/runtime` label on the Component and Workload.
+An OpenCode cycle that did not resolve to an API key fails closed
+([ADR-0034](../../../../../../docs/decisions/ADR-0034-the-coding-credential-is-a-subscription.md)).
 
 The type name is also what wso2cloud's entitlement gate keys on
 (`job/coding-agent`, `coding-agent`). A create over the org's cap answers

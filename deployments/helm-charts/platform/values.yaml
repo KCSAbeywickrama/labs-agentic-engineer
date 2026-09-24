@@ -122,6 +122,13 @@ codingAgentRunner:
   # The release pipeline pins this to ghcr.io/wso2/aep/remote-worker:<version>;
   # empty disables coding dispatch (it fails loudly).
   image: "ghcr.io/wso2/aep/remote-worker:latest"
+  # The OpenCode variant: the same Dockerfile's runner-opencode stage (the
+  # image above plus the pinned OpenCode binary), used for organizations whose
+  # coding-agent runtime is OpenCode. Empty makes an OpenCode cycle's dispatch
+  # fail naming AGENT_RUNNER_IMAGE_OPENCODE; Claude Code orgs are unaffected.
+  # Set it to the published OpenCode runner tag once the release pipeline
+  # builds one.
+  opencodeImage: ""
 
 # Coding-agent dispatch wiring.
 #

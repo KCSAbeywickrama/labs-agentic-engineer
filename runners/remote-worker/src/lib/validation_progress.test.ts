@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import { observedCall } from "../runtime/claude/tools.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -29,8 +30,11 @@ import {
 const STUB = `// spec: tests/validation/test-plan.md § AC-004-a\n`;
 const FILLED = `${STUB}\nimport { test, expect } from "@playwright/test";\n\ntest('AC-004-a: shows an error', async ({ page }) => {});\n`;
 
+// Claude Code's tool shapes, through Claude Code's own adapter normaliser — the
+// watcher reads only the port's `ObservedCall`, and these cases pin both halves:
+// the derivation, and that Claude's calls reach it unchanged.
 const updates = (tool: string, input: unknown, state = new ValidationProgressState()) =>
-  validationProgressUpdates(tool, input, state);
+  validationProgressUpdates(observedCall(tool, input), state);
 
 // The tracker takes plain arguments, not a runtime's hook shape — see
 // ValidationProgressTracker.observe. Which mechanism delivers a tool call is the
@@ -211,7 +215,7 @@ test("validation-progress: a status is published once, not once per call", () =>
   const seen: ProgressItemUpdate[] = [];
   const tracker = createValidationProgressTracker((u) => seen.push(u));
   for (let i = 0; i < 5; i += 1) {
-    tracker.observe("Edit", { file_path: "tests/e2e/specs/AC-004-a.spec.ts" }, "toolu_01");
+    tracker.observe(observedCall("Edit", { file_path: "tests/e2e/specs/AC-004-a.spec.ts" }), "toolu_01");
   }
   assert.deepEqual(seen, [{ itemId: "AC-004-a", status: "authoring" }]);
 });
@@ -220,7 +224,7 @@ test("validation-progress: a run settles from the outcome of its own tool call",
   const seen: ProgressItemUpdate[] = [];
   const tracker = createValidationProgressTracker((u) => seen.push(u));
 
-  tracker.observe("Bash", { command: "npm test --prefix tests/e2e -- specs/AC-004-a.spec.ts" }, "toolu_run");
+  tracker.observe(observedCall("Bash", { command: "npm test --prefix tests/e2e -- specs/AC-004-a.spec.ts" }), "toolu_run");
   tracker.settle("toolu_run", false);
   // A tool call that was never a run settles nothing.
   tracker.settle("toolu_other", true);
@@ -240,8 +244,7 @@ test("validation-progress: watching a call decides nothing about it", () => {
   // all.
   const tracker = createValidationProgressTracker(() => {});
   const decision: void = tracker.observe(
-    "Write",
-    { file_path: "tests/e2e/specs/AC-004-a.spec.ts", content: FILLED },
+    observedCall("Write", { file_path: "tests/e2e/specs/AC-004-a.spec.ts", content: FILLED }),
     "toolu_01",
   );
   assert.equal(decision, undefined);
@@ -250,7 +253,7 @@ test("validation-progress: watching a call decides nothing about it", () => {
 test("validation-progress: a pass recorded through the tracker arms healing", () => {
   const seen: ProgressItemUpdate[] = [];
   const tracker = createValidationProgressTracker((u) => seen.push(u));
-  const run = (tool: string, input: unknown, id: string) => tracker.observe(tool, input, id);
+  const run = (tool: string, input: unknown, id: string) => tracker.observe(observedCall(tool, input), id);
 
   run("Write", { file_path: "tests/e2e/specs/AC-004-a.spec.ts", content: FILLED }, "t1");
   run("Bash", { command: "npm test --prefix tests/e2e -- specs/AC-004-a.spec.ts" }, "t2");
@@ -275,6 +278,6 @@ test("validation-progress: a run nobody settles leaves the criterion running", (
   // criterion, which on a heal re-run means a criterion that was just failing.
   const seen: ProgressItemUpdate[] = [];
   const tracker = createValidationProgressTracker((u) => seen.push(u));
-  tracker.observe("Bash", { command: "npm test --prefix tests/e2e -- specs/AC-004-a.spec.ts" }, "toolu_sev");
+  tracker.observe(observedCall("Bash", { command: "npm test --prefix tests/e2e -- specs/AC-004-a.spec.ts" }), "toolu_sev");
   assert.deepEqual(seen, [{ itemId: "AC-004-a", status: "running" }]);
 });

@@ -31,10 +31,10 @@
 // true and the model has one place to look rather than a definition buried
 // mid-prompt.
 //
-// A second runtime is a second entry in GLOSSARIES and nothing else. The runtime
+// Each runtime is one entry in GLOSSARIES and nothing else. The runtime
 // PORT — `runtime/port.ts`, one interface over starting, translating and
 // settling a session — is the larger seam this sits inside: a `Runtime` answers
-// `toolGlossary()` out of this table, and `progress/claude_adapter.ts` is the
+// `toolGlossary()` out of this table, and `runtime/claude/translate.ts` is the
 // translation half of the same adapter.
 //
 // The table is keyed on the port's `RuntimeName`, which is also the wire value
@@ -49,9 +49,12 @@ import { DEFAULT_RUNTIME, type RuntimeName } from "../runtime/port.js";
  *
  * Every role the `aep` skill names in prose has an entry here, and nothing else
  * does: this is a lookup table the agent reads under load, not a second copy of
- * the workflow. The model aliases are listed because the skill tells the lead to
- * pick one ("the fast model", "the default one") and a lead that guesses an
- * alias spends a turn on a schema error.
+ * the workflow. The model is named because the skill tells the lead to pick one
+ * ("the fast model", "the default one") and a lead that guesses an alias spends
+ * a turn on a schema error. A run has ONE model, the organization's setting, so
+ * both of those words resolve to it: Claude Code pins every alias and the
+ * subagent model to it (`modelPinEnv`, `runtime/claude/runtime.ts`) and
+ * OpenCode's one subagent, `general`, runs on it (`runtime/opencode/config.ts`).
  *
  * **Only models the platform can PRICE are offered.** `modelcost.SumCost` is
  * all-or-nothing by design — one slice whose model has no `model_rates` row
@@ -61,27 +64,48 @@ import { DEFAULT_RUNTIME, type RuntimeName } from "../runtime/port.js";
  * in that cycle, and it does it silently. This list offered `opus` while only
  * `claude-sonnet-5` and `claude-haiku-4-5` were seeded, which made the skill's
  * own "pick the model for the job" the way to lose a cycle's cost. Keep this in
- * step with `CodingAgentModel` in the contract, which is narrowed to the priced
+ * step with `AgentModel` in the contract, which is narrowed to the priced
  * set for the same reason; adding an alias here means seeding its rate row
  * first.
  *
- * PARTIAL on purpose: `RuntimeName` carries every runtime the org setting can
- * name, and only the ones this build can actually run have an entry. A missing
- * entry throws below rather than silently shipping a session whose workflow
- * names roles nothing binds.
+ * TOTAL over `RuntimeName`: every runtime the org setting can name has an
+ * entry, so a new name without one is a type error here rather than a session
+ * whose workflow names roles nothing binds.
  */
-const GLOSSARIES: Partial<Record<RuntimeName, string>> = {
+const GLOSSARIES: Record<RuntimeName, string> = {
   "claude-code": [
     "## Tool glossary (Claude Code)",
     "",
     "The roles your workflow names, and the tools that play them in this session:",
     "",
     "- **fan-out tool**: `Agent` — `run_in_background: true` for a builder;" +
-      " `model:` `haiku` (the fast model) or `sonnet` (the default)",
+      " `model:` `sonnet` — this session runs one model, so the fast model and the default one are both `sonnet`",
     "- **wait tool**: `TaskOutput` with `block: true` — one call per agent you dispatched",
     "- **stop tool**: `TaskStop`, for an agent that has run away",
     "- **task list**: `TaskCreate` and `TaskUpdate`",
     "- **edit**: `Edit`, `Write` · **shell**: `Bash`",
+  ].join("\n"),
+  // OpenCode runs its fan-out in the FOREGROUND only (ADR-0015): the platform
+  // does not set the experimental background flag, so the lead is held until
+  // every builder of a wave returns. The skill's prose still says "dispatch in
+  // the background … keep working while they build", which describes the Claude
+  // Code shape; this entry is where a lead reading that prose on OpenCode is
+  // told, in its own terms, what the words mean in this session. There is one
+  // subagent, `general`, on the org's model (`runtime/opencode/config.ts`).
+  opencode: [
+    "## Tool glossary (OpenCode)",
+    "",
+    "The roles your workflow names, and the tools that play them in this session:",
+    "",
+    '- **fan-out tool**: `task` with `subagent_type: "general"` — this session runs one model, so the fast' +
+      " model and the default one are both `general`. There is no background mode in this session:" +
+      ' "dispatch in the background" means issue every `task` call of the wave as PARALLEL tool calls' +
+      " in ONE message. They run at the same time and each returns its builder's report when that" +
+      " builder finishes; you are held until the slowest one does.",
+    "- **wait tool**: none is needed. Each `task` call IS the wait: its result is the report.",
+    "- **stop tool**: none in this session; a task you no longer need is left to finish",
+    "- **task list**: `todowrite`",
+    "- **edit**: `edit`, `write` · **shell**: `bash`",
   ].join("\n"),
 };
 

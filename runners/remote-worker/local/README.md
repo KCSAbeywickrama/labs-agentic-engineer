@@ -30,7 +30,7 @@ cp env.local.example .env.local     # fill in the four required values
 ```
 
 The runner streams progress NDJSON to stdout. After exit, the cloned
-workspace (including `.logs/claude.log`, the full SDK transcript) is kept
+workspace (including `.logs/runtime.log`, the full SDK transcript) is kept
 under `workspace/<org>/<project>/<taskId>/` for inspection.
 
 ## Validation tasks

@@ -68,10 +68,11 @@ fail at startup the way a missing anchor does.
    `npm run build` and reports clean is the same shape, and the run has no way to
    tell that report from a true one.
 
-4. **The lead names the model on the fan-out call.** A walk or a small fix runs
-   well on the fast model; a build does not. Nothing else in the run can make
-   that choice — the runner pins one model for the session, and only the lead
-   knows what a given subagent is for.
+4. **One model serves every agent.** The runner pins the organization's model
+   for the session, its subagents and the runtime's helper calls (ADR-0015).
+   The skill's "the fast model" and "the default one" both resolve to it
+   through the tool glossary, so a model named on the fan-out call cannot reach
+   a second model the org's key may not serve or the platform cannot price.
 
 5. **The lead's plan lives in the runtime's task list.** One entry per issue,
    `in_progress` when work starts and `completed` when it is committed. The list
@@ -95,7 +96,8 @@ fail at startup the way a missing anchor does.
 
    A second runtime is one more entry in `GLOSSARIES` and nothing else. This is
    deliberately *not* the runtime port: spawning, translating and settling a
-   session is a larger seam, and `progress/claude_adapter.ts` is its other half.
+   session is a larger seam, and `runtime/claude/translate.ts` is its other
+   half.
 
 ## Consequences
 

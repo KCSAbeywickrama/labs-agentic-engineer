@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import { observedCall } from "../runtime/claude/tools.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -44,7 +45,7 @@ const write = (file: string, content: string) => ({
 const bash = (command: string) => ({ toolName: "Bash", input: { command } });
 
 function stateFor(call: { toolName: string; input: unknown }, progress = new ValidationProgressState()) {
-  return ladderStateFor(call.toolName, call.input, progress);
+  return ladderStateFor(observedCall(call.toolName, call.input), progress);
 }
 
 // The brand the BFF classifies by, spelled out rather than read from the
@@ -333,7 +334,7 @@ async function fire(
   observe: ReturnType<typeof createValidationStatusLine>["observe"],
   input: { tool_name: string; tool_input: unknown; tool_use_id: string },
 ) {
-  return observe(input.tool_name, input.tool_input, input.tool_use_id);
+  return observe(observedCall(input.tool_name, input.tool_input), input.tool_use_id);
 }
 
 // The whole reason this mode exists. Step 9's exit 2 is "the ordinary loop, not

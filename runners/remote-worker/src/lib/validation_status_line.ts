@@ -66,7 +66,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { ValidationProgressState, WRITE_TOOLS, validationProgressUpdates } from "./validation_progress.js";
+import { ValidationProgressState, validationProgressUpdates } from "./validation_progress.js";
+import type { ObservedCall } from "../runtime/port.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -270,24 +271,19 @@ export class Ladder {
  * `exploring` / `authoring` / `running` here mean exactly what a row means. The
  * two ends are matched directly because no criterion status describes them.
  */
-export function ladderStateFor(
-  toolName: string,
-  toolInput: unknown,
-  progress: ValidationProgressState,
-): LadderState | undefined {
-  if (toolName === "Bash") {
-    const command = readCommand(toolInput);
-    if (REPORT_GENERATOR.test(command)) return "reporting";
-    if (INSTALL_VERB.test(command) && E2E_PACKAGE.test(command)) return "harness";
+export function ladderStateFor(call: ObservedCall, progress: ValidationProgressState): LadderState | undefined {
+  if (call.kind === "shell") {
+    if (REPORT_GENERATOR.test(call.command)) return "reporting";
+    if (INSTALL_VERB.test(call.command) && E2E_PACKAGE.test(call.command)) return "harness";
   }
 
   // Checked BEFORE the per-criterion derivation, which owns everything under
   // `specs/` — HARNESS_FILE excludes that path, so the two cannot both answer.
-  if (WRITE_TOOLS.has(toolName) && HARNESS_FILE.test(writtenPath(toolInput))) {
+  if ((call.kind === "write" || call.kind === "edit") && HARNESS_FILE.test(call.path)) {
     return "harness";
   }
 
-  for (const update of validationProgressUpdates(toolName, toolInput, progress)) {
+  for (const update of validationProgressUpdates(call, progress)) {
     // `planned` (the test plan) and `healing`/`pass`/`fail` are real criterion
     // statuses with no rung of their own: the first is covered by `harness`
     // already standing, and the rest are what the rows say, per criterion, far
@@ -297,19 +293,6 @@ export function ladderStateFor(
     }
   }
   return undefined;
-}
-
-function writtenPath(toolInput: unknown): string {
-  if (!toolInput || typeof toolInput !== "object") return "";
-  const input = toolInput as Record<string, unknown>;
-  const v = input.file_path ?? input.notebook_path;
-  return typeof v === "string" ? v : "";
-}
-
-function readCommand(toolInput: unknown): string {
-  if (!toolInput || typeof toolInput !== "object") return "";
-  const v = (toolInput as Record<string, unknown>).command;
-  return typeof v === "string" ? v : "";
 }
 
 /** Posts one line to the issue. Injected so the decision above owns no I/O. */
@@ -325,12 +308,12 @@ export interface ValidationStatusLine {
   /**
    * A tool call, before it runs: the rung it announces.
    *
-   * Wired onto `RuntimePolicy.observe.toolUse`, which is why it takes plain
-   * arguments rather than a runtime's hook shape — which mechanism delivers a
-   * call is the adapter's business. AWAITED there, unlike the per-criterion
+   * Wired onto `RuntimePolicy.observe.toolUse`, which is why it takes the call
+   * in the port's vocabulary (`ObservedCall`) rather than a runtime's tool name —
+   * which tool a runtime writes files with is the adapter's business. AWAITED there, unlike the per-criterion
    * watcher next door, because this one posts: see the comment on the body.
    */
-  observe(toolName: string, toolInput: unknown, toolUseId: string): Promise<void>;
+  observe(call: ObservedCall, toolUseId: string): Promise<void>;
   /** Called when a tool call settles, with the `ok` that reaches the feed. */
   settle(toolUseId: string, ok: boolean): void;
 }
@@ -428,8 +411,8 @@ export function createValidationStatusLine(
     onError(`status line capped at ${MAX_POSTS} posts for this cycle — the last line will stand`);
   };
 
-  const observe = async (toolName: string, toolInput: unknown, toolUseId: string): Promise<void> => {
-    const state = ladderStateFor(toolName, toolInput, progress);
+  const observe = async (call: ObservedCall, toolUseId: string): Promise<void> => {
+    const state = ladderStateFor(call, progress);
     if (state === "reporting") reportCall = toolUseId;
     if (state === undefined || !ladder.admit(state)) return;
 
