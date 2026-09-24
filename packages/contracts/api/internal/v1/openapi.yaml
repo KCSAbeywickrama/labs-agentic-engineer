@@ -121,11 +121,15 @@ components:
       - Email
       - Login
     ValidationContextResponse:
-      description: Deployed endpoints + criteria path for a validation run.
-        Generated as igen.ValidationContextResponse (no x-go-type) — igen must
-        stay a leaf, so the edge's internal handler projects the delivery
-        domain's own struct onto this wire shape (the same decoupling as
-        RefreshResponse).
+      description: The deployed endpoints a validation run drives. Generated as
+        igen.ValidationContextResponse (no x-go-type) — igen must stay a leaf,
+        so the edge's internal handler projects the delivery domain's own struct
+        onto this wire shape (the same decoupling as RefreshResponse).
+
+        It carries NO oracle path. It used to name the single
+        specs/validation/validation-criteria.json file; the oracle is now the
+        specs/acceptance/ directory, which the acceptance-run skill already
+        knows, so the field was a constant nothing read.
       type: object
       additionalProperties: false
       properties:
@@ -133,11 +137,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ComponentEndpoint'
-        criteriaPath:
-          type: string
       required:
       - endpoints
-      - criteriaPath
     ComponentEndpoint:
       type: object
       additionalProperties: false

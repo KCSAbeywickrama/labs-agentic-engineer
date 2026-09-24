@@ -37,15 +37,21 @@ type ComponentEndpoint struct {
 
 // ValidationContextResponse is the secure runtime-inputs payload the runner
 // fetches at dispatch time (never carried in the public issue): the deployed
-// endpoint URLs and the acceptance-criteria directory.
+// endpoint URLs, and nothing else.
+//
+// No ORACLE PATH rides here, and its absence is the point. The field used to name
+// the one validation-criteria.json file the compiled path graded; the oracle is a
+// DIRECTORY now, this side always answered the criteriaDirPath constant, and the
+// acceptance-run skill walks specs/acceptance/ without being told. A field whose
+// value never varies and whose reader does not exist is not a seam, it is a
+// second place for the two sides to disagree.
 //
 // No test account rides here, not even a username. The build publishes the whole
 // roster — logins included — on the roles gate ticket, and the agent reads it
 // there (ADR-0022). A copy in this payload would land on disk for the run's
 // lifetime and could disagree with the ticket.
 type ValidationContextResponse struct {
-	Endpoints    []ComponentEndpoint `json:"endpoints"`
-	CriteriaPath string              `json:"criteriaPath"`
+	Endpoints []ComponentEndpoint `json:"endpoints"`
 }
 
 // CycleLocator resolves a runner's CYCLE id to its project, fenced by the
@@ -99,8 +105,5 @@ func (s *ContextService) ValidationContext(ctx context.Context, cycleID, orgHand
 	if err != nil {
 		return nil, fmt.Errorf("validation context: resolve endpoints: %w", err)
 	}
-	return &ValidationContextResponse{
-		Endpoints:    eps,
-		CriteriaPath: criteriaDirPath,
-	}, nil
+	return &ValidationContextResponse{Endpoints: eps}, nil
 }

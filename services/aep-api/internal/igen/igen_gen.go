@@ -62,10 +62,10 @@ type RefreshResponse struct {
 	Token    string   `json:"token"`
 }
 
-// ValidationContextResponse Deployed endpoints + criteria path for a validation run. Generated as igen.ValidationContextResponse (no x-go-type) — igen must stay a leaf, so the edge's internal handler projects the delivery domain's own struct onto this wire shape (the same decoupling as RefreshResponse).
+// ValidationContextResponse The deployed endpoints a validation run drives. Generated as igen.ValidationContextResponse (no x-go-type) — igen must stay a leaf, so the edge's internal handler projects the delivery domain's own struct onto this wire shape (the same decoupling as RefreshResponse).
+// It carries NO oracle path. It used to name the single specs/validation/validation-criteria.json file; the oracle is now the specs/acceptance/ directory, which the acceptance-run skill already knows, so the field was a constant nothing read.
 type ValidationContextResponse struct {
-	CriteriaPath string              `json:"criteriaPath"`
-	Endpoints    []ComponentEndpoint `json:"endpoints"`
+	Endpoints []ComponentEndpoint `json:"endpoints"`
 }
 
 // publisherCCContextKey is the context key for publisherCC security scheme

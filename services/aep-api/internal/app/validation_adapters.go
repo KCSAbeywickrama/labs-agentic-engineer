@@ -90,20 +90,20 @@ func (a acceptanceCriteria) ReportAt(ctx context.Context, orgID, projectID, at s
 // Bundle, like the HEAD read above, so every file comes from ONE state of the
 // repo. An absent directory is an empty slice: a version whose oracle was never
 // authored is an ordinary state and the page says so in words, not by failing.
-func (a acceptanceCriteria) CriteriaAt(ctx context.Context, orgID, projectID, at string) ([]gen.ValidationCriteriaFile, error) {
+func (a acceptanceCriteria) CriteriaAt(ctx context.Context, orgID, projectID, at string) ([]gen.AcceptanceCriteriaFile, error) {
 	bundle, err := a.files.Bundle(ctx, orgID, projectID, acceptanceDirPath, at)
 	if err != nil {
 		if errors.Is(err, spec.ErrFileNotFound) {
-			return []gen.ValidationCriteriaFile{}, nil
+			return []gen.AcceptanceCriteriaFile{}, nil
 		}
 		return nil, err
 	}
-	out := make([]gen.ValidationCriteriaFile, 0, len(bundle.Files))
+	out := make([]gen.AcceptanceCriteriaFile, 0, len(bundle.Files))
 	for _, fc := range bundle.Files {
 		if !strings.HasSuffix(fc.Path, ".feature") {
 			continue
 		}
-		out = append(out, gen.ValidationCriteriaFile{Path: fc.Path, Content: fc.Content})
+		out = append(out, gen.AcceptanceCriteriaFile{Path: fc.Path, Content: fc.Content})
 	}
 	return out, nil
 }

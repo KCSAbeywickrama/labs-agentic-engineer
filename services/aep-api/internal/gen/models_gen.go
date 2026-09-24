@@ -1309,6 +1309,15 @@ type AcceptAssumptionBody struct {
 	Note string `json:"note,omitempty"`
 }
 
+// AcceptanceCriteriaFile One acceptance criteria file as it stood at the snapshot's commit.
+type AcceptanceCriteriaFile struct {
+	// Content The file's Gherkin source, verbatim.
+	Content string `json:"content"`
+
+	// Path Repository path, e.g. specs/acceptance/checkout.feature.
+	Path string `json:"path"`
+}
+
 // AccessRequest defines model for AccessRequest.
 type AccessRequest struct {
 	ConsumerComponentName string    `json:"consumerComponentName"`
@@ -3457,15 +3466,6 @@ type Usage struct {
 	OutputTokens int64  `json:"outputTokens"`
 }
 
-// ValidationCriteriaFile One acceptance criteria file as it stood at the snapshot's commit.
-type ValidationCriteriaFile struct {
-	// Content The file's Gherkin source, verbatim.
-	Content string `json:"content"`
-
-	// Path Repository path, e.g. specs/acceptance/checkout.feature.
-	Path string `json:"path"`
-}
-
 // ValidationDetail One version's validation history, already filtered to what asks the question.
 // `runs` holds only runs that ATTEMPTED validation — ones holding at least one VALIDATION cycle, which is the fact rather than the kind: a task run never holds one, and a run that did ask the criteria is listed whatever its kind says it was for. Each run's `cycles` holds only its VALIDATION cycles. Both filters are applied here rather than by the client: they are the platform's own rules, and the surface that re-derived them read a newer non-validating run as the version's answer and hid a real verdict. The views are the same MilestoneRunView and RunCycleView the run story serves, so one projection describes a cycle everywhere.
 type ValidationDetail struct {
@@ -3500,7 +3500,7 @@ type ValidationSnapshot struct {
 	Commit string `json:"commit"`
 
 	// Criteria Every specs/acceptance/*.feature file at that commit. The report annotates these; they are the spine the view renders and the report is the overlay.
-	Criteria []ValidationCriteriaFile `json:"criteria"`
+	Criteria []AcceptanceCriteriaFile `json:"criteria"`
 
 	// Report The raw tests/acceptance/report.json at that commit, verbatim, for the client's own parser to read. Null while the attempt is still running: it has not committed one yet, and an absent report is not the same fact as an empty one.
 	Report *string `json:"report,omitempty"`

@@ -8754,7 +8754,7 @@ components:
         - model
         - costUsd
       type: object
-    ValidationCriteriaFile:
+    AcceptanceCriteriaFile:
       additionalProperties: false
       description: One acceptance criteria file as it stood at the snapshot's commit.
       properties:
@@ -8892,7 +8892,7 @@ components:
           description: Every specs/acceptance/*.feature file at that commit. The report annotates
             these; they are the spine the view renders and the report is the overlay.
           items:
-            $ref: '#/components/schemas/ValidationCriteriaFile'
+            $ref: '#/components/schemas/AcceptanceCriteriaFile'
           type: array
         report:
           description: >-
