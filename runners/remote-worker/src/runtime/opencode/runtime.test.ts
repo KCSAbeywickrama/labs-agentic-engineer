@@ -49,6 +49,7 @@ test("childEnvironment: the policy's env, the runtime's four flags, and the guar
     secrets: "/t/s.json",
     ready: "/t/r",
     instructions: "/t/instructions.md",
+    probe: "/t/p",
   });
   assert.equal(env.PATH, "/bin");
   assert.equal(env.ANTHROPIC_API_KEY, "k");
@@ -64,6 +65,7 @@ test("childEnvironment: the policy's env, the runtime's four flags, and the guar
   assert.equal(env.AEP_GUARD_SECRETS_FILE, "/t/s.json");
   assert.equal(env.AEP_GUARD_READY, "/t/r");
   assert.equal(env.AEP_GUARD_APPENDIX, "/t/instructions.md");
+  assert.equal(env.AEP_GUARD_PROBE_MARKER, "/t/p");
   assert.equal(env.AEP_GUARD_SESSION_LOG, "/work/proj/.logs/session-context.jsonl");
   // Decided: never set by the platform. It turns `.claude/skills/` discovery off.
   assert.equal(env.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS, undefined);
@@ -73,7 +75,7 @@ test("childEnvironment: the policy's env, the runtime's four flags, and the guar
 // A leaked flag is FAILED at start (startup.ts reads the task schema), not
 // silently removed here — removing it would hide the leak and keep the run.
 test("childEnvironment: a background flag in the pod's env is passed through for the assertion to catch", () => {
-  const env = childEnvironment(policy({ OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS: "true" }), { secrets: "s", ready: "r", instructions: "i" });
+  const env = childEnvironment(policy({ OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS: "true" }), { secrets: "s", ready: "r", instructions: "i", probe: "p" });
   assert.equal(env.OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS, "true");
 });
 

@@ -312,15 +312,6 @@ const RUNTIME_PROFILES: Record<RuntimeName, RuntimeProfile> = {
   },
 };
 
-/**
- * The runtime a run asks for — `AEP_AGENT_RUNTIME` from the developer's shell,
- * read by the RUNNER's own parser, so an unknown name is refused here exactly
- * as a pod would refuse it (`UnsupportedRuntimeError`), before anything starts.
- */
-export function codingRuntime(env: NodeJS.ProcessEnv = process.env): RuntimeName {
-  return runtimeNameFromEnv(env);
-}
-
 export function runnerImage(runtime: RuntimeName, env: NodeJS.ProcessEnv = process.env): string {
   const profile = RUNTIME_PROFILES[runtime];
   return env[profile.imageEnv] || profile.defaultImage;
@@ -329,7 +320,8 @@ export function runnerImage(runtime: RuntimeName, env: NodeJS.ProcessEnv = proce
 /**
  * The runtime this run gets, or why it cannot start in this mode with these
  * credentials. Checked before any build or spawn, for refusals the runner would
- * otherwise make a minute later.
+ * otherwise make a minute later. `AEP_AGENT_RUNTIME` is read by the RUNNER's
+ * own parser, so an unknown name is refused exactly as a pod would refuse it.
  */
 export function resolveRuntime(
   mode: "docker" | "host",
@@ -338,7 +330,7 @@ export function resolveRuntime(
 ): { runtime: RuntimeName } | { refusal: string } {
   let runtime: RuntimeName;
   try {
-    runtime = codingRuntime(env);
+    runtime = runtimeNameFromEnv(env);
   } catch (err) {
     if (err instanceof UnsupportedRuntimeError) return { refusal: err.message };
     throw err;
@@ -691,7 +683,7 @@ export function dockerInvocation(opts: CodingRunOptions, runDir: string, contain
     `AEP_LOCAL_SKILLS_DIR=${IMAGE_LIBRARY_DIR}`,
     // By name, like the credential: docker forwards each only when it is set.
     ...FORWARDED_AGENT_SETTINGS.flatMap((name) => ["-e", name]),
-    runnerImage(codingRuntime()),
+    runnerImage(runtimeNameFromEnv()),
     "npx",
     "tsx",
     "src/local.ts",

@@ -33,26 +33,10 @@ import { trimSummary } from "./adapter_common.js";
 // --- paths ----------------------------------------------------------------------
 
 /**
- * A path inside the workspace, said the way a reader of the workspace would say
- * it.
- *
- * The workspace root is ~95 characters of nothing — a mount point, an
- * environment name, a project handle and a UUID — and it is identical on every
- * row of a run. Live (2026-09-08) that pushed the only meaningful part of a
- * `Read` off the right edge and left ten consecutive reads looking like one
- * repeated line: `$ Read /home/aep/aep-workspace/default/employees-submit-…
- * /07f229c4-4e80-4168-9609-e5a4c4ff7f66/specs/design/security.json`.
- *
- * Two cases are deliberately left alone. A path OUTSIDE the workspace stays
- * absolute, because "outside" is the interesting half of that fact — the
- * runtime's own session directory under `$HOME/.claude/projects/…` reads as a
- * detour precisely because it does not start where the project does. And a path
- * under the workspace's own `.claude/` needs nothing special: relativised it
- * becomes `.claude/skills/aep/references/component-contract.md`, which is both
- * short and unambiguous about being tooling rather than the product.
- *
- * Matching is on a path boundary, so a sibling checkout at `<root>-old` is not
- * mistaken for a child of the root.
+ * A path inside the workspace, relative to it: the ~95-character root is the
+ * same on every row and pushes the meaningful tail off the width. A path
+ * outside stays absolute, since "outside" is the interesting fact. Matched on a
+ * path boundary, so `<root>-old` is not a child.
  */
 export function relativiseToWorkspace(path: string, root: string): string {
   if (!root || !path.startsWith("/")) return path;
@@ -63,18 +47,9 @@ export function relativiseToWorkspace(path: string, root: string): string {
 // --- shell commands ----------------------------------------------------------
 
 /**
- * A shell command as a READER's line: the workspace root collapsed to `~ws`.
- *
- * `command` keeps the exact text — see `shellEvents` — and this is the other
- * field the contract defines: "one line describing the call, composed by the
- * producer for a reader". A live run (2026-09-08) put 66 of 379 rows through the
- * feed carrying the same ~95-character prefix, and `agent_progress` then
- * truncated them to `Running cat /home/aep/aep-workspace/default/hello-world-s…`
- * — a row that says nothing at all. Collapsing the prefix is what makes the tail
- * survive the width.
- *
- * `~ws` rather than deleting the prefix outright: a bare `hello-webapp && npm
- * run build` would read as a command someone could paste, and it is not one.
+ * A shell command as a READER's line: the workspace root collapsed to `~ws`, so
+ * the tail survives the width. `~ws` rather than nothing, so the line does not
+ * read as a command someone could paste; `command` keeps the exact text.
  */
 function commandForReader(cmd: string, root: string): string {
   if (!root) return cmd;
@@ -107,6 +82,24 @@ function shellFields(cmd: string, shown: string): { summary: string; command?: s
 }
 
 /**
+ * A tool input as a reader's line: the first of `fields` it carries (a runtime
+ * lists its own argument spellings, most identifying first), relativised
+ * before the cap so the cap spends itself on the part that names the file;
+ * otherwise a compact JSON dump, which still surfaces an unknown tool.
+ */
+export function summaryFromInput(input: unknown, fields: readonly string[], workspaceRoot: string): string {
+  if (!input || typeof input !== "object") return "";
+  const o = input as Record<string, unknown>;
+  const candidate = fields.map((f) => o[f]).find((v) => v !== undefined && v !== null);
+  if (typeof candidate === "string") return trimSummary(relativiseToWorkspace(candidate, workspaceRoot));
+  try {
+    return trimSummary(JSON.stringify(o));
+  } catch {
+    return "";
+  }
+}
+
+/**
  * What one shell command becomes on the feed.
  *
  * The three rewrites exist because a commit, a push and a `gh` call are the
@@ -117,12 +110,8 @@ function shellFields(cmd: string, shown: string): { summary: string; command?: s
  * plain `tool_use` row: a row prints the name the runtime used, while the three
  * effects are named by the contract and by nothing a runtime spells.
  *
- * A command's absolute paths are NOT shortened the way a file tool's argument
- * is. The contract calls this field "the command line that ran", and a relative
- * path in it would be a claim that resolves only from the workspace root —
- * which is not where the command ran once an agent has `cd`-ed into a
- * component. Editing the text of a command a reader may re-run is the one place
- * brevity is worth less than truth.
+ * A command's paths are NOT relativised: after a `cd` a relative path would
+ * resolve somewhere else, and `command` is the text a reader may re-run.
  *
  * The caller stamps `agentId` and `toolUseId` onto what comes back.
  */
@@ -161,32 +150,14 @@ export function shellEvents(command: string, workspaceRoot: string, tool: string
 const EXIT_CODE_LINE = /^Exit code (\d+)\b/;
 
 // A line that announces the fault, as opposed to the build chatter above it.
-// `bal build` prints nine lines of dependency pulls before the first ERROR, so
-// "the line after the exit code" would report "Compiling source" — technically
-// the first line and useless as a diagnosis.
-//
-// Matched ANYWHERE in the line, not anchored at its start. Anchoring looked
-// like the conservative choice and it excluded the commonest compiler-error
-// shape there is — `src/main.tsx(13,44): error TS2307: …` puts the file first,
-// so `^error` never fires and such a line only ever read well when it happened
-// to also be the first line of output. Every diagnostic family this feed sees
-// (tsc, javac, ballerina, gcc, a test runner's failure line) leads with a
-// location. The cost of unanchoring is a prose line that merely mentions the
-// word winning over the real one; the fallback below makes that the mild
-// failure, since the tail of the output is where a diagnosis lives anyway.
+// Unanchored: compiler errors lead with a location
+// (`src/main.tsx(13,44): error TS2307: …`).
 const ANNOUNCES_FAULT = /\b(?:error|fatal|panic|exception|failed)\b/i;
 
 /**
- * A trailing line that TELLS THE READER WHAT TO DO NEXT rather than saying what
- * went wrong. Skipped when walking back from the end for a diagnosis.
- *
- * This is the other half of the last-line rule, and it was learned the hard way.
- * Taking the last line fixed a live run's `--- expense-webapp dir ---`, and then
- * the very next run reported `Learn about accessibility experiences using
- * `gh help accessibility`` as the reason a `gh issue view` failed — gh prints
- * that footer after every error. `git`, `cargo` and `npm` all end the same way
- * ("See 'git help'", "For more information about this error…"), so the fault is
- * the LAST line that is not guidance, not the last line.
+ * A trailing line that tells the reader what to do next (`gh`, `git`, `cargo`
+ * and `npm` all end errors with one), skipped when walking back from the end
+ * for a diagnosis.
  */
 const OFFERS_GUIDANCE =
   /^\s*(?:learn (?:more|about)\b|see\b|try\b|usage:|hint:|note:|for more info(?:rmation)?\b|run ['"`]|use ['"`])/i;
@@ -235,13 +206,8 @@ export function failureDetail(text: string): { exitCode?: number; summary: strin
   const code = EXIT_CODE_LINE.exec(lines[0]);
   const rest = code ? lines.slice(1) : lines;
   let at = rest.findIndex((l) => ANNOUNCES_FAULT.test(l));
-  // Nothing announced a fault, so fall back to the LAST line rather than the
-  // first. Shell output is a banner then a diagnosis: a compiler names its
-  // sources, npm prints its version notice, a test runner lists what it ran,
-  // and the sentence that explains the exit code comes last. Taking line 0 put
-  // `--- expense-webapp dir ---` and `import React from 'react';` on the feed
-  // as two of four failure diagnoses in one live run (2026-09-08) — an echoed
-  // heading and the first line of a file the command had cat'd.
+  // Nothing announced a fault: the LAST line, since shell output is a banner
+  // then a diagnosis.
   if (at < 0) {
     // Walk back past the tool's closing advice to the last line that states
     // something. If a command printed nothing BUT guidance, the last line is

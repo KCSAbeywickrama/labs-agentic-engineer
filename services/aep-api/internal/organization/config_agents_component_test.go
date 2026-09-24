@@ -295,6 +295,42 @@ func TestConfigAgents_Refusals(t *testing.T) {
 	}
 }
 
+// A blank credential is refused on its section and writes nothing: it cannot
+// stand in for the key the subscription needs, and it cannot answer 200 while
+// storing nothing. Whitespace passes the contract's minLength, so the service
+// is what refuses it.
+func TestConfigAgents_BlankCredentialsAreRefused(t *testing.T) {
+	t.Parallel()
+	c := newConfigHarness(t)
+
+	// A blank key alone.
+	r := c.h.AsOrg("acme").Patch(configPath, `{"llm":{"kind":"anthropic","apiKey":"   "}}`)
+	refused(t, r.Code, r.Body.String(), "llm", "anthropic_key_missing")
+	// A blank key beside a real subscription token.
+	r = c.h.AsOrg("acme").Patch(configPath, `{"llm":{"kind":"anthropic","apiKey":"   "},"agents":{"subscription":{"kind":"claude","token":"`+goodToken+`"}}}`)
+	refused(t, r.Code, r.Body.String(), "llm", "anthropic_key_missing")
+	if creds, settings, secrets := c.cardRows(t, "acme"); creds+settings+secrets != 0 {
+		t.Fatalf("a blank key left rows behind: credentials=%d settings=%d secrets=%d", creds, settings, secrets)
+	}
+
+	// A blank token, with a key connected.
+	if r := c.h.AsOrg("acme").Patch(configPath, llmConnect(goodAnthKey)); r.Code != 200 {
+		t.Fatalf("key: %d %s", r.Code, r.Body.String())
+	}
+	r = c.h.AsOrg("acme").Patch(configPath, subscribe("   "))
+	refused(t, r.Code, r.Body.String(), "agents", "anthropic_key_missing")
+	if a := agentsOf(t, c.h.AsOrg("acme").Get(configPath).Body.Bytes()); a["subscription"] != nil {
+		t.Fatalf("a blank token was stored: %v", a)
+	}
+
+	// An empty string never reaches the service: the contract's minLength refuses it.
+	for _, body := range []string{`{"llm":{"kind":"anthropic","apiKey":""}}`, subscribe("")} {
+		if r := c.h.AsOrg("acme").Patch(configPath, body); r.Code != 400 {
+			t.Errorf("%s: want 400, got %d %s", body, r.Code, r.Body.String())
+		}
+	}
+}
+
 // The request validator refuses a value outside the contract's enums before
 // any handler runs; the section never persists one.
 func TestConfigAgents_ValuesOutsideTheEnumsAreRefused(t *testing.T) {

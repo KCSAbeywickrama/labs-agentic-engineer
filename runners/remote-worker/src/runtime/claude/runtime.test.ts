@@ -26,11 +26,10 @@ import {
   createClaudeCodeRuntime,
   openPromptStream,
   sessionContextHook,
-  watchHook,
 } from "./runtime.js";
 import type { SessionContextRecord } from "../../lib/run_context.js";
 import { BASE_ALLOWED_TOOLS, buildMcpOptions, deniedTools, namespacedMcpTool } from "./tools.js";
-import { DENIED_CAPABILITIES, type DeniedCapability, type ObservedCall } from "../port.js";
+import { DENIED_CAPABILITIES, type DeniedCapability } from "../port.js";
 
 // D9 secure search (Task 12) — WebSearch joins the base tool set (gated by the
 // PreToolUse DLP hook this adapter wires from `RuntimePolicy.webSearch`; see
@@ -253,17 +252,10 @@ test("createClaudeCodeRuntime: the glossary binds the fan-out, wait and task-lis
   assert.match(glossary, /`run_in_background: true`/);
   assert.match(glossary, /wait tool.*`TaskOutput`/);
   assert.match(glossary, /task list.*`TaskCreate`/);
-  // The skill says "the fast model" and "the default one" and leaves the alias
-  // to this table; a lead that guesses one spends a turn on a schema error. The
-  // run has one model, so both words name the same alias.
-  assert.match(glossary, /the fast model and the default one are both `sonnet`/);
-  assert.doesNotMatch(glossary, /haiku/);
-  // And ONLY models the platform can price. modelcost.SumCost is all-or-nothing:
-  // one slice whose model has no rate row makes the whole cycle's cost null. So
-  // offering an alias with no seeded rate turns the skill's own "pick the model
-  // for the job" into a silent way to lose a cycle's spend. This offered `opus`
-  // when only sonnet and haiku were seeded.
-  assert.doesNotMatch(glossary, /opus/i);
+  // A run has one model and the fan-out call names none: an alias offered here
+  // is a second model the org's key may not serve or the platform cannot price
+  // (modelcost.SumCost is all-or-nothing, so one unpriced slice nulls the cycle).
+  assert.doesNotMatch(glossary, /`model:`|haiku|opus/i);
 });
 
 test("debugQueryOptions: a normal run carries NONE of the developer options", () => {
@@ -326,53 +318,6 @@ test("openPromptStream: yields the prompt once and stays open until released", a
   release();
   release(); // idempotent
   assert.equal((await second).done, true);
-});
-
-// --- watchHook --------------------------------------------------------------
-
-const preToolUse = (toolName = "Bash") =>
-  ({ hook_event_name: "PreToolUse", tool_name: toolName, tool_input: {}, tool_use_id: "tu_1" }) as never;
-
-const fireHook = (hook: ReturnType<typeof watchHook>, input: unknown = preToolUse()) =>
-  hook(input as never, undefined, { signal: undefined } as never);
-
-// The regression pin for `RuntimeObservers.toolUse` returning a promise. The
-// validation status line posts from that seam, and its whole value is that the
-// line explaining a twenty-minute silence lands BEFORE the silence — which only
-// holds while this adapter awaits the watcher, because the SDK dispatches the
-// tool call the moment this callback resolves.
-test("watchHook: a watcher that reaches the outside world is awaited before the call", async () => {
-  let posted = false;
-  const hook = watchHook(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    posted = true;
-  });
-
-  await fireHook(hook);
-
-  assert.equal(posted, true, "the call would have been dispatched while the line was still unposted");
-});
-
-// A watcher is not a decision — see RuntimeObservers — so whatever it answers,
-// the hook answers the SDK with an empty decision.
-test("watchHook: watching never decides", async () => {
-  const seen: ObservedCall[] = [];
-  const hook = watchHook((call) => void seen.push(call));
-
-  assert.deepEqual(await fireHook(hook, preToolUse("Write")), {});
-  // Delivered in the port's vocabulary, never as the SDK's tool name.
-  assert.deepEqual(seen, [{ kind: "write", path: "", content: "" }]);
-});
-
-// Every other hook event reaches the same callback, and a watcher derived from
-// one would report a tool call that is not happening.
-test("watchHook: a non-PreToolUse event is not a tool call", async () => {
-  let calls = 0;
-  const hook = watchHook(() => void (calls += 1));
-
-  await fireHook(hook, { hook_event_name: "PostToolUse", tool_name: "Bash", tool_use_id: "tu_1" });
-
-  assert.equal(calls, 0);
 });
 
 // --- sessionContextHook -----------------------------------------------------

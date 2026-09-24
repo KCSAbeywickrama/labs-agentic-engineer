@@ -78,13 +78,13 @@ import {
   type RunEventModelUsage,
   type RunEventUsage,
 } from "../../lib/progress/emitter.js";
-import { cap, createHeartbeatLimiter, MAX_REPORT, reportFrom, trimSummary } from "../../lib/progress/adapter_common.js";
+import { cap, createHeartbeatLimiter, MAX_REPORT, planStatus, reportFrom, trimSummary } from "../../lib/progress/adapter_common.js";
 import {
   editDelta,
   failureDetail,
   failureText,
-  relativiseToWorkspace,
   shellEvents,
+  summaryFromInput,
   writeDelta,
   type LineDelta,
 } from "../../lib/progress/tool_rows.js";
@@ -131,9 +131,9 @@ const MAX_PENDING_CALLS = 2000;
  * The split is what makes the number usable. Cost is stamped per model, against
  * that model's own rate row, so an aggregate that folded two models — and
  * therefore reports `model: ""` — cannot be priced at all. Mixed-model runs are
- * not exotic: the runtime reaches for small-model helpers of its own, and a lead
- * is expected to pick the model for the job (a walk on the fast one, a build on
- * the default). Emitting only the total is how those runs became unpriceable.
+ * not exotic: the runtime reaches for small-model helpers of its own, and a
+ * fan-out call can name a model alias. The runner pins every alias to the org's
+ * model today, but emitting only the total is how those runs became unpriceable.
  *
  * Two more things about this are counter-intuitive and both are measured.
  *
@@ -220,26 +220,11 @@ function usageFromResult(m: Record<string, unknown>): RunEventUsage | undefined 
   };
 }
 
-function summaryFromInput(input: unknown, workspaceRoot: string): string {
-  if (input && typeof input === "object") {
-    const o = input as Record<string, unknown>;
-    // Most file tools carry file_path / pattern / path; `skill` is the Skill
-    // tool's, and `description` is the last human-readable field a tool is
-    // likely to have. Reaching any of them beats the JSON dump below, which
-    // rendered `$ Skill {"skill":"aep:aep"}` in a live run.
-    const candidate = o.file_path ?? o.path ?? o.pattern ?? o.glob ?? o.url ?? o.skill ?? o.description;
-    // Relativised BEFORE the cap, so the cap spends its 200 characters on the
-    // part that identifies the file rather than on the mount point.
-    if (typeof candidate === "string") return trimSummary(relativiseToWorkspace(candidate, workspaceRoot));
-    // Fall back to a compact JSON dump (truncated). Helps surface unknown tools.
-    try {
-      return trimSummary(JSON.stringify(o));
-    } catch {
-      return "";
-    }
-  }
-  return "";
-}
+// Most file tools carry file_path / pattern / path; `skill` is the Skill tool's,
+// and `description` is the last human-readable field a tool is likely to have.
+// Reaching any of them beats the JSON dump, which rendered
+// `$ Skill {"skill":"aep:aep"}` in a live run.
+const SUMMARY_FIELDS = ["file_path", "path", "pattern", "glob", "url", "skill", "description"] as const;
 
 interface ToolUseBlock {
   id: string;
@@ -250,7 +235,7 @@ interface ToolUseBlock {
 // Best-effort pluck of tool_use content blocks from an assistant SDK message.
 // The SDK exposes message.message.content[] where each block has a `type`;
 // every other block kind (text, thinking) is developer material and reaches
-// claude.log, never the feed.
+// runtime.log, never the feed.
 function assistantToolUseBlocks(message: Record<string, unknown>): ToolUseBlock[] {
   const content = obj(message.message).content;
   if (!Array.isArray(content)) return [];
@@ -318,26 +303,21 @@ function toolOutputText(content: unknown): string {
 }
 
 /**
- * Whether a tool call came back WITHOUT having finished, and why.
+ * How long a tool call ran before its Bash timeout severed it, when it was.
  *
  * A command that blows its Bash timeout is auto-backgrounded, and what comes
  * back is `code: 0`, empty output, and `is_error` false — indistinguishable
  * from a command that ran and succeeded. That cost a validation run its whole
- * cycle (#701): the final suite run was severed at the ceiling, the feed
- * recorded it as a success, and the per-criterion rows painted `Passed` on
- * criteria whose tests never completed.
+ * cycle (#701): the final suite run was severed at the ceiling and the feed
+ * recorded it as a success.
  *
  * `timedOutAfterMs` is the SDK's own flag for exactly that case. A
  * `backgroundTaskId` with no timeout is a deliberate `run_in_background`
- * launch — also not a completion, but nobody was misled about it.
+ * launch — also not a completion, but nobody was misled about it, so it is
+ * not reported here.
  */
-function incompleteCall(result: unknown): { severedAfterMs?: number; backgrounded: boolean } {
-  const r = obj(result);
-  const severed = num(r.timedOutAfterMs);
-  return {
-    ...(severed ? { severedAfterMs: severed } : {}),
-    backgrounded: str(r.backgroundTaskId) !== "",
-  };
+function severedAfterMs(result: unknown): number | undefined {
+  return num(obj(result).timedOutAfterMs) || undefined;
 }
 
 /**
@@ -435,18 +415,6 @@ export interface ClaudeAdapterOptions {
    * a message.
    */
   taskKind?: NonNullable<RunEvent["taskKind"]>;
-  /**
-   * Called when a plain tool call settles, with the same `ok` this adapter puts
-   * on the feed. A seam, not a second feature: whether a call succeeded is
-   * already decided here from the SDK's own `is_error`, and re-deriving it
-   * anywhere else would give two answers to one question.
-   *
-   * Fan-out results are deliberately excluded — such a call settles a whole
-   * agent, which is a different kind of fact from one command's exit. Today's
-   * only consumer is the validation progress tracker, which settles per-spec
-   * `npm test` calls.
-   */
-  onToolOutcome?: (toolUseId: string, ok: boolean) => void;
   /** Heartbeat budget per agent; the default is the design's 10s. */
   heartbeatIntervalMs?: number;
 }
@@ -470,6 +438,11 @@ export interface ClaudeAdapter {
    * port's `artifacts()`, which adds the runtime's own developer files.
    */
   artifacts(): RuntimeArtifact[];
+  /**
+   * The newest `result`'s usage — cumulative, so the run's total so far
+   * (`RuntimeSession.usage`).
+   */
+  usage(): RunEventUsage | undefined;
 }
 
 /**
@@ -481,7 +454,6 @@ export interface ClaudeAdapter {
  */
 export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter {
   const now = opts?.now ?? Date.now;
-  const onToolOutcome = opts?.onToolOutcome;
   const heartbeat = createHeartbeatLimiter({
     now,
     ...(opts?.heartbeatIntervalMs !== undefined ? { intervalMs: opts.heartbeatIntervalMs } : {}),
@@ -505,6 +477,7 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
   const pending = new Map<string, PendingCall>();
   const pendingPlanItems = new Map<string, PendingPlanItem>();
   const transcripts: RuntimeArtifact[] = [];
+  let lastUsage: RunEventUsage | undefined;
 
   // Only the run's FIRST init opens the run. A notification-woken turn
   // announces another one (probe 2, message 28) and each spawned agent boots
@@ -824,7 +797,7 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
         }
         continue;
       }
-      events.push({ kind: "tool_use", tool: tu.name, summary: summaryFromInput(tu.input, workspaceRoot), ...stamp });
+      events.push({ kind: "tool_use", tool: tu.name, summary: summaryFromInput(tu.input, SUMMARY_FIELDS, workspaceRoot), ...stamp });
     }
     return events;
   }
@@ -846,11 +819,6 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
   }
 
   /** A plan entry's status, in the runtime's own task-list vocabulary. */
-  function planStatus(v: unknown): NonNullable<RunEvent["itemStatus"]> | undefined {
-    const s = str(v);
-    return s === "pending" || s === "in_progress" || s === "completed" || s === "deleted" ? s : undefined;
-  }
-
   // --- user messages (tool results) ----------------------------------------
 
   function onUser(m: Record<string, unknown>): RunEventInput[] {
@@ -873,13 +841,6 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
       }
 
       const agentId = call?.agentId ?? author;
-      const incomplete = incompleteCall(m.tool_use_result);
-      // A call that has not finished settles nothing. Reporting its outcome
-      // would be inventing one: the command is still running, and a consumer
-      // that folds outcomes into state would record a result no run produced.
-      if (!incomplete.severedAfterMs && !incomplete.backgrounded) {
-        onToolOutcome?.(tr.toolUseId, !tr.isError);
-      }
       // A successful authoring call is what the agent's line counters are made
       // of; a failed one wrote nothing.
       if (call && !tr.isError && (call.added || call.removed)) {
@@ -892,7 +853,7 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
       // The severed case is the one the feed actively lied about, so it is the
       // one overridden here. A deliberate background launch is left as it was:
       // nothing failed, and nobody has been misled about it.
-      const severed = incomplete.severedAfterMs;
+      const severed = severedAfterMs(m.tool_use_result);
       events.push({
         kind: "tool_result",
         agentId,
@@ -935,7 +896,7 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
    * `AgentRecord.reportedLines`), and a FAILED spawn's error text becomes a
    * notice — because that text is the last copy of the reason. Measured live:
    * without it a 22-minute agent arrived as a bare failure with the cause
-   * recorded nowhere, its transcript not on the feed and `claude.log` dying
+   * recorded nowhere, its transcript not on the feed and `runtime.log` dying
    * with the pod (ADR-0002 decision 5).
    */
   function settleFanOutResult(tr: ToolResultBlock, m: Record<string, unknown>): RunEventInput[] {
@@ -984,6 +945,7 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
   function onResult(m: Record<string, unknown>): RunEventInput[] {
     const subtype = str(m.subtype);
     const usage = usageFromResult(m);
+    if (usage) lastUsage = usage;
     if (subtype === "success") {
       return [{ kind: "turn_ended", agentId: LEAD_AGENT_ID, outcome: "success", ...(usage ? { usage } : {}) }];
     }
@@ -1071,5 +1033,6 @@ export function createClaudeAdapter(opts?: ClaudeAdapterOptions): ClaudeAdapter 
       transcripts.push({ agentId, path, kind: "transcript" });
     },
     artifacts: () => [...transcripts],
+    usage: () => lastUsage,
   };
 }

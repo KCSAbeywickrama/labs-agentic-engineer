@@ -644,7 +644,7 @@ test("adapter: the runtime's own toolStats beat the counted figures when they ar
 // --- a failed agent ----------------------------------------------------------
 
 // ADR-0002 decision 5: this text is the LAST copy of the reason. The agent's
-// transcript is not on this feed and claude.log dies with the pod, so a live run
+// transcript is not on this feed and runtime.log dies with the pod, so a live run
 // once left a 22-minute agent arriving as a bare failure with the cause recorded
 // nowhere at all.
 test("adapter: a failed agent's error text reaches the feed, attributed to it", () => {
@@ -746,18 +746,6 @@ test("adapter: a severed command is reported as a failure that proved nothing", 
   assert.equal((events[0] as { ok: boolean }).ok, false);
   assert.match((events[0] as { summary: string }).summary, /hit its 120\.0s timeout and was detached/);
   assert.match((events[0] as { summary: string }).summary, /this call proved nothing/);
-});
-
-test("adapter: only a call that actually finished settles an outcome", () => {
-  const settled: [string, boolean][] = [];
-  const a = adapter({ onToolOutcome: (id, ok) => settled.push([id, ok]) });
-  a.translate(assistant(null, toolUse("t1", "Bash", { command: "npm test" })));
-  a.translate(toolResult(null, "t1", { structured: { timedOutAfterMs: 1_000 } }));
-  a.translate(assistant(null, toolUse("t2", "Bash", { command: "npm run dev" })));
-  a.translate(toolResult(null, "t2", { structured: { backgroundTaskId: "bo1" } }));
-  a.translate(assistant(null, toolUse("t3", "Bash", { command: "npm test" })));
-  a.translate(toolResult(null, "t3", { content: "ok" }));
-  assert.deepEqual(settled, [["t3", true]]);
 });
 
 // --- backgrounded shell commands ---------------------------------------------

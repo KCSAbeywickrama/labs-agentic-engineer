@@ -1,7 +1,7 @@
-# ADR-0012 — The runtime is a port, and it has one adapter
+# ADR-0012 — The runtime is a port, with two adapters
 
 **Status:** accepted · 2026-09-07 · Amended 2026-09-22 (the loop reads a
-classifier, last section); second adapter in ADR-0015
+classifier, last section); the second adapter is ADR-0015
 **Supersedes nothing.** Extends ADR-0002 (run observability) and ADR-0014 (the
 tool glossary), which each carved out one half of this seam before it existed.
 
@@ -39,9 +39,8 @@ The test for whether something belongs in the port is whether it would be writte
 the same way for a second runtime. If it names a tool, a hook or an SDK option,
 it does not.
 
-**There is exactly one adapter: `runtime/claude/`.** `runtime/registry.ts`
-refuses `opencode` by name, with the reason, and that refusal is the deliverable
-— see the last section.
+**There are two adapters: `runtime/claude/` and `runtime/opencode/`
+(ADR-0015).** `runtime/registry.ts` builds the one `AEP_AGENT_RUNTIME` names.
 
 ## Where the design's sketch and the repository disagreed
 
@@ -65,8 +64,8 @@ it, and each is recorded at its field in `port.ts`.
 
 3. **`toolGlossary(): {fanOut, wait, stop, edit, write, shell}` → `string`.**
    `lib/tool_glossary.ts` already worked, and its content is more than a name per
-   role: it carries the model aliases a lead picks from and the argument that
-   makes each role work (`run_in_background: true`, `block: true`). A record of
+   role: it carries the argument that makes each role work
+   (`run_in_background: true`, `block: true`). A record of
    bare names drops exactly the part that stopped leads guessing, and the caller
    would render it back into prose anyway.
 
@@ -112,33 +111,13 @@ which would have duplicated `stream.stopTask`; the `reason` the sketch gave it
 has nowhere to go in the SDK and already reaches the feed as the deadline guard's
 own notice.
 
-## Why there is no OpenCode adapter
+## What a second adapter had to answer first
 
-Three spikes are owed before one is worth merging, and none has been run:
-
-1. **Tool and permission parity** — can every `DeniedCapability` and every guard
-   be enforced PRE-DISPATCH by OpenCode's own mechanism? The Claude Code spike
-   that established this shape also established that the obvious mechanism
-   (`canUseTool`) is never invoked for a server-executed tool. There is no reason
-   to assume the second runtime's obvious mechanism is the right one.
-2. **Message-stream fidelity** — run events v2 needs an agent's birth
-   certificate: a declared start carrying its id, its depth, and the call that
-   spawned it. Claude Code emits `task_started`; nothing says OpenCode declares
-   the same facts, and without them the crew view goes back to inferring a tree,
-   which is the v1 failure the contract exists to end.
-3. **Usage and cost** — the platform stamps cost from per-model token counts
-   reported cumulatively per turn. A runtime that reports usage differently does
-   not merely lose a number: `modelcost.SumCost` is all-or-nothing, so it blanks
-   the whole cycle's cost.
-
-An adapter written before those answers guesses in three places at once, and each
-guess fails SILENTLY — an unenforced guard, an inferred tree, a missing cost. A
-seam that refuses by name with a reason is the honest deliverable.
-
-Two of this work's acceptance criteria therefore remain unmet and are recorded as
-unmet rather than worked around: the three spikes themselves, and "both adapters
-replay one scripted session into identical run events", which needs a second
-adapter to mean anything.
+Three questions, each of which fails silently when guessed: can every
+`DeniedCapability` and guard be enforced PRE-DISPATCH; does the stream declare
+an agent's id, depth and parent; is usage reported cumulatively per model, since
+`modelcost.SumCost` blanks a cycle's cost on one missing slice. ADR-0015 records
+OpenCode's answers.
 
 ## Consequences
 
@@ -153,17 +132,13 @@ adapter to mean anything.
 - `createWebSearchDlpHook` / `createWebFetchGuardHook` / `createWorkspaceWriteGuard`
   now take the DECISION rather than the inputs to it, so each rule is stated once
   by the runner and enforced by whichever adapter is running.
-- `ValidationProgressTracker.hook` became `observe(toolName, toolInput, toolUseId)`.
-  Which mechanism delivers a tool call is the adapter's business.
-- **A watcher may be AWAITED.** `RuntimeObservers.toolUse` answers
-  `void | Promise<void>`, and the adapter awaits it. Merging ADR-0011 is what
-  established the need: the validation status line posts a comment from that
-  seam, and its whole value is that the line explaining a twenty-minute silence
-  lands before the silence — which only holds while the runtime holds the call
-  until the watcher returns. It stays a watcher: the return value is still
-  ignored, so awaiting buys ordering and never a veto. Pinned in
-  `runtime/claude/runtime.test.ts` (`watchHook`), because losing the `await`
-  breaks nothing a type-checker or a unit test of the line itself would see.
+- `RuntimeSession.usage()` is the adapter's cumulative usage, which the loop
+  settles with when a run ends early (deadline, fatal) and no turn carries it.
+- The port carries no tool-call watcher. The validation run's progress
+  tracker and status line read tool calls through one while they existed; they
+  were retired with the move to acceptance scenarios, and the seam went with
+  them rather than stay as an unwired runtime-neutral call type in both
+  adapters.
 
 ## Amendment (2026-09-22): the loop reads a classifier, not a message shape
 

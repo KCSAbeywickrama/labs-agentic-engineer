@@ -39,60 +39,30 @@ type ConfigPatch = components["schemas"]["ConfigPatch"];
 type AgentRuntime = components["schemas"]["AgentRuntime"];
 type AgentModel = components["schemas"]["AgentModel"];
 
-type ModelProvider = "anthropic";
+type LLMProjection = components["schemas"]["LLMProjection"];
+type SubscriptionProjection = components["schemas"]["SubscriptionProjection"];
 
 /**
  * Only models the platform holds a cost rate for: a cycle's cost stamp is
  * all-or-nothing, so one unpriced model would blank the whole cycle's cost.
- * `provider` decides which coding agents can run the model.
  */
-export const MODELS: {
-  value: AgentModel;
-  label: string;
-  provider: ModelProvider;
-}[] = [
-  { value: "claude-sonnet-5", label: "Claude Sonnet 5", provider: "anthropic" },
-  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5", provider: "anthropic" },
+export const MODELS: { value: AgentModel; label: string }[] = [
+  { value: "claude-sonnet-5", label: "Claude Sonnet 5" },
+  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
 ];
 
 /**
- * Why a coding agent cannot run the chosen model, or undefined when it can.
- * Every offered model is Anthropic's today, so this never refuses yet; it is
- * the seam a model from another provider will use.
+ * `claude setup-token` values carry this prefix. The server refuses anything
+ * else as a subscription; checking here says why before a round trip.
  */
-export function runtimeUnavailableReason(
-  runtime: AgentRuntime,
-  model: AgentModel,
-): string | undefined {
-  const provider = MODELS.find((m) => m.value === model)?.provider;
-  if (runtime === "claude-code" && provider !== undefined && provider !== "anthropic") {
-    return "Runs Anthropic models only";
-  }
-  return undefined;
-}
-
-/** A stored credential, masked. */
-interface MaskedKey {
-  keyPrefix: string;
-  keyLast4: string;
-  connectedAt: string;
-  lastValidatedAt?: string | undefined;
-  validationError?: string | undefined;
-}
-
-/** A stored Claude subscription token, masked. */
-interface Subscription {
-  keyPrefix: string;
-  keyLast4: string;
-  validationError?: string | undefined;
-}
+export const SUBSCRIPTION_TOKEN_PREFIX = "sk-ant-oat";
 
 /** What the server holds, in the card's terms. */
 export interface AiSettings {
   model: AgentModel;
-  apiKey: MaskedKey | null;
+  apiKey: LLMProjection | null;
   runtime: AgentRuntime;
-  subscription: Subscription | null;
+  subscription: SubscriptionProjection | null;
   updatedAt: string | null;
   updatedBy: string | null;
 }
@@ -113,23 +83,9 @@ export function aiSettingsFrom(config: ConfigProjection): AiSettings {
   const { agents, llm } = config;
   return {
     model: agents.model,
-    apiKey: llm
-      ? {
-          keyPrefix: llm.keyPrefix,
-          keyLast4: llm.keyLast4,
-          connectedAt: llm.connectedAt,
-          lastValidatedAt: llm.lastValidatedAt,
-          validationError: llm.validationError,
-        }
-      : null,
+    apiKey: llm,
     runtime: agents.runtime,
-    subscription: agents.subscription
-      ? {
-          keyPrefix: agents.subscription.keyPrefix,
-          keyLast4: agents.subscription.keyLast4,
-          validationError: agents.subscription.validationError,
-        }
-      : null,
+    subscription: agents.subscription,
     updatedAt: agents.updatedAt ?? null,
     updatedBy: agents.updatedBy ?? null,
   };
@@ -157,10 +113,6 @@ function usesSubscription(draft: AiDraft): boolean {
 export function removesSubscription(saved: AiSettings, draft: AiDraft): boolean {
   return saved.subscription !== null && !usesSubscription(draft);
 }
-
-// `claude setup-token` values carry this prefix. The server refuses anything
-// else as a subscription; checking here says why before a round trip.
-const SUBSCRIPTION_TOKEN_PREFIX = "sk-ant-oat";
 
 /**
  * A subscription token is stored beside the org's API key and cannot exist

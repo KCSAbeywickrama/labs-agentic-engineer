@@ -806,6 +806,23 @@ test("400 on a model that is not a non-empty string; no model is built", async (
   }
 });
 
+test("400 on a model the platform does not offer; no model is built", async () => {
+  const root = makeMountRoot({ [REQUIREMENTS]: "# Req\n" });
+  const run = await bootRecordingModels(root);
+  try {
+    const token = await mintToken();
+    for (const model of ["claude-opus-5", "gpt-5", "claude-sonnet-5-typo"]) {
+      const res = await fetch(`${run.baseUrl}/conversations/${WS_CONV}/turns`, turnPost(wsBody({ model }), { token, org: WS_ORG }));
+      assert.equal(res.status, 400, `model=${model}`);
+      assert.match(((await res.json()) as { error: string }).error, /is not offered \(claude-sonnet-5, claude-haiku-4-5\)/);
+    }
+    assert.deepEqual(run.requested, []);
+  } finally {
+    await run.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("reasoning effort rides a Sonnet 5 turn and is left off a Haiku 4.5 turn", async () => {
   const root = makeMountRoot({ [REQUIREMENTS]: "# Req\n" });
   const models: ReturnType<typeof mockModel>[] = [];

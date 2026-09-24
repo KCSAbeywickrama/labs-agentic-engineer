@@ -223,36 +223,39 @@ func (s *AgentSettingsService) apply(ctx context.Context, ocOrgID, actor string,
 
 // currentState reads the card's state from the pool, for the probe phase.
 func (s *AgentSettingsService) currentState(ctx context.Context, ocOrgID string) (cardState, error) {
-	settings, err := s.settings.GetByOrg(ctx, ocOrgID)
-	if err != nil {
-		return cardState{}, fmt.Errorf("agents card: setting: %w", err)
-	}
-	key, err := s.creds.repo.GetByOrg(ctx, ocOrgID, AnthropicRoleDefault)
-	if err != nil {
-		return cardState{}, fmt.Errorf("agents card: key: %w", err)
-	}
-	token, err := s.creds.repo.GetByOrg(ctx, ocOrgID, AnthropicRoleCoding)
-	if err != nil {
-		return cardState{}, fmt.Errorf("agents card: subscription: %w", err)
-	}
-	return cardState{settings: settings, hasKey: key != nil, hasToken: token != nil}, nil
+	return readCardState(
+		func() (*OrgAgentSettings, error) { return s.settings.GetByOrg(ctx, ocOrgID) },
+		func(role AnthropicRole) (bool, error) { return s.creds.Holds(ctx, ocOrgID, role) },
+	)
 }
 
 // stateInTx reads the same state through the card's transaction.
 func stateInTx(tx AgentsCardTx, ocOrgID string) (cardState, error) {
-	settings, err := tx.GetSettings(ocOrgID)
+	return readCardState(
+		func() (*OrgAgentSettings, error) { return tx.GetSettings(ocOrgID) },
+		func(role AnthropicRole) (bool, error) {
+			row, err := tx.GetCredential(ocOrgID, role)
+			return row != nil, err
+		},
+	)
+}
+
+// readCardState assembles a cardState from one source's reads, so the probe
+// phase and the transaction judge the patch against the same shape of state.
+func readCardState(settings func() (*OrgAgentSettings, error), holds func(AnthropicRole) (bool, error)) (cardState, error) {
+	row, err := settings()
 	if err != nil {
 		return cardState{}, fmt.Errorf("agents card: setting: %w", err)
 	}
-	key, err := tx.GetCredential(ocOrgID, AnthropicRoleDefault)
+	hasKey, err := holds(AnthropicRoleDefault)
 	if err != nil {
 		return cardState{}, fmt.Errorf("agents card: key: %w", err)
 	}
-	token, err := tx.GetCredential(ocOrgID, AnthropicRoleCoding)
+	hasToken, err := holds(AnthropicRoleCoding)
 	if err != nil {
 		return cardState{}, fmt.Errorf("agents card: subscription: %w", err)
 	}
-	return cardState{settings: settings, hasKey: key != nil, hasToken: token != nil}, nil
+	return cardState{settings: row, hasKey: hasKey, hasToken: hasToken}, nil
 }
 
 func subscriptionProjectionFrom(p *AnthropicProjection) *orgconfig.SubscriptionProjection {

@@ -207,6 +207,18 @@ describe("AiAgentsCard", () => {
         agents: { subscription: { kind: "claude", token: "sk-ant-oat01-token" } },
       });
     });
+
+    it("keeps the key and token out of the browser's password manager", () => {
+      renderCard(config({ llm: null }));
+      fireEvent.change(screen.getByLabelText("API key"), {
+        target: { value: "sk-ant-api03-first" },
+      });
+      fireEvent.click(subscriptionSwitch());
+
+      for (const label of ["API key", "Subscription token"]) {
+        expect(screen.getByLabelText(label)).toHaveAttribute("autocomplete", "new-password");
+      }
+    });
   });
 
   describe("Claude subscription", () => {

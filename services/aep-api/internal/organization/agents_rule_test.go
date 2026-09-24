@@ -192,3 +192,14 @@ func TestAgentSettings_AReadFailureIsAnErrorNotTheDefaults(t *testing.T) {
 		t.Fatal("Model swallowed a storage failure and answered with the default")
 	}
 }
+
+// A blank credential is refused on its own section: it must never count as a
+// connected key for the subscription rule, nor answer 200 while saving nothing.
+func TestJudgeCard_BlankCredentialsAreRefused(t *testing.T) {
+	blankKey := set(orgconfig.LLMWrite{Kind: "anthropic", APIKey: " \n\t"})
+	refusal(t, cardState{}, orgconfig.ConfigPatch{LLM: blankKey}, "llm", "anthropic_key_missing")
+	refusal(t, cardState{}, orgconfig.ConfigPatch{LLM: blankKey, Agents: agentsWrite("", "", token(ruleToken))},
+		"llm", "anthropic_key_missing")
+	refusal(t, cardState{hasKey: true}, orgconfig.ConfigPatch{Agents: agentsWrite("", "", token("   "))},
+		"agents", "anthropic_key_missing")
+}

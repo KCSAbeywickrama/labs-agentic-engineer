@@ -81,7 +81,7 @@ import { conversationOrgId, resolveWorkspace, WorkspaceRefError } from "./shared
 import { createAuthMiddleware, type AgentsAuthConfig } from "./shared/auth.js";
 import { startKeepAlive } from "./shared/keepalive.js";
 import { config } from "./shared/config.js";
-import { resolveModelId } from "./shared/model.js";
+import { isOfferedModel, OFFERED_MODELS, resolveModelId } from "./shared/model.js";
 
 export interface CreateAppDeps {
   store: ConversationStore;
@@ -422,13 +422,18 @@ export function createApp(deps: CreateAppDeps): Express {
     const eagerSkills = derivedEager.length > 0 ? derivedEager : undefined;
 
     // model (optional): the organization's model for this turn, resolved by the
-    // caller. Absent → the service default (AGENT_MODEL); present but not a
-    // non-empty string → a clean 400 rather than a provider error mid-stream.
+    // caller. Absent → the service default (AGENT_MODEL); present but empty or
+    // not an offered model → a clean 400 rather than a provider error mid-stream.
     if (body.model !== undefined && (typeof body.model !== "string" || body.model.trim() === "")) {
       res.status(400).json({ error: "model must be a non-empty string" });
       return;
     }
-    const modelId = resolveModelId(typeof body.model === "string" ? { model: body.model.trim() } : {});
+    const requestedModel = typeof body.model === "string" ? body.model.trim() : undefined;
+    if (requestedModel !== undefined && !isOfferedModel(requestedModel)) {
+      res.status(400).json({ error: `model "${requestedModel}" is not offered (${OFFERED_MODELS.join(", ")})` });
+      return;
+    }
+    const modelId = resolveModelId(requestedModel !== undefined ? { model: requestedModel } : {});
 
     // Build the per-turn model from the request key + model id (fail as a
     // pre-stream 500).

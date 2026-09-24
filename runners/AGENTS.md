@@ -32,6 +32,10 @@ into the runner pod at `/app/skills` for live skill edits (see
   `git -c`, then the same script installed durably). No GIT_ASKPASS, no token
   in argv or URL. Don't add a third path. Changes to the generated refresh
   scripts must keep `credhelper.test.ts` green — it drives them with real `git`.
+  `.aep/` (the publisher bearer, the credential helper, the `gh` wrapper) and
+  `.gh-config/`, which `provisionWorkspace` drops inside the clone, are in the
+  clone's `.git/info/exclude`: one `git add -A` would otherwise push the bearer
+  into the customer's repository.
 - Runner `console.*` is a **user-facing** channel, and it shares the file
   descriptor the NDJSON progress feed writes to. `installConsoleScrubber()`
   converts every call into a scrubbed `notice` run event, so
@@ -112,11 +116,11 @@ into the runner pod at `/app/skills` for live skill edits (see
   rule order, a leaked background flag) are asserted at start before the prompt
   is sent (`runtime/opencode/startup.ts`); why each mechanism is what it is —
   the one guard plugin, the server not `opencode run`, the close rule, the
-  API-key-only credential, the second image — is
+  API-key-only credential — is
   `remote-worker/design/decisions/ADR-0015-opencode-is-the-second-adapter.md`.
   Every deviation from the design's sketch is recorded at its field in
   `port.ts` and argued in
-  `remote-worker/design/decisions/ADR-0012-the-runtime-is-a-port-with-one-adapter.md`
+  `remote-worker/design/decisions/ADR-0012-the-runtime-is-a-port-with-two-adapters.md`
   — read it before reshaping the interface, because the largest one (the session
   exposes `stream` + `translate` + `classify`, not a flat `events()`) is a
   measured constraint of the WATCHDOG's contract, not a preference.
@@ -137,14 +141,8 @@ into the runner pod at `/app/skills` for live skill edits (see
   a row prints, but fan-out is `agent_started`, never "a `tool_result` whose tool
   is called `Agent`". It is a per-run factory — the agent registry, the in-flight
   calls and the heartbeat clocks describe ONE run, and two runs sharing them
-  would mislabel lines rather than merely lose detail. A second runtime is a
-  second adapter and nothing else — and it SHARES what is not a runtime's: the
-  shell rewrite into `git_commit` / `git_push` / `gh_action`, a failed call's
-  one-line diagnosis and the line deltas live in `lib/progress/tool_rows.ts`, the
-  contract's field caps and the heartbeat limiter in
-  `lib/progress/adapter_common.ts`. Both take facts a translator has already
-  pulled out of its messages, never a message; two copies of "what a commit looks
-  like" would drift.
+  would mislabel lines rather than merely lose detail. What is not a runtime's
+  is shared, not copied (ADR-0012's amendment).
 - **The run settles when the SDK stream CLOSES, and the feed gets exactly one
   `result` line.** `remote-worker/src/lib/run_loop.ts` owns both, and both are
   counter-intuitive. A `result` message is one TURN ending: a lead can launch a
@@ -224,10 +222,7 @@ into the runner pod at `/app/skills` for live skill edits (see
   each skill-tool load). The appendix is skill text and the constant glossary
   only, never an env value, which is why it is not debug-gated. In a pod these
   are files nothing collects, like `runtime.log`; `.logs/` is in the clone's
-  `.git/info/exclude` so none of them can be staged. So are `.aep/` (the
-  publisher bearer, the credential helper, the `gh` wrapper) and `.gh-config/`,
-  which `provisionWorkspace` drops inside the clone: one `git add -A` would
-  otherwise push the bearer into the customer's repository.
+  `.git/info/exclude` so none of them can be staged.
 - **Fan-out is NOT forced into the foreground any more, and the hook that did it
   is deleted.** `lib/fanout_foreground.ts` rewrote `run_in_background` to `false`
   on every `Agent`/`Task` call, for two measured reasons. The first — that a
@@ -345,12 +340,8 @@ into the runner pod at `/app/skills` for live skill edits (see
   dispatch carried before the setting existed and what the playground still runs
   under. An unrecognised runtime is an error, never a silent fallback: running
   the one we do have would bill an org for a runtime it did not choose. The model
-  is no longer a literal in `runner.ts`. That ONE model serves the lead, every
-  subagent and the runtime's own helper calls on BOTH runtimes: OpenCode's
-  `model`, `small_model` and its one `general` subagent, and on Claude Code
-  every alias pin plus `CLAUDE_CODE_SUBAGENT_MODEL` (`modelPinEnv`,
-  `runtime/claude/runtime.ts`). Never hard-code or default to a second model:
-  the org's key decides which models it can reach.
+  is no longer a literal in `runner.ts`, and it is the run's only model
+  (ADR-0015).
 - Self-contained: all agent and SDK-specific wiring lives here.
 - **The runner's contract types are GENERATED and DELIBERATELY NOT COMMITTED.**
   `pnpm --filter remote-worker gen` (wired into root `make gen` via turbo) runs

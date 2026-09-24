@@ -28,8 +28,7 @@
 // call): invalid, question, bash, read, glob, grep, edit, write, task,
 // webfetch, todowrite, websearch, skill, apply_patch.
 
-import { obj, str } from "../fields.js";
-import { deniedToolNames, type DeniedCapability, type ObservedCall } from "../port.js";
+import { deniedToolNames, type DeniedCapability } from "../port.js";
 
 /**
  * OpenCode's permission keys denied by each capability class.
@@ -98,28 +97,6 @@ export function patchPaths(patchText: string): string[] {
     if (m) out.push(m[1].trim());
   }
   return out;
-}
-
-/**
- * One OpenCode tool call in the port's vocabulary (`ObservedCall`), for the
- * platform's watchers — the mirror of Claude Code's `observedCall`. `write`
- * hands over the whole file; `edit` and `apply_patch` change part of one (a
- * patch is read as an edit of the first file it names).
- */
-export function observedCall(tool: string, toolInput: unknown): ObservedCall {
-  const input = obj(toolInput);
-  switch (tool) {
-    case "bash":
-      return { kind: "shell", command: str(input.command) };
-    case "write":
-      return { kind: "write", path: str(input.filePath), content: str(input.content) };
-    case "edit":
-      return { kind: "edit", path: str(input.filePath) };
-    case "apply_patch":
-      return { kind: "edit", path: patchPaths(str(input.patchText))[0] ?? "" };
-    default:
-      return { kind: "other", tool };
-  }
 }
 
 /**

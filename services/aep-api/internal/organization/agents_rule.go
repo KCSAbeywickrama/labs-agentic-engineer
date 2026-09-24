@@ -44,8 +44,8 @@ type cardState struct {
 }
 
 // cardEffects is what a save does, in terms of rows. Zero values mean "leave
-// it": an empty key or token is never written, and nil settings is never
-// upserted.
+// it": judgeCard refuses a blank key or token, so an empty one here is never
+// written, and nil settings is never upserted.
 type cardEffects struct {
 	writeKey       string
 	deleteKey      bool
@@ -69,6 +69,9 @@ func judgeCard(s cardState, p orgconfig.ConfigPatch) (cardEffects, error) {
 			keyAfter = false
 		} else {
 			eff.writeKey = strings.TrimSpace(p.LLM.Value.APIKey)
+			if eff.writeKey == "" {
+				return cardEffects{}, sectionErrorFrom("llm", errCredentialMissing("an Anthropic API key"))
+			}
 			keyAfter = true
 		}
 	}
@@ -101,6 +104,9 @@ func judgeCard(s cardState, p orgconfig.ConfigPatch) (cardEffects, error) {
 					tokenAfter = false
 				} else {
 					newToken = strings.TrimSpace(w.Subscription.Value.Token)
+					if newToken == "" {
+						return cardEffects{}, sectionErrorFrom("agents", errCredentialMissing("a Claude subscription token"))
+					}
 					tokenAfter = true
 				}
 			}
@@ -182,6 +188,13 @@ func validateRuntime(runtime orgconfig.AgentRuntime) error {
 		Code:    "agents_runtime_unknown",
 		Message: fmt.Sprintf("runtime %q does not exist (%s)", runtime, strings.Join(names, ", ")),
 	}
+}
+
+// errCredentialMissing refuses a credential field sent blank: saving nothing
+// and answering 200 would tell the reader a key was stored when none was, and
+// a blank key must never count as "connected" for the subscription rule.
+func errCredentialMissing(what string) *ValidationError {
+	return &ValidationError{Code: "anthropic_key_missing", Message: what + " is required"}
 }
 
 func errSubscriptionRequiresClaudeCode() *ValidationError {

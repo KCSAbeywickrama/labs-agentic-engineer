@@ -45,7 +45,8 @@
 // sentence is the one the agent reads.
 //
 // It also keeps the prompt appendix to the lead and records what each session
-// was given (`context.ts`).
+// was given (`context.ts`), and answers the runner's startup probe
+// (`startup_probe.ts`).
 
 import fs from "node:fs";
 import { appendSessionContext } from "../../../lib/run_context.js";
@@ -54,6 +55,7 @@ import { PRIMARY_AGENT } from "../tools.js";
 import { createSessionContext, type SessionContext } from "./context.js";
 import { createGuardDecision, type GuardDecision } from "./guard.js";
 import { GUARD_ENV } from "./protocol.js";
+import { createStartupProbe } from "./startup_probe.js";
 
 /** The slice of OpenCode's plugin hook input this guard reads. */
 interface ToolExecuteInput {
@@ -73,6 +75,7 @@ interface ChatMessageInput {
 }
 interface ChatMessageOutput {
   message: { agent?: string };
+  parts: unknown[];
 }
 interface SystemTransformInput {
   sessionID?: string;
@@ -80,11 +83,15 @@ interface SystemTransformInput {
 interface SystemTransformOutput {
   system: string[];
 }
+interface ChatParamsInput {
+  sessionID: string;
+}
 
 interface GuardHooks {
   "tool.execute.before": (input: ToolExecuteInput, output: ToolExecuteOutput) => Promise<void>;
   "chat.message": (input: ChatMessageInput, output: ChatMessageOutput) => Promise<void>;
   "experimental.chat.system.transform": (input: SystemTransformInput, output: SystemTransformOutput) => Promise<void>;
+  "chat.params": (input: ChatParamsInput) => Promise<void>;
 }
 
 function required(name: string): string {
@@ -120,6 +127,8 @@ function loadSessionContext(): SessionContext {
 export const AepGuard = async (): Promise<GuardHooks> => {
   const decide = loadDecision();
   const context = loadSessionContext();
+  const probeFile = required(GUARD_ENV.probeFile);
+  const probe = createStartupProbe(() => fs.writeFileSync(probeFile, "system.transform\n", { mode: 0o600 }));
   fs.writeFileSync(required(GUARD_ENV.readyFile), JSON.stringify({ pid: process.pid }) + "\n", { mode: 0o600 });
   return {
     "tool.execute.before": async (input, output) => {
@@ -128,10 +137,16 @@ export const AepGuard = async (): Promise<GuardHooks> => {
       if (reason) throw new Error(reason);
     },
     "chat.message": async (input, output) => {
-      context.noteAgent(input.sessionID, output.message.agent);
+      probe.noteMessage(input.sessionID, output.parts ?? []);
+      if (!probe.isProbe(input.sessionID)) context.noteAgent(input.sessionID, output.message.agent);
     },
     "experimental.chat.system.transform": async (input, output) => {
-      context.shapeSystem(input.sessionID ?? "", output.system);
+      const sessionID = input.sessionID ?? "";
+      if (probe.isProbe(sessionID)) return probe.markTransform(sessionID);
+      context.shapeSystem(sessionID, output.system);
+    },
+    "chat.params": async (input) => {
+      probe.refuseModelCall(input.sessionID);
     },
   };
 };

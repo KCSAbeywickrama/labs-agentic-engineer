@@ -74,6 +74,7 @@ const files = {
   instructions: path.join(scratch, "instructions.md"),
   secrets: path.join(scratch, "guard-secrets.json"),
   ready: path.join(scratch, "aep-guard.ready"),
+  probe: path.join(scratch, "aep-guard.probe"),
 };
 fs.writeFileSync(files.instructions, `# Your workflow\n\nProbe workflow.\n\n## Tool glossary\n${MARKER}\n`);
 fs.writeFileSync(files.secrets, "[]", { mode: 0o600 });

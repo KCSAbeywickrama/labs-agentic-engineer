@@ -23,7 +23,7 @@
 //
 //   - a GOLDEN per recording (`test/fixtures/opencode-*.loop.ndjson`): the
 //     loop's whole transcript — every run event, every watchdog call, every
-//     raw-log write, every observer call, and where the stream closed. A diff is
+//     raw-log write, and where the stream closed. A diff is
 //     a behaviour change; regenerate with `AEP_UPDATE_GOLDEN=1 pnpm test` and
 //     say why, never by hand.
 //   - the FACTS the design measured, asserted by name, so a regenerated golden
@@ -34,7 +34,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { consumeRun, type RunResult } from "../../lib/run_loop.js";
+import { consumeRun, createRunTerminator, type RunResult } from "../../lib/run_loop.js";
 import type { RunWatchdog } from "../../lib/progress/watchdog.js";
 import type { RunEventInput } from "../../lib/progress/emitter.js";
 import { createOpencodeClassifier } from "./classify.js";
@@ -67,9 +67,13 @@ interface Replay {
  * Deterministic: the translator's clock is the probe's own `t` for the event
  * being read, so durations are the recorded ones; the classifier's clock is
  * pinned (no recording carries a retry).
+ *
+ * `endBefore` cuts the recording there and ends the run through the loop's
+ * terminator instead, as the deadline or a fatal would.
  */
-async function replay(name: string): Promise<Replay> {
+async function replay(name: string, endBefore?: number): Promise<Replay> {
   const messages = recording(name);
+  const terminator = createRunTerminator();
   const lines: string[] = [];
   const events: RunEventInput[] = [];
   const log = (o: unknown): void => {
@@ -79,6 +83,10 @@ async function replay(name: string): Promise<Replay> {
   let clock = 1_000_000;
   async function* source(): AsyncGenerator<unknown> {
     for (let i = 0; i < messages.length; i++) {
+      if (i === endBefore) {
+        terminator.terminate({ source: "deadline", why: "the replay was cut", error: "run terminated" });
+        await new Promise(() => {});
+      }
       cursor = i + 1;
       clock = 1_000_000 + Number(messages[i].t ?? 0);
       yield messages[i];
@@ -100,8 +108,6 @@ async function replay(name: string): Promise<Replay> {
     model: "claude-haiku-4-5",
     taskKind: "implementation",
     now: () => clock,
-    onToolUse: (call, id) => log({ at: cursor, toolUse: call, id }),
-    onToolOutcome: (id, ok) => log({ at: cursor, toolOutcome: ok, id }),
     // The runner's own onDenied wording (lib/runner.ts), so the golden shows
     // the line a live run would put on the feed.
     onWorkspaceDenied: (reason) =>
@@ -118,6 +124,8 @@ async function replay(name: string): Promise<Replay> {
     {
       translate: adapter.translate,
       classify: createOpencodeClassifier({ now: () => 0 }),
+      usage: adapter.usage,
+      ...(endBefore !== undefined ? { terminator } : {}),
       watchdog,
       emit,
       record: (m) => log({ at: cursor, record: m && typeof m === "object" ? ((m as { type?: string }).type ?? "?") : String(m) }),
@@ -176,8 +184,7 @@ test("S2b: three foreground builders and a depth-2 child, attributed, settled on
     assert.ok(a, `no agent_started for ${label}`);
     assert.equal(a.depth, 1);
     assert.equal(a.parentAgentId, undefined, `${label} is the lead's child`);
-    // The subagent type the recording's prompt named, passed through as spoken.
-    assert.equal(a.role, "general-fast");
+    assert.equal(a.role, "general");
     assert.equal(a.model, "claude-haiku-4-5");
   }
   const gamma = byLabel.get("Create gamma file")!;
@@ -222,13 +229,12 @@ test("S2b: three foreground builders and a depth-2 child, attributed, settled on
   );
   assert.ok(plan.every((w) => w.source === "plan" && w.agentId === "lead"));
 
-  // The stream closed AT the root's idle — the recording's trailing events (the
-  // probe waited four quiet seconds) are never read.
+  // The stream closed AT the root's idle — the probe records through the same
+  // close rule, so that idle is also the recording's last event.
   const rootIdle = recording("opencode-s2b-foreground-fanout.jsonl").findIndex(
-    (e) => e.type === "session.idle" && (e.properties as { sessionID?: string }).sessionID === "ses_f360b6b7effeLFQo4gq9ZIlRuC",
+    (e) => e.type === "session.idle" && (e.properties as { sessionID?: string }).sessionID === "ses_f2d4b8eabffeHOYsXlfzRlsSZV",
   );
   assert.equal(r.consumed, rootIdle + 1);
-  assert.ok(r.consumed < r.total);
 });
 
 test("S2b: usage is cumulative across every session, per model, platform-spelled", async () => {
@@ -242,12 +248,30 @@ test("S2b: usage is cumulative across every session, per model, platform-spelled
     {
       model: "claude-haiku-4-5",
       inputTokens: 52,
-      outputTokens: 1396,
-      cacheReadTokens: 84689,
-      cacheCreationTokens: 11100,
+      outputTokens: 1402,
+      cacheReadTokens: 64375,
+      cacheCreationTokens: 24315,
       costUsd: null,
     },
   ]);
+});
+
+test("S2b: a run ended before the root idles still settles with the usage it spent", async () => {
+  const messages = recording("opencode-s2b-foreground-fanout.jsonl");
+  const rootIdle = messages.findIndex(
+    (e) => e.type === "session.idle" && (e.properties as { sessionID?: string }).sessionID === "ses_f2d4b8eabffeHOYsXlfzRlsSZV",
+  );
+  const full = await replay("opencode-s2b-foreground-fanout.jsonl");
+  const cut = await replay("opencode-s2b-foreground-fanout.jsonl", rootIdle);
+
+  assert.equal(ofKind(cut.events, "turn_ended").length, 0, "no turn reported the usage");
+  const settles = ofKind(cut.events, "run_settled");
+  assert.equal(settles.length, 1);
+  assert.equal(settles[0].outcome, "failure");
+  assert.equal(cut.result.exitCode, 1);
+  // Every assistant message was on the wire before the idle, so the adapter's
+  // running total is the whole run's.
+  assert.deepEqual(settles[0].usage, ofKind(full.events, "run_settled")[0].usage);
 });
 
 // --- S1c: guards, allowlists, two models ---------------------------------------
@@ -258,17 +282,19 @@ test("S1c: two models priced apart, and the guards' refusals read as failed call
   assert.ok(usage);
   assert.equal(usage.model, "", "a two-model run names no single model");
   assert.deepEqual(usage.models?.map((m) => m.model).sort(), ["claude-haiku-4-5", "claude-sonnet-5"]);
-  // Reasoning is billed as output: S1c's first Sonnet step reported 146 output
-  // and 34 reasoning tokens, and its cost only adds up with both.
+  // Reasoning is billed as output: S1c's first Sonnet step reported 82 output
+  // and 12 reasoning tokens, and its cost only adds up with both.
   const sonnet = usage.models?.find((m) => m.model === "claude-sonnet-5");
-  assert.equal(sonnet?.outputTokens, 1536 + 34);
+  assert.equal(sonnet?.outputTokens, 1465 + 87);
 
   const failed = ofKind(r.events, "tool_result").filter((t) => !t.ok);
   assert.deepEqual(failed.map((t) => t.tool).sort(), ["webfetch", "write"]);
-  // The spike's plugin predates the marker, so its refusal is a plain failure
-  // with the sentence as the diagnosis — the marked form is plugin.test.ts's.
-  assert.match(failed.find((t) => t.tool === "write")?.summary ?? "", /outside the project/);
-  assert.equal(ofKind(r.events, "notice").filter((n) => n.code === "workspace_guard").length, 0);
+  // The platform's plugin marks its refusal, so the sentence is the run's own
+  // workspace line and the failed row carries no second copy of it.
+  assert.equal(failed.find((t) => t.tool === "write")?.summary, undefined);
+  const guard = ofKind(r.events, "notice").filter((n) => n.code === "workspace_guard");
+  assert.equal(guard.length, 1);
+  assert.match(guard[0].detail ?? "", /outside the project/);
 });
 
 // --- S2c: the background mode the platform refuses ------------------------------

@@ -16,8 +16,8 @@
  * under the License.
  */
 
-// What every runtime's TRANSLATOR shares: the contract's field caps, and the
-// heartbeat budget.
+// What every runtime's TRANSLATOR shares: the contract's field caps, the
+// plan-status vocabulary, and the heartbeat budget.
 //
 // Both are rules about the FEED, not about any runtime's messages — the
 // contract caps a `summary` at 200 whoever composed it, and "at most one
@@ -26,7 +26,7 @@
 // numbers by construction rather than by copying them, which is the drift a
 // shared contract exists to prevent.
 
-import type { RunEventInput } from "./emitter.js";
+import type { RunEvent, RunEventInput } from "./emitter.js";
 
 /** `summary`, `phrase`, `label` and `detail` are all capped at 200 in the contract. */
 const MAX_SUMMARY = 200;
@@ -68,6 +68,16 @@ export function trimSummary(s: string): string {
 export function reportFrom(summary: string): string {
   const lines = summary.split("\n").map((l) => l.trim()).filter((l) => l !== "");
   return cap(lines[lines.length - 1] ?? "", MAX_REPORT);
+}
+
+/**
+ * A task-list entry's status in the contract's vocabulary, or undefined for one
+ * it has no word for. OpenCode's `cancelled` is a deletion.
+ */
+export function planStatus(v: unknown): NonNullable<RunEvent["itemStatus"]> | undefined {
+  if (v === "pending" || v === "in_progress" || v === "completed" || v === "deleted") return v;
+  if (v === "cancelled") return "deleted";
+  return undefined;
 }
 
 /**

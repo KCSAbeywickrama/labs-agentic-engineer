@@ -98,7 +98,7 @@ test("apiRetryLine: names the attempt, the cause and the wait", () => {
   assert.match(line, /next attempt in 4s/);
 });
 
-// A streaming frame is the one model wait that never reaches claude.log, so the
+// A streaming frame is the one model wait that never reaches runtime.log, so the
 // flag is what the loop's record decision turns on.
 test("classify: only the streaming frames are marked streaming", () => {
   const classify = createClaudeClassifier();

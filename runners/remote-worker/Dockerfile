@@ -538,15 +538,9 @@ RUN HOME=/home/aep /tmp/opencode-prewarm.sh \
     && test -s /home/aep/.cache/opencode/models.json \
     && test -x /home/aep/.cache/opencode/bin/rg \
     && test -f /home/aep/.config/opencode/node_modules/@opencode-ai/plugin/package.json
-
-# After the pre-warm, which needed all of them off: a pod never updates itself,
-# never refetches the model list, never downloads an LSP, and never reads the
-# checkout's own opencode.json or .opencode/. The runtime sets the same four on
-# the server's environment; these make them true for anything else in the pod.
-ENV OPENCODE_DISABLE_AUTOUPDATE=1 \
-    OPENCODE_DISABLE_MODELS_FETCH=1 \
-    OPENCODE_DISABLE_LSP_DOWNLOAD=1 \
-    OPENCODE_DISABLE_PROJECT_CONFIG=1
+# The OPENCODE_DISABLE_* flags a pod needs are set by the runtime on the server
+# it starts (runtime/opencode/runtime.ts, childEnvironment), not here: that is
+# the one place that reaches every run, a host playground run included.
 
 # ─── The default target ─────────────────────────────────────────────────────
 # A build with no `--target` produces the LAST stage, and every path that builds

@@ -166,7 +166,8 @@ has a built-in default; an OpenCode cycle with no OpenCode image fails its
 dispatch naming the variable rather than starting on an image with no OpenCode
 binary. The dispatcher stamps the same runtime as the Component's `runtime`
 parameter and as the `aep.wso2.com/runtime` label on the Component and Workload.
-An OpenCode cycle that did not resolve to an API key fails closed
+Which credential it mounts is the organization domain's answer for the run's
+runtime (`ResolveCodingSecretRef`): an OpenCode run is always handed the API key
 ([ADR-0036](../../../../../../docs/decisions/ADR-0036-the-coding-credential-is-a-subscription.md)).
 
 The type name is also what wso2cloud's entitlement gate keys on

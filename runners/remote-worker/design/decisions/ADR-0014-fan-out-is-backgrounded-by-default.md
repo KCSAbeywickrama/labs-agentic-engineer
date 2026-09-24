@@ -68,11 +68,8 @@ fail at startup the way a missing anchor does.
    `npm run build` and reports clean is the same shape, and the run has no way to
    tell that report from a true one.
 
-4. **One model serves every agent.** The runner pins the organization's model
-   for the session, its subagents and the runtime's helper calls (ADR-0015).
-   The skill's "the fast model" and "the default one" both resolve to it
-   through the tool glossary, so a model named on the fan-out call cannot reach
-   a second model the org's key may not serve or the platform cannot price.
+4. **The fan-out call names no model.** Which model a subagent runs is the
+   runner's, not the lead's (ADR-0015).
 
 5. **The lead's plan lives in the runtime's task list.** One entry per issue,
    `in_progress` when work starts and `completed` when it is committed. The list

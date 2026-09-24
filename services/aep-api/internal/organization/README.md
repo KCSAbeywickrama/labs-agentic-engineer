@@ -31,8 +31,8 @@ flowchart LR
 | `rotateidp` `discoveridp` | rotate the publisher client secret / OIDC discovery | `POST .../config:rotate-idp-secret` etc. |
 | `listorgs` | enumerate orgs (tenant-gate carve-out — no org ctx) | `GET /organizations` |
 
-*Still flat in the domain root (not carved into slices): the credential / anthropic / agent-settings /
-idp services, the raw connect-callback controller, and the S2S credentials-refresh.*
+*Flat in the domain root, outside the slices: the credential / anthropic / agent-settings / idp
+services, the raw connect-callback controller, and the S2S credentials-refresh.*
 
 ## Ports
 | Port | Dir | Peer · contract |
@@ -55,57 +55,36 @@ idp services, the raw connect-callback controller, and the S2S credentials-refre
 - **The phantom-OU trust guard** (`ouIsTrustworthy`): reject a JWT `ouId` ONLY when a wired validator
   positively reports it does not exist; empty id / no validator / transient error all fail-open. A phantom
   OU poisons `wc-` namespace derivation + the publisher OU binding. Both write paths are guarded.
-- **This domain is FAIL-LOUD**, not nil-tolerant: a nil collaborator panics (its pre-migration handlers had
-  no nil guard), unlike sourcecontrol's 503 — the edge assigns it directly, no `OrEmpty`.
+- **This domain is FAIL-LOUD**, not nil-tolerant: a nil collaborator panics, unlike sourcecontrol's
+  503 — the edge assigns it directly, no `OrEmpty`.
 - The `/config` PATCH is an **atomic multi-section** apply; sections are three-state `patch.Field`.
-- **The AI agents card is `llm` + `agents`, and one save of it is ONE transaction** (ADR-0036):
-  `AgentSettingsService` writes the credential rows, the `org_agent_settings` row and the
-  `org_secrets` bytes under one per-org advisory lock (`org_anthropic:<org>`), the secret store
-  joining the transaction (`secrets.TxCredentialStore.WithDB`, `repository_agents_card.go`). A
-  failure anywhere writes nothing. It is the ONLY writer of credential rows. The SM-API copy is
-  mirrored after commit, best-effort; a deleted credential's copy is deleted after commit by the
-  `secret_ref_name` read before the row went.
-- **One rule, judged on the state the patch leaves** (`judgeCard`, `agents_rule.go`): a Claude
-  subscription needs the `claude-code` runtime and a connected API key. Choosing `opencode`,
-  `llm: null` and `agents: null` delete the stored token in the same transaction; a patch that
-  sets a token its end state cannot use is refused on `body.agents`
-  (`agents_subscription_requires_claude_code` / `agents_subscription_requires_api_key`). The
-  patch is judged before the live probes and again inside the transaction.
-- **The `coding` role holds a Claude subscription token only; the `default` role an API key
-  only** — CHECK `org_anthropic_credentials_role_kind`, and `ValidateKey` refuses the wrong kind
-  per role before any probe. There is no separate coding API key.
-- **`agents` is never null on the wire**: every org has an effective model and runtime, so the
-  section carries the platform's defaults until somebody chooses, and `updatedBy` tells "on the
-  defaults" from "chose the defaults". `null` on the PATCH **resets** — the row is deleted, and
-  the subscription with it. Its fields are individually optional: an omitted model or runtime
-  keeps the stored one, and the token is sent only when it changes. `AgentRuntimes` /
-  `AgentModels` (`platform/orgconfig`) are pinned against the committed contract's enums by a
-  test.
-- **A runtime is never substituted.** A name outside the `AgentRuntime` enum is refused by name;
-  running another runtime would bill an organization for one it did not choose and never tell it.
-- **`agents.model` is the one model every agent uses**: the spec agents resolve it with the key
-  per turn; a coding run copies it at dispatch and uses it for the lead, every subagent and the
-  runtime's own helper calls.
-- **The `AgentModel` enum is the set the platform can PRICE.** `modelcost.SumCost` is
-  all-or-nothing across a cycle's capture, so one model with no `model_rates` row blanks the whole
-  cycle's cost rather than just its own share. Offering a model is a rate row and a contract
-  change together, never one without the other.
-- **`llm_disconnected_at`** on `organizations` records the last key disconnect (the credential row
-  is deleted, so it is the only trace the org had a key); projected as `llmDisconnectedAt` while
-  `llm` is null, cleared by the next key save.
-- **Exactly one credential variable reaches a coding run.** `credential_kind` (`api_key` |
-  `oauth_token`) is persisted, not re-derived — dispatch reads the row and never the secret bytes — and
-  picks `ANTHROPIC_API_KEY` xor `CLAUDE_CODE_OAUTH_TOKEN`. Claude Code ranks the former above the
-  latter, so mounting both would silently ignore an org's subscription token.
-- `ResolveCodingSecretRef(ctx, org, runtime)` is the **single** statement of which credential a
-  coding run mounts: the subscription only when the runtime is `claude-code`, the API key otherwise.
-  It fails closed: a configured-but-unusable subscription aborts the dispatch rather than quietly
-  billing API credits. Every other reader (`EffectiveKey`, the RCA push) is default-only by
-  construction.
-- **Orphaned SM-API copies are accepted.** The migration that removed separate coding API keys
-  (`phase16_coding_role_subscription_only`) could not delete their vault copies (entity
-  `anthropic-coding`; a delete needs a signed-in user's context), and a failed post-commit delete
-  leaves the same. Nothing reads them; the next subscription save overwrites that path.
+- **The AI agents card** (`llm` + `agents`, [ADR-0036](../../../../docs/decisions/ADR-0036-the-coding-credential-is-a-subscription.md)):
+  - One save is ONE transaction under the per-org `org_anthropic:<org>` advisory lock, covering the
+    credential rows, `org_agent_settings` and the `org_secrets` bytes (`repository_agents_card.go`).
+    A failure anywhere writes nothing. `AgentSettingsService` is the only writer of credential rows.
+  - One rule, judged on the state the patch leaves (`judgeCard`), before the probes and again in the
+    transaction: a Claude subscription needs `claude-code` and a connected API key. `opencode`,
+    `llm: null` and `agents: null` delete the token in the same save; a token the end state cannot
+    use, or a blank key or token, is refused on its section.
+  - The `default` role holds an API key only, the `coding` role a subscription token only (CHECK
+    `org_anthropic_credentials_role_kind`; `ValidateKey` refuses the wrong kind before any probe).
+  - `agents` is never null on the wire: the platform defaults until someone chooses, `updatedBy`
+    telling the two apart. `null` on the PATCH resets (row and token deleted); omitted fields keep
+    the stored value. `AgentRuntimes` / `AgentModels` are pinned against the contract's enums.
+  - A runtime is never substituted. `agents.model` is the one model every agent uses: the spec
+    agents resolve it per turn, a coding run copies it at dispatch.
+  - The `AgentModel` enum is the set the platform can PRICE: offering a model is a `model_rates` row
+    and a contract change together (`modelcost.SumCost` is all-or-nothing per cycle).
+  - `llm_disconnected_at` is the only trace of a disconnected key; projected as `llmDisconnectedAt`
+    while `llm` is null, cleared by the next key save.
+  - The SM-API copy is mirrored after commit, best-effort. A credential save clears the row's
+    `secret_ref_*` triplet, so a failed mirror fails dispatch closed instead of mounting the previous
+    credential; a deleted credential's copy is deleted after commit, and an orphaned copy is
+    accepted (nothing reads it, the next save of that role overwrites it).
+  - Exactly one credential variable reaches a coding run: the persisted `credential_kind` picks
+    `ANTHROPIC_API_KEY` xor `CLAUDE_CODE_OAUTH_TOKEN`. `ResolveCodingSecretRef(ctx, org, runtime)` is
+    the single statement of which: the subscription only on `claude-code`, else the API key, failing
+    closed on an unusable subscription. Every other reader is default-only.
 - **Publisher SecretReference for coding Jobs is fail-closed on `POST /build`.**
   `ProvisionPublisherForBuild` (actor `build-provision`) ensures the Thunder publisher app and stamps
   `secret_ref_name` while the console JWT is on ctx. A missing or disabled `SecretRefWriter` returns

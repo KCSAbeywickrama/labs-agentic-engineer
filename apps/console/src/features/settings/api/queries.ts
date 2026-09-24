@@ -48,14 +48,7 @@ export function useConfig() {
   });
 }
 
-// The AI card's one Save. The patch comes from aiSettingsPatch (aiSettings.ts),
-// which owns the mapping from the card to /config's sections; this hook only
-// sends it. The server validates every section (the API key and subscription
-// token against Anthropic) before writing any, so a rejected key leaves the
-// model and runtime unwritten too.
-//
-// The write lands on the org, not on a run in flight: dispatch copies these
-// onto the run it starts, so a change takes effect from the next cycle.
+// The AI agents card's one Save: sends the patch aiSettingsPatch built.
 export function useSaveAiSettings() {
   const queryClient = useQueryClient();
   return useMutation({

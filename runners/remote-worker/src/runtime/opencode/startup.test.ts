@@ -43,10 +43,17 @@ const CORRECT = [
 ];
 
 function facts(over: Partial<StartupFacts> = {}): StartupFacts {
-  return { guardReady: true, toolIds: TOOL_IDS, agentRules: CORRECT, taskParameters: TASK_PARAMS, ...over };
+  return {
+    guardReady: true,
+    systemTransformLive: true,
+    toolIds: TOOL_IDS,
+    agentRules: CORRECT,
+    taskParameters: TASK_PARAMS,
+    ...over,
+  };
 }
 
-test("startupProblems: the config builder's rule set passes all three assertions", () => {
+test("startupProblems: the config builder's rule set passes all four assertions", () => {
   assert.deepEqual(startupProblems(facts()), []);
   const visible = visibleTools(facts());
   assert.ok(visible.includes("task") && visible.includes("skill"));
@@ -70,6 +77,16 @@ test("startupProblems: a silent plugin, a visible question tool, a background sc
     /OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS is set/,
   );
   assert.match(startupProblems(facts({ agentRules: undefined }))[0], /no `aep` agent/);
+});
+
+test("startupProblems: a system transform that never fired refuses the run, unless the plugin itself is missing", () => {
+  const [problem, ...rest] = startupProblems(facts({ systemTransformLive: false }));
+  assert.match(problem, /experimental\.chat\.system\.transform hook did not fire/);
+  assert.deepEqual(rest, []);
+  // A plugin that never loaded cannot run the probe; that is one problem, said once.
+  const silent = startupProblems(facts({ guardReady: false, systemTransformLive: false }));
+  assert.equal(silent.length, 1);
+  assert.match(silent[0], /did not announce itself/);
 });
 
 test("hiddenTools: the authoring tools share the edit permission", () => {

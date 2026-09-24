@@ -31,12 +31,13 @@ import { authoredPathDenial } from "../../../lib/workspace_guard.js";
 import { WEBSEARCH_DENIAL_MESSAGE } from "../../../lib/websearch_dlp.js";
 import { buildGuardPlugin, GUARD_PACKAGE_JSON } from "./build.js";
 import { createGuardDecision } from "./guard.js";
-import { GUARD_ENV, WORKSPACE_GUARD_MARKER } from "./protocol.js";
+import { GUARD_ENV, STARTUP_PROBE_PROMPT, WORKSPACE_GUARD_MARKER } from "./protocol.js";
 
 type Hooks = {
   "tool.execute.before": (i: { tool: string; sessionID: string; callID: string }, o: { args: unknown }) => Promise<void>;
-  "chat.message": (i: { sessionID: string }, o: { message: { agent?: string } }) => Promise<void>;
+  "chat.message": (i: { sessionID: string }, o: { message: { agent?: string }; parts?: unknown[] }) => Promise<void>;
   "experimental.chat.system.transform": (i: { sessionID?: string }, o: { system: string[] }) => Promise<void>;
+  "chat.params": (i: { sessionID: string }) => Promise<void>;
 };
 type PluginModule = { AepGuard: () => Promise<Hooks> };
 
@@ -94,6 +95,7 @@ test("plugin: it announces itself, then refuses with the platform's own sentence
         [GUARD_ENV.readyFile]: ready,
         [GUARD_ENV.appendixFile]: appendix,
         [GUARD_ENV.sessionLog]: path.join(tmp, "logs", "session-context.jsonl"),
+        [GUARD_ENV.probeFile]: path.join(tmp, "probe"),
       },
       async () => {
         const hooks = await mod.AepGuard();
@@ -166,6 +168,7 @@ test("plugin: the appendix stays with the lead, and each session's context is re
         [GUARD_ENV.readyFile]: path.join(tmp, "ready"),
         [GUARD_ENV.appendixFile]: appendix,
         [GUARD_ENV.sessionLog]: log,
+        [GUARD_ENV.probeFile]: path.join(tmp, "probe"),
       },
       async () => {
         const hooks = await mod.AepGuard();
@@ -196,6 +199,50 @@ test("plugin: the appendix stays with the lead, and each session's context is re
           { session: "ses_child", agent: "general", appendix: false },
           { session: "ses_child", skill: "ballerina" },
         ]);
+      },
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("plugin: the startup probe marks the system transform and never reaches a model call", async () => {
+  const { mod, tmp } = await built();
+  const secrets = path.join(tmp, "secrets.json");
+  fs.writeFileSync(secrets, "[]");
+  const appendix = path.join(tmp, "instructions.md");
+  fs.writeFileSync(appendix, "WORKFLOW");
+  const log = path.join(tmp, "logs", "session-context.jsonl");
+  const probe = path.join(tmp, "probe");
+  try {
+    await withEnv(
+      {
+        [GUARD_ENV.workspace]: tmp,
+        [GUARD_ENV.secretsFile]: secrets,
+        [GUARD_ENV.readyFile]: path.join(tmp, "ready"),
+        [GUARD_ENV.appendixFile]: appendix,
+        [GUARD_ENV.sessionLog]: log,
+        [GUARD_ENV.probeFile]: probe,
+      },
+      async () => {
+        const hooks = await mod.AepGuard();
+        // A real session's model call goes ahead, and is no probe.
+        await hooks["chat.message"]({ sessionID: "ses_lead" }, { message: { agent: "aep" }, parts: [{ type: "text", text: "build it" }] });
+        await hooks["experimental.chat.system.transform"]({ sessionID: "ses_lead" }, { system: ["BASE"] });
+        await hooks["chat.params"]({ sessionID: "ses_lead" });
+        assert.ok(!fs.existsSync(probe));
+
+        await hooks["chat.message"](
+          { sessionID: "ses_probe" },
+          { message: { agent: "aep" }, parts: [{ type: "text", text: STARTUP_PROBE_PROMPT }] },
+        );
+        await hooks["experimental.chat.system.transform"]({ sessionID: "ses_probe" }, { system: ["BASE"] });
+        assert.ok(fs.existsSync(probe), "the transform did not mark the probe");
+        await assert.rejects(hooks["chat.params"]({ sessionID: "ses_probe" }), /startup probe, no model call/);
+
+        // The probe is not a session of the run: nothing about it is recorded.
+        const sessions = fs.readFileSync(log, "utf8").trim().split("\n").map((l) => (JSON.parse(l) as { session: string }).session);
+        assert.deepEqual(sessions, ["ses_lead"]);
       },
     );
   } finally {

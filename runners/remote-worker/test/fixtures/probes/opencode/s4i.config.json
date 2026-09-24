@@ -1,13 +1,18 @@
 {
+  "$schema": "https://opencode.ai/config.json",
   "model": "anthropic/claude-haiku-4-5",
   "small_model": "anthropic/claude-haiku-4-5",
   "default_agent": "aep",
   "subagent_depth": 3,
   "autoupdate": false,
   "share": "disabled",
-  "plugin": [
-    "/scratch/aepguard"
+  "instructions": [
+    "/scratch/ocbin/instructions.md"
   ],
+  "plugin": [
+    "/scratch/ocbin/aep-guard"
+  ],
+  "snapshot": false,
   "provider": {
     "anthropic": {
       "options": {
@@ -27,19 +32,6 @@
         "todowrite": "deny",
         "task": "allow"
       }
-    },
-    "general-fast": {
-      "mode": "subagent",
-      "model": "anthropic/claude-haiku-4-5",
-      "description": "Fast subagent for small work",
-      "permission": {
-        "todowrite": "deny",
-        "task": "allow"
-      }
-    },
-    "forbidden-agent": {
-      "mode": "subagent",
-      "description": "A subagent the platform does not allow"
     },
     "build": {
       "disable": true
@@ -63,25 +55,20 @@
     "bash": "allow",
     "task": {
       "*": "deny",
-      "general": "allow",
-      "general-fast": "allow"
+      "general": "allow"
     },
     "todowrite": "allow",
     "webfetch": "allow",
     "websearch": "allow",
     "skill": {
-      "*": "deny",
-      "allowed-skill": "allow"
+      "*": "deny"
     },
     "question": "deny",
-    "external_directory": "deny",
+    "external_directory": "allow",
     "doom_loop": "allow",
     "lsp": "deny"
   },
   "tools": {
     "lsp": false
-  },
-  "instructions": [
-    "/scratch/spikes/instr.md"
-  ]
+  }
 }

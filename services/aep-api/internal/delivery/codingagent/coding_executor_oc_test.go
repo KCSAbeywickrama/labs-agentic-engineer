@@ -886,28 +886,6 @@ func TestDispatch_AsksForTheCredentialOfTheRunsRuntime(t *testing.T) {
 	}
 }
 
-// OpenCode cannot present a subscription token. The resolver never hands it
-// one; dispatch still refuses rather than trusts.
-func TestDispatch_AnOpenCodeRunOnAnOAuthCredentialFailsClosed(t *testing.T) {
-	for _, envVar := range []string{"CLAUDE_CODE_OAUTH_TOKEN", ""} {
-		rec := &chainRecorder{}
-		anthropic, github := fullSecretRefs()
-		anthropic.ref.EnvVar = envVar
-		e := newOpenCodeDispatchExecutor(rec, anthropic, github, openCodeRunnerImage)
-
-		_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
-		if err == nil {
-			t.Fatalf("an OpenCode run dispatched on credential env var %q", envVar)
-		}
-		if !strings.Contains(err.Error(), "API key") {
-			t.Errorf("error %q does not name the fix", err)
-		}
-		if len(rec.calls) != 0 {
-			t.Errorf("the OC chain was walked anyway: %v", rec.calls)
-		}
-	}
-}
-
 // A platform with no OpenCode image cannot run an OpenCode cycle, and must not
 // run it on the Claude Code image (no OpenCode binary in it). The failure names
 // the setting that is missing.

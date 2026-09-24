@@ -4464,6 +4464,9 @@ components:
                   type: string
                 token:
                   type: string
+                  writeOnly: true
+                  minLength: 1
+                  maxLength: 512
               required:
               - kind
               - token
@@ -4519,6 +4522,9 @@ components:
           properties:
             apiKey:
               type: string
+              writeOnly: true
+              minLength: 1
+              maxLength: 512
             kind:
               enum:
               - anthropic

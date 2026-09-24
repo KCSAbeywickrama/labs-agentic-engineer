@@ -26,13 +26,11 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  IconButton,
-  InputAdornment,
-  TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ExternalLink, Eye, EyeOff } from "@wso2/oxygen-ui-icons-react";
+import { ExternalLink } from "@wso2/oxygen-ui-icons-react";
 import type { AiSettings } from "../aiSettings";
+import { MaskedCredential, SecretField } from "./CredentialField";
 
 type StoredKey = NonNullable<AiSettings["apiKey"]>;
 
@@ -68,7 +66,6 @@ export function AnthropicKeyRow({
   /** Whether the row explains why the key is needed; the wizard explains it above. */
   explained: boolean;
 }) {
-  const [showKey, setShowKey] = useState(false);
   const [replacing, setReplacing] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
 
@@ -88,21 +85,11 @@ export function AnthropicKeyRow({
 
       {connected ? (
         <>
-          <Box
-            sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 1 }}
+          <MaskedCredential
+            stored={stored}
+            onReplace={replacing ? undefined : () => setReplacing(true)}
+            disabled={disabled}
           >
-            <Typography variant="body2" fontFamily="monospace">
-              {stored.keyPrefix}•••••••••{stored.keyLast4}
-            </Typography>
-            {!replacing && (
-              <Button
-                size="small"
-                onClick={() => setReplacing(true)}
-                disabled={disabled}
-              >
-                Replace
-              </Button>
-            )}
             <Button
               size="small"
               color="error"
@@ -111,7 +98,7 @@ export function AnthropicKeyRow({
             >
               Disconnect
             </Button>
-          </Box>
+          </MaskedCredential>
           <Typography variant="body2" color="text.secondary">
             Connected {new Date(stored.connectedAt).toLocaleString()}
             {stored.lastValidatedAt &&
@@ -132,31 +119,15 @@ export function AnthropicKeyRow({
 
       {editing && (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1, mt: 1 }}>
-          <TextField
+          <SecretField
             label={connected ? "New API key" : "API key"}
             placeholder="sk-ant-api…"
-            type={showKey ? "text" : "password"}
             value={value}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={onChange}
             disabled={disabled}
-            error={error !== undefined}
-            helperText={error ?? "Validated with Anthropic when you save."}
-            fullWidth
-            slotProps={{
-              input: {
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton
-                      aria-label={showKey ? "hide key" : "show key"}
-                      onClick={() => setShowKey((v) => !v)}
-                      edge="end"
-                    >
-                      {showKey ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </IconButton>
-                  </InputAdornment>
-                ),
-              },
-            }}
+            error={error}
+            helperText="Validated with Anthropic when you save."
+            noun="key"
           />
           <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center" }}>
             {connected && (

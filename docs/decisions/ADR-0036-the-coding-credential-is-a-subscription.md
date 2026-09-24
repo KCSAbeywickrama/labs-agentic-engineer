@@ -63,15 +63,17 @@ transactions. A database error between them could leave a save half-applied.
    (`secrets.TxCredentialStore.WithDB`). The patch is judged once before the live
    key probes (so a refusal costs no probe) and again inside the transaction
    against the rows it writes over. The SM-API copy of a written credential is
-   mirrored after commit, best-effort; a deleted credential's copy is deleted
-   after commit by the secret-ref name read before the row went.
+   mirrored after commit, best-effort. A save clears the row's secret-ref
+   triplet, because the vault path is fixed per org and role: a failed mirror
+   then fails dispatch closed instead of mounting the previous credential. A
+   deleted credential's copy is deleted after commit by the secret-ref name read
+   before the row went. A blank key or token is refused on its section.
 
 5. **Dispatch mounts the subscription only on Claude Code.**
    `ResolveCodingSecretRef(ctx, org, runtime)` returns the subscription's triplet
    when the runtime is `claude-code` and one exists, the default key's otherwise.
-   It still fails closed on a subscription with no usable triplet, and dispatch
-   still refuses an OpenCode run whose credential variable is not
-   `ANTHROPIC_API_KEY`. Exactly one of `ANTHROPIC_API_KEY` /
+   It fails closed on a subscription with no usable triplet, and on any other
+   runtime never consults the subscription at all. Exactly one of `ANTHROPIC_API_KEY` /
    `CLAUDE_CODE_OAUTH_TOKEN` reaches a run, because Claude Code ranks the former
    above the latter and would silently ignore the token.
 

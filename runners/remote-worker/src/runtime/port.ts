@@ -52,7 +52,7 @@
 // what `lib/run_loop.ts` measurably needs — see the note there.
 
 import type { components } from "../generated/aep-api";
-import type { RunEventInput } from "../lib/progress/emitter.js";
+import type { RunEventInput, RunEventUsage } from "../lib/progress/emitter.js";
 import type { RunEventTranslator, RunStream } from "../lib/run_loop.js";
 
 /**
@@ -237,51 +237,6 @@ export interface SkillsPolicy {
 }
 
 /**
- * One tool call, as the platform's watchers read it — in the port's vocabulary,
- * not a runtime's.
- *
- * The watchers (the validation run's per-criterion rows and its status line)
- * ask three questions of a call: is it a shell command, and which; does it
- * write a whole file, and with what; does it edit a file in place. Every
- * runtime spells those differently — Claude Code's `Bash`/`Write`/`Edit` with
- * `file_path`, OpenCode's `bash`/`write`/`edit` with `filePath` — so the ADAPTER
- * answers them (each runtime's `observedCall`, in its `tools.ts`) and the
- * watchers never see a tool name.
- *
- * `write` carries the whole new file, so a watcher can read the body; `edit` is
- * a change to part of one, whose result the call does not state. A call that is
- * none of those is `other`, with the runtime's own name for reading only.
- */
-export type ObservedCall =
-  | { kind: "shell"; command: string }
-  | { kind: "write"; path: string; content: string }
-  | { kind: "edit"; path: string }
-  | { kind: "other"; tool: string };
-
-/**
- * Watchers, never deciders.
- *
- * Both of these existed before the port and neither is a guard: the validation
- * run derives per-criterion progress from the calls it sees going out, and
- * settles a criterion from the same `ok` the feed reports. They are on the
- * policy because they are the platform's, and they are separate from the guards
- * above because a progress feature that could block a write would be a worse
- * bargain than no progress feature.
- */
-export interface RuntimeObservers {
-  /**
-   * A tool call, before it runs. The return value is ignored — but a promise
-   * is AWAITED, so a watcher that has to reach the outside world lands before
-   * the call it describes. The validation status line does: its whole value is
-   * that the line explaining a twenty-minute silence is posted before the
-   * silence, not after it.
-   */
-  toolUse?(call: ObservedCall, toolUseId: string): void | Promise<void>;
-  /** A plain tool call settling, with the same `ok` that reaches the feed. */
-  toolOutcome?(toolUseId: string, ok: boolean): void;
-}
-
-/**
  * Everything a runtime needs to start this platform's kind of run.
  *
  * Read it as the sentence "a coding run may author files under X, may not do Y,
@@ -332,7 +287,6 @@ export interface RuntimePolicy {
   skills: SkillsPolicy;
   /** Absent when the dispatch carried no MCP url or no token to present. */
   mcp?: McpPolicy;
-  observe?: RuntimeObservers;
 }
 
 /** One runtime-owned file worth keeping, once the run is over. */
@@ -503,6 +457,14 @@ export interface RuntimeSession {
    */
   readonly classify: MessageClassifier;
   /**
+   * The run's usage so far, cumulative and per model, as the adapter holds it —
+   * undefined before any was reported. What the loop settles with when the run
+   * ends early (the deadline, a fatal) and no turn is left to carry it: tokens
+   * spent on an unfinished run are still spent, and a settle without them
+   * blanks the cycle's cost.
+   */
+  usage(): RunEventUsage | undefined;
+  /**
    * The files this run produced that outlive its messages.
    *
    * Async because a runtime may have to look: this one already knows, because
@@ -546,9 +508,8 @@ export interface Runtime {
    *
    * A STRING, not the sketch's `{fanOut, wait, stop, edit, write, shell}` record.
    * The repo already had this working (`lib/tool_glossary.ts`) and its content is
-   * more than a name per role: it carries the model aliases a lead picks from and
-   * the argument that makes each role work (`run_in_background: true`,
-   * `block: true`). A record of bare names would drop exactly the part that
+   * more than a name per role: it carries the argument that makes each role
+   * work (`run_in_background: true`, `block: true`). A record of bare names would drop exactly the part that
    * stopped leads guessing, and the caller would have to render it back into
    * prose anyway. Reformatting a working artefact to match a sketch is churn.
    */

@@ -269,7 +269,7 @@ function isModelWaitFrame(m: Record<string, unknown>): boolean {
  *
  * Only present when `includePartialMessages` is on, which is a developer-only
  * option: these arrive per token and belong to neither the feed nor
- * `claude.log`. Their one job is to let the watchdog tell a long generation
+ * `runtime.log`. Their one job is to let the watchdog tell a long generation
  * apart from a wedged one, which is the residual fault `api_retry` does not
  * explain — no retries and no tokens is a different problem from no retries
  * and 4,000 tokens.

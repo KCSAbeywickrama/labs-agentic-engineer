@@ -26,8 +26,6 @@ import {
   Chip,
   Divider,
   FormControlLabel,
-  IconButton,
-  InputAdornment,
   MenuItem,
   Radio,
   RadioGroup,
@@ -35,11 +33,12 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Bot, Eye, EyeOff } from "@wso2/oxygen-ui-icons-react";
+import { Bot } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
-import { MODELS, runtimeUnavailableReason, type AiSettings } from "../aiSettings";
+import { MODELS, SUBSCRIPTION_TOKEN_PREFIX, type AiSettings } from "../aiSettings";
 import { useAiSettings } from "../hooks/useAiSettings";
 import { AnthropicKeyRow } from "./AnthropicKeyRow";
+import { MaskedCredential, SecretField } from "./CredentialField";
 
 type ConfigProjection = components["schemas"]["ConfigProjection"];
 type AgentRuntime = components["schemas"]["AgentRuntime"];
@@ -144,11 +143,7 @@ export function AiAgentsCard({
         <RadioGroup
           aria-labelledby="coding-agent-label"
           value={draft.runtime}
-          onChange={(e) => {
-            const runtime = e.target.value as AgentRuntime;
-            if (runtimeUnavailableReason(runtime, draft.model)) return;
-            ai.change({ runtime });
-          }}
+          onChange={(e) => ai.change({ runtime: e.target.value as AgentRuntime })}
           sx={{
             display: "grid",
             gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
@@ -156,13 +151,12 @@ export function AiAgentsCard({
           }}
         >
           {RUNTIMES.map((r) => {
-            const reason = runtimeUnavailableReason(r.value, draft.model);
             const selected = draft.runtime === r.value;
             return (
               <Tile key={r.value} selected={selected}>
                 <FormControlLabel
                   value={r.value}
-                  disabled={busy || reason !== undefined}
+                  disabled={busy}
                   control={<Radio />}
                   label={
                     <Box>
@@ -170,7 +164,7 @@ export function AiAgentsCard({
                         {r.label}
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
-                        {reason ?? r.description}
+                        {r.description}
                       </Typography>
                     </Box>
                   }
@@ -275,7 +269,6 @@ function Tile({ selected, children }: { selected: boolean; children: ReactNode }
 function SubscriptionControl({ ai }: { ai: ReturnType<typeof useAiSettings> }) {
   const { saved, draft } = ai;
   const [replacing, setReplacing] = useState(false);
-  const [showToken, setShowToken] = useState(false);
   const busy = ai.saving;
   const stored = saved.subscription;
   const askForToken = draft.billToSubscription && (stored === null || replacing);
@@ -328,14 +321,7 @@ function SubscriptionControl({ ai }: { ai: ReturnType<typeof useAiSettings> }) {
       )}
 
       {draft.billToSubscription && stored && !replacing && (
-        <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 1 }}>
-          <Typography variant="body2" fontFamily="monospace">
-            {stored.keyPrefix}•••••••••{stored.keyLast4}
-          </Typography>
-          <Button size="small" onClick={() => setReplacing(true)} disabled={busy}>
-            Replace
-          </Button>
-        </Box>
+        <MaskedCredential stored={stored} onReplace={() => setReplacing(true)} disabled={busy} />
       )}
       {draft.billToSubscription && stored?.validationError && (
         <Alert severity="warning">{stored.validationError}</Alert>
@@ -343,38 +329,20 @@ function SubscriptionControl({ ai }: { ai: ReturnType<typeof useAiSettings> }) {
 
       {askForToken && (
         <>
-          <TextField
+          <SecretField
             label={stored ? "New subscription token" : "Subscription token"}
-            placeholder="sk-ant-oat01-…"
-            type={showToken ? "text" : "password"}
+            placeholder={`${SUBSCRIPTION_TOKEN_PREFIX}01-…`}
             value={draft.token}
-            onChange={(e) => ai.change({ token: e.target.value })}
+            onChange={(token) => ai.change({ token })}
             disabled={busy}
-            error={tokenError !== undefined}
+            error={tokenError}
             helperText={
-              tokenError ?? (
-                <>
-                  Run <code>claude setup-token</code> and paste the token. Other
-                  agents keep using the API key.
-                </>
-              )
+              <>
+                Run <code>claude setup-token</code> and paste the token. Other
+                agents keep using the API key.
+              </>
             }
-            fullWidth
-            slotProps={{
-              input: {
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton
-                      aria-label={showToken ? "hide token" : "show token"}
-                      onClick={() => setShowToken((v) => !v)}
-                      edge="end"
-                    >
-                      {showToken ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </IconButton>
-                  </InputAdornment>
-                ),
-              },
-            }}
+            noun="token"
           />
           {stored && (
             <Button

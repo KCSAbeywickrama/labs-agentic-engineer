@@ -20,10 +20,11 @@
 //
 // Boots an OpenCode server for a project exactly as a run does
 // (`bootOpencode`, runtime/opencode/runtime.ts: the config builder's output, the
-// runtime's env flags, the guard plugin, the three start-time assertions) and
+// runtime's env flags, the guard plugin, the four start-time assertions) and
 // prints what the server reports — its merged config, the tools the `aep` agent
-// is offered, the skills it discovered — then stops it. No session is created
-// and no prompt is sent, so it costs nothing; a dummy key is enough.
+// is offered, the skills it discovered — then stops it. The only session is the
+// startup probe, which the guard refuses before any model call, so it costs
+// nothing; a dummy key is enough.
 //
 //   npx tsx test/fixtures/probes/opencode-probe-config.mts <projectDir> [pluginDir]
 //
@@ -75,7 +76,7 @@ try {
       {
         ok: true,
         bootMs: Date.now() - t0,
-        assertions: "guard plugin loaded; task/skill/todowrite/edit/write/bash visible; question hidden; task has no background",
+        assertions: "guard plugin loaded; task/skill/todowrite/edit/write/bash visible; question hidden; task has no background; system transform live",
         skillsDiscovered: booted.skills,
         config: {
           model: cfg.model,

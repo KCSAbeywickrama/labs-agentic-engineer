@@ -35,7 +35,16 @@ export const GUARD_ENV = {
   appendixFile: "AEP_GUARD_APPENDIX",
   /** Where the plugin appends one `SessionContextRecord` per session fact (lib/run_context.ts). */
   sessionLog: "AEP_GUARD_SESSION_LOG",
+  /** Where the plugin writes its marker when the startup probe reaches the system transform. */
+  probeFile: "AEP_GUARD_PROBE_MARKER",
 } as const;
+
+/**
+ * The text of the runner's startup probe prompt. A session whose message is
+ * exactly this is the probe: the plugin marks the system transform firing and
+ * refuses the model call, so the probe proves the hook is live and costs nothing.
+ */
+export const STARTUP_PROBE_PROMPT = "[aep-guard:startup-probe]";
 
 /**
  * The prefix a workspace-guard denial carries in the tool's error text.

@@ -443,6 +443,7 @@ export async function startCodingRun(
       return await consumeRun(session.stream, {
         translate: session.translate,
         classify: session.classify,
+        usage: session.usage,
         watchdog,
         emit,
         record: (m) => log.write(m),

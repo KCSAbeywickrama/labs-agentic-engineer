@@ -514,16 +514,7 @@ here: they're the open `console` + `feature` issues.
   (browse/search/import/sync; no in-console authoring) —
   [#96](https://github.com/wso2/labs-agentic-engineer/issues/96) (BE
   handshake: [#100](https://github.com/wso2/labs-agentic-engineer/issues/100))
-- Settings → AI agents — one card, one Save: the model every agent uses
-  (requirements to coding), the org's Anthropic API key (a new key rides the
-  Save and is validated server-side; disconnect is its own confirmed action and
-  takes the subscription with it), and the coding agent as Claude Code | OpenCode
-  tiles. Only the Claude Code tile offers "Bill coding to a Claude subscription"
-  (a `claude setup-token` token); choosing OpenCode warns in the tile that
-  saving deletes a stored token, and the Save deletes it. The separate coding
-  API key is gone from the UI, and a legacy one reads as none. The card→`/config`
-  section mapping lives in one adapter, `features/settings/aiSettings.ts`
-  (root ADR-0028; replaces the UI of the root ADR-0016 coding-agent key)
+- Settings → AI agents — one card, one Save: model, Anthropic API key, coding agent (Claude Code | OpenCode) and an optional Claude subscription on Claude Code (root ADR-0036)
 - Settings → Skills legacy parity — per-tab routes, categorised catalogue
   (org/platform/custom/imported), MD viewer + monospace editor with preview,
   upload-only import with pull-request guidance —

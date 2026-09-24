@@ -41,8 +41,6 @@
 //   policy.model               → `model:`, every alias's pin and the
 //                                subagent model (modelPinEnv)
 //   policy.debug               → the SDK's own debug/stderr/streaming options
-//   policy.observe             → a watching PreToolUse hook, and the adapter's
-//                                own tool-outcome seam
 //   the prompt                 → a streaming input held open until the run loop
 //                                ends it (see openPromptStream)
 //
@@ -74,7 +72,7 @@ import { createWebSearchDlpHook } from "../../lib/websearch_dlp.js";
 import { createWorkspaceWriteGuard } from "../../lib/workspace_guard.js";
 import type { Runtime, RuntimeArtifact, RuntimePolicy, RuntimeSession } from "../port.js";
 import { createClaudeClassifier } from "./classify.js";
-import { buildMcpOptions, deniedTools, observedCall } from "./tools.js";
+import { buildMcpOptions, deniedTools } from "./tools.js";
 import { createClaudeAdapter } from "./translate.js";
 
 /**
@@ -131,27 +129,6 @@ export function modelPinEnv(model: string): Record<string, string> {
 
 /** Placeholder header the SDK sends to the loopback proxy; never sent upstream. */
 const LOOPBACK_TOKEN = "loopback";
-
-/**
- * A PreToolUse hook that only WATCHES.
- *
- * `policy.observe.toolUse` is not a decision — see `RuntimeObservers` — so this
- * adapts the platform's watcher onto the SDK's hook shape and always returns an
- * empty decision. It exists so the port never has to mention `HookCallback`.
- *
- * The watcher is AWAITED, which is the one thing this adapter has to get right
- * for it: a watcher that posts (the validation status line) is only worth
- * having if its line lands before the call it describes, and the SDK awaiting
- * this callback is what holds the call until it has.
- */
-export function watchHook(observe: NonNullable<RuntimePolicy["observe"]>["toolUse"]): HookCallback {
-  return async (input) => {
-    const hookInput = input as { hook_event_name?: string; tool_name?: string; tool_input?: unknown; tool_use_id?: string };
-    if (hookInput?.hook_event_name !== "PreToolUse") return {};
-    await observe?.(observedCall(hookInput.tool_name ?? "", hookInput.tool_input), hookInput.tool_use_id ?? "");
-    return {};
-  };
-}
 
 /** The lead's name in the session-context record: the feed's own word for it. */
 const LEAD_SESSION = "lead";
@@ -271,7 +248,6 @@ async function startClaudeCodeSession(prompt: string, policy: RuntimePolicy): Pr
   );
   const webSearchHook = createWebSearchDlpHook(policy.webSearch.deny);
   const webFetchHook = createWebFetchGuardHook(policy.webFetch.deny);
-  const observeHook = policy.observe?.toolUse ? watchHook(policy.observe.toolUse) : undefined;
   const sessionContextFile = path.join(policy.logDir, SESSION_CONTEXT_FILE);
   const recordContext = (r: SessionContextRecord): void => appendSessionContext(sessionContextFile, r);
   recordContext({ session: LEAD_SESSION, agent: LEAD_SESSION, appendix: policy.skills.preloadBodies !== "" });
@@ -279,10 +255,7 @@ async function startClaudeCodeSession(prompt: string, policy: RuntimePolicy): Pr
 
   // One adapter per run — it carries this run's agent registry and in-flight
   // tool calls (see createClaudeAdapter).
-  const adapter = createClaudeAdapter({
-    taskKind: policy.taskKind,
-    ...(policy.observe?.toolOutcome ? { onToolOutcome: policy.observe.toolOutcome } : {}),
-  });
+  const adapter = createClaudeAdapter({ taskKind: policy.taskKind });
 
   const input = openPromptStream(prompt);
   let q: Query;
@@ -358,17 +331,6 @@ async function startClaudeCodeSession(prompt: string, policy: RuntimePolicy): Pr
             { matcher: "Edit", hooks: [workspaceWriteGuard] },
             { matcher: "NotebookEdit", hooks: [workspaceWriteGuard] },
             { matcher: "Skill", hooks: [contextHook] },
-            // Neither a guard nor a rewrite: this one only watches, and returns
-            // an empty decision. `Bash` is in the set because a validation run's
-            // per-spec `npm test` call is what says a criterion is running.
-            ...(observeHook
-              ? [
-                  { matcher: "Write", hooks: [observeHook] },
-                  { matcher: "Edit", hooks: [observeHook] },
-                  { matcher: "NotebookEdit", hooks: [observeHook] },
-                  { matcher: "Bash", hooks: [observeHook] },
-                ]
-              : []),
           ],
         },
       },
@@ -393,6 +355,7 @@ async function startClaudeCodeSession(prompt: string, policy: RuntimePolicy): Pr
     translate: adapter.translate,
     // Per session, like the adapter: it remembers the last rate-limit line.
     classify: createClaudeClassifier(),
+    usage: adapter.usage,
     artifacts: async () => [...adapter.artifacts(), contextArtifact, ...debugArtifacts],
     close: async () => {
       // A closed session must not leave the prompt stream pending: the SDK

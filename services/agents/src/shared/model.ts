@@ -44,6 +44,19 @@ export interface LlmConfig {
 }
 
 /**
+ * The model ids a turn may name: the contract's `AgentModel` enum, the set the
+ * platform can price (pinned against the contract by test/model.test.ts). A
+ * turn naming none runs on `AGENT_MODEL`, the operator's default, which this
+ * list does not bind.
+ */
+export const OFFERED_MODELS: readonly string[] = ["claude-sonnet-5", "claude-haiku-4-5"];
+
+/** Whether a turn may name `modelId`. */
+export function isOfferedModel(modelId: string): boolean {
+  return OFFERED_MODELS.includes(modelId);
+}
+
+/**
  * The model id `createModel` resolves for `cfg`. Exported so the composition
  * root can thread the SAME id it instantiates into the turn (usage attribution
  * on the terminal manifest, #249) instead of re-deriving the default elsewhere.

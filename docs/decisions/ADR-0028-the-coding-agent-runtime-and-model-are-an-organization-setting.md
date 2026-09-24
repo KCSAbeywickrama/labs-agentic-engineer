@@ -87,60 +87,31 @@ deliberately does not widen.
   compensated by the section-level `orgconfig.patched` audit line — which now
   names `codingAgent` — and by `updated_by` on the row itself.
 
-## Amendment 2026-09-22 — OpenCode is selectable; credential rule, image per runtime, one model
+## Amendment 2026-09-24 — OpenCode is selectable; one `agents` section and one model
 
-The platform ships a second runtime adapter (OpenCode, `runners/remote-worker`),
-so every `AgentRuntime` value is selectable and the separate "supported" list,
-with its "unavailable" refusal, is gone: a runtime enters the contract with its
-adapter. The default runtime is still Claude Code; OpenCode is opt-in per org.
+[ADR-0036](ADR-0036-the-coding-credential-is-a-subscription.md) supersedes
+ADR-0016, and OpenCode is the second runtime adapter
+([`runners/remote-worker` ADR-0015](../../runners/remote-worker/design/decisions/ADR-0015-opencode-is-the-second-adapter.md)).
+Together they reshape this setting:
 
-**OpenCode cannot present a Claude subscription** (it authenticates to
-Anthropic with an API key only), so an OpenCode run always bills the org's API
-key. How that is enforced is the 2026-09-24 amendment below.
-
-**Image per runtime, one ComponentType.** The runtime picks the runner image
-(`AGENT_RUNNER_IMAGE` for Claude Code, `AGENT_RUNNER_IMAGE_OPENCODE` for
-OpenCode: two tags from one Dockerfile; Helm `codingAgentRunner.opencodeImage`,
-compose default `aep-runner-opencode:dev`). Neither has a built-in default; an
-OpenCode cycle with no OpenCode image fails its dispatch naming the variable.
-The `job/coding-agent` ComponentType gains a `runtime` parameter (enum, default
-`claude-code`) that renders as the `aep.wso2.com/runtime` label on the Job and
-its pod; the dispatcher stamps the parameter and the same label on the Component
-and Workload, so the cluster can select runs by runtime.
-
-**The org's one model is the only model a run uses**, on both runtimes: the
-lead, every subagent, and the runtime's own helper calls (OpenCode's titles and
-summaries, Claude Code's `haiku`-alias calls). The org brings its own key and
-that key decides which models it can reach, so the runner never falls back to a
-second model the org did not choose; one model also keeps every slice inside
-the all-or-nothing cost stamp.
-
-## Amendment 2026-09-24 — one `agents` section, one model for every agent
-
-Superseding ADR-0016 ([ADR-0036](ADR-0036-the-coding-credential-is-a-subscription.md))
-reshapes this setting:
-
-- **`agents` replaces `codingAgent` (and `codingLlm`).** `AgentModel` and
-  `AgentsProjection` replace `CodingAgentModel` and `CodingAgentProjection`; the
-  section also carries the Claude subscription (`subscription`, masked on read,
-  three-state on write). Storage is `org_agent_settings` (renamed from
-  `org_coding_agent_settings`); its absence is still the platform defaults.
+- **Every `AgentRuntime` value is selectable.** A runtime enters the contract
+  with its adapter, so there is no separate "supported" list. Claude Code is the
+  default; OpenCode is opt-in per org.
+- **`agents` is the section.** It carries `model`, `runtime` and the optional
+  Claude subscription (`subscription`, masked on read, three-state on write),
+  stored in `org_agent_settings`; the row's absence is the platform defaults.
 - **One model for every agent.** The requirements, design and task-planning
-  agents use the org's model too, not only the coding agent. They resolve it with
-  the key at the start of every turn and send it in the turn body (`model`); the
-  agents service builds the model per turn and falls back to `AGENT_MODEL` only
-  when a caller sends none. A spec agent picks up a change from its next turn; a
-  coding run still copies the model at dispatch and keeps it. Any offered model
-  can be chosen, Haiku included; the reasoning-effort option is sent only to
-  models that accept it (`services/agents/src/shared/model.ts`).
-- **The credential rule is the subscription rule.** A subscription needs
-  `claude-code` and a connected API key, judged on the state the patch leaves.
-  Choosing `opencode`, disconnecting the key and resetting the section delete the
-  stored token in the same transaction; `opencode` with a new token in one patch
-  is refused (`agents_subscription_requires_claude_code`, on `body.agents`).
-  The 2026-09-22 refusals (`coding_agent_runtime_credential_incompatible`,
-  `coding_llm_incompatible_with_runtime`) are gone with the sections they named.
-- **One save, one transaction.** `llm` and `agents` are written together under
-  one per-org lock, secret bytes included (ADR-0036 point 4).
-- Dispatch asks for the credential of the run's runtime: the subscription only
-  on Claude Code, the API key otherwise, still failing closed.
+  agents resolve the org's model with its key at the start of every turn; a
+  coding run copies it at dispatch and uses it for the lead, every subagent and
+  the runtime's own helper calls. The runner never falls back to a model the org
+  did not choose, which also keeps every slice inside the all-or-nothing cost
+  stamp.
+- **The credential rule is the subscription rule.** OpenCode authenticates with
+  an API key only, so a subscription needs `claude-code` and a connected API
+  key, judged on the state the patch leaves. Choosing `opencode`, disconnecting
+  the key and resetting the section delete the stored token in the same
+  transaction. Dispatch asks for the credential of the run's runtime.
+- **The runtime picks the runner image**, and the `job/coding-agent`
+  ComponentType's `runtime` parameter labels the run's Job, pod, Component and
+  Workload `aep.wso2.com/runtime`. An OpenCode cycle on a platform with no
+  OpenCode image fails its dispatch naming the missing setting.

@@ -297,10 +297,6 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 	}
 	env[envAgentRuntime] = string(agent.Runtime)
 	env[envAgentModel] = agent.Model
-	anthropicEnvVar, err := anthropicEnvVarFor(in.orgID, agent.Runtime, anthropicSR.EnvVar)
-	if err != nil {
-		return "", err
-	}
 	// Only a validation cycle is issue-anchored, so only it can name an issue.
 	// Absent rather than "0" for every other kind: the runner reads presence, and
 	// a stamped zero would be a number it has to know is not one.
@@ -308,7 +304,7 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		env[envValidationIssue] = strconv.Itoa(disp.validationIssue)
 	}
 	secretEnv := []SecretEnvRef{
-		{Key: anthropicEnvVar, SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
+		{Key: anthropicEnvVarOrDefault(anthropicSR.EnvVar), SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
 		{Key: envGitHubToken, SecretName: githubSR.SecretRefName, SecretKey: githubSR.Property},
 	}
 	if evalSR, ok := e.evaluationKeyRef(ctx, in.orgID); ok {
@@ -466,11 +462,10 @@ func (e *CodingExecutor) evaluationKeyRef(ctx context.Context, orgID string) (Se
 	return SecretEnvRef{Key: envEvalAnthropicAPIKey, SecretName: triplet.Name, SecretKey: triplet.Property}, true
 }
 
-// codingAgentEnv resolves the runtime and models this run is launched with.
+// codingAgentEnv resolves the runtime and the model this run is launched with.
 //
 // A missing resolver, or an org that never chose, both mean the platform
-// defaults — which is what every dispatch carried before the setting existed, so
-// nothing changes for an org that never opens the page. A resolver that ERRORS
+// defaults. A resolver that ERRORS
 // is different and fails the dispatch: the org did choose something, we cannot
 // read what, and launching on the defaults would bill it for a model it moved
 // off without ever saying so.
@@ -483,20 +478,6 @@ func (e *CodingExecutor) codingAgentEnv(ctx context.Context, orgID string) (orgc
 		return orgconfig.AgentsProjection{}, fmt.Errorf("coding dispatch: coding-agent setting for org %q: %w", orgID, err)
 	}
 	return proj, nil
-}
-
-// anthropicEnvVarFor names the Job's Anthropic SecretEnv entry, failing closed
-// when an OpenCode run did not resolve to an API key. The resolver never hands
-// OpenCode a subscription, so this guards the one thing that must not happen
-// even if that ever changes: a run mounting a credential its runtime cannot
-// present.
-func anthropicEnvVarFor(orgID string, runtime orgconfig.AgentRuntime, resolved string) (string, error) {
-	if runtime == orgconfig.AgentRuntimeOpenCode && resolved != envAnthropicAPIKey {
-		return "", fmt.Errorf(
-			"coding dispatch: org %q runs on OpenCode, which authenticates with an Anthropic API key only, "+
-				"but its coding credential resolves to %q", orgID, resolved)
-	}
-	return anthropicEnvVarOrDefault(resolved), nil
 }
 
 // anthropicEnvVarOrDefault names the Job's Anthropic SecretEnv entry from

@@ -17,49 +17,16 @@
  */
 
 // The OPENCODE adapter: `RuntimePolicy` in, a running OpenCode session out.
-// The second implementation of the port (ADR-0015), beside `runtime/claude/`.
+// Which OpenCode mechanism enforces each policy clause is ADR-0015's table.
 //
-// Read it as: for each clause of `RuntimePolicy`, which OpenCode mechanism
-// enforces it.
-//
-//   policy.workspace           → the server's cwd and the client's `directory`
-//   policy.env                 → the server's environment (its tools inherit it),
-//                                plus the runtime's own flags (childEnvironment)
-//   policy.model               → config `model`, `small_model` and the one
-//                                subagent, `anthropic/`-spelled (config.ts)
-//   policy.write               → the aep-guard plugin's `tool.execute.before` on
-//                                edit/write/apply_patch, the one enforcer
-//                                (`external_directory: allow`, config.ts —
-//                                reads are not gated); a refusal reaches the feed
-//                                through the translator (`onWorkspaceDenied`)
-//   policy.webSearch/webFetch  → the same plugin, fed the run's staged-secret
-//                                values through a 0600 file
-//   policy.deniedCapabilities  → permission denies (tools.ts), `share: disabled`
-//   policy.skills.allow        → `permission.skill`, `"*": "deny"` FIRST
-//   policy.skills.preloadBodies→ an instructions file, named in `instructions`,
-//                                kept to the lead by the plugin (plugin/context.ts)
-//   policy.skills.dir          → discovered natively from `.claude/skills/`
-//   policy.mcp                 → a `remote` MCP entry behind the SAME loopback
-//                                auth proxy Claude Code uses (static headers)
-//   policy.observe             → called by the translator AFTER THE FACT, when a
-//                                call's part first leaves `pending` (ADR-0015)
-//   policy.debug / logDir      → `--log-level=DEBUG --print-logs` into
-//                                `<logDir>/opencode.stderr`, and the config the
-//                                run was started with beside it
-//
-// Four invariants are not policy fields, for the reason the Claude adapter
-// gives for its three — they are conditions of running this workload at all:
-//
-//   1. `OPENCODE_DISABLE_PROJECT_CONFIG=1` — the checkout's own `opencode.json`
-//      and `.opencode/` do not reach a platform run (measured, S1c). The
-//      equivalent of Claude Code's `strictMcpConfig`, and wider.
-//   2. `OPENCODE_DISABLE_AUTOUPDATE` / `_MODELS_FETCH` / `_LSP_DOWNLOAD` — a pod
-//      must start without npm, GitHub or models.dev; the image pre-warms what
-//      the server would otherwise fetch (Dockerfile, runner-opencode stage).
-//   3. The experimental background flag is NEVER set, and its absence is
-//      asserted (startup.ts): fan-out is foreground on this runtime.
-//   4. `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` is never set either: it turns off
-//      the `.claude/skills/` discovery the mirror depends on.
+// Invariants that are not policy fields (conditions of running at all):
+//   - `OPENCODE_DISABLE_PROJECT_CONFIG` — the checkout's own config never
+//     reaches a run (the equivalent of Claude Code's `strictMcpConfig`);
+//   - `OPENCODE_DISABLE_AUTOUPDATE` / `_MODELS_FETCH` / `_LSP_DOWNLOAD` — a pod
+//     starts offline from the image's pre-warmed home;
+//   - never set: the experimental background flag (asserted absent,
+//     startup.ts) and `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` (it turns off the
+//     `.claude/skills/` discovery the mirror depends on).
 
 import fs from "node:fs";
 import os from "node:os";
@@ -70,13 +37,14 @@ import { startMcpAuthProxy } from "../../lib/mcp_auth_proxy.js";
 import { scrubber } from "../../lib/progress/scrubber.js";
 import { SESSION_CONTEXT_FILE } from "../../lib/run_context.js";
 import { toolGlossary } from "../../lib/tool_glossary.js";
+import { withTimeout } from "../../lib/with_timeout.js";
 import { stagedSecretValues } from "../../lib/websearch_dlp.js";
 import type { Runtime, RuntimeArtifact, RuntimePolicy, RuntimeSession } from "../port.js";
 import { createOpencodeClassifier } from "./classify.js";
 import { buildOpencodeConfig } from "./config.js";
 import { pumpEvents } from "./event_queue.js";
 import { obj, str } from "../fields.js";
-import { GUARD_ENV } from "./plugin/protocol.js";
+import { GUARD_ENV, STARTUP_PROBE_PROMPT } from "./plugin/protocol.js";
 import { freePort, startServer, type RunningServer } from "./server.js";
 import { createStreamCloser, sessionStream } from "./settle.js";
 import { OpencodeStartupError, startupProblems, type PermissionRuleRecord } from "./startup.js";
@@ -96,6 +64,7 @@ export const OPENCODE_GUARD_DIR = "/app/runtime/opencode/aep-guard";
 const START_TIMEOUT_MS = 60_000;
 const GUARD_READY_TIMEOUT_MS = 15_000;
 const CONNECT_TIMEOUT_MS = 15_000;
+const PROBE_TIMEOUT_MS = 15_000;
 
 /** The adapter's clock — see `aep.tick` in messages.ts. */
 const TICK_MS = 10_000;
@@ -118,20 +87,18 @@ interface RunFiles {
   instructions: string;
   secrets: string;
   ready: string;
+  probe: string;
 }
 
 /**
- * The server's environment: the policy's, plus the flags that are this
- * runtime's conditions of running (see the header) and the guard's inputs.
- *
- * Exported for its test. The experimental background flag is deliberately NOT
- * removed if the pod's environment happens to carry it: that is a leak worth
- * failing the run over, and `startup.ts` does, loudly — deleting it here would
- * hide the leak and keep the run.
+ * The server's environment: the policy's, plus the invariant flags (header) and
+ * the guard's inputs. The one place those flags are set, for every run path.
+ * A leaked background flag is passed through, not removed: `startup.ts` fails
+ * the run on it, where removing it would hide the leak.
  */
 export function childEnvironment(
   policy: Pick<RuntimePolicy, "workspace" | "env" | "logDir">,
-  files: Pick<RunFiles, "secrets" | "ready" | "instructions">,
+  files: Pick<RunFiles, "secrets" | "ready" | "instructions" | "probe">,
 ): Record<string, string> {
   return {
     ...policy.env,
@@ -143,6 +110,7 @@ export function childEnvironment(
     [GUARD_ENV.secretsFile]: files.secrets,
     [GUARD_ENV.readyFile]: files.ready,
     [GUARD_ENV.appendixFile]: files.instructions,
+    [GUARD_ENV.probeFile]: files.probe,
     [GUARD_ENV.sessionLog]: sessionContextPath(policy),
   };
 }
@@ -152,13 +120,9 @@ function sessionContextPath(policy: Pick<RuntimePolicy, "logDir">): string {
 }
 
 /**
- * The run's private files, in a fresh 0700 directory under the temp dir.
- *
- * NOT `policy.logDir`: in a pod that is `<workspace>/.logs`, inside the clone
- * the agent commits from, and the secrets file holds the run's staged secret
- * VALUES — one `git add -A` from a customer's repository. The temp directory is
- * the pod's own emptyDir and is discarded with it; the files are also removed
- * at `close()`.
+ * The run's private files, in a fresh 0700 temp directory removed at `close()`.
+ * Not `policy.logDir`: that is inside the clone, and the secrets file holds
+ * staged secret VALUES.
  */
 function writeRunFiles(policy: RuntimePolicy): RunFiles {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aep-opencode-"));
@@ -167,16 +131,12 @@ function writeRunFiles(policy: RuntimePolicy): RunFiles {
     instructions: path.join(dir, "instructions.md"),
     secrets: path.join(dir, "guard-secrets.json"),
     ready: path.join(dir, "aep-guard.ready"),
+    probe: path.join(dir, "aep-guard.probe"),
   };
-  // The whole appendix, glossary last: "the tool glossary at the end of your
-  // instructions" has to stay literally true (S4i: the lead quoted a marker
-  // placed at the end of this file). The plugin reads it too, to remove it from
-  // every session that is not the lead's.
+  // The whole appendix, glossary last; the plugin reads it too, to keep it to the lead.
   fs.writeFileSync(files.instructions, policy.skills.preloadBodies, { mode: 0o600 });
-  // The values the runner's WebSearch/WebFetch predicates were built from —
-  // `stagedSecretValues` over the SAME env (lib/runner.ts) — because a closure
-  // cannot cross into the plugin's process. Values, so the file is 0600 and
-  // deleted at close; never in the config, which is an env var any child reads.
+  // The values the runner's egress predicates were built from: a closure cannot
+  // cross into the plugin's process, and the config is an env var any child reads.
   fs.writeFileSync(files.secrets, JSON.stringify(stagedSecretValues(policy.env)), { mode: 0o600 });
   return files;
 }
@@ -190,27 +150,48 @@ async function waitForFile(file: string, timeoutMs: number): Promise<boolean> {
   return fs.existsSync(file);
 }
 
-function withTimeout<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const expired = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${what} did not happen within ${ms}ms`)), ms);
-  });
-  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
-}
-
 /** The token source the loopback proxy drives, built from the port's two members. */
 function tokenSource(mcp: NonNullable<RuntimePolicy["mcp"]>): AccessTokenSource {
   return { getToken: () => mcp.token(), invalidate: () => mcp.invalidate?.() };
 }
 
 /**
- * The three start-time assertions, asked of the running server. The prompt has
+ * Whether the plugin's system transform fires: one prompt on a throwaway
+ * session, which the plugin marks at the transform and refuses before the model
+ * call (plugin/startup_probe.ts). The synchronous prompt returns once that
+ * refusal has ended the turn; the session is then deleted, so none of it can
+ * reach the run's event stream.
+ */
+async function probeSystemTransform(client: OpencodeClient, policy: RuntimePolicy, files: RunFiles): Promise<boolean> {
+  const created = await client.session.create({ body: { title: "aep startup probe" } });
+  const id = created.data?.id ?? "";
+  try {
+    await withTimeout(
+      client.session
+        .prompt({
+          path: { id },
+          body: {
+            agent: PRIMARY_AGENT,
+            model: { providerID: PROVIDER_ID, modelID: policy.model },
+            parts: [{ type: "text", text: STARTUP_PROBE_PROMPT }],
+          },
+        })
+        .catch(() => undefined),
+      PROBE_TIMEOUT_MS,
+      "the startup probe",
+    ).catch(() => undefined);
+    return fs.existsSync(files.probe);
+  } finally {
+    await client.session.delete({ path: { id } }).catch(() => undefined);
+  }
+}
+
+/**
+ * The four start-time assertions, asked of the running server. The prompt has
  * not been sent, so a failure here costs no model call.
  */
 async function assertStartup(client: OpencodeClient, policy: RuntimePolicy, files: RunFiles): Promise<void> {
-  // Any project request boots the workspace's instance, and the instance is
-  // what loads plugins — a bare `serve` loads none (S5). So the config read
-  // comes first and the marker is waited for after it.
+  // A project request boots the instance, which is what loads plugins.
   await client.config.get();
   const guardReady = await waitForFile(files.ready, GUARD_READY_TIMEOUT_MS);
   const tools = await client.tool.list({ query: { provider: PROVIDER_ID, model: policy.model } });
@@ -218,8 +199,10 @@ async function assertStartup(client: OpencodeClient, policy: RuntimePolicy, file
   const aep = (agents.data ?? []).find((a) => a.name === PRIMARY_AGENT) as { permission?: unknown } | undefined;
   const rules = Array.isArray(aep?.permission) ? (aep.permission as PermissionRuleRecord[]) : undefined;
   const task = (tools.data ?? []).find((t) => t.id === "task");
+  const systemTransformLive = guardReady ? await probeSystemTransform(client, policy, files) : false;
   const problems = startupProblems({
     guardReady,
+    systemTransformLive,
     toolIds: (tools.data ?? []).map((t) => t.id),
     agentRules: aep ? (rules ?? []) : undefined,
     taskParameters: Object.keys(obj(obj(task?.parameters).properties)),
@@ -275,9 +258,7 @@ export interface BootedServer {
  * checked model-free (the image's verification drives exactly this).
  */
 export async function bootOpencode(policy: RuntimePolicy, opts: OpencodeRuntimeOptions = {}): Promise<BootedServer> {
-  // OpenCode removed Claude subscription OAuth in 1.3.0: an API key is the
-  // only credential it can run on. Refused here rather than as a provider
-  // error three calls in; the platform refuses the combination earlier still.
+  // An API key is the only credential OpenCode runs on; refused before a spawn.
   if (!policy.env.ANTHROPIC_API_KEY) {
     throw new OpencodeStartupError([
       "OpenCode authenticates with ANTHROPIC_API_KEY and this run has none — an OAuth coding token cannot run OpenCode",
@@ -323,10 +304,8 @@ export async function bootOpencode(policy: RuntimePolicy, opts: OpencodeRuntimeO
       debug: policy.debug,
     });
 
-    // Developer files, beside `claude.log`: the server's own log and the
-    // config it was started with (no credential in it — the key is an
-    // `{env:…}` reference). Absent on a normal run. The plugin's per-session
-    // record is on every run.
+    // Beside `runtime.log`: the session record on every run; the server's log
+    // and its config (no credential in it) only under debug.
     const artifacts: RuntimeArtifact[] = [{ path: sessionContextPath(policy), kind: "log" }];
     let stderrSink: fs.WriteStream | undefined;
     if (policy.debug) {
@@ -377,8 +356,7 @@ async function startOpencodeSession(
   };
 
   try {
-    // Subscribe BEFORE the session exists, and wait for the server's own
-    // `server.connected`: the root's `session.created` must be on this stream.
+    // Subscribe before the session exists: its `session.created` must be on this stream.
     const abort = new AbortController();
     extra.push(() => abort.abort());
     const subscription = await client.event.subscribe({ signal: abort.signal, sseMaxRetryAttempts: SSE_MAX_RETRY_ATTEMPTS });
@@ -392,8 +370,6 @@ async function startOpencodeSession(
     const adapter = createOpencodeAdapter({
       model: policy.model,
       taskKind: policy.taskKind,
-      ...(policy.observe?.toolUse ? { onToolUse: policy.observe.toolUse } : {}),
-      ...(policy.observe?.toolOutcome ? { onToolOutcome: policy.observe.toolOutcome } : {}),
       ...(policy.write.onDenied ? { onWorkspaceDenied: policy.write.onDenied } : {}),
     });
     const closer = createStreamCloser();
@@ -407,9 +383,8 @@ async function startOpencodeSession(
       },
     });
 
-    // Any permission ask is REJECTED — the rule set is explicit allow/deny, an
-    // ask means a rule the platform did not write, and in server mode an
-    // unanswered ask is a hang. The notice is the classifier's (stall_signal).
+    // Every permission ask is rejected: an unanswered ask in server mode is a
+    // hang. The notice is the classifier's (stall_signal).
     const reject = (props: Record<string, unknown>): void => {
       const id = str(props.id);
       const sessionID = str(props.sessionID);
@@ -434,6 +409,7 @@ async function startOpencodeSession(
       },
       translate: adapter.translate,
       classify: createOpencodeClassifier(),
+      usage: adapter.usage,
       artifacts: async () => [...booted.artifacts],
       close: async () => {
         // Anything still running is stopped before the server goes, so no

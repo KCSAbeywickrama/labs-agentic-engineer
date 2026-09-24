@@ -425,14 +425,7 @@ test("the glossary binds every role the workflow names, on every runtime", () =>
         assert.ok(composed[mode].includes(role), `${mode} mode never names the ${role}`);
       }
     }
-    // "the fast model" / "the default one" is how the body defers the choice, so
-    // the glossary has to carry what those words resolve to.
-    assert.ok(
-      glossary.includes("the fast model") && glossary.includes("the default"),
-      `the ${runtime} glossary does not say what the fast model and the default one resolve to`,
-    );
   }
-  assert.ok(composed.github.includes("runs well on the fast model"));
 });
 
 // A subagent posts its own progress, so the fan-out prompt list is the only

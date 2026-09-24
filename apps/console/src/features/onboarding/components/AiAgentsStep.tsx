@@ -23,13 +23,7 @@ import { anthropicKeyWasDisconnected } from "../keyDisconnected";
 
 type ConfigProjection = components["schemas"]["ConfigProjection"];
 
-/**
- * The wizard's AI step is the settings card itself, so the choices and the one
- * Save are the same in both places. The card renders without its own frame
- * and header here, and the intro below explains the key in its place. Only the API key is required: the model
- * and coding agent arrive prefilled with what the server holds, which for a
- * new organization is the platform's defaults.
- */
+/** The wizard's AI step: the settings card itself, unframed, with an intro. */
 export function AiAgentsStep({ config }: { config: ConfigProjection }) {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>

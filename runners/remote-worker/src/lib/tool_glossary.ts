@@ -49,24 +49,11 @@ import { DEFAULT_RUNTIME, type RuntimeName } from "../runtime/port.js";
  *
  * Every role the `aep` skill names in prose has an entry here, and nothing else
  * does: this is a lookup table the agent reads under load, not a second copy of
- * the workflow. The model is named because the skill tells the lead to pick one
- * ("the fast model", "the default one") and a lead that guesses an alias spends
- * a turn on a schema error. A run has ONE model, the organization's setting, so
- * both of those words resolve to it: Claude Code pins every alias and the
- * subagent model to it (`modelPinEnv`, `runtime/claude/runtime.ts`) and
- * OpenCode's one subagent, `general`, runs on it (`runtime/opencode/config.ts`).
- *
- * **Only models the platform can PRICE are offered.** `modelcost.SumCost` is
- * all-or-nothing by design — one slice whose model has no `model_rates` row
- * makes the WHOLE cycle's cost null, on the argument that a partial dollar
- * figure under-reports spend more dangerously than an absent one. So a single
- * subagent dispatched to an unpriced model blanks the cost of everything else
- * in that cycle, and it does it silently. This list offered `opus` while only
- * `claude-sonnet-5` and `claude-haiku-4-5` were seeded, which made the skill's
- * own "pick the model for the job" the way to lose a cycle's cost. Keep this in
- * step with `AgentModel` in the contract, which is narrowed to the priced
- * set for the same reason; adding an alias here means seeding its rate row
- * first.
+ * the workflow. No model is named: a run has ONE model, the organization's
+ * setting, which Claude Code pins every alias and the subagent model to
+ * (`modelPinEnv`, `runtime/claude/runtime.ts`) and OpenCode's one subagent,
+ * `general`, runs on (`runtime/opencode/config.ts`). An alias offered here would
+ * be a second model the org's key may not serve or the platform cannot price.
  *
  * TOTAL over `RuntimeName`: every runtime the org setting can name has an
  * entry, so a new name without one is a type error here rather than a session
@@ -78,8 +65,7 @@ const GLOSSARIES: Record<RuntimeName, string> = {
     "",
     "The roles your workflow names, and the tools that play them in this session:",
     "",
-    "- **fan-out tool**: `Agent` — `run_in_background: true` for a builder;" +
-      " `model:` `sonnet` — this session runs one model, so the fast model and the default one are both `sonnet`",
+    "- **fan-out tool**: `Agent` — `run_in_background: true` for a builder",
     "- **wait tool**: `TaskOutput` with `block: true` — one call per agent you dispatched",
     "- **stop tool**: `TaskStop`, for an agent that has run away",
     "- **task list**: `TaskCreate` and `TaskUpdate`",
@@ -97,8 +83,7 @@ const GLOSSARIES: Record<RuntimeName, string> = {
     "",
     "The roles your workflow names, and the tools that play them in this session:",
     "",
-    '- **fan-out tool**: `task` with `subagent_type: "general"` — this session runs one model, so the fast' +
-      " model and the default one are both `general`. There is no background mode in this session:" +
+    '- **fan-out tool**: `task` with `subagent_type: "general"`. There is no background mode in this session:' +
       ' "dispatch in the background" means issue every `task` call of the wave as PARALLEL tool calls' +
       " in ONE message. They run at the same time and each returns its builder's report when that" +
       " builder finishes; you are held until the slowest one does.",

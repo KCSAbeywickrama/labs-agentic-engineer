@@ -26,8 +26,7 @@
 // without editing the module every run goes through.
 
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
-import { obj, str } from "../fields.js";
-import { deniedToolNames, type DeniedCapability, type ObservedCall } from "../port.js";
+import { deniedToolNames, type DeniedCapability } from "../port.js";
 
 // Phase 0 allowed-tools: git, gh, build/test/lint via Bash; standard file
 // tools. Endpoint Spec Discovery (B2) re-introduces MCP — but only as an
@@ -138,27 +137,6 @@ const DENIED_TOOLS_BY_CAPABILITY: Record<DeniedCapability, readonly string[]> = 
 /** The Claude Code tool names denied by a set of capability classes. */
 export function deniedTools(capabilities: readonly DeniedCapability[]): string[] {
   return deniedToolNames(DENIED_TOOLS_BY_CAPABILITY, capabilities);
-}
-
-/**
- * One Claude Code tool call in the port's vocabulary (`ObservedCall`), for the
- * platform's watchers. `Write` hands over the whole file; `Edit` and
- * `NotebookEdit` change part of one; `Bash` is the shell.
- */
-export function observedCall(toolName: string, toolInput: unknown): ObservedCall {
-  const input = obj(toolInput);
-  switch (toolName) {
-    case "Bash":
-      return { kind: "shell", command: str(input.command) };
-    case "Write":
-      return { kind: "write", path: str(input.file_path), content: str(input.content) };
-    case "Edit":
-      return { kind: "edit", path: str(input.file_path) };
-    case "NotebookEdit":
-      return { kind: "edit", path: str(input.notebook_path) };
-    default:
-      return { kind: "other", tool: toolName };
-  }
 }
 
 // The server key the platform's MCP endpoint is registered under. The SDK

@@ -611,8 +611,8 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 		snapshots = cfg.snapshots
 	}
 	svc := spec.NewService(spec.ServiceDeps{
-		Repos:         repos,
-		Git:           sourcecontrol.NewGitOpsService(stubResolver{}, fx.Engine),
+		Repos: repos,
+		Git:   sourcecontrol.NewGitOpsService(stubResolver{}, fx.Engine),
 		LLM: func(context.Context, string) (spec.AgentLLM, error) {
 			return spec.AgentLLM{Key: rig.key, Model: rig.model}, nil
 		},

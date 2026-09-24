@@ -47,7 +47,7 @@ type PlanService struct {
 	repos      RepoResolver
 	versions   VersionReader
 	git        GitReader
-	llm        spec.AgentLLMResolver
+	llm        AgentLLMResolver
 	client     TurnClient
 	issues     IssueClient
 	writer     *delivery.IssueWriter
@@ -69,7 +69,7 @@ func (s *PlanService) SetComponentPaths(r ComponentPathReader) { s.paths = r }
 // workspace dispatch (snapshot refs + lineage diffs); issues is the READ half
 // the turn's context is assembled from and writer is the domain's issue-write
 // surface, which is what the tap mints each planned Task through.
-func NewPlanService(repos RepoResolver, versions VersionReader, git GitReader, llm spec.AgentLLMResolver, client TurnClient, issues IssueClient, writer *delivery.IssueWriter, snapshots sourcecontrol.SnapshotProvider, skillsRepo SkillsRepoResolver) *PlanService {
+func NewPlanService(repos RepoResolver, versions VersionReader, git GitReader, llm AgentLLMResolver, client TurnClient, issues IssueClient, writer *delivery.IssueWriter, snapshots sourcecontrol.SnapshotProvider, skillsRepo SkillsRepoResolver) *PlanService {
 	return &PlanService{repos: repos, versions: versions, git: git, llm: llm, client: client, issues: issues, writer: writer, snapshots: snapshots, skillsRepo: skillsRepo}
 }
 

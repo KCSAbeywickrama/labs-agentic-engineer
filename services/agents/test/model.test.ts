@@ -25,7 +25,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { config } from "../src/shared/config.js";
-import { modelProviderOptions, resolveModelId, supportsEffort } from "../src/shared/model.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { parse } from "yaml";
+import { isOfferedModel, modelProviderOptions, OFFERED_MODELS, resolveModelId, supportsEffort } from "../src/shared/model.js";
 
 test("Sonnet 5 turns carry the configured reasoning effort", () => {
   assert.deepEqual(modelProviderOptions("claude-sonnet-5"), { anthropic: { effort: config.reasoningEffort } });
@@ -41,4 +44,12 @@ test("Haiku 4.5 and Sonnet 4.5 turns carry no effort option", () => {
 test("resolveModelId: the turn's model wins; none falls back to AGENT_MODEL", () => {
   assert.equal(resolveModelId({ model: "claude-haiku-4-5" }), "claude-haiku-4-5");
   assert.equal(resolveModelId(), config.model);
+});
+
+test("OFFERED_MODELS is the contract's AgentModel enum", () => {
+  const spec = parse(
+    readFileSync(fileURLToPath(new URL("../../../packages/contracts/api/v1/openapi.yaml", import.meta.url)), "utf8"),
+  ) as { components: { schemas: { AgentModel: { enum: string[] } } } };
+  assert.deepEqual([...OFFERED_MODELS].sort(), [...spec.components.schemas.AgentModel.enum].sort());
+  assert.equal(isOfferedModel("claude-opus-5"), false);
 });

@@ -32,7 +32,7 @@
 //     inside its transaction; mirrorKey / forgetKey — the SM-API copy, after
 //     it commits; publishModelKey — the Agent Manager provider's copy of the
 //     default key, after it commits.
-//   - Status — one role's masked projection.
+//   - Status — one role's masked projection; Holds — whether a role's row exists.
 //   - EffectiveKey — the DEFAULT key (or "none") for the spec agents, which
 //     the BFF forwards to agents-service per turn. There is no platform
 //     fallback: orgs bring their own key.
@@ -125,15 +125,6 @@ func NewAnthropicCredentialService(
 		httpClient:   &http.Client{Timeout: 15 * time.Second},
 	}
 }
-
-// ----------------------------------------------------------------------------
-// Errors
-// ----------------------------------------------------------------------------
-
-// ErrAnthropicKeyRequired signals that no per-org key is configured and
-// the caller specifically required one (dispatch path). Distinct from
-// returning the platform fallback. Wrap with status 422 at the API edge.
-var ErrAnthropicKeyRequired = errors.New("anthropic: org key required")
 
 // ----------------------------------------------------------------------------
 // Projection — what the API + console see
@@ -251,8 +242,9 @@ func (s *AnthropicCredentialService) deleteKeyTx(ctx context.Context, tx AgentsC
 }
 
 // mirrorKey copies a committed credential into SM-API, best-effort: org_secrets
-// stays authoritative, and a failed mirror leaves the row's triplet NULL until
-// the next save (dispatch then fails closed with a reason naming it).
+// stays authoritative. The save cleared the row's triplet (UpsertCredential), so
+// a failed mirror leaves it NULL until the next save, and dispatch fails closed
+// with a reason naming it rather than mounting the previous credential.
 func (s *AnthropicCredentialService) mirrorKey(ctx context.Context, ocOrgID string, role AnthropicRole, key string) {
 	if s.secretRefWriter == nil || !s.secretRefWriter.Enabled() {
 		return
@@ -316,6 +308,14 @@ func (s *AnthropicCredentialService) Status(ctx context.Context, ocOrgID string,
 		return nil, err
 	}
 	return projectionFromAnthropicRow(row), nil
+}
+
+// Holds reports whether the org has a row for role, whatever its status: the
+// AI agents card judges a save by which credentials exist, not whether they
+// currently validate.
+func (s *AnthropicCredentialService) Holds(ctx context.Context, ocOrgID string, role AnthropicRole) (bool, error) {
+	row, err := s.repo.GetByOrg(ctx, ocOrgID, role)
+	return row != nil, err
 }
 
 // ----------------------------------------------------------------------------

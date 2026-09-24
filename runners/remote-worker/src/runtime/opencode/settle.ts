@@ -30,7 +30,7 @@
 // With foreground fan-out (the only shape this platform runs on OpenCode,
 // ADR-0015) the root cannot go idle before its children: every `task` call
 // blocks it until the child returns, measured on S2b (children idle at
-// 6.2-11.1s, the root at 14.1s). So the rule is a GUARD there rather than the
+// 7.1-11.5s, the root at 13.7s). So the rule is a GUARD there rather than the
 // settle itself, and it stays because a rule that only holds by accident of
 // timing is not a rule — a child still busy when the root idles means something
 // went wrong, and closing then would kill it mid-flight.

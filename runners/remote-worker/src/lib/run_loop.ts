@@ -106,8 +106,9 @@
 
 import type { ApiRetryInfo, MessageClassifier } from "../runtime/port.js";
 import { checkPreload, preloadWarning } from "./skills_preload_check.js";
-import { emit as defaultEmit, LEAD_AGENT_ID, type RunEventInput } from "./progress/emitter.js";
+import { emit as defaultEmit, LEAD_AGENT_ID, type RunEventInput, type RunEventUsage } from "./progress/emitter.js";
 import type { RunWatchdog } from "./progress/watchdog.js";
+import { withTimeout } from "./with_timeout.js";
 
 // The race's "this run is over" arm. A unique symbol key rather than a sentinel
 // object so an early end can never be confused with an IteratorResult — which is
@@ -339,6 +340,13 @@ export interface RunLoopOptions {
   /** Where every raw SDK message is kept (runtime.log). */
   record?: (message: unknown) => void;
   /**
+   * The adapter's cumulative usage — see `RuntimeSession.usage`. Carried by a
+   * settle no turn reported (an early end, a stream that closed or threw
+   * without one); a normal settle carries the last turn's, which is the same
+   * total.
+   */
+  usage?: () => RunEventUsage | undefined;
+  /**
    * The skills the session was asked for, checked against the ones its `init`
    * says it resolved. Data rather than a callback: the mismatch is reported as
    * a feed line, and lines are this loop's business.
@@ -365,6 +373,10 @@ export async function consumeRun(stream: RunStream, opts: RunLoopOptions): Promi
   const emit = opts.emit ?? defaultEmit;
   const record = opts.record ?? (() => {});
   const { translate, classify, watchdog, deadline } = opts;
+  const usageSoFar = (): { usage?: RunEventUsage } => {
+    const usage = opts.usage?.();
+    return usage ? { usage } : {};
+  };
   // The task ids this run knows are still running — what a termination has to
   // stop. Moved only by `task_bookkeeping`; which runtime words open and close
   // a task (and which deliberately do not) is the classifier's to know.
@@ -412,10 +424,11 @@ export async function consumeRun(stream: RunStream, opts: RunLoopOptions): Promi
     for (;;) {
       const step = ending ? await Promise.race([messages.next(), ending]) : await messages.next();
       if (isEarlyEnd(step)) {
-        // The held turn is deliberately dropped. Whatever the last turn
-        // reported, this run did not finish — it was ended with work
-        // outstanding, and a success line here is the one thing nobody re-reads.
-        return await terminateRun(step[TERMINATED], stream, live, watchdog, emit);
+        // The held turn's VERDICT is deliberately dropped. Whatever the last
+        // turn reported, this run did not finish — it was ended with work
+        // outstanding, and a success line here is the one thing nobody
+        // re-reads. Its usage is not: the adapter's running total is carried.
+        return await terminateRun(step[TERMINATED], stream, live, watchdog, emit, usageSoFar);
       }
       if (step.done) break;
       const message = step.value;
@@ -537,7 +550,7 @@ export async function consumeRun(stream: RunStream, opts: RunLoopOptions): Promi
     // does not know is a different, readable statement.
     if (!lastTurn) {
       const error = "agent stream ended without result";
-      emit({ kind: "run_settled", agentId: LEAD_AGENT_ID, outcome: "failure", error });
+      emit({ kind: "run_settled", agentId: LEAD_AGENT_ID, outcome: "failure", error, ...usageSoFar() });
       return { exitCode: 1, error };
     }
     // The exit code follows the SETTLE, so the feed and the process cannot give
@@ -554,7 +567,7 @@ export async function consumeRun(stream: RunStream, opts: RunLoopOptions): Promi
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     record({ type: "worker_error", error: msg });
-    emit({ kind: "run_settled", agentId: LEAD_AGENT_ID, outcome: "failure", error: msg });
+    emit({ kind: "run_settled", agentId: LEAD_AGENT_ID, outcome: "failure", error: msg, ...usageSoFar() });
     return { exitCode: 1, error: msg };
   } finally {
     disarmInputGrace();
@@ -602,6 +615,7 @@ async function terminateRun(
   live: ReadonlySet<string>,
   watchdog: RunWatchdog,
   emit: (event: RunEventInput) => void,
+  usageSoFar: () => { usage?: RunEventUsage },
 ): Promise<RunResult> {
   const ids = [...live];
   const stopping = ids.length > 0 ? `, stopping ${ids.length} running task(s)` : "";
@@ -623,18 +637,11 @@ async function terminateRun(
   await withTimeout(
     Promise.all(ids.map((id) => stream.stopTask(id).catch(() => {}))),
     STOP_TASKS_TIMEOUT_MS,
-  );
-  emit({ kind: "run_settled", agentId: LEAD_AGENT_ID, outcome: "failure", error: reason.error });
+    "stopping the live tasks",
+  ).catch(() => {});
+  // Read after the stop, so a task's last usage report is counted.
+  emit({ kind: "run_settled", agentId: LEAD_AGENT_ID, outcome: "failure", error: reason.error, ...usageSoFar() });
   return { exitCode: 1, error: reason.error };
-}
-
-function withTimeout(work: Promise<unknown>, ms: number): Promise<unknown> {
-  let timer: NodeJS.Timeout | undefined;
-  const capped = new Promise<void>((resolve) => {
-    timer = setTimeout(resolve, ms);
-    timer.unref?.();
-  });
-  return Promise.race([work, capped]).finally(() => clearTimeout(timer));
 }
 
 /** A budget as a person set it: whole minutes above a minute, seconds below. */

@@ -40,9 +40,11 @@
 //
 // **Identity is declared, never inferred.** An agent's id is its OpenCode
 // session id, its parent is `Session.parentID`, its depth is the chain. The
-// spawning `task` part goes `running` with `metadata.sessionId` ~400ms BEFORE
-// the child's `session.created` (S2b), so a spawn is keyed by that id and
-// `agent_started` goes out when the second of the two arrives.
+// spawning `task` part's `running` update (carrying `metadata.sessionId`) and
+// the child's `session.created` arrive close together in either order (the
+// committed recordings have the child first; an earlier spike had the part
+// first), so a spawn is keyed by that id and `agent_started` goes out when the
+// second of the two arrives.
 //
 // **Every agent is `background: false`.** The platform does not set OpenCode's
 // experimental background flag (ADR-0015), so every `task` call blocks its
@@ -65,21 +67,20 @@ import {
   type RunEventModelUsage,
   type RunEventUsage,
 } from "../../lib/progress/emitter.js";
-import { cap, createHeartbeatLimiter, MAX_REPORT, reportFrom, trimSummary } from "../../lib/progress/adapter_common.js";
+import { cap, createHeartbeatLimiter, MAX_REPORT, planStatus, reportFrom, trimSummary } from "../../lib/progress/adapter_common.js";
 import {
   editDelta,
   failureDetail,
   failureText,
-  relativiseToWorkspace,
   shellEvents,
+  summaryFromInput,
   writeDelta,
   type LineDelta,
 } from "../../lib/progress/tool_rows.js";
 import { WORKSPACE_GUARD_MARKER } from "./plugin/protocol.js";
 import { num, obj, str } from "../fields.js";
 import { readEvent, TOOL_TICK } from "./messages.js";
-import type { ObservedCall } from "../port.js";
-import { FANOUT_TOOL, observedCall, PLAN_TOOL, platformModel, SHELL_TOOL } from "./tools.js";
+import { FANOUT_TOOL, PLAN_TOOL, platformModel, SHELL_TOOL } from "./tools.js";
 
 /** A call running this long with nothing on the wire gets a tool heartbeat on the next tick. */
 const TOOL_HEARTBEAT_AFTER_MS = 10_000;
@@ -144,17 +145,6 @@ export interface OpencodeAdapterOptions {
   /** Injected clock, so durations and heartbeat budgets are testable without sleeping. */
   now?: () => number;
   /**
-   * A plain tool call starting — `RuntimePolicy.observe.toolUse`, called when
-   * the call's part first leaves `pending`. AFTER THE FACT: the bus reports a
-   * call that has already started, typically well under a second in, so the
-   * ordering ADR-0012 pinned for Claude Code ("the status line lands before the
-   * call") is weaker here — decided 2026-09-22 and recorded in ADR-0015. A
-   * returned promise is not awaited; a watcher's failure is its own to swallow.
-   */
-  onToolUse?: (call: ObservedCall, toolUseId: string) => void | Promise<void>;
-  /** A plain tool call settling, with the same `ok` the feed gets (`observe.toolOutcome`). */
-  onToolOutcome?: (toolUseId: string, ok: boolean) => void;
-  /**
    * The platform's workspace guard refused a write — `RuntimePolicy.write.onDenied`.
    * The plugin cannot reach the feed, so it marks its refusal in the tool's
    * error text and this is where the marked text becomes the run's own line.
@@ -173,18 +163,12 @@ export interface OpencodeAdapter {
    * `stopped`. An abort nobody asked for stays an error.
    */
   markStopped(sessionId: string): void;
+  /** The run's cumulative usage so far — `RuntimeSession.usage`. */
+  usage(): RunEventUsage | undefined;
 }
 
-/** A tool input as a reader's line: the argument that names what it touched. */
-function summaryFromInput(input: Record<string, unknown>, workspaceRoot: string): string {
-  const candidate = input.filePath ?? input.path ?? input.pattern ?? input.url ?? input.query ?? input.name ?? input.description;
-  if (typeof candidate === "string") return trimSummary(relativiseToWorkspace(candidate, workspaceRoot));
-  try {
-    return trimSummary(JSON.stringify(input));
-  } catch {
-    return "";
-  }
-}
+/** OpenCode's argument spellings, most identifying first — see `summaryFromInput`. */
+const SUMMARY_FIELDS = ["filePath", "path", "pattern", "url", "query", "name", "description"] as const;
 
 /** A successful authoring call's line delta, by OpenCode's argument spelling. */
 function lineDelta(tool: string, input: Record<string, unknown>): LineDelta {
@@ -199,14 +183,6 @@ function errorLine(error: unknown): string {
   const name = str(e.name);
   const message = str(obj(e.data).message) || str(e.message);
   return [name, message].filter(Boolean).join(": ");
-}
-
-/** The todo list's statuses in the contract's vocabulary; `cancelled` is a deletion. */
-function planStatus(v: unknown): NonNullable<RunEvent["itemStatus"]> | undefined {
-  const s = str(v);
-  if (s === "pending" || s === "in_progress" || s === "completed") return s;
-  if (s === "cancelled") return "deleted";
-  return undefined;
 }
 
 /** Build the adapter for ONE run. */
@@ -339,7 +315,7 @@ export function createOpencodeAdapter(opts: OpencodeAdapterOptions): OpencodeAda
    * `outputTokens` is OpenCode's `output + reasoning`: the two are reported
    * apart (a step's `total` is input + output + reasoning + cache, measured on
    * S1c), and the provider bills reasoning as output — S1c's first Sonnet step
-   * prices to its reported `cost` only when the 34 reasoning tokens are counted
+   * prices to its reported `cost` only when its 12 reasoning tokens are counted
    * as output. `costUsd` is null for the reason the Claude adapter gives: the
    * platform stamps cost from its own rate table.
    */
@@ -478,10 +454,8 @@ export function createOpencodeAdapter(opts: OpencodeAdapterOptions): OpencodeAda
           ),
         );
       } else {
-        events.push({ kind: "tool_use", tool, summary: summaryFromInput(input, workspaceRoot), ...stamp });
+        events.push({ kind: "tool_use", tool, summary: summaryFromInput(input, SUMMARY_FIELDS, workspaceRoot), ...stamp });
       }
-      const watched = opts.onToolUse?.(observedCall(tool, input), callId);
-      if (watched && typeof (watched as Promise<void>).catch === "function") (watched as Promise<void>).catch(() => {});
     }
 
     // A child's running call with a title is what it is doing now.
@@ -549,7 +523,6 @@ export function createOpencodeAdapter(opts: OpencodeAdapterOptions): OpencodeAda
         session.linesRemoved += delta.removed;
       }
     }
-    opts.onToolOutcome?.(callId, ok);
     return [{
       kind: "tool_result",
       agentId,
@@ -716,5 +689,6 @@ export function createOpencodeAdapter(opts: OpencodeAdapterOptions): OpencodeAda
     markStopped(sessionId) {
       stopRequested.add(sessionId);
     },
+    usage,
   };
 }

@@ -26,6 +26,7 @@ package organization_test
 //   - the schema itself refuses a role paired with the wrong kind;
 //   - ResolveCodingSecretRef — the subscription only on Claude Code, the API
 //     key otherwise, and failing closed on a broken subscription;
+//   - a replaced credential drops its SM-API triplet until the mirror re-stamps it;
 //   - EffectiveKey — the spec agents' reader — stays default-only.
 
 import (
@@ -36,6 +37,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
+	"github.com/wso2/aep/aep-api/internal/platform/patch"
 )
 
 // anthropicDBOAuthToken is shaped like a `claude setup-token` result. The probe
@@ -170,6 +172,14 @@ func TestResolveCodingSecretRef_OpenCodeNeverGetsTheSubscription_DB(t *testing.T
 	if ref.EnvVar != "ANTHROPIC_API_KEY" || ref.KVPath != "user-app-secrets/wc-acme/acme-anthropic" {
 		t.Fatalf("an OpenCode run must mount the API key, got %+v", ref)
 	}
+
+	// Not consulted means not consulted: a subscription broken enough to fail a
+	// Claude Code run closed still leaves OpenCode on the API key.
+	stampTriplet(t, c.repo, "acme", organization.AnthropicRoleCoding, "", "", "")
+	ref, err = c.svc.ResolveCodingSecretRef(context.Background(), "acme", orgconfig.AgentRuntimeOpenCode)
+	if err != nil || ref.EnvVar != "ANTHROPIC_API_KEY" {
+		t.Fatalf("a broken subscription reached an OpenCode run: ref=%+v err=%v", ref, err)
+	}
 }
 
 // An org that chose to bill its plan must never have a run quietly billed to
@@ -195,4 +205,39 @@ func TestResolveCodingSecretRef_NoRowsAtAll_Errors_DB(t *testing.T) {
 	if _, err := c.svc.ResolveCodingSecretRef(context.Background(), "ghost", orgconfig.AgentRuntimeClaudeCode); err == nil {
 		t.Fatal("an org with no Anthropic key at all must not resolve a secret ref")
 	}
+}
+
+// Replacing a credential clears its SM-API triplet in the same save. The vault
+// path is fixed per (org, role), so a triplet kept across a failed mirror would
+// resolve to the PREVIOUS credential's copy; cleared, dispatch fails closed
+// until the mirror re-stamps it. A save that touches no credential keeps it.
+func TestAnthropicReplace_ClearsTheStaleTriplet_DB(t *testing.T) {
+	t.Parallel()
+	c := newCardDB(t, http.StatusOK) // no SM-API writer: the mirror never re-stamps
+	ctx := context.Background()
+	keyAndSubscription(t, c)
+
+	c.patch(t, "acme", orgconfig.ConfigPatch{Agents: agentsModelPatch("claude-haiku-4-5")})
+	if ref, err := c.svc.ResolveCodingSecretRef(ctx, "acme", orgconfig.AgentRuntimeClaudeCode); err != nil || ref.Name != "acme-anthropic-coding" {
+		t.Fatalf("a model-only save must keep the triplet: ref=%+v err=%v", ref, err)
+	}
+
+	const token2 = "sk-ant-oat01-SubscriptionTokenForCodingRuns-second"
+	c.patch(t, "acme", subscriptionPatch(token2))
+	if _, err := c.svc.ResolveCodingSecretRef(ctx, "acme", orgconfig.AgentRuntimeClaudeCode); err == nil ||
+		!strings.Contains(err.Error(), "secret_ref_name is not populated") {
+		t.Fatalf("a replaced token with no fresh mirror must fail closed, got %v", err)
+	}
+	if ref, err := c.svc.DefaultKeyRef(ctx, "acme"); err != nil || ref.Name != "acme-anthropic" {
+		t.Fatalf("replacing the token must not touch the key's triplet: ref=%+v err=%v", ref, err)
+	}
+
+	c.connect(t, "acme", anthropicDBKey2)
+	if _, err := c.svc.DefaultKeyRef(ctx, "acme"); err == nil || !strings.Contains(err.Error(), "not populated") {
+		t.Fatalf("a replaced key with no fresh mirror must not resolve, got %v", err)
+	}
+}
+
+func agentsModelPatch(model string) patch.Field[orgconfig.AgentsWrite] {
+	return patch.Field[orgconfig.AgentsWrite]{Sent: true, Value: orgconfig.AgentsWrite{Model: model}}
 }

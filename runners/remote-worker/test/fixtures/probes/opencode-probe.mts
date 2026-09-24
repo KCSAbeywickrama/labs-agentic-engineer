@@ -32,8 +32,11 @@
 //
 // `overrides.json` is deep-merged into the config (the S2c recording set the
 // experimental flag in the ENVIRONMENT instead — export it to reproduce that).
+// PROBE_PAST_CLOSE_MS records the raw bus PAST the close rule, until it has been
+// quiet (heartbeats aside) that long: S2c's evidence is what arrives after the rule would close,
+// which a recording that stops at the close cannot hold.
 // Makes REAL model calls: needs ANTHROPIC_API_KEY and `opencode` on PATH; the
-// four recordings on claude-haiku-4-5 cost 1–5 cents each. PROBE_MODEL picks
+// Haiku recordings cost 1–5 cents each (S1c's Sonnet lead about 8). PROBE_MODEL picks
 // the model (platform spelling).
 import fs from "node:fs";
 import os from "node:os";
@@ -80,6 +83,7 @@ const files = {
   instructions: path.join(scratch, "instructions.md"),
   secrets: path.join(scratch, "guard-secrets.json"),
   ready: path.join(scratch, "aep-guard.ready"),
+  probe: path.join(scratch, "aep-guard.probe"),
 };
 fs.writeFileSync(files.instructions, process.env.PROBE_INSTRUCTIONS ? fs.readFileSync(process.env.PROBE_INSTRUCTIONS, "utf8") : "");
 fs.writeFileSync(files.secrets, JSON.stringify(process.env.PROBE_SECRET ? [process.env.PROBE_SECRET] : []), { mode: 0o600 });
@@ -96,7 +100,25 @@ let config: Json = buildOpencodeConfig({
 if (overridesFile) config = deepMerge(config, JSON.parse(fs.readFileSync(overridesFile, "utf8")) as Json);
 fs.writeFileSync(out.replace(/\.jsonl$/, "") + ".config.json", JSON.stringify(config, null, 2) + "\n");
 
-const env = childEnvironment({ workspace, env: process.env as Record<string, string>, logDir: scratch }, files);
+// A pod's HOME holds only the image's pre-warmed OpenCode cache and config
+// (opencode-prewarm.sh). The developer's own HOME is not that: OpenCode also
+// reads skills from ~/.claude/skills, and a recording made there carried the
+// host's skill paths. So the server gets a scratch HOME with just those two,
+// and a plain bash with none of the developer's shell startup files (a zsh
+// ZDOTDIR put the host's own ~/.zshenv errors into a recorded bash output).
+const home = path.join(scratch, "home");
+for (const dir of [".cache/opencode", ".config/opencode"]) {
+  const from = path.join(os.homedir(), dir);
+  if (!fs.existsSync(from)) continue;
+  fs.mkdirSync(path.dirname(path.join(home, dir)), { recursive: true });
+  fs.symlinkSync(from, path.join(home, dir));
+}
+const hostEnv = Object.fromEntries(
+  Object.entries(process.env).filter(
+    ([k, v]) => v !== undefined && !k.startsWith("XDG_") && !["ZDOTDIR", "BASH_ENV", "ENV"].includes(k),
+  ),
+) as Record<string, string>;
+const env = childEnvironment({ workspace, env: { ...hostEnv, HOME: home, SHELL: "/bin/bash" }, logDir: scratch }, files);
 const t0 = Date.now();
 const server = await startServer({
   command: "opencode",
@@ -131,6 +153,17 @@ try {
     outcome = "timeout";
     abort.abort();
   }, Number(process.env.PROBE_TIMEOUT_MS || 600_000));
+  const pastCloseMs = Number(process.env.PROBE_PAST_CLOSE_MS || 0);
+  const closer = pastCloseMs > 0 ? { observe: () => false, busySessions: () => [] } : createStreamCloser();
+  let quiet: NodeJS.Timeout | undefined;
+  const armQuiet = (): void => {
+    if (pastCloseMs <= 0) return;
+    clearTimeout(quiet);
+    quiet = setTimeout(() => {
+      outcome = "quiet";
+      abort.abort();
+    }, pastCloseMs);
+  };
   const reject = (p: Json): void => {
     void client
       .postSessionIdPermissionsPermissionId({
@@ -139,11 +172,19 @@ try {
       })
       .catch(() => {});
   };
-  for await (const message of sessionStream(queue.messages, createStreamCloser(), { skills: [], onPermissionAsked: reject })) {
-    if (String((message as Json).type).startsWith("aep.")) continue;
-    rec.write(JSON.stringify({ t: Date.now() - t0, ...(message as Json) }) + "\n");
+  try {
+    for await (const message of sessionStream(queue.messages, closer, { skills: [], onPermissionAsked: reject })) {
+      if (String((message as Json).type).startsWith("aep.")) continue;
+      // A heartbeat is the server alive, not the session working.
+      if ((message as Json).type !== "server.heartbeat") armQuiet();
+      rec.write(JSON.stringify({ t: Date.now() - t0, ...(message as Json) }) + "\n");
+    }
+  } catch (err) {
+    // The quiet timer ends a past-close recording by aborting the subscription.
+    if (outcome !== "quiet") throw err;
   }
   clearTimeout(deadline);
+  clearTimeout(quiet);
   queue.stop();
 } finally {
   abort.abort();
@@ -152,4 +193,4 @@ try {
   fs.rmSync(scratch, { recursive: true, force: true });
 }
 console.log(`[probe] ${outcome} after ${Date.now() - t0}ms → ${out}`);
-process.exit(outcome === "settled" ? 0 : 3);
+process.exit(outcome === "settled" || outcome === "quiet" ? 0 : 3);

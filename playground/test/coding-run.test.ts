@@ -25,7 +25,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   createTimelineRenderer,
-  codingRuntime,
   dockerInvocation,
   FORWARDED_AGENT_SETTINGS,
   hostInvocation,
@@ -565,8 +564,8 @@ test("the bal library tool's source carries what the image install needs", () =>
 // The platform's own setting, read from the shell: a playground run is shaped
 // like a dispatched one, and the image that carries the runtime is the one run.
 test("runtime: AEP_AGENT_RUNTIME picks the image; unset is the default runtime", () => {
-  assert.equal(codingRuntime({}), "claude-code");
-  assert.equal(codingRuntime({ AEP_AGENT_RUNTIME: " opencode " }), "opencode");
+  assert.deepEqual(resolveRuntime("docker", undefined, {}), { runtime: "claude-code" });
+  assert.deepEqual(resolveRuntime("docker", undefined, { AEP_AGENT_RUNTIME: " opencode " }), { runtime: "opencode" });
   assert.equal(runnerImage("claude-code", {}), "aep-runner:dev");
   assert.equal(runnerImage("opencode", {}), "aep-runner-opencode:dev");
   assert.equal(runnerImage("opencode", { AGENT_RUNNER_IMAGE_OPENCODE: "oc:x" }), "oc:x");
@@ -591,10 +590,9 @@ test("runtime: docker mode forwards the agent settings BY NAME, and runs the run
 
 test("runtime: an unknown AEP_AGENT_RUNTIME is refused, never read as Claude Code", () => {
   const cursor = { AEP_AGENT_RUNTIME: "cursor" };
-  assert.throws(() => codingRuntime(cursor), /"cursor" is not available: no runtime by that name exists/);
   const resolved = resolveRuntime("docker", undefined, cursor);
   assert.ok("refusal" in resolved);
-  assert.match(resolved.refusal, /"cursor"/);
+  assert.match(resolved.refusal, /"cursor" is not available: no runtime by that name exists/);
 });
 
 test("runtime: OpenCode is refused in host mode and with an OAuth coding token, before anything starts", () => {

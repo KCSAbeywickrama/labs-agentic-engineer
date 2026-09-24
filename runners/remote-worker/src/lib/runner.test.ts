@@ -207,17 +207,10 @@ test("systemPromptAppend: the glossary names the fan-out, wait and task-list too
   assert.match(glossary, /`run_in_background: true`/);
   assert.match(glossary, /wait tool.*`TaskOutput`/);
   assert.match(glossary, /task list.*`TaskCreate`/);
-  // The skill says "the fast model" and "the default one" and leaves the alias
-  // to this table; a lead that guesses one spends a turn on a schema error. The
-  // run has one model, so both words name the same alias.
-  assert.match(glossary, /the fast model and the default one are both `sonnet`/);
-  assert.doesNotMatch(glossary, /haiku/);
-  // And ONLY models the platform can price. modelcost.SumCost is all-or-nothing:
-  // one slice whose model has no rate row makes the whole cycle's cost null. So
-  // offering an alias with no seeded rate turns the skill's own "pick the model
-  // for the job" into a silent way to lose a cycle's spend. This offered `opus`
-  // when only sonnet and haiku were seeded.
-  assert.doesNotMatch(glossary, /opus/i);
+  // A run has one model and the fan-out call names none: an alias offered here
+  // is a second model the org's key may not serve or the platform cannot price
+  // (modelcost.SumCost is all-or-nothing, so one unpriced slice nulls the cycle).
+  assert.doesNotMatch(glossary, /`model:`|haiku|opus/i);
 });
 
 
@@ -286,6 +279,7 @@ function recordingRuntime(): { runtime: Runtime; calls: { prompt: string; policy
         stream: { messages: (async function* () {})(), stopTask: async () => {} },
         translate: () => [],
         classify: () => ({ kind: "activity" }),
+        usage: () => undefined,
         artifacts: async () => [],
         close: async () => {},
       };
@@ -450,19 +444,6 @@ test("startCodingRun: the model is the org's setting, or the runtime's default",
   // A blank stamp is the same as no stamp — a dispatcher that sends "" for an
   // unset setting must not pin the model to nothing.
   assert.equal((await policyFor(dispatch(), { AEP_AGENT_MODEL: "" })).model, "model-from-runtime");
-});
-
-// Watching the authoring tools costs a hook on every call, so it is registered
-// only where something reads it.
-// The `observe` seam is deliberately unregistered on BOTH kinds while real-time
-// validation progress is deferred. The watchers it used to carry matched
-// Playwright file writes and spec names, so against an agent driving a browser
-// they matched nothing at all and every criterion rendered `not_validated` —
-// which reads as a verdict, not as an empty state. Pinned so re-registering one
-// is a deliberate act rather than a merge's side effect.
-test("startCodingRun: no run registers tool watchers while progress is deferred", async () => {
-  assert.equal((await policyFor(dispatch())).observe, undefined);
-  assert.equal((await policyFor(dispatch({ taskKind: "validation" }))).observe, undefined);
 });
 
 // A URL with no token must omit the server rather than register it

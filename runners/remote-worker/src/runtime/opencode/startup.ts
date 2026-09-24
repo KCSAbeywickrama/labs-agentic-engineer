@@ -16,12 +16,11 @@
  * under the License.
  */
 
-// The three start-time assertions (ADR-0015), stated as a pure function of
+// The four start-time assertions (ADR-0015), stated as a pure function of
 // what the server reports, so each failure mode is a unit test.
 //
 // Silence is OpenCode's failure mode. Each of these degrades a run without an
-// error anywhere on the wire, and each was measured doing so (spikes S1, S1b,
-// S2b/S2c):
+// error anywhere on the wire:
 //
 //   1. THE GUARD PLUGIN LOADED. A mis-packaged plugin is skipped without a log
 //      line; the plugin writes a marker at init and a missing marker means no
@@ -34,8 +33,13 @@
 //      parameter. Its presence means the experimental flag leaked into the
 //      pod's environment and the run would take a shape the glossary does not
 //      describe.
+//   4. THE APPENDIX IS KEPT TO THE LEAD: the plugin's
+//      `experimental.chat.system.transform` hook fires. It is an experimental
+//      hook; were it dropped, every subagent would read the lead's workflow and
+//      glossary. Proven by a probe prompt the plugin refuses before its model
+//      call (plugin/startup_probe.ts).
 //
-// The runtime proves all three before it sends the prompt, so a failing run
+// The runtime proves all four before it sends the prompt, so a failing run
 // costs no model call.
 //
 // Where (2) reads from, precisely: `GET /experimental/tool` lists what the
@@ -65,6 +69,8 @@ export interface StartupFacts {
   agentRules: readonly PermissionRuleRecord[] | undefined;
   /** The `task` tool's parameter names, from the same listing. */
   taskParameters: readonly string[];
+  /** The startup probe reached the plugin's system transform. */
+  systemTransformLive: boolean;
 }
 
 /** OpenCode's `Wildcard.match`: `*` any run of characters, `?` one, the rest literal. */
@@ -103,6 +109,11 @@ export function startupProblems(facts: StartupFacts): string[] {
     problems.push(
       "the aep-guard plugin did not announce itself (no ready marker) — the workspace, WebSearch and WebFetch guards " +
         "are not loaded; check that the plugin directory exists and holds package.json + index.js",
+    );
+  } else if (!facts.systemTransformLive) {
+    problems.push(
+      "the aep-guard plugin's experimental.chat.system.transform hook did not fire on the startup probe — every " +
+        "subagent would receive the lead's prompt appendix; this OpenCode build no longer calls that hook",
     );
   }
   if (!facts.agentRules) {

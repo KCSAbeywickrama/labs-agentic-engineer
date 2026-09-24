@@ -16,23 +16,10 @@
  * under the License.
  */
 
-// Starting and stopping the `opencode serve` child.
-//
-// The SDK ships a launcher for this (`createOpencodeServer`, @opencode-ai/sdk
-// 1.18.32 `dist/server.js`) and this module speaks its exact protocol — the
-// `serve --hostname --port [--log-level]` argv, the config in
-// `OPENCODE_CONFIG_CONTENT`, the "opencode server listening on <url>" line —
-// but does not call it, for three reasons the launcher cannot be told about:
-//
-//   - it spawns with `{...process.env}` and no `cwd`, while this run's child
-//     environment is `RuntimePolicy.env` (plus the runtime's own flags) and its
-//     working directory is the workspace — the binary spawns every tool with
-//     both, so they are not the runner's to leave to inheritance;
-//   - it appends every stderr chunk to an in-memory string for the life of the
-//     process, which under `--log-level=DEBUG` is an unbounded buffer in a pod
-//     with a 2 GiB request;
-//   - its `close()` sends a signal and returns, and a pod that exits must not
-//     leave the server's tools running.
+// Starting and stopping the `opencode serve` child. Speaks the SDK launcher's
+// protocol (`createOpencodeServer`) without calling it: the launcher inherits
+// `process.env` and no `cwd` (the run's tools need the policy's env and the
+// workspace), buffers stderr without bound, and does not wait for the exit.
 
 import { spawn, type ChildProcess } from "node:child_process";
 import net from "node:net";
@@ -66,13 +53,9 @@ const STOP_GRACE_MS = 5_000;
 const LISTENING = /^opencode server listening.*?\bon\s+(https?:\/\/\S+)/m;
 
 /**
- * A free loopback port, chosen here rather than by the server.
- *
- * `port: 0` does not mean "any port" to OpenCode's launcher path — it means
- * "4096 if free, else random" (measured), and two runs on one host (the
- * playground, a test) would race for 4096. The window between closing this
- * listener and the server binding is real but tiny, and a collision fails the
- * start loudly rather than attaching to someone else's server.
+ * A free loopback port, chosen here: OpenCode reads `port: 0` as "4096 if
+ * free", which two runs on one host would race for. A collision in the small
+ * window before the server binds fails the start loudly.
  */
 export function freePort(hostname = "127.0.0.1"): Promise<number> {
   return new Promise((resolve, reject) => {

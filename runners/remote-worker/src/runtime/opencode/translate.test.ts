@@ -43,8 +43,7 @@ const tool = (callID: string, name: string, state: Record<string, unknown>, sess
 
 test("translate: the guard's marked refusal becomes the run's own workspace line, not a row diagnosis", () => {
   const denied: string[] = [];
-  const outcomes: [string, boolean][] = [];
-  const { run } = adapterAt({ onWorkspaceDenied: (r) => denied.push(r), onToolOutcome: (id, ok) => outcomes.push([id, ok]) });
+  const { run } = adapterAt({ onWorkspaceDenied: (r) => denied.push(r) });
   const input = { filePath: "/elsewhere/x.ts", content: "x" };
   assert.deepEqual(run(tool("c1", "write", { status: "running", input, time: { start: 10 } })), [
     { kind: "tool_use", tool: "write", summary: "/elsewhere/x.ts", agentId: "lead", toolUseId: "c1" },
@@ -59,7 +58,6 @@ test("translate: the guard's marked refusal becomes the run's own workspace line
   );
   assert.deepEqual(out, [{ kind: "tool_result", agentId: "lead", toolUseId: "c1", ok: false, tool: "write", durationMs: 3 }]);
   assert.deepEqual(denied, ["Refusing to write outside the project. write named /elsewhere/x.ts, …"]);
-  assert.deepEqual(outcomes, [["c1", false]]);
 });
 
 test("translate: a shell call that ran to a non-zero exit is a failed call, with its code and diagnosis", () => {
@@ -226,12 +224,3 @@ test("translate: a fan-out call that fails is an error line naming the agent", (
   );
 });
 
-test("translate: the observers see each plain call once, the fan-out and the plan never", () => {
-  const seen: string[] = [];
-  const { run } = adapterAt({ onToolUse: (call, id) => void seen.push(`${call.kind}:${id}`) });
-  run(tool("r1", "read", { status: "running", input: { filePath: `${WS}/x` } }));
-  run(tool("r1", "read", { status: "completed", input: { filePath: `${WS}/x` }, time: { start: 1, end: 2 } }));
-  run(tool("p1", "todowrite", { status: "running", input: { todos: [] } }));
-  run(tool("t1", "task", { status: "running", input: { description: "x" } }));
-  assert.deepEqual(seen, ["other:r1"]);
-});

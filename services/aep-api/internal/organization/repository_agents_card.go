@@ -52,7 +52,8 @@ type AgentsCardTx interface {
 	GetCredential(ocOrgID string, role AnthropicRole) (*OrgAnthropicCredential, error)
 	// UpsertCredential INSERTs the row or, on (oc_org_id, role) conflict,
 	// UPDATEs the metadata columns — preserving the ORIGINAL connected_at on a
-	// replace — and scans the persisted connected_at back into the row.
+	// replace, and clearing the SM-API secret_ref_* triplet the mirror stamps
+	// after commit — and scans the persisted connected_at back into the row.
 	UpsertCredential(row *OrgAnthropicCredential) error
 	// DeleteCredential removes one role's row. Idempotent.
 	DeleteCredential(ocOrgID string, role AnthropicRole) error
@@ -128,6 +129,12 @@ func (t *agentsCardTx) UpsertCredential(row *OrgAnthropicCredential) error {
 	// would leave the column at its 'api_key' default, and dispatch would then
 	// mount a subscription token as ANTHROPIC_API_KEY — a name Claude Code ranks
 	// higher, so the run would bill the wrong credential with no error to show.
+	//
+	// The secret_ref_* triplet is cleared on a replace. The SM-API path is fixed
+	// per (org, role), so a triplet left in place after a failed mirror would
+	// still resolve — to the vault copy of the PREVIOUS credential, which
+	// dispatch would mount without a word. Cleared, the row carries no triplet
+	// until mirrorKey re-stamps it, and dispatch fails closed naming why.
 	return t.tx.Raw(`
 		INSERT INTO org_anthropic_credentials
 		    (oc_org_id, role, credential_kind, key_prefix, key_last4, status, connected_at, last_validated_at, validation_error)
@@ -138,7 +145,10 @@ func (t *agentsCardTx) UpsertCredential(row *OrgAnthropicCredential) error {
 		      key_last4          = EXCLUDED.key_last4,
 		      status             = EXCLUDED.status,
 		      last_validated_at  = EXCLUDED.last_validated_at,
-		      validation_error   = NULL
+		      validation_error   = NULL,
+		      secret_ref_name     = NULL,
+		      secret_ref_kv_path  = NULL,
+		      secret_ref_property = NULL
 		RETURNING connected_at`,
 		row.OcOrgID, row.Role, row.CredentialKind, row.KeyPrefix, row.KeyLast4, row.Status, row.ConnectedAt, row.LastValidatedAt,
 	).Scan(&row.ConnectedAt).Error
