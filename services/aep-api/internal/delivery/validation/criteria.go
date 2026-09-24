@@ -21,6 +21,11 @@ import (
 	"strings"
 )
 
+// AcceptanceDirPath is the acceptance-oracle directory in the project repo,
+// authored by the acceptance-criteria skill. Exported because the adapter that
+// reads it lives at the composition root.
+const AcceptanceDirPath = "specs/validation/acceptance"
+
 // AcceptanceCriteriaFile is one `specs/validation/acceptance/<slug>.feature` as
 // committed.
 type AcceptanceCriteriaFile struct {

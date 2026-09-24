@@ -121,15 +121,7 @@ codingAgentRunner:
   # from the per-org `coding-agent` ComponentType.
   # The release pipeline pins this to ghcr.io/wso2/aep/remote-worker:<version>;
   # empty disables coding dispatch (it fails loudly).
-  #
-  # NEVER OLDER THAN aep-api. The two speak a PRIVATE contract
-  # (packages/contracts/api/internal/v1) that is versioned with the repo and not
-  # kept backward compatible: aep-api reads this value, so each pod dispatches
-  # the tag its own release carries and a rollout is self-consistent — but the
-  # default below is a FLOATING tag, so publishing aep-api ahead of the runner
-  # pairs a new caller with an old image. A runner that predates a field's
-  # removal rejects the payload in its preflight and the validation run dies
-  # before it starts. Pin both to the same version, or publish the runner first.
+  # Never older than aep-api — see docs/developer-guide/releasing.md.
   image: "ghcr.io/wso2/aep/remote-worker:latest"
 
 # Coding-agent dispatch wiring.

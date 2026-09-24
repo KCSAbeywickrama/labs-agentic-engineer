@@ -1317,7 +1317,7 @@ criteria** were a rail entry: that document is plural, one row inside it is an *
 criterion** — what its `AC-` id says and what the term means everywhere else — and naming a
 document after one of its rows cost the link between the criteria and the runs against them, at a
 sentence of empty-state copy to restore. The rule stands; its example has moved. With the criteria
-document hidden, **Acceptance criteria** now names the Gherkin set under
+document retired, **Acceptance criteria** now names the Gherkin set under
 `specs/validation/acceptance/` and nothing else, and the same discipline applies
 there: the entry is the set, a `Scenario:` inside it is one criterion.
 

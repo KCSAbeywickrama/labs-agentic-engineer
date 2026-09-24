@@ -27,17 +27,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
-// AcceptanceDirPath is the acceptance-oracle directory in the project repo,
-// authored by the acceptance-criteria skill and driven by the runner. It sits
-// under specs/validation/ beside the phase's other inputs, and it is the
-// counterpart of ReportFilePath: the scenarios here say what must hold, the
-// report there says what did.
-//
-// Exported because the adapter that READS it (the composition root's
-// CriteriaReader) is a different package. Nothing forces a second copy the way
-// slice ⊥ sibling forces runread's own ReportFilePath, so there is one.
-const AcceptanceDirPath = "specs/validation/acceptance"
-
 // validationTitle is the fixed title of a version's validation issue. It names
 // no version: the MILESTONE is the version pin, and a title is renamable display
 // text that nothing matches on.

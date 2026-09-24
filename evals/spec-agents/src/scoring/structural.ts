@@ -75,15 +75,10 @@ export function requirementsChecks(projectDir: string, run: SectionRunResult): S
  * A design that minted no oracle, or minted one with no scenarios in it, has
  * nothing to validate against and settles `skipped`.
  *
- * A scenario also has to SAY something. `Scenario:` with no steps under it
- * parses, and both the platform's gate and the run's checker count it: the
- * first is a line scan whose number is display only, the second only joins the
- * report to the scenarios it must cover. Neither judges the text, deliberately
- * — the agent reading the file does. So an oracle of bare headings reaches a
- * run that drives nothing and reports it green, and THIS is the place that
- * notices, because scoring what the design turn actually produced is what an
- * eval is for. Identity still comes from the shared parser; only the bar for a
- * point is local.
+ * Stricter than the platform's gate and the run's checker, which both count a
+ * bare `Scenario:` heading because neither judges the text. An oracle of bare
+ * headings drives nothing and reports green, so the bar is local; identity
+ * still comes from the shared parser.
  */
 function acceptanceProblems(projectDir: string): string[] {
   const dir = join(projectDir, "specs/validation/acceptance");
