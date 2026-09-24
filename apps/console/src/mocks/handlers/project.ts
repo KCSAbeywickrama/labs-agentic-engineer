@@ -160,21 +160,21 @@ function validationAttempt(): ValidationAttempt {
 }
 
 // Whether the repo should read as having no acceptance oracle at all
-// (aep:mock:validation-criteria=missing). A separate key from the two above because
+// (aep:mock:acceptance-criteria=missing). A separate key from the two above because
 // it names what is IN THE REPO rather than which run or which attempt: the page
 // treats a `not_found` on the criteria as "none were authored" — the state a version
 // eventually settles as `skipped` for — and nothing else can produce it, since every
 // scenario that has a verdict also has an oracle.
 function criteriaMissing(): boolean {
-  return localStorage.getItem("aep:mock:validation-criteria") === "missing";
+  return localStorage.getItem("aep:mock:acceptance-criteria") === "missing";
 }
 
 // Whether the oracle should carry a scenario the pinned report predates
-// (aep:mock:validation-criteria=drifted). Shares the key with `missing` because both
+// (aep:mock:acceptance-criteria=drifted). Shares the key with `missing` because both
 // describe the criteria FILE rather than a run, and the two are mutually exclusive:
 // a file that is absent cannot also have drifted.
 function criteriaDrifted(): boolean {
-  return localStorage.getItem("aep:mock:validation-criteria") === "drifted";
+  return localStorage.getItem("aep:mock:acceptance-criteria") === "drifted";
 }
 
 // The project's files with the two validation artifacts swapped for the ones the

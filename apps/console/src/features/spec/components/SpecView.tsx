@@ -102,7 +102,6 @@ import { DesignView } from "@aep/ui-design-view";
 import type { DependencyStatusInfo } from "@aep/ui-design-view";
 import { AcceptanceView } from "@aep/ui-acceptance-view";
 import { useAcceptanceEntry } from "../hooks/useAcceptanceEntry";
-import { ValidationView } from "@aep/ui-validation-view";
 import {
   type SpecSelection,
   DESIGN_CELL_PATH,
@@ -401,8 +400,8 @@ export function SpecView({ projectName }: { projectName: string }) {
   const firstRequirements = files.find((f) => f.group === "requirements");
   // A fresh project may hold no requirements file yet; fall back to whatever
   // the spec view does list. Named for what it IS — any listed entry, which may
-  // be a structured path (`openapi.yaml`, a component `design.json`,
-  // `validation-criteria.json`) that renders as a read-only structured view
+  // be a structured path (`openapi.yaml`, a component `design.json`, a
+  // `.feature` file) that renders as a read-only structured view
   // rather than in the editor. That is the right fallback: showing the one
   // artifact a bare project has beats showing an empty pane, and every path
   // reaching here has a renderer.
@@ -538,18 +537,6 @@ export function SpecView({ projectName }: { projectName: string }) {
     /^specs\/design\/components\/[^/]+\/design\.json$/.test(
       selectedFile?.path ?? "",
     );
-  // The RETIRED acceptance oracle, rendered as a read-only structured view —
-  // like design.json, it never goes through the collab text editor.
-  //
-  // UNREACHABLE while the criteria path is hidden: `specGroupOf` drops that path
-  // (see mapping.ts), so `selectedFile` can never be it and nothing routes here.
-  // Kept rather than deleted because removing the viewer belongs to the
-  // criteria+e2e removal, which also takes the label and the
-  // `@aep/ui-validation-view` dependency; un-hiding is one line until then.
-  const isValidationCriteriaFile =
-    /^specs\/validation\/validation-criteria\.json$/.test(
-      selectedFile?.path ?? "",
-    );
   // The Gherkin acceptance criteria render as a read-only structured view.
   // Without this they are neither .md nor structured, so they fall through to
   // CollabTextArea — an editable monospace box over a document nobody edits by
@@ -567,7 +554,6 @@ export function SpecView({ projectName }: { projectName: string }) {
   const isStructuredFile =
     isOpenApiFile ||
     isComponentDesignFile ||
-    isValidationCriteriaFile ||
     isAcceptanceFeatureFile ||
     isDependencyDefinitionFile;
   // Canvas-based views (cell diagram, Excalidraw) need a flex-column,
@@ -1478,8 +1464,6 @@ export function SpecView({ projectName }: { projectName: string }) {
                         roles={apiSecurity.roles}
                         resourceServer={apiSecurity.resourceServer}
                       />
-                    ) : isValidationCriteriaFile ? (
-                      <ValidationView criteria={structuredLive} />
                     ) : isAcceptanceFeatureFile ? (
                       <AcceptanceView
                         features={[{ path: selectedFile.path, content: structuredLive }]}
@@ -1512,11 +1496,6 @@ export function SpecView({ projectName }: { projectName: string }) {
                         spec={content.data.content}
                         roles={apiSecurity.roles}
                         resourceServer={apiSecurity.resourceServer}
-                      />
-                    ) : isValidationCriteriaFile ? (
-                      <ValidationView
-                        key={content.data.sha}
-                        criteria={content.data.content}
                       />
                     ) : isAcceptanceFeatureFile ? (
                       <AcceptanceView

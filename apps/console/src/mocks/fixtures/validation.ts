@@ -24,10 +24,10 @@ type RunVerdict = NonNullable<
 //
 // Two companion keys narrow it — whether the newest attempt is a REPEAT over a
 // failed one (see ValidationAttempt below) and whether the repo has an oracle at all:
-//   localStorage.setItem('aep:mock:validation-criteria', 'missing')
+//   localStorage.setItem('aep:mock:acceptance-criteria', 'missing')
 // which drops every specs/acceptance/*.feature from the file list, so the page sees
 // a version whose spec authored none (handlers/project.ts). The same key also takes:
-//   localStorage.setItem('aep:mock:validation-criteria', 'drifted')
+//   localStorage.setItem('aep:mock:acceptance-criteria', 'drifted')
 // which adds a SCENARIO to the feature files that the pinned report does not speak
 // for — see DRIFTED below.
 //

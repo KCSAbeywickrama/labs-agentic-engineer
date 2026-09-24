@@ -24,7 +24,6 @@ describe("fileLabel — a document's name, never its filename", () => {
     expect(fileLabel("specs/requirements/prd.md")).toBe("Product requirements");
     expect(fileLabel("specs/design/domain-model.md")).toBe("Domain model");
     expect(fileLabel("specs/design/security.json")).toBe("Security");
-    expect(fileLabel("specs/validation/validation-criteria.json")).toBe("Validation criteria");
   });
 
   it("names a component's artifacts without repeating the component", () => {
