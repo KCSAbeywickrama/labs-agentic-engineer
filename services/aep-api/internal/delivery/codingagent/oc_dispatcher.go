@@ -79,13 +79,39 @@ const codingAgentWorkspacePath = "/home/aep/aep-workspace"
 // SecretReference the org's row names.
 const (
 	envAnthropicAPIKey = "ANTHROPIC_API_KEY"
+	envGitHubToken     = "GITHUB_TOKEN"
+
+	// envEvalAnthropicAPIKey carries the org's DEFAULT Anthropic key for the
+	// build's agent-evaluation step, which needs a model twice over: for the
+	// generated agent it boots and for the judge that grades it.
+	//
+	// It has its OWN name rather than reusing ANTHROPIC_API_KEY because that
+	// variable already belongs to Claude Code, which ranks it above
+	// CLAUDE_CODE_OAUTH_TOKEN (ADR-0016). Mounting the evaluation key under it
+	// would silently move the coding session of every OAuth-billing org onto the
+	// credential that org deliberately moved away from — the exact mis-bill
+	// ADR-0016 exists to prevent. A distinct name keeps the two budgets apart,
+	// and the harness reads it in preference to ANTHROPIC_API_KEY.
+	envEvalAnthropicAPIKey = "AEP_EVAL_ANTHROPIC_API_KEY"
+
+	// envEvalKeyManaged declares that the PLATFORM owns this pod's evaluation
+	// credential: if envEvalAnthropicAPIKey is not set here, this run has no
+	// evaluation key at all.
+	//
+	// It exists because the pod's ANTHROPIC_API_KEY, when present, is the CODING
+	// credential — possibly an override the org chose to bill coding and nothing
+	// else. Without this declaration the harness cannot tell that pod apart from
+	// a developer's machine, where ANTHROPIC_API_KEY is simply "the key", and it
+	// would quietly grade agents on a budget the org ring-fenced. Set on EVERY
+	// dispatch, including the ones carrying no evaluation key: that is the case
+	// it exists for.
+	envEvalKeyManaged = "AEP_EVAL_KEY_MANAGED"
 
 	// The organization's coding-agent setting, as the runner reads it
 	// (`runtime/registry.ts`). Plain env, never a secret: they are two enum
 	// values, and the runner needs both before it can start a session.
 	envAgentRuntime = "AEP_AGENT_RUNTIME"
 	envAgentModel   = "AEP_AGENT_MODEL"
-	envGitHubToken  = "GITHUB_TOKEN"
 )
 
 // OCDispatcher creates the ephemeral coding-agent Component chain:

@@ -93,6 +93,13 @@ type Config struct {
 	// the App-mode redirect after callback (302 → console settings page).
 	BFFPublicURL string
 
+	// TryItCallbackURL is the platform tester's OAuth callback, registered as a
+	// redirect URI on every project's sign-in resource so a client that is not
+	// one of the project's own components — the platform's test app — can
+	// complete a sign-in there. One fixed URL for the whole platform. Empty
+	// disables the registration.
+	TryItCallbackURL string
+
 	// TaskTokenSigningKey is the PEM-encoded RSA private key used to sign
 	// Task JWTs. The matching public key is published at /auth/external/jwks.json.
 	TaskTokenSigningKey string
@@ -161,6 +168,7 @@ type Config struct {
 	Observability ObservabilityConfig
 	AgentsSvc     AgentsSvcConfig
 	ServiceAuth   ServiceAuthConfig
+	AgentManager  AgentManagerConfig
 	Workspace     WorkspaceConfig
 
 	// SkillsDir is the on-disk platform skill library the BFF seeds + reconciles
@@ -403,6 +411,30 @@ type ObservabilityConfig struct {
 	ClientID     string
 	ClientSecret string
 	HostHeader   string
+}
+
+// AgentManagerConfig holds the machine credentials AEP calls Agent Manager
+// with.
+//
+// No base URL: Agent Manager's address is per ENVIRONMENT, read from that
+// environment's AI gateway binding record, because two environments may be
+// governed by different Agent Managers. Only the identity is configuration.
+//
+// The client id must match the `amp-publisher-*` wildcard in amp-api's
+// KEY_MANAGER_AUDIENCE, or its tokens are rejected as "invalid jwt" whatever
+// scopes they carry. Declared in
+// deployments/single-cluster/thunder-resources/92-aep-amp-publisher-client.yaml.
+type AgentManagerConfig struct {
+	TokenURL     string
+	ClientID     string
+	ClientSecret string
+	// Resource is the OAuth resource indicator. Agent Manager's resource server
+	// is urn:wso2:amp, and a mint that omits it can come back with no scopes.
+	Resource string
+	// HostHeader is the vhost the token URL is routed by — see
+	// agentmanager.Config.HostHeader. Defaults to the one the service's other
+	// Thunder clients already use.
+	HostHeader string
 }
 
 // PlatformAPIConfig holds connection settings for the OpenChoreo platform API.

@@ -206,7 +206,7 @@ const FLOW_SUPPORTING_SKILLS: Record<string, string[]> = {
   //
   // `acceptance-criteria` writes the Gherkin features a validation run drives
   // (ADR-0029), authored from the PRD alone.
-  design: ["grilling", "cell-design", "architecture", "security-design", "openapi-conventions", "wireframes", "acceptance-criteria"],
+  design: ["grilling", "cell-design", "architecture", "security-design", "openapi-conventions", "wireframes", "agent-building", "acceptance-criteria"],
 };
 
 /** The branch a command names, or undefined for a token that IS its skill. */

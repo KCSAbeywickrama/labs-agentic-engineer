@@ -272,6 +272,9 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		"AEP_CORRELATION_ID":  in.correlationID,
 		"AEP_TASK_KIND":       taskKindOrDefault(disp.taskKind),
 		"WORKSPACE_BASE_PATH": codingAgentWorkspacePath,
+		// Unconditional, and deliberately not tied to whether a key was resolved
+		// below — see envEvalKeyManaged.
+		envEvalKeyManaged: "1",
 		// The run's OWN deadline, so it can end itself rather than be ended.
 		// The same number this dispatch puts on the Job's activeDeadlineSeconds
 		// below: when that one passes, the pod is killed mid-sentence and
@@ -302,6 +305,9 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 	secretEnv := []SecretEnvRef{
 		{Key: anthropicEnvVarOrDefault(anthropicSR.EnvVar), SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
 		{Key: envGitHubToken, SecretName: githubSR.SecretRefName, SecretKey: githubSR.Property},
+	}
+	if evalSR, ok := e.evaluationKeyRef(ctx, in.orgID); ok {
+		secretEnv = append(secretEnv, evalSR)
 	}
 	pub, tokenURL, err := e.publisherSecretEnv(ctx, in.orgID)
 	if err != nil {
@@ -418,6 +424,40 @@ func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID stri
 		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: %w", err)
 	}
 	return anthropicSR, githubSR, nil
+}
+
+// evaluationKeyRef resolves the org's DEFAULT Anthropic key as the build's
+// agent-evaluation credential, reporting whether there is one to mount.
+//
+// A build that generates an ai-agent evaluates it before opening its PR, and
+// that step needs a model twice over — once for the agent it boots, once for the
+// judge that grades it. Both are API calls, so the credential has to be an API
+// key; the default key always is (ADR-0016), while the coding credential may be
+// a Claude Code OAuth token that authenticates neither.
+//
+// An unresolvable key is NOT a dispatch failure, which is the one thing that
+// makes this different from every other credential here. Evaluation reports; it
+// never fails a build. An org that has connected no key still gets its work done
+// and its PR opened — the evaluation step simply reports that it could not run —
+// so a missing key must not cost the org a delivery. It is logged rather than
+// swallowed silently, because "the harness never became ready" is otherwise a
+// puzzling thing to read in a build report.
+func (e *CodingExecutor) evaluationKeyRef(ctx context.Context, orgID string) (SecretEnvRef, bool) {
+	triplet, err := e.anthropicKey.DefaultKeyRef(ctx, orgID)
+	if err != nil {
+		slog.InfoContext(ctx, "coding dispatch: no default Anthropic key — the build will run without agent evaluation",
+			"org", orgID, "error", err)
+		return SecretEnvRef{}, false
+	}
+	// A half-mirrored row resolves to a triplet ESO cannot follow. Mounting it
+	// would put the variable on the pod pointing at nothing, and the harness
+	// would report the agent as misbehaving rather than as unconfigured.
+	if triplet.Name == "" || triplet.Property == "" {
+		slog.WarnContext(ctx, "coding dispatch: default Anthropic secret reference is incomplete — the build will run without agent evaluation",
+			"org", orgID)
+		return SecretEnvRef{}, false
+	}
+	return SecretEnvRef{Key: envEvalAnthropicAPIKey, SecretName: triplet.Name, SecretKey: triplet.Property}, true
 }
 
 // codingAgentEnv resolves the runtime and model this run is launched with.

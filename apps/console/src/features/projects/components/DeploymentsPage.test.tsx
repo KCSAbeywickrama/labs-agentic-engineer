@@ -31,16 +31,24 @@ vi.mock("@tanstack/react-router", () => ({
     function MockLink({
       to,
       params,
+      search,
       ...rest
     }: {
       to: string;
       params?: Record<string, unknown>;
+      search?: Record<string, unknown>;
     } & Record<string, unknown>) {
       let href = to;
       for (const [key, value] of Object.entries(params ?? {})) {
         href = href.replace(`$${key}`, String(value));
       }
-      return <Component component="a" href={href} {...rest} />;
+      // `search` is modelled, not dropped: a deep link that loses its query
+      // reaches the right PAGE with the wrong agent, and a mock that silently
+      // discarded it would let that ship green.
+      const query = new URLSearchParams(
+        Object.entries(search ?? {}).map(([k, v]) => [k, String(v)]),
+      ).toString();
+      return <Component component="a" href={query ? `${href}?${query}` : href} {...rest} />;
     },
   Link: ({ children }: { children?: React.ReactNode }) => <a>{children}</a>,
   useNavigate: () => navigate,
@@ -94,16 +102,6 @@ let mockDeploy: DeployStage = {
 
 // The component/binding join. One serving binding by default; the on-hold
 // case empties it, because a parked run has deployed nothing.
-const DEFAULT_DEPLOYMENTS = [
-  {
-    componentName: "storefront",
-    environment: "development",
-    status: "Ready",
-    endpointUrl: "https://storefront.dev.example.com",
-  },
-];
-let mockDeployments = DEFAULT_DEPLOYMENTS;
-
 // The design's dependency read (the promote dialog's connection list, and
 // the Configure button's own gate) — overridden per test; defaults to one
 // required external connection, reset in beforeEach so a test that mutates
@@ -153,6 +151,23 @@ let mockBuildVersion = "v1";
 // it needs no QueryClientProvider; mutate is captured for the save assertion.
 const mockMutate = vi.fn();
 
+// Overridable per test (the chat-link test adds an ai-agent component +
+// deployment); defaults match the single-web-app fixture every other test
+// in this file was written against, reset in beforeEach.
+const DEFAULT_COMPONENTS = [
+  { name: "storefront", displayName: "Storefront", type: "web-application" },
+];
+const DEFAULT_DEPLOYMENTS = [
+  {
+    componentName: "storefront",
+    environment: "development",
+    status: "Ready",
+    endpointUrl: "https://storefront.dev.example.com",
+  },
+];
+let mockComponents = DEFAULT_COMPONENTS;
+let mockDeployments = DEFAULT_DEPLOYMENTS;
+
 vi.mock("../api/queries", () => ({
   // The platform's pipeline, in promotion order — what `useEnvironments`
   // serves. Two environments here because that is the pipeline these tests
@@ -177,7 +192,7 @@ vi.mock("../api/queries", () => ({
     reset: vi.fn(),
   }),
   useProjectComponents: () => ({
-    data: { items: [{ name: "storefront", displayName: "Storefront", type: "web-application" }] },
+    data: { items: mockComponents },
     isPending: false,
     isError: false,
     error: null,
@@ -315,12 +330,13 @@ beforeEach(() => {
   mockRepairing = false;
   mockMutate.mockClear();
   mockDependencies = DEFAULT_DEPENDENCIES;
+  mockComponents = DEFAULT_COMPONENTS;
+  mockDeployments = DEFAULT_DEPLOYMENTS;
   mockDependenciesPending = false;
   mockExternalCatalog = [];
   mockExternalCatalogPending = false;
   mockExternalCatalogError = false;
   mockBuilds = [];
-  mockDeployments = DEFAULT_DEPLOYMENTS;
   mockRuns = [];
   mockRunsByTag = {};
   mockRunsError = false;

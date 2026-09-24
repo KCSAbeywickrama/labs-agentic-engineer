@@ -33,6 +33,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/clients/agentmanager"
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/clients/observability"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -41,6 +42,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/thundersvc"
 	"github.com/wso2/aep/aep-api/internal/config"
 	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/delivery/agentgovernance"
 	"github.com/wso2/aep/aep-api/internal/delivery/build"
 	"github.com/wso2/aep/aep-api/internal/delivery/codingagent"
 	"github.com/wso2/aep/aep-api/internal/delivery/eventcore"
@@ -193,6 +195,14 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// plane (via OC → OpenBao → SecretReference). Used by BuildCredentialsService
 	// for both cloud (CP/WP split) and local k3d — one unified path.
 	gitSecretClient := openchoreo.NewGitSecretClient(ocConfig)
+	// SecretReference client for ai-agent model access (component_service.go's
+	// EnsureComponent → wireModelAccess): always goes through OC's own
+	// SecretReference CRUD directly (docs/glossary.md's SecretReference
+	// entry — authored in the org NS, materialized by ESO into the
+	// consuming-plane NS), independent of which secrets provider owns the
+	// KV-write/mirroring path below.
+	modelAccessSecretRefClient := openchoreo.NewSecretReferenceClient(ocConfig)
+
 	// The runtime reader: a release binding's rendered pods, their logs and
 	// their events. It is what makes a coding cycle observable without a
 	// Kubernetes client — status from the pod, live logs from the pod, and
@@ -323,6 +333,19 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// the Enabled() check.
 	credService.WithSecretRefWriter(secretRefWriter)
 	anthropicCredService.WithSecretRefWriter(secretRefWriter)
+	// A rotated org key must reach the Agent Manager provider that holds a copy
+	// of it, or every governed agent in the org keeps calling Anthropic with a
+	// revoked credential until the next deploy re-asserts it.
+	anthropicCredService.WithModelProvider(ampModelProviderPublisher{
+		amp: ampClientFactory{cfg: agentmanager.Config{
+			TokenURL:     cfg.AgentManager.TokenURL,
+			ClientID:     cfg.AgentManager.ClientID,
+			ClientSecret: cfg.AgentManager.ClientSecret,
+			Resource:     cfg.AgentManager.Resource,
+			HostHeader:   cfg.AgentManager.HostHeader,
+		}},
+		bindings: environmentClient,
+	})
 	validatorProbes := organization.NewValidatorProbes(credService, gitHost, credResolver, minter)
 	credValidator := secrets.NewValidator(db, validatorProbes, nil, cfg.CredentialValidatorInterval)
 
@@ -450,7 +473,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// (NewBuildCredentialsService always returns a value; its gitSecrets are
 	// nil-safe internally), so the stager is always wired.
 	buildStager := buildSecretStagerAdapter{svc: buildCredService}
-	componentService := projects.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager)
+	// anthropicCredService already satisfies projects.AnthropicKeyResolver
+	// structurally (DefaultKeyRef has the exact same signature) — no
+	// adapter needed, unlike buildStager above.
+	componentService := projects.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager, anthropicCredService, modelAccessSecretRefClient)
 	// deploymentService is built below, so the converger is attached after
 	// construction — an env-var edit pushes onto the live binding through the one
 	// writer rather than patching a field of it.
@@ -629,6 +655,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			"environment", openchoreo.DevEnvironmentName, "adminRoute", cfg.ThunderEnvAdminRoute)
 	}
 	identityPanel := identity.NewPanelService(identityTargets, identityStore)
+	// Late-bound: provisioning, which owns the sign-in binding, is built below.
+	testUserCoords := &lateSignInCoords{}
+	identityPanel.SetSignInCoordinates(testUserCoords)
 
 	// The other end of the ensure: a project delete removes the authorization
 	// objects its builds created — the resource server, its permission catalog
@@ -1137,6 +1166,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	platformProvisioner := dependencies.NewOCNativeProvisioner(resourceClient)
 	catalogValuePlane := provisioning.NewMemoryValuePlane()
 	provisioningSvc := provisioning.NewService(provisioning.Deps{
+		TryItCallbackURL:  cfg.TryItCallbackURL,
 		Issues:            issueService,
 		Execs:             executionRepo,
 		Design:            designComponents{store: artifactStore},
@@ -1160,6 +1190,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		SecurityJSON:      securityJSONReader{art: artifactSvcGit},
 		ProjectNames:      projectDisplayNamer{client: projectClient},
 	})
+	testUserCoords.svc = provisioningSvc
 	// Assemble the dependencies domain (P8): the provisioning slice (7 ops over
 	// provisioningSvc) + the resource-type-discovery slice (ListPlatformResourceTypes
 	// over the catalog). Both slices are nil-tolerant; the edge 503s when unwired.
@@ -1324,6 +1355,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// this fails OPEN (defer + retry) when the catalog is unreachable: emission is
 	// a retried cascade hook, not a user-facing save gate.
 	runtimeConfigSvc.SetResourceCatalog(resourceTypeCatalog)
+	// The platform tester's callback rides the same patch as the SPAs' own
+	// callbacks, and is what lets an agent-only project be signed in to at all.
+	runtimeConfigSvc.SetTryItCallbackURL(cfg.TryItCallbackURL)
 	// The pre-build ensure is now the Component CR alone. env-config.js used to be
 	// emitted here too and could not land — the binding it writes to does not
 	// exist before the first build — so it is a deploy-stage input instead, pulled
@@ -1353,6 +1387,55 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		slog.Info("ThunderApplication CR reader", "baseURL", cfg.KubeAPI.BaseURL)
 	} else {
 		slog.Info("ThunderApplication CR reader disabled — no KUBERNETES_SERVICE_HOST/PORT or KUBE_API_BASE_URL; thunder deploy-wait skipped")
+	}
+
+	// An ai-agent's model access. Without this the deploy still succeeds and
+	// the agent still starts — it simply comes up with no MODEL_* and fails
+	// its first turn with an upstream 401 ("x-api-key header is required"),
+	// which is a long way from the missing wire that caused it.
+	deploymentService.SetModelAccess(componentService)
+	// Agent Manager governance, called from inside Deploy — the one path every
+	// deployment takes, so the workflow's promote, Converge's drift repair and a
+	// config change's redeploy are all covered by construction.
+	agentComponentKinds := ampComponentKinds{store: artifactStore}
+	agentGovernor := agentgovernance.New(agentgovernance.Deps{
+		AMP: ampClientFactory{cfg: agentmanager.Config{
+			TokenURL:     cfg.AgentManager.TokenURL,
+			ClientID:     cfg.AgentManager.ClientID,
+			ClientSecret: cfg.AgentManager.ClientSecret,
+			Resource:     cfg.AgentManager.Resource,
+			HostHeader:   cfg.AgentManager.HostHeader,
+		}},
+		Keys: ampKeyStore{
+			writer: secretRefWriter,
+			refs:   modelAccessSecretRefClient,
+			orgs:   orgRepo,
+		},
+		Bindings: environmentClient,
+		OrgKeys:  ampOrgKeyReader{creds: anthropicCredService},
+		// Only ai-agent components are governed; a wave's services and web apps
+		// are left alone.
+		Kinds: agentComponentKinds,
+	})
+	deploymentService.SetGovernor(agentGovernor)
+	// The BUILD-TIME half of the same governor: the version's `provision` gate
+	// registers this version's agents before the coding agent is dispatched, so
+	// an Agent Manager that cannot serve the build fails it at PLANNING rather
+	// than after a full coding → build → deploy → validate cycle. The same
+	// governor object, so the two halves can never disagree about what a
+	// registration is; only the credential is withheld (see EnsureRegistration).
+	provisioningSvc.SetAgentRegistrar(ampAgentRegistrar{
+		governor: agentGovernor,
+		kinds:    agentComponentKinds,
+	})
+	// Model access is composed from the AI gateway binding when the environment
+	// has one: an Agent-Manager-governed agent gets the gateway's endpoint and
+	// its own AMP key instead of the org's Anthropic key. Nil-safe — an
+	// environment with no binding composes exactly what it did before.
+	if cs, ok := componentService.(interface {
+		SetAIGatewayBindings(projects.AIGatewayBindingReader)
+	}); ok {
+		cs.SetAIGatewayBindings(environmentClient)
 	}
 	// Endpoint deploy-wait: after OC Ready, a component that advertises an
 	// external URL stays pending until that URL answers. OC reports Ready when

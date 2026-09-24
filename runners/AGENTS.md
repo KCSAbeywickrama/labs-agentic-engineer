@@ -448,6 +448,27 @@ into the runner pod at `/app/skills` for live skill edits (see
   on an out-of-sync `npm ci`, which is the loud outcome. The quiet one is worse:
   a range that still resolves leaves the pod running a version the tests never
   saw.
+- **The agent-evaluation harness ships in the image too**, at
+  `/opt/aep/agent-eval` (`$AEP_AGENT_EVAL_HOME`) with `agent-eval` on `PATH`. A
+  build that generates an ai-agent evaluates it before opening its PR, and a
+  build pod holds no monorepo — so a harness resolved from the checkout would run
+  on a developer's machine and nowhere else, which is the worst kind of step:
+  one that looks wired and silently is not. `packages/agent-eval` arrives as the
+  `agent-eval` named build context, so all three build paths must pass it
+  (`build-runner.sh`, `release.yml`'s matrix row, `local/run-local.sh`);
+  `src/agent_eval_packaging.test.ts` pins all three, because a context passed by
+  one builder and not another differs between local and cloud rather than
+  failing. It installs with `npm ci` from `packages/agent-eval/package-lock.json`
+  — the same two-lockfile rule as `/app` — and runs from source under `tsx`. It
+  installs promptfoo with `--omit=optional` (its optional provider SDKs are not
+  the harness's; ~0.3 GB instead of ~2.5 GB — `packages/agent-eval/design/running-in-a-build-pod.md`)
+  and sits before the runner's sources so a source edit does not re-run it.
+- **`AEP_EVAL_ANTHROPIC_API_KEY` is a THIRD credential on the pod** — the org's
+  default Anthropic key, for the evaluation step's agent and judge. It is not
+  `ANTHROPIC_API_KEY` because that name belongs to Claude Code, which ranks it
+  above `CLAUDE_CODE_OAUTH_TOKEN` (ADR-0016). It is enrolled with the
+  other mounted credentials in `credential_env.ts`: the agent invokes the
+  harness through its Bash tool, whose output is the progress feed.
 - **The image states what the environment IS, so no agent has to discover it.**
   Two entries earn their place there rather than in a skill or a prompt.
   `AGENT_BROWSER_ARGS=--no-sandbox` (Dockerfile): a pod has no usable chromium

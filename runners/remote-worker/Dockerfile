@@ -350,6 +350,45 @@ COPY --chown=aep:aep package.json package-lock.json* ./
 RUN npm ci --include=optional \
     && rm -rf node_modules/@anthropic-ai/claude-agent-sdk-linux-*-musl
 
+# ─── The agent-evaluation harness ───────────────────────────────────────────
+# packages/agent-eval, reached as a NAMED BUILD CONTEXT for the same reason
+# skills/ and the bal library tool are: it lives outside this image's context.
+#
+# It is IN THE IMAGE rather than resolved from the monorepo at task time,
+# because a build pod holds no monorepo. The `agent-building` skill tells a
+# build to evaluate the agent it generated before opening its PR; without this
+# the command would resolve on a developer's machine and nowhere else, which is
+# the worst of the two — a step that looks wired and silently is not.
+#
+# Its dependency tree is INSTALLED BEFORE the runner's sources are copied, so a
+# runner source edit does not re-run it, and paying it again on every source
+# change would slow the dev rebuild.
+#
+# npm rather than pnpm, from packages/agent-eval/package-lock.json — the same
+# two-lockfile arrangement /app already lives under: pnpm's lockfile covers the
+# workspace (tests, typecheck), npm's is what this image installs from. Bump a
+# dependency and BOTH have to move (`npm install --package-lock-only` in
+# packages/agent-eval), or `npm ci` fails here — which is the loud outcome. The
+# quiet one is what a floating install would give: a pod grading agents against
+# a promptfoo the tests never saw, and a score nobody can reproduce.
+ENV AEP_AGENT_EVAL_HOME=/opt/aep/agent-eval
+COPY --from=agent-eval package.json package-lock.json ${AEP_AGENT_EVAL_HOME}/
+# --omit=optional: promptfoo's optional dependencies are its model-provider
+# SDKs, none of which the harness uses (its judge is the Anthropic Messages
+# API, a regular dependency). The one optional it cannot start without —
+# libsql's native binding for this platform — is added back by name at the
+# lockfile's version. Numbers, and why it is not a regular dependency:
+# packages/agent-eval/design/running-in-a-build-pod.md.
+ARG TARGETARCH
+RUN cd "$AEP_AGENT_EVAL_HOME" \
+    && npm ci --omit=dev --omit=optional --no-audit --no-fund \
+    && case "$TARGETARCH" in amd64) LIBSQL_ARCH=x64 ;; arm64) LIBSQL_ARCH=arm64 ;; \
+         *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; esac \
+    && LIBSQL_VERSION="$(node -p "require('./node_modules/libsql/package.json').version")" \
+    && npm install --no-save --omit=dev --omit=optional --no-audit --no-fund \
+         "@libsql/linux-${LIBSQL_ARCH}-gnu@${LIBSQL_VERSION}" \
+    && chmod -R a+rX "$AEP_AGENT_EVAL_HOME"
+
 # .dockerignore excludes node_modules/dist/.git/etc so we never ship a
 # duplicate of the dependency tree the previous step already produced.
 # --chown writes ownership directly into the layer instead of a trailing
@@ -380,6 +419,33 @@ COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/aep-runner-entrypoint
 # playground bind-mount their working tree over /app/skills, so a skill edit
 # never needs a rebuild.
 COPY --from=skills --chown=aep:aep . /app/skills
+
+# The harness's own sources, copied AFTER its dependency layer so editing them
+# costs a few kilobytes rather than a 2GB reinstall.
+#
+# Run from SOURCE with `tsx` — the same interpreter this image's ENTRYPOINT
+# already uses — rather than compiled to dist/. Compiling here would need the
+# monorepo's tsconfig.base.json, which is outside every build context this image
+# has; duplicating those compiler options into the image is a copy that can
+# silently disagree with the one the tests run against.
+#
+# The shim is what makes ONE command correct in both places the harness runs. In
+# a build pod `agent-eval` is on PATH; in the platform monorepo it is a built
+# entry point under packages/agent-eval. The skill names both and says how to
+# tell which you are in — see skills/agent-building/references/building.md.
+COPY --from=agent-eval bin ${AEP_AGENT_EVAL_HOME}/bin
+COPY --from=agent-eval src ${AEP_AGENT_EVAL_HOME}/src
+RUN printf '%s\n' \
+        '#!/bin/sh' \
+        '# Wrapper only. The harness itself is /opt/aep/agent-eval.' \
+        'exec /app/node_modules/.bin/tsx /opt/aep/agent-eval/bin/agent-eval.ts "$@"' \
+        > /usr/local/bin/agent-eval \
+    && chmod 0755 /usr/local/bin/agent-eval \
+    # bin/ and src/ ONLY, never the whole tree: a recursive chmod over the
+    # dependency layer rewrites every one of its files, and a rewritten file is
+    # a new file in a new layer — 2GB of duplicate, for a permission bit the
+    # install step already set.
+    && chmod -R a+rX "$AEP_AGENT_EVAL_HOME/bin" "$AEP_AGENT_EVAL_HOME/src"
 
 # The Ballerina Central reader the `ballerina` skill drives by name — `bal
 # library overview <org/name>` and its four sibling verbs.

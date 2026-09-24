@@ -96,7 +96,7 @@ jobs:
           # belongs here too. An image is selected when its own directory — the
           # Dockerfile's — changed.
           IMAGES=(
-            "remote-worker|runners/remote-worker|runners/remote-worker/Dockerfile|skills=skills bal-library-tool=packages/bal-library-tool|linux/amd64,linux/arm64"
+            "remote-worker|runners/remote-worker|runners/remote-worker/Dockerfile|skills=skills bal-library-tool=packages/bal-library-tool agent-eval=packages/agent-eval|linux/amd64,linux/arm64"
             "aep-api|services/aep-api|services/aep-api/Dockerfile|skills=skills|"
             "agents|.|services/agents/Dockerfile||"
             "collab|.|services/collab/Dockerfile||"

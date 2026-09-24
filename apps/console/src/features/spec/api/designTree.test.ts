@@ -202,6 +202,54 @@ describe("dependencies — one directory, one definition", () => {
   });
 });
 
+describe("buildDesignSection — a component's artifacts lead with the overview", () => {
+  // Path order is not reading order. `agent.afm.md` sorts above `design.json`
+  // on path alone, so an ai-agent listed its Agent Spec before the Design
+  // Overview while a service listed design.json first — by the accident of
+  // "d" < "o". The overview is the document that says what the component IS,
+  // so it leads for every type. Same reasoning the Requirements group already
+  // applies to the PRD.
+  it("puts Design Overview before an ai-agent's Agent Spec", () => {
+    const section = buildDesignSection([
+      { path: "specs/design/components/trip-agent/agent.afm.md", sha: "a", group: "designs" },
+      { path: "specs/design/components/trip-agent/design.json", sha: "b", group: "designs" },
+    ]);
+
+    expect(section.components[0]?.files.map((f) => f.path)).toEqual([
+      "specs/design/components/trip-agent/design.json",
+      "specs/design/components/trip-agent/agent.afm.md",
+    ]);
+  });
+
+  it("keeps Design Overview before a service's API Spec", () => {
+    const section = buildDesignSection([
+      { path: "specs/design/components/plants-api/openapi.yaml", sha: "a", group: "designs" },
+      { path: "specs/design/components/plants-api/design.json", sha: "b", group: "designs" },
+    ]);
+
+    expect(section.components[0]?.files.map((f) => f.path)).toEqual([
+      "specs/design/components/plants-api/design.json",
+      "specs/design/components/plants-api/openapi.yaml",
+    ]);
+  });
+
+  it("leaves anything else in path order behind them", () => {
+    const section = buildDesignSection([
+      { path: "specs/design/components/x/zebra.md", sha: "a", group: "designs" },
+      { path: "specs/design/components/x/agent.afm.md", sha: "b", group: "designs" },
+      { path: "specs/design/components/x/alpha.md", sha: "c", group: "designs" },
+      { path: "specs/design/components/x/design.json", sha: "d", group: "designs" },
+    ]);
+
+    expect(section.components[0]?.files.map((f) => f.path)).toEqual([
+      "specs/design/components/x/design.json",
+      "specs/design/components/x/agent.afm.md",
+      "specs/design/components/x/alpha.md",
+      "specs/design/components/x/zebra.md",
+    ]);
+  });
+});
+
 // followSelection is the single definition of "where does a written path open",
 // so the write-watcher can never land somewhere a rail click would not have
 // gone. With no per-capability row, an acceptance path has to route to the set.

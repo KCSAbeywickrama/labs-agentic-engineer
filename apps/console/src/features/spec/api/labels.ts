@@ -23,6 +23,7 @@ const OPENAPI_RE = /\/openapi\.ya?ml$/;
 const GRAPHQL_SCHEMA_RE = /^specs\/design\/dependencies\/[^/]+\/schema\.graphql$/;
 const COMPONENT_DESIGN_RE = /^specs\/design\/components\/[^/]+\/design\.json$/;
 const SDK_MANIFEST_RE = /^specs\/design\/dependencies\/[^/]+\/sdk\.json$/;
+const AGENT_AFM_RE = /^specs\/design\/components\/[^/]+\/agent\.afm\.md$/;
 
 function basename(path: string): string {
   return path.split("/").at(-1) ?? path;
@@ -53,6 +54,9 @@ export function fileLabel(path: string): string {
   // Under the component's own header, so the label adds the artifact and
   // never repeats the subject — `orders › Design · API · Wireframe`.
   if (COMPONENT_DESIGN_RE.test(path)) return "Design";
+  // An ai-agent's definition. Named like its siblings — the file is
+  // `agent.afm.md`, but what the reader is opening is the agent's spec.
+  if (AGENT_AFM_RE.test(path)) return "Agent spec";
   // A dependency's directory reads the same way under its own header —
   // `stripe › Definition · API · SDK` — the interface file taking the name
   // a component's does, whichever style wrote it.

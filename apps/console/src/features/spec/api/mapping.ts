@@ -55,11 +55,17 @@ const GROUP_BY_FOLDER: Record<string, SpecGroup> = {
   // grades (docs/glossary.md — different axes, both words correct). A group of
   // its own would put two headers on one phase.
   //
-  // `specs/validation/` is deliberately absent. It only ever held the retired
-  // criteria+e2e oracle, and legacy projects still have that JSON committed —
-  // mapping the folder would put it back on the rail with no viewer left to
-  // render it, so it would open as an editable textarea over a generated
-  // document. It stays readable on GitHub, which is where it belongs now.
+  // `specs/validation/` is deliberately absent, which hides BOTH files that
+  // have ever lived there — the two an exact-path set used to name one by one.
+  //
+  // The retired criteria+e2e oracle: legacy projects still have that JSON
+  // committed, and mapping the folder would put it back on the rail with no
+  // viewer left to render it, so it would open as an editable textarea over a
+  // generated document.
+  //
+  // `agent-scenarios.json` (ADR-0035): still written, and still hidden on
+  // purpose — it is the build's evaluation input, not a document a reader is
+  // meant to open. Both stay readable on GitHub, which is where they belong.
   acceptance: "validation",
 };
 

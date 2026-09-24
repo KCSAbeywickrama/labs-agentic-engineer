@@ -66,6 +66,7 @@ import {
   type ValidationStory,
 } from "../fixtures/validation";
 
+
 function scenario(): ProjectScenario {
   const chosen = localStorage.getItem("aep:mock:project") as ProjectScenario | null;
   if (chosen) return chosen;
