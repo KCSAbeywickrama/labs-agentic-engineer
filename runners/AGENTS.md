@@ -553,9 +553,9 @@ into the runner pod at `/app/skills` for live skill edits (see
   models.dev — `opencode-prewarm.sh`). The file ends in a bare `FROM runner` so
   every build that names no target (release.yml, images.yml, ci.yml,
   `local/run-local.sh`) still produces the Claude Code image. It is Debian-based
-  because Playwright's browsers are glibc-linked; do not reintroduce a slimmer
-  image without moving the Helm/compose/release/`AGENT_RUNNER_IMAGE` consumers
-  with it. Build + k3d-import BOTH locally with `make build-runner`.
+  because its chromium comes from Debian's archive and is glibc-linked; do not
+  reintroduce a slimmer image without moving the
+  Helm/compose/release/`AGENT_RUNNER_IMAGE` consumers with it. Build + k3d-import BOTH locally with `make build-runner`.
   Full `deployments/scripts/setup.sh` pre-builds it in the background (off the
   critical path) and imports it in `setup-aep.sh`; `PREBUILD_RUNNER=0` reverts
   to a serial build. The build is skipped when both tags exist, so use

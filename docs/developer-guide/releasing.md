@@ -24,7 +24,7 @@ Images are built for `linux/amd64` and `linux/arm64`. Builder stages that can be
 architecture-independent are pinned to `$BUILDPLATFORM` so they run once,
 natively, instead of under QEMU — read the note in `services/aep-api/Dockerfile`
 before removing a pin. `remote-worker` is the notable exception: it installs a
-per-arch Go toolchain, Ballerina, and Playwright browsers, so its arm64 half
+per-arch Go toolchain, Ballerina, and a per-arch chromium, so its arm64 half
 genuinely is emulated and it is the slowest job in the release. One consequence:
 chromium cannot run under QEMU, so the runner Dockerfile's browser smoke test
 runs only on native builds. The release asserts the arm64 image's browser

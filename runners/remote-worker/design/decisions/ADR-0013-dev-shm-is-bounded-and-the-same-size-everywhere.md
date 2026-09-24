@@ -2,9 +2,9 @@
 
 **Status:** Accepted
 
-This image runs a headless Chromium — `agent-browser` during a mock-verification
-walk, playwright during a validation run — and Chromium mmaps its shared buffers
-out of `/dev/shm`. On 64Mi of it Chromium does not degrade, it **aborts**: the
+This image runs a headless Chromium — `agent-browser` drives it in a
+mock-verification walk and in a validation run alike — and Chromium mmaps its
+shared buffers out of `/dev/shm`. On 64Mi of it Chromium does not degrade, it **aborts**: the
 browser process dies mid-page and the CLI reports a closed CDP channel, which
 reaches an agent as a browser that will not start rather than as a resource
 problem.

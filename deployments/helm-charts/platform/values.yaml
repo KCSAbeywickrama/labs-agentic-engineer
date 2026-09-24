@@ -116,7 +116,7 @@ console:
 
 codingAgentRunner:
   # Docker image for the runner Job — ONE image for both task kinds
-  # (implementation and validation; it bakes Playwright + chromium).
+  # (implementation and validation; it bakes a chromium).
   # OpenChoreo renders the Job into the project's `dp-…` dataplane namespace
   # from the per-org `coding-agent` ComponentType.
   # The release pipeline pins this to ghcr.io/wso2/aep/remote-worker:<version>;

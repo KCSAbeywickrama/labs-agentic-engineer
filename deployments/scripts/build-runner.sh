@@ -16,8 +16,8 @@
 # under the License.
 
 # Builds the runner images (runners/remote-worker/Dockerfile — one image per
-# coding-agent RUNTIME, each serving both task kinds: Debian + Go + Playwright +
-# baked chromium) and imports them into the local k3d cluster:
+# coding-agent RUNTIME, each serving both task kinds: Debian + Go + a baked
+# chromium) and imports them into the local k3d cluster:
 #
 #   aep-runner:dev            --target runner           Claude Code
 #   aep-runner-opencode:dev   --target runner-opencode  the same, plus OpenCode
@@ -120,7 +120,7 @@ build_target() {
 # FORCE rebuilds BOTH: the OpenCode image is FROM the Claude one, so rebuilding
 # only the first would leave the second running last build's runner code.
 if [ "${FORCE:-0}" = "1" ] || ! docker image inspect "$IMAGE" &>/dev/null || ! docker image inspect "$IMAGE_OPENCODE" &>/dev/null; then
-    echo "   First build downloads Playwright + a baked chromium — expect a few minutes."
+    echo "   First build installs a chromium and a Ballerina distribution — expect a few minutes."
     build_target runner "$IMAGE"
     build_target runner-opencode "$IMAGE_OPENCODE"
 else
