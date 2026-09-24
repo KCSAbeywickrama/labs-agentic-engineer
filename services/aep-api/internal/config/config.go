@@ -241,8 +241,8 @@ type Config struct {
 	CredentialValidatorInterval time.Duration
 
 	// AgentRunnerImage is the docker image the runner Job uses — ONE image
-	// for BOTH task kinds (implementation and validation; it bakes
-	// Playwright + chromium). Pinned at deploy time, no built-in default;
+	// for BOTH task kinds (implementation and validation). Pinned at deploy
+	// time, no built-in default;
 	// `:latest` is OK in dev but the cloud release-binding should resolve to
 	// a digest. Empty ⇒ dispatch is off and fails loudly.
 	AgentRunnerImage string

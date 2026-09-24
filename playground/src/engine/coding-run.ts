@@ -35,7 +35,7 @@
  *
  * Two run modes, same `local.ts` entrypoint:
  *   docker (default) — runs inside the exact `remote-worker/Dockerfile` image
- *     production ships (Debian, pinned Go, baked Playwright/chromium, the
+ *     production ships (Debian, pinned Go, a baked chromium, the
  *     non-root `aep` user), so a skill authored here behaves under the same
  *     toolchain a real cluster run gives it. `local.ts` is never baked into
  *     that image (`.dockerignore` — see `remote-worker/AGENTS.md`), so it is

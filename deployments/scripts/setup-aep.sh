@@ -75,8 +75,8 @@ apply_with_retry "${SCRIPT_DIR}/../manifests/docker-build-workflow.yaml" "docker
 echo "✅ ClusterWorkflow 'dockerfile-builder' installed"
 
 # Coding-agent runs as an OpenChoreo Job Component (not a ClusterWorkflow).
-# Build + import the runner image (ONE image, both task kinds: Debian + Go +
-# Playwright + baked chromium). It has no published counterpart on this branch,
+# Build + import the runner image (ONE image, both task kinds: Debian + Go + a
+# baked chromium). It has no published counterpart on this branch,
 # so it's built locally once per machine and imported into the node —
 # self-contained, no shared registry. Pre-importing also keeps the FIRST
 # dispatch from cold-pulling a multi-GB image, which has taken long enough to
