@@ -99,6 +99,10 @@ build_target() {
     # --build-context bal-library-tool=<repo>/packages/bal-library-tool: same
     # mechanism, for the same reason — the tool's source is outside this image's
     # context and its first stage compiles it.
+    # --build-context agent-eval=<repo>/packages/agent-eval: same mechanism
+    # again, for the agent-evaluation harness a build runs before opening an
+    # ai-agent's PR. A build pod holds no monorepo, so the harness has to be in
+    # the image or the step cannot run at all.
     # --secret: never a --build-arg. Build args land in image history, and
     # release.yml publishes this image's builder stages to a public buildcache.
     # --target: always named. The Dockerfile's default (last) stage is the Claude
@@ -107,6 +111,7 @@ build_target() {
         --target "$target" \
         --build-context "skills=$REPO_ROOT/skills" \
         --build-context "bal-library-tool=$BAL_TOOL_DIR" \
+        --build-context "agent-eval=$REPO_ROOT/packages/agent-eval" \
         --secret "id=packagePAT,env=PACKAGE_PAT" \
         -f "$DOCKERFILE" -t "$tag" "$WORKER_DIR"
     echo "✅ built $tag"

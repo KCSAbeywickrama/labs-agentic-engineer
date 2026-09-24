@@ -1,6 +1,6 @@
 # ADR-0016 — The coding agent's Anthropic key is an override on the org's key, not a peer
 
-**Status:** Superseded by [ADR-0034](ADR-0034-the-coding-credential-is-a-subscription.md)
+**Status:** Superseded by [ADR-0036](ADR-0036-the-coding-credential-is-a-subscription.md)
 (2026-09-24): the coding credential is a Claude subscription token only, there
 is no separate coding API key, and `codingLlm` is folded into `agents`.
 

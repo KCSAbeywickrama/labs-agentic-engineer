@@ -35,7 +35,7 @@ const (
 	// AnthropicRoleCoding is the optional Claude subscription the coding agent
 	// bills instead of the API key, read by coding-agent dispatch alone and
 	// only while the runtime is Claude Code. Always an oauth_token
-	// (CHECK-enforced), and it cannot outlive the default row (ADR-0034).
+	// (CHECK-enforced), and it cannot outlive the default row (ADR-0036).
 	AnthropicRoleCoding AnthropicRole = "coding"
 )
 
@@ -88,7 +88,7 @@ func AnthropicCredentialKindOf(key string) AnthropicCredentialKind {
 // ranks `ANTHROPIC_API_KEY` ABOVE `CLAUDE_CODE_OAUTH_TOKEN`, so a container
 // holding both would authenticate with the API key and silently ignore the
 // token. Mounting exactly one is what makes the org's choice actually take
-// effect. See docs/decisions/ADR-0034 and
+// effect. See docs/decisions/ADR-0036 and
 // https://code.claude.com/docs/en/authentication#authentication-precedence.
 func (k AnthropicCredentialKind) RunnerEnvVar() string {
 	if k == AnthropicCredentialOAuth {
@@ -122,7 +122,7 @@ func (r AnthropicRole) SecretRefEntity() string {
 // — same `dbStore` (Postgres + AES-256-GCM) plumbing, different `key` value.
 // This table stores only non-secret projection fields.
 //
-// See docs/decisions/ADR-0034-the-coding-credential-is-a-subscription.md.
+// See docs/decisions/ADR-0036-the-coding-credential-is-a-subscription.md.
 type OrgAnthropicCredential struct {
 	OcOrgID         string                  `gorm:"primaryKey;type:text" json:"ocOrgId"`
 	Role            AnthropicRole           `gorm:"primaryKey;type:text;not null;default:default" json:"role"`

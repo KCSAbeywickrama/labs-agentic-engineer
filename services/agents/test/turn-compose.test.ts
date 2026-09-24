@@ -292,7 +292,9 @@ test("the design flow inlines its whole lineup, in lineup order", () => {
     "security-design",
     "openapi-conventions",
     "wireframes",
+    "agent-building",
     "validation-criteria",
+    "acceptance-criteria",
   ]);
 });
 

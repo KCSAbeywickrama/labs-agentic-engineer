@@ -30,7 +30,8 @@
 //     agents card (AgentSettingsService) calls it before its unit of work.
 //   - writeKeyTx / deleteKeyTx — the credential half of that unit of work,
 //     inside its transaction; mirrorKey / forgetKey — the SM-API copy, after
-//     it commits.
+//     it commits; publishModelKey — the Agent Manager provider's copy of the
+//     default key, after it commits.
 //   - Status — one role's masked projection.
 //   - EffectiveKey — the DEFAULT key (or "none") for the spec agents, which
 //     the BFF forwards to agents-service per turn. There is no platform
@@ -45,7 +46,7 @@
 // (prefix / last4 / status / connected_at / last_validated_at) lives in the
 // `org_anthropic_credentials` table.
 //
-// See docs/decisions/ADR-0034-the-coding-credential-is-a-subscription.md.
+// See docs/decisions/ADR-0036-the-coding-credential-is-a-subscription.md.
 package organization
 
 import (
@@ -72,6 +73,27 @@ type AnthropicCredentialService struct {
 
 	// secretRefWriter mirrors a saved credential into SM-API. nil-safe.
 	secretRefWriter *SecretRefWriter
+
+	// modelProvider is told when the org's key changes, so an Agent Manager
+	// provider holding a COPY of it stops holding a revoked one. nil-safe.
+	modelProvider ModelProviderPublisher
+}
+
+// ModelProviderPublisher receives the org's current Anthropic key so a governed
+// model provider can be kept truthful.
+//
+// Declared here, implemented at the composition root: this domain must not
+// reach into Agent Manager, and the only thing it has to say is "the key
+// changed". An org with no governed environment has no implementation wired and
+// nothing happens.
+type ModelProviderPublisher interface {
+	PublishOrgModelKey(ctx context.Context, ocOrgID, apiKey string) error
+}
+
+// WithModelProvider injects the publisher; chainable, nil disables the push.
+func (s *AnthropicCredentialService) WithModelProvider(p ModelProviderPublisher) *AnthropicCredentialService {
+	s.modelProvider = p
+	return s
 }
 
 // WithSecretRefWriter injects the SM-API writer; chainable. nil disables
@@ -254,6 +276,33 @@ func (s *AnthropicCredentialService) forgetKey(ctx context.Context, ocOrgID stri
 	}
 }
 
+// publishModelKey pushes a committed DEFAULT key to the org's Agent Manager
+// provider, which holds a COPY of it on behalf of every governed agent.
+//
+// WHY THIS MATTERS MORE THAN IT LOOKS: without it, a rotated key leaves the
+// provider calling Anthropic with a revoked one, and EVERY governed agent in
+// the org fails at once — at the upstream, far from Settings, with nothing in
+// AEP saying why.
+//
+// Best-effort, and deliberately so: the key IS stored, and failing the user's
+// Settings action because a downstream copy lagged would be the worse outcome.
+// The next governed deploy re-asserts it anyway (EnsureProvider writes the
+// current key every time), so this is how fast it converges, not whether it
+// does.
+//
+// Only the DEFAULT role is ever published: that is the key agents run on. The
+// coding role's subscription token belongs to the coding agent, which does not
+// go through the gateway.
+func (s *AnthropicCredentialService) publishModelKey(ctx context.Context, ocOrgID, key string) {
+	if s.modelProvider == nil {
+		return
+	}
+	if err := s.modelProvider.PublishOrgModelKey(ctx, ocOrgID, strings.TrimSpace(key)); err != nil {
+		slog.WarnContext(ctx, "anthropic: could not publish the rotated key to the Agent Manager provider; governed agents keep the previous key until the next deploy",
+			"ocOrgId", ocOrgID, "error", err)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Status
 // ----------------------------------------------------------------------------
@@ -368,6 +417,35 @@ func (s *AnthropicCredentialService) ResolveCodingSecretRef(ctx context.Context,
 		return SecretRefTriplet{}, fmt.Errorf("anthropic secret reference for org %q: %w", ocOrgID, err)
 	}
 	return ref, nil
+}
+
+// ----------------------------------------------------------------------------
+// DefaultKeyRef — the default-role vault triplet, for consumers that mount
+// a SecretReference rather than reading the key's bytes
+// ----------------------------------------------------------------------------
+
+// DefaultKeyRef returns the org's DEFAULT-role Anthropic key's vault
+// coordinates — the same {kvPath, property} pushExternalSecret resolves to
+// deliver the RCA agent's ExternalSecret (see that method's doc comment).
+// Distinct from EffectiveKey: this never reads the key's bytes, only where
+// they live, for a caller that points an OpenChoreo SecretReference at the
+// path rather than forwarding the value itself (e.g. wiring an ai-agent
+// component's MODEL_API_KEY — docs/glossary.md's SecretReference entry:
+// "authored in the org NS, ESO materializes it into the consuming-plane
+// NS").
+//
+// Returns NotFoundError when the org has no active default key. Every
+// caller must treat that as "not connected yet", not a hard failure — same
+// discipline EffectiveKey's Source:"none" gives genai callers.
+func (s *AnthropicCredentialService) DefaultKeyRef(ctx context.Context, ocOrgID string) (SecretRefTriplet, error) {
+	row, err := s.fetchRow(ctx, ocOrgID, AnthropicRoleDefault)
+	if err != nil {
+		return SecretRefTriplet{}, err
+	}
+	if row.Status != "active" {
+		return SecretRefTriplet{}, &NotFoundError{What: fmt.Sprintf("org_anthropic_credentials.%s.default (status=%s)", ocOrgID, row.Status)}
+	}
+	return tripletFrom(row)
 }
 
 // tripletFrom reads a row's resolved secret-ref coordinates, naming whichever

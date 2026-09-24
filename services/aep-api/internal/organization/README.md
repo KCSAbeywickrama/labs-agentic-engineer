@@ -58,7 +58,7 @@ idp services, the raw connect-callback controller, and the S2S credentials-refre
 - **This domain is FAIL-LOUD**, not nil-tolerant: a nil collaborator panics (its pre-migration handlers had
   no nil guard), unlike sourcecontrol's 503 — the edge assigns it directly, no `OrEmpty`.
 - The `/config` PATCH is an **atomic multi-section** apply; sections are three-state `patch.Field`.
-- **The AI agents card is `llm` + `agents`, and one save of it is ONE transaction** (ADR-0034):
+- **The AI agents card is `llm` + `agents`, and one save of it is ONE transaction** (ADR-0036):
   `AgentSettingsService` writes the credential rows, the `org_agent_settings` row and the
   `org_secrets` bytes under one per-org advisory lock (`org_anthropic:<org>`), the secret store
   joining the transaction (`secrets.TxCredentialStore.WithDB`, `repository_agents_card.go`). A

@@ -233,7 +233,7 @@ model" and "the default one" to that one model.
   `AEP_AGENT_RUNTIME=opencode pnpm play <dir> code`.
 - OpenCode needs `ANTHROPIC_API_KEY`; a Claude subscription token is refused at
   start. The platform never hands it one: dispatch mounts the org's subscription
-  only on Claude Code (aep-api ADR-0034).
+  only on Claude Code (aep-api ADR-0036).
 - `external_directory` is `allow`, and the guard plugin is the platform's only
   write gate on OpenCode, as `lib/workspace_guard.ts` is on Claude Code. In
   1.18.32 that one permission is asked (`tool/external-directory.ts`) by `read`,
@@ -253,12 +253,13 @@ model" and "the default one" to that one model.
   an `ObservedCall` (`shell {command}` | `write {path, content}` | `edit {path}` |
   `other {tool}`, `runtime/port.ts`) instead of a runtime's tool name and input,
   and each adapter's `tools.ts` supplies the `observedCall` that spells its own
-  tools into it. The validation watchers (`validation_progress.ts`,
-  `validation_status_line.ts`) read only that call: matching one runtime's
-  names (`Bash`, `Write`, `file_path`) would match nothing on the other,
-  silently. `runtime/opencode/observe.test.ts` drives one validation session
-  through the OpenCode translator into both real watchers and asserts the same
-  rows and lines as the same session through Claude Code's normaliser. This
+  tools into it. A watcher reads only that call: matching one runtime's names
+  (`Bash`, `Write`, `file_path`) would match nothing on the other, silently. The
+  validation watchers that first read it were retired upstream with the move to
+  acceptance scenarios, so the seam has no production caller today;
+  `runtime/opencode/observe.test.ts` drives one session through the OpenCode
+  translator and asserts the observer receives the same calls and outcomes as
+  the same session through Claude Code's normaliser. This
   supersedes ADR-0012's "`observe(toolName,
   toolInput, toolUseId)`".
 - The adapter contract test (`runtime/contract.test.ts`) holds both adapters to

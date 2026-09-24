@@ -198,7 +198,7 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		}),
 		// Re-key org_anthropic_credentials to (oc_org_id, role) so an org can
 		// hold a coding credential beside its default key (ADR-0016; since
-		// phase16 that credential is a Claude subscription only, ADR-0034).
+		// phase16 that credential is a Claude subscription only, ADR-0036).
 		// Follows phase11, which added the secret_ref_* columns the new row
 		// carries just like the default row does.
 		ctxStep("phase13_anthropic_credential_role", RunPhase13AnthropicCredentialRole),
@@ -221,7 +221,7 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// list is append-only; it depends only on the AutoMigrate above it, which
 		// is where those three tables come from (BaseModels).
 		ctxStep("phase15_identity_per_environment", RunPhase15IdentityPerEnvironment),
-		// The coding role holds a Claude subscription token only (ADR-0034):
+		// The coding role holds a Claude subscription token only (ADR-0036):
 		// separate coding API keys and their bytes are deleted and the CHECK
 		// becomes default ⇔ api_key, coding ⇔ oauth_token. Follows phase13,
 		// which created the role/credential_kind columns and the CHECK this

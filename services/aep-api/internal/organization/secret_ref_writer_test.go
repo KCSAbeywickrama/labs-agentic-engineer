@@ -897,3 +897,97 @@ func TestSecretRefWriter_WriteGitHubPAT_StampsSecretRef(t *testing.T) {
 		t.Fatalf("secret_ref_written_at: %v", got.SecretRefWrittenAt)
 	}
 }
+
+// --- WriteAMPModelKey ---------------------------------------------------------
+
+func TestSecretRefWriter_WriteAMPModelKey(t *testing.T) {
+	t.Parallel()
+
+	t.Run("disabled (nil client) is a no-op", func(t *testing.T) {
+		t.Parallel()
+		w := organization.NewSecretRefWriter(nil, nil, nil, nil)
+		name, prop, err := w.WriteAMPModelKey(claimsCtx("ou-1"), "acme", "checkout-agent", "default", "amp-key", "http://gw/aep-default-anthropic")
+		if err != nil || name != "" || prop != "" {
+			t.Fatalf("disabled writer must no-op: name=%q prop=%q err=%v", name, prop, err)
+		}
+	})
+
+	t.Run("stores per agent and per environment in the org's CP namespace", func(t *testing.T) {
+		t.Parallel()
+		fake := &fakeSMClient{createRef: "amp-model-checkout-agent-default"}
+		w := organization.NewSecretRefWriter(fake, nil, nil, nil)
+
+		name, prop, err := w.WriteAMPModelKey(claimsCtx("ou-1"), "acme", "checkout-agent", "default", "amp-key-value", "http://gw/aep-default-anthropic")
+		if err != nil {
+			t.Fatalf("WriteAMPModelKey: %v", err)
+		}
+		if name != "amp-model-checkout-agent-default" || prop != secretmanagersvc.SecretKeyAPIKey {
+			t.Fatalf("name=%q prop=%q", name, prop)
+		}
+		if len(fake.createCalls) != 1 {
+			t.Fatalf("CreateSecret calls = %d, want 1", len(fake.createCalls))
+		}
+		call := fake.createCalls[0]
+
+		// The CONTROL-PLANE namespace is the org id, not a vault path segment.
+		// A SecretReference must live where the ReleaseBinding that
+		// secretKeyRefs it lives; write it elsewhere and the create SUCCEEDS
+		// while OpenChoreo fails the render with "SecretReference not found".
+		if call.loc.ControlPlaneNamespace != "acme" {
+			t.Errorf("ControlPlaneNamespace = %q, want the org's CP namespace", call.loc.ControlPlaneNamespace)
+		}
+		if call.loc.OrgName != "ou-1" {
+			t.Errorf("OrgName = %q, want the ouId claim (the vault path segment)", call.loc.OrgName)
+		}
+		// Per agent AND per environment: AMP issues one key per model config per
+		// environment, and two agents sharing an entity would share a credential,
+		// defeating the per-agent revocation this whole path exists for.
+		if !strings.Contains(call.loc.EntityName, "checkout-agent") ||
+			!strings.Contains(call.loc.EntityName, "default") {
+			t.Errorf("EntityName = %q, want it to name both agent and environment", call.loc.EntityName)
+		}
+		if call.data[secretmanagersvc.SecretKeyAPIKey] != "amp-key-value" {
+			t.Errorf("payload = %v, want the issued key under the api-key key", call.data)
+		}
+		// The endpoint rides in the same secret: the key authenticates against
+		// that address alone, and one secret means the deployment composes both
+		// MODEL_API_KEY and MODEL_ENDPOINT from a single SecretReference.
+		if call.data[organization.AMPModelURLKey] != "http://gw/aep-default-anthropic" {
+			t.Errorf("payload = %v, want the endpoint stored beside the key", call.data)
+		}
+	})
+
+	t.Run("validation errors never reach SM-API", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name                             string
+			org, component, environment, key string
+		}{
+			{"no org", "  ", "agent", "default", "k"},
+			{"no component", "acme", " ", "default", "k"},
+			{"no environment", "acme", "agent", "", "k"},
+			{"no key", "acme", "agent", "default", "  "},
+		} {
+			fake := &fakeSMClient{}
+			w := organization.NewSecretRefWriter(fake, nil, nil, nil)
+			if _, _, err := w.WriteAMPModelKey(claimsCtx("ou-1"), tc.org, tc.component, tc.environment, tc.key, "http://gw/ctx"); err == nil {
+				t.Errorf("%s: want a validation error", tc.name)
+			}
+			if len(fake.createCalls) != 0 {
+				t.Errorf("%s: CreateSecret must not be called", tc.name)
+			}
+		}
+	})
+
+	t.Run("without an ouId claim it refuses rather than writing to the wrong path", func(t *testing.T) {
+		t.Parallel()
+		fake := &fakeSMClient{}
+		w := organization.NewSecretRefWriter(fake, nil, nil, nil)
+		if _, _, err := w.WriteAMPModelKey(context.Background(), "acme", "agent", "default", "k", "http://gw/ctx"); err == nil {
+			t.Fatal("want an error: SM-API derives the namespace from the JWT, so a missing claim cannot be guessed")
+		}
+		if len(fake.createCalls) != 0 {
+			t.Error("CreateSecret must not be called without an ouId claim")
+		}
+	})
+}

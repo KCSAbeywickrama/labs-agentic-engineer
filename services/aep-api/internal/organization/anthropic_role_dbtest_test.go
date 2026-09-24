@@ -19,7 +19,7 @@ package organization_test
 // DBTEST tier — the two credential roles over the same real Postgres + real
 // AES-GCM store as anthropic_dbtest_test.go: the org's API key (default) and
 // the Claude subscription the coding agent may bill instead (coding, an
-// oauth_token only — ADR-0034). What is pinned here:
+// oauth_token only — ADR-0036). What is pinned here:
 //
 //   - the two are independent rows with independent secret bytes, so rotating
 //     the key cannot touch the token;

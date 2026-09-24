@@ -25,7 +25,7 @@ import (
 
 // RunPhase16CodingRoleSubscriptionOnly makes the coding role of
 // org_anthropic_credentials hold a Claude subscription token and nothing else
-// (ADR-0034). A separate coding API key is no longer a thing the platform
+// (ADR-0036). A separate coding API key is no longer a thing the platform
 // offers, so every one of them is deleted — its encrypted bytes in org_secrets
 // with it — and the org's coding runs bill its default API key from then on.
 //

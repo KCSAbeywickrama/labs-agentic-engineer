@@ -165,44 +165,31 @@ RUN groupadd -r aep \
     && mkdir -p /home/aep/aep-workspace \
     && chown -R aep:aep /home/aep
 
-# Playwright toolchain, pinned as a pair: AEP_PLAYWRIGHT_VERSION is the
-# contract the aep-validation skill pins tests/e2e/package.json to, so
-# the browsers baked here always match the version the specs run with.
+# Playwright is here for ONE reason: its chromium. Nothing in this image runs
+# `playwright test` any more — a validation run drives `agent-browser`, whose
+# executable path is derived from this package below (see the
+# AGENT_BROWSER_EXECUTABLE_PATH block). So `@playwright/test` is a browser
+# DELIVERY mechanism, not a test runner, and removing it would leave
+# agent-browser with no browser to launch.
+#
+# Kept as a Playwright download rather than a distro chromium because this
+# chromium is the one whose system libraries `--with-deps` installed, and
+# because the Debian base (see the header) exists for exactly these glibc-linked
+# builds.
 ARG PLAYWRIGHT_VERSION=1.61.1
-ARG PLAYWRIGHT_CLI_VERSION=0.1.15
-# PLAYWRIGHT_MCP_BROWSER names the browser TYPE for playwright-cli, whose own
-# default is the pair (chromium, channel `chrome`) — one branch sets both, so
-# the default engine cannot be had without Google's branded build at the system
-# path /opt/google/chrome/chrome, which this image neither carries (Chrome is a
-# vendor install, not a Playwright download) nor may redistribute. Naming the
-# type selects the chromium baked below, and with it the sandbox default that
-# can start as the non-root `aep` user. A `--browser=` flag still wins, so this
-# is the default rather than a lid.
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    AEP_PLAYWRIGHT_VERSION=${PLAYWRIGHT_VERSION} \
-    PLAYWRIGHT_MCP_BROWSER=chromium
-RUN npm install -g "@playwright/test@${PLAYWRIGHT_VERSION}" "@playwright/cli@${PLAYWRIGHT_CLI_VERSION}" \
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN npm install -g "@playwright/test@${PLAYWRIGHT_VERSION}" \
     && playwright install --with-deps chromium \
-    # playwright-cli bundles a different playwright build, and browser
-    # revisions are pinned per build (it wants chromium 1229 where
-    # @playwright/test above wants 1228), so this second install is not
-    # redundant — it is what keeps the CLI's first use at task time offline.
-    # Named explicitly: with no argument it also fetches firefox and webkit,
-    # ~546MB whose system dependencies the chromium-only line above never
-    # installs, so they could be downloaded but never launched. Non-fatal:
-    # worst case it downloads at runtime.
-    && (playwright-cli install-browser chromium || true) \
     # OWNED by the runtime user, not merely readable by it. `playwright install`
     # takes a LOCK in this directory before it can decide there is nothing to
     # download, so a read-only tree does not make the command a no-op — it makes
     # it BLOCK, silently, until the caller's timeout severs it. A validation run
-    # reached for it (the two clients pin different revisions, so asking is
-    # reasonable) and lost two hours to the hang. Owned, the same command exits 0
-    # immediately.
+    # reached for it and lost two hours to the hang. Owned, the same command
+    # exits 0 immediately.
     #
     # In THIS layer, beside the download, for the reason the `--chown` on the
     # app COPY below records: a trailing `chown -R` rewrites every file it
-    # touches into a fresh layer, and this tree is two chromium revisions.
+    # touches into a fresh layer, and this tree is a whole chromium.
     && chown -R aep:aep /ms-playwright
 
 # The agent-browser CLI — what a CODING run opens a page with and reads the
@@ -221,17 +208,12 @@ RUN npm install -g "@playwright/test@${PLAYWRIGHT_VERSION}" "@playwright/cli@${P
 # NO THIRD BROWSER IS DOWNLOADED. The CLI's own `agent-browser install` would
 # fetch one; instead AGENT_BROWSER_EXECUTABLE_PATH names a chromium that is
 # already in this image — the image deciding which binary launches, for the same
-# reason ADR-0007 has the image and not the skill name playwright-cli's browser.
+# reason ADR-0007 has the image and not a skill name the browser.
 #
-# WHICH of the two baked revisions: @playwright/test's, not playwright-cli's.
-# Three reasons that agree — it is the only chromium this build REQUIRES (the
-# `playwright-cli install-browser` above is `|| true`, so naming its revision
-# would make this variable a promise the build does not keep); it is the one
-# whose system libraries `--with-deps` installed; and it is the build the e2e
-# specs are later asserted in, so a locator the agent reads while coding is read
-# in the chromium that will assert it. Left unset the CLI's own discovery picks
-# the OTHER one — it takes the highest version it finds under /ms-playwright —
-# which is the drift this line closes.
+# It is @playwright/test's chromium: the only one this build installs, and the
+# one whose system libraries `--with-deps` installed. Left unset, the CLI's own
+# discovery takes the highest version it finds under /ms-playwright, which is a
+# promise this image would rather make explicitly than inherit.
 #
 # Resolved FROM playwright through a fixed symlink rather than spelled out: the
 # revision is decided by PLAYWRIGHT_VERSION above, and a literal `chromium-1228`
@@ -371,6 +353,45 @@ COPY --chown=aep:aep package.json package-lock.json* ./
 RUN npm ci --include=optional \
     && rm -rf node_modules/@anthropic-ai/claude-agent-sdk-linux-*-musl
 
+# ─── The agent-evaluation harness ───────────────────────────────────────────
+# packages/agent-eval, reached as a NAMED BUILD CONTEXT for the same reason
+# skills/ and the bal library tool are: it lives outside this image's context.
+#
+# It is IN THE IMAGE rather than resolved from the monorepo at task time,
+# because a build pod holds no monorepo. The `agent-building` skill tells a
+# build to evaluate the agent it generated before opening its PR; without this
+# the command would resolve on a developer's machine and nowhere else, which is
+# the worst of the two — a step that looks wired and silently is not.
+#
+# Its dependency tree is INSTALLED BEFORE the runner's sources are copied, so a
+# runner source edit does not re-run it, and paying it again on every source
+# change would slow the dev rebuild.
+#
+# npm rather than pnpm, from packages/agent-eval/package-lock.json — the same
+# two-lockfile arrangement /app already lives under: pnpm's lockfile covers the
+# workspace (tests, typecheck), npm's is what this image installs from. Bump a
+# dependency and BOTH have to move (`npm install --package-lock-only` in
+# packages/agent-eval), or `npm ci` fails here — which is the loud outcome. The
+# quiet one is what a floating install would give: a pod grading agents against
+# a promptfoo the tests never saw, and a score nobody can reproduce.
+ENV AEP_AGENT_EVAL_HOME=/opt/aep/agent-eval
+COPY --from=agent-eval package.json package-lock.json ${AEP_AGENT_EVAL_HOME}/
+# --omit=optional: promptfoo's optional dependencies are its model-provider
+# SDKs, none of which the harness uses (its judge is the Anthropic Messages
+# API, a regular dependency). The one optional it cannot start without —
+# libsql's native binding for this platform — is added back by name at the
+# lockfile's version. Numbers, and why it is not a regular dependency:
+# packages/agent-eval/design/running-in-a-build-pod.md.
+ARG TARGETARCH
+RUN cd "$AEP_AGENT_EVAL_HOME" \
+    && npm ci --omit=dev --omit=optional --no-audit --no-fund \
+    && case "$TARGETARCH" in amd64) LIBSQL_ARCH=x64 ;; arm64) LIBSQL_ARCH=arm64 ;; \
+         *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; esac \
+    && LIBSQL_VERSION="$(node -p "require('./node_modules/libsql/package.json').version")" \
+    && npm install --no-save --omit=dev --omit=optional --no-audit --no-fund \
+         "@libsql/linux-${LIBSQL_ARCH}-gnu@${LIBSQL_VERSION}" \
+    && chmod -R a+rX "$AEP_AGENT_EVAL_HOME"
+
 # .dockerignore excludes node_modules/dist/.git/etc so we never ship a
 # duplicate of the dependency tree the previous step already produced.
 # --chown writes ownership directly into the layer instead of a trailing
@@ -401,6 +422,33 @@ COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/aep-runner-entrypoint
 # playground bind-mount their working tree over /app/skills, so a skill edit
 # never needs a rebuild.
 COPY --from=skills --chown=aep:aep . /app/skills
+
+# The harness's own sources, copied AFTER its dependency layer so editing them
+# costs a few kilobytes rather than a 2GB reinstall.
+#
+# Run from SOURCE with `tsx` — the same interpreter this image's ENTRYPOINT
+# already uses — rather than compiled to dist/. Compiling here would need the
+# monorepo's tsconfig.base.json, which is outside every build context this image
+# has; duplicating those compiler options into the image is a copy that can
+# silently disagree with the one the tests run against.
+#
+# The shim is what makes ONE command correct in both places the harness runs. In
+# a build pod `agent-eval` is on PATH; in the platform monorepo it is a built
+# entry point under packages/agent-eval. The skill names both and says how to
+# tell which you are in — see skills/agent-building/references/building.md.
+COPY --from=agent-eval bin ${AEP_AGENT_EVAL_HOME}/bin
+COPY --from=agent-eval src ${AEP_AGENT_EVAL_HOME}/src
+RUN printf '%s\n' \
+        '#!/bin/sh' \
+        '# Wrapper only. The harness itself is /opt/aep/agent-eval.' \
+        'exec /app/node_modules/.bin/tsx /opt/aep/agent-eval/bin/agent-eval.ts "$@"' \
+        > /usr/local/bin/agent-eval \
+    && chmod 0755 /usr/local/bin/agent-eval \
+    # bin/ and src/ ONLY, never the whole tree: a recursive chmod over the
+    # dependency layer rewrites every one of its files, and a rewritten file is
+    # a new file in a new layer — 2GB of duplicate, for a permission bit the
+    # install step already set.
+    && chmod -R a+rX "$AEP_AGENT_EVAL_HOME/bin" "$AEP_AGENT_EVAL_HOME/src"
 
 # The Ballerina Central reader the `ballerina` skill drives by name — `bal
 # library overview <org/name>` and its four sibling verbs.

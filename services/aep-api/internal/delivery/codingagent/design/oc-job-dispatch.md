@@ -151,7 +151,7 @@ credential ref. The setting is read FIRST, because the runtime decides the
 credential: `ResolveCodingSecretRef(org, runtime)` returns the org's Claude
 subscription (mounted as `CLAUDE_CODE_OAUTH_TOKEN`) only when the runtime is
 Claude Code, and its API key (`ANTHROPIC_API_KEY`) otherwise; exactly one of the
-two reaches the run (ADR-0034). They are **copied, not referenced**: a
+two reaches the run (ADR-0036). They are **copied, not referenced**: a
 change applies from the next cycle, because a run that re-read the setting halfway through would leave a feed
 whose model names disagree with the tokens they were billed for. An org that
 never opened the setting gets the platform defaults, which is exactly what every
@@ -167,7 +167,7 @@ dispatch naming the variable rather than starting on an image with no OpenCode
 binary. The dispatcher stamps the same runtime as the Component's `runtime`
 parameter and as the `aep.wso2.com/runtime` label on the Component and Workload.
 An OpenCode cycle that did not resolve to an API key fails closed
-([ADR-0034](../../../../../../docs/decisions/ADR-0034-the-coding-credential-is-a-subscription.md)).
+([ADR-0036](../../../../../../docs/decisions/ADR-0036-the-coding-credential-is-a-subscription.md)).
 
 The type name is also what wso2cloud's entitlement gate keys on
 (`job/coding-agent`, `coding-agent`). A create over the org's cap answers
@@ -250,3 +250,54 @@ internal-marked Components **in the OC client**, so a future listing endpoint
 inherits the filter instead of re-implementing it. Humans who do see an instance
 read a dynamic display name: `Coding cycle — milestone #<n> <title>`, or
 `Validation cycle — …` for a validation cycle.
+
+## Two model credentials on one pod
+
+A cycle mounts the Anthropic credential the organization's coding runs bill
+(ADR-0036) — as `ANTHROPIC_API_KEY` or, for a Claude subscription on Claude
+Code, as `CLAUDE_CODE_OAUTH_TOKEN`, never both. That is the credential the agent's own session
+authenticates with.
+
+It also mounts the org's **default-role** key as `AEP_EVAL_ANTHROPIC_API_KEY`,
+for the agent-evaluation step a build runs before opening an ai-agent's PR. That
+step needs a model twice over — for the generated agent it boots and for the LLM
+judge that grades it — and both are API calls, so the credential has to be an API
+key. The default key always is; the coding one may be a subscription token that
+authenticates neither.
+
+The separate variable is not decoration. `ANTHROPIC_API_KEY` belongs to Claude
+Code, which ranks it above `CLAUDE_CODE_OAUTH_TOKEN`, so mounting the evaluation
+key there would move a subscription org's whole coding session onto it — the
+silent mis-bill ADR-0036 keeps out.
+
+An org with no connected default key dispatches **without** the variable and the
+run proceeds: evaluation reports, it never fails a build, and a missing key must
+not cost an org a delivery. That is the one credential here whose absence is not
+a dispatch failure — `evaluationKeyRef` logs it rather than returning an error,
+because "the agent never became ready" is otherwise a puzzling thing to read in
+a build report.
+
+### Why the pod also carries `AEP_EVAL_KEY_MANAGED`
+
+Every dispatch sets `AEP_EVAL_KEY_MANAGED=1` — a plain env var, not a
+credential, and set whether or not an evaluation key was resolved. It is a
+**declaration of ownership**: on this pod the platform decides the evaluation
+credential, so if `AEP_EVAL_ANTHROPIC_API_KEY` is not here, this run has none.
+
+Without it the harness cannot read a pod correctly. Outside one —
+a developer in the monorepo — `ANTHROPIC_API_KEY` simply is "the key", and the
+harness falls back to it. On a pod that same name holds the **coding**
+credential, which may be the org's Claude subscription. An org whose
+subscription is live while its API key row is not active is the case that makes
+this concrete: the dispatch succeeds on the subscription, `DefaultKeyRef` finds
+nothing, and an unconditional fallback would then grade agents on the
+subscription token — which cannot authenticate an API call — quietly, and
+contradicting what this note says happens. The declaration is what makes the
+documented behaviour the actual one.
+
+It is set unconditionally on purpose. A marker that appeared only alongside the
+key would carry no information: the case it exists for is exactly the dispatch
+that has no key to mount. And it is a variable of the platform's own rather than
+a reused one — `AEP_TASK_ID` would have been the obvious candidate, but
+`local/run-local.sh` mints one for every local run, so keying on it would
+suppress the fallback in the one place the fallback is the only path to a key.

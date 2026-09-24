@@ -2,7 +2,7 @@
 
 **Status:** accepted · 2026-09-07
 **Related:** ADR-0016 (the coding-agent key is an override, not a peer;
-superseded by ADR-0034) · ADR-0034 (the coding credential is a subscription) ·
+superseded by ADR-0036) · ADR-0036 (the coding credential is a subscription) ·
 `runners/remote-worker/design/decisions/ADR-0012` (the runtime is a port) ·
 ADR-0027 (run recordings are observability, not ledger)
 
@@ -117,7 +117,7 @@ the all-or-nothing cost stamp.
 
 ## Amendment 2026-09-24 — one `agents` section, one model for every agent
 
-Superseding ADR-0016 ([ADR-0034](ADR-0034-the-coding-credential-is-a-subscription.md))
+Superseding ADR-0016 ([ADR-0036](ADR-0036-the-coding-credential-is-a-subscription.md))
 reshapes this setting:
 
 - **`agents` replaces `codingAgent` (and `codingLlm`).** `AgentModel` and
@@ -141,6 +141,6 @@ reshapes this setting:
   The 2026-09-22 refusals (`coding_agent_runtime_credential_incompatible`,
   `coding_llm_incompatible_with_runtime`) are gone with the sections they named.
 - **One save, one transaction.** `llm` and `agents` are written together under
-  one per-org lock, secret bytes included (ADR-0034 point 4).
+  one per-org lock, secret bytes included (ADR-0036 point 4).
 - Dispatch asks for the credential of the run's runtime: the subscription only
   on Claude Code, the API key otherwise, still failing closed.

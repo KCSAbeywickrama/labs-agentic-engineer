@@ -915,7 +915,7 @@ LOCAL_DEV_ADMIN_GITHUB_OWNER=${LOCAL_DEV_ADMIN_GITHUB_OWNER_VAL}
 ANTHROPIC_API_KEY=${ANTHROPIC_KEY}
 
 # Optional. A Claude subscription token (`claude setup-token`, sk-ant-oat…) the
-# CODING agent bills instead of ANTHROPIC_API_KEY above (ADR-0034). Read by BOTH
+# CODING agent bills instead of ANTHROPIC_API_KEY above (ADR-0036). Read by BOTH
 # seed-dev.sh (which connects it as the org's Claude subscription; any other
 # value is skipped) and the playground (which hands it to local coding runs) —
 # leave it empty and coding runs bill the key above, the default everywhere.

@@ -64,6 +64,7 @@ func Load() (Config, error) {
 		TenantGateMode:           r.readOptionalString("TENANT_GATE_MODE", "enforce"),
 		OAuthStateSigningKey:     r.readOptionalString("OAUTH_STATE_SIGNING_KEY", ""),
 		BFFPublicURL:             r.readOptionalString("BFF_PUBLIC_URL", "http://localhost:8090"),
+		TryItCallbackURL:         r.readOptionalString("TRY_IT_CALLBACK_URL", ""),
 		BuildAuthRetryBudget:     r.readOptionalInt("BUILD_AUTH_RETRY_BUDGET", 3),
 		SkillsDir:                r.readOptionalString("SKILLS_DIR", "/app/skills"),
 		ThunderAdmin: ThunderAdminConfig{
@@ -124,6 +125,18 @@ func Load() (Config, error) {
 			ClientID:     r.readOptionalString("SERVICE_AUTH_CLIENT_ID", ""),
 			ClientSecret: r.readOptionalString("SERVICE_AUTH_CLIENT_SECRET", ""),
 			HostHeader:   r.readOptionalString("SERVICE_AUTH_HOST_HEADER", ""),
+		},
+
+		// Agent Manager. Defaults match the client AEP publishes into the
+		// platform IdP's bootstrap, so a local stack governs agents without any
+		// .env entry; the token URL falls back to the one the rest of the
+		// service already uses.
+		AgentManager: AgentManagerConfig{
+			TokenURL:     r.readOptionalString("AMP_TOKEN_URL", r.readOptionalString("SERVICE_AUTH_TOKEN_URL", "")),
+			ClientID:     r.readOptionalString("AMP_CLIENT_ID", "amp-publisher-aep"),
+			ClientSecret: r.readOptionalString("AMP_CLIENT_SECRET", "amp-publisher-aep-secret"),
+			Resource:     r.readOptionalString("AMP_RESOURCE", "urn:wso2:amp"),
+			HostHeader:   r.readOptionalString("AMP_TOKEN_HOST_HEADER", r.readOptionalString("SERVICE_AUTH_HOST_HEADER", "")),
 		},
 
 		// Git-service config. Uses the same env-var names git-service used so

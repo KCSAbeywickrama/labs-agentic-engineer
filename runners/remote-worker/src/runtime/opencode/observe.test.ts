@@ -16,79 +16,51 @@
  * under the License.
  */
 
-// The validation watchers on OpenCode: its `bash` / `write` / `edit` tool parts,
-// through the translator's observer seam, into the REAL per-criterion tracker
-// and status line — and held equal to the same session driven through Claude
-// Code's hook seam. The watchers read the port's `ObservedCall` only, so the two
-// runtimes must produce the same rows and the same lines.
+// The observer seam on OpenCode: its `bash` / `write` / `edit` tool parts,
+// through the translator's observer seam, reach `RuntimeObservers` in the port's
+// `ObservedCall` vocabulary — and equal to the same session driven through Claude
+// Code's hook seam. A watcher reads `ObservedCall` only, so the two runtimes must
+// hand it the same calls and the same outcomes.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createValidationProgressTracker, type ProgressItemUpdate } from "../../lib/validation_progress.js";
-import { createValidationStatusLine } from "../../lib/validation_status_line.js";
 import type { ObservedCall } from "../port.js";
 import { observedCall as claudeCall } from "../claude/tools.js";
 import { observedCall as opencodeCall } from "./tools.js";
 import { createOpencodeAdapter } from "./translate.js";
 
-const PLAN = "## AC-001-a — shows the list\n## AC-001-b — adds an item\n";
-const STUB = "// spec: tests/validation/test-plan.md § AC-001-a\n";
-const FILLED = `${STUB}import { test } from "@playwright/test";\ntest('AC-001-a: list', async () => {});\n`;
-const RUN = "npm test --prefix tests/e2e -- specs/AC-001-a.spec.ts";
-const REPORT = 'node "$AEP_SKILLS_DIR/aep-validation/scripts/generate-report.mjs" --issue 7';
-
-/** One validation session, as the steps a lead takes — named once, spelled per runtime below. */
+/** One session, as the steps a lead takes — named once, spelled per runtime below. */
 type Step =
   | { kind: "shell"; command: string; ok: boolean }
   | { kind: "write"; path: string; content: string }
   | { kind: "edit"; path: string; oldText: string; newText: string };
 
 const SESSION: Step[] = [
-  { kind: "shell", command: "npm ci --prefix tests/e2e", ok: true },
-  { kind: "write", path: "/w/tests/validation/test-plan.md", content: PLAN },
-  { kind: "write", path: "/w/tests/e2e/specs/AC-001-a.spec.ts", content: STUB },
-  { kind: "write", path: "/w/tests/e2e/specs/AC-001-a.spec.ts", content: FILLED },
-  { kind: "shell", command: RUN, ok: true },
-  { kind: "edit", path: "/w/tests/e2e/specs/AC-001-b.spec.ts", oldText: "a", newText: "b" },
-  { kind: "shell", command: REPORT, ok: true },
+  { kind: "shell", command: "npm ci", ok: true },
+  { kind: "write", path: "/w/src/a.ts", content: "export const a = 1;\n" },
+  { kind: "edit", path: "/w/src/b.ts", oldText: "a", newText: "b" },
+  { kind: "shell", command: "npm test", ok: false },
 ];
 
-interface Watched {
-  rows: ProgressItemUpdate[];
-  lines: string[];
-}
+type Observed = { use: ObservedCall; id: string } | { outcome: boolean; id: string };
 
-/** The two watchers, wired exactly as `startCodingRun` fans them out. */
-function watchers() {
-  const rows: ProgressItemUpdate[] = [];
-  const lines: string[] = [];
-  const progress = createValidationProgressTracker((u) => rows.push(u));
-  const statusLine = createValidationStatusLine(progress.state, async (body) => void lines.push(body), () => {});
+/** A recording observer, wired as a runtime's `observe` policy would be. */
+function recorder() {
+  const seen: Observed[] = [];
   return {
-    watched: { rows, lines } as Watched,
-    toolUse: async (call: ObservedCall, id: string) => {
-      progress.observe(call, id);
-      await statusLine.observe(call, id);
-    },
-    toolOutcome: (id: string, ok: boolean) => {
-      progress.settle(id, ok);
-      statusLine.settle(id, ok);
-    },
+    seen,
+    toolUse: (call: ObservedCall, id: string) => void seen.push({ use: call, id }),
+    toolOutcome: (id: string, ok: boolean) => void seen.push({ outcome: ok, id }),
   };
 }
 
 /** The session as OpenCode's bus reports it, through the OpenCode translator. */
-async function onOpencode(): Promise<Watched> {
-  const w = watchers();
-  const pending: Promise<void>[] = [];
+function onOpencode(): Observed[] {
+  const r = recorder();
   const adapter = createOpencodeAdapter({
     model: "claude-haiku-4-5",
-    onToolUse: (call, id) => {
-      const p = w.toolUse(call, id);
-      pending.push(p);
-      return p;
-    },
-    onToolOutcome: w.toolOutcome,
+    onToolUse: r.toolUse,
+    onToolOutcome: r.toolOutcome,
   });
   adapter.translate({ type: "session.created", properties: { info: { id: "root", directory: "/w" } } });
   for (const [i, step] of SESSION.entries()) {
@@ -104,9 +76,6 @@ async function onOpencode(): Promise<Watched> {
       properties: { part: { type: "tool", tool, callID, sessionID: "root", state: { input, ...state } } },
     });
     adapter.translate(part({ status: "running", time: { start: 1 } }));
-    // The lines are posted from the observer; let it land before the outcome,
-    // as it does live (the call takes longer than the post).
-    await Promise.all(pending);
     adapter.translate(
       part({
         status: "completed",
@@ -116,12 +85,12 @@ async function onOpencode(): Promise<Watched> {
       }),
     );
   }
-  return w.watched;
+  return r.seen;
 }
 
 /** The same session as Claude Code's hook sees it, through Claude Code's normaliser. */
-async function onClaude(): Promise<Watched> {
-  const w = watchers();
+function onClaude(): Observed[] {
+  const r = recorder();
   for (const [i, step] of SESSION.entries()) {
     const id = `c${i}`;
     const call =
@@ -130,23 +99,27 @@ async function onClaude(): Promise<Watched> {
         : step.kind === "write"
           ? claudeCall("Write", { file_path: step.path, content: step.content })
           : claudeCall("Edit", { file_path: step.path, old_string: step.oldText, new_string: step.newText });
-    await w.toolUse(call, id);
-    w.toolOutcome(id, step.kind !== "shell" || step.ok);
+    r.toolUse(call, id);
+    r.toolOutcome(id, step.kind !== "shell" || step.ok);
   }
-  return w.watched;
+  return r.seen;
 }
 
-test("watchers on OpenCode: bash and write parts reach the per-criterion rows and the status line", async () => {
-  const { rows, lines } = await onOpencode();
-  assert.deepEqual(
-    rows.map((r) => `${r.itemId}:${r.status}`),
-    ["AC-001-a:planned", "AC-001-b:planned", "AC-001-a:exploring", "AC-001-a:authoring", "AC-001-a:running", "AC-001-a:pass", "AC-001-b:authoring"],
-  );
-  assert.ok(lines.length >= 3, `the status line never moved: ${JSON.stringify(lines)}`);
+test("observers on OpenCode: bash, write and edit parts reach the observer as ObservedCalls with their outcome", () => {
+  assert.deepEqual(onOpencode(), [
+    { use: { kind: "shell", command: "npm ci" }, id: "c0" },
+    { outcome: true, id: "c0" },
+    { use: { kind: "write", path: "/w/src/a.ts", content: "export const a = 1;\n" }, id: "c1" },
+    { outcome: true, id: "c1" },
+    { use: { kind: "edit", path: "/w/src/b.ts" }, id: "c2" },
+    { outcome: true, id: "c2" },
+    { use: { kind: "shell", command: "npm test" }, id: "c3" },
+    { outcome: false, id: "c3" },
+  ]);
 });
 
-test("watchers: an OpenCode session and the same Claude Code session produce the same rows and lines", async () => {
-  assert.deepEqual(await onOpencode(), await onClaude());
+test("observers: an OpenCode session and the same Claude Code session hand the observer the same calls", () => {
+  assert.deepEqual(onOpencode(), onClaude());
 });
 
 test("observedCall (OpenCode): each authoring and shell tool in the port's vocabulary", () => {

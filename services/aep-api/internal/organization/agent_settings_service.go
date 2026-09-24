@@ -213,6 +213,7 @@ func (s *AgentSettingsService) apply(ctx context.Context, ocOrgID, actor string,
 	}
 	if eff.writeKey != "" {
 		s.creds.mirrorKey(ctx, ocOrgID, AnthropicRoleDefault, eff.writeKey)
+		s.creds.publishModelKey(ctx, ocOrgID, eff.writeKey)
 	}
 	if eff.writeToken != "" {
 		s.creds.mirrorKey(ctx, ocOrgID, AnthropicRoleCoding, eff.writeToken)

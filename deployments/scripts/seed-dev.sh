@@ -35,7 +35,7 @@
 #   ANTHROPIC_API_KEY            Anthropic key to register
 #   AEP_CODING_ANTHROPIC_KEY optional; a Claude subscription token
 #                                (`claude setup-token`, sk-ant-oat…) the CODING
-#                                agent bills instead of the key above (ADR-0034)
+#                                agent bills instead of the key above (ADR-0036)
 #
 # Knobs (env, with defaults):
 #   ENV_FILE                     defaults to deployments/.env
@@ -179,7 +179,7 @@ else
 fi
 
 # The coding agent may bill a Claude subscription instead of the key above
-# (ADR-0034). It sits beside that key and cannot exist without it — connected
+# (ADR-0036). It sits beside that key and cannot exist without it — connected
 # already, or by this very PATCH (the BFF judges the state the patch leaves).
 # Only a subscription token is accepted: a separate coding API key is not a
 # thing the platform offers.

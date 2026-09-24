@@ -31,7 +31,7 @@ import (
 // capture (never re-derived), that change only affects work captured after it.
 //
 // Two rows, exactly the contract's AgentModel enum — the models an org can
-// choose for every one of its agents (spec and coding alike, ADR-0034):
+// choose for every one of its agents (spec and coding alike, ADR-0036):
 //
 //   - claude-sonnet-5 (the default agent model) at its
 //     INTRODUCTORY rates, in force through 2026-08-31: input $2.00/MTok,

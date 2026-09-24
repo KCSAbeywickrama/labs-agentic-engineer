@@ -134,9 +134,19 @@ type SkillMirror interface {
 // Code, its API key otherwise. The choice is the organization domain's to make —
 // dispatch only mounts what it is handed — so this port deliberately exposes no
 // way to ask "is there a subscription?", which keeps the rule stated in exactly
-// one place (ADR-0034). Wired from organization.AnthropicCredentialService.
+// one place (ADR-0036). Wired from organization.AnthropicCredentialService.
+//
+// DefaultKeyRef is a SECOND question, not a way around the first: which key the
+// build's agent-evaluation step bills. That step is an API call — it drives the
+// generated agent's model and an LLM judge — so it cannot run on a Claude
+// subscription token, and the default key is the org's key that is always an
+// API key. Asking for it says nothing about whether a subscription exists, so
+// the rule above stays in its one place. A NotFoundError means the org has
+// connected no key at all; see evaluationKeyRef for why that is not a dispatch
+// failure.
 type CodingKeyResolver interface {
 	ResolveCodingSecretRef(ctx context.Context, ocOrgID string, runtime orgconfig.AgentRuntime) (organization.SecretRefTriplet, error)
+	DefaultKeyRef(ctx context.Context, ocOrgID string) (organization.SecretRefTriplet, error)
 }
 
 // CodingAgentSettings answers which runtime and model this org's next cycle

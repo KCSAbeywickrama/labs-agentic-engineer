@@ -281,6 +281,9 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		"AEP_CORRELATION_ID":  in.correlationID,
 		"AEP_TASK_KIND":       taskKindOrDefault(disp.taskKind),
 		"WORKSPACE_BASE_PATH": codingAgentWorkspacePath,
+		// Unconditional, and deliberately not tied to whether a key was resolved
+		// below — see envEvalKeyManaged.
+		envEvalKeyManaged: "1",
 		// The run's OWN deadline, so it can end itself rather than be ended.
 		// The same number this dispatch puts on the Job's activeDeadlineSeconds
 		// below: when that one passes, the pod is killed mid-sentence and
@@ -307,6 +310,9 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 	secretEnv := []SecretEnvRef{
 		{Key: anthropicEnvVar, SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
 		{Key: envGitHubToken, SecretName: githubSR.SecretRefName, SecretKey: githubSR.Property},
+	}
+	if evalSR, ok := e.evaluationKeyRef(ctx, in.orgID); ok {
+		secretEnv = append(secretEnv, evalSR)
 	}
 	pub, tokenURL, err := e.publisherSecretEnv(ctx, in.orgID)
 	if err != nil {
@@ -426,6 +432,40 @@ func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID stri
 	return anthropicSR, githubSR, nil
 }
 
+// evaluationKeyRef resolves the org's DEFAULT Anthropic key as the build's
+// agent-evaluation credential, reporting whether there is one to mount.
+//
+// A build that generates an ai-agent evaluates it before opening its PR, and
+// that step needs a model twice over — once for the agent it boots, once for the
+// judge that grades it. Both are API calls, so the credential has to be an API
+// key; the default key always is (ADR-0036), while the coding credential may be
+// a Claude subscription token that authenticates neither.
+//
+// An unresolvable key is NOT a dispatch failure, which is the one thing that
+// makes this different from every other credential here. Evaluation reports; it
+// never fails a build. An org that has connected no key still gets its work done
+// and its PR opened — the evaluation step simply reports that it could not run —
+// so a missing key must not cost the org a delivery. It is logged rather than
+// swallowed silently, because "the harness never became ready" is otherwise a
+// puzzling thing to read in a build report.
+func (e *CodingExecutor) evaluationKeyRef(ctx context.Context, orgID string) (SecretEnvRef, bool) {
+	triplet, err := e.anthropicKey.DefaultKeyRef(ctx, orgID)
+	if err != nil {
+		slog.InfoContext(ctx, "coding dispatch: no default Anthropic key — the build will run without agent evaluation",
+			"org", orgID, "error", err)
+		return SecretEnvRef{}, false
+	}
+	// A half-mirrored row resolves to a triplet ESO cannot follow. Mounting it
+	// would put the variable on the pod pointing at nothing, and the harness
+	// would report the agent as misbehaving rather than as unconfigured.
+	if triplet.Name == "" || triplet.Property == "" {
+		slog.WarnContext(ctx, "coding dispatch: default Anthropic secret reference is incomplete — the build will run without agent evaluation",
+			"org", orgID)
+		return SecretEnvRef{}, false
+	}
+	return SecretEnvRef{Key: envEvalAnthropicAPIKey, SecretName: triplet.Name, SecretKey: triplet.Property}, true
+}
+
 // codingAgentEnv resolves the runtime and models this run is launched with.
 //
 // A missing resolver, or an org that never chose, both mean the platform
@@ -461,7 +501,7 @@ func anthropicEnvVarFor(orgID string, runtime orgconfig.AgentRuntime, resolved s
 
 // anthropicEnvVarOrDefault names the Job's Anthropic SecretEnv entry from
 // organization.SecretRefTriplet.EnvVar (ANTHROPIC_API_KEY or
-// CLAUDE_CODE_OAUTH_TOKEN — ADR-0034), falling back to the runner's default
+// CLAUDE_CODE_OAUTH_TOKEN — ADR-0036), falling back to the runner's default
 // only if a resolver ever returns the zero value.
 func anthropicEnvVarOrDefault(envVar string) string {
 	if envVar == "" {
@@ -528,7 +568,7 @@ func buildPrompt(milestoneNumber int, milestoneTitle string) string {
 const validationComponentSentinel = "aep-validation"
 
 // validationTaskKind is the runner's AEP_TASK_KIND for a validation cycle: it
-// is what makes the runner preload the `aep-validation` skill instead of `aep`.
+// is what makes the runner preload the `acceptance-run` skill instead of `aep`.
 const validationTaskKind = "validation"
 
 // envValidationIssue names the validation issue to the pod. A validation run
@@ -587,7 +627,7 @@ type dispatchShape struct {
 }
 
 // buildValidationPrompt is the validation-runner directive: it points at the
-// validation issue and defers the workflow to the aep-validation skill (the
+// validation issue and defers the workflow to the acceptance-run skill (the
 // runner preloads it because AEP_TASK_KIND=validation).
 //
 // It names NO milestone, and that is load-bearing: a validation cycle is
@@ -605,5 +645,5 @@ type dispatchShape struct {
 // in the milestone, so a body referencing nothing is read as somebody else's work
 // and never merges. See eventcore/resolves.go.
 func buildValidationPrompt(issueURL string, issueNumber int) string {
-	return fmt.Sprintf("This is a validation task. Work on this GitHub validation issue: %s\n\nFollow the `aep-validation` skill's workflow: read the validation context, author and run the e2e tests against the deployed system, commit the tests and report, and open a PR whose body includes `Validates #%d` so the platform links it back. Use `Validates`, never a closing keyword such as `Closes` or `Fixes`: the platform closes this task itself.", issueURL, issueNumber)
+	return fmt.Sprintf("This is a validation task. Work on this GitHub validation issue: %s\n\nFollow the `acceptance-run` skill's workflow: read the validation context, drive every scenario in the acceptance criteria against the deployed system, commit the report, and open a PR whose body includes `Validates #%d` so the platform links it back. Use `Validates`, never a closing keyword such as `Closes` or `Fixes`: the platform closes this task itself.", issueURL, issueNumber)
 }
