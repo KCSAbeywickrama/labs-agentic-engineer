@@ -734,8 +734,8 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   settle — and minting last is also what makes the coverage honest, because mid-run adoption postpones
   deployed-green by construction. It then settles SUCCEEDED with an EMPTY verdict, which is the honest
   reading of "delivered, not yet judged". The one exception is a project with no acceptance oracle: no
-  task is filed, nothing will ever judge the version, and `skipped` says so. The acceptance oracle
-  `specs/validation/validation-criteria.json` is read-only input authored in the design phase (spec domain).
+  task is filed, nothing will ever judge the version, and `skipped` says so. The acceptance oracle —
+  every `specs/acceptance/<slug>.feature` — is read-only input authored in the design phase (spec domain).
   **ONE validation issue per version, filed into the version's milestone by the create itself** — like a
   Task, it carries no version label, because the milestone is the pin. Per version and not per project:
   the body embeds the criteria as they stood at mint time, so adopting an older version's issue would

@@ -1,18 +1,22 @@
 # ADR-0029 — Validation drives scenarios, it does not compile tests
 
-**Status:** Accepted, **on the `vld-redesign` branch only** · **Replaces, on this branch,**
+**Status:** Accepted · **Supersedes**
 [ADR-0010](../../runners/remote-worker/design/decisions/ADR-0010-a-validation-report-is-an-accumulation.md)
 (the report's shape) and the Playwright half of
 [ADR-0012](ADR-0012-one-debian-runner-image-for-both-task-kinds.md) (what the image carries a browser
-for). The ADRs that describe the compiled path are left standing rather than rewritten: they record
-what main still does, and this branch is an experiment that may be reverted whole.
+for).
+
+The experiment this began as has concluded, and the compiled path is **removed**: the
+`validation-criteria` skill, the JSON oracle it wrote, and the console viewer that rendered it. The
+older ADRs describing that path are left standing rather than rewritten — they record why it was
+built and why it was replaced, which is the reason to keep them.
 
 ## Context
 
-The incumbent validation phase compiles each `method: e2e` criterion from
+The incumbent validation phase compiled each `method: e2e` criterion from
 `specs/validation/validation-criteria.json` into a committed Playwright spec at
-`tests/e2e/specs/<AC-ID>.spec.ts`, runs the suite, heals what fails, and reports. That seam — a plan
-row joined to a spec file by an id — is the thing this branch removes.
+`tests/e2e/specs/<AC-ID>.spec.ts`, ran the suite, healed what failed, and reported. That seam — a
+plan row joined to a spec file by an id — is the thing this removes.
 
 A playground experiment measured the alternative on one app, four ways (two oracles × two execution
 methods), and established the result that shaped this decision: the **oracle**, not the execution
@@ -33,16 +37,18 @@ compiled path heals and rewrites its specs between runs, so "authored once" desc
 
 ## Decision
 
-On this branch, a validation run **drives the scenario text directly**. There is no generated test
-code and no plan↔code seam, because the scenario IS the test.
+A validation run **drives the scenario text directly**. There is no generated test code and no
+plan↔code seam, because the scenario IS the test.
 
 - The oracle is `specs/acceptance/<slug>.feature` — Gherkin, authored from the PRD alone by the
   `acceptance-criteria` skill.
 - The runner loads `acceptance-run` (always-on) and `agent-browser` (on demand) where it used to load
   `aep-validation` and `playwright-cli`.
 - The report is `tests/acceptance/report.json`, keyed by scenario rather than by criterion id.
-- `specs/validation/validation-criteria.json` is **still generated**, and deliberately unexecuted. It
-  is the comparison's other arm; deleting either oracle by hand isolates one path.
+- `specs/validation/validation-criteria.json` is **gone**, along with the `validation-criteria`
+  skill that wrote it. It was kept generated-but-unexecuted while the comparison still needed a
+  second arm to isolate; once the measurements above settled the question, a second oracle nothing
+  grades against is only a second answer for a reader to trip over.
 
 ### Four outcomes, not five
 
@@ -93,7 +99,7 @@ verdict**: a nonzero exit, a step with no command at all, or a value-returning c
 
 This is the single most important property of the approach and the one most easily lost. It is
 checked by a script the run invokes — deliberately not yet by the platform, which is an open question
-this branch does not close.
+this decision does not close.
 
 ### A failure carries what the system was doing
 
