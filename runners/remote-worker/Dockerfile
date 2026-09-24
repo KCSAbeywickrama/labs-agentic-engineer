@@ -37,12 +37,12 @@
 #     (`go build`, `bal build`, `tsc --noEmit`, lockfile resolution) before
 #     it opens a PR. There is no container runtime here: Dockerfiles are
 #     verified by the post-merge OpenChoreo build, not in this pod.
-#   - Playwright + a baked chromium — validation runs author and execute
-#     e2e specs against the deployed system and must never download a
-#     browser at task time.
-#   - agent-browser — the browser CLI a CODING run drives a page with. It
-#     adds a binary, not a browser: it is pointed at the chromium the line
-#     above already baked.
+#   - Playwright + a baked chromium — installed for its BROWSER alone;
+#     nothing here runs `playwright test`. A run must never download a
+#     browser at task time, and this is what puts one on disk.
+#   - agent-browser — the browser CLI both a CODING run and a VALIDATION run
+#     drive a page with. It adds a binary, not a browser: it is pointed at
+#     the chromium the line above already baked.
 
 # ─── Stage 1: the `bal library` tool jar ────────────────────────────────────
 # BUILT here rather than committed. The tool's source is in this monorepo

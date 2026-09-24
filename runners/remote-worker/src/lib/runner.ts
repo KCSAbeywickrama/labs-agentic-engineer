@@ -287,12 +287,13 @@ export async function startCodingRun(
     AEP_GIT_SERVICE_URL: req.gitServiceUrl,
     AEP_CORRELATION_ID: req.correlationId ?? "",
     // A runtime's own default is typically 120s, which is under what this
-    // platform's longest legitimate command takes: a Playwright spec is allowed
-    // 30s, so a suite severs on a handful of them. A severed call proves nothing
-    // — the command keeps running, its results are unread, and a validation run
-    // that authored a full suite can end with none of it recorded. 600s is the
-    // documented ceiling for a single shell call, so this raises the default to
-    // the maximum already allowed rather than picking a number.
+    // platform's longest legitimate command takes: driving a scenario is a
+    // sequence of `agent-browser` calls against a live page, each waiting on a
+    // real navigation. A severed call proves nothing — the command keeps
+    // running and its result is unread, so a step that did settle is recorded
+    // as one that never answered. 600s is the documented ceiling for a single
+    // shell call, so this raises the default to the maximum already allowed
+    // rather than picking a number.
     BASH_DEFAULT_TIMEOUT_MS: "600000",
     // Where curl looks for `.curlrc`. Named explicitly rather than left to the
     // inherited HOME: a validation run writes `resolve` overrides there for its
