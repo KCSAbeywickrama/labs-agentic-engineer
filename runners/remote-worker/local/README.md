@@ -106,10 +106,8 @@ agent-browser install
 ```
 
 On a Mac that is all of it — the CLI downloads Chrome for Testing and finds it
-without being told. The image cannot use this command (its installer is
-linux-x64 only, so it does nothing on the arm64 half) and installs Debian's
-`chromium` instead, which is why the two differ; for driving a page they are the
-same CDP.
+without being told. The image gets its browser a different way (ADR-0016); for
+driving a page they are the same CDP.
 
 Never set `AGENT_BROWSER_ARGS=--no-sandbox` on a host. The image sets it because
 a pod has no usable chromium sandbox; your machine does.

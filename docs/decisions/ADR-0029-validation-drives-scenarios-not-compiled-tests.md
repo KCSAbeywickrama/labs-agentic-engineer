@@ -161,9 +161,10 @@ names rather than one it introduces.
 - **Real-time progress is dark.** The matchers that drove it keyed on Playwright file writes and spec
   names, so against an agent driving a browser they matched nothing. Deleted rather than rewritten;
   the redesign is its own piece of work.
-- **The image keeps `@playwright/test`.** Not as a test runner — nothing runs `playwright test` any
-  more — but as the delivery mechanism for the chromium `agent-browser` launches. The second chromium
-  that `playwright-cli` pinned is gone.
+- **The image kept `@playwright/test`** — not as a test runner, but as the delivery mechanism for the
+  chromium `agent-browser` launches. The second chromium that `playwright-cli` pinned is gone, and so
+  is Playwright itself: the browser is now a Debian package
+  ([ADR-0016](../../runners/remote-worker/design/decisions/ADR-0016-the-browser-comes-from-debian.md)).
 - **The phase is still called Validation.** Validation is the objective, acceptance testing the
   activity that serves it, and an acceptance criterion the unit it grades — different axes, all three
   correct at once (`docs/glossary.md`). Nothing user-facing is renamed.

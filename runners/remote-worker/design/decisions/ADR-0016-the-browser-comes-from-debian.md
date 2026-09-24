@@ -122,7 +122,8 @@ argument rests on this image having no setuid helper.
 ## Consequences
 
 - **The image loses ~600 MB.** Measured on arm64, before against after: the
-  filesystem goes 3.2 GB → 2.6 GB and the layer sum 3.67 GB → 2.96 GB. Out:
+  filesystem goes 3.2 GB → 2.6 GB and the layer sum 3.67 GB → 2.96 GB. The
+  amd64 image lands at the same 2.6 GB filesystem. Out:
   `/ms-playwright` (961 MB — chromium 624 MB, `chromium_headless_shell` 334 MB,
   `ffmpeg` 3 MB) and 18 MB of global `@playwright`. In: `/usr/lib/chromium`
   (350 MB) and the rest of its dependency closure.
@@ -139,12 +140,3 @@ argument rests on this image having no setuid helper.
 - **The browser is newer** — Chromium 153 against Playwright's 149 on arm64. What
   an agent acts on is the accessibility tree `snapshot -i` returns, so this is
   proven by a real coding run and a real validation run, not by the build.
-
-## Noted, not changed
-
-`agent-browser` passes `--disable-dev-shm-usage` on every launch — it is baked
-into the CLI's binary, and the current image's browser already runs with it.
-[ADR-0013](ADR-0013-dev-shm-is-bounded-and-the-same-size-everywhere.md)
-considered that flag and rejected it, and every run path still sizes `/dev/shm`
-to 1 GiB. Both were true before this change and neither is its to settle, but
-whoever revisits ADR-0013 should start here.

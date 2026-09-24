@@ -5,10 +5,7 @@
 `playwright-cli` was retired with the compiled-spec path (ADR-0029) and
 `PLAYWRIGHT_MCP_BROWSER` appears nowhere in the tree. What survives is the
 principle this ADR established and ADR-0016 keeps: **the image, not a skill,
-decides which binary launches.** Kept for the Rejected section, whose argument
-against Google's branded Chrome — the sandbox it re-enables, and the licensing
-question a redistributed proprietary build raises — was weighed again and still
-held.
+decides which binary launches.** Its Rejected section still stands.
 
 `playwright-cli` defaults to the *pair* (engine `chromium`, channel `chrome`), so
 its default engine cannot be had without Google's branded build at

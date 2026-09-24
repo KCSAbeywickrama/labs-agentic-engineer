@@ -120,7 +120,7 @@ build_target() {
 # FORCE rebuilds BOTH: the OpenCode image is FROM the Claude one, so rebuilding
 # only the first would leave the second running last build's runner code.
 if [ "${FORCE:-0}" = "1" ] || ! docker image inspect "$IMAGE" &>/dev/null || ! docker image inspect "$IMAGE_OPENCODE" &>/dev/null; then
-    echo "   First build installs a chromium and a Ballerina distribution — expect a few minutes."
+    echo "   First build installs a chromium — expect a few minutes."
     build_target runner "$IMAGE"
     build_target runner-opencode "$IMAGE_OPENCODE"
 else

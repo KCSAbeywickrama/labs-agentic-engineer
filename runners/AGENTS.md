@@ -503,8 +503,8 @@ into the runner pod at `/app/skills` for live skill edits (see
 - **`AEP_EVAL_ANTHROPIC_API_KEY` is a THIRD credential on the pod** — the org's
   default Anthropic key, for the evaluation step's agent and judge. It is not
   `ANTHROPIC_API_KEY` because that name belongs to Claude Code, which ranks it
-  above `CLAUDE_CODE_OAUTH_TOKEN` (ADR-0016). It is enrolled with the
-  other mounted credentials in `credential_env.ts`: the agent invokes the
+  above `CLAUDE_CODE_OAUTH_TOKEN` (docs/decisions ADR-0016). It is enrolled
+  with the other mounted credentials in `credential_env.ts`: the agent invokes the
   harness through its Bash tool, whose output is the progress feed.
 - **The image states what the environment IS, so no agent has to discover it.**
   Two entries earn their place there rather than in a skill or a prompt.
@@ -555,7 +555,8 @@ into the runner pod at `/app/skills` for live skill edits (see
   `local/run-local.sh`) still produces the Claude Code image. It is Debian-based
   because its chromium comes from Debian's archive and is glibc-linked; do not
   reintroduce a slimmer image without moving the
-  Helm/compose/release/`AGENT_RUNNER_IMAGE` consumers with it. Build + k3d-import BOTH locally with `make build-runner`.
+  Helm/compose/release/`AGENT_RUNNER_IMAGE` consumers with it. Build +
+  k3d-import BOTH locally with `make build-runner`.
   Full `deployments/scripts/setup.sh` pre-builds it in the background (off the
   critical path) and imports it in `setup-aep.sh`; `PREBUILD_RUNNER=0` reverts
   to a serial build. The build is skipped when both tags exist, so use

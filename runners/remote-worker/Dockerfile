@@ -163,27 +163,15 @@ RUN groupadd -r aep \
     && chown -R aep:aep /home/aep
 
 # The browser, from Debian's own archive — one package, both architectures, the
-# same version on each, and the CLI below launches it.
+# same version on each, and the CLI below launches it. NOT the CLI's own
+# `agent-browser install`, whose installer is linux-x64 only; why, and why
+# chromium rather than Chrome for Testing, is ADR-0016.
 #
-# NOT `agent-browser install`, which is the obvious choice and cannot be used:
-# its installer is linux-x64 ONLY. The arm64 build of the CLI carries no
-# download path, no apt list and no `--with-deps` at all — it prints "Chrome for
-# Testing does not provide Linux ARM64 builds. Install Chromium from your system
-# package manager instead" and exits. This IS that instruction. (Chrome for
-# Testing does publish a linux-arm64 zip today; neither 0.35.2 nor 0.38.1, the
-# current release, reads it.)
-#
-# UNPINNED, unlike the Go and Ballerina archives above, because that is the rule
-# this file already follows: archives are pinned, apt is not. The version line
-# is what pays for it — a run's browser stays recoverable from the build log of
-# the image that dispatched it. ADR-0016 argues the trade.
-#
+# UNPINNED, unlike the Go and Ballerina archives above, because archives are
+# pinned here and apt is not. The version line is what pays for it: a run's
+# browser stays recoverable from the build log of the image that dispatched it.
 # `dpkg-query` and not `chromium --version`, because this layer also builds for
 # the foreign architecture under emulation, where the browser cannot run.
-#
-# NO `chromium-sandbox`: it is a Recommends, so `--no-install-recommends` leaves
-# it out, and that is deliberate — see the AGENT_BROWSER_ARGS block below, whose
-# whole argument rests on this image having no setuid helper.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends chromium \
     && rm -rf /var/lib/apt/lists/* \
@@ -205,21 +193,15 @@ RUN apt-get update \
 #
 # NO SECOND BROWSER IS DOWNLOADED. The CLI's own installer would fetch one where
 # it can; instead this names the chromium apt already put in the image — the
-# image deciding which binary launches, for the same reason ADR-0007 has the
-# image and not a skill name the browser. Left unset, the CLI's own discovery
+# image deciding which binary launches, for the same reason ADR-0016 keeps: the
+# image names the browser, not a skill. Left unset, the CLI's own discovery
 # picks whatever it finds first, which is a promise this image would rather make
 # explicitly than inherit.
 #
 # `/usr/lib/chromium/chromium` — the REAL binary — and deliberately not
-# `/usr/bin/chromium`, which is Debian's `#!/bin/sh` launcher. Both start and
-# both pass the smoke test below; the launcher sources `/etc/chromium.d/*`
-# first, and what those fragments add does not belong in a pod: an
-# `--enable-remote-extensions` and a `--load-extension=` that is empty here
-# because the directory it globs does not exist, `--enable-gpu-rasterization` on
-# a machine with no GPU, and GOOGLE_API_KEY / GOOGLE_DEFAULT_CLIENT_SECRET
-# exported into the environment of a run working in a customer's repository.
-# Their contents are also Debian's to change in a security update, which would
-# silently change how every run's browser starts.
+# `/usr/bin/chromium`, Debian's `#!/bin/sh` launcher. Both start; the launcher
+# sources `/etc/chromium.d/*` first, which adds extension and GPU flags and
+# exports Google API credentials into the run. ADR-0016 lists what and why.
 ARG AGENT_BROWSER_VERSION=0.35.2
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/lib/chromium/chromium
 
