@@ -74,6 +74,16 @@ export function requirementsChecks(projectDir: string, run: SectionRunResult): S
  * carrying no `Feature:` line, which is exactly the file a run cannot answer.
  * A design that minted no oracle, or minted one with no scenarios in it, has
  * nothing to validate against and settles `skipped`.
+ *
+ * A scenario also has to SAY something. `Scenario:` with no steps under it
+ * parses, and both the platform's gate and the run's checker count it: the
+ * first is a line scan whose number is display only, the second only joins the
+ * report to the scenarios it must cover. Neither judges the text, deliberately
+ * — the agent reading the file does. So an oracle of bare headings reaches a
+ * run that drives nothing and reports it green, and THIS is the place that
+ * notices, because scoring what the design turn actually produced is what an
+ * eval is for. Identity still comes from the shared parser; only the bar for a
+ * point is local.
  */
 function acceptanceProblems(projectDir: string): string[] {
   const dir = join(projectDir, "specs/validation/acceptance");
@@ -86,8 +96,33 @@ function acceptanceProblems(projectDir: string): string[] {
   const problems: string[] = [];
   for (const name of names) {
     const feature = parseFeatureFile(name, readFileSync(join(dir, name), "utf8"));
-    if (!feature) problems.push(`${name}: no Feature: line`);
-    else if (featureScenarios(feature).length === 0) problems.push(`${name}: no scenarios`);
+    if (!feature) {
+      problems.push(`${name}: no Feature: line`);
+      continue;
+    }
+    const scenarios = featureScenarios(feature);
+    if (scenarios.length === 0) {
+      problems.push(`${name}: no scenarios`);
+      continue;
+    }
+    const empty = scenarios.filter(({ scenario }) => scenario.steps.length === 0);
+    if (empty.length === scenarios.length) {
+      problems.push(`${name}: every scenario is a bare heading with no steps`);
+    } else if (empty.length > 0) {
+      problems.push(
+        `${name}: ${empty.length} scenario(s) with no steps — ${empty
+          .map(({ scenario }) => scenario.name || `line ${scenario.line}`)
+          .join(", ")}`,
+      );
+    }
+    const unnamed = scenarios.filter(({ scenario }) => scenario.name.trim() === "");
+    if (unnamed.length > 0) {
+      problems.push(
+        `${name}: ${unnamed.length} unnamed scenario(s) — ${unnamed
+          .map(({ scenario }) => `line ${scenario.line}`)
+          .join(", ")}`,
+      );
+    }
   }
   return problems;
 }
@@ -157,7 +192,7 @@ export function designChecks(projectDir: string, run: SectionRunResult): Structu
       cellCompile === null ? "specs/design/design.cell missing or empty" : cellErrors.map((d) => `line ${d.line}: ${d.message}`).join("; "),
     ),
     check("openapi.yaml documents valid", openapiProblems.length === 0, openapiProblems.join("; ")),
-    check("≥1 acceptance .feature, each with scenarios", oracleProblems.length === 0, oracleProblems.join("; ")),
+    check("≥1 acceptance .feature, each with named scenarios that have steps", oracleProblems.length === 0, oracleProblems.join("; ")),
     check("section completed", run.finishedInterview, run.error ?? "hit the turn cap"),
   ]);
 }
