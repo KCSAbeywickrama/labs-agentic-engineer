@@ -207,7 +207,7 @@ const FLOW_SUPPORTING_SKILLS: Record<string, string[]> = {
   // Two oracles: `validation-criteria` writes the JSON criteria list,
   // `acceptance-criteria` writes the Gherkin features. Both are authored from
   // the PRD alone; only the features are executed (ADR-0029).
-  design: ["grilling", "cell-design", "architecture", "security-design", "openapi-conventions", "wireframes", "validation-criteria", "acceptance-criteria"],
+  design: ["grilling", "cell-design", "architecture", "security-design", "openapi-conventions", "wireframes", "agent-building", "validation-criteria", "acceptance-criteria"],
 };
 
 /** The branch a command names, or undefined for a token that IS its skill. */

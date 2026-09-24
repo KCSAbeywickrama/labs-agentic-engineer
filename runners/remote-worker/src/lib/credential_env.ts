@@ -56,6 +56,12 @@ export const CREDENTIAL_ENV_KEYS = [
   "GH_TOKEN",
   "ANTHROPIC_API_KEY",
   "CLAUDE_CODE_OAUTH_TOKEN",
+  // A THIRD model credential on the same pod: the org's default Anthropic key,
+  // mounted for the agent-evaluation step a build runs before opening an
+  // ai-agent's PR. The agent invokes that step through its Bash tool, whose
+  // output is streamed into the progress feed — so of the three this is the one
+  // most likely to actually leak.
+  "AEP_EVAL_ANTHROPIC_API_KEY",
   "PUBLISHER_CLIENT_SECRET",
 ] as const;
 

@@ -91,6 +91,13 @@ function hideFromOverview(path: string): boolean {
 // the `specs/` prefix too.
 const COMPONENT_RE = /^specs\/design\/components\/([^/]+)\//;
 
+// The three artifacts a component's files are RANKED by (see
+// compareComponentFiles). Naming those documents is labels.ts's job now; these
+// only decide the order they are read in.
+const OPENAPI_RE = /\/openapi\.ya?ml$/;
+const COMPONENT_DESIGN_RE = /^specs\/design\/components\/[^/]+\/design\.json$/;
+const AGENT_AFM_RE = /^specs\/design\/components\/[^/]+\/agent\.afm\.md$/;
+
 /** Component name for a `specs/design/components/<name>/…` path, else null. */
 export function componentOf(path: string): string | null {
   return COMPONENT_RE.exec(path)?.[1] ?? null;
@@ -124,11 +131,31 @@ function isDsl(path: string): boolean {
 }
 
 /**
- * Group the Designs files into an overview list + per-component nodes. The raw
- * `.dsl` sources are not listed as files; each becomes its component's wireframe
- * entry (rendered as a diagram, not shown as text). Components and their files
- * are sorted by path for a stable tree.
+ * Reading order for one component's artifacts, which is NOT path order.
+ *
+ * `design.json` says what the component IS — its type, its dependencies, its
+ * exposure — so it leads whatever else is there. On path alone an ai-agent led
+ * with `agent.afm.md` ("a" sorts above "d") while a service led with
+ * `design.json` only by the accident of "d" before "o", so the same list was
+ * ordered differently per component type for no reason a reader could see.
+ * Ranked explicitly instead; anything unranked keeps path order behind them.
  */
+const COMPONENT_FILE_RANK: ReadonlyArray<RegExp> = [
+  COMPONENT_DESIGN_RE, // Design Overview
+  AGENT_AFM_RE, // Agent Spec
+  OPENAPI_RE, // API Spec
+];
+
+function rankOf(path: string): number {
+  const i = COMPONENT_FILE_RANK.findIndex((re) => re.test(path));
+  return i === -1 ? COMPONENT_FILE_RANK.length : i;
+}
+
+function compareComponentFiles(a: SpecFileEntry, b: SpecFileEntry): number {
+  const byRank = rankOf(a.path) - rankOf(b.path);
+  return byRank !== 0 ? byRank : a.path.localeCompare(b.path);
+}
+
 /**
  * What the Validation rail section is made of.
  *
@@ -231,7 +258,7 @@ export function buildDesignSection(files: SpecFileEntry[]): DesignSection {
   const components = [...byComponent.values()].sort((a, b) =>
     a.name.localeCompare(b.name),
   );
-  for (const c of components) c.files.sort((a, b) => a.path.localeCompare(b.path));
+  for (const c of components) c.files.sort(compareComponentFiles);
 
   const byDependency = new Map<string, DesignDependencyNode>();
   for (const f of design) {

@@ -181,6 +181,25 @@ describe("SpecFileList — the rail carries state", () => {
   });
 });
 
+/** The real paths a generated ai-agent project produces. */
+function designFiles(...paths: string[]): SpecFileEntry[] {
+  return paths.map((path, i) => ({ path, sha: `sha${i}`, group: "designs" }));
+}
+
+describe("SpecFileList — artifact labels", () => {
+  it("names an ai-agent's agent.afm.md 'Agent spec' rather than its file name", () => {
+    renderList(designFiles("specs/design/components/booking-agent/agent.afm.md"));
+
+    expect(screen.getByText("Agent spec")).toBeInTheDocument();
+    expect(screen.queryByText("agent.afm.md")).not.toBeInTheDocument();
+  });
+
+  // Only the ai-agent artifact is pinned here. The sibling labels ("API",
+  // "Design") are upstream's own concern and are covered there — and the rail
+  // now carries a "Design" section header too, so a bare text query for them
+  // matches the header as readily as the file.
+});
+
 // The declared plan (#576): ghosts hold the coming files' places, the header
 // carries the count, and a ghost is disabled — a control that selects nothing
 // is worse than prose.

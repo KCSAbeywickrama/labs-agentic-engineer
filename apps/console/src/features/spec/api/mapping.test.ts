@@ -65,6 +65,15 @@ describe("toSpecEntry", () => {
     });
   });
 
+  it("hides the agent-scenarios file — the build's evaluation input, not a document", () => {
+    expect(toSpecEntry({ path: "specs/validation/agent-scenarios.json", sha: "s1" })).toBeNull();
+    expect(specGroupOf("specs/validation/agent-scenarios.json")).toBeNull();
+    // The Gherkin acceptance criteria beside it stay: they are the oracle a person reads.
+    expect(toSpecEntry({ path: "specs/acceptance/bought-items.feature", sha: "s2" })?.group).toBe(
+      "validation",
+    );
+  });
+
   it("hides files outside the known folders (#113 decision 3)", () => {
     expect(toSpecEntry({ path: "specs/notes.md", sha: "x" })).toBeNull();
     expect(toSpecEntry({ path: "specs/scratch/todo.md", sha: "x" })).toBeNull();

@@ -1813,6 +1813,9 @@ type DependencyContractResponse struct {
 	Contract string `json:"contract"`
 }
 
+// DependencyOperationStatus One `x-aep.tools.openapi[].allow` entry's read-time computed resolution against the dependency it targets — status/reason are computed by spec.ComputeAgentToolStatus, never authored, never persisted.
+type DependencyOperationStatus = contracts.DependencyOperationStatus
+
 // DependencyStatus defines model for DependencyStatus.
 type DependencyStatus struct {
 	Outputs    []string                     `json:"outputs"`
@@ -2355,8 +2358,17 @@ type ProjectRolesView struct {
 	// Roles The WHOLE directory catalog, name-ordered — not just this project's roles. Roles are shared, so the panel shows which existing role a design reuses. Empty when directoryAvailable is false.
 	Roles []ProjectRoleState `json:"roles,omitempty"`
 
+	// SignIn Absent when the project declares no sign-in resource or its binding has not resolved yet.
+	SignIn *ProjectSignIn `json:"signIn,omitempty"`
+
 	// TestUsers The test accounts THIS project's design references, role-ordered.
 	TestUsers []ProjectTestUserState `json:"testUsers,omitempty"`
+}
+
+// ProjectSignIn How a client outside a project's own components signs in to it - the issuer to sign in AT and the public OAuth client to sign in AS. Both are public. Absent from a view when the project declares no sign-in resource or its binding has not resolved yet.
+type ProjectSignIn struct {
+	ClientID string `json:"clientId"`
+	Issuer   string `json:"issuer"`
 }
 
 // ProjectStatus Computed SDLC phase and artifact states.

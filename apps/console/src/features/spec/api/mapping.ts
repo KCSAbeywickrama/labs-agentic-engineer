@@ -79,6 +79,8 @@ export function isAcceptanceFeaturePath(path: string): boolean {
 // #427 was opened to fix.
 const REFERENCES_PREFIX = "specs/requirements/references/";
 
+// Exact paths the view hides although their folder is shown.
+//
 // The RETIRING acceptance oracle. The design turn still mints it — its step 8
 // says to mint BOTH halves (skills/design/SKILL.md) — so every project holds one
 // beside its Gherkin acceptance criteria, and the rail offered two rows with
@@ -86,11 +88,15 @@ const REFERENCES_PREFIX = "specs/requirements/references/";
 // than removed: the file stays committed and is read on GitHub when anyone needs
 // it, which is why nothing in the console has to keep it reachable.
 //
-// DELETE this and its guard below with the criteria+e2e path itself. That change
-// also takes SpecView's `isValidationCriteriaFile` branches, `fileLabel`'s
-// "Validation criteria" entry and the console's `@aep/ui-validation-view`
-// dependency, which this one leaves standing but unreachable.
-const RETIRED_CRITERIA_PATH = "specs/validation/validation-criteria.json";
+// DELETE that entry with the criteria+e2e path itself. That change also takes
+// SpecView's `isValidationCriteriaFile` branches, `fileLabel`'s "Validation
+// criteria" entry and the console's `@aep/ui-validation-view` dependency, which
+// this one leaves standing but unreachable.
+const HIDDEN_PATHS = new Set<string>([
+  "specs/validation/validation-criteria.json",
+  // The build's evaluation input; the criteria it cites are the readable oracle.
+  "specs/validation/agent-scenarios.json",
+]);
 
 /**
  * The spec-view group a path would belong to, or null for a path the view
@@ -110,7 +116,7 @@ export function specGroupOf(path: string): SpecGroup | null {
   if (segments[0] !== "specs" || segments.length < 3) return null;
   if (segments[segments.length - 1] === "") return null;
   if (path.startsWith(REFERENCES_PREFIX)) return null;
-  if (path === RETIRED_CRITERIA_PATH) return null;
+  if (HIDDEN_PATHS.has(path)) return null;
   return GROUP_BY_FOLDER[segments[1] ?? ""] ?? null;
 }
 

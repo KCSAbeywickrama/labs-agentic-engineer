@@ -134,7 +134,7 @@ turn — apply them directly, and load one only if you find you do not have it.
    the design has sign-in or roles.
 6. **Per-component artifacts** — every `service` gets `openapi.yaml`
    (`openapi-conventions`); every `web-application` gets `wireframes.dsl`
-   (`wireframes`).
+   (`wireframes`); every `ai-agent` gets `agent.afm.md` (`agent-building`).
 7. **Grants pass** (`security-design`) — re-read `specs/design/security.json`
    now that the screens and the operations exist. Step 5 wrote each role's
    `grants` against a design it could only intend; the operations the screens
