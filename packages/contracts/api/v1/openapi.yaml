@@ -8790,7 +8790,7 @@ components:
           description: The file's Gherkin source, verbatim.
           type: string
         path:
-          description: Repository path, e.g. specs/acceptance/checkout.feature.
+          description: Repository path, e.g. specs/validation/acceptance/checkout.feature.
           type: string
       required:
       - path
@@ -8917,7 +8917,7 @@ components:
             is still running and the criteria came from HEAD.
           type: string
         criteria:
-          description: Every specs/acceptance/*.feature file at that commit. The report annotates
+          description: Every specs/validation/acceptance/*.feature file at that commit. The report annotates
             these; they are the spine the view renders and the report is the overlay.
           items:
             $ref: '#/components/schemas/AcceptanceCriteriaFile'

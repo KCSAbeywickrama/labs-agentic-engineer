@@ -96,7 +96,7 @@ test("filterTurnSnapshot mirrors the walk's rules over an in-memory map", () => 
     "a.md": "x",
     "b/system.dsl": "y",
     "b/design.json": "z",
-    "specs/acceptance/checkout.feature": "keep",
+    "specs/validation/acceptance/checkout.feature": "keep",
     "specs/design/components/api/openapi.yaml": "keep",
     "specs/design/components/api/dependencies/stripe.openapi.yaml": "keep",
     "specs/design/security.json": "keep",
@@ -110,10 +110,10 @@ test("filterTurnSnapshot mirrors the walk's rules over an in-memory map", () => 
     "a.md",
     "b/design.json",
     "b/system.dsl",
-    "specs/acceptance/checkout.feature",
     "specs/design/components/api/dependencies/stripe.openapi.yaml",
     "specs/design/components/api/openapi.yaml",
     "specs/design/security.json",
+    "specs/validation/acceptance/checkout.feature",
   ]);
 });
 
@@ -193,7 +193,7 @@ const KEEP_PARITY: Record<string, boolean> = {
   "specs/design/design.cell": true,
   "specs/design/system.dsl": true,
   "specs/design/components/api/design.json": true,
-  "specs/acceptance/checkout.feature": true,
+  "specs/validation/acceptance/checkout.feature": true,
   "specs/design/components/api/openapi.yaml": true,
   "specs/design/components/api/dependencies/stripe.openapi.yaml": true,
   // The project security design: one design-level file, by exact path.

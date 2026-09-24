@@ -27,9 +27,16 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
-// criteriaDirPath is the acceptance-oracle directory in the project repo,
-// authored by the acceptance-criteria skill and driven by the runner.
-const criteriaDirPath = "specs/acceptance"
+// AcceptanceDirPath is the acceptance-oracle directory in the project repo,
+// authored by the acceptance-criteria skill and driven by the runner. It sits
+// under specs/validation/ beside the phase's other inputs, and it is the
+// counterpart of ReportFilePath: the scenarios here say what must hold, the
+// report there says what did.
+//
+// Exported because the adapter that READS it (the composition root's
+// CriteriaReader) is a different package. Nothing forces a second copy the way
+// slice ⊥ sibling forces runread's own ReportFilePath, so there is one.
+const AcceptanceDirPath = "specs/validation/acceptance"
 
 // validationTitle is the fixed title of a version's validation issue. It names
 // no version: the MILESTONE is the version pin, and a title is renamable display
@@ -301,7 +308,7 @@ func plural(n int, noun string) string {
 // oracle was a JSON table nobody could read in the repo, so the issue rendered
 // it; a `.feature` file is already the readable artifact, and copying it here
 // would give the agent two versions of the specification that can disagree.
-func renderScope(files []AcceptanceFile, sum acceptanceSummary) string {
+func renderScope(files []AcceptanceCriteriaFile, sum acceptanceSummary) string {
 	var b strings.Builder
 	w := func(lines ...string) {
 		for _, l := range lines {
@@ -317,7 +324,7 @@ func renderScope(files []AcceptanceFile, sum acceptanceSummary) string {
 		"",
 		"## Acceptance criteria",
 		fmt.Sprintf("The source of truth is `%s/` in this repo — %s across %s. It is read-only input for this task — do not modify it or anything else under `specs/`.",
-			criteriaDirPath, plural(sum.Scenarios, "scenario"), plural(sum.Rules, "rule")),
+			AcceptanceDirPath, plural(sum.Scenarios, "scenario"), plural(sum.Rules, "rule")),
 		"",
 		"There is no test code to author. The scenario text IS the test: drive each one through the deployed app and record what settled it.",
 		"",

@@ -39,7 +39,7 @@ const e = (path: string): SpecFileEntry => ({
   sha: path,
   group: path.startsWith("specs/requirements/")
     ? "requirements"
-    : path.startsWith("specs/acceptance/")
+    : path.startsWith("specs/validation/acceptance/")
       ? "validation"
       : "designs",
 });
@@ -255,18 +255,18 @@ describe("buildDesignSection — a component's artifacts lead with the overview"
 // gone. With no per-capability row, an acceptance path has to route to the set.
 describe("followSelection — acceptance paths open the set", () => {
   it("routes any capability to the one entry", () => {
-    expect(followSelection("specs/acceptance/bought-items.feature")).toEqual({
+    expect(followSelection("specs/validation/acceptance/bought-items.feature")).toEqual({
       kind: "acceptance",
     });
-    expect(followSelection("specs/acceptance/adding-items.feature")).toEqual({
+    expect(followSelection("specs/validation/acceptance/adding-items.feature")).toEqual({
       kind: "acceptance",
     });
   });
 
   it("does not claim a nested or differently-suffixed path", () => {
     for (const path of [
-      "specs/acceptance/nested/deep.feature",
-      "specs/acceptance/notes.md",
+      "specs/validation/acceptance/nested/deep.feature",
+      "specs/validation/acceptance/notes.md",
       "specs/design/flows/checkout.feature",
     ]) {
       expect(followSelection(path), path).toEqual({ kind: "file", path });
@@ -276,21 +276,21 @@ describe("followSelection — acceptance paths open the set", () => {
   it("gives the set a stable identity of its own", () => {
     expect(selectionKey({ kind: "acceptance" })).toBe("acceptance");
     expect(selectionKey({ kind: "acceptance" })).not.toBe(
-      selectionKey({ kind: "file", path: "specs/acceptance/bought-items.feature" }),
+      selectionKey({ kind: "file", path: "specs/validation/acceptance/bought-items.feature" }),
     );
   });
 });
 
 // The Validation section is not just a file list: ONE rail entry stands for
-// every specs/acceptance/*.feature (ADR-0031). Which files keep an ordinary row
+// every specs/validation/acceptance/*.feature (ADR-0031). Which files keep an ordinary row
 // and whether that standing-in entry appears are two halves of one fact, and
 // deriving them apart is how they come to disagree — so they are derived here,
 // together, and tested here rather than through the rail.
 describe("buildValidationSection", () => {
   const file = (path: string): SpecFileEntry => ({ path, sha: "sha", group: "validation" });
   const ghost = (path: string): SpecFileEntry => ({ path, sha: "", group: "validation" });
-  const BOUGHT = "specs/acceptance/bought-items.feature";
-  const ADDING = "specs/acceptance/adding-items.feature";
+  const BOUGHT = "specs/validation/acceptance/bought-items.feature";
+  const ADDING = "specs/validation/acceptance/adding-items.feature";
   const planned = (path: string, status: RailPlanEntry["status"]): RailPlanEntry => ({
     path,
     status,
@@ -307,11 +307,12 @@ describe("buildValidationSection", () => {
     expect(section.hasAcceptance).toBe(true);
   });
 
-  // specs/acceptance/ is the only folder in this group today, so the filter has
-  // nothing left to spare. It stays as the guard: whatever a later folder adds
-  // here keeps its own row rather than being swallowed by the entry.
+  // Only the oracle's folder reaches this group (mapping's ACCEPTANCE_PREFIX),
+  // and inside it only `.feature` files are the capability set. Something else
+  // in that same folder is therefore the one thing this filter still has to
+  // spare, and it keeps its own row rather than being swallowed by the entry.
   it("leaves a validation document that is not a capability its own row", () => {
-    const OTHER = "specs/validation/plan.md";
+    const OTHER = "specs/validation/acceptance/README.md";
     const section = buildValidationSection(
       [file(OTHER), file(BOUGHT)],
       new Set([OTHER, BOUGHT]),

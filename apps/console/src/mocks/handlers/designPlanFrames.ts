@@ -37,7 +37,7 @@ const FLOW_APPROVE = "specs/design/flows/approve-an-expense.md";
 const SECURITY = "specs/design/security.json";
 const PORTAL = "specs/design/components/expense-portal/design.json";
 const API = "specs/design/components/expense-api/design.json";
-const ACCEPTANCE = "specs/acceptance/submitting-an-expense.feature";
+const ACCEPTANCE = "specs/validation/acceptance/submitting-an-expense.feature";
 
 // The document each write delivers, as plain text — `addFile` below is what
 // escapes it for the JSON input stream, so a document may hold quotes and

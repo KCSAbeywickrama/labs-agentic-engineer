@@ -146,7 +146,7 @@ turn — apply them directly, and load one only if you find you do not have it.
    a hidden screen — so this pass is where it is cheap.
 8. **The acceptance oracle** — mint it LAST. A design without one is
    unfinished — never skip this.
-   - `acceptance-criteria` → `specs/acceptance/<slug>.feature`, one per
+   - `acceptance-criteria` → `specs/validation/acceptance/<slug>.feature`, one per
      capability.
 
    Authored from the PRD alone, so it is independent of everything above.

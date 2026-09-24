@@ -128,7 +128,7 @@ export function runCycleEvents(cycle: RunCycleView, startSeq: number): RunEvent[
     return [
       lead({ kind: "run_started", taskKind: "validation", runtime: "claude-code", model: "claude-opus-4" }),
       lead({ kind: "agent_started", role: "validator", model: "claude-opus-4" }),
-      lead({ kind: "tool_use", tool: "Read", summary: "specs/acceptance/checkout.feature", toolUseId: "v0" }),
+      lead({ kind: "tool_use", tool: "Read", summary: "specs/validation/acceptance/checkout.feature", toolUseId: "v0" }),
       lead({ kind: "tool_result", tool: "Read", ok: true, durationMs: 120, toolUseId: "v0" }),
       // The per-criterion story, which is what the Validation page's rows are
       // painted from — and which renders as NO row here, on purpose. Only for an

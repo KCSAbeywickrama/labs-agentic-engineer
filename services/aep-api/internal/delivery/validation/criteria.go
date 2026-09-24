@@ -21,8 +21,9 @@ import (
 	"strings"
 )
 
-// AcceptanceFile is one `specs/acceptance/<slug>.feature` as committed.
-type AcceptanceFile struct {
+// AcceptanceCriteriaFile is one `specs/validation/acceptance/<slug>.feature` as
+// committed.
+type AcceptanceCriteriaFile struct {
 	Path    string
 	Content string
 }
@@ -41,7 +42,7 @@ type acceptanceSummary struct {
 // slightly wrong figure. Judging the scenarios is the agent's job, and the agent
 // reads the files themselves. `Scenario:` and `Example:` are synonyms in the
 // Gherkin grammar, so both count.
-func summarize(files []AcceptanceFile) acceptanceSummary {
+func summarize(files []AcceptanceCriteriaFile) acceptanceSummary {
 	sum := acceptanceSummary{Files: len(files)}
 	for _, f := range files {
 		for _, line := range strings.Split(f.Content, "\n") {
@@ -60,13 +61,13 @@ func summarize(files []AcceptanceFile) acceptanceSummary {
 // file carrying at least one scenario. An oracle with none is the agent's bug,
 // not a reason to fail the save — the caller treats the error as "skip minting"
 // and a corrected pass re-mints.
-func validateAcceptance(files []AcceptanceFile) (acceptanceSummary, error) {
+func validateAcceptance(files []AcceptanceCriteriaFile) (acceptanceSummary, error) {
 	sum := summarize(files)
 	if sum.Files == 0 {
-		return sum, fmt.Errorf("specs/acceptance/ holds no .feature files")
+		return sum, fmt.Errorf("specs/validation/acceptance/ holds no .feature files")
 	}
 	if sum.Scenarios == 0 {
-		return sum, fmt.Errorf("specs/acceptance/ holds no scenarios")
+		return sum, fmt.Errorf("specs/validation/acceptance/ holds no scenarios")
 	}
 	return sum, nil
 }

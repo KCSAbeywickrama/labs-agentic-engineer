@@ -76,13 +76,13 @@ export function requirementsChecks(projectDir: string, run: SectionRunResult): S
  * nothing to validate against and settles `skipped`.
  */
 function acceptanceProblems(projectDir: string): string[] {
-  const dir = join(projectDir, "specs/acceptance");
-  if (!existsSync(dir)) return ["specs/acceptance/ missing"];
+  const dir = join(projectDir, "specs/validation/acceptance");
+  if (!existsSync(dir)) return ["specs/validation/acceptance/ missing"];
   const names = readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isFile() && e.name.endsWith(".feature"))
     .map((e) => e.name)
     .sort();
-  if (names.length === 0) return ["no .feature files under specs/acceptance/"];
+  if (names.length === 0) return ["no .feature files under specs/validation/acceptance/"];
   const problems: string[] = [];
   for (const name of names) {
     const feature = parseFeatureFile(name, readFileSync(join(dir, name), "utf8"));

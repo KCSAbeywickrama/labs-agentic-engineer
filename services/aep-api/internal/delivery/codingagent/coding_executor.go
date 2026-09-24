@@ -559,8 +559,8 @@ const validationTaskKind = "validation"
 const envValidationIssue = "AEP_VALIDATION_ISSUE"
 
 // validationDeadlineSeconds bounds a validation run (2h): a browser boots once
-// and every scenario in specs/acceptance/ is then driven through it in sequence,
-// which is longer than a coding run.
+// and every scenario in specs/validation/acceptance/ is then driven through it
+// in sequence, which is longer than a coding run.
 const validationDeadlineSeconds int64 = 7200
 
 // codingDeadlineSeconds bounds an ordinary coding run (3h). A coding cycle no

@@ -403,7 +403,7 @@ func TestSnapshotReadsBothHalvesAtTheAttemptsOwnCommit(t *testing.T) {
 	}
 	files := &vFiles{
 		reportAt:   map[string]string{"sha-attempt": `{"scenarios":[]}`},
-		criteriaAt: map[string][]gen.AcceptanceCriteriaFile{"sha-attempt": {{Path: "specs/acceptance/a.feature", Content: "Feature: a"}}},
+		criteriaAt: map[string][]gen.AcceptanceCriteriaFile{"sha-attempt": {{Path: "specs/validation/acceptance/a.feature", Content: "Feature: a"}}},
 	}
 	out, err := reads(rows, cycles, files).ValidationSnapshot(context.Background(), vOrg, vProject, "v1", "val")
 	if err != nil {
@@ -433,7 +433,7 @@ func TestSnapshotOfARunningAttemptReadsCriteriaAtHeadAndHasNoReport(t *testing.T
 	rows := []delivery.MilestoneRun{devRun("r1", 1, "v1", delivery.RunStateRunning, "")}
 	cycles := map[string][]delivery.RunCycle{"r1": {vCycle("val", "r1", 5, nil, "", "")}}
 	files := &vFiles{
-		criteriaAt: map[string][]gen.AcceptanceCriteriaFile{"": {{Path: "specs/acceptance/a.feature", Content: "Feature: a"}}},
+		criteriaAt: map[string][]gen.AcceptanceCriteriaFile{"": {{Path: "specs/validation/acceptance/a.feature", Content: "Feature: a"}}},
 	}
 	out, err := reads(rows, cycles, files).ValidationSnapshot(context.Background(), vOrg, vProject, "v1", "val")
 	if err != nil {

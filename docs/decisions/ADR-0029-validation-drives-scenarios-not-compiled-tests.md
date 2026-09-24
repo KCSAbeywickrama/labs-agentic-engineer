@@ -40,8 +40,14 @@ compiled path heals and rewrites its specs between runs, so "authored once" desc
 A validation run **drives the scenario text directly**. There is no generated test code and no
 plan↔code seam, because the scenario IS the test.
 
-- The oracle is `specs/acceptance/<slug>.feature` — Gherkin, authored from the PRD alone by the
-  `acceptance-criteria` skill.
+- The oracle is `specs/validation/acceptance/<slug>.feature` — Gherkin, authored from the PRD
+  alone by the `acceptance-criteria` skill. It sits **under** `specs/validation/` rather than
+  beside it: that folder is the phase's, and it already holds the agent evaluation's own input
+  (ADR-0035). Two sibling folders for one phase left a reader no rule for telling them apart.
+  The oracle moved there from `specs/acceptance/` after the experiment settled; a project repo
+  written before that move has its features at the old path, where nothing now looks, so it
+  files no validation task and its version settles `skipped` until a `git mv` or a fresh design
+  turn puts them under the new one.
 - The runner loads `acceptance-run` (always-on) and `agent-browser` (on demand) where it used to load
   `aep-validation` and `playwright-cli`.
 - The report is `tests/acceptance/report.json`, keyed by scenario rather than by criterion id.

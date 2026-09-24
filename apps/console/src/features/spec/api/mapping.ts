@@ -50,35 +50,26 @@ export interface SpecFileEntry {
 const GROUP_BY_FOLDER: Record<string, SpecGroup> = {
   requirements: "requirements",
   design: "designs",
-  // The `validation` SECTION is served by the `acceptance` folder, and by no
-  // other: validation is the phase, and an acceptance criterion is the unit it
-  // grades (docs/glossary.md — different axes, both words correct). A group of
-  // its own would put two headers on one phase.
-  //
-  // `specs/validation/` is deliberately absent, which hides BOTH files that
-  // have ever lived there — the two an exact-path set used to name one by one.
-  //
-  // The retired criteria+e2e oracle: legacy projects still have that JSON
-  // committed, and mapping the folder would put it back on the rail with no
-  // viewer left to render it, so it would open as an editable textarea over a
-  // generated document.
-  //
-  // `agent-scenarios.json` (ADR-0035): still written, and still hidden on
-  // purpose — it is the build's evaluation input, not a document a reader is
-  // meant to open. Both stay readable on GitHub, which is where they belong.
-  acceptance: "validation",
+  // `validation` is absent on purpose: the section is served by ONE subfolder
+  // of it, admitted by ACCEPTANCE_PREFIX below. See that constant for why the
+  // parent stays shut.
 };
 
 /**
- * One acceptance-criteria document, `specs/acceptance/<capability>.feature`.
+ * One acceptance-criteria document,
+ * `specs/validation/acceptance/<capability>.feature`.
  *
  * The single definition, because three places were carrying the same regex —
  * the pane's read-only routing, the Validations page's oracle read, and the
  * rail. A fourth copy is how one of them comes to disagree with the others
  * about what an acceptance file is.
+ *
+ * Narrower than ACCEPTANCE_PREFIX, and deliberately: the prefix decides which
+ * SECTION a path belongs to, this decides which files the one rail entry stands
+ * for. Anything else in that folder keeps its own row instead of disappearing.
  */
-export function isAcceptanceFeaturePath(path: string): boolean {
-  return /^specs\/acceptance\/[^/]+\.feature$/.test(path);
+export function isAcceptanceCriteriaFile(path: string): boolean {
+  return /^specs\/validation\/acceptance\/[^/]+\.feature$/.test(path);
 }
 
 // Reference documents (#383) are transient turn inputs, never committed
@@ -88,6 +79,15 @@ export function isAcceptanceFeaturePath(path: string): boolean {
 // selectable, and pour a PDF's bytes into the editor pane — the exact incident
 // #427 was opened to fix.
 const REFERENCES_PREFIX = "specs/requirements/references/";
+
+// The acceptance oracle's folder, admitted by prefix because its PARENT stays
+// shut. `specs/validation/` also holds the build's own evaluation inputs —
+// generated JSON with no viewer, which the rail would offer as an editable
+// textarea over a document nobody hand-writes. Opening one subfolder admits the
+// oracle and leaves whatever else the phase keeps there hidden until someone
+// decides it is a document a reader should open. Both stay readable on GitHub,
+// which is where they belong.
+const ACCEPTANCE_PREFIX = "specs/validation/acceptance/";
 
 /**
  * The spec-view group a path would belong to, or null for a path the view
@@ -100,13 +100,19 @@ const REFERENCES_PREFIX = "specs/requirements/references/";
  * beyond it (segments.length >= 3). A trailing slash means the path names a
  * DIRECTORY, not a file: it clears the length check (the empty last segment
  * counts) and would otherwise become a selectable entry with no file name.
- * Checked before the hidden-path branches below, so it holds for every group.
+ * Checked before the path branches below, so it holds for every group — which
+ * is also why `specs/validation/acceptance/` names no group on its own.
+ *
+ * Most groups are decided by the folder directly under specs/. Two are decided
+ * by a deeper path instead, one denying and one admitting, and both are checked
+ * first because a folder rule cannot express either.
  */
 export function specGroupOf(path: string): SpecGroup | null {
   const segments = path.split("/");
   if (segments[0] !== "specs" || segments.length < 3) return null;
   if (segments[segments.length - 1] === "") return null;
   if (path.startsWith(REFERENCES_PREFIX)) return null;
+  if (path.startsWith(ACCEPTANCE_PREFIX)) return "validation";
   return GROUP_BY_FOLDER[segments[1] ?? ""] ?? null;
 }
 

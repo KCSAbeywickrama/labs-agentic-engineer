@@ -2145,8 +2145,8 @@ describe("SpecView acceptance criteria", () => {
   beforeEach(() => {
     mockUseSpecFiles.mockReturnValue({
       data: [
-        { path: "specs/acceptance/adding-items.feature", sha: "a", group: "validation" },
-        { path: "specs/acceptance/bought-items.feature", sha: "b", group: "validation" },
+        { path: "specs/validation/acceptance/adding-items.feature", sha: "a", group: "validation" },
+        { path: "specs/validation/acceptance/bought-items.feature", sha: "b", group: "validation" },
       ],
       isPending: false,
       isError: false,
@@ -2155,8 +2155,8 @@ describe("SpecView acceptance criteria", () => {
     });
     mockAcceptance = {
       features: [
-        { path: "specs/acceptance/adding-items.feature", content: ADDING },
-        { path: "specs/acceptance/bought-items.feature", content: FEATURE },
+        { path: "specs/validation/acceptance/adding-items.feature", content: ADDING },
+        { path: "specs/validation/acceptance/bought-items.feature", content: FEATURE },
       ],
       isPending: false,
       isError: false,

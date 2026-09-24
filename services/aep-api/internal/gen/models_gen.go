@@ -1314,7 +1314,7 @@ type AcceptanceCriteriaFile struct {
 	// Content The file's Gherkin source, verbatim.
 	Content string `json:"content"`
 
-	// Path Repository path, e.g. specs/acceptance/checkout.feature.
+	// Path Repository path, e.g. specs/validation/acceptance/checkout.feature.
 	Path string `json:"path"`
 }
 
@@ -3511,7 +3511,7 @@ type ValidationSnapshot struct {
 	// Commit The commit both halves were read at — the cycle's merge SHA, or empty when the attempt is still running and the criteria came from HEAD.
 	Commit string `json:"commit"`
 
-	// Criteria Every specs/acceptance/*.feature file at that commit. The report annotates these; they are the spine the view renders and the report is the overlay.
+	// Criteria Every specs/validation/acceptance/*.feature file at that commit. The report annotates these; they are the spine the view renders and the report is the overlay.
 	Criteria []AcceptanceCriteriaFile `json:"criteria"`
 
 	// Report The raw tests/acceptance/report.json at that commit, verbatim, for the client's own parser to read. Null while the attempt is still running: it has not committed one yet, and an absent report is not the same fact as an empty one.

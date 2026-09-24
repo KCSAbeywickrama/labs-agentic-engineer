@@ -50,7 +50,7 @@ import {
   useSpecFiles,
 } from "../api/queries";
 import {
-  isAcceptanceFeaturePath, PRD_PATH, specGroupOf, toSpecEntry } from "../api/mapping";
+  isAcceptanceCriteriaFile, PRD_PATH, specGroupOf, toSpecEntry } from "../api/mapping";
 import { fileLabel } from "../api/labels";
 import { computeDependencyUsedBy } from "../lib/dependencyUsedBy";
 import { useCollabSpec } from "../collab/useCollabSpec";
@@ -578,7 +578,7 @@ export function SpecView({ projectName }: { projectName: string }) {
   // rail has one entry for the set and followSelection routes to it. This stays
   // as the guard: without it such a selection falls through to CollabTextArea,
   // an editable textarea over a generated document, silently.
-  const isAcceptanceFeatureFile = isAcceptanceFeaturePath(selectedFile?.path ?? "");
+  const isAcceptanceCriteriaSelected = isAcceptanceCriteriaFile(selectedFile?.path ?? "");
   // A dependency's definition renders as its own structured view (ADR-0028)
   // — the same path a component's design.json takes.
   const isDependencyDefinitionFile = isDependencyDefinition(selectedFile?.path ?? "");
@@ -588,7 +588,7 @@ export function SpecView({ projectName }: { projectName: string }) {
     isOpenApiFile ||
     isComponentDesignFile ||
     isAgentAfmFile ||
-    isAcceptanceFeatureFile ||
+    isAcceptanceCriteriaSelected ||
     isDependencyDefinitionFile;
   // Canvas-based views (cell diagram, Excalidraw) need a flex-column,
   // overflow-hidden ancestor so their own `flex: 1` roots get a real
@@ -1535,7 +1535,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                         renderMarkdown={(md) => <MarkdownView>{md}</MarkdownView>}
                         {...(afmText ? { onSaveBehaviour: handleSaveBehaviour } : {})}
                       />
-                    ) : isAcceptanceFeatureFile ? (
+                    ) : isAcceptanceCriteriaSelected ? (
                       <AcceptanceView
                         features={[{ path: selectedFile.path, content: structuredLive }]}
                       />
@@ -1576,7 +1576,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                         renderMarkdown={(md) => <MarkdownView>{md}</MarkdownView>}
                         {...(afmText ? { onSaveBehaviour: handleSaveBehaviour } : {})}
                       />
-                    ) : isAcceptanceFeatureFile ? (
+                    ) : isAcceptanceCriteriaSelected ? (
                       <AcceptanceView
                         key={content.data.sha}
                         features={[

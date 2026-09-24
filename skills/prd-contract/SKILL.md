@@ -79,7 +79,7 @@ buildable with them outstanding.>
   defines.
 - **The story list is total.** Every story the PRD defines ships. Work that
   should come later is an Out of Scope line, or it is not a story yet.
-- **No acceptance criteria.** They live in `specs/acceptance/<slug>.feature`
+- **No acceptance criteria.** They live in `specs/validation/acceptance/<slug>.feature`
   — the acceptance oracle. The PRD never duplicates them.
 - **The PRD body stays lean.** A story is one line; what the product does
   is the story list, not an elaboration of it. There is no separate

@@ -42,7 +42,7 @@ concept for *the agreed description of what we're building*.
 |---|---|---|
 | `REQUIREMENTS` | **Product requirements** | `specs/requirements/prd.md` |
 | `DESIGN` (not `DESIGNS` — one design, several files) | **Architecture** · **Domain model** · **Security** as rows, then the groups: **Flows**, then one per component | `specs/design/` |
-| `VALIDATION` | **Acceptance criteria** | every `specs/acceptance/<slug>.feature`, as ONE entry |
+| `VALIDATION` | **Acceptance criteria** | every `specs/validation/acceptance/<slug>.feature`, as ONE entry |
 
 **Security** is one rail entry, one page:
 
@@ -1022,7 +1022,7 @@ agent is waiting on the user, not working, and the user may want to talk instead
 ## The acceptance pane, and its one entry
 
 **One rail entry, not one per capability.** **Acceptance criteria** stands for
-every `specs/acceptance/<capability>.feature` at once, and the pane lists them
+every `specs/validation/acceptance/<capability>.feature` at once, and the pane lists them
 all — the same set the Validations page shows. The capabilities are named inside
 it, as feature headings, never in the rail.
 
@@ -1317,9 +1317,9 @@ criteria** were a rail entry: that document is plural, one row inside it is an *
 criterion** — what its `AC-` id says and what the term means everywhere else — and naming a
 document after one of its rows cost the link between the criteria and the runs against them, at a
 sentence of empty-state copy to restore. The rule stands; its example has moved. With the criteria
-document hidden, **Acceptance criteria** now names the Gherkin set under `specs/acceptance/` and
-nothing else, and the same discipline applies there: the entry is the set, a `Scenario:` inside it
-is one criterion.
+document hidden, **Acceptance criteria** now names the Gherkin set under
+`specs/validation/acceptance/` and nothing else, and the same discipline applies
+there: the entry is the set, a `Scenario:` inside it is one criterion.
 
 **Validations has four empty states, and only the first offers an action.** The ledger and the
 version page are different surfaces: a project with no built version cannot validate anything, and
@@ -1401,7 +1401,7 @@ too, in the same message as the text it overrides.
 ### The rules it carries
 
 1. **Name things the way the UI names them.** *Architecture*, not `design.cell`. *Acceptance
-   criteria*, not `specs/acceptance/<slug>.feature`. The mapping is the table under
+   criteria*, not `specs/validation/acceptance/<slug>.feature`. The mapping is the table under
    [The spec workspace](#the-spec-workspace) — this file is its source, and the console skill is
    how it reaches the agent.
 2. **Never quote a repo path** to the user.

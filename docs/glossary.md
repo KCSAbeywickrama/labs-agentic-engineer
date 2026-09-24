@@ -479,8 +479,8 @@ replaced within a tick by one with fresh budgets. Cleared by a rebuild, or by a
 person removing the label.
 
 ### Acceptance oracle
-Every `specs/acceptance/<slug>.feature` in its JUDGING role — the source of truth
-a validation run grades the deployed system against. *Oracle* names what the set
+Every `specs/validation/acceptance/<slug>.feature` in its JUDGING role — the
+source of truth a validation run grades the deployed system against. *Oracle* names what the set
 DOES, not what it is: the console calls the documents themselves the **Acceptance
 criteria** (`apps/console/design/lexicon.md` holds that mapping), and one
 `Scenario:` inside them is an **acceptance criterion**. Different axes, so both

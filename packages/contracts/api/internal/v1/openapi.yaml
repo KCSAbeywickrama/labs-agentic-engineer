@@ -128,7 +128,7 @@ components:
 
         It carries NO oracle path. It used to name the single
         specs/validation/validation-criteria.json file; the oracle is now the
-        specs/acceptance/ directory, which the acceptance-run skill already
+        specs/validation/acceptance/ directory, which the acceptance-run skill already
         knows, so the field was a constant nothing read.
       type: object
       additionalProperties: false
