@@ -23,11 +23,12 @@
  * event, not drift.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { checkComponentDependencies, checkComponentDesign, checkDesignDiagram, DOMAIN_MODEL_PATH } from "@aep/agent-stream";
 import { listComponents, listFlows } from "@aep/playground/src/engine/gates.js";
+import { featureScenarios, parseFeatureFile } from "@aep/ui-acceptance-view/parse";
 import { compileProject } from "@aep/ui-cell-diagram-react/compiler";
 import type { SectionRunResult } from "../drivers/conversational.js";
 import type { TaskPlanRunResult } from "../drivers/task-plan.js";
@@ -65,6 +66,30 @@ export function requirementsChecks(projectDir: string, run: SectionRunResult): S
     check("interview happened", run.questionsAsked > 0, "the agent never asked a question"),
     check("interview finished within cap", run.finishedInterview, run.error ?? "hit the turn cap"),
   ]);
+}
+
+/**
+ * The acceptance oracle, read with the SAME parser the console renders it with
+ * and the run's checker keys on — `parseFeatureFile` returns null for text
+ * carrying no `Feature:` line, which is exactly the file a run cannot answer.
+ * A design that minted no oracle, or minted one with no scenarios in it, has
+ * nothing to validate against and settles `skipped`.
+ */
+function acceptanceProblems(projectDir: string): string[] {
+  const dir = join(projectDir, "specs/acceptance");
+  if (!existsSync(dir)) return ["specs/acceptance/ missing"];
+  const names = readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith(".feature"))
+    .map((e) => e.name)
+    .sort();
+  if (names.length === 0) return ["no .feature files under specs/acceptance/"];
+  const problems: string[] = [];
+  for (const name of names) {
+    const feature = parseFeatureFile(name, readFileSync(join(dir, name), "utf8"));
+    if (!feature) problems.push(`${name}: no Feature: line`);
+    else if (featureScenarios(feature).length === 0) problems.push(`${name}: no scenarios`);
+  }
+  return problems;
 }
 
 export function designChecks(projectDir: string, run: SectionRunResult): StructuralReport {
@@ -116,13 +141,7 @@ export function designChecks(projectDir: string, run: SectionRunResult): Structu
   const cellCompile = cellSource.trim() ? compileProject(cellSource) : null;
   const cellErrors = (cellCompile?.diagnostics ?? []).filter((d) => d.severity === "error");
 
-  const criteria = readSafe(join(projectDir, "specs/validation/validation-criteria.json"));
-  let criteriaOk = false;
-  try {
-    criteriaOk = criteria.trim().length > 0 && JSON.parse(criteria) !== null;
-  } catch {
-    criteriaOk = false;
-  }
+  const oracleProblems = acceptanceProblems(projectDir);
 
   return report([
     check("domain-model.md exists", domainModel.trim().length > 0, "specs/design/domain-model.md missing or empty"),
@@ -138,7 +157,7 @@ export function designChecks(projectDir: string, run: SectionRunResult): Structu
       cellCompile === null ? "specs/design/design.cell missing or empty" : cellErrors.map((d) => `line ${d.line}: ${d.message}`).join("; "),
     ),
     check("openapi.yaml documents valid", openapiProblems.length === 0, openapiProblems.join("; ")),
-    check("validation-criteria.json valid", criteriaOk, "missing or not JSON"),
+    check("≥1 acceptance .feature, each with scenarios", oracleProblems.length === 0, oracleProblems.join("; ")),
     check("section completed", run.finishedInterview, run.error ?? "hit the turn cap"),
   ]);
 }

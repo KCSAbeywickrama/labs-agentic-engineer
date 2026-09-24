@@ -230,6 +230,9 @@ importers:
       '@aep/playground':
         specifier: workspace:*
         version: link:../../playground
+      '@aep/ui-acceptance-view':
+        specifier: workspace:*
+        version: link:../../packages/ui/acceptance-view
       '@aep/ui-cell-diagram-react':
         specifier: workspace:*
         version: link:../../packages/ui/cell-diagram-react
