@@ -96,8 +96,11 @@ RUN --mount=type=secret,id=packagePAT,required=true \
     packageUser=x packagePAT="$(cat /run/secrets/packagePAT)" \
     ./make-dist.sh
 
-# ─── Stage 2: the runner ────────────────────────────────────────────────────
-FROM node:22-bookworm-slim
+# ─── Stage 2: the runner (Claude Code) ──────────────────────────────────────
+# NAMED so the OpenCode variant below can build on it. It is also the image a
+# build with no `--target` produces — the file ends with a bare `FROM runner`
+# for exactly that reason (see the bottom of this file).
+FROM node:22-bookworm-slim AS runner
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -494,3 +497,54 @@ RUN HOME=/home/aep bash /tmp/bal-library-tool/install.sh \
 # appended to a single ENTRYPOINT would not.
 ENTRYPOINT ["/usr/local/bin/aep-runner-entrypoint"]
 CMD ["npx", "tsx", "src/oneshot.ts"]
+
+# ─── Stage 3: the OpenCode variant ──────────────────────────────────────────
+# The same image plus one runtime: the `opencode` binary, the platform's guard
+# plugin, and a pre-warmed home. Built as its own TAG (aep-runner-opencode:dev,
+# `build-runner.sh --target runner-opencode`) so an org on Claude Code pulls
+# none of it, and so every heavy layer above is shared on the build cache. The
+# dispatcher picks the image by the org's runtime (ADR-0015).
+FROM runner AS runner-opencode
+
+# Pinned, and bumped deliberately — the same discipline as the Agent SDK pin in
+# package.json. The npm package is a thin wrapper whose postinstall picks the
+# platform's prebuilt Bun binary (~185 MB on linux); the version check RUNS it,
+# so a wrong-architecture or wrong-libc pick fails this build, not a pod.
+# Bump it together with `@opencode-ai/sdk` in package.json, and re-check
+# `hiddenTools` (src/runtime/opencode/startup.ts): it is a port of this
+# version's `Permission.disabled`, and a drift there hides a tool silently.
+ARG OPENCODE_VERSION=1.18.32
+USER root
+RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" \
+    && test "$(opencode --version)" = "${OPENCODE_VERSION}"
+
+# The guard plugin, built from src/runtime/opencode/plugin/ by the same function
+# the tests load it through. A package DIRECTORY with one dependency-free
+# index.js: the binary imports it with its own Bun (it cannot see this image's
+# node_modules), and a bare-file plugin spec is skipped without a word. The
+# runtime passes this path in its config (runtime/opencode/runtime.ts,
+# OPENCODE_GUARD_DIR) and refuses a run whose plugin did not announce itself.
+RUN npx tsx src/runtime/opencode/plugin/build.ts /app/runtime/opencode/aep-guard \
+    && test -f /app/runtime/opencode/aep-guard/index.js \
+    && test -f /app/runtime/opencode/aep-guard/package.json \
+    && chmod -R a+rX /app/runtime
+
+# Pre-warm OpenCode's home AS THE USER A POD RUNS AS, by booting an instance
+# (the script says why a bare `serve` is not enough). Then assert the three
+# things a first start would otherwise fetch are on disk.
+USER aep
+COPY --chmod=0755 opencode-prewarm.sh /tmp/opencode-prewarm.sh
+RUN HOME=/home/aep /tmp/opencode-prewarm.sh \
+    && test -s /home/aep/.cache/opencode/models.json \
+    && test -x /home/aep/.cache/opencode/bin/rg \
+    && test -f /home/aep/.config/opencode/node_modules/@opencode-ai/plugin/package.json
+# The OPENCODE_DISABLE_* flags a pod needs are set by the runtime on the server
+# it starts (runtime/opencode/runtime.ts, childEnvironment), not here: that is
+# the one place that reaches every run, a host playground run included.
+
+# ─── The default target ─────────────────────────────────────────────────────
+# A build with no `--target` produces the LAST stage, and every path that builds
+# this file that way — release.yml, images.yml, ci.yml, local/run-local.sh —
+# means the Claude Code runner. This keeps it so; build-runner.sh names both of
+# its targets explicitly.
+FROM runner

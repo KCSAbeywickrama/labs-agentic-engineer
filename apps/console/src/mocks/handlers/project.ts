@@ -1,5 +1,6 @@
 import type { components } from "../../generated/aep-api";
 
+type AgentRuntime = components["schemas"]["AgentRuntime"];
 type ApiError = components["schemas"]["Error"];
 type ApplyRequest = components["schemas"]["ApplyRequest"];
 type ApplyResult = components["schemas"]["ApplyResult"];
@@ -126,6 +127,12 @@ function scenarioRuns(s: Exclude<ProjectScenario, "error">): MilestoneRunView[] 
   if (v) return validationRuns(v).runs ?? [];
   if (trackScenario() === "on-hold") return heldRun.runs ?? [];
   return projectBuildRuns[s].runs ?? [];
+}
+
+// aep:mock:runtime=opencode replays the run feed as an OpenCode run; anything
+// else is Claude Code.
+function mockRuntime(): AgentRuntime {
+  return localStorage.getItem("aep:mock:runtime") === "opencode" ? "opencode" : "claude-code";
 }
 
 function validationScenario(): ValidationScenario | null {
@@ -422,7 +429,7 @@ export const projectHandlers = [
           for (const cycle of run?.cycles ?? []) {
             if (request.signal.aborted) return controller.close();
             send(JSON.stringify({ type: "cycle", cycle }));
-            for (const event of runCycleEvents(cycle, seq)) {
+            for (const event of runCycleEvents(cycle, seq, mockRuntime())) {
               if (request.signal.aborted) return controller.close();
               send(
                 JSON.stringify({

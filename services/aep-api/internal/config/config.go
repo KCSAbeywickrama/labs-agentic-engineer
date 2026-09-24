@@ -247,6 +247,15 @@ type Config struct {
 	// a digest. Empty ⇒ dispatch is off and fails loudly.
 	AgentRunnerImage string
 
+	// AgentRunnerImageOpenCode is the runner image for an organization whose
+	// coding-agent runtime is OpenCode: the same Dockerfile's runner-opencode
+	// stage, which adds the pinned OpenCode binary on top of AgentRunnerImage's
+	// layers. Pinned at deploy time like AgentRunnerImage and for the same
+	// reason (no built-in default; compose defaults it to aep-runner-opencode:dev,
+	// Helm reads codingAgentRunner.opencodeImage). Empty ⇒ an OpenCode cycle's
+	// dispatch fails naming this setting; Claude Code orgs are unaffected.
+	AgentRunnerImageOpenCode string
+
 	// CodingAgentComponentRetention is how many finished coding-agent
 	// Components a project may keep (LRU reap before each create). Defaults
 	// to codingagent.DefaultCodingAgentComponentRetention (10). Override via
