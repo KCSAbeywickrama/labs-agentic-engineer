@@ -73,6 +73,11 @@ services, the raw connect-callback controller, and the S2S credentials-refresh.*
     the stored value. `AgentRuntimes` / `AgentModels` are pinned against the contract's enums.
   - A runtime is never substituted. `agents.model` is the one model every agent uses: the spec
     agents resolve it per turn, a coding run copies it at dispatch.
+  - Only a runtime the installation can run is selectable. `AgentSettingsService` is handed the
+    runnable set by the app root (Claude Code always, OpenCode when `AGENT_RUNNER_IMAGE_OPENCODE`
+    is set), projects it as `agents.availableRuntimes`, and `judgeCard` refuses a write NAMING
+    any other (`agents_runtime_unavailable`). An org already on a lost runtime still reads, saves
+    its model, and can move off it; its dispatches fail naming the missing image.
   - The `AgentModel` enum is the set the platform can PRICE: offering a model is a `model_rates` row
     and a contract change together (`modelcost.SumCost` is all-or-nothing per cycle).
   - `llm_disconnected_at` is the only trace of a disconnected key; projected as `llmDisconnectedAt`

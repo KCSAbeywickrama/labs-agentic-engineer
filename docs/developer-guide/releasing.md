@@ -25,14 +25,18 @@ architecture-independent are pinned to `$BUILDPLATFORM` so they run once,
 natively, instead of under QEMU — read the note in `services/aep-api/Dockerfile`
 before removing a pin. `remote-worker` is the notable exception: it installs a
 per-arch Go toolchain, Ballerina, and Playwright browsers, so its arm64 half
-genuinely is emulated and it is the slowest job in the release. One consequence:
+genuinely is emulated and it is the slowest job in the release, together with
+`remote-worker-opencode` (its `runner-opencode` target, the OpenCode runner),
+which rebuilds the same layers on its own runner, reading `remote-worker`'s
+cache. One consequence:
 chromium cannot run under QEMU, so the runner Dockerfile's browser smoke test
 runs only on native builds. The release asserts the arm64 image's browser
 launch nowhere; native arm64 builds (every Apple-silicon bring-up) do. The
 emulated arm64 build itself is exercised before a release by the `Images`
-workflow, which builds `remote-worker` for both platforms on its PR.
+workflow, which builds both runner images for both platforms on its PR.
 
-**Publish `remote-worker` before `aep-api`, and never the other way round.** The
+**Publish `remote-worker` (and `remote-worker-opencode`) before `aep-api`, and
+never the other way round.** The
 two speak a private contract (`packages/contracts/api/internal/v1`) that is
 versioned with this repo and deliberately not kept backward compatible, so a
 runner older than the aep-api dispatching it can reject the payload in its

@@ -94,9 +94,13 @@ ADR-0016, and OpenCode is the second runtime adapter
 ([`runners/remote-worker` ADR-0015](../../runners/remote-worker/design/decisions/ADR-0015-opencode-is-the-second-adapter.md)).
 Together they reshape this setting:
 
-- **Every `AgentRuntime` value is selectable.** A runtime enters the contract
-  with its adapter, so there is no separate "supported" list. Claude Code is the
-  default; OpenCode is opt-in per org.
+- **A runtime is selectable when the installation can run it.** A runtime
+  enters the contract with its adapter; whether it can run is the deployment's
+  answer, since each runtime has its own runner image. Claude Code, the
+  default, is always offered; OpenCode only when `AGENT_RUNNER_IMAGE_OPENCODE`
+  is set. `agents.availableRuntimes` on GET says which, and a save naming any
+  other runtime is refused on `body.agents` (`agents_runtime_unavailable`).
+  OpenCode is opt-in per org.
 - **`agents` is the section.** It carries `model`, `runtime` and the optional
   Claude subscription (`subscription`, masked on read, three-state on write),
   stored in `org_agent_settings`; the row's absence is the platform defaults.
@@ -113,5 +117,9 @@ Together they reshape this setting:
   transaction. Dispatch asks for the credential of the run's runtime.
 - **The runtime picks the runner image**, and the `job/coding-agent`
   ComponentType's `runtime` parameter labels the run's Job, pod, Component and
-  Workload `aep.wso2.com/runtime`. An OpenCode cycle on a platform with no
-  OpenCode image fails its dispatch naming the missing setting.
+  Workload `aep.wso2.com/runtime`. The release publishes both images and pins
+  both into the chart. An org already on OpenCode when the installation loses
+  its image keeps it: GET still answers with `runtime: opencode` beside an
+  `availableRuntimes` without it, a save that does not name the runtime is
+  accepted, the console marks the tile unavailable, and each dispatch fails
+  naming the missing setting. Never substituted, as above.

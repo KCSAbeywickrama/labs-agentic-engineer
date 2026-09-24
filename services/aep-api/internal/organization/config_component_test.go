@@ -53,6 +53,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
 	"github.com/wso2/aep/aep-api/internal/platform/contracttest"
 	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
+	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 )
 
@@ -183,6 +184,18 @@ func newConfigHarness(t *testing.T) *configHarness {
 // a GitHub App client id (for the connect-sessions authorize URL).
 func newConfigHarnessOpts(t *testing.T, thunder thundersvc.Client, appClientID string) *configHarness {
 	t.Helper()
+	return newConfigHarnessOn(t, thunder, appClientID, orgconfig.AgentRuntimes)
+}
+
+// newConfigHarnessRuntimes is newConfigHarness on an installation that runs
+// only runtimes — one deployed without a runtime's runner image.
+func newConfigHarnessRuntimes(t *testing.T, runtimes []orgconfig.AgentRuntime) *configHarness {
+	t.Helper()
+	return newConfigHarnessOn(t, nil, "", runtimes)
+}
+
+func newConfigHarnessOn(t *testing.T, thunder thundersvc.Client, appClientID string, runtimes []orgconfig.AgentRuntime) *configHarness {
+	t.Helper()
 	db := dbtest.New(t) // self-skips under -short
 	gh := newCfgFakeGH(t)
 	anth := newAnthropicFake(t)
@@ -207,7 +220,7 @@ func newConfigHarnessOpts(t *testing.T, thunder thundersvc.Client, appClientID s
 		organization.PlatformIDPConfig{Issuer: platformIss, JWKSURL: platformJWKS},
 		"http://localhost:8090", appClientID,
 	).WithAgentSettings(organization.NewAgentSettingsService(organization.NewOrgAgentSettingsRepository(db),
-		organization.NewOrganizationRepository(db), anthropicSvc, organization.NewAgentsCardRepository(db, store)))
+		organization.NewOrganizationRepository(db), anthropicSvc, organization.NewAgentsCardRepository(db, store), runtimes))
 
 	// The harness wires the DOMAIN, not a loose service: the edge embeds
 	// organization's handlers, so this assembles the same graph production does.

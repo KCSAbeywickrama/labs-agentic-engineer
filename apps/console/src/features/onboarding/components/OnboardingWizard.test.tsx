@@ -72,6 +72,7 @@ function config(over: Partial<ConfigProjection> = {}) {
     agents: {
       model: "claude-sonnet-5",
       runtime: "claude-code",
+      availableRuntimes: ["claude-code", "opencode"],
       subscription: null,
       updatedAt: null,
       updatedBy: null,

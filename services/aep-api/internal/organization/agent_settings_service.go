@@ -45,25 +45,33 @@ type AgentSettingsService struct {
 	orgs     OrganizationRepository
 	creds    *AnthropicCredentialService
 	card     AgentsCardRepository
+	runtimes []orgconfig.AgentRuntime
 	now      func() time.Time
 }
 
 // NewAgentSettingsService wires the service. creds validates, reads and mirrors
-// the credentials; card is the unit of work the saves run in.
+// the credentials; card is the unit of work the saves run in; runtimes are the
+// runtimes this installation can run (a runner image for each), the only ones a
+// save may choose.
 func NewAgentSettingsService(
 	settings OrgAgentSettingsRepository,
 	orgs OrganizationRepository,
 	creds *AnthropicCredentialService,
 	card AgentsCardRepository,
+	runtimes []orgconfig.AgentRuntime,
 ) *AgentSettingsService {
-	return &AgentSettingsService{settings: settings, orgs: orgs, creds: creds, card: card, now: time.Now}
+	return &AgentSettingsService{settings: settings, orgs: orgs, creds: creds, card: card, runtimes: runtimes, now: time.Now}
 }
 
 // Effective returns how the org's agents run: its chosen model and runtime (or
-// the platform defaults when nobody chose), and its Claude subscription, masked,
-// when it has one. Never an error for "not set": the defaults ARE the answer.
+// the platform defaults when nobody chose), the runtimes this installation can
+// run, and its Claude subscription, masked, when it has one. Never an error for
+// "not set": the defaults ARE the answer. A chosen runtime the installation can
+// no longer run is returned as chosen, never substituted: dispatch fails naming
+// the missing image, and the projection is what lets a client say why.
 func (s *AgentSettingsService) Effective(ctx context.Context, ocOrgID string) (orgconfig.AgentsProjection, error) {
 	out := orgconfig.DefaultAgents()
+	out.AvailableRuntimes = append([]orgconfig.AgentRuntime{}, s.runtimes...) // [] on the wire, never null
 	row, err := s.settings.GetByOrg(ctx, ocOrgID)
 	if err != nil {
 		return orgconfig.AgentsProjection{}, fmt.Errorf("agent settings: %w", err)
@@ -117,7 +125,7 @@ func (s *AgentSettingsService) probe(ctx context.Context, ocOrgID string, p orgc
 	if err != nil {
 		return err
 	}
-	eff, err := judgeCard(state, p)
+	eff, err := judgeCard(state, s.runtimes, p)
 	if err != nil {
 		return err
 	}
@@ -152,7 +160,7 @@ func (s *AgentSettingsService) apply(ctx context.Context, ocOrgID, actor string,
 		if err != nil {
 			return err
 		}
-		if eff, err = judgeCard(state, p); err != nil {
+		if eff, err = judgeCard(state, s.runtimes, p); err != nil {
 			return err
 		}
 		// Deletes first: the token goes before the key it sits beside.

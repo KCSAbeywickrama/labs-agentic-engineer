@@ -60,6 +60,7 @@ const subscription: SubscriptionProjection = {
 
 const defaultAgents: ConfigProjection["agents"] = {
   runtime: "claude-code",
+  availableRuntimes: ["claude-code", "opencode"],
   model: "claude-sonnet-5",
   subscription: null,
   updatedAt: null,
@@ -317,6 +318,40 @@ describe("AiAgentsCard", () => {
     });
   });
 
+  describe("on an installation without OpenCode", () => {
+    const claudeCodeOnly = { ...defaultAgents, availableRuntimes: ["claude-code" as const] };
+
+    it("disables the OpenCode tile and says why", () => {
+      renderCard(config({ agents: claudeCodeOnly }));
+
+      expect(radio(/OpenCode/)).toBeDisabled();
+      expect(radio(/OpenCode/)).not.toBeChecked();
+      expect(screen.getByText("Not available on this installation.")).toBeInTheDocument();
+      expect(radio(/Claude Code/)).toBeEnabled();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("says an org already on OpenCode has every coding run failing, and lets it move", () => {
+      renderCard(config({ agents: { ...claudeCodeOnly, runtime: "opencode" } }));
+
+      expect(radio(/OpenCode/)).toBeChecked();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "OpenCode is not available on this installation, so every coding run fails.",
+      );
+
+      fireEvent.click(radio(/Claude Code/));
+      fireEvent.click(saveButton());
+      expect(lastPatch()).toEqual({ agents: { runtime: "claude-code" } });
+    });
+
+    it("still saves a model change without restating the runtime", () => {
+      renderCard(config({ agents: { ...claudeCodeOnly, runtime: "opencode" } }));
+      chooseModel("Claude Haiku 4.5");
+      fireEvent.click(saveButton());
+      expect(lastPatch()).toEqual({ agents: { model: "claude-haiku-4-5" } });
+    });
+  });
+
   describe("a refused save", () => {
     it("shows a rejected API key on the key field", () => {
       saveState.isError = true;
@@ -350,6 +385,23 @@ describe("AiAgentsCard", () => {
 
       expect(screen.getByLabelText("Subscription token")).toHaveAccessibleDescription(
         "the token was rejected by Anthropic",
+      );
+    });
+
+    it("shows an unavailable runtime beside the coding agents", () => {
+      saveState.isError = true;
+      saveState.error = new ApiRequestError(
+        {
+          code: "agents_runtime_unavailable",
+          message: 'runtime "opencode" is not available on this installation',
+          details: [{ field: "body.agents", message: "unavailable" }],
+        },
+        "fallback",
+      );
+      renderCard();
+
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        'runtime "opencode" is not available on this installation',
       );
     });
 

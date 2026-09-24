@@ -164,7 +164,8 @@ The runtime also picks the image: `AGENT_RUNNER_IMAGE` for Claude Code,
 `AGENT_RUNNER_IMAGE_OPENCODE` for OpenCode (two tags from one Dockerfile). Neither
 has a built-in default; an OpenCode cycle with no OpenCode image fails its
 dispatch naming the variable rather than starting on an image with no OpenCode
-binary. The dispatcher stamps the same runtime as the Component's `runtime`
+binary. Such an installation does not offer OpenCode on `/config` either, so
+only an org that chose it before the image went missing reaches this failure. The dispatcher stamps the same runtime as the Component's `runtime`
 parameter and as the `aep.wso2.com/runtime` label on the Component and Workload.
 Which credential it mounts is the organization domain's answer for the run's
 runtime (`ResolveCodingSecretRef`): an OpenCode run is always handed the API key

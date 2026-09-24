@@ -551,8 +551,10 @@ into the runner pod at `/app/skills` for live skill edits (see
   guard plugin at `/app/runtime/opencode/aep-guard`, and a home pre-warmed by
   BOOTING an instance at build time so a pod never reaches npm, GitHub or
   models.dev — `opencode-prewarm.sh`). The file ends in a bare `FROM runner` so
-  every build that names no target (release.yml, images.yml, ci.yml,
-  `local/run-local.sh`) still produces the Claude Code image. It is Debian-based
+  every build that names no target (ci.yml, `local/run-local.sh`, the
+  `remote-worker` rows of release.yml and images.yml) still produces the Claude
+  Code image; the `remote-worker-opencode` rows name `runner-opencode`, and the
+  release pins it into the chart's `codingAgentRunner.opencodeImage`. It is Debian-based
   because Playwright's browsers are glibc-linked; do not reintroduce a slimmer
   image without moving the Helm/compose/release/`AGENT_RUNNER_IMAGE` consumers
   with it. Build + k3d-import BOTH locally with `make build-runner`.
