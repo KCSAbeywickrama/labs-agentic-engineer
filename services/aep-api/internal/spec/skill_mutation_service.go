@@ -35,13 +35,13 @@ var (
 	// ErrSkillNameCollision is returned when a create reuses a visible name.
 	ErrSkillNameCollision = errors.New("skill name already in use")
 	// ErrSkillRequired is returned when a PATCH tries to disable a skill the
-	// coding runner cannot start without. See RequiredSkills.
-	ErrSkillRequired = errors.New("skill is required by every coding run and cannot be disabled")
+	// runner cannot start without. See RequiredSkills.
+	ErrSkillRequired = errors.New("skill is a run workflow the runner cannot start without, and cannot be disabled")
 )
 
-// RequiredSkills names the skills the coding runner reads out of the project
-// mirror on EVERY run, whatever the design pinned: each is one task kind's whole
-// procedure — `aep` for a coding run, `validation-task` for a validation run.
+// RequiredSkills names the workflow skills the runner reads out of the project
+// mirror whatever the design pinned — `aep` on every coding run,
+// `validation-task` on every validation run.
 //
 // Availability is deliberately not gated on `editable` — an org admin may
 // withhold a read-only platform skill from their own library, and that is the
