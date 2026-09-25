@@ -58,7 +58,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { startCodingRun } from "./lib/runner.js";
+import { implementationSkills, startCodingRun } from "./lib/runner.js";
 import { openTaskLog } from "./lib/logger.js";
 import type { DispatchRequest } from "./lib/types.js";
 import type { WorkspaceLayout } from "./lib/workspace.js";
@@ -204,9 +204,10 @@ async function main(): Promise<number> {
     if (dangling.length > 0) {
       console.warn(`[local] ⚠️  pinned skill(s) missing from .claude/skills/ — proceeding without them: ${dangling.join(", ")}`);
     }
-    // The whole mirror is allowed (the SDK rejects anything unlisted); the
-    // pinned subset additionally rides in on the system prompt.
-    availableSkillNames = await listMirroredSkills(run.projectDir);
+    // The whole mirror but the validation workflow is allowed (the SDK rejects
+    // anything unlisted); the pinned subset additionally rides in on the system
+    // prompt.
+    availableSkillNames = implementationSkills(await listMirroredSkills(run.projectDir));
     pinnedBodies = await readSkillBodies(run.projectDir, present);
     pinnedSkillNames = present;
   } catch (err) {
