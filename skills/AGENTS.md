@@ -170,7 +170,7 @@ build reads.
   rebase. So `validation-task` restates the few rails it shares with `aep` in
   the form a validation run obeys, and that restatement is deliberate, not the
   duplication the rules below forbid: the rules differ. Nothing about validation
-  belongs in `aep` (runner ADR-0017).
+  belongs in `aep` (ADR-0037).
 - **`aep` is the umbrella**, and it is split by reader. `SKILL.md` is the **run**
   (start the cycle → work the issues → finish) and only the lead ever reads it.
   The platform contract every component obeys — App Path, port, config + error

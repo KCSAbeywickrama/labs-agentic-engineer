@@ -1,7 +1,7 @@
-# ADR-0017 — A validation run reads one workflow, and a coding run never sees it
+# ADR-0037 — A validation run reads one workflow, and a coding run never sees it
 
-**Status:** Accepted. Amends the always-on clause of
-[ADR-0005](ADR-0005-the-workflow-rides-the-project-mirror.md).
+**Status:** Accepted · 2026-09-25 · **Amends** the always-on clause of the
+runner's [ADR-0005](../../runners/remote-worker/design/decisions/ADR-0005-the-workflow-rides-the-project-mirror.md).
 
 A validation run preloaded two workflow bodies: `aep` and `acceptance-run`. A
 callout in `aep` said the validation skill "REPLACES **The run** below …

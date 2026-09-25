@@ -233,7 +233,7 @@ export const VALIDATION_WORKFLOW_SKILL = "validation-task";
  * touch a validation issue, a PR must say `Resolves`, force-push only during a
  * conflict rebase), leaving the agent to arbitrate between two procedures. So
  * `validation-task` restates the few rails it shares with `aep`, in the form a
- * validation run obeys (ADR-0017).
+ * validation run obeys (ADR-0037).
  *
  * Everything else a component needs is a `skillsPinned` entry in its
  * `design.json`, and that is the design's call. This list is not: no design

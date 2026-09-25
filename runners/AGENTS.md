@@ -397,7 +397,7 @@ into the runner pod at `/app/skills` for live skill edits (see
   reads it out of the mirror and appends it to the `claude_code` preset. The two
   are not layered: a validation run once preloaded `aep` beneath its own
   workflow, and `aep`'s rules contradicted it on the very issue it was working
-  (ADR-0017). Everything else a component needs
+  (ADR-0037). Everything else a component needs
   is a `skillsPinned` entry someone put in a `design.json` — but no design decides
   whether a run follows its workflow. `agent-browser` is
   deliberately NOT always-on: `validation-task` names it, and mechanics a run may
