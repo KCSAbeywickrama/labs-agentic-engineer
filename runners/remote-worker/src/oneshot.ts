@@ -41,7 +41,7 @@ import { emit, primeScrubber } from "./lib/progress/emitter.js";
 import { PROVISIONING, WORKSPACE_READY } from "./lib/progress/lifecycle.js";
 import { installLogRedaction } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
-import { listMirroredSkills, readSkillBodies, resolveSkillPresence } from "./lib/skills_presence.js";
+import { readSkillBodies, resolveSkillPresence } from "./lib/skills_presence.js";
 import { ClientCredentialsTokenProvider } from "./lib/oauth.js";
 import {
   fetchValidationContext,
@@ -344,11 +344,10 @@ async function main(): Promise<number> {
         `[oneshot] ⚠️  ${dangling.length} pinned skill(s) missing from .claude/skills/ — proceeding without them: ${dangling.join(", ")}`,
       );
     }
-    // Every mirrored skill but the validation workflow is allowed — the SDK's
     // `skills:` is an allowlist, so anything omitted here cannot be invoked at
     // all. The pinned subset also goes into the system prompt, which is the only
     // thing that actually preloads guidance.
-    availableSkillNames = implementationSkills(await listMirroredSkills(layout.workspace));
+    availableSkillNames = await implementationSkills(layout.workspace);
     pinnedBodies = await readSkillBodies(layout.workspace, present);
     pinnedSkillNames = present;
   }

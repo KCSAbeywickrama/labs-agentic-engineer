@@ -608,19 +608,14 @@ type dispatchShape struct {
 	validationIssue int
 }
 
-// buildValidationPrompt is the validation-runner directive: the validation
-// issue and nothing else, mirroring buildPrompt. The runner preloads the
-// `validation-task` skill because AEP_TASK_KIND=validation, and that skill is the
-// whole procedure — the report, the branch and the PR contract (`Validates #N`,
-// never a closing keyword) — so it versions with the skill rather than with the
-// BFF binary, and the agent never reads two statements of it that can disagree.
+// buildValidationPrompt is the validation-runner directive, mirroring
+// buildPrompt: it names the issue, and the preloaded `validation-task` skill is
+// the procedure.
 //
 // It names NO milestone, and that is load-bearing: a validation cycle is
 // issue-anchored — one issue, one run — where a coding prompt's milestone
-// reference is an instruction to discover a whole working set. The skill still
-// needs the milestone for its branch identity (the platform keys a merged pull
-// request back to its run by an `aep/m<milestone#>-…` branch); it reads it off
-// the issue, which is filed under that milestone at mint time.
+// reference is an instruction to discover a whole working set. The skill reads
+// the milestone off the issue for its branch identity.
 func buildValidationPrompt(issueURL string) string {
 	return fmt.Sprintf("This is a validation task. Work on this GitHub validation issue: %s\n\nFollow the `validation-task` skill loaded in your session — it defines the run, the report and the PR contract.", issueURL)
 }

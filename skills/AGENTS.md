@@ -163,14 +163,11 @@ build reads.
 ## Who owns what
 
 - **Each run reads exactly one workflow skill.** `aep` is a coding run's,
-  `validation-task` a validation run's, and neither is layered on the other. A
-  validation run once preloaded `aep` under its own workflow with "everything
-  else still applies", and everything else contradicted it — never touch a
-  validation issue, a PR must say `Resolves`, force-push only in a conflict
-  rebase. So `validation-task` restates the few rails it shares with `aep` in
-  the form a validation run obeys, and that restatement is deliberate, not the
-  duplication the rules below forbid: the rules differ. Nothing about validation
-  belongs in `aep` (ADR-0037).
+  `validation-task` a validation run's, and neither is layered on the other.
+  `validation-task` restates the few rails it shares with `aep` in the form a
+  validation run obeys; that is deliberate, not the duplication the rules below
+  forbid, because the rules differ. Nothing about validation belongs in `aep`
+  (ADR-0037).
 - **`aep` is the umbrella**, and it is split by reader. `SKILL.md` is the **run**
   (start the cycle → work the issues → finish) and only the lead ever reads it.
   The platform contract every component obeys — App Path, port, config + error

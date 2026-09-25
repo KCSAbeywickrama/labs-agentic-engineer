@@ -53,7 +53,7 @@ import { stagedSecretValues, webSearchDenial } from "./websearch_dlp.js";
 import { allowsWriteOutsideProject } from "./workspace_guard.js";
 import { staticTokenSource, type AccessTokenSource } from "./auth_retry.js";
 import { webFetchDenial } from "./webfetch_guard.js";
-import { SKILLS_MIRROR_DIR, requireWorkflowBodies } from "./skills_presence.js";
+import { SKILLS_MIRROR_DIR, listMirroredSkills, requireWorkflowBodies } from "./skills_presence.js";
 import { skillsNotice, writePromptAppendix } from "./run_context.js";
 import {
   DENIED_CAPABILITIES,
@@ -216,24 +216,15 @@ export interface McpAuthOpts {
   canRefresh: boolean;
 }
 
-/**
- * The validation run's whole procedure, and the one mirrored skill a coding run
- * must not see. Named once because both sides of that sentence read it.
- */
+/** The validation run's workflow skill. */
 export const VALIDATION_WORKFLOW_SKILL = "validation-task";
 
 /**
  * The skills a run is steered by whatever its design says — read from the mirror
  * like every other skill, but not optional and not the design's to choose.
  *
- * Exactly one per task kind: `aep` for a coding run, `validation-task` for a
- * validation run. They are not layered. `aep` was once preloaded under the
- * validation workflow with a note that the latter replaced its run section and
- * "everything else still applies" — and everything else contradicted it (never
- * touch a validation issue, a PR must say `Resolves`, force-push only during a
- * conflict rebase), leaving the agent to arbitrate between two procedures. So
- * `validation-task` restates the few rails it shares with `aep`, in the form a
- * validation run obeys (ADR-0037).
+ * Exactly one per task kind, never layered: `aep` for a coding run,
+ * `validation-task` for a validation run (ADR-0037).
  *
  * Everything else a component needs is a `skillsPinned` entry in its
  * `design.json`, and that is the design's call. This list is not: no design
@@ -271,18 +262,12 @@ export function onDemandSkills(taskKind: DispatchRequest["taskKind"]): string[] 
 }
 
 /**
- * An implementation run's allowlist: the whole mirror, minus the validation
- * workflow.
- *
- * The whole mirror because the BFF already decided what this build may use, and
- * a mirrored skill left off the allowlist is an inert file (see PerTaskSkills).
- * Minus `validation-task` because the mirror cannot leave it out: `audience`
- * says only `design` or `coding`, and both task kinds read the one project
- * mirror. Listed, it sits in every coding run's catalog as a procedure the run
- * could load and must never follow.
+ * An implementation run's allowlist: the whole mirror (see PerTaskSkills) minus
+ * the validation workflow, which rides the same mirror because `audience`
+ * cannot say "validation only" (ADR-0037).
  */
-export function implementationSkills(mirrored: string[]): string[] {
-  return mirrored.filter((name) => name !== VALIDATION_WORKFLOW_SKILL);
+export async function implementationSkills(workspace: string): Promise<string[]> {
+  return (await listMirroredSkills(workspace)).filter((name) => name !== VALIDATION_WORKFLOW_SKILL);
 }
 
 /**

@@ -66,7 +66,7 @@ import { emit, primeScrubber } from "./lib/progress/emitter.js";
 import { PROVISIONING, WORKSPACE_READY } from "./lib/progress/lifecycle.js";
 import { installLogRedaction } from "./lib/progress/console_scrub.js";
 import { resolveTaskSkills } from "./lib/skills_resolver.js";
-import { listMirroredSkills, readSkillBodies, resolveSkillPresence } from "./lib/skills_presence.js";
+import { readSkillBodies, resolveSkillPresence } from "./lib/skills_presence.js";
 import { mirrorLocalSkillLibrary } from "./lib/local_skill_mirror.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -204,10 +204,9 @@ async function main(): Promise<number> {
     if (dangling.length > 0) {
       console.warn(`[local] ⚠️  pinned skill(s) missing from .claude/skills/ — proceeding without them: ${dangling.join(", ")}`);
     }
-    // The whole mirror but the validation workflow is allowed (the SDK rejects
-    // anything unlisted); the pinned subset additionally rides in on the system
-    // prompt.
-    availableSkillNames = implementationSkills(await listMirroredSkills(run.projectDir));
+    // The SDK rejects anything unlisted; the pinned subset additionally rides in
+    // on the system prompt.
+    availableSkillNames = await implementationSkills(run.projectDir);
     pinnedBodies = await readSkillBodies(run.projectDir, present);
     pinnedSkillNames = present;
   } catch (err) {

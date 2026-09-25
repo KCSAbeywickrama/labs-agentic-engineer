@@ -45,9 +45,7 @@ import type { DispatchRequest } from "./types.js";
 
 // Every other skill a build reads is a `skillsPinned` entry someone put in a
 // design.json. This list is not: no design decides whether a run follows its
-// workflow. And each task kind has exactly ONE — a validation run preloading
-// `aep` under its own workflow is what left the agent arbitrating between two
-// procedures that disagreed about the very issue it was working.
+// workflow, and each task kind has exactly one (ADR-0037).
 test("alwaysOnSkills: each task kind is steered by exactly one workflow", () => {
   assert.deepEqual(alwaysOnSkills("implementation"), ["aep"]);
   assert.deepEqual(alwaysOnSkills("validation"), ["validation-task"]);
@@ -76,15 +74,19 @@ test("onDemandSkills: an implementation run names nothing", () => {
   assert.deepEqual(onDemandSkills("implementation"), []);
 });
 
-// Both task kinds read the one project mirror, so the validation workflow is in
-// every coding run's checkout. Allowed, it would sit in the catalog as a
-// procedure the coding agent could load; everything else stays allowed.
-test("implementationSkills: the whole mirror but the validation workflow", () => {
-  assert.deepEqual(implementationSkills(["aep", "go", "validation-task", "agent-browser"]), [
-    "aep",
-    "go",
-    "agent-browser",
-  ]);
+// Both task kinds read the one project mirror, so a coding run must drop the
+// validation workflow from it and keep everything else.
+test("implementationSkills: the whole mirror but the validation workflow", async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "aep-mirror-"));
+  try {
+    for (const name of ["aep", "go", "validation-task", "agent-browser"]) {
+      fs.mkdirSync(path.join(workspace, ".claude", "skills", name), { recursive: true });
+      fs.writeFileSync(path.join(workspace, ".claude", "skills", name, "SKILL.md"), `# ${name}\n`);
+    }
+    assert.deepEqual(await implementationSkills(workspace), ["aep", "agent-browser", "go"]);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
 });
 
 // --- requireWorkflowBodies: a run with no procedure must not start -----------

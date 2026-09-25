@@ -297,9 +297,7 @@ func TestEnsureValidationIssue_CreatesFormattedIssue(t *testing.T) {
 			t.Errorf("body missing %q", want)
 		}
 	}
-	// The procedure is the skill's. A body is never rewritten on reopen, so a
-	// checker path or a PR contract copied here outlives any change to the skill
-	// — and the agent reads two statements of one rule that can disagree.
+	// The procedure is the skill's (ADR-0037).
 	for _, banned := range []string{"check-report", "Validates #", "summary comment"} {
 		if strings.Contains(got.Body, banned) {
 			t.Errorf("the body restates the skill's procedure (%q):\n%s", banned, got.Body)

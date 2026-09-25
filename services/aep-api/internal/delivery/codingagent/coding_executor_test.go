@@ -125,9 +125,7 @@ func TestBuildPrompt_IsAMilestoneReferenceOnly(t *testing.T) {
 
 // TestBuildValidationPrompt_StaysIssueAnchored pins the other half of §9: the
 // validation cycle stays issue-anchored — one validation issue, one run — and,
-// like the coding prompt, defers every step to its skill. The PR contract
-// (`Validates #N`, never a closing keyword) is the skill's to state: a copy here
-// would version with the BFF binary and could disagree with it.
+// like the coding prompt, defers every step to its skill.
 func TestBuildValidationPrompt_StaysIssueAnchored(t *testing.T) {
 	got := buildValidationPrompt("https://github.com/acme/widgets/issues/9")
 

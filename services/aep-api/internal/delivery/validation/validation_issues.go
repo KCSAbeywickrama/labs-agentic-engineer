@@ -286,12 +286,8 @@ func plural(n int, noun string) string {
 }
 
 // renderScope builds the human markdown body of the validation issue — the
-// task's inputs, for the validation-task skill and for a person reading the
-// issue. The procedure is not here: the report checker, the summary comment and
-// the `Validates #N` PR contract are the skill's, which the runner preloads, and
-// a copy in a body that is never rewritten on reopen would outlive any change to
-// them. Deployed endpoints and test
-// credentials are deliberately absent: the runner fetches endpoints from the
+// task's inputs. The procedure is the validation-task skill's (ADR-0037).
+// Deployed endpoints and test credentials are deliberately absent: the runner fetches endpoints from the
 // secure validation-context endpoint, and the agent reads a test user's login
 // from the roles gate ticket in this same milestone. Mirrors
 // scripts/create-validation-issue.mjs renderBody minus the Deployed-endpoints
