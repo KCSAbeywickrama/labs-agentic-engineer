@@ -24,16 +24,20 @@
 //   - one Save is one unit of work: a failure anywhere writes nothing;
 //   - the one rule — a subscription needs Claude Code and an API key — and the
 //     deletions that follow from it (OpenCode, disconnect, reset);
-//   - the refusals, each on its section with its own code.
+//   - the refusals, each on its section with its own code;
+//   - only a runtime the installation can run is selectable, and an org
+//     already on one it lost still reads and saves.
 package organization_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/wso2/aep/aep-api/internal/organization"
+	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 )
 
 const goodToken = "sk-ant-oat01-CONFIGsubscriptionTokenABCDEFGH"
@@ -98,6 +102,58 @@ func TestConfigAgents_FreshOrgReadsTheDefaults(t *testing.T) {
 		if !present || v != nil {
 			t.Fatalf("%s must be present and null on a fresh org: %v", k, a)
 		}
+	}
+	if got := fmt.Sprint(a["availableRuntimes"]); got != "[claude-code opencode]" {
+		t.Fatalf("availableRuntimes = %s, want both runtimes on an installation with both images", got)
+	}
+}
+
+// An installation deployed without the OpenCode runner image says so on GET and
+// refuses a save choosing OpenCode, writing nothing: accepted, it would fail
+// every coding dispatch after it.
+func TestConfigAgents_AnInstallationWithoutOpenCodeRefusesIt(t *testing.T) {
+	t.Parallel()
+	c := newConfigHarnessRuntimes(t, []orgconfig.AgentRuntime{orgconfig.AgentRuntimeClaudeCode})
+
+	a := agentsOf(t, c.h.AsOrg("acme").Get(configPath).Body.Bytes())
+	if got := fmt.Sprint(a["availableRuntimes"]); got != "[claude-code]" {
+		t.Fatalf("availableRuntimes = %s, want [claude-code]", got)
+	}
+
+	resp := c.h.AsOrg("acme").Patch(configPath, `{"agents":{"runtime":"opencode"}}`)
+	refused(t, resp.Code, resp.Body.String(), "agents", "agents_runtime_unavailable")
+	if _, settings, _ := c.cardRows(t, "acme"); settings != 0 {
+		t.Fatalf("a refused runtime left a setting row")
+	}
+}
+
+// An org that chose OpenCode before the installation lost its image: GET still
+// answers, naming the runtime it chose (never substituted) beside the runtimes
+// on offer, and the org can change its model or move to Claude Code.
+func TestConfigAgents_AnOrgOnALostRuntimeStillReadsAndSaves(t *testing.T) {
+	t.Parallel()
+	c := newConfigHarnessRuntimes(t, []orgconfig.AgentRuntime{orgconfig.AgentRuntimeClaudeCode})
+	if err := c.db.Exec(`INSERT INTO org_agent_settings (oc_org_id, runtime, model, updated_by, updated_at)
+		VALUES ('acme', 'opencode', 'claude-sonnet-5', 'ada', now())`).Error; err != nil {
+		t.Fatalf("seed an org on OpenCode: %v", err)
+	}
+
+	resp := c.h.AsOrg("acme").Get(configPath)
+	if resp.Code != 200 {
+		t.Fatalf("get: %d %s", resp.Code, resp.Body.String())
+	}
+	a := agentsOf(t, resp.Body.Bytes())
+	if a["runtime"] != "opencode" || fmt.Sprint(a["availableRuntimes"]) != "[claude-code]" {
+		t.Fatalf("agents = %v, want runtime opencode beside availableRuntimes [claude-code]", a)
+	}
+
+	resp = c.h.AsOrg("acme").Patch(configPath, `{"agents":{"model":"claude-haiku-4-5"}}`)
+	if resp.Code != 200 {
+		t.Fatalf("a model-only save was refused over the lost runtime: %d %s", resp.Code, resp.Body.String())
+	}
+	resp = c.h.AsOrg("acme").Patch(configPath, `{"agents":{"runtime":"claude-code"}}`)
+	if resp.Code != 200 || agentsOf(t, resp.Body.Bytes())["runtime"] != "claude-code" {
+		t.Fatalf("moving to Claude Code: %d %s", resp.Code, resp.Body.String())
 	}
 }
 

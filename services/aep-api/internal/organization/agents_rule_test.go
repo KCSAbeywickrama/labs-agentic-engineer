@@ -51,9 +51,21 @@ func onRuntime(r orgconfig.AgentRuntime) *OrgAgentSettings {
 	return &OrgAgentSettings{Runtime: r, Model: orgconfig.DefaultAgentModel}
 }
 
+// everyRuntime is an installation with a runner image for every runtime, the
+// one every rule below is judged on unless it says otherwise.
+var everyRuntime = orgconfig.AgentRuntimes
+
+// claudeCodeOnly is an installation deployed without the OpenCode image.
+var claudeCodeOnly = []orgconfig.AgentRuntime{orgconfig.AgentRuntimeClaudeCode}
+
 func mustJudge(t *testing.T, s cardState, p orgconfig.ConfigPatch) cardEffects {
 	t.Helper()
-	eff, err := judgeCard(s, p)
+	return mustJudgeOn(t, everyRuntime, s, p)
+}
+
+func mustJudgeOn(t *testing.T, runtimes []orgconfig.AgentRuntime, s cardState, p orgconfig.ConfigPatch) cardEffects {
+	t.Helper()
+	eff, err := judgeCard(s, runtimes, p)
 	if err != nil {
 		t.Fatalf("judgeCard refused: %v", err)
 	}
@@ -63,7 +75,13 @@ func mustJudge(t *testing.T, s cardState, p orgconfig.ConfigPatch) cardEffects {
 // refusal asserts judgeCard refused p on body.<section> with code.
 func refusal(t *testing.T, s cardState, p orgconfig.ConfigPatch, section, code string) {
 	t.Helper()
-	_, err := judgeCard(s, p)
+	refusalOn(t, everyRuntime, s, p, section, code)
+}
+
+// refusalOn is refusal on an installation that runs runtimes.
+func refusalOn(t *testing.T, runtimes []orgconfig.AgentRuntime, s cardState, p orgconfig.ConfigPatch, section, code string) *SectionError {
+	t.Helper()
+	_, err := judgeCard(s, runtimes, p)
 	var se *SectionError
 	if !errors.As(err, &se) {
 		t.Fatalf("judgeCard = %v, want a SectionError", err)
@@ -71,6 +89,7 @@ func refusal(t *testing.T, s cardState, p orgconfig.ConfigPatch, section, code s
 	if se.Section != section || se.Code != code {
 		t.Fatalf("refused on body.%s (%s), want body.%s (%s): %s", se.Section, se.Code, section, code, se.Message)
 	}
+	return se
 }
 
 func TestJudgeCard_SubscriptionNeedsClaudeCode(t *testing.T) {
@@ -121,6 +140,40 @@ func TestJudgeCard_OpenCodeDeletesTheToken(t *testing.T) {
 	}
 }
 
+// A runtime this installation has no runner image for is refused when a save
+// names it: accepted, it would fail every coding dispatch after it.
+func TestJudgeCard_AnUnavailableRuntimeIsRefused(t *testing.T) {
+	se := refusalOn(t, claudeCodeOnly, cardState{hasKey: true},
+		orgconfig.ConfigPatch{Agents: agentsWrite("opencode", "", patch.Field[orgconfig.SubscriptionWrite]{})},
+		"agents", "agents_runtime_unavailable")
+	if !strings.Contains(se.Message, "claude-code") {
+		t.Errorf("message %q does not say what IS available", se.Message)
+	}
+	// Refused before anything else it would do: the stored token stays.
+	refusalOn(t, claudeCodeOnly, cardState{hasKey: true, hasToken: true},
+		orgconfig.ConfigPatch{Agents: agentsWrite("opencode", "", patch.Field[orgconfig.SubscriptionWrite]{})},
+		"agents", "agents_runtime_unavailable")
+}
+
+// An org already on a runtime the installation lost can still save the rest of
+// the card: the runtime it did not name is kept, never substituted.
+func TestJudgeCard_AnUnnamedUnavailableRuntimeIsKept(t *testing.T) {
+	eff, err := judgeCard(cardState{hasKey: true, settings: onRuntime("opencode")}, claudeCodeOnly,
+		orgconfig.ConfigPatch{Agents: agentsWrite("", "claude-haiku-4-5", patch.Field[orgconfig.SubscriptionWrite]{})})
+	if err != nil {
+		t.Fatalf("a model-only save was refused over a runtime it did not name: %v", err)
+	}
+	if eff.settings == nil || eff.settings.Runtime != "opencode" || eff.settings.Model != "claude-haiku-4-5" {
+		t.Fatalf("settings = %+v, want the model changed and the runtime kept", eff.settings)
+	}
+	// And moving off it is always possible.
+	eff = mustJudgeOn(t, claudeCodeOnly, cardState{settings: onRuntime("opencode")},
+		orgconfig.ConfigPatch{Agents: agentsWrite("claude-code", "", patch.Field[orgconfig.SubscriptionWrite]{})})
+	if eff.settings == nil || eff.settings.Runtime != "claude-code" {
+		t.Fatalf("settings = %+v, want claude-code", eff.settings)
+	}
+}
+
 func TestJudgeCard_DisconnectCascadesToTheToken(t *testing.T) {
 	eff := mustJudge(t, cardState{hasKey: true, hasToken: true}, orgconfig.ConfigPatch{LLM: null[orgconfig.LLMWrite]()})
 	if !eff.deleteKey || !eff.deleteToken {
@@ -163,7 +216,7 @@ func TestJudgeCard_AModelChangeKeepsTheToken(t *testing.T) {
 func TestJudgeCard_UnknownValuesAreRefusedByName(t *testing.T) {
 	refusal(t, cardState{}, orgconfig.ConfigPatch{Agents: agentsWrite("cursor", "", patch.Field[orgconfig.SubscriptionWrite]{})},
 		"agents", "agents_runtime_unknown")
-	_, err := judgeCard(cardState{}, orgconfig.ConfigPatch{Agents: agentsWrite("", "claude-opus-5", patch.Field[orgconfig.SubscriptionWrite]{})})
+	_, err := judgeCard(cardState{}, everyRuntime, orgconfig.ConfigPatch{Agents: agentsWrite("", "claude-opus-5", patch.Field[orgconfig.SubscriptionWrite]{})})
 	var se *SectionError
 	if !errors.As(err, &se) || se.Code != "agents_model_unknown" {
 		t.Fatalf("judgeCard(claude-opus-5) = %v, want agents_model_unknown", err)
@@ -184,7 +237,7 @@ func (failingSettingsRepo) GetByOrg(context.Context, string) (*OrgAgentSettings,
 // a run on a model the org may have moved off, and bill it, without ever saying
 // so — see the dispatcher's codingAgentEnv for the other half of this rule.
 func TestAgentSettings_AReadFailureIsAnErrorNotTheDefaults(t *testing.T) {
-	svc := NewAgentSettingsService(failingSettingsRepo{}, nil, nil, nil)
+	svc := NewAgentSettingsService(failingSettingsRepo{}, nil, nil, nil, everyRuntime)
 	if _, err := svc.Effective(context.Background(), "acme"); err == nil {
 		t.Fatal("Effective swallowed a storage failure and answered with the defaults")
 	}

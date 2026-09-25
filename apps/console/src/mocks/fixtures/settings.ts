@@ -30,7 +30,7 @@ type ApiError = components["schemas"]["Error"];
 // Toggle in devtools:
 //   localStorage.setItem('aep:mock:settings',
 //     'empty' | 'partial' | 'connected' | 'subscription' | 'opencode'
-//     | 'legacy-coding-key' | 'disconnected' | 'error' | 'sync-error')
+//     | 'opencode-unavailable' | 'disconnected' | 'error' | 'sync-error')
 // "empty": nothing connected yet (the default — triggers the onboarding
 // gate; also exercises Settings' not-connected states).
 // "partial": GitHub connected, Anthropic not — the onboarding wizard opens
@@ -40,6 +40,8 @@ type ApiError = components["schemas"]["Error"];
 // "subscription": as "connected", plus a Claude subscription token billing
 // Claude Code.
 // "opencode": as "connected", with OpenCode chosen as the coding agent.
+// "opencode-unavailable": as "opencode", on an installation with no OpenCode
+// runner image — the org is stranded on a runtime it can no longer choose.
 // "disconnected": GitHub connected and the Anthropic key disconnected — the
 // wizard opens at its AI step and says the key was disconnected
 // (`llmDisconnectedAt`).
@@ -52,6 +54,7 @@ export type SettingsScenario =
   | "connected"
   | "subscription"
   | "opencode"
+  | "opencode-unavailable"
   | "disconnected"
   | "error"
   | "sync-error";
@@ -121,11 +124,15 @@ export const subscriptionFixture: SubscriptionProjection = {
 
 export const agentsOpenCodeFixture: AgentsProjection = {
   runtime: "opencode",
+  availableRuntimes: ["claude-code", "opencode"],
   model: "claude-sonnet-5",
   subscription: null,
   updatedAt: "2026-09-20T08:30:00Z",
   updatedBy: "dev@acme.example",
 };
+
+// An installation deployed without the OpenCode runner image.
+export const claudeCodeOnlyRuntimes: AgentsProjection["availableRuntimes"] = ["claude-code"];
 
 // Every org has an effective model and runtime, so this section is never
 // absent — unlike the credential sections. Null updatedAt/updatedBy is the
@@ -133,6 +140,7 @@ export const agentsOpenCodeFixture: AgentsProjection = {
 // render as somebody having picked these very values.
 export const agentsDefaultsFixture: AgentsProjection = {
   runtime: "claude-code",
+  availableRuntimes: ["claude-code", "opencode"],
   model: "claude-sonnet-5",
   subscription: null,
   updatedAt: null,
@@ -158,6 +166,15 @@ export const subscriptionRequiresApiKey: ApiError = {
   code: "agents_subscription_requires_api_key",
   message: subscriptionRequiresApiKeyMessage,
   details: [{ field: "body.agents", message: subscriptionRequiresApiKeyMessage }],
+};
+
+const runtimeUnavailableMessage =
+  'runtime "opencode" is not available on this installation, which has no runner image for it (available: claude-code)';
+
+export const runtimeUnavailable: ApiError = {
+  code: "agents_runtime_unavailable",
+  message: runtimeUnavailableMessage,
+  details: [{ field: "body.agents", message: runtimeUnavailableMessage }],
 };
 
 const subscriptionTokenRequiredMessage =

@@ -514,7 +514,7 @@ RUN HOME=/home/aep /tmp/opencode-prewarm.sh \
 
 # ─── The default target ─────────────────────────────────────────────────────
 # A build with no `--target` produces the LAST stage, and every path that builds
-# this file that way — release.yml, images.yml, ci.yml, local/run-local.sh —
-# means the Claude Code runner. This keeps it so; build-runner.sh names both of
-# its targets explicitly.
+# this file that way — ci.yml, local/run-local.sh, the `remote-worker` rows of
+# release.yml and images.yml — means the Claude Code runner. This keeps it so;
+# build-runner.sh and the `remote-worker-opencode` rows name `runner-opencode`.
 FROM runner

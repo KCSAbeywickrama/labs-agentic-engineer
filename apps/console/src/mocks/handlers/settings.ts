@@ -23,6 +23,7 @@ type ApiError = components["schemas"]["Error"];
 import {
   agentsDefaultsFixture,
   agentsOpenCodeFixture,
+  claudeCodeOnlyRuntimes,
   configLoadError,
   gitProviderDisconnectRejected,
   githubConnectedFixture,
@@ -35,6 +36,7 @@ import {
   llmDisconnectedAtFixture,
   llmConnectedFixture,
   llmValidationError,
+  runtimeUnavailable,
   seedSkillUpdates,
   seedSkills,
   skillsLoadError,
@@ -117,6 +119,7 @@ function ensureInitialized() {
     "connected",
     "subscription",
     "opencode",
+    "opencode-unavailable",
   ];
   if (connectedScenarios.includes(scenario())) {
     gitProvider = { ...githubConnectedFixture };
@@ -149,6 +152,8 @@ function ensureInitialized() {
   agents =
     scenario() === "opencode"
       ? { ...agentsOpenCodeFixture }
+      : scenario() === "opencode-unavailable"
+        ? { ...agentsOpenCodeFixture, availableRuntimes: claudeCodeOnlyRuntimes }
       : scenario() === "subscription"
         ? { ...agentsDefaultsFixture, subscription: { ...subscriptionFixture } }
         : { ...agentsDefaultsFixture };
@@ -256,6 +261,11 @@ export const settingsHandlers = [
     if (body.llm != null && body.llm.apiKey === INVALID_CREDENTIAL_VALUE) {
       return errorJson(llmValidationError, 400);
     }
+    // Only a runtime this installation can run may be chosen.
+    const runtime = body.agents?.runtime;
+    if (runtime !== undefined && !agents.availableRuntimes.includes(runtime)) {
+      return errorJson(runtimeUnavailable, 400);
+    }
     // The AI agents card, judged as one on the state the patch leaves, as on
     // the server: a subscription needs Claude Code and a connected API key.
     const newToken = body.agents?.subscription?.token;
@@ -305,7 +315,8 @@ export const settingsHandlers = [
 
     if (body.agents !== undefined) {
       if (body.agents === null) {
-        agents = { ...agentsDefaultsFixture };
+        // The installation's runtimes are not the org's to reset.
+        agents = { ...agentsDefaultsFixture, availableRuntimes: agents.availableRuntimes };
       } else {
         // Every field is optional so a client can move one without restating
         // the others — merge, never replace.

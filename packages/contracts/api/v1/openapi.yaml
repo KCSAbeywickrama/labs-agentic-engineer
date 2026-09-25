@@ -3711,6 +3711,18 @@ components:
           $ref: '#/components/schemas/AgentModel'
         runtime:
           $ref: '#/components/schemas/AgentRuntime'
+        availableRuntimes:
+          description: >-
+            The runtimes this installation can run, and so the only ones an
+            organization may choose. Claude Code, the default, is always
+            listed; OpenCode only when the platform is deployed with its
+            runner image. `runtime` can name one missing here (an
+            organization that chose OpenCode on an installation that later
+            lost its image); every coding dispatch then fails until the
+            organization chooses an available runtime.
+          items:
+            $ref: '#/components/schemas/AgentRuntime'
+          type: array
         subscription:
           allOf:
           - $ref: '#/components/schemas/SubscriptionProjection'
@@ -3728,6 +3740,7 @@ components:
       required:
       - model
       - runtime
+      - availableRuntimes
       - subscription
       - updatedAt
       - updatedBy
@@ -4440,6 +4453,9 @@ components:
             same write, and `opencode` with a new subscription in one patch is
             refused (`agents_subscription_requires_claude_code`), as is a
             subscription with no API key (`agents_subscription_requires_api_key`).
+            A `runtime` this installation cannot run (absent from the
+            projection's `availableRuntimes`) is refused
+            (`agents_runtime_unavailable`).
 
 
             `null` on the section resets it to the platform's defaults and

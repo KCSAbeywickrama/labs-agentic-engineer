@@ -107,6 +107,8 @@ export function useAiSettings(config: ConfigProjection) {
 }
 
 function saveError(error: Error): { field: AiField; message: string } {
-  const fields = error instanceof ApiRequestError ? error.fields : [];
-  return { field: refusedField(fields), message: error.message };
+  if (!(error instanceof ApiRequestError)) {
+    return { field: "card", message: error.message };
+  }
+  return { field: refusedField(error.fields, error.code), message: error.message };
 }

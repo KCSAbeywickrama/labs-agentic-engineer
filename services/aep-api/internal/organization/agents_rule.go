@@ -24,6 +24,9 @@
 // disconnecting the key and resetting the card each delete the stored token in
 // the same transaction, and a patch that sets a token the end state could not
 // use is refused.
+//
+// Beside it, a save may only choose a runtime this installation can run
+// (runtimes): one with no runner image would fail every dispatch.
 
 package organization
 
@@ -55,11 +58,12 @@ type cardEffects struct {
 	deleteToken    bool
 }
 
-// judgeCard decides what p does to an org in state s, or refuses it with a
-// SectionError naming the section the fix belongs in. Pure: every input is an
-// argument, so the same call judges the patch before the live probes (on the
-// pool's view) and again under the card's lock (on the transaction's).
-func judgeCard(s cardState, p orgconfig.ConfigPatch) (cardEffects, error) {
+// judgeCard decides what p does to an org in state s, on an installation that
+// runs runtimes, or refuses it with a SectionError naming the section the fix
+// belongs in. Pure: every input is an argument, so the same call judges the
+// patch before the live probes (on the pool's view) and again under the card's
+// lock (on the transaction's).
+func judgeCard(s cardState, runtimes []orgconfig.AgentRuntime, p orgconfig.ConfigPatch) (cardEffects, error) {
 	var eff cardEffects
 
 	keyAfter := s.hasKey
@@ -91,7 +95,7 @@ func judgeCard(s cardState, p orgconfig.ConfigPatch) (cardEffects, error) {
 			tokenAfter = false
 		} else {
 			w := p.Agents.Value
-			settings, err := resolveAgentSettings(s.settings, w)
+			settings, err := resolveAgentSettings(s.settings, runtimes, w)
 			if err != nil {
 				return cardEffects{}, sectionErrorFrom("agents", err)
 			}
@@ -138,7 +142,11 @@ func judgeCard(s cardState, p orgconfig.ConfigPatch) (cardEffects, error) {
 // org's current value (or the platform default when it has none). nil when the
 // write names neither field — a subscription-only save leaves the setting row,
 // and with it "who chose the model", alone.
-func resolveAgentSettings(current *OrgAgentSettings, w orgconfig.AgentsWrite) (*OrgAgentSettings, error) {
+//
+// Only a runtime the write NAMES must be one of runtimes. A model-only save by
+// an org already on a runtime the installation lost is kept: refusing it would
+// block an unrelated change, and GET already says the runtime is unavailable.
+func resolveAgentSettings(current *OrgAgentSettings, runtimes []orgconfig.AgentRuntime, w orgconfig.AgentsWrite) (*OrgAgentSettings, error) {
 	runtime := orgconfig.AgentRuntime(strings.TrimSpace(string(w.Runtime)))
 	model := strings.TrimSpace(w.Model)
 	if runtime == "" && model == "" {
@@ -149,7 +157,7 @@ func resolveAgentSettings(current *OrgAgentSettings, w orgconfig.AgentsWrite) (*
 		out.Runtime, out.Model = current.Runtime, current.Model
 	}
 	if runtime != "" {
-		if err := validateRuntime(runtime); err != nil {
+		if err := validateRuntime(runtime, runtimes); err != nil {
 			return nil, err
 		}
 		out.Runtime = runtime
@@ -175,19 +183,32 @@ func validateModel(model string) error {
 }
 
 // validateRuntime refuses a runtime outside the enum by name: running another
-// runtime would bill an organization for one it did not choose and never tell it.
-func validateRuntime(runtime orgconfig.AgentRuntime) error {
-	if slices.Contains(orgconfig.AgentRuntimes, runtime) {
-		return nil
+// runtime would bill an organization for one it did not choose and never tell
+// it. It refuses one this installation cannot run (runtimes) under its own code:
+// the save would succeed and every coding dispatch after it would fail.
+func validateRuntime(runtime orgconfig.AgentRuntime, runtimes []orgconfig.AgentRuntime) error {
+	if !slices.Contains(orgconfig.AgentRuntimes, runtime) {
+		return &ValidationError{
+			Code:    "agents_runtime_unknown",
+			Message: fmt.Sprintf("runtime %q does not exist (%s)", runtime, runtimeNames(orgconfig.AgentRuntimes)),
+		}
 	}
-	names := make([]string, 0, len(orgconfig.AgentRuntimes))
-	for _, r := range orgconfig.AgentRuntimes {
+	if !slices.Contains(runtimes, runtime) {
+		return &ValidationError{
+			Code: "agents_runtime_unavailable",
+			Message: fmt.Sprintf("runtime %q is not available on this installation, which has no runner "+
+				"image for it (available: %s)", runtime, runtimeNames(runtimes)),
+		}
+	}
+	return nil
+}
+
+func runtimeNames(runtimes []orgconfig.AgentRuntime) string {
+	names := make([]string, 0, len(runtimes))
+	for _, r := range runtimes {
 		names = append(names, string(r))
 	}
-	return &ValidationError{
-		Code:    "agents_runtime_unknown",
-		Message: fmt.Sprintf("runtime %q does not exist (%s)", runtime, strings.Join(names, ", ")),
-	}
+	return strings.Join(names, ", ")
 }
 
 // errCredentialMissing refuses a credential field sent blank: saving nothing

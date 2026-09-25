@@ -73,7 +73,7 @@ func newCardDB(t *testing.T, apiStatus int) *cardDB {
 	repo := organization.NewOrgAnthropicRepository(db)
 	svc := organization.NewAnthropicCredentialService(repo, store).WithAnthropicAPIBase(base)
 	settings := organization.NewAgentSettingsService(organization.NewOrgAgentSettingsRepository(db),
-		organization.NewOrganizationRepository(db), svc, organization.NewAgentsCardRepository(db, store))
+		organization.NewOrganizationRepository(db), svc, organization.NewAgentsCardRepository(db, store), orgconfig.AgentRuntimes)
 	config := organization.NewService(svc, nil, nil, nil, nil, organization.PlatformIDPConfig{}, "", "").
 		WithAgentSettings(settings)
 	return &cardDB{db: db, svc: svc, config: config, store: store, repo: repo}

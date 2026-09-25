@@ -68,6 +68,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/auth/jwtassertion"
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs/reaper"
+	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 	"github.com/wso2/aep/aep-api/internal/projects"
 	projectshttpapi "github.com/wso2/aep/aep-api/internal/projects/httpapi"
@@ -310,7 +311,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// subscription. ONE instance, read by three callers for three reasons:
 	// /config projects and saves it, the spec agents resolve the model per turn,
 	// and coding dispatch copies model + runtime onto the run it launches.
-	agentSettings := organization.NewAgentSettingsService(orgAgentSettingsRepo, orgRepo, anthropicCredService, agentsCardRepo)
+	agentSettings := organization.NewAgentSettingsService(orgAgentSettingsRepo, orgRepo, anthropicCredService, agentsCardRepo,
+		runnableAgentRuntimes(cfg))
 
 	// Task JWT manager — RS256. The public key is published on
 	// /auth/external/jwks.json. Used to mint BFF MCP tokens
@@ -1737,4 +1739,17 @@ func deliveryOpenBaoConfigFromAppConfig(cfg config.Config) *secretmanagersvc.Ope
 		Path:   "secret",
 		Auth:   &secretmanagersvc.OpenBaoAuth{Token: cfg.OpenBaoToken},
 	}
+}
+
+// runnableAgentRuntimes are the coding-agent runtimes this installation can run,
+// and so the only ones an organization may choose. Claude Code is the platform
+// default and always offered (with no AGENT_RUNNER_IMAGE there is no coding
+// dispatch at all); OpenCode only when its runner image is configured, since
+// the dispatcher refuses an OpenCode cycle without one.
+func runnableAgentRuntimes(cfg config.Config) []orgconfig.AgentRuntime {
+	runtimes := []orgconfig.AgentRuntime{orgconfig.AgentRuntimeClaudeCode}
+	if strings.TrimSpace(cfg.AgentRunnerImageOpenCode) != "" {
+		runtimes = append(runtimes, orgconfig.AgentRuntimeOpenCode)
+	}
+	return runtimes
 }

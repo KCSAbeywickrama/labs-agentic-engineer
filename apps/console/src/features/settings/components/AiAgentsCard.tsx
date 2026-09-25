@@ -35,7 +35,12 @@ import {
 } from "@wso2/oxygen-ui";
 import { Bot } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
-import { MODELS, SUBSCRIPTION_TOKEN_PREFIX, type AiSettings } from "../aiSettings";
+import {
+  MODELS,
+  SUBSCRIPTION_TOKEN_PREFIX,
+  runtimeAvailable,
+  type AiSettings,
+} from "../aiSettings";
 import { useAiSettings } from "../hooks/useAiSettings";
 import { AnthropicKeyRow } from "./AnthropicKeyRow";
 import { MaskedCredential, SecretField } from "./CredentialField";
@@ -45,6 +50,9 @@ type AgentRuntime = components["schemas"]["AgentRuntime"];
 
 // One constant: the card's name is expected to change.
 const CARD_TITLE = "AI agents";
+
+/** Why a runtime's tile is disabled: the installation has no runner image for it. */
+const UNAVAILABLE_REASON = "Not available on this installation.";
 
 const RUNTIMES: { value: AgentRuntime; label: string; description: string }[] = [
   {
@@ -152,11 +160,12 @@ export function AiAgentsCard({
         >
           {RUNTIMES.map((r) => {
             const selected = draft.runtime === r.value;
+            const available = runtimeAvailable(saved, r.value);
             return (
               <Tile key={r.value} selected={selected}>
                 <FormControlLabel
                   value={r.value}
-                  disabled={busy}
+                  disabled={busy || !available}
                   control={<Radio />}
                   label={
                     <Box>
@@ -164,12 +173,18 @@ export function AiAgentsCard({
                         {r.label}
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
-                        {r.description}
+                        {available ? r.description : UNAVAILABLE_REASON}
                       </Typography>
                     </Box>
                   }
                   sx={{ alignItems: "flex-start", m: 0 }}
                 />
+                {selected && !available && (
+                  <Alert severity="error" sx={{ mt: 1.5 }}>
+                    {r.label} is not available on this installation, so every
+                    coding run fails. Choose another coding agent and save.
+                  </Alert>
+                )}
                 {r.value === "claude-code" && selected && (
                   <SubscriptionControl
                     key={
@@ -190,6 +205,11 @@ export function AiAgentsCard({
             );
           })}
         </RadioGroup>
+        {ai.error?.field === "runtime" && (
+          <Alert severity="error" sx={{ mt: 1.5 }}>
+            {ai.error.message}
+          </Alert>
+        )}
       </Box>
 
       {saved.updatedBy && (

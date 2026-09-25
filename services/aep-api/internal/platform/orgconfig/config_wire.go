@@ -125,11 +125,15 @@ var AgentModels = []string{"claude-sonnet-5", "claude-haiku-4-5"}
 // "the platform's defaults" apart from "somebody chose the same values", a
 // distinction the console needs and no other field carries.
 type AgentsProjection struct {
-	Model        string                  `json:"model" enum:"claude-sonnet-5,claude-haiku-4-5"`
-	Runtime      AgentRuntime            `json:"runtime" enum:"claude-code,opencode"`
-	Subscription *SubscriptionProjection `json:"subscription"` // null = coding bills the API key
-	UpdatedAt    *time.Time              `json:"updatedAt"`
-	UpdatedBy    *string                 `json:"updatedBy"`
+	Model   string       `json:"model" enum:"claude-sonnet-5,claude-haiku-4-5"`
+	Runtime AgentRuntime `json:"runtime" enum:"claude-code,opencode"`
+	// AvailableRuntimes are the runtimes this installation can run, the only
+	// ones a save may choose. Runtime can name one missing here: an org that
+	// chose it before the installation lost its runner image.
+	AvailableRuntimes []AgentRuntime          `json:"availableRuntimes"`
+	Subscription      *SubscriptionProjection `json:"subscription"` // null = coding bills the API key
+	UpdatedAt         *time.Time              `json:"updatedAt"`
+	UpdatedBy         *string                 `json:"updatedBy"`
 }
 
 // SubscriptionProjection is a stored Claude subscription token, masked.
@@ -147,11 +151,13 @@ type SubscriptionProjection struct {
 // through a `claude setup-token` token.
 const SubscriptionKindClaude = "claude"
 
-// DefaultAgents is the projection for an org that has never set one.
+// DefaultAgents is the projection for an org that has never set one. It
+// offers the default runtime only: that is the one every installation runs.
 func DefaultAgents() AgentsProjection {
 	return AgentsProjection{
-		Model:   DefaultAgentModel,
-		Runtime: DefaultAgentRuntime,
+		Model:             DefaultAgentModel,
+		Runtime:           DefaultAgentRuntime,
+		AvailableRuntimes: []AgentRuntime{DefaultAgentRuntime},
 	}
 }
 

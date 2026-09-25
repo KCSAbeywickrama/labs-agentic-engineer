@@ -171,7 +171,10 @@ fan-out call cannot reach a second one.
 
 - The org's `agents` setting selects the runtime; the dispatcher stamps
   `AEP_AGENT_RUNTIME` and picks the image for it. The image is a second target
-  of the same Dockerfile (`runners/AGENTS.md`).
+  of the same Dockerfile (`runners/AGENTS.md`), published by the release as
+  `ghcr.io/wso2/aep/remote-worker-opencode` and pinned into the chart's
+  `codingAgentRunner.opencodeImage`. An installation without it does not offer
+  OpenCode (aep-api ADR-0028, amendment).
 - OpenCode needs `ANTHROPIC_API_KEY`; a Claude subscription token is refused at
   start. Dispatch mounts the org's subscription only on Claude Code (aep-api
   ADR-0036).

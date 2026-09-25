@@ -62,6 +62,12 @@ export interface AiSettings {
   model: AgentModel;
   apiKey: LLMProjection | null;
   runtime: AgentRuntime;
+  /**
+   * The runtimes this installation can run, the only ones a save may choose.
+   * `runtime` can be missing from it: an org that chose a runtime before the
+   * installation lost its runner image.
+   */
+  availableRuntimes: AgentRuntime[];
   subscription: SubscriptionProjection | null;
   updatedAt: string | null;
   updatedBy: string | null;
@@ -85,6 +91,7 @@ export function aiSettingsFrom(config: ConfigProjection): AiSettings {
     model: agents.model,
     apiKey: llm,
     runtime: agents.runtime,
+    availableRuntimes: agents.availableRuntimes,
     subscription: agents.subscription,
     updatedAt: agents.updatedAt ?? null,
     updatedBy: agents.updatedBy ?? null,
@@ -99,6 +106,11 @@ export function draftFrom(saved: AiSettings): AiDraft {
     billToSubscription: saved.subscription !== null,
     token: "",
   };
+}
+
+/** Whether this installation can run `runtime`, and so whether it can be chosen. */
+export function runtimeAvailable(saved: AiSettings, runtime: AgentRuntime): boolean {
+  return saved.availableRuntimes.includes(runtime);
 }
 
 /** A subscription is used only by Claude Code. */
@@ -179,17 +191,21 @@ export function disconnectKeyPatch(): ConfigPatch {
 }
 
 /** The card field a refusal belongs on. */
-export type AiField = "apiKey" | "subscription" | "card";
+export type AiField = "apiKey" | "subscription" | "runtime" | "card";
 
 /**
  * Where to show a refused save: the server names the section it refused in
- * `details[].field` (`body.llm`, `body.agents`, …). The card only sends models
- * and runtimes from the contract's enums, so every `agents` refusal it can meet
- * is about the subscription: its token, or the rule that it needs Claude Code
- * and an API key.
+ * `details[].field` (`body.llm`, `body.agents`, …) and the reason in `code`.
+ * The card only sends models and runtimes from the contract's enums, so an
+ * `agents` refusal is either a runtime this installation cannot run
+ * (`agents_runtime_unavailable`, reachable when the card's view of the
+ * installation is stale) or about the subscription: its token, or the rule
+ * that it needs Claude Code and an API key.
  */
-export function refusedField(fields: string[]): AiField {
+export function refusedField(fields: string[], code?: string): AiField {
   if (fields.includes("body.llm")) return "apiKey";
-  if (fields.includes("body.agents")) return "subscription";
+  if (fields.includes("body.agents")) {
+    return code === "agents_runtime_unavailable" ? "runtime" : "subscription";
+  }
   return "card";
 }
