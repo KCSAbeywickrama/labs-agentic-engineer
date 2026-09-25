@@ -47,12 +47,70 @@ the summary at the end (**Landing it**).
    base URL from there. **Never probe, scan, or guess an endpoint**, and never
    assume localhost: the app under test is deployed. Confirm it answers before
    the first scenario.
+5. Read the milestone your validation issue is filed under — the logins below
+   and the branch you land on are both keyed by it:
+   `MILESTONE=$(gh issue view <N> --repo <owner/repo> --json milestone -q .milestone.number)`
+   Empty means the issue was filed without one — a platform fault, not
+   something to work around. Say so in an issue comment and stop.
+6. Read the test logins (**Signing in**), once, before any scenario needs one.
 
 **One browser at a time.** Work the scenarios in sequence, in this agent. A live
 Chromium is the largest thing in the cycle's pod, and a second session OOM-kills
 the run mid-phase; splitting scenarios across dispatched agents looks like
 parallel work and buys an OOM instead. This binds harder here than it did for a
 compiled suite — there is a browser open for every scenario, not one per run.
+
+## Signing in — the logins are on the roles gate ticket
+
+A project whose design declares roles gets one issue per version titled
+*Provision roles and test users*, labelled `aep:gate/roles`, in your milestone.
+Before closing it, the platform posts every test account's login there. That
+comment is the only copy — the validation context carries none, and neither does
+any file in the repo:
+
+```bash
+# the newest gate in THIS milestone — a rebuild can leave an older one beside it
+GATE=$(gh issue list --repo <owner/repo> --label "aep:gate/roles" \
+  --milestone "$MILESTONE" --state all --json number,createdAt \
+  --jq 'sort_by(.createdAt) | .[-1].number // empty')
+[ -n "$GATE" ] && gh issue view "$GATE" --repo <owner/repo> --comments
+```
+
+`--state all` because the platform closes this ticket itself; `--comments`
+because the logins are a comment. Never run it without `$MILESTONE`: unfiltered,
+it returns another version's ticket.
+
+Read the table under the `<!-- aep:test-users -->` marker — in the LAST comment
+carrying it, since an earlier one is a superseded build's — never the prose
+around it:
+
+| Username | Password | Roles | Scopes |
+| --- | --- | --- | --- |
+| `test-trainer` | `tdyjkfmq5t` | Trainer | workouts:read workouts:write |
+
+**Which account.** The one whose `Roles` holds the role the scenario's `Given`
+names. A scenario that needs *a* signed-in user but names no role takes the
+account with the fewest roles. Never exercise one role's behaviour with another
+role's login: that judges a page, not a permission.
+
+**Below the UI.** The bullets under the table give the `issuer`, `resource`,
+`client_id` and `redirect_uri` a token request needs, for a step you carry out
+against the API. A token minted without that `resource` is refused with the same
+401 as every other failure (**Acting**).
+
+**A password never leaves the session** — not the report, not the pull request,
+not an issue comment.
+
+**When no login fits**, never improvise one: a verdict from a user the app does
+not know is worth less than none. Report each scenario that needed it `blocked`,
+with the case in `observed`, and name the case in the pull request body:
+
+| What you see | Means |
+| --- | --- |
+| No gate ticket in the milestone | The design declares no roles, so nothing should need a login |
+| A ticket with no login table, or open with a failure comment | Provisioning failed — quote the ticket |
+| No account holds the role | That account was refused — the ticket's other comment says why |
+| A password reading *unavailable* | The platform could not publish it — name the account |
 
 ## Isolation — own the container, don't reset
 
@@ -204,8 +262,8 @@ identity provider, and no generated app renders them (`authorization-model`
 invariant 11). A `Then` about one of them is `unjudgeable`, never `failed` — a
 platform matter, not an application defect. A `Given` or `When` that merely
 passes through one — "a new user signs up, then…" — is carried out by signing in
-with the published test login instead, and the rest of the scenario is judged as
-written.
+with a published test login (**Signing in**) instead, and the rest of the
+scenario is judged as written.
 
 ## The report
 
@@ -287,15 +345,11 @@ to attach it to, and returns silently. Nothing is logged, no merge is declined,
 and the run sits at its landing deadline with a green agent log, an open pull
 request, and no way to connect them. Everything you just did is stranded.
 
-The milestone is the one your validation issue is filed under:
+The milestone is the `$MILESTONE` you read before the first scenario:
 
 ```bash
-MILESTONE=$(gh issue view <N> --repo <owner/repo> --json milestone -q .milestone.number)
 git checkout -b "aep/m${MILESTONE}-validation"
 ```
-
-If `MILESTONE` comes back empty the issue was filed without one — a platform
-fault, not something to work around. Say so in an issue comment and stop.
 
 Then commit the report and open ONE pull request:
 
