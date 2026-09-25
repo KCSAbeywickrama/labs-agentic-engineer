@@ -1,6 +1,6 @@
 ---
 name: validation-task
-description: Load when working a VALIDATION task dispatched by WSO2 Labs Agentic Engineer — judging a deployed version against its acceptance criteria by driving each Gherkin scenario in specs/validation/acceptance/ with agent-browser, and landing tests/acceptance/report.json. Never loaded by a coding run.
+description: Load when working a VALIDATION task dispatched by WSO2 Labs Agentic Engineer — judging a deployed version against its acceptance criteria.
 metadata:
   aep:
     kind: platform
@@ -63,9 +63,8 @@ compiled suite — there is a browser open for every scenario, not one per run.
 ## Signing in
 
 Test logins are on this milestone's roles gate ticket (label `aep:gate/roles`),
-in the comment under `<!-- aep:test-users -->` — the last such comment, since an
-earlier one is a superseded build's. The platform closes that ticket, so ask for
-closed ones too:
+in the last comment under `<!-- aep:test-users -->`. The platform closes that
+ticket, so ask for closed ones too:
 
 ```bash
 gh issue list --label "aep:gate/roles" --milestone "$MILESTONE" --state all
@@ -362,4 +361,4 @@ gh issue comment <N> --body "<passed>/<total> scenarios passed — <PR URL>"
 - Do not run `gh pr merge`, `gh pr close`, `gh repo create`, `gh repo delete`,
   `gh repo fork` or `gh repo edit`; do not delete a remote branch; do not touch
   branch protection, secrets, repository settings, collaborators or webhooks.
-- Do not touch any issue but this validation issue.
+- Do not comment on or edit any issue but this validation issue.
