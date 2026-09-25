@@ -60,57 +60,22 @@ the run mid-phase; splitting scenarios across dispatched agents looks like
 parallel work and buys an OOM instead. This binds harder here than it did for a
 compiled suite — there is a browser open for every scenario, not one per run.
 
-## Signing in — the logins are on the roles gate ticket
+## Signing in
 
-A project whose design declares roles gets one issue per version titled
-*Provision roles and test users*, labelled `aep:gate/roles`, in your milestone.
-Before closing it, the platform posts every test account's login there. That
-comment is the only copy — the validation context carries none, and neither does
-any file in the repo:
+Test logins are on this milestone's roles gate ticket (label `aep:gate/roles`),
+in the comment under `<!-- aep:test-users -->` — the last such comment, since an
+earlier one is a superseded build's. The platform closes that ticket, so ask for
+closed ones too:
 
 ```bash
-# the newest gate in THIS milestone — a rebuild can leave an older one beside it
-GATE=$(gh issue list --repo <owner/repo> --label "aep:gate/roles" \
-  --milestone "$MILESTONE" --state all --json number,createdAt \
-  --jq 'sort_by(.createdAt) | .[-1].number // empty')
-[ -n "$GATE" ] && gh issue view "$GATE" --repo <owner/repo> --comments
+gh issue list --label "aep:gate/roles" --milestone "$MILESTONE" --state all
+gh issue view <number> --comments
 ```
 
-`--state all` because the platform closes this ticket itself; `--comments`
-because the logins are a comment. Never run it without `$MILESTONE`: unfiltered,
-it returns another version's ticket.
-
-Read the table under the `<!-- aep:test-users -->` marker — in the LAST comment
-carrying it, since an earlier one is a superseded build's — never the prose
-around it:
-
-| Username | Password | Roles | Scopes |
-| --- | --- | --- | --- |
-| `test-trainer` | `tdyjkfmq5t` | Trainer | workouts:read workouts:write |
-
-**Which account.** The one whose `Roles` holds the role the scenario's `Given`
-names. A scenario that needs *a* signed-in user but names no role takes the
-account with the fewest roles. Never exercise one role's behaviour with another
-role's login: that judges a page, not a permission.
-
-**Below the UI.** The bullets under the table give the `issuer`, `resource`,
-`client_id` and `redirect_uri` a token request needs, for a step you carry out
-against the API. A token minted without that `resource` is refused with the same
-401 as every other failure (**Acting**).
-
-**A password never leaves the session** — not the report, not the pull request,
-not an issue comment.
-
-**When no login fits**, never improvise one: a verdict from a user the app does
-not know is worth less than none. Report each scenario that needed it `blocked`,
-with the case in `observed`, and name the case in the pull request body:
-
-| What you see | Means |
-| --- | --- |
-| No gate ticket in the milestone | The design declares no roles, so nothing should need a login |
-| A ticket with no login table, or open with a failure comment | Provisioning failed — quote the ticket |
-| No account holds the role | That account was refused — the ticket's other comment says why |
-| A password reading *unavailable* | The platform could not publish it — name the account |
+The comment says how to use the accounts. Pick the one holding the scenario's
+role. No ticket means the design declares no roles. When no login fits, the
+scenario is `blocked` — never improvise one — and a password never leaves the
+session.
 
 ## Isolation — own the container, don't reset
 
