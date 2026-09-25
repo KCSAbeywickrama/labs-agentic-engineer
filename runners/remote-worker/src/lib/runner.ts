@@ -53,7 +53,13 @@ import { stagedSecretValues, webSearchDenial } from "./websearch_dlp.js";
 import { allowsWriteOutsideProject } from "./workspace_guard.js";
 import { staticTokenSource, type AccessTokenSource } from "./auth_retry.js";
 import { webFetchDenial } from "./webfetch_guard.js";
-import { SKILLS_MIRROR_DIR, listMirroredSkills, requireWorkflowBodies } from "./skills_presence.js";
+import {
+  CODING_WORKFLOW_SKILL,
+  SKILLS_MIRROR_DIR,
+  VALIDATION_WORKFLOW_SKILL,
+  listMirroredSkills,
+  requireWorkflowBodies,
+} from "./skills_presence.js";
 import { skillsNotice, writePromptAppendix } from "./run_context.js";
 import {
   DENIED_CAPABILITIES,
@@ -146,7 +152,7 @@ export function promptWithProjectRoot(prompt: string, workspaceRoot: string, con
  * the lead does, and a developer who clones the project repo can read them too.
  */
 export function contractReferencePath(workspace: string): string {
-  return path.join(mirrorDir(workspace), "aep", "references", "component-contract.md");
+  return path.join(mirrorDir(workspace), CODING_WORKFLOW_SKILL, "references", "component-contract.md");
 }
 
 /**
@@ -216,9 +222,6 @@ export interface McpAuthOpts {
   canRefresh: boolean;
 }
 
-/** The validation run's workflow skill. */
-export const VALIDATION_WORKFLOW_SKILL = "validation-task";
-
 /**
  * The skills a run is steered by whatever its design says — read from the mirror
  * like every other skill, but not optional and not the design's to choose.
@@ -237,7 +240,7 @@ export const VALIDATION_WORKFLOW_SKILL = "validation-task";
  * and paying for its body on every turn of every validation run is not.
  */
 export function alwaysOnSkills(taskKind: DispatchRequest["taskKind"]): string[] {
-  return taskKind === "validation" ? [VALIDATION_WORKFLOW_SKILL] : ["aep"];
+  return taskKind === "validation" ? [VALIDATION_WORKFLOW_SKILL] : [CODING_WORKFLOW_SKILL];
 }
 
 /**
