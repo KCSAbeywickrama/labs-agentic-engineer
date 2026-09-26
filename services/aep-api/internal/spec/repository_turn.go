@@ -59,7 +59,27 @@ const (
 	turnReasonBaseMoved      = "base-moved"
 	turnReasonDispatchFailed = "dispatch-failed"
 	turnReasonInternal       = "internal"
+	// turnReasonAgentError: the agents service ended the turn with a coded
+	// error frame — a failure it could name (AgentTurn.Code says which) — in
+	// place of the manifest. Distinct from stream-died: the stream ended
+	// cleanly, it just vouched for nothing.
+	turnReasonAgentError = "agent-error"
 )
+
+// The error codes a coded agents error frame can carry (TurnErrorPart in
+// packages/agent-stream), stored on the failed turn (AgentTurn.Code) so a
+// reader can say why it failed. Mirrors the contract's TurnStatus.code enum.
+const (
+	TurnErrorProviderLimit   = "provider_limit"
+	TurnErrorOutputTruncated = "output_truncated"
+)
+
+// knownTurnErrorCode reports whether code is one aep-api stores. An unknown
+// code (a newer agents image) degrades to the uncoded path rather than
+// writing a value the contract cannot represent.
+func knownTurnErrorCode(code string) bool {
+	return code == TurnErrorProviderLimit || code == TurnErrorOutputTruncated
+}
 
 // ErrTurnActive is returned by TryStart when another turn holds the D18
 // one-active-turn-per-project guard; the accompanying row is the active turn.
@@ -73,6 +93,15 @@ type TurnTerminal struct {
 	Paths     []string
 	NoChanges bool
 	Message   string
+	// Code names why a failed turn failed when the agents service could say
+	// (TurnErrorProviderLimit / TurnErrorOutputTruncated); "" otherwise.
+	// ResetAt is when the provider said its limit resets (provider_limit
+	// only, and only when it said). Host is the model host the code is about —
+	// carried to the terminal event only; the row already holds it as
+	// model_host.
+	Code    string
+	ResetAt *time.Time
+	Host    string
 	// Usage is the turn's token usage off the terminal manifest (#249); nil
 	// when the stream carried none (failed turns, pre-capture agents).
 	Usage *contracts.TokenUsage
@@ -205,6 +234,8 @@ func (r *turnRepository) Finish(ctx context.Context, id string, terminal TurnTer
 		"paths":      encodePaths(terminal.Paths),
 		"no_changes": terminal.NoChanges,
 		"message":    terminal.Message,
+		"code":       terminal.Code,
+		"reset_at":   terminal.ResetAt,
 	}
 	if u := terminal.Usage; u != nil {
 		updates["input_tokens"] = u.InputTokens

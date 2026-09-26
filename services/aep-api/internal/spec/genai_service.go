@@ -184,6 +184,13 @@ type TurnStatus struct {
 	Message        string    `json:"message,omitempty"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
+	// Why a failed turn failed, when the agents service could name it
+	// (TurnErrorProviderLimit / TurnErrorOutputTruncated); "" otherwise. Host
+	// and ResetAt refine a provider limit: whose limit, and when the provider
+	// said it resets.
+	Code    string     `json:"code,omitempty"`
+	Host    string     `json:"host,omitempty"`
+	ResetAt *time.Time `json:"resetAt,omitempty"`
 	// The turn's DISPLAY record (#562) — the transcript line for the message
 	// that started it, and who sent it. A client attaching to a turn it did not
 	// send has no other source for these until the turn lands: the conversation
@@ -208,10 +215,24 @@ func turnStatusOf(t *AgentTurn) *TurnStatus {
 		CreatedAt:      t.CreatedAt,
 		UpdatedAt:      t.UpdatedAt,
 
+		Code:    t.Code,
+		Host:    providerLimitHost(t),
+		ResetAt: t.ResetAt,
+
 		Instruction:       t.Summary,
 		AuthorID:          t.AuthorID,
 		AuthorDisplayName: t.AuthorDisplayName,
 	}
+}
+
+// providerLimitHost is the host a provider-limited turn names: the connection
+// host it was admitted on. Empty for every other turn, so the status read
+// only says whose limit it was when a limit is what stopped the turn.
+func providerLimitHost(t *AgentTurn) string {
+	if t.Code != TurnErrorProviderLimit {
+		return ""
+	}
+	return t.ModelHost
 }
 
 // ---- service ---------------------------------------------------------------

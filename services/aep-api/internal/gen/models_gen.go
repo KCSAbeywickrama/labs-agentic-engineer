@@ -1207,6 +1207,24 @@ func (e TurnInputMultipartIntent) Valid() bool {
 	}
 }
 
+// Defines values for TurnStatusCode.
+const (
+	TurnStatusCodeOutputTruncated TurnStatusCode = "output_truncated"
+	TurnStatusCodeProviderLimit   TurnStatusCode = "provider_limit"
+)
+
+// Valid indicates whether the value is a known member of the TurnStatusCode enum.
+func (e TurnStatusCode) Valid() bool {
+	switch e {
+	case TurnStatusCodeOutputTruncated:
+		return true
+	case TurnStatusCodeProviderLimit:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ValidationState.
 const (
 	ValidationStateAwaitingFix  ValidationState = "awaiting-fix"
@@ -3438,10 +3456,16 @@ type TurnStatus struct {
 	AuthorDisplayName string `json:"authorDisplayName,omitempty"`
 
 	// AuthorID Who started this turn — EMAIL-anchored, matching the console's live author identity, which is what lets a client tell its own turn from a teammate's. Empty when no attributable human sent it (an M2M token, a minimal user token, or a turn dispatched before the display record was stored). Flat rather than a nested object so "absent" is one convention across this schema: the empty string, exactly as `instruction` uses it.
-	AuthorID       string    `json:"authorId,omitempty"`
-	CommitSha      string    `json:"commitSha,omitempty"`
-	ConversationID string    `json:"conversationId"`
-	CreatedAt      time.Time `json:"createdAt"`
+	AuthorID string `json:"authorId,omitempty"`
+
+	// Code Why a failed turn failed, when the agents service could name it (reason `agent-error`): `provider_limit`, the model provider refused the turn's calls with HTTP 429 for longer than a wait (a `retry-after` of five minutes or more, or five minutes of 429 retries in total); `output_truncated`, the connection's output limit cut a file write off before it finished, so nothing was written. `message` carries the agents service's sentence for it. Absent on every other turn.
+	Code           TurnStatusCode `json:"code,omitempty"`
+	CommitSha      string         `json:"commitSha,omitempty"`
+	ConversationID string         `json:"conversationId"`
+	CreatedAt      time.Time      `json:"createdAt"`
+
+	// Host `code: provider_limit` only: the host of the model endpoint whose limit stopped the turn (`ollama.com`), as the turn's connection named it. Display only — what the reader's sentence names.
+	Host string `json:"host,omitempty"`
 
 	// Instruction What this turn's DISPLAY record says — the transcript line for the message that started it. Present so a client attaching to a turn it did not send can render the sender's message immediately, instead of narration under a blank space: the conversation store persists a turn's transcript only when the turn ENDS, so a history read mid-turn cannot supply it. Empty on turns dispatched before this field existed. Not the model's prompt — the agents service composes that from the turn spec and it never crosses this boundary.
 	Instruction string   `json:"instruction,omitempty"`
@@ -3450,12 +3474,18 @@ type TurnStatus struct {
 	Paths       []string `json:"paths,omitempty"`
 	Reason      string   `json:"reason,omitempty"`
 
+	// ResetAt `code: provider_limit` only: when the provider said its limit resets. Absent when it stated no reset, so a reader is told to try again later rather than given a time nobody promised.
+	ResetAt *time.Time `json:"resetAt,omitempty"`
+
 	// Status running, completed, failed
 	Status    string    `json:"status"`
 	TurnID    string    `json:"turnId"`
 	UpdatedAt time.Time `json:"updatedAt"`
 	UseCase   string    `json:"useCase"`
 }
+
+// TurnStatusCode Why a failed turn failed, when the agents service could name it (reason `agent-error`): `provider_limit`, the model provider refused the turn's calls with HTTP 429 for longer than a wait (a `retry-after` of five minutes or more, or five minutes of 429 retries in total); `output_truncated`, the connection's output limit cut a file write off before it finished, so nothing was written. `message` carries the agents service's sentence for it. Absent on every other turn.
+type TurnStatusCode string
 
 // TurnUsage The token usage RunEvent carries: the folded aggregate every reader already consumes, plus the per-model split the platform prices against its rate table. It is Usage with one field added, rather than Usage itself, because `models` is meaningful only on a producer's own report of what it just spent — the project and cycle roll-ups that Usage serves sum already-stamped rows and have nothing to break down.
 // The split is not a nicety. Cost is stamped per model, from that model's own rate row, so an aggregate whose `model` is "" (see below) cannot be priced at all — and a real coding run regularly touches a second model, both because the runtime reaches for small-model helpers of its own and because a lead is expected to pick the model for the job. Without `models` those runs are simply unpriceable, which is the defect this schema exists to close (#291).

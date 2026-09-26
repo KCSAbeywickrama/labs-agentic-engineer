@@ -892,7 +892,8 @@ test("the body's connection builds the turn's model, with the header's key and t
     assert.equal(res.status, 200);
     assert.match(await res.text(), /"model":"gpt-oss:20b"/);
     assert.deepEqual(run.connections[0], { ...OLLAMA_CONNECTION, apiKey: KEY, model: "gpt-oss:20b" });
-    assert.deepEqual(run.contexts[0], { orgId: WS_ORG });
+    assert.equal(run.contexts[0]!.orgId, WS_ORG);
+    assert.equal(typeof run.contexts[0]!.onProviderWait, "function", "a provider wait reaches the turn's stream");
   } finally {
     await run.close();
     rmSync(root, { recursive: true, force: true });

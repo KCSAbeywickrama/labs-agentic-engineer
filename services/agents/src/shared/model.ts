@@ -157,6 +157,8 @@ interface CreateModelOptions {
   providerLimitLog?: ProviderLimitLog;
   /** The clock the 429 budget counts on (tests). */
   now?: () => number;
+  /** Told when a model call waits out a short 429 (`ProviderLimitWatch.onWait`). */
+  onProviderWait?: (host: string) => void;
 }
 
 /**
@@ -173,6 +175,7 @@ export function createModel(conn: ModelConnection, options: CreateModelOptions =
     ...(options.orgId ? { org: options.orgId } : {}),
     ...(options.providerLimitLog ? { log: options.providerLimitLog } : {}),
     ...(options.now ? { now: options.now } : {}),
+    ...(options.onProviderWait ? { onWait: options.onProviderWait } : {}),
   });
   // Trace capture is NOT wrapped around the model: a capturing object's
   // lifetime became the trace's run identity, and this object is rebuilt every

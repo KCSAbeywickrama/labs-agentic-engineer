@@ -62,6 +62,7 @@ export type {
   WebSearchStrategy,
   Tristate,
   TurnErrorPart,
+  ProviderWaitPart,
   TurnAnchor,
   TurnAnchorNode,
   TurnAim,

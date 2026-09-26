@@ -101,7 +101,7 @@ async function main(): Promise<void> {
   const app = createApp({
     store,
     // Built PER TURN from the turn's connection (key, format, URL, model).
-    buildModel: (conn, { orgId }) => createModel(conn, orgId ? { orgId } : {}),
+    buildModel: (conn, ctx) => createModel(conn, ctx),
     auth: buildAuthConfig(), // throws here if neither JWKS nor secret is set (gate is always on)
   });
 

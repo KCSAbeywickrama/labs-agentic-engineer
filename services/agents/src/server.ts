@@ -62,6 +62,7 @@ import {
   SURFACES,
   type CollabConfig,
   type McpConfig,
+  type ProviderWaitPart,
   type StreamPart,
   type Surface,
   type Toolset,
@@ -100,6 +101,11 @@ import {
 export interface TurnModelContext {
   /** The organization the turn runs for (`X-Org-Id`), named on its provider log lines. */
   orgId?: string;
+  /**
+   * Told when a model call waits out a short 429, so the turn's stream can say
+   * it is waiting on the model provider (a `provider-wait` frame).
+   */
+  onProviderWait?: (host: string) => void;
 }
 
 export interface CreateAppDeps {
@@ -491,7 +497,15 @@ export function createApp(deps: CreateAppDeps): Express {
     // Build the per-turn model from the connection (fail as a pre-stream 500).
     let model: LanguageModel;
     try {
-      model = deps.buildModel(conn, orgId ? { orgId } : {});
+      // `send` is declared below; the wait callback only fires once the turn
+      // is running, by which point it is.
+      model = deps.buildModel(conn, {
+        ...(orgId ? { orgId } : {}),
+        onProviderWait: (host) => {
+          const wait: ProviderWaitPart = { type: "provider-wait", host };
+          send(wait);
+        },
+      });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : "model init failed" });
       return;

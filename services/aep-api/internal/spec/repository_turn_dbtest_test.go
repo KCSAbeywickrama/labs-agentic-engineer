@@ -135,6 +135,43 @@ func TestTurnRepo_GuardAndLifecycle(t *testing.T) {
 	}
 }
 
+// A turn the agents service ended with a coded error frame keeps the code
+// and the provider's reset time on its row; a turn without them stores none
+// (reset_at NULL, not a zero time).
+func TestTurnRepo_FinishStoresTheErrorCode(t *testing.T) {
+	t.Parallel()
+	repo := spec.NewTurnRepository(dbtest.New(t), nil)
+	ctx := context.Background()
+
+	limited, err := repo.TryStart(ctx, newTurn("o1", "p1", "c1", "general"))
+	if err != nil {
+		t.Fatalf("TryStart: %v", err)
+	}
+	resetAt := time.Date(2026, 9, 26, 14, 5, 0, 0, time.UTC)
+	if ok, err := repo.Finish(ctx, limited.ID, spec.TurnTerminal{
+		Status: "failed", Reason: "agent-error", Message: "usage limit is reached",
+		Code: spec.TurnErrorProviderLimit, ResetAt: &resetAt, Host: "ollama.com",
+	}); err != nil || !ok {
+		t.Fatalf("Finish = (%v, %v)", ok, err)
+	}
+	got, _ := repo.Get(ctx, "o1", "p1", limited.ID)
+	if got.Code != spec.TurnErrorProviderLimit || got.ResetAt == nil || !got.ResetAt.Equal(resetAt) {
+		t.Fatalf("row code/resetAt = %q/%v", got.Code, got.ResetAt)
+	}
+
+	plain, err := repo.TryStart(ctx, newTurn("o1", "p1", "c1", "general"))
+	if err != nil {
+		t.Fatalf("second TryStart: %v", err)
+	}
+	if ok, err := repo.Finish(ctx, plain.ID, spec.TurnTerminal{Status: "failed", Reason: "stream-died"}); err != nil || !ok {
+		t.Fatalf("Finish = (%v, %v)", ok, err)
+	}
+	got, _ = repo.Get(ctx, "o1", "p1", plain.ID)
+	if got.Code != "" || got.ResetAt != nil {
+		t.Fatalf("uncoded row code/resetAt = %q/%v, want none", got.Code, got.ResetAt)
+	}
+}
+
 func TestTurnRepo_SweepStale(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)

@@ -386,6 +386,10 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 
 	fold := agentfold.New(s.turnBaseReader(job.repoRef, job.baseRef))
 	var manifest *agentfold.Manifest
+	// agentErr is the coded error frame the agents service ended the turn
+	// with, when it could name the failure; it is still relayed like any
+	// other part, so an attached reader sees it live.
+	var agentErr *agentfold.TurnError
 	var foldErr error
 	end, readErr := agentfold.ForEachDataFrame(&pulseReader{r: body, activity: activity}, func(raw []byte) error {
 		var part agentfold.StreamPart
@@ -395,6 +399,9 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		if m, ok := agentfold.ManifestOf(part); ok {
 			manifest = &m
 			return nil // backend integrity plumbing — never forwarded (D14)
+		}
+		if te, ok := agentfold.TurnErrorOf(part); ok && knownTurnErrorCode(te.Code) {
+			agentErr = &te
 		}
 		s.broker.Append(job.turnID, raw)
 		if roomMode {
@@ -418,11 +425,7 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		case manifest == nil:
 			// Same severed/errored semantics as the committed path — the agents
 			// service vouched for nothing.
-			msg := "stream ended without a manifest"
-			if end == agentfold.StreamEOF {
-				msg = "stream severed before the manifest"
-			}
-			return failedTerminal(turnReasonStreamDied, msg, nil)
+			return noManifestTerminal(end, agentErr)
 		}
 		// Edits live in the room's doc; git is untouched (persistence is the
 		// #86 phase-3 committer). The base sha stays the "content as of" pin.
@@ -456,11 +459,7 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 	case manifest == nil:
 		// Severed (EOF) or completed-with-error ([DONE] after an in-band
 		// error frame) — either way agents vouched for nothing: no commit.
-		msg := "stream ended without a manifest"
-		if end == agentfold.StreamEOF {
-			msg = "stream severed before the manifest"
-		}
-		return failedTerminal(turnReasonStreamDied, msg, nil)
+		return noManifestTerminal(end, agentErr)
 	}
 
 	// D14 integrity gate: the Go fold must agree byte-for-byte with the
@@ -484,6 +483,25 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 	// so a refetch on the terminal reconciles the live preview back to the
 	// unchanged tree.
 	return withUsage(TurnTerminal{Status: turnStatusCompleted, CommitSHA: job.baseRef, NoChanges: true}, manifest)
+}
+
+// noManifestTerminal is the failed terminal of a stream that ended without a
+// manifest. When the agents service named the failure in a coded error frame
+// the turn fails with that code and its sentence (reason agent-error);
+// otherwise it is the severed/errored stream it always was.
+func noManifestTerminal(end agentfold.StreamEnd, agentErr *agentfold.TurnError) TurnTerminal {
+	if agentErr != nil {
+		term := failedTerminal(turnReasonAgentError, agentErr.Message, nil)
+		term.Code = agentErr.Code
+		term.ResetAt = agentErr.ResetAt
+		term.Host = agentErr.Host
+		return term
+	}
+	msg := "stream ended without a manifest"
+	if end == agentfold.StreamEOF {
+		msg = "stream severed before the manifest"
+	}
+	return failedTerminal(turnReasonStreamDied, msg, nil)
 }
 
 // withUsage stamps the manifest's token spend (#249) onto a terminal. A nil
@@ -600,11 +618,17 @@ func terminalEventJSON(term TurnTerminal) []byte {
 		}{Type: "turn-committed", CommitSHA: term.CommitSHA, NoChanges: term.NoChanges}
 	} else {
 		payload = struct {
-			Type    string   `json:"type"`
-			Reason  string   `json:"reason"`
-			Message string   `json:"message,omitempty"`
-			Paths   []string `json:"paths,omitempty"`
-		}{Type: "turn-failed", Reason: term.Reason, Message: term.Message, Paths: term.Paths}
+			Type    string     `json:"type"`
+			Reason  string     `json:"reason"`
+			Message string     `json:"message,omitempty"`
+			Paths   []string   `json:"paths,omitempty"`
+			Code    string     `json:"code,omitempty"`
+			Host    string     `json:"host,omitempty"`
+			ResetAt *time.Time `json:"resetAt,omitempty"`
+		}{
+			Type: "turn-failed", Reason: term.Reason, Message: term.Message, Paths: term.Paths,
+			Code: term.Code, Host: term.Host, ResetAt: term.ResetAt,
+		}
 	}
 	b, err := json.Marshal(payload)
 	if err != nil { // unreachable: static shapes

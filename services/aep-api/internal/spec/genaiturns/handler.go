@@ -294,6 +294,11 @@ func turnStatusModel(st *spec.TurnStatus) gen.TurnStatus {
 		CreatedAt:      st.CreatedAt,
 		UpdatedAt:      st.UpdatedAt,
 
+		// Why a failed turn failed, when the agents service named it.
+		Code:    gen.TurnStatusCode(st.Code),
+		Host:    st.Host,
+		ResetAt: st.ResetAt,
+
 		// The turn's display record (#562) — what a client attaching to a
 		// running turn paints as the message that started it.
 		Instruction:       st.Instruction,

@@ -980,6 +980,7 @@ function isPlanContextOrAbsent(v: unknown): boolean {
  * derived server-side from tokens + model (console ADR-0011).
  */
 export interface TurnUsage {
+  /** Input tokens neither read from nor written to the prompt cache; those two are counted below. */
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
@@ -1029,6 +1030,19 @@ export type TurnErrorPart =
   | { type: "error"; code: "provider_limit"; error: string; host: string; resetAt?: string }
   | { type: "error"; code: "output_truncated"; error: string; toolName: string; path?: string };
 
+/**
+ * The turn is waiting on the model provider: it answered a model call with a
+ * 429 the provider-limit rule calls a WAIT (a short stated `retry-after`, well
+ * inside the turn's 429 budget), and the service is sleeping before it retries.
+ * One frame per such 429. It is status, not content: the next frame of any
+ * other type means the model answered and the wait is over, so no frame
+ * clears it. `host` names whose limit it is (`ollama.com`).
+ */
+export interface ProviderWaitPart {
+  type: "provider-wait";
+  host: string;
+}
+
 // --- The emitted event catalog ----------------------------------------------
 
 /**
@@ -1059,6 +1073,8 @@ export const AGENT_SSE_EVENT_TYPES = [
   "tool-result",
   "tool-error",
   "error",
+  // Status only, while a model call waits out a short 429 (`ProviderWaitPart`).
+  "provider-wait",
   "finish",
   "manifest",
 ] as const;

@@ -8729,12 +8729,35 @@ components:
             is one convention across this schema: the empty string, exactly as `instruction`
             uses it.
           type: string
+        code:
+          description: >-
+            Why a failed turn failed, when the agents service could name it
+            (reason `agent-error`): `provider_limit`, the model provider refused
+            the turn's calls with HTTP 429 for longer than a wait (a
+            `retry-after` of five minutes or more, or five minutes of 429
+            retries in total); `output_truncated`, the connection's output
+            limit cut a file write off before it finished, so nothing was
+            written. `message` carries the agents service's sentence for it.
+            Absent on every other turn.
+          enum:
+          - provider_limit
+          - output_truncated
+          type: string
+          x-enum-varnames:
+          - TurnStatusCodeProviderLimit
+          - TurnStatusCodeOutputTruncated
         commitSha:
           type: string
         conversationId:
           type: string
         createdAt:
           format: date-time
+          type: string
+        host:
+          description: >-
+            `code: provider_limit` only: the host of the model endpoint whose
+            limit stopped the turn (`ollama.com`), as the turn's connection
+            named it. Display only — what the reader's sentence names.
           type: string
         instruction:
           description: >-
@@ -8757,6 +8780,14 @@ components:
           nullable: true
         reason:
           type: string
+        resetAt:
+          description: >-
+            `code: provider_limit` only: when the provider said its limit
+            resets. Absent when it stated no reset, so a reader is told to try
+            again later rather than given a time nobody promised.
+          format: date-time
+          type: string
+          x-go-type-skip-optional-pointer: false
         status:
           description: running, completed, failed
           type: string

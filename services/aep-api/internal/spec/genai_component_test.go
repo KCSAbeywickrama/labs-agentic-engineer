@@ -327,6 +327,8 @@ func (m *memTurnRepo) Finish(_ context.Context, id string, term spec.TurnTermina
 			r.Reason = term.Reason
 			r.NoChanges = term.NoChanges
 			r.Message = term.Message
+			r.Code = term.Code
+			r.ResetAt = term.ResetAt
 			if len(term.Paths) > 0 {
 				b, _ := json.Marshal(term.Paths)
 				r.Paths = string(b)
@@ -1024,6 +1026,83 @@ func TestManifestGate_MismatchSeveredEmpty(t *testing.T) {
 			t.Error("no-changes turn must not commit")
 		}
 	})
+}
+
+// TestCodedErrorFrame_StoredOnTheFailedTurn: when the agents service ends a
+// turn with a coded error frame (no manifest), the turn fails as agent-error
+// with the frame's code and sentence — on the row, on the status read, and on
+// the terminal stream event — instead of the generic stream-died. An uncoded
+// error frame keeps the stream-died verdict, and so does a code aep-api does
+// not know.
+func TestCodedErrorFrame_StoredOnTheFailedTurn(t *testing.T) {
+	t.Run("provider limit", func(t *testing.T) {
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
+		r.fake.parts = []string{
+			textPart("working"),
+			`{"type":"error","code":"provider_limit","error":"api.anthropic.com's usage limit is reached. Try again after 2026-09-26T14:05:00.000Z.","host":"api.anthropic.com","resetAt":"2026-09-26T14:05:00.000Z"}`,
+		}
+
+		turnID := r.startTurn(t, convUUID, "", "x")
+		st := r.waitTerminal(t, turnID)
+		want := time.Date(2026, 9, 26, 14, 5, 0, 0, time.UTC)
+		if st.Status != "failed" || st.Reason != "agent-error" || st.Code != spec.TurnErrorProviderLimit ||
+			st.Host != modelconn.AnthropicHost || st.ResetAt == nil || !st.ResetAt.Equal(want) ||
+			!strings.Contains(st.Message, "usage limit is reached") {
+			t.Fatalf("terminal = %+v, want failed agent-error provider_limit", st)
+		}
+		if row := r.turns.row(t, turnID); row.Code != spec.TurnErrorProviderLimit || row.ResetAt == nil {
+			t.Fatalf("row code/resetAt = %q/%v", row.Code, row.ResetAt)
+		}
+
+		events, done, _ := r.streamEvents(t, turnID, "", nil)
+		if !done || len(events) != 3 {
+			t.Fatalf("stream: done=%v events=%d, want the text, the coded frame and the terminal", done, len(events))
+		}
+		var term struct {
+			Type, Reason, Code, Host, ResetAt string
+		}
+		if err := json.Unmarshal([]byte(events[2].data), &term); err != nil {
+			t.Fatal(err)
+		}
+		if term.Type != "turn-failed" || term.Reason != "agent-error" || term.Code != spec.TurnErrorProviderLimit ||
+			term.Host != modelconn.AnthropicHost || term.ResetAt == "" {
+			t.Fatalf("terminal event = %s", events[2].data)
+		}
+	})
+
+	t.Run("output truncated, room turn", func(t *testing.T) {
+		r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
+		r.fake.parts = []string{`{"type":"error","code":"output_truncated","error":"The model's output limit cut off addFile.","toolName":"addFile"}`}
+
+		body, _ := json.Marshal(map[string]any{"instruction": "x", "collab": true})
+		rec := r.h.AsOrg(testOrg).Post(turnsPath(convUUID), string(body))
+		var out struct {
+			TurnID string `json:"turnId"`
+		}
+		if rec.Code != http.StatusAccepted || json.Unmarshal(rec.Body.Bytes(), &out) != nil {
+			t.Fatalf("POST collab turn: code %d (%s)", rec.Code, rec.Body.String())
+		}
+		st := r.waitTerminal(t, out.TurnID)
+		if st.Status != "failed" || st.Reason != "agent-error" || st.Code != spec.TurnErrorOutputTruncated ||
+			st.Host != "" || st.ResetAt != nil {
+			t.Fatalf("terminal = %+v, want failed agent-error output_truncated", st)
+		}
+	})
+
+	for name, frame := range map[string]string{
+		"uncoded error": `{"type":"error","error":"boom"}`,
+		"unknown code":  `{"type":"error","code":"something_new","error":"boom"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
+			r.fake.parts = []string{frame}
+
+			st := r.waitTerminal(t, r.startTurn(t, convUUID, "", "x"))
+			if st.Status != "failed" || st.Reason != "stream-died" || st.Code != "" {
+				t.Fatalf("terminal = %+v, want failed stream-died with no code", st)
+			}
+		})
+	}
 }
 
 func (r *genaiRig) waitTerminalOf(t *testing.T, turnID string) spec.TurnStatus {

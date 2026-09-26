@@ -99,6 +99,7 @@ function always429(headers: Record<string, string>, body: string): { calls: numb
 test("watchProviderLimits on a fake clock: 20s waits pass back to the SDK until five minutes of them, then it stops", async () => {
   let now = NOW;
   const lines: ProviderLimitLogLine[] = [];
+  const waits: string[] = [];
   const base = always429({ "retry-after": "20", "x-ratelimit-remaining": "0", "content-type": "application/json" }, "{}");
   const fetch = watchProviderLimits(base.fetch, {
     apiKey: KEY,
@@ -108,6 +109,7 @@ test("watchProviderLimits on a fake clock: 20s waits pass back to the SDK until 
     org: "org-1",
     log: (l) => lines.push(l),
     now: () => now,
+    onWait: (host) => waits.push(host),
   });
   let stopped: unknown;
   for (let i = 0; i < 100 && stopped === undefined; i++) {
@@ -128,6 +130,7 @@ test("watchProviderLimits on a fake clock: 20s waits pass back to the SDK until 
   assert.equal(lines[15]!.waitedMs, 5 * MIN);
   assert.deepEqual(lines[0]!.limitHeaders, { "retry-after": "20", "x-ratelimit-remaining": "0" });
   assert.equal(lines[0]!.org, "org-1");
+  assert.deepEqual(waits, Array(15).fill("ollama.com"), "every wait is announced, the provider limit is not");
 });
 
 test("a 429's logged body is scrubbed of the key before it is cut to 300 characters", async () => {
@@ -211,12 +214,37 @@ function mountRoot(): string {
   return root;
 }
 
-test("a stub provider answering 429 retry-after: 600 ends the turn with one provider_limit frame and one log line", async () => {
+/** How the stub provider answers its `n`th request (1-based). */
+type StubAnswer = { status: number; headers: Record<string, string>; body: string };
+
+/** An OpenAI-compatible streamed completion answering "ok". */
+function okCompletion(): StubAnswer {
+  const data = (o: unknown) => `data: ${JSON.stringify(o)}\n\n`;
+  const chunk = { id: "c1", object: "chat.completion.chunk", created: 1, model: "gpt-oss:20b" };
+  return {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+    body: data({ ...chunk, choices: [{ index: 0, delta: { content: "ok" }, finish_reason: "stop" }] }) + "data: [DONE]\n\n",
+  };
+}
+
+/**
+ * One real turn through the SSE route, its model reaching a stub provider that
+ * answers each request with `answer(n)`. Returns the stream's frames and raw
+ * text, how many requests the provider saw, and the 429 lines logged.
+ */
+async function runStubTurn(answer: (n: number) => StubAnswer): Promise<{
+  frames: Array<Record<string, unknown>>;
+  sse: string;
+  requests: number;
+  lines: ProviderLimitLogLine[];
+}> {
   let requests = 0;
   const provider: Server = createServer((_req, res) => {
     requests += 1;
-    res.writeHead(429, { "content-type": "application/json", "retry-after": "600" });
-    res.end(JSON.stringify({ error: { message: `usage limit reached for ${KEY}` } }));
+    const a = answer(requests);
+    res.writeHead(a.status, a.headers);
+    res.end(a.body);
   });
   await new Promise<void>((r) => provider.listen(0, "127.0.0.1", r));
   const providerBase = `http://127.0.0.1:${(provider.address() as AddressInfo).port}`;
@@ -226,10 +254,10 @@ test("a stub provider answering 429 retry-after: 600 ends the turn with one prov
     store: new InMemoryConversationStore(),
     // The connection names a public host; the test's fetch carries its
     // requests to the stub instead, beneath the 429 watch.
-    buildModel: (conn, { orgId }) =>
+    buildModel: (conn, ctx) =>
       createModel(conn, {
+        ...ctx,
         fetch: (url, init) => globalThis.fetch(String(url).replace("https://llm.example", providerBase), init),
-        ...(orgId ? { orgId } : {}),
         providerLimitLog: (l) => lines.push(l),
       }),
     auth: { audience: "agents-service", secret: "s" },
@@ -256,30 +284,61 @@ test("a stub provider answering 429 retry-after: 600 ends the turn with one prov
     assert.equal(res.status, 200);
     const sse = await res.text();
     const frames = sse.split("\n").filter((l) => l.startsWith("data: {")).map((l) => JSON.parse(l.slice(6)) as Record<string, unknown>);
-    const errors = frames.filter((f) => f.type === "error");
-    assert.equal(errors.length, 1, `exactly one error frame, got ${JSON.stringify(errors)}`);
-    assert.equal(errors[0]!.code, "provider_limit");
-    assert.equal(errors[0]!.host, "llm.example");
-    const resetAt = Date.parse(String(errors[0]!.resetAt));
-    assert.ok(Math.abs(resetAt - (Date.now() + 600_000)) < 30_000, "resetAt is the stated wait from now");
-    assert.match(String(errors[0]!.error), /^llm\.example's usage limit is reached\. Try again after /);
-    assert.equal(frames.some((f) => f.type === "manifest"), false, "a failed turn carries no manifest");
-    assert.equal(requests, 1, "a provider limit is not retried");
-    assert.equal(lines.length, 1, "exactly one model_provider_429 line");
-    assert.equal(lines[0]!.msg, "model_provider_429");
-    assert.equal(lines[0]!.source, "agents");
-    assert.equal(lines[0]!.org, ORG);
-    assert.equal(lines[0]!.host, "llm.example");
-    assert.equal(lines[0]!.format, "openai-compatible");
-    assert.equal(lines[0]!.model, "gpt-oss:20b");
-    assert.equal(lines[0]!.status, 429);
-    assert.deepEqual(lines[0]!.limitHeaders, { "retry-after": "600" });
-    assert.equal(lines[0]!.verdict, "provider_limit");
-    assert.ok(!JSON.stringify(lines).includes(KEY), "no key literal in the log line");
-    assert.ok(!sse.includes(KEY), "no key literal on the stream");
+    return { frames, sse, requests, lines };
   } finally {
     await close();
     await new Promise<void>((r) => provider.close(() => r()));
     rmSync(root, { recursive: true, force: true });
   }
+}
+
+test("a stub provider answering 429 retry-after: 600 ends the turn with one provider_limit frame and one log line", async () => {
+  const { frames, sse, requests, lines } = await runStubTurn(() => ({
+    status: 429,
+    headers: { "content-type": "application/json", "retry-after": "600" },
+    body: JSON.stringify({ error: { message: `usage limit reached for ${KEY}` } }),
+  }));
+  const errors = frames.filter((f) => f.type === "error");
+  assert.equal(errors.length, 1, `exactly one error frame, got ${JSON.stringify(errors)}`);
+  assert.equal(errors[0]!.code, "provider_limit");
+  assert.equal(errors[0]!.host, "llm.example");
+  const resetAt = Date.parse(String(errors[0]!.resetAt));
+  assert.ok(Math.abs(resetAt - (Date.now() + 600_000)) < 30_000, "resetAt is the stated wait from now");
+  assert.match(String(errors[0]!.error), /^llm\.example's usage limit is reached\. Try again after /);
+  assert.equal(frames.some((f) => f.type === "manifest"), false, "a failed turn carries no manifest");
+  assert.equal(frames.some((f) => f.type === "provider-wait"), false, "a provider limit is not a wait");
+  assert.equal(requests, 1, "a provider limit is not retried");
+  assert.equal(lines.length, 1, "exactly one model_provider_429 line");
+  assert.equal(lines[0]!.msg, "model_provider_429");
+  assert.equal(lines[0]!.source, "agents");
+  assert.equal(lines[0]!.org, ORG);
+  assert.equal(lines[0]!.host, "llm.example");
+  assert.equal(lines[0]!.format, "openai-compatible");
+  assert.equal(lines[0]!.model, "gpt-oss:20b");
+  assert.equal(lines[0]!.status, 429);
+  assert.deepEqual(lines[0]!.limitHeaders, { "retry-after": "600" });
+  assert.equal(lines[0]!.verdict, "provider_limit");
+  assert.ok(!JSON.stringify(lines).includes(KEY), "no key literal in the log line");
+  assert.ok(!sse.includes(KEY), "no key literal on the stream");
+});
+
+test("a short 429 wait streams one provider-wait frame, and the model's answer follows it", async () => {
+  const { frames, requests } = await runStubTurn((n) =>
+    n === 1 ? { status: 429, headers: { "retry-after": "0.05" }, body: "{}" } : okCompletion(),
+  );
+  assert.equal(requests, 2, "the wait was retried");
+  const waits = frames.filter((f) => f.type === "provider-wait");
+  assert.deepEqual(waits, [{ type: "provider-wait", host: "llm.example" }]);
+  const types = frames.map((f) => f.type);
+  const answered = types.indexOf("text-delta");
+  assert.ok(answered > 0, "the model's answer follows");
+  assert.ok(types.indexOf("provider-wait") < types.indexOf("start-step"), `the wait is said before the model answers: ${types.join(",")}`);
+  assert.ok(frames.some((f) => f.type === "manifest"), "the turn completes");
+});
+
+test("a turn the provider answers first time streams no provider-wait frame", async () => {
+  const { frames, requests } = await runStubTurn(() => okCompletion());
+  assert.equal(requests, 1);
+  assert.equal(frames.some((f) => f.type === "provider-wait"), false);
+  assert.ok(frames.some((f) => f.type === "manifest"));
 });

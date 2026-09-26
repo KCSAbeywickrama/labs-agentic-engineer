@@ -17,6 +17,7 @@
  */
 
 import type { components } from "../../../generated/aep-api";
+import { resetStamp } from "../../../lib/resetStamp";
 
 type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 type RunFailure = components["schemas"]["RunFailure"];
@@ -207,18 +208,6 @@ function providerLimitCopy(f: RunFailure | undefined, now: Date): Omit<FailureCo
       `The coding agent stopped when ${host ?? "its model provider"} refused further requests, ` +
       `and nothing from that build session was merged. ${resume}`,
   };
-}
-
-/**
- * A reset time as a reader plans around it: the time alone today, the date as
- * well when the plan resets another day (a weekly limit).
- */
-function resetStamp(iso: string, now: Date): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const time: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit" };
-  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString(undefined, time);
-  return d.toLocaleString(undefined, { month: "short", day: "numeric", ...time });
 }
 
 /** A run that failed before the record existed, or in a phase no producer records yet. */

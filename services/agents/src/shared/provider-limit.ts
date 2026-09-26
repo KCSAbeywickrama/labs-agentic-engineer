@@ -29,6 +29,10 @@
  *   which covers a provider that states no reset. The turn stops at once with
  *   a `provider_limit` frame instead of sleeping on a spent plan.
  *
+ * While a wait is being ridden out the turn says so: `onWait` fires on each
+ * such 429 and the SSE route turns it into a `provider-wait` frame, so a reader
+ * sees "waiting on the model provider" instead of a silent stall.
+ *
  * The rule runs inside the fetch each turn's model is built with, because only
  * there is every attempt visible (the SDK's own retries included) with its
  * headers and body. What a spent plan actually returns is learned from
@@ -158,6 +162,11 @@ export interface ProviderLimitWatch {
   log?: ProviderLimitLog;
   /** The clock, injected so the 5-minute budget is testable. */
   now?: () => number;
+  /**
+   * Called on each 429 the rule calls a wait, before the SDK sleeps and
+   * retries — the turn is waiting on `host`. Never called for a provider limit.
+   */
+  onWait?: (host: string) => void;
 }
 
 /**
@@ -192,7 +201,10 @@ export function watchProviderLimits(base: typeof globalThis.fetch, watch: Provid
       verdict,
       waitedMs,
     });
-    if (verdict === "wait") return res;
+    if (verdict === "wait") {
+      watch.onWait?.(watch.host);
+      return res;
+    }
     await res.body?.cancel();
     throw new ProviderLimitError(watch.host, resetAtOf(res.headers, at));
   }) as typeof globalThis.fetch;

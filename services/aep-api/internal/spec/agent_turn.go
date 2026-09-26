@@ -61,7 +61,8 @@ type AgentTurn struct {
 
 	// CommitSHA is the landed commit for a completed turn ("" for a
 	// no-changes completion). Reason is the failure class for a failed turn:
-	// stream-died | fold-parity | base-moved | dispatch-failed | internal.
+	// stream-died | fold-parity | base-moved | dispatch-failed | internal |
+	// agent-error.
 	// Paths is a JSON array of the conflicting paths for base-moved.
 	// Message carries a human-readable failure detail.
 	CommitSHA string `gorm:"type:text" json:"commitSha,omitempty"`
@@ -69,6 +70,14 @@ type AgentTurn struct {
 	Paths     string `gorm:"type:text" json:"-"`
 	NoChanges bool   `json:"noChanges,omitempty"`
 	Message   string `gorm:"type:text" json:"message,omitempty"`
+
+	// Code names the failure when the agents service could (reason
+	// agent-error): provider_limit (the model provider's usage limit) or
+	// output_truncated (the output limit cut a file write off). ResetAt is
+	// when the provider said a provider_limit resets, nil when it did not say.
+	// Both nullable, added by AutoMigrate; empty/nil on every other turn.
+	Code    string     `gorm:"type:text" json:"-"`
+	ResetAt *time.Time `json:"-"`
 
 	// SpecTag is the D19 lineage stamp for design turns: the latest approved
 	// requirements tag (vN) at gate time. BaseRef covers the baseSha half.

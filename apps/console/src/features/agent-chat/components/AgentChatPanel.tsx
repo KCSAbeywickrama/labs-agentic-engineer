@@ -60,6 +60,7 @@ import { useAgentEngaged } from "../useAgentEngaged";
 import { useCurrentAuthor } from "../currentUser";
 import { buildFeed, participantsOf, type FeedBlock } from "../feed";
 import { answerableQuestionIds } from "../questionCards";
+import { providerWaitLabel, useProviderWait } from "../providerWait";
 import { MessageList } from "./MessageList";
 import { ChatInput } from "./ChatInput";
 import { DESIGN_COMMAND } from "@aep/contracts/commands";
@@ -195,6 +196,10 @@ export function AgentChatPanel({
     isSending || messages.some((m) => m.role === "user" && m.status === "in_flight");
   const showWorkingTail =
     sendInFlight && !feed.some((b) => b.kind === "turn" && b.status === "running");
+  // While the running turn waits out a short 429 its indicator says so,
+  // rather than a bare "Working…" over a silent stall.
+  const waitingOn = useProviderWait(chatKey);
+  const workingLabel = waitingOn ? providerWaitLabel(waitingOn) : undefined;
 
   // Same-file tool runs render collapsed by default; a click flips membership.
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
@@ -560,6 +565,7 @@ export function AgentChatPanel({
               onOpenSpecFile={openSpecFile}
               showSpecLink={specWorkspace}
               showWorkingTail={showWorkingTail}
+              workingLabel={workingLabel}
             />
           )}
         </Box>
