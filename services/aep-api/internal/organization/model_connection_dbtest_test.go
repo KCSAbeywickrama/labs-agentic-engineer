@@ -78,7 +78,7 @@ func TestModelConnectionEffective_DB(t *testing.T) {
 	wantAnthropic(t, conn, modelconn.DefaultAnthropicModel)
 
 	// The row exists but the bytes vanished → degrades to none.
-	if err := c.store.Delete(ctx, "acme", "anthropic/key"); err != nil {
+	if err := c.store.Delete(ctx, "acme", "model/key"); err != nil {
 		t.Fatalf("store delete: %v", err)
 	}
 	if _, key, ok, err := c.conns.Effective(ctx, "acme"); err != nil || ok || key != "" {

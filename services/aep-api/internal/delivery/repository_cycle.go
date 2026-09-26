@@ -170,6 +170,13 @@ type RunCycleRepository interface {
 	// Org-scoped because it is derived from an already-org-resolved dispatch.
 	ListOpenCycleIDs(ctx context.Context, orgID, projectID string) ([]string, error)
 
+	// HasOpenCycle reports whether any of the org's cycles has not ended, in
+	// any project: an agent that may still be starting on the credential it
+	// was dispatched with. The model connection key's rename reads it before
+	// deleting the key's previous copy. A cycle row is appended before its Job
+	// is launched, so a dispatch in progress already counts.
+	HasOpenCycle(ctx context.Context, orgID string) (bool, error)
+
 	// DeleteByProject purges a project's cycle records — the project-delete
 	// cascade, paired with MilestoneRunRepository.DeleteByProject so a recreated
 	// same-named project starts with a clean timeline.
@@ -396,6 +403,14 @@ func (r *runCycleRepository) ListOpenCycleIDs(ctx context.Context, orgID, projec
 		return nil, err
 	}
 	return ids, nil
+}
+
+func (r *runCycleRepository) HasOpenCycle(ctx context.Context, orgID string) (bool, error) {
+	var open bool
+	err := r.db.WithContext(ctx).Raw(
+		`SELECT EXISTS (SELECT 1 FROM run_cycles WHERE org_id = ? AND ended_at IS NULL)`, orgID,
+	).Scan(&open).Error
+	return open, err
 }
 
 func (r *runCycleRepository) DeleteByProject(ctx context.Context, orgID, projectID string) error {

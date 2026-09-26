@@ -182,7 +182,7 @@ func TestSecretRefWriter_WriteModelKey(t *testing.T) {
 			t.Fatalf("want exactly 1 CreateSecret call, got %d", len(fake.createCalls))
 		}
 		call := fake.createCalls[0]
-		wantLoc := secretmanagersvc.SecretLocation{OrgName: "ou-acme-uuid", ControlPlaneNamespace: "acme", EntityName: "anthropic", SecretKey: secretmanagersvc.SecretKeyAPIKey}
+		wantLoc := secretmanagersvc.SecretLocation{OrgName: "ou-acme-uuid", ControlPlaneNamespace: "acme", EntityName: "model-connection", SecretKey: secretmanagersvc.SecretKeyAPIKey}
 		if call.loc != wantLoc {
 			t.Fatalf("SecretLocation = %+v; want %+v", call.loc, wantLoc)
 		}
@@ -196,7 +196,7 @@ func TestSecretRefWriter_WriteModelKey(t *testing.T) {
 		fake := &fakeSMClient{}
 		w := organization.NewSecretRefWriter(fake, nil, nil, nil, nil)
 		_, err := w.WriteModelKey(context.Background(), "acme", "sk-ant-key")
-		if err == nil || !strings.Contains(err.Error(), "anthropic upload") {
+		if err == nil || !strings.Contains(err.Error(), "model-connection upload") {
 			t.Fatalf("want a wrapped upload error, got %v", err)
 		}
 		if !strings.Contains(err.Error(), "no ouId claim") {
@@ -215,7 +215,7 @@ func TestSecretRefWriter_WriteModelKey(t *testing.T) {
 		if err == nil || ref != "" {
 			t.Fatalf("WriteModelKey = (%q, %v); want (\"\", wrapped error)", ref, err)
 		}
-		if !strings.Contains(err.Error(), "anthropic upload") {
+		if !strings.Contains(err.Error(), "model-connection upload") {
 			t.Fatalf("error not wrapped as expected: %v", err)
 		}
 	})
@@ -567,7 +567,7 @@ func TestSecretRefWriter_DeleteAnthropic(t *testing.T) {
 	t.Run("disabled (nil client) is a no-op", func(t *testing.T) {
 		t.Parallel()
 		w := organization.NewSecretRefWriter(nil, nil, nil, nil, nil)
-		if err := w.DeleteModelKey(context.Background(), "acme", "acme-anthropic-secrets"); err != nil {
+		if err := w.DeleteModelKey(context.Background(), "acme", "model-connection-secrets"); err != nil {
 			t.Fatalf("disabled DeleteAnthropic = %v; want nil", err)
 		}
 	})
@@ -593,10 +593,30 @@ func TestSecretRefWriter_DeleteAnthropic(t *testing.T) {
 		t.Parallel()
 		fake := &fakeSMClient{deleteErr: errors.New("sm-api: 500")}
 		w := organization.NewSecretRefWriter(fake, nil, nil, nil, nil)
-		if err := w.DeleteModelKey(claimsCtx("ou-acme-uuid"), "acme", "acme-anthropic-secrets"); err == nil {
+		if err := w.DeleteModelKey(claimsCtx("ou-acme-uuid"), "acme", "model-connection-secrets"); err == nil {
 			t.Fatalf("want the SM-API error to propagate")
 		}
 	})
+
+	// The entity follows the reference name: a row still on the Anthropic-era
+	// copy deletes that copy's vault path, never the new name's.
+	for _, tc := range []struct{ ref, entity string }{
+		{"model-connection-secrets", "model-connection"},
+		{"anthropic-secrets", "anthropic"},
+	} {
+		t.Run("model key "+tc.ref+" deletes entity "+tc.entity, func(t *testing.T) {
+			t.Parallel()
+			fake := &fakeSMClient{}
+			w := organization.NewSecretRefWriter(fake, nil, nil, nil, nil)
+			if err := w.DeleteModelKey(claimsCtx("ou-acme-uuid"), "acme", tc.ref); err != nil {
+				t.Fatalf("DeleteModelKey: %v", err)
+			}
+			wantLoc := secretmanagersvc.SecretLocation{OrgName: "ou-acme-uuid", ControlPlaneNamespace: "acme", EntityName: tc.entity, SecretKey: secretmanagersvc.SecretKeyAPIKey}
+			if len(fake.deleteCalls) != 1 || fake.deleteCalls[0].loc != wantLoc || fake.deleteCalls[0].secretRefName != tc.ref {
+				t.Fatalf("DeleteSecret calls = %+v; want one at %+v named %q", fake.deleteCalls, wantLoc, tc.ref)
+			}
+		})
+	}
 }
 
 func seedIDPProfileRow(t testing.TB, db *gorm.DB, orgID string, refName, kvPath *string) {
@@ -837,13 +857,13 @@ func TestSecretRefWriter_WriteModelKey_StampsSecretRef(t *testing.T) {
 	db := dbtest.New(t)
 	seedModelConnectionRow(t, db, "acme")
 
-	fake := &fakeSMClient{createRef: "acme-anthropic-secrets"}
+	fake := &fakeSMClient{createRef: "model-connection-secrets"}
 	w := organization.NewSecretRefWriter(fake, organization.NewOrgCredentialRepository(db, nil), organization.NewOrgAnthropicRepository(db), organization.NewIDPRepository(db, nil), organization.NewOrgModelConnectionRepository(db))
 	ref, err := w.WriteModelKey(claimsCtx("ou-acme-uuid"), "acme", "sk-ant-key")
 	if err != nil {
 		t.Fatalf("WriteModelKey: %v", err)
 	}
-	if ref != "acme-anthropic-secrets" {
+	if ref != "model-connection-secrets" {
 		t.Fatalf("ref = %q", ref)
 	}
 
@@ -852,12 +872,12 @@ func TestSecretRefWriter_WriteModelKey_StampsSecretRef(t *testing.T) {
 		t.Fatalf("reload: %v", err)
 	}
 	wantPath := "user-app-secrets/" // prefix; full path includes OrgBaseNamespace(ouId)
-	if got.SecretRefName == nil || *got.SecretRefName != "acme-anthropic-secrets" {
+	if got.SecretRefName == nil || *got.SecretRefName != "model-connection-secrets" {
 		t.Fatalf("secret_ref_name: %v", got.SecretRefName)
 	}
 	if got.SecretRefKVPath == nil ||
 		!strings.HasPrefix(*got.SecretRefKVPath, wantPath) ||
-		!strings.HasSuffix(*got.SecretRefKVPath, "/acme-anthropic-secrets") {
+		!strings.HasSuffix(*got.SecretRefKVPath, "/model-connection-secrets") {
 		t.Fatalf("secret_ref_kv_path: %v", got.SecretRefKVPath)
 	}
 	if got.SecretRefProperty == nil || *got.SecretRefProperty != "api-key" {

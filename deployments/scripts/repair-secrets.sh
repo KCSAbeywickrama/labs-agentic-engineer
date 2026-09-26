@@ -18,11 +18,11 @@
 # Trigger in-process OpenBao secret repair after a local cluster reseed.
 #
 # When the k3d cluster (or just the OpenBao volume) is torn down, the
-# secret-ref metadata rows on org_credentials + org_anthropic_credentials still
-# point at OpenBao paths that no longer exist. aep-api's
-# POST /_dev/v1/secret-ref-resync re-reads from the encrypted credential store and
-# re-pushes through the in-process secrets provider — no plaintext crosses
-# the HTTP boundary. This script is trigger-only.
+# secret-ref metadata rows on org_credentials, org_model_connections and
+# org_anthropic_credentials still point at OpenBao paths that no longer exist.
+# aep-api's POST /_dev/v1/secret-ref-resync re-reads from the encrypted
+# credential store and re-pushes through the in-process secrets provider — no
+# plaintext crosses the HTTP boundary. This script is trigger-only.
 #
 # The repair endpoint is TestMode-gated on the BFF (off in production) and
 # this script aborts unless kubectl is pointed at the local k3d cluster.
@@ -77,7 +77,7 @@ if command -v jq >/dev/null 2>&1; then
     ORG_COUNT="$(echo "$BODY" | jq '.orgs | length')"
     WRITE_COUNT="$(echo "$BODY" | jq '[.orgs[].written] | add // 0')"
     echo "🔐 Resync complete: $WRITE_COUNT write(s) across $ORG_COUNT org(s)."
-    ERRORS="$(echo "$BODY" | jq -r '.orgs[] | select(.anthropicError or .githubPatError) | "  - \(.ocOrgId): anthropic=\(.anthropicError // "-") github=\(.githubPatError // "-")"')"
+    ERRORS="$(echo "$BODY" | jq -r '.orgs[] | select(.modelError or .githubPatError) | "  - \(.ocOrgId): model=\(.modelError // "-") github=\(.githubPatError // "-")"')"
     if [ -n "$ERRORS" ]; then
         echo "⚠️  resync errors:"
         echo "$ERRORS"

@@ -1547,6 +1547,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// running turn is failed and the D18 one-active guard released;
 		// locally-buffered streams get the terminal event.
 		spec.NewTurnSweeper(turnRepo, turnBroker, 0, 0),
+		// Moves each org's model connection key off its Anthropic-era storage
+		// names: migrate's phase20 copied the bytes at boot, and this switches
+		// the SM-API mirror at boot; the periodic passes retire the old copies
+		// once none of the org's cycles is open (decision 23).
+		organization.NewModelKeyRename(organization.NewModelKeyRenameRepository(db, credStore), orgRepo, secretRefWriter, runCycleRepo),
 	}
 	// Disk-lifecycle reaper: global passes self-elect via non-blocking flock.
 	// Omitted when Fake() leaves Workspace nil (no disk at assemble time).

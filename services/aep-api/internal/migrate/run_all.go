@@ -243,6 +243,11 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// model column. Follows phase17 (which no longer copies a model) and
 		// every step that shaped org_anthropic_credentials.
 		ctxStep("phase19_model_connection", RunPhase19ModelConnection),
+		// The connection key's bytes move from org_secrets 'anthropic/key' to
+		// 'model/key' (copy only; organization.ModelKeyRename moves the SM-API
+		// mirror after assembly and retires the old copies). Follows phase19,
+		// which left the key under the old name.
+		ctxStep("phase20_model_key_rename", RunPhase20ModelKeyRename),
 	}
 }
 

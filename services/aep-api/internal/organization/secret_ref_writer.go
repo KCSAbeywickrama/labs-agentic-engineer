@@ -109,21 +109,51 @@ func (w *SecretRefWriter) WriteModelKey(ctx context.Context, ocOrgID, apiKey str
 	})
 }
 
+// UploadModelKey uploads the org's model connection key to SM-API under the
+// connection's entity and returns the reference, stamping nothing: for a
+// caller that switches the row onto it inside its own transaction (the
+// rename, model_key_rename.go). ctx must carry an ouId claim.
+func (w *SecretRefWriter) UploadModelKey(ctx context.Context, ocOrgID, apiKey string) (SecretRefTriplet, error) {
+	if !w.Enabled() {
+		return SecretRefTriplet{}, errors.New("secret-ref writer: not configured")
+	}
+	return w.uploadAPIKey(ctx, ocOrgID, modelKeySecretEntity, apiKey)
+}
+
 // writeAPIKey uploads one API-key-shaped secret under entity and stamps the
 // resulting triplet through stamp.
 func (w *SecretRefWriter) writeAPIKey(ctx context.Context, ocOrgID, entity, apiKey string, stamp func(map[string]any) error) (string, error) {
 	if !w.Enabled() {
 		return "", nil
 	}
+	ref, err := w.uploadAPIKey(ctx, ocOrgID, entity, apiKey)
+	if err != nil {
+		return ref.Name, err
+	}
+	if err := stamp(stampSecretRefTriplet(ref.Name, ref.KVPath, ref.Property)); err != nil {
+		return ref.Name, fmt.Errorf("secret-ref writer: stamp %s triplet: %w", entity, err)
+	}
+	slog.InfoContext(ctx, "secret-ref writer: api key uploaded",
+		"ocOrgId", ocOrgID,
+		"entity", entity,
+		"secretRefName", ref.Name,
+		"vaultKey", ref.KVPath)
+	return ref.Name, nil
+}
+
+// uploadAPIKey uploads one API-key-shaped secret under entity and resolves
+// where it landed. On a vault-key failure the returned triplet carries the
+// name the upload produced.
+func (w *SecretRefWriter) uploadAPIKey(ctx context.Context, ocOrgID, entity, apiKey string) (SecretRefTriplet, error) {
 	if strings.TrimSpace(ocOrgID) == "" {
-		return "", errors.New("secret-ref writer: ocOrgID required")
+		return SecretRefTriplet{}, errors.New("secret-ref writer: ocOrgID required")
 	}
 	if strings.TrimSpace(apiKey) == "" {
-		return "", errors.New("secret-ref writer: apiKey required")
+		return SecretRefTriplet{}, errors.New("secret-ref writer: apiKey required")
 	}
 	orgUUID, err := orgUUIDForSecretLocation(ctx)
 	if err != nil {
-		return "", fmt.Errorf("secret-ref writer: %s upload: %w", entity, err)
+		return SecretRefTriplet{}, fmt.Errorf("secret-ref writer: %s upload: %w", entity, err)
 	}
 	loc := secretmanagersvc.SecretLocation{
 		OrgName:               orgUUID,
@@ -135,21 +165,13 @@ func (w *SecretRefWriter) writeAPIKey(ctx context.Context, ocOrgID, entity, apiK
 		secretmanagersvc.SecretKeyAPIKey: apiKey,
 	})
 	if err != nil {
-		return "", fmt.Errorf("secret-ref writer: %s upload: %w", entity, err)
+		return SecretRefTriplet{}, fmt.Errorf("secret-ref writer: %s upload: %w", entity, err)
 	}
 	vaultKey, err := w.resolveVaultKey(ctx, secretRefName)
 	if err != nil {
-		return secretRefName, fmt.Errorf("secret-ref writer: resolve %s vault key: %w", entity, err)
+		return SecretRefTriplet{Name: secretRefName}, fmt.Errorf("secret-ref writer: resolve %s vault key: %w", entity, err)
 	}
-	if err := stamp(stampSecretRefTriplet(secretRefName, vaultKey, secretmanagersvc.SecretKeyAPIKey)); err != nil {
-		return secretRefName, fmt.Errorf("secret-ref writer: stamp %s triplet: %w", entity, err)
-	}
-	slog.InfoContext(ctx, "secret-ref writer: api key uploaded",
-		"ocOrgId", ocOrgID,
-		"entity", entity,
-		"secretRefName", secretRefName,
-		"vaultKey", vaultKey)
-	return secretRefName, nil
+	return SecretRefTriplet{Name: secretRefName, KVPath: vaultKey, Property: secretmanagersvc.SecretKeyAPIKey}, nil
 }
 
 // WriteAMPModelKey stores one agent's Agent-Manager-issued model key and
@@ -497,10 +519,12 @@ func (w *SecretRefWriter) DeleteAnthropic(ctx context.Context, ocOrgID string, r
 	return w.deleteAPIKey(ctx, ocOrgID, role.SecretRefEntity(), secretRefName)
 }
 
-// DeleteModelKey best-effort removes the model connection key's SM-API copy,
-// with DeleteAnthropic's contract.
+// DeleteModelKey best-effort removes a model connection key's SM-API copy,
+// with DeleteAnthropic's contract. The entity is read off the reference name,
+// so a row the rename has not moved yet deletes its Anthropic-era copy rather
+// than the new name's vault path (model_key_rename.go).
 func (w *SecretRefWriter) DeleteModelKey(ctx context.Context, ocOrgID, secretRefName string) error {
-	return w.deleteAPIKey(ctx, ocOrgID, modelKeySecretEntity, secretRefName)
+	return w.deleteAPIKey(ctx, ocOrgID, modelKeyEntityOf(secretRefName), secretRefName)
 }
 
 func (w *SecretRefWriter) deleteAPIKey(ctx context.Context, ocOrgID, entity, secretRefName string) error {

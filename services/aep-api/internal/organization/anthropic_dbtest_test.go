@@ -168,7 +168,7 @@ func TestModelConnectionConnect_HappyPath_DB(t *testing.T) {
 		t.Fatalf("llmCheck = %+v, want a listed, priced model", out.LLMCheck)
 	}
 	// The TRIMMED key round-trips through the real AES-GCM org_secrets store.
-	got, err := c.store.Get(ctx, "acme", "anthropic/key")
+	got, err := c.store.Get(ctx, "acme", "model/key")
 	if err != nil || string(got) != anthropicUnitKey {
 		t.Fatalf("stored key: got %q (%v), want the trimmed key", string(got), err)
 	}
@@ -186,7 +186,7 @@ func TestModelConnectionConnect_RejectedKeyLeavesNoTrace_DB(t *testing.T) {
 	if row, err := c.connRepo.GetByOrg(ctx, "acme"); err != nil || row != nil {
 		t.Fatalf("row after rejected connect: %+v (%v), want none", row, err)
 	}
-	if _, err := c.store.Get(ctx, "acme", "anthropic/key"); !errors.Is(err, secrets.ErrSecretNotFound) {
+	if _, err := c.store.Get(ctx, "acme", "model/key"); !errors.Is(err, secrets.ErrSecretNotFound) {
 		t.Fatalf("store after rejected connect: want ErrSecretNotFound, got %v", err)
 	}
 }
@@ -204,7 +204,7 @@ func TestModelConnectionConnect_ReplaceUpserts_DB(t *testing.T) {
 	if second.KeyPreview != "sk-a…9876" || !second.ConnectedAt.Equal(first.ConnectedAt) || !second.UpdatedAt.After(first.UpdatedAt) {
 		t.Fatalf("rotation: first %+v, second %+v", first, second)
 	}
-	got, err := c.store.Get(ctx, "acme", "anthropic/key")
+	got, err := c.store.Get(ctx, "acme", "model/key")
 	if err != nil || string(got) != anthropicDBKey2 {
 		t.Fatalf("stored key after replace: got %q err %v, want key2", string(got), err)
 	}
@@ -236,7 +236,7 @@ func TestModelConnectionDisconnect_RemovesRowAndBytes_Idempotent_DB(t *testing.T
 	if row, err := c.connRepo.GetByOrg(ctx, "acme"); err != nil || row != nil {
 		t.Fatalf("row after disconnect: %+v (%v)", row, err)
 	}
-	if _, err := c.store.Get(ctx, "acme", "anthropic/key"); !errors.Is(err, secrets.ErrSecretNotFound) {
+	if _, err := c.store.Get(ctx, "acme", "model/key"); !errors.Is(err, secrets.ErrSecretNotFound) {
 		t.Fatalf("secret bytes must go with the row, got %v", err)
 	}
 	if out.LLM != nil || out.LLMDisconnectedAt == nil {
@@ -266,7 +266,7 @@ func TestModelConnectionOrgIsolation_DB(t *testing.T) {
 	// Disconnecting one org must not touch the other's row or bytes.
 	c.patch(t, "acme", disconnectPatch())
 	c.row(t, "globex")
-	if got, err := c.store.Get(ctx, "globex", "anthropic/key"); err != nil || string(got) != anthropicDBKey2 {
+	if got, err := c.store.Get(ctx, "globex", "model/key"); err != nil || string(got) != anthropicDBKey2 {
 		t.Fatalf("globex bytes must survive acme's disconnect: %q err %v", string(got), err)
 	}
 }

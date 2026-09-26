@@ -95,7 +95,7 @@ func TestSubscription_IndependentOfTheConnection_DB(t *testing.T) {
 	if got, err := c.store.Get(ctx, "acme", "anthropic/coding-key"); err != nil || string(got) != anthropicDBOAuthToken {
 		t.Fatalf("key rotation clobbered the token bytes: %q (%v)", string(got), err)
 	}
-	if got, err := c.store.Get(ctx, "acme", "anthropic/key"); err != nil || string(got) != anthropicDBKey2 {
+	if got, err := c.store.Get(ctx, "acme", "model/key"); err != nil || string(got) != anthropicDBKey2 {
 		t.Fatalf("key did not rotate: %q (%v)", string(got), err)
 	}
 }

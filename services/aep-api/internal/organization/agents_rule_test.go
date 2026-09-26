@@ -513,13 +513,14 @@ func (t *lockRecordingTx) GetSettings(string) (*OrgAgentSettings, error) {
 	return nil, errors.New("stop after the locks")
 }
 
-// The card takes both lock names, the previous release's first, so a rolling
-// deploy never has two replicas saving one org's card under different locks.
-func TestAgentSettings_TheSaveTakesBothLockNamesOldThenNew(t *testing.T) {
+// The card takes only the model connection's lock name; the Anthropic-era
+// name is gone (the previous release took both, so the two serialize on this
+// one during a rolling deploy).
+func TestAgentSettings_TheSaveTakesTheModelLockOnly(t *testing.T) {
 	card := &lockRecordingCard{}
 	svc := NewAgentSettingsService(nil, nil, nil, nil, card, everyRuntime)
 	_ = svc.apply(context.Background(), "acme", "ada", orgconfig.ConfigPatch{}, cardProbe{})
-	if strings.Join(card.locks, ",") != "org_anthropic:acme,org_model:acme" {
-		t.Fatalf("locks = %v, want org_anthropic:acme then org_model:acme", card.locks)
+	if strings.Join(card.locks, ",") != "org_model:acme" {
+		t.Fatalf("locks = %v, want org_model:acme alone", card.locks)
 	}
 }

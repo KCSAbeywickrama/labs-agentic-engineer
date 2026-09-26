@@ -43,14 +43,11 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 )
 
-// The card's advisory lock names, taken in this order. The old name is the
-// one every earlier release takes; phase 6 drops it, and until then taking
-// both means two replicas of different releases never hold different locks
-// for the same org during a rolling deploy.
-const (
-	cardLockPrefixOld = "org_anthropic:"
-	cardLockPrefix    = "org_model:"
-)
+// cardLockPrefix is the card's per-org advisory lock name. The release before
+// took it after the Anthropic-era name `org_anthropic:`, so replicas of the two
+// releases serialize on this one during a rolling deploy; the old name is no
+// longer taken.
+const cardLockPrefix = "org_model:"
 
 // AgentSettingsService owns the AI agents card. See the file doc.
 type AgentSettingsService struct {
@@ -225,10 +222,8 @@ func (s *AgentSettingsService) apply(ctx context.Context, ocOrgID, actor string,
 		forgotKey     string                // SM-API ref name of a deleted connection key
 	)
 	err := s.card.Tx(ctx, func(tx AgentsCardTx) error {
-		for _, lock := range []string{cardLockPrefixOld + ocOrgID, cardLockPrefix + ocOrgID} {
-			if err := tx.AdvisoryLock(lock); err != nil {
-				return fmt.Errorf("agents card: lock: %w", err)
-			}
+		if err := tx.AdvisoryLock(cardLockPrefix + ocOrgID); err != nil {
+			return fmt.Errorf("agents card: lock: %w", err)
 		}
 		state, err := stateInTx(tx, ocOrgID)
 		if err != nil {

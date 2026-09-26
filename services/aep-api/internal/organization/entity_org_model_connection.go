@@ -22,16 +22,16 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 )
 
-// The connection key's storage names. They keep the Anthropic-era values the
-// default key was stored under, so an existing org's bytes and vault copy
-// carry over with no re-save; phase 6 renames them by copy-then-switch
-// (model/key, entity model-connection).
+// The connection key's storage names. Existing orgs' copies are moved here
+// from the Anthropic-era names by copy-then-switch (migrate's
+// phase20_model_key_rename for the bytes, model_key_rename.go for the SM-API
+// mirror); every write from this release on uses these.
 const (
 	// modelKeyStoreKey is the `org_secrets` key holding the connection key's
 	// encrypted bytes.
-	modelKeyStoreKey = "anthropic/key"
+	modelKeyStoreKey = "model/key"
 	// modelKeySecretEntity is the SM-API EntityName the key mirrors under.
-	modelKeySecretEntity = "anthropic"
+	modelKeySecretEntity = "model-connection"
 )
 
 // OrgModelConnection is the org's model connection: one row per org, absent
