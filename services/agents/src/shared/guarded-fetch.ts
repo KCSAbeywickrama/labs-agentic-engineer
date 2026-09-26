@@ -97,6 +97,25 @@ export class HostRefusedError extends Error {
 }
 
 /**
+ * A model request refused because its host answered with a redirect. Not
+ * followed: `fetch` would forward `x-api-key` to the new host.
+ */
+export class RedirectRefusedError extends Error {
+  constructor(readonly hostname: string) {
+    super(`refusing to follow a redirect from ${hostname}`);
+    this.name = "RedirectRefusedError";
+  }
+}
+
+/** The `HostRefusedError` a failed fetch carries somewhere in its cause chain. */
+function hostRefusal(err: unknown): HostRefusedError | undefined {
+  for (let e: unknown = err, depth = 0; e && depth < 8; e = (e as { cause?: unknown }).cause, depth++) {
+    if (e instanceof HostRefusedError) return e;
+  }
+  return undefined;
+}
+
+/**
  * A socket lookup that resolves once, validates every answer, and returns only
  * what it validated. Answers in the shape the socket asked for: `net.connect`
  * asks for `all` addresses when it races families (the default since Node 20).
@@ -140,6 +159,11 @@ interface GuardOptions {
  * forwards `x-api-key`, so a followed redirect would carry the org's key to a
  * host nobody checked.
  *
+ * Both refusals are thrown as themselves (`HostRefusedError`,
+ * `RedirectRefusedError`), never as undici's `TypeError("fetch failed")`: the AI
+ * SDK retries that as a network error — six times, over two minutes, re-resolving
+ * the host each time — and neither answer changes on a retry.
+ *
  * The AI SDK calls it with a string URL; a `Request` object from the global
  * fetch is not a valid input for undici's own fetch.
  */
@@ -160,12 +184,23 @@ export function createGuardedFetch({ resolve, permit = isPublicAddress }: GuardO
   // different undici major, and a dispatcher is not portable across the two.
   // The casts cross that boundary: the two majors' types describe the same
   // fetch but are not assignable to each other.
-  return ((input: Parameters<FetchFunction>[0], init?: Parameters<FetchFunction>[1]) =>
-    undiciFetch(input as UndiciRequestInfo, {
-      ...(init as unknown as UndiciRequestInit),
-      dispatcher,
-      redirect: "error",
-    })) as unknown as FetchFunction;
+  return (async (input: Parameters<FetchFunction>[0], init?: Parameters<FetchFunction>[1]) => {
+    let res: Awaited<ReturnType<typeof undiciFetch>>;
+    try {
+      res = await undiciFetch(input as UndiciRequestInfo, {
+        ...(init as unknown as UndiciRequestInit),
+        dispatcher,
+        redirect: "manual",
+      });
+    } catch (err) {
+      throw hostRefusal(err) ?? err;
+    }
+    if (res.status >= 300 && res.status < 400 && res.headers.has("location")) {
+      await res.body?.cancel();
+      throw new RedirectRefusedError(new URL(res.url || String(input)).host);
+    }
+    return res;
+  }) as unknown as FetchFunction;
 }
 
 /**

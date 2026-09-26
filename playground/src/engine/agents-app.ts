@@ -27,7 +27,7 @@
 
 import type { LanguageModel } from "ai";
 import { createApp } from "@aep/agents/server";
-import { anthropicConnection, createModel } from "@aep/agents/shared/model";
+import { createModel } from "@aep/agents/shared/model";
 import { listen0 } from "@aep/agents/shared/listen";
 import type { ConversationStore } from "@aep/agents/store/conversation-store";
 import { EVAL_AUTH, evalTurnHeaders } from "../kit/auth.js";
@@ -35,7 +35,7 @@ import { PLAY_ORG } from "../ports/spec-workspace.js";
 
 export interface AgentsApp {
   baseUrl: string;
-  /** The M2M token + X-Anthropic-Key + X-Org-Id every turn POST carries. */
+  /** The M2M token + X-Model-Key + X-Org-Id every turn POST carries. */
   headers: Record<string, string>;
   close: () => Promise<void>;
 }
@@ -44,7 +44,7 @@ export interface BootOptions {
   store: ConversationStore;
   /** The fixture mount snapshots materialize into (FsSpecWorkspace.mountRoot). */
   workspaceMountRoot: string;
-  /** ANTHROPIC_API_KEY for real runs; tests inject a mock via `model`. */
+  /** The model key for real runs (`playgroundModel`); tests inject a mock via `model`. */
   apiKey: string;
   /** Test seam: bypass `createModel` with a scripted model. */
   model?: LanguageModel;
@@ -53,7 +53,7 @@ export interface BootOptions {
 export async function bootAgentsApp(opts: BootOptions): Promise<AgentsApp> {
   const app = createApp({
     store: opts.store,
-    buildModel: opts.model ? () => opts.model! : (key, model) => createModel(anthropicConnection(key, model)),
+    buildModel: opts.model ? () => opts.model! : (conn, { orgId }) => createModel(conn, orgId ? { orgId } : {}),
     auth: { audience: EVAL_AUTH.audience, secret: EVAL_AUTH.secret },
     workspaceMountRoot: opts.workspaceMountRoot,
   });

@@ -137,8 +137,8 @@ func (s *Service) runTurn(ctx context.Context, job turnJob) {
 // architect of list_org_endpoints, causing invented cross-project org-service
 // names that fail exact-name resolution at build. mcpForTurn (additionally
 // gated on the MCP token minter being wired) and the dispatched
-// TurnRequest.WebSearch flag (external-dependency-discovery #252 — Anthropic's
-// web_search provider tool, which needs no BFF-minted credential) key off this
+// TurnRequest.WebSearch flag (external-dependency-discovery #252 — the
+// connection's web_search tool, which needs no BFF-minted credential) key off this
 // SAME condition. A plain chat turn with no room does not qualify.
 func designOrCollabTurn(job turnJob) bool {
 	return job.flow == "design" || job.collabRoomID != ""
@@ -317,8 +317,9 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		collab = &agentsvc.CollabBlock{RoomID: job.collabRoomID, Token: job.collabToken}
 	}
 	body, err := s.client.Turn(ctx, job.nsConversationID, job.orgID, job.llm.Key, agentsvc.TurnRequest{
-		Turn:  job.turn,
-		Model: job.llm.Model,
+		Turn:       job.turn,
+		Model:      job.llm.Connection.Model,
+		Connection: agentsvc.ConnectionFor(job.llm.Connection),
 		Workspace: agentsvc.WorkspaceRef{
 			ConversationID: job.nsConversationID,
 			TurnID:         job.turnID,

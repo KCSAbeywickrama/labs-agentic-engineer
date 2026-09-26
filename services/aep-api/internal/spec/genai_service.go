@@ -36,6 +36,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
@@ -55,7 +56,7 @@ var (
 	// ErrCollabNoToken rejects a room-scoped turn whose request carried no
 	// bearer — the agent joins the room with the caller's token (#86 d7).
 	ErrCollabNoToken        = errors.New("collab turn requires a bearer token")
-	ErrNoAnthropicKey       = errors.New("organization has no Anthropic API key configured")
+	ErrNoModelConnection    = errors.New("organization has no model connection")
 	ErrConversationNotFound = errors.New("conversation not found")
 	ErrTurnNotFound         = errors.New("turn not found")
 	// ErrConversationRotated refuses a turn addressed to a thread that is no
@@ -112,21 +113,20 @@ type GitReader interface {
 	ResolveSaveIdentities(cred secrets.Credential) (*sourcecontrol.GitIdentity, *sourcecontrol.GitIdentity)
 }
 
-// AgentLLM is what a spec-agent turn runs on: the org's Anthropic API key and
-// the one model its agents use, and the host of the connection they belong to.
-// Resolved together, per turn, so a model change in Settings reaches the very
-// next turn. Host is written on the turn row at admission: it is the host the
-// turn's usage is priced on.
+// AgentLLM is what a spec-agent turn runs on: the org's model connection
+// (format, URL, model, auth scheme, limits — the one model its agents use) and
+// the connection key's bytes. Resolved together, per turn, so a change in
+// Settings reaches the very next turn. The connection's host is written on the
+// turn row at admission: it is the host the turn's usage is priced on.
 type AgentLLM struct {
-	Key   string
-	Model string
-	Host  string
+	Key        string
+	Connection modelconn.Connection
 }
 
 // AgentLLMResolver resolves the org's AgentLLM. An empty Key with a nil error
-// means "org has none" → the service raises ErrNoAnthropicKey pre-202 (no
-// platform fallback); an empty Model leaves the agents service on its default.
-// Wired at the composition root from the organization domain.
+// means "org has none" → the service raises ErrNoModelConnection pre-202 (no
+// platform fallback). Wired at the composition root from the organization
+// domain.
 type AgentLLMResolver func(ctx context.Context, orgID string) (AgentLLM, error)
 
 // SkillsRepoResolver returns the org _skills git row used as a turn's
@@ -449,7 +449,7 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		Summary:           summary,
 		AuthorID:          authorIDOf(author),
 		AuthorDisplayName: authorNameOf(author),
-		ModelHost:         llm.Host,
+		ModelHost:         llm.Connection.Host,
 	})
 	if errors.Is(err, ErrTurnActive) {
 		return "", &TurnInProgressError{ActiveTurnID: row.ID}
@@ -603,14 +603,14 @@ func (s *Service) resolveRepo(ctx context.Context, orgID, projectID string) (*so
 
 func (s *Service) resolveLLM(ctx context.Context, orgID string) (AgentLLM, error) {
 	if s.llm == nil {
-		return AgentLLM{}, ErrNoAnthropicKey
+		return AgentLLM{}, ErrNoModelConnection
 	}
 	llm, err := s.llm(ctx, orgID)
 	if err != nil {
 		return AgentLLM{}, fmt.Errorf("resolve agent llm: %w", err)
 	}
 	if llm.Key == "" {
-		return AgentLLM{}, ErrNoAnthropicKey
+		return AgentLLM{}, ErrNoModelConnection
 	}
 	return llm, nil
 }

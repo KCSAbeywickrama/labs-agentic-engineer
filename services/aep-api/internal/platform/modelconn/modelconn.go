@@ -110,8 +110,6 @@ type Capabilities struct {
 
 // CapabilitiesOf is the ONE statement of what a connection supports. A new
 // format or host-bound feature is a branch here, not a check in a consumer.
-//
-//deadcode:keep the capabilities seam; first called when aep-api sends the connection to the agents service (phase 3).
 func CapabilitiesOf(c Connection) Capabilities {
 	anthropic := c.Format == FormatAnthropic
 	firstParty := anthropic && c.Host == AnthropicHost

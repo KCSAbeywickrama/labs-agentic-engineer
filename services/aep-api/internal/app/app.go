@@ -377,8 +377,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 
 	// File-mutation agents service (services/agents) — the requirements/design/
 	// chat generation and task-planning flows. Plain HS256 M2M bearer; the
-	// per-org Anthropic key and model are resolved per turn: the key is
-	// forwarded as X-Anthropic-Key, the model in the turn body.
+	// org's model connection is resolved per turn: the key is forwarded as
+	// X-Model-Key, the connection and model in the turn body.
 	agentsvcClient := agentsvc.New(agentsvc.Config{
 		BaseURL:  cfg.AgentsSvc.BaseURL,
 		Secret:   cfg.AgentsSvc.JWTSecret,
@@ -391,7 +391,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	filesSvc := spec.NewFilesService(repoService, gitOpsService)
 
 	// Unified genai committed-truth turn surface (shared-workspace-volume). It
-	// resolves the org Anthropic key (no platform fallback), snapshots the
+	// resolves the org's model connection (no platform fallback), snapshots the
 	// project repo + the org's _skills repo onto the workspace mount, and
 	// runs turns detached behind the durable agent_turns guard. Skills are
 	// NOT pushed inline anymore — agents reads the full catalog (embedded
@@ -405,7 +405,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		if !ok {
 			return spec.AgentLLM{}, nil // no key → a pre-202 4xx
 		}
-		return spec.AgentLLM{Key: key, Model: conn.Model, Host: conn.Host}, nil
+		return spec.AgentLLM{Key: key, Connection: conn}, nil
 	}
 	// SkillsRef source for genai + task-plan turns. Reconcile so platform
 	// skills shipped after first provision land before Head/Ensure.

@@ -21,43 +21,54 @@
  * goes through `createModel`, so the rest of the code consumes a
  * provider-agnostic `LanguageModel` and never imports a provider SDK directly.
  * A turn's model is described by a `ModelConnection` (format, base URL, auth
- * scheme, key, model id) and `createModel` switches on its `format`, so a new
- * format is one new branch here — no call-site changes. Only the Anthropic
- * format exists today.
+ * scheme, key, model id, limits, capabilities) and `createModel` switches on
+ * its `format`, so a new format is one new branch here — no call-site changes.
  *
- * The key and the model id both arrive per turn (the `X-Anthropic-Key` header
- * and the turn body's `model`); `config.model` (`AGENT_MODEL`) is only the
- * default for a caller that sends no model. Every provider request goes out
- * through `guardedFetch`, which refuses a host that resolves to a non-public
- * address.
+ * The connection arrives per turn: the key in the `X-Model-Key` header, the
+ * rest in the turn body's `connection` and `model`, all resolved by aep-api
+ * from the organization's one connection. What a connection supports is
+ * aep-api's `capabilities`, read here and never re-derived from the host.
+ * `config.model` (`AGENT_MODEL`) is only the default for a caller that sends
+ * no model. Every provider request goes out through `guardedFetch`, which
+ * refuses a host that resolves to a non-public address.
  */
 
 import type { LanguageModel } from "ai";
 import { anthropic, createAnthropic, type AnthropicLanguageModelOptions } from "@ai-sdk/anthropic";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import type { ModelAuthScheme, ModelCapabilities, ModelFormat, TurnConnection } from "@aep/agent-stream";
 import type { ProviderOptions } from "../agents/main/run-turn.js";
 import { config } from "./config.js";
 import { guardedFetch } from "./guarded-fetch.js";
+import { watchProviderLimits, type ProviderLimitLog } from "./provider-limit.js";
 
-/** The wire format a connection speaks. Only the Anthropic format exists today. */
-export type ModelFormat = "anthropic";
+export type { ModelAuthScheme, ModelCapabilities, ModelFormat };
 
-/** How the key is sent: Anthropic's `x-api-key` header, or `Authorization: Bearer`. */
-export type AuthScheme = "x-api-key" | "bearer";
-
-/** The resolved connection a turn's model is built from. */
-export interface ModelConnection {
-  format: ModelFormat;
-  /** Provider base URL, e.g. `https://api.anthropic.com/v1`. */
-  baseURL: string;
-  authScheme: AuthScheme;
+/** The resolved connection a turn's model is built from: the wire's connection plus the key and the model. */
+export interface ModelConnection extends TurnConnection {
   /** Provider API key. */
   apiKey: string;
   /** Model id. */
   model: string;
 }
 
-/** Anthropic's own API, the only connection the platform serves today. */
+/** Anthropic's own API: the connection every caller from before connections meant. */
 const ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1";
+
+/**
+ * What Anthropic's own API supports, as aep-api's `CapabilitiesOf` states it
+ * for `anthropic@api.anthropic.com`. Used only for a turn that names no
+ * connection, which is always that one.
+ */
+const ANTHROPIC_CAPABILITIES: ModelCapabilities = {
+  claudeCode: true,
+  claudeSubscription: true,
+  promptCache: true,
+  generatedAgents: true,
+  nativePdf: true,
+  webSearch: "anthropic-server-tool",
+  imageInput: "yes",
+};
 
 /**
  * A connection's identity for history replay, `format@host`: stored parts a
@@ -69,34 +80,52 @@ export function connectionFingerprint(conn: Pick<ModelConnection, "format" | "ba
   return `${conn.format}@${new URL(conn.baseURL).host}`;
 }
 
-/** The fingerprint of today's connection (`anthropicConnection`), for a turn built without one. */
-export const DEFAULT_CONNECTION_FINGERPRINT = connectionFingerprint({ format: "anthropic", baseURL: ANTHROPIC_BASE_URL });
+/** The host a connection's requests go to, as its errors and log lines name it. */
+export function connectionHost(conn: Pick<ModelConnection, "baseURL">): string {
+  return new URL(conn.baseURL).host;
+}
 
 /**
- * Today's connection: `model` on Anthropic's API with the key as `x-api-key`.
- * An absent model resolves to the service default (`resolveModelId`).
+ * The connection a turn that names none runs on: `model` on Anthropic's API
+ * with the key as `x-api-key`. An absent model resolves to the service default
+ * (`resolveModelId`).
  */
 export function anthropicConnection(apiKey: string, model?: string): ModelConnection {
   return {
     format: "anthropic",
     baseURL: ANTHROPIC_BASE_URL,
     authScheme: "x-api-key",
+    capabilities: ANTHROPIC_CAPABILITIES,
     apiKey,
     model: resolveModelId(model !== undefined ? { model } : {}),
   };
 }
 
 /**
- * The model ids a turn may name: the contract's `AgentModel` enum, the set the
- * platform can price (pinned against the contract by test/model.test.ts). A
- * turn naming none runs on `AGENT_MODEL`, the operator's default, which this
- * list does not bind.
+ * The turn's connection from the wire: the body's `connection` (validated by
+ * `isTurnConnection`) with the header's key and the resolved model. Rebuilt
+ * field by field, so nothing a caller smuggled beside the known fields rides
+ * along.
  */
-export const OFFERED_MODELS: readonly string[] = ["claude-sonnet-5", "claude-haiku-4-5"];
-
-/** Whether a turn may name `modelId`. */
-export function isOfferedModel(modelId: string): boolean {
-  return OFFERED_MODELS.includes(modelId);
+export function connectionFromTurn(wire: TurnConnection, apiKey: string, model: string): ModelConnection {
+  return {
+    format: wire.format,
+    baseURL: wire.baseURL,
+    authScheme: wire.authScheme,
+    ...(wire.contextWindow !== undefined ? { contextWindow: wire.contextWindow } : {}),
+    ...(wire.outputLimit !== undefined ? { outputLimit: wire.outputLimit } : {}),
+    capabilities: {
+      claudeCode: wire.capabilities.claudeCode,
+      claudeSubscription: wire.capabilities.claudeSubscription,
+      promptCache: wire.capabilities.promptCache,
+      generatedAgents: wire.capabilities.generatedAgents,
+      nativePdf: wire.capabilities.nativePdf,
+      webSearch: wire.capabilities.webSearch,
+      imageInput: wire.capabilities.imageInput,
+    },
+    apiKey,
+    model,
+  };
 }
 
 /**
@@ -108,6 +137,12 @@ export function resolveModelId(cfg: { model?: string } = {}): string {
   return cfg.model ?? config.model;
 }
 
+/**
+ * The OpenAI-compatible provider's name, which is also the key it reads its
+ * per-call options under (`providerOptions.aep`).
+ */
+const OPENAI_COMPATIBLE_PROVIDER = "aep";
+
 /** Per-call overrides of how `createModel` reaches the provider. */
 interface CreateModelOptions {
   /**
@@ -116,33 +151,56 @@ interface CreateModelOptions {
    * guard would refuse.
    */
   fetch?: typeof globalThis.fetch;
+  /** The organization the turn runs for: named on its `model_provider_429` lines. */
+  orgId?: string;
+  /** Where `model_provider_429` lines go (the service log unless a test captures them). */
+  providerLimitLog?: ProviderLimitLog;
+  /** The clock the 429 budget counts on (tests). */
+  now?: () => number;
 }
 
 /**
  * Build a Vercel AI SDK `LanguageModel` from a connection. This is the ONLY
- * function that knows which provider SDK to instantiate.
+ * function that knows which provider SDK to instantiate. Build one per turn:
+ * the fetch it wraps carries the turn's 429 budget (`watchProviderLimits`).
  */
 export function createModel(conn: ModelConnection, options: CreateModelOptions = {}): LanguageModel {
-  const auth = conn.authScheme === "bearer" ? { authToken: conn.apiKey } : { apiKey: conn.apiKey };
-  const provider = createAnthropic({
-    baseURL: conn.baseURL,
-    ...auth,
-    fetch: options.fetch ?? guardedFetch,
+  const fetch = watchProviderLimits(options.fetch ?? guardedFetch, {
+    apiKey: conn.apiKey,
+    host: connectionHost(conn),
+    format: conn.format,
+    model: conn.model,
+    ...(options.orgId ? { org: options.orgId } : {}),
+    ...(options.providerLimitLog ? { log: options.providerLimitLog } : {}),
+    ...(options.now ? { now: options.now } : {}),
   });
   // Trace capture is NOT wrapped around the model: a capturing object's
   // lifetime became the trace's run identity, and this object is rebuilt every
   // turn (the key is per-request), which split one conversation across N runs.
   // Capture registers once at the composition root and is stamped per turn —
   // see shared/telemetry.ts.
-  return provider(conn.model);
+  if (conn.format === "openai-compatible") {
+    // `includeUsage` asks for the usage chunk a stream otherwise omits, which
+    // is what the turn's cost capture reads.
+    return createOpenAICompatible({
+      name: OPENAI_COMPATIBLE_PROVIDER,
+      baseURL: conn.baseURL,
+      apiKey: conn.apiKey,
+      includeUsage: true,
+      fetch,
+    })(conn.model);
+  }
+  const auth = conn.authScheme === "bearer" ? { authToken: conn.apiKey } : { apiKey: conn.apiKey };
+  return createAnthropic({ baseURL: conn.baseURL, ...auth, fetch })(conn.model);
 }
 
 /**
  * Models that reject Anthropic's `effort` parameter. `@ai-sdk/anthropic`
  * forwards `effort` as `output_config.effort` without checking the model, and
  * the API answers a 400 on these rather than ignoring it, so the option is
- * omitted for them. Every other offered model (Sonnet 5, Opus 4.5 and later)
- * takes it.
+ * omitted for them. Every other Claude model (Sonnet 5, Opus 4.5 and later)
+ * takes it. A quirk of these model ids, so it applies on the Anthropic format
+ * only.
  */
 const MODELS_WITHOUT_EFFORT = ["claude-haiku-4-5", "claude-sonnet-4-5"] as const;
 
@@ -154,60 +212,57 @@ export function supportsEffort(modelId: string): boolean {
 /**
  * Provider-specific per-call options for the turn's model, built here so the
  * reasoning-effort knob (like the provider SDK itself) stays inside this seam.
- * The generic turn loop passes the returned object through untouched. A model
- * that rejects `effort` gets no options at all, so its request carries no
- * `output_config`.
+ * The generic turn loop passes the returned object through untouched.
+ *
+ * - Anthropic format: `effort`, except on a model that rejects it, whose turns
+ *   carry no options at all (no `output_config`).
+ * - OpenAI-compatible: the same level as `reasoning_effort`.
  */
-export function modelProviderOptions(modelId: string): ProviderOptions | undefined {
-  if (!supportsEffort(modelId)) return undefined;
+export function modelProviderOptions(conn: Pick<ModelConnection, "format" | "model">): ProviderOptions | undefined {
+  if (conn.format === "openai-compatible") {
+    return { [OPENAI_COMPATIBLE_PROVIDER]: { reasoningEffort: config.reasoningEffort } };
+  }
+  if (!supportsEffort(conn.model)) return undefined;
   return {
     anthropic: { effort: config.reasoningEffort } satisfies AnthropicLanguageModelOptions,
   };
 }
 
 /**
+ * The per-step output-token ceiling: `AGENT_MAX_OUTPUT_TOKENS`, lowered to the
+ * connection's own output limit when it states one (a model that emits past
+ * its limit is refused by its host, not truncated).
+ */
+export function maxOutputTokensFor(conn: Pick<ModelConnection, "outputLimit">): number {
+  return conn.outputLimit !== undefined ? Math.min(config.maxOutputTokens, conn.outputLimit) : config.maxOutputTokens;
+}
+
+/**
  * The provider-specific PROMPT-CACHE breakpoint, or undefined when caching is
- * off. Lives in this seam for the same reason `modelProviderOptions` does: the
- * marker is Anthropic's (`cacheControl`), and the turn loop stays
- * provider-agnostic by passing whatever this returns through opaquely.
+ * off or the connection does not take markers (`capabilities.promptCache`:
+ * other hosts cache on their own, measured on Ollama). Lives in this seam for
+ * the same reason `modelProviderOptions` does: the marker is Anthropic's
+ * (`cacheControl`), and the turn loop stays provider-agnostic by passing
+ * whatever this returns through opaquely.
  *
  * Anthropic caches the prompt prefix UP TO AND INCLUDING the marked block, so a
  * caller marks the last stable block rather than every block — the API allows
  * only a handful of breakpoints, and marking history messages individually
  * would exhaust them as a conversation grows.
  */
-export function modelCacheBreakpoint(): ProviderOptions | undefined {
-  if (!config.promptCache) return undefined;
+export function modelCacheBreakpoint(conn: Pick<ModelConnection, "capabilities">): ProviderOptions | undefined {
+  if (!config.promptCache || !conn.capabilities.promptCache) return undefined;
   return { anthropic: { cacheControl: { type: "ephemeral" } } };
 }
 
 /**
- * True iff `model` is served by the Anthropic provider (`provider` starts with
- * "anthropic") — gates the provider-executed `web_search` tool (external-
- * dependency-discovery #252), which is Anthropic-specific: injecting it
- * against another provider would error, so a mismatch degrades silently to no
- * web_search tool instead. `createModel` is Anthropic-only today, so this is
- * always true in production; the check keeps the call site correct if a
- * second provider is ever added.
- */
-export function isAnthropicModel(model: LanguageModel): boolean {
-  return (
-    typeof model === "object" &&
-    model !== null &&
-    "provider" in model &&
-    typeof (model as { provider?: unknown }).provider === "string" &&
-    (model as { provider: string }).provider.startsWith("anthropic")
-  );
-}
-
-/**
  * Anthropic's provider-executed `web_search` tool (external-dependency-
- * discovery #252): gives the turn's model direct access to real-time web
- * content so it can verify a candidate external API/SDK actually exists
- * before proposing a `dependencies` entry for it, instead of inventing one.
- * `maxUses` bounds the per-turn search budget. Anthropic-only — call only
- * behind `isAnthropicModel`.
+ * discovery #252), the `anthropic-server-tool` strategy: Anthropic's own API
+ * runs the search, so the tool has no `execute` here. `maxUses` bounds the
+ * per-turn search budget. Registered only on a connection whose
+ * `capabilities.webSearch` names this strategy (`tools/web-search.ts`), since
+ * any other host answers the tool with an error.
  */
-export function webSearchTool(): ReturnType<typeof anthropic.tools.webSearch_20250305> {
-  return anthropic.tools.webSearch_20250305({ maxUses: 4 });
+export function anthropicWebSearchTool(maxUses: number): ReturnType<typeof anthropic.tools.webSearch_20250305> {
+  return anthropic.tools.webSearch_20250305({ maxUses });
 }

@@ -67,12 +67,21 @@ off the stream. The plan tool contract (inputs, results, error codes, the
 - `pnpm --filter @aep/agents dev` — SSE server, watch/reload. `start` — run once.
 - Endpoints: `GET /healthz` (open) · `POST /conversations/:id/turns` (SSE) ·
   `GET /conversations/:id` — the last two behind the M2M gate.
-- **No boot-time Anthropic key or model**: the model is built per turn from the
-  `X-Anthropic-Key` header (missing → 400) and the body's optional `model` (the
-  organization's model, resolved by aep-api each turn; not a non-empty string →
-  400). `AGENT_MODEL` is only the default when a caller sends no `model` (the
-  playground). Reasoning effort (`AGENT_REASONING_EFFORT`) is sent only to models
-  that accept it — not Haiku 4.5 / Sonnet 4.5 (`shared/model.ts`). Every provider
+- **No boot-time key or model**: the model is built per turn from the
+  organization's connection, resolved by aep-api each turn: the key in the
+  `X-Model-Key` header (missing → 400; `X-Anthropic-Key` is accepted in its
+  place from callers that predate connections), and the body's optional
+  `connection` (`{format, baseURL, authScheme, contextWindow?, outputLimit?,
+  capabilities}`; absent → Anthropic's own API; malformed → 400) and `model`
+  (checked for an id's shape only). `AGENT_MODEL` is only the default when a
+  caller sends no `model` (the playground). `createModel` has one branch per
+  format (`@ai-sdk/anthropic`, `@ai-sdk/openai-compatible`); reasoning effort
+  (`AGENT_REASONING_EFFORT`) rides as `effort` on the Anthropic format (not to
+  Haiku 4.5 / Sonnet 4.5) and as `reasoning_effort` on OpenAI-compatible. What
+  the connection supports (`web_search` strategy, native PDFs, images, cache
+  markers) is its `capabilities`, never the provider string. A 429 past a
+  5-minute `retry-after` ends the turn with a `provider_limit` frame and every
+  429 logs one `model_provider_429` line (`shared/provider-limit.ts`). Every provider
   request goes out through `shared/guarded-fetch.ts`: the host resolves once, any
   non-public answer is refused, the socket dials the checked address, and a
   redirect is refused rather than followed. `X-Org-Id` is LOAD-BEARING: the
@@ -94,8 +103,9 @@ off the stream. The plan tool contract (inputs, results, error codes, the
   fields → in-memory. Idempotent bootstrap + TTL sweep
   (`CONVERSATIONS_TTL_MS` / `CONVERSATIONS_SWEEP_MS`).
 - Keep-alives every `AGENT_KEEPALIVE_MS` (default 15s) while a turn streams.
-- Callers (e.g. the `@aep/playground` CLI) read `ANTHROPIC_API_KEY` themselves and
-  send it (plus an HS256 M2M token) as headers — the service holds no key.
+- Callers (e.g. the `@aep/playground` CLI, from `AEP_MODEL_*` or
+  `ANTHROPIC_API_KEY`) read the key themselves and send it (plus an HS256 M2M
+  token) as headers — the service holds no key.
 - **MCP dependency-discovery** (optional): the caller — not the service — pushes an
   `mcp: { url, token }` bundle on the turn (aep-api in production; the playground in
   local dev). Absent → no discovery tools (byte-identical to today); malformed → a
@@ -108,8 +118,10 @@ off the stream. The plan tool contract (inputs, results, error codes, the
   turn falls back to its raw stored message); assistant/tool rows pass through.
   The read is org-fenced like the turn POST (`X-Org-Id` must match the id's
   org segment). Absent → no entry; malformed → a clean pre-stream 400. Each
-  entry also records the connection that wrote the turn (`format@host`), which
-  `conversation/history-for.ts` compares before replaying history.
+  entry also records the connection that wrote the turn (`format@host`):
+  `conversation/history-for.ts` drops reasoning and provider-executed tool
+  calls from the turns another connection wrote, and replays the rest as
+  stored.
 
 ## Test
 
@@ -117,7 +129,10 @@ off the stream. The plan tool contract (inputs, results, error codes, the
   fixtures live in `test/` (never in the shipped `src/` tree), mirroring
   `@aep/agent-stream` and `@aep/playground`. Fixtures/doubles are flat siblings:
   `test/seed-files.ts` (the spec-bundle fixture), `test/skill-source.ts` (the
-  `SkillSource` double). Cross-package test-support that must be importable (the
+  `SkillSource` double). Provider cassettes (`test/fixtures/provider-cassettes/`,
+  one directory per turn, one `@aep/sse-cassette` file per model call) replay a
+  turn per format through `createModel`; `test/provider-cassette.ts` replays and
+  records them. Cross-package test-support that must be importable (the
   `mock-model`) stays in `src/shared/` and is published via `exports`.
 
 The local-filesystem playground and the model-eval harness live in the root

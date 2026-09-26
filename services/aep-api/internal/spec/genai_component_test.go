@@ -615,7 +615,14 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 		Repos: repos,
 		Git:   sourcecontrol.NewGitOpsService(stubResolver{}, fx.Engine),
 		LLM: func(context.Context, string) (spec.AgentLLM, error) {
-			return spec.AgentLLM{Key: rig.key, Model: rig.model, Host: modelconn.AnthropicHost}, nil
+			return spec.AgentLLM{Key: rig.key, Connection: modelconn.Connection{
+				Format:     modelconn.FormatAnthropic,
+				BaseURL:    modelconn.AnthropicBaseURL,
+				Host:       modelconn.AnthropicHost,
+				Model:      rig.model,
+				AuthScheme: modelconn.AuthXAPIKey,
+				ImageInput: modelconn.Unknown,
+			}}, nil
 		},
 		Client:        client,
 		Turns:         turns,
@@ -801,12 +808,16 @@ func Test202Flow_PreviewOnlyAndStreamReplays(t *testing.T) {
 	if o := sent.headers.Get("X-Org-Id"); o != testOrg {
 		t.Errorf("X-Org-Id = %q", o)
 	}
-	if k := sent.headers.Get("X-Anthropic-Key"); k != "sk-ant-test" {
-		t.Errorf("X-Anthropic-Key = %q", k)
+	if k := sent.headers.Get("X-Model-Key"); k != "sk-ant-test" {
+		t.Errorf("X-Model-Key = %q", k)
 	}
-	// The org's model rides the turn body, resolved for THIS turn.
+	// The org's connection and model ride the turn body, resolved for THIS turn.
 	if sent.req.Model != "claude-haiku-4-5" {
 		t.Errorf("turn model = %q, want the org's model", sent.req.Model)
+	}
+	if c := sent.req.Connection; c == nil || c.Format != modelconn.FormatAnthropic || c.BaseURL != modelconn.AnthropicBaseURL ||
+		c.Capabilities.WebSearch != modelconn.WebSearchAnthropicServerTool || !c.Capabilities.NativePDF {
+		t.Errorf("turn connection = %+v, want Anthropic's own API with its capabilities", c)
 	}
 	if sent.req.FilesChangedExternally {
 		t.Error("first turn must not carry filesChangedExternally")

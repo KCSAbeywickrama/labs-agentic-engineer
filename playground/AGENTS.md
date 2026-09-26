@@ -112,8 +112,14 @@ Relative project paths resolve against where you launched `pnpm play` (pnpm's
 may live (a gitignored dot-dir, invisible to lint + license gates). Anywhere
 else inside the repo is refused.
 
-Requires `ANTHROPIC_API_KEY` (env or `deployments/.env`) for the **engineering**
-agent, which is an AI SDK model call with no other way to authenticate. The
+The **engineering** agent runs on a model connection named by the same
+`AEP_MODEL_*` variables a coding run reads (`AEP_MODEL_FORMAT`,
+`AEP_MODEL_BASE_URL`, `AEP_MODEL_AUTH_SCHEME`, `AEP_MODEL_API_KEY`, model
+`AEP_AGENT_MODEL`), sent on every turn as aep-api sends the organization's
+(`src/kit/model-connection.ts`, whose `capabilitiesOf` mirrors aep-api's
+`modelconn.CapabilitiesOf`); a design turn gets `web_search` as aep-api's does.
+With none of them set it requires `ANTHROPIC_API_KEY` (env or
+`deployments/.env`) and runs on Anthropic's own API. The
 **coding** agent is a Claude Code session and authenticates by mode: a docker run
 gets the key (a container reaches no credential store), while `--host` withholds
 it and lets the SDK use the developer's own credentials — the ones `claude login`

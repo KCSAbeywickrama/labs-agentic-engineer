@@ -403,8 +403,8 @@ func mapGenAITurnError(ctx context.Context, err error) error {
 		return apierr.BadRequest(spec.ErrEmptyInstruction.Error())
 	case errors.Is(err, spec.ErrCollabNoToken):
 		return apierr.BadRequest(spec.ErrCollabNoToken.Error())
-	case errors.Is(err, spec.ErrNoAnthropicKey):
-		return apierr.BadRequest(spec.ErrNoAnthropicKey.Error())
+	case errors.Is(err, spec.ErrNoModelConnection):
+		return apierr.BadRequest(spec.ErrNoModelConnection.Error())
 	case errors.Is(err, spec.ErrTurnBufferTruncated):
 		return apierr.Conflict(spec.ErrTurnBufferTruncated.Error())
 	case errors.Is(err, spec.ErrSkillsRepoUnavailable):

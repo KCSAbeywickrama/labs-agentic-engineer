@@ -27,9 +27,10 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { LookupAddress } from "node:dns";
 import type { AddressInfo } from "node:net";
-import { streamText } from "ai";
-import { createGuardedFetch, HostRefusedError, isPublicAddress } from "../src/shared/guarded-fetch.js";
-import { anthropicConnection, createModel } from "../src/shared/model.js";
+import { generateText, streamText } from "ai";
+import { createGuardedFetch, HostRefusedError, isPublicAddress, RedirectRefusedError } from "../src/shared/guarded-fetch.js";
+import { anthropicConnection, createModel, type ModelConnection } from "../src/shared/model.js";
+import { MODEL_MAX_RETRIES } from "../src/shared/provider-limit.js";
 
 const NON_PUBLIC = [
   "127.0.0.1", // loopback
@@ -108,10 +109,9 @@ function stubResolver(table: Record<string, string[]>): {
 /** Whether `p` rejects with a HostRefusedError naming `host` and none of `hidden`. */
 async function assertRefused(p: Promise<unknown>, host: string, hidden: string[] = []): Promise<void> {
   await assert.rejects(p, (err: unknown) => {
-    const cause = (err as { cause?: unknown }).cause;
-    assert.ok(cause instanceof HostRefusedError, `expected HostRefusedError, got ${String(cause ?? err)}`);
-    assert.equal(cause.hostname, host);
-    for (const address of hidden) assert.ok(!cause.message.includes(address), "the resolved address is never echoed");
+    assert.ok(err instanceof HostRefusedError, `expected HostRefusedError, got ${String(err)}`);
+    assert.equal(err.hostname, host);
+    for (const address of hidden) assert.ok(!err.message.includes(address), "the resolved address is never echoed");
     return true;
   });
 }
@@ -189,6 +189,7 @@ test("a redirect is refused, so the key never reaches a second host", async () =
         headers: { "x-api-key": "sk-test-key-000000" },
         body: "{}",
       }),
+      (err: unknown) => err instanceof RedirectRefusedError && err.hostname === `model.test:${first.port}`,
     );
     assert.equal(first.seen.length, 1);
     assert.equal(second.seen.length, 0, "the redirect target received nothing");
@@ -239,5 +240,55 @@ test("a model streams a turn through the guarded fetch", async () => {
     assert.equal(target.seen[0]!.headers["x-api-key"], key);
   } finally {
     await target.close();
+  }
+});
+
+/** An OpenAI-compatible connection on `baseURL`, as aep-api resolves one. */
+function openAICompatible(baseURL: string): ModelConnection {
+  return {
+    format: "openai-compatible",
+    baseURL,
+    authScheme: "bearer",
+    capabilities: { claudeCode: false, claudeSubscription: false, promptCache: false, generatedAgents: false, nativePdf: false, webSearch: "none", imageInput: "unknown" },
+    apiKey: "ollama-test-key-0000000000",
+    model: "gpt-oss:20b",
+  };
+}
+
+// A refusal is an answer, not a blip: the SDK must not retry it (six retries
+// would re-resolve the host seven times over two minutes of backoff).
+test("a connection whose host resolves private is refused once, before any byte leaves, with the turn's retries on", async () => {
+  const target = await recordingServer();
+  const { asked, resolve } = stubResolver({ "llm.test": ["127.0.0.1"] });
+  const conn = openAICompatible(`http://llm.test:${target.port}/v1`);
+  const started = Date.now();
+  try {
+    await assert.rejects(
+      generateText({ model: createModel(conn, { fetch: createGuardedFetch({ resolve }) }), prompt: "hi", maxRetries: MODEL_MAX_RETRIES }),
+      (err: unknown) => err instanceof HostRefusedError && err.hostname === "llm.test",
+    );
+    assert.deepEqual(asked, ["llm.test"], "resolved once: not retried");
+    assert.ok(Date.now() - started < 5_000, "no backoff");
+    assert.equal(target.seen.length, 0, "no byte reached the host");
+  } finally {
+    await target.close();
+  }
+});
+
+test("a redirect answer fails the call once, without a retry", async () => {
+  const first = await recordingServer((_req, res) => {
+    res.writeHead(302, { location: "https://elsewhere.test/v1/chat/completions" });
+    res.end();
+  });
+  const { resolve } = stubResolver({ "llm.test": ["127.0.0.1"] });
+  const fetch = createGuardedFetch({ resolve, permit: (address) => address === "127.0.0.1" });
+  try {
+    await assert.rejects(
+      generateText({ model: createModel(openAICompatible(`http://llm.test:${first.port}/v1`), { fetch }), prompt: "hi", maxRetries: MODEL_MAX_RETRIES }),
+      RedirectRefusedError,
+    );
+    assert.equal(first.seen.length, 1);
+  } finally {
+    await first.close();
   }
 });

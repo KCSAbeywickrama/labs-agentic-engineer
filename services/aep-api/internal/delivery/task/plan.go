@@ -102,7 +102,7 @@ func (s *planSession) drain() int {
 // is an error rather than a warning: the run this plan feeds is about to be
 // supervised against the milestone's contents, so a silently short plan would
 // become a run that settles early.
-// Pre-stream failures are typed errors (ErrNoSpecVersion, ErrNoAnthropicKey,
+// Pre-stream failures are typed errors (ErrNoSpecVersion, ErrNoModelConnection,
 // ErrProjectRepoNotFound, ErrPlanInProgress, ErrSkillsRepoUnavailable) or an
 // *agentsvc.UpstreamError.
 func (s *PlanService) PlanIntoMilestone(ctx context.Context, orgID, projectID string, milestoneNumber int) error {
@@ -175,7 +175,7 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 		return nil, fmt.Errorf("resolve agent llm: %w", err)
 	}
 	if llm.Key == "" {
-		return nil, ErrNoAnthropicKey
+		return nil, ErrNoModelConnection
 	}
 
 	ref, err := sourcecontrol.ResolveWorkspaceRef(ctx, s.git.Resolver(), orgID, repo)
@@ -254,7 +254,8 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 	// Detached context so the turn drains even if the client disconnects (§6).
 	detached := context.WithoutCancel(ctx)
 	body, err := s.client.Turn(detached, conversationID, orgID, llm.Key, agentsvc.TurnRequest{
-		Model: llm.Model,
+		Model:      llm.Connection.Model,
+		Connection: agentsvc.ConnectionFor(llm.Connection),
 		Turn: agentsvc.TurnSpec{
 			Kind:        agentsvc.TurnKindPlan,
 			Scope:       planScopeFor(scope, covered),
