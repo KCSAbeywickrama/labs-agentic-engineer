@@ -75,6 +75,11 @@ const ANTHROPIC_CAPABILITIES: ModelCapabilities = {
  * provider can replay (signed reasoning, provider-executed tool calls) are
  * tied to the format and the host that produced them. Stamped on each turn's
  * journal entry and compared by `historyFor`.
+ *
+ * The model is deliberately not part of it: Anthropic's API accepts one Claude
+ * model's signed thinking replayed to another (checked 2026-09-26 both ways
+ * between claude-haiku-4-5 and claude-sonnet-5), so a model change on the same
+ * host keeps the history, and its cache, as it is.
  */
 export function connectionFingerprint(conn: Pick<ModelConnection, "format" | "baseURL">): string {
   return `${conn.format}@${new URL(conn.baseURL).host}`;

@@ -20,13 +20,14 @@
  * Attachments follow the model (`conversation/attachments.ts`): a PDF stays a
  * native document only where the connection reads PDFs natively, else it
  * becomes its text under the same file name; a scan (no text) and an image the
- * model cannot read are refused naming the file.
+ * model cannot read are refused naming the file when the user just attached
+ * them, and left out with the reason when they are reference documents.
  */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { FilePart } from "ai";
-import { AttachmentRefusedError, fitAttachments } from "../src/conversation/attachments.js";
+import { AttachmentRefusedError, fitAttachments, fitReferences } from "../src/conversation/attachments.js";
 import { minimalPdf } from "./pdf-fixture.js";
 
 const FIRST_PARTY = { nativePdf: true, imageInput: "yes" as const };
@@ -93,4 +94,24 @@ test("text parts pass unchanged, and order is kept", async () => {
   const out = await fitAttachments([notes, pdfPart("brief.pdf", minimalPdf("Brief"))], OLLAMA_VISION);
   assert.equal(out[0], notes);
   assert.equal(out[1]!.filename, "brief.pdf");
+});
+
+test("references the model cannot read are left out with the reason; the rest are fitted in order", async () => {
+  const notes = textPart("notes.txt");
+  const { parts, unreadable } = await fitReferences(
+    [imagePart("flow.png"), notes, pdfPart("scan.pdf", minimalPdf()), pdfPart("brief.pdf", minimalPdf("Brief"))],
+    OLLAMA_NO_VISION,
+  );
+  assert.equal(parts.length, 2);
+  assert.equal(parts[0], notes);
+  assert.equal(parts[1]!.filename, "brief.pdf");
+  assert.equal(parts[1]!.mediaType, "text/plain", "a readable PDF still becomes its text");
+  assert.deepEqual(unreadable.map((r) => r.filename), ["flow.png", "scan.pdf"]);
+  assert.equal(unreadable[0]!.reason, "the model on this connection does not read images");
+  assert.match(unreadable[1]!.reason, /^the PDF has no extractable text/);
+});
+
+test("an image reference is sent as is where the model reads images", async () => {
+  const image = imagePart("flow.png");
+  assert.deepEqual(await fitReferences([image], OLLAMA_VISION), { parts: [image], unreadable: [] });
 });

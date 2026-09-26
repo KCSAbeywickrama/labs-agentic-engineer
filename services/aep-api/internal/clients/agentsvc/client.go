@@ -434,10 +434,6 @@ func (c *client) Turn(ctx context.Context, conversationID, orgID, modelKey strin
 	httpReq.Header.Set("Accept", "text/event-stream")
 	if modelKey != "" {
 		httpReq.Header.Set("X-Model-Key", modelKey)
-		// An agents service from before connections reads only this name,
-		// and the two images roll separately: sent until both sides have
-		// shipped X-Model-Key.
-		httpReq.Header.Set("X-Anthropic-Key", modelKey)
 	}
 	if err := c.attachAuth(orgID, httpReq); err != nil {
 		return nil, err

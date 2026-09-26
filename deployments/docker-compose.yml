@@ -359,8 +359,8 @@ services:
   # agents — file-mutation agents service (services/agents). Serves the
   # requirements/design/chat generation turns AND task planning. The BFF
   # (aep-api/internal/feature/{genai,task}) is its only caller. Tenancy-blind:
-  # the acting org rides the log-only X-Org-Id header; the per-org Anthropic key
-  # arrives per-turn in X-Anthropic-Key (no boot-time key).
+  # the acting org rides the log-only X-Org-Id header; the org's model
+  # connection's key arrives per-turn in X-Model-Key (no boot-time key).
   # See docs/design/agents-generation-migration.md.
   # Built from the repo root so pnpm resolves the workspace:* deps
   # (@aep/agent-stream, @aep/excalidraw-dsl, @aep/design-projection).

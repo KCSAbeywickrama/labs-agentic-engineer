@@ -27,8 +27,7 @@
  * The turn requires an `X-Model-Key` header — the model is built PER TURN
  * from it (§12.3.1), the body's optional `model` id (the org's model; absent →
  * `AGENT_MODEL`) and its optional `connection` (absent → Anthropic's own API),
- * so the service holds no key and pins no model. `X-Anthropic-Key` is accepted
- * in its place for callers from before connections. While a turn streams, a
+ * so the service holds no key and pins no model. While a turn streams, a
  * `: keep-alive` comment is emitted every `keepAliveMs` so long generations
  * survive an idle ingress.
  *
@@ -83,7 +82,7 @@ import {
   overlayReferenceTexts,
   toAttachmentParts,
 } from "./conversation/load-workspace.js";
-import { AttachmentRefusedError, fitAttachments } from "./conversation/attachments.js";
+import { AttachmentRefusedError, fitAttachments, fitReferences } from "./conversation/attachments.js";
 import { codedErrorFrame, turnErrorFrame } from "./conversation/turn-error.js";
 import { conversationOrgId, resolveWorkspace, WorkspaceRefError } from "./shared/snapshot-path.js";
 import { createAuthMiddleware, type AgentsAuthConfig } from "./shared/auth.js";
@@ -194,9 +193,7 @@ export function createApp(deps: CreateAppDeps): Express {
     const id = req.params.id as string;
 
     // Per-request model key (§12.3.1): required, model built per turn.
-    // `X-Anthropic-Key` is its name from before connections, still sent by an
-    // aep-api that predates them.
-    const apiKey = req.header("x-model-key") || req.header("x-anthropic-key");
+    const apiKey = req.header("x-model-key");
     if (!apiKey || apiKey.trim() === "") {
       res.status(400).json({ error: "X-Model-Key header is required" });
       return;
@@ -396,6 +393,14 @@ export function createApp(deps: CreateAppDeps): Express {
       ? connectionFromTurn(body.connection, apiKey, modelId)
       : anthropicConnection(apiKey, modelId);
 
+    // Reference documents fitted to what the connection reads (attachments.ts):
+    // a PDF becomes its text off Anthropic's own API, and a reference the model
+    // cannot read is left out and named in the prompt rather than failing the
+    // turn, since it is re-read on every turn of the project. Fitted before the
+    // chat attachments are budgeted, so a reference left out costs nothing.
+    const references = await fitReferences(referenceAttachments, conn.capabilities);
+    referenceAttachments = references.parts;
+
     // Chat attachments (#428): bytes INLINE on the body, because nothing stores
     // them (console ADR-0019). Converted to native file parts and appended to the
     // reference parts — the per-turn encoded budget is SHARED between the two
@@ -419,11 +424,10 @@ export function createApp(deps: CreateAppDeps): Express {
       );
       chatAttachments = toAttachmentParts(body.attachments, spent);
     }
-    // Both channels fitted to what the connection reads (attachments.ts): a PDF
-    // becomes its text off Anthropic's own API, and a part the model cannot
-    // take is refused here, naming the file, instead of failing mid-turn.
+    // Chat attachments fitted the same way, except that one the model cannot
+    // take is refused here, naming the file: attaching it was the user's act
+    // on this message, so they hear about it instead of the model.
     try {
-      referenceAttachments = await fitAttachments(referenceAttachments, conn.capabilities);
       chatAttachments = await fitAttachments(chatAttachments, conn.capabilities);
     } catch (err) {
       if (err instanceof AttachmentRefusedError) {
@@ -582,6 +586,7 @@ export function createApp(deps: CreateAppDeps): Express {
         filesChangedExternally: body.filesChangedExternally === true,
         skillSource,
         ...(referenceAttachments.length ? { referenceAttachments } : {}),
+        ...(references.unreadable.length ? { unreadableReferences: references.unreadable } : {}),
         ...(chatAttachments.length ? { chatAttachments } : {}),
         ...(toolset ? { toolset } : {}),
         ...(wantsRegisterDraftTool(turn, projectId) ? { registerDraft: true } : {}),

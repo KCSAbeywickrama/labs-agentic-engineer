@@ -98,9 +98,9 @@ func TestTurn_SendsExactRequestAndHeaders(t *testing.T) {
 	if k := srv.headers.Get("X-Model-Key"); k != "sk-ant-123" {
 		t.Errorf("X-Model-Key = %q", k)
 	}
-	// Until both images ship X-Model-Key, the key also rides the old name.
-	if k := srv.headers.Get("X-Anthropic-Key"); k != "sk-ant-123" {
-		t.Errorf("X-Anthropic-Key = %q", k)
+	// The key rides one header; its name from before connections is gone.
+	if k := srv.headers.Get("X-Anthropic-Key"); k != "" {
+		t.Errorf("X-Anthropic-Key = %q, want absent", k)
 	}
 	if o := srv.headers.Get("X-Org-Id"); o != "org-o" {
 		t.Errorf("X-Org-Id = %q", o)

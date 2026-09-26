@@ -69,8 +69,7 @@ off the stream. The plan tool contract (inputs, results, error codes, the
   `GET /conversations/:id` — the last two behind the M2M gate.
 - **No boot-time key or model**: the model is built per turn from the
   organization's connection, resolved by aep-api each turn: the key in the
-  `X-Model-Key` header (missing → 400; `X-Anthropic-Key` is accepted in its
-  place from callers that predate connections), and the body's optional
+  `X-Model-Key` header (missing → 400), and the body's optional
   `connection` (`{format, baseURL, authScheme, contextWindow?, outputLimit?,
   capabilities}`; absent → Anthropic's own API; malformed → 400) and `model`
   (checked for an id's shape only). `AGENT_MODEL` is only the default when a
@@ -121,7 +120,14 @@ off the stream. The plan tool contract (inputs, results, error codes, the
   entry also records the connection that wrote the turn (`format@host`):
   `conversation/history-for.ts` drops reasoning and provider-executed tool
   calls from the turns another connection wrote, and replays the rest as
-  stored.
+  stored. The model is not part of the fingerprint: Anthropic's API accepts
+  one Claude model's signed thinking replayed to another (checked
+  `claude-haiku-4-5` ↔ `claude-sonnet-5`, both ways). When the current
+  connection's `imageInput` is `no`, every stored image, from any turn, is
+  replaced by a short text naming the file, because a model without vision
+  refuses the whole request over one stored image. On a connection whose `imageInput` is `no` it also replaces every
+  stored image with a short text naming the file, since such a host refuses
+  the whole request over one image anywhere in the history.
 
 ## Test
 

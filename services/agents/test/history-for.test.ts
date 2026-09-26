@@ -21,15 +21,20 @@
  * as stored — the same array, so the prompt stays byte-identical (the cached
  * prefix holds). Turns another connection wrote lose only what that connection
  * alone can replay: reasoning, provider-executed tool calls and their results.
+ * On a model that reads no images, every stored image becomes a text naming it.
  */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ModelMessage } from "ai";
-import { historyFor } from "../src/conversation/history-for.js";
+import { historyFor, type ReplayTarget } from "../src/conversation/history-for.js";
+import { imageLeftOutOfHistory } from "../src/prompts/turn.js";
 
 const ANTHROPIC = "anthropic@api.anthropic.com";
 const OLLAMA = "openai-compatible@ollama.com";
+
+/** Replaying to `fingerprint`, on a model that reads images unless stated. */
+const on = (fingerprint: string, imageInput: ReplayTarget["imageInput"] = "yes"): ReplayTarget => ({ fingerprint, imageInput });
 
 const MESSAGES: ModelMessage[] = [
   { role: "user", content: "first" },
@@ -75,24 +80,24 @@ test("every fingerprint matching returns the stored array itself", () => {
     { messageIndex: 0, connection: "anthropic@ollama.com" },
     { messageIndex: 2, connection: "anthropic@ollama.com" },
   ];
-  assert.equal(historyFor(MESSAGES, journal, "anthropic@ollama.com"), MESSAGES);
+  assert.equal(historyFor(MESSAGES, journal, on("anthropic@ollama.com")), MESSAGES);
 });
 
 test("a turn with no fingerprint counts as anthropic@api.anthropic.com", () => {
   const snapshot = structuredClone(MESSAGES);
   const journal = [{ messageIndex: 0 }, { messageIndex: 2, connection: ANTHROPIC }];
-  const out = historyFor(MESSAGES, journal, ANTHROPIC);
+  const out = historyFor(MESSAGES, journal, on(ANTHROPIC));
   assert.equal(out, MESSAGES);
   assert.deepEqual(out, snapshot, "nothing was rewritten");
 });
 
 test("a conversation with no journal is replayed as stored on Anthropic's API", () => {
-  assert.equal(historyFor(MESSAGES, [], ANTHROPIC), MESSAGES);
+  assert.equal(historyFor(MESSAGES, [], on(ANTHROPIC)), MESSAGES);
 });
 
 test("an Anthropic turn replayed to another connection drops reasoning and server tool calls, keeps text and client tools", () => {
   const snapshot = structuredClone(ANTHROPIC_TURN);
-  const out = historyFor(ANTHROPIC_TURN, [{ messageIndex: 0, connection: ANTHROPIC }], OLLAMA);
+  const out = historyFor(ANTHROPIC_TURN, [{ messageIndex: 0, connection: ANTHROPIC }], on(OLLAMA));
   assert.notEqual(out, ANTHROPIC_TURN, "a filtered history is a copy");
   assert.deepEqual(ANTHROPIC_TURN, snapshot, "the stored transcript is never rewritten");
   assert.deepEqual(out, [
@@ -119,7 +124,7 @@ test("only the turns another connection wrote are filtered; the current connecti
     { messageIndex: 0, connection: ANTHROPIC },
     { messageIndex: ANTHROPIC_TURN.length, connection: OLLAMA },
   ];
-  const out = historyFor(messages, journal, OLLAMA);
+  const out = historyFor(messages, journal, on(OLLAMA));
   assert.equal(out[out.length - 1], ollamaTurn[1], "the current connection's message is the stored object, reasoning and all");
   assert.equal(out.length, 3 + ollamaTurn.length);
 });
@@ -131,12 +136,53 @@ test("a journal-less turn in the middle counts as Anthropic's, not as the turn b
     { role: "user", content: "no journal" },
     { role: "assistant", content: [{ type: "reasoning", text: "r2" }, { type: "text", text: "b" }] },
   ];
-  const out = historyFor(messages, [{ messageIndex: 0, connection: OLLAMA }], OLLAMA);
+  const out = historyFor(messages, [{ messageIndex: 0, connection: OLLAMA }], on(OLLAMA));
   assert.equal(out[1], messages[1], "the journaled Ollama turn is untouched");
   assert.deepEqual(out[3], { role: "assistant", content: [{ type: "text", text: "b" }] });
 });
 
 test("the filter is deterministic: the same stored history cleans to the same bytes on every turn", () => {
   const journal = [{ messageIndex: 0, connection: ANTHROPIC }];
-  assert.equal(JSON.stringify(historyFor(ANTHROPIC_TURN, journal, OLLAMA)), JSON.stringify(historyFor(ANTHROPIC_TURN, journal, OLLAMA)));
+  assert.equal(JSON.stringify(historyFor(ANTHROPIC_TURN, journal, on(OLLAMA))), JSON.stringify(historyFor(ANTHROPIC_TURN, journal, on(OLLAMA))));
+});
+
+/** A turn whose user message carried a reference image and a chat screenshot, on Anthropic's API. */
+const IMAGE_TURN: ModelMessage[] = [
+  {
+    role: "user",
+    content: [
+      { type: "text", text: "build this" },
+      { type: "file", mediaType: "image/png", data: "iVBORw0KGgo=", filename: "specs/requirements/references/flow.png" },
+      { type: "image", image: "iVBORw0KGgo=", mediaType: "image/png" },
+      { type: "file", mediaType: "text/plain", data: "bm90ZXM=", filename: "notes.txt" },
+    ],
+  },
+  { role: "assistant", content: [{ type: "text", text: "on it" }] },
+];
+
+test("on a model that reads no images, each stored image becomes a text naming it, from any turn", () => {
+  const snapshot = structuredClone(IMAGE_TURN);
+  // The same connection wrote the turn: only the images change.
+  const out = historyFor(IMAGE_TURN, [{ messageIndex: 0, connection: OLLAMA }], on(OLLAMA, "no"));
+  assert.deepEqual(IMAGE_TURN, snapshot, "the stored transcript is never rewritten");
+  assert.match(imageLeftOutOfHistory("flow.png"), /flow\.png/, "the stand-in names the file");
+  assert.deepEqual(out, [
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "build this" },
+        { type: "text", text: imageLeftOutOfHistory("specs/requirements/references/flow.png") },
+        { type: "text", text: imageLeftOutOfHistory(undefined) },
+        IMAGE_TURN[0]!.content[3],
+      ],
+    },
+    IMAGE_TURN[1],
+  ]);
+});
+
+test("images stay when the model reads them or nobody knows, so the stored array is returned itself", () => {
+  const journal = [{ messageIndex: 0, connection: OLLAMA }];
+  assert.equal(historyFor(IMAGE_TURN, journal, on(OLLAMA, "yes")), IMAGE_TURN);
+  assert.equal(historyFor(IMAGE_TURN, journal, on(OLLAMA, "unknown")), IMAGE_TURN);
+  assert.equal(historyFor(MESSAGES, [], on(ANTHROPIC, "no")), MESSAGES, "no image stored, nothing to replace");
 });

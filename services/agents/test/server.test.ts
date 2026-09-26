@@ -41,6 +41,7 @@ import { mockModel } from "../src/shared/mock-model.js";
 import type { ModelConnection } from "../src/shared/model.js";
 import type { TurnModelContext } from "../src/server.js";
 import { minimalPdf } from "./pdf-fixture.js";
+import { unreadableReferencesNote } from "../src/prompts/turn.js";
 import { config } from "../src/shared/config.js";
 
 const OPENAPI = "specs/design/components/hello-api/openapi.yaml";
@@ -115,13 +116,13 @@ async function mintToken(opts: { audience?: string; secret?: string; expired?: b
   return jwt.sign(new TextEncoder().encode(opts.secret ?? SECRET));
 }
 
-/** A turn POST carrying the M2M token and (unless omitted) the model key, under `keyHeader` (default X-Model-Key). */
-function turnPost(body: unknown, opts: { token: string; key?: string | null; org?: string; keyHeader?: string }) {
+/** A turn POST carrying the M2M token and (unless omitted) the model key as X-Model-Key. */
+function turnPost(body: unknown, opts: { token: string; key?: string | null; org?: string }) {
   const headers: Record<string, string> = {
     "content-type": "application/json",
     Authorization: `Bearer ${opts.token}`,
   };
-  if (opts.key !== null) headers[opts.keyHeader ?? "X-Model-Key"] = opts.key ?? KEY;
+  if (opts.key !== null) headers["X-Model-Key"] = opts.key ?? KEY;
   if (opts.org !== undefined) headers["X-Org-Id"] = opts.org;
   return { method: "POST", headers, body: JSON.stringify(body) };
 }
@@ -215,18 +216,18 @@ test("401 when the M2M token is missing, malformed, wrong-secret, or wrong-aud",
     const body = JSON.stringify(wsBody());
     const post = (headers: Record<string, string>) => fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body });
 
-    const noAuth = await post({ "X-Anthropic-Key": KEY });
+    const noAuth = await post({ "X-Model-Key": KEY });
     assert.equal(noAuth.status, 401);
     assert.match(noAuth.headers.get("www-authenticate") ?? "", /Bearer realm="agents-service"/);
 
-    const malformed = await post({ Authorization: "NotBearer xyz", "X-Anthropic-Key": KEY });
+    const malformed = await post({ Authorization: "NotBearer xyz", "X-Model-Key": KEY });
     assert.equal(malformed.status, 401);
 
     const wrongSecret = await mintToken({ secret: "not-the-secret" });
-    assert.equal((await post({ Authorization: `Bearer ${wrongSecret}`, "X-Anthropic-Key": KEY })).status, 401);
+    assert.equal((await post({ Authorization: `Bearer ${wrongSecret}`, "X-Model-Key": KEY })).status, 401);
 
     const wrongAud = await mintToken({ audience: "some-other-service" });
-    assert.equal((await post({ Authorization: `Bearer ${wrongAud}`, "X-Anthropic-Key": KEY })).status, 401);
+    assert.equal((await post({ Authorization: `Bearer ${wrongAud}`, "X-Model-Key": KEY })).status, 401);
 
     // GET is gated too.
     assert.equal((await fetch(`${baseUrl}/conversations/c`)).status, 401);
@@ -242,21 +243,29 @@ test("400 when X-Model-Key is missing (authenticated but no key)", async () => {
     const res = await fetch(`${baseUrl}/conversations/${WS_CONV}/turns`, turnPost(wsBody(), { token, key: null, org: WS_ORG }));
     assert.equal(res.status, 400);
     assert.match(((await res.json()) as { error: string }).error, /X-Model-Key/);
+
+    // The header's name from before connections is no longer read.
+    const legacy = turnPost(wsBody(), { token, key: null, org: WS_ORG });
+    const legacyRes = await fetch(`${baseUrl}/conversations/${WS_CONV}/turns`, {
+      ...legacy,
+      headers: { ...legacy.headers, "X-Anthropic-Key": KEY },
+    });
+    assert.equal(legacyRes.status, 400);
   } finally {
     await close();
   }
 });
 
-// An aep-api from before connections sends the key as X-Anthropic-Key and no
-// connection: the turn runs on Anthropic's own API exactly as it did.
-test("a request carrying only X-Anthropic-Key still runs, on Anthropic's own API", async () => {
+// A caller that names no connection (the playground, evals) runs on
+// Anthropic's own API with the header's key.
+test("a turn naming no connection runs on Anthropic's own API", async () => {
   const root = makeMountRoot({ [REQUIREMENTS]: "# Req\n" });
   const run = await bootRecordingModels(root);
   try {
     const token = await mintToken();
     const res = await fetch(
       `${run.baseUrl}/conversations/${WS_CONV}/turns`,
-      turnPost(wsBody({ model: "claude-sonnet-5" }), { token, org: WS_ORG, keyHeader: "X-Anthropic-Key" }),
+      turnPost(wsBody({ model: "claude-sonnet-5" }), { token, org: WS_ORG }),
     );
     assert.equal(res.status, 200);
     assert.match(await res.text(), /"type":"manifest"/);
@@ -326,7 +335,7 @@ test("400 on an unparseable JSON body (the body-parser catch-all)", async () => 
     const token = await mintToken();
     const res = await fetch(`${baseUrl}/conversations/${WS_CONV}/turns`, {
       method: "POST",
-      headers: { "content-type": "application/json", Authorization: `Bearer ${token}`, "X-Anthropic-Key": KEY },
+      headers: { "content-type": "application/json", Authorization: `Bearer ${token}`, "X-Model-Key": KEY },
       body: "{not json",
     });
     assert.equal(res.status, 400);
@@ -918,6 +927,60 @@ test("on a connection that reads PDFs only as text, a PDF reference reaches the 
     assert.equal(part.mediaType, "text/plain");
     assert.equal(part.filename, refPath);
     assert.match(Buffer.from(part.data as string, "base64").toString("utf8"), /Checkout brief for shoppers/);
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// A reference is re-read on every turn of the project, so one the model cannot
+// read is left out and named in the prompt; the turn runs.
+test("an image reference on a model that reads no images is left out and named in the prompt; the turn runs", async () => {
+  const refPath = "specs/requirements/references/flow.png";
+  const root = makeMountRoot({ [REQUIREMENTS]: "# Req\n", [refPath]: Buffer.from("iVBORw0KGgo=", "base64") });
+  const { baseUrl, close, store } = await boot(mockModel([{ kind: "text", text: "ok" }]), root);
+  try {
+    const token = await mintToken();
+    const res = await fetch(
+      `${baseUrl}/conversations/${WS_CONV}/turns`,
+      turnPost(wsBody({ turn: { kind: "start", idea: "an app", references: [refPath] }, connection: OLLAMA_CONNECTION }), { token, org: WS_ORG }),
+    );
+    assert.equal(res.status, 200);
+    assert.match(await res.text(), /"type":"manifest"/);
+    const firstUser = (await store.get(WS_CONV))!.messages.find((m) => m.role === "user")!;
+    assert.equal(typeof firstUser.content, "string", "no image part reaches the model");
+    assert.ok(
+      (firstUser.content as string).includes(
+        unreadableReferencesNote([{ filename: refPath, reason: "the model on this connection does not read images" }]),
+      ),
+      "the prompt names the file and why it was left out",
+    );
+  } finally {
+    await close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an image reference on a model that reads images reaches it as an image part", async () => {
+  const refPath = "specs/requirements/references/flow.png";
+  const root = makeMountRoot({ [REQUIREMENTS]: "# Req\n", [refPath]: Buffer.from("iVBORw0KGgo=", "base64") });
+  const { baseUrl, close, store } = await boot(mockModel([{ kind: "text", text: "ok" }]), root);
+  try {
+    const token = await mintToken();
+    const vision = { ...OLLAMA_CONNECTION, capabilities: { ...OLLAMA_CONNECTION.capabilities, imageInput: "yes" } };
+    const res = await fetch(
+      `${baseUrl}/conversations/${WS_CONV}/turns`,
+      turnPost(wsBody({ turn: { kind: "start", idea: "an app", references: [refPath] }, connection: vision }), { token, org: WS_ORG }),
+    );
+    assert.equal(res.status, 200);
+    await res.text();
+    const firstUser = (await store.get(WS_CONV))!.messages.find((m) => m.role === "user")!;
+    const parts = firstUser.content as unknown as Array<Record<string, unknown>>;
+    const image = parts.find((p) => p.type === "file");
+    assert.equal(image?.mediaType, "image/png");
+    assert.equal(image?.filename, refPath);
+    const text = parts.flatMap((p) => (p.type === "text" ? [p.text as string] : [])).join("");
+    assert.doesNotMatch(text, /left out/, "nothing was left out, so no note");
   } finally {
     await close();
     rmSync(root, { recursive: true, force: true });

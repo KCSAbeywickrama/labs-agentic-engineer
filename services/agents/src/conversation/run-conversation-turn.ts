@@ -50,10 +50,11 @@ import { buildTaskPlanTools } from "../agents/main/tools/task-plan.js";
 import { TaskPlan } from "../agents/main/task-plan-accumulator.js";
 import { buildInstructions, buildTaskPlanInstructions, buildPrompt, buildEagerSkillsBlock } from "../agents/main/prompt.js";
 import type { SkillSource } from "../agents/main/skill-source.js";
+import type { UnreadableReference } from "./attachments.js";
 import { historyFor } from "./history-for.js";
 import { buildManifestPart, toTurnUsage } from "./manifest.js";
 import { OutputTruncatedError, TruncationWatch } from "./truncation.js";
-import { attachmentsNote } from "../prompts/turn.js";
+import { attachmentsNote, unreadableReferencesNote } from "../prompts/turn.js";
 import { config } from "../shared/config.js";
 import { guardedFetch } from "../shared/guarded-fetch.js";
 import {
@@ -165,6 +166,13 @@ export interface RunConversationTurnInput {
    * → the message stays a plain string, byte-identical to a turn without it.
    */
   referenceAttachments?: FilePart[];
+  /**
+   * Reference documents the caller left out of `referenceAttachments` because
+   * the connection's model cannot read them (`fitReferences`). Named in the
+   * prompt so the model neither assumes their content nor goes looking for
+   * them. Absent/empty → no note.
+   */
+  unreadableReferences?: readonly UnreadableReference[];
   /**
    * Native file parts for the files the user attached to THIS message (#428).
    *
@@ -399,7 +407,10 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // conv.messages itself while every turn came from this connection, else a
     // cleaned copy. runTurn appends this turn to the array it is handed, so a
     // copy's appended tail is carried onto conv.messages below.
-    const history = historyFor(conv.messages, conv.turns ?? [], fingerprint);
+    const history = historyFor(conv.messages, conv.turns ?? [], {
+      fingerprint,
+      imageInput: conn.capabilities.imageInput,
+    });
     const historyLen = history.length;
     const maxOutputTokens = maxOutputTokensFor(conn);
     const res = await runTurn({
@@ -408,6 +419,7 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       prompt:
         note +
         attachmentsNote((input.chatAttachments ?? []).flatMap((p) => (p.filename ? [p.filename] : []))) +
+        unreadableReferencesNote(input.unreadableReferences) +
         eagerBlock +
         buildPrompt(input.files, input.instruction),
       messages: history,
