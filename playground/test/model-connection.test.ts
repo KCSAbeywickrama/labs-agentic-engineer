@@ -28,7 +28,9 @@ import assert from "node:assert/strict";
 import { capabilitiesOf, playgroundModel } from "../src/kit/model-connection.js";
 
 test("capabilitiesOf mirrors modelconn.CapabilitiesOf's table", () => {
-  const none = { claudeCode: false, claudeSubscription: false, promptCache: false, generatedAgents: false, nativePdf: false };
+  // What every connection off Anthropic's own API shares: generated agents run
+  // on any format, the first-party features on none.
+  const base = { claudeCode: false, claudeSubscription: false, promptCache: false, generatedAgents: true, nativePdf: false };
   assert.deepEqual(capabilitiesOf("anthropic", "api.anthropic.com"), {
     claudeCode: true,
     claudeSubscription: true,
@@ -39,15 +41,15 @@ test("capabilitiesOf mirrors modelconn.CapabilitiesOf's table", () => {
     imageInput: "yes",
   });
   assert.deepEqual(capabilitiesOf("anthropic", "ollama.com"), {
-    ...none,
+    ...base,
     claudeCode: true,
     promptCache: true,
     webSearch: "ollama-api",
     imageInput: "unknown",
   });
-  assert.deepEqual(capabilitiesOf("openai-compatible", "ollama.com"), { ...none, webSearch: "ollama-api", imageInput: "unknown" });
-  assert.deepEqual(capabilitiesOf("openai-compatible", "openrouter.ai"), { ...none, webSearch: "none", imageInput: "unknown" });
-  assert.deepEqual(capabilitiesOf("openai-compatible", "api.anthropic.com"), { ...none, webSearch: "none", imageInput: "unknown" });
+  assert.deepEqual(capabilitiesOf("openai-compatible", "ollama.com"), { ...base, webSearch: "ollama-api", imageInput: "unknown" });
+  assert.deepEqual(capabilitiesOf("openai-compatible", "openrouter.ai"), { ...base, webSearch: "none", imageInput: "unknown" });
+  assert.deepEqual(capabilitiesOf("openai-compatible", "api.anthropic.com"), { ...base, webSearch: "none", imageInput: "unknown" });
 });
 
 test("AEP_MODEL_* names the connection, its key and its model", () => {

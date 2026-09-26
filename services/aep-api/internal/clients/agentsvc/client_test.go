@@ -249,7 +249,7 @@ func TestConnectionFor_WireShape(t *testing.T) {
 		{
 			name: "openai-compatible@ollama.com",
 			conn: modelconn.Connection{Format: modelconn.FormatOpenAICompatible, BaseURL: "https://ollama.com/v1", Host: modelconn.OllamaHost, Model: "gpt-oss:20b", AuthScheme: modelconn.AuthBearer, ContextWindow: &window, OutputLimit: &limit, ImageInput: modelconn.No},
-			want: `{"format":"openai-compatible","baseURL":"https://ollama.com/v1","authScheme":"bearer","contextWindow":131072,"outputLimit":32000,"capabilities":{"claudeCode":false,"claudeSubscription":false,"promptCache":false,"generatedAgents":false,"nativePdf":false,"webSearch":"ollama-api","imageInput":"no"}}`,
+			want: `{"format":"openai-compatible","baseURL":"https://ollama.com/v1","authScheme":"bearer","contextWindow":131072,"outputLimit":32000,"capabilities":{"claudeCode":false,"claudeSubscription":false,"promptCache":false,"generatedAgents":true,"nativePdf":false,"webSearch":"ollama-api","imageInput":"no"}}`,
 		},
 	}
 	for _, tc := range cases {

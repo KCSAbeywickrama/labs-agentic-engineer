@@ -162,11 +162,11 @@ func TestDispatch_NonAnthropicConnection_MountsTheConnectionKey(t *testing.T) {
 	}
 }
 
-// TestDispatch_NonAnthropicConnection_MountsNoEvaluationKey is the interim
-// gate: the evaluation harness and its judge speak Anthropic's API, so on any
-// other connection the build runs without evaluation rather than handing them
-// a key for a host they never call.
-func TestDispatch_NonAnthropicConnection_MountsNoEvaluationKey(t *testing.T) {
+// TestDispatch_OpenAICompatibleConnection_MountsTheEvaluationKey: evaluation
+// runs on any connection. The harness boots the generated agent and its judge
+// on the connection's own format, URL, model and auth scheme, so all four ride
+// beside the key.
+func TestDispatch_OpenAICompatibleConnection_MountsTheEvaluationKey(t *testing.T) {
 	rec := &chainRecorder{}
 	anthropic, github := fullSecretRefs()
 	conn := ollamaConnection()
@@ -176,11 +176,18 @@ func TestDispatch_NonAnthropicConnection_MountsNoEvaluationKey(t *testing.T) {
 	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
-		t.Fatalf("a build must not fail because evaluation cannot run: %v", err)
+		t.Fatalf("Dispatch: %v", err)
 	}
-	if hasEnvKey(rec.load, envEvalAnthropicAPIKey) {
-		t.Errorf("%s mounted on a non-Anthropic connection: %+v", envEvalAnthropicAPIKey, rec.load.Env)
+	ev := secretEnvByKey(t, rec.load, envEvalModelAPIKey)
+	if ev.ValueFrom == nil || ev.ValueFrom.SecretKeyRef == nil || ev.ValueFrom.SecretKeyRef.Name != anthropic.defaultRef.Name {
+		t.Fatalf("%s = %+v, want a SecretReference to the connection key %q", envEvalModelAPIKey, ev, anthropic.defaultRef.Name)
 	}
+	assertEvalConnEnv(t, rec.load, map[string]string{
+		envEvalModelFormat:     "openai-compatible",
+		envEvalModelBaseURL:    "https://ollama.com/v1",
+		envEvalModelName:       "gpt-oss:20b",
+		envEvalModelAuthScheme: "bearer",
+	})
 	if !hasEnvKey(rec.load, envEvalKeyManaged) {
 		t.Errorf("%s must still declare the platform owns the evaluation key", envEvalKeyManaged)
 	}

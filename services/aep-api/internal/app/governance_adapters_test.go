@@ -22,65 +22,20 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/clients/agentmanager"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
-	"github.com/wso2/aep/aep-api/internal/organization"
+	"github.com/wso2/aep/aep-api/internal/delivery/agentgovernance"
 	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 )
 
-// connectionReader answers Effective with one connection and key.
-type connectionReader struct {
-	conn modelconn.Connection
-	key  string
-}
-
-func (r connectionReader) Effective(context.Context, string) (modelconn.Connection, string, bool, error) {
-	return r.conn, r.key, true, nil
-}
-
-func (r connectionReader) KeyRef(context.Context, string) (modelconn.Connection, organization.SecretRefTriplet, error) {
-	return r.conn, organization.SecretRefTriplet{}, nil
-}
-
-// The deploy path's half of the interim gate: the governor reads "" as nothing
-// to govern, so another host's key never becomes the Anthropic provider's.
-func TestAMPOrgKeyReader_OnlyYieldsAKeyGeneratedAgentsCanUse(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		conn modelconn.Connection
-		want string
-	}{
-		{
-			name: "Anthropic's own API",
-			conn: modelconn.Connection{Format: modelconn.FormatAnthropic, Host: modelconn.AnthropicHost},
-			want: "sk-ant-api03-key",
-		},
-		{
-			name: "another host",
-			conn: modelconn.Connection{Format: modelconn.FormatOpenAICompatible, Host: modelconn.OllamaHost},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := ampOrgKeyReader{conns: connectionReader{conn: tc.conn, key: "sk-ant-api03-key"}}.AnthropicKeyValue(context.Background(), "acme")
-			if err != nil || got != tc.want {
-				t.Fatalf("key = %q, %v; want %q", got, err, tc.want)
-			}
-		})
-	}
-}
-
-// providerClient records the provider credential writes; nothing else is used.
+// providerClient records the provider writes; nothing else is used.
 type providerClient struct {
 	agentmanager.Client
 	exists  bool
 	updates []agentmanager.EnsureProviderInput
-	ensured int
+	ensured []agentmanager.EnsureProviderInput
 }
 
-func (c *providerClient) ProviderTemplate(context.Context, string, string) (agentmanager.ProviderTemplate, error) {
-	return agentmanager.ProviderTemplate{EndpointURL: "https://api.anthropic.com", AuthType: "api-key", AuthHeader: "x-api-key"}, nil
-}
-
-func (c *providerClient) EnsureProvider(context.Context, agentmanager.EnsureProviderInput) (agentmanager.ProviderRef, error) {
-	c.ensured++
+func (c *providerClient) EnsureProvider(_ context.Context, in agentmanager.EnsureProviderInput) (agentmanager.ProviderRef, error) {
+	c.ensured = append(c.ensured, in)
 	return agentmanager.ProviderRef{}, nil
 }
 
@@ -99,24 +54,56 @@ func (oneBinding) GetAIGatewayBinding(context.Context, string, string) (openchor
 	return openchoreo.AIGatewayBinding{AdminURL: "http://amp.example", GatewayID: "gw-1"}, nil
 }
 
+func ollamaConnection() modelconn.Connection {
+	return modelconn.Connection{
+		Format: modelconn.FormatOpenAICompatible, BaseURL: "https://ollama.com/v1",
+		Host: modelconn.OllamaHost, Model: "gpt-oss:20b", AuthScheme: modelconn.AuthBearer,
+	}
+}
+
+// A saved connection reaches the provider as the same input the deploy path
+// builds, re-asserted, on any format: one write carrying the template, the
+// upstream, the auth and the key.
+func TestAMPModelProviderPublisher_PublishesTheConnection(t *testing.T) {
+	client := &providerClient{exists: true}
+	pub := ampModelProviderPublisher{amp: providerClients{client}, bindings: oneBinding{}}
+
+	if err := pub.PublishOrgModelConnection(context.Background(), "acme", ollamaConnection(), "fake-ollama-key"); err != nil {
+		t.Fatalf("PublishOrgModelConnection: %v", err)
+	}
+	if len(client.ensured) != 1 {
+		t.Fatalf("provider writes = %d, want 1", len(client.ensured))
+	}
+	want, err := agentgovernance.ProviderInputFor("acme", ollamaConnection(), "fake-ollama-key", "gw-1")
+	if err != nil {
+		t.Fatalf("ProviderInputFor: %v", err)
+	}
+	want.ReassertCredential = true
+	if got := client.ensured[0]; got != want {
+		t.Fatalf("write = %+v, want %+v", got, want)
+	}
+}
+
 // Clearing overwrites the provider's copy of the key in place — never through
 // EnsureProvider, whose create branch would conjure a provider no deploy asked
-// for — with a value that authenticates nowhere.
+// for — with a value that authenticates nowhere, under the header of the
+// connection the copy belonged to.
 func TestAMPModelProviderPublisher_ClearOverwritesTheKey(t *testing.T) {
 	client := &providerClient{exists: true}
 	pub := ampModelProviderPublisher{amp: providerClients{client}, bindings: oneBinding{}}
 
-	if err := pub.ClearOrgModelKey(context.Background(), "acme"); err != nil {
+	if err := pub.ClearOrgModelKey(context.Background(), "acme", ollamaConnection()); err != nil {
 		t.Fatalf("ClearOrgModelKey: %v", err)
 	}
-	if client.ensured != 0 {
-		t.Fatalf("EnsureProvider called %d time(s); a clear must not create a provider", client.ensured)
+	if len(client.ensured) != 0 {
+		t.Fatalf("EnsureProvider called %d time(s); a clear must not create a provider", len(client.ensured))
 	}
 	if len(client.updates) != 1 {
 		t.Fatalf("credential writes = %d, want 1", len(client.updates))
 	}
 	in := client.updates[0]
-	if in.APIKey != clearedProviderCredential || in.ID != "aep-acme-anthropic" || in.GatewayID != "gw-1" {
+	if in.APIKey != "Bearer "+clearedProviderCredential || in.ID != "aep-acme-anthropic" || in.GatewayID != "gw-1" ||
+		in.Template != "openai" || in.AuthHeader != "Authorization" {
 		t.Fatalf("write = %+v, want the org's provider holding the cleared value", in)
 	}
 }

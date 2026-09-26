@@ -92,3 +92,16 @@ func modelKeyEnvVar(cred organization.CodingCredential) string {
 		return envModelAPIKey
 	}
 }
+
+// evalModelEnv is the connection the build's agent-evaluation key is for, as
+// plain values beside it: the harness boots the generated agent and runs its
+// judge on the same connection the deployed agent will use, on any format.
+// Composed only alongside the key (see evaluationKeyRef).
+func evalModelEnv(conn modelconn.Connection) map[string]string {
+	return map[string]string{
+		envEvalModelFormat:     string(conn.Format),
+		envEvalModelBaseURL:    conn.BaseURL,
+		envEvalModelName:       conn.Model,
+		envEvalModelAuthScheme: string(conn.AuthScheme),
+	}
+}

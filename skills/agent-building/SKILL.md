@@ -63,9 +63,10 @@ did not list.
 from the component's dependencies at deploy. `specs/` is committed to git.
 `MODEL_*` needs no dependency — an `ai-agent` gets model access from its
 component type, either on the organisation's own key or through the platform's
-AI gateway. Which one is not the agent's business: it reads the same three
-variables either way. See `references/building.md`, "Model access", for the one
-branch that differs.
+AI gateway. Which one is not the agent's business: it reads the same `MODEL_*`
+variables either way, whatever host or API format the organisation's connection
+names. See `references/building.md`, "Model access", for the switch on the
+format and the one header override that differs.
 
 ## Where each fact is enforced
 

@@ -54,7 +54,7 @@ const (
 
 // The two hosts named here are named because features are bound to them, not
 // to a format: Anthropic's own API (Claude Code subscriptions, the web-search
-// server tool, native PDFs, generated agents) and Ollama's (its web-search API).
+// server tool, native PDFs) and Ollama's (its web-search API).
 const (
 	AnthropicHost = "api.anthropic.com"
 	OllamaHost    = "ollama.com"
@@ -101,7 +101,9 @@ type Capabilities struct {
 	// authenticates only against Anthropic's own API.
 	ClaudeSubscription bool
 	PromptCache        bool
-	// GeneratedAgents: generated ai-agents may run on this connection.
+	// GeneratedAgents: generated ai-agents may run on this connection. True on
+	// every format: a generated agent reads the connection's format, URL and
+	// model from its env, and Agent Manager fronts either format.
 	GeneratedAgents bool
 	NativePDF       bool
 	WebSearch       WebSearch
@@ -117,7 +119,7 @@ func CapabilitiesOf(c Connection) Capabilities {
 		ClaudeCode:         anthropic,
 		ClaudeSubscription: firstParty,
 		PromptCache:        anthropic,
-		GeneratedAgents:    firstParty,
+		GeneratedAgents:    true,
 		NativePDF:          firstParty,
 		WebSearch:          WebSearchNone,
 		ImageInput:         c.ImageInput,

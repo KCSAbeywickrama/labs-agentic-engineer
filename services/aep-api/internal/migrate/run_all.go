@@ -248,6 +248,10 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// mirror after assembly and retires the old copies). Follows phase19,
 		// which left the key under the old name.
 		ctxStep("phase20_model_key_rename", RunPhase20ModelKeyRename),
+		// The endpoint each governed ai-agent's key was stored beside, so the
+		// govern stage can tell when a connection switch moved its base path.
+		// A new table with no backfill; depends on nothing above it.
+		ctxStep("phase21_ai_agent_model_endpoints", RunPhase21AIAgentModelEndpoints),
 	}
 }
 

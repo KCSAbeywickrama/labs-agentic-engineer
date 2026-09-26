@@ -161,3 +161,18 @@ a key and a model. Every agent uses it.**
 - **An operator allowlist of hosts.** It makes the platform vet providers and
   every new one an operator request. Public https hosts only, with the SSRF
   guard, is the rule; an allowlist can be revisited if a customer asks.
+
+## Amendment 2026-09-26 — generated ai-agents run on the connection
+
+The interim gate is lifted: `CapabilitiesOf` reports `GeneratedAgents` on every
+format, and the console card no longer names it.
+
+- **ai-agent components** take the connection's model and format
+  (`MODEL_NAME`, `MODEL_API_FORMAT`) on both paths. Direct, they also take its
+  base URL and auth scheme (`MODEL_ENDPOINT`, `MODEL_API_AUTH_SCHEME`, `x-api-key`
+  or `bearer`). Governed, they keep the per-agent proxy URL and
+  `MODEL_API_KEY_HEADER`, and Agent Manager's provider takes its template,
+  upstream and auth from the connection.
+- **Build evaluation** mounts the connection key as `AEP_EVAL_MODEL_API_KEY`,
+  with `AEP_EVAL_MODEL_FORMAT`, `AEP_EVAL_MODEL_BASE_URL`, `AEP_EVAL_MODEL_NAME`
+  and `AEP_EVAL_MODEL_AUTH_SCHEME` beside it: all five or none.

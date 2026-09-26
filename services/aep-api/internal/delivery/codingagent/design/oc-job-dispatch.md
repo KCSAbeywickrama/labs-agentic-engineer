@@ -272,18 +272,19 @@ A cycle mounts the model credential the organization's coding runs bill
 (ADR-0036) — under the one variable `modelEnv` names, never two. That is the
 credential the agent's own session authenticates with.
 
-It also mounts the org's **connection** key as `AEP_EVAL_ANTHROPIC_API_KEY`,
+It also mounts the org's **connection** key as `AEP_EVAL_MODEL_API_KEY`,
 for the agent-evaluation step a build runs before opening an ai-agent's PR. That
 step needs a model twice over — for the generated agent it boots and for the LLM
 judge that grades it — and both are API calls, so the credential has to be an API
 key. The connection key always is; the coding one may be a subscription token
 that authenticates neither.
 
-Only while the connection is one generated agents run on (Anthropic's own API,
-`modelconn.CapabilitiesOf`'s `GeneratedAgents`): the harness and its judge speak
-Anthropic's API, so on any other connection the variable is absent and the
-evaluation step reports that it could not run. The gate lifts with generated
-agents' own follow-up.
+The connection the key is for rides beside it as plain values, on every format:
+`AEP_EVAL_MODEL_FORMAT`, `AEP_EVAL_MODEL_BASE_URL`, `AEP_EVAL_MODEL_NAME` and
+`AEP_EVAL_MODEL_AUTH_SCHEME` (`evalModelEnv`). The harness boots the agent and
+runs its judge on the same connection the deployed agent will use. The five are
+set together or not at all: a URL with no key reaches a host the harness cannot
+authenticate against, and a key with no format would be read as Anthropic's.
 
 The separate variable is not decoration. `ANTHROPIC_API_KEY` belongs to Claude
 Code, which ranks it above `CLAUDE_CODE_OAUTH_TOKEN`, so mounting the evaluation
@@ -291,7 +292,7 @@ key there would move a subscription org's whole coding session onto it — the
 silent mis-bill ADR-0036 keeps out.
 
 A dispatch whose connection key cannot be resolved for evaluation goes out
-**without** the variable and the run proceeds: evaluation reports, it never fails a build, and a missing key must
+**without** those variables and the run proceeds: evaluation reports, it never fails a build, and a missing key must
 not cost an org a delivery. That is the one credential here whose absence is not
 a dispatch failure — `evaluationKeyRef` logs it rather than returning an error,
 because "the agent never became ready" is otherwise a puzzling thing to read in
@@ -302,7 +303,7 @@ a build report.
 Every dispatch sets `AEP_EVAL_KEY_MANAGED=1` — a plain env var, not a
 credential, and set whether or not an evaluation key was resolved. It is a
 **declaration of ownership**: on this pod the platform decides the evaluation
-credential, so if `AEP_EVAL_ANTHROPIC_API_KEY` is not here, this run has none.
+credential, so if `AEP_EVAL_MODEL_API_KEY` is not here, this run has none.
 
 Without it the harness cannot read a pod correctly. Outside one —
 a developer in the monorepo — `ANTHROPIC_API_KEY` simply is "the key", and the

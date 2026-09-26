@@ -41,6 +41,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/modelcost"
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 	"github.com/wso2/aep/aep-api/internal/platform/patch"
@@ -292,39 +293,64 @@ func TestModelConnectionResyncSecretRef_NoopCases_DB(t *testing.T) {
 
 type fakeModelProviderPublisher struct {
 	published string
+	conn      modelconn.Connection
 	calls     int
 	cleared   int
 	err       error
 }
 
-func (f *fakeModelProviderPublisher) PublishOrgModelKey(_ context.Context, _, apiKey string) error {
+func (f *fakeModelProviderPublisher) PublishOrgModelConnection(_ context.Context, _ string, conn modelconn.Connection, apiKey string) error {
 	f.calls++
-	f.published = apiKey
+	f.published, f.conn = apiKey, conn
 	return f.err
 }
 
-func (f *fakeModelProviderPublisher) ClearOrgModelKey(context.Context, string) error {
+func (f *fakeModelProviderPublisher) ClearOrgModelKey(context.Context, string, modelconn.Connection) error {
 	f.cleared++
 	return f.err
 }
 
-// A rotated key must reach the provider that holds a COPY of it. Without this,
-// every governed agent in the org keeps calling Anthropic with a revoked
-// credential, and the failure surfaces at the upstream rather than in Settings.
-func TestModelConnectionSave_PublishesTheKeyToTheModelProvider_DB(t *testing.T) {
+// A rotated key must reach the provider that holds a COPY of it, and so must a
+// switch to another host. Without this, every governed agent in the org keeps
+// calling the old upstream with the old credential, and the failure surfaces
+// there rather than in Settings.
+func TestModelConnectionSave_PublishesTheConnectionToTheModelProvider_DB(t *testing.T) {
 	t.Parallel()
 	c := newCardDB(t, http.StatusOK)
 	pub := &fakeModelProviderPublisher{}
 	c.svc.WithModelProvider(pub)
 
 	c.connect(t, "acme", anthropicDBKey2)
-	if pub.calls != 1 || pub.published != anthropicDBKey2 {
-		t.Fatalf("publisher calls = %d with %q, want 1 with the newly saved key", pub.calls, pub.published)
+	if pub.calls != 1 || pub.published != anthropicDBKey2 || pub.conn.Format != modelconn.FormatAnthropic {
+		t.Fatalf("publisher calls = %d with %q on %q, want 1 with the newly saved key", pub.calls, pub.published, pub.conn.Format)
 	}
-	// Moving to another host clears the provider's copy, once.
+	// Moving to another host publishes that host's connection, in one write.
 	c.patch(t, "acme", ollamaPatch())
-	if pub.calls != 1 || pub.cleared != 1 {
-		t.Fatalf("after the move: publishes=%d clears=%d, want 1 and 1", pub.calls, pub.cleared)
+	if pub.calls != 2 || pub.cleared != 0 {
+		t.Fatalf("after the move: publishes=%d clears=%d, want 2 and 0", pub.calls, pub.cleared)
+	}
+	if pub.published != "ollama-db-key-0123456789" || pub.conn.Format != modelconn.FormatOpenAICompatible ||
+		pub.conn.BaseURL != "https://ollama.com/v1" {
+		t.Fatalf("published %q on %+v, want the Ollama key and connection", pub.published, pub.conn)
+	}
+}
+
+// A save that moves the URL and keeps the key (allowed on the stored host)
+// still changes what the provider holds, so it publishes — with the stored
+// key, since the save carried none.
+func TestModelConnectionSave_AURLChangeKeepingTheKeyPublishesTheStoredKey_DB(t *testing.T) {
+	t.Parallel()
+	c := newCardDB(t, http.StatusOK)
+	pub := &fakeModelProviderPublisher{}
+	c.svc.WithModelProvider(pub)
+
+	c.patch(t, "acme", ollamaPatch())
+	c.patch(t, "acme", llmPatch(orgconfig.LLMPatch{Kind: "openai-compatible", BaseURL: "https://ollama.com/api/v1"}))
+	if pub.calls != 2 {
+		t.Fatalf("publishes = %d, want the URL change published", pub.calls)
+	}
+	if pub.published != "ollama-db-key-0123456789" || pub.conn.BaseURL != "https://ollama.com/api/v1" {
+		t.Fatalf("published %q on %q, want the stored key on the new URL", pub.published, pub.conn.BaseURL)
 	}
 }
 
@@ -336,10 +362,9 @@ func ollamaPatch() orgconfig.ConfigPatch {
 	}
 }
 
-// A disconnect leaves the org with no connection generated agents run on, so
-// the provider's copy of the Anthropic key is cleared on it, and only on it:
-// the Ollama connect that follows has no copy left to clear and publishes
-// nothing.
+// A disconnect leaves the org with no connection, so the provider's copy of the
+// key is cleared on it, and only on it: a second disconnect has nothing to
+// clear, and the Ollama connect that follows publishes.
 func TestModelConnectionDisconnect_ClearsTheModelProviderOnce_DB(t *testing.T) {
 	t.Parallel()
 	c := newCardDB(t, http.StatusOK)
@@ -353,15 +378,15 @@ func TestModelConnectionDisconnect_ClearsTheModelProviderOnce_DB(t *testing.T) {
 	}
 	c.patch(t, "acme", disconnectPatch())
 	c.patch(t, "acme", ollamaPatch())
-	if pub.calls != 1 || pub.cleared != 1 {
-		t.Fatalf("after a second disconnect and an Ollama connect: publishes=%d clears=%d, want 1 and 1 in total",
+	if pub.calls != 2 || pub.cleared != 1 {
+		t.Fatalf("after a second disconnect and an Ollama connect: publishes=%d clears=%d, want 2 and 1 in total",
 			pub.calls, pub.cleared)
 	}
 }
 
-// An org that was only ever on another host never had a key published, so
-// its disconnect makes no call.
-func TestModelConnectionDisconnect_FromAnotherHostMakesNoCall_DB(t *testing.T) {
+// Every format's key reaches the provider, so every format's disconnect clears
+// it.
+func TestModelConnectionDisconnect_FromAnotherHostClears_DB(t *testing.T) {
 	t.Parallel()
 	c := newCardDB(t, http.StatusOK)
 	pub := &fakeModelProviderPublisher{}
@@ -369,8 +394,8 @@ func TestModelConnectionDisconnect_FromAnotherHostMakesNoCall_DB(t *testing.T) {
 
 	c.patch(t, "acme", ollamaPatch())
 	c.patch(t, "acme", disconnectPatch())
-	if pub.calls != 0 || pub.cleared != 0 {
-		t.Fatalf("publishes=%d clears=%d, want no call", pub.calls, pub.cleared)
+	if pub.calls != 1 || pub.cleared != 1 {
+		t.Fatalf("publishes=%d clears=%d, want 1 and 1", pub.calls, pub.cleared)
 	}
 }
 

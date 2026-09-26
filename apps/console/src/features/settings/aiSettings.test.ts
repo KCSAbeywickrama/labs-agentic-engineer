@@ -66,7 +66,7 @@ const ollamaCaps: LLMCapabilities = {
   webSearch: "ollama-api",
   imageInput: "no",
   nativePdf: false,
-  generatedAgents: false,
+  generatedAgents: true,
 };
 
 const anthropic: LLMProjection = {
@@ -164,7 +164,7 @@ describe("switchFormat", () => {
 });
 
 describe("infoLines", () => {
-  it("draws Anthropic's API: priced, its search tool, images and PDFs, no gate", () => {
+  it("draws Anthropic's API: priced, its search tool, images and PDFs", () => {
     const lines = infoLines(anthropicCaps, true, "claude-sonnet-5", "api.anthropic.com").map((l) => l.text);
     expect(lines).toEqual([
       "Prompts and code from every agent go to api.anthropic.com.",
@@ -174,14 +174,13 @@ describe("infoLines", () => {
     ]);
   });
 
-  it("draws a text-only open model on Ollama: tokens, Ollama search, no images, the agents gate", () => {
+  it("draws a text-only open model on Ollama: tokens, Ollama search, no images", () => {
     const lines = infoLines(ollamaCaps, false, "glm-5.3", "ollama.com");
     expect(lines[0]).toEqual({ text: "Prompts and code from every agent go to ollama.com.", strong: "ollama.com" });
     expect(lines.map((l) => l.text).slice(1)).toEqual([
       "Usage shows tokens, not dollars: the platform has no rate for glm-5.3. Your provider bills you directly.",
       "Agents search the web through Ollama's search API, with this key.",
       "Chat does not accept images: glm-5.3 does not read them. PDFs are sent as extracted text.",
-      "Generated AI agents need Anthropic's API for now: on this connection they start unconfigured.",
     ]);
   });
 

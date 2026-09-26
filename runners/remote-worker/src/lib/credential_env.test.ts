@@ -124,7 +124,7 @@ test("CREDENTIAL_ENV_KEYS: names the credentials the dispatch mounts", () => {
     "CLAUDE_CODE_OAUTH_TOKEN",
     "AEP_MODEL_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
-    "AEP_EVAL_ANTHROPIC_API_KEY",
+    "AEP_EVAL_MODEL_API_KEY",
     "PUBLISHER_CLIENT_SECRET",
   ]);
   // PUBLISHER_CLIENT_ID is an identifier, not a secret — enrolling it would

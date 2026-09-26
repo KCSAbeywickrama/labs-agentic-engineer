@@ -52,38 +52,6 @@ func (f ampClientFactory) For(baseURL string) agentmanager.Client {
 	return agentmanager.New(c)
 }
 
-// ampOrgKeyReader yields the org's connected key VALUE — what Agent Manager's
-// provider holds on the org's behalf.
-//
-// Effective rather than the vault triplet: the provider needs the secret
-// itself, once, at create time. An org that has connected nothing answers "",
-// which the governor reads as "nothing to govern" rather than as a failure —
-// and so does an org whose connection generated agents cannot run on: the
-// provider is an Anthropic one, and another host's key is not one to hand it
-// (the interim gate; modelconn.CapabilitiesOf lifts it).
-type ampOrgKeyReader struct {
-	conns organization.ConnectionReader
-}
-
-func (r ampOrgKeyReader) AnthropicKeyValue(ctx context.Context, ocOrgID string) (string, error) {
-	if r.conns == nil {
-		return "", nil
-	}
-	conn, key, ok, err := r.conns.Effective(ctx, ocOrgID)
-	if err != nil {
-		return "", fmt.Errorf("read org anthropic key: %w", err)
-	}
-	if !ok {
-		return "", nil
-	}
-	if !modelconn.CapabilitiesOf(conn).GeneratedAgents {
-		slog.InfoContext(ctx, "governance: generated agents need Anthropic's API for now — nothing published to Agent Manager",
-			"org", ocOrgID, "host", conn.Host)
-		return "", nil
-	}
-	return key, nil
-}
-
 // ampKeyStore persists an agent's Agent-Manager-issued model key and reports
 // whether one is already stored.
 //
@@ -162,6 +130,21 @@ func (s ampKeyStore) orgIdentity(ctx context.Context, ocOrgID string) (context.C
 		&jwtassertion.TokenClaims{OuId: org.ThunderOrgUUID.String()}), nil
 }
 
+// ampEndpointStore records the endpoint each governed agent's key was stored
+// beside, in organization's ai_agent_model_endpoints — the durable half of
+// what the agent's write-only secret holds.
+type ampEndpointStore struct {
+	repo organization.AIAgentModelEndpointRepository
+}
+
+func (s ampEndpointStore) StoredAMPModelEndpoint(ctx context.Context, ocOrgID, component, environment string) (string, bool, error) {
+	return s.repo.Get(ctx, ocOrgID, component, environment)
+}
+
+func (s ampEndpointStore) RecordAMPModelEndpoint(ctx context.Context, ocOrgID, component, environment, endpoint string) error {
+	return s.repo.Put(ctx, ocOrgID, component, environment, endpoint)
+}
+
 // ampComponentKinds answers what kind each of a project's components is, read
 // from the design the project itself declares.
 //
@@ -191,8 +174,8 @@ func (k ampComponentKinds) ComponentKinds(ctx context.Context, orgID, projectID 
 	return kinds, nil
 }
 
-// ampModelProviderPublisher pushes the org's current Anthropic key onto its
-// Agent Manager provider when the key changes.
+// ampModelProviderPublisher writes the org's model connection onto its Agent
+// Manager provider when a save changes it, on any format.
 //
 // It resolves the environment's binding itself rather than taking an address:
 // an org with no governed environment has nothing to publish to, and that is a
@@ -202,7 +185,7 @@ type ampModelProviderPublisher struct {
 	bindings agentgovernance.BindingReader
 }
 
-func (p ampModelProviderPublisher) PublishOrgModelKey(ctx context.Context, ocOrgID, apiKey string) error {
+func (p ampModelProviderPublisher) PublishOrgModelConnection(ctx context.Context, ocOrgID string, conn modelconn.Connection, apiKey string) error {
 	if p.amp == nil || p.bindings == nil || strings.TrimSpace(apiKey) == "" {
 		return nil
 	}
@@ -214,34 +197,35 @@ func (p ampModelProviderPublisher) PublishOrgModelKey(ctx context.Context, ocOrg
 		return fmt.Errorf("resolve AI gateway binding: %w", err)
 	}
 
-	client := p.amp.For(binding.AdminURL)
-	tmpl, err := client.ProviderTemplate(ctx, ocOrgID, agentgovernance.AnthropicTemplate)
-	if err != nil {
-		return fmt.Errorf("read provider template: %w", err)
-	}
 	// THIS path always re-asserts, and it is the one place that must.
 	//
-	// The govern stage writes the credential only when its fingerprint changed
+	// The govern stage writes the provider only when its fingerprint changed
 	// (agentgovernance.Governor.credentialChanged), because a provider update
-	// redeploys every proxy bound to it. Rotation is exactly the case where it
-	// DID change, and it is reached from the organization domain, which holds
-	// no fingerprint of its own — so it says so explicitly rather than relying
-	// on a later deploy to notice.
-	providerIn := agentgovernance.ProviderInputFor(ocOrgID, tmpl, apiKey, binding.GatewayID)
-	providerIn.ReassertCredential = true
-	if _, err := client.EnsureProvider(ctx, providerIn); err != nil {
-		return fmt.Errorf("publish org key to the provider: %w", err)
+	// redeploys every proxy bound to it. A save that changed the key, URL,
+	// format or auth is exactly the case where it DID change, and it is
+	// reached from the organization domain, which holds no fingerprint of its
+	// own — so it says so explicitly rather than relying on a later deploy to
+	// notice. One PUT carries the template, upstream, auth and key together.
+	providerIn, err := agentgovernance.ProviderInputFor(ocOrgID, conn, apiKey, binding.GatewayID)
+	if err != nil {
+		return err
 	}
-	slog.InfoContext(ctx, "governance: org key published to the Agent Manager provider", "org", ocOrgID)
+	providerIn.ReassertCredential = true
+	if _, err := p.amp.For(binding.AdminURL).EnsureProvider(ctx, providerIn); err != nil {
+		return fmt.Errorf("publish org model connection to the provider: %w", err)
+	}
+	slog.InfoContext(ctx, "governance: org model connection published to the Agent Manager provider",
+		"org", ocOrgID, "template", providerIn.Template, "upstream", providerIn.UpstreamURL)
 	return nil
 }
 
 // ClearOrgModelKey replaces the provider's copy of the org's key with
-// clearedProviderCredential, on the save that leaves the org without a
-// connection generated agents run on (a move to another host or a disconnect).
-// It never creates a provider: an org no deploy ever governed has no copy to
-// clear.
-func (p ampModelProviderPublisher) ClearOrgModelKey(ctx context.Context, ocOrgID string) error {
+// clearedProviderCredential, on the save that disconnects the org's model
+// connection. last is the connection the copy belonged to: the PUT carries a
+// whole provider, so it keeps that connection's template, upstream and header
+// and changes only the value. It never creates a provider: an org no deploy
+// ever governed has no copy to clear.
+func (p ampModelProviderPublisher) ClearOrgModelKey(ctx context.Context, ocOrgID string, last modelconn.Connection) error {
 	if p.amp == nil || p.bindings == nil {
 		return nil
 	}
@@ -253,13 +237,11 @@ func (p ampModelProviderPublisher) ClearOrgModelKey(ctx context.Context, ocOrgID
 		return fmt.Errorf("resolve AI gateway binding: %w", err)
 	}
 
-	client := p.amp.For(binding.AdminURL)
-	tmpl, err := client.ProviderTemplate(ctx, ocOrgID, agentgovernance.AnthropicTemplate)
+	providerIn, err := agentgovernance.ProviderInputFor(ocOrgID, last, clearedProviderCredential, binding.GatewayID)
 	if err != nil {
-		return fmt.Errorf("read provider template: %w", err)
+		return err
 	}
-	found, err := client.UpdateProviderCredential(ctx,
-		agentgovernance.ProviderInputFor(ocOrgID, tmpl, clearedProviderCredential, binding.GatewayID))
+	found, err := p.amp.For(binding.AdminURL).UpdateProviderCredential(ctx, providerIn)
 	if err != nil {
 		return fmt.Errorf("clear the org key on the provider: %w", err)
 	}
@@ -269,11 +251,12 @@ func (p ampModelProviderPublisher) ClearOrgModelKey(ctx context.Context, ocOrgID
 	return nil
 }
 
-// clearedProviderCredential is what the provider holds once the org's key is
-// no longer one it may keep. The publisher client has no delete scope, and a
-// provider cannot exist without a credential, so the key is OVERWRITTEN with a
-// value that authenticates nowhere and says why to anyone reading the provider.
-const clearedProviderCredential = "cleared-by-aep:model-connection-not-on-api.anthropic.com"
+// clearedProviderCredential is what the provider holds once the org has
+// disconnected its model connection. The publisher client has no delete scope,
+// and a provider cannot exist without a credential, so the key is OVERWRITTEN
+// with a value that authenticates nowhere and says why to anyone reading the
+// provider.
+const clearedProviderCredential = "cleared-by-aep:model-connection-disconnected"
 
 // ampAgentRegistrar satisfies provisioning.AgentRegistrar: the BUILD-TIME half
 // of agent governance, reached from the version's `provision` gate.
@@ -319,8 +302,8 @@ func (r ampAgentRegistrar) GovernedAgents(ctx context.Context, orgID, projectID 
 // this gate exists to prevent: the run would settle failed anyway (the caller
 // collapses failures into one error), and carrying on would spend more calls on
 // an Agent Manager that has already answered once that it cannot serve this
-// build. A SKIP is different and is collected — an org with no connected
-// Anthropic key is a fact for the ticket to state, not a failure.
+// build. A SKIP is different and is collected — an org with no model
+// connection is a fact for the ticket to state, not a failure.
 func (r ampAgentRegistrar) RegisterAgentsForBuild(ctx context.Context, orgID, projectID string, components []string) (provisioning.AgentRegistrationOutcome, error) {
 	out := provisioning.AgentRegistrationOutcome{
 		Provider: agentgovernance.ProviderID(orgID),

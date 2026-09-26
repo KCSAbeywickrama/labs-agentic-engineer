@@ -343,7 +343,7 @@ function capabilitiesOf(kind: LLMProjection["kind"], host: string, model: string
         ? ollamaVisionModels.includes(model) ? "yes" : "no"
         : "unknown",
     nativePdf: anthropicApi,
-    generatedAgents: anthropicApi && kind === "anthropic",
+    generatedAgents: true,
   };
 }
 

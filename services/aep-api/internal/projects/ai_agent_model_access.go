@@ -15,13 +15,13 @@
 // under the License.
 
 // ai_agent_model_access.go — gives every ai-agent component the
-// organisation's own Anthropic key, with no per-component dependency
-// declared (ADR-0016: every agent runs on the org's key, same as the RCA
+// organisation's own model connection, with no per-component dependency
+// declared (ADR-0016: every agent runs on the org's connection, same as the RCA
 // agent — there is nothing per-agent to choose or provision).
 //
 // The mechanism (docs/glossary.md's `SecretReference` entry): a
 // SecretReference is authored ONCE, in the org's control-plane namespace,
-// pointing at the org's default-role Anthropic key's vault path; OpenChoreo
+// pointing at the org's model connection key's vault path; OpenChoreo
 // (via ESO) materializes the resulting K8s Secret directly in the
 // CONSUMING-plane namespace — the `dp-*` namespace an ai-agent component's
 // pod actually runs in. This package never learns that namespace's name;
@@ -44,9 +44,9 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 )
 
-// ModelAccessEnvVars returns the MODEL_ENDPOINT / MODEL_NAME / MODEL_API_KEY
-// an ai-agent component needs, after making sure the SecretReference the
-// MODEL_API_KEY entry names exists in the org's control-plane namespace.
+// ModelAccessEnvVars returns the MODEL_* env vars an ai-agent component needs
+// to reach the org's model connection, after making sure the SecretReference
+// the MODEL_API_KEY entry names exists in the org's control-plane namespace.
 //
 // It is called while COMPOSING a deployment, so the values ride the one
 // ReleaseBinding write the deploy stage already makes (DesiredDeploymentFor →
@@ -57,92 +57,92 @@ import (
 // a declared one — the platform has to put it there, and the only moment a
 // binding is guaranteed to exist is the write that creates it.
 //
-// An org with no connected Anthropic key yields (nil, nil): a brand-new org
-// before its first Settings visit is expected, not exceptional, and retrying
-// cannot conjure a key. The agent then starts unconfigured and agent-building's
-// contract is a 503 from /healthz until one is connected.
+// The connection is resolved first, on both paths: it names the model and the
+// API format a governed agent speaks through Agent Manager just as much as a
+// direct one speaks to the host itself.
 //
-// So does an org whose model connection generated agents cannot run on: the
-// agent-building skill generates an Anthropic client, and the values below name
-// Anthropic's API, so another host's key would fail far from Settings. That
-// gate is lifted by generated agents' own follow-up, in modelconn.CapabilitiesOf.
+// An org with no model connection yields (nil, nil): a brand-new org before its
+// first Settings visit is expected, not exceptional, and retrying cannot
+// conjure a connection. The agent then starts unconfigured and agent-building's
+// contract is a 503 from /healthz until one is connected. That holds for a
+// governed agent too: its provider holds no key once the org has none.
 func (s *componentService) ModelAccessEnvVars(ctx context.Context, ocOrgID, component string) ([]openchoreo.WorkflowEnvVarRef, error) {
-	// Resolved first because it gates both paths below: a governed agent's
-	// provider holds a copy of this same key.
-	var (
-		triplet organization.SecretRefTriplet
-		keyErr  error
-	)
-	if s.modelKeyResolver != nil {
-		var conn modelconn.Connection
-		conn, triplet, keyErr = s.modelKeyResolver.KeyRef(ctx, ocOrgID)
-		if keyErr == nil && !modelconn.CapabilitiesOf(conn).GeneratedAgents {
-			slog.InfoContext(ctx, "model access: generated ai-agents need Anthropic's API for now — ai-agent components start unconfigured (agent-building reports 503 from /healthz)",
-				"org", ocOrgID, "component", component, "host", conn.Host)
-			return nil, nil
-		}
-	}
-
-	// An Agent-Manager-governed agent takes the AI gateway's endpoint and a key
-	// of its OWN. The org's Anthropic key is not copied into its namespace at
-	// all: it lives once, in Agent Manager's provider, and what the pod holds is
-	// a credential scoped to this agent that can be revoked without touching any
-	// other. The govern stage put it there before this deploy composed.
-	if amp, ok := s.ampModelAccess(ctx, ocOrgID, component); ok {
-		governed := []openchoreo.WorkflowEnvVarRef{
-			// MODEL_ENDPOINT is a secretKeyRef rather than a literal, and not
-			// because the URL is secret. Agent Manager GENERATES a proxy path
-			// per agent, so the address cannot be derived here; it was written
-			// alongside the key by the govern stage, and reading both from one
-			// SecretReference keeps composition free of any Agent Manager call.
-			{
-				Key: modelEndpointEnvVar,
-				ValueFrom: &openchoreo.WorkflowEnvVarValueRef{
-					SecretKeyRef: &openchoreo.WorkflowSecretKeyRef{
-						Name: amp.SecretRefName,
-						Key:  organization.AMPModelURLKey,
-					},
-				},
-			},
-			{Key: modelNameEnvVar, Value: modelNameDefault},
-			{
-				Key: modelAPIKeyEnvVar,
-				ValueFrom: &openchoreo.WorkflowEnvVarValueRef{
-					SecretKeyRef: &openchoreo.WorkflowSecretKeyRef{
-						Name: amp.SecretRefName,
-						Key:  amp.Property,
-					},
-				},
-			},
-			// HACK, with an expiry date — see modelAPIKeyHeaderEnvVar. The
-			// governed path is the only one that sets it; the direct path below
-			// leaves it unset and the agent uses the SDK's own default.
-			{Key: modelAPIKeyHeaderEnvVar, Value: ampModelAPIKeyHeader},
-		}
-		return append(governed, s.ampTracingEnvVars(ctx, ocOrgID, component, amp.OTelEndpoint)...), nil
-	}
-
 	if s.modelKeyResolver == nil || s.secretRefClient == nil {
 		return nil, fmt.Errorf("model access not configured at the composition root")
 	}
-
-	if err := keyErr; err != nil {
+	conn, triplet, err := s.modelKeyResolver.KeyRef(ctx, ocOrgID)
+	if err != nil {
 		var notFound *organization.NotFoundError
 		if errors.As(err, &notFound) {
-			slog.InfoContext(ctx, "model access: org has no connected Anthropic key yet — ai-agent components start unconfigured (agent-building reports 503 from /healthz until one is connected)",
+			slog.InfoContext(ctx, "model access: org has no model connection yet — ai-agent components start unconfigured (agent-building reports 503 from /healthz until one is connected)",
 				"org", ocOrgID)
 			return nil, nil
 		}
-		return nil, fmt.Errorf("resolve org's default Anthropic key: %w", err)
+		return nil, fmt.Errorf("resolve org's model connection: %w", err)
+	}
+
+	if amp, ok := s.ampModelAccess(ctx, ocOrgID, component); ok {
+		return append(governedModelEnvVars(conn, amp), s.ampTracingEnvVars(ctx, ocOrgID, component, amp.OTelEndpoint)...), nil
 	}
 
 	if err := s.upsertModelAccessSecretReference(ctx, ocOrgID, triplet); err != nil {
 		return nil, fmt.Errorf("upsert model-access SecretReference: %w", err)
 	}
+	return directModelEnvVars(conn, triplet), nil
+}
 
+// governedModelEnvVars points an Agent-Manager-governed agent at the AI
+// gateway, with a key of its OWN. The org's connection key is not copied into
+// its namespace at all: it lives once, in Agent Manager's provider, and what
+// the pod holds is a credential scoped to this agent that can be revoked
+// without touching any other. The govern stage put it there before this deploy
+// composed.
+//
+// The model and the format are the connection's: the provider forwards to the
+// connection's host in the connection's format, so the agent's client must
+// speak it.
+func governedModelEnvVars(conn modelconn.Connection, amp ampModelAccessRef) []openchoreo.WorkflowEnvVarRef {
 	return []openchoreo.WorkflowEnvVarRef{
-		{Key: modelEndpointEnvVar, Value: modelEndpointDefault},
-		{Key: modelNameEnvVar, Value: modelNameDefault},
+		// MODEL_ENDPOINT is a secretKeyRef rather than a literal, and not
+		// because the URL is secret. Agent Manager GENERATES a proxy path
+		// per agent, so the address cannot be derived here; it was written
+		// alongside the key by the govern stage, and reading both from one
+		// SecretReference keeps composition free of any Agent Manager call.
+		{
+			Key: modelEndpointEnvVar,
+			ValueFrom: &openchoreo.WorkflowEnvVarValueRef{
+				SecretKeyRef: &openchoreo.WorkflowSecretKeyRef{
+					Name: amp.SecretRefName,
+					Key:  organization.AMPModelURLKey,
+				},
+			},
+		},
+		{Key: modelNameEnvVar, Value: conn.Model},
+		{Key: modelAPIFormatEnvVar, Value: string(conn.Format)},
+		{
+			Key: modelAPIKeyEnvVar,
+			ValueFrom: &openchoreo.WorkflowEnvVarValueRef{
+				SecretKeyRef: &openchoreo.WorkflowSecretKeyRef{
+					Name: amp.SecretRefName,
+					Key:  amp.Property,
+				},
+			},
+		},
+		// HACK, with an expiry date — see modelAPIKeyHeaderEnvVar. The
+		// governed path is the only one that sets it; the direct path leaves
+		// it unset and names the connection's auth scheme instead.
+		{Key: modelAPIKeyHeaderEnvVar, Value: ampModelAPIKeyHeader},
+	}
+}
+
+// directModelEnvVars points an ungoverned agent straight at the connection's
+// host, with the org's connection key through the org-scoped SecretReference.
+func directModelEnvVars(conn modelconn.Connection, triplet organization.SecretRefTriplet) []openchoreo.WorkflowEnvVarRef {
+	return []openchoreo.WorkflowEnvVarRef{
+		{Key: modelEndpointEnvVar, Value: conn.BaseURL},
+		{Key: modelNameEnvVar, Value: conn.Model},
+		{Key: modelAPIFormatEnvVar, Value: string(conn.Format)},
+		{Key: modelAPIAuthSchemeEnvVar, Value: string(conn.AuthScheme)},
 		{
 			Key: modelAPIKeyEnvVar,
 			ValueFrom: &openchoreo.WorkflowEnvVarValueRef{
@@ -152,7 +152,7 @@ func (s *componentService) ModelAccessEnvVars(ctx context.Context, ocOrgID, comp
 				},
 			},
 		},
-	}, nil
+	}
 }
 
 // ampTracingEnvVars gives a governed agent what it needs to export traces, or
@@ -206,7 +206,7 @@ func (s *componentService) ampTracingEnvVars(ctx context.Context, ocOrgID, compo
 
 // upsertModelAccessSecretReference points modelAccessSecretRefName — one per
 // org, shared by every ai-agent component in it — at the organisation's
-// default Anthropic key's vault coordinates. Mirrors
+// model connection key's vault coordinates. Mirrors
 // secretmanagersvc.upsertSecretReference's get-then-create/update-on-
 // conflict shape, but cannot reuse that method directly: its
 // CreateSecret/PatchSecret write a NEW value into a NEW KV path (it is a
@@ -253,7 +253,7 @@ func (s *componentService) upsertModelAccessSecretReference(ctx context.Context,
 		// SecretReference's remoteRef.property to the SAME string as its
 		// secretKey, so this must be the real vault property name. The env
 		// var's own name ("MODEL_API_KEY") is decoupled from this — it is
-		// set separately, in wireModelAccess's WorkflowSecretKeyRef.Key.
+		// set separately, in directModelEnvVars' WorkflowSecretKeyRef.Key.
 		SecretKeys:      []string{triplet.Property},
 		RefreshInterval: modelAccessSecretRefRefresh,
 	}
@@ -316,7 +316,7 @@ type ampModelAccessRef struct {
 // in the govern stage where a failure can still stop the deploy.
 //
 // Any doubt resolves to "not governed", which falls back to the org's own
-// Anthropic key. That is the safe direction: an agent on the direct key works
+// connection key. That is the safe direction: an agent on the direct key works
 // and is merely ungoverned, while an agent pointed at a gateway whose key was
 // never stored cannot reach a model at all.
 func (s *componentService) ampModelAccess(ctx context.Context, ocOrgID, component string) (ampModelAccessRef, bool) {

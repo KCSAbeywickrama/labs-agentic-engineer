@@ -347,9 +347,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// the Enabled() check.
 	credService.WithSecretRefWriter(secretRefWriter)
 	anthropicCredService.WithSecretRefWriter(secretRefWriter)
-	// A rotated org key must reach the Agent Manager provider that holds a copy
-	// of it, or every governed agent in the org keeps calling Anthropic with a
-	// revoked credential until the next deploy re-asserts it.
+	// A saved model connection must reach the Agent Manager provider that holds
+	// a copy of it, or every governed agent in the org keeps calling the old
+	// upstream with the old credential until the next deploy re-asserts it.
 	anthropicCredService.WithModelProvider(ampModelProviderPublisher{
 		amp: ampClientFactory{cfg: agentmanager.Config{
 			TokenURL:     cfg.AgentManager.TokenURL,
@@ -1427,8 +1427,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			refs:   modelAccessSecretRefClient,
 			orgs:   orgRepo,
 		},
-		Bindings: environmentClient,
-		OrgKeys:  ampOrgKeyReader{conns: modelConnections},
+		Endpoints: ampEndpointStore{repo: organization.NewAIAgentModelEndpointRepository(db)},
+		Bindings:  environmentClient,
+		// The org's model connection, read as organization.ConnectionReader.
+		Connections: modelConnections,
 		// Only ai-agent components are governed; a wave's services and web apps
 		// are left alone.
 		Kinds: agentComponentKinds,

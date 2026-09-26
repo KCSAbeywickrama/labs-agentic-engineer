@@ -46,13 +46,13 @@ describe("buildPromptfooConfig", () => {
   it("pins the grader so a score means the same thing between runs", () => {
     const c = buildPromptfooConfig(FILE, {
       providerPath: "./p.js",
-      graderModel: "anthropic:messages:claude-sonnet-5",
+      grader: "anthropic:messages:claude-sonnet-5",
     }) as PromptfooConfigShape;
     expect(c.defaultTest.options.provider).toBe("anthropic:messages:claude-sonnet-5");
   });
 
   it("carries each mustCover through with its weight", () => {
-    const c = buildPromptfooConfig(FILE, { providerPath: "./p.js", graderModel: "m" }) as PromptfooConfigShape;
+    const c = buildPromptfooConfig(FILE, { providerPath: "./p.js", grader: "m" }) as PromptfooConfigShape;
     const cover = c.tests[0]!.assert.find((a) => a.metric === "MC-1")!;
     expect(cover.type).toBe("llm-rubric");
     expect(cover.weight).toBe(2);
@@ -61,7 +61,7 @@ describe("buildPromptfooConfig", () => {
   // A mustNot is not a low score — it is a zero. Encoding it as a weighted
   // rubric line would let a good scenario average away a harm.
   it("makes a mustNot a hard failure, not a weighted line", () => {
-    const c = buildPromptfooConfig(FILE, { providerPath: "./p.js", graderModel: "m" }) as PromptfooConfigShape;
+    const c = buildPromptfooConfig(FILE, { providerPath: "./p.js", grader: "m" }) as PromptfooConfigShape;
     const not = c.tests[0]!.assert.find((a) => a.metric === "MN-1")!;
     expect(not.type).toBe("llm-rubric");
     expect(not.threshold).toBe(1);
@@ -73,7 +73,7 @@ describe("buildPromptfooConfig", () => {
   // out of that mean entirely — it still fails outright via `threshold: 1`,
   // which is read straight from componentResults, not from the mean.
   it("gives a mustNot zero weight so it cannot dilute the mustCover mean", () => {
-    const c = buildPromptfooConfig(FILE, { providerPath: "./p.js", graderModel: "m" }) as PromptfooConfigShape;
+    const c = buildPromptfooConfig(FILE, { providerPath: "./p.js", grader: "m" }) as PromptfooConfigShape;
     const not = c.tests[0]!.assert.find((a) => a.metric === "MN-1")!;
     expect(not.weight).toBe(0);
   });
@@ -81,8 +81,19 @@ describe("buildPromptfooConfig", () => {
   // An unpinned or missing grader makes a score meaningless between runs —
   // reject it at config build time rather than let it surface as a mystery
   // later.
+  // The judge on a connection is a provider OBJECT (id plus a non-secret
+  // config), because promptfoo's string ids cannot carry a base URL.
+  it("passes a provider object through as the grader", () => {
+    const judge = { id: "openai:chat:gpt-oss:20b", config: { apiBaseUrl: "https://ollama.com/v1" } };
+    const c = buildPromptfooConfig(FILE, { providerPath: "./p.js", grader: judge }) as unknown as {
+      defaultTest: { options: { provider: unknown } };
+    };
+    expect(c.defaultTest.options.provider).toEqual(judge);
+  });
+
   it("rejects a blank grader model", () => {
-    expect(() => buildPromptfooConfig(FILE, { providerPath: "./p.js", graderModel: "" })).toThrow();
-    expect(() => buildPromptfooConfig(FILE, { providerPath: "./p.js", graderModel: "   " })).toThrow();
+    expect(() => buildPromptfooConfig(FILE, { providerPath: "./p.js", grader: "" })).toThrow();
+    expect(() => buildPromptfooConfig(FILE, { providerPath: "./p.js", grader: "   " })).toThrow();
+    expect(() => buildPromptfooConfig(FILE, { providerPath: "./p.js", grader: { id: " ", config: {} } })).toThrow();
   });
 });

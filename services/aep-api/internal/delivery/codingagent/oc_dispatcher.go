@@ -86,9 +86,10 @@ const (
 	envAnthropicAPIKey = "ANTHROPIC_API_KEY"
 	envGitHubToken     = "GITHUB_TOKEN"
 
-	// envEvalAnthropicAPIKey carries the org's DEFAULT Anthropic key for the
+	// envEvalModelAPIKey carries the org's model connection key for the
 	// build's agent-evaluation step, which needs a model twice over: for the
-	// generated agent it boots and for the judge that grades it.
+	// generated agent it boots and for the judge that grades it. The
+	// connection it is for rides beside it as plain values (evalModelEnv).
 	//
 	// It has its OWN name rather than reusing ANTHROPIC_API_KEY because that
 	// variable already belongs to Claude Code, which ranks it above
@@ -97,10 +98,19 @@ const (
 	// credential that org deliberately moved away from — the exact mis-bill
 	// ADR-0016 exists to prevent. A distinct name keeps the two budgets apart,
 	// and the harness reads it in preference to ANTHROPIC_API_KEY.
-	envEvalAnthropicAPIKey = "AEP_EVAL_ANTHROPIC_API_KEY"
+	envEvalModelAPIKey = "AEP_EVAL_MODEL_API_KEY"
+
+	// The connection the evaluation key is for, as the harness reads it. Plain
+	// values, set together with envEvalModelAPIKey or not at all: a format or
+	// URL with no key would send the harness to a host it cannot authenticate
+	// against, and a key with no format would be read as Anthropic's.
+	envEvalModelFormat     = "AEP_EVAL_MODEL_FORMAT"
+	envEvalModelBaseURL    = "AEP_EVAL_MODEL_BASE_URL"
+	envEvalModelName       = "AEP_EVAL_MODEL_NAME"
+	envEvalModelAuthScheme = "AEP_EVAL_MODEL_AUTH_SCHEME"
 
 	// envEvalKeyManaged declares that the PLATFORM owns this pod's evaluation
-	// credential: if envEvalAnthropicAPIKey is not set here, this run has no
+	// credential: if envEvalModelAPIKey is not set here, this run has no
 	// evaluation key at all.
 	//
 	// It exists because the pod's ANTHROPIC_API_KEY, when present, is the CODING

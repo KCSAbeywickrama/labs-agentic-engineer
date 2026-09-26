@@ -165,6 +165,32 @@ describe("AgentEvalProvider", () => {
     await expect(p.callApi("", { vars: { scenario: SCENARIO } })).resolves.toBeDefined();
   }, 30_000);
 
+  // The agent is evaluated on the code path it runs deployed, so it gets the
+  // whole model connection a deployed ai-agent is given — and nothing the
+  // judge reads its credential from.
+  it("forwards the model connection to the agent, and only that", async () => {
+    const echo = mkdtempSync(join(tmpdir(), "agent-eval-model-env-"));
+    writeFakeAgent(echo, undefined, "echo-model-env");
+    const connection = {
+      MODEL_API_KEY: "ollama-key-value",
+      MODEL_ENDPOINT: "https://ollama.com/v1",
+      MODEL_NAME: "gpt-oss:20b",
+      MODEL_API_FORMAT: "openai-compatible",
+      MODEL_API_AUTH_SCHEME: "bearer",
+    };
+    const judgeOnly = { OPENAI_API_KEY: "ollama-key-value", ANTHROPIC_CUSTOM_HEADERS: "Authorization: Bearer x" };
+    const saved = { ...process.env };
+    Object.assign(process.env, connection, judgeOnly);
+    try {
+      const result = await provider({ appDir: echo, maxTurns: 1 }).callApi("", { vars: { scenario: SCENARIO } });
+      const reply = result.output.split("Agent: ")[1]!.split("\n")[0]!;
+      expect(JSON.parse(reply)).toEqual(connection);
+    } finally {
+      process.env = saved;
+      rmSync(echo, { recursive: true, force: true });
+    }
+  }, 20_000);
+
   it("refuses to run with neither an appDir nor an injected ask", async () => {
     await expect(provider({}).callApi("", { vars: { scenario: SCENARIO } })).rejects.toThrow(
       /appDir/,

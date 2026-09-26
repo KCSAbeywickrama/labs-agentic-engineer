@@ -58,7 +58,9 @@ services, the raw connect-callback controller, and the S2S credentials-refresh.*
   and the old copies go only on a periodic pass (never at boot) once the org has no open cycle),
   `org_anthropic_credentials` (the optional `coding` Claude subscription only — CHECK
   `org_anthropic_credentials_subscription_only`), `org_agent_settings` (the runtime; one row per org,
-  absent = the platform default), `organization_idp_profiles` + `idp_audit_events` — gorm + entities in
+  absent = the platform default), `ai_agent_model_endpoints` (the endpoint the Agent Manager govern stage
+  last stored beside each governed ai-agent's key, per environment; non-secret, read by
+  `delivery/agentgovernance` to tell a moved base path), `organization_idp_profiles` + `idp_audit_events` — gorm + entities in
   this domain (`entity_*.go` over `repository_*.go`), single write-authority.
 
 ## Invariants — don't break
@@ -107,11 +109,10 @@ services, the raw connect-callback controller, and the S2S credentials-refresh.*
     the single statement of which: the subscription only on `claude-code`, else the connection key,
     failing closed on an unusable subscription. It answers with a kind and the connection, never a
     variable name; dispatch (`codingagent/model_env.go`) maps that to the runner's env.
-  - Generated agents run only where `modelconn.CapabilitiesOf` says `GeneratedAgents` (Anthropic's
-    own API) until their follow-up. On any other connection the Agent Manager provider gets no key,
-    and its copy of the previous one is cleared once, after commit, on the save that leaves such a
-    connection, by a move to another host or a disconnect (`syncModelProvider`); ai-agent components
-    start unconfigured and builds run without evaluation.
+  - Generated agents run on the connection, on every format (`modelconn.CapabilitiesOf` says
+    `GeneratedAgents` for all). The Agent Manager provider's copy follows it (`syncModelProvider`):
+    republished after commit on a save that changes the key, URL, format or auth scheme, and
+    cleared once on a disconnect.
 - **The model connection is read only through `ModelConnectionService`** (`model_connection_service.go`):
   a `modelconn.Connection` (format, base URL, host, model, auth scheme, limits, image input) beside the
   key's bytes (`Effective`), its vault reference (`KeyRef`) or the coding credential

@@ -119,7 +119,7 @@ func TestConfigLLM_AHostChange(t *testing.T) {
 	llm := llmOf(t, resp.Body.Bytes())
 	caps := llm["capabilities"].(map[string]any)
 	if llm["kind"] != "openai-compatible" || llm["priced"] != false || caps["webSearch"] != "ollama-api" ||
-		caps["claudeSubscription"] != false || caps["generatedAgents"] != false || caps["imageInput"] != "no" {
+		caps["claudeSubscription"] != false || caps["generatedAgents"] != true || caps["imageInput"] != "no" {
 		t.Fatalf("llm on Ollama = %v", llm)
 	}
 	for _, req := range c.model.seen() {

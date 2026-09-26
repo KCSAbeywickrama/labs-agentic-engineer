@@ -289,9 +289,8 @@ export interface InfoLine {
 
 /**
  * The info box under the connection: where prompts go, whether usage has a
- * dollar figure, how agents search, what chat attachments do, and whether
- * generated AI agents can run. Read from the server's capabilities, never
- * from the host name.
+ * dollar figure, how agents search, and what chat attachments do. Read from
+ * the server's capabilities, never from the host name.
  */
 export function infoLines(
   capabilities: LLMCapabilities,
@@ -300,7 +299,7 @@ export function infoLines(
   host: string,
 ): InfoLine[] {
   const where = host || "the endpoint you enter";
-  const lines: InfoLine[] = [
+  return [
     { text: `Prompts and code from every agent go to ${where}.`, strong: where },
     {
       text: priced
@@ -310,12 +309,6 @@ export function infoLines(
     { text: searchLine(capabilities.webSearch, where) },
     { text: attachLine(capabilities, model) },
   ];
-  if (!capabilities.generatedAgents) {
-    lines.push({
-      text: "Generated AI agents need Anthropic's API for now: on this connection they start unconfigured.",
-    });
-  }
-  return lines;
 }
 
 /**

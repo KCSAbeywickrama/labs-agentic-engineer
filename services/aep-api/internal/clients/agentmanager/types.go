@@ -62,10 +62,10 @@ type Config struct {
 // projection always won. Re-adding it buys a round-trip per deploy and a second
 // writer on a record Agent Manager owns.
 type Client interface {
-	ProviderTemplate(ctx context.Context, org, template string) (ProviderTemplate, error)
 	EnsureProvider(ctx context.Context, in EnsureProviderInput) (ProviderRef, error)
-	// UpdateProviderCredential writes in.APIKey onto an EXISTING provider and
-	// never creates one; found is false when the org has none.
+	// UpdateProviderCredential writes in's template, upstream, auth and key
+	// onto an EXISTING provider and never creates one; found is false when the
+	// org has none.
 	UpdateProviderCredential(ctx context.Context, in EnsureProviderInput) (found bool, err error)
 	EnsureAgent(ctx context.Context, in EnsureAgentInput) (AgentRef, error)
 	EnsureModelConfig(ctx context.Context, in EnsureModelConfigInput) (ModelConfigRef, error)
@@ -81,24 +81,26 @@ type Client interface {
 
 // EnsureProviderInput is one org's LLM provider, as AEP declares it.
 //
-// UpstreamURL, AuthType and AuthHeader come from AMP's provider TEMPLATE rather
-// than from constants here: `anthropic` answers with
-// {type: "api-key", header: "x-api-key"} and https://api.anthropic.com, and a
-// different template answers differently. A hardcoded header reaches the
-// upstream as a 401 that reads like a bad key.
+// Template, UpstreamURL, AuthHeader and APIKey come from the org's model
+// connection, not from AMP's template metadata: a template's endpoint and auth
+// are defaults for its own vendor, and both `anthropic` and `openai` take any
+// upstream. APIKey is the VALUE the upstream receives under AuthHeader, sent
+// verbatim — AMP's API does not apply a template's valuePrefix, so a Bearer
+// upstream is sent `Bearer <key>` whole.
 type EnsureProviderInput struct {
 	Org         string
 	ID          string // slug; also the provider handle a model config names
 	Name        string
 	Version     string // AMP validates v<major>.<minor>
 	Context     string // the gateway path segment, e.g. /aep-default-anthropic
-	Template    string
-	UpstreamURL string
+	Template    string // `anthropic` or `openai`
+	UpstreamURL string // origin only; the gateway appends the request path as is
 	AuthType    string
 	AuthHeader  string
-	APIKey      string // the ORG's Anthropic key, held by AMP and never by an agent
+	APIKey      string // the ORG's key, held by AMP and never by an agent
 	GatewayID   string
-	// ReassertCredential re-PUTs APIKey onto a provider that already exists.
+	// ReassertCredential re-PUTs the connection — template, upstream, auth and
+	// APIKey — onto a provider that already exists.
 	//
 	// IT IS NOT FREE, which is why the caller decides. Updating a provider
 	// redeploys every LLM proxy bound to it — measured at twelve proxy
@@ -120,14 +122,6 @@ type ProviderRef struct {
 	UUID    string
 	Handle  string
 	Context string
-}
-
-// ProviderTemplate is the half of a provider that AMP already knows.
-type ProviderTemplate struct {
-	ID          string
-	EndpointURL string
-	AuthType    string
-	AuthHeader  string
 }
 
 // EnsureAgentInput registers one externally-hosted agent.

@@ -549,10 +549,10 @@ into the runner pod at `/app/skills` for live skill edits (see
   installs promptfoo with `--omit=optional` (its optional provider SDKs are not
   the harness's; ~0.3 GB instead of ~2.5 GB — `packages/agent-eval/design/running-in-a-build-pod.md`)
   and sits before the runner's sources so a source edit does not re-run it.
-- **`AEP_EVAL_ANTHROPIC_API_KEY` is a THIRD credential on the pod** — the org's
-  connection key, for the evaluation step's agent and judge, mounted only while
-  the connection is Anthropic's own API (the harness speaks only that; off it
-  the build runs without evaluation until generated agents' follow-up). It is not
+- **`AEP_EVAL_MODEL_API_KEY` is a THIRD credential on the pod** — the org's
+  connection key, on any format, for the evaluation step's agent and judge. The
+  connection rides beside it as plain `AEP_EVAL_MODEL_FORMAT` / `_BASE_URL` /
+  `_NAME` / `_AUTH_SCHEME`, all five set together or none. It is not
   `ANTHROPIC_API_KEY` because that name belongs to Claude Code, which ranks it
   above `CLAUDE_CODE_OAUTH_TOKEN` (docs/decisions ADR-0016). It is enrolled
   with the other mounted credentials in `credential_env.ts`: the agent invokes the

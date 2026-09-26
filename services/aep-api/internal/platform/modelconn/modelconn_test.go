@@ -36,26 +36,26 @@ func TestCapabilitiesOf(t *testing.T) {
 			name: "anthropic@ollama.com",
 			conn: Connection{Format: FormatAnthropic, Host: OllamaHost, ImageInput: No},
 			want: Capabilities{
-				ClaudeCode: true, PromptCache: true,
+				ClaudeCode: true, PromptCache: true, GeneratedAgents: true,
 				WebSearch: WebSearchOllamaAPI, ImageInput: No,
 			},
 		},
 		{
 			name: "openai-compatible@ollama.com",
 			conn: Connection{Format: FormatOpenAICompatible, Host: OllamaHost, ImageInput: Yes},
-			want: Capabilities{WebSearch: WebSearchOllamaAPI, ImageInput: Yes},
+			want: Capabilities{GeneratedAgents: true, WebSearch: WebSearchOllamaAPI, ImageInput: Yes},
 		},
 		{
 			name: "openai-compatible@openrouter.ai",
 			conn: Connection{Format: FormatOpenAICompatible, Host: "openrouter.ai", ImageInput: Unknown},
-			want: Capabilities{WebSearch: WebSearchNone, ImageInput: Unknown},
+			want: Capabilities{GeneratedAgents: true, WebSearch: WebSearchNone, ImageInput: Unknown},
 		},
 		{
 			// The format, not the host, decides the first-party features: an
 			// OpenAI-compatible call to Anthropic's host is not Anthropic's API.
 			name: "openai-compatible@api.anthropic.com",
 			conn: Connection{Format: FormatOpenAICompatible, Host: AnthropicHost, ImageInput: Unknown},
-			want: Capabilities{WebSearch: WebSearchNone, ImageInput: Unknown},
+			want: Capabilities{GeneratedAgents: true, WebSearch: WebSearchNone, ImageInput: Unknown},
 		},
 	}
 	for _, tc := range cases {

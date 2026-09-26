@@ -20,8 +20,8 @@
 // optional `coding` token (`claude setup-token`) the coding agent bills instead
 // of the connection's key, only while it runs on Claude Code against
 // Anthropic's own API. It cannot exist without the connection. It also keeps
-// the Agent Manager provider's copy of the connection's key in line with a
-// save (syncModelProvider).
+// the Agent Manager provider's copy of the connection in line with a save
+// (syncModelProvider).
 //
 // Surface — all in-process; this service has no HTTP routes of its own:
 //
@@ -30,7 +30,7 @@
 //   - writeKeyTx / deleteKeyTx — the subscription half of that unit of work,
 //     inside its transaction; mirrorKey / forgetKey — the SM-API copy, after
 //     it commits; syncModelProvider — the Agent Manager provider's copy of the
-//     connection's key, after it commits.
+//     connection, after it commits.
 //   - Status — the masked projection; Holds — whether the row exists.
 //
 // The connection itself — its row, key and probe — is ModelConnectionService's
@@ -69,25 +69,29 @@ type AnthropicCredentialService struct {
 	// secretRefWriter mirrors a saved credential into SM-API. nil-safe.
 	secretRefWriter *SecretRefWriter
 
-	// modelProvider is told when the org's key changes, so an Agent Manager
-	// provider holding a COPY of it stops holding a revoked one. nil-safe.
+	// modelProvider is told when the org's connection changes, so an Agent
+	// Manager provider holding a COPY of it stops calling a revoked key or a
+	// host the org moved off. nil-safe.
 	modelProvider ModelProviderPublisher
 }
 
 // ModelProviderPublisher keeps a governed model provider's copy of the org's
-// key truthful: the current key while generated agents can run on the org's
-// connection, no usable key once they cannot.
+// connection truthful: the current connection and key while the org has one,
+// no usable key once it disconnects.
 //
 // Declared here, implemented at the composition root: this domain must not
-// reach into Agent Manager, and the only things it has to say are "the key
-// changed" and "the key is no longer one to hold". An org with no governed
-// environment has no implementation wired and nothing happens.
+// reach into Agent Manager, and the only things it has to say are "the
+// connection changed" and "there is no connection to hold". An org with no
+// governed environment has no implementation wired and nothing happens.
 type ModelProviderPublisher interface {
-	PublishOrgModelKey(ctx context.Context, ocOrgID, apiKey string) error
+	// PublishOrgModelConnection writes conn and its key onto the provider —
+	// the format, URL and auth as well as the key, in one write.
+	PublishOrgModelConnection(ctx context.Context, ocOrgID string, conn modelconn.Connection, apiKey string) error
 	// ClearOrgModelKey replaces the provider's copy of the org's key with no
-	// usable credential, so a key the org moved off is not left live in a
-	// second system. A no-op for an org with no provider.
-	ClearOrgModelKey(ctx context.Context, ocOrgID string) error
+	// usable credential, so a disconnected key is not left live in a second
+	// system. last is the connection the copy belonged to. A no-op for an org
+	// with no provider.
+	ClearOrgModelKey(ctx context.Context, ocOrgID string, last modelconn.Connection) error
 }
 
 // WithModelProvider injects the publisher; chainable, nil disables the push.
@@ -260,24 +264,23 @@ func (s *AnthropicCredentialService) forgetKey(ctx context.Context, ocOrgID stri
 }
 
 // syncModelProvider brings the org's Agent Manager provider, which holds a
-// COPY of the connection's key on behalf of every governed agent, in line with
-// a committed save: before and after are the org's connection on either side
-// of it (nil where it had none), writtenKey the key the save stored, if any.
+// COPY of the connection and its key on behalf of every governed agent, in
+// line with a committed save: before and after are the org's connection on
+// either side of it (nil where it had none), writtenKey the key the save
+// stored, if any.
 //
 // WHY THIS MATTERS MORE THAN IT LOOKS: without it, a rotated key leaves the
-// provider calling Anthropic with a revoked one, and EVERY governed agent in
-// the org fails at once — at the upstream, far from Settings, with nothing in
-// AEP saying why. And a key the org no longer runs generated agents on is not
-// one the provider may keep: they run only on Anthropic's own API until their
-// follow-up (modelconn.CapabilitiesOf), so whenever a save leaves the org
-// without such a connection (a move to another host, or a disconnect) the old
-// key is cleared once rather than left live in a second system.
+// provider calling the upstream with a revoked one, and a switch to another
+// host leaves it calling the old one — and EVERY governed agent in the org
+// fails at once, at the upstream, far from Settings, with nothing in AEP
+// saying why. And a disconnected key is not one the provider may keep, so a
+// disconnect clears it once rather than leaving it live in a second system.
 //
-// Best-effort, and deliberately so: the key IS stored, and failing the user's
-// Settings action because a downstream copy lagged would be the worse outcome.
-// The next governed deploy re-asserts a publishable key anyway (EnsureProvider
-// writes the current key every time), so this is how fast it converges, not
-// whether it does.
+// Best-effort, and deliberately so: the connection IS stored, and failing the
+// user's Settings action because a downstream copy lagged would be the worse
+// outcome. The next governed deploy re-asserts a changed connection anyway
+// (the governor fingerprints the provider it writes), so this is how fast it
+// converges, not whether it does.
 //
 // Only the connection's key is ever published: that is the key agents run on.
 // The subscription token belongs to the coding agent, which does not go
@@ -286,23 +289,45 @@ func (s *AnthropicCredentialService) syncModelProvider(ctx context.Context, ocOr
 	if s.modelProvider == nil {
 		return
 	}
-	switch modelProviderStepFor(before, after, strings.TrimSpace(writtenKey) != "") {
+	writtenKey = strings.TrimSpace(writtenKey)
+	switch modelProviderStepFor(before, after, writtenKey != "") {
 	case modelProviderPublish:
-		if err := s.modelProvider.PublishOrgModelKey(ctx, ocOrgID, strings.TrimSpace(writtenKey)); err != nil {
-			slog.WarnContext(ctx, "anthropic: could not publish the rotated key to the Agent Manager provider; governed agents keep the previous key until the next deploy",
-				"ocOrgId", ocOrgID, "error", err)
+		key, err := s.publishableKey(ctx, ocOrgID, writtenKey)
+		if err == nil {
+			err = s.modelProvider.PublishOrgModelConnection(ctx, ocOrgID, *after, key)
+		}
+		if err != nil {
+			slog.WarnContext(ctx, "model connection: could not publish the saved connection to the Agent Manager provider; governed agents keep the previous one until the next deploy",
+				"ocOrgId", ocOrgID, "host", after.Host, "error", err)
 		}
 	case modelProviderClear:
-		if err := s.modelProvider.ClearOrgModelKey(ctx, ocOrgID); err != nil {
-			slog.WarnContext(ctx, "model connection: could not clear the Agent Manager provider's copy of the previous key; it stays live there until cleared by hand",
+		if err := s.modelProvider.ClearOrgModelKey(ctx, ocOrgID, *before); err != nil {
+			slog.WarnContext(ctx, "model connection: could not clear the Agent Manager provider's copy of the disconnected key; it stays live there until cleared by hand",
 				"ocOrgId", ocOrgID, "previousHost", before.Host, "error", err)
 		}
 	case modelProviderLeave:
 	}
 }
 
+// publishableKey is the key a publish sends: the one the save wrote, or — on a
+// save that changed the URL, format or auth and kept the key (allowed on the
+// stored host) — the stored one, read after the commit.
+func (s *AnthropicCredentialService) publishableKey(ctx context.Context, ocOrgID, writtenKey string) (string, error) {
+	if writtenKey != "" {
+		return writtenKey, nil
+	}
+	key, err := s.store.Get(ctx, ocOrgID, modelKeyStoreKey)
+	if err != nil {
+		return "", fmt.Errorf("read the stored connection key: %w", err)
+	}
+	if len(key) == 0 {
+		return "", errors.New("the stored connection key is empty")
+	}
+	return string(key), nil
+}
+
 // modelProviderStep is what a save does to the Agent Manager provider's copy
-// of the org's key.
+// of the org's connection.
 type modelProviderStep int
 
 const (
@@ -314,34 +339,33 @@ const (
 // modelProviderStepFor decides it from the connection before and after a save.
 // Pure, so the rule is a table test.
 //
-// The rule is that the provider's copy matches what the connection allows: a
-// usable key while generated agents can run on it, none otherwise. The stored
-// connection before the save is what says whether a copy may be live: both
-// writers of the provider (this sync, and a governed deploy through the
-// governance key reader) hand it a key only while the stored connection is one
-// generated agents run on. So:
+// The rule is that the provider's copy matches the org's connection, on any
+// format:
 //
-//   - Publish a written key while generated agents can run on the connection.
-//   - Clear when a save leaves the org without such a connection while the
-//     stored one was: a move to another host or a disconnect. Once, because
-//     the next save starts from a connection that never had a copy published.
-//   - Otherwise leave it: an org that was never on such a connection has no
-//     copy to clear.
+//   - Publish when the save changed anything the provider carries: the key, or
+//     the URL, format or auth scheme (a first connect changes all of them).
+//   - Clear on a disconnect: once, because the next save starts from no
+//     connection.
+//   - Otherwise leave it: a model change, or a save that changed nothing the
+//     provider holds, would redeploy every proxy bound to it for nothing.
 func modelProviderStepFor(before, after *modelconn.Connection, keyWritten bool) modelProviderStep {
-	generated := func(c *modelconn.Connection) bool {
-		return c != nil && modelconn.CapabilitiesOf(*c).GeneratedAgents
-	}
 	switch {
-	case generated(after):
-		if keyWritten {
-			return modelProviderPublish
-		}
-		return modelProviderLeave
-	case generated(before):
+	case after == nil && before != nil:
 		return modelProviderClear
+	case after == nil:
+		return modelProviderLeave
+	case before == nil || keyWritten || providerFieldsChanged(*before, *after):
+		return modelProviderPublish
 	default:
 		return modelProviderLeave
 	}
+}
+
+// providerFieldsChanged reports whether a save moved anything the provider is
+// built from besides the key: the URL (host and path), the format or the auth
+// scheme.
+func providerFieldsChanged(before, after modelconn.Connection) bool {
+	return before.BaseURL != after.BaseURL || before.Format != after.Format || before.AuthScheme != after.AuthScheme
 }
 
 // ----------------------------------------------------------------------------

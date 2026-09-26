@@ -124,12 +124,12 @@ conversation that does not exist under this user answers **404** — the same
 404 whether the id is foreign or simply wrong, so an id leaks nothing.
 
 **Message shapes never cross the wire.** `message` arrives as a plain string;
-`ModelMessage[]` lives only between your store and `generateText`. There is
+`ModelMessage[]` lives only between your store and the model call. There is
 nothing for a caller to normalise and nothing for it to mis-render.
 
 **Then validate, and answer 400.** A `message` that is missing, not a string,
-or empty is a bad REQUEST, not a server error — letting it through to
-`generateText` throws, which becomes a 500 and reads as the agent being
+or empty is a bad REQUEST, not a server error — letting it through to the
+model call throws, which becomes a 500 and reads as the agent being
 broken:
 
 ```ts
@@ -150,8 +150,8 @@ in config like every other injected value. Dependency: `pg`.
 **The database configuration is optional, and its absence is not a fault.**
 Never list a `MEMORY_DB_*` variable in `/healthz`'s `missing`: an agent run
 without one is correctly configured for the in-memory backing below, and
-reporting it missing answers 503 forever. `MODEL_API_KEY` is what `missing`
-is for.
+reporting it missing answers 503 forever. The required `MODEL_*` variables
+(see "Model access") are what `missing` is for.
 
 Map them exactly as below. The database name is the one to get right: the
 resource's output is `dbname`, so the variable is `MEMORY_DB_DBNAME` — not
@@ -314,11 +314,11 @@ The handler flow, exactly:
 //    conversationId present → loadConversation(id, userId); null → 404 { error: "conversation not found" }
 //    absent → id = crypto.randomUUID(), history = [] (no row yet — the first save creates it)
 // 4. const full = [...history, { role: "user", content: message }]
-// 5. const result = await runTurn(full)   // generateText, unchanged
-// 6. await saveConversation(id, userId, [...full, ...result.steps.flatMap(s => s.response.messages)])
+// 5. const turn = await runTurn(full)     // see "Model access", "The model call"
+// 6. await saveConversation(id, userId, [...full, ...turn.steps.flatMap(s => s.response.messages)])
 //    — this INSERT..ON CONFLICT is the only place a row is created, so a turn
 //    that throws in step 5 leaves nothing in the store to orphan
-// 7. sendJson(res, 200, { conversationId: id, text: result.text, toolCalls: result.toolCalls })
+// 7. sendJson(res, 200, { conversationId: id, text: turn.text, toolCalls: turn.toolCalls })
 ```
 
 **Wrap the whole of that in `try`/`catch`, and never let a rejection escape.**
@@ -421,43 +421,144 @@ to fix, not this component's, so do not invent a local answer:
 
 ## Model access
 
-Three variables carry it, and all three are injected by the platform —
-`MODEL_ENDPOINT` (the base URL), `MODEL_NAME`, `MODEL_API_KEY`. Read them in
-config like everything else, and build the provider client from them:
+The platform injects the org's model connection as environment variables,
+governed or not — which one is not the agent's business:
+
+| Variable | What it is |
+|---|---|
+| `MODEL_ENDPOINT` | the base URL, ending in its version segment (`…/v1`) |
+| `MODEL_NAME` | the model id, as the host names it |
+| `MODEL_API_KEY` | the credential |
+| `MODEL_API_FORMAT` | `anthropic` or `openai-compatible` — which API the host speaks |
+| `MODEL_API_AUTH_SCHEME` | `x-api-key` or `bearer`; unset means the SDK's default |
+| `MODEL_API_KEY_HEADER` | normally unset — see below |
+
+Read them in config like everything else. **The first four are required:**
+`/healthz` lists each one that is unset in `missing`. None has a fallback —
+not even a model name: a default id is right for one host and a 404 on every
+other, so an agent missing `MODEL_NAME` is misconfigured and says so, rather
+than asking some host for a model it may not serve.
+
+The connection's format decides the SDK at runtime, so both provider packages
+are always installed (see "Layout") and the client is built by one switch:
 
 ```ts
+// agent.ts
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import type { LanguageModel } from "ai";
 
-const model = createAnthropic({
-  baseURL: process.env.MODEL_ENDPOINT,
-  apiKey:  process.env.MODEL_API_KEY,
-})(process.env.MODEL_NAME ?? "claude-sonnet-5");
+// Filled from config once /healthz's required variables are all set.
+export interface ModelSettings {
+  format: string;      // MODEL_API_FORMAT
+  baseURL: string;     // MODEL_ENDPOINT
+  apiKey: string;      // MODEL_API_KEY
+  modelName: string;   // MODEL_NAME
+  keyHeader?: string;  // MODEL_API_KEY_HEADER — normally unset
+  authScheme?: string; // MODEL_API_AUTH_SCHEME
+}
+
+export function modelClient(
+  { format, baseURL, apiKey, modelName, keyHeader, authScheme }: ModelSettings,
+): LanguageModel {
+  switch (format) {
+    case "anthropic":
+      return createAnthropic({
+        baseURL,
+        ...(keyHeader
+          ? { apiKey: "unused", headers: { [keyHeader]: apiKey } } // SDK will not start without an apiKey
+          : authScheme === "bearer"
+            ? { authToken: apiKey }                                // Authorization: Bearer
+            : { apiKey }),                                         // x-api-key
+      })(modelName);
+    case "openai-compatible":
+      return createOpenAICompatible({
+        name: "model",
+        baseURL,
+        includeUsage: true, // a streamed turn reports usage only when asked
+        // No apiKey under the override: this SDK sends Authorization only when
+        // given one, so the key goes out once, under the named header.
+        ...(keyHeader ? { headers: { [keyHeader]: apiKey } } : { apiKey }),
+      })(modelName);
+    default:
+      throw new Error(`unsupported MODEL_API_FORMAT: ${format}`);
+  }
+}
 ```
+
+**`openai-compatible` is `@ai-sdk/openai-compatible`, never `@ai-sdk/openai`.**
+The OpenAI package defaults to OpenAI's Responses API, which not every host
+serves; the compatible package speaks Chat Completions, the API an
+OpenAI-compatible host is compatible with. Keep
+`includeUsage: true`: without it a streamed reply carries no token counts, and
+the trace and the platform's cost view read zero.
 
 **`MODEL_ENDPOINT` is a base the SDK appends to, and it already ends in the
 API version segment** (`…/v1`). Never append a path of your own; the SDK asks
-for `<base>/messages` itself.
+for `<base>/messages` or `<base>/chat/completions` itself.
+
+### The model call — `streamText`, consumed to completion
+
+A turn is ONE function, and it streams. The reply is still one JSON body;
+streaming is how the turn reaches the model, not how it reaches the caller:
+
+```ts
+// agent.ts
+import { streamText, stepCountIs, type ModelMessage } from "ai";
+// SYSTEM_PROMPT and MAX_ITERATIONS from prompt.ts, tools from tools.ts,
+// modelSettings() — the ModelSettings above — from config.ts.
+
+export async function runTurn(messages: ModelMessage[]) {
+  let failure: unknown;
+  const result = streamText({
+    model: modelClient(modelSettings()),
+    system: SYSTEM_PROMPT,
+    messages,
+    tools,
+    stopWhen: stepCountIs(MAX_ITERATIONS),
+    // A provider error arrives HERE, not as the rejection below.
+    onError: ({ error }) => { failure ??= error; },
+  });
+  // Awaiting these drives the stream, every tool step included, to its end.
+  const [text, steps, toolCalls, usage] = await Promise.all([
+    result.text, result.steps, result.toolCalls, result.totalUsage,
+  ]).catch((err: unknown) => { throw failure ?? err; });
+  if (failure !== undefined) throw failure;
+  return { text, steps, toolCalls, usage };
+}
+```
+
+**`streamText`, never `generateText`.** The two produce the same turn, but
+they validate different response shapes, and only the streamed one holds on
+every host: an Anthropic-format host other than Anthropic's own (Ollama's
+`/v1/messages`, measured) answers a reasoning model with thinking blocks the
+non-streaming parser rejects, so `generateText` fails every turn there with a
+200 in hand. One code path is what lets the org switch its connection without a
+rebuild.
+
+**Keep the `onError` capture and both rethrows.** `streamText` reports a
+provider failure to `onError`; its promises reject with a generic "no output"
+error instead, and once a step has finished they resolve with the steps so far.
+Without the capture, a refused step 2 of a tool loop becomes a half-finished
+turn saved as if it succeeded, and the handler's guardrail check never sees the
+upstream body it reads. With it, every failure is the original error, thrown.
+
+`usage` is the whole turn's, every step summed — the figure tracing records.
 
 ### `MODEL_API_KEY_HEADER` — a temporary override
 
 When the platform sets `MODEL_API_KEY_HEADER`, send the key under THAT header
-name instead of the SDK's own:
-
-```ts
-const keyHeader = process.env.MODEL_API_KEY_HEADER;   // normally unset
-const model = createAnthropic(
-  keyHeader
-    ? { baseURL, apiKey: "unused", headers: { [keyHeader]: apiKey } }
-    : { baseURL, apiKey },                            // the SDK's own default
-)(modelName);
-```
+name and no other — the branch above, on either format.
 
 This is a HACK with an expiry date. An agent whose model traffic is governed
 reaches the model through Agent Manager's per-agent proxy, and that proxy
-authenticates on `API-Key` — a name it does not yet let anyone configure. The
-Anthropic SDK hardcodes `x-api-key` and offers no way to rename it, so a
-governed agent's request arrives unauthenticated. Naming the header in the
-environment is what bridges the two.
+authenticates on `API-Key` — a name it does not yet let anyone configure. Each
+SDK has its own fixed header (`x-api-key` for Anthropic's, `Authorization:
+Bearer` for the OpenAI-compatible one) and no way to rename it, so a governed
+agent's request would arrive unauthenticated. Naming the header in the
+environment is what bridges the two. The Anthropic SDK refuses to start without
+an `apiKey`, so it is given a placeholder the proxy ignores; the
+OpenAI-compatible SDK is given none, so no stray `Authorization` goes out.
 
 **Write the branch, not the workaround alone.** Agent Manager's team has
 confirmed the proxy's header will become configurable; when it does the
@@ -529,23 +630,25 @@ if (endpoint && apiKey) {
 }
 ```
 
-Wrap every model call:
+Wrap every turn:
 
 ```ts
 import { tracer } from "./tracing.js";
 
-const model = process.env.MODEL_NAME ?? "claude-sonnet-5";
+const model = config.modelName; // MODEL_NAME
+// The OpenTelemetry name of the API the client speaks, not of the host.
+const system = config.modelApiFormat === "openai-compatible" ? "openai" : "anthropic";
 
-const result = await tracer.startActiveSpan(`chat ${model}`, async (span) => {
+const turn = await tracer.startActiveSpan(`chat ${model}`, async (span) => {
   try {
-    const r = await generateText({ model: modelClient, prompt });
+    const t = await runTurn(full); // see "Model access", "The model call"
     span.setAttributes({
-      "gen_ai.system": "anthropic",
+      "gen_ai.system": system,
       "gen_ai.request.model": model,
-      "gen_ai.usage.input_tokens": r.usage?.inputTokens ?? 0,
-      "gen_ai.usage.output_tokens": r.usage?.outputTokens ?? 0,
+      "gen_ai.usage.input_tokens": t.usage.inputTokens ?? 0,
+      "gen_ai.usage.output_tokens": t.usage.outputTokens ?? 0,
     });
-    return r;
+    return t;
   } catch (err) {
     span.recordException(err as Error);
     span.setStatus({ code: 2 }); // ERROR
@@ -562,15 +665,15 @@ nothing about it looks broken — the pod is healthy, the turns succeed, and the
 trace store is simply empty. If you add the config entries, add the provider and
 the spans in the same change.
 
-**Instrument the model call by hand.** OpenLLMetry (`@traceloop/node-server-sdk`)
+**Instrument the turn by hand.** OpenLLMetry (`@traceloop/node-server-sdk`)
 does not auto-instrument the Vercel AI SDK: installing it produces a tracer that
-emits nothing for `generateText`, which reads as a broken collector rather than
-as a missing instrumentation. Wrap each model call in a span yourself, following
+emits nothing for `streamText`, which reads as a broken collector rather than
+as a missing instrumentation. Wrap each turn in a span yourself, following
 the OpenTelemetry `gen_ai.*` semantic conventions:
 
 | attribute | value |
 |---|---|
-| `gen_ai.system` | `anthropic` |
+| `gen_ai.system` | from `MODEL_API_FORMAT`: `anthropic`, or `openai` for `openai-compatible` (the semantic conventions name the client's API, not the host behind it) |
 | `gen_ai.request.model` | `MODEL_NAME` |
 | `gen_ai.usage.input_tokens` | from the SDK result's `usage` |
 | `gen_ai.usage.output_tokens` | from the SDK result's `usage` |
@@ -643,7 +746,7 @@ credential on the request, never from the transcript.
 just the reply, and load it back next request. An agent given only its own
 prose has lost everything its tools told it, and will re-look-up or invent
 identifiers it already had. The save in step 6 of the handler flow above is
-where this lives — `steps.flatMap`, NOT `result.response.messages`, which is
+where this lives — `steps.flatMap`, NOT the result's `response.messages`, which is
 the LAST step only and silently drops every tool call and result.
 
 **Return tool errors to the model; do not throw.** A `409 cutoff has passed` is
@@ -657,7 +760,7 @@ is the deliberate exception, and only where there is no database to reach:
 never reach for process memory as a cache, a fallback, or a place to keep
 anything the store does not already hold.
 
-**Bound the loop** with `stopWhen: stepCountIs(max_iterations)`. An unbounded
+**Bound the loop** with `stopWhen: stepCountIs(max_iterations)`, as `runTurn` does. An unbounded
 agent spends money until something else stops it.
 
 **Start even when unconfigured.** The component contract requires a component to
@@ -694,6 +797,7 @@ this list:**
 "dependencies": {
   "ai": "^7.0.2",
   "@ai-sdk/anthropic": "^4.0.0",
+  "@ai-sdk/openai-compatible": "^3.0.55",
   "zod": "^4.3.6",
   "pg": "^8.13.0",
   "@opentelemetry/api": "^1.9.0",
@@ -717,12 +821,12 @@ versions are not compatible, and a run that resolves its own version lands one
 behind and writes code against the wrong API. `pg` is pinned for the same
 reason. These majors are what the platform runs (`services/agents`).
 
-**The model provider comes from the document's `model.provider`.** Map it to its
-package: `anthropic` → `@ai-sdk/anthropic` (`createAnthropic`), `openai` →
-`@ai-sdk/openai` (`createOpenAI`). **When the document does not name one, use
-Anthropic** — the platform default. Never infer a provider from `model.url` or
-`model.name`; a wrong guess builds against a different SDK entirely and only
-fails when a real key is supplied.
+Both provider packages are required, not a choice: **the model provider is
+chosen at runtime from `MODEL_API_FORMAT`**, never at build time — not from the
+document's `model.provider`, and never inferred from `model.url` or
+`model.name`. The org can switch its connection without a rebuild, and an agent
+compiled against one SDK would stop answering the day it did. See "Model
+access".
 
 ```dockerfile
 FROM node:22-slim AS builder
@@ -762,12 +866,12 @@ const { authorization } = callContext.getStore() ?? {};
 > scenario file is still authored at design time, so nothing else changes and
 > turning this back on is a one-word change to this line.
 >
-> Why it is off: the harness boots the agent with only `MODEL_API_KEY`
-> forwarded, so an agent whose model access also needs `MODEL_ENDPOINT` and
-> `MODEL_NAME` — which is every agent once its model access is governed through
-> the AI gateway — fails at boot and scores 0/6 for a reason that has nothing to
-> do with its behaviour. Re-enable once the harness forwards the whole
-> `MODEL_*` set.
+> Why it was switched off: the harness booted the agent with only
+> `MODEL_API_KEY` forwarded, so an agent that also needs `MODEL_ENDPOINT` and
+> `MODEL_NAME` failed at boot and scored 0/6 for a reason that had nothing to
+> do with its behaviour. The harness now forwards the whole `MODEL_*`
+> connection, so that reason is gone; turning evaluation on is the
+> deployment's decision.
 
 Once `npm run build` exits 0, and before the PR, run the agent's scenarios
 against the agent you just built. `specs/validation/agent-scenarios.json` was
@@ -822,15 +926,17 @@ miss. A simulated user drives the conversation and WITHHOLDS the facts the
 scenario says to withhold — that is what makes "asks for what it needs"
 observable rather than asserted.
 
-The organisation's Anthropic key is the credential, for the agent under test
-and for the judge alike. The harness finds it itself, under either of the two
-names it can arrive as: `AEP_EVAL_ANTHROPIC_API_KEY` in a build pod, where the
-platform mounts the org's default key, and `ANTHROPIC_API_KEY` outside one.
-Never `CLAUDE_CODE_OAUTH_TOKEN`, which is the platform's own coding budget and
-authenticates none of the API calls the judge makes. **Pass no key on the
-command line and set none yourself** — a key you export is a key that ends up
-in a build log. In particular, if the harness reports no key, do NOT copy the
-`ANTHROPIC_API_KEY` you can see into it: in a pod that one is the
+The organisation's model connection is the credential, for the agent under
+test and for the judge alike: the harness boots the agent with the same
+`MODEL_*` variables a deployment gives it, and grades on the same connection.
+The harness finds it itself. In a build pod the platform mounts it as
+`AEP_EVAL_MODEL_API_KEY` beside the connection's format, URL, model and auth
+scheme; outside one the harness falls back to `ANTHROPIC_API_KEY`, on
+Anthropic's API. Never `CLAUDE_CODE_OAUTH_TOKEN`, which is the platform's own
+coding budget and authenticates none of the API calls the judge makes. **Pass
+no key on the command line and set none yourself** — a key you export is a key
+that ends up in a build log. In particular, if the harness reports no key, do
+NOT copy the `ANTHROPIC_API_KEY` you can see into it: in a pod that one is the
 organisation's CODING credential, which it may bill separately on purpose, and
 the platform withheld it from evaluation deliberately. No evaluation is the
 correct outcome there, and it is report content like any other.

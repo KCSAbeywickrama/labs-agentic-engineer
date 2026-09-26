@@ -192,7 +192,7 @@ export const llmOllamaFixture: LLMProjection = {
     webSearch: "ollama-api",
     imageInput: "no",
     nativePdf: false,
-    generatedAgents: false,
+    generatedAgents: true,
   },
 };
 

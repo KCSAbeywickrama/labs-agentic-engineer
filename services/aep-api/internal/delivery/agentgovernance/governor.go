@@ -40,6 +40,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/agentmanager"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
@@ -49,11 +50,12 @@ type BindingReader interface {
 	GetAIGatewayBinding(ctx context.Context, orgID, environment string) (openchoreo.AIGatewayBinding, error)
 }
 
-// OrgKeyReader yields the org's connected Anthropic key VALUE — the credential
-// Agent Manager's provider holds on the org's behalf. Empty means the org has
-// connected none.
-type OrgKeyReader interface {
-	AnthropicKeyValue(ctx context.Context, ocOrgID string) (string, error)
+// ConnectionReader yields the org's model connection and its key VALUE — the
+// credential Agent Manager's provider holds on the org's behalf, so plaintext
+// rather than a vault reference. ok is false when the org has connected none.
+// Satisfied by organization.ConnectionReader.
+type ConnectionReader interface {
+	Effective(ctx context.Context, ocOrgID string) (conn modelconn.Connection, key string, ok bool, err error)
 }
 
 // KeyStore persists an agent's AMP key and reports whether one is already
@@ -78,6 +80,23 @@ type KeyStore interface {
 	WriteAMPTracingToken(ctx context.Context, ocOrgID, component, environment, token string) error
 }
 
+// EndpointStore durably records the endpoint stored beside each agent's key.
+// Satisfied at the composition root by organization's
+// ai_agent_model_endpoints repository.
+//
+// It exists because the endpoint in the agent's secret cannot be read back —
+// the secret store is write-only — and a connection switch that moves the base
+// path (Anthropic's `/v1` to a host's `/compatible-mode/v1`) has to reach an
+// agent whose key both sides already hold. DURABLE, not remembered in process:
+// aep-api runs more than one replica, and a deploy may land on one that never
+// saw the agent's key stored.
+type EndpointStore interface {
+	// StoredAMPModelEndpoint is the endpoint last recorded for the agent; ok is
+	// false when none is.
+	StoredAMPModelEndpoint(ctx context.Context, ocOrgID, component, environment string) (endpoint string, ok bool, err error)
+	RecordAMPModelEndpoint(ctx context.Context, ocOrgID, component, environment, endpoint string) error
+}
+
 // ComponentKinds answers what kind each of a project's components is, so only
 // agents are registered as agents.
 //
@@ -98,10 +117,14 @@ type ClientFactory interface {
 
 // Deps are the governor's collaborators.
 type Deps struct {
-	AMP      ClientFactory
-	Keys     KeyStore
-	Bindings BindingReader
-	OrgKeys  OrgKeyReader
+	AMP  ClientFactory
+	Keys KeyStore
+	// Endpoints records the endpoint each stored key was written beside.
+	Endpoints EndpointStore
+	Bindings  BindingReader
+	// Connections is the org's model connection: what the provider is built
+	// from, and the base path an agent's endpoint ends in.
+	Connections ConnectionReader
 	// Kinds gates which components are governed. Nil governs every target,
 	// which is right only for a caller that has already filtered.
 	Kinds ComponentKinds
@@ -111,10 +134,11 @@ type Deps struct {
 type Governor struct {
 	deps Deps
 
-	// mu guards pushedKey.
+	// mu guards pushedKey and tracingExpiry.
 	mu sync.Mutex
-	// pushedKey remembers, per org, a FINGERPRINT of the Anthropic key this
-	// process last wrote to Agent Manager's provider.
+	// pushedKey remembers, per org, a FINGERPRINT of the provider this process
+	// last wrote to Agent Manager: the key, the upstream, the template and the
+	// auth header — everything a connection switch changes.
 	//
 	// It exists to stop a needless write. Updating a provider redeploys every
 	// LLM proxy bound to it — twelve redeploys per governed deploy in a
@@ -129,8 +153,9 @@ type Governor struct {
 	// after a restart re-asserts once and the map is warm again — so the
 	// self-healing property that motivated the original unconditional write
 	// survives, at the cost of one write per process rather than one per
-	// deploy. A rotation still pushes immediately through the organization
-	// domain's own path, and changes the fingerprint here on the next deploy.
+	// deploy. A saved connection still pushes immediately through the
+	// organization domain's own path, and changes the fingerprint here on the
+	// next deploy.
 	pushedKey map[string]string
 
 	// tracingExpiry remembers, per (org, component, environment), when the
@@ -156,10 +181,17 @@ func New(d Deps) *Governor {
 	return &Governor{deps: d, pushedKey: map[string]string{}, tracingExpiry: map[string]int64{}}
 }
 
-// credentialChanged reports whether this org's key differs from the one this
-// process last wrote, and records the new one.
-func (g *Governor) credentialChanged(org, key string) bool {
-	sum := sha256.Sum256([]byte(key))
+// credentialChanged reports whether the provider this org's connection
+// describes differs from the one this process last wrote, and records it.
+//
+// The key alone is not enough: a connection switch that kept the key (the
+// same Ollama key on another format) or changed only the host would leave the
+// provider calling the old upstream, with the old template, under the old
+// header. The fields are NUL-separated so no two different providers can
+// concatenate to the same bytes.
+func (g *Governor) credentialChanged(org string, in agentmanager.EnsureProviderInput) bool {
+	sum := sha256.Sum256([]byte(strings.Join(
+		[]string{in.APIKey, in.UpstreamURL, in.Template, in.AuthHeader}, "\x00")))
 	fp := hex.EncodeToString(sum[:])
 
 	g.mu.Lock()
@@ -221,7 +253,7 @@ type registration struct {
 	// the key path can never drift from the one the binding was made under.
 	agentName string
 	// endpoint is the base an agent's SDK is pointed at — the in-cluster
-	// gateway, this agent's own proxy path, and the API version segment.
+	// gateway, this agent's own proxy path, and the connection's base path.
 	endpoint string
 }
 
@@ -256,29 +288,28 @@ func (g *Governor) register(ctx context.Context, in delivery.GovernAgentInput) (
 		return registration{}, delivery.GovernAgentOutcome{}, fmt.Errorf("resolve AI gateway binding: %w", err)
 	}
 
-	orgKey, err := g.deps.OrgKeys.AnthropicKeyValue(ctx, in.OrgID)
+	conn, orgKey, ok, err := g.deps.Connections.Effective(ctx, in.OrgID)
 	if err != nil {
-		return registration{}, delivery.GovernAgentOutcome{}, fmt.Errorf("read org Anthropic key: %w", err)
+		return registration{}, delivery.GovernAgentOutcome{}, fmt.Errorf("read org model connection: %w", err)
 	}
-	if orgKey == "" {
-		// No key connected: there is no provider to build. The agent comes up
+	if !ok || orgKey == "" {
+		// No connection: there is no provider to build. The agent comes up
 		// unconfigured and reports 503 from /healthz, exactly as it does today.
 		// Not a governance bypass — an agent with no model access reaches no
 		// model at all.
 		return registration{}, delivery.GovernAgentOutcome{
 			Skipped: true,
-			Reason:  "org has no connected Anthropic key",
+			Reason:  "org has no model connection",
 		}, nil
 	}
 
-	amp := g.deps.AMP.For(binding.AdminURL)
-
-	tmpl, err := amp.ProviderTemplate(ctx, in.OrgID, AnthropicTemplate)
+	providerIn, err := ProviderInputFor(in.OrgID, conn, orgKey, binding.GatewayID)
 	if err != nil {
-		return registration{}, delivery.GovernAgentOutcome{}, fmt.Errorf("read provider template: %w", err)
+		return registration{}, delivery.GovernAgentOutcome{}, err
 	}
-	providerIn := ProviderInputFor(in.OrgID, tmpl, orgKey, binding.GatewayID)
-	providerIn.ReassertCredential = g.credentialChanged(in.OrgID, orgKey)
+	providerIn.ReassertCredential = g.credentialChanged(in.OrgID, providerIn)
+
+	amp := g.deps.AMP.For(binding.AdminURL)
 	provider, err := amp.EnsureProvider(ctx, providerIn)
 	if err != nil {
 		return registration{}, delivery.GovernAgentOutcome{}, fmt.Errorf("ensure LLM provider: %w", err)
@@ -328,7 +359,7 @@ func (g *Governor) register(ctx context.Context, in delivery.GovernAgentInput) (
 	if strings.TrimSpace(podEndpoint) == "" {
 		podEndpoint = binding.Endpoint
 	}
-	endpoint, err := proxyEndpoint(cfg.ProxyURL, podEndpoint)
+	endpoint, err := proxyEndpoint(cfg.ProxyURL, podEndpoint, conn.BaseURL)
 	if err != nil {
 		return registration{}, delivery.GovernAgentOutcome{}, err
 	}
@@ -387,11 +418,31 @@ func (g *Governor) reconcileKey(ctx context.Context, reg registration, in delive
 		return fmt.Errorf("read stored model key: %w", err)
 	}
 
+	moved := false
+	if stored != "" && ours {
+		if moved, err = g.endpointMoved(ctx, in, reg.endpoint); err != nil {
+			return err
+		}
+	}
+
 	switch {
-	case stored != "" && ours:
+	case stored != "" && ours && !moved:
 		// Both sides hold it. Regenerating here would invalidate the credential
 		// a RUNNING agent is using, on every redeploy.
 		return nil
+
+	case stored != "" && ours:
+		// Both sides hold it, but the secret carries another endpoint than the
+		// one composed now — a connection switch moved the base path — or one
+		// never recorded. The URL cannot be rewritten without the key beside
+		// it, and the key cannot be read, so the key is rotated and both are
+		// stored together. As safe as the branch below, and for the same
+		// reason: a deploy is in flight to carry the new value.
+		issued, err := reg.amp.RotateModelKey(ctx, ref, keyName)
+		if err != nil {
+			return fmt.Errorf("rotate model key for a moved endpoint: %w", err)
+		}
+		return g.store(ctx, in, issued, reg.endpoint)
 
 	case stored == "" && ours:
 		// Agent Manager holds this agent's key but AEP cannot read its value.
@@ -467,6 +518,22 @@ func tracingKey(in delivery.GovernAgentInput) string {
 	return in.OrgID + "/" + in.Component + "/" + in.Environment
 }
 
+// endpointMoved reports whether the agent's key was stored beside an endpoint
+// other than the one composed now.
+//
+// NO RECORD IS "MOVED". A stored key with no recorded endpoint was stored
+// before endpoints were recorded, beside a URL nothing can read, so the only
+// way back to a known state is the rotate branch — once, because storing
+// records the endpoint. That is one rotation per governed agent, on its first
+// deploy after the record existed.
+func (g *Governor) endpointMoved(ctx context.Context, in delivery.GovernAgentInput, endpoint string) (bool, error) {
+	prev, ok, err := g.deps.Endpoints.StoredAMPModelEndpoint(ctx, in.OrgID, in.Component, in.Environment)
+	if err != nil {
+		return false, fmt.Errorf("read stored model endpoint: %w", err)
+	}
+	return !ok || prev != endpoint, nil
+}
+
 // proxyEndpoint turns the proxy address Agent Manager generated into the base
 // URL an agent's SDK can be pointed at.
 //
@@ -474,19 +541,26 @@ func tracingKey(in delivery.GovernAgentInput) string {
 // agent runs in a pod, so only the path is kept and the environment's
 // in-cluster gateway address is put in front of it.
 //
-// THE /v1 IS NOT DECORATION. An agent builds its client from MODEL_ENDPOINT and
-// the SDK appends the operation — the Anthropic SDK asks for
-// `<base>/messages` — so a base without the version segment requests
-// `/aep-…/messages` and the gateway answers 404. AEP's own ungoverned default
-// is `https://api.anthropic.com/v1` for exactly the same reason; the governed
-// endpoint has to have the same shape, or swapping one for the other silently
-// breaks every agent.
-func proxyEndpoint(proxyURL, gatewayEndpoint string) (string, error) {
+// THE CONNECTION'S BASE PATH GOES ON THE END, and it is not decoration. The
+// provider's upstream is the connection's origin alone, and the gateway appends
+// the request path to it as is. An agent builds its client from MODEL_ENDPOINT
+// and the SDK appends the operation (`/messages`, `/chat/completions`), so the
+// base path the host serves under — `/v1`, `/api/v1`, `/compatible-mode/v1`, or
+// none — has to be on this side. Without it the gateway asks the upstream for
+// `/messages` and gets 404; with it on the upstream as well, `/v1/v1/…`, also
+// 404. The ungoverned path hands the agent the connection's base URL itself, so
+// both paths end in the same segment and swapping one for the other changes
+// nothing for the agent.
+func proxyEndpoint(proxyURL, gatewayEndpoint, baseURL string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(proxyURL))
 	if err != nil || u.Path == "" || u.Path == "/" {
 		return "", fmt.Errorf("agent governance: Agent Manager returned no usable proxy URL (%q)", proxyURL)
 	}
-	return strings.TrimSuffix(gatewayEndpoint, "/") + u.Path + modelAPIVersionPath, nil
+	base, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return "", fmt.Errorf("agent governance: model connection base URL %q: %w", baseURL, err)
+	}
+	return strings.TrimSuffix(gatewayEndpoint, "/") + u.Path + strings.TrimSuffix(base.Path, "/"), nil
 }
 
 // store persists the issued key with the endpoint it authenticates against.
@@ -501,6 +575,13 @@ func (g *Governor) store(ctx context.Context, in delivery.GovernAgentInput, issu
 		// retries the whole activity, which lands in the rotate branch on the
 		// next attempt rather than leaking a second key.
 		return fmt.Errorf("store model key: %w", err)
+	}
+	// After the secret, never before: a record of an endpoint that was not
+	// written would hide a stale one. A failure here leaves the secret right
+	// and the record absent, so the retry takes the rotate branch once more —
+	// a spare rotation, never a stale URL.
+	if err := g.deps.Endpoints.RecordAMPModelEndpoint(ctx, in.OrgID, in.Component, in.Environment, endpoint); err != nil {
+		return fmt.Errorf("record stored model endpoint: %w", err)
 	}
 	return nil
 }
@@ -565,15 +646,25 @@ const maxAgentRecordName = 25
 // and the agent's own name is now unique.
 func ModelConfigName(component string) string { return "aep-" + component }
 
-// AnthropicTemplate is Agent Manager's template id for Anthropic. Exported
-// because key rotation builds the same provider input from outside this package.
-const AnthropicTemplate = "anthropic"
+// Agent Manager's provider templates, one per connection format. There is no
+// generic OpenAI-compatible template: `openai` takes any upstream URL, and so
+// does `anthropic`, so the format picks the template and the connection
+// supplies the rest.
+const (
+	anthropicTemplate = "anthropic"
+	openAITemplate    = "openai"
+)
+
+// The upstream auth the provider sends, from the connection's scheme. Both
+// templates declare type `api-key`; only the header differs.
+const (
+	upstreamAuthType    = "api-key"
+	xAPIKeyHeader       = "x-api-key"
+	authorizationHeader = "Authorization"
+	bearerValuePrefix   = "Bearer "
+)
 
 const (
-	// modelAPIVersionPath is the version segment an Anthropic-shaped client
-	// expects on its base URL — see where the endpoint is composed.
-	modelAPIVersionPath = "/v1"
-
 	// tracingRefreshWindow is how close to expiry a tracing token may get
 	// before a deploy replaces it. Agent Manager issues them for about ninety
 	// days, so a fortnight leaves many ordinary deploys in which to roll over
@@ -589,29 +680,89 @@ const (
 	ModelAPIKeyEnvVar   = "MODEL_API_KEY"
 )
 
-// ProviderInputFor builds the org's provider exactly as AEP declares it.
+// ProviderInputFor builds the org's provider from its model connection, exactly
+// as AEP declares it.
 //
-// One builder, used by the deploy path and by key rotation, so the two can
-// never describe the same provider differently — which would show up as a
+// One builder, used by the deploy path and by a saved connection, so the two
+// can never describe the same provider differently — which would show up as a
 // provider that flips shape depending on which path last wrote it.
-func ProviderInputFor(org string, tmpl agentmanager.ProviderTemplate, orgKey, gatewayID string) agentmanager.EnsureProviderInput {
+//
+// The connection supplies everything a template would otherwise default:
+//
+//   - Template from the format: `anthropic` stays `anthropic`,
+//     `openai-compatible` takes `openai`.
+//   - Upstream is the base URL's scheme and host. Its path goes on the agent's
+//     endpoint instead (proxyEndpoint), because the gateway appends the
+//     request path to the upstream as is.
+//   - Auth from the connection's scheme: `x-api-key` sends the key under
+//     x-api-key; bearer sends `Bearer <key>` under Authorization. The prefix is
+//     written here because Agent Manager's API does not apply the template's
+//     valuePrefix — only its console does, in the browser.
+func ProviderInputFor(org string, conn modelconn.Connection, key, gatewayID string) (agentmanager.EnsureProviderInput, error) {
+	template, err := templateFor(conn.Format)
+	if err != nil {
+		return agentmanager.EnsureProviderInput{}, err
+	}
+	upstream, err := upstreamOf(conn.BaseURL)
+	if err != nil {
+		return agentmanager.EnsureProviderInput{}, err
+	}
+	header, value, err := upstreamAuth(conn.AuthScheme, key)
+	if err != nil {
+		return agentmanager.EnsureProviderInput{}, err
+	}
 	return agentmanager.EnsureProviderInput{
 		Org:         org,
 		ID:          ProviderID(org),
 		Name:        providerName(org),
 		Version:     providerVersion,
 		Context:     "/" + ProviderID(org),
-		Template:    AnthropicTemplate,
-		UpstreamURL: tmpl.EndpointURL,
-		AuthType:    tmpl.AuthType,
-		AuthHeader:  tmpl.AuthHeader,
-		APIKey:      orgKey,
+		Template:    template,
+		UpstreamURL: upstream,
+		AuthType:    upstreamAuthType,
+		AuthHeader:  header,
+		APIKey:      value,
 		GatewayID:   gatewayID,
+	}, nil
+}
+
+func templateFor(f modelconn.Format) (string, error) {
+	switch f {
+	case modelconn.FormatAnthropic:
+		return anthropicTemplate, nil
+	case modelconn.FormatOpenAICompatible:
+		return openAITemplate, nil
 	}
+	return "", fmt.Errorf("agent governance: no Agent Manager template for connection format %q", f)
+}
+
+// upstreamOf is the base URL's origin — scheme and host, no path.
+func upstreamOf(baseURL string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("agent governance: model connection base URL %q has no scheme and host", baseURL)
+	}
+	return u.Scheme + "://" + u.Host, nil
+}
+
+func upstreamAuth(scheme modelconn.AuthScheme, key string) (header, value string, err error) {
+	switch scheme {
+	case modelconn.AuthXAPIKey:
+		return xAPIKeyHeader, key, nil
+	case modelconn.AuthBearer:
+		return authorizationHeader, bearerValuePrefix + key, nil
+	}
+	return "", "", fmt.Errorf("agent governance: no upstream auth for connection auth scheme %q", scheme)
 }
 
 // ProviderID is the handle of the org's AEP-owned provider. Exported because
-// rotation resolves the same provider by the same name.
+// the organization domain's publisher resolves the same provider by the same
+// name.
+//
+// It still ends in `-anthropic` on every format, deliberately: a new ID is a
+// new provider, the publisher client has no delete scope to remove the old
+// one, and every bound agent would have to rebind. Only the display name says
+// what the provider is.
 func ProviderID(org string) string { return "aep-" + org + "-anthropic" }
 
-func providerName(org string) string { return "AEP " + org + " Anthropic" }
+func providerName(org string) string { return "AEP " + org + " model connection" }

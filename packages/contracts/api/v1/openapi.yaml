@@ -5879,7 +5879,7 @@ components:
         generatedAgents:
           description: >-
             Generated AI agents, Agent Manager and build evaluation can run on
-            this connection. Anthropic's own API only, until their follow-up.
+            this connection. True on every format.
           type: boolean
         imageInput:
           description: >-

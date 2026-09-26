@@ -618,6 +618,32 @@ func hasEnvKey(in openchoreo.WorkloadInput, key string) bool {
 	return false
 }
 
+// evalEnvVars is every variable the evaluation credential puts on the pod: the
+// key and the connection it is for, which travel together or not at all.
+var evalEnvVars = []string{envEvalModelAPIKey, envEvalModelFormat, envEvalModelBaseURL, envEvalModelName, envEvalModelAuthScheme}
+
+// assertNoEvalEnv fails if any evaluation variable is on the pod.
+func assertNoEvalEnv(t *testing.T, in openchoreo.WorkloadInput) {
+	t.Helper()
+	for _, name := range evalEnvVars {
+		if hasEnvKey(in, name) {
+			t.Errorf("%s set with no evaluation key to mount: %+v", name, in.Env)
+		}
+	}
+}
+
+// assertEvalConnEnv checks the connection the evaluation key is for rides
+// beside it as plain values.
+func assertEvalConnEnv(t *testing.T, in openchoreo.WorkloadInput, want map[string]string) {
+	t.Helper()
+	for name, v := range want {
+		ev := secretEnvByKey(t, in, name)
+		if ev.ValueFrom != nil || ev.Value != v {
+			t.Errorf("%s = %+v, want the plain value %q", name, ev, v)
+		}
+	}
+}
+
 // TestDispatch_MountsTheOrgDefaultKeyForEvaluation: a build that evaluates the
 // agent it just generated needs a model credential twice over — for the agent
 // under test and for the judge grading it. The org's DEFAULT key is the one that
@@ -641,18 +667,24 @@ func TestDispatch_MountsTheOrgDefaultKeyForEvaluation(t *testing.T) {
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
-	ev := secretEnvByKey(t, rec.load, envEvalAnthropicAPIKey)
+	ev := secretEnvByKey(t, rec.load, envEvalModelAPIKey)
 	if ev.ValueFrom == nil || ev.ValueFrom.SecretKeyRef == nil {
-		t.Fatalf("%s must be a SecretReference, not an inline value: %+v", envEvalAnthropicAPIKey, ev)
+		t.Fatalf("%s must be a SecretReference, not an inline value: %+v", envEvalModelAPIKey, ev)
 	}
 	if ev.ValueFrom.SecretKeyRef.Name != anthropic.defaultRef.Name {
 		t.Errorf("%s resolves from %q, want the org's DEFAULT key %q",
-			envEvalAnthropicAPIKey, ev.ValueFrom.SecretKeyRef.Name, anthropic.defaultRef.Name)
+			envEvalModelAPIKey, ev.ValueFrom.SecretKeyRef.Name, anthropic.defaultRef.Name)
 	}
 	if ev.ValueFrom.SecretKeyRef.Key != anthropic.defaultRef.Property {
-		t.Errorf("%s property = %q, want %q", envEvalAnthropicAPIKey,
+		t.Errorf("%s property = %q, want %q", envEvalModelAPIKey,
 			ev.ValueFrom.SecretKeyRef.Key, anthropic.defaultRef.Property)
 	}
+	assertEvalConnEnv(t, rec.load, map[string]string{
+		envEvalModelFormat:     "anthropic",
+		envEvalModelBaseURL:    "https://api.anthropic.com/v1",
+		envEvalModelName:       "claude-sonnet-5",
+		envEvalModelAuthScheme: "x-api-key",
+	})
 }
 
 // TestDispatch_EvaluationKeyRidesItsOwnVariable: the evaluation credential must
@@ -671,8 +703,8 @@ func TestDispatch_EvaluationKeyRidesItsOwnVariable(t *testing.T) {
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
-	if !hasEnvKey(rec.load, envEvalAnthropicAPIKey) {
-		t.Fatalf("an org billing its coding agent to an OAuth token still needs %s for evaluation", envEvalAnthropicAPIKey)
+	if !hasEnvKey(rec.load, envEvalModelAPIKey) {
+		t.Fatalf("an org billing its coding agent to an OAuth token still needs %s for evaluation", envEvalModelAPIKey)
 	}
 	if hasEnvKey(rec.load, "ANTHROPIC_API_KEY") {
 		t.Error("the evaluation key must not be mounted as ANTHROPIC_API_KEY beside an OAuth token")
@@ -680,9 +712,9 @@ func TestDispatch_EvaluationKeyRidesItsOwnVariable(t *testing.T) {
 }
 
 // TestDispatch_NoDefaultKeyConnected_StillDispatches: evaluation reports, it
-// never fails a build. An org with no connected default key dispatches WITHOUT
-// the variable — absent, not present-and-empty, so the harness sees "no key"
-// rather than "a key that does not authenticate".
+// never fails a build. An org with no connected key dispatches WITHOUT the
+// evaluation variables — absent, not present-and-empty, so the harness sees "no
+// key" rather than "a key that does not authenticate".
 func TestDispatch_NoDefaultKeyConnected_StillDispatches(t *testing.T) {
 	rec := &chainRecorder{}
 	anthropic, github := fullSecretRefs()
@@ -694,9 +726,7 @@ func TestDispatch_NoDefaultKeyConnected_StillDispatches(t *testing.T) {
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
 		t.Fatalf("a build must not fail because evaluation cannot run: %v", err)
 	}
-	if hasEnvKey(rec.load, envEvalAnthropicAPIKey) {
-		t.Errorf("an absent key must be absent, not mounted: %+v", rec.load.Env)
-	}
+	assertNoEvalEnv(t, rec.load)
 }
 
 // TestDispatch_IncompleteKeyRef_IsNotMounted: a half-mirrored row can
@@ -714,9 +744,7 @@ func TestDispatch_IncompleteKeyRef_IsNotMounted(t *testing.T) {
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
 		t.Fatalf("a build must not fail because evaluation cannot run: %v", err)
 	}
-	if hasEnvKey(rec.load, envEvalAnthropicAPIKey) {
-		t.Errorf("a triplet with no property must not be mounted: %+v", rec.load.Env)
-	}
+	assertNoEvalEnv(t, rec.load)
 }
 
 // TestDispatch_DeclaresThePlatformOwnsTheEvaluationKey: the pod's

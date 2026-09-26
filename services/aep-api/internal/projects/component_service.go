@@ -46,7 +46,7 @@ import (
 // BFF reads ReleaseBindings via ListDeployments.
 type ComponentService interface {
 	// ModelAccessEnvVars yields the MODEL_* env vars an ai-agent needs, from
-	// the org's connected key. On the interface rather than the concrete type
+	// the org's model connection. On the interface rather than the concrete type
 	// so DeploymentService's wiring is checked by the COMPILER: the previous
 	// shape left it reachable only by type assertion, app.go never wired it,
 	// and every ai-agent deployed with no model key and 500'd on its first
@@ -104,25 +104,32 @@ type ModelKeyResolver interface {
 
 // -- model access for ai-agent components (see ai_agent_model_access.go) ----
 //
-// modelEndpointDefault / modelNameDefault are literals for now: no
-// multi-provider or multi-model choice exists yet (agent.afm.md's
-// model.provider is validated to "anthropic" | "openai" by the AFM schema,
-// but only Anthropic is wired end-to-end — ADR-0016). Named here, not
-// scattered as string literals, so a later "org-configurable model" change
-// has one place to touch.
+// The MODEL_* variables are the generated agent's contract with the platform
+// (skills/agent-building): every value comes from the org's model connection,
+// so the agent names no provider, URL or model of its own.
 const (
 	modelEndpointEnvVar = "MODEL_ENDPOINT"
 	modelNameEnvVar     = "MODEL_NAME"
 	modelAPIKeyEnvVar   = "MODEL_API_KEY"
+	// modelAPIFormatEnvVar is the API the agent's client speaks: the
+	// connection's format, `anthropic` or `openai-compatible`, on both paths.
+	modelAPIFormatEnvVar = "MODEL_API_FORMAT"
+	// modelAPIAuthSchemeEnvVar is how the key is presented on the DIRECT path
+	// (`x-api-key` or `bearer`). An Anthropic-format host other than
+	// Anthropic's own API takes the key as a Bearer token, which the Anthropic
+	// SDK sends only when asked to. The governed path leaves it unset: there
+	// modelAPIKeyHeaderEnvVar names the one header the proxy reads.
+	modelAPIAuthSchemeEnvVar = "MODEL_API_AUTH_SCHEME"
 
 	// modelAPIKeyHeaderEnvVar / ampModelAPIKeyHeader are a HACK, and carry an
 	// expiry date.
 	//
 	// Agent Manager's per-agent LLM proxy authenticates on a header of its own
 	// choosing — `API-Key` — and that name is not configurable today. The
-	// Anthropic client an AEP agent is built on sends its credential as
-	// `x-api-key` and offers no way to rename it, so a governed agent's request
-	// arrives at the proxy unauthenticated. Naming the header here, and having
+	// clients an AEP agent is built on send their credential as `x-api-key`
+	// (Anthropic format) or `Authorization: Bearer` (OpenAI-compatible), and
+	// the proxy reads neither, so a governed agent's request would arrive at
+	// the proxy unauthenticated on every format. Naming the header here, and having
 	// the agent template send the key under whatever name it finds, is what
 	// bridges the two until Agent Manager makes the proxy's header
 	// configurable — which its team has confirmed it will.
@@ -169,13 +176,11 @@ const (
 	traceloopTraceContentEnvVar = "TRACELOOP_TRACE_CONTENT"
 	traceloopTraceContentValue  = "false"
 
-	modelEndpointDefault = "https://api.anthropic.com/v1"
-	modelNameDefault     = "claude-sonnet-5"
-
 	// modelAccessSecretRefName is the org-scoped SecretReference every
 	// ai-agent component's MODEL_API_KEY points at — one per org, upserted
 	// (not per component), since every agent shares the organisation's one
-	// Anthropic key (ADR-0016) and there is nothing per-agent to provision.
+	// model connection key (ADR-0016, ADR-0038) and there is nothing per-agent
+	// to provision.
 	modelAccessSecretRefName = "ai-agent-model-access"
 	// modelAccessSecretRefRefresh mirrors pushExternalSecret's cadence for
 	// the same underlying credential.
@@ -368,8 +373,8 @@ func (s *componentService) EnsureComponent(ctx context.Context, orgName, project
 	}
 	slog.InfoContext(ctx, "ensure component: OC Component ensured", "org", orgName, "project", projectName, "component", k8sName)
 
-	// Every ai-agent component gets the organisation's Anthropic key —
-	// MODEL_ENDPOINT/MODEL_NAME/MODEL_API_KEY — without declaring a
+	// Every ai-agent component gets the organisation's model connection —
+	// the MODEL_* variables — without declaring a
 	// dependency (ADR-0016). No-op for every other component type; see
 	// ai_agent_model_access.go. Best-effort: never fails EnsureComponent, so
 	// a model-access hiccup cannot block component creation or a build.

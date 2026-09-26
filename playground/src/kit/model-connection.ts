@@ -64,7 +64,7 @@ export function capabilitiesOf(format: TurnConnection["format"], host: string): 
     claudeCode: anthropic,
     claudeSubscription: firstParty,
     promptCache: anthropic,
-    generatedAgents: firstParty,
+    generatedAgents: true,
     nativePdf: firstParty,
     webSearch: firstParty ? "anthropic-server-tool" : host === OLLAMA_HOST ? "ollama-api" : "none",
     imageInput: firstParty ? "yes" : "unknown",

@@ -321,8 +321,13 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		{Key: modelKeyVar, SecretName: modelRef.Name, SecretKey: modelRef.Property},
 		{Key: envGitHubToken, SecretName: githubSR.SecretRefName, SecretKey: githubSR.Property},
 	}
-	if evalSR, ok := e.evaluationKeyRef(ctx, in.orgID); ok {
+	// The evaluation key and the connection it is for travel together or not
+	// at all — see envEvalModelFormat.
+	if evalConn, evalSR, ok := e.evaluationKeyRef(ctx, in.orgID); ok {
 		secretEnv = append(secretEnv, evalSR)
+		for k, v := range evalModelEnv(evalConn) {
+			env[k] = v
+		}
 	}
 	pub, tokenURL, err := e.publisherSecretEnv(ctx, in.orgID)
 	if err != nil {
@@ -446,18 +451,15 @@ func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID stri
 }
 
 // evaluationKeyRef resolves the org's connection key as the build's
-// agent-evaluation credential, reporting whether there is one to mount.
+// agent-evaluation credential, with the connection it is for, reporting whether
+// there is one to mount.
 //
 // A build that generates an ai-agent evaluates it before opening its PR, and
 // that step needs a model twice over — once for the agent it boots, once for the
 // judge that grades it. Both are API calls, so the credential has to be an API
 // key; the connection's key always is (ADR-0036), while the coding credential
-// may be a Claude subscription token that authenticates neither.
-//
-// Only on a connection generated agents can run on (Anthropic's own API, until
-// their follow-up lifts the gate): the harness and its judge speak Anthropic's
-// API with the key as `x-api-key`, so another host's key would not reach them
-// and would reach a host they never meant to call.
+// may be a Claude subscription token that authenticates neither. Any format
+// will do: the harness reaches the connection the way the deployed agent will.
 //
 // An unresolvable key is NOT a dispatch failure, which is the one thing that
 // makes this different from every other credential here. Evaluation reports; it
@@ -466,17 +468,12 @@ func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID stri
 // so a missing key must not cost the org a delivery. It is logged rather than
 // swallowed silently, because "the harness never became ready" is otherwise a
 // puzzling thing to read in a build report.
-func (e *CodingExecutor) evaluationKeyRef(ctx context.Context, orgID string) (SecretEnvRef, bool) {
+func (e *CodingExecutor) evaluationKeyRef(ctx context.Context, orgID string) (modelconn.Connection, SecretEnvRef, bool) {
 	conn, triplet, err := e.anthropicKey.KeyRef(ctx, orgID)
 	if err != nil {
 		slog.InfoContext(ctx, "coding dispatch: no model connection key — the build will run without agent evaluation",
 			"org", orgID, "error", err)
-		return SecretEnvRef{}, false
-	}
-	if !modelconn.CapabilitiesOf(conn).GeneratedAgents {
-		slog.InfoContext(ctx, "coding dispatch: agent evaluation needs Anthropic's API — the build will run without it",
-			"org", orgID, "host", conn.Host)
-		return SecretEnvRef{}, false
+		return modelconn.Connection{}, SecretEnvRef{}, false
 	}
 	// A half-mirrored row resolves to a triplet ESO cannot follow. Mounting it
 	// would put the variable on the pod pointing at nothing, and the harness
@@ -484,9 +481,9 @@ func (e *CodingExecutor) evaluationKeyRef(ctx context.Context, orgID string) (Se
 	if triplet.Name == "" || triplet.Property == "" {
 		slog.WarnContext(ctx, "coding dispatch: the connection key's secret reference is incomplete — the build will run without agent evaluation",
 			"org", orgID)
-		return SecretEnvRef{}, false
+		return modelconn.Connection{}, SecretEnvRef{}, false
 	}
-	return SecretEnvRef{Key: envEvalAnthropicAPIKey, SecretName: triplet.Name, SecretKey: triplet.Property}, true
+	return conn, SecretEnvRef{Key: envEvalModelAPIKey, SecretName: triplet.Name, SecretKey: triplet.Property}, true
 }
 
 // codingAgentEnv resolves the runtime this run is launched with (the model

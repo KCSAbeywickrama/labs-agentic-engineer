@@ -16,8 +16,8 @@
 # The permission list is deliberately narrower than amp-role-admin's: AEP
 # registers agents and maintains its own provider, and has no business deleting
 # either. `amp:llm-provider:api-key-manage` is what lets it issue an agent's own
-# model key; `amp:llm-provider-template:read` is what lets it read the auth
-# header and upstream URL rather than hardcoding them.
+# model key. There is no template read: the provider's template, upstream and
+# auth all come from the org's model connection.
 resource_type: role
 id: aep-amp-publisher-role
 name: AEP Agent Manager Publisher
@@ -49,7 +49,6 @@ permissions:
       # minted per agent at registration. Without this scope the mint answers
       # 403 and the agent emits no traces — silently, because nothing tries.
       - "amp:agent:token-manage"
-      - "amp:llm-provider-template:read"
       - "amp:gateway:read"
       - "amp:environment:read"
 assignments:

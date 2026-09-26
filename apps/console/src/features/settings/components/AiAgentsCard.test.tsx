@@ -81,7 +81,7 @@ const ollama: LLMProjection = {
     webSearch: "ollama-api",
     imageInput: "no",
     nativePdf: false,
-    generatedAgents: false,
+    generatedAgents: true,
   },
 };
 
@@ -182,7 +182,6 @@ describe("AiAgentsCard on Anthropic's API", () => {
     expect(info().getByText("api.anthropic.com").tagName).toBe("STRONG");
     expect(info().getByText("Usage is priced in USD: claude-sonnet-5 has a rate.")).toBeInTheDocument();
     expect(info().getByText("Chat reads attached images and PDFs.")).toBeInTheDocument();
-    expect(info().queryByText(/Generated AI agents/)).not.toBeInTheDocument();
   });
 
   it("offers the Claude subscription as an optional token field inside the Claude Code tile", () => {
@@ -243,7 +242,6 @@ describe("AiAgentsCard on an OpenAI-compatible connection", () => {
     expect(info().getByText(/the platform has no rate for glm-5.3/)).toBeInTheDocument();
     expect(info().getByText(/Ollama's search API/)).toBeInTheDocument();
     expect(info().getByText(/Chat does not accept images: glm-5.3/)).toBeInTheDocument();
-    expect(info().getByText(/Generated AI agents need Anthropic's API/)).toBeInTheDocument();
     expect(screen.queryByText(/Claude subscription token/)).not.toBeInTheDocument();
   });
 });

@@ -92,6 +92,9 @@ without that tool and would score badly for a reason no prompt fix can address.
 
 The provider's `config` block is JSON on disk, under the build's output
 directory. It carries the App Path and the tool contracts — never a credential.
-The org's Anthropic key reaches the agent as `MODEL_API_KEY` through the
-environment only, and reaches the judge as promptfoo's own `ANTHROPIC_API_KEY`.
-One credential, two names, no file.
+The org's model connection reaches the agent as the `MODEL_*` variables a
+deployed ai-agent reads, through the environment only, and reaches the judge as
+the variable promptfoo's provider for that format reads (`ANTHROPIC_API_KEY` or
+`OPENAI_API_KEY`). The judge's provider entry in the config carries its model and
+base URL, never the key. One credential, two names, no file
+(`running-in-a-build-pod.md`, "The connection arrives under different names").
