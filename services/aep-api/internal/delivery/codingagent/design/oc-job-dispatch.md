@@ -149,9 +149,19 @@ not stated here; duplicating it would let the two drift apart silently.
 organization's `agents` setting (ADR-0028) onto every cycle, beside the
 credential ref. The setting is read FIRST, because the runtime decides the
 credential: `ResolveCodingCredential(org, runtime)` returns the org's Claude
-subscription (mounted as `CLAUDE_CODE_OAUTH_TOKEN`) only when the runtime is
-Claude Code, and its API key (`ANTHROPIC_API_KEY`) otherwise; exactly one of the
-two reaches the run (ADR-0036). They are **copied, not referenced**: a
+subscription only when the runtime is Claude Code, and its connection key
+otherwise, with the connection that key is for; exactly one credential reaches
+the run (ADR-0036). The organization domain answers with a KIND, never a
+variable name: `modelEnv` (`model_env.go`) is the one mapping onto the runner's
+contract. The connection rides as plain env (`AEP_MODEL_FORMAT`,
+`AEP_MODEL_BASE_URL`, `AEP_MODEL_AUTH_SCHEME`, `AEP_MODEL_WEB_SEARCH`, and
+`AEP_MODEL_CONTEXT_WINDOW` / `AEP_MODEL_OUTPUT_LIMIT` where the connection states
+them, never on `api.anthropic.com`), and the credential as one secret ref:
+`CLAUDE_CODE_OAUTH_TOKEN` for a subscription, `ANTHROPIC_API_KEY` for a key on
+Anthropic's own API (the name every Job carried before the connection, so an
+older runner image still reads a first-party Job), `AEP_MODEL_API_KEY` for a key
+on any other host. Each runtime adapter maps that to what its binary reads. They
+are **copied, not referenced**: a
 change applies from the next cycle, because a run that re-read the setting halfway through would leave a feed
 whose model names disagree with the tokens they were billed for. An org that
 never opened the setting gets the platform defaults, which is exactly what every
@@ -255,17 +265,22 @@ read a dynamic display name: `Coding cycle — milestone #<n> <title>`, or
 
 ## Two model credentials on one pod
 
-A cycle mounts the Anthropic credential the organization's coding runs bill
-(ADR-0036) — as `ANTHROPIC_API_KEY` or, for a Claude subscription on Claude
-Code, as `CLAUDE_CODE_OAUTH_TOKEN`, never both. That is the credential the agent's own session
-authenticates with.
+A cycle mounts the model credential the organization's coding runs bill
+(ADR-0036) — under the one variable `modelEnv` names, never two. That is the
+credential the agent's own session authenticates with.
 
-It also mounts the org's **default-role** key as `AEP_EVAL_ANTHROPIC_API_KEY`,
+It also mounts the org's **connection** key as `AEP_EVAL_ANTHROPIC_API_KEY`,
 for the agent-evaluation step a build runs before opening an ai-agent's PR. That
 step needs a model twice over — for the generated agent it boots and for the LLM
 judge that grades it — and both are API calls, so the credential has to be an API
-key. The default key always is; the coding one may be a subscription token that
-authenticates neither.
+key. The connection key always is; the coding one may be a subscription token
+that authenticates neither.
+
+Only while the connection is one generated agents run on (Anthropic's own API,
+`modelconn.CapabilitiesOf`'s `GeneratedAgents`): the harness and its judge speak
+Anthropic's API, so on any other connection the variable is absent and the
+evaluation step reports that it could not run. The gate lifts with generated
+agents' own follow-up.
 
 The separate variable is not decoration. `ANTHROPIC_API_KEY` belongs to Claude
 Code, which ranks it above `CLAUDE_CODE_OAUTH_TOKEN`, so mounting the evaluation

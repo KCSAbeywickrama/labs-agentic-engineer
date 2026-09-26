@@ -54,11 +54,13 @@ jobs:
             # image's first stage compiles it, so nothing has to be built before
             # this job and no artifact can be stale (ADR-0008); and the
             # agent-evaluation harness, which a build runs before opening the PR
-            # for an ai-agent and which therefore has to exist in the pod.
+            # for an ai-agent and which therefore has to exist in the pod; and
+            # the web search package the pod's `aep-web` MCP server is built from.
             buildContexts: |
               skills=skills
               bal-library-tool=packages/bal-library-tool
               agent-eval=packages/agent-eval
+              web-search=packages/web-search
           # The OpenCode variant: the same Dockerfile's `runner-opencode` stage,
           # the image above plus the pinned OpenCode binary, for organizations
           # whose coding-agent runtime is OpenCode (aep-api
@@ -73,6 +75,7 @@ jobs:
               skills=skills
               bal-library-tool=packages/bal-library-tool
               agent-eval=packages/agent-eval
+              web-search=packages/web-search
             sharesCacheWith: remote-worker
           - name: aep-api
             dockerfile: services/aep-api/Dockerfile

@@ -99,7 +99,7 @@ jobs:
           # Mirrors release.yml's matrix; an image added there belongs here
           # too. An image is selected when its own directory — the
           # Dockerfile's — changed.
-          RUNNER_CONTEXTS="skills=skills bal-library-tool=packages/bal-library-tool agent-eval=packages/agent-eval"
+          RUNNER_CONTEXTS="skills=skills bal-library-tool=packages/bal-library-tool agent-eval=packages/agent-eval web-search=packages/web-search"
           IMAGES=(
             "remote-worker|runners/remote-worker|runners/remote-worker/Dockerfile|$RUNNER_CONTEXTS|linux/amd64,linux/arm64|"
             "remote-worker-opencode|runners/remote-worker|runners/remote-worker/Dockerfile|$RUNNER_CONTEXTS|linux/amd64,linux/arm64|runner-opencode"

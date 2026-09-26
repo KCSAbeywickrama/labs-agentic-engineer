@@ -43,9 +43,10 @@ const (
 func (r AnthropicRole) String() string { return string(r) }
 
 // AnthropicCredentialKind names HOW a stored credential authenticates, which
-// decides both how it is validated and which environment variable it must be
-// delivered as. It is persisted rather than re-derived, because dispatch reads
-// the metadata row and never the secret bytes — it has nothing to sniff.
+// decides how it is validated. It is persisted rather than re-derived, because
+// readers of the metadata row never see the secret bytes — they have nothing to
+// sniff. Which variable a coding run receives a credential under follows its
+// role (CodingCredential.Kind), and dispatch owns that mapping.
 type AnthropicCredentialKind string
 
 const (
@@ -79,22 +80,6 @@ func AnthropicCredentialKindOf(key string) AnthropicCredentialKind {
 		return AnthropicCredentialOAuth
 	}
 	return AnthropicCredentialAPIKey
-}
-
-// RunnerEnvVar is the environment variable a coding run must receive this
-// credential as.
-//
-// The two are mutually exclusive by necessity, not by preference: Claude Code
-// ranks `ANTHROPIC_API_KEY` ABOVE `CLAUDE_CODE_OAUTH_TOKEN`, so a container
-// holding both would authenticate with the API key and silently ignore the
-// token. Mounting exactly one is what makes the org's choice actually take
-// effect. See docs/decisions/ADR-0036 and
-// https://code.claude.com/docs/en/authentication#authentication-precedence.
-func (k AnthropicCredentialKind) RunnerEnvVar() string {
-	if k == AnthropicCredentialOAuth {
-		return "CLAUDE_CODE_OAUTH_TOKEN"
-	}
-	return "ANTHROPIC_API_KEY"
 }
 
 // SecretStoreKey is the `org_secrets` key holding this role's encrypted bytes.

@@ -393,6 +393,15 @@ func (w *JobWatcher) failOnProviderLimit(ctx context.Context, cycle *delivery.Ru
 	if cycle.EndedAt != nil {
 		return
 	}
+	// The provider is named by the host the cycle was DISPATCHED on — stamped by
+	// aep-api from the connection whose key the Job mounted — rather than the
+	// one the runner reported: the platform's own record wins over a producer's
+	// claim, as it does for pricing. The runner's is the fallback for a cycle
+	// dispatched before the host was stamped.
+	host := cycle.ModelHost
+	if host == "" {
+		host = limit.host
+	}
 	// The operator's evidence: what a spent plan actually returns is learned
 	// from production, one line per stopped run, grouped by host. The runner
 	// saw no response headers (its runtime made the call), so its retry delay
@@ -402,7 +411,7 @@ func (w *JobWatcher) failOnProviderLimit(ctx context.Context, cycle *delivery.Ru
 		"source", "runner", "org", cycle.OrgID, "run", cycle.RunID, "cycle", cycle.ID,
 		// The runner's rule counts only 429s (by status, or by the rate-limit
 		// class when the runtime did not know the status).
-		"host", limit.host, "status", http.StatusTooManyRequests,
+		"host", host, "status", http.StatusTooManyRequests,
 		"resetAt", limit.resetAt, "body", limit.detail, "verdict", "provider_limit")
 	if w.failures != nil && cycle.RunID != "" {
 		now := time.Now().UTC()
@@ -419,7 +428,7 @@ func (w *JobWatcher) failOnProviderLimit(ctx context.Context, cycle *delivery.Ru
 			MaxAttempts: 1,
 			FirstAt:     now,
 			LastAt:      now,
-			Host:        limit.host,
+			Host:        host,
 			ResetAt:     limit.resetAt,
 		}); err != nil {
 			slog.WarnContext(ctx, "codingagent.JobWatcher: record provider-limit failure failed (the run still settles blocked)",

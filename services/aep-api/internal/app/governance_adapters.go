@@ -35,6 +35,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/delivery/agentgovernance"
 	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/platform/auth/jwtassertion"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
@@ -56,7 +57,10 @@ func (f ampClientFactory) For(baseURL string) agentmanager.Client {
 //
 // Effective rather than the vault triplet: the provider needs the secret
 // itself, once, at create time. An org that has connected nothing answers "",
-// which the governor reads as "nothing to govern" rather than as a failure.
+// which the governor reads as "nothing to govern" rather than as a failure —
+// and so does an org whose connection generated agents cannot run on: the
+// provider is an Anthropic one, and another host's key is not one to hand it
+// (the interim gate; modelconn.CapabilitiesOf lifts it).
 type ampOrgKeyReader struct {
 	conns organization.ConnectionReader
 }
@@ -65,11 +69,16 @@ func (r ampOrgKeyReader) AnthropicKeyValue(ctx context.Context, ocOrgID string) 
 	if r.conns == nil {
 		return "", nil
 	}
-	_, key, ok, err := r.conns.Effective(ctx, ocOrgID)
+	conn, key, ok, err := r.conns.Effective(ctx, ocOrgID)
 	if err != nil {
 		return "", fmt.Errorf("read org anthropic key: %w", err)
 	}
 	if !ok {
+		return "", nil
+	}
+	if !modelconn.CapabilitiesOf(conn).GeneratedAgents {
+		slog.InfoContext(ctx, "governance: generated agents need Anthropic's API for now — nothing published to Agent Manager",
+			"org", ocOrgID, "host", conn.Host)
 		return "", nil
 	}
 	return key, nil
@@ -226,6 +235,44 @@ func (p ampModelProviderPublisher) PublishOrgModelKey(ctx context.Context, ocOrg
 	slog.InfoContext(ctx, "governance: org key published to the Agent Manager provider", "org", ocOrgID)
 	return nil
 }
+
+// ClearOrgModelKey replaces the provider's copy of the org's key with
+// clearedProviderCredential, on the save that moves the org off a connection
+// generated agents run on. It never creates a provider: an org no deploy ever
+// governed has no copy to clear.
+func (p ampModelProviderPublisher) ClearOrgModelKey(ctx context.Context, ocOrgID string) error {
+	if p.amp == nil || p.bindings == nil {
+		return nil
+	}
+	binding, err := p.bindings.GetAIGatewayBinding(ctx, ocOrgID, openchoreo.DevEnvironmentName)
+	if errors.Is(err, openchoreo.ErrNoAIGatewayBinding) {
+		return nil // nothing governed here
+	}
+	if err != nil {
+		return fmt.Errorf("resolve AI gateway binding: %w", err)
+	}
+
+	client := p.amp.For(binding.AdminURL)
+	tmpl, err := client.ProviderTemplate(ctx, ocOrgID, agentgovernance.AnthropicTemplate)
+	if err != nil {
+		return fmt.Errorf("read provider template: %w", err)
+	}
+	found, err := client.UpdateProviderCredential(ctx,
+		agentgovernance.ProviderInputFor(ocOrgID, tmpl, clearedProviderCredential, binding.GatewayID))
+	if err != nil {
+		return fmt.Errorf("clear the org key on the provider: %w", err)
+	}
+	if found {
+		slog.InfoContext(ctx, "governance: org key cleared from the Agent Manager provider", "org", ocOrgID)
+	}
+	return nil
+}
+
+// clearedProviderCredential is what the provider holds once the org's key is
+// no longer one it may keep. The publisher client has no delete scope, and a
+// provider cannot exist without a credential, so the key is OVERWRITTEN with a
+// value that authenticates nowhere and says why to anyone reading the provider.
+const clearedProviderCredential = "cleared-by-aep:model-connection-not-on-api.anthropic.com"
 
 // ampAgentRegistrar satisfies provisioning.AgentRegistrar: the BUILD-TIME half
 // of agent governance, reached from the version's `provision` gate.

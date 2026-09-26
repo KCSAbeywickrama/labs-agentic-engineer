@@ -36,6 +36,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 )
 
@@ -149,8 +150,9 @@ func (s *AgentSettingsService) probe(ctx context.Context, ocOrgID string, p orgc
 // and never decide whether the save happened.
 func (s *AgentSettingsService) apply(ctx context.Context, ocOrgID, actor string, p orgconfig.ConfigPatch) error {
 	var (
-		eff       cardEffects
-		forgotten = map[AnthropicRole]string{} // role → SM-API ref name of a deleted credential
+		eff           cardEffects
+		before, after *modelconn.Connection        // the org's connection either side of the save
+		forgotten     = map[AnthropicRole]string{} // role → SM-API ref name of a deleted credential
 	)
 	err := s.card.Tx(ctx, func(tx AgentsCardTx) error {
 		if err := tx.AdvisoryLock("org_anthropic:" + ocOrgID); err != nil {
@@ -163,6 +165,7 @@ func (s *AgentSettingsService) apply(ctx context.Context, ocOrgID, actor string,
 		if eff, err = judgeCard(state, s.runtimes, p); err != nil {
 			return err
 		}
+		before, after = connectionsAround(state, eff)
 		// Deletes first: the token goes before the key it sits beside.
 		for _, del := range []struct {
 			on   bool
@@ -221,8 +224,8 @@ func (s *AgentSettingsService) apply(ctx context.Context, ocOrgID, actor string,
 	}
 	if eff.writeKey != "" {
 		s.creds.mirrorKey(ctx, ocOrgID, AnthropicRoleDefault, eff.writeKey)
-		s.creds.publishModelKey(ctx, ocOrgID, eff.writeKey)
 	}
+	s.creds.syncModelProvider(ctx, ocOrgID, before, after, eff.writeKey)
 	if eff.writeToken != "" {
 		s.creds.mirrorKey(ctx, ocOrgID, AnthropicRoleCoding, eff.writeToken)
 	}

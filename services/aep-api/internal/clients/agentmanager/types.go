@@ -64,6 +64,9 @@ type Config struct {
 type Client interface {
 	ProviderTemplate(ctx context.Context, org, template string) (ProviderTemplate, error)
 	EnsureProvider(ctx context.Context, in EnsureProviderInput) (ProviderRef, error)
+	// UpdateProviderCredential writes in.APIKey onto an EXISTING provider and
+	// never creates one; found is false when the org has none.
+	UpdateProviderCredential(ctx context.Context, in EnsureProviderInput) (found bool, err error)
 	EnsureAgent(ctx context.Context, in EnsureAgentInput) (AgentRef, error)
 	EnsureModelConfig(ctx context.Context, in EnsureModelConfigInput) (ModelConfigRef, error)
 	ListModelKeys(ctx context.Context, in ModelKeyRef) ([]string, error)

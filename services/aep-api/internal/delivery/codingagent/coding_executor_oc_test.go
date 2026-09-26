@@ -65,8 +65,12 @@ func (f fakeOrgRepo) SetThunderOrgUUID(context.Context, string, uuid.UUID) error
 // with.
 type fakeCodingKey struct {
 	ref   organization.SecretRefTriplet
+	kind  organization.CodingCredentialKind
 	err   error
 	asked *orgconfig.AgentRuntime
+	// conn is the connection both answers are for; the zero value means
+	// Anthropic's own API, the only connection an org can save today.
+	conn *modelconn.Connection
 
 	// The DEFAULT-role key is a separate answer to a separate question: which
 	// credential the build's EVALUATION step bills. It is not always the same
@@ -80,12 +84,51 @@ func (f fakeCodingKey) ResolveCodingCredential(_ context.Context, _ string, runt
 	if f.asked != nil {
 		*f.asked = runtime
 	}
-	conn := modelconn.Connection{Format: modelconn.FormatAnthropic, Host: modelconn.AnthropicHost}
-	return organization.CodingCredential{Conn: conn, Ref: f.ref}, f.err
+	kind := f.kind
+	if kind == "" {
+		kind = organization.CodingCredentialConnectionKey
+	}
+	return organization.CodingCredential{Conn: f.connection(), Ref: f.ref, Kind: kind}, f.err
 }
 
 func (f fakeCodingKey) KeyRef(context.Context, string) (modelconn.Connection, organization.SecretRefTriplet, error) {
-	return modelconn.Connection{}, f.defaultRef, f.defaultErr
+	return f.connection(), f.defaultRef, f.defaultErr
+}
+
+func (f fakeCodingKey) connection() modelconn.Connection {
+	if f.conn != nil {
+		return *f.conn
+	}
+	return firstPartyConnection()
+}
+
+// firstPartyConnection is the connection ModelConnectionService builds today:
+// Anthropic's own API, the key as x-api-key, no limits stated.
+func firstPartyConnection() modelconn.Connection {
+	return modelconn.Connection{
+		Format:     modelconn.FormatAnthropic,
+		BaseURL:    modelconn.AnthropicBaseURL,
+		Host:       modelconn.AnthropicHost,
+		Model:      orgconfig.DefaultAgentModel,
+		AuthScheme: modelconn.AuthXAPIKey,
+		ImageInput: modelconn.Yes,
+	}
+}
+
+// ollamaConnection is a connection on another host: Ollama Cloud's
+// OpenAI-compatible endpoint, the key as a Bearer token, limits resolved.
+func ollamaConnection() modelconn.Connection {
+	window, output := 131072, 32768
+	return modelconn.Connection{
+		Format:        modelconn.FormatOpenAICompatible,
+		BaseURL:       "https://ollama.com/v1",
+		Host:          modelconn.OllamaHost,
+		Model:         "gpt-oss:20b",
+		AuthScheme:    modelconn.AuthBearer,
+		ContextWindow: &window,
+		OutputLimit:   &output,
+		ImageInput:    modelconn.No,
+	}
 }
 
 type fakeGitHubCreds struct {
@@ -118,7 +161,6 @@ func fullSecretRefs() (fakeCodingKey, *organization.OrgCredential) {
 		Name:     "acme-anthropic-secrets",
 		KVPath:   "user-app-secrets/wc-acme/acme-anthropic-secrets",
 		Property: "api-key",
-		EnvVar:   "ANTHROPIC_API_KEY",
 	}
 	return fakeCodingKey{ref: defaultRef, defaultRef: defaultRef}, &organization.OrgCredential{
 		SecretRefName:     strPtr("acme-github-pat-secrets"),
@@ -203,12 +245,11 @@ func anthropicSecretEnv(t *testing.T, in openchoreo.WorkloadInput, secretRefName
 }
 
 // TestDispatch_AnthropicAPIKey_MountsAsAnthropicAPIKeyEnvVar pins ADR-0016's
-// rule for the OC path: a Console API key credential rides the Job as
-// ANTHROPIC_API_KEY, named by the resolver's EnvVar rather than hardcoded here.
+// rule for the OC path: a connection key on Anthropic's own API rides the Job
+// as ANTHROPIC_API_KEY, the name every Job carried before the connection.
 func TestDispatch_AnthropicAPIKey_MountsAsAnthropicAPIKeyEnvVar(t *testing.T) {
 	rec := &chainRecorder{}
 	anthropic, github := fullSecretRefs()
-	anthropic.ref.EnvVar = "ANTHROPIC_API_KEY"
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
 	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
@@ -230,7 +271,7 @@ func TestDispatch_AnthropicAPIKey_MountsAsAnthropicAPIKeyEnvVar(t *testing.T) {
 func TestDispatch_AnthropicOAuthToken_MountsAsClaudeCodeOAuthTokenEnvVar(t *testing.T) {
 	rec := &chainRecorder{}
 	anthropic, github := fullSecretRefs()
-	anthropic.ref.EnvVar = "CLAUDE_CODE_OAUTH_TOKEN"
+	anthropic.kind = organization.CodingCredentialClaudeSubscription
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
 	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
@@ -592,7 +633,6 @@ func TestDispatch_MountsTheOrgDefaultKeyForEvaluation(t *testing.T) {
 		Name:     "acme-anthropic-default-secrets",
 		KVPath:   "user-app-secrets/wc-acme/acme-anthropic-default-secrets",
 		Property: "api-key",
-		EnvVar:   "ANTHROPIC_API_KEY",
 	}
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
@@ -623,7 +663,7 @@ func TestDispatch_MountsTheOrgDefaultKeyForEvaluation(t *testing.T) {
 func TestDispatch_EvaluationKeyRidesItsOwnVariable(t *testing.T) {
 	rec := &chainRecorder{}
 	anthropic, github := fullSecretRefs()
-	anthropic.ref.EnvVar = "CLAUDE_CODE_OAUTH_TOKEN"
+	anthropic.kind = organization.CodingCredentialClaudeSubscription
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
 	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
@@ -666,7 +706,7 @@ func TestDispatch_NoDefaultKeyConnected_StillDispatches(t *testing.T) {
 func TestDispatch_IncompleteKeyRef_IsNotMounted(t *testing.T) {
 	rec := &chainRecorder{}
 	anthropic, github := fullSecretRefs()
-	anthropic.defaultRef = organization.SecretRefTriplet{Name: "acme-anthropic-secrets", EnvVar: "ANTHROPIC_API_KEY"}
+	anthropic.defaultRef = organization.SecretRefTriplet{Name: "acme-anthropic-secrets"}
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
 	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))

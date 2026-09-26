@@ -118,28 +118,21 @@ func (c *client) EnsureProvider(ctx context.Context, in EnsureProviderInput) (Pr
 	}
 	path := fmt.Sprintf("/orgs/%s/llm-providers", url.PathEscape(in.Org))
 
-	var existing struct {
-		Providers []struct {
-			UUID string `json:"uuid"`
-			ID   string `json:"id"`
-		} `json:"providers"`
-	}
-	if err := c.do(ctx, tok, http.MethodGet, path, nil, &existing); err != nil {
+	uuid, found, err := c.findProvider(ctx, tok, in.Org, in.ID)
+	if err != nil {
 		return ProviderRef{}, err
 	}
-	for _, p := range existing.Providers {
-		if p.ID == in.ID {
-			// It exists. Re-assert the org's key only when the caller says it
-			// changed — the key is masked on read, so the caller is the only
-			// one that can know, and a needless PUT redeploys every proxy this
-			// provider serves. See EnsureProviderInput.ReassertCredential.
-			if in.ReassertCredential {
-				if err := c.updateProviderCredential(ctx, tok, p.UUID, in); err != nil {
-					return ProviderRef{}, err
-				}
+	if found {
+		// It exists. Re-assert the org's key only when the caller says it
+		// changed — the key is masked on read, so the caller is the only one
+		// that can know, and a needless PUT redeploys every proxy this provider
+		// serves. See EnsureProviderInput.ReassertCredential.
+		if in.ReassertCredential {
+			if err := c.updateProviderCredential(ctx, tok, uuid, in); err != nil {
+				return ProviderRef{}, err
 			}
-			return ProviderRef{UUID: p.UUID, Handle: p.ID, Context: in.Context}, nil
 		}
+		return ProviderRef{UUID: uuid, Handle: in.ID, Context: in.Context}, nil
 	}
 
 	body := map[string]any{
@@ -168,6 +161,43 @@ func (c *client) EnsureProvider(ctx context.Context, in EnsureProviderInput) (Pr
 		created.ID = in.ID
 	}
 	return ProviderRef{UUID: created.UUID, Handle: created.ID, Context: in.Context}, nil
+}
+
+// UpdateProviderCredential writes in.APIKey onto the org's provider when it
+// exists, and creates nothing when it does not: found reports which. It is the
+// write a credential change makes on a provider some deploy created, where
+// EnsureProvider's create branch would conjure a provider no agent is bound to.
+func (c *client) UpdateProviderCredential(ctx context.Context, in EnsureProviderInput) (bool, error) {
+	tok, err := c.token(ctx, scopeProvider)
+	if err != nil {
+		return false, err
+	}
+	uuid, found, err := c.findProvider(ctx, tok, in.Org, in.ID)
+	if err != nil || !found {
+		return false, err
+	}
+	return true, c.updateProviderCredential(ctx, tok, uuid, in)
+}
+
+// findProvider looks the org's provider up by its handle. The list is the only
+// lookup the API offers by handle; a provider's own resource is keyed by UUID.
+func (c *client) findProvider(ctx context.Context, token, org, id string) (string, bool, error) {
+	var existing struct {
+		Providers []struct {
+			UUID string `json:"uuid"`
+			ID   string `json:"id"`
+		} `json:"providers"`
+	}
+	path := fmt.Sprintf("/orgs/%s/llm-providers", url.PathEscape(org))
+	if err := c.do(ctx, token, http.MethodGet, path, nil, &existing); err != nil {
+		return "", false, err
+	}
+	for _, p := range existing.Providers {
+		if p.ID == id {
+			return p.UUID, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // updateProviderCredential writes the org's current key onto an existing

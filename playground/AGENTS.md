@@ -126,6 +126,13 @@ it and lets the SDK use the developer's own credentials — the ones `claude log
 wrote — so a local tuning loop bills your subscription, not the platform's key.
 `code --host --api-key` opts back into key auth.
 
+The same `AEP_MODEL_*` variables put a **coding** run on that connection, shaped
+as a dispatch stamps it (`codingConnectionEnv`): the connection forwarded by
+name, `AEP_MODEL_WEB_SEARCH` derived as aep-api would when you set none, and
+`AEP_MODEL_API_KEY` as the ONE credential — no Anthropic key follows the run to
+another host, and `AEP_CODING_ANTHROPIC_KEY` does not apply. The runner image
+must carry the adapters (`FORCE=1 make build-runner`).
+
 `AEP_CODING_ANTHROPIC_KEY` bills **coding** runs to a separate credential — the
 local half of the platform's per-org coding-agent key (ADR-0016). It takes
 either a Console API key (`sk-ant-api…`) or a `claude setup-token` OAuth token

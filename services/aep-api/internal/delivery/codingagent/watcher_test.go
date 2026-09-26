@@ -604,6 +604,24 @@ func TestTick_ProviderLimitWithNoResetOnAValidationCycle(t *testing.T) {
 	}
 }
 
+// The provider is named by the host the cycle was dispatched on, not by the
+// runner's report: the platform's own record of which connection the Job
+// mounted wins, and the report is only the fallback for an unstamped cycle.
+func TestTick_ProviderLimitNamesTheDispatchedHost(t *testing.T) {
+	rt := providerLimitedPod(`{"v":2,"seq":8,"ts":"2026-09-26T10:05:00Z","agentId":"lead","kind":"run_settled","outcome":"failure",` +
+		`"code":"provider_limit","host":"proxy.example.com"}`)
+	row := dispatchedCycle("c13", time.Minute)
+	row.ModelHost = "ollama.com"
+	cycles := newWatchedCycles(row)
+	failures := &recordingFailures{}
+
+	newTestWatcher(rt, cycles).WithRunFailures(failures).Tick(context.Background())
+
+	if len(failures.failures) != 1 || failures.failures[0].Host != "ollama.com" {
+		t.Fatalf("record = %+v, want the cycle's dispatched host", failures.failures)
+	}
+}
+
 // A failed settle with no code is agent death, exactly as before: no record,
 // and the pod's own reason on the cycle.
 func TestTick_AFailedSettleWithoutTheCodeIsStillAgentDeath(t *testing.T) {

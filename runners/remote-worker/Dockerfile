@@ -362,6 +362,28 @@ RUN cd "$AEP_AGENT_EVAL_HOME" \
          "@libsql/linux-${LIBSQL_ARCH}-gnu@${LIBSQL_VERSION}" \
     && chmod -R a+rX "$AEP_AGENT_EVAL_HOME"
 
+# ─── aep-web: the platform's web search as an MCP server ─────────────────────
+# packages/web-search, reached as the `web-search` NAMED BUILD CONTEXT for the
+# same reason as the harness above: a pod holds no monorepo. A run whose model
+# connection searches through Ollama's API (no runtime runs that itself) is
+# offered `aep-web` by src/lib/aep_web.ts, which finds it through
+# AEP_WEB_SEARCH_SERVER. It is the SAME implementation the spec agents' web
+# search runs, so the two cannot drift.
+#
+# Bundled into one dependency-free ESM file with the esbuild `npm ci` installed
+# above (the package has no dependencies; its sources are all it needs), so a
+# pod runs it with plain `node` — no compile at task time, and no tsconfig from
+# the project a run happens to be working in. Before the runner's sources, so a
+# runner edit does not rebuild it.
+ENV AEP_WEB_SEARCH_HOME=/opt/aep/web-search
+ENV AEP_WEB_SEARCH_SERVER=${AEP_WEB_SEARCH_HOME}/aep-web.mjs
+COPY --from=web-search src ${AEP_WEB_SEARCH_HOME}/src
+RUN /app/node_modules/.bin/esbuild "$AEP_WEB_SEARCH_HOME/src/aep-web.ts" \
+        --bundle --platform=node --format=esm --target=node22 --log-level=warning \
+        --outfile="$AEP_WEB_SEARCH_SERVER" \
+    && test -s "$AEP_WEB_SEARCH_SERVER" \
+    && chmod -R a+rX "$AEP_WEB_SEARCH_HOME"
+
 # .dockerignore excludes node_modules/dist/.git/etc so we never ship a
 # duplicate of the dependency tree the previous step already produced.
 # --chown writes ownership directly into the layer instead of a trailing

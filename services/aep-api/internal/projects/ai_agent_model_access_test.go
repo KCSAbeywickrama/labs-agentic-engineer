@@ -34,10 +34,23 @@ import (
 // --- SyncProjectModelAccess (the builds-green sweep) --------------------------
 
 // fakeKeyResolver serves a canned org key triplet.
-type fakeKeyResolver struct{ triplet organization.SecretRefTriplet }
+type fakeKeyResolver struct {
+	triplet organization.SecretRefTriplet
+	// conn is the connection the key is for; nil means Anthropic's own API,
+	// the only connection an org can save today.
+	conn *modelconn.Connection
+}
 
 func (f fakeKeyResolver) KeyRef(context.Context, string) (modelconn.Connection, organization.SecretRefTriplet, error) {
-	return modelconn.Connection{}, f.triplet, nil
+	if f.conn != nil {
+		return *f.conn, f.triplet, nil
+	}
+	return modelconn.Connection{Format: modelconn.FormatAnthropic, BaseURL: modelconn.AnthropicBaseURL, Host: modelconn.AnthropicHost}, f.triplet, nil
+}
+
+// ollamaConnection is a connection generated agents cannot run on yet.
+func ollamaConnection() *modelconn.Connection {
+	return &modelconn.Connection{Format: modelconn.FormatOpenAICompatible, BaseURL: "https://ollama.com/v1", Host: modelconn.OllamaHost}
 }
 
 // fakeSecretRefClient accepts any SecretReference upsert. GetSecretReference
@@ -304,6 +317,42 @@ func TestModelAccessEnvVars_PrefersTheAMPBinding(t *testing.T) {
 	// the agent sends `x-api-key` and Agent Manager's proxy rejects the turn.
 	if got := byKey[modelAPIKeyHeaderEnvVar].Value; got != ampModelAPIKeyHeader {
 		t.Errorf("MODEL_API_KEY_HEADER = %q, want %q", got, ampModelAPIKeyHeader)
+	}
+}
+
+// The interim gate: generated agents are written against Anthropic's API, so
+// on any other connection an ai-agent starts unconfigured (503 from /healthz)
+// rather than being handed a key for a host its client never calls — on the
+// direct path AND the governed one, whose provider holds a copy of that key.
+// No SecretReference is read or pointed at the other host's key.
+func TestModelAccessEnvVars_NonAnthropicConnectionStartsUnconfigured(t *testing.T) {
+	for _, governed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "direct", true: "governed"}[governed], func(t *testing.T) {
+			var touched []string
+			sr := &namespaceCapturingSecretRefClient{seen: &touched}
+			svc := NewComponentService(
+				&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
+				fakeKeyResolver{
+					triplet: organization.SecretRefTriplet{Name: "model-default", KVPath: "user-app-secrets/acme/model", Property: "api-key"},
+					conn:    ollamaConnection(),
+				},
+				sr,
+			).(*componentService)
+			if governed {
+				svc.SetAIGatewayBindings(fakeAIGatewayBindings{})
+			}
+
+			got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+			if err != nil {
+				t.Fatalf("a connection generated agents cannot use is not an error: %v", err)
+			}
+			if len(got) != 0 {
+				t.Fatalf("ai-agent env = %+v, want none", got)
+			}
+			if len(touched) != 0 {
+				t.Fatalf("SecretReference calls in %v, want none", touched)
+			}
+		})
 	}
 }
 

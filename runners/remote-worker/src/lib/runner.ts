@@ -49,11 +49,12 @@ import {
 // and test already imports it from.
 export type { RunResult } from "./run_loop.js";
 import { createRunWatchdog } from "./progress/watchdog.js";
-import { stagedSecretValues, webSearchDenial } from "./websearch_dlp.js";
+import { stagedSecretValues, WEBSEARCH_DENIAL_MESSAGE, webSearchDenial } from "./websearch_dlp.js";
 import { allowsWriteOutsideProject } from "./workspace_guard.js";
 import { staticTokenSource, type AccessTokenSource } from "./auth_retry.js";
 import { webFetchDenial } from "./webfetch_guard.js";
 import { readModelConnection } from "./model_connection.js";
+import { mountAepWeb } from "./aep_web.js";
 import { createProviderLimits } from "./provider_limit.js";
 import {
   CODING_WORKFLOW_SKILL,
@@ -356,13 +357,40 @@ export async function startCodingRun(
   // here instead.
   const terminator = createRunTerminator();
 
+  // The whole appendix, in the one order the `aep` skill can be read in — see
+  // systemPromptAppend. The glossary is the runtime's text, appended last, and
+  // nothing may follow it. What the lead's context was built from is said once
+  // on the feed, and the exact appendix kept beside runtime.log
+  // (lib/run_context.ts).
+  const preloadBodies = systemPromptAppend(workflowBodies, perTaskSkills?.pinnedBodies ?? "", runtime.toolGlossary());
+  emit({
+    kind: "notice",
+    level: "info",
+    detail: skillsNotice(alwaysOnSkills(req.taskKind), perTaskSkills?.pinnedSkillNames ?? [], skills),
+  });
+  writePromptAppendix(log.dir, preloadBodies);
+
+  // The organization's model and connection, stamped onto the Workload by the
+  // dispatcher. Absent for a dispatch made before the settings existed, and
+  // for the playground — both then get exactly the run they had.
+  const connection = readModelConnection(runtime.defaultModel);
+  // The platform's own web search, when the connection's strategy is one no
+  // runtime runs (lib/aep_web.ts). It refuses a staged secret with the same
+  // rule and the same sentence as every other search path.
+  const aepWeb = mountAepWeb({
+    connection,
+    env: childEnv,
+    deniedValues: stagedSecrets,
+    denialMessage: WEBSEARCH_DENIAL_MESSAGE,
+  });
+  if (aepWeb.reason) {
+    emit({ kind: "notice", level: "warn", detail: `[web search] off for this run: ${aepWeb.reason}` });
+  }
+
   const policy: RuntimePolicy = {
     workspace: layout.workspace,
     env: childEnv,
-    // The organization's model and connection, stamped onto the Workload by the
-    // dispatcher. Absent for a dispatch made before the settings existed, and
-    // for the playground — both then get exactly the run they had.
-    connection: readModelConnection(runtime.defaultModel),
+    connection,
     taskKind: req.taskKind,
     // Absent on a normal run, which is what keeps a prompt-bearing debug log out
     // of the cluster — see DispatchRequest.debug.
@@ -379,31 +407,14 @@ export async function startCodingRun(
     // The whole platform list: a one-shot pod has no interactive user, no
     // scheduler, no durable session and no peer, whatever the runtime.
     deniedCapabilities: DENIED_CAPABILITIES,
-    webSearch: { deny: webSearchDenial(stagedSecrets) },
-    webFetch: { deny: webFetchDenial(stagedSecrets) },
-    skills: {
-      dir: mirrorDir(layout.workspace),
-      allow: skills,
-      // The whole appendix, in the one order the `aep` skill can be read in —
-      // see systemPromptAppend. The glossary is the runtime's text, appended
-      // last, and nothing may follow it.
-      preloadBodies: systemPromptAppend(
-        workflowBodies,
-        perTaskSkills?.pinnedBodies ?? "",
-        runtime.toolGlossary(),
-      ),
+    webSearch: {
+      deny: webSearchDenial(stagedSecrets),
+      ...(aepWeb.mount ? { server: aepWeb.mount.server } : {}),
     },
+    webFetch: { deny: webFetchDenial(stagedSecrets) },
+    skills: { dir: mirrorDir(layout.workspace), allow: skills, preloadBodies },
     ...buildMcpPolicy(req, layout, terminator, mcpAuth),
   };
-
-  // What the lead's context was built from, said once on the feed, and the
-  // exact appendix kept beside runtime.log (lib/run_context.ts).
-  emit({
-    kind: "notice",
-    level: "info",
-    detail: skillsNotice(alwaysOnSkills(req.taskKind), perTaskSkills?.pinnedSkillNames ?? [], skills),
-  });
-  writePromptAppendix(log.dir, policy.skills.preloadBodies);
 
   let session: RuntimeSession;
   try {
@@ -420,6 +431,7 @@ export async function startCodingRun(
     // failures, and there is no loop yet to collide with (see run_loop.ts).
     const msg = err instanceof Error ? err.message : String(err);
     emit({ kind: "notice", level: "error", detail: cap(`[runtime] ${runtime.name} did not start: ${msg}`, MAX_REPORT) });
+    aepWeb.mount?.close();
     throw err;
   }
 
@@ -479,6 +491,8 @@ export async function startCodingRun(
       process.removeListener("SIGINT", onTerminate);
       log.close();
       await session.close();
+      // After the session: its runtime may still hold the server open.
+      aepWeb.mount?.close();
     }
   })();
 

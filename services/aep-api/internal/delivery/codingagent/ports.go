@@ -86,13 +86,6 @@ type SecretRef struct {
 	SecretRefName string
 	KVPath        string
 	Property      string
-
-	// EnvVar is the env var name the runner reads this secret under. Empty
-	// means the caller supplies its own fixed name (e.g. GITHUB_TOKEN); the
-	// Anthropic credential sets this from organization.SecretRefTriplet.EnvVar
-	// because exactly which of ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN
-	// applies is the organization domain's decision, not dispatch's.
-	EnvVar string
 }
 
 // ExternalResourceSecretInputs is one external resource's per-env secret bundle

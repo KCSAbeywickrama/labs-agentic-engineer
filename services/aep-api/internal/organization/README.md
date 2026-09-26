@@ -87,10 +87,15 @@ services, the raw connect-callback controller, and the S2S credentials-refresh.*
     `secret_ref_*` triplet, so a failed mirror fails dispatch closed instead of mounting the previous
     credential; a deleted credential's copy is deleted after commit, and an orphaned copy is
     accepted (nothing reads it, the next save of that role overwrites it).
-  - Exactly one credential variable reaches a coding run: the persisted `credential_kind` picks
-    `ANTHROPIC_API_KEY` xor `CLAUDE_CODE_OAUTH_TOKEN`. `ResolveCodingCredential(ctx, org, runtime)` is
-    the single statement of which: the subscription only on `claude-code`, else the API key, failing
-    closed on an unusable subscription. Every other reader is default-only.
+  - Exactly one credential reaches a coding run. `ResolveCodingCredential(ctx, org, runtime)` is
+    the single statement of which: the subscription only on `claude-code`, else the connection key,
+    failing closed on an unusable subscription. It answers with a kind and the connection, never a
+    variable name; dispatch (`codingagent/model_env.go`) maps that to the runner's env. Every other
+    reader is default-only.
+  - Generated agents run only where `modelconn.CapabilitiesOf` says `GeneratedAgents` (Anthropic's
+    own API) until their follow-up. On any other connection the Agent Manager provider gets no key,
+    and its copy of the previous one is cleared once, after commit, on the save that moved off
+    (`syncModelProvider`); ai-agent components start unconfigured and builds run without evaluation.
 - **The model connection is read only through `ModelConnectionService`** (`model_connection_service.go`):
   a `modelconn.Connection` (format, base URL, host, model, auth scheme) beside the key's bytes
   (`Effective`), its vault reference (`KeyRef`) or the coding credential (`ResolveCodingCredential`).

@@ -53,7 +53,9 @@ test("childEnvironment: the policy's env, the runtime's four flags, and the guar
     probe: "/t/p",
   });
   assert.equal(env.PATH, "/bin");
-  assert.equal(env.ANTHROPIC_API_KEY, "k");
+  // The key under the one name the config references, whatever the dispatch called it.
+  assert.equal(env.AEP_MODEL_API_KEY, "k");
+  assert.equal(env.ANTHROPIC_API_KEY, undefined);
   for (const flag of [
     "OPENCODE_DISABLE_PROJECT_CONFIG",
     "OPENCODE_DISABLE_AUTOUPDATE",

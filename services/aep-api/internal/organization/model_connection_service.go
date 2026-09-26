@@ -85,19 +85,14 @@ type CodingCredential struct {
 }
 
 // SecretRefTriplet is a resolved SM-API secret reference: the name plus the
-// vault coordinates an ExternalSecret's remoteRef needs, and the env var the
-// materialised value must land under.
+// vault coordinates an ExternalSecret's remoteRef needs. Which variable a
+// coding run receives it under is not this domain's to say: it says only which
+// KIND of credential it is (CodingCredential.Kind), and dispatch maps that to
+// the runner's env contract.
 type SecretRefTriplet struct {
 	Name     string
 	KVPath   string
 	Property string
-
-	// EnvVar is the name a coding run must receive this credential as —
-	// ANTHROPIC_API_KEY for a Console API key, CLAUDE_CODE_OAUTH_TOKEN for a
-	// Claude subscription token. Carried here rather than re-derived at the
-	// mount site because the secret bytes are never read on that path, so
-	// nothing downstream can tell the two apart on its own.
-	EnvVar string
 }
 
 // ModelConnectionService — see file doc.
@@ -124,6 +119,13 @@ func (s *ModelConnectionService) connection(ctx context.Context, ocOrgID string)
 	if err != nil {
 		return modelconn.Connection{}, err
 	}
+	return storedConnection(model), nil
+}
+
+// storedConnection is the connection the org's rows describe around its model:
+// every connection an org can save today is Anthropic's own API, the key sent
+// as x-api-key.
+func storedConnection(model string) modelconn.Connection {
 	return modelconn.Connection{
 		Format:     modelconn.FormatAnthropic,
 		BaseURL:    modelconn.AnthropicBaseURL,
@@ -131,7 +133,7 @@ func (s *ModelConnectionService) connection(ctx context.Context, ocOrgID string)
 		Model:      model,
 		AuthScheme: modelconn.AuthXAPIKey,
 		ImageInput: modelconn.Yes,
-	}, nil
+	}
 }
 
 // Effective returns the connection and its key when the org's key row is
@@ -270,7 +272,6 @@ func tripletFrom(row *OrgAnthropicCredential) (SecretRefTriplet, error) {
 		Name:     derefOrEmpty(row.SecretRefName),
 		KVPath:   derefOrEmpty(row.SecretRefKVPath),
 		Property: derefOrEmpty(row.SecretRefProperty),
-		EnvVar:   row.CredentialKind.RunnerEnvVar(),
 	}
 	switch {
 	case ref.Name == "":

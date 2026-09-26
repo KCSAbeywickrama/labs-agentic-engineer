@@ -18,7 +18,13 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { InvalidModelConnectionError, readModelConnection } from "./model_connection.js";
+import {
+  FALLBACK_CONTEXT_WINDOW,
+  InvalidModelConnectionError,
+  connectionKey,
+  onAnthropicAPI,
+  readModelConnection,
+} from "./model_connection.js";
 
 // A Job dispatched before the connection env existed must run exactly as it did.
 test("readModelConnection: no AEP_MODEL_* is Anthropic's own API on the runtime's default model", () => {
@@ -91,4 +97,32 @@ test("readModelConnection: a refused base URL is named by its host, never echoed
     () => readModelConnection("claude-sonnet-5", { AEP_MODEL_BASE_URL: "http://user:hunter2@ollama.com/v1" }),
     (err: Error) => err.message.includes('"ollama.com"') && !err.message.includes("hunter2"),
   );
+});
+
+// A connection named without a window (the playground's) still states one off
+// Anthropic's API, so neither runtime runs an open model with no compaction.
+test("readModelConnection: off Anthropic's API a missing context window is the platform's fallback", () => {
+  const ollama = { AEP_MODEL_FORMAT: "openai-compatible", AEP_MODEL_BASE_URL: "https://ollama.com/v1" };
+  assert.equal(readModelConnection("m", ollama).contextWindow, FALLBACK_CONTEXT_WINDOW);
+  assert.equal(readModelConnection("m", { ...ollama, AEP_MODEL_CONTEXT_WINDOW: "40000" }).contextWindow, 40000);
+  // Anthropic's format on another host is not Anthropic's API.
+  assert.equal(
+    readModelConnection("m", { AEP_MODEL_FORMAT: "anthropic", AEP_MODEL_BASE_URL: "https://ollama.com" }).contextWindow,
+    FALLBACK_CONTEXT_WINDOW,
+  );
+  assert.equal(readModelConnection("m", {}).contextWindow, undefined, "on Anthropic's API the runtimes know Claude's");
+});
+
+test("onAnthropicAPI: the Anthropic format on api.anthropic.com, and nothing else", () => {
+  assert.equal(onAnthropicAPI({ format: "anthropic", host: "api.anthropic.com" }), true);
+  assert.equal(onAnthropicAPI({ format: "anthropic", host: "ollama.com" }), false);
+  assert.equal(onAnthropicAPI({ format: "openai-compatible", host: "api.anthropic.com" }), false);
+});
+
+// Upgrade skew: a Job from the aep-api before the connection mounts the key as
+// ANTHROPIC_API_KEY and nothing else, and must still find its key.
+test("connectionKey: AEP_MODEL_API_KEY, else the ANTHROPIC_API_KEY an older dispatch mounts", () => {
+  assert.equal(connectionKey({ ANTHROPIC_API_KEY: "sk-ant-api03-old-dispatch" }), "sk-ant-api03-old-dispatch");
+  assert.equal(connectionKey({ AEP_MODEL_API_KEY: "ollama-key-0123456789" }), "ollama-key-0123456789");
+  assert.equal(connectionKey({ AEP_MODEL_API_KEY: " ", CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-token" }), undefined);
 });

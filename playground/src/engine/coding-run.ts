@@ -72,6 +72,7 @@ import {
 import { createAgentTags, type AgentTags } from "./agent-tags.js";
 import { openCrewPane } from "./crew-pane.js";
 import { REPO_ROOT } from "../paths.js";
+import { codingConnectionEnv } from "../kit/model-connection.js";
 import { DEFAULT_RUNTIME, runtimeNameFromEnv, UnsupportedRuntimeError, type RuntimeName } from "remote-worker/src/runtime/port.js";
 
 const LOCAL_ENTRY = join(REPO_ROOT, "runners", "remote-worker", "src", "local.ts");
@@ -555,6 +556,9 @@ export function hostInvocation(opts: CodingRunOptions, runDir: string): Invocati
   // resolves to is reported by `hostToolAdvice`, not patched here.
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    // A connection named by `AEP_MODEL_*` rides as a dispatch stamps it; its key
+    // is the developer's `AEP_MODEL_API_KEY`, already in this env.
+    ...codingConnectionEnv(),
     AEP_LOCAL_PROJECT_DIR: opts.projectDir,
     AEP_LOCAL_RUN_DIR: runDir,
     AEP_LOCAL_SKILLS_DIR: opts.skillsDir,
@@ -636,9 +640,12 @@ export function dockerInvocation(opts: CodingRunOptions, runDir: string, contain
   // Forward exactly ONE credential variable — the one this run will actually
   // authenticate with. Passing both names would hand the container a developer's
   // subscription token even on runs that bill the API key (which outranks it),
-  // putting a secret somewhere it is never read.
-  const coding = codingCredential();
-  const credentialVar = coding?.envVar ?? "ANTHROPIC_API_KEY";
+  // putting a secret somewhere it is never read. A connection named by
+  // `AEP_MODEL_*` authenticates with ITS key, as a dispatch mounts it — never an
+  // Anthropic credential, which must not follow the run to another host.
+  const connection = codingConnectionEnv();
+  const coding = connection ? undefined : codingCredential();
+  const credentialVar = connection ? "AEP_MODEL_API_KEY" : (coding?.envVar ?? "ANTHROPIC_API_KEY");
   const toolJar = toolJarOverlay();
   const args = [
     "run",
@@ -683,6 +690,7 @@ export function dockerInvocation(opts: CodingRunOptions, runDir: string, contain
     `AEP_LOCAL_SKILLS_DIR=${IMAGE_LIBRARY_DIR}`,
     // By name, like the credential: docker forwards each only when it is set.
     ...FORWARDED_AGENT_SETTINGS.flatMap((name) => ["-e", name]),
+    ...Object.keys(connection ?? {}).flatMap((name) => ["-e", name]),
     runnerImage(runtimeNameFromEnv()),
     "npx",
     "tsx",
@@ -692,7 +700,9 @@ export function dockerInvocation(opts: CodingRunOptions, runDir: string, contain
   // OWN environment, so the secret never lands in an argv that any user on the
   // machine can read out of `ps`.
   let env = process.env;
-  if (coding) {
+  if (connection) {
+    env = { ...process.env, ...connection };
+  } else if (coding) {
     env = { ...process.env };
     applyCodingCredential(env, coding);
   }
@@ -826,7 +836,9 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
   const progressLog = createWriteStream(join(runDir, "progress.ndjson"), { flags: "w" });
 
   const mode = opts.mode ?? "docker";
-  const resolved = resolveRuntime(mode, codingCredential());
+  // A connection named by AEP_MODEL_* runs on its own key; the coding
+  // credential is not in play, so it cannot be what refuses the runtime.
+  const resolved = resolveRuntime(mode, codingConnectionEnv() ? undefined : codingCredential());
   if ("refusal" in resolved) {
     progressLog.end();
     if (!opts.silent) output.write(`  ✗ ${resolved.refusal}\n`);

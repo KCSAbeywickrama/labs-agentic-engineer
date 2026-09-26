@@ -374,6 +374,68 @@ func TestEnsureProviderReassertsTheKeyWhenItExists(t *testing.T) {
 	}
 }
 
+// UpdateProviderCredential rewrites the key on a provider that exists and
+// creates nothing when none does: the credential write a Settings change makes
+// must not conjure a provider no deploy asked for.
+func TestUpdateProviderCredentialWritesOnlyAnExistingProvider(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		providers []map[string]any
+		wantFound bool
+	}{
+		{name: "exists", providers: []map[string]any{{"uuid": "prov-uuid", "id": "aep-default-anthropic"}}, wantFound: true},
+		{name: "absent", providers: []map[string]any{{"uuid": "other", "id": "someone-elses"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var put map[string]any
+			putPath := ""
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/oauth2/token"):
+					_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "t", "expires_in": 3600})
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/llm-providers"):
+					_ = json.NewEncoder(w).Encode(map[string]any{"providers": tc.providers})
+				case r.Method == http.MethodPut:
+					putPath = r.URL.Path
+					_ = json.NewDecoder(r.Body).Decode(&put)
+					_ = json.NewEncoder(w).Encode(map[string]any{})
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer srv.Close()
+
+			c := New(Config{BaseURL: srv.URL, TokenURL: srv.URL + "/oauth2/token"})
+			found, err := c.UpdateProviderCredential(context.Background(), EnsureProviderInput{
+				Org: "default", ID: "aep-default-anthropic", Name: "AEP Default Anthropic",
+				Version: "v1.0", Context: "/aep-default-anthropic", Template: "anthropic",
+				UpstreamURL: "https://api.anthropic.com", AuthType: "api-key",
+				AuthHeader: "x-api-key", APIKey: "cleared", GatewayID: "gw-1",
+			})
+			if err != nil {
+				t.Fatalf("UpdateProviderCredential: %v", err)
+			}
+			if found != tc.wantFound {
+				t.Fatalf("found = %v, want %v", found, tc.wantFound)
+			}
+			if !tc.wantFound {
+				if putPath != "" {
+					t.Fatalf("wrote %s for a provider that does not exist", putPath)
+				}
+				return
+			}
+			if !strings.HasSuffix(putPath, "/llm-providers/prov-uuid") {
+				t.Fatalf("PUT path = %q, want the provider's own resource", putPath)
+			}
+			auth := put["upstream"].(map[string]any)["main"].(map[string]any)["auth"].(map[string]any)
+			if auth["value"] != "cleared" {
+				t.Errorf("upstream auth value = %v, want the caller's", auth["value"])
+			}
+		})
+	}
+}
+
 // The token endpoint is reached through a gateway that routes by Host.
 //
 // Without this the request carries the URL's own host — an internal address

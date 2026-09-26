@@ -268,7 +268,7 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 	if err != nil {
 		return delivery.AgentLaunch{}, err
 	}
-	anthropicSR, githubSR := creds.model, creds.github
+	githubSR := creds.github
 	disp := in.shape
 	platform := strings.TrimRight(e.platformURL, "/")
 	env := map[string]string{
@@ -303,14 +303,22 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 	}
 	env[envAgentRuntime] = string(agent.Runtime)
 	env[envAgentModel] = agent.Model
+	// The model connection the credential is for, copied onto the run beside
+	// the model for the same reason: a run in flight keeps the endpoint its
+	// usage is billed against.
+	connEnv, modelKeyVar := modelEnv(creds.model)
+	for k, v := range connEnv {
+		env[k] = v
+	}
 	// Only a validation cycle is issue-anchored, so only it can name an issue.
 	// Absent rather than "0" for every other kind: the runner reads presence, and
 	// a stamped zero would be a number it has to know is not one.
 	if disp.validationIssue > 0 {
 		env[envValidationIssue] = strconv.Itoa(disp.validationIssue)
 	}
+	modelRef := creds.model.Ref
 	secretEnv := []SecretEnvRef{
-		{Key: anthropicEnvVarOrDefault(anthropicSR.EnvVar), SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
+		{Key: modelKeyVar, SecretName: modelRef.Name, SecretKey: modelRef.Property},
 		{Key: envGitHubToken, SecretName: githubSR.SecretRefName, SecretKey: githubSR.Property},
 	}
 	if evalSR, ok := e.evaluationKeyRef(ctx, in.orgID); ok {
@@ -339,7 +347,7 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 	if err != nil {
 		return delivery.AgentLaunch{}, err
 	}
-	return delivery.AgentLaunch{JobRef: jobRef, ModelHost: creds.conn.Host}, nil
+	return delivery.AgentLaunch{JobRef: jobRef, ModelHost: creds.model.Conn.Host}, nil
 }
 
 // stageBuildSecret pre-stages the org's build git credential and returns the
@@ -397,35 +405,26 @@ func (e *CodingExecutor) RetryAuthFailedBuild(ctx context.Context, row *delivery
 	return run.Name, nil
 }
 
-// runnerCredentials is what every coding run mounts, and the model connection
-// its model credential is for.
+// runnerCredentials is what every coding run mounts: the model credential,
+// with the connection it is for and its kind, and the org's GitHub credential.
 type runnerCredentials struct {
-	model  SecretRef
+	model  organization.CodingCredential
 	github SecretRef
-	conn   modelconn.Connection
 }
 
 // resolveRunnerSecretRefs resolves the two credentials every coding run mounts.
 //
-// The Anthropic side asks the organization domain WHICH credential a run on
+// The model side asks the organization domain WHICH credential a run on
 // runtime bills — its Claude subscription when it has one and the runtime is
-// Claude Code, its API key otherwise — and mounts whatever comes back under the
-// variable name that came back WITH it, since a subscription token has to
-// arrive as CLAUDE_CODE_OAUTH_TOKEN rather than ANTHROPIC_API_KEY. The runner
-// therefore needs no notion of the choice at all; it reads whichever of the two
-// is present. The resolver fails closed on a configured-but-unusable
-// subscription, so a run never silently bills API credits an org chose to
-// replace with its plan.
+// Claude Code, the connection's key otherwise — and which connection it is
+// for. The domain answers in its own terms (a kind, never a variable name);
+// modelEnv maps that to the runner's env contract. The resolver fails closed
+// on a configured-but-unusable subscription, so a run never silently bills API
+// credits an org chose to replace with its plan.
 func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID string, runtime orgconfig.AgentRuntime) (runnerCredentials, error) {
 	cred, err := e.anthropicKey.ResolveCodingCredential(ctx, orgID, runtime)
 	if err != nil {
 		return runnerCredentials{}, fmt.Errorf("coding dispatch: %w", err)
-	}
-	anthropicSR := SecretRef{
-		SecretRefName: cred.Ref.Name,
-		KVPath:        cred.Ref.KVPath,
-		Property:      cred.Ref.Property,
-		EnvVar:        cred.Ref.EnvVar,
 	}
 
 	githubRow, err := e.githubCreds.GetByOrg(ctx, orgID)
@@ -443,37 +442,47 @@ func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID stri
 	if err := validateSecretRefTriplet("github", orgID, githubSR); err != nil {
 		return runnerCredentials{}, fmt.Errorf("coding dispatch: %w", err)
 	}
-	return runnerCredentials{model: anthropicSR, github: githubSR, conn: cred.Conn}, nil
+	return runnerCredentials{model: cred, github: githubSR}, nil
 }
 
-// evaluationKeyRef resolves the org's DEFAULT Anthropic key as the build's
+// evaluationKeyRef resolves the org's connection key as the build's
 // agent-evaluation credential, reporting whether there is one to mount.
 //
 // A build that generates an ai-agent evaluates it before opening its PR, and
 // that step needs a model twice over — once for the agent it boots, once for the
 // judge that grades it. Both are API calls, so the credential has to be an API
-// key; the default key always is (ADR-0036), while the coding credential may be
-// a Claude subscription token that authenticates neither.
+// key; the connection's key always is (ADR-0036), while the coding credential
+// may be a Claude subscription token that authenticates neither.
+//
+// Only on a connection generated agents can run on (Anthropic's own API, until
+// their follow-up lifts the gate): the harness and its judge speak Anthropic's
+// API with the key as `x-api-key`, so another host's key would not reach them
+// and would reach a host they never meant to call.
 //
 // An unresolvable key is NOT a dispatch failure, which is the one thing that
 // makes this different from every other credential here. Evaluation reports; it
-// never fails a build. An org that has connected no key still gets its work done
-// and its PR opened — the evaluation step simply reports that it could not run —
+// never fails a build. An org with no usable key still gets its work done and
+// its PR opened — the evaluation step simply reports that it could not run —
 // so a missing key must not cost the org a delivery. It is logged rather than
 // swallowed silently, because "the harness never became ready" is otherwise a
 // puzzling thing to read in a build report.
 func (e *CodingExecutor) evaluationKeyRef(ctx context.Context, orgID string) (SecretEnvRef, bool) {
-	_, triplet, err := e.anthropicKey.KeyRef(ctx, orgID)
+	conn, triplet, err := e.anthropicKey.KeyRef(ctx, orgID)
 	if err != nil {
-		slog.InfoContext(ctx, "coding dispatch: no default Anthropic key — the build will run without agent evaluation",
+		slog.InfoContext(ctx, "coding dispatch: no model connection key — the build will run without agent evaluation",
 			"org", orgID, "error", err)
+		return SecretEnvRef{}, false
+	}
+	if !modelconn.CapabilitiesOf(conn).GeneratedAgents {
+		slog.InfoContext(ctx, "coding dispatch: agent evaluation needs Anthropic's API — the build will run without it",
+			"org", orgID, "host", conn.Host)
 		return SecretEnvRef{}, false
 	}
 	// A half-mirrored row resolves to a triplet ESO cannot follow. Mounting it
 	// would put the variable on the pod pointing at nothing, and the harness
 	// would report the agent as misbehaving rather than as unconfigured.
 	if triplet.Name == "" || triplet.Property == "" {
-		slog.WarnContext(ctx, "coding dispatch: default Anthropic secret reference is incomplete — the build will run without agent evaluation",
+		slog.WarnContext(ctx, "coding dispatch: the connection key's secret reference is incomplete — the build will run without agent evaluation",
 			"org", orgID)
 		return SecretEnvRef{}, false
 	}
@@ -496,17 +505,6 @@ func (e *CodingExecutor) codingAgentEnv(ctx context.Context, orgID string) (orgc
 		return orgconfig.AgentsProjection{}, fmt.Errorf("coding dispatch: coding-agent setting for org %q: %w", orgID, err)
 	}
 	return proj, nil
-}
-
-// anthropicEnvVarOrDefault names the Job's Anthropic SecretEnv entry from
-// organization.SecretRefTriplet.EnvVar (ANTHROPIC_API_KEY or
-// CLAUDE_CODE_OAUTH_TOKEN — ADR-0036), falling back to the runner's default
-// only if a resolver ever returns the zero value.
-func anthropicEnvVarOrDefault(envVar string) string {
-	if envVar == "" {
-		return envAnthropicAPIKey
-	}
-	return envVar
 }
 
 func validateSecretRefTriplet(credential, orgID string, ref SecretRef) error {

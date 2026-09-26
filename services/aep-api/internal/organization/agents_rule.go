@@ -35,6 +35,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 )
 
@@ -56,6 +57,34 @@ type cardEffects struct {
 	deleteSettings bool
 	writeToken     string
 	deleteToken    bool
+}
+
+// connectionsAround is the org's model connection on either side of a save,
+// nil where it has none: what the Agent Manager provider's copy of the key
+// follows (syncModelProvider). The connection is derived from the rows the
+// card writes, so whether a key is held and which model is set are the whole
+// of it today; a saved connection row replaces this derivation.
+func connectionsAround(s cardState, eff cardEffects) (before, after *modelconn.Connection) {
+	modelBefore := orgconfig.DefaultAgentModel
+	if s.settings != nil {
+		modelBefore = s.settings.Model
+	}
+	if s.hasKey {
+		conn := storedConnection(modelBefore)
+		before = &conn
+	}
+	modelAfter := modelBefore
+	switch {
+	case eff.settings != nil:
+		modelAfter = eff.settings.Model
+	case eff.deleteSettings:
+		modelAfter = orgconfig.DefaultAgentModel
+	}
+	if eff.writeKey != "" || (s.hasKey && !eff.deleteKey) {
+		conn := storedConnection(modelAfter)
+		after = &conn
+	}
+	return before, after
 }
 
 // judgeCard decides what p does to an org in state s, on an installation that

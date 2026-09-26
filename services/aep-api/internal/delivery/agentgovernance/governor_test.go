@@ -69,6 +69,12 @@ func (f *fakeAMP) ProviderTemplate(context.Context, string, string) (agentmanage
 	}, nil
 }
 
+// UpdateProviderCredential is the organization domain's write, never the
+// governor's: a deploy that reached it would be a regression.
+func (f *fakeAMP) UpdateProviderCredential(context.Context, agentmanager.EnsureProviderInput) (bool, error) {
+	panic("the governor must not write a provider credential outside EnsureProvider")
+}
+
 func (f *fakeAMP) EnsureProvider(_ context.Context, in agentmanager.EnsureProviderInput) (agentmanager.ProviderRef, error) {
 	f.calls++
 	f.providerIn = in

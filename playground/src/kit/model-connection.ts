@@ -97,3 +97,34 @@ export function playgroundModel(env: NodeJS.ProcessEnv = process.env): Playgroun
     },
   };
 }
+
+/** The plain `AEP_MODEL_*` variables a coding run's connection rides on, as a dispatch stamps them. */
+const CONNECTION_VARS = [
+  "AEP_MODEL_FORMAT",
+  "AEP_MODEL_BASE_URL",
+  "AEP_MODEL_AUTH_SCHEME",
+  "AEP_MODEL_CONTEXT_WINDOW",
+  "AEP_MODEL_OUTPUT_LIMIT",
+] as const;
+
+/**
+ * The connection env a local CODING run is given, or undefined when no
+ * `AEP_MODEL_*` names one (the run is then on Anthropic's own API, as always).
+ *
+ * The developer's variables, plus the search strategy aep-api would stamp
+ * (`capabilitiesOf`), unless one was set by hand: a dispatch always carries it,
+ * and a run without it would take the runner's default — Anthropic's server
+ * tool — on a host that cannot run it. The key is not in here: it is forwarded
+ * by name, as `AEP_MODEL_API_KEY` (`engine/coding-run.ts`).
+ */
+export function codingConnectionEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> | undefined {
+  if (!(env.AEP_MODEL_FORMAT ?? "").trim() && !(env.AEP_MODEL_BASE_URL ?? "").trim()) return undefined;
+  const conn = readModelConnection(config.model, env);
+  const out: Record<string, string> = {};
+  for (const name of CONNECTION_VARS) {
+    const value = (env[name] ?? "").trim();
+    if (value !== "") out[name] = value;
+  }
+  out.AEP_MODEL_WEB_SEARCH = (env.AEP_MODEL_WEB_SEARCH ?? "").trim() || capabilitiesOf(conn.format, conn.host).webSearch;
+  return out;
+}

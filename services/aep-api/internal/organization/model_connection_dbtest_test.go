@@ -156,17 +156,17 @@ func TestResolveCodingCredential_NoSubscription_UsesTheKey_DB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if cred.Ref.KVPath != "user-app-secrets/wc-acme/acme-anthropic" || cred.Ref.EnvVar != "ANTHROPIC_API_KEY" ||
+	if cred.Ref.KVPath != "user-app-secrets/wc-acme/acme-anthropic" ||
 		cred.Kind != organization.CodingCredentialConnectionKey {
 		t.Fatalf("no subscription must resolve to the API key, got %+v", cred)
 	}
 	wantAnthropic(t, cred.Conn, orgconfig.DefaultAgentModel)
 }
 
-// The whole reason the kind is persisted: dispatch reads the row, never the
-// bytes, so this is the only thing that can tell it which variable to mount.
-// Getting it wrong means Claude Code ignores the token (ANTHROPIC_API_KEY
-// outranks CLAUDE_CODE_OAUTH_TOKEN) and bills the API key in silence.
+// Dispatch reads the row, never the bytes, so the resolved kind is the only
+// thing that can tell it which variable to mount. Getting it wrong means Claude
+// Code ignores the token (ANTHROPIC_API_KEY outranks CLAUDE_CODE_OAUTH_TOKEN)
+// and bills the API key in silence.
 func TestResolveCodingCredential_SubscriptionOnClaudeCode_DB(t *testing.T) {
 	t.Parallel()
 	c := newCardDB(t, http.StatusOK)
@@ -176,7 +176,7 @@ func TestResolveCodingCredential_SubscriptionOnClaudeCode_DB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if cred.Ref.EnvVar != "CLAUDE_CODE_OAUTH_TOKEN" || cred.Ref.KVPath != "user-app-secrets/wc-acme/acme-anthropic-coding" ||
+	if cred.Ref.KVPath != "user-app-secrets/wc-acme/acme-anthropic-coding" ||
 		cred.Kind != organization.CodingCredentialClaudeSubscription {
 		t.Fatalf("a Claude Code run must mount the subscription, got %+v", cred)
 	}
@@ -193,7 +193,7 @@ func TestResolveCodingCredential_OpenCodeNeverGetsTheSubscription_DB(t *testing.
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if cred.Ref.EnvVar != "ANTHROPIC_API_KEY" || cred.Ref.KVPath != "user-app-secrets/wc-acme/acme-anthropic" ||
+	if cred.Ref.KVPath != "user-app-secrets/wc-acme/acme-anthropic" ||
 		cred.Kind != organization.CodingCredentialConnectionKey {
 		t.Fatalf("an OpenCode run must mount the API key, got %+v", cred)
 	}
@@ -202,7 +202,7 @@ func TestResolveCodingCredential_OpenCodeNeverGetsTheSubscription_DB(t *testing.
 	// Claude Code run closed still leaves OpenCode on the API key.
 	stampTriplet(t, c.repo, "acme", organization.AnthropicRoleCoding, "", "", "")
 	cred, err = c.conns.ResolveCodingCredential(context.Background(), "acme", orgconfig.AgentRuntimeOpenCode)
-	if err != nil || cred.Ref.EnvVar != "ANTHROPIC_API_KEY" {
+	if err != nil || cred.Kind != organization.CodingCredentialConnectionKey {
 		t.Fatalf("a broken subscription reached an OpenCode run: cred=%+v err=%v", cred, err)
 	}
 }

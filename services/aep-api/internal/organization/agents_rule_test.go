@@ -256,3 +256,36 @@ func TestJudgeCard_BlankCredentialsAreRefused(t *testing.T) {
 	refusal(t, cardState{hasKey: true}, orgconfig.ConfigPatch{Agents: agentsWrite("", "", token("   "))},
 		"agents", "anthropic_key_missing")
 }
+
+// connectionsAround is what the Agent Manager provider's copy follows: the
+// connection on either side of a save, derived from the rows the card writes.
+func TestConnectionsAround(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		state                 cardState
+		eff                   cardEffects
+		wantBefore, wantAfter bool
+		wantModelAfter        string
+	}{
+		{name: "first connect", eff: cardEffects{writeKey: ruleKey}, wantAfter: true, wantModelAfter: orgconfig.DefaultAgentModel},
+		{name: "rotation", state: cardState{hasKey: true}, eff: cardEffects{writeKey: ruleKey}, wantBefore: true, wantAfter: true, wantModelAfter: orgconfig.DefaultAgentModel},
+		{name: "disconnect", state: cardState{hasKey: true}, eff: cardEffects{deleteKey: true}, wantBefore: true},
+		{
+			name:       "model change",
+			state:      cardState{hasKey: true, settings: onRuntime(orgconfig.AgentRuntimeClaudeCode)},
+			eff:        cardEffects{settings: &OrgAgentSettings{Runtime: orgconfig.AgentRuntimeClaudeCode, Model: "claude-haiku-4-5"}},
+			wantBefore: true, wantAfter: true, wantModelAfter: "claude-haiku-4-5",
+		},
+		{name: "no key either side", eff: cardEffects{deleteSettings: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before, after := connectionsAround(tc.state, tc.eff)
+			if (before != nil) != tc.wantBefore || (after != nil) != tc.wantAfter {
+				t.Fatalf("before=%v after=%v, want before=%v after=%v", before, after, tc.wantBefore, tc.wantAfter)
+			}
+			if after != nil && (after.Model != tc.wantModelAfter || after.Host != "api.anthropic.com") {
+				t.Fatalf("after = %+v, want Anthropic's API on %q", after, tc.wantModelAfter)
+			}
+		})
+	}
+}

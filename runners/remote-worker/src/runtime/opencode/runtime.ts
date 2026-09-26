@@ -41,14 +41,15 @@ import { withTimeout } from "../../lib/with_timeout.js";
 import { stagedSecretValues } from "../../lib/websearch_dlp.js";
 import type { Runtime, RuntimeArtifact, RuntimePolicy, RuntimeSession } from "../port.js";
 import { createOpencodeClassifier } from "./classify.js";
-import { buildOpencodeConfig } from "./config.js";
 import { pumpEvents } from "./event_queue.js";
 import { obj, str } from "../fields.js";
 import { GUARD_ENV, STARTUP_PROBE_PROMPT } from "./plugin/protocol.js";
 import { freePort, startServer, type RunningServer } from "./server.js";
 import { createStreamCloser, sessionStream } from "./settle.js";
 import { OpencodeStartupError, startupProblems, type PermissionRuleRecord } from "./startup.js";
-import { PRIMARY_AGENT, PROVIDER_ID } from "./tools.js";
+import { connectionKey } from "../../lib/model_connection.js";
+import { PRIMARY_AGENT, providerId } from "./tools.js";
+import { buildOpencodeConfig, CONNECTION_KEY_ENV } from "./config.js";
 import { createOpencodeAdapter } from "./translate.js";
 
 /** The model an OpenCode run bills to when the org has not chosen: the platform's priced default. */
@@ -95,13 +96,23 @@ interface RunFiles {
  * the guard's inputs. The one place those flags are set, for every run path.
  * A leaked background flag is passed through, not removed: `startup.ts` fails
  * the run on it, where removing it would hide the leak.
+ *
+ * The connection key is carried under ONE name, the one the config references
+ * (`CONNECTION_KEY_ENV`), whichever name the dispatch mounted it under; an
+ * ANTHROPIC_API_KEY beside it would be a second credential the server could
+ * pick up on its own.
  */
 export function childEnvironment(
   policy: Pick<RuntimePolicy, "workspace" | "env" | "logDir">,
   files: Pick<RunFiles, "secrets" | "ready" | "instructions" | "probe">,
 ): Record<string, string> {
+  const env = { ...policy.env };
+  const key = connectionKey(env);
+  delete env.ANTHROPIC_API_KEY;
+  delete env[CONNECTION_KEY_ENV];
+  if (key !== undefined) env[CONNECTION_KEY_ENV] = key;
   return {
-    ...policy.env,
+    ...env,
     OPENCODE_DISABLE_PROJECT_CONFIG: "1",
     OPENCODE_DISABLE_AUTOUPDATE: "1",
     OPENCODE_DISABLE_MODELS_FETCH: "1",
@@ -172,7 +183,7 @@ async function probeSystemTransform(client: OpencodeClient, policy: RuntimePolic
           path: { id },
           body: {
             agent: PRIMARY_AGENT,
-            model: { providerID: PROVIDER_ID, modelID: policy.connection.model },
+            model: { providerID: providerId(policy.connection), modelID: policy.connection.model },
             parts: [{ type: "text", text: STARTUP_PROBE_PROMPT }],
           },
         })
@@ -194,7 +205,7 @@ async function assertStartup(client: OpencodeClient, policy: RuntimePolicy, file
   // A project request boots the instance, which is what loads plugins.
   await client.config.get();
   const guardReady = await waitForFile(files.ready, GUARD_READY_TIMEOUT_MS);
-  const tools = await client.tool.list({ query: { provider: PROVIDER_ID, model: policy.connection.model } });
+  const tools = await client.tool.list({ query: { provider: providerId(policy.connection), model: policy.connection.model } });
   const agents = await client.app.agents();
   const aep = (agents.data ?? []).find((a) => a.name === PRIMARY_AGENT) as { permission?: unknown } | undefined;
   const rules = Array.isArray(aep?.permission) ? (aep.permission as PermissionRuleRecord[]) : undefined;
@@ -258,10 +269,10 @@ export interface BootedServer {
  * checked model-free (the image's verification drives exactly this).
  */
 export async function bootOpencode(policy: RuntimePolicy, opts: OpencodeRuntimeOptions = {}): Promise<BootedServer> {
-  // An API key is the only credential OpenCode runs on; refused before a spawn.
-  if (!policy.env.ANTHROPIC_API_KEY) {
+  // The connection key is the only credential OpenCode runs on; refused before a spawn.
+  if (connectionKey(policy.env) === undefined) {
     throw new OpencodeStartupError([
-      "OpenCode authenticates with ANTHROPIC_API_KEY and this run has none — an OAuth coding token cannot run OpenCode",
+      "OpenCode authenticates with the connection's key (AEP_MODEL_API_KEY, or ANTHROPIC_API_KEY on Anthropic's API) and this run has none — an OAuth coding token cannot run OpenCode",
     ]);
   }
 
@@ -295,12 +306,13 @@ export async function bootOpencode(policy: RuntimePolicy, opts: OpencodeRuntimeO
     }
 
     const config = buildOpencodeConfig({
-      model: policy.connection.model,
+      connection: policy.connection,
       instructionsPath: files.instructions,
       pluginDir: opts.pluginDir ?? OPENCODE_GUARD_DIR,
       skillAllow: policy.skills.allow,
       deniedCapabilities: policy.deniedCapabilities,
       ...(mcpUrl ? { mcpUrl } : {}),
+      ...(policy.webSearch.server ? { webSearchServer: policy.webSearch.server } : {}),
       debug: policy.debug,
     });
 
@@ -378,7 +390,7 @@ async function startOpencodeSession(
       path: { id: rootId },
       body: {
         agent: PRIMARY_AGENT,
-        model: { providerID: PROVIDER_ID, modelID: policy.connection.model },
+        model: { providerID: providerId(policy.connection), modelID: policy.connection.model },
         parts: [{ type: "text", text: prompt }],
       },
     });

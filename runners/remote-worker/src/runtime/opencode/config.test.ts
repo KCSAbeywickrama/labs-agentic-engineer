@@ -18,9 +18,29 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readModelConnection, type ModelConnection } from "../../lib/model_connection.js";
 import { DENIED_CAPABILITIES } from "../port.js";
-import { allowlist, buildOpencodeConfig, type OpencodeConfigInput } from "./config.js";
-import { deniedTools, opencodeModel, platformModel } from "./tools.js";
+import { allowlist, buildOpencodeConfig, providerConfig, type OpencodeConfigInput } from "./config.js";
+import { deniedTools, opencodeModel, platformModel, providerId } from "./tools.js";
+
+/** Anthropic's own API on the org's model — what every run was before the connection. */
+function firstParty(model = "claude-sonnet-5"): ModelConnection {
+  return readModelConnection(model, {});
+}
+
+/** Ollama's OpenAI-compatible endpoint, as a dispatch stamps it. */
+function ollama(over: Record<string, string> = {}): ModelConnection {
+  return readModelConnection("claude-sonnet-5", {
+    AEP_AGENT_MODEL: "gpt-oss:20b",
+    AEP_MODEL_FORMAT: "openai-compatible",
+    AEP_MODEL_BASE_URL: "https://ollama.com/v1",
+    AEP_MODEL_AUTH_SCHEME: "bearer",
+    AEP_MODEL_CONTEXT_WINDOW: "131072",
+    AEP_MODEL_OUTPUT_LIMIT: "32768",
+    AEP_MODEL_WEB_SEARCH: "ollama-api",
+    ...over,
+  });
+}
 
 /** The config as the tests read it — the builder's return is deliberately loose. */
 interface ConfigView {
@@ -35,7 +55,7 @@ function config(over: Partial<OpencodeConfigInput> = {}): ConfigView {
 
 function input(over: Partial<OpencodeConfigInput> = {}): OpencodeConfigInput {
   return {
-    model: "claude-sonnet-5",
+    connection: firstParty(),
     instructionsPath: "/tmp/run/instructions.md",
     pluginDir: "/app/runtime/opencode/aep-guard",
     skillAllow: ["aep", "go"],
@@ -73,7 +93,8 @@ test("buildOpencodeConfig: the config, policy clause by clause", () => {
   assert.deepEqual(c.plugin, ["/app/runtime/opencode/aep-guard"]);
   assert.deepEqual(c.tools, { lsp: false });
   // The key is a reference the server resolves from its own env — never a value.
-  assert.deepEqual(c.provider, { anthropic: { options: { apiKey: "{env:ANTHROPIC_API_KEY}" } } });
+  assert.deepEqual(c.provider, { anthropic: { options: { apiKey: "{env:AEP_MODEL_API_KEY}" } } });
+  assert.equal(c.enabled_providers, undefined);
 
   assert.deepEqual(c.agent.aep, { mode: "primary", description: "AEP coding run lead" });
   assert.equal(c.agent.general.model, "anthropic/claude-sonnet-5");
@@ -103,7 +124,7 @@ test("buildOpencodeConfig: the config, policy clause by clause", () => {
 });
 
 test("buildOpencodeConfig: the org's model binds model, small_model and the subagent alike", () => {
-  const c = config({ model: "claude-haiku-4-5" });
+  const c = config({ connection: firstParty("claude-haiku-4-5") });
   assert.equal(c.model, "anthropic/claude-haiku-4-5");
   assert.equal(c.small_model, "anthropic/claude-haiku-4-5");
   assert.equal(c.agent.general.model, "anthropic/claude-haiku-4-5");
@@ -136,10 +157,79 @@ test("deniedTools: the capability classes map to OpenCode's one tool in them", (
   assert.deepEqual(deniedTools(["scheduling", "peer_messaging"]), []);
 });
 
-test("model spelling: platform id ↔ anthropic/ id, and anything else reported as is", () => {
-  assert.equal(opencodeModel("claude-sonnet-5"), "anthropic/claude-sonnet-5");
+test("model spelling: platform id ↔ <provider>/ id, and anything else reported as is", () => {
+  assert.equal(opencodeModel("anthropic", "claude-sonnet-5"), "anthropic/claude-sonnet-5");
+  assert.equal(opencodeModel("aep", "gpt-oss:20b"), "aep/gpt-oss:20b");
   assert.equal(platformModel("anthropic/claude-haiku-4-5"), "claude-haiku-4-5");
+  assert.equal(platformModel("aep/gpt-oss:20b"), "gpt-oss:20b");
   assert.equal(platformModel("claude-haiku-4-5"), "claude-haiku-4-5");
   // An unmapped id is left loud: it blanks the cycle's cost, which is the right failure.
   assert.equal(platformModel("openai/gpt-9"), "openai/gpt-9");
+});
+
+// SNAPSHOT — first party: the catalog provider, the key by reference, NO limits
+// (models.dev supplies Claude's, from the image's pre-warmed cache).
+test("providerConfig: on Anthropic's API, provider anthropic with the key and nothing else", () => {
+  assert.equal(providerId(firstParty()), "anthropic");
+  assert.deepEqual(providerConfig(firstParty()), { anthropic: { options: { apiKey: "{env:AEP_MODEL_API_KEY}" } } });
+});
+
+// SNAPSHOT — elsewhere: provider aep, which no catalog entry matches, so the
+// connection's limits are the only ones; a model with none is never compacted.
+test("providerConfig: on Ollama's OpenAI-compatible endpoint, provider aep with the connection's limits", () => {
+  assert.equal(providerId(ollama()), "aep");
+  assert.deepEqual(providerConfig(ollama()), {
+    aep: {
+      npm: "@ai-sdk/openai-compatible",
+      name: "AEP model connection (ollama.com)",
+      options: { baseURL: "https://ollama.com/v1", apiKey: "{env:AEP_MODEL_API_KEY}", includeUsage: true },
+      models: { "gpt-oss:20b": { name: "gpt-oss:20b", limit: { context: 131072, output: 32768 } } },
+    },
+  });
+});
+
+// Run live once on Ollama's Anthropic endpoint (the directed aep-web check).
+test("providerConfig: an Anthropic-format host other than Anthropic's API takes a Bearer key as authToken", () => {
+  const conn = ollama({ AEP_MODEL_FORMAT: "anthropic", AEP_MODEL_BASE_URL: "https://ollama.com/v1" });
+  assert.deepEqual(providerConfig(conn), {
+    aep: {
+      npm: "@ai-sdk/anthropic",
+      name: "AEP model connection (ollama.com)",
+      // With its /v1: the SDK appends `/messages` (a root URL answers 405 on Ollama).
+      options: { baseURL: "https://ollama.com/v1", authToken: "{env:AEP_MODEL_API_KEY}" },
+      models: { "gpt-oss:20b": { name: "gpt-oss:20b", limit: { context: 131072, output: 32768 } } },
+    },
+  });
+});
+
+test("providerConfig: limits the connection does not state fall back, so compaction stays on", () => {
+  const conn = readModelConnection("m", { AEP_MODEL_FORMAT: "openai-compatible", AEP_MODEL_BASE_URL: "https://llm.example.com/v1" });
+  const models = (providerConfig(conn).aep as { models: Record<string, { limit: unknown }> }).models;
+  assert.deepEqual(models.m?.limit, { context: 128000, output: 32000 });
+});
+
+test("buildOpencodeConfig: off Anthropic's API only the connection's provider loads, on its model", () => {
+  const c = config({ connection: ollama() });
+  assert.equal(c.model, "aep/gpt-oss:20b");
+  assert.equal(c.small_model, "aep/gpt-oss:20b");
+  assert.equal(c.agent.general.model, "aep/gpt-oss:20b");
+  assert.deepEqual(c.enabled_providers, ["aep"]);
+  // OpenCode's own search is off; the platform's aep-web is the search here.
+  assert.equal(c.permission.websearch, "deny");
+});
+
+test("buildOpencodeConfig: the aep-web server is a local MCP server beside the platform's", () => {
+  const c = config({
+    connection: ollama(),
+    mcpUrl: "http://127.0.0.1:4321/",
+    webSearchServer: { name: "aep-web", command: "/usr/local/bin/node", args: ["/opt/aep/web-search/aep-web.mjs", "/tmp/aep-web-x/config.json"], tool: "web_search" },
+  });
+  assert.deepEqual(c.mcp, {
+    aep: { type: "remote", url: "http://127.0.0.1:4321/", headers: { Authorization: "Bearer loopback" }, oauth: false },
+    "aep-web": {
+      type: "local",
+      command: ["/usr/local/bin/node", "/opt/aep/web-search/aep-web.mjs", "/tmp/aep-web-x/config.json"],
+      enabled: true,
+    },
+  });
 });

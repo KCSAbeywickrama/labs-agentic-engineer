@@ -272,12 +272,18 @@ func TestAnthropicResyncSecretRef_NoopCases_DB(t *testing.T) {
 type fakeModelProviderPublisher struct {
 	published string
 	calls     int
+	cleared   int
 	err       error
 }
 
 func (f *fakeModelProviderPublisher) PublishOrgModelKey(_ context.Context, _, apiKey string) error {
 	f.calls++
 	f.published = apiKey
+	return f.err
+}
+
+func (f *fakeModelProviderPublisher) ClearOrgModelKey(context.Context, string) error {
+	f.cleared++
 	return f.err
 }
 

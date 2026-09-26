@@ -103,6 +103,9 @@ build_target() {
     # again, for the agent-evaluation harness a build runs before opening an
     # ai-agent's PR. A build pod holds no monorepo, so the harness has to be in
     # the image or the step cannot run at all.
+    # --build-context web-search=<repo>/packages/web-search: and again, for the
+    # `aep-web` MCP server a run searches through when its model connection's
+    # search is Ollama's API.
     # --secret: never a --build-arg. Build args land in image history, and
     # release.yml publishes this image's builder stages to a public buildcache.
     # --target: always named. The Dockerfile's default (last) stage is the Claude
@@ -112,6 +115,7 @@ build_target() {
         --build-context "skills=$REPO_ROOT/skills" \
         --build-context "bal-library-tool=$BAL_TOOL_DIR" \
         --build-context "agent-eval=$REPO_ROOT/packages/agent-eval" \
+        --build-context "web-search=$REPO_ROOT/packages/web-search" \
         --secret "id=packagePAT,env=PACKAGE_PAT" \
         -f "$DOCKERFILE" -t "$tag" "$WORKER_DIR"
     echo "✅ built $tag"

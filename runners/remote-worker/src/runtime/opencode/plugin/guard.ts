@@ -31,8 +31,15 @@ import { obj, str } from "../../fields.js";
 import { allowsWriteOutsideProject, authoredPathDenial } from "../../../lib/workspace_guard.js";
 import { webFetchDenial } from "../../../lib/webfetch_guard.js";
 import { webSearchDenial } from "../../../lib/websearch_dlp.js";
-import { patchPaths } from "../tools.js";
+import { AEP_WEB_SERVER, AEP_WEB_TOOL } from "../../../lib/aep_web.js";
+import { opencodeMcpTool, patchPaths } from "../tools.js";
 import { WORKSPACE_GUARD_MARKER } from "./protocol.js";
+
+/**
+ * The platform's `aep-web` search tool, as OpenCode names it: refused by the
+ * same rule as `websearch`, ahead of the server's own check.
+ */
+const AEP_WEB_SEARCH_TOOL = opencodeMcpTool(AEP_WEB_SERVER, AEP_WEB_TOOL);
 
 /** Everything the decision depends on, captured once when the plugin loads. */
 export interface GuardInputs {
@@ -76,6 +83,7 @@ export function createGuardDecision(inputs: GuardInputs): GuardDecision {
         return null;
       }
       case "websearch":
+      case AEP_WEB_SEARCH_TOOL:
         return searchDenial(str(args.query));
       case "webfetch":
         return fetchDenial(str(args.url));

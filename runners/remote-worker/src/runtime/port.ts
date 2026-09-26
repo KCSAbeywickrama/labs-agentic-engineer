@@ -214,6 +214,24 @@ export interface McpPolicy {
   onFatal?(err: Error): void;
 }
 
+/**
+ * The platform's own web search, as a local MCP server a runtime spawns: the
+ * run's search when its connection's strategy is one the runtime cannot run
+ * itself (`ollama-api` today; `lib/aep_web.ts` builds it).
+ *
+ * A command, not a URL: it is a stdio server, and both runtimes spawn one the
+ * same way. Its arguments name a private file, never a credential — a runtime's
+ * MCP config can end up on a command line. `tool` is the BARE tool name, which
+ * each adapter namespaces its own way, exactly as for `McpPolicy.tools`.
+ */
+export interface WebSearchServer {
+  /** The server's key in the runtime's MCP config. */
+  name: string;
+  command: string;
+  args: readonly string[];
+  tool: string;
+}
+
 /** What a run may read, and what it starts with already read. */
 export interface SkillsPolicy {
   /** Absolute path of the `.claude/skills/` mirror in the project clone. */
@@ -276,8 +294,16 @@ export interface RuntimePolicy {
   logDir: string;
   write: WritePolicy;
   deniedCapabilities: readonly DeniedCapability[];
-  /** Deny a WebSearch query — a staged secret in it, today. */
-  webSearch: { deny: DenialReason };
+  /**
+   * How a run searches the web, and what a query may contain.
+   *
+   * `deny` gates every search path — a staged secret in a query, today.
+   * `server` is present when the platform supplies the search (the
+   * connection's strategy is not one the runtime runs itself); the runtime's
+   * own search is then off, as it is when the strategy is `none`. Which
+   * strategy applies is `connection.webSearch`.
+   */
+  webSearch: { deny: DenialReason; server?: WebSearchServer };
   /** Deny a WebFetch URL — SSRF, or a staged secret in it. */
   webFetch: { deny: DenialReason };
   skills: SkillsPolicy;

@@ -57,8 +57,19 @@ const FORMATS: readonly ModelFormat[] = ["anthropic", "openai-compatible"];
 const AUTH_SCHEMES: readonly ModelAuthScheme[] = ["x-api-key", "bearer"];
 const WEB_SEARCH_STRATEGIES: readonly WebSearchStrategy[] = ["anthropic-server-tool", "ollama-api", "none"];
 
-/** The connection a run gets when the dispatch stated none: Anthropic's own API. */
-const DEFAULT_BASE_URL = "https://api.anthropic.com/v1";
+/** Anthropic's own API: the host features are bound to, and the connection a run gets when the dispatch stated none. */
+const ANTHROPIC_HOST = "api.anthropic.com";
+const DEFAULT_BASE_URL = `https://${ANTHROPIC_HOST}/v1`;
+
+/**
+ * The context window a connection off Anthropic's API runs with when the
+ * dispatch stated none: the platform's own fallback when a provider publishes
+ * no figure (aep-api resolves it at save), applied here for a connection named
+ * by hand — the playground's. Without a window, OpenCode turns auto-compaction
+ * off and Claude Code assumes 200k for a model it does not know, and either
+ * ends a long open-model run at its provider's real limit.
+ */
+export const FALLBACK_CONTEXT_WINDOW = 128_000;
 
 /** A coding run's model connection. */
 export interface ModelConnection {
@@ -84,7 +95,10 @@ export interface ModelConnection {
    * so the settable list is narrower than the list a runtime can serve.
    */
   model: string;
-  /** Resolved at save; absent on `api.anthropic.com`, where the runtimes know Claude's. */
+  /**
+   * Resolved at save; absent on `api.anthropic.com`, where the runtimes know
+   * Claude's, and always present anywhere else (`FALLBACK_CONTEXT_WINDOW`).
+   */
   contextWindow?: number;
   /** Resolved at save; absent on `api.anthropic.com`. */
   outputLimit?: number;
@@ -122,18 +136,44 @@ export function readModelConnection(defaultModel: string, env: NodeJS.ProcessEnv
   const read = (key: string): string => (env[key] ?? "").trim();
 
   const baseURL = read("AEP_MODEL_BASE_URL") || DEFAULT_BASE_URL;
-  const contextWindow = positiveInt("AEP_MODEL_CONTEXT_WINDOW", read("AEP_MODEL_CONTEXT_WINDOW"));
+  const format = oneOf("AEP_MODEL_FORMAT", read("AEP_MODEL_FORMAT"), FORMATS, "anthropic");
+  const host = hostOf(baseURL);
+  const firstParty = format === "anthropic" && host === ANTHROPIC_HOST;
+  const contextWindow =
+    positiveInt("AEP_MODEL_CONTEXT_WINDOW", read("AEP_MODEL_CONTEXT_WINDOW")) ??
+    (firstParty ? undefined : FALLBACK_CONTEXT_WINDOW);
   const outputLimit = positiveInt("AEP_MODEL_OUTPUT_LIMIT", read("AEP_MODEL_OUTPUT_LIMIT"));
   return {
-    format: oneOf("AEP_MODEL_FORMAT", read("AEP_MODEL_FORMAT"), FORMATS, "anthropic"),
+    format,
     baseURL,
-    host: hostOf(baseURL),
+    host,
     authScheme: oneOf("AEP_MODEL_AUTH_SCHEME", read("AEP_MODEL_AUTH_SCHEME"), AUTH_SCHEMES, "x-api-key"),
     model: read("AEP_AGENT_MODEL") || defaultModel,
     ...(contextWindow !== undefined ? { contextWindow } : {}),
     ...(outputLimit !== undefined ? { outputLimit } : {}),
     webSearch: oneOf("AEP_MODEL_WEB_SEARCH", read("AEP_MODEL_WEB_SEARCH"), WEB_SEARCH_STRATEGIES, "anthropic-server-tool"),
   };
+}
+
+/**
+ * Whether the connection is Anthropic's own API — the Anthropic format on
+ * `api.anthropic.com`. The Anthropic format alone is not: Ollama serves it too,
+ * and a key or a feature bound to Anthropic must not follow the format there.
+ */
+export function onAnthropicAPI(conn: Pick<ModelConnection, "format" | "host">): boolean {
+  return conn.format === "anthropic" && conn.host === ANTHROPIC_HOST;
+}
+
+/**
+ * The connection key's value, from the variable the dispatch mounted it under:
+ * `AEP_MODEL_API_KEY`, or `ANTHROPIC_API_KEY` — the name a key on Anthropic's
+ * own API keeps, and the only one a Job from an aep-api older than the
+ * connection carries. Undefined when neither holds one (a Claude subscription,
+ * or no credential at all). Each adapter presents it under its own spelling.
+ */
+export function connectionKey(env: Readonly<Record<string, string | undefined>>): string | undefined {
+  const key = (env.AEP_MODEL_API_KEY ?? "").trim() || (env.ANTHROPIC_API_KEY ?? "").trim();
+  return key === "" ? undefined : key;
 }
 
 function oneOf<T extends string>(variable: string, raw: string, allowed: readonly T[], fallback: T): T {

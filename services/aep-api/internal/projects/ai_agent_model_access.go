@@ -41,6 +41,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/organization"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 )
 
 // ModelAccessEnvVars returns the MODEL_ENDPOINT / MODEL_NAME / MODEL_API_KEY
@@ -60,7 +61,28 @@ import (
 // before its first Settings visit is expected, not exceptional, and retrying
 // cannot conjure a key. The agent then starts unconfigured and agent-building's
 // contract is a 503 from /healthz until one is connected.
+//
+// So does an org whose model connection generated agents cannot run on: the
+// agent-building skill generates an Anthropic client, and the values below name
+// Anthropic's API, so another host's key would fail far from Settings. That
+// gate is lifted by generated agents' own follow-up, in modelconn.CapabilitiesOf.
 func (s *componentService) ModelAccessEnvVars(ctx context.Context, ocOrgID, component string) ([]openchoreo.WorkflowEnvVarRef, error) {
+	// Resolved first because it gates both paths below: a governed agent's
+	// provider holds a copy of this same key.
+	var (
+		triplet organization.SecretRefTriplet
+		keyErr  error
+	)
+	if s.modelKeyResolver != nil {
+		var conn modelconn.Connection
+		conn, triplet, keyErr = s.modelKeyResolver.KeyRef(ctx, ocOrgID)
+		if keyErr == nil && !modelconn.CapabilitiesOf(conn).GeneratedAgents {
+			slog.InfoContext(ctx, "model access: generated ai-agents need Anthropic's API for now — ai-agent components start unconfigured (agent-building reports 503 from /healthz)",
+				"org", ocOrgID, "component", component, "host", conn.Host)
+			return nil, nil
+		}
+	}
+
 	// An Agent-Manager-governed agent takes the AI gateway's endpoint and a key
 	// of its OWN. The org's Anthropic key is not copied into its namespace at
 	// all: it lives once, in Agent Manager's provider, and what the pod holds is
@@ -104,8 +126,7 @@ func (s *componentService) ModelAccessEnvVars(ctx context.Context, ocOrgID, comp
 		return nil, fmt.Errorf("model access not configured at the composition root")
 	}
 
-	_, triplet, err := s.modelKeyResolver.KeyRef(ctx, ocOrgID)
-	if err != nil {
+	if err := keyErr; err != nil {
 		var notFound *organization.NotFoundError
 		if errors.As(err, &notFound) {
 			slog.InfoContext(ctx, "model access: org has no connected Anthropic key yet — ai-agent components start unconfigured (agent-building reports 503 from /healthz until one is connected)",
