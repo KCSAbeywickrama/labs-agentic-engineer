@@ -40,7 +40,7 @@ services, the raw connect-callback controller, and the S2S credentials-refresh.*
 | Port | Dir | Peer · contract |
 |---|---|---|
 | `AppInstallOps` · `IssueService` | needs | `sourcecontrol` — App/PAT probes, disconnect issue cascade |
-| `CredentialStore` · `Resolver` · `AppTokenMinter` | needs | `platform/secrets` — sealed git-token/anthropic store, credential resolution |
+| `CredentialStore` · `Resolver` · `AppTokenMinter` | needs | `platform/secrets` — sealed git-token / model-key / subscription store, credential resolution |
 | `thundersvc` · `secretmanagersvc` | needs | publisher-app CRUD + OU check · secret-ref mirror |
 | `OrganizationService` · `CredentialService` · `AnthropicCredentialService` · `IDPService` | offers | `delivery` (coding identity/publisher) · `sourcecontrol` (credential resolution) · the edge (dev secret-ref resync) |
 | `ModelConnectionService` — `ConnectionReader` · `CodingCredentialResolver` | offers | the app root (the spec agents' and task planning's connection + key per turn; Agent Manager's provider key) · `projects` (ai-agent model access) · `delivery` (the coding credential and the connection's model; the evaluation key) |
@@ -51,7 +51,11 @@ services, the raw connect-callback controller, and the S2S credentials-refresh.*
 ## Owns
 - `organizations` (+ `thunder_org_uuid`, `llm_disconnected_at`), `org_credentials`,
   `org_model_connections` (one row per org, absent = no connection: format, base URL, host, model, auth
-  scheme, probed limits and image input, key preview; the key's bytes in `org_secrets` `anthropic/key`),
+  scheme, probed limits and image input, key preview; the key's bytes in `org_secrets` `model/key`,
+  mirrored to SM-API under the entity `model-connection`; orgs connected before the rename still hold
+  `anthropic/key` and entity `anthropic` until `ModelKeyRename` moves them — `migrate/phase20_model_key_rename`
+  copies the bytes at boot, the watcher uploads the new mirror and switches the row under `org_model:<org>`,
+  and the old copies go only on a periodic pass (never at boot) once the org has no open cycle),
   `org_anthropic_credentials` (the optional `coding` Claude subscription only — CHECK
   `org_anthropic_credentials_subscription_only`), `org_agent_settings` (the runtime; one row per org,
   absent = the platform default), `organization_idp_profiles` + `idp_audit_events` — gorm + entities in
@@ -64,11 +68,11 @@ services, the raw connect-callback controller, and the S2S credentials-refresh.*
 - **This domain is FAIL-LOUD**, not nil-tolerant: a nil collaborator panics, unlike sourcecontrol's
   503 — the edge assigns it directly, no `OrEmpty`.
 - The `/config` PATCH is an **atomic multi-section** apply; sections are three-state `patch.Field`.
-- **The AI agents card** (`llm` + `agents`, [ADR-0036](../../../../docs/decisions/ADR-0036-the-coding-credential-is-a-subscription.md)):
-  - One save is ONE transaction under the per-org advisory locks `org_anthropic:<org>` then
-    `org_model:<org>` (both names, old then new, so replicas of different releases never hold
-    different locks), covering the connection row, the subscription row, `org_agent_settings` and the
-    `org_secrets` bytes (`repository_agents_card.go`). A failure anywhere writes nothing.
+- **The AI agents card** (`llm` + `agents`, [ADR-0038](../../../../docs/decisions/ADR-0038-an-organization-has-one-model-connection.md),
+  [ADR-0036](../../../../docs/decisions/ADR-0036-the-coding-credential-is-a-subscription.md)):
+  - One save is ONE transaction under the per-org advisory lock `org_model:<org>`, covering the
+    connection row, the subscription row, `org_agent_settings` and the `org_secrets` bytes
+    (`repository_agents_card.go`). A failure anywhere writes nothing.
     `AgentSettingsService` is the only writer of these rows.
   - `llm` is patched field by field (`model_connection_rule.go`): first connect needs `kind` and
     `apiKey` (the URL and model default from `modelconn.Formats`, so `{kind: anthropic, apiKey}`

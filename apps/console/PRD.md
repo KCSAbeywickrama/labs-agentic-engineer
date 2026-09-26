@@ -96,6 +96,22 @@ which is also what closes its issue. Newest first; links go to the feature's
 GitHub issue plus any ADRs it produced. Features still being built aren't
 here: they're the open `console` + `feature` issues.
 
+- Settings → AI agents and the welcome onboarding — **one model connection**
+  for every agent: API format (Anthropic Messages · OpenAI-compatible), base
+  URL (the format's default prefilled, still editable), key and a free-text
+  model with a per-format default, plus optional **Test connection**; Save
+  probes anyway. The info box and the Claude Code tile are drawn from the
+  server's `capabilities` and `priced` (where prompts go, pricing, web search,
+  attachments, the generated-agents gate); the Claude subscription is a token
+  field inside the Claude Code tile, offered only on Anthropic's own API.
+  Onboarding step 2 is **Connect a model**, the same card; a removed connection
+  re-gates with *Your model connection was disconnected*. The chat's attach
+  control follows `imageInput` and reads PDFs *as text* off Anthropic's API;
+  Usage shows *not priced · billed by \<host\>* for unpriced work. "Anthropic
+  key" is retired as a product word (`design/lexicon.md`)
+  ([root ADR-0038](../../docs/decisions/ADR-0038-an-organization-has-one-model-connection.md))
+  (contract: `llm` is the connection, patched field by field; `llmFormats`;
+  `POST /config/llm/test`; `agents.model` removed; usage rows gain `host`)
 - Deployments — the Development card reads as the flow: **Deployed →
   Validation → Promote to Production** as three numbered steps on one rail,
   each with its one action. Step 1 holds the rollout sentence, the components
@@ -506,6 +522,8 @@ here: they're the open `console` + `feature` issues.
   [#102](https://github.com/wso2/labs-agentic-engineer/issues/102)
   (BE handshake [#171](https://github.com/wso2/labs-agentic-engineer/issues/171);
   ADR-0009)
+  *Superseded: step 2 is now **Connect a model**, and the key belongs to the
+  model connection (root ADR-0038).*
 - Spec view — rich design rendering: component-grouped file list, whole-architecture
   cell diagram, per-component wireframes, and Swagger-style API Spec view
   (client-derived, read-only; no committed artifacts) —
@@ -514,7 +532,9 @@ here: they're the open `console` + `feature` issues.
   (browse/search/import/sync; no in-console authoring) —
   [#96](https://github.com/wso2/labs-agentic-engineer/issues/96) (BE
   handshake: [#100](https://github.com/wso2/labs-agentic-engineer/issues/100))
+  *Superseded: the Anthropic key is now the model connection's key (root ADR-0038).*
 - Settings → AI agents — one card, one Save: model, Anthropic API key, coding agent (Claude Code | OpenCode) and an optional Claude subscription on Claude Code (root ADR-0036)
+  *Superseded: the model and key moved into the model connection (root ADR-0038).*
 - Settings → Skills legacy parity — per-tab routes, categorised catalogue
   (org/platform/custom/imported), MD viewer + monospace editor with preview,
   upload-only import with pull-request guidance —

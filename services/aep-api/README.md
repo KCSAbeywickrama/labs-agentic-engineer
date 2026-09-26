@@ -53,7 +53,7 @@ datastore · `(["/surface"])` = an inbound HTTP surface.
 
 | Domain | Owns | Shape | README |
 |---|---|---|---|
-| **organization** | tenant onboarding + every per-org config (GitHub / Anthropic / IDP), behind `/config` | flat-root | [→](internal/organization/README.md) |
+| **organization** | tenant onboarding + every per-org config (GitHub / model connection / IDP), behind `/config` | flat-root | [→](internal/organization/README.md) |
 | **spec** | git-committed requirements+design spec, `v<N>` version tags, agent turns, the org Skill library | flat-root | [→](internal/spec/README.md) |
 | **delivery** | the version's **milestone run loop**: plan, dispatch the coding agent, merge, build, validate | kernel-root | [→](internal/delivery/README.md) |
 | **dependencies** | resource-type catalog + provisioning + runtime-config convergence | kernel-root | [→](internal/dependencies/README.md) |

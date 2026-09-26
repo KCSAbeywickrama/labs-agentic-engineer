@@ -38,11 +38,12 @@ bash scripts/start.sh
 # → http://localhost:8090 (admin / admin)
 ```
 
-No Anthropic key is needed to bring this up: the agents build their model per turn
-from the calling org's connected credential (`X-Anthropic-Key`), and there is no
-platform fallback. Set `ANTHROPIC_API_KEY` + `LOCAL_DEV_ADMIN_GITHUB_PAT` in
-`.env` only to have `start.sh` pre-connect them via `scripts/seed-dev.sh` and skip
-the Settings clickthrough. The observability plane's RCA agent is the one true
+No model key is needed to bring this up: every agent runs on the calling org's
+model connection (format, base URL, key, model), which aep-api hands the agents
+per turn (`X-Model-Key` plus the connection) and each coding run at dispatch, and
+there is no platform fallback. Set `ANTHROPIC_API_KEY` + `LOCAL_DEV_ADMIN_GITHUB_PAT`
+in `.env` only to have `start.sh` pre-connect them via `scripts/seed-dev.sh` (an
+Anthropic connection on its defaults) and skip the Settings clickthrough. The observability plane's RCA agent is the one true
 consumer of a platform-level key from `.env`.
 
 ### Option B — Skaffold + k3d (in-cluster)
@@ -185,7 +186,7 @@ Key wiring:
 The Thunder default admin (`admin` / `admin`) is in the **Administrators** group. `setup-aep.sh` binds that group to the OC `admin` ClusterAuthzRole.
 
 For GitHub repo provisioning, connect a PAT (or GitHub App) at **Settings → GitHub Integration**.
-For AI generation, connect an Anthropic key at **Settings → Anthropic Integration** — per-org, with no platform fallback.
+For AI generation, connect a model on the **AI agents** card under **Settings → Credentials** (Anthropic's API or any public https endpoint speaking the Anthropic or OpenAI-compatible format) — per-org, with no platform fallback.
 
 ## POC: API Platform + Thunder JWT (`poc-api-platform` branch)
 

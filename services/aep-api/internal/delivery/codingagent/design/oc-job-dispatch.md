@@ -143,12 +143,13 @@ The runner's own guard fires a margin earlier, stops the tasks still live and
 settles with a reason on the feed. The margin is the runner's and is deliberately
 not stated here; duplicating it would let the two drift apart silently.
 
-## The org's runtime and model ride on the same env
+## The org's runtime and model connection ride on the same env
 
-`AEP_AGENT_RUNTIME` and `AEP_AGENT_MODEL` carry the
-organization's `agents` setting (ADR-0028) onto every cycle, beside the
-credential ref. The setting is read FIRST, because the runtime decides the
-credential: `ResolveCodingCredential(org, runtime)` returns the org's Claude
+`AEP_AGENT_RUNTIME` carries the organization's `agents` runtime (ADR-0028) and
+`AEP_AGENT_MODEL` its model connection's model
+([ADR-0038](../../../../../../docs/decisions/ADR-0038-an-organization-has-one-model-connection.md))
+onto every cycle, beside the credential ref. The runtime is read FIRST, because
+it decides the credential: `ResolveCodingCredential(org, runtime)` returns the org's Claude
 subscription only when the runtime is Claude Code, and its connection key
 otherwise, with the connection that key is for; exactly one credential reaches
 the run (ADR-0036). The organization domain answers with a KIND, never a
@@ -163,12 +164,14 @@ older runner image still reads a first-party Job), `AEP_MODEL_API_KEY` for a key
 on any other host. Each runtime adapter maps that to what its binary reads. They
 are **copied, not referenced**: a
 change applies from the next cycle, because a run that re-read the setting halfway through would leave a feed
-whose model names disagree with the tokens they were billed for. An org that
-never opened the setting gets the platform defaults, which is exactly what every
-dispatch carried before it existed — but a resolver that ERRORS fails the
-dispatch rather than falling back, since the org did choose something and
-launching on the defaults would bill it for a model it moved off without ever
-saying so.
+whose model names disagree with the tokens they were billed for. The dispatch
+also writes the connection's host on the cycle, so its usage is priced on
+`(host, model)`. An org that never chose a runtime gets the platform default,
+which is exactly what every dispatch carried before the setting existed — but a
+resolver that ERRORS fails the dispatch rather than falling back, since the org
+did choose something and launching on the default would bill it for a runtime
+it moved off without ever saying so. An org with no model connection fails the
+dispatch too: there is no platform key to fall back to.
 
 The runtime also picks the image: `AGENT_RUNNER_IMAGE` for Claude Code,
 `AGENT_RUNNER_IMAGE_OPENCODE` for OpenCode (two tags from one Dockerfile). Neither
@@ -287,8 +290,8 @@ Code, which ranks it above `CLAUDE_CODE_OAUTH_TOKEN`, so mounting the evaluation
 key there would move a subscription org's whole coding session onto it — the
 silent mis-bill ADR-0036 keeps out.
 
-An org with no connected default key dispatches **without** the variable and the
-run proceeds: evaluation reports, it never fails a build, and a missing key must
+A dispatch whose connection key cannot be resolved for evaluation goes out
+**without** the variable and the run proceeds: evaluation reports, it never fails a build, and a missing key must
 not cost an org a delivery. That is the one credential here whose absence is not
 a dispatch failure — `evaluationKeyRef` logs it rather than returning an error,
 because "the agent never became ready" is otherwise a puzzling thing to read in
@@ -305,9 +308,9 @@ Without it the harness cannot read a pod correctly. Outside one —
 a developer in the monorepo — `ANTHROPIC_API_KEY` simply is "the key", and the
 harness falls back to it. On a pod that same name holds the **coding**
 credential, which may be the org's Claude subscription. An org whose
-subscription is live while its API key row is not active is the case that makes
-this concrete: the dispatch succeeds on the subscription, `KeyRef` finds
-nothing, and an unconditional fallback would then grade agents on the
+subscription is live while its connection key's vault reference is not (a failed
+mirror) is the case that makes this concrete: the dispatch succeeds on the
+subscription, `KeyRef` finds nothing, and an unconditional fallback would then grade agents on the
 subscription token — which cannot authenticate an API call — quietly, and
 contradicting what this note says happens. The declaration is what makes the
 documented behaviour the actual one.
