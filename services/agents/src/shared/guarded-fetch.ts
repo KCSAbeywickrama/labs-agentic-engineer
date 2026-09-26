@@ -27,9 +27,8 @@
  * non-public, and hands the checked addresses to the socket as its lookup — so
  * the socket dials exactly what was checked, never a second resolution. An IP
  * literal skips the lookup (Node does not resolve one), so the connector checks
- * it directly. The address table mirrors aep-api's `spec_collect.go` dialer
- * (public unicast only; CGNAT and NAT64 refused) so the two can be audited side
- * by side.
+ * it directly. aep-api's `platform/netguard` refuses the same address set
+ * (public unicast only; CGNAT and NAT64 refused).
  *
  * Only the model's fetch uses this dispatcher; the process's global dispatcher
  * (collab, MCP, telemetry) is untouched.
@@ -205,6 +204,6 @@ export function createGuardedFetch({ resolve, permit = isPublicAddress }: GuardO
 
 /**
  * The process-wide guarded fetch every model provider uses. One dispatcher, so
- * connections pool across turns as they did on the global fetch.
+ * connections pool across turns.
  */
 export const guardedFetch: FetchFunction = createGuardedFetch();

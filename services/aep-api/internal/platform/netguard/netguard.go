@@ -46,18 +46,19 @@ import (
 // leaking internal DNS results.
 var ErrNonPublicAddress = errors.New("refusing to fetch from non-public address")
 
-// cgnatNet is the IANA Shared Address Space (RFC 6598, 100.64.0.0/10) used
-// by carrier-grade NAT. It is not publicly routable and must be blocked to
-// prevent SSRF via CGNAT-addressed hosts.
-var cgnatNet = mustCIDR("100.64.0.0/10")
-
-// nat64Net is the IPv6 Well-Known Prefix for NAT64 (RFC 6052, 64:ff9b::/96).
-// In a NAT64/DNS64 cluster a DNS64 resolver can synthesize a 64:ff9b:: AAAA for
-// an attacker domain that NAT64 then routes to an embedded IPv4 — including the
-// link-local cloud-metadata endpoint and the RFC1918 pod/service CIDR. None of
-// Go's IsPrivate/IsLoopback/IsLinkLocalUnicast catch this prefix, so block it
-// explicitly to close the metadata-SSRF-via-NAT64 vector.
-var nat64Net = mustCIDR("64:ff9b::/96")
+// nonPublicNets are the non-public prefixes net.IP.IsGlobalUnicast admits. The
+// agents service refuses the same set (services/agents/src/shared/guarded-fetch.ts).
+//
+// The NAT64 prefixes matter in a NAT64/DNS64 cluster: a DNS64 resolver can
+// synthesize an AAAA for an attacker domain that NAT64 then routes to an
+// embedded IPv4, including the cloud-metadata endpoint and the pod/service CIDR.
+var nonPublicNets = []*net.IPNet{
+	mustCIDR("0.0.0.0/8"),      // "this network" (RFC 1122)
+	mustCIDR("100.64.0.0/10"),  // CGNAT shared space (RFC 6598)
+	mustCIDR("240.0.0.0/4"),    // reserved (RFC 1112)
+	mustCIDR("64:ff9b::/96"),   // NAT64 well-known prefix (RFC 6052)
+	mustCIDR("64:ff9b:1::/48"), // NAT64 local-use prefix (RFC 8215)
+}
 
 func mustCIDR(s string) *net.IPNet {
 	_, n, err := net.ParseCIDR(s)
@@ -69,10 +70,18 @@ func mustCIDR(s string) *net.IPNet {
 
 // isPublic reports whether ip is a public unicast address: not loopback,
 // link-local (which covers the 169.254.169.254 metadata endpoint), private
-// (10/8, 172.16/12, 192.168/16, fc00::/7), unspecified, multicast, CGNAT or
-// NAT64.
+// (10/8, 172.16/12, 192.168/16, fc00::/7), unspecified, multicast, or in
+// nonPublicNets.
 func isPublic(ip net.IP) bool {
-	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !cgnatNet.Contains(ip) && !nat64Net.Contains(ip)
+	if !ip.IsGlobalUnicast() || ip.IsPrivate() {
+		return false
+	}
+	for _, n := range nonPublicNets {
+		if n.Contains(ip) {
+			return false
+		}
+	}
+	return true
 }
 
 // Redirects is a redirect policy, in http.Client.CheckRedirect's shape.
@@ -144,13 +153,11 @@ func guardedDial(lookup lookupFunc, dial dialFunc) dialFunc {
 		if len(ips) == 0 {
 			return nil, fmt.Errorf("no IP addresses resolved for %s", host)
 		}
-		// Reject the entire set if any address is non-public.
 		for _, ip := range ips {
 			if !isPublic(ip) {
 				return nil, ErrNonPublicAddress
 			}
 		}
-		// Dial the first validated IP directly — no second DNS resolution.
 		return dial(ctx, network, net.JoinHostPort(ips[0].String(), port))
 	}
 }
