@@ -622,7 +622,7 @@ func TestTick_ProviderLimitNamesTheDispatchedHost(t *testing.T) {
 	}
 }
 
-// A failed settle with no code is agent death, exactly as before: no record,
+// A failed settle with no code is agent death: no record,
 // and the pod's own reason on the cycle.
 func TestTick_AFailedSettleWithoutTheCodeIsStillAgentDeath(t *testing.T) {
 	rt := providerLimitedPod(`{"v":2,"seq":8,"ts":"2026-09-26T10:05:00Z","agentId":"lead","kind":"run_settled","outcome":"failure","error":"agent stream ended without result"}`)

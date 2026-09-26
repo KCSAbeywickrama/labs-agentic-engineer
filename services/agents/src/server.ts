@@ -380,8 +380,7 @@ export function createApp(deps: CreateAppDeps): Express {
     const modelId = resolveModelId(requestedModel !== undefined ? { model: requestedModel } : {});
 
     // connection (optional): the organization's model connection, resolved by
-    // the caller with the key. Absent → Anthropic's own API, the only
-    // connection a caller from before connections knew.
+    // the caller with the key. Absent → Anthropic's own API.
     if (body.connection !== undefined && !isTurnConnection(body.connection)) {
       res.status(400).json({
         error:
@@ -393,11 +392,9 @@ export function createApp(deps: CreateAppDeps): Express {
       ? connectionFromTurn(body.connection, apiKey, modelId)
       : anthropicConnection(apiKey, modelId);
 
-    // Reference documents fitted to what the connection reads (attachments.ts):
-    // a PDF becomes its text off Anthropic's own API, and a reference the model
-    // cannot read is left out and named in the prompt rather than failing the
-    // turn, since it is re-read on every turn of the project. Fitted before the
-    // chat attachments are budgeted, so a reference left out costs nothing.
+    // Reference documents fitted to the connection (attachments.ts). Fitted
+    // before the chat attachments are budgeted, so a reference left out costs
+    // nothing.
     const references = await fitReferences(referenceAttachments, conn.capabilities);
     referenceAttachments = references.parts;
 

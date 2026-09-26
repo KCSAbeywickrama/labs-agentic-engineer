@@ -31,13 +31,11 @@
 // credential as a secret ref, and which variable a runtime presents it under is
 // the adapter's business; it reaches the session through `RuntimePolicy.env`.
 //
-// Absent variables mean today's connection: Anthropic's own API, the key sent as
-// `x-api-key`, and no limits stated, because on `api.anthropic.com` both runtimes
-// already know Claude's. A Job dispatched before the variables existed, and the
-// playground, therefore get exactly the run they had. A variable that IS set
-// but names nothing this build knows is an error, never a default: running a
-// connection the org did not choose is the same silent substitution the runtime
-// registry refuses.
+// Absent variables mean Anthropic's own API, the key sent as `x-api-key`, and no
+// limits stated, because on `api.anthropic.com` both runtimes already know
+// Claude's. A variable that IS set but names nothing this build knows is an
+// error, never a default: running a connection the org did not choose is the
+// same silent substitution the runtime registry refuses.
 
 /** The wire format a connection speaks. */
 export type ModelFormat = "anthropic" | "openai-compatible";
@@ -84,15 +82,11 @@ export interface ModelConnection {
   host: string;
   authScheme: ModelAuthScheme;
   /**
-   * The ONE model of the run: the lead, every subagent and the runtime's own
-   * helper calls (titles, summaries) all run on it, because the platform is
-   * bring-your-own-key and a second model is one the org's key may not reach.
-   * The organization's setting, reaching the pod as `AEP_AGENT_MODEL`.
+   * The ONE model of the run (lead, subagents, helper calls), from
+   * `AEP_AGENT_MODEL`.
    *
    * Pinned rather than left to the runtime's default, which drifts across
-   * releases (seen live: an unpinned run resolved to `claude-sonnet-4-6`). The
-   * platform can only stamp a cost for a model it has a `model_rates` row for,
-   * so the settable list is narrower than the list a runtime can serve.
+   * releases (seen live: an unpinned run resolved to `claude-sonnet-4-6`).
    */
   model: string;
   /**
@@ -167,8 +161,7 @@ export function onAnthropicAPI(conn: Pick<ModelConnection, "format" | "host">): 
 /**
  * The connection key's value, from the variable the dispatch mounted it under:
  * `AEP_MODEL_API_KEY`, or `ANTHROPIC_API_KEY` — the name a key on Anthropic's
- * own API keeps, and the only one a Job from an aep-api older than the
- * connection carries. Undefined when neither holds one (a Claude subscription,
+ * own API keeps. Undefined when neither holds one (a Claude subscription,
  * or no credential at all). Each adapter presents it under its own spelling.
  */
 export function connectionKey(env: Readonly<Record<string, string | undefined>>): string | undefined {

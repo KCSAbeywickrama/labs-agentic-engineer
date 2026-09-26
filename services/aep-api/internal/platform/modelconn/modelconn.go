@@ -19,11 +19,7 @@
 // authenticates, and what the connection supports.
 //
 // It is a pure leaf — types, the format table and one function — imported by
-// the domains that resolve, dispatch or project a connection. Consumers ask
-// CapabilitiesOf what a connection supports; none asks whether it is
-// Anthropic. Capabilities are computed here, once, and sent to the agents
-// service, the runner and the console, so Go, TypeScript and the UI cannot
-// disagree about what a host supports.
+// the domains that resolve, dispatch or project a connection.
 package modelconn
 
 // Format is the API a connection speaks.
@@ -52,9 +48,9 @@ const (
 	Unknown Tristate = "unknown"
 )
 
-// The two hosts named here are named because features are bound to them, not
-// to a format: Anthropic's own API (Claude Code subscriptions, the web-search
-// server tool, native PDFs) and Ollama's (its web-search API).
+// Hosts that features are bound to: Anthropic's own API with the Anthropic
+// format (the subscription, the web-search server tool, native PDFs) and
+// Ollama's, whatever the format (its web-search API).
 const (
 	AnthropicHost = "api.anthropic.com"
 	OllamaHost    = "ollama.com"

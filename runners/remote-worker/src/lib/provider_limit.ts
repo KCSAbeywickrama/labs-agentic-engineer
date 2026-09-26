@@ -21,22 +21,8 @@
 //
 // A 429 means one of two things — wait a little (a rate or concurrency limit),
 // or the plan is spent until it resets — and the status alone cannot tell them
-// apart. Ollama Cloud queued concurrent requests rather than refusing them
-// (measured), so there a 429 is most likely a spent plan. Before this rule a
-// spent plan parked a coding run behind the runtime's retries until the Job's
-// two-hour deadline: OpenCode retries a long `retry-after` for as long as it
-// says, and Claude Code gives up and settles a failure that reads like any
-// other.
-//
-// So ONE pure rule decides (`providerLimit`), and a per-run tracker feeds it
-// from the retries the runtime reports:
-//
-//   - a WAIT is a 429 whose retry delay is under five minutes, while 429
-//     retries have run for under five minutes in total. The runtime retries;
-//     the feed already says so (`api_retry`).
-//   - a PROVIDER LIMIT is a retry delay of five minutes or more, or five
-//     minutes of 429 retries in total — which covers a provider that states no
-//     reset at all. The run stops and says why.
+// apart (ADR-0038 §8). ONE pure rule decides (`providerLimit`), and a per-run
+// tracker feeds it from the retries the runtime reports.
 //
 // The runner sees no HTTP response: the runtime makes the calls. What reaches
 // it is the runtime's retry report (`ApiRetryInfo`): the delay it derived from
@@ -45,9 +31,10 @@
 // `x-ratelimit-reset*` header never gets this far, so a reset time is only ever
 // the runtime's own delay.
 //
-// "In total" is per STREAK: a streak starts at the first 429 and ends when the
-// model answers again (`progress`). A long run that meets a short rate limit
-// twice an hour apart has not waited on its provider for the sum of both.
+// The five-minute total is per STREAK: a streak starts at the first 429 and
+// ends when the model answers again (`progress`). A long run that meets a short
+// rate limit twice an hour apart has not waited on its provider for the sum of
+// both.
 
 import type { ApiRetryInfo } from "../runtime/port.js";
 

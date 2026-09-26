@@ -112,10 +112,10 @@ func TestEnsureProviderSendsTheBuilderShape(t *testing.T) {
 	}
 }
 
-// firstPartyProviderWire is the provider body AEP sent for an org on
-// Anthropic's own API before connections had formats, captured from that code
-// with a fake key. The create and the update send the same bytes, and a later
-// change to the body is a change to this literal, made on purpose.
+// firstPartyProviderWire is the provider body an org on Anthropic's own API
+// already has in Agent Manager, with a fake key. The create and the update send
+// the same bytes, and a later change to the body is a change to this literal,
+// made on purpose.
 const firstPartyProviderWire = `{"accessControl":{"exceptions":[],"mode":"allow_all"},` +
 	`"context":"/aep-default-anthropic","gateways":["gw-1"],"id":"aep-default-anthropic",` +
 	`"name":"AEP default Anthropic",` +
@@ -353,9 +353,8 @@ func TestFourXXIsPermanent(t *testing.T) {
 // "it exists" is what lets a stale copy go unnoticed until every governed agent
 // in the org starts failing at Anthropic.
 //
-// The write is conditional now (ReassertCredential), because a provider update
-// redeploys every proxy bound to it; this covers the case where the caller has
-// determined the key changed. Its twin,
+// The write is conditional (ReassertCredential); this covers the case where the
+// caller has determined the key changed. Its twin,
 // TestEnsureProviderSkipsTheCredentialWriteWhenUnchanged, covers the other.
 func TestEnsureProviderReassertsTheKeyWhenItExists(t *testing.T) {
 	var put map[string]any
@@ -716,9 +715,8 @@ func TestAPersistent401IsNotRetriedForever(t *testing.T) {
 	}
 }
 
-// A provider update redeploys every LLM proxy bound to it, and a redeploy is
-// the window in which a proxy can lose its broadcast API keys. So an existing
-// provider is left alone unless the caller says the credential changed.
+// An existing provider is left alone unless the caller says the credential
+// changed (EnsureProviderInput.ReassertCredential).
 func TestEnsureProviderSkipsTheCredentialWriteWhenUnchanged(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

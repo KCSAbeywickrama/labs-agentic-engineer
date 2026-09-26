@@ -35,8 +35,9 @@ import (
 // back, so the card is never half-saved.
 //
 // Tx begins the transaction, runs fn, and commits when fn returns nil or rolls
-// back when it returns an error. fn takes the org-scoped advisory locks first
-// (AgentsCardTx.AdvisoryLock), so two saves of one org's card serialize.
+// back when it returns an error. fn takes the org-scoped advisory lock
+// `org_model:<org>` first (AgentsCardTx.AdvisoryLock), so two saves of one
+// org's card serialize.
 type AgentsCardRepository interface {
 	Tx(ctx context.Context, fn func(tx AgentsCardTx) error) error
 }

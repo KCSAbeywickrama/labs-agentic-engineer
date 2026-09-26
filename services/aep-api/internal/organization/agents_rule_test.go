@@ -118,8 +118,8 @@ func refusalOn(t *testing.T, runtimes []orgconfig.AgentRuntime, s cardState, p o
 
 // --- clause 1: first connect ---------------------------------------------------
 
-// Today's `{kind, apiKey}` body still connects: the format's defaults fill the
-// URL and the model.
+// A `{kind, apiKey}` body connects: the format's defaults fill the URL and the
+// model.
 func TestJudgeCard_FirstConnectFillsTheFormatDefaults(t *testing.T) {
 	eff := mustJudge(t, cardState{}, orgconfig.ConfigPatch{LLM: llm(orgconfig.LLMPatch{Kind: "anthropic", APIKey: "  " + ruleKey + "\n"})})
 	want := connectionDraft{Format: modelconn.FormatAnthropic, BaseURL: modelconn.AnthropicBaseURL,
@@ -513,9 +513,7 @@ func (t *lockRecordingTx) GetSettings(string) (*OrgAgentSettings, error) {
 	return nil, errors.New("stop after the locks")
 }
 
-// The card takes only the model connection's lock name; the Anthropic-era
-// name is gone (the previous release took both, so the two serialize on this
-// one during a rolling deploy).
+// The card takes only the model connection's lock, org_model:<org>.
 func TestAgentSettings_TheSaveTakesTheModelLockOnly(t *testing.T) {
 	card := &lockRecordingCard{}
 	svc := NewAgentSettingsService(nil, nil, nil, nil, card, everyRuntime)

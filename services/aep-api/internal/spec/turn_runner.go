@@ -497,7 +497,7 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 // noManifestTerminal is the failed terminal of a stream that ended without a
 // manifest. When the agents service named the failure in a coded error frame
 // the turn fails with that code and its sentence (reason agent-error);
-// otherwise it is the severed/errored stream it always was.
+// otherwise it fails with reason stream-died.
 func noManifestTerminal(end agentfold.StreamEnd, agentErr *agentfold.TurnError) TurnTerminal {
 	if agentErr != nil {
 		term := failedTerminal(turnReasonAgentError, agentErr.Message, nil)

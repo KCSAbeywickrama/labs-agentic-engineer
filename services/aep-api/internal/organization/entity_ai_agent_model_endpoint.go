@@ -22,11 +22,7 @@ import "time"
 // stored beside one governed ai-agent's key, per environment: the gateway, the
 // agent's own proxy path and the model connection's base path.
 //
-// A RECORD OF A WRITE, not a second source for the address. The agent's secret
-// (SecretRefWriter.WriteAMPModelKey) is what its deployment composes
-// MODEL_ENDPOINT from; this row exists because that secret cannot be read
-// back, and the govern stage has to know when a connection switch moved the
-// base path under a key both sides already hold. Nothing in it is secret.
+// A record of a write, not a source for the address; nothing in it is secret.
 // Created by migrate's phase21_ai_agent_model_endpoints step.
 type AIAgentModelEndpoint struct {
 	OcOrgID     string    `gorm:"column:oc_org_id;primaryKey;type:text"`

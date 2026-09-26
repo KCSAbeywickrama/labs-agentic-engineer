@@ -60,27 +60,8 @@ function oneOf<T extends string>(name: string, value: string | undefined, allowe
 /**
  * The connection this run evaluates on, or `undefined` when it has none.
  *
- * In a build pod the platform mounts the connection's key as
- * `AEP_EVAL_MODEL_API_KEY`, with the rest of the connection beside it in
- * `AEP_EVAL_MODEL_FORMAT` / `_BASE_URL` / `_NAME` / `_AUTH_SCHEME`. It cannot
- * use `ANTHROPIC_API_KEY` there: that name already belongs to Claude Code,
- * which ranks it above `CLAUDE_CODE_OAUTH_TOKEN`, so an org that bills its
- * coding agent to an OAuth token would have its whole coding session silently
- * moved onto this key instead (ADR-0016). Outside a pod — a developer running
- * the harness in the monorepo — `ANTHROPIC_API_KEY` is the only key there is,
- * so it is the fallback, and it goes to Anthropic's API and nowhere else: a key
- * under Anthropic's name never follows some other `AEP_EVAL_MODEL_BASE_URL`.
- *
- * `AEP_EVAL_KEY_MANAGED` is what tells the two apart, and it is why the
- * fallback is not unconditional. On a pod, `ANTHROPIC_API_KEY` is the
- * organisation's CODING credential — possibly an override it chose to bill
- * coding and nothing else — so falling back to it would grade agents on a
- * budget the org ring-fenced. The platform sets the declaration on every
- * dispatch, so its presence means: if no evaluation key came with it, this run
- * has none, and saying so is the documented behaviour.
- *
- * `CLAUDE_CODE_OAUTH_TOKEN` is NEVER a fallback. It is the platform's own
- * coding budget, and it authenticates none of the API calls the judge makes.
+ * `AEP_EVAL_MODEL_*` first; outside a managed pod, `ANTHROPIC_API_KEY` on
+ * Anthropic's API only; never the OAuth token (design/running-in-a-build-pod.md).
  *
  * `||`, not `??`: ESO can materialise an EMPTY secret, and an empty key is no
  * key rather than a key that fails to authenticate. The difference decides

@@ -179,8 +179,8 @@ test("connectionFromTurn takes the wire's known fields only, beside the key and 
   assert.deepEqual(conn.capabilities, OLLAMA.capabilities, "capabilities keep their known fields only");
 });
 
-// The Anthropic branch must send exactly what the stock provider sends, so
-// moving onto the connection changes no request byte (and no cached prefix).
+// The Anthropic branch sends exactly what the stock provider sends, so no
+// request byte (and no cached prefix) differs.
 test("createModel on Anthropic's connection sends the stock Anthropic provider's request", async () => {
   const ours = recorder(anthropicMessage);
   const stock = recorder(anthropicMessage);

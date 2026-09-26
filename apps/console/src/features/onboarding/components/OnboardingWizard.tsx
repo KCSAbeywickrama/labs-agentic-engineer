@@ -38,8 +38,7 @@ const STEPS = ["Connect GitHub", "Connect a model", "Set up skills"];
 // The active step derives from server state, not local navigation: each
 // successful PATCH /config updates the query cache and the wizard advances.
 // A partially-configured org therefore resumes at its first incomplete step
-// (issue #102 decisions comment): an org with no model connection resumes at
-// "Connect a model".
+// (issue #102 decisions comment).
 function activeStep(config: ConfigProjection): number {
   if (config.gitProvider === null) return 0;
   if (config.llm === null) return 1;

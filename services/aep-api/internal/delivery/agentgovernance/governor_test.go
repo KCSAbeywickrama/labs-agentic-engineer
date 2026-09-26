@@ -338,7 +338,7 @@ func TestGovernSkipsWithoutBinding(t *testing.T) {
 }
 
 // An org that has connected no model has no provider to build. The agent
-// deploys unconfigured and 503s, as it does today.
+// deploys unconfigured and 503s.
 func TestGovernSkipsWithoutAConnection(t *testing.T) {
 	amp := newFakeAMP()
 	g := New(Deps{Endpoints: &fakeEndpoints{}, AMP: amp, Keys: &fakeKeyStore{},
@@ -630,13 +630,10 @@ func TestGovernAddressesRecordBindingAndKeyByTheSameName(t *testing.T) {
 	}
 }
 
-// Re-asserting an UNCHANGED provider is not free: updating a provider
-// redeploys every LLM proxy bound to it — twelve per governed deploy was
-// measured in a single-agent org — and a redeploy is the window in which a
-// proxy can lose the API keys broadcast to it. So the provider is written when
-// the connection it is built from CHANGES, not on every deploy and every
-// converge tick — and a change to any one of key, upstream, template or header
-// is one write carrying all four.
+// The provider is written when the connection it is built from CHANGES, not
+// on every deploy and every converge tick (EnsureProviderInput.ReassertCredential),
+// and a change to any one of key, upstream, template or header is one write
+// carrying all four.
 func TestGovernReassertsTheProviderOnlyWhenTheConnectionChanges(t *testing.T) {
 	anthropicOnOllama := modelconn.Connection{
 		Format: modelconn.FormatAnthropic, BaseURL: "https://ollama.com",
@@ -840,8 +837,8 @@ func TestGovernRewritesAStoredEndpointWhenTheBasePathMoves(t *testing.T) {
 	}
 }
 
-// An agent deployed before endpoints were recorded holds a key beside a URL
-// nothing can read. Unknown is treated as moved: one rotation on its next
+// An agent whose key has no recorded endpoint holds it beside a URL nothing
+// can read. Unknown is treated as moved: one rotation on its next
 // deploy, which records the endpoint, and reuse from then on.
 func TestGovernRotatesOnceWhenNoEndpointWasRecorded(t *testing.T) {
 	amp := newFakeAMP(AgentKeyName("checkout-agent", "default"))
@@ -902,11 +899,9 @@ func TestEnsureRegistrationLeavesAMovedEndpointToTheDeploy(t *testing.T) {
 
 // --- the provider, from the connection ------------------------------------------
 
-// For Anthropic's own API the provider is what it was before connections had
-// formats — the template, upstream, auth and key a template read supplied —
-// with only the display name made format-neutral. The ID stays: a new ID is a
-// new provider, which the publisher cannot delete and every agent would rebind
-// to.
+// For Anthropic's own API the provider keeps the `anthropic` template,
+// upstream, x-api-key auth and ID that existing providers carry; only the
+// display name is format-neutral. The ID is ProviderID's.
 func TestProviderInputForAnthropicsOwnAPIIsTodaysProvider(t *testing.T) {
 	got, err := ProviderInputFor("default", firstPartyConn(), "sk-ant-api03-FAKE-golden-key", "gw-1")
 	if err != nil {

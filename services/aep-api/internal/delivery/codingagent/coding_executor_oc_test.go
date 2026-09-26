@@ -69,10 +69,10 @@ type fakeCodingKey struct {
 	err   error
 	asked *orgconfig.AgentRuntime
 	// conn is the connection both answers are for; the zero value means
-	// Anthropic's own API, the only connection an org can save today.
+	// Anthropic's own API (firstPartyConnection).
 	conn *modelconn.Connection
 
-	// The DEFAULT-role key is a separate answer to a separate question: which
+	// The connection key (KeyRef) is a separate answer to a separate question: which
 	// credential the build's EVALUATION step bills. It is not always the same
 	// row as the coding one, which is exactly what the evaluation tests below
 	// exercise.
@@ -102,8 +102,8 @@ func (f fakeCodingKey) connection() modelconn.Connection {
 	return firstPartyConnection()
 }
 
-// firstPartyConnection is the connection ModelConnectionService builds today:
-// Anthropic's own API, the key as x-api-key, no limits stated.
+// firstPartyConnection is a connection on Anthropic's own API: the key as
+// x-api-key, no limits stated.
 func firstPartyConnection() modelconn.Connection {
 	return modelconn.Connection{
 		Format:     modelconn.FormatAnthropic,
@@ -246,7 +246,7 @@ func anthropicSecretEnv(t *testing.T, in openchoreo.WorkloadInput, secretRefName
 
 // TestDispatch_AnthropicAPIKey_MountsAsAnthropicAPIKeyEnvVar pins ADR-0016's
 // rule for the OC path: a connection key on Anthropic's own API rides the Job
-// as ANTHROPIC_API_KEY, the name every Job carried before the connection.
+// as ANTHROPIC_API_KEY.
 func TestDispatch_AnthropicAPIKey_MountsAsAnthropicAPIKeyEnvVar(t *testing.T) {
 	rec := &chainRecorder{}
 	anthropic, github := fullSecretRefs()

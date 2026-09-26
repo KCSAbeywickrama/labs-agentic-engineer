@@ -22,10 +22,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 )
 
-// The connection key's storage names. Existing orgs' copies are moved here
-// from the Anthropic-era names by copy-then-switch (migrate's
-// phase20_model_key_rename for the bytes, model_key_rename.go for the SM-API
-// mirror); every write from this release on uses these.
+// The connection key's storage names.
 const (
 	// modelKeyStoreKey is the `org_secrets` key holding the connection key's
 	// encrypted bytes.

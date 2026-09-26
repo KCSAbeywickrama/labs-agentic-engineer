@@ -521,11 +521,9 @@ func tracingKey(in delivery.GovernAgentInput) string {
 // endpointMoved reports whether the agent's key was stored beside an endpoint
 // other than the one composed now.
 //
-// NO RECORD IS "MOVED". A stored key with no recorded endpoint was stored
-// before endpoints were recorded, beside a URL nothing can read, so the only
-// way back to a known state is the rotate branch — once, because storing
-// records the endpoint. That is one rotation per governed agent, on its first
-// deploy after the record existed.
+// NO RECORD IS "MOVED": a stored key with no recorded endpoint sits beside a
+// URL nothing can read, so the rotate branch is the only way back to a known
+// state, and storing records the endpoint, so this happens once per agent.
 func (g *Governor) endpointMoved(ctx context.Context, in delivery.GovernAgentInput, endpoint string) (bool, error) {
 	prev, ok, err := g.deps.Endpoints.StoredAMPModelEndpoint(ctx, in.OrgID, in.Component, in.Environment)
 	if err != nil {

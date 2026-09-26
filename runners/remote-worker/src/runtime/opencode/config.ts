@@ -66,9 +66,9 @@ export const FALLBACK_OUTPUT_LIMIT = 32_000;
 /**
  * The provider block for a connection.
  *
- * On Anthropic's own API: provider `anthropic` with the key and nothing else —
- * the config this runtime always ran with, so models.dev's catalog (shipped in
- * the image) keeps supplying Claude's limits.
+ * On Anthropic's own API: provider `anthropic` with the key and nothing else,
+ * so models.dev's catalog (shipped in the image) keeps supplying Claude's
+ * limits.
  *
  * Anywhere else: provider `aep`, which matches no catalog entry, so the
  * connection's figures are the only ones — and a model with no context limit

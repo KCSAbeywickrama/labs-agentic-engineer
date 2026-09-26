@@ -67,7 +67,7 @@ type ConnectionName = keyof typeof CONNECTIONS;
 
 /** The credential as each kind of dispatch mounts it. */
 const CREDENTIALS = {
-  // A Job from the aep-api before the connection, or a first-party key today.
+  // The key under Claude Code's own name, as a first-party dispatch mounts it.
   "key as ANTHROPIC_API_KEY": { ANTHROPIC_API_KEY: KEY },
   "key as AEP_MODEL_API_KEY": { AEP_MODEL_API_KEY: KEY },
   "Claude subscription": { CLAUDE_CODE_OAUTH_TOKEN: TOKEN },

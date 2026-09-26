@@ -18,7 +18,6 @@ package modelcost
 
 import "testing"
 
-// anthropic is the host every rate before model connections was on.
 const anthropic = "api.anthropic.com"
 
 func sonnetStamper() *Stamper {

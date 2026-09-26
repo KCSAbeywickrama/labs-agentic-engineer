@@ -51,8 +51,8 @@ func TestCapabilitiesOf(t *testing.T) {
 			want: Capabilities{GeneratedAgents: true, WebSearch: WebSearchNone, ImageInput: Unknown},
 		},
 		{
-			// The format, not the host, decides the first-party features: an
-			// OpenAI-compatible call to Anthropic's host is not Anthropic's API.
+			// Anthropic's host alone is not Anthropic's API: an OpenAI-compatible
+			// call to it gets no first-party features.
 			name: "openai-compatible@api.anthropic.com",
 			conn: Connection{Format: FormatOpenAICompatible, Host: AnthropicHost, ImageInput: Unknown},
 			want: Capabilities{GeneratedAgents: true, WebSearch: WebSearchNone, ImageInput: Unknown},

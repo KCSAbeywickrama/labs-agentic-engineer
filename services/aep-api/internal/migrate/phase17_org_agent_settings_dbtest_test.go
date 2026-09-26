@@ -25,9 +25,8 @@ import (
 )
 
 // The rename, on a reconstructed pre-phase17 state: the old table's rows move
-// into org_agent_settings (which AutoMigrate created) without their model,
-// which lives on the connection now; an existing new row wins, the old table
-// goes, and a re-run is a no-op.
+// into org_agent_settings (which AutoMigrate created) without their model; an
+// existing new row wins, the old table goes, and a re-run is a no-op.
 func TestPhase17_MovesTheRowsAndDropsTheOldTable(t *testing.T) {
 	db := dbtest.New(t)
 	ctx := context.Background()

@@ -90,9 +90,7 @@ type AgentUsageLedgerEntry struct {
 	CostUsd             *float64 `gorm:"column:cost_usd"`
 	// ModelHost is copied from the source row with the rest of the capture, so
 	// the ledger names the host its CostUsd was priced on.
-	// Nullable on purpose: a row that predates the column reads NULL until
-	// migrate's phase18 backfills it to api.anthropic.com, and NULL-only is what
-	// keeps that backfill one-shot (see RunPhase18ModelHost).
+	// Nullable on purpose (see RunPhase18ModelHost).
 	ModelHost string `gorm:"type:text"`
 
 	CapturedAt time.Time `gorm:"not null;default:now()"`

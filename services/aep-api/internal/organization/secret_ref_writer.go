@@ -120,8 +120,6 @@ func (w *SecretRefWriter) UploadModelKey(ctx context.Context, ocOrgID, apiKey st
 	return w.uploadAPIKey(ctx, ocOrgID, modelKeySecretEntity, apiKey)
 }
 
-// writeAPIKey uploads one API-key-shaped secret under entity and stamps the
-// resulting triplet through stamp.
 func (w *SecretRefWriter) writeAPIKey(ctx context.Context, ocOrgID, entity, apiKey string, stamp func(map[string]any) error) (string, error) {
 	if !w.Enabled() {
 		return "", nil

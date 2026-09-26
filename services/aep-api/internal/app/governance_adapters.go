@@ -200,12 +200,11 @@ func (p ampModelProviderPublisher) PublishOrgModelConnection(ctx context.Context
 	// THIS path always re-asserts, and it is the one place that must.
 	//
 	// The govern stage writes the provider only when its fingerprint changed
-	// (agentgovernance.Governor.credentialChanged), because a provider update
-	// redeploys every proxy bound to it. A save that changed the key, URL,
-	// format or auth is exactly the case where it DID change, and it is
-	// reached from the organization domain, which holds no fingerprint of its
-	// own — so it says so explicitly rather than relying on a later deploy to
-	// notice. One PUT carries the template, upstream, auth and key together.
+	// (agentgovernance.Governor.credentialChanged). A save that changed the
+	// key, URL, format or auth is exactly the case where it DID change, and it
+	// is reached from the organization domain, which holds no fingerprint of
+	// its own — so it says so explicitly rather than relying on a later deploy
+	// to notice.
 	providerIn, err := agentgovernance.ProviderInputFor(ocOrgID, conn, apiKey, binding.GatewayID)
 	if err != nil {
 		return err

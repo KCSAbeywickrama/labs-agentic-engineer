@@ -77,7 +77,6 @@ type CodingCredentialResolver interface {
 type CodingCredentialKind string
 
 const (
-	// CodingCredentialConnectionKey: the connection's own key.
 	CodingCredentialConnectionKey CodingCredentialKind = "connection_key"
 	// CodingCredentialClaudeSubscription: the org's Claude subscription token,
 	// only ever on Claude Code.
@@ -93,10 +92,7 @@ type CodingCredential struct {
 }
 
 // SecretRefTriplet is a resolved SM-API secret reference: the name plus the
-// vault coordinates an ExternalSecret's remoteRef needs. Which variable a
-// coding run receives it under is not this domain's to say: it says only which
-// KIND of credential it is (CodingCredential.Kind), and dispatch maps that to
-// the runner's env contract.
+// vault coordinates an ExternalSecret's remoteRef needs.
 type SecretRefTriplet struct {
 	Name     string
 	KVPath   string
@@ -194,13 +190,7 @@ func (s *ModelConnectionService) storedKey(ctx context.Context, ocOrgID string) 
 // KeyRef returns the connection and its key's vault coordinates. It never
 // reads the key's bytes, only where they live, for a caller that points an
 // OpenChoreo SecretReference at the path rather than forwarding the value
-// itself (e.g. wiring an ai-agent component's MODEL_API_KEY — docs/glossary.md's
-// SecretReference entry: "authored in the org NS, ESO materializes it into the
-// consuming-plane NS").
-//
-// Returns NotFoundError when the org has no connection. Every caller must
-// treat that as "not connected yet", not a hard failure — the same discipline
-// Effective's ok=false gives the spec agents.
+// itself (e.g. wiring an ai-agent component's MODEL_API_KEY).
 func (s *ModelConnectionService) KeyRef(ctx context.Context, ocOrgID string) (modelconn.Connection, SecretRefTriplet, error) {
 	row, err := s.connectionRow(ctx, ocOrgID)
 	if err != nil {
@@ -232,8 +222,7 @@ func (s *ModelConnectionService) connectionRow(ctx context.Context, ocOrgID stri
 
 // ResolveCodingCredential returns the credential a coding run on runtime must
 // mount: the org's Claude subscription when it has one and the runtime is
-// Claude Code, the connection's key otherwise. This is the ONLY place that
-// choice is written.
+// Claude Code, the connection's key otherwise.
 //
 // Only Claude Code can present a subscription token, so on any other runtime
 // the subscription is not consulted at all (the save rule keeps one from being

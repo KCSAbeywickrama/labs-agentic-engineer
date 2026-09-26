@@ -93,9 +93,8 @@ type LLMProjection struct {
 	Capabilities LLMCapabilities `json:"capabilities"`
 }
 
-// LLMCapabilities is the part of modelconn.Capabilities the console renders:
-// the info box, the Claude Code tile's subscription field and the chat attach
-// control. Computed once, server side (modelconn.CapabilitiesOf).
+// LLMCapabilities is the part of modelconn.Capabilities the console reads.
+// Computed once, server side (modelconn.CapabilitiesOf).
 type LLMCapabilities struct {
 	ClaudeSubscription bool                `json:"claudeSubscription"`
 	WebSearch          modelconn.WebSearch `json:"webSearch" enum:"anthropic-server-tool,ollama-api,none"`
@@ -281,7 +280,8 @@ type SubscriptionWrite struct {
 
 // LLMPatch is the llm section's write shape — and the body of POST
 // /config/llm/test — patched field by field: an omitted field keeps the saved
-// value, or on first connect takes the format's default (modelconn.Formats).
+// value; on first connect kind and apiKey are required and an omitted baseURL
+// or model takes the format's default (modelconn.Formats).
 // APIKey is write-only: probed, never echoed.
 type LLMPatch struct {
 	Kind    modelconn.Format `json:"kind,omitempty" enum:"anthropic,openai-compatible"`

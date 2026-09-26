@@ -20,8 +20,8 @@
 // the CLI's environment carries, so it calls the connection's endpoint with the
 // connection's credential. Pure, so the whole mapping is a table test.
 //
-//   on Anthropic's own API — the environment the run was given, as it always
-//     was: the subscription as CLAUDE_CODE_OAUTH_TOKEN, else the key as
+//   on Anthropic's own API — the environment the run was given: the
+//     subscription as CLAUDE_CODE_OAUTH_TOKEN, else the key as
 //     ANTHROPIC_API_KEY (from AEP_MODEL_API_KEY when the dispatch named it so);
 //   anywhere else — ANTHROPIC_BASE_URL is the saved URL minus a trailing `/v1`
 //     (the CLI appends `/v1/messages` itself, where the AI SDK and OpenCode
@@ -73,8 +73,8 @@ export function claudeCodeEnv(connection: ModelConnection, env: Record<string, s
   const key = connectionKey(env);
 
   if (onAnthropicAPI(connection)) {
-    // The run as it always was. A key the dispatch named AEP_MODEL_API_KEY is
-    // presented under the name the CLI reads; nothing else moves.
+    // A key the dispatch named AEP_MODEL_API_KEY is presented under the name the
+    // CLI reads; nothing else moves.
     if (out.AEP_MODEL_API_KEY !== undefined) {
       delete out.AEP_MODEL_API_KEY;
       if (key !== undefined && out.CLAUDE_CODE_OAUTH_TOKEN === undefined) out.ANTHROPIC_API_KEY = key;

@@ -48,8 +48,7 @@ import (
 //     Claude subscription (CHECK role = 'coding');
 //  6. drop org_agent_settings.model.
 //
-// The deletes make the step one-way: the rollback is a database backup taken
-// before the deploy, restored onto the previous release. Idempotent: a re-run
+// The deletes make the step one-way (ADR-0038 §10). Idempotent: a re-run
 // finds no default row and no model column, and changes nothing.
 //
 // The SM-API copies of a deleted subscription (entity "anthropic-coding")

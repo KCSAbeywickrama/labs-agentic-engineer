@@ -123,7 +123,7 @@ func TestAssemble_MinimalConfigBuildsTheGraph(t *testing.T) {
 // the run-supervisor worker rides on TEMPORAL_HOSTPORT. The base is 9 — Fake()
 // omits the disk reaper (nil Workspace); the event plane's reconcile AND build
 // sweeps, the OpenChoreo pod-truth watcher and the model key rename are all
-// unconditional (the first three no longer gated on cluster-gateway-proxy).
+// unconditional.
 func TestAssemble_WatcherRegistration(t *testing.T) {
 	tests := []struct {
 		name   string

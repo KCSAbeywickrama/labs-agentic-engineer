@@ -116,7 +116,7 @@ func (s *AnthropicCredentialService) WithAnthropicAPIBase(base string) *Anthropi
 }
 
 // NewAnthropicCredentialService wires the service. repo and store must be
-// non-nil; store serves the resync read, while the card's
+// non-nil; store serves the resync and publish reads, while the card's
 // writes go through the store bound to its transaction.
 func NewAnthropicCredentialService(
 	repo OrgAnthropicRepository,
@@ -278,9 +278,7 @@ func (s *AnthropicCredentialService) forgetKey(ctx context.Context, ocOrgID stri
 //
 // Best-effort, and deliberately so: the connection IS stored, and failing the
 // user's Settings action because a downstream copy lagged would be the worse
-// outcome. The next governed deploy re-asserts a changed connection anyway
-// (the governor fingerprints the provider it writes), so this is how fast it
-// converges, not whether it does.
+// outcome.
 //
 // Only the connection's key is ever published: that is the key agents run on.
 // The subscription token belongs to the coding agent, which does not go
@@ -337,17 +335,8 @@ const (
 )
 
 // modelProviderStepFor decides it from the connection before and after a save.
-// Pure, so the rule is a table test.
-//
-// The rule is that the provider's copy matches the org's connection, on any
-// format:
-//
-//   - Publish when the save changed anything the provider carries: the key, or
-//     the URL, format or auth scheme (a first connect changes all of them).
-//   - Clear on a disconnect: once, because the next save starts from no
-//     connection.
-//   - Otherwise leave it: a model change, or a save that changed nothing the
-//     provider holds, would redeploy every proxy bound to it for nothing.
+// Pure, so the rule is a table test. A model-only change writes nothing: it
+// would redeploy every bound proxy.
 func modelProviderStepFor(before, after *modelconn.Connection, keyWritten bool) modelProviderStep {
 	switch {
 	case after == nil && before != nil:
@@ -373,7 +362,7 @@ func providerFieldsChanged(before, after modelconn.Connection) bool {
 // ----------------------------------------------------------------------------
 
 // Status returns the projection for (ocOrgID, role). Returns NotFoundError
-// when no row exists, which the config projection maps to null (no key, or no
+// when no row exists, which the config projection maps to null (no
 // subscription).
 func (s *AnthropicCredentialService) Status(ctx context.Context, ocOrgID string, role AnthropicRole) (*AnthropicProjection, error) {
 	row, err := fetchAnthropicRow(ctx, s.repo, ocOrgID, role)
@@ -447,7 +436,7 @@ func (s *AnthropicCredentialService) resyncRole(ctx context.Context, ocOrgID str
 }
 
 // fetchAnthropicRow loads (ocOrgID, role)'s row, answering NotFoundError when
-// there is none. Shared by this service and ModelConnectionService.
+// there is none.
 func fetchAnthropicRow(ctx context.Context, repo OrgAnthropicRepository, ocOrgID string, role AnthropicRole) (*OrgAnthropicCredential, error) {
 	row, err := repo.GetByOrg(ctx, ocOrgID, role)
 	if err != nil {

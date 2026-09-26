@@ -92,7 +92,12 @@ a key and a model. Every agent uses it.**
    and reported. A spec turn ends with a `provider_limit` frame. A coding run
    settles BLOCKED with reason `model-provider-limit` and the reset time when
    known, spending no re-dispatch budget. The user starts it again. There is no
-   org-wide limit state.
+   org-wide limit state. The status alone cannot tell a rate limit from a
+   spent plan, and Ollama Cloud was measured queueing concurrent requests
+   rather than refusing them, so a long 429 there is most likely a spent plan.
+   Left to the runtimes, a spent plan parked a coding run until the Job's
+   two-hour deadline: OpenCode retries a long `retry-after` for as long as it
+   says, and Claude Code settles a failure that reads like any other.
 
 9. **History is filtered only across connections.** Each turn's journal entry
    records the connection that wrote it (`format@host`). Turns from the current

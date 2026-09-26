@@ -31,9 +31,8 @@ import (
 // thereafter — a price change is an UPDATE, and because USD is stamped at
 // capture (never re-derived), that change only affects work captured after it.
 //
-// Two rows on api.anthropic.com, exactly the contract's AgentModel enum — the
-// models an org can choose for every one of its agents (spec and coding alike,
-// ADR-0036):
+// Two rows on api.anthropic.com: the Anthropic format's default model
+// (claude-sonnet-5) and claude-haiku-4-5.
 //
 //   - claude-sonnet-5 (the default agent model) at its
 //     INTRODUCTORY rates, in force through 2026-08-31: input $2.00/MTok,
@@ -42,7 +41,7 @@ import (
 //     intended ops override — a live demonstration of why history must not
 //     reprice.
 //   - claude-haiku-4-5 at standard rates ($1.00/$5.00, cache-read $0.10,
-//     cache-write $1.25), the second model an org can choose. Pricing is
+//     cache-write $1.25). Pricing is
 //     all-or-nothing per capture (Stamper.SumCost), so an offered model with
 //     no row would stamp every run on it null and show tokens instead of
 //     dollars.

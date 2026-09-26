@@ -825,7 +825,7 @@ export interface TurnRequest {
   /**
    * The connection `model` is served from (aep-api resolves it per turn, the
    * key rides `X-Model-Key`). Absent → Anthropic's own API with the key as
-   * `x-api-key`, the only connection a caller from before connections knew.
+   * `x-api-key`.
    */
   connection?: TurnConnection;
   /** Where to read files + skills from the shared mount (IDs + shas only). */

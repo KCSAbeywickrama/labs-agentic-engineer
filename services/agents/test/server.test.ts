@@ -244,7 +244,7 @@ test("400 when X-Model-Key is missing (authenticated but no key)", async () => {
     assert.equal(res.status, 400);
     assert.match(((await res.json()) as { error: string }).error, /X-Model-Key/);
 
-    // The header's name from before connections is no longer read.
+    // `X-Anthropic-Key` is not read.
     const legacy = turnPost(wsBody(), { token, key: null, org: WS_ORG });
     const legacyRes = await fetch(`${baseUrl}/conversations/${WS_CONV}/turns`, {
       ...legacy,

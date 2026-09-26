@@ -43,7 +43,7 @@
 /** How long a stated wait, or a run of 429s, may last before it is a provider limit. */
 export const PROVIDER_LIMIT_AFTER_MS = 5 * 60_000;
 
-/** The AI SDK's retries per model call: short waits ride out about a minute. */
+/** The AI SDK's retries per model call: short waits ride out about two minutes. */
 export const MODEL_MAX_RETRIES = 6;
 
 export type ProviderLimitVerdict = "wait" | "provider_limit";

@@ -98,7 +98,6 @@ func TestTurn_SendsExactRequestAndHeaders(t *testing.T) {
 	if k := srv.headers.Get("X-Model-Key"); k != "sk-ant-123" {
 		t.Errorf("X-Model-Key = %q", k)
 	}
-	// The key rides one header; its name from before connections is gone.
 	if k := srv.headers.Get("X-Anthropic-Key"); k != "" {
 		t.Errorf("X-Anthropic-Key = %q, want absent", k)
 	}

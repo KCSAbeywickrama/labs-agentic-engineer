@@ -64,13 +64,13 @@ export const CREDENTIAL_ENV_KEYS = [
   // both are listed, and the value is enrolled whichever carries it.
   "AEP_MODEL_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
-  // A THIRD model credential on the same pod: the org's connection key, on any
+  // Another model credential on the same pod: the org's connection key, on any
   // format, mounted for the agent-evaluation step a build runs before opening an
   // ai-agent's PR (`envEvalModelAPIKey` in oc_dispatcher.go). The connection it
   // is for rides beside it as plain AEP_EVAL_MODEL_* values, which are not
   // secrets. The agent invokes that step through its Bash tool, whose output is
-  // streamed into the progress feed — so of the three this is the one most
-  // likely to actually leak.
+  // streamed into the progress feed — so this is the one most likely to
+  // actually leak.
   "AEP_EVAL_MODEL_API_KEY",
   "PUBLISHER_CLIENT_SECRET",
 ] as const;

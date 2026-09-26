@@ -1427,9 +1427,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			refs:   modelAccessSecretRefClient,
 			orgs:   orgRepo,
 		},
-		Endpoints: ampEndpointStore{repo: organization.NewAIAgentModelEndpointRepository(db)},
-		Bindings:  environmentClient,
-		// The org's model connection, read as organization.ConnectionReader.
+		Endpoints:   ampEndpointStore{repo: organization.NewAIAgentModelEndpointRepository(db)},
+		Bindings:    environmentClient,
 		Connections: modelConnections,
 		// Only ai-agent components are governed; a wave's services and web apps
 		// are left alone.
@@ -1552,7 +1551,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// Moves each org's model connection key off its Anthropic-era storage
 		// names: migrate's phase20 copied the bytes at boot, and this switches
 		// the SM-API mirror at boot; the periodic passes retire the old copies
-		// once none of the org's cycles is open (decision 23).
+		// once none of the org's cycles is open.
 		organization.NewModelKeyRename(organization.NewModelKeyRenameRepository(db, credStore), orgRepo, secretRefWriter, runCycleRepo),
 	}
 	// Disk-lifecycle reaper: global passes self-elect via non-blocking flock.

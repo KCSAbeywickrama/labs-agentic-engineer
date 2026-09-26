@@ -21,7 +21,7 @@
 // One row per refusal code and one per transition the card can make: first
 // connect on the format's defaults, a host change, a format change on the same
 // host, Claude Code on an OpenAI-compatible connection, the subscription on
-// leaving Anthropic's API, disconnect, and today's `{kind, apiKey}` body.
+// leaving Anthropic's API, disconnect, and the minimal `{kind, apiKey}` body.
 package organization_test
 
 import (
@@ -71,8 +71,8 @@ func (c *configHarness) keyPreview(t *testing.T, org string) string {
 
 // --- transitions -------------------------------------------------------------------
 
-// Today's `{kind: anthropic, apiKey}` body (the old console, seed-dev.sh) still
-// connects: the server fills the format's defaults, and GET says what they are.
+// A `{kind: anthropic, apiKey}` body (seed-dev.sh sends it) connects: the
+// server fills the format's defaults, and GET says what they are.
 func TestConfigLLM_TheOldBodyConnectsWithTheFormatDefaults(t *testing.T) {
 	t.Parallel()
 	c := newConfigHarness(t)
@@ -238,7 +238,7 @@ func TestConfigLLM_AfterADisconnectFromOpenCodeASubscriptionNeedsTheRuntime(t *t
 	}
 }
 
-// An unlisted model is a warning, not a refusal (decision 24): the save goes
+// An unlisted model is a warning, not a refusal: the save goes
 // through with the stored key, and llmCheck says so.
 func TestConfigLLM_AnUnlistedModelIsAWarning(t *testing.T) {
 	t.Parallel()

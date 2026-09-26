@@ -26,7 +26,6 @@ import {
   readModelConnection,
 } from "./model_connection.js";
 
-// A Job dispatched before the connection env existed must run exactly as it did.
 test("readModelConnection: no AEP_MODEL_* is Anthropic's own API on the runtime's default model", () => {
   assert.deepEqual(readModelConnection("claude-sonnet-5", {}), {
     format: "anthropic",
@@ -119,8 +118,7 @@ test("onAnthropicAPI: the Anthropic format on api.anthropic.com, and nothing els
   assert.equal(onAnthropicAPI({ format: "openai-compatible", host: "api.anthropic.com" }), false);
 });
 
-// Upgrade skew: a Job from the aep-api before the connection mounts the key as
-// ANTHROPIC_API_KEY and nothing else, and must still find its key.
+// A key on Anthropic's own API is mounted as ANTHROPIC_API_KEY (ADR-0038 §6).
 test("connectionKey: AEP_MODEL_API_KEY, else the ANTHROPIC_API_KEY an older dispatch mounts", () => {
   assert.equal(connectionKey({ ANTHROPIC_API_KEY: "sk-ant-api03-old-dispatch" }), "sk-ant-api03-old-dispatch");
   assert.equal(connectionKey({ AEP_MODEL_API_KEY: "ollama-key-0123456789" }), "ollama-key-0123456789");

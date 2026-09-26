@@ -21,7 +21,7 @@
 // URL, key and model, one for every agent) and `agents` (the coding agent's
 // runtime and an optional Claude subscription it bills instead of the
 // connection's key). One save of it is one transaction under the card's
-// per-org locks, covering the connection row, the subscription row, the
+// per-org lock, covering the connection row, the subscription row, the
 // setting row and the encrypted secret bytes — see repository_agents_card.go.
 // What a save does is decided by agents_rule.go; the connection is probed
 // (model_probe.go) before the transaction opens, so no lock is held across a
@@ -43,10 +43,8 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 )
 
-// cardLockPrefix is the card's per-org advisory lock name. The release before
-// took it after the Anthropic-era name `org_anthropic:`, so replicas of the two
-// releases serialize on this one during a rolling deploy; the old name is no
-// longer taken.
+// cardLockPrefix is the card's per-org advisory lock name (also taken by
+// ModelKeyRename).
 const cardLockPrefix = "org_model:"
 
 // AgentSettingsService owns the AI agents card. See the file doc.
@@ -209,7 +207,7 @@ func (s *AgentSettingsService) testConnection(ctx context.Context, ocOrgID strin
 }
 
 // apply saves the card's part of p as ONE transaction under the org's card
-// locks. The patch is judged again inside it, against the rows it is about to
+// lock. The patch is judged again inside it, against the rows it is about to
 // write over, so a concurrent save cannot slip a state between probe and write
 // that the rule would refuse; a connection that changed since it was probed
 // is a conflict, never a write of an unprobed connection. The SM-API copies

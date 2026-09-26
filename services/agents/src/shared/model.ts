@@ -52,7 +52,7 @@ export interface ModelConnection extends TurnConnection {
   model: string;
 }
 
-/** Anthropic's own API: the connection every caller from before connections meant. */
+/** Anthropic's own API. */
 const ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1";
 
 /**
@@ -76,10 +76,7 @@ const ANTHROPIC_CAPABILITIES: ModelCapabilities = {
  * tied to the format and the host that produced them. Stamped on each turn's
  * journal entry and compared by `historyFor`.
  *
- * The model is deliberately not part of it: Anthropic's API accepts one Claude
- * model's signed thinking replayed to another (checked 2026-09-26 both ways
- * between claude-haiku-4-5 and claude-sonnet-5), so a model change on the same
- * host keeps the history, and its cache, as it is.
+ * The model is not part of it (ADR-0038 §9).
  */
 export function connectionFingerprint(conn: Pick<ModelConnection, "format" | "baseURL">): string {
   return `${conn.format}@${new URL(conn.baseURL).host}`;
@@ -134,9 +131,10 @@ export function connectionFromTurn(wire: TurnConnection, apiKey: string, model: 
 }
 
 /**
- * The model id `createModel` resolves for `cfg`. Exported so the composition
- * root can thread the SAME id it instantiates into the turn (usage attribution
- * on the terminal manifest, #249) instead of re-deriving the default elsewhere.
+ * The model id a turn runs on: `cfg.model`, else `AGENT_MODEL`. Exported so
+ * the composition root can thread the SAME id it instantiates into the turn
+ * (usage attribution on the terminal manifest, #249) instead of re-deriving the
+ * default elsewhere.
  */
 export function resolveModelId(cfg: { model?: string } = {}): string {
   return cfg.model ?? config.model;

@@ -106,9 +106,7 @@
 //
 // **A spent model plan ends the run; it does not wait out the deadline.** Every
 // retry the runtime reports is also fed to the provider-limit rule
-// (`lib/provider_limit.ts`): a 429 with a retry delay of five minutes or more,
-// or five minutes of 429 retries in one streak (until the model next answers —
-// a tool call or a clean turn), ends the run through the same one
+// (`lib/provider_limit.ts`), which ends the run through the same one
 // termination path the deadline takes, and the settle carries
 // `code: provider_limit` with the host and, when the provider stated one, the
 // reset time. aep-api reads that code and settles the run BLOCKED instead of

@@ -15,7 +15,7 @@
 // under the License.
 
 // model_key_rename.go — moves every org's model connection key off its
-// Anthropic-era storage names (decision 23), by copy-then-switch.
+// Anthropic-era storage names, by copy-then-switch.
 //
 // The key lives in two places: its encrypted bytes in org_secrets (read by the
 // spec agents, task planning and Agent Manager) and a mirror in SM-API (the
@@ -25,7 +25,7 @@
 //
 // The move is split by what each half needs. The bytes are copied at boot by
 // migrate's phase20_model_key_rename, before anything is served, because every
-// reader looks under `model/key` from this release on. The mirror needs the
+// reader looks under `model/key`. The mirror needs the
 // SM-API client, which exists only once the app is assembled, so this
 // reconciler moves it: a pass at boot, then one every modelKeyRenameInterval.
 // Per org still holding `anthropic/key`, step 1 runs on every pass and step 2

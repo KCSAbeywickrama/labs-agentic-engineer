@@ -23,7 +23,7 @@ import { DENIED_CAPABILITIES } from "../port.js";
 import { allowlist, buildOpencodeConfig, providerConfig, type OpencodeConfigInput } from "./config.js";
 import { deniedTools, opencodeModel, platformModel, providerId } from "./tools.js";
 
-/** Anthropic's own API on the org's model — what every run was before the connection. */
+/** Anthropic's own API on the org's model. */
 function firstParty(model = "claude-sonnet-5"): ModelConnection {
   return readModelConnection(model, {});
 }
@@ -188,7 +188,7 @@ test("providerConfig: on Ollama's OpenAI-compatible endpoint, provider aep with 
   });
 });
 
-// Run live once on Ollama's Anthropic endpoint (the directed aep-web check).
+// Run live once on Ollama's Anthropic endpoint.
 test("providerConfig: an Anthropic-format host other than Anthropic's API takes a Bearer key as authToken", () => {
   const conn = ollama({ AEP_MODEL_FORMAT: "anthropic", AEP_MODEL_BASE_URL: "https://ollama.com/v1" });
   assert.deepEqual(providerConfig(conn), {

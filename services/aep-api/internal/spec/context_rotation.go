@@ -16,16 +16,8 @@
 
 package spec
 
-// Automatic rotation near a smaller context window. The spec agents have no
-// compaction: a conversation's history only grows, which is fine at 1M
-// tokens but fills a smaller model's window within a long interview. So when
-// the org's model connection states its window, a send to a conversation
-// whose last turn ended past 80% of it rotates the project's thread first —
-// the same rotation as "New conversation" (#430), answered with the same
-// 409 conversation_rotated the console already handles by switching to the
-// fresh thread. The message is not carried over: on a thread with none of
-// the old history, "yes, go ahead" would mean nothing, so the sender resends
-// it deliberately.
+// Rotates a spec conversation whose last measured context passed 80% of the
+// connection's stated window (see README).
 
 import (
 	"context"
@@ -53,9 +45,8 @@ func contextFull(tokens int64, window int) bool {
 // rotated it or a concurrent sender did first), a TurnInProgressError when it
 // is full but a turn is still running in it, and nil otherwise.
 //
-// A connection that states no window (first-party Anthropic, where the
-// runtime knows the model) returns before any query, so that path is exactly
-// what it was before rotation existed.
+// A connection that states no window (Anthropic's own API) returns before
+// any query.
 func (s *Service) rotateIfContextFull(ctx context.Context, orgID, projectID, conversationID string, conn modelconn.Connection) error {
 	if conn.ContextWindow == nil || *conn.ContextWindow <= 0 || s.conversations == nil {
 		return nil

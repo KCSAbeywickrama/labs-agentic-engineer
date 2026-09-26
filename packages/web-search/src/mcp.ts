@@ -22,9 +22,7 @@
  * runtime spawns it as `aep-web` when its connection's search strategy is one
  * the runtime cannot run itself (`runners/remote-worker/src/lib/aep_web.ts`).
  *
- * Hand-written rather than built on the MCP SDK, because this package is
- * dependency-free by design: the runner image installs it from source, with no
- * lockfile of its own. The surface a tool server needs is four methods.
+ * Hand-written: the package is dependency-free (README).
  *
  * Every query is judged by `deny` BEFORE it leaves the process; a refused query
  * reaches no network, and the refusal is the tool's error text, which is what

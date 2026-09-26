@@ -328,14 +328,8 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       }
     }
 
-    // 3b'. Web search (external-dependency-discovery #252): gated on the
-    //      caller-supplied `webSearch` flag (the BFF sets it true under the
-    //      same design-generate/collab condition as `mcp`), and the tool is the
-    //      connection's strategy — Anthropic's server tool, Ollama's search
-    //      API, or none (`tools/web-search.ts`). Absent flag, or strategy
-    //      `none`, leaves `tools` untouched (byte-identical to today). Spread
-    //      LAST — same shadow-guard as the MCP merge above — so a discovered
-    //      MCP tool can never shadow it either.
+    // 3b'. Web search (#252), spread LAST: the same shadow-guard as the MCP
+    //      merge above, so a discovered MCP tool can never shadow it.
     if (input.webSearch) {
       tools = { ...tools, ...buildWebSearchTools(conn, input.toolFetch ?? guardedFetch) };
     }

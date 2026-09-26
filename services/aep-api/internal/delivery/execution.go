@@ -86,9 +86,7 @@ type Execution struct {
 	// ModelHost is the model host the stamp is priced against. Nothing stamps
 	// it on a new row: the only executions minted today are provision rows,
 	// which run no model, so their usage (if any) stays unpriced.
-	// Nullable on purpose: a row that predates the column reads NULL until
-	// migrate's phase18 backfills it to api.anthropic.com, and NULL-only is what
-	// keeps that backfill one-shot (see RunPhase18ModelHost).
+	// Nullable on purpose (see RunPhase18ModelHost).
 	ModelHost string `gorm:"type:text" json:"-"`
 
 	CreatedAt time.Time  `json:"createdAt"`

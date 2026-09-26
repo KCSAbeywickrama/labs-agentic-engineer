@@ -77,11 +77,8 @@ func modelEnv(cred organization.CodingCredential) (env map[string]string, keyEnv
 // ANTHROPIC_API_KEY above CLAUDE_CODE_OAUTH_TOKEN, so a pod holding both would
 // bill the key and ignore the org's subscription.
 //
-// A connection key on Anthropic's own API keeps ANTHROPIC_API_KEY, the name
-// every Job carried before the connection existed. That keeps a first-party
-// Job readable by a runner image that predates AEP_MODEL_API_KEY — the local
-// build skips an existing image tag unless forced — while every other host,
-// which no older image could run anyway, gets the connection's own variable.
+// A connection key on Anthropic's own API keeps ANTHROPIC_API_KEY (ADR-0038
+// §6); every other host gets AEP_MODEL_API_KEY.
 func modelKeyEnvVar(cred organization.CodingCredential) string {
 	switch {
 	case cred.Kind == organization.CodingCredentialClaudeSubscription:

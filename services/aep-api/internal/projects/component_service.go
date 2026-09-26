@@ -91,9 +91,9 @@ type BuildSecretStager interface {
 	StageBuildSecret(ctx context.Context, ocOrgID, repoSlug, workflowRunName string) (secretRef string, err error)
 }
 
-// ModelKeyResolver is the narrow port EnsureComponent needs from the
-// organization domain's ConnectionReader to wire an ai-agent component's
-// MODEL_API_KEY: the org's model connection and its key's vault coordinates.
+// ModelKeyResolver is the narrow port ModelAccessEnvVars needs from the
+// organization domain's ConnectionReader: the org's model connection and its
+// key's vault coordinates.
 // Declared consumer-side (same pattern as OrgPublisher in trait_sync.go) so
 // this package takes only the one method it needs, not the whole reader.
 // Returns an *organization.NotFoundError when the org has no active
@@ -212,8 +212,8 @@ type componentService struct {
 // NewComponentService builds the component service. repoSvc, buildCredSvc,
 // modelKeyResolver, and secretRefClient may be nil in tests / unit-only
 // flows; production wiring passes all four so TriggerBuild can pre-stage
-// the per-WorkflowRun build Secret and EnsureComponent can wire MODEL_* into
-// ai-agent components.
+// the per-WorkflowRun build Secret and ModelAccessEnvVars can compose MODEL_*
+// for ai-agent components.
 func NewComponentService(client openchoreo.ComponentClient, observClient observability.Client, artifactStore *spec.ArtifactStore, repoSvc sourcecontrol.RepoService, buildCredSvc BuildSecretStager, modelKeyResolver ModelKeyResolver, secretRefClient secretmanagersvc.OpenChoreoSecretReferenceClient) ComponentService {
 	return &componentService{
 		client:           client,
@@ -372,12 +372,6 @@ func (s *componentService) EnsureComponent(ctx context.Context, orgName, project
 		return fmt.Errorf("ensure component: apply spec for %q: %w", k8sName, err)
 	}
 	slog.InfoContext(ctx, "ensure component: OC Component ensured", "org", orgName, "project", projectName, "component", k8sName)
-
-	// Every ai-agent component gets the organisation's model connection —
-	// the MODEL_* variables — without declaring a
-	// dependency (ADR-0016). No-op for every other component type; see
-	// ai_agent_model_access.go. Best-effort: never fails EnsureComponent, so
-	// a model-access hiccup cannot block component creation or a build.
 	return nil
 }
 

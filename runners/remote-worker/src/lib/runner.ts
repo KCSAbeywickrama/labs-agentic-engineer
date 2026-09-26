@@ -371,8 +371,7 @@ export async function startCodingRun(
   writePromptAppendix(log.dir, preloadBodies);
 
   // The organization's model and connection, stamped onto the Workload by the
-  // dispatcher. Absent for a dispatch made before the settings existed, and
-  // for the playground — both then get exactly the run they had.
+  // dispatcher.
   const connection = readModelConnection(runtime.defaultModel);
   // The platform's own web search, when the connection's strategy is one no
   // runtime runs (lib/aep_web.ts). It refuses a staged secret with the same

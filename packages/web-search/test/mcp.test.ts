@@ -88,7 +88,6 @@ test("a query is searched and its results come back as text", async () => {
   assert.match(res.result.content[0]?.text ?? "", /Stripe\nhttps:\/\/stripe\.com\/docs\n\nPayment intents/);
 });
 
-// The DLP rule: a query holding a staged secret never reaches the search.
 test("a query holding a staged secret is refused before it is sent", async () => {
   const { handle, queries } = server();
   const res = (await handle(call(6, `how do I call the API with ${SECRET}`))) as {

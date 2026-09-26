@@ -26,10 +26,6 @@ package delivery
 // re-dispatch budget, and a person starts it again: the same shape as
 // ErrAgentQuotaExceeded, arriving after launch instead of at it.
 //
-// There is no organization-wide "limited until" state (design decision 19):
-// every run finds out for itself, so a run started while the plan is still
-// spent costs one pod start and a few seconds before it blocks.
-//
 // It lives here rather than in codingagent for the reason agent_quota.go does:
 // the producer (the pod-truth watcher) and the consumer (the run supervisor)
 // both import this package and neither imports the other.

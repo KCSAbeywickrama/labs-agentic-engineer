@@ -28,8 +28,7 @@
  *   AEP_MODEL_AUTH_SCHEME=bearer AEP_MODEL_API_KEY=… AEP_AGENT_MODEL=gpt-oss:20b pnpm play …
  *
  * With neither `AEP_MODEL_FORMAT` nor `AEP_MODEL_BASE_URL` set, a turn names no
- * connection and runs on Anthropic's own API with `ANTHROPIC_API_KEY`, as it
- * always has.
+ * connection and runs on Anthropic's own API with `ANTHROPIC_API_KEY`.
  */
 
 import type { ModelCapabilities, TurnConnection } from "@aep/agent-stream";
@@ -109,7 +108,7 @@ const CONNECTION_VARS = [
 
 /**
  * The connection env a local CODING run is given, or undefined when no
- * `AEP_MODEL_*` names one (the run is then on Anthropic's own API, as always).
+ * `AEP_MODEL_*` names one (the run is then on Anthropic's own API).
  *
  * The developer's variables, plus the search strategy aep-api would stamp
  * (`capabilitiesOf`), unless one was set by hand: a dispatch always carries it,

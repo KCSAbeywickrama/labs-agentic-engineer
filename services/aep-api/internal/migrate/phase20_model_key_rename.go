@@ -25,7 +25,7 @@ import (
 
 // RunPhase20ModelKeyRename copies every org's model connection key from its
 // Anthropic-era org_secrets key, `anthropic/key`, to `model/key`, where every
-// reader looks from this release on (decision 23). The sealed value is copied
+// reader looks from this release on. The sealed value is copied
 // as is — the column cipher binds no associated data to the key name — with
 // its updated_at, so the bytes are identical.
 //

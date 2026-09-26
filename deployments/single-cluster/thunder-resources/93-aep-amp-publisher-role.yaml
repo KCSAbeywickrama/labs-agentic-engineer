@@ -16,8 +16,7 @@
 # The permission list is deliberately narrower than amp-role-admin's: AEP
 # registers agents and maintains its own provider, and has no business deleting
 # either. `amp:llm-provider:api-key-manage` is what lets it issue an agent's own
-# model key. There is no template read: the provider's template, upstream and
-# auth all come from the org's model connection.
+# model key.
 resource_type: role
 id: aep-amp-publisher-role
 name: AEP Agent Manager Publisher

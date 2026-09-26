@@ -34,10 +34,10 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 )
 
-// firstPartyProviderWireBefore is the provider body AEP sent for an org on
-// Anthropic's own API before connections had formats, captured from that code
-// (the `anthropic` template's auth read from Agent Manager, then
-// ProviderInputFor) with a fake key. POST and PUT sent the same bytes.
+// firstPartyProviderWireBefore is the provider body an org on Anthropic's own
+// API already has in Agent Manager (the `anthropic` template's auth read from
+// Agent Manager, then ProviderInputFor), with a fake key. POST and PUT send
+// the same bytes.
 const firstPartyProviderWireBefore = `{"accessControl":{"exceptions":[],"mode":"allow_all"},` +
 	`"context":"/aep-default-anthropic","gateways":["gw-1"],"id":"aep-default-anthropic",` +
 	`"name":"AEP default Anthropic",` +
@@ -91,9 +91,8 @@ func providerWire(t *testing.T, conn modelconn.Connection, key string) (post, pu
 	return post, put
 }
 
-// An org on Anthropic's own API gets the provider it had before connections had
-// formats, byte for byte, except the display name, which no longer says
-// "Anthropic" on every format.
+// An org on Anthropic's own API keeps its existing provider byte for byte,
+// except the display name.
 func TestProviderWireForAnthropicsOwnAPIIsUnchanged(t *testing.T) {
 	want := strings.Replace(firstPartyProviderWireBefore,
 		`"name":"AEP default Anthropic"`, `"name":"AEP default model connection"`, 1)

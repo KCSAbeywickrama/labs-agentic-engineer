@@ -22,8 +22,7 @@ import (
 )
 
 // AnthropicRole names which reader an org's Anthropic credential serves. The
-// table is keyed (OcOrgID, Role), and since the model connection moved to
-// org_model_connections the only role is the Claude subscription
+// table is keyed (OcOrgID, Role); the only role is the Claude subscription
 // (CHECK org_anthropic_credentials_subscription_only).
 type AnthropicRole string
 
@@ -40,15 +39,13 @@ func (r AnthropicRole) String() string { return string(r) }
 // AnthropicCredentialKind names HOW a stored credential authenticates, which
 // decides how it is validated. It is persisted rather than re-derived, because
 // readers of the metadata row never see the secret bytes — they have nothing to
-// sniff. Which variable a coding run receives a credential under follows its
-// role (CodingCredential.Kind), and dispatch owns that mapping.
+// sniff.
 type AnthropicCredentialKind string
 
 const (
 	// AnthropicCredentialAPIKey is a Console API key (`sk-ant-api…`),
-	// authenticated with the `x-api-key` header. Never stored in this table any
-	// more (the connection key lives in org_model_connections); it names what a
-	// subscription token is not.
+	// authenticated with the `x-api-key` header. Never stored in this table; it
+	// names what a subscription token is not.
 	AnthropicCredentialAPIKey AnthropicCredentialKind = "api_key"
 
 	// AnthropicCredentialOAuth is a long-lived Claude Code OAuth token from
@@ -79,8 +76,7 @@ func AnthropicCredentialKindOf(key string) AnthropicCredentialKind {
 }
 
 // SecretStoreKey is the `org_secrets` key holding this role's encrypted bytes:
-// "anthropic/coding-key", the key the subscription held when it could also be
-// an API key. Distinct from the connection key's modelKeyStoreKey.
+// "anthropic/coding-key". Distinct from the connection key's modelKeyStoreKey.
 func (r AnthropicRole) SecretStoreKey() string {
 	return "anthropic/" + string(r) + "-key"
 }

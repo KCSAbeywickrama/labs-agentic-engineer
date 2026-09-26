@@ -208,9 +208,7 @@ type RunCycle struct {
 	// on, copied onto the row at launch (NoteModelHost) just as the runtime and
 	// model are copied into the Job, and the host its stamp is priced against:
 	// rates are keyed by (host, model). Empty on a cycle not yet dispatched.
-	// Nullable on purpose: a row that predates the column reads NULL until
-	// migrate's phase18 backfills it to api.anthropic.com, and NULL-only is what
-	// keeps that backfill one-shot (see RunPhase18ModelHost).
+	// Nullable on purpose (see RunPhase18ModelHost).
 	ModelHost string `gorm:"type:text" json:"-"`
 
 	CreatedAt time.Time `json:"createdAt"`

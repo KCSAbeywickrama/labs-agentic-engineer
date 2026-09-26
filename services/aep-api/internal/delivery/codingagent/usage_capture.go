@@ -36,12 +36,8 @@ type terminalReport struct {
 	// usage is the run's token spend (#249): the last TERMINAL runner line
 	// carrying a usage object wins.
 	//
-	// Both envelope versions are read, because both are in flight during the
-	// cutover and a v2 runner emits NO `result` kind at all — its run settles as
-	// `run_settled` and its usage rides RunEvent.usage. Matching only `result`
-	// is what made every v2 run silently unbilled: the capture answered nil,
-	// RecordUsage was never called, and the cycle row kept an empty model id
-	// and a null cost while the pricing path downstream was working perfectly.
+	// Both envelope versions are read: a v2 runner emits no `result` kind; its
+	// usage rides `run_settled`.
 	//
 	// LAST, never summed. The runtime reports usage CUMULATIVELY across a
 	// session, so the terminal line already contains the whole run; folding the

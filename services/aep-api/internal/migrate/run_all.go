@@ -240,8 +240,8 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// every active default credential becomes a connection on Anthropic's
 		// API with the org's model, the default rows go, the credential table
 		// keeps only the Claude subscription, and org_agent_settings loses its
-		// model column. Follows phase17 (which no longer copies a model) and
-		// every step that shaped org_anthropic_credentials.
+		// model column. Follows phase17 and every step that shaped
+		// org_anthropic_credentials.
 		ctxStep("phase19_model_connection", RunPhase19ModelConnection),
 		// The connection key's bytes move from org_secrets 'anthropic/key' to
 		// 'model/key' (copy only; organization.ModelKeyRename moves the SM-API

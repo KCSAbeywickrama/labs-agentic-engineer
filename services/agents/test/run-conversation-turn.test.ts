@@ -141,8 +141,8 @@ test("a journaled turn appends one entry stamped with its user message's index",
 });
 
 // Each new turn names the connection that wrote it (history-for.ts decides
-// what a later connection may replay from that); a caller naming none ran on
-// today's Anthropic connection.
+// what a later connection may replay from that); a caller naming none runs on
+// Anthropic's own API.
 test("a journaled turn carries the fingerprint of the connection that wrote it", async () => {
   const store = new InMemoryConversationStore();
   const guard = new TurnGuard();

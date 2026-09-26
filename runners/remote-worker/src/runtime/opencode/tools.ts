@@ -111,15 +111,12 @@ export const BACKGROUND_PARAMETER = "background";
 /**
  * The provider a run's connection is configured as.
  *
- * `anthropic` on Anthropic's own API — exactly the provider this runtime ran on
- * before the connection existed, so the models.dev catalog still supplies
- * Claude's limits — and `aep` everywhere else: an id that matches no catalog
- * entry, so nothing is merged in and the connection's own figures are the only
- * ones (`config.ts`).
+ * `anthropic` on Anthropic's own API, so the models.dev catalog supplies
+ * Claude's limits, and `aep` everywhere else: an id that matches no catalog
+ * entry, so the connection's own figures are the only ones (`config.ts`).
  */
 export type ProviderId = "anthropic" | "aep";
 
-/** The provider for a connection. */
 export function providerId(connection: Pick<ModelConnection, "format" | "host">): ProviderId {
   return onAnthropicAPI(connection) ? "anthropic" : "aep";
 }

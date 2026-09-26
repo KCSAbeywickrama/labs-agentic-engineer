@@ -522,14 +522,13 @@ func TestSecretRefWriter_WritePublisher(t *testing.T) {
 
 // TestSecretRefWriter_ResolveVaultKey_NoClaimsInContext pins resolveVaultKey's
 // exact error text. resolveVaultKey itself is unexported and unreachable from
-// this black-box test, so this drives it indirectly through WriteModelKey
-// (any Write* would do — see the WriteModelKey "resolve-vault-key failure"
-// subtest for the same path with a Contains check). Go's %w wrapping
-// preserves the wrapped error's Error() text verbatim as a suffix, so the
-// precise underlying message is still pinned exactly, just reached through
-// the public API instead of the private method. resolveVaultKey never touches
-// the DB (it derives the path from the JWT, deliberately not from the local
-// `organizations.uuid` row — see its doc comment), so db: nil is safe here too.
+// this black-box test, so this drives it indirectly through WriteModelKey.
+// Go's %w wrapping preserves the wrapped error's Error() text verbatim as a
+// suffix, so the precise underlying message is still pinned exactly, just
+// reached through the public API instead of the private method.
+// resolveVaultKey never touches the DB (it derives the path from the JWT,
+// deliberately not from the local `organizations.uuid` row — see its doc
+// comment), so db: nil is safe here too.
 func TestSecretRefWriter_ResolveVaultKey_NoClaimsInContext(t *testing.T) {
 	t.Parallel()
 	w := organization.NewSecretRefWriter(&fakeSMClient{}, nil, nil, nil, nil)

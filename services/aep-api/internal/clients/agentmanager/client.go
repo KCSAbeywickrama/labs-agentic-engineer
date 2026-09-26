@@ -89,8 +89,7 @@ func (c *client) EnsureProvider(ctx context.Context, in EnsureProviderInput) (Pr
 	if found {
 		// It exists. Re-assert the org's connection only when the caller says
 		// it changed — the key is masked on read, so the caller is the only one
-		// that can know, and a needless PUT redeploys every proxy this provider
-		// serves. See EnsureProviderInput.ReassertCredential.
+		// that can know. See EnsureProviderInput.ReassertCredential.
 		if in.ReassertCredential {
 			if err := c.updateProviderCredential(ctx, tok, uuid, in); err != nil {
 				return ProviderRef{}, err
@@ -112,9 +111,9 @@ func (c *client) EnsureProvider(ctx context.Context, in EnsureProviderInput) (Pr
 	return ProviderRef{UUID: created.UUID, Handle: created.ID, Context: in.Context}, nil
 }
 
-// UpdateProviderCredential writes in's connection — template, upstream, auth
-// and key — onto the org's provider when it exists, and creates nothing when it
-// does not: found reports which. It is the write a credential change makes on
+// UpdateProviderCredential writes in's connection onto the org's provider when
+// it exists, and creates nothing when it does not: found reports which. It is
+// the write a credential change makes on
 // a provider some deploy created, where EnsureProvider's create branch would
 // conjure a provider no agent is bound to.
 func (c *client) UpdateProviderCredential(ctx context.Context, in EnsureProviderInput) (bool, error) {

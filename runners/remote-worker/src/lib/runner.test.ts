@@ -465,8 +465,6 @@ test("startCodingRun: the model is the org's setting, or the runtime's default",
   assert.equal((await policyFor(dispatch(), { AEP_AGENT_MODEL: "" })).connection.model, "model-from-runtime");
 });
 
-// A dispatch that carries no connection env (every Job before it existed, and
-// the playground) runs on Anthropic's own API, as it always did.
 test("startCodingRun: no connection env is Anthropic's own API", async () => {
   const { connection } = await policyFor(dispatch());
   assert.equal(connection.format, "anthropic");

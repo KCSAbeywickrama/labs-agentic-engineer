@@ -30,9 +30,8 @@ import (
 // have been written by this build), then the old table is dropped. Idempotent:
 // once the old table is gone the step does nothing.
 //
-// The runtime is copied and the model is not: the model moved onto the model
-// connection (phase19_model_connection), and org_agent_settings has no model
-// column any more. A database upgraded straight from before this step
+// The runtime is copied and the model is not: org_agent_settings has no model
+// column (phase19). A database upgraded straight from before this step
 // therefore loses a non-default model choice; the org's connection carries
 // the Anthropic format's default model until it saves another.
 func RunPhase17OrgAgentSettings(ctx context.Context, db *gorm.DB) error {
