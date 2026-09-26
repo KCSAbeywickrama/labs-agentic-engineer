@@ -211,6 +211,33 @@ func TestConfigLLM_NullDisconnects(t *testing.T) {
 	}
 }
 
+// A disconnect keeps the runtime, so an org that left OpenCode connected
+// cannot take a subscription back without choosing Claude Code in the same
+// save: deployments/scripts/seed-dev.sh sends the runtime with the token for
+// exactly this.
+func TestConfigLLM_AfterADisconnectFromOpenCodeASubscriptionNeedsTheRuntime(t *testing.T) {
+	t.Parallel()
+	c := newConfigHarness(t)
+	if r := c.h.AsOrg("acme").Patch(configPath, onOllama(ollamaKey)); r.Code != 200 {
+		t.Fatalf("setup: %d %s", r.Code, r.Body.String())
+	}
+	if r := c.h.AsOrg("acme").Patch(configPath, `{"llm":null}`); r.Code != 200 {
+		t.Fatalf("disconnect: %d %s", r.Code, r.Body.String())
+	}
+	connect := `{"llm":{"kind":"anthropic","apiKey":"` + goodAnthKey + `"},"agents":{%s"subscription":{"kind":"claude","token":"` + goodToken + `"}}}`
+
+	r := c.h.AsOrg("acme").Patch(configPath, fmt.Sprintf(connect, ""))
+	refused(t, r.Code, r.Body.String(), "agents", "agents_subscription_requires_claude_code")
+
+	r = c.h.AsOrg("acme").Patch(configPath, fmt.Sprintf(connect, `"runtime":"claude-code",`))
+	if r.Code != 200 {
+		t.Fatalf("seed-dev's body: %d %s", r.Code, r.Body.String())
+	}
+	if agents := agentsOf(t, r.Body.Bytes()); agents["runtime"] != "claude-code" || agents["subscription"] == nil {
+		t.Fatalf("agents after the save: %+v", agents)
+	}
+}
+
 // An unlisted model is a warning, not a refusal (decision 24): the save goes
 // through with the stored key, and llmCheck says so.
 func TestConfigLLM_AnUnlistedModelIsAWarning(t *testing.T) {

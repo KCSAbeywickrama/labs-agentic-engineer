@@ -22,6 +22,7 @@ package organization
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
@@ -56,7 +57,9 @@ func TestModelProviderStepFor(t *testing.T) {
 		{"a save that stays on the other host leaves it", onOllama(), onOllama(), true, modelProviderLeave},
 		{"first connect on another host has nothing to clear", nil, onOllama(), true, modelProviderLeave},
 		{"moving back to Anthropic's API publishes again", onOllama(), firstParty(), true, modelProviderPublish},
-		{"a disconnect leaves it, as before", firstParty(), nil, false, modelProviderLeave},
+		{"a disconnect from Anthropic's API clears the copy", firstParty(), nil, false, modelProviderClear},
+		{"a disconnect from another host has nothing to clear", onOllama(), nil, false, modelProviderLeave},
+		{"a save with no connection either side leaves it", nil, nil, false, modelProviderLeave},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := modelProviderStepFor(tc.before, tc.after, tc.keyWritten); got != tc.want {
@@ -66,10 +69,12 @@ func TestModelProviderStepFor(t *testing.T) {
 	}
 }
 
-// recordingProvider counts what reached the provider.
+// recordingProvider counts what reached the provider; clearErr is what every
+// clear answers.
 type recordingProvider struct {
 	published []string
 	cleared   int
+	clearErr  error
 }
 
 func (p *recordingProvider) PublishOrgModelKey(_ context.Context, _, apiKey string) error {
@@ -79,7 +84,7 @@ func (p *recordingProvider) PublishOrgModelKey(_ context.Context, _, apiKey stri
 
 func (p *recordingProvider) ClearOrgModelKey(context.Context, string) error {
 	p.cleared++
-	return nil
+	return p.clearErr
 }
 
 // The interim gate, over a sequence of saves: an org that moves off
@@ -99,5 +104,51 @@ func TestSyncModelProvider_ANonAnthropicConnectionClearsTheProviderOnce(t *testi
 	}
 	if len(provider.published) != 0 {
 		t.Fatalf("published %d key(s) for a connection generated agents cannot use", len(provider.published))
+	}
+}
+
+// A disconnect leaves no connection generated agents run on, so the provider's
+// copy goes with it, once: the Ollama save that follows starts from no
+// connection and has nothing left to clear.
+func TestSyncModelProvider_ADisconnectFromAnthropicClearsTheProviderOnce(t *testing.T) {
+	provider := &recordingProvider{}
+	svc := NewAnthropicCredentialService(nil, nil).WithModelProvider(provider)
+	ctx := context.Background()
+
+	svc.syncModelProvider(ctx, "acme", firstParty(), nil, "")
+	svc.syncModelProvider(ctx, "acme", nil, onOllama(), "ollama-key-0123456789")
+
+	if provider.cleared != 1 {
+		t.Fatalf("cleared %d time(s) over disconnect then Ollama, want once", provider.cleared)
+	}
+	if len(provider.published) != 0 {
+		t.Fatalf("published %d key(s) for a connection generated agents cannot use", len(provider.published))
+	}
+}
+
+// An org that was never on Anthropic's API never had a copy published, so its
+// disconnect makes no call.
+func TestSyncModelProvider_ADisconnectFromAnotherHostMakesNoCall(t *testing.T) {
+	provider := &recordingProvider{}
+	svc := NewAnthropicCredentialService(nil, nil).WithModelProvider(provider)
+
+	svc.syncModelProvider(context.Background(), "acme", onOllama(), nil, "")
+
+	if provider.cleared != 0 || len(provider.published) != 0 {
+		t.Fatalf("clears=%d publishes=%d, want no call", provider.cleared, len(provider.published))
+	}
+}
+
+// A failed clear is attempted once and swallowed, never raised: the save it
+// follows has committed. On a disconnect there is no connection after it, so
+// the warning names the host the copy belonged to.
+func TestSyncModelProvider_AFailedClearOnDisconnectIsAttemptedOnceAndSwallowed(t *testing.T) {
+	provider := &recordingProvider{clearErr: errors.New("amp unreachable")}
+	svc := NewAnthropicCredentialService(nil, nil).WithModelProvider(provider)
+
+	svc.syncModelProvider(context.Background(), "acme", firstParty(), nil, "")
+
+	if provider.cleared != 1 {
+		t.Fatalf("cleared %d time(s), want one attempt", provider.cleared)
 	}
 }

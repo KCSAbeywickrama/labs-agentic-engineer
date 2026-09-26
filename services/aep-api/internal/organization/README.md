@@ -109,8 +109,9 @@ services, the raw connect-callback controller, and the S2S credentials-refresh.*
     variable name; dispatch (`codingagent/model_env.go`) maps that to the runner's env.
   - Generated agents run only where `modelconn.CapabilitiesOf` says `GeneratedAgents` (Anthropic's
     own API) until their follow-up. On any other connection the Agent Manager provider gets no key,
-    and its copy of the previous one is cleared once, after commit, on the save that moved off
-    (`syncModelProvider`); ai-agent components start unconfigured and builds run without evaluation.
+    and its copy of the previous one is cleared once, after commit, on the save that leaves such a
+    connection, by a move to another host or a disconnect (`syncModelProvider`); ai-agent components
+    start unconfigured and builds run without evaluation.
 - **The model connection is read only through `ModelConnectionService`** (`model_connection_service.go`):
   a `modelconn.Connection` (format, base URL, host, model, auth scheme, limits, image input) beside the
   key's bytes (`Effective`), its vault reference (`KeyRef`) or the coding credential

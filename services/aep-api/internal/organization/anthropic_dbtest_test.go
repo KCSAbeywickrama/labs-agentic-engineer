@@ -322,12 +322,75 @@ func TestModelConnectionSave_PublishesTheKeyToTheModelProvider_DB(t *testing.T) 
 		t.Fatalf("publisher calls = %d with %q, want 1 with the newly saved key", pub.calls, pub.published)
 	}
 	// Moving to another host clears the provider's copy, once.
-	c.patch(t, "acme", orgconfig.ConfigPatch{
-		LLM:    patch.Field[orgconfig.LLMPatch]{Sent: true, Value: orgconfig.LLMPatch{Kind: "openai-compatible", BaseURL: "https://ollama.com/v1", APIKey: "ollama-db-key-0123456789"}},
-		Agents: patch.Field[orgconfig.AgentsWrite]{Sent: true, Value: orgconfig.AgentsWrite{Runtime: "opencode"}},
-	})
+	c.patch(t, "acme", ollamaPatch())
 	if pub.calls != 1 || pub.cleared != 1 {
 		t.Fatalf("after the move: publishes=%d clears=%d, want 1 and 1", pub.calls, pub.cleared)
+	}
+}
+
+// ollamaPatch moves the org to Ollama's OpenAI-compatible endpoint on OpenCode.
+func ollamaPatch() orgconfig.ConfigPatch {
+	return orgconfig.ConfigPatch{
+		LLM:    patch.Field[orgconfig.LLMPatch]{Sent: true, Value: orgconfig.LLMPatch{Kind: "openai-compatible", BaseURL: "https://ollama.com/v1", APIKey: "ollama-db-key-0123456789"}},
+		Agents: patch.Field[orgconfig.AgentsWrite]{Sent: true, Value: orgconfig.AgentsWrite{Runtime: "opencode"}},
+	}
+}
+
+// A disconnect leaves the org with no connection generated agents run on, so
+// the provider's copy of the Anthropic key is cleared on it, and only on it:
+// the Ollama connect that follows has no copy left to clear and publishes
+// nothing.
+func TestModelConnectionDisconnect_ClearsTheModelProviderOnce_DB(t *testing.T) {
+	t.Parallel()
+	c := newCardDB(t, http.StatusOK)
+	pub := &fakeModelProviderPublisher{}
+	c.svc.WithModelProvider(pub)
+
+	c.connect(t, "acme", anthropicDBKey2)
+	c.patch(t, "acme", disconnectPatch())
+	if pub.calls != 1 || pub.cleared != 1 {
+		t.Fatalf("after the disconnect: publishes=%d clears=%d, want 1 and 1", pub.calls, pub.cleared)
+	}
+	c.patch(t, "acme", disconnectPatch())
+	c.patch(t, "acme", ollamaPatch())
+	if pub.calls != 1 || pub.cleared != 1 {
+		t.Fatalf("after a second disconnect and an Ollama connect: publishes=%d clears=%d, want 1 and 1 in total",
+			pub.calls, pub.cleared)
+	}
+}
+
+// An org that was only ever on another host never had a key published, so
+// its disconnect makes no call.
+func TestModelConnectionDisconnect_FromAnotherHostMakesNoCall_DB(t *testing.T) {
+	t.Parallel()
+	c := newCardDB(t, http.StatusOK)
+	pub := &fakeModelProviderPublisher{}
+	c.svc.WithModelProvider(pub)
+
+	c.patch(t, "acme", ollamaPatch())
+	c.patch(t, "acme", disconnectPatch())
+	if pub.calls != 0 || pub.cleared != 0 {
+		t.Fatalf("publishes=%d clears=%d, want no call", pub.calls, pub.cleared)
+	}
+}
+
+// A failed clear must not fail the disconnect: the connection IS gone, and
+// the failure is logged naming the copy left behind.
+func TestModelConnectionDisconnect_SurvivesAClearFailure_DB(t *testing.T) {
+	t.Parallel()
+	c := newCardDB(t, http.StatusOK)
+	c.connect(t, "acme", anthropicDBKey2)
+	pub := &fakeModelProviderPublisher{err: errors.New("amp unreachable")}
+	c.svc.WithModelProvider(pub)
+
+	if _, err := c.config.Patch(context.Background(), "acme", "ada", disconnectPatch()); err != nil {
+		t.Fatalf("the disconnect must succeed even when the provider clear fails: %v", err)
+	}
+	if pub.cleared != 1 {
+		t.Fatalf("clears = %d, want one attempt", pub.cleared)
+	}
+	if row, err := c.connRepo.GetByOrg(context.Background(), "acme"); err != nil || row != nil {
+		t.Fatalf("row after disconnect: %+v (%v)", row, err)
 	}
 }
 

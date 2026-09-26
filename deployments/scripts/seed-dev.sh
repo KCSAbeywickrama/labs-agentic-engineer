@@ -182,7 +182,10 @@ fi
 # (ADR-0036). It sits beside that key and cannot exist without it — connected
 # already, or by this very PATCH (the BFF judges the state the patch leaves).
 # Only a subscription token is accepted: a separate coding API key is not a
-# thing the platform offers.
+# thing the platform offers. A subscription bills the coding agent only on
+# Claude Code, so the runtime is sent with it: the stored runtime may still be
+# OpenCode (a disconnect keeps it), and the BFF refuses a subscription the
+# patch would leave on OpenCode (agents_subscription_requires_claude_code).
 if [ -n "$CODING_ANTHROPIC_KEY" ]; then
     case "$CODING_ANTHROPIC_KEY" in
         sk-ant-oat*) _is_token=1 ;;
@@ -197,7 +200,7 @@ if [ -n "$CODING_ANTHROPIC_KEY" ]; then
         echo "⏭️  AEP_CODING_ANTHROPIC_KEY is set but ANTHROPIC_API_KEY is not — skipping"
         echo "   a Claude subscription needs the org's Anthropic API key; connect that one first"
     else
-        _sections="${_sections:+$_sections,}$(printf '"agents":{"subscription":{"kind":"claude","token":"%s"}}' "$CODING_ANTHROPIC_KEY")"
+        _sections="${_sections:+$_sections,}$(printf '"agents":{"runtime":"claude-code","subscription":{"kind":"claude","token":"%s"}}' "$CODING_ANTHROPIC_KEY")"
         _labels="${_labels:+$_labels + }Claude subscription (coding agent)"
     fi
 else

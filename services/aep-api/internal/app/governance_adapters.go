@@ -237,9 +237,10 @@ func (p ampModelProviderPublisher) PublishOrgModelKey(ctx context.Context, ocOrg
 }
 
 // ClearOrgModelKey replaces the provider's copy of the org's key with
-// clearedProviderCredential, on the save that moves the org off a connection
-// generated agents run on. It never creates a provider: an org no deploy ever
-// governed has no copy to clear.
+// clearedProviderCredential, on the save that leaves the org without a
+// connection generated agents run on (a move to another host or a disconnect).
+// It never creates a provider: an org no deploy ever governed has no copy to
+// clear.
 func (p ampModelProviderPublisher) ClearOrgModelKey(ctx context.Context, ocOrgID string) error {
 	if p.amp == nil || p.bindings == nil {
 		return nil

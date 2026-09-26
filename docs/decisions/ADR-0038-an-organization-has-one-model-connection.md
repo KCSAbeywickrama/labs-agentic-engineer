@@ -126,7 +126,8 @@ a key and a model. Every agent uses it.**
   Anthropic** until their own follow-up. They act only when `GeneratedAgents`
   holds (Anthropic's own API). On any other connection ai-agent components
   start unconfigured, no key is published to Agent Manager (its copy of the
-  previous key is cleared on the save that moved off), and builds run without
+  previous key is cleared on the save that leaves Anthropic's API, by a move
+  to another host or a disconnect), and builds run without
   evaluation. Lifting the gate is one line of `CapabilitiesOf` plus that
   follow-up's changes.
 - **Coding pods have no egress guard yet.** The runtimes call the URL from

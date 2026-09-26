@@ -267,10 +267,11 @@ func (s *AnthropicCredentialService) forgetKey(ctx context.Context, ocOrgID stri
 // WHY THIS MATTERS MORE THAN IT LOOKS: without it, a rotated key leaves the
 // provider calling Anthropic with a revoked one, and EVERY governed agent in
 // the org fails at once — at the upstream, far from Settings, with nothing in
-// AEP saying why. And a key the org moved to another host is not one the
-// provider may keep: generated agents run only on Anthropic's own API until
-// their follow-up (modelconn.CapabilitiesOf), so the old key is cleared once,
-// on the save that moved off, rather than left live in a second system.
+// AEP saying why. And a key the org no longer runs generated agents on is not
+// one the provider may keep: they run only on Anthropic's own API until their
+// follow-up (modelconn.CapabilitiesOf), so whenever a save leaves the org
+// without such a connection (a move to another host, or a disconnect) the old
+// key is cleared once rather than left live in a second system.
 //
 // Best-effort, and deliberately so: the key IS stored, and failing the user's
 // Settings action because a downstream copy lagged would be the worse outcome.
@@ -294,7 +295,7 @@ func (s *AnthropicCredentialService) syncModelProvider(ctx context.Context, ocOr
 	case modelProviderClear:
 		if err := s.modelProvider.ClearOrgModelKey(ctx, ocOrgID); err != nil {
 			slog.WarnContext(ctx, "model connection: could not clear the Agent Manager provider's copy of the previous key; it stays live there until cleared by hand",
-				"ocOrgId", ocOrgID, "host", after.Host, "error", err)
+				"ocOrgId", ocOrgID, "previousHost", before.Host, "error", err)
 		}
 	case modelProviderLeave:
 	}
@@ -313,11 +314,19 @@ const (
 // modelProviderStepFor decides it from the connection before and after a save.
 // Pure, so the rule is a table test.
 //
+// The rule is that the provider's copy matches what the connection allows: a
+// usable key while generated agents can run on it, none otherwise. The stored
+// connection before the save is what says whether a copy may be live: both
+// writers of the provider (this sync, and a governed deploy through the
+// governance key reader) hand it a key only while the stored connection is one
+// generated agents run on. So:
+//
 //   - Publish a written key while generated agents can run on the connection.
-//   - Clear on the save that moves the org OFF such a connection, and only on
-//     that one: the provider holds the old key exactly until then, and a later
-//     save on the new host has nothing left there to clear.
-//   - Otherwise leave it; a disconnect keeps today's behaviour.
+//   - Clear when a save leaves the org without such a connection while the
+//     stored one was: a move to another host or a disconnect. Once, because
+//     the next save starts from a connection that never had a copy published.
+//   - Otherwise leave it: an org that was never on such a connection has no
+//     copy to clear.
 func modelProviderStepFor(before, after *modelconn.Connection, keyWritten bool) modelProviderStep {
 	generated := func(c *modelconn.Connection) bool {
 		return c != nil && modelconn.CapabilitiesOf(*c).GeneratedAgents
@@ -328,7 +337,7 @@ func modelProviderStepFor(before, after *modelconn.Connection, keyWritten bool) 
 			return modelProviderPublish
 		}
 		return modelProviderLeave
-	case after != nil && generated(before):
+	case generated(before):
 		return modelProviderClear
 	default:
 		return modelProviderLeave
