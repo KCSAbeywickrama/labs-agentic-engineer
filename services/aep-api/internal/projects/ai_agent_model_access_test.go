@@ -26,6 +26,7 @@ import (
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/organization"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/spec"
 	"github.com/wso2/aep/aep-api/internal/spec/artifactstest"
 )
@@ -35,8 +36,8 @@ import (
 // fakeKeyResolver serves a canned org key triplet.
 type fakeKeyResolver struct{ triplet organization.SecretRefTriplet }
 
-func (f fakeKeyResolver) DefaultKeyRef(context.Context, string) (organization.SecretRefTriplet, error) {
-	return f.triplet, nil
+func (f fakeKeyResolver) KeyRef(context.Context, string) (modelconn.Connection, organization.SecretRefTriplet, error) {
+	return modelconn.Connection{}, f.triplet, nil
 }
 
 // fakeSecretRefClient accepts any SecretReference upsert. GetSecretReference
@@ -142,8 +143,8 @@ func TestModelAccessEnvVars_NoConnectedKeyIsNotAnError(t *testing.T) {
 // noKeyResolver reports the org has no connected default key.
 type noKeyResolver struct{}
 
-func (noKeyResolver) DefaultKeyRef(context.Context, string) (organization.SecretRefTriplet, error) {
-	return organization.SecretRefTriplet{}, &organization.NotFoundError{}
+func (noKeyResolver) KeyRef(context.Context, string) (modelconn.Connection, organization.SecretRefTriplet, error) {
+	return modelconn.Connection{}, organization.SecretRefTriplet{}, &organization.NotFoundError{}
 }
 
 // The SecretReference must be authored in the ReleaseBinding's namespace —

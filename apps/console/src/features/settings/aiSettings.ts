@@ -25,7 +25,7 @@
  *
  * The mapping:
  * - model and coding agent → `agents.{model,runtime}`
- * - Anthropic API key      → `llm`
+ * - model connection       → `llm` (today: the Anthropic API key)
  * - Claude subscription    → `agents.subscription`
  *
  * Disconnecting the API key is not a draft change: it is destructive, confirmed,
@@ -60,7 +60,11 @@ export const SUBSCRIPTION_TOKEN_PREFIX = "sk-ant-oat";
 /** What the server holds, in the card's terms. */
 export interface AiSettings {
   model: AgentModel;
-  apiKey: LLMProjection | null;
+  /**
+   * The org's stored model connection, masked; null when it has none. Today
+   * every connection is an Anthropic API key on Anthropic's own API.
+   */
+  connection: LLMProjection | null;
   runtime: AgentRuntime;
   /**
    * The runtimes this installation can run, the only ones a save may choose.
@@ -89,7 +93,7 @@ export function aiSettingsFrom(config: ConfigProjection): AiSettings {
   const { agents, llm } = config;
   return {
     model: agents.model,
-    apiKey: llm,
+    connection: llm,
     runtime: agents.runtime,
     availableRuntimes: agents.availableRuntimes,
     subscription: agents.subscription,
@@ -132,7 +136,7 @@ export function removesSubscription(saved: AiSettings, draft: AiDraft): boolean 
  * the same patch (the server judges the state the patch leaves).
  */
 export function canAddSubscription(saved: AiSettings, draft: AiDraft): boolean {
-  return saved.apiKey !== null || draft.apiKey.trim() !== "";
+  return saved.connection !== null || draft.apiKey.trim() !== "";
 }
 
 /** Why the draft cannot be saved, or undefined when it can. */

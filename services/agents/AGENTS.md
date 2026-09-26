@@ -72,7 +72,10 @@ off the stream. The plan tool contract (inputs, results, error codes, the
   organization's model, resolved by aep-api each turn; not a non-empty string →
   400). `AGENT_MODEL` is only the default when a caller sends no `model` (the
   playground). Reasoning effort (`AGENT_REASONING_EFFORT`) is sent only to models
-  that accept it — not Haiku 4.5 / Sonnet 4.5 (`shared/model.ts`). `X-Org-Id` is LOAD-BEARING: the
+  that accept it — not Haiku 4.5 / Sonnet 4.5 (`shared/model.ts`). Every provider
+  request goes out through `shared/guarded-fetch.ts`: the host resolves once, any
+  non-public answer is refused, the socket dials the checked address, and a
+  redirect is refused rather than followed. `X-Org-Id` is LOAD-BEARING: the
   conversation's `org_` segment must equal it (403 otherwise — the §12 fence).
 - **One turn shape**: `turn` (a `TurnSpec` — what the turn is FOR) + `workspace`
   (IDs + shas; files/skills read from `WORKSPACE_MOUNT_ROOT` snapshots via
@@ -104,7 +107,9 @@ off the stream. The plan tool contract (inputs, results, error codes, the
   raw transcript: user rows carry the journal text + author (a journal-less
   turn falls back to its raw stored message); assistant/tool rows pass through.
   The read is org-fenced like the turn POST (`X-Org-Id` must match the id's
-  org segment). Absent → no entry; malformed → a clean pre-stream 400.
+  org segment). Absent → no entry; malformed → a clean pre-stream 400. Each
+  entry also records the connection that wrote the turn (`format@host`), which
+  `conversation/history-for.ts` compares before replaying history.
 
 ## Test
 

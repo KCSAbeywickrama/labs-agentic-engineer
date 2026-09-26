@@ -28,6 +28,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/organization"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
@@ -58,7 +59,7 @@ func (f fakeOrgRepo) SetThunderOrgUUID(context.Context, string, uuid.UUID) error
 // fakeCodingKey stands in for the organization domain's answer to "which
 // Anthropic credential does a run on this runtime bill". WHICH credential that
 // is — the subscription or the API key — is decided and tested in the
-// organization package (TestResolveCodingSecretRef_*); dispatch's job is to ask
+// organization package (TestResolveCodingCredential_*); dispatch's job is to ask
 // with the runtime the run will use, mount whatever it is handed, and abort
 // when nothing can be handed to it. asked records the runtime it was asked
 // with.
@@ -75,15 +76,15 @@ type fakeCodingKey struct {
 	defaultErr error
 }
 
-func (f fakeCodingKey) ResolveCodingSecretRef(_ context.Context, _ string, runtime orgconfig.AgentRuntime) (organization.SecretRefTriplet, error) {
+func (f fakeCodingKey) ResolveCodingCredential(_ context.Context, _ string, runtime orgconfig.AgentRuntime) (organization.CodingCredential, error) {
 	if f.asked != nil {
 		*f.asked = runtime
 	}
-	return f.ref, f.err
+	return organization.CodingCredential{Ref: f.ref}, f.err
 }
 
-func (f fakeCodingKey) DefaultKeyRef(context.Context, string) (organization.SecretRefTriplet, error) {
-	return f.defaultRef, f.defaultErr
+func (f fakeCodingKey) KeyRef(context.Context, string) (modelconn.Connection, organization.SecretRefTriplet, error) {
+	return modelconn.Connection{}, f.defaultRef, f.defaultErr
 }
 
 type fakeGitHubCreds struct {
@@ -651,11 +652,11 @@ func TestDispatch_NoDefaultKeyConnected_StillDispatches(t *testing.T) {
 	}
 }
 
-// TestDispatch_IncompleteDefaultKeyRef_IsNotMounted: a half-mirrored row can
+// TestDispatch_IncompleteKeyRef_IsNotMounted: a half-mirrored row can
 // resolve to a triplet ESO cannot follow. Mounting it would put the variable on
 // the pod pointing at nothing, and the harness would then report the agent as
 // misbehaving rather than as unconfigured — a worse outcome than no evaluation.
-func TestDispatch_IncompleteDefaultKeyRef_IsNotMounted(t *testing.T) {
+func TestDispatch_IncompleteKeyRef_IsNotMounted(t *testing.T) {
 	rec := &chainRecorder{}
 	anthropic, github := fullSecretRefs()
 	anthropic.defaultRef = organization.SecretRefTriplet{Name: "acme-anthropic-secrets", EnvVar: "ANTHROPIC_API_KEY"}

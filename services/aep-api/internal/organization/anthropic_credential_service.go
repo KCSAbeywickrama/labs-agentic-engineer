@@ -33,13 +33,10 @@
 //     it commits; publishModelKey — the Agent Manager provider's copy of the
 //     default key, after it commits.
 //   - Status — one role's masked projection; Holds — whether a role's row exists.
-//   - EffectiveKey — the DEFAULT key (or "none") for the spec agents, which
-//     the BFF forwards to agents-service per turn. There is no platform
-//     fallback: orgs bring their own key.
-//   - ResolveCodingSecretRef — which credential a coding run mounts, stated
-//     once here so no other reader inherits the rule by accident. Its
-//     SecretRefTriplet.EnvVar is what the coding-agent OC Job Component mounts
-//     the credential under (ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN).
+//
+// The READS — the effective connection and key, the key's vault reference,
+// and which credential a coding run mounts — are ModelConnectionService's
+// (model_connection_service.go), over these same rows.
 //
 // Secret bytes live in the same `org_secrets` (Postgres + AES-256-GCM) table
 // as the GitHub PAT, keyed by the role's SecretStoreKey(). The metadata
@@ -60,7 +57,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 )
 
@@ -112,7 +108,7 @@ func (s *AnthropicCredentialService) WithAnthropicAPIBase(base string) *Anthropi
 }
 
 // NewAnthropicCredentialService wires the service. repo and store must be
-// non-nil; store serves the reads (EffectiveKey, resync), while the card's
+// non-nil; store serves the resync read, while the card's
 // writes go through the store bound to its transaction.
 func NewAnthropicCredentialService(
 	repo OrgAnthropicRepository,
@@ -303,7 +299,7 @@ func (s *AnthropicCredentialService) publishModelKey(ctx context.Context, ocOrgI
 // when no row exists, which the config projection maps to null (no key, or no
 // subscription).
 func (s *AnthropicCredentialService) Status(ctx context.Context, ocOrgID string, role AnthropicRole) (*AnthropicProjection, error) {
-	row, err := s.fetchRow(ctx, ocOrgID, role)
+	row, err := fetchAnthropicRow(ctx, s.repo, ocOrgID, role)
 	if err != nil {
 		return nil, err
 	}
@@ -316,156 +312,6 @@ func (s *AnthropicCredentialService) Status(ctx context.Context, ocOrgID string,
 func (s *AnthropicCredentialService) Holds(ctx context.Context, ocOrgID string, role AnthropicRole) (bool, error) {
 	row, err := s.repo.GetByOrg(ctx, ocOrgID, role)
 	return row != nil, err
-}
-
-// ----------------------------------------------------------------------------
-// EffectiveKey
-// ----------------------------------------------------------------------------
-
-// EffectiveKeyResponse is the shape returned to agents-service.
-type EffectiveKeyResponse struct {
-	Source string `json:"source"` // "org" | "none"
-	Key    string `json:"key,omitempty"`
-}
-
-// EffectiveKey returns the org's DEFAULT key when configured (and active).
-// Returns { source: "none" } when the org has no usable key — agents-service
-// maps to 503. There is no platform fallback: orgs bring their own key.
-//
-// Deliberately default-only: the spec agents are AI SDK calls, which cannot
-// present the coding role's subscription token.
-func (s *AnthropicCredentialService) EffectiveKey(ctx context.Context, ocOrgID string) (*EffectiveKeyResponse, error) {
-	row, err := s.fetchRow(ctx, ocOrgID, AnthropicRoleDefault)
-	if err == nil && row.Status == "active" {
-		key, getErr := s.store.Get(ctx, ocOrgID, AnthropicRoleDefault.SecretStoreKey())
-		if getErr == nil && len(key) > 0 {
-			return &EffectiveKeyResponse{Source: "org", Key: string(key)}, nil
-		}
-		// Row says active but bytes are gone — log loudly and return "none".
-		slog.WarnContext(ctx, "anthropic effective-key: row=active but org_secrets missing",
-			"ocOrgId", ocOrgID, "error", getErr)
-	}
-	// Row absent (NotFoundError) or not active, or bytes missing.
-	return &EffectiveKeyResponse{Source: "none"}, nil
-}
-
-// ----------------------------------------------------------------------------
-// ResolveCodingSecretRef — which credential a coding run mounts, stated once
-// ----------------------------------------------------------------------------
-
-// SecretRefTriplet is a resolved SM-API secret reference: the name plus the
-// vault coordinates an ExternalSecret's remoteRef needs, and the env var the
-// materialised value must land under.
-type SecretRefTriplet struct {
-	Name     string
-	KVPath   string
-	Property string
-
-	// EnvVar is the name a coding run must receive this credential as —
-	// ANTHROPIC_API_KEY for a Console API key, CLAUDE_CODE_OAUTH_TOKEN for a
-	// Claude subscription token. Carried here rather than re-derived at the
-	// mount site because the secret bytes are never read on that path, so
-	// nothing downstream can tell the two apart on its own.
-	EnvVar string
-}
-
-// ResolveCodingSecretRef returns the secret reference a coding run on runtime
-// must mount: the org's Claude subscription when it has one and the runtime is
-// Claude Code, its API key otherwise. This is the ONLY place that choice is
-// written; every other reader is default-only by construction.
-//
-// Only Claude Code can present a subscription token, so on any other runtime
-// the subscription is not consulted at all (the save rule keeps one from being
-// stored alongside OpenCode; this keeps a stray row from ever reaching a run).
-//
-// Fails closed. A subscription that exists but has no usable triplet is an
-// error, never a silent fall-through to the API key: the org chose to bill its
-// plan, and quietly billing API credits instead defeats that choice while
-// leaving no trace the org can see.
-func (s *AnthropicCredentialService) ResolveCodingSecretRef(ctx context.Context, ocOrgID string, runtime orgconfig.AgentRuntime) (SecretRefTriplet, error) {
-	if runtime == orgconfig.AgentRuntimeClaudeCode {
-		sub, err := s.repo.GetByOrg(ctx, ocOrgID, AnthropicRoleCoding)
-		if err != nil {
-			return SecretRefTriplet{}, fmt.Errorf("anthropic resolve coding ref: load subscription row: %w", err)
-		}
-		if sub != nil {
-			if sub.Status != "active" {
-				return SecretRefTriplet{}, fmt.Errorf(
-					"the Claude subscription for org %q is %s — replace its token in Settings, "+
-						"or remove the subscription so coding bills the organization's API key", ocOrgID, sub.Status)
-			}
-			ref, refErr := tripletFrom(sub)
-			if refErr != nil {
-				return SecretRefTriplet{}, fmt.Errorf(
-					"the Claude subscription for org %q is configured but %w — save its token again in Settings, "+
-						"or remove the subscription so coding bills the organization's API key", ocOrgID, refErr)
-			}
-			return ref, nil
-		}
-	}
-
-	def, err := s.repo.GetByOrg(ctx, ocOrgID, AnthropicRoleDefault)
-	if err != nil {
-		return SecretRefTriplet{}, fmt.Errorf("anthropic resolve coding ref: load default row: %w", err)
-	}
-	if def == nil {
-		return SecretRefTriplet{}, fmt.Errorf(
-			"anthropic secret reference missing for org %q: org_anthropic_credentials row not found", ocOrgID)
-	}
-	ref, err := tripletFrom(def)
-	if err != nil {
-		return SecretRefTriplet{}, fmt.Errorf("anthropic secret reference for org %q: %w", ocOrgID, err)
-	}
-	return ref, nil
-}
-
-// ----------------------------------------------------------------------------
-// DefaultKeyRef — the default-role vault triplet, for consumers that mount
-// a SecretReference rather than reading the key's bytes
-// ----------------------------------------------------------------------------
-
-// DefaultKeyRef returns the org's DEFAULT-role Anthropic key's vault
-// coordinates — the same {kvPath, property} pushExternalSecret resolves to
-// deliver the RCA agent's ExternalSecret (see that method's doc comment).
-// Distinct from EffectiveKey: this never reads the key's bytes, only where
-// they live, for a caller that points an OpenChoreo SecretReference at the
-// path rather than forwarding the value itself (e.g. wiring an ai-agent
-// component's MODEL_API_KEY — docs/glossary.md's SecretReference entry:
-// "authored in the org NS, ESO materializes it into the consuming-plane
-// NS").
-//
-// Returns NotFoundError when the org has no active default key. Every
-// caller must treat that as "not connected yet", not a hard failure — same
-// discipline EffectiveKey's Source:"none" gives genai callers.
-func (s *AnthropicCredentialService) DefaultKeyRef(ctx context.Context, ocOrgID string) (SecretRefTriplet, error) {
-	row, err := s.fetchRow(ctx, ocOrgID, AnthropicRoleDefault)
-	if err != nil {
-		return SecretRefTriplet{}, err
-	}
-	if row.Status != "active" {
-		return SecretRefTriplet{}, &NotFoundError{What: fmt.Sprintf("org_anthropic_credentials.%s.default (status=%s)", ocOrgID, row.Status)}
-	}
-	return tripletFrom(row)
-}
-
-// tripletFrom reads a row's resolved secret-ref coordinates, naming whichever
-// one is missing so a half-mirrored row is diagnosable from the error alone.
-func tripletFrom(row *OrgAnthropicCredential) (SecretRefTriplet, error) {
-	ref := SecretRefTriplet{
-		Name:     derefOrEmpty(row.SecretRefName),
-		KVPath:   derefOrEmpty(row.SecretRefKVPath),
-		Property: derefOrEmpty(row.SecretRefProperty),
-		EnvVar:   row.CredentialKind.RunnerEnvVar(),
-	}
-	switch {
-	case ref.Name == "":
-		return SecretRefTriplet{}, errors.New("secret_ref_name is not populated")
-	case ref.KVPath == "":
-		return SecretRefTriplet{}, errors.New("secret_ref_kv_path is not populated")
-	case ref.Property == "":
-		return SecretRefTriplet{}, errors.New("secret_ref_property is not populated")
-	}
-	return ref, nil
 }
 
 func derefOrEmpty(p *string) string {
@@ -505,7 +351,7 @@ func (s *AnthropicCredentialService) ResyncSecretRef(ctx context.Context, ocOrgI
 // triplet, or missing bytes is simply nothing to repair — (false, nil), not an
 // error, because the common case is an org with no subscription.
 func (s *AnthropicCredentialService) resyncRole(ctx context.Context, ocOrgID string, role AnthropicRole) (bool, error) {
-	row, err := s.fetchRow(ctx, ocOrgID, role)
+	row, err := fetchAnthropicRow(ctx, s.repo, ocOrgID, role)
 	if err != nil {
 		var nf *NotFoundError
 		if errors.As(err, &nf) {
@@ -531,8 +377,10 @@ func (s *AnthropicCredentialService) resyncRole(ctx context.Context, ocOrgID str
 	return true, nil
 }
 
-func (s *AnthropicCredentialService) fetchRow(ctx context.Context, ocOrgID string, role AnthropicRole) (*OrgAnthropicCredential, error) {
-	row, err := s.repo.GetByOrg(ctx, ocOrgID, role)
+// fetchAnthropicRow loads (ocOrgID, role)'s row, answering NotFoundError when
+// there is none. Shared by this service and ModelConnectionService.
+func fetchAnthropicRow(ctx context.Context, repo OrgAnthropicRepository, ocOrgID string, role AnthropicRole) (*OrgAnthropicCredential, error) {
+	row, err := repo.GetByOrg(ctx, ocOrgID, role)
 	if err != nil {
 		return nil, err
 	}

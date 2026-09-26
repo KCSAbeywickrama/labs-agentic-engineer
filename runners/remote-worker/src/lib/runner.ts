@@ -53,6 +53,7 @@ import { stagedSecretValues, webSearchDenial } from "./websearch_dlp.js";
 import { allowsWriteOutsideProject } from "./workspace_guard.js";
 import { staticTokenSource, type AccessTokenSource } from "./auth_retry.js";
 import { webFetchDenial } from "./webfetch_guard.js";
+import { readModelConnection } from "./model_connection.js";
 import {
   CODING_WORKFLOW_SKILL,
   SKILLS_MIRROR_DIR,
@@ -68,7 +69,7 @@ import {
   type RuntimePolicy,
   type RuntimeSession,
 } from "../runtime/port.js";
-import { createRuntime, envOr } from "../runtime/registry.js";
+import { createRuntime } from "../runtime/registry.js";
 import { curlConfigHome } from "./endpoint_access.js";
 
 /**
@@ -357,10 +358,10 @@ export async function startCodingRun(
   const policy: RuntimePolicy = {
     workspace: layout.workspace,
     env: childEnv,
-    // The organization's setting, stamped onto the Workload by the dispatcher.
-    // Absent for a dispatch made before the setting existed, and for the
-    // playground — both then get exactly the run they had.
-    model: envOr("AEP_AGENT_MODEL", runtime.defaultModel),
+    // The organization's model and connection, stamped onto the Workload by the
+    // dispatcher. Absent for a dispatch made before the settings existed, and
+    // for the playground — both then get exactly the run they had.
+    connection: readModelConnection(runtime.defaultModel),
     taskKind: req.taskKind,
     // Absent on a normal run, which is what keeps a prompt-bearing debug log out
     // of the cluster — see DispatchRequest.debug.

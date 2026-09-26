@@ -27,7 +27,7 @@
 
 import type { LanguageModel } from "ai";
 import { createApp } from "@aep/agents/server";
-import { createModel } from "@aep/agents/shared/model";
+import { anthropicConnection, createModel } from "@aep/agents/shared/model";
 import { listen0 } from "@aep/agents/shared/listen";
 import type { ConversationStore } from "@aep/agents/store/conversation-store";
 import { EVAL_AUTH, evalTurnHeaders } from "../kit/auth.js";
@@ -53,7 +53,7 @@ export interface BootOptions {
 export async function bootAgentsApp(opts: BootOptions): Promise<AgentsApp> {
   const app = createApp({
     store: opts.store,
-    buildModel: opts.model ? () => opts.model! : (key, model) => createModel({ apiKey: key, model }),
+    buildModel: opts.model ? () => opts.model! : (key, model) => createModel(anthropicConnection(key, model)),
     auth: { audience: EVAL_AUTH.audience, secret: EVAL_AUTH.secret },
     workspaceMountRoot: opts.workspaceMountRoot,
   });

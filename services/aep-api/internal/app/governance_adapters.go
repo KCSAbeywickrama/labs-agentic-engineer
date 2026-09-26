@@ -51,28 +51,28 @@ func (f ampClientFactory) For(baseURL string) agentmanager.Client {
 	return agentmanager.New(c)
 }
 
-// ampOrgKeyReader yields the org's connected Anthropic key VALUE — what Agent
-// Manager's provider holds on the org's behalf.
+// ampOrgKeyReader yields the org's connected key VALUE — what Agent Manager's
+// provider holds on the org's behalf.
 //
-// EffectiveKey rather than the vault triplet: the provider needs the secret
+// Effective rather than the vault triplet: the provider needs the secret
 // itself, once, at create time. An org that has connected nothing answers "",
 // which the governor reads as "nothing to govern" rather than as a failure.
 type ampOrgKeyReader struct {
-	creds *organization.AnthropicCredentialService
+	conns organization.ConnectionReader
 }
 
 func (r ampOrgKeyReader) AnthropicKeyValue(ctx context.Context, ocOrgID string) (string, error) {
-	if r.creds == nil {
+	if r.conns == nil {
 		return "", nil
 	}
-	eff, err := r.creds.EffectiveKey(ctx, ocOrgID)
+	_, key, ok, err := r.conns.Effective(ctx, ocOrgID)
 	if err != nil {
 		return "", fmt.Errorf("read org anthropic key: %w", err)
 	}
-	if eff == nil || eff.Source != "org" {
+	if !ok {
 		return "", nil
 	}
-	return eff.Key, nil
+	return key, nil
 }
 
 // ampKeyStore persists an agent's Agent-Manager-issued model key and reports

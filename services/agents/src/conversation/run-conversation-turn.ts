@@ -49,10 +49,12 @@ import { buildTaskPlanTools } from "../agents/main/tools/task-plan.js";
 import { TaskPlan } from "../agents/main/task-plan-accumulator.js";
 import { buildInstructions, buildTaskPlanInstructions, buildPrompt, buildEagerSkillsBlock } from "../agents/main/prompt.js";
 import type { SkillSource } from "../agents/main/skill-source.js";
+import { historyFor } from "./history-for.js";
 import { buildManifestPart, toTurnUsage } from "./manifest.js";
 import { attachmentsNote } from "../prompts/turn.js";
 import { config } from "../shared/config.js";
 import {
+  DEFAULT_CONNECTION_FINGERPRINT,
   isAnthropicModel,
   modelCacheBreakpoint,
   modelProviderOptions,
@@ -232,12 +234,18 @@ export interface RunConversationTurnInput {
    */
   modelId?: string;
   /**
+   * The fingerprint (`connectionFingerprint`) of the connection `model` was
+   * built on, stamped on this turn's journal entry. Absent → today's Anthropic
+   * connection (`DEFAULT_CONNECTION_FINGERPRINT`), the only one served.
+   */
+  connection?: string;
+  /**
    * The turn's journal entry (#463): the raw client-sent instruction + acting
    * user, appended to `conv.turns` alongside the transcript in the same save —
    * the display source the get-conversation read serves for user rows. Absent
    * (older callers, evals) → no entry; the read falls back to the raw message.
    */
-  journal?: Omit<TurnJournalEntry, "messageIndex" | "createdAt">;
+  journal?: Omit<TurnJournalEntry, "messageIndex" | "connection" | "createdAt">;
   store: ConversationStore;
   guard: TurnGuard;
   onEvent: (p: StreamPart) => void;
@@ -381,6 +389,7 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     // which is the one the model reads as current.
     const freshAttachments = [...freshReferences, ...(input.chatAttachments ?? [])];
     const startLen = conv.messages.length;
+    const connection = input.connection ?? DEFAULT_CONNECTION_FINGERPRINT;
     const res = await runTurn({
       model: input.model,
       instructions,
@@ -389,7 +398,9 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
         attachmentsNote((input.chatAttachments ?? []).flatMap((p) => (p.filename ? [p.filename] : []))) +
         eagerBlock +
         buildPrompt(input.files, input.instruction),
-      messages: conv.messages, // appended in place by runTurn
+      // Appended in place by runTurn: historyFor hands back conv.messages
+      // itself while every stored turn came from this connection.
+      messages: historyFor(conv.messages, conv.turns ?? [], connection),
       ...(freshAttachments.length ? { fileParts: freshAttachments } : {}),
       tools,
       // End the turn at an ACCEPTED HITL question call (the question tools live
@@ -426,9 +437,19 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     //    stamped with the INDEX of the user message this turn appended
     //    (startLen — runTurn appends the prompt first): the display read pairs
     //    entry↔message by that stated fact, so an un-journaled turn anywhere
-    //    in the history can never shift another turn's pairing.
+    //    in the history can never shift another turn's pairing. The entry
+    //    also names the connection that wrote the turn, which decides what a
+    //    later connection may replay of it (history-for.ts).
     if (input.journal) {
-      conv.turns = [...(conv.turns ?? []), { ...input.journal, messageIndex: startLen, createdAt: new Date() }];
+      conv.turns = [
+        ...(conv.turns ?? []),
+        {
+          ...input.journal,
+          messageIndex: startLen,
+          connection,
+          createdAt: new Date(),
+        },
+      ];
     }
     await input.store.save(conv);
 

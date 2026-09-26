@@ -123,6 +123,41 @@ test("a journaled turn appends one entry stamped with its user message's index",
   assert.ok(stored.turns[1]!.messageIndex > stored.turns[0]!.messageIndex);
 });
 
+// Each new turn names the connection that wrote it (history-for.ts decides
+// what a later connection may replay from that); a caller naming none ran on
+// today's Anthropic connection.
+test("a journaled turn carries the fingerprint of the connection that wrote it", async () => {
+  const store = new InMemoryConversationStore();
+  const guard = new TurnGuard();
+  const turn = { files: SEED_FILES, store, guard, onEvent: () => {} };
+
+  await runConversationTurn({
+    ...turn,
+    id: "conv-fp",
+    instruction: "one",
+    model: textModel("ok"),
+    journal: { text: "one", turnId: "t-1" },
+  });
+  await runConversationTurn({
+    ...turn,
+    id: "conv-fp",
+    model: textModel("ok"),
+    instruction: "two",
+    connection: "anthropic@ollama.com",
+    journal: { text: "two", turnId: "t-2" },
+  });
+
+  const stored = await store.get("conv-fp");
+  assert.ok(stored);
+  assert.deepEqual(
+    stored.turns.map((t) => t.connection),
+    ["anthropic@api.anthropic.com", "anthropic@ollama.com"],
+  );
+  // The second turn's history came from another connection; it still landed
+  // in the transcript (historyFor must never make a copy the append target).
+  assert.equal(stored.messages.filter((m) => m.role === "user").length, 2);
+});
+
 // An un-journaled turn (older caller, eval) stores no entry — the read path
 // falls back to the raw message for it.
 test("a journal-less turn appends no entry", async () => {

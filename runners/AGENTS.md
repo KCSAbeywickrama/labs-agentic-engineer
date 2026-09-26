@@ -342,7 +342,10 @@ into the runner pod at `/app/skills` for live skill edits (see
   under. An unrecognised runtime is an error, never a silent fallback: running
   the one we do have would bill an org for a runtime it did not choose. The model
   is no longer a literal in `runner.ts`, and it is the run's only model
-  (ADR-0015).
+  (ADR-0015). It rides `RuntimePolicy.connection` with the endpoint it is served
+  from: `lib/model_connection.ts` is the one reader of the `AEP_MODEL_*` env,
+  where absent means Anthropic's own API (every Job before it existed), and a
+  value it cannot read is an error, like an unknown runtime.
 - Self-contained: all agent and SDK-specific wiring lives here.
 - **The runner's contract types are GENERATED and DELIBERATELY NOT COMMITTED.**
   `pnpm --filter remote-worker gen` (wired into root `make gen` via turbo) runs

@@ -313,6 +313,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// and coding dispatch copies model + runtime onto the run it launches.
 	agentSettings := organization.NewAgentSettingsService(orgAgentSettingsRepo, orgRepo, anthropicCredService, agentsCardRepo,
 		runnableAgentRuntimes(cfg))
+	// The org's model connection as every consumer outside organization reads
+	// it: the spec agents and task planning (the connection and its key), the
+	// ai-agent model access and build evaluation (its key's vault reference),
+	// coding dispatch (which credential a run mounts) and Agent Manager.
+	modelConnections := organization.NewModelConnectionService(orgAnthropicRepo, credStore, agentSettings)
 
 	// Task JWT manager — RS256. The public key is published on
 	// /auth/external/jwks.json. Used to mint BFF MCP tokens
@@ -393,18 +398,14 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// flow skills seeded into _skills + org skills) from the SkillsRef
 	// snapshot.
 	agentLLMForTurns := func(ctx context.Context, orgID string) (spec.AgentLLM, error) {
-		res, err := anthropicCredService.EffectiveKey(ctx, orgID)
+		conn, key, ok, err := modelConnections.Effective(ctx, orgID)
 		if err != nil {
 			return spec.AgentLLM{}, err
 		}
-		if res == nil || res.Source == "none" {
+		if !ok {
 			return spec.AgentLLM{}, nil // no key → a pre-202 4xx
 		}
-		model, err := agentSettings.Model(ctx, orgID)
-		if err != nil {
-			return spec.AgentLLM{}, err
-		}
-		return spec.AgentLLM{Key: res.Key, Model: model}, nil
+		return spec.AgentLLM{Key: key, Model: conn.Model}, nil
 	}
 	// SkillsRef source for genai + task-plan turns. Reconcile so platform
 	// skills shipped after first provision land before Head/Ensure.
@@ -483,10 +484,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// (NewBuildCredentialsService always returns a value; its gitSecrets are
 	// nil-safe internally), so the stager is always wired.
 	buildStager := buildSecretStagerAdapter{svc: buildCredService}
-	// anthropicCredService already satisfies projects.AnthropicKeyResolver
-	// structurally (DefaultKeyRef has the exact same signature) — no
-	// adapter needed, unlike buildStager above.
-	componentService := projects.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager, anthropicCredService, modelAccessSecretRefClient)
+	// modelConnections already satisfies projects.ModelKeyResolver
+	// structurally (KeyRef has the exact same signature) — no adapter
+	// needed, unlike buildStager above.
+	componentService := projects.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager, modelConnections, modelAccessSecretRefClient)
 	// deploymentService is built below, so the converger is attached after
 	// construction — an env-var edit pushes onto the live binding through the one
 	// writer rather than patching a field of it.
@@ -744,7 +745,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		componentClient, repoService, identities{cred: credService},
 		executionRepo,
 		cfg.AgentPlatformURL, cfg.AgentPlatformURL,
-		orgRepo, anthropicCredService, orgCredRepo, idpRepo)
+		orgRepo, modelConnections, orgCredRepo, idpRepo)
 	// Dispatch reads secret_ref_name only — it does not call
 	// EnsureOrgPublisher. POST /build provisions the SecretReference while the
 	// console JWT is still on ctx.
@@ -1424,7 +1425,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			orgs:   orgRepo,
 		},
 		Bindings: environmentClient,
-		OrgKeys:  ampOrgKeyReader{creds: anthropicCredService},
+		OrgKeys:  ampOrgKeyReader{conns: modelConnections},
 		// Only ai-agent components are governed; a wave's services and web apps
 		// are left alone.
 		Kinds: agentComponentKinds,

@@ -52,6 +52,7 @@
 // what `lib/run_loop.ts` measurably needs — see the note there.
 
 import type { components } from "../generated/aep-api";
+import type { ModelConnection } from "../lib/model_connection.js";
 import type { RunEventInput, RunEventUsage } from "../lib/progress/emitter.js";
 import type { RunEventTranslator, RunStream } from "../lib/run_loop.js";
 
@@ -240,9 +241,9 @@ export interface SkillsPolicy {
  * Everything a runtime needs to start this platform's kind of run.
  *
  * Read it as the sentence "a coding run may author files under X, may not do Y,
- * may search for Z, may load these skills, bills to this model" — and note that
- * no field names a tool, a hook, an SDK option or a runtime. That is the test
- * for whether something belongs here.
+ * may search for Z, may load these skills, bills to this model on this
+ * connection" — and note that no field names a tool, a hook, an SDK option or a
+ * runtime. That is the test for whether something belongs here.
  */
 export interface RuntimePolicy {
   /** Absolute project root. It is also the session's working directory. */
@@ -258,18 +259,13 @@ export interface RuntimePolicy {
    */
   env: Record<string, string>;
   /**
-   * The model this run bills to — the organization's setting, reaching the pod
-   * as `AEP_AGENT_MODEL`. The ONE model of the run: the lead, every subagent and
-   * the runtime's own helper calls (titles, summaries) all run on it, because
-   * the platform is bring-your-own-key and a second model is one the org's key
-   * may not reach.
-   *
-   * Pinned rather than left to the runtime's default, which drifts across
-   * releases (seen live: an unpinned run resolved to `claude-sonnet-4-6`). The
-   * platform can only stamp a cost for a model it has a `model_rates` row for,
-   * so the settable list is narrower than the list a runtime can serve.
+   * The model this run bills to and the endpoint it is served from — the
+   * organization's connection, read from the dispatch's env
+   * (`lib/model_connection.ts`). `connection.model` is the ONE model of the run.
+   * Each adapter maps the connection to its own runtime's spelling; the
+   * credential is not on it (it rides `env`).
    */
-  model: string;
+  connection: ModelConnection;
   taskKind: TaskKind;
   /**
    * Developer diagnostics: the runtime's own debug log, its stderr, and whatever

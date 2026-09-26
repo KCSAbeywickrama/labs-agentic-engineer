@@ -20,8 +20,9 @@ package organization_test
 // AnthropicCredentialService and the AI agents card that writes its rows, over
 // a pristine per-test Postgres (dbtest.New) with the REAL AES-256-GCM
 // secrets.NewDBStore — the SQL-shaped behavior under pin: the card's upsert and
-// org_secrets write, Status org scoping, the disconnect's delete, EffectiveKey
-// resolution and org isolation. Nothing here writes into any cluster.
+// org_secrets write, Status org scoping, the disconnect's delete and org
+// isolation. Nothing here writes into any cluster. What ModelConnectionService
+// reads back from these rows is pinned in model_connection_dbtest_test.go.
 //
 // Writes go through organization.Service.Patch, the one path that writes a
 // credential, so the tests pin what production does.
@@ -56,6 +57,7 @@ const anthropicDBKey2 = "sk-ant-api03-ZyXwVuTsRqPoNmLkJiHgFe-second-9876"
 type cardDB struct {
 	db     *gorm.DB
 	svc    *organization.AnthropicCredentialService
+	conns  *organization.ModelConnectionService
 	config *organization.Service
 	store  secrets.CredentialStore
 	repo   organization.OrgAnthropicRepository
@@ -76,7 +78,8 @@ func newCardDB(t *testing.T, apiStatus int) *cardDB {
 		organization.NewOrganizationRepository(db), svc, organization.NewAgentsCardRepository(db, store), orgconfig.AgentRuntimes)
 	config := organization.NewService(svc, nil, nil, nil, nil, organization.PlatformIDPConfig{}, "", "").
 		WithAgentSettings(settings)
-	return &cardDB{db: db, svc: svc, config: config, store: store, repo: repo}
+	conns := organization.NewModelConnectionService(repo, store, settings)
+	return &cardDB{db: db, svc: svc, conns: conns, config: config, store: store, repo: repo}
 }
 
 func llmPatch(key string) orgconfig.ConfigPatch {
@@ -221,64 +224,6 @@ func TestAnthropicDisconnect_RemovesRowAndBytes_Idempotent_DB(t *testing.T) {
 	c.patch(t, "acme", disconnectPatch())
 }
 
-func TestAnthropicEffectiveKey_DB(t *testing.T) {
-	t.Parallel()
-	c := newCardDB(t, http.StatusOK)
-	ctx := context.Background()
-
-	// No row → the "none" answer, NOT an error (the turn surface maps it).
-	res, err := c.svc.EffectiveKey(ctx, "acme")
-	if err != nil || res.Source != "none" || res.Key != "" {
-		t.Fatalf("absent org: got %+v err %v, want source none", res, err)
-	}
-	c.connect(t, "acme", anthropicUnitKey)
-	res, err = c.svc.EffectiveKey(ctx, "acme")
-	if err != nil || res.Source != "org" || res.Key != anthropicUnitKey {
-		t.Fatalf("connected: got %+v err %v, want the org key", res, err)
-	}
-	// Row says active but the bytes vanished → degrades to "none".
-	if err := c.store.Delete(ctx, "acme", "anthropic/key"); err != nil {
-		t.Fatalf("store delete: %v", err)
-	}
-	res, err = c.svc.EffectiveKey(ctx, "acme")
-	if err != nil || res.Source != "none" || res.Key != "" {
-		t.Fatalf("active row without bytes: got %+v err %v, want source none", res, err)
-	}
-}
-
-func TestAnthropicDefaultKeyRef_DB(t *testing.T) {
-	t.Parallel()
-	c := newCardDB(t, http.StatusOK)
-	svc := c.svc
-	ctx := context.Background()
-
-	// No org row → NotFoundError, same "not connected yet" contract as
-	// fetchRow's other callers — a consumer wiring model access must treat
-	// this as skip, not fail.
-	if _, err := svc.DefaultKeyRef(ctx, "acme"); !isAnthropicNotFound(err) {
-		t.Fatalf("absent org: got %v, want *organization.NotFoundError", err)
-	}
-
-	// Connected and mirrored → the vault triplet, not the key's bytes. No
-	// SecretRefWriter is wired here, so the mirror's columns are stamped the
-	// way the ResolveCodingSecretRef tests stamp them.
-	c.connect(t, "acme", anthropicUnitKey)
-	stampTriplet(t, c.repo, "acme", organization.AnthropicRoleDefault,
-		"acme-anthropic", "user-app-secrets/wc-acme/acme-anthropic", "api-key")
-	triplet, err := svc.DefaultKeyRef(ctx, "acme")
-	if err != nil {
-		t.Fatalf("DefaultKeyRef after connect: %v", err)
-	}
-	if triplet.KVPath != "user-app-secrets/wc-acme/acme-anthropic" || triplet.Property != "api-key" {
-		t.Fatalf("DefaultKeyRef must return the stamped default triplet, got %+v", triplet)
-	}
-}
-
-func isAnthropicNotFound(err error) bool {
-	var nf *organization.NotFoundError
-	return errors.As(err, &nf)
-}
-
 func TestAnthropicOrgIsolation_DB(t *testing.T) {
 	t.Parallel()
 	c := newCardDB(t, http.StatusOK)
@@ -287,13 +232,11 @@ func TestAnthropicOrgIsolation_DB(t *testing.T) {
 	c.connect(t, "acme", anthropicUnitKey)
 	c.connect(t, "globex", anthropicDBKey2)
 
-	resA, err := c.svc.EffectiveKey(ctx, "acme")
-	if err != nil || resA.Key != anthropicUnitKey {
-		t.Fatalf("acme effective key: %+v err %v", resA, err)
+	if _, key, ok, err := c.conns.Effective(ctx, "acme"); err != nil || !ok || key != anthropicUnitKey {
+		t.Fatalf("acme effective key: ok=%v err %v", ok, err)
 	}
-	resB, err := c.svc.EffectiveKey(ctx, "globex")
-	if err != nil || resB.Key != anthropicDBKey2 {
-		t.Fatalf("globex effective key: %+v err %v", resB, err)
+	if _, key, ok, err := c.conns.Effective(ctx, "globex"); err != nil || !ok || key != anthropicDBKey2 {
+		t.Fatalf("globex effective key: ok=%v err %v", ok, err)
 	}
 	var nfe *organization.NotFoundError
 	if _, err := c.svc.Status(ctx, "intruder", organization.AnthropicRoleDefault); !errors.As(err, &nfe) {

@@ -20,27 +20,70 @@
  * Model seam — the single provider-aware module. Everything that needs an LLM
  * goes through `createModel`, so the rest of the code consumes a
  * provider-agnostic `LanguageModel` and never imports a provider SDK directly.
- * Multi-provider stays additive: `LlmConfig` grows a `provider` discriminator
- * and `createModel` switches on it — no call-site changes.
+ * A turn's model is described by a `ModelConnection` (format, base URL, auth
+ * scheme, key, model id) and `createModel` switches on its `format`, so a new
+ * format is one new branch here — no call-site changes. Only the Anthropic
+ * format exists today.
  *
  * The key and the model id both arrive per turn (the `X-Anthropic-Key` header
  * and the turn body's `model`); `config.model` (`AGENT_MODEL`) is only the
- * default for a caller that sends no model.
+ * default for a caller that sends no model. Every provider request goes out
+ * through `guardedFetch`, which refuses a host that resolves to a non-public
+ * address.
  */
 
 import type { LanguageModel } from "ai";
 import { anthropic, createAnthropic, type AnthropicLanguageModelOptions } from "@ai-sdk/anthropic";
 import type { ProviderOptions } from "../agents/main/run-turn.js";
 import { config } from "./config.js";
+import { guardedFetch } from "./guarded-fetch.js";
 
-/** Resolved LLM configuration for a single run. */
-export interface LlmConfig {
+/** The wire format a connection speaks. Only the Anthropic format exists today. */
+export type ModelFormat = "anthropic";
+
+/** How the key is sent: Anthropic's `x-api-key` header, or `Authorization: Bearer`. */
+export type AuthScheme = "x-api-key" | "bearer";
+
+/** The resolved connection a turn's model is built from. */
+export interface ModelConnection {
+  format: ModelFormat;
+  /** Provider base URL, e.g. `https://api.anthropic.com/v1`. */
+  baseURL: string;
+  authScheme: AuthScheme;
   /** Provider API key. */
   apiKey: string;
-  /** Model id. Defaults to the service-wide `config.model`. */
-  model?: string;
-  /** Optional provider base URL override (gateways / proxies / self-host). */
-  baseURL?: string;
+  /** Model id. */
+  model: string;
+}
+
+/** Anthropic's own API, the only connection the platform serves today. */
+const ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1";
+
+/**
+ * A connection's identity for history replay, `format@host`: stored parts a
+ * provider can replay (signed reasoning, provider-executed tool calls) are
+ * tied to the format and the host that produced them. Stamped on each turn's
+ * journal entry and compared by `historyFor`.
+ */
+export function connectionFingerprint(conn: Pick<ModelConnection, "format" | "baseURL">): string {
+  return `${conn.format}@${new URL(conn.baseURL).host}`;
+}
+
+/** The fingerprint of today's connection (`anthropicConnection`), for a turn built without one. */
+export const DEFAULT_CONNECTION_FINGERPRINT = connectionFingerprint({ format: "anthropic", baseURL: ANTHROPIC_BASE_URL });
+
+/**
+ * Today's connection: `model` on Anthropic's API with the key as `x-api-key`.
+ * An absent model resolves to the service default (`resolveModelId`).
+ */
+export function anthropicConnection(apiKey: string, model?: string): ModelConnection {
+  return {
+    format: "anthropic",
+    baseURL: ANTHROPIC_BASE_URL,
+    authScheme: "x-api-key",
+    apiKey,
+    model: resolveModelId(model !== undefined ? { model } : {}),
+  };
 }
 
 /**
@@ -61,25 +104,37 @@ export function isOfferedModel(modelId: string): boolean {
  * root can thread the SAME id it instantiates into the turn (usage attribution
  * on the terminal manifest, #249) instead of re-deriving the default elsewhere.
  */
-export function resolveModelId(cfg: Pick<LlmConfig, "model"> = {}): string {
+export function resolveModelId(cfg: { model?: string } = {}): string {
   return cfg.model ?? config.model;
 }
 
+/** Per-call overrides of how `createModel` reaches the provider. */
+interface CreateModelOptions {
+  /**
+   * The fetch provider requests go out through. Defaults to `guardedFetch`;
+   * tests and cassette replays pass a recorder or reach a local server the
+   * guard would refuse.
+   */
+  fetch?: typeof globalThis.fetch;
+}
+
 /**
- * Build a Vercel AI SDK `LanguageModel` from resolved credentials. This is the
- * ONLY function that knows which provider SDK to instantiate.
+ * Build a Vercel AI SDK `LanguageModel` from a connection. This is the ONLY
+ * function that knows which provider SDK to instantiate.
  */
-export function createModel(cfg: LlmConfig): LanguageModel {
+export function createModel(conn: ModelConnection, options: CreateModelOptions = {}): LanguageModel {
+  const auth = conn.authScheme === "bearer" ? { authToken: conn.apiKey } : { apiKey: conn.apiKey };
   const provider = createAnthropic({
-    apiKey: cfg.apiKey,
-    ...(cfg.baseURL ? { baseURL: cfg.baseURL } : {}),
+    baseURL: conn.baseURL,
+    ...auth,
+    fetch: options.fetch ?? guardedFetch,
   });
   // Trace capture is NOT wrapped around the model: a capturing object's
   // lifetime became the trace's run identity, and this object is rebuilt every
   // turn (the key is per-request), which split one conversation across N runs.
   // Capture registers once at the composition root and is stamped per turn —
   // see shared/telemetry.ts.
-  return provider(resolveModelId(cfg));
+  return provider(conn.model);
 }
 
 /**

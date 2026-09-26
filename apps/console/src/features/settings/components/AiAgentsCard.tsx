@@ -101,7 +101,7 @@ export function AiAgentsCard({
   const ai = useAiSettings(config);
   const { saved, draft } = ai;
   const busy = ai.saving;
-  const keyMissing = saved.apiKey === null && draft.apiKey.trim() === "";
+  const keyMissing = saved.connection === null && draft.apiKey.trim() === "";
   const canSave = ai.canSave && !(onboarding && keyMissing);
 
   const body = (
@@ -126,8 +126,8 @@ export function AiAgentsCard({
 
       <AnthropicKeyRow
         // A newly stored key closes the replace field.
-        key={saved.apiKey?.connectedAt ?? "none"}
-        stored={saved.apiKey}
+        key={saved.connection?.connectedAt ?? "none"}
+        stored={saved.connection}
         value={draft.apiKey}
         onChange={(apiKey) => ai.change({ apiKey })}
         error={ai.error?.field === "apiKey" ? ai.error.message : undefined}
@@ -251,7 +251,7 @@ export function AiAgentsCard({
           <Typography variant="h6" component="h2">
             {CARD_TITLE}
           </Typography>
-          {saved.apiKey ? (
+          {saved.connection ? (
             <Chip label="ready" size="small" color="success" />
           ) : (
             <Chip label="no API key" size="small" color="warning" />

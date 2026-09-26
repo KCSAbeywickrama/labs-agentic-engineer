@@ -29,6 +29,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
@@ -90,15 +91,15 @@ type BuildSecretStager interface {
 	StageBuildSecret(ctx context.Context, ocOrgID, repoSlug, workflowRunName string) (secretRef string, err error)
 }
 
-// AnthropicKeyResolver is the narrow port EnsureComponent needs from
-// *organization.AnthropicCredentialService to wire an ai-agent component's
-// MODEL_API_KEY: the org's default-role Anthropic key's vault coordinates.
+// ModelKeyResolver is the narrow port EnsureComponent needs from the
+// organization domain's ConnectionReader to wire an ai-agent component's
+// MODEL_API_KEY: the org's model connection and its key's vault coordinates.
 // Declared consumer-side (same pattern as OrgPublisher in trait_sync.go) so
-// this package takes only the one method it needs, not the concrete
-// service. Returns an *organization.NotFoundError when the org has no
-// active default key — see ModelAccessEnvVars.
-type AnthropicKeyResolver interface {
-	DefaultKeyRef(ctx context.Context, ocOrgID string) (organization.SecretRefTriplet, error)
+// this package takes only the one method it needs, not the whole reader.
+// Returns an *organization.NotFoundError when the org has no active
+// connection — see ModelAccessEnvVars.
+type ModelKeyResolver interface {
+	KeyRef(ctx context.Context, ocOrgID string) (modelconn.Connection, organization.SecretRefTriplet, error)
 }
 
 // -- model access for ai-agent components (see ai_agent_model_access.go) ----
@@ -199,7 +200,7 @@ type componentService struct {
 	// ai_agent_model_access.go). Optional — nil means "not configured" (tests /
 	// unit-only flows, or a deployment that hasn't wired the composition root
 	// yet).
-	modelKeyResolver AnthropicKeyResolver
+	modelKeyResolver ModelKeyResolver
 	secretRefClient  secretmanagersvc.OpenChoreoSecretReferenceClient
 }
 
@@ -208,7 +209,7 @@ type componentService struct {
 // flows; production wiring passes all four so TriggerBuild can pre-stage
 // the per-WorkflowRun build Secret and EnsureComponent can wire MODEL_* into
 // ai-agent components.
-func NewComponentService(client openchoreo.ComponentClient, observClient observability.Client, artifactStore *spec.ArtifactStore, repoSvc sourcecontrol.RepoService, buildCredSvc BuildSecretStager, modelKeyResolver AnthropicKeyResolver, secretRefClient secretmanagersvc.OpenChoreoSecretReferenceClient) ComponentService {
+func NewComponentService(client openchoreo.ComponentClient, observClient observability.Client, artifactStore *spec.ArtifactStore, repoSvc sourcecontrol.RepoService, buildCredSvc BuildSecretStager, modelKeyResolver ModelKeyResolver, secretRefClient secretmanagersvc.OpenChoreoSecretReferenceClient) ComponentService {
 	return &componentService{
 		client:           client,
 		observClient:     observClient,

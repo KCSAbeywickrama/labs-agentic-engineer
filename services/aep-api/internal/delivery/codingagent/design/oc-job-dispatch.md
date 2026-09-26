@@ -148,7 +148,7 @@ not stated here; duplicating it would let the two drift apart silently.
 `AEP_AGENT_RUNTIME` and `AEP_AGENT_MODEL` carry the
 organization's `agents` setting (ADR-0028) onto every cycle, beside the
 credential ref. The setting is read FIRST, because the runtime decides the
-credential: `ResolveCodingSecretRef(org, runtime)` returns the org's Claude
+credential: `ResolveCodingCredential(org, runtime)` returns the org's Claude
 subscription (mounted as `CLAUDE_CODE_OAUTH_TOKEN`) only when the runtime is
 Claude Code, and its API key (`ANTHROPIC_API_KEY`) otherwise; exactly one of the
 two reaches the run (ADR-0036). They are **copied, not referenced**: a
@@ -168,7 +168,7 @@ binary. Such an installation does not offer OpenCode on `/config` either, so
 only an org that chose it before the image went missing reaches this failure. The dispatcher stamps the same runtime as the Component's `runtime`
 parameter and as the `aep.wso2.com/runtime` label on the Component and Workload.
 Which credential it mounts is the organization domain's answer for the run's
-runtime (`ResolveCodingSecretRef`): an OpenCode run is always handed the API key
+runtime (`ResolveCodingCredential`): an OpenCode run is always handed the API key
 ([ADR-0036](../../../../../../docs/decisions/ADR-0036-the-coding-credential-is-a-subscription.md)).
 
 The type name is also what wso2cloud's entitlement gate keys on
@@ -291,7 +291,7 @@ a developer in the monorepo — `ANTHROPIC_API_KEY` simply is "the key", and the
 harness falls back to it. On a pod that same name holds the **coding**
 credential, which may be the org's Claude subscription. An org whose
 subscription is live while its API key row is not active is the case that makes
-this concrete: the dispatch succeeds on the subscription, `DefaultKeyRef` finds
+this concrete: the dispatch succeeds on the subscription, `KeyRef` finds
 nothing, and an unconditional fallback would then grade agents on the
 subscription token — which cannot authenticate an API call — quietly, and
 contradicting what this note says happens. The declaration is what makes the

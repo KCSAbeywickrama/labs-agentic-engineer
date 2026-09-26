@@ -32,7 +32,7 @@ import { ExternalLink } from "@wso2/oxygen-ui-icons-react";
 import type { AiSettings } from "../aiSettings";
 import { MaskedCredential, SecretField } from "./CredentialField";
 
-type StoredKey = NonNullable<AiSettings["apiKey"]>;
+type StoredKey = NonNullable<AiSettings["connection"]>;
 
 /**
  * The org's Anthropic API key, a row of the AI agents card.

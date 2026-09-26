@@ -24,6 +24,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readModelConnection } from "../../lib/model_connection.js";
 import { DENIED_CAPABILITIES, type RuntimePolicy } from "../port.js";
 import { childEnvironment, createOpencodeRuntime, OPENCODE_GUARD_DIR } from "./runtime.js";
 import { OpencodeStartupError } from "./startup.js";
@@ -32,7 +33,7 @@ function policy(env: Record<string, string>): RuntimePolicy {
   return {
     workspace: "/work/proj",
     env,
-    model: "claude-sonnet-5",
+    connection: readModelConnection("claude-sonnet-5", {}),
     taskKind: "implementation",
     debug: false,
     logDir: "/work/proj/.logs",

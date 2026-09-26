@@ -104,7 +104,7 @@ func (s *componentService) ModelAccessEnvVars(ctx context.Context, ocOrgID, comp
 		return nil, fmt.Errorf("model access not configured at the composition root")
 	}
 
-	triplet, err := s.modelKeyResolver.DefaultKeyRef(ctx, ocOrgID)
+	_, triplet, err := s.modelKeyResolver.KeyRef(ctx, ocOrgID)
 	if err != nil {
 		var notFound *organization.NotFoundError
 		if errors.As(err, &notFound) {

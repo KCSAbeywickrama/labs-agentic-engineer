@@ -399,15 +399,15 @@ func (e *CodingExecutor) RetryAuthFailedBuild(ctx context.Context, row *delivery
 // subscription, so a run never silently bills API credits an org chose to
 // replace with its plan.
 func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID string, runtime orgconfig.AgentRuntime) (SecretRef, SecretRef, error) {
-	triplet, err := e.anthropicKey.ResolveCodingSecretRef(ctx, orgID, runtime)
+	cred, err := e.anthropicKey.ResolveCodingCredential(ctx, orgID, runtime)
 	if err != nil {
 		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: %w", err)
 	}
 	anthropicSR := SecretRef{
-		SecretRefName: triplet.Name,
-		KVPath:        triplet.KVPath,
-		Property:      triplet.Property,
-		EnvVar:        triplet.EnvVar,
+		SecretRefName: cred.Ref.Name,
+		KVPath:        cred.Ref.KVPath,
+		Property:      cred.Ref.Property,
+		EnvVar:        cred.Ref.EnvVar,
 	}
 
 	githubRow, err := e.githubCreds.GetByOrg(ctx, orgID)
@@ -445,7 +445,7 @@ func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID stri
 // swallowed silently, because "the harness never became ready" is otherwise a
 // puzzling thing to read in a build report.
 func (e *CodingExecutor) evaluationKeyRef(ctx context.Context, orgID string) (SecretEnvRef, bool) {
-	triplet, err := e.anthropicKey.DefaultKeyRef(ctx, orgID)
+	_, triplet, err := e.anthropicKey.KeyRef(ctx, orgID)
 	if err != nil {
 		slog.InfoContext(ctx, "coding dispatch: no default Anthropic key — the build will run without agent evaluation",
 			"org", orgID, "error", err)

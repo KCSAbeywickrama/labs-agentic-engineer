@@ -172,7 +172,7 @@ async function probeSystemTransform(client: OpencodeClient, policy: RuntimePolic
           path: { id },
           body: {
             agent: PRIMARY_AGENT,
-            model: { providerID: PROVIDER_ID, modelID: policy.model },
+            model: { providerID: PROVIDER_ID, modelID: policy.connection.model },
             parts: [{ type: "text", text: STARTUP_PROBE_PROMPT }],
           },
         })
@@ -194,7 +194,7 @@ async function assertStartup(client: OpencodeClient, policy: RuntimePolicy, file
   // A project request boots the instance, which is what loads plugins.
   await client.config.get();
   const guardReady = await waitForFile(files.ready, GUARD_READY_TIMEOUT_MS);
-  const tools = await client.tool.list({ query: { provider: PROVIDER_ID, model: policy.model } });
+  const tools = await client.tool.list({ query: { provider: PROVIDER_ID, model: policy.connection.model } });
   const agents = await client.app.agents();
   const aep = (agents.data ?? []).find((a) => a.name === PRIMARY_AGENT) as { permission?: unknown } | undefined;
   const rules = Array.isArray(aep?.permission) ? (aep.permission as PermissionRuleRecord[]) : undefined;
@@ -295,7 +295,7 @@ export async function bootOpencode(policy: RuntimePolicy, opts: OpencodeRuntimeO
     }
 
     const config = buildOpencodeConfig({
-      model: policy.model,
+      model: policy.connection.model,
       instructionsPath: files.instructions,
       pluginDir: opts.pluginDir ?? OPENCODE_GUARD_DIR,
       skillAllow: policy.skills.allow,
@@ -368,7 +368,7 @@ async function startOpencodeSession(
     const rootId = created.data?.id ?? "";
 
     const adapter = createOpencodeAdapter({
-      model: policy.model,
+      model: policy.connection.model,
       taskKind: policy.taskKind,
       ...(policy.write.onDenied ? { onWorkspaceDenied: policy.write.onDenied } : {}),
     });
@@ -378,7 +378,7 @@ async function startOpencodeSession(
       path: { id: rootId },
       body: {
         agent: PRIMARY_AGENT,
-        model: { providerID: PROVIDER_ID, modelID: policy.model },
+        model: { providerID: PROVIDER_ID, modelID: policy.connection.model },
         parts: [{ type: "text", text: prompt }],
       },
     });

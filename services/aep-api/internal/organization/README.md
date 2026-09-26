@@ -14,7 +14,7 @@ flowchart LR
   S2S(["/internal/v1"]) -.-> CORE
   subgraph organization
     SL["slices — getconfig · patchconfig · connect/disconnect · rotate/discover idp · listorgs"]
-    CORE["config orchestrator + credential / anthropic / idp / org services"]
+    CORE["config orchestrator + credential / anthropic / model-connection / idp / org services"]
     SL --> CORE
     CORE --> DB[("organizations · org_credentials · org_anthropic_credentials · org_agent_settings · organization_idp_profiles")]
   end
@@ -40,8 +40,9 @@ services, the raw connect-callback controller, and the S2S credentials-refresh.*
 | `AppInstallOps` · `IssueService` | needs | `sourcecontrol` — App/PAT probes, disconnect issue cascade |
 | `CredentialStore` · `Resolver` · `AppTokenMinter` | needs | `platform/secrets` — sealed git-token/anthropic store, credential resolution |
 | `thundersvc` · `secretmanagersvc` | needs | publisher-app CRUD + OU check · secret-ref mirror |
-| `OrganizationService` · `CredentialService` · `AnthropicCredentialService` · `IDPService` | offers | `delivery` (coding identity/key/publisher) · `sourcecontrol` (credential resolution) |
-| `AgentSettingsService` | offers | `delivery` (the run's model + runtime) · the app root (the spec agents' per-turn model) |
+| `OrganizationService` · `CredentialService` · `AnthropicCredentialService` · `IDPService` | offers | `delivery` (coding identity/publisher) · `sourcecontrol` (credential resolution) · the edge (dev secret-ref resync) |
+| `ModelConnectionService` — `ConnectionReader` · `CodingCredentialResolver` | offers | the app root (the spec agents' and task planning's connection + key per turn; Agent Manager's provider key) · `projects` (ai-agent model access) · `delivery` (the coding credential; the evaluation key) |
+| `AgentSettingsService` | offers | `delivery` (the run's model + runtime) · `ModelConnectionService` (the connection's model) |
 | `CredentialsRefreshService` | offers | the S2S runner-refresh op (edge projects it onto `igen.RefreshResponse`) |
 
 ## Owns
@@ -87,9 +88,15 @@ services, the raw connect-callback controller, and the S2S credentials-refresh.*
     credential; a deleted credential's copy is deleted after commit, and an orphaned copy is
     accepted (nothing reads it, the next save of that role overwrites it).
   - Exactly one credential variable reaches a coding run: the persisted `credential_kind` picks
-    `ANTHROPIC_API_KEY` xor `CLAUDE_CODE_OAUTH_TOKEN`. `ResolveCodingSecretRef(ctx, org, runtime)` is
+    `ANTHROPIC_API_KEY` xor `CLAUDE_CODE_OAUTH_TOKEN`. `ResolveCodingCredential(ctx, org, runtime)` is
     the single statement of which: the subscription only on `claude-code`, else the API key, failing
     closed on an unusable subscription. Every other reader is default-only.
+- **The model connection is read only through `ModelConnectionService`** (`model_connection_service.go`):
+  a `modelconn.Connection` (format, base URL, host, model, auth scheme) beside the key's bytes
+  (`Effective`), its vault reference (`KeyRef`) or the coding credential (`ResolveCodingCredential`).
+  It is built from the `default` row and `org_agent_settings.model`, so it is the Anthropic format on
+  `api.anthropic.com` with an `x-api-key` key. No consumer outside this domain reads the credential
+  rows for a key.
 - **Publisher SecretReference for coding Jobs is fail-closed on `POST /build`.**
   `ProvisionPublisherForBuild` (actor `build-provision`) ensures the Thunder publisher app and stamps
   `secret_ref_name` while the console JWT is on ctx. A missing or disabled `SecretRefWriter` returns
