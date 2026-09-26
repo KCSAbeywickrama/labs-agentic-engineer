@@ -26,7 +26,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/contracts"
 	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
+	"github.com/wso2/aep/aep-api/internal/platform/modelcost"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
@@ -172,3 +175,47 @@ func TestTurnRepo_SweepStale(t *testing.T) {
 		t.Fatalf("second sweep = (%+v, %v)", again, err)
 	}
 }
+
+// A new turn carries the host it was admitted on, and Finish prices its usage
+// on (host, model): the same model on a host with no rate row stamps null, never
+// another host's figure.
+func TestTurnRepo_ModelHostPricesTheTurn(t *testing.T) {
+	t.Parallel()
+	stamper := modelcost.NewStamper([]modelcost.ModelRate{
+		{Host: modelconn.AnthropicHost, ModelID: "claude-sonnet-5", InputPerMTok: 2, OutputPerMTok: 10},
+	})
+	repo := spec.NewTurnRepository(dbtest.New(t), stamper)
+	ctx := context.Background()
+	usage := &contracts.TokenUsage{InputTokens: 1_000_000, OutputTokens: 100_000, Model: "claude-sonnet-5"} // $2 + $1
+
+	for _, tc := range []struct {
+		project, host string
+		wantCost      *float64
+	}{
+		{"p-anthropic", modelconn.AnthropicHost, ptr(3.00)},
+		{"p-ollama", modelconn.OllamaHost, nil},
+	} {
+		turn := newTurn("o1", tc.project, "c1", "requirements-chat")
+		turn.ModelHost = tc.host
+		started, err := repo.TryStart(ctx, turn)
+		if err != nil {
+			t.Fatalf("TryStart(%s): %v", tc.project, err)
+		}
+		admitted, _ := repo.Get(ctx, "o1", tc.project, started.ID)
+		if admitted == nil || admitted.ModelHost != tc.host {
+			t.Fatalf("admitted row = %+v, want model_host %q", admitted, tc.host)
+		}
+		if ok, err := repo.Finish(ctx, started.ID, spec.TurnTerminal{Status: "completed", Usage: usage}); err != nil || !ok {
+			t.Fatalf("Finish(%s) = (%v, %v)", tc.project, ok, err)
+		}
+		done, _ := repo.Get(ctx, "o1", tc.project, started.ID)
+		switch {
+		case tc.wantCost == nil && done.CostUsd != nil:
+			t.Errorf("(%s, claude-sonnet-5) cost_usd = %v, want null", tc.host, *done.CostUsd)
+		case tc.wantCost != nil && (done.CostUsd == nil || *done.CostUsd != *tc.wantCost):
+			t.Errorf("(%s, claude-sonnet-5) cost_usd = %v, want %v", tc.host, done.CostUsd, *tc.wantCost)
+		}
+	}
+}
+
+func ptr(f float64) *float64 { return &f }

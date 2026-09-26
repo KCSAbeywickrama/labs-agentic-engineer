@@ -214,9 +214,15 @@ func (r *turnRepository) Finish(ctx context.Context, id string, terminal TurnTer
 		updates["model_id"] = u.Model
 		// Stamp USD at capture from the rates in force now (#291): the cost is
 		// frozen on the row and never re-derived, so a later rate change can't
-		// rewrite this turn's spend. Null when unpriceable (no rate / no model).
+		// rewrite this turn's spend. Priced on the host the row was admitted
+		// with; null when unpriceable (no (host, model) rate, no host, no model).
 		if r.stamper != nil {
+			host, err := r.modelHost(ctx, id)
+			if err != nil {
+				return false, err
+			}
 			updates["cost_usd"] = r.stamper.Cost(modelcost.Tokens{
+				Host:                host,
 				ModelID:             u.Model,
 				InputTokens:         u.InputTokens,
 				OutputTokens:        u.OutputTokens,
@@ -233,6 +239,22 @@ func (r *turnRepository) Finish(ctx context.Context, id string, terminal TurnTer
 		return false, res.Error
 	}
 	return res.RowsAffected > 0, nil
+}
+
+// modelHost reads the host TryStart wrote on the turn at admission. A missing
+// row reads as no host (unpriced); Finish's guarded update then touches nothing.
+func (r *turnRepository) modelHost(ctx context.Context, id string) (string, error) {
+	var hosts []string
+	if err := r.db.WithContext(ctx).
+		Model(&AgentTurn{}).
+		Where("id = ?", id).
+		Pluck("COALESCE(model_host, '')", &hosts).Error; err != nil {
+		return "", err
+	}
+	if len(hosts) == 0 {
+		return "", nil
+	}
+	return hosts[0], nil
 }
 
 func (r *turnRepository) Get(ctx context.Context, orgID, projectID, turnID string) (*AgentTurn, error) {

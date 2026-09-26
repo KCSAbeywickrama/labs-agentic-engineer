@@ -47,31 +47,31 @@ var _ delivery.MilestoneDispatcher = (*CodingExecutor)(nil)
 const milestoneComponentSentinel = "aep-milestone"
 
 // Dispatch launches ONE agent run over a milestone and returns the launched
-// Job's name.
+// Job's name and the model host it runs on.
 //
 // It returns as soon as the Job is applied: everything after the launch — the
 // pull request, the merge, the builds — reaches the supervisor as a
 // webhook-derived signal, so waiting here would only hold a Temporal activity
 // open for hours.
-func (e *CodingExecutor) Dispatch(ctx context.Context, req delivery.MilestoneDispatch) (string, error) {
+func (e *CodingExecutor) Dispatch(ctx context.Context, req delivery.MilestoneDispatch) (delivery.AgentLaunch, error) {
 	if req.OrgID == "" || req.ProjectID == "" {
-		return "", fmt.Errorf("milestone dispatch: OrgID and ProjectID are required")
+		return delivery.AgentLaunch{}, fmt.Errorf("milestone dispatch: OrgID and ProjectID are required")
 	}
 	if req.CycleID == "" {
 		// The cycle id is the pod's correlation key (AEP_TASK_ID, the run-name
 		// seed, the bearer subject). Without it the launched Job could not be
 		// tied back to the cycle record that dispatched it.
-		return "", fmt.Errorf("milestone dispatch: CycleID is required — it is the launched Job's correlation key")
+		return delivery.AgentLaunch{}, fmt.Errorf("milestone dispatch: CycleID is required — it is the launched Job's correlation key")
 	}
 
 	repo, err := e.repos.GetRepo(ctx, req.OrgID, req.ProjectID)
 	if err != nil || repo == nil {
-		return "", fmt.Errorf("milestone dispatch: resolve project repo: %w", err)
+		return delivery.AgentLaunch{}, fmt.Errorf("milestone dispatch: resolve project repo: %w", err)
 	}
 
 	shape, err := milestoneDispatchShape(req, repo.RepoURL)
 	if err != nil {
-		return "", err
+		return delivery.AgentLaunch{}, err
 	}
 
 	// Publish the platform-resolved `endpoints:` wiring BEFORE the Job launches,

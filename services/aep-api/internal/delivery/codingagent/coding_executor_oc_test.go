@@ -80,7 +80,8 @@ func (f fakeCodingKey) ResolveCodingCredential(_ context.Context, _ string, runt
 	if f.asked != nil {
 		*f.asked = runtime
 	}
-	return organization.CodingCredential{Ref: f.ref}, f.err
+	conn := modelconn.Connection{Format: modelconn.FormatAnthropic, Host: modelconn.AnthropicHost}
+	return organization.CodingCredential{Conn: conn, Ref: f.ref}, f.err
 }
 
 func (f fakeCodingKey) KeyRef(context.Context, string) (modelconn.Connection, organization.SecretRefTriplet, error) {
@@ -166,10 +167,11 @@ func TestDispatch_OCPathDispatchesThroughOpenChoreo(t *testing.T) {
 	rec := &chainRecorder{}
 	e := newOCDispatchExecutor(rec)
 
-	runName, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
+	launch, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
 	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
+	runName := launch.JobRef
 	if !strings.HasPrefix(runName, "ca-") {
 		t.Errorf("run name = %q, want the ca- prefix (the watcher discriminator)", runName)
 	}
@@ -178,6 +180,11 @@ func TestDispatch_OCPathDispatchesThroughOpenChoreo(t *testing.T) {
 	}
 	if rec.create.Name != runName {
 		t.Errorf("component name %q != returned run name %q", rec.create.Name, runName)
+	}
+	// The launch reports the host of the connection whose credential it
+	// mounted; the supervisor copies it onto the cycle to price its usage.
+	if launch.ModelHost != modelconn.AnthropicHost {
+		t.Errorf("launch model host = %q, want %q (the resolved connection's host)", launch.ModelHost, modelconn.AnthropicHost)
 	}
 }
 

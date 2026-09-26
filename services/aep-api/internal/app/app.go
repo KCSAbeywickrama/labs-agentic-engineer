@@ -405,7 +405,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		if !ok {
 			return spec.AgentLLM{}, nil // no key → a pre-202 4xx
 		}
-		return spec.AgentLLM{Key: key, Model: conn.Model}, nil
+		return spec.AgentLLM{Key: key, Model: conn.Model, Host: conn.Host}, nil
 	}
 	// SkillsRef source for genai + task-plan turns. Reconcile so platform
 	// skills shipped after first provision land before Head/Ensure.

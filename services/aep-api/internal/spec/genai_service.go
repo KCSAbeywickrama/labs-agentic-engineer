@@ -113,11 +113,14 @@ type GitReader interface {
 }
 
 // AgentLLM is what a spec-agent turn runs on: the org's Anthropic API key and
-// the one model its agents use. Resolved together, per turn, so a model change
-// in Settings reaches the very next turn.
+// the one model its agents use, and the host of the connection they belong to.
+// Resolved together, per turn, so a model change in Settings reaches the very
+// next turn. Host is written on the turn row at admission: it is the host the
+// turn's usage is priced on.
 type AgentLLM struct {
 	Key   string
 	Model string
+	Host  string
 }
 
 // AgentLLMResolver resolves the org's AgentLLM. An empty Key with a nil error
@@ -446,6 +449,7 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		Summary:           summary,
 		AuthorID:          authorIDOf(author),
 		AuthorDisplayName: authorNameOf(author),
+		ModelHost:         llm.Host,
 	})
 	if errors.Is(err, ErrTurnActive) {
 		return "", &TurnInProgressError{ActiveTurnID: row.ID}

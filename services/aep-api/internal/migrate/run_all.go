@@ -230,6 +230,12 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// org_coding_agent_settings → org_agent_settings: copy the rows into the
 		// table AutoMigrate created, then drop the old one.
 		ctxStep("phase17_org_agent_settings", RunPhase17OrgAgentSettings),
+		// Usage becomes host-aware: model_rates is re-keyed to (host, model_id)
+		// and turns, cycles, executions and the ledger gain model_host, every
+		// existing row backfilled to api.anthropic.com. Appended after
+		// model_rates_seed, which is why the seed counts a NULL-host row as the
+		// Anthropic one: on the upgrade boot it runs before the key is widened.
+		ctxStep("phase18_model_host", RunPhase18ModelHost),
 	}
 }
 

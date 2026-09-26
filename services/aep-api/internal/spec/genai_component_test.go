@@ -50,6 +50,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/componenttest"
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs/workspacetest"
 	"github.com/wso2/aep/aep-api/internal/platform/gittest"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
@@ -614,7 +615,7 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 		Repos: repos,
 		Git:   sourcecontrol.NewGitOpsService(stubResolver{}, fx.Engine),
 		LLM: func(context.Context, string) (spec.AgentLLM, error) {
-			return spec.AgentLLM{Key: rig.key, Model: rig.model}, nil
+			return spec.AgentLLM{Key: rig.key, Model: rig.model, Host: modelconn.AnthropicHost}, nil
 		},
 		Client:        client,
 		Turns:         turns,
@@ -922,6 +923,26 @@ func TestGenericTurn_NoUseCase(t *testing.T) {
 	}
 	if strings.Contains(sent.req.Turn.Text, "requirements draft") || strings.Contains(sent.req.Turn.Text, "list_org_endpoints") {
 		t.Errorf("turn carries retired steering: %+v", sent.req.Turn)
+	}
+}
+
+// A turn's row carries the host of the connection it was admitted on, written
+// with the rest of the running row: it is the host Finish prices the turn's
+// usage against.
+func TestStartTurn_RowCarriesTheConnectionHost(t *testing.T) {
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
+	r.fake.parts = []string{textPart("working")}
+
+	turnID := r.startTurn(t, convUUID, "", "hello")
+	r.waitTerminal(t, turnID)
+
+	r.turns.mu.Lock()
+	defer r.turns.mu.Unlock()
+	if len(r.turns.rows) != 1 {
+		t.Fatalf("turn rows = %d, want 1", len(r.turns.rows))
+	}
+	if got := r.turns.rows[0].ModelHost; got != modelconn.AnthropicHost {
+		t.Fatalf("turn model_host = %q, want %q", got, modelconn.AnthropicHost)
 	}
 }
 

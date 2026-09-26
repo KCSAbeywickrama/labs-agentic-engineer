@@ -102,6 +102,13 @@ type AgentTurn struct {
 	CacheCreationTokens int64    `gorm:"not null;default:0" json:"-"`
 	ModelID             string   `gorm:"type:text;not null;default:''" json:"-"`
 	CostUsd             *float64 `gorm:"column:cost_usd" json:"-"`
+	// ModelHost is the host of the model connection the turn was admitted on,
+	// written by TryStart with the rest of the running row, and the host
+	// Finish prices the turn's usage against: rates are keyed by (host, model).
+	// Nullable on purpose: a row that predates the column reads NULL until
+	// migrate's phase18 backfills it to api.anthropic.com, and NULL-only is what
+	// keeps that backfill one-shot (see RunPhase18ModelHost).
+	ModelHost string `gorm:"type:text" json:"-"`
 
 	// HeartbeatAt is bumped by the running replica (~15s); the sweep fails
 	// rows whose heartbeat went stale (~60s) and releases the D18 guard.

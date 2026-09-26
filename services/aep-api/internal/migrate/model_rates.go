@@ -22,6 +22,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/modelcost"
 )
 
@@ -30,8 +31,9 @@ import (
 // thereafter — a price change is an UPDATE, and because USD is stamped at
 // capture (never re-derived), that change only affects work captured after it.
 //
-// Two rows, exactly the contract's AgentModel enum — the models an org can
-// choose for every one of its agents (spec and coding alike, ADR-0036):
+// Two rows on api.anthropic.com, exactly the contract's AgentModel enum — the
+// models an org can choose for every one of its agents (spec and coding alike,
+// ADR-0036):
 //
 //   - claude-sonnet-5 (the default agent model) at its
 //     INTRODUCTORY rates, in force through 2026-08-31: input $2.00/MTok,
@@ -45,12 +47,22 @@ import (
 //     no row would stamp every run on it null and show tokens instead of
 //     dollars.
 //
-// Idempotent per model: seeds only where the model has no row, so an
-// ops-adjusted rate is never clobbered by a redeploy. AutoMigrate (BaseModels)
-// creates the table before this step runs.
+// Idempotent per (host, model): seeds only where that pair has no row, so an
+// ops-adjusted rate is never clobbered by a redeploy, and an ops row for the
+// same model on another host neither blocks the seed nor is touched by it.
+// AutoMigrate (BaseModels) creates the table before this step runs.
+//
+// A row with a NULL host is the Anthropic row. On the first boot of the release
+// that added the host, AutoMigrate adds the column to the existing table
+// nullable and this step runs BEFORE phase18 backfills it (the step list is
+// append-only), with the table still keyed on model_id alone. Every row that
+// predates hosts is api.anthropic.com's — the backfill's own claim — so counting
+// it here is what keeps the seed from inserting a second claude-sonnet-5 into a
+// primary key that has not been widened yet.
 func RunModelRatesSeed(ctx context.Context, db *gorm.DB) error {
 	seeds := []modelcost.ModelRate{
 		{
+			Host:              modelconn.AnthropicHost,
 			ModelID:           "claude-sonnet-5",
 			InputPerMTok:      2.00,
 			OutputPerMTok:     10.00,
@@ -58,6 +70,7 @@ func RunModelRatesSeed(ctx context.Context, db *gorm.DB) error {
 			CacheWritePerMTok: 2.50,
 		},
 		{
+			Host:              modelconn.AnthropicHost,
 			ModelID:           "claude-haiku-4-5",
 			InputPerMTok:      1.00,
 			OutputPerMTok:     5.00,
@@ -68,14 +81,15 @@ func RunModelRatesSeed(ctx context.Context, db *gorm.DB) error {
 	for _, seed := range seeds {
 		var count int64
 		if err := db.WithContext(ctx).Model(&modelcost.ModelRate{}).
-			Where("model_id = ?", seed.ModelID).Count(&count).Error; err != nil {
-			return fmt.Errorf("model_rates seed: count %s: %w", seed.ModelID, err)
+			Where("model_id = ? AND (host = ? OR host IS NULL)", seed.ModelID, seed.Host).
+			Count(&count).Error; err != nil {
+			return fmt.Errorf("model_rates seed: count %s/%s: %w", seed.Host, seed.ModelID, err)
 		}
 		if count > 0 {
 			continue // already seeded (or ops-adjusted) — never overwrite
 		}
 		if err := db.WithContext(ctx).Create(&seed).Error; err != nil {
-			return fmt.Errorf("model_rates seed: insert %s: %w", seed.ModelID, err)
+			return fmt.Errorf("model_rates seed: insert %s/%s: %w", seed.Host, seed.ModelID, err)
 		}
 	}
 	return nil

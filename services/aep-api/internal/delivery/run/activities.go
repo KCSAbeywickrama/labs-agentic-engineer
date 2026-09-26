@@ -1005,17 +1005,31 @@ func (a *Activities) MintValidationRepairIssues(ctx context.Context, in MintVali
 
 // ---- dispatch --------------------------------------------------------------
 
-// DispatchAgent launches the cycle's agent run and returns the Job reference.
+// DispatchAgent launches the cycle's agent run, records on the cycle the model
+// host it launched on, and returns the Job reference.
+//
+// The host is written HERE, not by NoteCycleDispatch, because only the launch
+// knows it and this activity's result is frozen by workflow history: it has
+// always been the bare Job reference, and a run in flight across a deploy
+// replays that recorded value. Writing it before returning keeps the
+// copy-at-dispatch rule (the host is the one the Job was launched with) without
+// changing what the workflow reads back.
+//
+// A failed host write is logged, not returned. The Job is already running, and
+// this activity runs with retries off because a failed launch is agent death:
+// returning the error would spend a re-dispatch and launch a second agent beside
+// the first. The cost of the missed write is honest — the cycle's capture finds
+// no host and stamps a null cost, which the console shows as tokens only.
 //
 // Three non-retryable failure classes are stamped here (Temporal must not
 // retry any): agent death — a launch that did not happen, answered by the
 // cycle's re-dispatch budget; quota blocked — entitlement refused, not death;
 // publisher credentials missing — Job create cannot stamp the SecretReference.
 func (a *Activities) DispatchAgent(ctx context.Context, in delivery.MilestoneDispatch) (string, error) {
-	if a.dispatcher == nil {
+	if a.dispatcher == nil || a.cycles == nil {
 		return "", errNotConfigured
 	}
-	jobRef, err := a.dispatcher.Dispatch(ctx, in)
+	launch, err := a.dispatcher.Dispatch(ctx, in)
 	if errors.Is(err, delivery.ErrAgentQuotaExceeded) {
 		// A sentinel does not survive the activity boundary — Temporal
 		// round-trips errors as data — so the refusal is re-expressed as a
@@ -1028,5 +1042,12 @@ func (a *Activities) DispatchAgent(ctx context.Context, in delivery.MilestoneDis
 		return "", temporal.NewNonRetryableApplicationError(
 			delivery.PublisherCredentialsMissingMessage, delivery.ErrTypePublisherCredentialsMissing, err)
 	}
-	return jobRef, err
+	if err != nil {
+		return "", err
+	}
+	if err := a.cycles.NoteModelHost(ctx, in.CycleID, launch.ModelHost); err != nil {
+		slog.WarnContext(ctx, "run: the agent launched but its model host was not recorded — the cycle's usage will be unpriced",
+			"cycle", in.CycleID, "host", launch.ModelHost, "error", err)
+	}
+	return launch.JobRef, nil
 }

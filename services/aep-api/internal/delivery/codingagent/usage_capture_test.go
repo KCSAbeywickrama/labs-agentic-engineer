@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/contracts"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/modelcost"
 )
 
@@ -162,13 +163,13 @@ func TestUsageFromLogPricesAnOpenCodeRun(t *testing.T) {
 	}
 
 	rates := []modelcost.ModelRate{
-		{ModelID: "claude-sonnet-5", InputPerMTok: 2, OutputPerMTok: 10, CacheReadPerMTok: 0.2, CacheWritePerMTok: 2.5},
-		{ModelID: "claude-haiku-4-5", InputPerMTok: 1, OutputPerMTok: 5, CacheReadPerMTok: 0.1, CacheWritePerMTok: 1.25},
+		{Host: modelconn.AnthropicHost, ModelID: "claude-sonnet-5", InputPerMTok: 2, OutputPerMTok: 10, CacheReadPerMTok: 0.2, CacheWritePerMTok: 2.5},
+		{Host: modelconn.AnthropicHost, ModelID: "claude-haiku-4-5", InputPerMTok: 1, OutputPerMTok: 5, CacheReadPerMTok: 0.1, CacheWritePerMTok: 1.25},
 	}
 	ts := make([]modelcost.Tokens, 0, len(slices))
 	for _, s := range slices {
 		ts = append(ts, modelcost.Tokens{
-			ModelID: s.Model, InputTokens: s.InputTokens, OutputTokens: s.OutputTokens,
+			Host: modelconn.AnthropicHost, ModelID: s.Model, InputTokens: s.InputTokens, OutputTokens: s.OutputTokens,
 			CacheReadTokens: s.CacheReadTokens, CacheCreationTokens: s.CacheCreationTokens,
 		})
 	}

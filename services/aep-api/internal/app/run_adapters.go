@@ -145,6 +145,11 @@ func (a runCycles) NoteDispatch(ctx context.Context, cycleID, jobRef string) err
 	return err
 }
 
+func (a runCycles) NoteModelHost(ctx context.Context, cycleID, host string) error {
+	_, err := a.cycles.NoteModelHost(ctx, cycleID, host)
+	return err
+}
+
 func (a runCycles) Finish(ctx context.Context, cycleID, mergeSHA string) error {
 	_, err := a.cycles.Finish(ctx, cycleID, mergeSHA)
 	return err
