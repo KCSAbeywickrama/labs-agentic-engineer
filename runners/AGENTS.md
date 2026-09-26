@@ -182,6 +182,16 @@ into the runner pod at `/app/skills` for live skill edits (see
   and the cluster's backstop cannot disagree; the runner subtracts its own
   margin, which is not the dispatcher's to know. Unset still means no guard,
   which is what the playground runs under.
+  **A spent model plan ends the run too.** Every retry a runtime reports is
+  fed to `lib/provider_limit.ts`: a 429 whose retry delay is five minutes or
+  more, or five minutes of 429 retries in one streak (a streak ends when the
+  model answers — a tool call or a clean turn, not any activity), ends the run
+  through the same termination path, and the one settle carries
+  `code: provider_limit`, `host` and, when the provider stated one, `resetAt`.
+  A runtime that gives up on its 429s first settles the same code. aep-api
+  settles such a run BLOCKED, not failed. Each 429 leaves one
+  `model_provider_429` record in `runtime.log`, never on the feed; the
+  provider's text reaches the settle only as the capped `providerDetail`.
 - **API retries are on the feed for every run; the rest of the diagnostics are
   developer-only files.** A stalled model turn used to be reported as bare
   silence. The SDK emits `system`/`api_retry` for every retryable failure and

@@ -316,6 +316,15 @@ export interface ApiRetryInfo {
   errorStatus: number | null;
   /** The runtime's error CLASS — a closed enum, never free text. */
   error: string;
+  /**
+   * The provider's own words on this failure, as the runtime passed them on —
+   * OpenCode's retry `message`, Claude Code's status and error class. FREE
+   * TEXT, which is why it is a separate field from `error`: it never reaches
+   * the feed's retry line, only the provider-limit evidence
+   * (`lib/provider_limit.ts`), which caps it and scrubs it on the way out.
+   * Absent when the runtime said nothing beyond the class.
+   */
+  providerText?: string;
 }
 
 /**

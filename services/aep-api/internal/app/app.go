@@ -1552,12 +1552,14 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	}
 	// The pod-truth watcher: it classifies each dispatched cycle from the Pod
 	// OpenChoreo rendered for it, records a terminal agent reason when the agent
-	// died without a pull request, and banks the run's token spend. It writes no
+	// died without a pull request (or the run's failure record, when its model
+	// provider's limit stopped it), and banks the run's token spend. It writes no
 	// logs and deletes no components — history is the observability plane's and
 	// deletion is retention's. Always on (no longer gated on cluster-gateway-proxy).
 	watchers = append(watchers, codingagent.NewJobWatcher(runtimeClient, runCycleRepo, asServiceIdentity).
 		WithRecorder(runRecorder).
-		WithAgentDeathNotifier(agentDeathNotifier{runs: milestoneRunRepo, supervisor: runSupervisor}))
+		WithAgentDeathNotifier(agentDeathNotifier{runs: milestoneRunRepo, supervisor: runSupervisor}).
+		WithRunFailures(milestoneRunRepo))
 	slog.Info("codingagent.JobWatcher: enabled (OpenChoreo resource tree)")
 	// The milestone run supervisor's Temporal worker. Registered only when
 	// Temporal is configured (TEMPORAL_HOSTPORT set). The watcher dials in a

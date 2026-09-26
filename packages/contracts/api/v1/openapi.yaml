@@ -5914,7 +5914,9 @@ components:
             written (gates minted, then issues planned in). waiting is the unbounded wait
             between cycles, where something outside the platform is needed. blocked is
             terminal and is NOT a failure — the org has no agent concurrency slot left, so
-            the cycle was never launched (see terminalReason agent-quota-blocked).
+            the cycle was never launched (see terminalReason agent-quota-blocked), or the
+            model provider's usage limit stopped the coding agent (terminalReason
+            model-provider-limit); either way a person starts the run again.
           enum:
           - planning
           - waiting
@@ -5926,8 +5928,8 @@ components:
           type: string
         terminalReason:
           description: Why a non-succeeded run stopped. Each value names exactly one failure class;
-            empty while the run is non-terminal and on a succeeded run. agent-quota-blocked
-            explains state=blocked.
+            empty while the run is non-terminal and on a succeeded run. agent-quota-blocked,
+            publisher-credentials-missing and model-provider-limit explain state=blocked.
           type: string
         waitingReason:
           description: Why a `waiting` run is waiting. Empty for the ordinary between-cycles park,
@@ -6930,7 +6932,8 @@ components:
           type: string
         code:
           description: >-
-            `notice` only: WHICH condition, as a closed set. Closed on purpose,
+            `notice`, and `run_settled`'s one code below: WHICH condition, as a
+            closed set. Closed on purpose,
             twice over — a consumer can react to one condition without parsing
             prose, and no free text (a prompt, a credential, a path) can ride a
             notice into a user-visible build log. It is also where the WORDING
@@ -6965,6 +6968,14 @@ components:
             They are notices rather than agent events for the same reason
             throughout: a pod that has not started is not an agent, and there is
             no session to report a phrase about.
+
+            `run_settled` carries one code of its own: `provider_limit`, the
+            model provider refused the run's calls with HTTP 429 for longer
+            than a wait (a `retry-after` of five minutes or more, or five
+            minutes of 429 retries in total). The run stopped rather than
+            retry until its deadline; `host` and, when the provider gave one,
+            `resetAt` say whose limit and until when. No other code appears on
+            `run_settled`, and `provider_limit` appears nowhere else.
           enum:
           - api_retry
           - compaction
@@ -6983,6 +6994,7 @@ components:
           - runner_starting
           - workspace_provisioning
           - workspace_ready
+          - provider_limit
           type: string
           x-enum-varnames:
           - RunEventCodeAPIRetry
@@ -7002,6 +7014,7 @@ components:
           - RunEventCodeRunnerStarting
           - RunEventCodeWorkspaceProvisioning
           - RunEventCodeWorkspaceReady
+          - RunEventCodeProviderLimit
         command:
           description: >-
             `tool_use`, `tool_result` and the `git_*` kinds: the command line
@@ -7061,6 +7074,14 @@ components:
         files:
           description: '`git_commit` only: how many files the commit touched.'
           type: integer
+        host:
+          description: >-
+            `run_settled` with `code: provider_limit` only: the host of the
+            model endpoint whose limit stopped the run (`ollama.com`), as the
+            run's connection named it. It is what the reader's sentence names —
+            whose plan is spent — and it is display only: nothing prices or
+            routes on a producer's host.
+          type: string
         itemId:
           description: >-
             `work_item` only: WHICH named unit of work this event is about — the
@@ -7209,6 +7230,16 @@ components:
             `notice`.
           maxLength: 200
           type: string
+        providerDetail:
+          description: >-
+            `run_settled` with `code: provider_limit` only: the provider's own
+            words on the last 429 the runtime reported (its retry message, or
+            its status and error class), capped and scrubbed. It is evidence for
+            the operator, who learns each provider's limit shape from it; the
+            platform logs it and neither stores nor shows it, because it is a
+            third party's text.
+          maxLength: 300
+          type: string
         ref:
           description: >-
             `heartbeat` only: WHAT is being waited on — the `toolUseId` when
@@ -7224,6 +7255,17 @@ components:
             agent that settles without one leaves a reader nothing but counters.
           maxLength: 500
           type: string
+        resetAt:
+          description: >-
+            `run_settled` with `code: provider_limit` only: when the provider
+            said its limit resets — the runtime's retry delay behind a
+            `retry-after` of five minutes or more. Absent when the provider
+            stated no reset, which is the case the five-minute fallback exists
+            for: a reader is told to try again later rather than given a time
+            nobody promised.
+          format: date-time
+          type: string
+          x-go-type-skip-optional-pointer: false
         role:
           description: >-
             `agent_started`: what KIND of agent this is, in the runtime's own
@@ -7680,12 +7722,16 @@ components:
             platform could not call permanent, and the bounded retry is being or
             has been spent; `plan-turn-failed` the planning turn errored (an LLM
             or transport error, retried); `repository-unavailable` the run's
-            repository, issue or credential is gone.
+            repository, issue or credential is gone; `model-provider-limit` the
+            model provider's usage limit stopped the coding agent — the run is
+            `blocked`, not failed, and `host` and `resetAt` say whose limit and
+            until when.
           enum:
           - dependency-unprovisionable
           - dependency-provision-failed
           - plan-turn-failed
           - repository-unavailable
+          - model-provider-limit
           type: string
           x-go-type: string
         phase:
@@ -7719,6 +7765,16 @@ components:
         detail:
           description: The platform's recorded error text, scrubbed and capped at the producer.
           type: string
+        host:
+          description: '`model-provider-limit` only: the host of the model endpoint whose limit was
+            reached.'
+          type: string
+        resetAt:
+          description: '`model-provider-limit` only: when the provider said its limit resets. Absent
+            when it stated no reset.'
+          format: date-time
+          type: string
+          x-go-type-skip-optional-pointer: false
         workflowId:
           description: The run's workflow id — the handle an operator reads history by. Derived at
             read time, never stored.

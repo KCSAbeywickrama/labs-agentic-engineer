@@ -54,6 +54,7 @@ import { allowsWriteOutsideProject } from "./workspace_guard.js";
 import { staticTokenSource, type AccessTokenSource } from "./auth_retry.js";
 import { webFetchDenial } from "./webfetch_guard.js";
 import { readModelConnection } from "./model_connection.js";
+import { createProviderLimits } from "./provider_limit.js";
 import {
   CODING_WORKFLOW_SKILL,
   SKILLS_MIRROR_DIR,
@@ -467,6 +468,9 @@ export async function startCodingRun(
         requestedSkills: skills,
         deadline,
         terminator,
+        // The host is what a provider-limit settle names; the rule itself is
+        // the same for every connection.
+        providerLimits: createProviderLimits({ host: policy.connection.host }),
       });
     } finally {
       deadline?.cancel();

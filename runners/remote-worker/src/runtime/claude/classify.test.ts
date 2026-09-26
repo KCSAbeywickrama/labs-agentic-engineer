@@ -47,6 +47,7 @@ test("readApiRetry: reads the real wire shape", () => {
     retryDelayMs: 4_200,
     errorStatus: 529,
     error: "overloaded",
+    providerText: "529 overloaded",
   });
 });
 
@@ -87,6 +88,7 @@ test("readApiRetry: a renamed field degrades to a usable line, never to NaN", ()
     retryDelayMs: 0,
     errorStatus: null,
     error: "unknown",
+    providerText: "no status unknown",
   });
   assert.doesNotMatch(apiRetryLine(info!), /NaN|undefined/);
 });

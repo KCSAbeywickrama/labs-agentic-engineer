@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
@@ -69,6 +70,15 @@ type DeployObserver interface {
 // settles on its landing deadline as before.
 type AgentDeathNotifier interface {
 	AgentDied(ctx context.Context, orgID, runID, reason string) error
+}
+
+// RunFailureRecorder writes a run's failure record — the structured "why" the
+// console's card reads. The watcher uses it for the one fault it learns first,
+// a model provider limit, whose host and reset time only the runner's settle
+// carries. The milestone run repository satisfies it; it writes only a run
+// that is not yet terminal. Best-effort; nil → no record.
+type RunFailureRecorder interface {
+	RecordFailure(ctx context.Context, id string, failure delivery.RunFailure) (*delivery.MilestoneRun, error)
 }
 
 // SecretRef is one org credential's refs-only SM-API triplet.

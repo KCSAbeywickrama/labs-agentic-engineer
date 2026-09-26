@@ -210,7 +210,8 @@ help — in that order, in the platform's recorded words:
 | The repository is gone | error · *check the repository connection in Settings* |
 | A run failed before the record existed | error · the terminal reason in words · *The platform recorded no further details for this run.* |
 | Cancelled | **no card** — a person stopping an increment is not a fault |
-| Blocked | no card — the existing quota / credentials message is that surface |
+| Blocked on the model provider's usage limit | warning · *ollama.com's usage limit was reached* · *The coding agent stopped when ollama.com refused further requests, and nothing from that build session was merged. Start the run again after it resets (14:05).* — the date joins the time when the reset is another day; with no reset stated, *Start the run again once it resets — the provider did not say when.* No host recorded: *The model provider's usage limit was reached* |
+| Blocked on quota or credentials | no card — the existing quota / credentials message is that surface |
 
 **Show details** opens the platform's facts as a dense list — `code` (with
 *permanent* / *retryable*), `attempts`, `window`, `recorded` (the platform's own

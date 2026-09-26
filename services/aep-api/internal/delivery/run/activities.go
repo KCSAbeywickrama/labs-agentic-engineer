@@ -298,6 +298,10 @@ type CycleFacts struct {
 	PRNumber int    `json:"prNumber,omitempty"`
 	MergeSHA string `json:"mergeSha,omitempty"`
 	Ended    bool   `json:"ended"`
+	// AgentReason is why the cycle's agent stopped without landing, as the
+	// pod-truth watcher closed it. Read for the one reason that is not agent
+	// death: delivery.CycleReasonModelProviderLimit.
+	AgentReason string `json:"agentReason,omitempty"`
 	// CancelRequested is the run row's cancellation stamp, not the signal. The
 	// signal is a wake-up; this is the evidence — which is what stops a reaped
 	// agent pod from reading as agent death and buying a re-dispatch.
@@ -334,6 +338,7 @@ func (a *Activities) ReadCycleFacts(ctx context.Context, in CycleFactsInput) (Cy
 	facts.PRNumber = row.PRNumber
 	facts.MergeSHA = row.MergeSHA
 	facts.Ended = row.EndedAt != nil
+	facts.AgentReason = row.AgentReason
 	return facts, nil
 }
 
