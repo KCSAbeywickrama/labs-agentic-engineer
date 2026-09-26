@@ -24,12 +24,17 @@ import (
 )
 
 // RunPhase17OrgAgentSettings renames org_coding_agent_settings to
-// org_agent_settings: the row now holds the one model EVERY agent uses, not only
-// the coding agent's. AutoMigrate (BaseModels) has already created the new
+// org_agent_settings. AutoMigrate (BaseModels) has already created the new
 // table from organization.OrgAgentSettings by the time this runs, so the rename
 // is a copy: every old row moves across (an existing new row wins — it can only
 // have been written by this build), then the old table is dropped. Idempotent:
 // once the old table is gone the step does nothing.
+//
+// The runtime is copied and the model is not: the model moved onto the model
+// connection (phase19_model_connection), and org_agent_settings has no model
+// column any more. A database upgraded straight from before this step
+// therefore loses a non-default model choice; the org's connection carries
+// the Anthropic format's default model until it saves another.
 func RunPhase17OrgAgentSettings(ctx context.Context, db *gorm.DB) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var exists bool
@@ -40,8 +45,8 @@ func RunPhase17OrgAgentSettings(ctx context.Context, db *gorm.DB) error {
 			return nil
 		}
 		if err := tx.Exec(`
-			INSERT INTO org_agent_settings (oc_org_id, runtime, model, updated_by, updated_at)
-			SELECT oc_org_id, runtime, model, updated_by, updated_at
+			INSERT INTO org_agent_settings (oc_org_id, runtime, updated_by, updated_at)
+			SELECT oc_org_id, runtime, updated_by, updated_at
 			  FROM org_coding_agent_settings
 			ON CONFLICT (oc_org_id) DO NOTHING`).Error; err != nil {
 			return fmt.Errorf("phase17 copy rows: %w", err)

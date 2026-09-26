@@ -282,31 +282,28 @@ func TestAnthropicValidateKey_NetworkFailureIsUnreachable(t *testing.T) {
 
 // --- ValidateKey ordering: reject before any I/O ---------------------------------
 
-// The shape guards and the role's kind are checked before any probe: a nil
-// repo/store and an unreachable API base prove no I/O happens on these paths.
+// The shape guards and the kind are checked before any probe: a nil repo/store
+// and an unreachable API base prove no I/O happens on these paths.
 func TestAnthropicValidateKey_ShapeGuardsRejectBeforeAnyIO(t *testing.T) {
 	t.Parallel()
 	svc := NewAnthropicCredentialService(nil, nil).WithAnthropicAPIBase("http://127.0.0.1:0")
 	cases := []struct {
 		name     string
-		role     AnthropicRole
 		key      string
 		wantCode string
 	}{
-		{"empty", AnthropicRoleDefault, "", "anthropic_key_missing"},
-		{"whitespace only trims to empty", AnthropicRoleDefault, "   \n", "anthropic_key_missing"},
-		{"wrong prefix", AnthropicRoleDefault, strings.Repeat("x", 30), "anthropic_key_invalid"},
-		{"too short", AnthropicRoleDefault, "sk-ant-short", "anthropic_key_invalid"},
-		// The coding role is a Claude subscription: an API key pasted there is
+		{"empty", "", "anthropic_key_missing"},
+		{"whitespace only trims to empty", "   \n", "anthropic_key_missing"},
+		{"wrong prefix", strings.Repeat("x", 30), "anthropic_key_invalid"},
+		{"too short", "sk-ant-short", "anthropic_key_invalid"},
+		// A Claude subscription takes a token: an API key pasted there is
 		// refused, not stored as a separate coding key.
-		{"api key as a subscription", AnthropicRoleCoding, anthropicUnitKey, "agents_subscription_token_required"},
-		// The org's key serves the spec agents, which cannot present a token.
-		{"token as the org key", AnthropicRoleDefault, "sk-ant-oat01-" + strings.Repeat("t", 20), "anthropic_oauth_token_coding_only"},
+		{"api key as a subscription", anthropicUnitKey, "agents_subscription_token_required"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := svc.ValidateKey(context.Background(), tc.role, tc.key)
+			err := svc.ValidateKey(context.Background(), tc.key)
 			if got := anthropicValidationCode(t, err); got != tc.wantCode {
 				t.Fatalf("code: got %q, want %q (err %v)", got, tc.wantCode, err)
 			}

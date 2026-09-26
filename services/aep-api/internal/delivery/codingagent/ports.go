@@ -152,16 +152,16 @@ type CodingKeyResolver interface {
 	KeyRef(ctx context.Context, ocOrgID string) (modelconn.Connection, organization.SecretRefTriplet, error)
 }
 
-// CodingAgentSettings answers which runtime and model this org's next cycle
-// runs on. The organization domain owns the choice — including the fact that an
-// org which never opened the setting is on the platform's defaults — so dispatch
-// asks for the EFFECTIVE values and never for a row, which is what keeps
-// "nobody chose" from being a state dispatch has to know how to interpret.
+// CodingAgentSettings answers which runtime this org's next cycle runs on (the
+// model is part of the connection, CodingKeyResolver's answer). The
+// organization domain owns the choice — including the fact that an org which
+// never opened the setting is on the platform's default — so dispatch asks for
+// the EFFECTIVE value and never for a row, which is what keeps "nobody chose"
+// from being a state dispatch has to know how to interpret.
 //
-// The values are COPIED onto the run at launch, so a change applies from the
-// next cycle: re-reading mid-run would leave a feed whose model names disagree
-// with the tokens they were billed for. Wired from
-// organization.AgentSettingsService; nil → the platform defaults.
+// The value is COPIED onto the run at launch, so a change applies from the
+// next cycle. Wired from organization.AgentSettingsService; nil → the platform
+// default.
 type CodingAgentSettings interface {
 	Effective(ctx context.Context, ocOrgID string) (orgconfig.AgentsProjection, error)
 }

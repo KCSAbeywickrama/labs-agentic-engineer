@@ -163,6 +163,8 @@ type ledgerPhaseUsageRow struct {
 	CostUsd             *float64
 	Models              int64
 	MaxModel            string
+	Hosts               int64
+	MaxHost             string
 }
 
 func (r *agentUsageLedgerRepository) SumUsageByProjectPhase(ctx context.Context, orgID string) (map[contracts.UsageScope]contracts.StampedUsage, map[contracts.UsageScope]contracts.StampedUsage, error) {
@@ -182,7 +184,11 @@ func (r *agentUsageLedgerRepository) SumUsageByProjectPhase(ctx context.Context,
 			// entries that spent nothing drop out instead of dragging a single-model
 			// phase to "unknown".
 			"COUNT(DISTINCT CASE WHEN "+ledgerHasTokens+" THEN model_id END) AS models, "+
-			"COALESCE(MAX(CASE WHEN "+ledgerHasTokens+" THEN model_id END), '') AS max_model").
+			"COALESCE(MAX(CASE WHEN "+ledgerHasTokens+" THEN model_id END), '') AS max_model, "+
+			// The host the phase was billed by, under the same agreement rule
+			// (contracts.StampedUsage.Add): an unstamped row counts as the "" host.
+			"COUNT(DISTINCT CASE WHEN "+ledgerHasTokens+" THEN COALESCE(model_host, '') END) AS hosts, "+
+			"COALESCE(MAX(CASE WHEN "+ledgerHasTokens+" THEN COALESCE(model_host, '') END), '') AS max_host").
 		Where("org_id = ? AND project_id <> ''", orgID).
 		Group("project_id, phase, (retired_at IS NOT NULL)").
 		// Only lifetimes with real token traffic — an entry that captured nothing
@@ -206,6 +212,9 @@ func (r *agentUsageLedgerRepository) SumUsageByProjectPhase(ctx context.Context,
 		}
 		scope := contracts.UsageScope{ProjectID: row.ProjectID, Retired: row.Retired}
 		stamped := contracts.StampedUsage{Tokens: u, CostUsd: row.CostUsd}
+		if row.Hosts == 1 {
+			stamped.Host = row.MaxHost
+		}
 		if row.Phase == UsagePhaseValidation {
 			validation[scope] = stamped
 		} else {

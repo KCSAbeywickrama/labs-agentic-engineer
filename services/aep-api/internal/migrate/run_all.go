@@ -61,10 +61,10 @@ func BaseModels() []any {
 		&sourcecontrol.WebhookDelivery{},
 		&sourcecontrol.WebhookPayload{},
 		&organization.Organization{},
-		// How the org's agents run: the one model every agent uses and the
-		// coding agent's runtime. A plain settings table with a text primary key
-		// and nothing to encrypt, so AutoMigrate expresses the whole schema;
-		// phase17 moves the rows of its predecessor, org_coding_agent_settings.
+		// How the org's agents run: the coding agent's runtime. A plain settings
+		// table with a text primary key and nothing to encrypt, so AutoMigrate
+		// expresses the whole schema; phase17 moves the rows of its
+		// predecessor, org_coding_agent_settings.
 		&organization.OrgAgentSettings{},
 		&delivery.Execution{},
 		&spec.AgentTurn{},
@@ -236,6 +236,13 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// model_rates_seed, which is why the seed counts a NULL-host row as the
 		// Anthropic one: on the upgrade boot it runs before the key is widened.
 		ctxStep("phase18_model_host", RunPhase18ModelHost),
+		// The model connection moves to its own table, org_model_connections:
+		// every active default credential becomes a connection on Anthropic's
+		// API with the org's model, the default rows go, the credential table
+		// keeps only the Claude subscription, and org_agent_settings loses its
+		// model column. Follows phase17 (which no longer copies a model) and
+		// every step that shaped org_anthropic_credentials.
+		ctxStep("phase19_model_connection", RunPhase19ModelConnection),
 	}
 }
 

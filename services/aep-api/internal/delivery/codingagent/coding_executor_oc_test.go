@@ -109,7 +109,7 @@ func firstPartyConnection() modelconn.Connection {
 		Format:     modelconn.FormatAnthropic,
 		BaseURL:    modelconn.AnthropicBaseURL,
 		Host:       modelconn.AnthropicHost,
-		Model:      orgconfig.DefaultAgentModel,
+		Model:      modelconn.DefaultAnthropicModel,
 		AuthScheme: modelconn.AuthXAPIKey,
 		ImageInput: modelconn.Yes,
 	}
@@ -823,8 +823,8 @@ func TestDispatch_NoCodingAgentSettingStampsThePlatformDefaults(t *testing.T) {
 	if got := secretEnvByKey(t, rec.load, "AEP_AGENT_RUNTIME").Value; got != string(orgconfig.DefaultAgentRuntime) {
 		t.Errorf("AEP_AGENT_RUNTIME = %q, want %q", got, orgconfig.DefaultAgentRuntime)
 	}
-	if got := secretEnvByKey(t, rec.load, "AEP_AGENT_MODEL").Value; got != orgconfig.DefaultAgentModel {
-		t.Errorf("AEP_AGENT_MODEL = %q, want %q", got, orgconfig.DefaultAgentModel)
+	if got := secretEnvByKey(t, rec.load, "AEP_AGENT_MODEL").Value; got != modelconn.DefaultAnthropicModel {
+		t.Errorf("AEP_AGENT_MODEL = %q, want %q", got, modelconn.DefaultAnthropicModel)
 	}
 	// A Claude Code run on the Claude Code image, and the cluster can see so.
 	if rec.load.Image != "ghcr.io/wso2/aep/remote-worker:latest" {
@@ -843,21 +843,28 @@ func TestDispatch_NoCodingAgentSettingStampsThePlatformDefaults(t *testing.T) {
 	}
 }
 
-// The setting is COPIED onto the run, which is what makes "applies from the next
-// cycle" true: a run already in flight keeps the model it was launched with, so
-// its usage lines and the tokens they were billed for name the same model.
+// The setting and the connection's model are COPIED onto the run, which is
+// what makes "applies from the next cycle" true: a run already in flight keeps
+// the model it was launched with, so its usage lines and the tokens they were
+// billed for name the same model.
 func TestDispatch_TheOrgsCodingAgentSettingIsCopiedOntoTheRun(t *testing.T) {
 	rec := &chainRecorder{}
-	e := newOCDispatchExecutor(rec)
+	anthropic, github := fullSecretRefs()
+	conn := firstPartyConnection()
+	conn.Model = "claude-haiku-4-5"
+	anthropic.conn = &conn
+	e := newCodingDispatchExecutor(anthropic, github)
+	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
+	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 	e.WithCodingAgentSettings(fakeCodingAgentSettings{
-		proj: orgconfig.AgentsProjection{Runtime: "claude-code", Model: "claude-haiku-4-5"},
+		proj: orgconfig.AgentsProjection{Runtime: "claude-code"},
 	})
 
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
 	if got := secretEnvByKey(t, rec.load, "AEP_AGENT_MODEL").Value; got != "claude-haiku-4-5" {
-		t.Errorf("AEP_AGENT_MODEL = %q, want the org's chosen model", got)
+		t.Errorf("AEP_AGENT_MODEL = %q, want the connection's model", got)
 	}
 	if got := secretEnvByKey(t, rec.load, "AEP_AGENT_RUNTIME").Value; got != "claude-code" {
 		t.Errorf("AEP_AGENT_RUNTIME = %q", got)
@@ -875,7 +882,7 @@ func newOpenCodeDispatchExecutor(rec *chainRecorder, anthropic fakeCodingKey, gi
 		WithImage("ghcr.io/wso2/aep/remote-worker:latest").
 		WithOpenCodeImage(opencodeImage))
 	e.WithCodingAgentSettings(fakeCodingAgentSettings{proj: orgconfig.AgentsProjection{
-		Runtime: "opencode", Model: "claude-sonnet-5",
+		Runtime: "opencode",
 	}})
 	return e
 }
@@ -922,7 +929,7 @@ func TestDispatch_AsksForTheCredentialOfTheRunsRuntime(t *testing.T) {
 		anthropic.asked = &asked
 		e := newOpenCodeDispatchExecutor(rec, anthropic, github, openCodeRunnerImage)
 		e.WithCodingAgentSettings(fakeCodingAgentSettings{proj: orgconfig.AgentsProjection{
-			Runtime: runtime, Model: "claude-sonnet-5",
+			Runtime: runtime,
 		}})
 
 		if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {

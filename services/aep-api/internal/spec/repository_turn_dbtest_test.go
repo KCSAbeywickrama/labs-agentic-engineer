@@ -256,3 +256,79 @@ func TestTurnRepo_ModelHostPricesTheTurn(t *testing.T) {
 }
 
 func ptr(f float64) *float64 { return &f }
+
+// The rotation check's read: the conversation's newest MEASURED turn. A later
+// turn that left no measure (it failed before the agents service saved it)
+// does not reset the conversation to empty, and other conversations are not
+// read.
+func TestTurnRepo_LastContextTokens(t *testing.T) {
+	t.Parallel()
+	repo := spec.NewTurnRepository(dbtest.New(t), nil)
+	ctx := context.Background()
+
+	if got, err := repo.LastContextTokens(ctx, "o1", "p1", "c1"); err != nil || got != nil {
+		t.Fatalf("no turns: LastContextTokens = (%v, %v), want (nil, nil)", got, err)
+	}
+	finish := func(conv string, term spec.TurnTerminal) {
+		t.Helper()
+		started, err := repo.TryStart(ctx, newTurn("o1", "p1", conv, "general"))
+		if err != nil {
+			t.Fatalf("TryStart: %v", err)
+		}
+		if ok, err := repo.Finish(ctx, started.ID, term); err != nil || !ok {
+			t.Fatalf("Finish = (%v, %v)", ok, err)
+		}
+	}
+	tokens := func(n int64) *int64 { return &n }
+
+	finish("c1", spec.TurnTerminal{Status: "completed", ContextTokens: tokens(40_000)})
+	finish("c1", spec.TurnTerminal{Status: "completed", ContextTokens: tokens(70_000)})
+	finish("c1", spec.TurnTerminal{Status: "failed", Reason: "stream-died"})
+	finish("c2", spec.TurnTerminal{Status: "completed", ContextTokens: tokens(5_000)})
+
+	got, err := repo.LastContextTokens(ctx, "o1", "p1", "c1")
+	if err != nil || got == nil || *got != 70_000 {
+		t.Fatalf("LastContextTokens(c1) = (%v, %v), want 70000", got, err)
+	}
+	if got, _ := repo.LastContextTokens(ctx, "o1", "p1", "c2"); got == nil || *got != 5_000 {
+		t.Fatalf("LastContextTokens(c2) = %v, want 5000", got)
+	}
+}
+
+// The roll-up's host: kept while every turn that spent tokens was billed by
+// the same host, "" once they mix. A turn that captured nothing has no say.
+func TestTurnRepo_SumUsageByProjectHost(t *testing.T) {
+	t.Parallel()
+	repo := spec.NewTurnRepository(dbtest.New(t), nil)
+	ctx := context.Background()
+	spent := &contracts.TokenUsage{InputTokens: 100, OutputTokens: 10, Model: "m"}
+
+	run := func(project, host string, usage *contracts.TokenUsage) {
+		t.Helper()
+		turn := newTurn("o1", project, "c1", "general")
+		turn.ModelHost = host
+		started, err := repo.TryStart(ctx, turn)
+		if err != nil {
+			t.Fatalf("TryStart(%s): %v", project, err)
+		}
+		if ok, err := repo.Finish(ctx, started.ID, spec.TurnTerminal{Status: "completed", Usage: usage}); err != nil || !ok {
+			t.Fatalf("Finish(%s) = (%v, %v)", project, ok, err)
+		}
+	}
+	run("p-one", modelconn.OllamaHost, spent)
+	run("p-one", modelconn.OllamaHost, spent)
+	run("p-one", modelconn.AnthropicHost, nil) // captured nothing
+	run("p-mixed", modelconn.OllamaHost, spent)
+	run("p-mixed", modelconn.AnthropicHost, spent)
+
+	got, err := repo.SumUsageByProject(ctx, "o1")
+	if err != nil {
+		t.Fatalf("SumUsageByProject: %v", err)
+	}
+	if h := got["p-one"].Host; h != modelconn.OllamaHost {
+		t.Errorf("p-one host = %q, want %q", h, modelconn.OllamaHost)
+	}
+	if h := got["p-mixed"].Host; h != "" {
+		t.Errorf("p-mixed host = %q, want \"\" (mixed hosts)", h)
+	}
+}

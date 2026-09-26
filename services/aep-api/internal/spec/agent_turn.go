@@ -119,6 +119,17 @@ type AgentTurn struct {
 	// keeps that backfill one-shot (see RunPhase18ModelHost).
 	ModelHost string `gorm:"type:text" json:"-"`
 
+	// ContextTokens is how much context the conversation held when the turn
+	// ended: the last model step's whole prompt plus its output, read off the
+	// stream's final finish-step part (agentfold.StepContextOf). It is the
+	// measure the rotation check reads (context_rotation.go), which the
+	// summed usage above cannot be: that adds every step's prompt together.
+	// Written only when the agents service vouched for the turn with a
+	// manifest, because only then did it save the turn into the
+	// conversation's history. Nullable, added by AutoMigrate: NULL on every
+	// other turn and on rows that predate it.
+	ContextTokens *int64 `json:"-"`
+
 	// HeartbeatAt is bumped by the running replica (~15s); the sweep fails
 	// rows whose heartbeat went stale (~60s) and releases the D18 guard.
 	HeartbeatAt time.Time `gorm:"index" json:"-"`

@@ -16,24 +16,6 @@ const (
 	UserJWTScopes userJWTContextKey = "userJWT.Scopes"
 )
 
-// Defines values for AgentModel.
-const (
-	AgentModelClaudeHaiku45 AgentModel = "claude-haiku-4-5"
-	AgentModelClaudeSonnet5 AgentModel = "claude-sonnet-5"
-)
-
-// Valid indicates whether the value is a known member of the AgentModel enum.
-func (e AgentModel) Valid() bool {
-	switch e {
-	case AgentModelClaudeHaiku45:
-		return true
-	case AgentModelClaudeSonnet5:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for AgentRuntime.
 const (
 	AgentRuntimeClaudeCode AgentRuntime = "claude-code"
@@ -1384,27 +1366,22 @@ type ActivityFeed struct {
 	NextBeforeID string `json:"nextBeforeId,omitempty"`
 }
 
-// AgentModel The model every agent of an organization bills to: the requirements, design and task-planning agents and the coding agent alike.
-//
-// Offered only once the platform can price it. The platform stamps a run's cost from a per-model rate table, and that stamp is ALL-OR-NOTHING across a cycle's capture — one model with no rate blanks the cost of the whole cycle, not just its own share. Adding one is a rate row and a contract change together, never one without the other.
-type AgentModel string
-
 // AgentRuntime Which coding-agent runtime an organization's builds run on.
 //
 // The values are the same two RunEvent.runtime records, and deliberately so: what an org SELECTS and what a finished run REPORTS have to be the same vocabulary or a reader cannot line them up. The lifetimes differ — this is a setting that can change, that one is a fact about an attempt that cannot.
 //
-// Both runtimes run on the organization's Anthropic API key. Only `claude-code` can bill a Claude subscription instead, so choosing `opencode` deletes a stored subscription (ADR-0028, ADR-0036).
+// Both runtimes run on the organization's model connection. `claude-code` speaks only the Anthropic format, so an OpenAI-compatible connection needs `opencode` (`agents_runtime_requires_anthropic_format`). Only `claude-code` can bill a Claude subscription instead, so choosing `opencode` deletes a stored subscription (ADR-0028, ADR-0036).
 type AgentRuntime string
 
 // AgentStatus How an agent, or a backgrounded task an agent owns, ended — as the runtime itself reported it. `running` is the only non-terminal value and exists so a consumer can repaint a row without waiting for the end; `completed` is a clean finish; `failed` is one the runtime called an error; `stopped` is a cancellation or a kill from outside, which is NOT a failure — the work did not go wrong, it was taken away, and a run a user stopped must not be shown as broken.
 // Carried by RunEvent's `agent_settled` and `task_settled`, which are the only places a status is authoritative. A settle event that never arrives means the platform never learned how the agent ended; it does not mean the agent is still running.
 type AgentStatus string
 
-// AgentsProjection How an organization's agents run: the one model every agent uses, the coding agent's runtime, and the Claude subscription coding bills to instead of the API key.
+// AgentsProjection How an organization's agents run: the coding agent's runtime and the Claude subscription coding bills to instead of the connection's key. The model is part of the connection (`llm.model`).
 //
-// ALWAYS present: every org has an effective model and runtime whether or not anyone has chosen them, so the section carries the platform's defaults until someone does. `updatedAt`/`updatedBy` are null exactly when nobody has — which is what tells "the platform's defaults" apart from "somebody chose the same values".
+// ALWAYS present: every org has an effective runtime whether or not anyone has chosen it, so the section carries the platform's default until someone does. `updatedAt`/`updatedBy` are null exactly when nobody has — which is what tells "the platform's default" apart from "somebody chose the same value".
 //
-// The spec agents read the model at the start of every turn. A coding run copies the model and runtime when it is dispatched, so a run in flight keeps what it was launched with.
+// A coding run copies the runtime (and the connection) when it is dispatched, so a run in flight keeps what it was launched with.
 type AgentsProjection = orgconfig.AgentsProjection
 
 // ApplyConflict One file whose baseSha no longer matches HEAD.
@@ -2098,7 +2075,19 @@ type IssueResult struct {
 	URL     string `json:"url"`
 }
 
-// LLMProjection defines model for LLMProjection.
+// LLMCapabilities What a connection supports, computed by the platform from its format, host and probe, so the console holds no host rules of its own.
+type LLMCapabilities = orgconfig.LLMCapabilities
+
+// LLMCheck What probing a connection found: the connection as it would be saved, whether the endpoint lists the model, and what it supports. The card draws its info box and Claude Code tile from `capabilities` and `priced` here before a save, and from the projection after.
+type LLMCheck = orgconfig.LLMCheck
+
+// LLMFormatOption One API format a connection may speak.
+type LLMFormatOption = orgconfig.LLMFormatOption
+
+// LLMPatch A model connection, field by field: an absent field keeps the saved value (or, on first connect, the format's default). Any public https endpoint speaking one of the formats; private, cluster and plain-http hosts are refused.
+type LLMPatch = orgconfig.LLMPatch
+
+// LLMProjection The organization's model connection, as every agent uses it. A stored connection is usable by construction: a save is refused unless the probe passes.
 type LLMProjection = orgconfig.LLMProjection
 
 // Lineage defines model for Lineage.
@@ -3523,8 +3512,11 @@ type Usage struct {
 	CacheReadTokens     int64 `json:"cacheReadTokens"`
 
 	// CostUsd Write-time-stamped USD (sum, for aggregates); null when no stamp exists.
-	CostUsd     *float64 `json:"costUsd"`
-	InputTokens int64    `json:"inputTokens"`
+	CostUsd *float64 `json:"costUsd"`
+
+	// Host The model endpoint's host the work was billed by (e.g. `api.anthropic.com`, `ollama.com`); "" or absent on an aggregate that mixes hosts or a row that predates stamping. Stamped by the platform, never by a producer. With a null `costUsd`, the console reads "not priced, billed by <host>".
+	Host        string `json:"host,omitempty"`
+	InputTokens int64  `json:"inputTokens"`
 
 	// Model Model id the work ran on; "" on mixed-model aggregates.
 	Model        string `json:"model"`
@@ -3824,6 +3816,9 @@ type UpdateConfigJSONRequestBody = ConfigPatch
 
 // StartGitProviderConnectJSONRequestBody defines body for StartGitProviderConnect for application/json ContentType.
 type StartGitProviderConnectJSONRequestBody = StartConnectInputBody
+
+// TestLlmConnectionJSONRequestBody defines body for TestLlmConnection for application/json ContentType.
+type TestLlmConnectionJSONRequestBody = LLMPatch
 
 // RegisterExternalResourceJSONRequestBody defines body for RegisterExternalResource for application/json ContentType.
 type RegisterExternalResourceJSONRequestBody = RegisterExternalResourceRequest

@@ -207,3 +207,22 @@ func TestSumCostNilWhenASliceIsOnAnUnpricedHost(t *testing.T) {
 		t.Fatalf("cost = %v, want nil when a contributing slice's host has no rate", *got)
 	}
 }
+
+// Priced is the lookup the model connection's `priced` reads: the same rows the
+// stamp prices against, keyed on host AND model.
+func TestPricedKeysOnHostAndModel(t *testing.T) {
+	s := sonnetStamper()
+	for _, tc := range []struct {
+		host, model string
+		want        bool
+	}{
+		{anthropic, "claude-sonnet-5", true},
+		{"ollama.com", "claude-sonnet-5", false},
+		{anthropic, "kimi-k3", false},
+		{"", "", false},
+	} {
+		if got := s.Priced(tc.host, tc.model); got != tc.want {
+			t.Errorf("Priced(%q, %q) = %v, want %v", tc.host, tc.model, got, tc.want)
+		}
+	}
+}

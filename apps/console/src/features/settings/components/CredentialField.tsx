@@ -20,23 +20,19 @@ import { useState, type ReactNode } from "react";
 import { Box, Button, IconButton, InputAdornment, TextField, Typography } from "@wso2/oxygen-ui";
 import { Eye, EyeOff } from "@wso2/oxygen-ui-icons-react";
 
-/** The fields of a stored credential the card shows. */
-interface Masked {
-  keyPrefix: string;
-  keyLast4: string;
-}
-
 /**
  * A stored credential, masked, with a Replace button while `onReplace` is set
- * and any further actions (`children`) beside it.
+ * and any further actions (`children`) beside it. `preview` is the masked form
+ * the server built (never the secret): the connection's `keyPreview`, or a
+ * subscription's prefix and last four.
  */
 export function MaskedCredential({
-  stored,
+  preview,
   onReplace,
   disabled,
   children,
 }: {
-  stored: Masked;
+  preview: string;
   onReplace?: (() => void) | undefined;
   disabled: boolean;
   children?: ReactNode;
@@ -44,7 +40,7 @@ export function MaskedCredential({
   return (
     <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 1 }}>
       <Typography variant="body2" fontFamily="monospace">
-        {stored.keyPrefix}•••••••••{stored.keyLast4}
+        {preview}
       </Typography>
       {onReplace && (
         <Button size="small" onClick={onReplace} disabled={disabled}>

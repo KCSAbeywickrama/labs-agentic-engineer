@@ -159,6 +159,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	orgRepo := organization.NewOrganizationRepository(db)
 	orgCredRepo := organization.NewOrgCredentialRepository(db, in.ColumnCipher)
 	orgAnthropicRepo := organization.NewOrgAnthropicRepository(db)
+	orgModelConnRepo := organization.NewOrgModelConnectionRepository(db)
 	orgAgentSettingsRepo := organization.NewOrgAgentSettingsRepository(db)
 	// The AI agents card's unit of work: one transaction over the Anthropic
 	// credential rows, the agent-settings row and the secret bytes.
@@ -254,7 +255,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// Secret-ref mirror writer. Constructed ahead of the credential / IDP service
 	// constructors so all consumers can attach via WithSecretRefWriter (the no-op
 	// case when smClient is nil is fine).
-	secretRefWriter := organization.NewSecretRefWriter(smClient, orgCredRepo, orgAnthropicRepo, idpRepo)
+	secretRefWriter := organization.NewSecretRefWriter(smClient, orgCredRepo, orgAnthropicRepo, idpRepo, orgModelConnRepo)
 
 	// Credentials + git-service services and controllers. The credential store,
 	// the App-token minter (post OpenBao key-load / dev seed / bot-identity load),
@@ -307,17 +308,19 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	buildCredService := organization.NewBuildCredentialsService(repoRepo, credResolver, gitSecretClient)
 	credService.WithBuildSecretCleaner(buildCredService)
 	anthropicCredService := organization.NewAnthropicCredentialService(orgAnthropicRepo, credStore)
-	// How the org's agents run: the one model, the coding runtime and the Claude
-	// subscription. ONE instance, read by three callers for three reasons:
-	// /config projects and saves it, the spec agents resolve the model per turn,
-	// and coding dispatch copies model + runtime onto the run it launches.
-	agentSettings := organization.NewAgentSettingsService(orgAgentSettingsRepo, orgRepo, anthropicCredService, agentsCardRepo,
-		runnableAgentRuntimes(cfg))
 	// The org's model connection as every consumer outside organization reads
 	// it: the spec agents and task planning (the connection and its key), the
 	// ai-agent model access and build evaluation (its key's vault reference),
-	// coding dispatch (which credential a run mounts) and Agent Manager.
-	modelConnections := organization.NewModelConnectionService(orgAnthropicRepo, credStore, agentSettings)
+	// coding dispatch (which credential a run mounts) and Agent Manager. Its
+	// `priced` reads the same rate card the usage stamps are priced from.
+	modelConnections := organization.NewModelConnectionService(orgModelConnRepo, orgAnthropicRepo, credStore, in.RateStamper).
+		WithSecretRefWriter(secretRefWriter)
+	// How the org's agents run: the model connection, the coding runtime and
+	// the Claude subscription. ONE instance, read by two callers: /config
+	// projects and saves it, and coding dispatch copies the runtime onto the run
+	// it launches.
+	agentSettings := organization.NewAgentSettingsService(orgAgentSettingsRepo, orgRepo, anthropicCredService, modelConnections, agentsCardRepo,
+		runnableAgentRuntimes(cfg))
 
 	// Task JWT manager — RS256. The public key is published on
 	// /auth/external/jwks.json. Used to mint BFF MCP tokens
@@ -925,6 +928,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		DB:                   db,
 		CredService:          credService,
 		AnthropicCredService: anthropicCredService,
+		ModelConnections:     modelConnections,
 	}
 
 	// The consolidated /config orchestrator (docs/design/org-config-consolidation.md):
@@ -932,7 +936,6 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// platform IDP defaults so GET /config can render the default idp section
 	// without persisting a row on read.
 	orgConfigSvc := organization.NewService(
-		anthropicCredService,
 		credService,
 		disconnectSvc,
 		bearerSvc,

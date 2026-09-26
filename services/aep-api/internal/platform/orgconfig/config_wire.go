@@ -23,7 +23,7 @@
 // these types, so `gen` emits a transparent alias (`type X = orgconfig.X`)
 // instead of a wrong generated struct.
 //
-// This is a pure, gorm-free leaf (only platform/patch + stdlib), so both the
+// This is a pure, gorm-free leaf (platform/patch, platform/modelconn + stdlib), so both the
 // generated wire layer (gen, a leaf) and the organization domain import it
 // without a cycle — the home the types needed once models/ dissolved (§7).
 // Kept field-for-field aligned with packages/contracts/api/v1; gen-api-check
@@ -33,6 +33,7 @@ package orgconfig
 import (
 	"time"
 
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/patch"
 )
 
@@ -47,46 +48,112 @@ import (
 // {status:"not_connected"} sentinel objects); idp is always present because an
 // org always has at least the platform default.
 //
-// agents is never null: every org has an effective model and runtime whether
-// or not anyone has chosen them, so the section carries the platform's defaults
-// until someone does. Its UpdatedBy is what tells the two apart.
+// agents is never null: every org has an effective runtime whether or not
+// anyone has chosen it, so the section carries the platform's default until
+// someone does. Its UpdatedBy is what tells the two apart.
 type ConfigProjection struct {
 	LLM *LLMProjection `json:"llm"` // null = not connected
-	// LLMDisconnectedAt is when the org's API key was last disconnected; set
-	// only while llm is null, so a client can tell "your key was disconnected"
-	// from "no key was ever set".
-	LLMDisconnectedAt *time.Time             `json:"llmDisconnectedAt,omitempty"`
-	Agents            AgentsProjection       `json:"agents"`      // always present
-	GitProvider       *GitProviderProjection `json:"gitProvider"` // null = not connected
-	IDP               IDPProjection          `json:"idp"`         // always present
+	// LLMCheck is what the save's probe found; set only on the PATCH response
+	// of a save that probed the connection, never on GET.
+	LLMCheck *LLMCheck `json:"llmCheck,omitempty"`
+	// LLMDisconnectedAt is when the org's model connection was last
+	// disconnected; set only while llm is null, so a client can tell "your
+	// connection was disconnected" from "none was ever saved".
+	LLMDisconnectedAt *time.Time `json:"llmDisconnectedAt,omitempty"`
+	// LLMFormats are the formats a connection may speak, never null.
+	LLMFormats  []LLMFormatOption      `json:"llmFormats"`
+	Agents      AgentsProjection       `json:"agents"`      // always present
+	GitProvider *GitProviderProjection `json:"gitProvider"` // null = not connected
+	IDP         IDPProjection          `json:"idp"`         // always present
 }
 
-// LLMProjection carries the org's Anthropic API key status. Fields are carried
-// 1:1 from organization.AnthropicProjection minus ocOrgId (dropped from all
-// projections — the org is implicit from the JWT).
+// --- llm: the organization's model connection --------------------------------
+//
+// One connection for every agent: an API format, a base URL, a key and a
+// model. host, authScheme, contextWindow, outputLimit and promptCache are kept
+// off the wire on purpose: dispatch, the runner and the agents service consume
+// them from modelconn.Connection, and the console renders none of them.
+
+// LLMProjection is the org's saved model connection. The key is write-only and
+// projected only as KeyPreview. A stored connection is usable by construction
+// (a save is refused unless its probe passes), so there is no status.
 type LLMProjection struct {
-	Kind string `json:"kind" enum:"anthropic"`
-	// CredentialKind is always api_key: the spec agents are AI SDK calls that
-	// cannot present a Claude subscription token, so the org's key is a
-	// Console API key and a subscription lives on the agents section.
-	CredentialKind  string     `json:"credentialKind" enum:"api_key"`
-	KeyPrefix       string     `json:"keyPrefix"`
-	KeyLast4        string     `json:"keyLast4"`
-	Status          string     `json:"status"`
-	ConnectedAt     time.Time  `json:"connectedAt"`
-	LastValidatedAt *time.Time `json:"lastValidatedAt,omitempty"`
-	ValidationError *string    `json:"validationError,omitempty"`
+	Kind        modelconn.Format `json:"kind" enum:"anthropic,openai-compatible"`
+	BaseURL     string           `json:"baseURL"`
+	Model       string           `json:"model"`
+	KeyPreview  string           `json:"keyPreview"`
+	ConnectedAt time.Time        `json:"connectedAt"`
+	UpdatedAt   time.Time        `json:"updatedAt"`
+	// UpdatedBy is nil for a connection carried over by the migration from the
+	// Anthropic-only card, which recorded no author for the key.
+	UpdatedBy *string `json:"updatedBy"`
+	// Priced is whether the platform holds a rate for (host, model), so usage
+	// shows dollars rather than tokens only.
+	Priced       bool            `json:"priced"`
+	Capabilities LLMCapabilities `json:"capabilities"`
+}
+
+// LLMCapabilities is the part of modelconn.Capabilities the console renders:
+// the info box, the Claude Code tile's subscription field and the chat attach
+// control. Computed once, server side (modelconn.CapabilitiesOf).
+type LLMCapabilities struct {
+	ClaudeSubscription bool                `json:"claudeSubscription"`
+	WebSearch          modelconn.WebSearch `json:"webSearch" enum:"anthropic-server-tool,ollama-api,none"`
+	ImageInput         modelconn.Tristate  `json:"imageInput" enum:"yes,no,unknown"`
+	NativePDF          bool                `json:"nativePdf"`
+	GeneratedAgents    bool                `json:"generatedAgents"`
+}
+
+// LLMCapabilitiesFrom projects a connection's capabilities onto the wire.
+func LLMCapabilitiesFrom(c modelconn.Capabilities) LLMCapabilities {
+	return LLMCapabilities{
+		ClaudeSubscription: c.ClaudeSubscription,
+		WebSearch:          c.WebSearch,
+		ImageInput:         c.ImageInput,
+		NativePDF:          c.NativePDF,
+		GeneratedAgents:    c.GeneratedAgents,
+	}
+}
+
+// LLMCheck is what probing a connection found: the connection as it would be
+// saved, whether the endpoint lists the model, and what it supports. The body
+// of POST /config/llm/test, and ConfigProjection.LLMCheck on a probing save.
+type LLMCheck struct {
+	Kind    modelconn.Format `json:"kind" enum:"anthropic,openai-compatible"`
+	BaseURL string           `json:"baseURL"`
+	Model   string           `json:"model"`
+	// ModelListed is reported, never stored: an unlisted model is a warning.
+	ModelListed modelconn.Tristate `json:"modelListed" enum:"yes,no,unknown"`
+	// Warning is LLMWarningProviderLimit when the endpoint answered with a
+	// rate limit, which proves the key; empty otherwise.
+	Warning      string          `json:"warning,omitempty" enum:"provider_limit"`
+	Priced       bool            `json:"priced"`
+	Capabilities LLMCapabilities `json:"capabilities"`
+}
+
+// LLMWarningProviderLimit is LLMCheck.Warning when the probe met a rate limit.
+const LLMWarningProviderLimit = "provider_limit"
+
+// LLMFormatOption is one format the Settings card offers (GET /config's
+// llmFormats), built from modelconn.Formats. Runtimes are the runtimes on this
+// installation that run it.
+type LLMFormatOption struct {
+	Kind modelconn.Format `json:"kind" enum:"anthropic,openai-compatible"`
+	// DefaultBaseURL is nil when the format has no default host.
+	DefaultBaseURL *string        `json:"defaultBaseURL"`
+	DefaultModel   string         `json:"defaultModel"`
+	Runtimes       []AgentRuntime `json:"runtimes"`
 }
 
 // --- agents: how the organization's agents run ------------------------------
 //
-// One model for every agent (the spec agents and the coding agent), the coding
-// agent's runtime, and an optional Claude subscription the coding agent bills
-// instead of the API key. The model and runtime are plain values validated
-// against the contract's enums; the subscription is a write-only secret probed
-// against Anthropic. The rule that ties them together (a subscription needs
-// Claude Code and a connected API key) lives in the organization domain, which
-// owns the credentials.
+// The coding agent's runtime and an optional Claude subscription the coding
+// agent bills instead of the connection's key. The runtime is a plain value
+// validated against the contract's enum; the subscription is a write-only
+// secret probed against Anthropic. The rule that ties them to the connection
+// (a subscription needs Claude Code and Anthropic's own API; Claude Code needs
+// the Anthropic format) lives in the organization domain, which owns the
+// credentials.
 
 // AgentRuntime is a member of the contract's AgentRuntime enum: which
 // coding-agent runtime an organization's cycles run on.
@@ -103,35 +170,23 @@ const (
 // request validator long before any handler sees it.
 var AgentRuntimes = []AgentRuntime{AgentRuntimeClaudeCode, AgentRuntimeOpenCode}
 
-// The platform's defaults, and the values an org gets until someone chooses
-// otherwise. The model is deliberately one the platform seeds a `model_rates`
-// row for: cost stamping is all-or-nothing across a cycle's capture, so an
-// unpriced default would blank the cost of every run made by every org that
-// never opened the setting.
-const (
-	DefaultAgentRuntime = AgentRuntimeClaudeCode
-	DefaultAgentModel   = "claude-sonnet-5"
-)
-
-// AgentModels are the models the contract's AgentModel enum carries — the set
-// the platform can price. See the contract's own note.
-var AgentModels = []string{"claude-sonnet-5", "claude-haiku-4-5"}
+// DefaultAgentRuntime is the runtime an org gets until someone chooses: the
+// one every installation runs.
+const DefaultAgentRuntime = AgentRuntimeClaudeCode
 
 // AgentsProjection is how an organization's agents run, and the moment somebody
-// chose it. The one model serves every agent and every call a coding run makes,
-// on either runtime.
+// chose it. The model is part of the connection (LLMProjection.Model).
 //
 // UpdatedAt/UpdatedBy are nil exactly when nobody ever has — which is what tells
-// "the platform's defaults" apart from "somebody chose the same values", a
+// "the platform's default" apart from "somebody chose the same value", a
 // distinction the console needs and no other field carries.
 type AgentsProjection struct {
-	Model   string       `json:"model" enum:"claude-sonnet-5,claude-haiku-4-5"`
 	Runtime AgentRuntime `json:"runtime" enum:"claude-code,opencode"`
 	// AvailableRuntimes are the runtimes this installation can run, the only
 	// ones a save may choose. Runtime can name one missing here: an org that
 	// chose it before the installation lost its runner image.
 	AvailableRuntimes []AgentRuntime          `json:"availableRuntimes"`
-	Subscription      *SubscriptionProjection `json:"subscription"` // null = coding bills the API key
+	Subscription      *SubscriptionProjection `json:"subscription"` // null = coding bills the connection's key
 	UpdatedAt         *time.Time              `json:"updatedAt"`
 	UpdatedBy         *string                 `json:"updatedBy"`
 }
@@ -155,7 +210,6 @@ const SubscriptionKindClaude = "claude"
 // offers the default runtime only: that is the one every installation runs.
 func DefaultAgents() AgentsProjection {
 	return AgentsProjection{
-		Model:             DefaultAgentModel,
 		Runtime:           DefaultAgentRuntime,
 		AvailableRuntimes: []AgentRuntime{DefaultAgentRuntime},
 	}
@@ -196,25 +250,24 @@ type IDPProjection struct {
 // ConfigPatch is the PATCH /config body. Each section is a three-state
 // patch.Field: absent = keep, null = clear (where allowed), present = replace
 // the section wholesale (deliberately not RFC 7386 deep-merge — a section with
-// write-only fields can't be deep-merged into). agents is the one exception:
-// its fields are individually optional, see AgentsWrite.
+// write-only fields can't be deep-merged into). llm and agents are the
+// exceptions: their fields are individually optional, see LLMPatch and
+// AgentsWrite.
 type ConfigPatch struct {
-	LLM         patch.Field[LLMWrite]         `json:"llm,omitempty"`
+	LLM         patch.Field[LLMPatch]         `json:"llm,omitempty"`
 	Agents      patch.Field[AgentsWrite]      `json:"agents,omitempty"`
 	GitProvider patch.Field[GitProviderWrite] `json:"gitProvider,omitempty"`
 	IDP         patch.Field[IDPWrite]         `json:"idp,omitempty"`
 }
 
-// AgentsWrite is the agents section's write shape, and the ONE section whose
-// fields are individually optional: an omitted field keeps what is stored, so a
-// client changes the model without restating the runtime and never has to send
-// the stored token back.
+// AgentsWrite is the agents section's write shape; its fields are individually
+// optional: an omitted field keeps what is stored, so a client changes the
+// runtime without re-sending the stored token.
 //
 // Subscription is itself three-state: absent keeps it, a value sets or
-// replaces it, null deletes it. `null` on the whole section resets the model
-// and runtime to the platform's defaults and deletes the subscription.
+// replaces it, null deletes it. `null` on the whole section resets the runtime
+// to the platform's default and deletes the subscription.
 type AgentsWrite struct {
-	Model        string                         `json:"model,omitempty" enum:"claude-sonnet-5,claude-haiku-4-5"`
 	Runtime      AgentRuntime                   `json:"runtime,omitempty" enum:"claude-code,opencode"`
 	Subscription patch.Field[SubscriptionWrite] `json:"subscription,omitempty"`
 }
@@ -226,11 +279,15 @@ type SubscriptionWrite struct {
 	Token string `json:"token" required:"true"`
 }
 
-// LLMWrite is the llm section's write shape: the org's Anthropic API key. The
-// apiKey is write-only: probed against Anthropic, never echoed.
-type LLMWrite struct {
-	Kind   string `json:"kind" enum:"anthropic" required:"true"`
-	APIKey string `json:"apiKey" required:"true"`
+// LLMPatch is the llm section's write shape — and the body of POST
+// /config/llm/test — patched field by field: an omitted field keeps the saved
+// value, or on first connect takes the format's default (modelconn.Formats).
+// APIKey is write-only: probed, never echoed.
+type LLMPatch struct {
+	Kind    modelconn.Format `json:"kind,omitempty" enum:"anthropic,openai-compatible"`
+	BaseURL string           `json:"baseURL,omitempty"`
+	APIKey  string           `json:"apiKey,omitempty"`
+	Model   string           `json:"model,omitempty"`
 }
 
 // GitProviderWrite is the gitProvider section's write shape. Mode is pat-only:

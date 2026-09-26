@@ -22,13 +22,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { OxygenTheme, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import type { components } from "../../../generated/aep-api";
-import {
-  aiSettingsFrom,
-  aiSettingsPatch,
-  draftFrom,
-  type AiDraft,
-} from "../../settings/aiSettings";
-
 type ConfigProjection = components["schemas"]["ConfigProjection"];
 
 const mutate = vi.fn();
@@ -41,6 +34,7 @@ vi.mock("../../settings/api/queries", () => ({
     isError: false,
     error: null,
   }),
+  useTestConnection: () => ({ mutate: vi.fn(), reset: vi.fn(), isPending: false, isError: false, error: null }),
   useConnectGitHubPat: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
   useSyncSkills: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
 }));
@@ -63,14 +57,22 @@ const github: ConfigProjection["gitProvider"] = {
   connectedAt: "2026-06-01T12:00:00Z",
 };
 
-// An org whose GitHub step is done and which has no Anthropic key: the model
-// and coding agent are what GET /config returns when nobody has chosen.
+// An org whose GitHub step is done and which has no model connection: the
+// coding agent is what GET /config returns when nobody has chosen.
 function config(over: Partial<ConfigProjection> = {}) {
   return {
     gitProvider: github,
     llm: null,
+    llmFormats: [
+      {
+        kind: "anthropic",
+        defaultBaseURL: "https://api.anthropic.com/v1",
+        defaultModel: "claude-sonnet-5",
+        runtimes: ["claude-code", "opencode"],
+      },
+      { kind: "openai-compatible", defaultBaseURL: null, defaultModel: "glm-5.3", runtimes: ["opencode"] },
+    ],
     agents: {
-      model: "claude-sonnet-5",
       runtime: "claude-code",
       availableRuntimes: ["claude-code", "opencode"],
       subscription: null,
@@ -97,94 +99,103 @@ function renderWizard(c: ConfigProjection) {
 }
 
 const continueButton = () => screen.getByRole("button", { name: "Continue" });
-const pasteKey = (key: string) =>
-  fireEvent.change(screen.getByLabelText("API key"), { target: { value: key } });
-
-/** What the settings card's Save would send for this draft on this config. */
-function expectedPatch(c: ConfigProjection, over: Partial<AiDraft>) {
-  const saved = aiSettingsFrom(c);
-  return aiSettingsPatch(saved, { ...draftFrom(saved), ...over });
-}
+const type = (label: string, value: string) =>
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
 
 beforeEach(() => mutate.mockReset());
 afterEach(cleanup);
 
-describe("OnboardingWizard's AI agents step", () => {
+describe("OnboardingWizard's Connect a model step", () => {
   it("opens on GitHub for an org with nothing connected", () => {
     renderWizard(config({ gitProvider: null }));
     expect(screen.getByRole("heading", { name: "Connect GitHub" })).toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "Model" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Base URL")).not.toBeInTheDocument();
   });
 
-  it("shows the settings card prefilled with the platform defaults for a new org", () => {
+  it("resumes at step 2 for an org with GitHub and no connection", () => {
     renderWizard(config());
-
-    expect(screen.getByRole("combobox", { name: "Model" })).toHaveTextContent(
-      "Claude Sonnet 5",
-    );
+    expect(screen.getByText("Connect a model")).toBeInTheDocument();
+    expect(screen.queryByText("Set up AI agents")).not.toBeInTheDocument();
+    expect(screen.getByText(/Connect the model your agents will use/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Base URL")).toHaveValue("https://api.anthropic.com/v1");
+    expect(screen.getByLabelText("Model")).toHaveValue("claude-sonnet-5");
     expect(screen.getByRole("radio", { name: /Claude Code/ })).toBeChecked();
-    expect(screen.getByText(/Paste your organization's Anthropic API key/)).toBeInTheDocument();
     expect(screen.queryByText(/was disconnected/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   });
 
-  it("shows the card's contents without its frame, header or the key row's explanation", () => {
+  it("shows the card's contents without its frame, header or footer", () => {
     renderWizard(config());
-
     expect(screen.queryByRole("heading", { name: "AI agents" })).not.toBeInTheDocument();
-    expect(screen.queryByText("no API key")).not.toBeInTheDocument();
-    expect(screen.queryByText(/There is no platform fallback/)).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Anthropic API key" })).toBeInTheDocument();
+    expect(screen.queryByText("not connected")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
   });
 
-  it("says the key was disconnected when the org had one", () => {
+  it("says the connection was disconnected when the org had one", () => {
     renderWizard(config({ llmDisconnectedAt: "2026-09-20T08:00:00Z" }));
-
-    expect(screen.getByText("Your Anthropic key was disconnected")).toBeInTheDocument();
+    expect(screen.getByText("Your model connection was disconnected")).toBeInTheDocument();
+    expect(screen.getByText("Agents cannot run until a connection is saved.")).toBeInTheDocument();
     expect(screen.getByLabelText("API key")).toBeInTheDocument();
   });
 
-  it("requires the API key: a model change alone cannot continue", () => {
+  it("holds Continue until the draft has a key", () => {
     renderWizard(config());
     expect(continueButton()).toBeDisabled();
-
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Model" }));
-    fireEvent.click(screen.getByRole("option", { name: "Claude Haiku 4.5" }));
+    type("Model", "claude-haiku-4-5");
     expect(continueButton()).toBeDisabled();
   });
 
-  it("saves only the key when the defaults are kept, through the settings card's save", () => {
-    const c = config();
-    renderWizard(c);
-
-    pasteKey("sk-ant-api03-new-key-1234");
+  it("Continue saves the whole connection on Anthropic's defaults", () => {
+    renderWizard(config());
+    type("API key", "sk-ant-api03-new-key-1234");
     fireEvent.click(continueButton());
 
     expect(mutate).toHaveBeenCalledTimes(1);
-    const patch = mutate.mock.calls[0]?.[0] as unknown;
-    expect(patch).toEqual(expectedPatch(c, { apiKey: "sk-ant-api03-new-key-1234" }));
-    // Nothing but the key moved, so the org keeps the platform defaults the
-    // server already holds rather than restating them.
-    expect(JSON.stringify(patch)).toContain("sk-ant-api03-new-key-1234");
-    expect(JSON.stringify(patch)).not.toContain("claude-sonnet-5");
+    expect(mutate.mock.calls[0]?.[0]).toEqual({
+      llm: {
+        kind: "anthropic",
+        baseURL: "https://api.anthropic.com/v1",
+        model: "claude-sonnet-5",
+        apiKey: "sk-ant-api03-new-key-1234",
+      },
+    });
   });
 
-  it("saves a changed model with the key in the same save", () => {
-    const c = config();
-    renderWizard(c);
-
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Model" }));
-    fireEvent.click(screen.getByRole("option", { name: "Claude Haiku 4.5" }));
-    pasteKey("sk-ant-api03-new-key-1234");
+  it("Continue saves an Ollama connection with OpenCode in one save", () => {
+    renderWizard(config());
+    fireEvent.click(screen.getByRole("button", { name: "OpenAI-compatible" }));
+    type("Base URL", "https://ollama.com/v1");
+    type("API key", "ollama-key-0123456789");
     fireEvent.click(continueButton());
 
-    expect(mutate).toHaveBeenCalledTimes(1);
-    const patch = mutate.mock.calls[0]?.[0] as unknown;
-    expect(patch).toEqual(
-      expectedPatch(c, { apiKey: "sk-ant-api03-new-key-1234", model: "claude-haiku-4-5" }),
+    expect(mutate.mock.calls[0]?.[0]).toEqual({
+      llm: { kind: "openai-compatible", baseURL: "https://ollama.com/v1", model: "glm-5.3", apiKey: "ollama-key-0123456789" },
+      agents: { runtime: "opencode" },
+    });
+  });
+
+  it("moves to skills once the connection is saved", () => {
+    renderWizard(
+      config({
+        llm: {
+          kind: "anthropic",
+          baseURL: "https://api.anthropic.com/v1",
+          model: "claude-sonnet-5",
+          keyPreview: "wxyz",
+          connectedAt: "2026-09-26T08:00:00Z",
+          updatedAt: "2026-09-26T08:00:00Z",
+          updatedBy: "dev@acme.example",
+          priced: true,
+          capabilities: {
+            claudeSubscription: true,
+            webSearch: "anthropic-server-tool",
+            imageInput: "yes",
+            nativePdf: true,
+            generatedAgents: true,
+          },
+        },
+      }),
     );
-    expect(JSON.stringify(patch)).toContain("claude-haiku-4-5");
-    expect(JSON.stringify(patch)).toContain("sk-ant-api03-new-key-1234");
+    expect(screen.queryByLabelText("Base URL")).not.toBeInTheDocument();
   });
 });

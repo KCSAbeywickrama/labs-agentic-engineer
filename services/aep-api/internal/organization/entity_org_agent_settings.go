@@ -22,14 +22,13 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 )
 
-// OrgAgentSettings is how an organization's agents run: the one model every
-// agent uses and the coding agent's runtime. One row per org; ABSENT means the
-// platform defaults, which is a state of its own — an org that chose the same
-// values has a row, and its UpdatedBy is what the console reads to tell the two
-// apart.
+// OrgAgentSettings is how an organization's agents run: the coding agent's
+// runtime. One row per org; ABSENT means the platform default, which is a state
+// of its own — an org that chose the same value has a row, and its UpdatedBy is
+// what the console reads to tell the two apart.
 //
-// The Claude subscription is not a column here: it is a credential, stored
-// beside the org's API key as the `coding` row of org_anthropic_credentials.
+// The model is part of the connection (org_model_connections), and the Claude
+// subscription is a credential, the `coding` row of org_anthropic_credentials.
 type OrgAgentSettings struct {
 	// OcOrgID is the OC-side org handle, as every other org-scoped table here
 	// keys itself. Primary key: one setting per org, no history — the audit
@@ -38,9 +37,6 @@ type OrgAgentSettings struct {
 	// Runtime is a member of the contract's AgentRuntime enum, validated on the
 	// way in, so a value here is always one a dispatch can honour.
 	Runtime orgconfig.AgentRuntime `gorm:"column:runtime;not null" json:"runtime"`
-	// Model is a member of the contract's AgentModel enum, which is exactly the
-	// set the platform holds a `model_rates` row for.
-	Model string `gorm:"column:model;not null" json:"model"`
 	// UpdatedBy is the actor from the JWT — the compensating control for the
 	// coarse RBAC on /config, same as the section-level audit log.
 	UpdatedBy string    `gorm:"column:updated_by;not null" json:"updatedBy"`

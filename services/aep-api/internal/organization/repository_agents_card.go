@@ -29,13 +29,13 @@ import (
 
 // AgentsCardRepository is the unit of work behind the AI agents card: one
 // save of the card (the `llm` and `agents` sections of PATCH /config) is one
-// transaction over every row it touches — the org's Anthropic credential rows,
-// the agent-settings row, and the encrypted secret bytes in org_secrets, whose
-// store joins the same transaction. A failure anywhere rolls every one of them
+// transaction over every row it touches — the model connection row, the
+// Claude subscription row, the agent-settings row, and the encrypted secret
+// bytes in org_secrets, whose store joins the same transaction. A failure anywhere rolls every one of them
 // back, so the card is never half-saved.
 //
 // Tx begins the transaction, runs fn, and commits when fn returns nil or rolls
-// back when it returns an error. fn takes the org-scoped advisory lock first
+// back when it returns an error. fn takes the org-scoped advisory locks first
 // (AgentsCardTx.AdvisoryLock), so two saves of one org's card serialize.
 type AgentsCardRepository interface {
 	Tx(ctx context.Context, fn func(tx AgentsCardTx) error) error
@@ -58,6 +58,16 @@ type AgentsCardTx interface {
 	// DeleteCredential removes one role's row. Idempotent.
 	DeleteCredential(ocOrgID string, role AnthropicRole) error
 
+	// GetConnection reads the org's model connection, or nil when absent.
+	GetConnection(ocOrgID string) (*OrgModelConnection, error)
+	// UpsertConnection writes the whole row, creating it or replacing its
+	// columns. keyWritten says the save stored a new key: only then is the
+	// SM-API triplet cleared (the mirror re-stamps it after commit); a save
+	// that kept the key leaves the triplet it already has.
+	UpsertConnection(row *OrgModelConnection, keyWritten bool) error
+	// DeleteConnection removes the row. Idempotent.
+	DeleteConnection(ocOrgID string) error
+
 	// GetSettings reads the org's agent setting, or nil when absent.
 	GetSettings(ocOrgID string) (*OrgAgentSettings, error)
 	// UpsertSettings writes the whole row, creating it or replacing every column.
@@ -66,7 +76,7 @@ type AgentsCardTx interface {
 	// defaults. Idempotent.
 	DeleteSettings(ocOrgID string) error
 
-	// SetKeyDisconnectedAt records when the org's API key was disconnected
+	// SetKeyDisconnectedAt records when the org's connection was disconnected
 	// (organizations.llm_disconnected_at); nil clears it. A missing
 	// organizations row is not an error: there is nothing to record against.
 	SetKeyDisconnectedAt(ocOrgID string, at *time.Time) error
@@ -158,6 +168,37 @@ func (t *agentsCardTx) DeleteCredential(ocOrgID string, role AnthropicRole) erro
 	return t.tx.Exec(`DELETE FROM org_anthropic_credentials WHERE oc_org_id = ? AND role = ?`, ocOrgID, role).Error
 }
 
+func (t *agentsCardTx) GetConnection(ocOrgID string) (*OrgModelConnection, error) {
+	return getModelConnection(t.tx, ocOrgID)
+}
+
+// connectionColumns are the columns a save rewrites; connected_at is among
+// them because the writer decides it (kept on the same host, reset on another).
+var connectionColumns = []string{
+	"format", "base_url", "host", "model", "auth_scheme", "context_window", "output_limit",
+	"image_input", "key_preview", "connected_at", "updated_at", "updated_by",
+}
+
+func (t *agentsCardTx) UpsertConnection(row *OrgModelConnection, keyWritten bool) error {
+	cols := connectionColumns
+	if keyWritten {
+		// The SM-API path is fixed per org, so a triplet left in place after a
+		// failed mirror would still resolve — to the vault copy of the PREVIOUS
+		// key, which dispatch would mount without a word. Cleared, the row
+		// carries no triplet until mirrorKey re-stamps it.
+		row.SecretRefName, row.SecretRefKVPath, row.SecretRefProperty = nil, nil, nil
+		cols = append(append([]string{}, cols...), "secret_ref_name", "secret_ref_kv_path", "secret_ref_property")
+	}
+	return t.tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "oc_org_id"}},
+		DoUpdates: clause.AssignmentColumns(cols),
+	}).Create(row).Error
+}
+
+func (t *agentsCardTx) DeleteConnection(ocOrgID string) error {
+	return t.tx.Where("oc_org_id = ?", ocOrgID).Delete(&OrgModelConnection{}).Error
+}
+
 func (t *agentsCardTx) GetSettings(ocOrgID string) (*OrgAgentSettings, error) {
 	return getAgentSettings(t.tx, ocOrgID)
 }
@@ -165,7 +206,7 @@ func (t *agentsCardTx) GetSettings(ocOrgID string) (*OrgAgentSettings, error) {
 func (t *agentsCardTx) UpsertSettings(row *OrgAgentSettings) error {
 	return t.tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "oc_org_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"runtime", "model", "updated_by", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"runtime", "updated_by", "updated_at"}),
 	}).Create(row).Error
 }
 

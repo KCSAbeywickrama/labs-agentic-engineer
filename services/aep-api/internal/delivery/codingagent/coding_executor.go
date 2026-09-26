@@ -302,10 +302,10 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		"AEP_RUN_DEADLINE_SECONDS": strconv.FormatInt(disp.deadline, 10),
 	}
 	env[envAgentRuntime] = string(agent.Runtime)
-	env[envAgentModel] = agent.Model
-	// The model connection the credential is for, copied onto the run beside
-	// the model for the same reason: a run in flight keeps the endpoint its
-	// usage is billed against.
+	// The model connection the credential is for, and its model, copied onto
+	// the run for the same reason: a run in flight keeps the endpoint and the
+	// model its usage is billed against.
+	env[envAgentModel] = creds.model.Conn.Model
 	connEnv, modelKeyVar := modelEnv(creds.model)
 	for k, v := range connEnv {
 		env[k] = v
@@ -489,7 +489,8 @@ func (e *CodingExecutor) evaluationKeyRef(ctx context.Context, orgID string) (Se
 	return SecretEnvRef{Key: envEvalAnthropicAPIKey, SecretName: triplet.Name, SecretKey: triplet.Property}, true
 }
 
-// codingAgentEnv resolves the runtime and the model this run is launched with.
+// codingAgentEnv resolves the runtime this run is launched with (the model
+// comes with the connection, from resolveRunnerSecretRefs).
 //
 // A missing resolver, or an org that never chose, both mean the platform
 // defaults. A resolver that ERRORS

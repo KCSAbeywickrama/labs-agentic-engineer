@@ -14,13 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// model_connection_service.go — the org's model connection, as every consumer
-// outside this domain reads it.
+// model_connection_service.go — the org's model connection: the one reader
+// every consumer outside this domain goes through, and the connection half of
+// the AI agents card's save.
 //
-// ModelConnectionService is the one reader of the connection: which format,
-// URL, model and auth scheme the org's agents use (modelconn.Connection), the
-// key's bytes or where they live, and which credential a coding run mounts. It
-// offers two ports:
+// ModelConnectionService reads the connection (which format, URL, model and
+// auth scheme the org's agents use, modelconn.Connection), the key's bytes or
+// where they live, and which credential a coding run mounts. It offers two
+// ports:
 //
 //   - ConnectionReader — Effective (the connection and its key's bytes, for the
 //     spec agents, task planning and Agent Manager) and KeyRef (the connection
@@ -29,9 +30,13 @@
 //     mounts: the Claude subscription or the connection's key, stated once
 //     here (ADR-0036).
 //
-// The connection is read from the org_anthropic_credentials `default` row and
-// org_agent_settings' model, so it is always the Anthropic format on
-// api.anthropic.com with an x-api-key key.
+// For the card (AgentSettingsService) it probes a draft connection
+// (model_probe.go), writes or deletes the row and the key's bytes inside the
+// card's transaction, mirrors the key to SM-API after commit, and projects the
+// connection for GET /config.
+//
+// The connection lives in org_model_connections, one row per org; the key's
+// bytes in org_secrets under modelKeyStoreKey.
 package organization
 
 import (
@@ -39,6 +44,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"strings"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
@@ -54,7 +62,7 @@ type ConnectionReader interface {
 	Effective(ctx context.Context, ocOrgID string) (conn modelconn.Connection, key string, ok bool, err error)
 	// KeyRef is the connection and where its key lives, for a consumer that
 	// points a SecretReference at the vault path rather than forwarding the
-	// value. A NotFoundError means no active connection: "not connected yet".
+	// value. A NotFoundError means no connection: "not connected yet".
 	KeyRef(ctx context.Context, ocOrgID string) (modelconn.Connection, SecretRefTriplet, error)
 }
 
@@ -95,11 +103,24 @@ type SecretRefTriplet struct {
 	Property string
 }
 
+// RateCard answers whether the platform prices usage on (host, model): the
+// connection's `priced`. Satisfied by *modelcost.Stamper, the lookup the
+// usage stamps are priced from, so the card and the Usage page cannot
+// disagree.
+type RateCard interface {
+	Priced(host, model string) bool
+}
+
 // ModelConnectionService — see file doc.
 type ModelConnectionService struct {
-	repo     OrgAnthropicRepository
-	store    secrets.CredentialStore
-	settings *AgentSettingsService
+	conns   OrgModelConnectionRepository
+	subs    OrgAnthropicRepository
+	store   secrets.CredentialStore
+	rates   RateCard
+	probers modelProbers
+
+	// secretRefWriter mirrors a saved key into SM-API. nil-safe.
+	secretRefWriter *SecretRefWriter
 }
 
 var (
@@ -107,100 +128,106 @@ var (
 	_ CodingCredentialResolver = (*ModelConnectionService)(nil)
 )
 
-// NewModelConnectionService wires the reader over the credential rows, their
-// secret bytes and the org's agent settings (the model). All must be non-nil.
-func NewModelConnectionService(repo OrgAnthropicRepository, store secrets.CredentialStore, settings *AgentSettingsService) *ModelConnectionService {
-	return &ModelConnectionService{repo: repo, store: store, settings: settings}
-}
-
-// connection is the org's connection around its chosen model.
-func (s *ModelConnectionService) connection(ctx context.Context, ocOrgID string) (modelconn.Connection, error) {
-	model, err := s.settings.Model(ctx, ocOrgID)
-	if err != nil {
-		return modelconn.Connection{}, err
-	}
-	return storedConnection(model), nil
-}
-
-// storedConnection is the connection the org's rows describe around its model:
-// every connection an org can save today is Anthropic's own API, the key sent
-// as x-api-key.
-func storedConnection(model string) modelconn.Connection {
-	return modelconn.Connection{
-		Format:     modelconn.FormatAnthropic,
-		BaseURL:    modelconn.AnthropicBaseURL,
-		Host:       modelconn.AnthropicHost,
-		Model:      model,
-		AuthScheme: modelconn.AuthXAPIKey,
-		ImageInput: modelconn.Yes,
+// NewModelConnectionService wires the service over the connection rows, the
+// Claude subscription rows (subs), the key's bytes and the rate card. All
+// must be non-nil. The probe calls public endpoints only (netguard).
+func NewModelConnectionService(conns OrgModelConnectionRepository, subs OrgAnthropicRepository, store secrets.CredentialStore, rates RateCard) *ModelConnectionService {
+	return &ModelConnectionService{
+		conns:   conns,
+		subs:    subs,
+		store:   store,
+		rates:   rates,
+		probers: newModelProbers(defaultModelProbeClient()),
 	}
 }
 
-// Effective returns the connection and its key when the org's key row is
-// active and its bytes are present; ok=false otherwise, which the turn
-// surface maps to a pre-202 4xx. The model is read only once a key is found,
-// so an org with no key never depends on its settings row.
+// WithSecretRefWriter injects the SM-API writer; chainable. nil disables the
+// mirror — org_secrets remains authoritative.
+func (s *ModelConnectionService) WithSecretRefWriter(w *SecretRefWriter) *ModelConnectionService {
+	s.secretRefWriter = w
+	return s
+}
+
+// WithProbeClient replaces the probe's HTTP client; chainable. Tests aim it at
+// an httptest server the real guard would (rightly) refuse to reach. The
+// probers still follow no redirects, whatever client they are given.
+func (s *ModelConnectionService) WithProbeClient(c *http.Client) *ModelConnectionService {
+	s.probers = newModelProbers(c)
+	return s
+}
+
+// --- reads --------------------------------------------------------------------
+
+// Effective returns the connection and its key when the org has a connection
+// and its bytes are present; ok=false otherwise, which the turn surface maps
+// to a pre-202 4xx.
 //
 // Deliberately the connection's key only: the spec agents are AI SDK calls,
 // which cannot present the coding role's subscription token.
 func (s *ModelConnectionService) Effective(ctx context.Context, ocOrgID string) (modelconn.Connection, string, bool, error) {
-	key, ok := s.effectiveKey(ctx, ocOrgID)
-	if !ok {
-		return modelconn.Connection{}, "", false, nil
-	}
-	conn, err := s.connection(ctx, ocOrgID)
+	row, err := s.conns.GetByOrg(ctx, ocOrgID)
 	if err != nil {
 		return modelconn.Connection{}, "", false, err
 	}
-	return conn, key, true, nil
+	if row == nil {
+		return modelconn.Connection{}, "", false, nil
+	}
+	key, ok := s.storedKey(ctx, ocOrgID)
+	if !ok {
+		return modelconn.Connection{}, "", false, nil
+	}
+	return row.Connection(), key, true, nil
 }
 
-// effectiveKey reads the default row's key bytes. Any failure to find a usable
-// key — no row, a row that is not active, a read error, missing bytes — is
-// "none", not an error.
-func (s *ModelConnectionService) effectiveKey(ctx context.Context, ocOrgID string) (string, bool) {
-	row, err := fetchAnthropicRow(ctx, s.repo, ocOrgID, AnthropicRoleDefault)
-	if err != nil || row.Status != "active" {
-		return "", false
-	}
-	key, getErr := s.store.Get(ctx, ocOrgID, AnthropicRoleDefault.SecretStoreKey())
-	if getErr == nil && len(key) > 0 {
+// storedKey reads the connection key's bytes. A read error or missing bytes
+// is "none", not an error: the row says connected, so it is logged loudly.
+func (s *ModelConnectionService) storedKey(ctx context.Context, ocOrgID string) (string, bool) {
+	key, err := s.store.Get(ctx, ocOrgID, modelKeyStoreKey)
+	if err == nil && len(key) > 0 {
 		return string(key), true
 	}
-	// Row says active but bytes are gone — log loudly and return "none".
-	slog.WarnContext(ctx, "anthropic effective-key: row=active but org_secrets missing",
-		"ocOrgId", ocOrgID, "error", getErr)
+	slog.WarnContext(ctx, "model connection: row exists but its key bytes are missing",
+		"ocOrgId", ocOrgID, "error", err)
 	return "", false
 }
 
-// KeyRef returns the connection and its key's vault coordinates — the same
-// {kvPath, property} pushExternalSecret resolves to deliver the RCA agent's
-// ExternalSecret. It never reads the key's bytes, only where they live, for a
-// caller that points an OpenChoreo SecretReference at the path rather than
-// forwarding the value itself (e.g. wiring an ai-agent component's
-// MODEL_API_KEY — docs/glossary.md's SecretReference entry: "authored in the
-// org NS, ESO materializes it into the consuming-plane NS").
+// KeyRef returns the connection and its key's vault coordinates. It never
+// reads the key's bytes, only where they live, for a caller that points an
+// OpenChoreo SecretReference at the path rather than forwarding the value
+// itself (e.g. wiring an ai-agent component's MODEL_API_KEY — docs/glossary.md's
+// SecretReference entry: "authored in the org NS, ESO materializes it into the
+// consuming-plane NS").
 //
-// Returns NotFoundError when the org has no active key. Every caller must
+// Returns NotFoundError when the org has no connection. Every caller must
 // treat that as "not connected yet", not a hard failure — the same discipline
 // Effective's ok=false gives the spec agents.
 func (s *ModelConnectionService) KeyRef(ctx context.Context, ocOrgID string) (modelconn.Connection, SecretRefTriplet, error) {
-	row, err := fetchAnthropicRow(ctx, s.repo, ocOrgID, AnthropicRoleDefault)
+	row, err := s.connectionRow(ctx, ocOrgID)
 	if err != nil {
 		return modelconn.Connection{}, SecretRefTriplet{}, err
 	}
-	if row.Status != "active" {
-		return modelconn.Connection{}, SecretRefTriplet{}, &NotFoundError{What: fmt.Sprintf("org_anthropic_credentials.%s.default (status=%s)", ocOrgID, row.Status)}
-	}
-	ref, err := tripletFrom(row)
+	ref, err := tripletOf(row.SecretRefName, row.SecretRefKVPath, row.SecretRefProperty)
 	if err != nil {
 		return modelconn.Connection{}, SecretRefTriplet{}, err
 	}
-	conn, err := s.connection(ctx, ocOrgID)
+	return row.Connection(), ref, nil
+}
+
+// stored is the org's connection row, nil when it has none.
+func (s *ModelConnectionService) stored(ctx context.Context, ocOrgID string) (*OrgModelConnection, error) {
+	return s.conns.GetByOrg(ctx, ocOrgID)
+}
+
+// connectionRow loads the org's row, answering NotFoundError when it has none.
+func (s *ModelConnectionService) connectionRow(ctx context.Context, ocOrgID string) (*OrgModelConnection, error) {
+	row, err := s.conns.GetByOrg(ctx, ocOrgID)
 	if err != nil {
-		return modelconn.Connection{}, SecretRefTriplet{}, err
+		return nil, err
 	}
-	return conn, ref, nil
+	if row == nil {
+		return nil, &NotFoundError{What: fmt.Sprintf("org_model_connections.%s", ocOrgID)}
+	}
+	return row, nil
 }
 
 // ResolveCodingCredential returns the credential a coding run on runtime must
@@ -217,62 +244,57 @@ func (s *ModelConnectionService) KeyRef(ctx context.Context, ocOrgID string) (mo
 // bill its plan, and quietly billing API credits instead defeats that choice
 // while leaving no trace the org can see.
 func (s *ModelConnectionService) ResolveCodingCredential(ctx context.Context, ocOrgID string, runtime orgconfig.AgentRuntime) (CodingCredential, error) {
-	ref, kind, err := s.resolveCodingRef(ctx, ocOrgID, runtime)
-	if err != nil {
-		return CodingCredential{}, err
-	}
-	conn, err := s.connection(ctx, ocOrgID)
+	row, err := s.conns.GetByOrg(ctx, ocOrgID)
 	if err != nil {
 		return CodingCredential{}, fmt.Errorf("model connection for org %q: %w", ocOrgID, err)
 	}
-	return CodingCredential{Conn: conn, Ref: ref, Kind: kind}, nil
-}
-
-func (s *ModelConnectionService) resolveCodingRef(ctx context.Context, ocOrgID string, runtime orgconfig.AgentRuntime) (SecretRefTriplet, CodingCredentialKind, error) {
+	if row == nil {
+		return CodingCredential{}, fmt.Errorf("model connection missing for org %q: no connection is saved", ocOrgID)
+	}
 	if runtime == orgconfig.AgentRuntimeClaudeCode {
-		sub, err := s.repo.GetByOrg(ctx, ocOrgID, AnthropicRoleCoding)
+		ref, ok, err := s.subscriptionRef(ctx, ocOrgID)
 		if err != nil {
-			return SecretRefTriplet{}, "", fmt.Errorf("anthropic resolve coding ref: load subscription row: %w", err)
+			return CodingCredential{}, err
 		}
-		if sub != nil {
-			if sub.Status != "active" {
-				return SecretRefTriplet{}, "", fmt.Errorf(
-					"the Claude subscription for org %q is %s — replace its token in Settings, "+
-						"or remove the subscription so coding bills the organization's API key", ocOrgID, sub.Status)
-			}
-			ref, refErr := tripletFrom(sub)
-			if refErr != nil {
-				return SecretRefTriplet{}, "", fmt.Errorf(
-					"the Claude subscription for org %q is configured but %w — save its token again in Settings, "+
-						"or remove the subscription so coding bills the organization's API key", ocOrgID, refErr)
-			}
-			return ref, CodingCredentialClaudeSubscription, nil
+		if ok {
+			return CodingCredential{Conn: row.Connection(), Ref: ref, Kind: CodingCredentialClaudeSubscription}, nil
 		}
 	}
-
-	def, err := s.repo.GetByOrg(ctx, ocOrgID, AnthropicRoleDefault)
+	ref, err := tripletOf(row.SecretRefName, row.SecretRefKVPath, row.SecretRefProperty)
 	if err != nil {
-		return SecretRefTriplet{}, "", fmt.Errorf("anthropic resolve coding ref: load default row: %w", err)
+		return CodingCredential{}, fmt.Errorf("model connection secret reference for org %q: %w", ocOrgID, err)
 	}
-	if def == nil {
-		return SecretRefTriplet{}, "", fmt.Errorf(
-			"anthropic secret reference missing for org %q: org_anthropic_credentials row not found", ocOrgID)
-	}
-	ref, err := tripletFrom(def)
-	if err != nil {
-		return SecretRefTriplet{}, "", fmt.Errorf("anthropic secret reference for org %q: %w", ocOrgID, err)
-	}
-	return ref, CodingCredentialConnectionKey, nil
+	return CodingCredential{Conn: row.Connection(), Ref: ref, Kind: CodingCredentialConnectionKey}, nil
 }
 
-// tripletFrom reads a row's resolved secret-ref coordinates, naming whichever
-// one is missing so a half-mirrored row is diagnosable from the error alone.
-func tripletFrom(row *OrgAnthropicCredential) (SecretRefTriplet, error) {
-	ref := SecretRefTriplet{
-		Name:     derefOrEmpty(row.SecretRefName),
-		KVPath:   derefOrEmpty(row.SecretRefKVPath),
-		Property: derefOrEmpty(row.SecretRefProperty),
+// subscriptionRef is the Claude subscription's reference, ok=false when the
+// org has none; an unusable one is an error (see ResolveCodingCredential).
+func (s *ModelConnectionService) subscriptionRef(ctx context.Context, ocOrgID string) (SecretRefTriplet, bool, error) {
+	sub, err := s.subs.GetByOrg(ctx, ocOrgID, AnthropicRoleCoding)
+	if err != nil {
+		return SecretRefTriplet{}, false, fmt.Errorf("resolve coding credential: load subscription row: %w", err)
 	}
+	if sub == nil {
+		return SecretRefTriplet{}, false, nil
+	}
+	if sub.Status != "active" {
+		return SecretRefTriplet{}, false, fmt.Errorf(
+			"the Claude subscription for org %q is %s — replace its token in Settings, "+
+				"or remove the subscription so coding bills the connection's key", ocOrgID, sub.Status)
+	}
+	ref, err := tripletOf(sub.SecretRefName, sub.SecretRefKVPath, sub.SecretRefProperty)
+	if err != nil {
+		return SecretRefTriplet{}, false, fmt.Errorf(
+			"the Claude subscription for org %q is configured but %w — save its token again in Settings, "+
+				"or remove the subscription so coding bills the connection's key", ocOrgID, err)
+	}
+	return ref, true, nil
+}
+
+// tripletOf reads a row's resolved secret-ref coordinates, naming whichever
+// one is missing so a half-mirrored row is diagnosable from the error alone.
+func tripletOf(name, kvPath, property *string) (SecretRefTriplet, error) {
+	ref := SecretRefTriplet{Name: derefOrEmpty(name), KVPath: derefOrEmpty(kvPath), Property: derefOrEmpty(property)}
 	switch {
 	case ref.Name == "":
 		return SecretRefTriplet{}, errors.New("secret_ref_name is not populated")
@@ -282,4 +304,166 @@ func tripletFrom(row *OrgAnthropicCredential) (SecretRefTriplet, error) {
 		return SecretRefTriplet{}, errors.New("secret_ref_property is not populated")
 	}
 	return ref, nil
+}
+
+// Projection is the org's connection as GET /config shows it, nil when it has
+// none.
+func (s *ModelConnectionService) Projection(ctx context.Context, ocOrgID string) (*orgconfig.LLMProjection, error) {
+	row, err := s.conns.GetByOrg(ctx, ocOrgID)
+	if err != nil || row == nil {
+		return nil, err
+	}
+	conn := row.Connection()
+	return &orgconfig.LLMProjection{
+		Kind:         row.Format,
+		BaseURL:      row.BaseURL,
+		Model:        row.Model,
+		KeyPreview:   row.KeyPreview,
+		ConnectedAt:  row.ConnectedAt,
+		UpdatedAt:    row.UpdatedAt,
+		UpdatedBy:    row.UpdatedBy,
+		Priced:       s.rates.Priced(row.Host, row.Model),
+		Capabilities: orgconfig.LLMCapabilitiesFrom(modelconn.CapabilitiesOf(conn)),
+	}, nil
+}
+
+// --- the card's connection half -------------------------------------------------
+
+// probe checks d against its endpoint. A draft with no key reuses the stored
+// key, which draftConnection only allows on the stored connection's host.
+func (s *ModelConnectionService) probe(ctx context.Context, ocOrgID string, d connectionDraft) (ProbeResult, error) {
+	key := d.Key
+	if key == "" {
+		stored, ok := s.storedKey(ctx, ocOrgID)
+		if !ok {
+			return ProbeResult{}, &ValidationError{Code: "llm_field_required",
+				Message: "the stored key could not be read; send the apiKey again"}
+		}
+		key = stored
+	}
+	return s.probers.probe(ctx, probeTarget{
+		Org: ocOrgID, Format: d.Format, BaseURL: d.BaseURL, Host: d.Host, Model: d.Model, Key: key,
+	})
+}
+
+// check is what a probe of d found, as the card reads it.
+func (s *ModelConnectionService) check(d connectionDraft, res ProbeResult) orgconfig.LLMCheck {
+	conn := d.connection()
+	conn.ImageInput = res.ImageInput
+	out := orgconfig.LLMCheck{
+		Kind:         d.Format,
+		BaseURL:      d.BaseURL,
+		Model:        d.Model,
+		ModelListed:  res.ModelListed,
+		Priced:       s.rates.Priced(d.Host, d.Model),
+		Capabilities: orgconfig.LLMCapabilitiesFrom(modelconn.CapabilitiesOf(conn)),
+	}
+	if res.ProviderLimited {
+		out.Warning = orgconfig.LLMWarningProviderLimit
+	}
+	return out
+}
+
+// writeTx stores the probed connection inside the card's transaction: the row,
+// and the key's bytes when the save sent one. stored is the row it replaces
+// (nil on first connect); connected_at survives a save on the same host.
+func (s *ModelConnectionService) writeTx(ctx context.Context, tx AgentsCardTx, ocOrgID, actor string,
+	d connectionDraft, res ProbeResult, stored *OrgModelConnection, now time.Time) (*OrgModelConnection, error) {
+	row := &OrgModelConnection{
+		OcOrgID:       ocOrgID,
+		Format:        d.Format,
+		BaseURL:       d.BaseURL,
+		Host:          d.Host,
+		Model:         d.Model,
+		AuthScheme:    res.AuthScheme,
+		ContextWindow: res.ContextWindow,
+		OutputLimit:   res.OutputLimit,
+		ImageInput:    res.ImageInput,
+		ConnectedAt:   now,
+		UpdatedAt:     now,
+		UpdatedBy:     &actor,
+	}
+	if stored != nil && stored.Host == d.Host {
+		row.ConnectedAt = stored.ConnectedAt
+	}
+	keyWritten := d.Key != ""
+	if keyWritten {
+		if err := tx.Secrets().Put(ctx, ocOrgID, modelKeyStoreKey, []byte(d.Key)); err != nil {
+			return nil, fmt.Errorf("model connection: store put: %w", err)
+		}
+		row.KeyPreview = keyPreview(d.Key)
+	} else {
+		row.KeyPreview = stored.KeyPreview
+		row.SecretRefName, row.SecretRefKVPath, row.SecretRefProperty = stored.SecretRefName, stored.SecretRefKVPath, stored.SecretRefProperty
+	}
+	if err := tx.UpsertConnection(row, keyWritten); err != nil {
+		return nil, fmt.Errorf("model connection: upsert: %w", err)
+	}
+	return row, nil
+}
+
+// deleteTx removes the connection — row and bytes — inside the card's
+// transaction, returning the SM-API secret-ref name the row carried so its
+// copy can be deleted once the transaction commits. Idempotent.
+func (s *ModelConnectionService) deleteTx(ctx context.Context, tx AgentsCardTx, ocOrgID string) (string, error) {
+	row, err := tx.GetConnection(ocOrgID)
+	if err != nil || row == nil {
+		return "", err
+	}
+	if err := tx.DeleteConnection(ocOrgID); err != nil {
+		return "", fmt.Errorf("model connection: delete row: %w", err)
+	}
+	if err := tx.Secrets().Delete(ctx, ocOrgID, modelKeyStoreKey); err != nil {
+		return "", fmt.Errorf("model connection: store delete: %w", err)
+	}
+	return derefOrEmpty(row.SecretRefName), nil
+}
+
+// mirrorKey copies a committed key into SM-API, best-effort: org_secrets stays
+// authoritative. The save cleared the row's triplet, so a failed mirror leaves
+// it NULL until the next key save, and dispatch fails closed naming why.
+func (s *ModelConnectionService) mirrorKey(ctx context.Context, ocOrgID, key string) {
+	if !s.secretRefWriter.Enabled() {
+		return
+	}
+	if _, err := s.secretRefWriter.WriteModelKey(ctx, ocOrgID, strings.TrimSpace(key)); err != nil {
+		slog.WarnContext(ctx, "model connection: SM-API mirror failed (org_secrets still authoritative)",
+			"ocOrgId", ocOrgID, "error", err)
+	}
+}
+
+// forgetKey deletes a removed connection key's SM-API copy, best-effort.
+func (s *ModelConnectionService) forgetKey(ctx context.Context, ocOrgID, secretRefName string) {
+	if secretRefName == "" || !s.secretRefWriter.Enabled() {
+		return
+	}
+	if err := s.secretRefWriter.DeleteModelKey(ctx, ocOrgID, secretRefName); err != nil {
+		slog.WarnContext(ctx, "model connection: SM-API delete failed (orphaned copy until the next save)",
+			"ocOrgId", ocOrgID, "error", err)
+	}
+}
+
+// ResyncSecretRef re-pushes the connection key through the in-process
+// SecretRefWriter (local OpenBao repair). (false, nil) when there is nothing
+// to repair: no connection, no triplet yet, or no bytes. ctx must carry an
+// ouId claim.
+func (s *ModelConnectionService) ResyncSecretRef(ctx context.Context, ocOrgID string) (bool, error) {
+	if !s.secretRefWriter.Enabled() {
+		return false, nil
+	}
+	row, err := s.conns.GetByOrg(ctx, ocOrgID)
+	if err != nil {
+		return false, fmt.Errorf("model connection resync: load row: %w", err)
+	}
+	if row == nil || derefOrEmpty(row.SecretRefKVPath) == "" || derefOrEmpty(row.SecretRefProperty) == "" {
+		return false, nil
+	}
+	key, err := s.store.Get(ctx, ocOrgID, modelKeyStoreKey)
+	if err != nil || len(key) == 0 {
+		return false, nil
+	}
+	if _, err := s.secretRefWriter.WriteModelKey(ctx, ocOrgID, string(key)); err != nil {
+		return false, fmt.Errorf("model connection resync: write: %w", err)
+	}
+	return true, nil
 }

@@ -18,38 +18,47 @@
 
 import { describe, expect, it } from "vitest";
 import type { components } from "../../generated/aep-api";
-import { anthropicKeyWasDisconnected } from "./keyDisconnected";
+import { connectionWasDisconnected } from "./keyDisconnected";
 
 type ConfigProjection = components["schemas"]["ConfigProjection"];
 type LLMProjection = components["schemas"]["LLMProjection"];
 
-const key: LLMProjection = {
-  kind: "anthropic",
-  credentialKind: "api_key",
-  status: "connected",
-  keyPrefix: "sk-ant-",
-  keyLast4: "wxyz",
+const connection: LLMProjection = {
+  kind: "openai-compatible",
+  baseURL: "https://ollama.com/v1",
+  model: "glm-5.3",
+  keyPreview: "c2d1",
   connectedAt: "2026-06-01T12:05:00Z",
+  updatedAt: "2026-06-01T12:05:00Z",
+  updatedBy: null,
+  priced: false,
+  capabilities: {
+    claudeSubscription: false,
+    webSearch: "ollama-api",
+    imageInput: "no",
+    nativePdf: false,
+    generatedAgents: false,
+  },
 };
 
 // Only the fields the check reads; the rest of the projection is irrelevant.
 const config = (over: object) => ({ llm: null, ...over }) as unknown as ConfigProjection;
 
-describe("anthropicKeyWasDisconnected", () => {
-  it("is false for an org that never had a key", () => {
-    expect(anthropicKeyWasDisconnected(config({}))).toBe(false);
+describe("connectionWasDisconnected", () => {
+  it("is false for an org that never had a connection", () => {
+    expect(connectionWasDisconnected(config({}))).toBe(false);
   });
 
-  it("is true when the key was disconnected and none is connected", () => {
+  it("is true when the connection was disconnected and none is saved", () => {
     expect(
-      anthropicKeyWasDisconnected(config({ llmDisconnectedAt: "2026-09-20T08:00:00Z" })),
+      connectionWasDisconnected(config({ llmDisconnectedAt: "2026-09-20T08:00:00Z" })),
     ).toBe(true);
   });
 
-  it("is false once a key is connected again", () => {
+  it("is false once a connection is saved again", () => {
     expect(
-      anthropicKeyWasDisconnected(
-        config({ llm: key, llmDisconnectedAt: "2026-09-20T08:00:00Z" }),
+      connectionWasDisconnected(
+        config({ llm: connection, llmDisconnectedAt: "2026-09-20T08:00:00Z" }),
       ),
     ).toBe(false);
   });

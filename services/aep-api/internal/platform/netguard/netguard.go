@@ -98,8 +98,6 @@ func FollowHTTPS(maxHops int) Redirects {
 // carries a credential must use it — Go strips Authorization on a cross-host
 // redirect but forwards `x-api-key`, so a followed redirect would hand the key
 // to another host.
-//
-//deadcode:keep the model client's policy; first called by the model probe (phase 5).
 func NoRedirects() Redirects {
 	return func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 }

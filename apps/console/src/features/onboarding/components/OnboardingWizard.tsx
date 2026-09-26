@@ -33,12 +33,13 @@ import { SkillsBootstrapStep } from "./SkillsBootstrapStep";
 
 type ConfigProjection = components["schemas"]["ConfigProjection"];
 
-const STEPS = ["Connect GitHub", "Set up AI agents", "Set up skills"];
+const STEPS = ["Connect GitHub", "Connect a model", "Set up skills"];
 
 // The active step derives from server state, not local navigation: each
 // successful PATCH /config updates the query cache and the wizard advances.
 // A partially-configured org therefore resumes at its first incomplete step
-// (issue #102 decisions comment).
+// (issue #102 decisions comment): an org with no model connection resumes at
+// "Connect a model".
 function activeStep(config: ConfigProjection): number {
   if (config.gitProvider === null) return 0;
   if (config.llm === null) return 1;

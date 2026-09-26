@@ -131,6 +131,18 @@ func (s *Stamper) SumCost(slices []Tokens) *float64 {
 	return &total
 }
 
+// Priced reports whether (host, model) has a rate row, so usage on it is
+// stamped in dollars. The model connection's `priced` reads this same lookup,
+// so the Settings card and the Usage page cannot disagree.
+// A nil Stamper prices nothing.
+func (s *Stamper) Priced(host, model string) bool {
+	if s == nil {
+		return false
+	}
+	_, ok := s.rates[host][model]
+	return ok && host != "" && model != ""
+}
+
 // raw is the unrounded USD for one record; ok is false when the (host, model)
 // has no rate row (or either is empty).
 func (s *Stamper) raw(t Tokens) (float64, bool) {

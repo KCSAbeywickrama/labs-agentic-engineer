@@ -25,6 +25,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/wso2/aep/aep-api/internal/platform/contracttest"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 )
 
@@ -68,22 +69,12 @@ func TestAgentRuntimesMatchTheContract(t *testing.T) {
 	}
 }
 
-func TestAgentModelsMatchTheContract(t *testing.T) {
-	want := enumFromContract(t, "AgentModel")
-	if !slices.Equal(orgconfig.AgentModels, want) {
-		t.Errorf("AgentModels = %v, contract AgentModel enum = %v", orgconfig.AgentModels, want)
-	}
-}
-
-// An org that never opens the setting runs on these, so a default outside the
+// An org that never opens the setting runs on this, so a default outside the
 // enum would make every such org's dispatch invalid.
 func TestDefaultsAreSelectable(t *testing.T) {
 	def := orgconfig.DefaultAgents()
 	if !slices.Contains(orgconfig.AgentRuntimes, def.Runtime) {
 		t.Errorf("default runtime %q is not in the contract's AgentRuntime enum", def.Runtime)
-	}
-	if !slices.Contains(orgconfig.AgentModels, def.Model) {
-		t.Errorf("default model %q is not in the contract's AgentModel enum", def.Model)
 	}
 	if def.Subscription != nil {
 		t.Errorf("the default projection carries a subscription: %+v", def.Subscription)
@@ -106,9 +97,7 @@ func TestAgentsEnumTagsMatchTheContract(t *testing.T) {
 		schema string
 	}{
 		{reflect.TypeOf(orgconfig.AgentsProjection{}), "Runtime", "AgentRuntime"},
-		{reflect.TypeOf(orgconfig.AgentsProjection{}), "Model", "AgentModel"},
 		{reflect.TypeOf(orgconfig.AgentsWrite{}), "Runtime", "AgentRuntime"},
-		{reflect.TypeOf(orgconfig.AgentsWrite{}), "Model", "AgentModel"},
 	}
 	for _, tc := range cases {
 		f, ok := tc.typ.FieldByName(tc.field)
@@ -119,5 +108,65 @@ func TestAgentsEnumTagsMatchTheContract(t *testing.T) {
 		if want := enumFromContract(t, tc.schema); !slices.Equal(got, want) {
 			t.Errorf("%s.%s enum tag = %v, contract %s enum = %v", tc.typ.Name(), tc.field, got, tc.schema, want)
 		}
+	}
+}
+
+// propertyEnumFromContract reads the inline `enum` of schema.property.
+func propertyEnumFromContract(t *testing.T, schema, property string) []string {
+	t.Helper()
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]struct {
+					Enum []string `yaml:"enum"`
+				} `yaml:"properties"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(contracttest.SourceYAML(t), &doc); err != nil {
+		t.Fatalf("parse contract: %v", err)
+	}
+	p, ok := doc.Components.Schemas[schema].Properties[property]
+	if !ok || len(p.Enum) == 0 {
+		t.Fatalf("contract schema %s has no enum property %q", schema, property)
+	}
+	return p.Enum
+}
+
+// The llm wire types' enum tags, and the modelconn values behind them, against
+// the contract's inline enums: a format or tristate the Go offers and the
+// contract does not is a value the edge would refuse.
+func TestLLMEnumTagsMatchTheContract(t *testing.T) {
+	formats := make([]string, 0, len(modelconn.Formats))
+	for _, f := range modelconn.Formats {
+		formats = append(formats, string(f.Format))
+	}
+	cases := []struct {
+		typ      reflect.Type
+		field    string
+		schema   string
+		property string
+	}{
+		{reflect.TypeOf(orgconfig.LLMProjection{}), "Kind", "LLMProjection", "kind"},
+		{reflect.TypeOf(orgconfig.LLMPatch{}), "Kind", "LLMPatch", "kind"},
+		{reflect.TypeOf(orgconfig.LLMCheck{}), "Kind", "LLMCheck", "kind"},
+		{reflect.TypeOf(orgconfig.LLMCheck{}), "ModelListed", "LLMCheck", "modelListed"},
+		{reflect.TypeOf(orgconfig.LLMCheck{}), "Warning", "LLMCheck", "warning"},
+		{reflect.TypeOf(orgconfig.LLMFormatOption{}), "Kind", "LLMFormatOption", "kind"},
+		{reflect.TypeOf(orgconfig.LLMCapabilities{}), "WebSearch", "LLMCapabilities", "webSearch"},
+		{reflect.TypeOf(orgconfig.LLMCapabilities{}), "ImageInput", "LLMCapabilities", "imageInput"},
+	}
+	for _, tc := range cases {
+		f, ok := tc.typ.FieldByName(tc.field)
+		if !ok {
+			t.Fatalf("%s has no field %s", tc.typ.Name(), tc.field)
+		}
+		got := strings.Split(f.Tag.Get("enum"), ",")
+		if want := propertyEnumFromContract(t, tc.schema, tc.property); !slices.Equal(got, want) {
+			t.Errorf("%s.%s enum tag = %v, contract %s.%s enum = %v", tc.typ.Name(), tc.field, got, tc.schema, tc.property, want)
+		}
+	}
+	if want := propertyEnumFromContract(t, "LLMPatch", "kind"); !slices.Equal(formats, want) {
+		t.Errorf("modelconn.Formats = %v, contract LLMPatch.kind enum = %v", formats, want)
 	}
 }

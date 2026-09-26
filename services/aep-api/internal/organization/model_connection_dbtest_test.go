@@ -27,8 +27,8 @@ package organization_test
 //     connected;
 //   - ResolveCodingCredential — the subscription only on Claude Code, the
 //     connection's key otherwise, failing closed on a broken subscription;
-//   - the connection itself: Anthropic on api.anthropic.com, with the org's
-//     chosen model.
+//   - the connection itself, read from org_model_connections with the model
+//     it was saved with.
 
 import (
 	"context"
@@ -75,9 +75,9 @@ func TestModelConnectionEffective_DB(t *testing.T) {
 	if err != nil || !ok || key != anthropicUnitKey {
 		t.Fatalf("connected: ok=%v err %v, want the org key", ok, err)
 	}
-	wantAnthropic(t, conn, orgconfig.DefaultAgentModel)
+	wantAnthropic(t, conn, modelconn.DefaultAnthropicModel)
 
-	// Row says active but the bytes vanished → degrades to none.
+	// The row exists but the bytes vanished → degrades to none.
 	if err := c.store.Delete(ctx, "acme", "anthropic/key"); err != nil {
 		t.Fatalf("store delete: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestModelConnectionEffective_CarriesTheChosenModel_DB(t *testing.T) {
 	c := newCardDB(t, http.StatusOK)
 	ctx := context.Background()
 	c.connect(t, "acme", anthropicUnitKey)
-	c.patch(t, "acme", orgconfig.ConfigPatch{Agents: agentsModelPatch("claude-haiku-4-5")})
+	c.patch(t, "acme", llmPatch(orgconfig.LLMPatch{Model: "claude-haiku-4-5"}))
 
 	conn, _, ok, err := c.conns.Effective(ctx, "acme")
 	if err != nil || !ok {
@@ -120,7 +120,7 @@ func TestModelConnectionKeyRef_DB(t *testing.T) {
 	c := newCardDB(t, http.StatusOK)
 	ctx := context.Background()
 
-	// No org row → NotFoundError, the "not connected yet" contract — a
+	// No connection → NotFoundError, the "not connected yet" contract — a
 	// consumer wiring model access must treat this as skip, not fail.
 	var nf *organization.NotFoundError
 	if _, _, err := c.conns.KeyRef(ctx, "acme"); !errors.As(err, &nf) {
@@ -131,16 +131,15 @@ func TestModelConnectionKeyRef_DB(t *testing.T) {
 	// SecretRefWriter is wired here, so the mirror's columns are stamped the
 	// way the ResolveCodingCredential tests stamp them.
 	c.connect(t, "acme", anthropicUnitKey)
-	stampTriplet(t, c.repo, "acme", organization.AnthropicRoleDefault,
-		"acme-anthropic", "user-app-secrets/wc-acme/acme-anthropic", "api-key")
+	stampConnectionTriplet(t, c.connRepo, "acme", "acme-anthropic", "user-app-secrets/wc-acme/acme-anthropic", "api-key")
 	conn, triplet, err := c.conns.KeyRef(ctx, "acme")
 	if err != nil {
 		t.Fatalf("KeyRef after connect: %v", err)
 	}
 	if triplet.KVPath != "user-app-secrets/wc-acme/acme-anthropic" || triplet.Property != "api-key" {
-		t.Fatalf("KeyRef must return the stamped default triplet, got %+v", triplet)
+		t.Fatalf("KeyRef must return the stamped triplet, got %+v", triplet)
 	}
-	wantAnthropic(t, conn, orgconfig.DefaultAgentModel)
+	wantAnthropic(t, conn, modelconn.DefaultAnthropicModel)
 }
 
 // --- ResolveCodingCredential ----------------------------------------------------
@@ -149,8 +148,7 @@ func TestResolveCodingCredential_NoSubscription_UsesTheKey_DB(t *testing.T) {
 	t.Parallel()
 	c := newCardDB(t, http.StatusOK)
 	c.connect(t, "acme", anthropicUnitKey)
-	stampTriplet(t, c.repo, "acme", organization.AnthropicRoleDefault,
-		"acme-anthropic", "user-app-secrets/wc-acme/acme-anthropic", "api-key")
+	stampConnectionTriplet(t, c.connRepo, "acme", "acme-anthropic", "user-app-secrets/wc-acme/acme-anthropic", "api-key")
 
 	cred, err := c.conns.ResolveCodingCredential(context.Background(), "acme", orgconfig.AgentRuntimeClaudeCode)
 	if err != nil {
@@ -160,7 +158,7 @@ func TestResolveCodingCredential_NoSubscription_UsesTheKey_DB(t *testing.T) {
 		cred.Kind != organization.CodingCredentialConnectionKey {
 		t.Fatalf("no subscription must resolve to the API key, got %+v", cred)
 	}
-	wantAnthropic(t, cred.Conn, orgconfig.DefaultAgentModel)
+	wantAnthropic(t, cred.Conn, modelconn.DefaultAnthropicModel)
 }
 
 // Dispatch reads the row, never the bytes, so the resolved kind is the only
@@ -200,7 +198,7 @@ func TestResolveCodingCredential_OpenCodeNeverGetsTheSubscription_DB(t *testing.
 
 	// Not consulted means not consulted: a subscription broken enough to fail a
 	// Claude Code run closed still leaves OpenCode on the API key.
-	stampTriplet(t, c.repo, "acme", organization.AnthropicRoleCoding, "", "", "")
+	stampTriplet(t, c.repo, "acme", "", "", "")
 	cred, err = c.conns.ResolveCodingCredential(context.Background(), "acme", orgconfig.AgentRuntimeOpenCode)
 	if err != nil || cred.Kind != organization.CodingCredentialConnectionKey {
 		t.Fatalf("a broken subscription reached an OpenCode run: cred=%+v err=%v", cred, err)
@@ -213,7 +211,7 @@ func TestResolveCodingCredential_BrokenSubscriptionFailsClosed_DB(t *testing.T) 
 	t.Parallel()
 	c := newCardDB(t, http.StatusOK)
 	keyAndSubscription(t, c)
-	stampTriplet(t, c.repo, "acme", organization.AnthropicRoleCoding, "acme-anthropic-coding", "", "")
+	stampTriplet(t, c.repo, "acme", "acme-anthropic-coding", "", "")
 
 	cred, err := c.conns.ResolveCodingCredential(context.Background(), "acme", orgconfig.AgentRuntimeClaudeCode)
 	if err == nil {
@@ -228,6 +226,6 @@ func TestResolveCodingCredential_NoRowsAtAll_Errors_DB(t *testing.T) {
 	t.Parallel()
 	c := newCardDB(t, http.StatusOK)
 	if _, err := c.conns.ResolveCodingCredential(context.Background(), "ghost", orgconfig.AgentRuntimeClaudeCode); err == nil {
-		t.Fatal("an org with no Anthropic key at all must not resolve a secret ref")
+		t.Fatal("an org with no connection at all must not resolve a secret ref")
 	}
 }

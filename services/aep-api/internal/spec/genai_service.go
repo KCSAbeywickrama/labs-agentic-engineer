@@ -362,6 +362,12 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 	if err != nil {
 		return "", err
 	}
+	// On a model with a stated context window, a conversation near full
+	// rotates here and the send is answered like any other rotation (409
+	// conversation_rotated). No window, no query.
+	if err := s.rotateIfContextFull(ctx, orgID, projectID, in.ConversationID, llm.Connection); err != nil {
+		return "", err
+	}
 
 	// Room-scoped turn (#86 phase 4): capture the room + the prompting user's
 	// bearer NOW (D20 — the runner has no request context). Access is

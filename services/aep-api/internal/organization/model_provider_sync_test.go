@@ -17,20 +17,18 @@
 package organization
 
 // UNIT tier — what a save does to the Agent Manager provider's copy of the
-// org's key, over connections constructed here: nothing can SAVE a connection
-// on another host yet, so the rule is driven directly. The DB-backed half (a
-// saved key reaches the provider) is anthropic_dbtest_test.go.
+// org's key, over connections constructed here. The DB-backed half (a saved
+// key reaches the provider) is anthropic_dbtest_test.go.
 
 import (
 	"context"
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
-	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 )
 
 func firstParty() *modelconn.Connection {
-	c := storedConnection(orgconfig.DefaultAgentModel)
+	c := anthropicConn().Connection()
 	return &c
 }
 

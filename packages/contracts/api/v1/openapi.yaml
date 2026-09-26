@@ -86,6 +86,51 @@ paths:
       summary: Patch the organization's integration config (per-section, atomic)
       tags:
       - Org Config
+  /config/llm/test:
+    post:
+      operationId: test-llm-connection
+      description: >-
+        Probes a model connection WITHOUT saving anything: the same checks a
+        save of the `llm` section runs, on the connection the body describes
+        merged over the saved one (an omitted field keeps the saved value, and
+        on first connect the format's defaults fill `baseURL` and `model`).
+
+
+        `apiKey` may be omitted only when the connection's host equals the
+        saved connection's host; the stored key is then used, server side, and
+        never returned. A new host without a key is refused
+        (`llm_key_required_for_new_host`), so a stored key never follows a
+        host. The probe follows no redirects.
+
+
+        Refusals use the `llm` section's codes (see ConfigPatch.llm) on
+        `body.llm`. Rate-limited per organization: more than 10 calls in a
+        minute answer 429 `llm_test_rate_limited`. Every call is logged with
+        the organization and the host it probed.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LLMPatch'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMCheck'
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Test a model connection without saving it
+      tags:
+      - Org Config
   /config/git-provider/connect-sessions:
     post:
       operationId: start-git-provider-connect
@@ -3657,7 +3702,9 @@ components:
         that cannot.
 
 
-        Both runtimes run on the organization's Anthropic API key. Only
+        Both runtimes run on the organization's model connection. `claude-code`
+        speaks only the Anthropic format, so an OpenAI-compatible connection
+        needs `opencode` (`agents_runtime_requires_anthropic_format`). Only
         `claude-code` can bill a Claude subscription instead, so choosing
         `opencode` deletes a stored subscription (ADR-0028, ADR-0036).
       enum:
@@ -3667,48 +3714,27 @@ components:
       x-enum-varnames:
       - AgentRuntimeClaudeCode
       - AgentRuntimeOpencode
-    AgentModel:
-      description: >-
-        The model every agent of an organization bills to: the requirements,
-        design and task-planning agents and the coding agent alike.
-
-
-        Offered only once the platform can price it. The platform stamps a run's
-        cost from a per-model rate table, and that stamp is ALL-OR-NOTHING across
-        a cycle's capture — one model with no rate blanks the cost of the whole
-        cycle, not just its own share. Adding one is a rate row and a contract
-        change together, never one without the other.
-      enum:
-      - claude-sonnet-5
-      - claude-haiku-4-5
-      type: string
-      x-enum-varnames:
-      - AgentModelClaudeSonnet5
-      - AgentModelClaudeHaiku45
     AgentsProjection:
       x-go-type: orgconfig.AgentsProjection
       x-go-type-import:
         path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       description: >-
-        How an organization's agents run: the one model every agent uses, the
-        coding agent's runtime, and the Claude subscription coding bills to
-        instead of the API key.
+        How an organization's agents run: the coding agent's runtime and the
+        Claude subscription coding bills to instead of the connection's key.
+        The model is part of the connection (`llm.model`).
 
 
-        ALWAYS present: every org has an effective model and runtime whether or
-        not anyone has chosen them, so the section carries the platform's
-        defaults until someone does. `updatedAt`/`updatedBy` are null exactly
-        when nobody has — which is what tells "the platform's defaults" apart
-        from "somebody chose the same values".
+        ALWAYS present: every org has an effective runtime whether or not
+        anyone has chosen it, so the section carries the platform's default
+        until someone does. `updatedAt`/`updatedBy` are null exactly when
+        nobody has — which is what tells "the platform's default" apart from
+        "somebody chose the same value".
 
 
-        The spec agents read the model at the start of every turn. A coding run
-        copies the model and runtime when it is dispatched, so a run in flight
-        keeps what it was launched with.
+        A coding run copies the runtime (and the connection) when it is
+        dispatched, so a run in flight keeps what it was launched with.
       additionalProperties: false
       properties:
-        model:
-          $ref: '#/components/schemas/AgentModel'
         runtime:
           $ref: '#/components/schemas/AgentRuntime'
         availableRuntimes:
@@ -3728,7 +3754,8 @@ components:
           - $ref: '#/components/schemas/SubscriptionProjection'
           description: >-
             The stored Claude subscription token, masked, or null when coding
-            bills the organization's API key.
+            bills the connection's key. Only possible while the connection has
+            `capabilities.claudeSubscription` and the runtime is `claude-code`.
           nullable: true
         updatedAt:
           format: date-time
@@ -3738,7 +3765,6 @@ components:
           nullable: true
           type: string
       required:
-      - model
       - runtime
       - availableRuntimes
       - subscription
@@ -4441,30 +4467,32 @@ components:
         agents:
           description: >-
             How the organization's agents run. Every field is optional: an
-            absent field keeps what is stored, so a client changes the model
-            without restating the runtime and never has to send the stored
-            token back.
+            absent field keeps what is stored, so a client changes the runtime
+            without re-sending the stored token.
 
 
             `subscription` is three-state: absent keeps it, an object sets or
             replaces it, `null` deletes it. A subscription needs the
-            `claude-code` runtime and a connected API key, judged on the state
-            the patch leaves: choosing `opencode` deletes the stored token in the
-            same write, and `opencode` with a new subscription in one patch is
-            refused (`agents_subscription_requires_claude_code`), as is a
-            subscription with no API key (`agents_subscription_requires_api_key`).
-            A `runtime` this installation cannot run (absent from the
-            projection's `availableRuntimes`) is refused
-            (`agents_runtime_unavailable`).
+            `claude-code` runtime and a connection with
+            `capabilities.claudeSubscription` (Anthropic's own API), judged on
+            the state the patch leaves: choosing `opencode`, or moving the
+            connection off Anthropic's API, deletes the stored token in the same
+            write. A new token the end state cannot use is refused:
+            `agents_subscription_requires_claude_code` (runtime),
+            `agents_subscription_requires_anthropic_host` (connection lacks
+            `claudeSubscription`), `agents_subscription_requires_connection`
+            (no connection). `claude-code` with an OpenAI-compatible connection
+            is refused (`agents_runtime_requires_anthropic_format`); send
+            `runtime: opencode` in the same patch that switches the format. A
+            `runtime` this installation cannot run (absent from the projection's
+            `availableRuntimes`) is refused (`agents_runtime_unavailable`).
 
 
-            `null` on the section resets it to the platform's defaults and
+            `null` on the section resets it to the platform's default and
             deletes the subscription — a real state, not the same as never
             having set it; the projection's `updatedBy` tells them apart.
           additionalProperties: false
           properties:
-            model:
-              $ref: '#/components/schemas/AgentModel'
             runtime:
               $ref: '#/components/schemas/AgentRuntime'
             subscription:
@@ -4529,26 +4557,38 @@ components:
           type: object
           nullable: true
         llm:
+          allOf:
+          - $ref: '#/components/schemas/LLMPatch'
           description: >-
-            The organization's Anthropic API key (`sk-ant-api…`), used by every
-            agent. Write-only: probed against Anthropic before anything in the
-            patch is written. `null` disconnects it and deletes the stored Claude
-            subscription with it.
-          additionalProperties: false
-          properties:
-            apiKey:
-              type: string
-              writeOnly: true
-              minLength: 1
-              maxLength: 512
-            kind:
-              enum:
-              - anthropic
-              type: string
-          required:
-          - kind
-          - apiKey
-          type: object
+            The organization's model connection, patched field by field: an
+            absent field keeps what is stored. Probed before anything in the
+            patch is written; the probe's result rides the response's
+            `llmCheck`. `null` disconnects: the connection, its key and the
+            Claude subscription go, and `llmDisconnectedAt` is set.
+
+
+            First connect needs `kind` and `apiKey`; `baseURL` and `model`
+            default from `llmFormats`, so `{kind: anthropic, apiKey}` connects
+            to Anthropic's API with the default model. A changed host needs a
+            new `apiKey` in the same patch; a format change on the same host
+            keeps the stored key.
+
+
+            Refusal codes, each on `body.llm` (400 unless noted):
+            `llm_field_required` (first connect without `kind` or `apiKey`, or
+            without `baseURL` on a format with no default),
+            `llm_base_url_invalid` (not https, or carries userinfo, a query or a
+            fragment), `llm_host_refused` (the host resolves to a non-public
+            address), `llm_key_required_for_new_host`, `llm_key_too_short`
+            (under 12 characters), `llm_key_rejected` (the endpoint answered 401
+            or 403), `llm_unexpected_status` (any other 4xx, including a 429
+            without a rate-limit shape), `llm_unreachable` (network failure,
+            timeout, or a redirect, which is never followed),
+            `llm_upstream_error` (502: the endpoint answered 5xx),
+            `llm_format_has_no_runtime` (no available runtime runs the format),
+            `anthropic_oauth_token_coding_only` (a Claude subscription token as
+            the key on Anthropic's API), `anthropic_key_invalid` (a key on
+            Anthropic's API without the `sk-ant-` shape).
           nullable: true
       type: object
     ConfigProjection:
@@ -4568,17 +4608,35 @@ components:
         llm:
           allOf:
           - $ref: '#/components/schemas/LLMProjection'
+          description: The organization's model connection; null while it has none.
           nullable: true
+        llmCheck:
+          allOf:
+          - $ref: '#/components/schemas/LLMCheck'
+          description: >-
+            Present only on the PATCH response of a save that probed the
+            connection (the key, URL, format or model changed): what the probe
+            found, including `modelListed` (an unlisted model is a warning, not
+            a refusal) and `warning`. Never present on GET.
         llmDisconnectedAt:
           description: >-
-            When the organization's Anthropic API key was last disconnected.
+            When the organization's model connection was last disconnected.
             Present only while `llm` is null, so a client can tell an org whose
-            key was disconnected from one that never set a key. Cleared when a
-            key is connected again.
+            connection was disconnected from one that never set one. Cleared
+            when a connection is saved again.
           format: date-time
           type: string
+        llmFormats:
+          description: >-
+            The API formats a connection may speak, with the values a first
+            connect fills in and the runtimes on this installation that run
+            each. Read by the Settings card instead of hard-coding them.
+          items:
+            $ref: '#/components/schemas/LLMFormatOption'
+          type: array
       required:
       - llm
+      - llmFormats
       - agents
       - gitProvider
       - idp
@@ -5806,45 +5864,237 @@ components:
       - State
       - Labels
       type: object
+    LLMCapabilities:
+      x-go-type: orgconfig.LLMCapabilities
+      x-go-type-import:
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
+      additionalProperties: false
+      description: >-
+        What a connection supports, computed by the platform from its format,
+        host and probe, so the console holds no host rules of its own.
+      properties:
+        claudeSubscription:
+          description: A Claude subscription may bill coding runs (Anthropic's own API only).
+          type: boolean
+        generatedAgents:
+          description: >-
+            Generated AI agents, Agent Manager and build evaluation can run on
+            this connection. Anthropic's own API only, until their follow-up.
+          type: boolean
+        imageInput:
+          description: >-
+            Whether the model reads images: `yes` on Anthropic's API and where
+            the probe learned it, `no` where the probe learned it does not
+            (attachments are refused), `unknown` elsewhere (sent; the provider's
+            error names the problem).
+          enum:
+          - 'yes'
+          - 'no'
+          - unknown
+          type: string
+        nativePdf:
+          description: PDFs go to the model natively; otherwise they are sent as extracted text.
+          type: boolean
+        webSearch:
+          description: >-
+            How agents search the web on this connection: Anthropic's server
+            tool, Ollama's web search API, or `none` (web search is off).
+          enum:
+          - anthropic-server-tool
+          - ollama-api
+          - none
+          type: string
+      required:
+      - claudeSubscription
+      - webSearch
+      - imageInput
+      - nativePdf
+      - generatedAgents
+      type: object
+    LLMCheck:
+      x-go-type: orgconfig.LLMCheck
+      x-go-type-import:
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
+      additionalProperties: false
+      description: >-
+        What probing a connection found: the connection as it would be saved,
+        whether the endpoint lists the model, and what it supports. The card
+        draws its info box and Claude Code tile from `capabilities` and
+        `priced` here before a save, and from the projection after.
+      properties:
+        baseURL:
+          description: >-
+            The URL as it is (or would be) saved. An Anthropic-format URL with
+            no path gains `/v1`, because the SDKs append `/messages` to it.
+          type: string
+        capabilities:
+          $ref: '#/components/schemas/LLMCapabilities'
+        kind:
+          enum:
+          - anthropic
+          - openai-compatible
+          type: string
+        model:
+          type: string
+        modelListed:
+          description: >-
+            `yes` when the endpoint's model listing names the model, `no` when
+            it lists models but not this one (a warning: some endpoints serve
+            models they do not list, and the save goes through), `unknown` when
+            the endpoint has no listing.
+          enum:
+          - 'yes'
+          - 'no'
+          - unknown
+          type: string
+        priced:
+          description: >-
+            The platform holds a rate for this host and model, so usage shows a
+            dollar figure; otherwise usage shows tokens only.
+          type: boolean
+        warning:
+          description: >-
+            `provider_limit`: the endpoint answered with a rate limit, which
+            proves the key; agents will wait on (or be blocked by) the
+            provider's limit until it resets.
+          enum:
+          - provider_limit
+          type: string
+      required:
+      - kind
+      - baseURL
+      - model
+      - modelListed
+      - priced
+      - capabilities
+      type: object
+    LLMFormatOption:
+      x-go-type: orgconfig.LLMFormatOption
+      x-go-type-import:
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
+      additionalProperties: false
+      description: One API format a connection may speak.
+      properties:
+        defaultBaseURL:
+          description: >-
+            The URL a first connect fills in when none is sent; null when the
+            format has no default host and `baseURL` is required.
+          nullable: true
+          type: string
+        defaultModel:
+          description: >-
+            The model a first connect fills in when none is sent (`glm-5.3` is
+            Ollama's model ID; model IDs must match the endpoint's exactly).
+          type: string
+        kind:
+          enum:
+          - anthropic
+          - openai-compatible
+          type: string
+        runtimes:
+          description: >-
+            The runtimes on this installation that run this format (a subset of
+            `agents.availableRuntimes`). Empty means no runtime here can run it,
+            and a save is refused (`llm_format_has_no_runtime`).
+          items:
+            $ref: '#/components/schemas/AgentRuntime'
+          type: array
+      required:
+      - kind
+      - defaultBaseURL
+      - defaultModel
+      - runtimes
+      type: object
+    LLMPatch:
+      x-go-type: orgconfig.LLMPatch
+      x-go-type-import:
+        path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
+      additionalProperties: false
+      description: >-
+        A model connection, field by field: an absent field keeps the saved
+        value (or, on first connect, the format's default). Any public https
+        endpoint speaking one of the formats; private, cluster and plain-http
+        hosts are refused.
+      properties:
+        apiKey:
+          description: >-
+            Write-only; never echoed. At least 12 characters. Required on first
+            connect and whenever the host changes.
+          maxLength: 512
+          minLength: 1
+          type: string
+          writeOnly: true
+        baseURL:
+          description: >-
+            The API root, ending in its version segment (e.g.
+            `https://ollama.com/v1`). An Anthropic-format URL with no path gains
+            `/v1`, because the SDKs append `/messages` to it.
+          maxLength: 2048
+          minLength: 1
+          type: string
+        kind:
+          enum:
+          - anthropic
+          - openai-compatible
+          type: string
+        model:
+          description: The model ID exactly as the endpoint names it.
+          maxLength: 256
+          minLength: 1
+          type: string
+      type: object
     LLMProjection:
       x-go-type: orgconfig.LLMProjection
       x-go-type-import:
         path: github.com/wso2/aep/aep-api/internal/platform/orgconfig
       additionalProperties: false
+      description: >-
+        The organization's model connection, as every agent uses it. A stored
+        connection is usable by construction: a save is refused unless the
+        probe passes.
       properties:
+        baseURL:
+          type: string
+        capabilities:
+          $ref: '#/components/schemas/LLMCapabilities'
         connectedAt:
+          description: When a key was first connected on this connection's host.
           format: date-time
           type: string
-        credentialKind:
+        keyPreview:
           description: >-
-            Always `api_key`: the organization's key is a Console API key,
-            because the spec agents are AI SDK calls that cannot present a
-            Claude subscription token. A subscription lives on `agents`.
-          enum:
-          - api_key
-          type: string
-        keyLast4:
-          type: string
-        keyPrefix:
+            The key's last 4 characters, prefixed by its first 4 and an ellipsis
+            only when the key is at least 24 long.
           type: string
         kind:
           enum:
           - anthropic
+          - openai-compatible
           type: string
-        lastValidatedAt:
+        model:
+          type: string
+        priced:
+          description: >-
+            The platform holds a rate for this host and model, so usage shows a
+            dollar figure; otherwise usage shows tokens only.
+          type: boolean
+        updatedAt:
           format: date-time
           type: string
-        status:
-          type: string
-        validationError:
+        updatedBy:
+          description: Who last saved the connection; null for one carried over by a migration.
+          nullable: true
           type: string
       required:
       - kind
-      - credentialKind
-      - keyPrefix
-      - keyLast4
-      - status
+      - baseURL
+      - model
+      - keyPreview
       - connectedAt
+      - updatedAt
+      - updatedBy
+      - priced
+      - capabilities
       type: object
     Lineage:
       additionalProperties: false
@@ -8939,6 +9189,14 @@ components:
           type: number
           nullable: true
           x-go-type: '*float64'
+        host:
+          description: >-
+            The model endpoint's host the work was billed by (e.g.
+            `api.anthropic.com`, `ollama.com`); "" or absent on an aggregate
+            that mixes hosts or a row that predates stamping. Stamped by the
+            platform, never by a producer. With a null `costUsd`, the console
+            reads "not priced, billed by <host>".
+          type: string
         inputTokens:
           format: int64
           type: integer

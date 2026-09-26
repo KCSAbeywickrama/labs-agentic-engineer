@@ -140,8 +140,24 @@ type FormatOption struct {
 	DefaultModel   string
 }
 
+// DefaultAnthropicModel is the Anthropic format's default model, and the one
+// the platform seeds a `model_rates` row for, so an org that connects with
+// defaults has priced usage.
+const DefaultAnthropicModel = "claude-sonnet-5"
+
 // Formats is what the card offers; GET /config's llmFormats is built from it.
 var Formats = []FormatOption{
-	{Format: FormatAnthropic, DefaultBaseURL: AnthropicBaseURL, DefaultModel: "claude-sonnet-5"},
+	{Format: FormatAnthropic, DefaultBaseURL: AnthropicBaseURL, DefaultModel: DefaultAnthropicModel},
 	{Format: FormatOpenAICompatible, DefaultModel: "glm-5.3"},
+}
+
+// FormatOptionOf returns f's entry in Formats; ok is false for a format the
+// platform does not offer.
+func FormatOptionOf(f Format) (FormatOption, bool) {
+	for _, o := range Formats {
+		if o.Format == f {
+			return o, true
+		}
+	}
+	return FormatOption{}, false
 }

@@ -19,13 +19,20 @@
 // PATCH /config are judged TOGETHER, on the state the patch leaves, so the order
 // the writes happen in can never refuse a valid end state half-way.
 //
-// The one rule: a Claude subscription needs the Claude Code runtime and a
-// connected API key. Everything else follows from it — choosing OpenCode,
-// disconnecting the key and resetting the card each delete the stored token in
-// the same transaction, and a patch that sets a token the end state could not
-// use is refused.
+// The clauses (model_connection_rule.go merges the `llm` patch itself):
 //
-// Beside it, a save may only choose a runtime this installation can run
+//  1. First connect needs a format and a key, plus a URL when the format has no
+//     default.
+//  2. A host change needs a key; a format change on the same host keeps it.
+//  3. A format needs a runtime this installation runs.
+//  4. Claude Code needs the Anthropic format.
+//  5. The Claude subscription needs `claudeSubscription` (Anthropic's own API)
+//     and Claude Code: a save that leaves either deletes the stored token in
+//     the same transaction, and a new token the end state cannot use is
+//     refused.
+//  6. `llm: null` disconnects: the connection, its bytes and the token go.
+//
+// Beside them, a save may only choose a runtime this installation can run
 // (runtimes): one with no runner image would fail every dispatch.
 
 package organization
@@ -39,52 +46,27 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 )
 
-// cardState is what a save of the card is judged against: the org's current
-// setting row (nil = the platform defaults) and which credentials it holds.
+// cardState is what a save of the card is judged against: the org's setting
+// row (nil = the platform default), its connection (nil = none) and whether it
+// holds a Claude subscription.
 type cardState struct {
 	settings *OrgAgentSettings
-	hasKey   bool
+	conn     *OrgModelConnection
 	hasToken bool
 }
 
 // cardEffects is what a save does, in terms of rows. Zero values mean "leave
-// it": judgeCard refuses a blank key or token, so an empty one here is never
-// written, and nil settings is never upserted.
+// it": judgeCard refuses a blank token, so an empty one here is never written,
+// and nil settings is never upserted.
 type cardEffects struct {
-	writeKey       string
-	deleteKey      bool
-	settings       *OrgAgentSettings // model + runtime to upsert; OcOrgID/actor/time stamped by the writer
+	// writeConn is the connection to probe and then write; nil leaves the
+	// stored one as it is.
+	writeConn      *connectionDraft
+	deleteConn     bool
+	settings       *OrgAgentSettings // runtime to upsert; OcOrgID/actor/time stamped by the writer
 	deleteSettings bool
 	writeToken     string
 	deleteToken    bool
-}
-
-// connectionsAround is the org's model connection on either side of a save,
-// nil where it has none: what the Agent Manager provider's copy of the key
-// follows (syncModelProvider). The connection is derived from the rows the
-// card writes, so whether a key is held and which model is set are the whole
-// of it today; a saved connection row replaces this derivation.
-func connectionsAround(s cardState, eff cardEffects) (before, after *modelconn.Connection) {
-	modelBefore := orgconfig.DefaultAgentModel
-	if s.settings != nil {
-		modelBefore = s.settings.Model
-	}
-	if s.hasKey {
-		conn := storedConnection(modelBefore)
-		before = &conn
-	}
-	modelAfter := modelBefore
-	switch {
-	case eff.settings != nil:
-		modelAfter = eff.settings.Model
-	case eff.deleteSettings:
-		modelAfter = orgconfig.DefaultAgentModel
-	}
-	if eff.writeKey != "" || (s.hasKey && !eff.deleteKey) {
-		conn := storedConnection(modelAfter)
-		after = &conn
-	}
-	return before, after
 }
 
 // judgeCard decides what p does to an org in state s, on an installation that
@@ -95,17 +77,31 @@ func connectionsAround(s cardState, eff cardEffects) (before, after *modelconn.C
 func judgeCard(s cardState, runtimes []orgconfig.AgentRuntime, p orgconfig.ConfigPatch) (cardEffects, error) {
 	var eff cardEffects
 
-	keyAfter := s.hasKey
+	// connAfter is the connection the save leaves, as capabilities read it.
+	var connAfter *modelconn.Connection
+	if s.conn != nil {
+		c := s.conn.Connection()
+		connAfter = &c
+	}
 	if p.LLM.Sent {
 		if p.LLM.Null {
-			eff.deleteKey = s.hasKey
-			keyAfter = false
+			// Clause 6.
+			eff.deleteConn = s.conn != nil
+			connAfter = nil
 		} else {
-			eff.writeKey = strings.TrimSpace(p.LLM.Value.APIKey)
-			if eff.writeKey == "" {
-				return cardEffects{}, sectionErrorFrom("llm", errCredentialMissing("an Anthropic API key"))
+			draft, changed, err := draftConnection(s.conn, p.LLM.Value)
+			if err != nil {
+				return cardEffects{}, sectionErrorFrom("llm", err)
 			}
-			keyAfter = true
+			if changed {
+				// Clause 3.
+				if len(runtimesFor(draft.Format, runtimes)) == 0 {
+					return cardEffects{}, sectionErrorFrom("llm", errFormatHasNoRuntime(draft.Format, runtimes))
+				}
+				eff.writeConn = &draft
+				c := draft.connection()
+				connAfter = &c
+			}
 		}
 	}
 
@@ -117,14 +113,14 @@ func judgeCard(s cardState, runtimes []orgconfig.AgentRuntime, p orgconfig.Confi
 	newToken := ""
 	if p.Agents.Sent {
 		if p.Agents.Null {
-			// Reset: back on the platform's defaults, and the subscription goes
+			// Reset: back on the platform's default, and the subscription goes
 			// with the section it belongs to.
 			eff.deleteSettings = s.settings != nil
 			runtimeAfter = orgconfig.DefaultAgentRuntime
 			tokenAfter = false
 		} else {
 			w := p.Agents.Value
-			settings, err := resolveAgentSettings(s.settings, runtimes, w)
+			settings, err := resolveAgentSettings(runtimes, w)
 			if err != nil {
 				return cardEffects{}, sectionErrorFrom("agents", err)
 			}
@@ -146,69 +142,68 @@ func judgeCard(s cardState, runtimes []orgconfig.AgentRuntime, p orgconfig.Confi
 		}
 	}
 
-	// A new token has to be usable in the end state, or the save is refused:
-	// silently dropping a token the reader just pasted would be worse than
-	// saying why it cannot be kept.
+	// Clause 4. The card sends `runtime: opencode` in the patch that switches
+	// the format, so the fix is named on agents.
+	if connAfter != nil && runtimeAfter == orgconfig.AgentRuntimeClaudeCode && !modelconn.CapabilitiesOf(*connAfter).ClaudeCode {
+		return cardEffects{}, sectionErrorFrom("agents", errRuntimeRequiresAnthropicFormat(connAfter.Format))
+	}
+
+	// Clause 5. A new token has to be usable in the end state, or the save is
+	// refused: silently dropping a token the reader just pasted would be worse
+	// than saying why it cannot be kept.
+	subscriptionUsable := connAfter != nil && modelconn.CapabilitiesOf(*connAfter).ClaudeSubscription &&
+		runtimeAfter == orgconfig.AgentRuntimeClaudeCode
 	if newToken != "" {
-		if runtimeAfter != orgconfig.AgentRuntimeClaudeCode {
+		switch {
+		case connAfter == nil:
+			return cardEffects{}, sectionErrorFrom("agents", errSubscriptionRequiresConnection())
+		case runtimeAfter != orgconfig.AgentRuntimeClaudeCode:
 			return cardEffects{}, sectionErrorFrom("agents", errSubscriptionRequiresClaudeCode())
-		}
-		if !keyAfter {
-			return cardEffects{}, sectionErrorFrom("agents", errSubscriptionRequiresAPIKey())
+		case !subscriptionUsable:
+			return cardEffects{}, sectionErrorFrom("agents", errSubscriptionRequiresAnthropicHost(connAfter.Host))
 		}
 		eff.writeToken = newToken
 	}
 	// A stored token the end state cannot use goes in the same save: OpenCode
-	// cannot present one, and it cannot outlive the key it sits beside.
-	if runtimeAfter != orgconfig.AgentRuntimeClaudeCode || !keyAfter {
+	// cannot present one, only Anthropic's own API accepts one, and it cannot
+	// outlive the connection it sits beside.
+	if !subscriptionUsable {
 		tokenAfter = false
 	}
 	eff.deleteToken = s.hasToken && !tokenAfter && eff.writeToken == ""
 	return eff, nil
 }
 
-// resolveAgentSettings is the row a write leaves: each omitted field keeps the
-// org's current value (or the platform default when it has none). nil when the
-// write names neither field — a subscription-only save leaves the setting row,
-// and with it "who chose the model", alone.
-//
-// Only a runtime the write NAMES must be one of runtimes. A model-only save by
-// an org already on a runtime the installation lost is kept: refusing it would
-// block an unrelated change, and GET already says the runtime is unavailable.
-func resolveAgentSettings(current *OrgAgentSettings, runtimes []orgconfig.AgentRuntime, w orgconfig.AgentsWrite) (*OrgAgentSettings, error) {
-	runtime := orgconfig.AgentRuntime(strings.TrimSpace(string(w.Runtime)))
-	model := strings.TrimSpace(w.Model)
-	if runtime == "" && model == "" {
-		return nil, nil
+// connectionsAround is the org's model connection on either side of a save,
+// nil where it has none: what the Agent Manager provider's copy of the key
+// follows (syncModelProvider). written is the row the save wrote, if any.
+func connectionsAround(s cardState, eff cardEffects, written *OrgModelConnection) (before, after *modelconn.Connection) {
+	if s.conn != nil {
+		c := s.conn.Connection()
+		before = &c
 	}
-	out := &OrgAgentSettings{Runtime: orgconfig.DefaultAgentRuntime, Model: orgconfig.DefaultAgentModel}
-	if current != nil {
-		out.Runtime, out.Model = current.Runtime, current.Model
+	switch {
+	case written != nil:
+		c := written.Connection()
+		after = &c
+	case !eff.deleteConn:
+		after = before
 	}
-	if runtime != "" {
-		if err := validateRuntime(runtime, runtimes); err != nil {
-			return nil, err
-		}
-		out.Runtime = runtime
-	}
-	if model != "" {
-		if err := validateModel(model); err != nil {
-			return nil, err
-		}
-		out.Model = model
-	}
-	return out, nil
+	return before, after
 }
 
-func validateModel(model string) error {
-	if slices.Contains(orgconfig.AgentModels, model) {
-		return nil
+// resolveAgentSettings is the row a write leaves, or nil when the write names
+// no runtime — a subscription-only save leaves the setting row, and with it
+// "who chose the runtime", alone.
+func resolveAgentSettings(runtimes []orgconfig.AgentRuntime, w orgconfig.AgentsWrite) (*OrgAgentSettings, error) {
+	runtime := orgconfig.AgentRuntime(strings.TrimSpace(string(w.Runtime)))
+	if runtime == "" {
+		return nil, nil
 	}
-	return &ValidationError{
-		Code: "agents_model_unknown",
-		Message: fmt.Sprintf("model %q is not one this platform offers (%s)",
-			model, strings.Join(orgconfig.AgentModels, ", ")),
+	if err := validateRuntime(runtime, runtimes); err != nil {
+		return nil, err
 	}
+	return &OrgAgentSettings{Runtime: runtime}, nil
 }
 
 // validateRuntime refuses a runtime outside the enum by name: running another
@@ -256,10 +251,26 @@ func errSubscriptionRequiresClaudeCode() *ValidationError {
 	}
 }
 
-func errSubscriptionRequiresAPIKey() *ValidationError {
+func errSubscriptionRequiresConnection() *ValidationError {
 	return &ValidationError{
-		Code: "agents_subscription_requires_api_key",
-		Message: "a Claude subscription sits beside the organization's Anthropic API key and cannot " +
-			"exist without it. Connect the API key in the same save, or first",
+		Code: "agents_subscription_requires_connection",
+		Message: "a Claude subscription sits beside the organization's model connection and cannot " +
+			"exist without it. Save a connection to Anthropic's API in the same save, or first",
+	}
+}
+
+func errSubscriptionRequiresAnthropicHost(host string) *ValidationError {
+	return &ValidationError{
+		Code: "agents_subscription_requires_anthropic_host",
+		Message: fmt.Sprintf("a Claude subscription authenticates only against Anthropic's own API (%s), "+
+			"and the connection points at %s", modelconn.AnthropicHost, host),
+	}
+}
+
+func errRuntimeRequiresAnthropicFormat(format modelconn.Format) *ValidationError {
+	return &ValidationError{
+		Code: "agents_runtime_requires_anthropic_format",
+		Message: fmt.Sprintf("Claude Code speaks only the Anthropic format, and the connection is %s. "+
+			"Choose OpenCode in the same save", format),
 	}
 }

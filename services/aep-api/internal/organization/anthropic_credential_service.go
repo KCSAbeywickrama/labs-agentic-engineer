@@ -16,27 +16,25 @@
 
 // anthropic_credential_service.go — Anthropic credential service.
 //
-// AnthropicCredentialService owns the per-org Anthropic credentials. An org
-// holds one row per AnthropicRole:
-//
-//   - `default` — the org's API key. EVERY reader uses it.
-//   - `coding`  — an optional Claude subscription token (`claude setup-token`)
-//     the coding agent bills instead of the API key, only while it runs on
-//     Claude Code. It cannot exist without the default row.
+// AnthropicCredentialService owns the org's Claude subscription: the
+// optional `coding` token (`claude setup-token`) the coding agent bills instead
+// of the connection's key, only while it runs on Claude Code against
+// Anthropic's own API. It cannot exist without the connection. It also keeps
+// the Agent Manager provider's copy of the connection's key in line with a
+// save (syncModelProvider).
 //
 // Surface — all in-process; this service has no HTTP routes of its own:
 //
-//   - ValidateKey — the shape checks plus the live probe, per role. The AI
-//     agents card (AgentSettingsService) calls it before its unit of work.
-//   - writeKeyTx / deleteKeyTx — the credential half of that unit of work,
+//   - ValidateKey — the shape checks plus the live probe. The AI agents card
+//     (AgentSettingsService) calls it before its unit of work.
+//   - writeKeyTx / deleteKeyTx — the subscription half of that unit of work,
 //     inside its transaction; mirrorKey / forgetKey — the SM-API copy, after
 //     it commits; syncModelProvider — the Agent Manager provider's copy of the
-//     default key, after it commits.
-//   - Status — one role's masked projection; Holds — whether a role's row exists.
+//     connection's key, after it commits.
+//   - Status — the masked projection; Holds — whether the row exists.
 //
-// The READS — the effective connection and key, the key's vault reference,
-// and which credential a coding run mounts — are ModelConnectionService's
-// (model_connection_service.go), over these same rows.
+// The connection itself — its row, key and probe — is ModelConnectionService's
+// (model_connection_service.go).
 //
 // Secret bytes live in the same `org_secrets` (Postgres + AES-256-GCM) table
 // as the GitHub PAT, keyed by the role's SecretStoreKey(). The metadata
@@ -160,16 +158,14 @@ func projectionFromAnthropicRow(r *OrgAnthropicCredential) *AnthropicProjection 
 // Validation + the card's credential writes
 // ----------------------------------------------------------------------------
 
-// ValidateKey runs the save-time validation for a credential WITHOUT
-// persisting anything: the shape checks plus the live /v1/messages probe,
-// authenticated the way that KIND of credential authenticates.
+// ValidateKey runs the save-time validation for a Claude subscription token
+// WITHOUT persisting anything: the shape checks plus the live /v1/messages
+// probe against Anthropic's own API, authenticated as Bearer.
 //
-// role fixes the one kind it accepts: the default role holds a Console API key
-// (the spec agents are AI SDK calls that cannot present a bearer token), the
-// coding role a Claude subscription token (a separate coding API key is not a
-// thing the platform offers). The wrong kind is refused here, before a probe is
-// spent on it, rather than discovered later by an agent that cannot use it.
-func (s *AnthropicCredentialService) ValidateKey(ctx context.Context, role AnthropicRole, apiKey string) error {
+// Only a subscription token is accepted (a separate coding API key is not a
+// thing the platform offers); an API key is refused here, before a probe is
+// spent on it, rather than discovered later by a run that cannot use it.
+func (s *AnthropicCredentialService) ValidateKey(ctx context.Context, apiKey string) error {
 	key := strings.TrimSpace(apiKey)
 	if key == "" {
 		return &ValidationError{Code: "anthropic_key_missing", Message: "a credential is required"}
@@ -178,18 +174,11 @@ func (s *AnthropicCredentialService) ValidateKey(ctx context.Context, role Anthr
 		return &ValidationError{Code: "anthropic_key_invalid", Message: "value does not look like an Anthropic credential (expected prefix 'sk-ant-')"}
 	}
 	kind := AnthropicCredentialKindOf(key)
-	switch {
-	case role == AnthropicRoleCoding && kind != AnthropicCredentialOAuth:
+	if kind != AnthropicCredentialOAuth {
 		return &ValidationError{
 			Code: "agents_subscription_token_required",
 			Message: "a Claude subscription takes a token from `claude setup-token` (sk-ant-oat…); " +
-				"an Anthropic API key belongs in the organization's API key field",
-		}
-	case role != AnthropicRoleCoding && kind == AnthropicCredentialOAuth:
-		return &ValidationError{
-			Code: "anthropic_oauth_token_coding_only",
-			Message: "a Claude subscription token can only bill the coding agent; " +
-				"the organization's Anthropic key must be a Console API key (sk-ant-api…)",
+				"an Anthropic API key belongs in the model connection's key field",
 		}
 	}
 	return s.validateAnthropicKey(ctx, kind, key)
@@ -289,9 +278,9 @@ func (s *AnthropicCredentialService) forgetKey(ctx context.Context, ocOrgID stri
 // writes the current key every time), so this is how fast it converges, not
 // whether it does.
 //
-// Only the DEFAULT role is ever published: that is the key agents run on. The
-// coding role's subscription token belongs to the coding agent, which does not
-// go through the gateway.
+// Only the connection's key is ever published: that is the key agents run on.
+// The subscription token belongs to the coding agent, which does not go
+// through the gateway.
 func (s *AnthropicCredentialService) syncModelProvider(ctx context.Context, ocOrgID string, before, after *modelconn.Connection, writtenKey string) {
 	if s.modelProvider == nil {
 		return
@@ -380,26 +369,18 @@ func derefOrEmpty(p *string) string {
 // helpers
 // ----------------------------------------------------------------------------
 
-// ResyncSecretRef re-pushes the org's Anthropic credentials through the
-// in-process SecretRefWriter (local OpenBao repair). EVERY role is resynced: a
-// repair that only restored the API key would leave a subscription org
-// dispatching against a vault path that no longer resolves, which fails
-// closed — a repair that visibly does not repair. Returns (true, nil) when at least one role was
-// pushed, (false, nil) when there was nothing to push. ctx must carry an ouId
-// claim (repair injects thunder_org_uuid).
+// ResyncSecretRef re-pushes the org's Claude subscription through the
+// in-process SecretRefWriter (local OpenBao repair); the connection key's
+// repair is ModelConnectionService.ResyncSecretRef, and the repair route runs
+// both, so a subscription org never dispatches against a vault path that no
+// longer resolves. Returns (true, nil) when the token was pushed, (false, nil)
+// when there was nothing to push. ctx must carry an ouId claim (repair
+// injects thunder_org_uuid).
 func (s *AnthropicCredentialService) ResyncSecretRef(ctx context.Context, ocOrgID string) (bool, error) {
 	if s.secretRefWriter == nil || !s.secretRefWriter.Enabled() {
 		return false, nil
 	}
-	wroteAny := false
-	for _, role := range []AnthropicRole{AnthropicRoleDefault, AnthropicRoleCoding} {
-		wrote, err := s.resyncRole(ctx, ocOrgID, role)
-		if err != nil {
-			return wroteAny, err
-		}
-		wroteAny = wroteAny || wrote
-	}
-	return wroteAny, nil
+	return s.resyncRole(ctx, ocOrgID, AnthropicRoleCoding)
 }
 
 // resyncRole re-pushes one role's key. A role with no row, an inactive row, no

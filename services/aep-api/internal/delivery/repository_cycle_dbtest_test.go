@@ -549,6 +549,10 @@ func TestRunCycleRepository_RecordUsageStampsMultiModelSplit(t *testing.T) {
 	if b.Tokens.InputTokens != 2_500_010 {
 		t.Fatalf("build input tokens = %d, want 2_500_010", b.Tokens.InputTokens)
 	}
+	// Every contributing cycle was dispatched on one host, so the phase names it.
+	if b.Host != modelconn.AnthropicHost {
+		t.Fatalf("build host = %q, want %q", b.Host, modelconn.AnthropicHost)
+	}
 }
 
 // The validation verdict is the ONE cycle field written after the cycle closes: it

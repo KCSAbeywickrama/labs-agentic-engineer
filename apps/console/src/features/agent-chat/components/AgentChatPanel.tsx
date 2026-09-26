@@ -63,6 +63,8 @@ import { answerableQuestionIds } from "../questionCards";
 import { providerWaitLabel, useProviderWait } from "../providerWait";
 import { MessageList } from "./MessageList";
 import { ChatInput } from "./ChatInput";
+import { useConfig } from "../../settings/api/queries";
+import { modelReads } from "../../settings/aiSettings";
 import { DESIGN_COMMAND } from "@aep/contracts/commands";
 
 // Default a touch wider than the old 380 so the activity rail + narration
@@ -145,6 +147,9 @@ export function AgentChatPanel({
   // (ADR-0019), so dropping them on a routine 409 would cost the user a re-pick
   // of every file from disk.
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  // What the org's model reads, so the attach control refuses what the turn
+  // would refuse. Every org member can read /config.
+  const reads = modelReads(useConfig().data);
 
   const feed = useMemo(
     () => buildFeed(messages, { currentUserId: author.id, activeTurnId }),
@@ -582,6 +587,7 @@ export function AgentChatPanel({
         onSubmit={submit}
         files={attachedFiles}
         onFilesChange={setAttachedFiles}
+        reads={reads}
         disabled={inputDisabled}
         contextLabel={displayName ?? projectName}
         hint={hint}

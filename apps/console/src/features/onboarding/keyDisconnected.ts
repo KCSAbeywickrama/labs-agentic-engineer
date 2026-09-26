@@ -21,11 +21,12 @@ import type { components } from "../../generated/aep-api";
 type ConfigProjection = components["schemas"]["ConfigProjection"];
 
 /**
- * The org had an Anthropic key and it was disconnected; none is connected now.
+ * The org had a model connection and it was disconnected (by a person, or by
+ * the migration that dropped an invalid stored key); none is saved now.
  * `llmDisconnectedAt` is what tells this apart from an org that abandoned
  * onboarding after GitHub: both have `gitProvider` set and `llm` null.
  */
-export function anthropicKeyWasDisconnected(config: ConfigProjection): boolean {
+export function connectionWasDisconnected(config: ConfigProjection): boolean {
   if (config.llm !== null) return false;
   const at = config.llmDisconnectedAt;
   return typeof at === "string" && at !== "";

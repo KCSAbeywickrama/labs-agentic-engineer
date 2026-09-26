@@ -19,10 +19,10 @@
 // Postgres as config_component_test.go (whose harness this reuses).
 //
 // What these rows pin, on the wire:
-//   - `agents` is never null, and reads the platform defaults until someone
+//   - `agents` is never null, and reads the platform default until someone
 //     chooses;
 //   - one Save is one unit of work: a failure anywhere writes nothing;
-//   - the one rule — a subscription needs Claude Code and an API key — and the
+//   - the subscription rule — Claude Code and Anthropic's own API — and the
 //     deletions that follow from it (OpenCode, disconnect, reset);
 //   - the refusals, each on its section with its own code;
 //   - only a runtime the installation can run is selectable, and an org
@@ -31,6 +31,7 @@ package organization_test
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -66,11 +67,12 @@ func (c *configHarness) count(t *testing.T, sql string, args ...any) int64 {
 	return n
 }
 
-// cardRows counts every row the card writes for org: credential rows, the
-// setting row, and secret bytes.
+// cardRows counts every row the card writes for org: the connection and
+// subscription rows, the setting row, and secret bytes.
 func (c *configHarness) cardRows(t *testing.T, org string) (creds, settings, secrets int64) {
 	t.Helper()
-	return c.count(t, `SELECT count(*) FROM org_anthropic_credentials WHERE oc_org_id = ?`, org),
+	return c.count(t, `SELECT count(*) FROM org_anthropic_credentials WHERE oc_org_id = ?`, org) +
+			c.count(t, `SELECT count(*) FROM org_model_connections WHERE oc_org_id = ?`, org),
 		c.count(t, `SELECT count(*) FROM org_agent_settings WHERE oc_org_id = ?`, org),
 		c.count(t, `SELECT count(*) FROM org_secrets WHERE oc_org_id = ? AND key LIKE 'anthropic/%'`, org)
 }
@@ -94,8 +96,8 @@ func TestConfigAgents_FreshOrgReadsTheDefaults(t *testing.T) {
 	c := newConfigHarness(t)
 
 	a := agentsOf(t, c.h.AsOrg("acme").Get(configPath).Body.Bytes())
-	if a["model"] != "claude-sonnet-5" || a["runtime"] != "claude-code" {
-		t.Fatalf("defaults drifted: %v", a)
+	if _, hasModel := a["model"]; hasModel || a["runtime"] != "claude-code" {
+		t.Fatalf("defaults drifted (the model lives on llm now): %v", a)
 	}
 	for _, k := range []string{"subscription", "updatedAt", "updatedBy"} {
 		v, present := a[k]
@@ -133,8 +135,8 @@ func TestConfigAgents_AnInstallationWithoutOpenCodeRefusesIt(t *testing.T) {
 func TestConfigAgents_AnOrgOnALostRuntimeStillReadsAndSaves(t *testing.T) {
 	t.Parallel()
 	c := newConfigHarnessRuntimes(t, []orgconfig.AgentRuntime{orgconfig.AgentRuntimeClaudeCode})
-	if err := c.db.Exec(`INSERT INTO org_agent_settings (oc_org_id, runtime, model, updated_by, updated_at)
-		VALUES ('acme', 'opencode', 'claude-sonnet-5', 'ada', now())`).Error; err != nil {
+	if err := c.db.Exec(`INSERT INTO org_agent_settings (oc_org_id, runtime, updated_by, updated_at)
+		VALUES ('acme', 'opencode', 'ada', now())`).Error; err != nil {
 		t.Fatalf("seed an org on OpenCode: %v", err)
 	}
 
@@ -147,7 +149,10 @@ func TestConfigAgents_AnOrgOnALostRuntimeStillReadsAndSaves(t *testing.T) {
 		t.Fatalf("agents = %v, want runtime opencode beside availableRuntimes [claude-code]", a)
 	}
 
-	resp = c.h.AsOrg("acme").Patch(configPath, `{"agents":{"model":"claude-haiku-4-5"}}`)
+	if r := c.h.AsOrg("acme").Patch(configPath, llmConnect(goodAnthKey)); r.Code != 200 {
+		t.Fatalf("a connection save was refused over the lost runtime: %d %s", r.Code, r.Body.String())
+	}
+	resp = c.h.AsOrg("acme").Patch(configPath, `{"llm":{"model":"claude-haiku-4-5"}}`)
 	if resp.Code != 200 {
 		t.Fatalf("a model-only save was refused over the lost runtime: %d %s", resp.Code, resp.Body.String())
 	}
@@ -157,19 +162,19 @@ func TestConfigAgents_AnOrgOnALostRuntimeStillReadsAndSaves(t *testing.T) {
 	}
 }
 
-// Key, model, runtime and subscription in ONE save, then read back.
+// Connection, model, runtime and subscription in ONE save, then read back.
 func TestConfigAgents_OneSaveWritesTheWholeCard(t *testing.T) {
 	t.Parallel()
 	c := newConfigHarness(t)
 
-	resp := c.h.AsOrg("acme").Patch(configPath, `{"llm":{"kind":"anthropic","apiKey":"`+goodAnthKey+`"},
-		"agents":{"model":"claude-haiku-4-5","runtime":"claude-code","subscription":{"kind":"claude","token":"`+goodToken+`"}}}`)
+	resp := c.h.AsOrg("acme").Patch(configPath, `{"llm":{"kind":"anthropic","apiKey":"`+goodAnthKey+`","model":"claude-haiku-4-5"},
+		"agents":{"runtime":"claude-code","subscription":{"kind":"claude","token":"`+goodToken+`"}}}`)
 	if resp.Code != 200 {
 		t.Fatalf("save: %d %s", resp.Code, resp.Body.String())
 	}
 	a := agentsOf(t, resp.Body.Bytes())
-	if a["model"] != "claude-haiku-4-5" || a["updatedBy"] == nil {
-		t.Fatalf("agents: %v", a)
+	if llm := decodeCfg(t, resp.Body.Bytes())["llm"].(map[string]any); llm["model"] != "claude-haiku-4-5" || a["updatedBy"] == nil {
+		t.Fatalf("llm: %v agents: %v", llm, a)
 	}
 	sub, ok := a["subscription"].(map[string]any)
 	if !ok || sub["kind"] != "claude" || sub["keyLast4"] != goodToken[len(goodToken)-4:] {
@@ -181,7 +186,7 @@ func TestConfigAgents_OneSaveWritesTheWholeCard(t *testing.T) {
 		}
 	}
 	// A later model change keeps the token without it being sent again.
-	resp = c.h.AsOrg("acme").Patch(configPath, `{"agents":{"model":"claude-sonnet-5"}}`)
+	resp = c.h.AsOrg("acme").Patch(configPath, `{"llm":{"model":"claude-sonnet-5"}}`)
 	if resp.Code != 200 || agentsOf(t, resp.Body.Bytes())["subscription"] == nil {
 		t.Fatalf("a model change dropped the subscription: %d %s", resp.Code, resp.Body.String())
 	}
@@ -206,7 +211,7 @@ func TestConfigAgents_AFailureMidSaveWritesNothing(t *testing.T) {
 	}
 
 	resp := c.h.AsOrg("acme").Patch(configPath, `{"llm":{"kind":"anthropic","apiKey":"`+goodAnthKey+`"},
-		"agents":{"model":"claude-haiku-4-5","subscription":{"kind":"claude","token":"`+goodToken+`"}}}`)
+		"agents":{"runtime":"claude-code","subscription":{"kind":"claude","token":"`+goodToken+`"}}}`)
 	if resp.Code != 500 {
 		t.Fatalf("want the injected failure as a 500, got %d %s", resp.Code, resp.Body.String())
 	}
@@ -215,14 +220,14 @@ func TestConfigAgents_AFailureMidSaveWritesNothing(t *testing.T) {
 	}
 }
 
-// A key Anthropic rejects writes nothing, including the sections beside it.
+// A key the endpoint rejects writes nothing, including the sections beside it.
 func TestConfigAgents_ARejectedKeyWritesNothing(t *testing.T) {
 	t.Parallel()
 	c := newConfigHarness(t)
-	c.anth.rejectOnly(goodAnthKey)
+	c.model.setStatus(http.StatusUnauthorized)
 
-	resp := c.h.AsOrg("acme").Patch(configPath, `{"llm":{"kind":"anthropic","apiKey":"`+goodAnthKey+`"},"agents":{"model":"claude-haiku-4-5"}}`)
-	refused(t, resp.Code, resp.Body.String(), "llm", "anthropic_key_invalid")
+	resp := c.h.AsOrg("acme").Patch(configPath, `{"llm":{"kind":"anthropic","apiKey":"`+goodAnthKey+`"},"agents":{"runtime":"opencode"}}`)
+	refused(t, resp.Code, resp.Body.String(), "llm", "llm_key_rejected")
 	if creds, settings, secrets := c.cardRows(t, "acme"); creds+settings+secrets != 0 {
 		t.Fatalf("a rejected key left rows behind: credentials=%d settings=%d secrets=%d", creds, settings, secrets)
 	}
@@ -264,7 +269,7 @@ func TestConfigAgents_DisconnectCascadesToTheToken(t *testing.T) {
 	}
 	m := decodeCfg(t, resp.Body.Bytes())
 	if m["llm"] != nil || agentsOf(t, resp.Body.Bytes())["subscription"] != nil {
-		t.Fatalf("the key and the subscription must both be gone: %v", m)
+		t.Fatalf("the connection and the subscription must both be gone: %v", m)
 	}
 	if creds, _, secrets := c.cardRows(t, "acme"); creds+secrets != 0 {
 		t.Fatalf("disconnect left credentials=%d secrets=%d", creds, secrets)
@@ -301,7 +306,7 @@ func TestConfigAgents_ResetDeletesTheSettingAndTheToken(t *testing.T) {
 	t.Parallel()
 	c := newConfigHarness(t)
 	if r := c.h.AsOrg("acme").Patch(configPath, `{"llm":{"kind":"anthropic","apiKey":"`+goodAnthKey+`"},
-		"agents":{"model":"claude-haiku-4-5","subscription":{"kind":"claude","token":"`+goodToken+`"}}}`); r.Code != 200 {
+		"agents":{"runtime":"claude-code","subscription":{"kind":"claude","token":"`+goodToken+`"}}}`); r.Code != 200 {
 		t.Fatalf("setup: %d %s", r.Code, r.Body.String())
 	}
 
@@ -311,11 +316,11 @@ func TestConfigAgents_ResetDeletesTheSettingAndTheToken(t *testing.T) {
 	}
 	m := decodeCfg(t, resp.Body.Bytes())
 	a := agentsOf(t, resp.Body.Bytes())
-	if a["model"] != "claude-sonnet-5" || a["updatedBy"] != nil || a["subscription"] != nil {
-		t.Fatalf("reset must return to the defaults with no subscription: %v", a)
+	if a["runtime"] != "claude-code" || a["updatedBy"] != nil || a["subscription"] != nil {
+		t.Fatalf("reset must return to the default with no subscription: %v", a)
 	}
 	if m["llm"] == nil {
-		t.Fatal("resetting the card disconnected the API key")
+		t.Fatal("resetting the card disconnected the connection")
 	}
 }
 
@@ -324,23 +329,23 @@ func TestConfigAgents_Refusals(t *testing.T) {
 	t.Parallel()
 	c := newConfigHarness(t)
 
-	// No key anywhere.
+	// No connection anywhere.
 	r := c.h.AsOrg("acme").Patch(configPath, subscribe(goodToken))
-	refused(t, r.Code, r.Body.String(), "agents", "agents_subscription_requires_api_key")
+	refused(t, r.Code, r.Body.String(), "agents", "agents_subscription_requires_connection")
 
 	if r := c.h.AsOrg("acme").Patch(configPath, llmConnect(goodAnthKey)); r.Code != 200 {
 		t.Fatalf("key: %d %s", r.Code, r.Body.String())
 	}
-	// Disconnecting the key in the same save as a new token.
+	// Disconnecting in the same save as a new token.
 	r = c.h.AsOrg("acme").Patch(configPath, `{"llm":null,"agents":{"subscription":{"kind":"claude","token":"`+goodToken+`"}}}`)
-	refused(t, r.Code, r.Body.String(), "agents", "agents_subscription_requires_api_key")
+	refused(t, r.Code, r.Body.String(), "agents", "agents_subscription_requires_connection")
 	// OpenCode and a new token in one save.
 	r = c.h.AsOrg("acme").Patch(configPath, `{"agents":{"runtime":"opencode","subscription":{"kind":"claude","token":"`+goodToken+`"}}}`)
 	refused(t, r.Code, r.Body.String(), "agents", "agents_subscription_requires_claude_code")
 	// An API key pasted as the subscription.
 	r = c.h.AsOrg("acme").Patch(configPath, subscribe(goodAnthKey2))
 	refused(t, r.Code, r.Body.String(), "agents", "agents_subscription_token_required")
-	// A subscription token pasted as the org's key.
+	// A subscription token pasted as the connection's key.
 	r = c.h.AsOrg("acme").Patch(configPath, llmConnect(goodToken))
 	refused(t, r.Code, r.Body.String(), "llm", "anthropic_oauth_token_coding_only")
 
@@ -352,7 +357,7 @@ func TestConfigAgents_Refusals(t *testing.T) {
 }
 
 // A blank credential is refused on its section and writes nothing: it cannot
-// stand in for the key the subscription needs, and it cannot answer 200 while
+// stand in for the key a connection needs, and it cannot answer 200 while
 // storing nothing. Whitespace passes the contract's minLength, so the service
 // is what refuses it.
 func TestConfigAgents_BlankCredentialsAreRefused(t *testing.T) {
@@ -361,10 +366,10 @@ func TestConfigAgents_BlankCredentialsAreRefused(t *testing.T) {
 
 	// A blank key alone.
 	r := c.h.AsOrg("acme").Patch(configPath, `{"llm":{"kind":"anthropic","apiKey":"   "}}`)
-	refused(t, r.Code, r.Body.String(), "llm", "anthropic_key_missing")
+	refused(t, r.Code, r.Body.String(), "llm", "llm_field_required")
 	// A blank key beside a real subscription token.
 	r = c.h.AsOrg("acme").Patch(configPath, `{"llm":{"kind":"anthropic","apiKey":"   "},"agents":{"subscription":{"kind":"claude","token":"`+goodToken+`"}}}`)
-	refused(t, r.Code, r.Body.String(), "llm", "anthropic_key_missing")
+	refused(t, r.Code, r.Body.String(), "llm", "llm_field_required")
 	if creds, settings, secrets := c.cardRows(t, "acme"); creds+settings+secrets != 0 {
 		t.Fatalf("a blank key left rows behind: credentials=%d settings=%d secrets=%d", creds, settings, secrets)
 	}

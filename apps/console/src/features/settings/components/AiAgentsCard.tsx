@@ -26,24 +26,22 @@ import {
   Chip,
   Divider,
   FormControlLabel,
-  MenuItem,
   Radio,
   RadioGroup,
-  Switch,
-  TextField,
   Typography,
 } from "@wso2/oxygen-ui";
 import { Bot } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
 import {
-  MODELS,
   SUBSCRIPTION_TOKEN_PREFIX,
+  formatRuns,
+  formatsRunning,
+  lastChange,
   runtimeAvailable,
-  type AiSettings,
 } from "../aiSettings";
 import { useAiSettings } from "../hooks/useAiSettings";
-import { AnthropicKeyRow } from "./AnthropicKeyRow";
 import { MaskedCredential, SecretField } from "./CredentialField";
+import { ModelConnectionRow } from "./ModelConnectionRow";
 
 type ConfigProjection = components["schemas"]["ConfigProjection"];
 type AgentRuntime = components["schemas"]["AgentRuntime"];
@@ -63,14 +61,13 @@ const RUNTIMES: { value: AgentRuntime; label: string; description: string }[] = 
   {
     value: "opencode",
     label: "OpenCode",
-    description: "Open-source coding agent. Uses the API key.",
+    description: "Open-source coding agent. Works with either API format.",
   },
 ];
 
 /**
- * Who last changed the model or coding agent, and when. The timestamp is
- * optional on the wire, and printing an Invalid Date would be worse than
- * leaving it out.
+ * Who last changed the card, and when. The timestamp is optional on the wire,
+ * and printing an Invalid Date would be worse than leaving it out.
  */
 function changedLine(updatedAt: string | null, updatedBy: string | null): string {
   const who = updatedBy ? ` by ${updatedBy}` : "";
@@ -80,16 +77,16 @@ function changedLine(updatedAt: string | null, updatedBy: string | null): string
 }
 
 /**
- * How the organization's agents run: the model every agent uses, the Anthropic
- * API key they call it with, and the coding agent, with an optional Claude
- * subscription that only Claude Code can bill. One Save sends whatever
- * changed; `aiSettings.ts` decides which `/config` sections that is.
+ * How the organization's agents run: the one model connection every agent
+ * uses (format, URL, key, model), and the coding agent, with an optional
+ * Claude subscription that only Claude Code on Anthropic's API can bill. One
+ * Save sends whatever changed; `aiSettings.ts` decides which `/config`
+ * sections that is.
  *
- * `onboarding` is the wizard's use of the same card: Save reads "Continue" and
- * waits for an API key, since the wizard exists to get one and a save without
- * it would leave the organization where it started. The wizard frames and
- * explains the step itself, so the card drops its own frame, header and the
- * key row's explanation there.
+ * `onboarding` is the wizard's use of the same card: Save reads "Continue",
+ * and the wizard advances once the save (which probes the connection) lands.
+ * The wizard frames and explains the step itself, so the card drops its own
+ * frame, header and footer there.
  */
 export function AiAgentsCard({
   config,
@@ -101,45 +98,18 @@ export function AiAgentsCard({
   const ai = useAiSettings(config);
   const { saved, draft } = ai;
   const busy = ai.saving;
-  const keyMissing = saved.connection === null && draft.apiKey.trim() === "";
-  const canSave = ai.canSave && !(onboarding && keyMissing);
+  const changed = lastChange(config);
 
   const body = (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <TextField
-        select
-        fullWidth
-        label="Model"
-        value={draft.model}
-        disabled={busy}
-        onChange={(e) =>
-          ai.change({ model: e.target.value as AiSettings["model"] })
-        }
-        helperText="Every agent uses this model, from requirements to coding. Agents pick up a change from their next step; coding runs already in flight keep their model."
-      >
-        {MODELS.map((m) => (
-          <MenuItem key={m.value} value={m.value}>
-            {m.label}
-          </MenuItem>
-        ))}
-      </TextField>
-
-      <AnthropicKeyRow
-        // A newly stored key closes the replace field.
-        key={saved.connection?.connectedAt ?? "none"}
-        stored={saved.connection}
-        value={draft.apiKey}
-        onChange={(apiKey) => ai.change({ apiKey })}
-        error={ai.error?.field === "apiKey" ? ai.error.message : undefined}
-        disabled={busy}
-        hasSubscription={saved.subscription !== null}
-        onDisconnect={ai.disconnectKey}
-        disconnecting={ai.disconnecting}
-        disconnectError={ai.disconnectError}
-        explained={!onboarding}
+      <ModelConnectionRow
+        // A newly saved connection closes the replace field.
+        key={saved.connection?.updatedAt ?? "none"}
+        ai={ai}
+        onboarding={onboarding}
       />
 
-      <Box>
+      <Box sx={{ borderTop: onboarding ? 0 : 1, borderColor: "divider", pt: onboarding ? 0 : 3 }}>
         <Typography
           variant="subtitle2"
           component="h3"
@@ -161,11 +131,17 @@ export function AiAgentsCard({
           {RUNTIMES.map((r) => {
             const selected = draft.runtime === r.value;
             const available = runtimeAvailable(saved, r.value);
+            const runsFormat = formatRuns(saved, draft, r.value);
+            const reason = !available
+              ? UNAVAILABLE_REASON
+              : !runsFormat
+                ? `Needs the ${formatsRunning(saved.formats, r.value).join(" or ")} format.`
+                : r.description;
             return (
-              <Tile key={r.value} selected={selected}>
+              <Tile key={r.value} selected={selected} muted={available && !runsFormat}>
                 <FormControlLabel
                   value={r.value}
-                  disabled={busy || !available}
+                  disabled={busy || !available || !runsFormat}
                   control={<Radio />}
                   label={
                     <Box>
@@ -173,7 +149,7 @@ export function AiAgentsCard({
                         {r.label}
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
-                        {available ? r.description : UNAVAILABLE_REASON}
+                        {reason}
                       </Typography>
                     </Box>
                   }
@@ -195,7 +171,7 @@ export function AiAgentsCard({
                     ai={ai}
                   />
                 )}
-                {r.value === "opencode" && selected && ai.removesSubscription && (
+                {r.value === "opencode" && selected && ai.removesSubscription && !ai.runtimeMoved && (
                   <Alert severity="warning" sx={{ mt: 1.5 }}>
                     Saving deletes the stored Claude subscription token.
                     OpenCode bills coding to the API key.
@@ -205,6 +181,17 @@ export function AiAgentsCard({
             );
           })}
         </RadioGroup>
+        {/* In onboarding nobody chose the default runtime, so there is no
+            choice of theirs to say was moved. */}
+        {ai.runtimeMoved && !onboarding && (
+          <Alert severity="warning" sx={{ mt: 1.5 }} role="status">
+            Coding moved to{" "}
+            {RUNTIMES.find((r) => r.value === draft.runtime)?.label ?? draft.runtime}:{" "}
+            {RUNTIMES.find((r) => r.value === saved.runtime)?.label ?? saved.runtime} speaks
+            only the {formatsRunning(saved.formats, saved.runtime).join(" or ")} format.
+            {ai.removesSubscription && " Saving deletes the stored Claude subscription token."}
+          </Alert>
+        )}
         {ai.error?.field === "runtime" && (
           <Alert severity="error" sx={{ mt: 1.5 }}>
             {ai.error.message}
@@ -212,10 +199,10 @@ export function AiAgentsCard({
         )}
       </Box>
 
-      {saved.updatedBy && (
-        <Typography variant="body2" color="text.secondary">
-          {changedLine(saved.updatedAt, saved.updatedBy)}
-        </Typography>
+      {/* A missing field only holds Save back (the empty field says what is
+          missing); a format no coding agent here can run needs saying. */}
+      {ai.problem?.field === "connection" && (
+        <Alert severity="warning">{ai.problem.message}</Alert>
       )}
 
       {ai.error?.field === "card" && (
@@ -223,17 +210,22 @@ export function AiAgentsCard({
       )}
 
       <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 1.5 }}>
-        <Button variant="contained" onClick={ai.save} disabled={!canSave}>
+        <Button variant="contained" onClick={ai.save} disabled={!ai.canSave}>
           {busy ? "Saving…" : onboarding ? "Continue" : "Save"}
         </Button>
-        {ai.dirty && (
+        {ai.dirty && !onboarding && (
           <Button onClick={ai.discard} disabled={busy}>
             Discard changes
           </Button>
         )}
         {ai.justSaved && !ai.dirty && (
           <Typography variant="body2" color="success.main" role="status">
-            Saved.
+            Saved. Agents use it from their next step; coding runs in flight keep theirs.
+          </Typography>
+        )}
+        {!onboarding && (changed.at || changed.by) && (
+          <Typography variant="body2" color="text.secondary" sx={{ ml: "auto" }}>
+            {changedLine(changed.at, changed.by)}
           </Typography>
         )}
       </Box>
@@ -254,7 +246,7 @@ export function AiAgentsCard({
           {saved.connection ? (
             <Chip label="ready" size="small" color="success" />
           ) : (
-            <Chip label="no API key" size="small" color="warning" />
+            <Chip label="not connected" size="small" color="warning" />
           )}
         </Box>
         <Divider sx={{ mb: 3 }} />
@@ -264,7 +256,16 @@ export function AiAgentsCard({
   );
 }
 
-function Tile({ selected, children }: { selected: boolean; children: ReactNode }) {
+function Tile({
+  selected,
+  muted,
+  children,
+}: {
+  selected: boolean;
+  /** The tile cannot be chosen with the draft's format; it stays visible, dimmed. */
+  muted: boolean;
+  children: ReactNode;
+}) {
   return (
     <Box
       sx={{
@@ -274,6 +275,7 @@ function Tile({ selected, children }: { selected: boolean; children: ReactNode }
         outlineColor: "primary.main",
         borderRadius: 1,
         p: 1.5,
+        bgcolor: muted ? "action.hover" : undefined,
       }}
     >
       {children}
@@ -283,71 +285,80 @@ function Tile({ selected, children }: { selected: boolean; children: ReactNode }
 
 /**
  * The Claude subscription, inside the Claude Code tile because only Claude
- * Code can bill one. Keyed by the stored token, so a newly stored token closes
- * the replace field.
+ * Code can bill one, and only on a connection that takes one
+ * (`capabilities.claudeSubscription`). An optional token field, not a switch:
+ * leaving it empty bills coding to the connection's key. Keyed by the stored
+ * token, so a newly stored token closes the replace field.
  */
 function SubscriptionControl({ ai }: { ai: ReturnType<typeof useAiSettings> }) {
   const { saved, draft } = ai;
   const [replacing, setReplacing] = useState(false);
   const busy = ai.saving;
   const stored = saved.subscription;
-  const askForToken = draft.billToSubscription && (stored === null || replacing);
 
-  const serverError =
-    ai.error?.field === "subscription" ? ai.error.message : undefined;
+  const frame = {
+    borderTop: 1,
+    borderColor: "divider",
+    borderTopStyle: "dashed",
+    mt: 1.5,
+    pt: 1.5,
+    display: "flex",
+    flexDirection: "column",
+    gap: 1,
+  } as const;
+
+  if (!ai.subscriptionOffered) {
+    // Only said once the draft's connection is known not to take one.
+    if (!ai.view) return null;
+    return (
+      <Box sx={frame}>
+        <Typography variant="body2" color="text.secondary">
+          A Claude subscription token works only on Anthropic&apos;s own API.
+        </Typography>
+      </Box>
+    );
+  }
+
+  const serverError = ai.error?.field === "subscription" ? ai.error.message : undefined;
   const tokenError =
-    serverError ??
-    (draft.token.trim() !== "" || !ai.canAddSubscription ? ai.problem : undefined);
+    serverError ?? (ai.problem?.field === "subscription" ? ai.problem.message : undefined);
+  const showStored = stored !== null && !replacing && !draft.removeToken;
 
   return (
-    <Box
-      sx={{
-        borderTop: 1,
-        borderColor: "divider",
-        borderTopStyle: "dashed",
-        mt: 1.5,
-        pt: 1.5,
-        display: "flex",
-        flexDirection: "column",
-        gap: 1,
-      }}
-    >
-      <FormControlLabel
-        control={
-          <Switch
-            checked={draft.billToSubscription}
-            disabled={busy || (!draft.billToSubscription && !ai.canAddSubscription)}
-            onChange={(e) => {
-              setReplacing(false);
-              ai.change({ billToSubscription: e.target.checked, token: "" });
-            }}
-          />
-        }
-        label="Bill coding to a Claude subscription"
-        sx={{ m: 0 }}
-      />
-
-      {!draft.billToSubscription && (
-        <Typography variant="body2" color="text.secondary">
-          {ai.canAddSubscription ? (
-            <>
-              Uses a token from <code>claude setup-token</code>. Other agents
-              keep using the API key.
-            </>
-          ) : (
-            "Add the Anthropic API key first."
-          )}
+    <Box sx={frame}>
+      <Typography variant="body2" fontWeight={500}>
+        Claude subscription token{" "}
+        <Typography component="span" variant="body2" color="text.secondary">
+          (optional)
         </Typography>
+      </Typography>
+
+      {showStored && (
+        <>
+          <MaskedCredential
+            preview={`${stored.keyPrefix}••••••${stored.keyLast4}`}
+            onReplace={() => setReplacing(true)}
+            disabled={busy}
+          >
+            <Button
+              size="small"
+              color="error"
+              disabled={busy}
+              onClick={() => ai.change({ removeToken: true, token: "" })}
+            >
+              Remove
+            </Button>
+          </MaskedCredential>
+          <Typography variant="body2" color="text.secondary">
+            Coding bills your Claude plan. Other agents use the API key.
+          </Typography>
+          {stored.validationError && (
+            <Alert severity="warning">{stored.validationError}</Alert>
+          )}
+        </>
       )}
 
-      {draft.billToSubscription && stored && !replacing && (
-        <MaskedCredential stored={stored} onReplace={() => setReplacing(true)} disabled={busy} />
-      )}
-      {draft.billToSubscription && stored?.validationError && (
-        <Alert severity="warning">{stored.validationError}</Alert>
-      )}
-
-      {askForToken && (
+      {!showStored && !draft.removeToken && (
         <>
           <SecretField
             label={stored ? "New subscription token" : "Subscription token"}
@@ -358,8 +369,9 @@ function SubscriptionControl({ ai }: { ai: ReturnType<typeof useAiSettings> }) {
             error={tokenError}
             helperText={
               <>
-                Run <code>claude setup-token</code> and paste the token. Other
-                agents keep using the API key.
+                To bill coding to your Claude plan instead of the API key, run{" "}
+                <code>claude setup-token</code> and paste the token. Leave empty
+                to use the API key.
               </>
             }
             noun="token"
@@ -380,10 +392,20 @@ function SubscriptionControl({ ai }: { ai: ReturnType<typeof useAiSettings> }) {
         </>
       )}
 
-      {ai.removesSubscription && (
-        <Alert severity="warning">
-          Saving deletes the stored Claude subscription token.
-        </Alert>
+      {draft.removeToken && (
+        <>
+          <Typography variant="body2" color="warning.dark" role="status">
+            Saving deletes the stored token; coding goes back to the API key.
+          </Typography>
+          <Button
+            size="small"
+            sx={{ alignSelf: "flex-start" }}
+            disabled={busy}
+            onClick={() => ai.change({ removeToken: false })}
+          >
+            Keep the current token
+          </Button>
+        </>
       )}
     </Box>
   );

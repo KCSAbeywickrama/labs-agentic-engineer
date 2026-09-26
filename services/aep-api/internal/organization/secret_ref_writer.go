@@ -48,15 +48,17 @@ const vaultPathPrefix = "user-app-secrets"
 // `org_secrets`-backed path keeps working. The "secret-ref row was upserted
 // but the triplet is missing" state surfaces in the next Connect attempt
 // (overwrites the row cleanly).
-// The triplet columns live on three tables — org_credentials (GitHub PAT),
-// org_anthropic_credentials (Anthropic key), and organization_idp_profiles
-// (Thunder publisher). Each is reached through its owning repository so the
-// writer holds no ORM/DB handle of its own.
+// The triplet columns live on four tables — org_credentials (GitHub PAT),
+// org_model_connections (the model connection's key),
+// org_anthropic_credentials (the Claude subscription), and
+// organization_idp_profiles (Thunder publisher). Each is reached through its
+// owning repository so the writer holds no ORM/DB handle of its own.
 type SecretRefWriter struct {
 	client        secretmanagersvc.SecretManagementClient
 	orgCredRepo   OrgCredentialRepository
 	anthropicRepo OrgAnthropicRepository
 	idpRepo       IDPRepository
+	modelConnRepo OrgModelConnectionRepository
 }
 
 // NewSecretRefWriter returns a no-op writer when client is nil (matches the
@@ -66,12 +68,14 @@ func NewSecretRefWriter(
 	orgCredRepo OrgCredentialRepository,
 	anthropicRepo OrgAnthropicRepository,
 	idpRepo IDPRepository,
+	modelConnRepo OrgModelConnectionRepository,
 ) *SecretRefWriter {
 	return &SecretRefWriter{
 		client:        client,
 		orgCredRepo:   orgCredRepo,
 		anthropicRepo: anthropicRepo,
 		idpRepo:       idpRepo,
+		modelConnRepo: modelConnRepo,
 	}
 }
 
@@ -82,17 +86,32 @@ func (w *SecretRefWriter) Enabled() bool {
 	return w != nil && w.client != nil
 }
 
-// WriteAnthropic uploads one role's per-org Anthropic API key to SM-API and
-// stamps the triplet onto that role's `org_anthropic_credentials` row. ctx must
-// carry the inbound user JWT — Connect and POST /build run on that ctx (the
-// SM-API provider reads it via the jwtassertion middleware context helper).
-//
-// The role picks the SM-API EntityName, so the default and coding keys occupy
-// separate vault paths and a rotation of one can never clobber the other.
+// WriteAnthropic uploads one role's per-org Anthropic credential (the Claude
+// subscription) to SM-API and stamps the triplet onto that role's
+// `org_anthropic_credentials` row. ctx must carry the inbound user JWT — the
+// card's save runs on that ctx (the SM-API provider reads it via the
+// jwtassertion middleware context helper).
 //
 // Returns the secretRefName for caller convenience; the DB has already
 // been updated when the call returns nil.
 func (w *SecretRefWriter) WriteAnthropic(ctx context.Context, ocOrgID string, role AnthropicRole, apiKey string) (string, error) {
+	return w.writeAPIKey(ctx, ocOrgID, role.SecretRefEntity(), apiKey, func(cols map[string]any) error {
+		return w.anthropicRepo.UpdateColumns(ctx, ocOrgID, role, cols)
+	})
+}
+
+// WriteModelKey uploads the org's model connection key to SM-API and stamps
+// the triplet onto its `org_model_connections` row. Same contract as
+// WriteAnthropic.
+func (w *SecretRefWriter) WriteModelKey(ctx context.Context, ocOrgID, apiKey string) (string, error) {
+	return w.writeAPIKey(ctx, ocOrgID, modelKeySecretEntity, apiKey, func(cols map[string]any) error {
+		return w.modelConnRepo.UpdateColumns(ctx, ocOrgID, cols)
+	})
+}
+
+// writeAPIKey uploads one API-key-shaped secret under entity and stamps the
+// resulting triplet through stamp.
+func (w *SecretRefWriter) writeAPIKey(ctx context.Context, ocOrgID, entity, apiKey string, stamp func(map[string]any) error) (string, error) {
 	if !w.Enabled() {
 		return "", nil
 	}
@@ -104,31 +123,30 @@ func (w *SecretRefWriter) WriteAnthropic(ctx context.Context, ocOrgID string, ro
 	}
 	orgUUID, err := orgUUIDForSecretLocation(ctx)
 	if err != nil {
-		return "", fmt.Errorf("secret-ref writer: anthropic upload: %w", err)
+		return "", fmt.Errorf("secret-ref writer: %s upload: %w", entity, err)
 	}
 	loc := secretmanagersvc.SecretLocation{
 		OrgName:               orgUUID,
 		ControlPlaneNamespace: ocOrgID,
-		EntityName:            role.SecretRefEntity(),
+		EntityName:            entity,
 		SecretKey:             secretmanagersvc.SecretKeyAPIKey,
 	}
 	secretRefName, err := w.client.CreateSecret(ctx, loc, map[string]string{
 		secretmanagersvc.SecretKeyAPIKey: apiKey,
 	})
 	if err != nil {
-		return "", fmt.Errorf("secret-ref writer: anthropic upload: %w", err)
+		return "", fmt.Errorf("secret-ref writer: %s upload: %w", entity, err)
 	}
 	vaultKey, err := w.resolveVaultKey(ctx, secretRefName)
 	if err != nil {
-		return secretRefName, fmt.Errorf("secret-ref writer: resolve anthropic vault key: %w", err)
+		return secretRefName, fmt.Errorf("secret-ref writer: resolve %s vault key: %w", entity, err)
 	}
-	prop := secretmanagersvc.SecretKeyAPIKey
-	if err := w.anthropicRepo.UpdateColumns(ctx, ocOrgID, role, stampSecretRefTriplet(secretRefName, vaultKey, prop)); err != nil {
-		return secretRefName, fmt.Errorf("secret-ref writer: stamp anthropic triplet: %w", err)
+	if err := stamp(stampSecretRefTriplet(secretRefName, vaultKey, secretmanagersvc.SecretKeyAPIKey)); err != nil {
+		return secretRefName, fmt.Errorf("secret-ref writer: stamp %s triplet: %w", entity, err)
 	}
-	slog.InfoContext(ctx, "secret-ref writer: anthropic key uploaded",
+	slog.InfoContext(ctx, "secret-ref writer: api key uploaded",
 		"ocOrgId", ocOrgID,
-		"role", role,
+		"entity", entity,
 		"secretRefName", secretRefName,
 		"vaultKey", vaultKey)
 	return secretRefName, nil
@@ -476,21 +494,31 @@ func (w *SecretRefWriter) resolveVaultKey(ctx context.Context, secretRefName str
 // first), so there is no triplet left to read or clear. Tolerates "already
 // gone" responses (the underlying client returns nil on 404).
 func (w *SecretRefWriter) DeleteAnthropic(ctx context.Context, ocOrgID string, role AnthropicRole, secretRefName string) error {
+	return w.deleteAPIKey(ctx, ocOrgID, role.SecretRefEntity(), secretRefName)
+}
+
+// DeleteModelKey best-effort removes the model connection key's SM-API copy,
+// with DeleteAnthropic's contract.
+func (w *SecretRefWriter) DeleteModelKey(ctx context.Context, ocOrgID, secretRefName string) error {
+	return w.deleteAPIKey(ctx, ocOrgID, modelKeySecretEntity, secretRefName)
+}
+
+func (w *SecretRefWriter) deleteAPIKey(ctx context.Context, ocOrgID, entity, secretRefName string) error {
 	if !w.Enabled() {
 		return nil
 	}
 	orgUUID, err := orgUUIDForSecretLocation(ctx)
 	if err != nil {
-		return fmt.Errorf("secret-ref writer: delete anthropic secret: %w", err)
+		return fmt.Errorf("secret-ref writer: delete %s secret: %w", entity, err)
 	}
 	loc := secretmanagersvc.SecretLocation{
 		OrgName:               orgUUID,
 		ControlPlaneNamespace: ocOrgID,
-		EntityName:            role.SecretRefEntity(),
+		EntityName:            entity,
 		SecretKey:             secretmanagersvc.SecretKeyAPIKey,
 	}
 	if err := w.client.DeleteSecret(ctx, loc, secretRefName); err != nil {
-		return fmt.Errorf("secret-ref writer: delete anthropic secret: %w", err)
+		return fmt.Errorf("secret-ref writer: delete %s secret: %w", entity, err)
 	}
 	return nil
 }

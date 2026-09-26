@@ -17,27 +17,39 @@
 // agent_settings_service.go — the AI agents card: how an organization's agents
 // run, and the one unit of work that saves it.
 //
-// The card is two /config sections: `llm` (the org's Anthropic API key) and
-// `agents` (the one model every agent uses, the coding agent's runtime, and an
-// optional Claude subscription the coding agent bills instead of the key). One
-// save of it is one transaction under one per-org lock, covering the credential
-// rows, the setting row and the encrypted secret bytes — see
-// repository_agents_card.go. What a save does is decided by agents_rule.go.
+// The card is two /config sections: `llm` (the org's model connection: format,
+// URL, key and model, one for every agent) and `agents` (the coding agent's
+// runtime and an optional Claude subscription it bills instead of the
+// connection's key). One save of it is one transaction under the card's
+// per-org locks, covering the connection row, the subscription row, the
+// setting row and the encrypted secret bytes — see repository_agents_card.go.
+// What a save does is decided by agents_rule.go; the connection is probed
+// (model_probe.go) before the transaction opens, so no lock is held across a
+// network call.
 //
-// The model is read by two kinds of caller, for two lifetimes: the spec agents
-// resolve it at the start of every turn, and coding dispatch copies it (with the
-// runtime) onto the run it launches, so a run in flight keeps what it started
-// with.
+// The runtime is read by coding dispatch, which copies it (with the
+// connection) onto the run it launches, so a run in flight keeps what it
+// started with.
 
 package organization
 
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
+)
+
+// The card's advisory lock names, taken in this order. The old name is the
+// one every earlier release takes; phase 6 drops it, and until then taking
+// both means two replicas of different releases never hold different locks
+// for the same org during a rolling deploy.
+const (
+	cardLockPrefixOld = "org_anthropic:"
+	cardLockPrefix    = "org_model:"
 )
 
 // AgentSettingsService owns the AI agents card. See the file doc.
@@ -45,29 +57,32 @@ type AgentSettingsService struct {
 	settings OrgAgentSettingsRepository
 	orgs     OrganizationRepository
 	creds    *AnthropicCredentialService
+	conns    *ModelConnectionService
 	card     AgentsCardRepository
 	runtimes []orgconfig.AgentRuntime
 	now      func() time.Time
 }
 
 // NewAgentSettingsService wires the service. creds validates, reads and mirrors
-// the credentials; card is the unit of work the saves run in; runtimes are the
-// runtimes this installation can run (a runner image for each), the only ones a
-// save may choose.
+// the Claude subscription; conns probes, writes and mirrors the connection;
+// card is the unit of work the saves run in; runtimes are the runtimes this
+// installation can run (a runner image for each), the only ones a save may
+// choose.
 func NewAgentSettingsService(
 	settings OrgAgentSettingsRepository,
 	orgs OrganizationRepository,
 	creds *AnthropicCredentialService,
+	conns *ModelConnectionService,
 	card AgentsCardRepository,
 	runtimes []orgconfig.AgentRuntime,
 ) *AgentSettingsService {
-	return &AgentSettingsService{settings: settings, orgs: orgs, creds: creds, card: card, runtimes: runtimes, now: time.Now}
+	return &AgentSettingsService{settings: settings, orgs: orgs, creds: creds, conns: conns, card: card, runtimes: runtimes, now: time.Now}
 }
 
-// Effective returns how the org's agents run: its chosen model and runtime (or
-// the platform defaults when nobody chose), the runtimes this installation can
-// run, and its Claude subscription, masked, when it has one. Never an error for
-// "not set": the defaults ARE the answer. A chosen runtime the installation can
+// Effective returns how the org's agents run: its chosen runtime (or the
+// platform default when nobody chose), the runtimes this installation can run,
+// and its Claude subscription, masked, when it has one. Never an error for
+// "not set": the default IS the answer. A chosen runtime the installation can
 // no longer run is returned as chosen, never substituted: dispatch fails naming
 // the missing image, and the projection is what lets a client say why.
 func (s *AgentSettingsService) Effective(ctx context.Context, ocOrgID string) (orgconfig.AgentsProjection, error) {
@@ -79,7 +94,7 @@ func (s *AgentSettingsService) Effective(ctx context.Context, ocOrgID string) (o
 	}
 	if row != nil {
 		updatedAt, updatedBy := row.UpdatedAt, row.UpdatedBy
-		out.Model, out.Runtime = row.Model, row.Runtime
+		out.Runtime = row.Runtime
 		out.UpdatedAt, out.UpdatedBy = &updatedAt, &updatedBy
 	}
 	sub, err := s.creds.Status(ctx, ocOrgID, AnthropicRoleCoding)
@@ -92,19 +107,33 @@ func (s *AgentSettingsService) Effective(ctx context.Context, ocOrgID string) (o
 	return out, nil
 }
 
-// Model is the one model the org's agents use this turn.
-func (s *AgentSettingsService) Model(ctx context.Context, ocOrgID string) (string, error) {
-	row, err := s.settings.GetByOrg(ctx, ocOrgID)
-	if err != nil {
-		return "", fmt.Errorf("agent settings: %w", err)
-	}
-	if row == nil {
-		return orgconfig.DefaultAgentModel, nil
-	}
-	return row.Model, nil
+// Connection is the org's model connection as GET /config shows it, nil when
+// it has none.
+func (s *AgentSettingsService) Connection(ctx context.Context, ocOrgID string) (*orgconfig.LLMProjection, error) {
+	return s.conns.Projection(ctx, ocOrgID)
 }
 
-// KeyDisconnectedAt is when the org's API key was last disconnected, or nil
+// Formats are the formats a connection may speak on this installation.
+func (s *AgentSettingsService) Formats() []orgconfig.LLMFormatOption {
+	return llmFormatsFor(s.runtimes)
+}
+
+// llmFormatsFor builds GET /config's llmFormats from modelconn.Formats, each
+// with the runtimes among available that run it.
+func llmFormatsFor(available []orgconfig.AgentRuntime) []orgconfig.LLMFormatOption {
+	out := make([]orgconfig.LLMFormatOption, 0, len(modelconn.Formats))
+	for _, f := range modelconn.Formats {
+		opt := orgconfig.LLMFormatOption{Kind: f.Format, DefaultModel: f.DefaultModel, Runtimes: runtimesFor(f.Format, available)}
+		if f.DefaultBaseURL != "" {
+			url := f.DefaultBaseURL
+			opt.DefaultBaseURL = &url
+		}
+		out = append(out, opt)
+	}
+	return out
+}
+
+// KeyDisconnectedAt is when the org's connection was last disconnected, or nil
 // while one is connected or none ever was.
 func (s *AgentSettingsService) KeyDisconnectedAt(ctx context.Context, ocOrgID string) (*time.Time, error) {
 	org, err := s.orgs.GetByName(ctx, ocOrgID)
@@ -117,46 +146,89 @@ func (s *AgentSettingsService) KeyDisconnectedAt(ctx context.Context, ocOrgID st
 	return org.LLMDisconnectedAt, nil
 }
 
+// cardProbe is what the probe phase learned, handed to apply: the connection
+// draft it probed and the probe's result, and the stored connection it judged
+// against (nil when none), so apply can tell a connection changed underneath.
+type cardProbe struct {
+	draft  *connectionDraft
+	result ProbeResult
+	basis  *OrgModelConnection
+	check  *orgconfig.LLMCheck
+}
+
 // probe validates the card's part of p WITHOUT writing anything: the patch is
 // judged against the org's current state (so a refusal costs no live probe),
-// then every new credential is probed against Anthropic. A failure is a
-// SectionError naming the section to fix; nothing is written by any section.
-func (s *AgentSettingsService) probe(ctx context.Context, ocOrgID string, p orgconfig.ConfigPatch) error {
+// then the connection is probed against its endpoint and a new subscription
+// token against Anthropic. A failure is a SectionError naming the section to
+// fix; nothing is written by any section.
+func (s *AgentSettingsService) probe(ctx context.Context, ocOrgID string, p orgconfig.ConfigPatch) (cardProbe, error) {
 	state, err := s.currentState(ctx, ocOrgID)
 	if err != nil {
-		return err
+		return cardProbe{}, err
 	}
 	eff, err := judgeCard(state, s.runtimes, p)
 	if err != nil {
-		return err
+		return cardProbe{}, err
 	}
-	if eff.writeKey != "" {
-		if err := s.creds.ValidateKey(ctx, AnthropicRoleDefault, eff.writeKey); err != nil {
-			return sectionErrorFrom("llm", err)
+	out := cardProbe{basis: state.conn}
+	if eff.writeConn != nil {
+		res, err := s.conns.probe(ctx, ocOrgID, *eff.writeConn)
+		if err != nil {
+			return cardProbe{}, sectionErrorFrom("llm", err)
 		}
+		check := s.conns.check(*eff.writeConn, res)
+		out.draft, out.result, out.check = eff.writeConn, res, &check
 	}
 	if eff.writeToken != "" {
-		if err := s.creds.ValidateKey(ctx, AnthropicRoleCoding, eff.writeToken); err != nil {
-			return sectionErrorFrom("agents", err)
+		if err := s.creds.ValidateKey(ctx, eff.writeToken); err != nil {
+			return cardProbe{}, sectionErrorFrom("agents", err)
 		}
 	}
-	return nil
+	return out, nil
+}
+
+// testConnection probes the connection w describes, merged over the saved one,
+// without writing anything: POST /config/llm/test. The same merge and refusals
+// as a save's llm section; a body that changes nothing tests the saved
+// connection with its stored key.
+func (s *AgentSettingsService) testConnection(ctx context.Context, ocOrgID string, w orgconfig.LLMPatch) (orgconfig.LLMCheck, error) {
+	stored, err := s.conns.stored(ctx, ocOrgID)
+	if err != nil {
+		return orgconfig.LLMCheck{}, fmt.Errorf("model connection test: %w", err)
+	}
+	draft, _, err := draftConnection(stored, w)
+	if err != nil {
+		return orgconfig.LLMCheck{}, sectionErrorFrom("llm", err)
+	}
+	slog.InfoContext(ctx, "model connection test", "org", ocOrgID, "host", draft.Host, "format", draft.Format)
+	if len(runtimesFor(draft.Format, s.runtimes)) == 0 {
+		return orgconfig.LLMCheck{}, sectionErrorFrom("llm", errFormatHasNoRuntime(draft.Format, s.runtimes))
+	}
+	res, err := s.conns.probe(ctx, ocOrgID, draft)
+	if err != nil {
+		return orgconfig.LLMCheck{}, sectionErrorFrom("llm", err)
+	}
+	return s.conns.check(draft, res), nil
 }
 
 // apply saves the card's part of p as ONE transaction under the org's card
-// lock. The patch is judged again inside it, against the rows it is about to
+// locks. The patch is judged again inside it, against the rows it is about to
 // write over, so a concurrent save cannot slip a state between probe and write
-// that the rule would refuse. The SM-API copies follow the commit, best-effort,
-// and never decide whether the save happened.
-func (s *AgentSettingsService) apply(ctx context.Context, ocOrgID, actor string, p orgconfig.ConfigPatch) error {
+// that the rule would refuse; a connection that changed since it was probed
+// is a conflict, never a write of an unprobed connection. The SM-API copies
+// follow the commit, best-effort, and never decide whether the save happened.
+func (s *AgentSettingsService) apply(ctx context.Context, ocOrgID, actor string, p orgconfig.ConfigPatch, probed cardProbe) error {
 	var (
 		eff           cardEffects
-		before, after *modelconn.Connection        // the org's connection either side of the save
-		forgotten     = map[AnthropicRole]string{} // role → SM-API ref name of a deleted credential
+		before, after *modelconn.Connection // the org's connection either side of the save
+		forgotToken   string                // SM-API ref name of a deleted subscription
+		forgotKey     string                // SM-API ref name of a deleted connection key
 	)
 	err := s.card.Tx(ctx, func(tx AgentsCardTx) error {
-		if err := tx.AdvisoryLock("org_anthropic:" + ocOrgID); err != nil {
-			return fmt.Errorf("agents card: lock: %w", err)
+		for _, lock := range []string{cardLockPrefixOld + ocOrgID, cardLockPrefix + ocOrgID} {
+			if err := tx.AdvisoryLock(lock); err != nil {
+				return fmt.Errorf("agents card: lock: %w", err)
+			}
 		}
 		state, err := stateInTx(tx, ocOrgID)
 		if err != nil {
@@ -165,37 +237,38 @@ func (s *AgentSettingsService) apply(ctx context.Context, ocOrgID, actor string,
 		if eff, err = judgeCard(state, s.runtimes, p); err != nil {
 			return err
 		}
-		before, after = connectionsAround(state, eff)
-		// Deletes first: the token goes before the key it sits beside.
-		for _, del := range []struct {
-			on   bool
-			role AnthropicRole
-		}{{eff.deleteToken, AnthropicRoleCoding}, {eff.deleteKey, AnthropicRoleDefault}} {
-			if !del.on {
-				continue
-			}
-			ref, existed, err := s.creds.deleteKeyTx(ctx, tx, ocOrgID, del.role)
+		if eff.writeConn != nil && !probed.covers(*eff.writeConn, state.conn) {
+			return sectionErrorFrom("llm", &ConflictError{Reason: "the model connection changed while this save was being tested; save again"})
+		}
+		now := s.now().UTC()
+		// Deletes first: the token goes before the connection it sits beside.
+		if eff.deleteToken {
+			ref, existed, err := s.creds.deleteKeyTx(ctx, tx, ocOrgID, AnthropicRoleCoding)
 			if err != nil {
 				return err
 			}
-			if existed && ref != "" {
-				forgotten[del.role] = ref
+			if existed {
+				forgotToken = ref
 			}
 		}
-		if eff.deleteKey {
-			now := s.now().UTC()
+		var written *OrgModelConnection
+		switch {
+		case eff.deleteConn:
+			if forgotKey, err = s.conns.deleteTx(ctx, tx, ocOrgID); err != nil {
+				return err
+			}
 			if err := tx.SetKeyDisconnectedAt(ocOrgID, &now); err != nil {
 				return fmt.Errorf("agents card: record disconnect: %w", err)
 			}
-		}
-		if eff.writeKey != "" {
-			if err := s.creds.writeKeyTx(ctx, tx, ocOrgID, AnthropicRoleDefault, eff.writeKey); err != nil {
+		case eff.writeConn != nil:
+			if written, err = s.conns.writeTx(ctx, tx, ocOrgID, actor, *eff.writeConn, probed.result, state.conn, now); err != nil {
 				return err
 			}
 			if err := tx.SetKeyDisconnectedAt(ocOrgID, nil); err != nil {
 				return fmt.Errorf("agents card: clear disconnect: %w", err)
 			}
 		}
+		before, after = connectionsAround(state, eff, written)
 		if eff.writeToken != "" {
 			if err := s.creds.writeKeyTx(ctx, tx, ocOrgID, AnthropicRoleCoding, eff.writeToken); err != nil {
 				return err
@@ -208,7 +281,7 @@ func (s *AgentSettingsService) apply(ctx context.Context, ocOrgID, actor string,
 		}
 		if eff.settings != nil {
 			row := *eff.settings
-			row.OcOrgID, row.UpdatedBy, row.UpdatedAt = ocOrgID, actor, s.now().UTC()
+			row.OcOrgID, row.UpdatedBy, row.UpdatedAt = ocOrgID, actor, now
 			if err := tx.UpsertSettings(&row); err != nil {
 				return fmt.Errorf("agents card: write setting: %w", err)
 			}
@@ -219,24 +292,44 @@ func (s *AgentSettingsService) apply(ctx context.Context, ocOrgID, actor string,
 		return err
 	}
 
-	for role, ref := range forgotten {
-		s.creds.forgetKey(ctx, ocOrgID, role, ref)
+	if forgotToken != "" {
+		s.creds.forgetKey(ctx, ocOrgID, AnthropicRoleCoding, forgotToken)
 	}
-	if eff.writeKey != "" {
-		s.creds.mirrorKey(ctx, ocOrgID, AnthropicRoleDefault, eff.writeKey)
+	s.conns.forgetKey(ctx, ocOrgID, forgotKey)
+	writtenKey := ""
+	if eff.writeConn != nil {
+		writtenKey = eff.writeConn.Key
 	}
-	s.creds.syncModelProvider(ctx, ocOrgID, before, after, eff.writeKey)
+	if writtenKey != "" {
+		s.conns.mirrorKey(ctx, ocOrgID, writtenKey)
+	}
+	s.creds.syncModelProvider(ctx, ocOrgID, before, after, writtenKey)
 	if eff.writeToken != "" {
 		s.creds.mirrorKey(ctx, ocOrgID, AnthropicRoleCoding, eff.writeToken)
 	}
 	return nil
 }
 
+// covers reports whether this probe vouches for writing draft over stored: it
+// probed the same draft, against the same stored connection (the same key on
+// the same host, last saved at the same moment).
+func (p cardProbe) covers(draft connectionDraft, stored *OrgModelConnection) bool {
+	if p.draft == nil || *p.draft != draft {
+		return false
+	}
+	if (p.basis == nil) != (stored == nil) {
+		return false
+	}
+	return stored == nil || (p.basis.Host == stored.Host && p.basis.KeyPreview == stored.KeyPreview &&
+		p.basis.UpdatedAt.Equal(stored.UpdatedAt))
+}
+
 // currentState reads the card's state from the pool, for the probe phase.
 func (s *AgentSettingsService) currentState(ctx context.Context, ocOrgID string) (cardState, error) {
 	return readCardState(
 		func() (*OrgAgentSettings, error) { return s.settings.GetByOrg(ctx, ocOrgID) },
-		func(role AnthropicRole) (bool, error) { return s.creds.Holds(ctx, ocOrgID, role) },
+		func() (*OrgModelConnection, error) { return s.conns.stored(ctx, ocOrgID) },
+		func() (bool, error) { return s.creds.Holds(ctx, ocOrgID, AnthropicRoleCoding) },
 	)
 }
 
@@ -244,8 +337,9 @@ func (s *AgentSettingsService) currentState(ctx context.Context, ocOrgID string)
 func stateInTx(tx AgentsCardTx, ocOrgID string) (cardState, error) {
 	return readCardState(
 		func() (*OrgAgentSettings, error) { return tx.GetSettings(ocOrgID) },
-		func(role AnthropicRole) (bool, error) {
-			row, err := tx.GetCredential(ocOrgID, role)
+		func() (*OrgModelConnection, error) { return tx.GetConnection(ocOrgID) },
+		func() (bool, error) {
+			row, err := tx.GetCredential(ocOrgID, AnthropicRoleCoding)
 			return row != nil, err
 		},
 	)
@@ -253,20 +347,20 @@ func stateInTx(tx AgentsCardTx, ocOrgID string) (cardState, error) {
 
 // readCardState assembles a cardState from one source's reads, so the probe
 // phase and the transaction judge the patch against the same shape of state.
-func readCardState(settings func() (*OrgAgentSettings, error), holds func(AnthropicRole) (bool, error)) (cardState, error) {
+func readCardState(settings func() (*OrgAgentSettings, error), conn func() (*OrgModelConnection, error), holdsToken func() (bool, error)) (cardState, error) {
 	row, err := settings()
 	if err != nil {
 		return cardState{}, fmt.Errorf("agents card: setting: %w", err)
 	}
-	hasKey, err := holds(AnthropicRoleDefault)
+	c, err := conn()
 	if err != nil {
-		return cardState{}, fmt.Errorf("agents card: key: %w", err)
+		return cardState{}, fmt.Errorf("agents card: connection: %w", err)
 	}
-	hasToken, err := holds(AnthropicRoleCoding)
+	hasToken, err := holdsToken()
 	if err != nil {
 		return cardState{}, fmt.Errorf("agents card: subscription: %w", err)
 	}
-	return cardState{settings: row, hasKey: hasKey, hasToken: hasToken}, nil
+	return cardState{settings: row, conn: c, hasToken: hasToken}, nil
 }
 
 func subscriptionProjectionFrom(p *AnthropicProjection) *orgconfig.SubscriptionProjection {

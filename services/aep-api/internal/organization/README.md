@@ -4,7 +4,7 @@
 
 Bring a tenant org onto the platform (JIT onboarding + the phantom-OU trust guard) and own every
 per-org, org-keyed record that configures its integrations — GitHub credential, the AI agents card
-(Anthropic key, model, coding runtime, Claude subscription), IDP publisher — all fronted by the
+(the model connection, coding runtime, Claude subscription), IDP publisher — all fronted by the
 consolidated `/config` resource.
 
 ```mermaid
@@ -13,20 +13,22 @@ flowchart LR
   CB(["/connect/callback"]) -.-> CORE
   S2S(["/internal/v1"]) -.-> CORE
   subgraph organization
-    SL["slices — getconfig · patchconfig · connect/disconnect · rotate/discover idp · listorgs"]
+    SL["slices — getconfig · patchconfig · testllm · connect/disconnect · rotate/discover idp · listorgs"]
     CORE["config orchestrator + credential / anthropic / model-connection / idp / org services"]
     SL --> CORE
-    CORE --> DB[("organizations · org_credentials · org_anthropic_credentials · org_agent_settings · organization_idp_profiles")]
+    CORE --> DB[("organizations · org_credentials · org_model_connections · org_anthropic_credentials · org_agent_settings · organization_idp_profiles")]
   end
   CORE -->|AppInstallOps · IssueService| SC[[sourcecontrol]]
   CORE -->|CredentialStore · Resolver| SEC[[platform/secrets]]
   CORE -->|publisher app · OU| THUNDER(["Thunder"])
+  CORE -->|model probe, netguard, no redirects| MODEL(["the org's model endpoint"])
 ```
 
 ## Slices
 | Slice | Use-case | Entry |
 |---|---|---|
 | `getconfig` `patchconfig` | read / atomic multi-section write of the org config | `GET`+`PATCH .../config` |
+| `testllm` | probe a model connection without saving it (rationed: 10 per org per minute) | `POST .../config/llm/test` |
 | `connectgithub` `disconnectgithub` | start GitHub App connect / disconnect cascade | `POST .../config:connect-git-provider` etc. |
 | `rotateidp` `discoveridp` | rotate the publisher client secret / OIDC discovery | `POST .../config:rotate-idp-secret` etc. |
 | `listorgs` | enumerate orgs (tenant-gate carve-out — no org ctx) | `GET /organizations` |
@@ -41,16 +43,19 @@ services, the raw connect-callback controller, and the S2S credentials-refresh.*
 | `CredentialStore` · `Resolver` · `AppTokenMinter` | needs | `platform/secrets` — sealed git-token/anthropic store, credential resolution |
 | `thundersvc` · `secretmanagersvc` | needs | publisher-app CRUD + OU check · secret-ref mirror |
 | `OrganizationService` · `CredentialService` · `AnthropicCredentialService` · `IDPService` | offers | `delivery` (coding identity/publisher) · `sourcecontrol` (credential resolution) · the edge (dev secret-ref resync) |
-| `ModelConnectionService` — `ConnectionReader` · `CodingCredentialResolver` | offers | the app root (the spec agents' and task planning's connection + key per turn; Agent Manager's provider key) · `projects` (ai-agent model access) · `delivery` (the coding credential; the evaluation key) |
-| `AgentSettingsService` | offers | `delivery` (the run's model + runtime) · `ModelConnectionService` (the connection's model) |
+| `ModelConnectionService` — `ConnectionReader` · `CodingCredentialResolver` | offers | the app root (the spec agents' and task planning's connection + key per turn; Agent Manager's provider key) · `projects` (ai-agent model access) · `delivery` (the coding credential and the connection's model; the evaluation key) |
+| `RateCard` | needs | `platform/modelcost` (the boot-time `Stamper`) — whether `(host, model)` is priced, for `llm.priced` |
+| `AgentSettingsService` | offers | `delivery` (the run's runtime) |
 | `CredentialsRefreshService` | offers | the S2S runner-refresh op (edge projects it onto `igen.RefreshResponse`) |
 
 ## Owns
 - `organizations` (+ `thunder_org_uuid`, `llm_disconnected_at`), `org_credentials`,
-  `org_anthropic_credentials` (keyed `(oc_org_id, role)` — the `default` API key and the optional
-  `coding` Claude subscription), `org_agent_settings` (one row per org, absent = the platform defaults),
-  `organization_idp_profiles` + `idp_audit_events` — gorm + entities in this domain (`entity_*.go` over
-  `repository_*.go`), single write-authority.
+  `org_model_connections` (one row per org, absent = no connection: format, base URL, host, model, auth
+  scheme, probed limits and image input, key preview; the key's bytes in `org_secrets` `anthropic/key`),
+  `org_anthropic_credentials` (the optional `coding` Claude subscription only — CHECK
+  `org_anthropic_credentials_subscription_only`), `org_agent_settings` (the runtime; one row per org,
+  absent = the platform default), `organization_idp_profiles` + `idp_audit_events` — gorm + entities in
+  this domain (`entity_*.go` over `repository_*.go`), single write-authority.
 
 ## Invariants — don't break
 - **The phantom-OU trust guard** (`ouIsTrustworthy`): reject a JWT `ouId` ONLY when a wired validator
@@ -60,48 +65,53 @@ services, the raw connect-callback controller, and the S2S credentials-refresh.*
   503 — the edge assigns it directly, no `OrEmpty`.
 - The `/config` PATCH is an **atomic multi-section** apply; sections are three-state `patch.Field`.
 - **The AI agents card** (`llm` + `agents`, [ADR-0036](../../../../docs/decisions/ADR-0036-the-coding-credential-is-a-subscription.md)):
-  - One save is ONE transaction under the per-org `org_anthropic:<org>` advisory lock, covering the
-    credential rows, `org_agent_settings` and the `org_secrets` bytes (`repository_agents_card.go`).
-    A failure anywhere writes nothing. `AgentSettingsService` is the only writer of credential rows.
-  - One rule, judged on the state the patch leaves (`judgeCard`), before the probes and again in the
-    transaction: a Claude subscription needs `claude-code` and a connected API key. `opencode`,
-    `llm: null` and `agents: null` delete the token in the same save; a token the end state cannot
-    use, or a blank key or token, is refused on its section.
-  - The `default` role holds an API key only, the `coding` role a subscription token only (CHECK
-    `org_anthropic_credentials_role_kind`; `ValidateKey` refuses the wrong kind before any probe).
-  - `agents` is never null on the wire: the platform defaults until someone chooses, `updatedBy`
-    telling the two apart. `null` on the PATCH resets (row and token deleted); omitted fields keep
-    the stored value. `AgentRuntimes` / `AgentModels` are pinned against the contract's enums.
-  - A runtime is never substituted. `agents.model` is the one model every agent uses: the spec
-    agents resolve it per turn, a coding run copies it at dispatch.
-  - Only a runtime the installation can run is selectable. `AgentSettingsService` is handed the
-    runnable set by the app root (Claude Code always, OpenCode when `AGENT_RUNNER_IMAGE_OPENCODE`
-    is set), projects it as `agents.availableRuntimes`, and `judgeCard` refuses a write NAMING
-    any other (`agents_runtime_unavailable`). An org already on a lost runtime still reads, saves
-    its model, and can move off it; its dispatches fail naming the missing image.
-  - The `AgentModel` enum is the set the platform can PRICE: offering a model is a `model_rates` row
-    and a contract change together (`modelcost.SumCost` is all-or-nothing per cycle).
-  - `llm_disconnected_at` is the only trace of a disconnected key; projected as `llmDisconnectedAt`
-    while `llm` is null, cleared by the next key save.
-  - The SM-API copy is mirrored after commit, best-effort. A credential save clears the row's
-    `secret_ref_*` triplet, so a failed mirror fails dispatch closed instead of mounting the previous
-    credential; a deleted credential's copy is deleted after commit, and an orphaned copy is
-    accepted (nothing reads it, the next save of that role overwrites it).
+  - One save is ONE transaction under the per-org advisory locks `org_anthropic:<org>` then
+    `org_model:<org>` (both names, old then new, so replicas of different releases never hold
+    different locks), covering the connection row, the subscription row, `org_agent_settings` and the
+    `org_secrets` bytes (`repository_agents_card.go`). A failure anywhere writes nothing.
+    `AgentSettingsService` is the only writer of these rows.
+  - `llm` is patched field by field (`model_connection_rule.go`): first connect needs `kind` and
+    `apiKey` (the URL and model default from `modelconn.Formats`, so `{kind: anthropic, apiKey}`
+    connects); a host change needs a new key; a format change on the same host keeps it; keys under 12
+    characters are refused; an https URL with no userinfo, query or fragment, a path-less Anthropic URL
+    gaining `/v1`. The `sk-ant-` shape and subscription-token refusal apply only on `api.anthropic.com`.
+  - One rule, judged on the state the patch leaves (`judgeCard`), before the probe and again in the
+    transaction: a format needs a runtime this installation runs; Claude Code needs the Anthropic
+    format; the subscription needs `claude-code` and `claudeSubscription` (Anthropic's own API), and a
+    save that leaves either deletes it; `llm: null` deletes the connection, its bytes and the token.
+  - The probe (`model_probe.go`, one prober per format) runs before the transaction whenever the key,
+    URL, format or model changes, through `netguard` with NO redirects (a redirect is
+    `llm_unreachable`; Go forwards `x-api-key` across one). It lists models, and proves the key with
+    one `max_tokens=1` request when the listing is missing or public (Ollama's is). 401 on x-api-key
+    earns one Bearer retry; a rate-limit-shaped 429 proves the key (warning `provider_limit`), a bare
+    429 is `llm_unexpected_status`; 5xx is `llm_upstream_error` (502). On `ollama.com` it reads
+    `/api/show` for the context window and vision. An unlisted model is a warning, not a refusal. The
+    apply refuses (409) a connection that changed since it was probed.
+  - A stored connection is usable by construction: there is no status and nothing revalidates.
+  - `agents` is never null on the wire: the platform default runtime until someone chooses,
+    `updatedBy` telling the two apart. `null` on the PATCH resets (row and token deleted).
+  - A runtime is never substituted. Only a runtime the installation can run is selectable
+    (`agents.availableRuntimes`, `agents_runtime_unavailable`); `llmFormats[].runtimes` says which
+    runtimes here run each format.
+  - `llm_disconnected_at` is the only trace of a disconnected connection; projected as
+    `llmDisconnectedAt` while `llm` is null, cleared by the next connection save.
+  - The SM-API copies are mirrored after commit, best-effort. A save that writes a key clears the
+    row's `secret_ref_*` triplet (a save that keeps the key keeps it), so a failed mirror fails
+    dispatch closed instead of mounting the previous key; a deleted credential's copy is deleted after
+    commit, and an orphaned copy is accepted.
   - Exactly one credential reaches a coding run. `ResolveCodingCredential(ctx, org, runtime)` is
     the single statement of which: the subscription only on `claude-code`, else the connection key,
     failing closed on an unusable subscription. It answers with a kind and the connection, never a
-    variable name; dispatch (`codingagent/model_env.go`) maps that to the runner's env. Every other
-    reader is default-only.
+    variable name; dispatch (`codingagent/model_env.go`) maps that to the runner's env.
   - Generated agents run only where `modelconn.CapabilitiesOf` says `GeneratedAgents` (Anthropic's
     own API) until their follow-up. On any other connection the Agent Manager provider gets no key,
     and its copy of the previous one is cleared once, after commit, on the save that moved off
     (`syncModelProvider`); ai-agent components start unconfigured and builds run without evaluation.
 - **The model connection is read only through `ModelConnectionService`** (`model_connection_service.go`):
-  a `modelconn.Connection` (format, base URL, host, model, auth scheme) beside the key's bytes
-  (`Effective`), its vault reference (`KeyRef`) or the coding credential (`ResolveCodingCredential`).
-  It is built from the `default` row and `org_agent_settings.model`, so it is the Anthropic format on
-  `api.anthropic.com` with an `x-api-key` key. No consumer outside this domain reads the credential
-  rows for a key.
+  a `modelconn.Connection` (format, base URL, host, model, auth scheme, limits, image input) beside the
+  key's bytes (`Effective`), its vault reference (`KeyRef`) or the coding credential
+  (`ResolveCodingCredential`), all from `org_model_connections`. No consumer outside this domain reads
+  the rows for a key.
 - **Publisher SecretReference for coding Jobs is fail-closed on `POST /build`.**
   `ProvisionPublisherForBuild` (actor `build-provision`) ensures the Thunder publisher app and stamps
   `secret_ref_name` while the console JWT is on ctx. A missing or disabled `SecretRefWriter` returns

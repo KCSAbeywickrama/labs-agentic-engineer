@@ -18,22 +18,21 @@ package migrate_test
 
 import (
 	"context"
+	"net/url"
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/migrate"
 	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
 	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/modelcost"
-	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 )
 
-// Every model an organization can pick as its coding model must have a seeded
-// rate row: cost stamping is all-or-nothing per capture, so one offered model
-// without a rate blanks the whole cycle's cost on every run that touches it.
-// The contract says "a model is offered only once the
-// platform can price it"; this is the executable half of that sentence, over
-// the real migrated schema.
-func TestEveryOfferedCodingModelIsPriced_DB(t *testing.T) {
+// Every format's default connection must be priced: an org that connects
+// with the defaults would otherwise see tokens only from its first turn. A
+// format with no default host has no default connection to price. This is the
+// executable half of "the default model is one the platform seeds a rate for",
+// over the real migrated schema.
+func TestEveryDefaultConnectionIsPriced_DB(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
 
@@ -42,9 +41,16 @@ func TestEveryOfferedCodingModelIsPriced_DB(t *testing.T) {
 		t.Fatalf("load model rates: %v", err)
 	}
 	stamper := modelcost.NewStamper(rows)
-	for _, model := range orgconfig.AgentModels {
-		if stamper.Cost(modelcost.Tokens{Host: modelconn.AnthropicHost, ModelID: model, InputTokens: 1_000_000}) == nil {
-			t.Errorf("offered model %q has no seeded model_rates row", model)
+	for _, f := range modelconn.Formats {
+		if f.DefaultBaseURL == "" {
+			continue
+		}
+		u, err := url.Parse(f.DefaultBaseURL)
+		if err != nil {
+			t.Fatalf("format %s default URL: %v", f.Format, err)
+		}
+		if !stamper.Priced(u.Hostname(), f.DefaultModel) {
+			t.Errorf("format %s: default (%s, %s) has no seeded model_rates row", f.Format, u.Hostname(), f.DefaultModel)
 		}
 	}
 }

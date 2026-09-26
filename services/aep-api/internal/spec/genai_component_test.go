@@ -282,6 +282,9 @@ func (f *fakeAgents) turns(t *testing.T) int {
 type memTurnRepo struct {
 	mu   sync.Mutex
 	rows []*spec.AgentTurn
+	// contextReads counts LastContextTokens calls: a connection with no
+	// context window must never make one.
+	contextReads int
 }
 
 func (m *memTurnRepo) SumUsageByProject(context.Context, string) (map[string]contracts.StampedUsage, error) {
@@ -329,6 +332,7 @@ func (m *memTurnRepo) Finish(_ context.Context, id string, term spec.TurnTermina
 			r.Message = term.Message
 			r.Code = term.Code
 			r.ResetAt = term.ResetAt
+			r.ContextTokens = term.ContextTokens
 			if len(term.Paths) > 0 {
 				b, _ := json.Marshal(term.Paths)
 				r.Paths = string(b)
@@ -413,6 +417,19 @@ func (m *memTurnRepo) LastTerminal(_ context.Context, orgID, projectID, conversa
 	return &cp, nil
 }
 
+func (m *memTurnRepo) LastContextTokens(_ context.Context, orgID, projectID, conversationID string) (*int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.contextReads++
+	var last *int64
+	for _, r := range m.rows { // insertion order == creation order
+		if r.OrgID == orgID && r.ProjectID == projectID && r.ConversationID == conversationID && r.ContextTokens != nil {
+			last = r.ContextTokens
+		}
+	}
+	return last, nil
+}
+
 func (m *memTurnRepo) SweepStale(_ context.Context, olderThan time.Time) ([]spec.AgentTurn, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -484,6 +501,9 @@ type genaiRig struct {
 	// knobs read at request time
 	key   string
 	model string
+	// contextWindow is the connection's stated window; nil (the default) is
+	// first-party Anthropic, where the runtime knows the model.
+	contextWindow *int
 }
 
 // rigOption tweaks the rig before the service is wired.
@@ -618,12 +638,13 @@ func newGenaiRig(t *testing.T, seed map[string]string, opts ...rigOption) *genai
 		Git:   sourcecontrol.NewGitOpsService(stubResolver{}, fx.Engine),
 		LLM: func(context.Context, string) (spec.AgentLLM, error) {
 			return spec.AgentLLM{Key: rig.key, Connection: modelconn.Connection{
-				Format:     modelconn.FormatAnthropic,
-				BaseURL:    modelconn.AnthropicBaseURL,
-				Host:       modelconn.AnthropicHost,
-				Model:      rig.model,
-				AuthScheme: modelconn.AuthXAPIKey,
-				ImageInput: modelconn.Unknown,
+				Format:        modelconn.FormatAnthropic,
+				BaseURL:       modelconn.AnthropicBaseURL,
+				Host:          modelconn.AnthropicHost,
+				Model:         rig.model,
+				AuthScheme:    modelconn.AuthXAPIKey,
+				ContextWindow: rig.contextWindow,
+				ImageInput:    modelconn.Unknown,
 			}}, nil
 		},
 		Client:        client,

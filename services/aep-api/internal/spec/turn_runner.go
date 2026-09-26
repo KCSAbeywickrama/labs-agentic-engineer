@@ -390,6 +390,10 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 	// with, when it could name the failure; it is still relayed like any
 	// other part, so an attached reader sees it live.
 	var agentErr *agentfold.TurnError
+	// contextTokens is the context the conversation held at the last model
+	// step's end — the turn's closing context size, which the rotation check
+	// reads on the next send (context_rotation.go).
+	var contextTokens *int64
 	var foldErr error
 	end, readErr := agentfold.ForEachDataFrame(&pulseReader{r: body, activity: activity}, func(raw []byte) error {
 		var part agentfold.StreamPart
@@ -402,6 +406,11 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		}
 		if te, ok := agentfold.TurnErrorOf(part); ok && knownTurnErrorCode(te.Code) {
 			agentErr = &te
+		}
+		if part.Type == agentfold.PartFinishStep {
+			if n, ok := agentfold.StepContextOf(raw); ok {
+				contextTokens = &n
+			}
 		}
 		s.broker.Append(job.turnID, raw)
 		if roomMode {
@@ -439,7 +448,7 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 			NoChanges:   true,
 			SpecEdited:  !manifest.IsEmpty(),
 			EditedPaths: manifest.MutatedPaths(),
-		}, manifest)
+		}, manifest, contextTokens)
 	}
 
 	switch {
@@ -468,12 +477,12 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 		slog.ErrorContext(ctx, "genai: FOLD PARITY FAILURE — turn rejected, main untouched",
 			"turn", job.turnID, "error", err)
 		// The model DID run — a parity-rejected turn still burnt its tokens.
-		return withUsage(failedTerminal(turnReasonFoldParity, err.Error(), nil), manifest)
+		return withUsage(failedTerminal(turnReasonFoldParity, err.Error(), nil), manifest, contextTokens)
 	}
 	if manifest.IsEmpty() {
 		// A chat turn with no file ops: valid, completes with no commit. The
 		// terminal still carries the base sha as the "content as of" pin.
-		return withUsage(TurnTerminal{Status: turnStatusCompleted, CommitSHA: job.baseRef, NoChanges: true}, manifest)
+		return withUsage(TurnTerminal{Status: turnStatusCompleted, CommitSHA: job.baseRef, NoChanges: true}, manifest, contextTokens)
 	}
 	// Every genai turn is conversational/preview-only (#373 — the old
 	// commit-on-turn useCases are gone): file mutations stream to the client
@@ -482,7 +491,7 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 	// fold is reported like a no-op completion (base sha pinned, noChanges),
 	// so a refetch on the terminal reconciles the live preview back to the
 	// unchanged tree.
-	return withUsage(TurnTerminal{Status: turnStatusCompleted, CommitSHA: job.baseRef, NoChanges: true}, manifest)
+	return withUsage(TurnTerminal{Status: turnStatusCompleted, CommitSHA: job.baseRef, NoChanges: true}, manifest, contextTokens)
 }
 
 // noManifestTerminal is the failed terminal of a stream that ended without a
@@ -504,10 +513,17 @@ func noManifestTerminal(end agentfold.StreamEnd, agentErr *agentfold.TurnError) 
 	return failedTerminal(turnReasonStreamDied, msg, nil)
 }
 
-// withUsage stamps the manifest's token spend (#249) onto a terminal. A nil
-// manifest or a manifest without usage (pre-capture agents) leaves it unset.
-func withUsage(term TurnTerminal, m *agentfold.Manifest) TurnTerminal {
-	if m == nil || m.Usage == nil {
+// withUsage stamps the manifest's token spend (#249) and the turn's closing
+// context size onto a terminal. A nil manifest leaves both unset: without it
+// the agents service saved nothing into the conversation, so the context the
+// steps reached is not the history the next turn reads. A manifest without
+// usage (pre-capture agents) leaves the spend unset.
+func withUsage(term TurnTerminal, m *agentfold.Manifest, contextTokens *int64) TurnTerminal {
+	if m == nil {
+		return term
+	}
+	term.ContextTokens = contextTokens
+	if m.Usage == nil {
 		return term
 	}
 	term.Usage = &contracts.TokenUsage{
