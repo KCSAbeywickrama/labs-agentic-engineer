@@ -105,7 +105,7 @@ func init() {
 	initCmd.Flags().StringVar(&initPlatformRelease, "platform-release", "aep-platform", "Helm release name for the platform chart")
 	initCmd.Flags().StringVar(&initPlatformNamespace, "namespace", "wso2-aep", "Kubernetes namespace")
 	initCmd.Flags().StringVar(&initConsoleURL, "console-url", "http://console.ae.localhost:8080", "Public URL of the AEP console")
-	initCmd.Flags().StringVar(&initAPIURL, "api-url", "http://api.openchoreo.localhost:8080", "Public URL of the AEP API")
+	initCmd.Flags().StringVar(&initAPIURL, "api-url", "http://console.ae.localhost:8080", "Public base aep-api builds user-facing links on (GitHub App redirect, Settings page); the console's origin, which proxies the API")
 	initCmd.Flags().StringVar(&initBuildPlaneNamespace, "build-plane-namespace", "openchoreo-workflow-plane", "Namespace of the OpenChoreo build/workflow plane (must already exist, incl. its image registry)")
 	initCmd.Flags().StringVar(&initRegistryService, "registry-service", "registry", "Name of the build-plane image registry Service (the coding-agent build pushes/pulls here)")
 	initCmd.Flags().StringVar(&initOCNamespace, "oc-namespace", "", "Namespace where OpenChoreo control-plane is installed (overrides config)")

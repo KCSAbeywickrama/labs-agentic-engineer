@@ -18,7 +18,8 @@ OpenChoreo + ThunderID cluster, then hands off to the `aectl` CLI.
 # 1. One-shot bring-up — cluster + platform, via aectl (idempotent)
 make dev-env
 # Console: http://console.ae.localhost:8080
-# aep-api: kubectl -n wso2-aep port-forward svc/aep-api 9090:9090
+# aep-api: http://console.ae.localhost:8080/aep-api-service/ (the console proxies it)
+# Try it:  http://tryit.ae.localhost:8080
 
 # 2. Edit source, then run this to rebuild + redeploy just the changed image(s)
 make dev-update

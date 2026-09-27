@@ -143,9 +143,9 @@ both are per-org, which is why bring-up doesn't ask for them:
   run is billed to. There is no platform fallback, so nothing generates until
   it's connected.
 
-Reach the BFF with `kubectl -n wso2-aep port-forward svc/aep-api 9090:9090`
-(`skaffold run`'s one-shot model doesn't hold a port-forward open the way
-`skaffold dev` would). See
+Reach the BFF through the console, which proxies it:
+`http://console.ae.localhost:8080/aep-api-service/` (e.g. `…/healthz`), or
+directly with `kubectl -n wso2-aep port-forward svc/aep-api 9090:9090`. See
 [`deployments/README.md`](deployments/README.md)'s "Orphaned-but-kept" section
 — a couple of manifests the shared Helm chart already references by name
 aren't applied by `aectl platform install` yet, which affects builds and
