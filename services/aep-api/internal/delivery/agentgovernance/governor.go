@@ -134,11 +134,13 @@ type Deps struct {
 type Governor struct {
 	deps Deps
 
-	// mu guards pushedKey and tracingExpiry.
+	// mu guards providerFingerprint and tracingExpiry.
 	mu sync.Mutex
-	// pushedKey remembers, per org, a FINGERPRINT of the provider this process
-	// last wrote to Agent Manager: the key, the upstream, the template and the
-	// auth header — everything a connection switch changes.
+	// providerFingerprint remembers, per org, a FINGERPRINT of the provider
+	// this process last wrote to Agent Manager successfully: the key, the
+	// upstream, the template and the auth header — everything a connection
+	// switch changes. A failed write records nothing, so the next deploy
+	// writes again.
 	//
 	// It exists to stop a needless write. Updating a provider redeploys every
 	// LLM proxy bound to it — twelve redeploys per governed deploy in a
@@ -156,7 +158,7 @@ type Governor struct {
 	// deploy. A saved connection still pushes immediately through the
 	// organization domain's own path, and changes the fingerprint here on the
 	// next deploy.
-	pushedKey map[string]string
+	providerFingerprint map[string]string
 
 	// tracingExpiry remembers, per (org, component, environment), when the
 	// tracing token this process last minted runs out.
@@ -166,7 +168,8 @@ type Governor struct {
 	// read), so nothing can ask what token an agent holds or when it lapses —
 	// the only moment the expiry is knowable is the mint that produced it.
 	//
-	// In memory, for the same reason and with the same trade as pushedKey: the
+	// In memory, for the same reason and with the same trade as
+	// providerFingerprint: the
 	// first governed deploy after a restart mints once more than it strictly
 	// needed to. That costs nothing here — a tracing token is a signed JWT that
 	// Agent Manager keeps no record of, so a second one neither revokes the
@@ -178,29 +181,36 @@ type Governor struct {
 
 // New builds the governor.
 func New(d Deps) *Governor {
-	return &Governor{deps: d, pushedKey: map[string]string{}, tracingExpiry: map[string]int64{}}
+	return &Governor{deps: d, providerFingerprint: map[string]string{}, tracingExpiry: map[string]int64{}}
 }
 
-// credentialChanged reports whether the provider this org's connection
-// describes differs from the one this process last wrote, and records it.
+// providerFingerprintOf is the fingerprint of the provider `in` describes.
 //
 // The key alone is not enough: a connection switch that kept the key (the
 // same Ollama key on another format) or changed only the host would leave the
 // provider calling the old upstream, with the old template, under the old
 // header. The fields are NUL-separated so no two different providers can
 // concatenate to the same bytes.
-func (g *Governor) credentialChanged(org string, in agentmanager.EnsureProviderInput) bool {
+func providerFingerprintOf(in agentmanager.EnsureProviderInput) string {
 	sum := sha256.Sum256([]byte(strings.Join(
 		[]string{in.APIKey, in.UpstreamURL, in.Template, in.AuthHeader}, "\x00")))
-	fp := hex.EncodeToString(sum[:])
+	return hex.EncodeToString(sum[:])
+}
 
+// providerChanged reports whether the provider fingerprinted `fp` differs from
+// the one this process last wrote for this org.
+func (g *Governor) providerChanged(org, fp string) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.pushedKey[org] == fp {
-		return false
-	}
-	g.pushedKey[org] = fp
-	return true
+	return g.providerFingerprint[org] != fp
+}
+
+// providerWritten records that Agent Manager now holds the provider
+// fingerprinted `fp`. Called only once the write succeeded.
+func (g *Governor) providerWritten(org, fp string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.providerFingerprint[org] = fp
 }
 
 // GovernAgent makes Agent Manager's view of this agent true AND settles its
@@ -307,12 +317,16 @@ func (g *Governor) register(ctx context.Context, in delivery.GovernAgentInput) (
 	if err != nil {
 		return registration{}, delivery.GovernAgentOutcome{}, err
 	}
-	providerIn.ReassertCredential = g.credentialChanged(in.OrgID, providerIn)
+	fp := providerFingerprintOf(providerIn)
+	providerIn.ReassertCredential = g.providerChanged(in.OrgID, fp)
 
 	amp := g.deps.AMP.For(binding.AdminURL)
 	provider, err := amp.EnsureProvider(ctx, providerIn)
 	if err != nil {
 		return registration{}, delivery.GovernAgentOutcome{}, fmt.Errorf("ensure LLM provider: %w", err)
+	}
+	if providerIn.ReassertCredential {
+		g.providerWritten(in.OrgID, fp)
 	}
 
 	// ONE name for all three calls below. The agent record, its model binding

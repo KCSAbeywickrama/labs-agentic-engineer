@@ -737,13 +737,47 @@ func TestGovernTheFirstWriteAfterARestartIsTheSameBody(t *testing.T) {
 	}
 }
 
+// A provider write that failed is not remembered: the next deploy writes the
+// provider again, or Agent Manager keeps the old upstream, template and header
+// until the process restarts.
+func TestGovernRetriesAProviderWriteThatFailed(t *testing.T) {
+	amp := newFakeAMP()
+	g := New(Deps{Endpoints: &fakeEndpoints{}, AMP: amp, Keys: &fakeKeyStore{}, Bindings: fakeBindings{}, Connections: &fakeConnections{}})
+
+	amp.err = errors.New("agent manager: 503")
+	if _, err := g.GovernAgent(context.Background(), input()); err == nil {
+		t.Fatal("GovernAgent succeeded over a failed provider write")
+	}
+	amp.err = nil
+	if _, err := g.GovernAgent(context.Background(), input()); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if len(amp.puts) != 2 || !amp.providerIn.ReassertCredential {
+		t.Fatalf("provider writes = %d, last reassert = %v; the retry must re-send the provider",
+			len(amp.puts), amp.providerIn.ReassertCredential)
+	}
+
+	if _, err := g.GovernAgent(context.Background(), input()); err != nil {
+		t.Fatalf("third: %v", err)
+	}
+	if len(amp.puts) != 2 {
+		t.Error("re-asserted after the successful retry — the success must be remembered")
+	}
+}
+
 // The fingerprint map must never hold the credential itself.
 func TestGovernorRemembersAFingerprintNotTheKey(t *testing.T) {
-	g := New(Deps{})
-	g.credentialChanged("acme", agentmanager.EnsureProviderInput{APIKey: "sk-ant-secret-value"})
-	for org, fp := range g.pushedKey {
+	g := New(Deps{Endpoints: &fakeEndpoints{}, AMP: newFakeAMP(), Keys: &fakeKeyStore{}, Bindings: fakeBindings{},
+		Connections: &fakeConnections{key: "sk-ant-secret-value"}})
+	if _, err := g.GovernAgent(context.Background(), input()); err != nil {
+		t.Fatalf("GovernAgent: %v", err)
+	}
+	if len(g.providerFingerprint) != 1 {
+		t.Fatalf("remembered %d provider(s), want 1", len(g.providerFingerprint))
+	}
+	for org, fp := range g.providerFingerprint {
 		if strings.Contains(fp, "sk-ant") {
-			t.Errorf("pushedKey[%q] = %q — that is the key, not a fingerprint", org, fp)
+			t.Errorf("providerFingerprint[%q] = %q — that is the key, not a fingerprint", org, fp)
 		}
 	}
 }

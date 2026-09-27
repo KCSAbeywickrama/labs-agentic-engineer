@@ -200,7 +200,7 @@ func (p ampModelProviderPublisher) PublishOrgModelConnection(ctx context.Context
 	// THIS path always re-asserts, and it is the one place that must.
 	//
 	// The govern stage writes the provider only when its fingerprint changed
-	// (agentgovernance.Governor.credentialChanged). A save that changed the
+	// (agentgovernance.Governor.providerChanged). A save that changed the
 	// key, URL, format or auth is exactly the case where it DID change, and it
 	// is reached from the organization domain, which holds no fingerprint of
 	// its own — so it says so explicitly rather than relying on a later deploy
