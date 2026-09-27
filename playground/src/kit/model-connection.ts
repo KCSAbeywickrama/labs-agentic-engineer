@@ -107,6 +107,13 @@ const CONNECTION_VARS = [
 ] as const;
 
 /**
+ * Every variable a coding run's connection arrives under, its key included: what
+ * a run that names no connection must not carry, since the runner reads a bare
+ * `AEP_MODEL_API_KEY` as a key for Anthropic's own API.
+ */
+export const CODING_CONNECTION_ENV = [...CONNECTION_VARS, "AEP_MODEL_WEB_SEARCH", "AEP_MODEL_API_KEY"] as const;
+
+/**
  * The connection env a local CODING run is given, or undefined when no
  * `AEP_MODEL_*` names one (the run is then on Anthropic's own API).
  *

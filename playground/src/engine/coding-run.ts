@@ -72,7 +72,7 @@ import {
 import { createAgentTags, type AgentTags } from "./agent-tags.js";
 import { openCrewPane } from "./crew-pane.js";
 import { REPO_ROOT } from "../paths.js";
-import { codingConnectionEnv } from "../kit/model-connection.js";
+import { CODING_CONNECTION_ENV, codingConnectionEnv } from "../kit/model-connection.js";
 import { DEFAULT_RUNTIME, runtimeNameFromEnv, UnsupportedRuntimeError, type RuntimeName } from "remote-worker/src/runtime/port.js";
 
 const LOCAL_ENTRY = join(REPO_ROOT, "runners", "remote-worker", "src", "local.ts");
@@ -540,11 +540,14 @@ interface Invocation {
  * asking this run to authenticate with it, and host mode's default has to stay
  * "the developer's own login" for the reason above: a bypassPermissions process
  * on a developer's filesystem should not silently acquire a shared credential
- * because a file elsewhere happened to define one.
+ * because a file elsewhere happened to define one. The same holds for
+ * `AEP_MODEL_API_KEY`: it is withheld unless `AEP_MODEL_*` names a connection,
+ * because the runner reads a bare one as a key for Anthropic's own API.
  *
  *   host                 → nothing; `claude login` answers
  *   host --api-key       → AEP_CODING_ANTHROPIC_KEY, else ANTHROPIC_API_KEY
  *   docker               → AEP_CODING_ANTHROPIC_KEY, else ANTHROPIC_API_KEY
+ *   either, connection   → AEP_MODEL_API_KEY only (as `dockerInvocation`)
  *
  * See ADR-0016 for the platform half.
  */
@@ -556,13 +559,22 @@ export function hostInvocation(opts: CodingRunOptions, runDir: string): Invocati
   // resolves to is reported by `hostToolAdvice`, not patched here.
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    // A connection named by `AEP_MODEL_*` rides as a dispatch stamps it; its key
-    // is the developer's `AEP_MODEL_API_KEY`, already in this env.
-    ...codingConnectionEnv(),
     AEP_LOCAL_PROJECT_DIR: opts.projectDir,
     AEP_LOCAL_RUN_DIR: runDir,
     AEP_LOCAL_SKILLS_DIR: opts.skillsDir,
   };
+  // A connection named by `AEP_MODEL_*` rides as a dispatch stamps it and
+  // authenticates with ITS key, the developer's `AEP_MODEL_API_KEY`, already in
+  // this env — never an Anthropic credential, which must not follow the run to
+  // another host.
+  const connection = codingConnectionEnv();
+  if (connection) {
+    Object.assign(env, connection);
+    delete env.ANTHROPIC_API_KEY;
+    delete env.CLAUDE_CODE_OAUTH_TOKEN;
+    return { command: "npx", args: ["tsx", LOCAL_ENTRY], env };
+  }
+  for (const name of CODING_CONNECTION_ENV) delete env[name];
   const coding = opts.useApiKey ? codingCredential() : undefined;
   if (coding) {
     applyCodingCredential(env, coding);
