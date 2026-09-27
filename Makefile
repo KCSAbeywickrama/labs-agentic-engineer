@@ -48,7 +48,7 @@ LICENSE_HEADER := .github/license-header.txt
 LICENSE_MATCH = grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
 	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/|(^|/)\.(agents|claude)/'
 
-.PHONY: install gen build dev test lint eval-ui typecheck license license-check tools clean eval cover build-runner workflow-skill deadcode-ts deadcode-ts-check manifests-check dev-env dev-update bal-library-tool
+.PHONY: install gen build dev test lint eval-ui typecheck license license-check tools clean eval cover build-runner workflow-skill deadcode-ts deadcode-ts-check manifests-check dev-env dev-update dev-runner bal-library-tool
 
 install:
 	$(PNPM) install
@@ -259,14 +259,30 @@ dev-update:
 		ghcr.io/wso2/aep/collab:dev-local \
 		ghcr.io/wso2/aep/aep-mcp-server:dev-local \
 		ghcr.io/wso2/aep/console:dev-local \
+		ghcr.io/wso2/aep/tryit:dev-local \
 		--cluster openchoreo
 	helm upgrade aep-platform deployments/helm-charts/platform -n wso2-aep --reuse-values \
 		--set aepApi.image.repository=ghcr.io/wso2/aep/aep-api --set aepApi.image.tag=dev-local \
 		--set aepAgents.image.repository=ghcr.io/wso2/aep/agents --set aepAgents.image.tag=dev-local \
 		--set collab.image.repository=ghcr.io/wso2/aep/collab --set collab.image.tag=dev-local \
 		--set aepMcpServer.image.repository=ghcr.io/wso2/aep/aep-mcp-server --set aepMcpServer.image.tag=dev-local \
-		--set console.image.repository=ghcr.io/wso2/aep/console --set console.image.tag=dev-local
-	kubectl -n wso2-aep rollout restart deployment/aep-api deployment/aep-agents deployment/collab-server deployment/aep-mcp-server deployment/aep-console
+		--set console.image.repository=ghcr.io/wso2/aep/console --set console.image.tag=dev-local \
+		--set tryIt.image.repository=ghcr.io/wso2/aep/tryit --set tryIt.image.tag=dev-local
+	kubectl -n wso2-aep rollout restart deployment/aep-api deployment/aep-agents deployment/collab-server deployment/aep-mcp-server deployment/aep-console deployment/aep-tryit
+
+# Builds the coding-agent runner images from this checkout (Claude Code and
+# OpenCode, deployments/scripts/build-runner.sh), imports them into k3d, and
+# points the aep-platform release at them. The chart's defaults are the
+# released ghcr image and no OpenCode image, which takes OpenCode off the
+# runtime menu. Run after `make dev-env`, and again after changing
+# runners/remote-worker or a package it bakes in (agent-eval, web-search,
+# skills, bal-library-tool). Like dev-update, --reuse-values keeps aectl's
+# settings; the image values change, so Helm rolls aep-api by itself.
+dev-runner:
+	FORCE=1 bash deployments/scripts/build-runner.sh
+	helm upgrade aep-platform deployments/helm-charts/platform -n wso2-aep --reuse-values \
+		--set codingAgentRunner.image=aep-runner:dev \
+		--set codingAgentRunner.opencodeImage=aep-runner-opencode:dev
 
 clean:
 	$(TURBO) run build --force >/dev/null 2>&1 || true

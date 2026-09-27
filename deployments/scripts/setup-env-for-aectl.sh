@@ -143,11 +143,19 @@ done
 docker info >/dev/null 2>&1 || { echo "❌ Docker is not running"; exit 1; }
 
 # ============================================================================
-# Step 1: Create the cluster (official page, Step 1 — unchanged)
+# Step 1: Create the cluster (official page, Step 1; K3D_FIX_DNS=0 on Colima)
 # ============================================================================
 echo ""
 echo "1️⃣  Creating the k3d cluster"
 if ! k3d cluster list "${CLUSTER_NAME}" >/dev/null 2>&1; then
+    # The one deviation in this step: on Colima, k3d's DNS fix points the node's
+    # resolver at the VM gateway, whose DNAT to Docker's embedded DNS never
+    # answers inside the k3s node, so containerd cannot pull even the pause
+    # image and every pod sits in ContainerCreating. K3D_FIX_DNS=0 keeps Docker's
+    # embedded DNS. https://github.com/k3d-io/k3d/issues/1449
+    if docker info --format '{{.Name}}' 2>/dev/null | grep -qi colima; then
+        export K3D_FIX_DNS=0
+    fi
     curl -fsSL "${RAW}/install/k3d/single-cluster/config.yaml" | k3d cluster create --config=-
 else
     echo "⏭️  Cluster '${CLUSTER_NAME}' already exists"

@@ -22,6 +22,10 @@ make dev-env
 
 # 2. Edit source, then run this to rebuild + redeploy just the changed image(s)
 make dev-update
+
+# 3. Build the coding-agent runner images (Claude Code + OpenCode) from this
+#    checkout and point the release at them; again after a runner change
+make dev-runner
 ```
 
 `make dev-env` builds `tools/aectl` as `aectl-skaffold` (git-ignored — this
