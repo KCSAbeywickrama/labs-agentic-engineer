@@ -14,10 +14,9 @@ agent adoption.
   plaintext URL, and both the local and in-cluster URLs are plaintext.
   Instead `aep-mcp-server` applies the shared handoff credential itself as
   `AEP_MCP_DEFAULT_BEARER` (`Bearer <AEP_MCP_TOKEN>`), and `aep-api` verifies
-  it as `SRE_HANDOFF_TOKEN`. Locally, `setup-aep.sh` generates `AEP_MCP_TOKEN`
-  into `deployments/.env` and `docker-compose.yml` wires both services from
-  it. On Kubernetes, the platform chart's `sreHandoff.enabled=true` wires both
-  from the `aep/aep-mcp-token` OpenBao path and restricts `aep-mcp-server`
+  it as `SRE_HANDOFF_TOKEN`. The platform chart's `sreHandoff.enabled=true`
+  wires both from the `aep/aep-mcp-token` OpenBao path (locally,
+  `deployments/scripts/setup-sre.sh` seeds it and enables the block) and restricts `aep-mcp-server`
   ingress to the SRE agent's pods in its namespace. See
   `docs/developer-guide/sre-handoff-security.md`.
 - `remediation/CONTEXT.md` is the unconditional handoff trigger.

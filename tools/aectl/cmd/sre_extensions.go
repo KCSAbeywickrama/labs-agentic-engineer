@@ -114,8 +114,7 @@ func hasSREAssets(dir string) bool {
 
 // sreMCPURLPlaceholder is the token remediation/mcp.json carries for the MCP
 // URL. The SRE extension loader validates the URL before it expands env vars,
-// so the placeholder is rendered here rather than left to AEP_MCP_URL; this
-// matches deployments/scripts/setup-observability.sh.
+// so the placeholder is rendered here rather than left to AEP_MCP_URL.
 const sreMCPURLPlaceholder = "${AEP_MCP_URL}"
 
 // renderMCPJSON substitutes the concrete MCP URL for sreMCPURLPlaceholder.

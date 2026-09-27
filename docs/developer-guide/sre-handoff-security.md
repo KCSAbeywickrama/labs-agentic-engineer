@@ -33,16 +33,13 @@ deduplication, recurrence, adoption, dispatch, and human-attention state.
 - While the fallback is on, any caller that reaches `aep-mcp-server` acts
   with the handoff's rights (list/create issues in `SRE_HANDOFF_ORG`), so
   each deployment limits who can reach the port.
-- Local dev wires it in `deployments/docker-compose.yml` from one
-  `AEP_MCP_TOKEN` variable, which `setup-aep.sh` generates at random into
-  `deployments/.env` and preserves across re-runs. There is no built-in
-  default: unset or empty disables the shortcut on both services. An
-  explicit empty `AEP_MCP_TOKEN=` survives re-runs, so a disabled shortcut
-  stays disabled; deleting the line and re-running `setup-aep.sh` generates
-  a new token (rotation). The compose port (`3401`) is published so the k3d
-  SRE pod can reach it through `host.k3d.internal`, which also makes it
-  reachable from the host's network; keep the local stack on a trusted
-  network, or set `AEP_MCP_TOKEN=` when the handoff is not needed.
+- Local dev (`make dev-env WITH_SRE=1`) uses the k8s wiring in the next bullet:
+  `deployments/scripts/setup-sre.sh` generates a random value at
+  `aep/aep-mcp-token` once, keeps it across re-runs, and enables
+  `sreHandoff`. There is no built-in default. To rotate it, write a new
+  value with `aectl platform secret import --path aep/aep-mcp-token`, then
+  restart `aep-api` and `aep-mcp-server` once `aep-sre-handoff-secrets`
+  refreshes, since both read it only at pod start.
 - A full k8s install wires it through `deployments/helm-charts/platform`:
   `values.yaml`'s `sreHandoff` block (`enabled`, default `false`; `org`;
   `callerNamespace`; `callerPodLabels`), an `ExternalSecret` in
