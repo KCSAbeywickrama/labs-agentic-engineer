@@ -41,6 +41,7 @@ on:
       - 'runners/remote-worker/**'
       - 'services/**'
       - 'apps/console/**'
+      - 'apps/tryit/**'
       - 'packages/**'
       - 'skills/**'
       - 'deployments/single-cluster/resource-types/thunder-app/operator/**'
@@ -56,7 +57,7 @@ jobs:
     name: build changed images
     runs-on: ubuntu-latest
     # A budget, not just a ceiling: the images build in sequence in one slot,
-    # and a shared-input change builds all eight. remote-worker is the outlier
+    # and a shared-input change builds all nine. remote-worker is the outlier
     # — it compiles the `bal library` tool, installs a JDK and a chromium,
     # smoke-tests the browser, and does half of that under emulation; the
     # release has measured its two-platform build at 28 min cold, and the other
@@ -108,6 +109,7 @@ jobs:
             "collab|.|services/collab/Dockerfile|||"
             "aep-mcp-server|.|services/aep-mcp-server/Dockerfile|||"
             "console|.|apps/console/Dockerfile|||"
+            "tryit|.|apps/tryit/Dockerfile|||"
             "thunder-app-operator|deployments/single-cluster/resource-types/thunder-app/operator|deployments/single-cluster/resource-types/thunder-app/operator/Dockerfile|||"
           )
 
