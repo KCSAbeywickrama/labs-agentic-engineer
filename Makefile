@@ -147,10 +147,9 @@ deadcode-ts:
 deadcode-ts-check:
 	$(PNPM) run deadcode-ts:check
 
-# Local-dev helper (not a uniform verb): build + k3d-import the runner image
-# (one image, both task kinds). setup-aep.sh runs this automatically at setup;
-# use it to force a rebuild after changing runners/remote-worker/Dockerfile or
-# the runner's TS — `make build-runner FORCE=1`.
+# Local-dev helper (not a uniform verb): build + k3d-import the runner images
+# only — `make build-runner FORCE=1` to rebuild over an existing tag. The
+# release keeps its images until `make dev-runner` points it at them.
 build-runner:
 	FORCE=$(FORCE) bash deployments/scripts/build-runner.sh
 

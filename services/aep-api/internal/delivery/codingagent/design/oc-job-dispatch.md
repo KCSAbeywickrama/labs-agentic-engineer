@@ -159,15 +159,12 @@ contract. The connection rides as plain env (`AEP_MODEL_FORMAT`,
 `AEP_MODEL_CONTEXT_WINDOW` / `AEP_MODEL_OUTPUT_LIMIT` where the connection states
 them, never on `api.anthropic.com`), and the credential as one secret ref:
 `CLAUDE_CODE_OAUTH_TOKEN` for a subscription, `ANTHROPIC_API_KEY` for a key on
-Anthropic's own API (the name every Job carried before the connection, so an
-older runner image still reads a first-party Job), `AEP_MODEL_API_KEY` for a key
-on any other host. Each runtime adapter maps that to what its binary reads. They
+Anthropic's own API, `AEP_MODEL_API_KEY` for a key on any other host. Each runtime adapter maps that to what its binary reads. They
 are **copied, not referenced**: a
 change applies from the next cycle, because a run that re-read the setting halfway through would leave a feed
 whose model names disagree with the tokens they were billed for. The dispatch
 also writes the connection's host on the cycle, so its usage is priced on
-`(host, model)`. An org that never chose a runtime gets the platform default,
-which is exactly what every dispatch carried before the setting existed — but a
+`(host, model)`. An org that never chose a runtime gets the platform default, but a
 resolver that ERRORS fails the dispatch rather than falling back, since the org
 did choose something and launching on the default would bill it for a runtime
 it moved off without ever saying so. An org with no model connection fails the

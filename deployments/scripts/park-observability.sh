@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# scripts/park-observability.sh — park (scale to zero) or restore the heavy
+# deployments/scripts/park-observability.sh — park (scale to zero) or restore the heavy
 # workloads of the observability plane, without uninstalling anything.
 #
 # Usage: bash deployments/scripts/park-observability.sh [down|up|status]   (default: status)

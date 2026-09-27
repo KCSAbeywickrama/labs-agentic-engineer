@@ -93,9 +93,9 @@ Agent Manager has no generic OpenAI-compatible template, but both `openai` and
 `anthropic` take any upstream, so the connection supplies everything a
 template's own metadata would default. The Bearer prefix is written by AEP:
 Agent Manager's API does not apply a template's `valuePrefix` (its console adds
-it in the browser). For Anthropic's own API this is exactly the provider AEP
-declared before connections had formats — `anthropic`, `https://api.anthropic.com`,
-`x-api-key` — and the contract tests hold those bytes.
+it in the browser). For Anthropic's own API the provider is `anthropic`,
+`https://api.anthropic.com`, `x-api-key`, and the contract tests hold those
+bytes.
 
 **The handle stays `aep-<org>-anthropic` on every format.** A new handle is a
 new provider, the publisher client has no delete scope to remove the old one,
@@ -107,9 +107,10 @@ and every bound agent would rebind. Only the display name
 redeploy is the window in which a proxy can lose the keys broadcast to it. So:
 
 - The govern stage writes it when its fingerprint of key, upstream, template
-  and auth header changed. The fingerprint is in memory: the first governed
-  deploy after a restart (or an upgrade) writes once, a PUT of the same body,
-  and the map is warm again.
+  and auth header changed. The fingerprint is in memory and recorded only
+  once the write succeeds: the first governed deploy after a restart writes
+  once, a PUT of the same body, and a failed write is retried by the next
+  deploy.
 - A Settings save that changes the key, URL, format or auth scheme publishes
   the connection at once, post-commit and best-effort
   (`organization.ModelProviderPublisher`). A save that keeps the key sends the
@@ -151,12 +152,10 @@ aep-api runs more than one replica and a deploy may land on one that never
 stored the key. The record is written after the secret, never before, so a
 failure between the two costs a spare rotation, never a stale URL.
 
-**No record beside a stored key is treated as moved**: that key was stored
-before endpoints were recorded, beside a URL nothing can read. Each such agent
-rotates once, on its first governed deploy after the table exists — one
-rotation per governed (agent, environment) at upgrade, spread over their next
-deploys, never repeated. Switches between hosts on the same base path (most of
-them: `/v1`) move nothing.
+**No record beside a stored key is treated as moved**: the URL stored beside
+that key cannot be read, so the agent rotates once, on its next governed
+deploy, and the record is written. Switches between hosts on the same base path
+(most of them: `/v1`) move nothing.
 
 ## What the pod receives
 
@@ -188,10 +187,9 @@ agent's own proxy path plus the connection's base path (`/v1`, `/api/v1`,
   `/v1/v1/…`, also 404. The ungoverned path hands the agent the connection's
   base URL, so both end in the same segment.
 
-Composition could read `MODEL_ENDPOINT` from `ai_agent_model_endpoints` as a
-literal instead of the secret's `url`, since the endpoint is not secret and is
-now recorded where it can be read. It does not today; the secret stays the one
-source the pod is composed from.
+Composition reads `MODEL_ENDPOINT` from the secret's `url`, not from
+`ai_agent_model_endpoints`: the secret is the one source the pod is composed
+from.
 
 Any doubt on the composition side resolves to "not governed", which falls back
 to the org's key. That is the safe direction: an ungoverned agent works, while

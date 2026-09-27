@@ -102,7 +102,7 @@ here: they're the open `console` + `feature` issues.
   model with a per-format default, plus optional **Test connection**; Save
   probes anyway. The info box and the Claude Code tile are drawn from the
   server's `capabilities` and `priced` (where prompts go, pricing, web search,
-  attachments, the generated-agents gate); the Claude subscription is a token
+  attachments); the Claude subscription is a token
   field inside the Claude Code tile, offered only on Anthropic's own API.
   Onboarding step 2 is **Connect a model**, the same card; a removed connection
   re-gates with *Your model connection was disconnected*. The chat's attach

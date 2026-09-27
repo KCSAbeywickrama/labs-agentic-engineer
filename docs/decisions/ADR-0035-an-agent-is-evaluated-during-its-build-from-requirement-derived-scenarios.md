@@ -2,8 +2,11 @@
 
 **Status:** Accepted · 2026-08-23 · **shipped dormant** as of 2026-09-23: the
 harness and the scenario file exist, and every build skips evaluation because
-nothing sets `AEP_AGENT_EVAL=on` (the `agent-building` skill's gate). Turning
-it on, and proving a run end to end, is follow-up work.
+nothing sets `AEP_AGENT_EVAL=on` (the `agent-building` skill's gate). It was
+switched off when the harness forwarded only `MODEL_API_KEY`, failing every
+agent that also needs `MODEL_ENDPOINT` and `MODEL_NAME` at boot; it now forwards
+the whole `MODEL_*` connection. Turning it on, and proving a run end to end, is
+follow-up work.
 
 ## Context
 

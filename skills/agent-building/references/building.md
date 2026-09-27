@@ -865,13 +865,6 @@ const { authorization } = callContext.getStore() ?? {};
 > PR description that evaluation was skipped because it is disabled here. The
 > scenario file is still authored at design time, so nothing else changes and
 > turning this back on is a one-word change to this line.
->
-> Why it was switched off: the harness booted the agent with only
-> `MODEL_API_KEY` forwarded, so an agent that also needs `MODEL_ENDPOINT` and
-> `MODEL_NAME` failed at boot and scored 0/6 for a reason that had nothing to
-> do with its behaviour. The harness now forwards the whole `MODEL_*`
-> connection, so that reason is gone; turning evaluation on is the
-> deployment's decision.
 
 Once `npm run build` exits 0, and before the PR, run the agent's scenarios
 against the agent you just built. `specs/validation/agent-scenarios.json` was

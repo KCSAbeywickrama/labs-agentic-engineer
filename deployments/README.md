@@ -92,8 +92,7 @@ worked around here.
   it is for Thunder (`design/two-tier-thunder.md`): `aep-api` reads it to
   decide whether an environment is governed at all, and an environment without
   one deploys agents straight onto the org's model connection, as before Agent
-  Manager existed. `scripts/verify-convergence.sh` check 15 asserts it is bound and
-  ACTIVE. What aep-api then does with it is
+  Manager existed. What aep-api then does with it is
   `services/aep-api/internal/delivery/agentgovernance/design/governed-model-access.md`.
 
 ## What was removed from the previous v1
@@ -156,7 +155,7 @@ this repo's own bootstrap anymore. Check `skaffold/defaults.yaml` and
 `deployments/scripts/setup-env-for-aectl.sh`'s own output for current
 credentials on a given cluster.
 
-For GitHub repo provisioning, connect a PAT (or GitHub App) at **Settings → GitHub Integration**.
+For GitHub repo provisioning, connect a PAT (or GitHub App) at **Settings → Credentials → GitHub**.
 For AI generation, connect a model on the **AI agents** card under **Settings → Credentials** (Anthropic's API or any public https endpoint speaking the Anthropic or OpenAI-compatible format) — per-org, with no platform fallback.
 
 ## Tear down

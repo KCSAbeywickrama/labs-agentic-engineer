@@ -130,13 +130,14 @@ deployment.
 The console is at **http://console.ae.localhost:8080**. Sign in with
 the ThunderID admin account `setup-env-for-aectl.sh` creates
 (`admin` / `Admin@123` by default — see that script's output).
-If your OS doesn't resolve `*.localhost`, point `console.ae.localhost`
-and `thunder.openchoreo.localhost` at `127.0.0.1` in `/etc/hosts`.
+If your OS doesn't resolve `*.localhost`, point `console.ae.localhost`,
+`tryit.ae.localhost` and `thunder.openchoreo.localhost` at `127.0.0.1` in
+`/etc/hosts`.
 
 Before the first project, connect the organization's credentials in the console —
 both are per-org, which is why bring-up doesn't ask for them:
 
-- **Settings → GitHub Integration** — the PAT (or GitHub App) that specs,
+- **Settings → Credentials → GitHub** — the PAT (or GitHub App) that specs,
   component repos, issues and PRs are created under.
 - **Settings → Credentials → AI agents** — the model connection (Anthropic Messages or
   OpenAI-compatible: format, base URL, key, model) every agent turn and coding

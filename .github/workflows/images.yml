@@ -61,7 +61,7 @@ jobs:
     # — it compiles the `bal library` tool, installs a JDK and a chromium,
     # smoke-tests the browser, and does half of that under emulation; the
     # release has measured its two-platform build at 28 min cold, and the other
-    # seven follow it here rather than run beside it. remote-worker-opencode
+    # eight follow it here rather than run beside it. remote-worker-opencode
     # comes right after it and reuses every shared layer from this builder. Raise this rather than trim
     # an image if a cold all-images run legitimately grows past it.
     timeout-minutes: 90

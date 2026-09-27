@@ -1546,11 +1546,11 @@ never reach the copy except as what a connection supports.
 |---|---|
 | Section | **Model connection** · *Every agent uses this connection and model: requirements, design, task planning and coding.* |
 | Fields | **API format** (**Anthropic Messages** · **OpenAI-compatible**) · **Base URL** · **API key** · **Model** |
-| Model help | *Default for this format: \<model\>. Use the exact model ID your provider documents.* |
+| Model help | *Default for this format: \<model\> (\<note\>). Use the exact model ID your provider documents.* — the note only where the format has one (OpenAI-compatible: *Ollama's model ID*) |
 | Action | **Test connection** — optional; Save (onboarding: **Continue**) probes anyway |
 | Card chip | **ready** · **not connected** — two states only; a saved connection is usable by construction |
 | Probe status | *Connected to \<host\> · \<model\> is available*; unlisted and unlisting endpoints warn, never refuse |
-| Info box | where prompts go, then pricing (*Usage shows tokens, not dollars: the platform has no rate for \<model\>.*), web search, chat attachments, and the generated-agents gate |
+| Info box | where prompts go, then pricing (*Usage shows tokens, not dollars: the platform has no rate for \<model\>. Your provider bills you directly.*), web search and chat attachments |
 | Disconnect | **Disconnect the model connection?** · *Every agent stops until a new connection is saved.* |
 | Disconnected (onboarding) | *Your model connection was disconnected* · *Agents cannot run until a connection is saved.* |
 | Chat, an image the model cannot read | *\<file\> was not attached — \<model\> does not read images. Describe it in text, or switch to a model that reads images.* |
