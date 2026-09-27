@@ -48,7 +48,7 @@ LICENSE_HEADER := .github/license-header.txt
 LICENSE_MATCH = grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
 	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/|(^|/)\.(agents|claude)/'
 
-.PHONY: install gen build dev test lint eval-ui typecheck license license-check tools clean eval cover build-runner workflow-skill deadcode-ts deadcode-ts-check manifests-check dev-env dev-update dev-runner bal-library-tool
+.PHONY: install gen build dev test lint eval-ui typecheck license license-check tools clean eval cover build-runner workflow-skill deadcode-ts deadcode-ts-check manifests-check dev-env dev-update dev-runner obs-park obs-unpark obs-status bal-library-tool
 
 install:
 	$(PNPM) install
@@ -219,11 +219,26 @@ dev-env:
 	./tools/aectl/aectl-skaffold platform config import --config skaffold/defaults.yaml
 	ANTHROPIC_API_KEY=none AEP_THUNDER_ADMIN_CLIENT_SECRET=ae-install-client-secret \
 		./tools/aectl/aectl-skaffold platform install --addons=all --platform-version=latest --platform-chart=deployments/helm-charts/platform
-	@if [ "$${WITH_AGENT_MANAGER:-1}" = "1" ]; then \
-		bash deployments/scripts/setup-agent-manager.sh; \
-	else \
+	@if [ "$${WITH_AGENT_MANAGER:-1}" != "1" ]; then \
 		echo "⏭️  Skipping Agent Manager (WITH_AGENT_MANAGER=0)"; \
+	elif [ "$${WITH_OBSERVABILITY:-1}" != "1" ]; then \
+		echo "⏭️  Skipping Agent Manager: it installs against the observability plane (WITH_OBSERVABILITY=0)"; \
+	else \
+		bash deployments/scripts/setup-agent-manager.sh; \
 	fi
+	@if [ "$${WITH_OBSERVABILITY:-1}" = "1" ]; then \
+		bash deployments/scripts/park-observability.sh down; \
+	fi
+
+# The observability plane's heavy half (OpenSearch, Prometheus, collectors,
+# adapters): `make dev-env` installs it running and parks it last. Unpark to
+# read traces, metrics or archived logs, between builds on an 8 GiB VM.
+obs-park:
+	bash deployments/scripts/park-observability.sh down
+obs-unpark:
+	bash deployments/scripts/park-observability.sh up
+obs-status:
+	bash deployments/scripts/park-observability.sh status
 
 # Edit source, then run this: builds only the images whose dependencies
 # changed and loads them into k3d (skaffold.yaml — build-only, tagged

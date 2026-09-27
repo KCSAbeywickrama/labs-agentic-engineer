@@ -36,6 +36,15 @@ itself), then runs `aectl-skaffold platform config import` (against
 `skaffold/defaults.yaml`) and `aectl-skaffold platform install --addons=all
 --platform-version=latest --platform-chart deployments/helm-charts/platform`.
 
+The observability plane is installed running, because Agent Manager's charts
+install against it, and `make dev-env` parks its heavy half (OpenSearch,
+Prometheus, collectors, adapters) as its last step. Parked, Agent Manager's
+trace and metric views and the console's archived cycle logs are empty; live
+logs and everything else work. `make obs-unpark` brings it back and
+`make obs-park` parks it again: unpark between builds on an 8 GiB VM, where
+the plane and a coding Job together overload the node. `WITH_OBSERVABILITY=0
+make dev-env` skips the plane, and with it Agent Manager.
+
 No model key is needed to bring this up: every agent runs on the calling
 org's model connection (format, base URL, key, model), connected in the
 console's welcome step or on Settings' **AI agents** card, and there is no

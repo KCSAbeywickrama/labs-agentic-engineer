@@ -89,7 +89,9 @@ BOOTSTRAP_CM="${BOOTSTRAP_CM:-openchoreo-thunderid-bootstrap}"
 
 # Renames Agent Manager's forked build templates during the step 5 install.
 # See the file itself for which five move and why the others may not.
-FORKED_TEMPLATE_RENAMER="prefix-forked-workflow-templates.py"
+FORKED_TEMPLATE_RENAMER_DIR="$INPUTS_DIR/forked-template-renamer"
+FORKED_TEMPLATE_RENAMER="$FORKED_TEMPLATE_RENAMER_DIR/prefix-forked-workflow-templates.py"
+FORKED_TEMPLATE_RENAMER_PLUGIN="aep-prefix-forked-workflow-templates"
 
 AMP_NS="wso2-amp"
 OBS_NS="openchoreo-observability-plane"
@@ -167,8 +169,8 @@ command -v helm >/dev/null || fail "helm not found on PATH."
 command -v python3 >/dev/null || fail "python3 not found on PATH." "Used to compose the bootstrap ConfigMap."
 python3 -c 'import yaml' 2>/dev/null \
     || fail "python3 cannot import yaml (PyYAML)." "The bootstrap merge (step 3) and the workflow-template post-renderer (step 5) both parse YAML."
-[ -x "$INPUTS_DIR/$FORKED_TEMPLATE_RENAMER" ] \
-    || fail "Missing or non-executable $INPUTS_DIR/$FORKED_TEMPLATE_RENAMER." "Step 5 runs it as a Helm post-renderer; chmod +x it."
+[ -x "$FORKED_TEMPLATE_RENAMER" ] \
+    || fail "Missing or non-executable $FORKED_TEMPLATE_RENAMER." "Step 5 runs it as a Helm post-renderer; chmod +x it."
 
 # ── ThunderID's own object names ────────────────────────────────────────────
 # A hostname is a name, not an address: the public URL is what tokens are
@@ -373,12 +375,31 @@ DP_INGRESS_HOST="${DP_INGRESS_HOST:-openchoreoapis.localhost}"
 # prefixes Agent Manager's copies instead of adopting OpenChoreo's, because the
 # forks differ: Agent Manager's checkout-source has no ssh-privatekey branch,
 # so adopting it would drop SSH git authentication from every AEP build.
+# Two Helm 4 differences meet in this release:
+#   - Helm 3 takes the post-renderer as an executable's path; Helm 4 only as an
+#     installed postrenderer/v1 plugin, and refuses a path as "plugin not
+#     found". The plugin is reinstalled on every run so it is always this
+#     checkout's script.
+#   - Helm 4 applies server-side, and refuses to take DeploymentPipeline/default
+#     and the environment over from the field manager that wrote them
+#     ("kubectl-client-side-apply" for the getting-started samples). Taking
+#     them over is the point of step 4's hand-over, so --force-conflicts. Helm 3
+#     has no such flag and no such check.
+post_renderer="$FORKED_TEMPLATE_RENAMER"
+takeover=()
+if helm version --short 2>/dev/null | grep -q '^v[4-9]'; then
+    takeover=(--force-conflicts)
+    helm plugin uninstall "$FORKED_TEMPLATE_RENAMER_PLUGIN" >/dev/null 2>&1 || true
+    helm plugin install "$FORKED_TEMPLATE_RENAMER_DIR" >/dev/null \
+        || fail "Could not install the $FORKED_TEMPLATE_RENAMER_PLUGIN Helm plugin." "Step 5's post-renderer runs as a plugin on Helm 4."
+    post_renderer="$FORKED_TEMPLATE_RENAMER_PLUGIN"
+fi
 helm upgrade --install amp-platform-resources \
     "${AMP_REGISTRY}/wso2-amp-platform-resources-extension" \
     --version "$AMP_VERSION" \
     --namespace "$ORG_NS" --kube-context "$CLUSTER_CONTEXT" \
-    --reset-values \
-    --post-renderer "$INPUTS_DIR/$FORKED_TEMPLATE_RENAMER" \
+    --reset-values ${takeover[@]+"${takeover[@]}"} \
+    --post-renderer "$post_renderer" \
     -f "$INPUTS_DIR/amp-values.yaml" \
     --set-string "environment.gateway.http.host=${DP_INGRESS_HOST}" \
     --timeout 10m >/dev/null
