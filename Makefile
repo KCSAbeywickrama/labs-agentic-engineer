@@ -257,7 +257,7 @@ obs-status:
 # no-op as far as the running pods are concerned.
 #
 # One-shot, not a watch loop. Run after `make dev-env`.
-# Console: http://console.openchoreo.localhost:8080
+# Console: http://console.ae.localhost:8080
 #
 # Named dev-update, not dev: `make dev` is the uniform verb (turbo run dev,
 # host-side TS dev servers per package) and already means something else.

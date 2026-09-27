@@ -108,7 +108,7 @@ console:
     limits:
       cpu: "1"
       memory: "512Mi"
-  publicURL: "http://console.openchoreo.localhost:8080"
+  publicURL: "http://console.ae.localhost:8080"
   thunderPublicURL: "http://thunder.openchoreo.localhost:8080"
   thunder:
     clientId: "aep-console-client"

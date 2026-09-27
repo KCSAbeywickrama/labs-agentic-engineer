@@ -1277,7 +1277,7 @@ printf "    %-16s%-50s(%s / %s)\n" "OpenChoreo" "http://openchoreo.localhost:808
 printf "    %-16s%-50s(%s / %s)\n" "ThunderID" "http://thunder.openchoreo.localhost:8080/console" "${THUNDER_ADMIN_USER}" "${THUNDER_ADMIN_PASSWORD}"
 echo ""
 echo "  Still to install — \`make dev-env\` runs both of these next"
-printf "    %-16s%-50s%s\n" "AEP" "http://console.openchoreo.localhost:8080" "aectl platform install"
+printf "    %-16s%-50s%s\n" "AEP" "http://console.ae.localhost:8080" "aectl platform install"
 printf "    %-16s%-50s%s\n" "Agent Manager" "http://console.amp.localhost:8080" "setup-agent-manager.sh"
 echo ""
 echo "  Cleanup:  k3d cluster delete ${CLUSTER_NAME}"

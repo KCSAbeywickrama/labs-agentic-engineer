@@ -127,10 +127,10 @@ deployment.
 
 ### Accessing the portal
 
-The console is at **http://console.openchoreo.localhost:8080**. Sign in with
+The console is at **http://console.ae.localhost:8080**. Sign in with
 the ThunderID admin account `setup-env-for-aectl.sh` creates
 (`admin` / `Admin@123` by default — see that script's output).
-If your OS doesn't resolve `*.localhost`, point `console.openchoreo.localhost`
+If your OS doesn't resolve `*.localhost`, point `console.ae.localhost`
 and `thunder.openchoreo.localhost` at `127.0.0.1` in `/etc/hosts`.
 
 Before the first project, connect the organization's credentials in the console —

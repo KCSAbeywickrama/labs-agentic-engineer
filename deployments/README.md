@@ -17,7 +17,7 @@ OpenChoreo + ThunderID cluster, then hands off to the `aectl` CLI.
 ```bash
 # 1. One-shot bring-up — cluster + platform, via aectl (idempotent)
 make dev-env
-# Console: http://console.openchoreo.localhost:8080
+# Console: http://console.ae.localhost:8080
 # aep-api: kubectl -n wso2-aep port-forward svc/aep-api 9090:9090
 
 # 2. Edit source, then run this to rebuild + redeploy just the changed image(s)
