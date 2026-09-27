@@ -425,7 +425,8 @@ reimport_bootstrap() {
         | JOB_NAME="$job" python3 -c "
 import os, sys, yaml
 docs = [d for d in yaml.safe_load_all(sys.stdin) if d]
-jobs = [d for d in docs if d['kind'] == 'Job']
+# Helm 4 prints the OCI pull notice (Pulled/Digest) on stdout ahead of the manifests.
+jobs = [d for d in docs if isinstance(d, dict) and d.get('kind') == 'Job']
 if not jobs:
     sys.exit('no setup Job in the rendered chart — the chart layout changed')
 job = jobs[0]
