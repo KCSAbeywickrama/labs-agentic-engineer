@@ -314,17 +314,18 @@ postgres:
 # --obs-namespace) to aep-mcp-server.
 #
 # callerPodLabels defaults to the SRE agent Deployment's selector labels in the
-# openchoreo-observability-plane chart aectl installs (1.0.1-hotfix.1, where the
-# component is ai-rca-agent). Selector labels are immutable on a Deployment, so
-# every SRE pod carries them. Chart 1.2.0+ renamed the component to sre-agent;
-# set app.kubernetes.io/component accordingly for that chart.
+# openchoreo-observability-plane chart 1.2.0+ (component sre-agent), the plane
+# setup-env-for-aectl.sh installs and `aectl sre install` enables the agent on.
+# Selector labels are immutable on a Deployment, so every SRE pod carries them.
+# A plane `aectl sre install` installs itself at its --obs-plane-version default
+# (1.0.1-hotfix.1) names the component ai-rca-agent; set it accordingly there.
 sreHandoff:
   enabled: false
   org: "default"
   callerNamespace: "openchoreo-observability-plane"
   callerPodLabels:
     app.kubernetes.io/name: openchoreo-observability-plane
-    app.kubernetes.io/component: ai-rca-agent
+    app.kubernetes.io/component: sre-agent
 
 temporal:
   enabled: true

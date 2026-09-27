@@ -229,6 +229,9 @@ func TestMountSREAgentRuntimePatchesExtensionAndCredentialFile(t *testing.T) {
 	if volumes[1].Name != "anthropic-key" || volumes[1].Secret == nil || volumes[1].Secret.SecretName != "rca-agent-anthropic-secret" {
 		t.Fatalf("missing anthropic secret volume: %#v", volumes[1])
 	}
+	if o := volumes[1].Secret.Optional; o == nil || *o {
+		t.Fatalf("anthropic secret volume must be required, got optional=%v", o)
+	}
 
 	c := got.Spec.Template.Spec.Containers[0]
 	assertEnv := func(name, value string) {

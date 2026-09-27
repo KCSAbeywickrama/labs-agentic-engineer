@@ -33,7 +33,7 @@ deduplication, recurrence, adoption, dispatch, and human-attention state.
 - While the fallback is on, any caller that reaches `aep-mcp-server` acts
   with the handoff's rights (list/create issues in `SRE_HANDOFF_ORG`), so
   each deployment limits who can reach the port.
-- Local dev (`make dev-env WITH_SRE=1`) uses the k8s wiring in the next bullet:
+- Local dev (`make dev-env`, unless `WITH_SRE=0`) uses the k8s wiring in the next bullet:
   `deployments/scripts/setup-sre.sh` generates a random value at
   `aep/aep-mcp-token` once, keeps it across re-runs, and enables
   `sreHandoff`. There is no built-in default. To rotate it, write a new

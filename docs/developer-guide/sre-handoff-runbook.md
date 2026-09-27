@@ -36,10 +36,11 @@ dispatch the coding agent directly.
 
 ## Credentials
 
-The coding agent uses the org's Anthropic key, saved in the AE Console. The
-SRE agent currently uses a separate, platform-level key (below). The removed
-Docker Compose flow projected the Console's org key into the SRE agent instead;
-the in-cluster flow has no equivalent yet.
+Anthropic credentials are managed by AE per organization. The Console is the
+authoritative write path: saving the org's default Anthropic key stores it in
+AE's org secret store and mirrors it to OpenBao, and aep-api publishes where it
+put it as the `anthropic-secrets` SecretReference in the org's OpenChoreo
+namespace. The SRE agent has no key of its own; it uses that one.
 
 The SRE hotfix image consumes the key from a file:
 
@@ -47,67 +48,71 @@ The SRE hotfix image consumes the key from a file:
 RCA_LLM_API_KEY_FILE=/etc/rca-agent/anthropic/RCA_LLM_API_KEY
 ```
 
-`aectl sre install` mounts the `rca-agent-anthropic-secret` Kubernetes secret
-at `/etc/rca-agent/anthropic` and waits for the secret to sync before it wires
-the handoff. The key value must
-not be placed in the image, checked into config, or logged.
-
-`aectl sre install` projects that secret from the `aep/anthropic-api-key`
-OpenBao path. `make dev-env` seeds that path with the placeholder `none`, so
-`deployments/scripts/setup-sre.sh` requires a real key on its first run and
-stores it there:
+`aectl sre install` reads the KV path from the org's `anthropic-secrets`
+SecretReference and authors an ExternalSecret that projects it into the SRE
+agent's namespace:
 
 ```text
-ANTHROPIC_API_KEY (setup-sre.sh, once)
-  -> OpenBao aep/anthropic-api-key
+AE Console org key
+  -> OpenBao user-app-secrets/<org base namespace>/anthropic-secrets#api-key
+     (recorded in SecretReference <org-namespace>/anthropic-secrets)
   -> ExternalSecret openchoreo-observability-plane/rca-agent-anthropic-secret
+     (ClusterSecretStore default, refreshInterval 1m)
   -> /etc/rca-agent/anthropic/RCA_LLM_API_KEY
 ```
 
-This is a platform-level key, not the org key saved in the AE Console. To
-rotate it, write a new value with
-`aectl platform secret import --path aep/anthropic-api-key`; ESO refreshes
-the SRE secret within its `refreshInterval` (1h).
+The volume is required: until the key is saved, the SRE pod waits in
+`ContainerCreating` instead of accepting an alert and failing inside the
+analysis. The SecretReference only appears on the first save, so after saving
+the key for the first time, re-run `deployments/scripts/setup-sre.sh` (or
+`aectl sre install`). Later rotations from the Console need no re-run: ESO
+re-reads the same path every minute. The key value must not be placed in the
+image, checked into config, or logged.
+
+`--org-namespace` picks the org (default: config `oc.default_org_namespace`,
+else `default`).
 
 ## Prerequisites
 
 1. A `make dev-env` cluster (or any `aectl platform install`) with the
    observability plane.
 2. AEP and the SRE agent share one Thunder (`thunder.openchoreo.localhost:8080`).
-3. The AEP org is connected to GitHub, with an Anthropic key in org settings
-   for the coding agent.
+3. The AEP org is connected to GitHub, with an Anthropic key saved in the
+   Console. Both the coding agent and the SRE agent use it.
 4. The target project and components were **created through AEP** and
    deployed; the OC project slug equals the AEP project slug.
 
 ## Local setup
 
-Bring the cluster up with the handoff wired:
+`make dev-env` installs the observability plane (OpenSearch, Fluent Bit and
+the logs adapter) and then the SRE agent on it. To save memory, skip Agent
+Manager, which the SRE handoff does not use:
 
 ```bash
-WITH_SRE=1 ANTHROPIC_API_KEY=sk-ant-... make dev-env
+WITH_AGENT_MANAGER=0 make dev-env
 ```
 
-On a cluster that is already up, run the SRE step alone:
+| Variable | Default | Effect |
+|---|---|---|
+| `WITH_OBSERVABILITY` | `1` | `0` skips the observability plane and the SRE agent with it. |
+| `WITH_SRE` | `1` | `0` keeps the plane but skips the SRE agent. |
+| `WITH_AGENT_MANAGER` | `1` | `0` skips Agent Manager. |
+
+Then save the org's Anthropic key in the Console and run the SRE step once
+more, so the agent picks the key up:
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... bash deployments/scripts/setup-sre.sh
+bash deployments/scripts/setup-sre.sh
 ```
 
 `setup-sre.sh` is idempotent and, in order:
 
-1. stores the SRE agent's Anthropic key at `aep/anthropic-api-key` (later runs
-   keep the stored key when `ANTHROPIC_API_KEY` is unset);
-2. generates the handoff bearer at `aep/aep-mcp-token` once and keeps it;
-3. runs `aectl platform update --set sreHandoff.enabled=true` against the
+1. generates the handoff bearer at `aep/aep-mcp-token` once and keeps it;
+2. runs `aectl platform update --set sreHandoff.enabled=true` against the
    local chart and waits for `aep-api` and `aep-mcp-server` to roll out;
-4. applies the `observability-alert-rule` ClusterTrait, which
+3. applies the `observability-alert-rule` ClusterTrait, which
    `aectl platform install` does not; and
-5. runs `aectl sre install` (next section).
-
-`aectl sre install` pins the observability plane chart to the version the SRE
-image was built against (`--obs-plane-version`, default `1.0.1-hotfix.1`),
-while `setup-env-for-aectl.sh` installs the plane at its OpenChoreo version.
-That is why `make dev-env` runs the SRE step last.
+4. runs `aectl sre install` (next section).
 
 ## Kubernetes setup with aectl
 
@@ -118,8 +123,33 @@ cd tools/aectl
 go run . sre install
 ```
 
-The command reconciles the observability namespace, ExternalSecrets, charts,
-SRE extension ConfigMap, and SRE deployment mounts. It reads the extension
+The command picks its mode from the cluster:
+
+- **A plane is installed** (`setup-env-for-aectl.sh` installs chart 1.2.5): it
+  upgrades that release at its own chart version with `--reuse-values`,
+  setting only the `rca` block: `rca.enabled=true` and the SRE image
+  (`--rca-image-repo`/`--rca-image-tag`, default
+  `tharindulak/sre-agent:v1.0.1-hotfix.1-anthropic`). The plane's
+  OpenSearch secret, logs chart, Fluent Bit and `ClusterObservabilityPlane`
+  stay with whoever installed them. It warns when no `fluent-bit` DaemonSet
+  exists, since log alerts then never fire.
+
+  It does take over two observer settings the SRE agent's queries depend on,
+  both because ThunderID 1.0 identifies a service account by `client_id`
+  rather than `sub`: the observer's service-account claim
+  (`observer.security.subjectTypes`), and the observer's Thunder client secret
+  (`observer-secret`), which it points at the one `aectl platform install`
+  registers. With either left as the plane installer set it, the agent's log
+  queries come back empty and its RCA has no evidence to hand off.
+- **No plane is installed**: it installs the plane and logs charts itself at
+  `--obs-plane-version` (default `1.0.1-hotfix.1`) and `--obs-logs-version`,
+  with their secrets, route and `ClusterObservabilityPlane`.
+
+In both modes its authz grants (`rca-agent-dispatch`, `aep-observer-reader`)
+are keyed on `claim: client_id` for the same reason, and it finds the SRE agent
+Deployment by label (`sre-agent` from
+chart 1.2.0, `ai-rca-agent` before) and reconciles the Anthropic key
+ExternalSecret, the SRE extension ConfigMap, and the deployment mounts. It reads the extension
 assets from an AE repository checkout: the one containing the working
 directory, or the one passed as `--assets-root <checkout>`. It resolves them
 before changing the cluster. It
@@ -220,11 +250,19 @@ If `opensearch-master`, `logs-adapter-opensearch`, `fluent-bit`, or the SRE
 agent is not ready, alerts are not evaluated and no RCA request reaches the
 SRE agent.
 
-If SRE receives the RCA request but immediately fails with
-`Anthropic authentication failed`, the projected key is missing or still the
-`none` placeholder:
+If the SRE pod sits in `ContainerCreating` with a missing
+`rca-agent-anthropic-secret`, no org key has been projected yet. Save the
+org's Anthropic key in the Console, then re-run the SRE step:
+
+```bash
+kubectl -n default get secretreference anthropic-secrets   # appears on the first save
+bash deployments/scripts/setup-sre.sh
+```
+
+If SRE receives the RCA request but fails with
+`Anthropic authentication failed`, check that the ExternalSecret synced from
+the Console key's path:
 
 ```bash
 kubectl -n openchoreo-observability-plane get externalsecret rca-agent-anthropic-secret
-ANTHROPIC_API_KEY=sk-ant-... bash deployments/scripts/setup-sre.sh
 ```

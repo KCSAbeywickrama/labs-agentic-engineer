@@ -149,6 +149,9 @@ func applyExtensionsConfigMap(ctx context.Context, client kubernetes.Interface, 
 // in-cluster URL, so aep-mcp-server applies the handoff bearer itself (the
 // platform chart's sreHandoff block). The AEP_MCP_TOKEN delete directive
 // removes the unused credential that earlier aectl versions injected.
+//
+// The Anthropic key volume is required: a pod that cannot mount the org's key
+// waits for it instead of accepting an alert and failing inside the analysis.
 func mountSREAgentRuntime(ctx context.Context, client kubernetes.Interface, ns, deployName, mcpURL string) error {
 	patch := `{
 		"spec": {"template": {"spec": {
@@ -168,7 +171,7 @@ func mountSREAgentRuntime(ctx context.Context, client kubernetes.Interface, ns, 
 					"name": "anthropic-key",
 					"secret": {
 						"secretName": "rca-agent-anthropic-secret",
-						"optional": true,
+						"optional": false,
 						"defaultMode": 256
 					}
 				}

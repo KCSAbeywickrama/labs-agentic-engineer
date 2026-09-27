@@ -202,11 +202,18 @@ workflow-skill:
 # worked on — it is the slowest step here by a wide margin. WITH_AI_GATEWAY=0
 # keeps Agent Manager but skips the gateway alone.
 #
-# WITH_SRE=1 then wires the OpenChoreo SRE agent's alert → RCA → AE issue
-# handoff (deployments/scripts/setup-sre.sh). Off by default: it needs a real
-# Anthropic key (ANTHROPIC_API_KEY in the calling shell, stored once) and runs
-# last because `aectl sre install` reinstalls the observability plane charts
-# the steps above install against.
+# The SRE agent (deployments/scripts/setup-sre.sh) then wires the OpenChoreo
+# SRE agent's alert → RCA → AE issue handoff onto the observability plane
+# (OpenSearch, Fluent Bit, the logs adapter) the cluster bring-up installed.
+# It uses the org's Anthropic key as saved in the Console, so its pod waits
+# until that key is saved; re-run setup-sre.sh after saving it.
+#
+#   WITH_OBSERVABILITY=0  skips the observability plane, and with it the SRE
+#                         agent (the agent has nothing to read alerts from)
+#   WITH_SRE=0            keeps the plane but skips the SRE agent
+#
+# An SRE-only profile that saves the most memory:
+#   WITH_AGENT_MANAGER=0 make dev-env
 #
 # `platform install` otherwise prompts interactively for two secrets — set as
 # env vars here so it doesn't:
@@ -230,10 +237,12 @@ dev-env:
 	else \
 		echo "⏭️  Skipping Agent Manager (WITH_AGENT_MANAGER=0)"; \
 	fi
-	@if [ "$${WITH_SRE:-0}" = "1" ]; then \
+	@if [ "$${WITH_OBSERVABILITY:-1}" != "1" ]; then \
+		echo "⏭️  Skipping the SRE agent (WITH_OBSERVABILITY=0)"; \
+	elif [ "$${WITH_SRE:-1}" = "1" ]; then \
 		bash deployments/scripts/setup-sre.sh; \
 	else \
-		echo "⏭️  Skipping the SRE handoff (WITH_SRE=1 enables it)"; \
+		echo "⏭️  Skipping the SRE agent (WITH_SRE=0)"; \
 	fi
 
 # Edit source, then run this: builds only the images whose dependencies

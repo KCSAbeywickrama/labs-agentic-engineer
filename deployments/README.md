@@ -24,10 +24,12 @@ make dev-env
 make dev-update
 ```
 
-`WITH_SRE=1 ANTHROPIC_API_KEY=sk-ant-... make dev-env` also wires the
-OpenChoreo SRE agent's alert → RCA → AE issue handoff
-(`scripts/setup-sre.sh`); on an existing cluster, run that script directly.
-See `docs/developer-guide/sre-handoff-runbook.md`.
+`make dev-env` also enables the OpenChoreo SRE agent on the observability
+plane and wires its alert → RCA → AE issue handoff (`scripts/setup-sre.sh`),
+using the org's Anthropic key saved in the Console. `WITH_OBSERVABILITY=0`
+skips the plane and the SRE agent; `WITH_SRE=0` skips only the agent;
+`WITH_AGENT_MANAGER=0` is the lean profile for SRE work. See
+`docs/developer-guide/sre-handoff-runbook.md`.
 
 `make dev-env` builds `tools/aectl` as `aectl-skaffold` (git-ignored — this
 flow's own copy of the binary), installs a bare OpenChoreo + ThunderID cluster
