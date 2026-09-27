@@ -125,9 +125,7 @@ off the stream. The plan tool contract (inputs, results, error codes, the
   `claude-haiku-4-5` ↔ `claude-sonnet-5`, both ways). When the current
   connection's `imageInput` is `no`, every stored image, from any turn, is
   replaced by a short text naming the file, because a model without vision
-  refuses the whole request over one stored image. On a connection whose `imageInput` is `no` it also replaces every
-  stored image with a short text naming the file, since such a host refuses
-  the whole request over one image anywhere in the history.
+  refuses the whole request over one stored image.
 
 ## Test
 

@@ -22,11 +22,12 @@
  * alone cannot tell them apart. One pure rule decides (`providerLimit`), the
  * same rule the runner applies to a coding run's retries:
  *
- * - a WAIT: `retry-after` under 5 minutes while 429 retries have run for under
- *   5 minutes in all. The AI SDK retries it (honouring `retry-after` up to 60 s,
+ * - a WAIT: `retry-after` under 5 minutes while this streak of 429 retries has
+ *   run for under 5 minutes. A streak ends when the provider answers anything
+ *   but a 429, so two short rate limits far apart are not added up. The AI SDK retries it (honouring `retry-after` up to 60 s,
  *   else backing off from 2 s, `MODEL_MAX_RETRIES` times).
- * - a PROVIDER LIMIT: a `retry-after` past 5 minutes, or 5 minutes of 429s,
- *   which covers a provider that states no reset. The turn stops at once with
+ * - a PROVIDER LIMIT: a `retry-after` past 5 minutes, or a 5-minute streak of
+ *   429s, which covers a provider that states no reset. The turn stops at once with
  *   a `provider_limit` frame instead of sleeping on a spent plan.
  *
  * While a wait is being ridden out the turn says so: `onWait` fires on each
@@ -50,7 +51,7 @@ export type ProviderLimitVerdict = "wait" | "provider_limit";
 
 /**
  * The rule. `retryAfterMs` is the provider's stated wait (absent when it stated
- * none); `waitedMs` is how long this turn has been answered 429 so far.
+ * none); `waitedMs` is how long this streak of 429s has run.
  */
 export function providerLimit(retryAfterMs: number | undefined, waitedMs: number): ProviderLimitVerdict {
   if (retryAfterMs !== undefined && retryAfterMs > PROVIDER_LIMIT_AFTER_MS) return "provider_limit";
@@ -171,19 +172,23 @@ export interface ProviderLimitWatch {
 
 /**
  * `base` with the 429 rule applied to every response. Build one per turn: the
- * 5-minute budget counts from this turn's first 429. A wait is returned to the
- * SDK untouched (it retries); a provider limit throws `ProviderLimitError`.
+ * 5-minute budget counts from the first 429 of the current streak, and any
+ * other response ends the streak. A wait is returned to the SDK untouched (it
+ * retries); a provider limit throws `ProviderLimitError`.
  */
 export function watchProviderLimits(base: typeof globalThis.fetch, watch: ProviderLimitWatch): typeof globalThis.fetch {
   const now = watch.now ?? Date.now;
   const log = watch.log ?? stderrLog;
-  let first429At: number | undefined;
+  let streakStart: number | undefined;
   return (async (input, init) => {
     const res = await base(input, init);
-    if (res.status !== 429) return res;
+    if (res.status !== 429) {
+      streakStart = undefined;
+      return res;
+    }
     const at = now();
-    first429At ??= at;
-    const waitedMs = at - first429At;
+    streakStart ??= at;
+    const waitedMs = at - streakStart;
     const verdict = providerLimit(retryAfterMs(res.headers, at), waitedMs);
     // A clone for the log, so the SDK still reads the body it retries on.
     const text = await res.clone().text().catch(() => "");

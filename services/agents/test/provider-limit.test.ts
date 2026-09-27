@@ -133,6 +133,28 @@ test("watchProviderLimits on a fake clock: 20s waits pass back to the SDK until 
   assert.deepEqual(waits, Array(15).fill("ollama.com"), "every wait is announced, the provider limit is not");
 });
 
+test("any other response ends a streak: a short 429 long before does not count toward the five minutes", async () => {
+  let now = NOW;
+  const lines: ProviderLimitLogLine[] = [];
+  const answers = [429, 200, 429];
+  const base = (async () =>
+    new Response("{}", { status: answers.shift()!, headers: { "retry-after": "2" } })) as typeof globalThis.fetch;
+  const fetch = watchProviderLimits(base, {
+    apiKey: KEY,
+    host: "ollama.com",
+    format: "openai-compatible",
+    model: "gpt-oss:20b",
+    log: (l) => lines.push(l),
+    now: () => now,
+  });
+  assert.equal((await fetch("https://ollama.com/v1/chat/completions")).status, 429);
+  now += MIN;
+  assert.equal((await fetch("https://ollama.com/v1/chat/completions")).status, 200);
+  now += 6 * MIN;
+  assert.equal((await fetch("https://ollama.com/v1/chat/completions")).status, 429, "a new streak is a wait");
+  assert.deepEqual(lines.map((l) => [l.verdict, l.waitedMs]), [["wait", 0], ["wait", 0]]);
+});
+
 test("a 429's logged body is scrubbed of the key before it is cut to 300 characters", async () => {
   const lines: ProviderLimitLogLine[] = [];
   const body = `{"error":{"type":"rate_limit_error","message":"plan spent for key ${KEY}"}}${"x".repeat(400)}`;
