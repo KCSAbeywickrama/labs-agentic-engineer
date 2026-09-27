@@ -280,6 +280,32 @@ func TestProbe_429IsLoggedWithoutTheKey(t *testing.T) {
 	}
 }
 
+// A key straddling where a quoted body is cut leaves no prefix behind: the
+// key is removed before the body is cut, in the refusal (200 bytes) and in
+// the 429 log line (300). Not parallel: it swaps the process-global logger.
+func TestProbe_AKeyAcrossTheCutIsScrubbedWhole(t *testing.T) {
+	straddling := func(cut int) []byte {
+		return []byte(strings.Repeat("x", cut-len(probeKey)/2) + probeKey + " trailing")
+	}
+	prefix := probeKey[:len(probeKey)/2]
+
+	_, err := statusVerdict(target(modelconn.FormatOpenAICompatible, "gateway.example.com", "/v1", "m"),
+		modelconn.AuthBearer, probeResponse{status: http.StatusTeapot, body: straddling(200)})
+	if err == nil || strings.Contains(err.Error(), prefix) {
+		t.Fatalf("the refusal quotes part of the key: %v", err)
+	}
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	defer slog.SetDefault(prev)
+	logProvider429(context.Background(), target(modelconn.FormatOpenAICompatible, "gateway.example.com", "/v1", "m"),
+		probeResponse{status: http.StatusTooManyRequests, body: straddling(300)})
+	if !strings.Contains(buf.String(), `"msg":"model_provider_429"`) || strings.Contains(buf.String(), prefix) {
+		t.Fatalf("the 429 line quotes part of the key: %s", buf.String())
+	}
+}
+
 func TestProbe_OtherStatuses(t *testing.T) {
 	for _, tc := range []struct {
 		status int

@@ -33,8 +33,9 @@ flowchart LR
 | `rotateidp` `discoveridp` | rotate the publisher client secret / OIDC discovery | `POST .../config:rotate-idp-secret` etc. |
 | `listorgs` | enumerate orgs (tenant-gate carve-out — no org ctx) | `GET /organizations` |
 
-*Flat in the domain root, outside the slices: the credential / anthropic / agent-settings / idp
-services, the raw connect-callback controller, and the S2S credentials-refresh.*
+*Flat in the domain root, outside the slices: the credential / anthropic / agent-settings /
+model-connection / idp services, the model key rename watcher (`ModelKeyRename`), the raw
+connect-callback controller, and the S2S credentials-refresh.*
 
 ## Ports
 | Port | Dir | Peer · contract |
@@ -52,10 +53,11 @@ services, the raw connect-callback controller, and the S2S credentials-refresh.*
 - `organizations` (+ `thunder_org_uuid`, `llm_disconnected_at`), `org_credentials`,
   `org_model_connections` (one row per org, absent = no connection: format, base URL, host, model, auth
   scheme, probed limits and image input, key preview; the key's bytes in `org_secrets` `model/key`,
-  mirrored to SM-API under the entity `model-connection`; orgs connected before the rename still hold
-  `anthropic/key` and entity `anthropic` until `ModelKeyRename` moves them — `migrate/phase20_model_key_rename`
-  copies the bytes at boot, the watcher uploads the new mirror and switches the row under `org_model:<org>`,
-  and the old copies go only on a periodic pass (never at boot) once the org has no open cycle),
+  mirrored to SM-API under the entity `model-connection`. `ModelKeyRename` moves a key found under the
+  Anthropic-era names (`anthropic/key`, entity `anthropic`) onto these: `migrate/phase20_model_key_rename`
+  copies a connected org's bytes at boot, the watcher uploads the new mirror and switches the row under
+  the card's lock, and retires the old copies on a periodic pass (never at boot) once the org has no
+  open cycle),
   `org_anthropic_credentials` (the optional `coding` Claude subscription only — CHECK
   `org_anthropic_credentials_subscription_only`), `org_agent_settings` (the runtime; one row per org,
   absent = the platform default), `ai_agent_model_endpoints` (the endpoint the Agent Manager govern stage
@@ -72,13 +74,14 @@ services, the raw connect-callback controller, and the S2S credentials-refresh.*
 - The `/config` PATCH is an **atomic multi-section** apply; sections are three-state `patch.Field`.
 - **The AI agents card** (`llm` + `agents`, [ADR-0038](../../../../docs/decisions/ADR-0038-an-organization-has-one-model-connection.md),
   [ADR-0036](../../../../docs/decisions/ADR-0036-the-coding-credential-is-a-subscription.md)):
-  - One save is ONE transaction under the per-org advisory lock `org_model:<org>`, covering the
-    connection row, the subscription row, `org_agent_settings` and the `org_secrets` bytes
-    (`repository_agents_card.go`). A failure anywhere writes nothing.
+  - One save is ONE transaction under the card's per-org advisory locks, `org_anthropic:<org>` then
+    `org_model:<org>` (the first is the previous release's name, so replicas of both serialize),
+    covering the connection row, the subscription row, `org_agent_settings` and the `org_secrets`
+    bytes (`repository_agents_card.go`). A failure anywhere writes nothing.
     `AgentSettingsService` is the only writer of these rows.
   - `llm` is patched field by field (`model_connection_rule.go`): first connect needs `kind` and
     `apiKey` (the URL and model default from `modelconn.Formats`, so `{kind: anthropic, apiKey}`
-    connects); a host change needs a new key; a format change on the same host keeps it; keys under 12
+    connects); a host or port change needs a new key (`https://x` and `https://x:443` are one origin); a format change on the same host keeps it; keys under 12
     characters are refused; an https URL with no userinfo, query or fragment, a path-less Anthropic URL
     gaining `/v1`. The `sk-ant-` shape and subscription-token refusal apply only on `api.anthropic.com`.
   - One rule, judged on the state the patch leaves (`judgeCard`), before the probe and again in the
@@ -101,10 +104,13 @@ services, the raw connect-callback controller, and the S2S credentials-refresh.*
     runtimes here run each format.
   - `llm_disconnected_at` is the only trace of a disconnected connection; projected as
     `llmDisconnectedAt` while `llm` is null, cleared by the next connection save.
-  - The SM-API copies are mirrored after commit, best-effort. A save that writes a key clears the
-    row's `secret_ref_*` triplet (a save that keeps the key keeps it), so a failed mirror fails
-    dispatch closed instead of mounting the previous key; a deleted credential's copy is deleted after
-    commit, and an orphaned copy is accepted.
+  - The copies outside Postgres (the SM-API mirrors, the Agent Manager provider) follow the commit,
+    best-effort, in a second transaction under the same locks, made from the rows as they stand, so
+    two saves' copies land in save order and a stored key never sits beside another host's row. A
+    save that writes a key clears the row's `secret_ref_*` triplet (a save that keeps the key keeps
+    it), so a failed mirror fails dispatch closed instead of mounting the previous key; a deleted
+    credential's copy is deleted unless a credential saved since owns its path, and an orphaned copy
+    is accepted.
   - Exactly one credential reaches a coding run. `ResolveCodingCredential(ctx, org, runtime)` is
     the single statement of which: the subscription only on `claude-code`, else the connection key,
     failing closed on an unusable subscription. It answers with a kind and the connection, never a

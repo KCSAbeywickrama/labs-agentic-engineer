@@ -37,8 +37,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
 	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
@@ -232,13 +234,19 @@ func TestModelConnectionDisconnect_RemovesRowAndBytes_Idempotent_DB(t *testing.T
 		t.Fatalf("seed org: %v", err)
 	}
 	c.connect(t, "acme", anthropicUnitKey)
+	// An org the rename has not finished still holds its Anthropic-era copy.
+	if err := c.store.Put(ctx, "acme", "anthropic/key", []byte(anthropicUnitKey)); err != nil {
+		t.Fatalf("seed anthropic/key: %v", err)
+	}
 
 	out := c.patch(t, "acme", disconnectPatch())
 	if row, err := c.connRepo.GetByOrg(ctx, "acme"); err != nil || row != nil {
 		t.Fatalf("row after disconnect: %+v (%v)", row, err)
 	}
-	if _, err := c.store.Get(ctx, "acme", "model/key"); !errors.Is(err, secrets.ErrSecretNotFound) {
-		t.Fatalf("secret bytes must go with the row, got %v", err)
+	for _, key := range []string{"model/key", "anthropic/key"} {
+		if _, err := c.store.Get(ctx, "acme", key); !errors.Is(err, secrets.ErrSecretNotFound) {
+			t.Fatalf("%s must go with the row, got %v", key, err)
+		}
 	}
 	if out.LLM != nil || out.LLMDisconnectedAt == nil {
 		t.Fatalf("projection after disconnect: llm=%+v disconnectedAt=%v", out.LLM, out.LLMDisconnectedAt)
@@ -287,6 +295,64 @@ func TestModelConnectionResyncSecretRef_NoopCases_DB(t *testing.T) {
 	if wrote, err := c.svc.ResyncSecretRef(ctx, "acme"); wrote || err != nil {
 		t.Fatalf("no subscription: want (false,nil), got (%v,%v)", wrote, err)
 	}
+}
+
+// --- the key's SM-API copy ------------------------------------------------------
+
+// The copies follow the commit under the card's lock: each saved key and
+// token is uploaded and its row stamped with where it lives, and a
+// disconnect deletes the connection key's copy and the token's.
+func TestAgentsCardSave_MirrorsAndStampsTheCopies_DB(t *testing.T) {
+	t.Parallel()
+	c := newCardDB(t, http.StatusOK)
+	sm := &fakeSMClient{createRef: "model-connection-secrets"}
+	writer := organization.NewSecretRefWriter(sm, organization.NewOrgCredentialRepository(c.db, nil), c.repo,
+		organization.NewIDPRepository(c.db, nil), c.connRepo)
+	c.conns.WithSecretRefWriter(writer)
+	c.svc.WithSecretRefWriter(writer)
+	ctx := claimsCtx(uuid.NewString())
+	patch := func(p orgconfig.ConfigPatch) {
+		t.Helper()
+		if _, err := c.config.Patch(ctx, "acme", "ada", p); err != nil {
+			t.Fatalf("patch: %v", err)
+		}
+	}
+	lastUpload := func() string {
+		t.Helper()
+		if len(sm.createCalls) == 0 {
+			t.Fatal("nothing was uploaded")
+		}
+		return sm.createCalls[len(sm.createCalls)-1].data[secretmanagersvc.SecretKeyAPIKey]
+	}
+
+	patch(keyPatch(anthropicUnitKey))
+	if got := lastUpload(); got != anthropicUnitKey {
+		t.Fatalf("uploaded %q, want the saved key", got)
+	}
+	if row := c.row(t, "acme"); derefStr(row.SecretRefName) != "model-connection-secrets" || derefStr(row.SecretRefKVPath) == "" {
+		t.Fatalf("connection triplet = %v %v, want the uploaded copy", row.SecretRefName, row.SecretRefKVPath)
+	}
+
+	patch(subscriptionPatch(anthropicDBOAuthToken))
+	if got := lastUpload(); got != anthropicDBOAuthToken {
+		t.Fatalf("uploaded %q, want the subscription token", got)
+	}
+	sub, err := c.repo.GetByOrg(context.Background(), "acme", organization.AnthropicRoleCoding)
+	if err != nil || sub == nil || derefStr(sub.SecretRefName) == "" || derefStr(sub.SecretRefKVPath) == "" {
+		t.Fatalf("subscription row = %+v (%v), want its triplet stamped", sub, err)
+	}
+
+	patch(disconnectPatch())
+	if len(sm.deleteCalls) != 2 {
+		t.Fatalf("SM-API deletes = %d, want the key's copy and the token's", len(sm.deleteCalls))
+	}
+}
+
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // --- the key reaches the Agent Manager provider ------------------------------

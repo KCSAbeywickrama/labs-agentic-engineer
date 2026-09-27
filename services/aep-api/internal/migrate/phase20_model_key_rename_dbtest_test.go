@@ -43,9 +43,22 @@ func secretRows(t *testing.T, db *gorm.DB) (values, versions map[string]string) 
 	return values, versions
 }
 
+// seedConnection gives org a connection row: only a connected org's key is
+// copied.
+func seedConnection(t *testing.T, db *gorm.DB, org string) {
+	t.Helper()
+	if err := db.Exec(`INSERT INTO org_model_connections
+		(oc_org_id, format, base_url, host, model, auth_scheme, key_preview, connected_at, updated_at)
+		VALUES (?, 'anthropic', 'https://api.anthropic.com/v1', 'api.anthropic.com', 'claude-sonnet-5', 'x-api-key', '…0001', now(), now())`,
+		org).Error; err != nil {
+		t.Fatalf("seed connection %s: %v", org, err)
+	}
+}
+
 // The boot path on a database holding keys under the Anthropic-era name: every
-// org's key is readable under model/key with identical bytes, the old rows are
-// left for the SM-API half to retire, and a second run rewrites nothing.
+// connected org's key is readable under model/key with identical bytes, the
+// old rows are left for the SM-API half to retire, and a second run rewrites
+// nothing. Bytes with no connection row (a disconnected key) are not copied.
 func TestPhase20ModelKeyRename_CopiesEveryKeyAndReRunsAsANoOp(t *testing.T) {
 	db := dbtest.New(t)
 	ctx := context.Background()
@@ -56,9 +69,13 @@ func TestPhase20ModelKeyRename_CopiesEveryKeyAndReRunsAsANoOp(t *testing.T) {
 	}
 	keys := map[string]string{"acme": "sk-ant-api03-acme-key-bytes-0001", "globex": "sk-ant-api03-globex-key-bytes-0002"}
 	for org, key := range keys {
+		seedConnection(t, db, org)
 		if err := store.Put(ctx, org, "anthropic/key", []byte(key)); err != nil {
 			t.Fatalf("seed %s: %v", org, err)
 		}
+	}
+	if err := store.Put(ctx, "initech", "anthropic/key", []byte("sk-ant-api03-disconnected-key-0003")); err != nil {
+		t.Fatalf("seed disconnected: %v", err)
 	}
 	// Another secret of the org is not touched.
 	if err := store.Put(ctx, "acme", "github/pat", []byte("ghp-token")); err != nil {
@@ -77,8 +94,11 @@ func TestPhase20ModelKeyRename_CopiesEveryKeyAndReRunsAsANoOp(t *testing.T) {
 			t.Fatalf("%s model/key = %q (%v), want %q", org, got, err, key)
 		}
 	}
-	if n := count(t, db, `SELECT count(*) FROM org_secrets WHERE key = 'anthropic/key'`); n != 2 {
-		t.Fatalf("anthropic/key rows = %d, want both kept for the SM-API half", n)
+	if n := count(t, db, `SELECT count(*) FROM org_secrets WHERE key = 'anthropic/key'`); n != 3 {
+		t.Fatalf("anthropic/key rows = %d, want all kept for the SM-API half", n)
+	}
+	if _, ok := values["initech/model/key"]; ok {
+		t.Fatal("a key with no connection row was copied to model/key")
 	}
 	if n := count(t, db, `SELECT count(*) FROM org_secrets WHERE key <> 'anthropic/key' AND key <> 'model/key'`); n != 1 {
 		t.Fatalf("other secrets = %d, want the one untouched", n)
@@ -120,6 +140,8 @@ func TestPhase20ModelKeyRename_TheNewerKeyWins(t *testing.T) {
 			t.Fatalf("age %s %s: %v", org, key, err)
 		}
 	}
+	seedConnection(t, db, "saved")
+	seedConnection(t, db, "resaved")
 	// saved: the old key, then a save on this release.
 	put("saved", "anthropic/key", "old-bytes")
 	age("saved", "anthropic/key")

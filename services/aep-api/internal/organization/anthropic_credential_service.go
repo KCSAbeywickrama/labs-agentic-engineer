@@ -28,9 +28,9 @@
 //   - ValidateKey — the shape checks plus the live probe. The AI agents card
 //     (AgentSettingsService) calls it before its unit of work.
 //   - writeKeyTx / deleteKeyTx — the subscription half of that unit of work,
-//     inside its transaction; mirrorKey / forgetKey — the SM-API copy, after
-//     it commits; syncModelProvider — the Agent Manager provider's copy of the
-//     connection, after it commits.
+//     inside its transaction; mirrorKey / forgetKey — the SM-API copy, and
+//     syncModelProvider — the Agent Manager provider's copy of the
+//     connection, both after it commits, under the card's lock.
 //   - Status — the masked projection; Holds — whether the row exists.
 //
 // The connection itself — its row, key and probe — is ModelConnectionService's
@@ -116,8 +116,8 @@ func (s *AnthropicCredentialService) WithAnthropicAPIBase(base string) *Anthropi
 }
 
 // NewAnthropicCredentialService wires the service. repo and store must be
-// non-nil; store serves the resync and publish reads, while the card's
-// writes go through the store bound to its transaction.
+// non-nil; store serves the resync reads, while the card's reads and writes
+// go through the store bound to its transaction.
 func NewAnthropicCredentialService(
 	repo OrgAnthropicRepository,
 	store secrets.CredentialStore,
@@ -236,28 +236,62 @@ func (s *AnthropicCredentialService) deleteKeyTx(ctx context.Context, tx AgentsC
 	return derefOrEmpty(row.SecretRefName), true, nil
 }
 
-// mirrorKey copies a committed credential into SM-API, best-effort: org_secrets
-// stays authoritative. The save cleared the row's triplet (UpsertCredential), so
-// a failed mirror leaves it NULL until the next save, and dispatch fails closed
-// with a reason naming it rather than mounting the previous credential.
-func (s *AnthropicCredentialService) mirrorKey(ctx context.Context, ocOrgID string, role AnthropicRole, key string) {
-	if s.secretRefWriter == nil || !s.secretRefWriter.Enabled() {
+// mirrorKey copies role's credential as it stands into SM-API and records
+// where on its row, inside the transaction the card's copies run in (under its
+// lock), best-effort: org_secrets stays authoritative. It reads the credential
+// rather than taking the one a save wrote, so an earlier save's copy never
+// lands over a later one's. The save cleared the row's triplet
+// (UpsertCredential), so a failed mirror leaves it NULL until the next save,
+// and dispatch fails closed with a reason naming it rather than mounting the
+// previous credential. No row: removed since, nothing to copy.
+func (s *AnthropicCredentialService) mirrorKey(ctx context.Context, tx AgentsCardTx, ocOrgID string, role AnthropicRole) {
+	if !s.secretRefWriter.Enabled() {
 		return
 	}
-	if _, err := s.secretRefWriter.WriteAnthropic(ctx, ocOrgID, role, strings.TrimSpace(key)); err != nil {
+	if err := s.mirrorKeyTx(ctx, tx, ocOrgID, role); err != nil {
 		slog.WarnContext(ctx, "anthropic: SM-API mirror failed (org_secrets still authoritative)",
 			"ocOrgId", ocOrgID, "role", role, "error", err)
 	}
 }
 
+func (s *AnthropicCredentialService) mirrorKeyTx(ctx context.Context, tx AgentsCardTx, ocOrgID string, role AnthropicRole) error {
+	row, err := tx.GetCredential(ocOrgID, role)
+	if err != nil || row == nil {
+		return err
+	}
+	key, err := tx.Secrets().Get(ctx, ocOrgID, role.SecretStoreKey())
+	if err != nil {
+		return fmt.Errorf("read the credential: %w", err)
+	}
+	ref, err := s.secretRefWriter.UploadAnthropic(ctx, ocOrgID, role, strings.TrimSpace(string(key)))
+	if err != nil {
+		return err
+	}
+	if err := tx.StampCredentialSecretRef(ocOrgID, role, ref); err != nil {
+		return fmt.Errorf("stamp the secret reference: %w", err)
+	}
+	slog.InfoContext(ctx, "anthropic: credential mirrored to SM-API",
+		"ocOrgId", ocOrgID, "role", role, "secretRefName", ref.Name, "vaultKey", ref.KVPath)
+	return nil
+}
+
 // forgetKey deletes a removed credential's SM-API copy, best-effort, by the
-// secret-ref name deleteKeyTx captured before the row went. A failure leaves an
-// orphaned vault entry nothing reads; the next save of that role overwrites it.
-func (s *AnthropicCredentialService) forgetKey(ctx context.Context, ocOrgID string, role AnthropicRole, secretRefName string) {
-	if s.secretRefWriter == nil || !s.secretRefWriter.Enabled() {
+// secret-ref name deleteKeyTx captured before the row went, inside the
+// transaction the card's copies run in. A credential saved since mirrors to the
+// same path, so the copy is left to it. A failure leaves an orphaned vault
+// entry nothing reads; the next save of that role overwrites it.
+func (s *AnthropicCredentialService) forgetKey(ctx context.Context, tx AgentsCardTx, ocOrgID string, role AnthropicRole, secretRefName string) {
+	if secretRefName == "" || !s.secretRefWriter.Enabled() {
 		return
 	}
-	if err := s.secretRefWriter.DeleteAnthropic(ctx, ocOrgID, role, secretRefName); err != nil {
+	row, err := tx.GetCredential(ocOrgID, role)
+	if err == nil && row != nil {
+		return
+	}
+	if err == nil {
+		err = s.secretRefWriter.DeleteAnthropic(ctx, ocOrgID, role, secretRefName)
+	}
+	if err != nil {
 		slog.WarnContext(ctx, "anthropic: SM-API delete failed (orphaned copy until the next save)",
 			"ocOrgId", ocOrgID, "role", role, "error", err)
 	}
@@ -266,8 +300,12 @@ func (s *AnthropicCredentialService) forgetKey(ctx context.Context, ocOrgID stri
 // syncModelProvider brings the org's Agent Manager provider, which holds a
 // COPY of the connection and its key on behalf of every governed agent, in
 // line with a committed save: before and after are the org's connection on
-// either side of it (nil where it had none), writtenKey the key the save
-// stored, if any.
+// either side of it (nil where it had none), keyWritten whether it stored a
+// key. It runs inside the transaction the card's copies run in (under its
+// lock), and what it publishes is the connection and key as they stand, not
+// as the save left them: a save's publish that runs after a later save's must
+// not put the earlier host or key back. A publish finding no connection, or a
+// clear finding one, defers to the later save that changed it.
 //
 // WHY THIS MATTERS MORE THAN IT LOOKS: without it, a rotated key leaves the
 // provider calling the upstream with a revoked one, and a switch to another
@@ -283,23 +321,32 @@ func (s *AnthropicCredentialService) forgetKey(ctx context.Context, ocOrgID stri
 // Only the connection's key is ever published: that is the key agents run on.
 // The subscription token belongs to the coding agent, which does not go
 // through the gateway.
-func (s *AnthropicCredentialService) syncModelProvider(ctx context.Context, ocOrgID string, before, after *modelconn.Connection, writtenKey string) {
+func (s *AnthropicCredentialService) syncModelProvider(ctx context.Context, tx AgentsCardTx, ocOrgID string, before, after *modelconn.Connection, keyWritten bool) {
 	if s.modelProvider == nil {
 		return
 	}
-	writtenKey = strings.TrimSpace(writtenKey)
-	switch modelProviderStepFor(before, after, writtenKey != "") {
+	switch modelProviderStepFor(before, after, keyWritten) {
 	case modelProviderPublish:
-		key, err := s.publishableKey(ctx, ocOrgID, writtenKey)
+		conn, key, err := currentConnection(ctx, tx, ocOrgID)
+		if err == nil && conn == nil {
+			return
+		}
 		if err == nil {
-			err = s.modelProvider.PublishOrgModelConnection(ctx, ocOrgID, *after, key)
+			err = s.modelProvider.PublishOrgModelConnection(ctx, ocOrgID, *conn, key)
 		}
 		if err != nil {
 			slog.WarnContext(ctx, "model connection: could not publish the saved connection to the Agent Manager provider; governed agents keep the previous one until the next deploy",
 				"ocOrgId", ocOrgID, "host", after.Host, "error", err)
 		}
 	case modelProviderClear:
-		if err := s.modelProvider.ClearOrgModelKey(ctx, ocOrgID, *before); err != nil {
+		row, err := tx.GetConnection(ocOrgID)
+		if err == nil && row != nil {
+			return
+		}
+		if err == nil {
+			err = s.modelProvider.ClearOrgModelKey(ctx, ocOrgID, *before)
+		}
+		if err != nil {
 			slog.WarnContext(ctx, "model connection: could not clear the Agent Manager provider's copy of the disconnected key; it stays live there until cleared by hand",
 				"ocOrgId", ocOrgID, "previousHost", before.Host, "error", err)
 		}
@@ -307,21 +354,22 @@ func (s *AnthropicCredentialService) syncModelProvider(ctx context.Context, ocOr
 	}
 }
 
-// publishableKey is the key a publish sends: the one the save wrote, or — on a
-// save that changed the URL, format or auth and kept the key (allowed on the
-// stored host) — the stored one, read after the commit.
-func (s *AnthropicCredentialService) publishableKey(ctx context.Context, ocOrgID, writtenKey string) (string, error) {
-	if writtenKey != "" {
-		return writtenKey, nil
+// currentConnection is the org's connection and its key as they stand in tx;
+// a nil connection when it has none.
+func currentConnection(ctx context.Context, tx AgentsCardTx, ocOrgID string) (*modelconn.Connection, string, error) {
+	row, err := tx.GetConnection(ocOrgID)
+	if err != nil || row == nil {
+		return nil, "", err
 	}
-	key, err := s.store.Get(ctx, ocOrgID, modelKeyStoreKey)
+	key, err := tx.Secrets().Get(ctx, ocOrgID, modelKeyStoreKey)
 	if err != nil {
-		return "", fmt.Errorf("read the stored connection key: %w", err)
+		return nil, "", fmt.Errorf("read the stored connection key: %w", err)
 	}
-	if len(key) == 0 {
-		return "", errors.New("the stored connection key is empty")
+	if len(bytes.TrimSpace(key)) == 0 {
+		return nil, "", errors.New("the stored connection key is empty")
 	}
-	return string(key), nil
+	conn := row.Connection()
+	return &conn, strings.TrimSpace(string(key)), nil
 }
 
 // modelProviderStep is what a save does to the Agent Manager provider's copy

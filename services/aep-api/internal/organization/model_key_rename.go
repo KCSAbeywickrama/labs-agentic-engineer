@@ -32,11 +32,12 @@
 // only on the periodic ones:
 //
 //  1. One transaction under the card's lock: copy the bytes again if the old
-//     key is newer (a replica of the previous release saved mid-rollout); if
-//     the row still names the Anthropic-era reference, upload the key under
-//     the new entity and switch the row's secret-ref columns onto it. The
-//     upload is inside the lock so a card save cannot land between reading the
-//     key and switching to its copy.
+//     key is newer (a replica of the previous release saved mid-rollout) and
+//     the org still has a connection (a disconnected key is not brought
+//     back); if the row still names the Anthropic-era reference, upload the
+//     key under the new entity and switch the row's secret-ref columns onto
+//     it. The upload is inside the lock so a card save cannot land between
+//     reading the key and switching to its copy.
 //  2. After commit, once the row names the new copy (or none, or is gone) and
 //     no cycle of the org is open: delete the old SM-API copy, then the old
 //     bytes, best-effort, like forgetKey. The `anthropic/key` row goes last and
@@ -74,7 +75,8 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/auth/jwtassertion"
 )
 
-// The connection key's Anthropic-era storage names, read only by the rename.
+// The connection key's Anthropic-era storage names, read only by the rename
+// (a disconnect deletes the bytes under both names).
 const (
 	legacyModelKeyStoreKey     = "anthropic/key"
 	legacyModelKeySecretEntity = "anthropic"

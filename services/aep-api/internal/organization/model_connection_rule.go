@@ -23,6 +23,7 @@ package organization
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 
@@ -43,7 +44,7 @@ type connectionDraft struct {
 	Host    string
 	Model   string
 	// Key is the key sent with the patch; "" reuses the stored key, which is
-	// only ever allowed on the stored connection's host.
+	// only ever allowed on the stored connection's origin (keyOrigin).
 	Key string
 }
 
@@ -103,13 +104,16 @@ func draftConnection(stored *OrgModelConnection, w orgconfig.LLMPatch) (connecti
 	}
 	d.BaseURL, d.Host, d.Key = baseURL, host, key
 
-	// Clause 2: a host change needs a key. A format change on the same host
-	// keeps it: Ollama serves both formats on one host with one key.
-	if stored != nil && d.Host != stored.Host && d.Key == "" {
-		return connectionDraft{}, false, &ValidationError{
-			Code: "llm_key_required_for_new_host",
-			Message: fmt.Sprintf("the connection moves from %s to %s; send the key for %s in the same save "+
-				"(a stored key is never sent to another host)", stored.Host, d.Host, d.Host),
+	// Clause 2: a change of origin (host or port) needs a key. A format change
+	// on the same origin keeps it: Ollama serves both formats on one host with
+	// one key.
+	if stored != nil && d.Key == "" {
+		if from, to := keyOrigin(stored.BaseURL), keyOrigin(d.BaseURL); from != to {
+			return connectionDraft{}, false, &ValidationError{
+				Code: "llm_key_required_for_new_host",
+				Message: fmt.Sprintf("the connection moves from %s to %s; send the key for %s in the same save "+
+					"(a stored key is never sent to another host)", from, to, to),
+			}
 		}
 	}
 	if d.Key != "" {
@@ -124,7 +128,7 @@ func draftConnection(stored *OrgModelConnection, w orgconfig.LLMPatch) (connecti
 
 // normalizeBaseURL checks what the org typed before any DNS lookup and returns
 // the URL as it is stored, and its host. https only, with no userinfo, query or
-// fragment; a trailing slash goes. An Anthropic-format URL with no path gains
+// fragment; a trailing slash and an explicit :443 go. An Anthropic-format URL with no path gains
 // `/v1`: the SDKs append `/messages` to it, so the bare host would answer 405.
 func normalizeBaseURL(format modelconn.Format, raw string) (string, string, error) {
 	u, err := url.Parse(raw)
@@ -145,11 +149,28 @@ func normalizeBaseURL(format modelconn.Format, raw string) (string, string, erro
 	if path == "" && format == modelconn.FormatAnthropic {
 		path = "/v1"
 	}
-	authority := host
-	if port := u.Port(); port != "" {
-		authority += ":" + port
+	return "https://" + authorityOf(u) + path, host, nil
+}
+
+// keyOrigin is where a stored base URL sends its key: host and port, the
+// https default left implied, so https://x and https://x:443 are one origin
+// and https://x:8443 another. The key follows the origin, not the host alone:
+// another port can be another server.
+func keyOrigin(baseURL string) string {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return baseURL
 	}
-	return "https://" + authority + path, host, nil
+	return authorityOf(u)
+}
+
+// authorityOf is u's lower-cased host with its port, dropping https's default.
+func authorityOf(u *url.URL) string {
+	host := strings.ToLower(u.Hostname())
+	if port := u.Port(); port != "" && port != "443" {
+		return net.JoinHostPort(host, port)
+	}
+	return host
 }
 
 // checkKeyShape refuses a key that could never work, before a probe is spent

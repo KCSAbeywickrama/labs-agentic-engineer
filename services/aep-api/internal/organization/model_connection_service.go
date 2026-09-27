@@ -32,8 +32,9 @@
 //
 // For the card (AgentSettingsService) it probes a draft connection
 // (model_probe.go), writes or deletes the row and the key's bytes inside the
-// card's transaction, mirrors the key to SM-API after commit, and projects the
-// connection for GET /config.
+// card's transaction, mirrors the key to SM-API after commit (under the card's
+// lock, from the row as it stands), and projects the connection for GET
+// /config.
 //
 // The connection lives in org_model_connections, one row per org; the key's
 // bytes in org_secrets under modelKeyStoreKey.
@@ -319,7 +320,7 @@ func (s *ModelConnectionService) Projection(ctx context.Context, ocOrgID string)
 // --- the card's connection half -------------------------------------------------
 
 // probe checks d against its endpoint. A draft with no key reuses the stored
-// key, which draftConnection only allows on the stored connection's host.
+// key, which draftConnection only allows on the stored connection's origin.
 func (s *ModelConnectionService) probe(ctx context.Context, ocOrgID string, d connectionDraft) (ProbeResult, error) {
 	key := d.Key
 	if key == "" {
@@ -393,7 +394,9 @@ func (s *ModelConnectionService) writeTx(ctx context.Context, tx AgentsCardTx, o
 
 // deleteTx removes the connection — row and bytes — inside the card's
 // transaction, returning the SM-API secret-ref name the row carried so its
-// copy can be deleted once the transaction commits. Idempotent.
+// copy can be deleted once the transaction commits. The bytes go under both
+// names: an org ModelKeyRename has not finished still holds `anthropic/key`,
+// which would otherwise outlive the connection. Idempotent.
 func (s *ModelConnectionService) deleteTx(ctx context.Context, tx AgentsCardTx, ocOrgID string) (string, error) {
 	row, err := tx.GetConnection(ocOrgID)
 	if err != nil || row == nil {
@@ -402,31 +405,69 @@ func (s *ModelConnectionService) deleteTx(ctx context.Context, tx AgentsCardTx, 
 	if err := tx.DeleteConnection(ocOrgID); err != nil {
 		return "", fmt.Errorf("model connection: delete row: %w", err)
 	}
-	if err := tx.Secrets().Delete(ctx, ocOrgID, modelKeyStoreKey); err != nil {
-		return "", fmt.Errorf("model connection: store delete: %w", err)
+	for _, key := range []string{modelKeyStoreKey, legacyModelKeyStoreKey} {
+		if err := tx.Secrets().Delete(ctx, ocOrgID, key); err != nil {
+			return "", fmt.Errorf("model connection: store delete %s: %w", key, err)
+		}
 	}
 	return derefOrEmpty(row.SecretRefName), nil
 }
 
-// mirrorKey copies a committed key into SM-API, best-effort: org_secrets stays
-// authoritative. The save cleared the row's triplet, so a failed mirror leaves
-// it NULL until the next key save, and dispatch fails closed naming why.
-func (s *ModelConnectionService) mirrorKey(ctx context.Context, ocOrgID, key string) {
+// mirrorKey copies the connection key as it stands into SM-API and records
+// where on the row, inside the transaction the card's copies run in (under its
+// lock), best-effort: org_secrets stays authoritative. It reads the key rather
+// than taking the one a save wrote, so a save's copy that runs after a later
+// save's leaves the later key in the vault. A save that wrote a key cleared the
+// row's triplet, so a failed mirror leaves it NULL until the next key save, and
+// dispatch fails closed naming why. No row: a disconnect landed since, and
+// there is nothing to copy.
+func (s *ModelConnectionService) mirrorKey(ctx context.Context, tx AgentsCardTx, ocOrgID string) {
 	if !s.secretRefWriter.Enabled() {
 		return
 	}
-	if _, err := s.secretRefWriter.WriteModelKey(ctx, ocOrgID, strings.TrimSpace(key)); err != nil {
+	if err := s.mirrorKeyTx(ctx, tx, ocOrgID); err != nil {
 		slog.WarnContext(ctx, "model connection: SM-API mirror failed (org_secrets still authoritative)",
 			"ocOrgId", ocOrgID, "error", err)
 	}
 }
 
-// forgetKey deletes a removed connection key's SM-API copy, best-effort.
-func (s *ModelConnectionService) forgetKey(ctx context.Context, ocOrgID, secretRefName string) {
+func (s *ModelConnectionService) mirrorKeyTx(ctx context.Context, tx AgentsCardTx, ocOrgID string) error {
+	row, err := tx.GetConnection(ocOrgID)
+	if err != nil || row == nil {
+		return err
+	}
+	key, err := tx.Secrets().Get(ctx, ocOrgID, modelKeyStoreKey)
+	if err != nil {
+		return fmt.Errorf("read the key: %w", err)
+	}
+	ref, err := s.secretRefWriter.UploadModelKey(ctx, ocOrgID, strings.TrimSpace(string(key)))
+	if err != nil {
+		return err
+	}
+	if err := tx.StampConnectionSecretRef(ocOrgID, ref); err != nil {
+		return fmt.Errorf("stamp the secret reference: %w", err)
+	}
+	slog.InfoContext(ctx, "model connection: key mirrored to SM-API",
+		"ocOrgId", ocOrgID, "secretRefName", ref.Name, "vaultKey", ref.KVPath)
+	return nil
+}
+
+// forgetKey deletes a removed connection key's SM-API copy, best-effort, inside
+// the transaction the card's copies run in. A connection saved since mirrors
+// its key to the same path, so the copy is left to it; the Anthropic-era path
+// no save writes goes either way.
+func (s *ModelConnectionService) forgetKey(ctx context.Context, tx AgentsCardTx, ocOrgID, secretRefName string) {
 	if secretRefName == "" || !s.secretRefWriter.Enabled() {
 		return
 	}
-	if err := s.secretRefWriter.DeleteModelKey(ctx, ocOrgID, secretRefName); err != nil {
+	row, err := tx.GetConnection(ocOrgID)
+	if err == nil && row != nil && secretRefName == modelKeyRefName {
+		return
+	}
+	if err == nil {
+		err = s.secretRefWriter.DeleteModelKey(ctx, ocOrgID, secretRefName)
+	}
+	if err != nil {
 		slog.WarnContext(ctx, "model connection: SM-API delete failed (orphaned copy until the next save)",
 			"ocOrgId", ocOrgID, "error", err)
 	}

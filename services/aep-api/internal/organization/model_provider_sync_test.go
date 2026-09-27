@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
+	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 )
 
 func firstParty() *modelconn.Connection {
@@ -128,13 +129,35 @@ func (s storedKey) Get(_ context.Context, _, key string) ([]byte, error) {
 func (storedKey) Put(context.Context, string, string, []byte) error { return nil }
 func (storedKey) Delete(context.Context, string, string) error      { return nil }
 
+// cardNow is the card's copies transaction over the rows as they stand: the
+// connection row (nil for none) and, in its store, the key.
+type cardNow struct {
+	AgentsCardTx // every other method: never reached
+	row          *OrgModelConnection
+	key          storedKey
+}
+
+func (c cardNow) GetConnection(string) (*OrgModelConnection, error) { return c.row, nil }
+func (c cardNow) Secrets() secrets.CredentialStore                  { return c.key }
+
+// holding is a card whose rows hold conn (nil for none) and key.
+func holding(conn *modelconn.Connection, key string) cardNow {
+	if conn == nil {
+		return cardNow{}
+	}
+	return cardNow{key: storedKey{key: key}, row: &OrgModelConnection{
+		OcOrgID: "acme", Format: conn.Format, BaseURL: conn.BaseURL, Host: conn.Host,
+		Model: conn.Model, AuthScheme: conn.AuthScheme,
+	}}
+}
+
 // A switch to another host publishes that host's connection and key in one
 // write, and clears nothing: the provider's copy moves with the org.
 func TestSyncModelProvider_ASwitchPublishesTheNewConnection(t *testing.T) {
 	provider := &recordingProvider{}
 	svc := NewAnthropicCredentialService(nil, nil).WithModelProvider(provider)
 
-	svc.syncModelProvider(context.Background(), "acme", firstParty(), onOllama(), " ollama-key-0123456789 ")
+	svc.syncModelProvider(context.Background(), holding(onOllama(), " ollama-key-0123456789 "), "acme", firstParty(), onOllama(), true)
 
 	if len(provider.cleared) != 0 {
 		t.Fatalf("cleared %d time(s) on a switch, want none", len(provider.cleared))
@@ -149,13 +172,13 @@ func TestSyncModelProvider_ASwitchPublishesTheNewConnection(t *testing.T) {
 }
 
 // A save that moved the format and kept the key (allowed on the stored host)
-// publishes with the stored key, read after the commit: the provider needs the
-// value, and the save carried none.
+// publishes with the stored key: the provider needs the value, and the save
+// carried none.
 func TestSyncModelProvider_AKeptKeyIsReadFromTheStore(t *testing.T) {
 	provider := &recordingProvider{}
-	svc := NewAnthropicCredentialService(nil, storedKey{key: "ollama-stored-0123456789"}).WithModelProvider(provider)
+	svc := NewAnthropicCredentialService(nil, nil).WithModelProvider(provider)
 
-	svc.syncModelProvider(context.Background(), "acme", onOllama(), anthropicOnOllama(), "")
+	svc.syncModelProvider(context.Background(), holding(anthropicOnOllama(), "ollama-stored-0123456789"), "acme", onOllama(), anthropicOnOllama(), false)
 
 	if len(provider.published) != 1 || provider.published[0].key != "ollama-stored-0123456789" ||
 		provider.published[0].conn != *anthropicOnOllama() {
@@ -163,16 +186,46 @@ func TestSyncModelProvider_AKeptKeyIsReadFromTheStore(t *testing.T) {
 	}
 }
 
-// A kept key that cannot be read is logged and swallowed — the save has
-// committed — and nothing half-built reaches the provider.
-func TestSyncModelProvider_AnUnreadableKeptKeyPublishesNothing(t *testing.T) {
+// A key that cannot be read is logged and swallowed — the save has committed —
+// and nothing half-built reaches the provider.
+func TestSyncModelProvider_AnUnreadableKeyPublishesNothing(t *testing.T) {
 	provider := &recordingProvider{}
-	svc := NewAnthropicCredentialService(nil, storedKey{}).WithModelProvider(provider)
+	svc := NewAnthropicCredentialService(nil, nil).WithModelProvider(provider)
 
-	svc.syncModelProvider(context.Background(), "acme", onOllama(), anthropicOnOllama(), "")
+	svc.syncModelProvider(context.Background(), holding(anthropicOnOllama(), ""), "acme", onOllama(), anthropicOnOllama(), false)
 
 	if len(provider.published) != 0 {
 		t.Fatalf("published %+v with no key to send", provider.published)
+	}
+}
+
+// An earlier save's publish that runs after a later save's sends the later
+// connection and key, never its own: a stored key never follows the host.
+func TestSyncModelProvider_ALatePublishSendsTheConnectionAsItStands(t *testing.T) {
+	provider := &recordingProvider{}
+	svc := NewAnthropicCredentialService(nil, nil).WithModelProvider(provider)
+
+	// The first connect (to Anthropic) publishes after the switch to Ollama committed.
+	svc.syncModelProvider(context.Background(), holding(onOllama(), "ollama-key-0123456789"), "acme", nil, firstParty(), true)
+
+	if len(provider.published) != 1 || provider.published[0].conn != *onOllama() ||
+		provider.published[0].key != "ollama-key-0123456789" {
+		t.Fatalf("published %+v, want the Ollama connection and its key", provider.published)
+	}
+}
+
+// A publish finding the connection gone, or a clear finding one, defers to the
+// later save that changed it.
+func TestSyncModelProvider_DefersToALaterSave(t *testing.T) {
+	provider := &recordingProvider{}
+	svc := NewAnthropicCredentialService(nil, nil).WithModelProvider(provider)
+	ctx := context.Background()
+
+	svc.syncModelProvider(ctx, holding(nil, ""), "acme", nil, firstParty(), true)
+	svc.syncModelProvider(ctx, holding(firstParty(), "sk-ant-api03-0123456789"), "acme", onOllama(), nil, false)
+
+	if len(provider.published) != 0 || len(provider.cleared) != 0 {
+		t.Fatalf("published %+v, cleared %+v, want neither", provider.published, provider.cleared)
 	}
 }
 
@@ -183,9 +236,9 @@ func TestSyncModelProvider_ADisconnectClearsTheProviderOnce(t *testing.T) {
 	svc := NewAnthropicCredentialService(nil, nil).WithModelProvider(provider)
 	ctx := context.Background()
 
-	svc.syncModelProvider(ctx, "acme", onOllama(), nil, "")
-	svc.syncModelProvider(ctx, "acme", nil, nil, "")
-	svc.syncModelProvider(ctx, "acme", nil, firstParty(), "sk-ant-api03-0123456789")
+	svc.syncModelProvider(ctx, holding(nil, ""), "acme", onOllama(), nil, false)
+	svc.syncModelProvider(ctx, holding(nil, ""), "acme", nil, nil, false)
+	svc.syncModelProvider(ctx, holding(firstParty(), "sk-ant-api03-0123456789"), "acme", nil, firstParty(), true)
 
 	if len(provider.cleared) != 1 || provider.cleared[0] != *onOllama() {
 		t.Fatalf("cleared %+v, want once, for the Ollama connection", provider.cleared)
@@ -202,7 +255,7 @@ func TestSyncModelProvider_AFailedClearOnDisconnectIsAttemptedOnceAndSwallowed(t
 	provider := &recordingProvider{clearErr: errors.New("amp unreachable")}
 	svc := NewAnthropicCredentialService(nil, nil).WithModelProvider(provider)
 
-	svc.syncModelProvider(context.Background(), "acme", firstParty(), nil, "")
+	svc.syncModelProvider(context.Background(), holding(nil, ""), "acme", firstParty(), nil, false)
 
 	if len(provider.cleared) != 1 {
 		t.Fatalf("cleared %d time(s), want one attempt", len(provider.cleared))

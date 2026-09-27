@@ -373,8 +373,9 @@ func TestModelKeyRename_WithoutAnOuIDOnlyTheBytesMove_DB(t *testing.T) {
 	}
 }
 
-// An org disconnected before its move (the card deletes the row and
-// `model/key`, not `anthropic/key`) has its previous copies retired.
+// An org holding `anthropic/key` with no connection row (a credential phase19
+// carried no connection for) has its previous copies retired, and the key is
+// never copied under `model/key`.
 func TestModelKeyRename_RetiresADisconnectedOrgsPreviousCopies_DB(t *testing.T) {
 	t.Parallel()
 	r := newRenameDB(t)
@@ -387,6 +388,9 @@ func TestModelKeyRename_RetiresADisconnectedOrgsPreviousCopies_DB(t *testing.T) 
 	if len(r.sm.createCalls) != 0 || len(r.sm.deleteCalls) != 1 || r.hasLegacyBytes(t, "acme") {
 		t.Fatalf("disconnected org: %d uploads, %d deletes, legacy bytes %v; want only the old copies deleted",
 			len(r.sm.createCalls), len(r.sm.deleteCalls), r.hasLegacyBytes(t, "acme"))
+	}
+	if _, err := r.store.Get(context.Background(), "acme", "model/key"); !errors.Is(err, secrets.ErrSecretNotFound) {
+		t.Fatalf("a disconnected key was copied back under model/key (%v)", err)
 	}
 }
 

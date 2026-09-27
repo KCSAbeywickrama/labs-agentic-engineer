@@ -35,9 +35,9 @@ import (
 // back, so the card is never half-saved.
 //
 // Tx begins the transaction, runs fn, and commits when fn returns nil or rolls
-// back when it returns an error. fn takes the org-scoped advisory lock
-// `org_model:<org>` first (AgentsCardTx.AdvisoryLock), so two saves of one
-// org's card serialize.
+// back when it returns an error. fn takes the card's per-org advisory locks
+// first (lockCard over AgentsCardTx.AdvisoryLock), so two saves of one org's
+// card, and the copies that follow them, serialize.
 type AgentsCardRepository interface {
 	Tx(ctx context.Context, fn func(tx AgentsCardTx) error) error
 }
@@ -58,6 +58,8 @@ type AgentsCardTx interface {
 	UpsertCredential(row *OrgAnthropicCredential) error
 	// DeleteCredential removes one role's row. Idempotent.
 	DeleteCredential(ocOrgID string, role AnthropicRole) error
+	// StampCredentialSecretRef records where one role's SM-API copy lives.
+	StampCredentialSecretRef(ocOrgID string, role AnthropicRole, ref SecretRefTriplet) error
 
 	// GetConnection reads the org's model connection, or nil when absent.
 	GetConnection(ocOrgID string) (*OrgModelConnection, error)
@@ -68,6 +70,9 @@ type AgentsCardTx interface {
 	UpsertConnection(row *OrgModelConnection, keyWritten bool) error
 	// DeleteConnection removes the row. Idempotent.
 	DeleteConnection(ocOrgID string) error
+	// StampConnectionSecretRef records where the connection key's SM-API copy
+	// lives.
+	StampConnectionSecretRef(ocOrgID string, ref SecretRefTriplet) error
 
 	// GetSettings reads the org's agent setting, or nil when absent.
 	GetSettings(ocOrgID string) (*OrgAgentSettings, error)
@@ -169,6 +174,12 @@ func (t *agentsCardTx) DeleteCredential(ocOrgID string, role AnthropicRole) erro
 	return t.tx.Exec(`DELETE FROM org_anthropic_credentials WHERE oc_org_id = ? AND role = ?`, ocOrgID, role).Error
 }
 
+func (t *agentsCardTx) StampCredentialSecretRef(ocOrgID string, role AnthropicRole, ref SecretRefTriplet) error {
+	return t.tx.Model(&OrgAnthropicCredential{}).
+		Where("oc_org_id = ? AND role = ?", ocOrgID, role).
+		Updates(stampSecretRefTriplet(ref.Name, ref.KVPath, ref.Property)).Error
+}
+
 func (t *agentsCardTx) GetConnection(ocOrgID string) (*OrgModelConnection, error) {
 	return getModelConnection(t.tx, ocOrgID)
 }
@@ -198,6 +209,12 @@ func (t *agentsCardTx) UpsertConnection(row *OrgModelConnection, keyWritten bool
 
 func (t *agentsCardTx) DeleteConnection(ocOrgID string) error {
 	return t.tx.Where("oc_org_id = ?", ocOrgID).Delete(&OrgModelConnection{}).Error
+}
+
+func (t *agentsCardTx) StampConnectionSecretRef(ocOrgID string, ref SecretRefTriplet) error {
+	return t.tx.Model(&OrgModelConnection{}).
+		Where("oc_org_id = ?", ocOrgID).
+		Updates(stampSecretRefTriplet(ref.Name, ref.KVPath, ref.Property)).Error
 }
 
 func (t *agentsCardTx) GetSettings(ocOrgID string) (*OrgAgentSettings, error) {

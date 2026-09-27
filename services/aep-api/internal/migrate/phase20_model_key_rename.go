@@ -36,14 +36,20 @@ import (
 // mirror is gone (its presence marks the org's move as unfinished) — never at
 // boot, so a replica of the previous release still draining can read it.
 //
+// Only an org with a connection row is copied: bytes with no row are a
+// disconnected key (or a credential phase19 did not carry over), and copying
+// them would keep them under a name nothing retires.
+//
 // Idempotent: a target at least as new as its source is left alone, so a
 // re-run changes nothing, while a key a replica of the previous release saved
 // under the old name since is copied again. organization's per-org copy uses
-// the same rule.
+// the same rules.
 func RunPhase20ModelKeyRename(ctx context.Context, db *gorm.DB) error {
 	if err := db.WithContext(ctx).Exec(`
 		INSERT INTO org_secrets (oc_org_id, key, value, updated_at)
-		SELECT oc_org_id, 'model/key', value, updated_at FROM org_secrets WHERE key = 'anthropic/key'
+		SELECT s.oc_org_id, 'model/key', s.value, s.updated_at FROM org_secrets s
+		 WHERE s.key = 'anthropic/key'
+		   AND EXISTS (SELECT 1 FROM org_model_connections c WHERE c.oc_org_id = s.oc_org_id)
 		ON CONFLICT (oc_org_id, key) DO UPDATE
 		  SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
 		  WHERE org_secrets.updated_at < EXCLUDED.updated_at`).Error; err != nil {

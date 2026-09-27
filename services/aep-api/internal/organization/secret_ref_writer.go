@@ -111,13 +111,21 @@ func (w *SecretRefWriter) WriteModelKey(ctx context.Context, ocOrgID, apiKey str
 
 // UploadModelKey uploads the org's model connection key to SM-API under the
 // connection's entity and returns the reference, stamping nothing: for a
-// caller that switches the row onto it inside its own transaction (the
-// rename, model_key_rename.go). ctx must carry an ouId claim.
+// caller that records it on the row inside its own transaction (the card's
+// copies, the rename). ctx must carry an ouId claim.
 func (w *SecretRefWriter) UploadModelKey(ctx context.Context, ocOrgID, apiKey string) (SecretRefTriplet, error) {
 	if !w.Enabled() {
 		return SecretRefTriplet{}, errors.New("secret-ref writer: not configured")
 	}
 	return w.uploadAPIKey(ctx, ocOrgID, modelKeySecretEntity, apiKey)
+}
+
+// UploadAnthropic is UploadModelKey for one role's Claude subscription token.
+func (w *SecretRefWriter) UploadAnthropic(ctx context.Context, ocOrgID string, role AnthropicRole, apiKey string) (SecretRefTriplet, error) {
+	if !w.Enabled() {
+		return SecretRefTriplet{}, errors.New("secret-ref writer: not configured")
+	}
+	return w.uploadAPIKey(ctx, ocOrgID, role.SecretRefEntity(), apiKey)
 }
 
 func (w *SecretRefWriter) writeAPIKey(ctx context.Context, ocOrgID, entity, apiKey string, stamp func(map[string]any) error) (string, error) {

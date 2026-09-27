@@ -42,12 +42,13 @@ type ModelKeyRenameRepository interface {
 
 // ModelKeyRenameTx is the transaction-scoped surface of one org's move.
 type ModelKeyRenameTx interface {
-	// Lock takes the AI agents card's per-org advisory lock, so the move and a
-	// save of the card serialize.
+	// Lock takes the AI agents card's per-org advisory locks (lockCard), so
+	// the move and a save of the card serialize.
 	Lock(ocOrgID string) error
 	// CopyLegacyKey copies the org's `anthropic/key` bytes to `model/key`,
-	// unless `model/key` is newer (a save since); the sealed value is copied
-	// as is, with its updated_at.
+	// unless `model/key` is newer (a save since) or the org has no connection
+	// (a disconnect since); the sealed value is copied as is, with its
+	// updated_at.
 	CopyLegacyKey(ocOrgID string) error
 	// Connection reads the org's connection row, nil when it has none.
 	Connection(ocOrgID string) (*OrgModelConnection, error)
@@ -99,16 +100,19 @@ type modelKeyRenameTx struct {
 }
 
 func (t *modelKeyRenameTx) Lock(ocOrgID string) error {
-	return t.tx.Exec(`SELECT pg_advisory_xact_lock(hashtext(?))`, cardLockPrefix+ocOrgID).Error
+	return lockCard(func(key string) error {
+		return t.tx.Exec(`SELECT pg_advisory_xact_lock(hashtext(?))`, key).Error
+	}, ocOrgID)
 }
 
 // CopyLegacyKey is the per-org form of migrate's phase20_model_key_rename
-// copy; the two must agree on "newer".
+// copy; the two must agree on "newer" and on copying only a connected org.
 func (t *modelKeyRenameTx) CopyLegacyKey(ocOrgID string) error {
 	return t.tx.Exec(`
 		INSERT INTO org_secrets (oc_org_id, key, value, updated_at)
-		SELECT oc_org_id, ?, value, updated_at FROM org_secrets
-		 WHERE oc_org_id = ? AND key = ?
+		SELECT s.oc_org_id, ?, s.value, s.updated_at FROM org_secrets s
+		 WHERE s.oc_org_id = ? AND s.key = ?
+		   AND EXISTS (SELECT 1 FROM org_model_connections c WHERE c.oc_org_id = s.oc_org_id)
 		ON CONFLICT (oc_org_id, key) DO UPDATE
 		  SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
 		  WHERE org_secrets.updated_at < EXCLUDED.updated_at`,

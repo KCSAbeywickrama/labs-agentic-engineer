@@ -53,6 +53,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/netguard"
+	"github.com/wso2/aep/aep-api/internal/platform/text"
 )
 
 // The limits a connection gets when its host states none: what OpenCode and
@@ -285,10 +286,10 @@ func statusVerdict(t probeTarget, scheme modelconn.AuthScheme, resp probeRespons
 		return ProbeResult{AuthScheme: scheme, ModelListed: modelconn.Unknown, ProviderLimited: true}, nil
 	case resp.status >= 500:
 		return ProbeResult{}, &UpstreamError{Code: "llm_upstream_error", Message: fmt.Sprintf(
-			"%s returned %d: %s", t.Host, resp.status, scrubKey(truncateForError(resp.body), t.Key))}
+			"%s returned %d: %s", t.Host, resp.status, scrubbedExcerpt(resp.body, t.Key))}
 	default:
 		return ProbeResult{}, &ValidationError{Code: "llm_unexpected_status", Message: fmt.Sprintf(
-			"%s returned %d: %s", t.Host, resp.status, scrubKey(truncateForError(resp.body), t.Key))}
+			"%s returned %d: %s", t.Host, resp.status, scrubbedExcerpt(resp.body, t.Key))}
 	}
 }
 
@@ -489,16 +490,12 @@ func transportRefusal(host string, err error) error {
 }
 
 // logProvider429 writes the one structured line every 429 gets, so what a
-// provider's limit looks like is learned from the logs. The body is capped and
-// has the key's literal removed.
+// provider's limit looks like is learned from the logs. The body has the key's
+// literal removed, then is capped.
 func logProvider429(ctx context.Context, t probeTarget, resp probeResponse) {
 	verdict := "unexpected_status"
 	if rateLimitShaped(resp) {
 		verdict = "provider_limit"
-	}
-	body := string(resp.body)
-	if len(body) > 300 {
-		body = body[:300]
 	}
 	slog.WarnContext(ctx, "model_provider_429",
 		"source", "probe",
@@ -508,8 +505,14 @@ func logProvider429(ctx context.Context, t probeTarget, resp probeResponse) {
 		"model", t.Model,
 		"status", resp.status,
 		"limitHeaders", limitHeaders(resp.header),
-		"body", scrubKey(body, t.Key),
+		"body", text.Truncate(scrubKey(string(resp.body), t.Key), 300),
 		"verdict", verdict)
+}
+
+// scrubbedExcerpt is an answer's body as an error quotes it: the key removed
+// first, then cut, so a key straddling the cut leaves no prefix behind.
+func scrubbedExcerpt(body []byte, key string) string {
+	return truncateForError([]byte(scrubKey(string(body), key)))
 }
 
 // scrubKey removes the key's literal from text headed for a log or an error.

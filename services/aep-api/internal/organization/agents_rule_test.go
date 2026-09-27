@@ -152,6 +152,8 @@ func TestDraftConnection_BaseURLShape(t *testing.T) {
 		{format: modelconn.FormatAnthropic, raw: "https://Ollama.com/v1/", wantURL: "https://ollama.com/v1", wantHost: "ollama.com"},
 		{format: modelconn.FormatOpenAICompatible, raw: "https://gw.example.com:8443/api/v1", wantURL: "https://gw.example.com:8443/api/v1", wantHost: "gw.example.com"},
 		{format: modelconn.FormatOpenAICompatible, raw: "https://ollama.com", wantURL: "https://ollama.com", wantHost: "ollama.com"},
+		// https's default port is implied, never stored.
+		{format: modelconn.FormatOpenAICompatible, raw: "https://ollama.com:443/v1", wantURL: "https://ollama.com/v1", wantHost: "ollama.com"},
 		{format: modelconn.FormatOpenAICompatible, raw: "http://ollama.com/v1", wantRefusal: true},
 		{format: modelconn.FormatOpenAICompatible, raw: "https://user:pw@ollama.com/v1", wantRefusal: true},
 		{format: modelconn.FormatOpenAICompatible, raw: "https://ollama.com/v1?x=1", wantRefusal: true},
@@ -178,6 +180,24 @@ func TestDraftConnection_BaseURLShape(t *testing.T) {
 func TestJudgeCard_AHostChangeNeedsAKey(t *testing.T) {
 	refusal(t, cardState{conn: anthropicConn(), settings: onRuntime("opencode")},
 		orgconfig.ConfigPatch{LLM: llm(orgconfig.LLMPatch{Kind: "openai-compatible", BaseURL: "https://ollama.com/v1"})},
+		"llm", "llm_key_required_for_new_host")
+}
+
+// The key follows the origin, not the host alone: another port can be another
+// server, so a port change needs a key; the https default port is no change.
+func TestJudgeCard_APortChangeNeedsAKey(t *testing.T) {
+	onOllama := cardState{conn: ollamaConn(), settings: onRuntime("opencode")}
+	refusal(t, onOllama, orgconfig.ConfigPatch{LLM: llm(orgconfig.LLMPatch{BaseURL: "https://ollama.com:8443/v1"})},
+		"llm", "llm_key_required_for_new_host")
+
+	eff := mustJudge(t, onOllama, orgconfig.ConfigPatch{LLM: llm(orgconfig.LLMPatch{BaseURL: "https://ollama.com:443/v1"})})
+	if eff.writeConn != nil {
+		t.Fatalf("draft = %+v, want https://ollama.com:443/v1 to be the stored URL, unchanged", eff.writeConn)
+	}
+
+	onPort := cardState{conn: ollamaConn(), settings: onRuntime("opencode")}
+	onPort.conn.BaseURL = "https://ollama.com:8443/v1"
+	refusal(t, onPort, orgconfig.ConfigPatch{LLM: llm(orgconfig.LLMPatch{BaseURL: "https://ollama.com/v1"})},
 		"llm", "llm_key_required_for_new_host")
 }
 
@@ -513,12 +533,16 @@ func (t *lockRecordingTx) GetSettings(string) (*OrgAgentSettings, error) {
 	return nil, errors.New("stop after the locks")
 }
 
-// The card takes only the model connection's lock, org_model:<org>.
-func TestAgentSettings_TheSaveTakesTheModelLockOnly(t *testing.T) {
+// The save and the copies after it take both lock names, the previous
+// release's first, so a rolling deploy never has two replicas writing one
+// org's card under different locks.
+func TestAgentSettings_TheSaveAndItsCopiesTakeBothLockNamesOldThenNew(t *testing.T) {
 	card := &lockRecordingCard{}
-	svc := NewAgentSettingsService(nil, nil, nil, nil, card, everyRuntime)
+	svc := NewAgentSettingsService(nil, nil, &AnthropicCredentialService{}, &ModelConnectionService{}, card, everyRuntime)
 	_ = svc.apply(context.Background(), "acme", "ada", orgconfig.ConfigPatch{}, cardProbe{})
-	if strings.Join(card.locks, ",") != "org_model:acme" {
-		t.Fatalf("locks = %v, want org_model:acme alone", card.locks)
+	svc.syncCopies(context.Background(), "acme", cardCopies{forgotToken: "claude-subscription-ref"})
+	want := "org_anthropic:acme,org_model:acme,org_anthropic:acme,org_model:acme"
+	if got := strings.Join(card.locks, ","); got != want {
+		t.Fatalf("locks = %s, want %s", got, want)
 	}
 }

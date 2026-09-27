@@ -24,8 +24,10 @@
 // per-org lock, covering the connection row, the subscription row, the
 // setting row and the encrypted secret bytes — see repository_agents_card.go.
 // What a save does is decided by agents_rule.go; the connection is probed
-// (model_probe.go) before the transaction opens, so no lock is held across a
-// network call.
+// (model_probe.go) before the transaction opens, so no save holds the lock
+// across a probe. The copies outside Postgres (the SM-API mirrors, the Agent
+// Manager provider) follow the commit under the same lock, so they land in
+// save order.
 //
 // The runtime is read by coding dispatch, which copies it (with the
 // connection) onto the run it launches, so a run in flight keeps what it
@@ -43,9 +45,22 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 )
 
-// cardLockPrefix is the card's per-org advisory lock name (also taken by
-// ModelKeyRename).
-const cardLockPrefix = "org_model:"
+// cardLockPrefixes are the card's per-org advisory lock names, taken in this
+// order by everything that writes the card's rows or their copies: a save, its
+// copies after commit, and ModelKeyRename. `org_anthropic:` is the name the
+// previous release takes; holding it too keeps a replica of that release,
+// saving during a rolling deploy, serialized with this one.
+var cardLockPrefixes = []string{"org_anthropic:", "org_model:"}
+
+// lockCard takes the card's per-org locks, in cardLockPrefixes order.
+func lockCard(lock func(key string) error, ocOrgID string) error {
+	for _, prefix := range cardLockPrefixes {
+		if err := lock(prefix + ocOrgID); err != nil {
+			return fmt.Errorf("agents card: lock: %w", err)
+		}
+	}
+	return nil
+}
 
 // AgentSettingsService owns the AI agents card. See the file doc.
 type AgentSettingsService struct {
@@ -210,8 +225,9 @@ func (s *AgentSettingsService) testConnection(ctx context.Context, ocOrgID strin
 // lock. The patch is judged again inside it, against the rows it is about to
 // write over, so a concurrent save cannot slip a state between probe and write
 // that the rule would refuse; a connection that changed since it was probed
-// is a conflict, never a write of an unprobed connection. The SM-API copies
-// follow the commit, best-effort, and never decide whether the save happened.
+// is a conflict, never a write of an unprobed connection. The copies outside
+// Postgres follow the commit (syncCopies), best-effort, and never decide
+// whether the save happened.
 func (s *AgentSettingsService) apply(ctx context.Context, ocOrgID, actor string, p orgconfig.ConfigPatch, probed cardProbe) error {
 	var (
 		eff           cardEffects
@@ -220,8 +236,8 @@ func (s *AgentSettingsService) apply(ctx context.Context, ocOrgID, actor string,
 		forgotKey     string                // SM-API ref name of a deleted connection key
 	)
 	err := s.card.Tx(ctx, func(tx AgentsCardTx) error {
-		if err := tx.AdvisoryLock(cardLockPrefix + ocOrgID); err != nil {
-			return fmt.Errorf("agents card: lock: %w", err)
+		if err := lockCard(tx.AdvisoryLock, ocOrgID); err != nil {
+			return err
 		}
 		state, err := stateInTx(tx, ocOrgID)
 		if err != nil {
@@ -284,23 +300,62 @@ func (s *AgentSettingsService) apply(ctx context.Context, ocOrgID, actor string,
 	if err != nil {
 		return err
 	}
-
-	if forgotToken != "" {
-		s.creds.forgetKey(ctx, ocOrgID, AnthropicRoleCoding, forgotToken)
-	}
-	s.conns.forgetKey(ctx, ocOrgID, forgotKey)
-	writtenKey := ""
-	if eff.writeConn != nil {
-		writtenKey = eff.writeConn.Key
-	}
-	if writtenKey != "" {
-		s.conns.mirrorKey(ctx, ocOrgID, writtenKey)
-	}
-	s.creds.syncModelProvider(ctx, ocOrgID, before, after, writtenKey)
-	if eff.writeToken != "" {
-		s.creds.mirrorKey(ctx, ocOrgID, AnthropicRoleCoding, eff.writeToken)
-	}
+	s.syncCopies(ctx, ocOrgID, cardCopies{
+		forgotToken:  forgotToken,
+		forgotKey:    forgotKey,
+		keyWritten:   eff.writeConn != nil && eff.writeConn.Key != "",
+		tokenWritten: eff.writeToken != "",
+		before:       before,
+		after:        after,
+	})
 	return nil
+}
+
+// cardCopies is what a committed save changed that the card's copies outside
+// Postgres follow: the SM-API mirrors and the Agent Manager provider.
+type cardCopies struct {
+	forgotToken, forgotKey   string // SM-API ref names of deleted credentials
+	keyWritten, tokenWritten bool
+	before, after            *modelconn.Connection // the org's connection either side of the save
+}
+
+// none reports a save that changed nothing the copies hold (a runtime-only or
+// model-only save).
+func (c cardCopies) none() bool {
+	return c.forgotToken == "" && c.forgotKey == "" && !c.keyWritten && !c.tokenWritten &&
+		modelProviderStepFor(c.before, c.after, c.keyWritten) == modelProviderLeave
+}
+
+// syncCopies brings the copies in line with a committed save, best-effort, in
+// a second transaction under the card's locks. Each copy is made from the rows
+// as they stand, not as the save left them: the SM-API paths are fixed per
+// org, so two saves' copies finishing out of order would otherwise leave the
+// earlier key in the vault beside the later host, and a stored key never
+// follows the host (ADR-0038). Under the lock, whichever copy runs last copies
+// the last save. A failure is logged and never undoes the save.
+func (s *AgentSettingsService) syncCopies(ctx context.Context, ocOrgID string, c cardCopies) {
+	if c.none() {
+		return
+	}
+	err := s.card.Tx(ctx, func(tx AgentsCardTx) error {
+		if err := lockCard(tx.AdvisoryLock, ocOrgID); err != nil {
+			return err
+		}
+		s.creds.forgetKey(ctx, tx, ocOrgID, AnthropicRoleCoding, c.forgotToken)
+		s.conns.forgetKey(ctx, tx, ocOrgID, c.forgotKey)
+		if c.keyWritten {
+			s.conns.mirrorKey(ctx, tx, ocOrgID)
+		}
+		s.creds.syncModelProvider(ctx, tx, ocOrgID, c.before, c.after, c.keyWritten)
+		if c.tokenWritten {
+			s.creds.mirrorKey(ctx, tx, ocOrgID, AnthropicRoleCoding)
+		}
+		return nil
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "agents card: the saved card's copies were not brought in line (org_secrets still authoritative)",
+			"ocOrgId", ocOrgID, "error", err)
+	}
 }
 
 // covers reports whether this probe vouches for writing draft over stored: it
