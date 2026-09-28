@@ -36,11 +36,17 @@ dispatch the coding agent directly.
 
 ## Credentials
 
-Anthropic credentials are managed by AE per organization. The Console is the
-authoritative write path: saving the org's default Anthropic key stores it in
-AE's org secret store and mirrors it to OpenBao, and aep-api publishes where it
-put it as the `anthropic-secrets` SecretReference in the org's OpenChoreo
+The org's model connection is managed by AE per organization. The Console is
+the authoritative write path: saving the connection's key stores it in AE's org
+secret store and mirrors it to OpenBao, and aep-api publishes where it put it
+as the `model-connection-secrets` SecretReference in the org's OpenChoreo
 namespace. The SRE agent has no key of its own; it uses that one.
+
+The SRE image calls Anthropic (`--rca-model`, default
+`anthropic:claude-sonnet-4-6`), so this only works when the org's connection
+is an Anthropic key. With an `openai-compatible` connection the agent gets a
+key its model cannot use. aectl cannot tell the connection's format from the
+SecretReference, so it does not check.
 
 The SRE hotfix image consumes the key from a file:
 
@@ -48,14 +54,14 @@ The SRE hotfix image consumes the key from a file:
 RCA_LLM_API_KEY_FILE=/etc/rca-agent/anthropic/RCA_LLM_API_KEY
 ```
 
-`aectl sre install` reads the KV path from the org's `anthropic-secrets`
+`aectl sre install` reads the KV path from the org's `model-connection-secrets`
 SecretReference and authors an ExternalSecret that projects it into the SRE
 agent's namespace:
 
 ```text
-AE Console org key
-  -> OpenBao user-app-secrets/<org base namespace>/anthropic-secrets#api-key
-     (recorded in SecretReference <org-namespace>/anthropic-secrets)
+AE Console model connection key
+  -> OpenBao user-app-secrets/<org base namespace>/model-connection-secrets#api-key
+     (recorded in SecretReference <org-namespace>/model-connection-secrets)
   -> ExternalSecret openchoreo-observability-plane/rca-agent-anthropic-secret
      (ClusterSecretStore default, refreshInterval 1m)
   -> /etc/rca-agent/anthropic/RCA_LLM_API_KEY
@@ -69,6 +75,11 @@ the key for the first time, re-run `deployments/scripts/setup-sre.sh` (or
 re-reads the same path every minute. The key value must not be placed in the
 image, checked into config, or logged.
 
+An org whose key predates the model connection still has an
+`anthropic-secrets` reference until aep-api's background rename moves it
+(`services/aep-api/internal/organization/model_key_rename.go`). aectl falls
+back to that name, and a re-run after the rename picks up the new one.
+
 `--org-namespace` picks the org (default: config `oc.default_org_namespace`,
 else `default`).
 
@@ -77,7 +88,7 @@ else `default`).
 1. A `make dev-env` cluster (or any `aectl platform install`) with the
    observability plane.
 2. AEP and the SRE agent share one Thunder (`thunder.openchoreo.localhost:8080`).
-3. The AEP org is connected to GitHub, with an Anthropic key saved in the
+3. The AEP org is connected to GitHub, with an Anthropic model connection saved in the
    Console. Both the coding agent and the SRE agent use it.
 4. The target project and components were **created through AEP** and
    deployed; the OC project slug equals the AEP project slug.
@@ -98,7 +109,7 @@ WITH_AGENT_MANAGER=0 make dev-env
 | `WITH_SRE` | `1` | `0` keeps the plane but skips the SRE agent. |
 | `WITH_AGENT_MANAGER` | `1` | `0` skips Agent Manager. |
 
-Then save the org's Anthropic key in the Console and run the SRE step once
+Then save the org's model connection (an Anthropic key) in the Console and run the SRE step once
 more, so the agent picks the key up:
 
 ```bash
@@ -148,7 +159,7 @@ The command picks its mode from the cluster:
 In both modes its authz grants (`rca-agent-dispatch`, `aep-observer-reader`)
 are keyed on `claim: client_id` for the same reason, and it finds the SRE agent
 Deployment by label (`sre-agent` from
-chart 1.2.0, `ai-rca-agent` before) and reconciles the Anthropic key
+chart 1.2.0, `ai-rca-agent` before) and reconciles the model connection key
 ExternalSecret, the SRE extension ConfigMap, and the deployment mounts. It reads the extension
 assets from an AE repository checkout: the one containing the working
 directory, or the one passed as `--assets-root <checkout>`. It resolves them
@@ -252,10 +263,10 @@ SRE agent.
 
 If the SRE pod sits in `ContainerCreating` with a missing
 `rca-agent-anthropic-secret`, no org key has been projected yet. Save the
-org's Anthropic key in the Console, then re-run the SRE step:
+org's model connection in the Console, then re-run the SRE step:
 
 ```bash
-kubectl -n default get secretreference anthropic-secrets   # appears on the first save
+kubectl -n default get secretreference model-connection-secrets   # appears on the first save
 bash deployments/scripts/setup-sre.sh
 ```
 

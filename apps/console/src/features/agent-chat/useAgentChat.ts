@@ -480,7 +480,7 @@ export function useAgentChat(
       // must persist exactly the row shape it did before this feature.
       const attachments = files.length > 0 ? files.map((f) => f.name) : undefined;
       // The row goes up NOW, not after the dispatch answers. `startCollabTurn`
-      // resolves the repo, the workspace ref, the org's Anthropic key, two git
+      // resolves the repo, the workspace ref, the org's model connection key, two git
       // heads and two snapshot extracts before it returns a turn id — and the
       // user watching their own message not appear for all of that cannot tell
       // a slow platform from a dropped message. It carries no turnId yet;

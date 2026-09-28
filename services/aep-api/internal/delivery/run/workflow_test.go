@@ -2417,6 +2417,40 @@ func TestPublisherCredentialsMissing_SettlesBlockedWithoutSpendingTheBudget(t *t
 	require.Equal(t, 0, h.closed, "a blocked increment keeps its milestone open")
 }
 
+// TestProviderLimit_SettlesBlockedWithoutSpendingTheBudget is the quota block's
+// twin, met after launch: the runner stopped because its model provider's usage
+// limit refused every call, the pod-truth watcher closed the cycle under
+// delivery.CycleReasonModelProviderLimit, and the run settles BLOCKED on that
+// record — not failed under redispatch-budget, which is what the same closed
+// cycle reads as for any other reason. Re-dispatching would only meet the same
+// refusal until the plan resets, so the budget is not touched and a person
+// starts the run again.
+func TestProviderLimit_SettlesBlockedWithoutSpendingTheBudget(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1))
+	h.factsAre(CycleFacts{CycleID: testCycleID, Ended: true, AgentReason: delivery.CycleReasonModelProviderLimit})
+	h.signal(delivery.SigRunAgentDied, 5*time.Minute)
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateBlocked, delivery.RunReasonModelProviderLimit)
+	require.Equal(t, 1, h.dispatchCount(),
+		"a provider limit must not be re-dispatched — the answer cannot change before the plan resets")
+	require.Equal(t, 0, h.closed, "a blocked increment keeps its milestone open")
+	require.Equal(t, []FinishCycleInput{{CycleID: testCycleID}}, h.finishes,
+		"the cycle closes with no merge SHA, like any dispatch that landed nothing")
+}
+
+// The validation workflow maps an unlanded agent stage through its own switch,
+// so the same record has to settle a revalidation run blocked too, rather than
+// falling through to its default (redispatch-budget).
+func TestProviderLimit_BlocksAValidationRunToo(t *testing.T) {
+	state, reason := stateForUnlandedValidation(cycleProviderLimit)
+	require.Equal(t, delivery.RunStateBlocked, state)
+	require.Equal(t, delivery.RunReasonModelProviderLimit, reason)
+}
+
 // TestBuildRetriggerBudget_RedWithNothingToFix is the exit for a build that
 // stayed red through its one automatic re-trigger and produced no fix issue:
 // the allowance is spent and nothing came back that could make it green.

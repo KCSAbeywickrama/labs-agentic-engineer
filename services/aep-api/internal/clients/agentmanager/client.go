@@ -36,7 +36,7 @@ const ExternalAgentAPIType = "external-agent-api"
 // per set, and asking for everything everywhere would hand every request the
 // broadest credential this client can hold.
 const (
-	scopeProvider = "amp:llm-provider:create amp:llm-provider:read amp:llm-provider:update amp:llm-provider-template:read amp:gateway:read"
+	scopeProvider = "amp:llm-provider:create amp:llm-provider:read amp:llm-provider:update amp:gateway:read"
 	scopeAgent    = "amp:agent:create amp:agent:read amp:agent:update amp:project:read amp:org:view"
 	// AN AGENT'S KEY IS NOT A PROVIDER KEY. The two families are gated by
 	// different permissions and the pair is not interchangeable: a token
@@ -67,42 +67,6 @@ func (e *PermanentError) Error() string {
 	return fmt.Sprintf("agentmanager: request rejected with %d: %s", e.Status, e.Body)
 }
 
-// ProviderTemplate reads one template's metadata: the upstream URL and the auth
-// header the provider body must carry.
-func (c *client) ProviderTemplate(ctx context.Context, org, template string) (ProviderTemplate, error) {
-	tok, err := c.token(ctx, scopeProvider)
-	if err != nil {
-		return ProviderTemplate{}, err
-	}
-	var out struct {
-		Templates []struct {
-			ID       string `json:"id"`
-			Metadata struct {
-				EndpointURL string `json:"endpointUrl"`
-				Auth        struct {
-					Type   string `json:"type"`
-					Header string `json:"header"`
-				} `json:"auth"`
-			} `json:"metadata"`
-		} `json:"templates"`
-	}
-	if err := c.do(ctx, tok, http.MethodGet,
-		fmt.Sprintf("/orgs/%s/llm-provider-templates?limit=50", url.PathEscape(org)), nil, &out); err != nil {
-		return ProviderTemplate{}, err
-	}
-	for _, t := range out.Templates {
-		if t.ID == template {
-			return ProviderTemplate{
-				ID:          t.ID,
-				EndpointURL: t.Metadata.EndpointURL,
-				AuthType:    t.Metadata.Auth.Type,
-				AuthHeader:  t.Metadata.Auth.Header,
-			}, nil
-		}
-	}
-	return ProviderTemplate{}, fmt.Errorf("agentmanager: no provider template %q in org %s", template, org)
-}
-
 // EnsureProvider creates the org's provider, or returns the one already there.
 //
 // The body is the shape AMP's console BUILDS, not the shape its form collects —
@@ -118,50 +82,27 @@ func (c *client) EnsureProvider(ctx context.Context, in EnsureProviderInput) (Pr
 	}
 	path := fmt.Sprintf("/orgs/%s/llm-providers", url.PathEscape(in.Org))
 
-	var existing struct {
-		Providers []struct {
-			UUID string `json:"uuid"`
-			ID   string `json:"id"`
-		} `json:"providers"`
-	}
-	if err := c.do(ctx, tok, http.MethodGet, path, nil, &existing); err != nil {
+	uuid, found, err := c.findProvider(ctx, tok, in.Org, in.ID)
+	if err != nil {
 		return ProviderRef{}, err
 	}
-	for _, p := range existing.Providers {
-		if p.ID == in.ID {
-			// It exists. Re-assert the org's key only when the caller says it
-			// changed — the key is masked on read, so the caller is the only
-			// one that can know, and a needless PUT redeploys every proxy this
-			// provider serves. See EnsureProviderInput.ReassertCredential.
-			if in.ReassertCredential {
-				if err := c.updateProviderCredential(ctx, tok, p.UUID, in); err != nil {
-					return ProviderRef{}, err
-				}
+	if found {
+		// It exists. Re-assert the org's connection only when the caller says
+		// it changed — the key is masked on read, so the caller is the only one
+		// that can know. See EnsureProviderInput.ReassertCredential.
+		if in.ReassertCredential {
+			if err := c.updateProviderCredential(ctx, tok, uuid, in); err != nil {
+				return ProviderRef{}, err
 			}
-			return ProviderRef{UUID: p.UUID, Handle: p.ID, Context: in.Context}, nil
 		}
+		return ProviderRef{UUID: uuid, Handle: in.ID, Context: in.Context}, nil
 	}
 
-	body := map[string]any{
-		"id": in.ID, "name": in.Name, "version": in.Version,
-		"context": in.Context, "template": in.Template,
-		"upstream": map[string]any{"main": map[string]any{
-			"url": in.UpstreamURL,
-			"auth": map[string]any{
-				"type": in.AuthType, "header": in.AuthHeader, "value": in.APIKey,
-			},
-		}},
-		"security": map[string]any{"enabled": true, "apiKey": map[string]any{
-			"enabled": true, "key": "X-API-Key", "in": "header",
-		}},
-		"gateways":      []string{in.GatewayID},
-		"accessControl": map[string]any{"exceptions": []string{}, "mode": "allow_all"},
-	}
 	var created struct {
 		UUID string `json:"uuid"`
 		ID   string `json:"id"`
 	}
-	if err := c.do(ctx, tok, http.MethodPost, path, body, &created); err != nil {
+	if err := c.do(ctx, tok, http.MethodPost, path, providerBody(in), &created); err != nil {
 		return ProviderRef{}, err
 	}
 	if created.ID == "" {
@@ -170,10 +111,67 @@ func (c *client) EnsureProvider(ctx context.Context, in EnsureProviderInput) (Pr
 	return ProviderRef{UUID: created.UUID, Handle: created.ID, Context: in.Context}, nil
 }
 
-// updateProviderCredential writes the org's current key onto an existing
-// provider.
+// UpdateProviderCredential writes in's connection onto the org's provider when
+// it exists, and creates nothing when it does not: found reports which. It is
+// the write a credential change makes on
+// a provider some deploy created, where EnsureProvider's create branch would
+// conjure a provider no agent is bound to.
+func (c *client) UpdateProviderCredential(ctx context.Context, in EnsureProviderInput) (bool, error) {
+	tok, err := c.token(ctx, scopeProvider)
+	if err != nil {
+		return false, err
+	}
+	uuid, found, err := c.findProvider(ctx, tok, in.Org, in.ID)
+	if err != nil || !found {
+		return false, err
+	}
+	return true, c.updateProviderCredential(ctx, tok, uuid, in)
+}
+
+// findProvider looks the org's provider up by its handle. The list is the only
+// lookup the API offers by handle; a provider's own resource is keyed by UUID.
+func (c *client) findProvider(ctx context.Context, token, org, id string) (string, bool, error) {
+	var existing struct {
+		Providers []struct {
+			UUID string `json:"uuid"`
+			ID   string `json:"id"`
+		} `json:"providers"`
+	}
+	path := fmt.Sprintf("/orgs/%s/llm-providers", url.PathEscape(org))
+	if err := c.do(ctx, token, http.MethodGet, path, nil, &existing); err != nil {
+		return "", false, err
+	}
+	for _, p := range existing.Providers {
+		if p.ID == id {
+			return p.UUID, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+// updateProviderCredential writes the org's current connection onto an existing
+// provider: the template, the upstream and its auth as well as the key.
+//
+// ALL FOUR, not the key alone. A connection switch changes every one of them —
+// Anthropic's API on `anthropic` with x-api-key becomes Ollama on `openai` with
+// a Bearer Authorization — and one PUT carrying all four is what moves the
+// provider, and every agent proxy bound to it, onto the new host. Agent
+// Manager accepts a template, upstream and key change on an existing provider
+// and redeploys its proxies; agents keep their own keys and proxy URLs.
 func (c *client) updateProviderCredential(ctx context.Context, token, providerUUID string, in EnsureProviderInput) error {
-	body := map[string]any{
+	return c.do(ctx, token, http.MethodPut,
+		fmt.Sprintf("/orgs/%s/llm-providers/%s", url.PathEscape(in.Org), url.PathEscape(providerUUID)),
+		providerBody(in), nil)
+}
+
+// providerBody is the provider as both the create and the update send it — one
+// shape, so a PUT can never describe the provider differently from the POST
+// that made it.
+//
+// NO `policies` field. Guardrails on this provider are the operator's, and
+// writing the connection must not silently drop the PII policy they attached.
+func providerBody(in EnsureProviderInput) map[string]any {
+	return map[string]any{
 		"id": in.ID, "name": in.Name, "version": in.Version,
 		"context": in.Context, "template": in.Template,
 		"upstream": map[string]any{"main": map[string]any{
@@ -188,11 +186,6 @@ func (c *client) updateProviderCredential(ctx context.Context, token, providerUU
 		"gateways":      []string{in.GatewayID},
 		"accessControl": map[string]any{"exceptions": []string{}, "mode": "allow_all"},
 	}
-	// NO `policies` field. Guardrails on this provider are the operator's, and
-	// sending the key must not silently drop the PII policy they attached.
-	return c.do(ctx, token, http.MethodPut,
-		fmt.Sprintf("/orgs/%s/llm-providers/%s", url.PathEscape(in.Org), url.PathEscape(providerUUID)),
-		body, nil)
 }
 
 // do performs one request and maps the response onto this package's error

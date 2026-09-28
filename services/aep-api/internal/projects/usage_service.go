@@ -192,6 +192,7 @@ func toGenUsage(u contracts.StampedUsage) gen.Usage {
 		CacheCreationTokens: u.Tokens.CacheCreationTokens,
 		Model:               u.Tokens.Model,
 		CostUsd:             u.CostUsd,
+		Host:                u.Host,
 	}
 }
 

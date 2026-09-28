@@ -19,7 +19,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DEFAULT_RUNTIME, runtimeNameFromEnv, UnsupportedRuntimeError } from "./port.js";
-import { createRuntime, envOr } from "./registry.js";
+import { createRuntime } from "./registry.js";
 
 test("createRuntime: the default is Claude Code, and it is what an unset env resolves to", () => {
   assert.equal(DEFAULT_RUNTIME, "claude-code");
@@ -47,14 +47,3 @@ test("runtimeNameFromEnv: a name the platform has never heard of is an error, no
   // spelling now, across the contract, the env and the lookup key.
   assert.throws(() => runtimeNameFromEnv({ AEP_AGENT_RUNTIME: "claude_code" }), UnsupportedRuntimeError);
 });
-
-test("envOr(AEP_AGENT_MODEL): the org's setting wins, and an absent one changes nothing", () => {
-  assert.equal(envOr("AEP_AGENT_MODEL", "claude-sonnet-5", {}), "claude-sonnet-5");
-  assert.equal(envOr("AEP_AGENT_MODEL", "claude-sonnet-5", { AEP_AGENT_MODEL: "" }), "claude-sonnet-5");
-  assert.equal(envOr("AEP_AGENT_MODEL", "claude-sonnet-5", { AEP_AGENT_MODEL: "  " }), "claude-sonnet-5");
-  assert.equal(envOr("AEP_AGENT_MODEL", "claude-sonnet-5", { AEP_AGENT_MODEL: "claude-haiku-4-5" }), "claude-haiku-4-5");
-  // Trimmed, because a stamped env var picks up whitespace from a YAML block
-  // scalar and a model id with a trailing space resolves to nothing.
-  assert.equal(envOr("AEP_AGENT_MODEL", "claude-sonnet-5", { AEP_AGENT_MODEL: " claude-haiku-4-5 " }), "claude-haiku-4-5");
-});
-

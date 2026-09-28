@@ -95,11 +95,13 @@ type AppParams struct {
 	SREHandoffAuth *auth.SREHandoffVerifier
 
 	// Runner-facing and agents-facing surfaces. Callers use the gitrepo +
-	// artifacts packages in-process. CredService + AnthropicCredService + DB
-	// also back the local-dev in-process secret resync helper (devResyncHandler).
+	// artifacts packages in-process. CredService + AnthropicCredService +
+	// ModelConnections + DB also back the local-dev in-process secret resync
+	// helper (devResyncHandler).
 	DB                   *gorm.DB
 	CredService          *organization.CredentialService
 	AnthropicCredService *organization.AnthropicCredentialService
+	ModelConnections     *organization.ModelConnectionService
 
 	// MCP discovery ports (dependencies feature). The composition root wires
 	// them concretely (external-resource repository / org endpoint catalog /

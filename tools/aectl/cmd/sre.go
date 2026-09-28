@@ -54,8 +54,8 @@ import (
 //   - none is installed: aectl installs the plane and logs charts itself at
 //     --obs-plane-version / --obs-logs-version.
 //
-// The agent's Anthropic key is the org's key as saved in the AE Console
-// (sre_plane.go). Prerequisite: `aectl platform install` (it registers the
+// The agent's Anthropic key is the org's model connection key as saved in the
+// AE Console (sre_plane.go). Prerequisite: `aectl platform install` (it registers the
 // openchoreo-rca-agent Thunder client and seeds the OpenBao secrets this reads).
 
 var (
@@ -117,7 +117,7 @@ func init() {
 	f.StringVar(&sreObserverHost, "observer-hostname", "observer.openchoreo.localhost", "Observer gateway hostname")
 	f.StringVar(&sreRcaHost, "rca-hostname", "rca-agent.openchoreo.localhost", "RCA agent gateway hostname")
 	f.StringVar(&sreAssetsRoot, "assets-root", "", "AE repository checkout holding the SRE extension assets (deployments/sre-agent-extensions, services/aep-mcp-server/skills); default: search upward from the working directory")
-	f.StringVar(&sreOrgNamespace, "org-namespace", "", "OpenChoreo namespace of the org whose Console-saved Anthropic key the agent uses (default: config oc.default_org_namespace, else \"default\")")
+	f.StringVar(&sreOrgNamespace, "org-namespace", "", "OpenChoreo namespace of the org whose Console-saved model connection key (an Anthropic key) the agent uses (default: config oc.default_org_namespace, else \"default\")")
 	f.StringVar(&sreOrgSecretStore, "org-secret-store", "default", "ClusterSecretStore that resolves the org's secret paths")
 	f.StringVar(&srePlatformStore, "platform-secret-store", "aep-platform", "ClusterSecretStore the platform chart installs for the aep/* OpenBao paths")
 	f.String("oc-api-url", "", "In-cluster OpenChoreo platform API URL (overrides config)")
@@ -137,7 +137,7 @@ type sreParams struct {
 	// the two cannot disagree.
 	RcaServiceURL, AEApiURL, AEPApiURL, AEMCPURL string
 	AEHandoff, AEAutoDispatch, AEPublish         bool
-	// The org's Console-saved Anthropic key (sreAnthropicSecretTmpl).
+	// The org's Console-saved model connection key (sreAnthropicSecretTmpl).
 	OrgSecretStore string
 	AnthropicRef   kvRef
 }
@@ -197,7 +197,7 @@ func runSreInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 1. Detect the plane and the org's Anthropic key.
+	// 1. Detect the plane and the org's model connection key.
 	plane, adopt, err := installedObsPlane(ctx, sreObsNamespace)
 	if err != nil {
 		return err
@@ -216,7 +216,7 @@ func runSreInstall(cmd *cobra.Command, args []string) error {
 	}
 	anthropicRef, haveKey, err := resolveOrgAnthropicKVRef(ctx, applier, orgNS)
 	if err != nil {
-		return fmt.Errorf("resolve the org's Anthropic key: %w", err)
+		return fmt.Errorf("resolve the org's model connection key: %w", err)
 	}
 	p.AnthropicRef = anthropicRef
 
@@ -354,8 +354,8 @@ func runSreInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	if !haveKey {
-		ui.Warn(fmt.Sprintf("No Anthropic key saved for org namespace %q yet — the SRE agent waits for one.", orgNS))
-		ui.Detail("Save the org's Anthropic key in the AE Console (Settings), then re-run `aectl sre install`.")
+		ui.Warn(fmt.Sprintf("No model connection saved for org namespace %q yet — the SRE agent waits for its key.", orgNS))
+		ui.Detail("Save the org's model connection (an Anthropic key) in the AE Console (Settings), then re-run `aectl sre install`.")
 	}
 	printSreCompletion(p)
 	return nil

@@ -53,7 +53,7 @@ datastore · `(["/surface"])` = an inbound HTTP surface.
 
 | Domain | Owns | Shape | README |
 |---|---|---|---|
-| **organization** | tenant onboarding + every per-org config (GitHub / Anthropic / IDP), behind `/config` | flat-root | [→](internal/organization/README.md) |
+| **organization** | tenant onboarding + every per-org config (GitHub / model connection / IDP), behind `/config` | flat-root | [→](internal/organization/README.md) |
 | **spec** | git-committed requirements+design spec, `v<N>` version tags, agent turns, the org Skill library | flat-root | [→](internal/spec/README.md) |
 | **delivery** | the version's **milestone run loop**: plan, dispatch the coding agent, merge, build, validate | kernel-root | [→](internal/delivery/README.md) |
 | **dependencies** | resource-type catalog + provisioning + runtime-config convergence | kernel-root | [→](internal/dependencies/README.md) |
@@ -65,7 +65,7 @@ datastore · `(["/surface"])` = an inbound HTTP surface.
 ## The kernel, the edge, and the rest
 
 - **`platform/`** — the shared **kernel**: `auth`, `secrets`, `gitfs`, `tenant`,
-  `database`, `agentfold`, `orgconfig`, `patch`, `validate`, `httpkit`, `k8sname`, `obs`,
+  `database`, `agentfold`, `orgconfig`, `modelconn`, `netguard`, `patch`, `validate`, `httpkit`, `k8sname`, `obs`,
   plus the test kits (`componenttest`, `dbtest`, …). It carries no business logic and
   **imports no domain** — the dependency arrow only ever points *into* it.
 - **`edge/`** — the **surface composer / composition root**: the single package that

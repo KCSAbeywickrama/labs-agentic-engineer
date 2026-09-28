@@ -32,7 +32,7 @@ import (
 
 // What `aectl sre install` needs to know about the cluster it lands on: the
 // observability plane already there (if any), the SRE agent Deployment that
-// plane's chart line renders, and where the org's Console-saved Anthropic key
+// plane's chart line renders, and where the org's Console-saved model key
 // lives.
 
 // obsPlaneChart is the chart name of every observability plane release.
@@ -98,24 +98,28 @@ func findSREAgentDeployment(ctx context.Context, client kubernetes.Interface, ns
 	}
 }
 
-// The org's default Anthropic key, as aep-api publishes it when the key is
+// The org's model connection key, as aep-api publishes it when the key is
 // saved in the Console: a SecretReference named after the credential entity
-// ("anthropic" + "-secrets") in the org's OpenChoreo namespace, whose
-// api-key entry points at the key's KV path. Reading the coordinates from
-// that CR, rather than rebuilding the path, keeps aep-api the only place that
-// knows how the path is derived.
-const (
-	orgAnthropicSecretRef = "anthropic-secrets"
-	orgAnthropicSecretKey = "api-key"
-)
+// (entity + "-secrets") in the org's OpenChoreo namespace, whose api-key entry
+// points at the key's KV path. Reading the coordinates from that CR, rather
+// than rebuilding the path, keeps aep-api the only place that knows how the
+// path is derived.
+//
+// The entity is "model-connection"; before the model connection it was
+// "anthropic", and aep-api moves each org off that name in the background
+// (organization/model_key_rename.go), so an org it has not reached yet still
+// has only the old reference. The current name wins when both exist.
+const orgAnthropicSecretKey = "api-key"
+
+var orgModelKeySecretRefs = []string{"model-connection-secrets", "anthropic-secrets"}
 
 // kvRef is a secret-store remote reference: a KV path and a property in it.
 type kvRef struct {
 	Key, Property string
 }
 
-// orgAnthropicKVRef extracts the api-key remote reference from an
-// anthropic-secrets SecretReference.
+// orgAnthropicKVRef extracts the api-key remote reference from the org's
+// model key SecretReference.
 func orgAnthropicKVRef(ref *unstructured.Unstructured) (kvRef, error) {
 	data, _, err := unstructured.NestedSlice(ref.Object, "spec", "data")
 	if err != nil {
@@ -140,13 +144,19 @@ func orgAnthropicKVRef(ref *unstructured.Unstructured) (kvRef, error) {
 		ref.GetNamespace(), ref.GetName(), orgAnthropicSecretKey)
 }
 
-// resolveOrgAnthropicKVRef finds the org's Console-saved Anthropic key.
+// resolveOrgAnthropicKVRef finds the org's Console-saved model connection key.
 // found is false until someone saves the key in the Console.
 func resolveOrgAnthropicKVRef(ctx context.Context, applier *k8s.Applier, orgNamespace string) (ref kvRef, found bool, err error) {
-	obj, err := applier.Get(ctx, "openchoreo.dev/v1alpha1", "SecretReference", orgNamespace, orgAnthropicSecretRef)
-	if err != nil || obj == nil {
-		return kvRef{}, false, err
+	for _, name := range orgModelKeySecretRefs {
+		obj, err := applier.Get(ctx, "openchoreo.dev/v1alpha1", "SecretReference", orgNamespace, name)
+		if err != nil {
+			return kvRef{}, false, err
+		}
+		if obj == nil {
+			continue
+		}
+		ref, err = orgAnthropicKVRef(obj)
+		return ref, err == nil, err
 	}
-	ref, err = orgAnthropicKVRef(obj)
-	return ref, err == nil, err
+	return kvRef{}, false, nil
 }

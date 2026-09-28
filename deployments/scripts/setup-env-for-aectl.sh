@@ -143,11 +143,19 @@ done
 docker info >/dev/null 2>&1 || { echo "❌ Docker is not running"; exit 1; }
 
 # ============================================================================
-# Step 1: Create the cluster (official page, Step 1 — unchanged)
+# Step 1: Create the cluster (official page, Step 1; K3D_FIX_DNS=0 on Colima)
 # ============================================================================
 echo ""
 echo "1️⃣  Creating the k3d cluster"
 if ! k3d cluster list "${CLUSTER_NAME}" >/dev/null 2>&1; then
+    # The one deviation in this step: on Colima, k3d's DNS fix points the node's
+    # resolver at the VM gateway, whose DNAT to Docker's embedded DNS never
+    # answers inside the k3s node, so containerd cannot pull even the pause
+    # image and every pod sits in ContainerCreating. K3D_FIX_DNS=0 keeps Docker's
+    # embedded DNS. https://github.com/k3d-io/k3d/issues/1449
+    if docker info --format '{{.Name}}' 2>/dev/null | grep -qi colima; then
+        export K3D_FIX_DNS=0
+    fi
     curl -fsSL "${RAW}/install/k3d/single-cluster/config.yaml" | k3d cluster create --config=-
 else
     echo "⏭️  Cluster '${CLUSTER_NAME}' already exists"
@@ -893,7 +901,7 @@ inboundAuthConfig:
       tokenEndpointAuthMethod: "client_secret_basic"
       pkceRequired: false
       publicClient: false
-      scopes: ["amp:org:view","amp:project:create","amp:project:read","amp:agent:create","amp:agent:read","amp:agent:update","amp:llm-provider:create","amp:llm-provider:read","amp:llm-provider:update","amp:llm-provider:api-key-manage","amp:agent:api-key-manage","amp:llm-provider-template:read","amp:gateway:read","amp:environment:read"]
+      scopes: ["amp:org:view","amp:project:create","amp:project:read","amp:agent:create","amp:agent:read","amp:agent:update","amp:llm-provider:create","amp:llm-provider:read","amp:llm-provider:update","amp:llm-provider:api-key-manage","amp:agent:api-key-manage","amp:gateway:read","amp:environment:read"]
       # ouId above sets the OU; \`attributes\` is what puts the claim INTO the
       # token. Without it the mint succeeds and every amp-api call still fails.
       token:
@@ -932,7 +940,6 @@ permissions:
       # The agent's TRACING token is a third key family again: without this the
       # mint answers 403 and the agent emits no traces, silently.
       - "amp:agent:token-manage"
-      - "amp:llm-provider-template:read"
       - "amp:gateway:read"
       - "amp:environment:read"
 assignments:
@@ -1270,7 +1277,7 @@ printf "    %-16s%-50s(%s / %s)\n" "OpenChoreo" "http://openchoreo.localhost:808
 printf "    %-16s%-50s(%s / %s)\n" "ThunderID" "http://thunder.openchoreo.localhost:8080/console" "${THUNDER_ADMIN_USER}" "${THUNDER_ADMIN_PASSWORD}"
 echo ""
 echo "  Still to install — \`make dev-env\` runs both of these next"
-printf "    %-16s%-50s%s\n" "AEP" "http://console.openchoreo.localhost:8080" "aectl platform install"
+printf "    %-16s%-50s%s\n" "AEP" "http://console.ae.localhost:8080" "aectl platform install"
 printf "    %-16s%-50s%s\n" "Agent Manager" "http://console.amp.localhost:8080" "setup-agent-manager.sh"
 echo ""
 echo "  Cleanup:  k3d cluster delete ${CLUSTER_NAME}"

@@ -25,8 +25,8 @@ import (
 )
 
 // The rename, on a reconstructed pre-phase17 state: the old table's rows move
-// into org_agent_settings (which AutoMigrate created), an existing new row
-// wins, the old table goes, and a re-run is a no-op.
+// into org_agent_settings (which AutoMigrate created) without their model; an
+// existing new row wins, the old table goes, and a re-run is a no-op.
 func TestPhase17_MovesTheRowsAndDropsTheOldTable(t *testing.T) {
 	db := dbtest.New(t)
 	ctx := context.Background()
@@ -39,8 +39,8 @@ func TestPhase17_MovesTheRowsAndDropsTheOldTable(t *testing.T) {
 		   ('acme', 'opencode', 'claude-haiku-4-5', 'ada', now()),
 		   ('globex', 'claude-code', 'claude-haiku-4-5', 'bob', now())`,
 		// Written by this build before the step ran: it must not be overwritten.
-		`INSERT INTO org_agent_settings (oc_org_id, runtime, model, updated_by, updated_at)
-		   VALUES ('globex', 'claude-code', 'claude-sonnet-5', 'carol', now())`,
+		`INSERT INTO org_agent_settings (oc_org_id, runtime, updated_by, updated_at)
+		   VALUES ('globex', 'claude-code', 'carol', now())`,
 	} {
 		if err := db.Exec(sql).Error; err != nil {
 			t.Fatalf("seed: %v", err)
@@ -60,14 +60,14 @@ func TestPhase17_MovesTheRowsAndDropsTheOldTable(t *testing.T) {
 	if exists {
 		t.Fatal("org_coding_agent_settings survived")
 	}
-	type row struct{ OcOrgID, Runtime, Model, UpdatedBy string }
+	type row struct{ OcOrgID, Runtime, UpdatedBy string }
 	var rows []row
-	if err := db.Raw(`SELECT oc_org_id, runtime, model, updated_by FROM org_agent_settings ORDER BY oc_org_id`).Scan(&rows).Error; err != nil {
+	if err := db.Raw(`SELECT oc_org_id, runtime, updated_by FROM org_agent_settings ORDER BY oc_org_id`).Scan(&rows).Error; err != nil {
 		t.Fatalf("read: %v", err)
 	}
 	want := []row{
-		{"acme", "opencode", "claude-haiku-4-5", "ada"},
-		{"globex", "claude-code", "claude-sonnet-5", "carol"},
+		{"acme", "opencode", "ada"},
+		{"globex", "claude-code", "carol"},
 	}
 	if len(rows) != len(want) || rows[0] != want[0] || rows[1] != want[1] {
 		t.Fatalf("org_agent_settings = %+v, want %+v", rows, want)

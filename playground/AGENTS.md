@@ -112,13 +112,28 @@ Relative project paths resolve against where you launched `pnpm play` (pnpm's
 may live (a gitignored dot-dir, invisible to lint + license gates). Anywhere
 else inside the repo is refused.
 
-Requires `ANTHROPIC_API_KEY` (env) for the **engineering**
-agent, which is an AI SDK model call with no other way to authenticate. The
+The **engineering** agent runs on a model connection named by the same
+`AEP_MODEL_*` variables a coding run reads (`AEP_MODEL_FORMAT`,
+`AEP_MODEL_BASE_URL`, `AEP_MODEL_AUTH_SCHEME`, `AEP_MODEL_API_KEY`, model
+`AEP_AGENT_MODEL`), sent on every turn as aep-api sends the organization's
+(`src/kit/model-connection.ts`, whose `capabilitiesOf` mirrors aep-api's
+`modelconn.CapabilitiesOf`); a design turn gets `web_search` as aep-api's does.
+With none of them set it requires `ANTHROPIC_API_KEY` (env, or
+`deployments/.env` if you keep one) and runs on Anthropic's own API. The
 **coding** agent is a Claude Code session and authenticates by mode: a docker run
 gets the key (a container reaches no credential store), while `--host` withholds
 it and lets the SDK use the developer's own credentials — the ones `claude login`
 wrote — so a local tuning loop bills your subscription, not the platform's key.
 `code --host --api-key` opts back into key auth.
+
+`AEP_MODEL_FORMAT` or `AEP_MODEL_BASE_URL` puts a **coding** run, in either mode,
+on that connection, shaped as a dispatch stamps it (`codingConnectionEnv`): the
+connection by name, `AEP_MODEL_WEB_SEARCH` derived as aep-api would when you set
+none, and `AEP_MODEL_API_KEY` as the ONE credential — no Anthropic credential
+follows the run to another host. With neither set, no
+`AEP_MODEL_*` variable reaches the run: the runner would read a bare
+`AEP_MODEL_API_KEY` as a key for Anthropic's own API. The runner image must carry
+the adapters (`FORCE=1 make build-runner`).
 
 `AEP_CODING_ANTHROPIC_KEY` bills **coding** runs to a separate credential — the
 local half of the platform's per-org coding-agent key (ADR-0016). It takes
@@ -133,12 +148,13 @@ It changes WHICH credential is used, not WHETHER one is:
 | `code` (docker) | `AEP_CODING_ANTHROPIC_KEY`, else `ANTHROPIC_API_KEY` |
 | `code --host --api-key` | `AEP_CODING_ANTHROPIC_KEY`, else `ANTHROPIC_API_KEY` |
 | `code --host` | none — your own `claude login` |
+| any, with a connection named | `AEP_MODEL_API_KEY` only; `--api-key` and `AEP_CODING_ANTHROPIC_KEY` do not apply |
 
 Docker needs no flag because a container reaches no keychain to fall back to.
-Host mode still requires `--api-key`: defining a variable is not the same act as
-asking this run to authenticate with it, and a bypassPermissions process on your
-own filesystem should not pick up a shared credential because a file elsewhere
-happened to define one.
+Without a connection, host mode still requires `--api-key`: defining a variable
+is not the same act as asking this run to authenticate with it, and a
+bypassPermissions process on your own filesystem should not pick up a shared
+credential because a file elsewhere happened to define one.
 
 An API key arrives as `ANTHROPIC_API_KEY`, an OAuth token as
 `CLAUDE_CODE_OAUTH_TOKEN` — and the run gets **exactly one of them**, same as in

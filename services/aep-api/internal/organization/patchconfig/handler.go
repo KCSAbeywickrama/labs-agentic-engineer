@@ -18,12 +18,9 @@ package patchconfig
 
 import (
 	"context"
-	"errors"
-	"net/http"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 	"github.com/wso2/aep/aep-api/internal/organization"
-	"github.com/wso2/aep/aep-api/internal/platform/apierr"
 	"github.com/wso2/aep/aep-api/internal/platform/auth"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 )
@@ -41,36 +38,7 @@ func (h *Handler) UpdateConfig(ctx context.Context, request gen.UpdateConfigRequ
 	actor := auth.ActorFromContext(ctx)
 	proj, err := h.config.Patch(ctx, org, actor, *request.Body)
 	if err != nil {
-		return nil, mapPatchError(err)
+		return nil, organization.MapConfigError(err)
 	}
 	return gen.UpdateConfig200JSONResponse(*proj), nil
-}
-
-// mapPatchError turns a PATCH failure into the envelope. A SectionError
-// carries the offending section, so the response includes a body.<section>
-// field the console uses to highlight that form section; anything else
-// collapses to an opaque 500 that never echoes the internal cause. Probe
-// rejections that were 422 under the problem-details dialect are 400 now
-// (the error-model break).
-func mapPatchError(err error) error {
-	var se *organization.SectionError
-	if errors.As(err, &se) {
-		details := []gen.ErrorDetail{{Field: "body." + se.Section, Message: se.Message}}
-		switch se.Status {
-		case http.StatusConflict:
-			return apierr.New(http.StatusConflict, apierr.CodeConflict, se.Message, details)
-		case http.StatusBadGateway:
-			return apierr.New(http.StatusBadGateway, apierr.CodeBadGateway, se.Message, details)
-		default:
-			// The refusal's own slug when it has one (agents_subscription_requires_claude_code,
-			// anthropic_key_invalid, …), so a client can branch on the reason
-			// without parsing prose; validation_failed otherwise.
-			code := apierr.CodeValidationFailed
-			if se.Code != "" {
-				code = se.Code
-			}
-			return apierr.New(http.StatusBadRequest, code, se.Message, details)
-		}
-	}
-	return apierr.Internal("internal error")
 }

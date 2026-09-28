@@ -18,6 +18,7 @@ package projects
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -26,6 +27,7 @@ import (
 	ocmocks "github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/organization"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/spec"
 	"github.com/wso2/aep/aep-api/internal/spec/artifactstest"
 )
@@ -33,10 +35,43 @@ import (
 // --- SyncProjectModelAccess (the builds-green sweep) --------------------------
 
 // fakeKeyResolver serves a canned org key triplet.
-type fakeKeyResolver struct{ triplet organization.SecretRefTriplet }
+type fakeKeyResolver struct {
+	triplet organization.SecretRefTriplet
+	// conn is the connection the key is for; nil means Anthropic's own API.
+	conn *modelconn.Connection
+}
 
-func (f fakeKeyResolver) DefaultKeyRef(context.Context, string) (organization.SecretRefTriplet, error) {
-	return f.triplet, nil
+func (f fakeKeyResolver) KeyRef(context.Context, string) (modelconn.Connection, organization.SecretRefTriplet, error) {
+	if f.conn != nil {
+		return *f.conn, f.triplet, nil
+	}
+	return anthropicConnection(), f.triplet, nil
+}
+
+// anthropicConnection is Anthropic's own API with its defaults.
+func anthropicConnection() modelconn.Connection {
+	return modelconn.Connection{
+		Format: modelconn.FormatAnthropic, BaseURL: modelconn.AnthropicBaseURL, Host: modelconn.AnthropicHost,
+		Model: modelconn.DefaultAnthropicModel, AuthScheme: modelconn.AuthXAPIKey,
+	}
+}
+
+// ollamaConnection is Ollama Cloud's OpenAI-compatible endpoint, the key as a
+// Bearer token: every MODEL_* value differs from Anthropic's.
+func ollamaConnection() *modelconn.Connection {
+	return &modelconn.Connection{
+		Format: modelconn.FormatOpenAICompatible, BaseURL: "https://ollama.com/v1", Host: modelconn.OllamaHost,
+		Model: "gpt-oss:20b", AuthScheme: modelconn.AuthBearer,
+	}
+}
+
+// envByKey indexes composed env vars by name.
+func envByKey(vars []openchoreo.WorkflowEnvVarRef) map[string]openchoreo.WorkflowEnvVarRef {
+	byKey := map[string]openchoreo.WorkflowEnvVarRef{}
+	for _, v := range vars {
+		byKey[v.Key] = v
+	}
+	return byKey
 }
 
 // fakeSecretRefClient accepts any SecretReference upsert. GetSecretReference
@@ -75,37 +110,69 @@ func agentDesignJSON(name string) string {
 // the only moment a binding is guaranteed to exist. An earlier design wrote them
 // from the pre-build EnsureComponent pass and every agent's FIRST deploy came up
 // with no MODEL_* at all, 503ing on /healthz and 500ing on every chat.
-func TestModelAccessEnvVars_ReturnsTheThreeModelVars(t *testing.T) {
-	svc := NewComponentService(
-		&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
-		fakeKeyResolver{triplet: organization.SecretRefTriplet{
-			Name: "anthropic-default", KVPath: "user-app-secrets/acme/anthropic", Property: "api-key",
-		}},
-		fakeSecretRefClient{},
-	).(*componentService)
+//
+// The ungoverned agent reaches the connection's host directly, so every value
+// is the connection's: its URL, model, format and how its key authenticates.
+func TestModelAccessEnvVars_ReturnsTheConnectionsModelVars(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		conn *modelconn.Connection
+		want map[string]string
+	}{
+		{
+			name: "Anthropic's own API",
+			want: map[string]string{
+				modelEndpointEnvVar:      "https://api.anthropic.com/v1",
+				modelNameEnvVar:          "claude-sonnet-5",
+				modelAPIFormatEnvVar:     "anthropic",
+				modelAPIAuthSchemeEnvVar: "x-api-key",
+			},
+		},
+		{
+			name: "Ollama, OpenAI-compatible",
+			conn: ollamaConnection(),
+			want: map[string]string{
+				modelEndpointEnvVar:      "https://ollama.com/v1",
+				modelNameEnvVar:          "gpt-oss:20b",
+				modelAPIFormatEnvVar:     "openai-compatible",
+				modelAPIAuthSchemeEnvVar: "bearer",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := NewComponentService(
+				&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
+				fakeKeyResolver{
+					triplet: organization.SecretRefTriplet{Name: "model-default", KVPath: "user-app-secrets/acme/model", Property: "api-key"},
+					conn:    tc.conn,
+				},
+				fakeSecretRefClient{},
+			).(*componentService)
 
-	got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
-	if err != nil {
-		t.Fatalf("ModelAccessEnvVars: %v", err)
+			got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+			if err != nil {
+				t.Fatalf("ModelAccessEnvVars: %v", err)
+			}
+			if len(got) != len(tc.want)+1 {
+				t.Fatalf("env var count = %d, want %d: %+v", len(got), len(tc.want)+1, got)
+			}
+			byKey := envByKey(got)
+			for name, want := range tc.want {
+				if v := byKey[name]; v.Value != want || v.ValueFrom != nil {
+					t.Errorf("%s = %+v, want the plain value %q", name, v, want)
+				}
+			}
+			assertOrgKeyRef(t, byKey[modelAPIKeyEnvVar])
+		})
 	}
-	if len(got) != 3 {
-		t.Fatalf("env var count = %d, want 3: %+v", len(got), got)
-	}
+}
 
-	byKey := map[string]openchoreo.WorkflowEnvVarRef{}
-	for _, v := range got {
-		byKey[v.Key] = v
-	}
-	if v := byKey[modelEndpointEnvVar]; v.Value != modelEndpointDefault {
-		t.Errorf("%s = %q, want %q", modelEndpointEnvVar, v.Value, modelEndpointDefault)
-	}
-	if v := byKey[modelNameEnvVar]; v.Value != modelNameDefault {
-		t.Errorf("%s = %q, want %q", modelNameEnvVar, v.Value, modelNameDefault)
-	}
+// assertOrgKeyRef checks MODEL_API_KEY names the org-scoped SecretReference.
+func assertOrgKeyRef(t *testing.T, key openchoreo.WorkflowEnvVarRef) {
+	t.Helper()
 	// The key itself is never a literal: it is a SecretKeyRef naming the
 	// org-scoped SecretReference, which ESO materialises into the consuming
-	// namespace. A literal here would put the org's Anthropic key in a CR.
-	key := byKey[modelAPIKeyEnvVar]
+	// namespace. A literal here would put the org's connection key in a CR.
 	if key.Value != "" {
 		t.Errorf("%s carries a literal value %q — it must be a SecretKeyRef", modelAPIKeyEnvVar, key.Value)
 	}
@@ -120,30 +187,68 @@ func TestModelAccessEnvVars_ReturnsTheThreeModelVars(t *testing.T) {
 	}
 }
 
-// An org with no connected Anthropic key is expected, not exceptional: a
-// brand-new org before its first Settings visit. Yielding (nil, nil) lets the
-// agent deploy and report 503 from /healthz — a state an operator can see and
-// fix — where an error would fail the whole deploy and leave no agent at all.
+// An org with no model connection is expected, not exceptional: a brand-new
+// org before its first Settings visit. Yielding (nil, nil) lets the agent
+// deploy and report 503 from /healthz — a state an operator can see and fix —
+// where an error would fail the whole deploy and leave no agent at all. A
+// governed agent is no different: with no connection there is no model to name
+// and its provider holds no key.
 func TestModelAccessEnvVars_NoConnectedKeyIsNotAnError(t *testing.T) {
-	svc := NewComponentService(
-		&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
-		noKeyResolver{}, fakeSecretRefClient{},
-	).(*componentService)
+	for _, governed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "direct", true: "governed"}[governed], func(t *testing.T) {
+			svc := NewComponentService(
+				&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
+				noKeyResolver{}, &presentSecretRefClient{},
+			).(*componentService)
+			if governed {
+				svc.SetAIGatewayBindings(fakeAIGatewayBindings{})
+			}
 
-	got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
-	if err != nil {
-		t.Fatalf("an org with no key must not error, got: %v", err)
+			got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+			if err != nil {
+				t.Fatalf("an org with no key must not error, got: %v", err)
+			}
+			if got != nil {
+				t.Errorf("env vars = %+v, want nil", got)
+			}
+		})
 	}
-	if got != nil {
-		t.Errorf("env vars = %+v, want nil", got)
+}
+
+// A connection that cannot be READ is different from one that does not exist:
+// retrying may succeed, and composing without it would name no model. The
+// deploy fails on both paths, governed included, since the governed agent's
+// model and format come from the connection too.
+func TestModelAccessEnvVars_UnreadableConnectionFailsTheDeploy(t *testing.T) {
+	for _, governed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "direct", true: "governed"}[governed], func(t *testing.T) {
+			svc := NewComponentService(
+				&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
+				failingKeyResolver{}, &presentSecretRefClient{},
+			).(*componentService)
+			if governed {
+				svc.SetAIGatewayBindings(fakeAIGatewayBindings{})
+			}
+
+			if _, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent"); err == nil {
+				t.Fatal("an unreadable connection must fail composition")
+			}
+		})
 	}
+}
+
+// failingKeyResolver cannot read the org's connection.
+type failingKeyResolver struct{}
+
+func (failingKeyResolver) KeyRef(context.Context, string) (modelconn.Connection, organization.SecretRefTriplet, error) {
+	return modelconn.Connection{}, organization.SecretRefTriplet{}, errors.New("database unavailable")
 }
 
 // noKeyResolver reports the org has no connected default key.
 type noKeyResolver struct{}
 
-func (noKeyResolver) DefaultKeyRef(context.Context, string) (organization.SecretRefTriplet, error) {
-	return organization.SecretRefTriplet{}, &organization.NotFoundError{}
+func (noKeyResolver) KeyRef(context.Context, string) (modelconn.Connection, organization.SecretRefTriplet, error) {
+	return modelconn.Connection{}, organization.SecretRefTriplet{}, &organization.NotFoundError{}
 }
 
 // The SecretReference must be authored in the ReleaseBinding's namespace —
@@ -256,7 +361,7 @@ func (p *presentSecretRefClient) GetSecretReference(_ context.Context, _ string,
 	return &secretmanagersvc.SecretReference{}, nil
 }
 
-// A governed agent gets the gateway and its OWN key — never the org's Anthropic
+// A governed agent gets the gateway and its OWN key — never the org's connection
 // key. This is the composition half of the whole feature.
 func TestModelAccessEnvVars_PrefersTheAMPBinding(t *testing.T) {
 	sr := &presentSecretRefClient{}
@@ -273,10 +378,7 @@ func TestModelAccessEnvVars_PrefersTheAMPBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ModelAccessEnvVars: %v", err)
 	}
-	byKey := map[string]openchoreo.WorkflowEnvVarRef{}
-	for _, v := range got {
-		byKey[v.Key] = v
-	}
+	byKey := envByKey(got)
 	// MODEL_ENDPOINT comes from the SAME secret as the key, not from a literal:
 	// Agent Manager generates a proxy path per agent, so the address is read
 	// back rather than derived, and the two are stored together because the key
@@ -306,8 +408,57 @@ func TestModelAccessEnvVars_PrefersTheAMPBinding(t *testing.T) {
 	}
 }
 
-// THE REGRESSION GUARD for every environment that has no AI gateway. This path
-// must stay byte-for-byte what it was before Agent Manager existed.
+// A governed agent speaks the connection's format with the connection's model:
+// Agent Manager's provider forwards to the connection's host as is. The key
+// travels under the proxy's own header, so the connection's auth scheme is not
+// the agent's concern and stays unset.
+func TestModelAccessEnvVars_GovernedCarriesTheConnectionsModelAndFormat(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		conn        *modelconn.Connection
+		model, form string
+	}{
+		{name: "Anthropic's own API", model: "claude-sonnet-5", form: "anthropic"},
+		{name: "Ollama, OpenAI-compatible", conn: ollamaConnection(), model: "gpt-oss:20b", form: "openai-compatible"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := NewComponentService(
+				&ocmocks.ComponentClientMock{}, nil, modelAccessStore(nil), nil, nil,
+				fakeKeyResolver{
+					triplet: organization.SecretRefTriplet{Name: "model-default", KVPath: "user-app-secrets/acme/model", Property: "api-key"},
+					conn:    tc.conn,
+				},
+				&presentSecretRefClient{},
+			).(*componentService)
+			svc.SetAIGatewayBindings(fakeAIGatewayBindings{})
+
+			got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+			if err != nil {
+				t.Fatalf("ModelAccessEnvVars: %v", err)
+			}
+			byKey := envByKey(got)
+			if v := byKey[modelNameEnvVar].Value; v != tc.model {
+				t.Errorf("MODEL_NAME = %q, want the connection's model %q", v, tc.model)
+			}
+			if v := byKey[modelAPIFormatEnvVar].Value; v != tc.form {
+				t.Errorf("MODEL_API_FORMAT = %q, want %q", v, tc.form)
+			}
+			if v := byKey[modelAPIKeyHeaderEnvVar].Value; v != ampModelAPIKeyHeader {
+				t.Errorf("MODEL_API_KEY_HEADER = %q, want %q on every format", v, ampModelAPIKeyHeader)
+			}
+			if _, ok := byKey[modelAPIAuthSchemeEnvVar]; ok {
+				t.Error("set MODEL_API_AUTH_SCHEME on the governed path; the proxy reads only MODEL_API_KEY_HEADER")
+			}
+			if byKey[modelEndpointEnvVar].ValueFrom == nil {
+				t.Error("MODEL_ENDPOINT must stay the agent's proxy URL from its AMP secret, not the connection's base URL")
+			}
+		})
+	}
+}
+
+// THE REGRESSION GUARD for every environment that has no AI gateway, and for
+// every way a governed environment falls back: the agent reaches the
+// connection directly on the org's key.
 func TestModelAccessEnvVars_FallsBackToTheOrgKey(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -342,19 +493,16 @@ func TestModelAccessEnvVars_FallsBackToTheOrgKey(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ModelAccessEnvVars: %v", err)
 			}
-			byKey := map[string]openchoreo.WorkflowEnvVarRef{}
-			for _, v := range got {
-				byKey[v.Key] = v
-			}
-			if byKey[modelEndpointEnvVar].Value != modelEndpointDefault {
-				t.Errorf("MODEL_ENDPOINT = %q, want the direct Anthropic endpoint", byKey[modelEndpointEnvVar].Value)
+			byKey := envByKey(got)
+			if byKey[modelEndpointEnvVar].Value != modelconn.AnthropicBaseURL {
+				t.Errorf("MODEL_ENDPOINT = %q, want the connection's base URL", byKey[modelEndpointEnvVar].Value)
 			}
 			ref := byKey[modelAPIKeyEnvVar].ValueFrom.SecretKeyRef
 			if ref.Name != modelAccessSecretRefName {
 				t.Errorf("MODEL_API_KEY refs %q, want the org-scoped SecretReference", ref.Name)
 			}
 			// The ungoverned path must NOT set the header override: the agent
-			// talks to Anthropic directly, where `x-api-key` is correct.
+			// talks to the host directly, on the connection's auth scheme.
 			if _, ok := byKey[modelAPIKeyHeaderEnvVar]; ok {
 				t.Error("set MODEL_API_KEY_HEADER on the direct path; only the governed path overrides it")
 			}

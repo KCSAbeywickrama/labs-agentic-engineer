@@ -72,6 +72,7 @@ import {
 import { createAgentTags, type AgentTags } from "./agent-tags.js";
 import { openCrewPane } from "./crew-pane.js";
 import { REPO_ROOT } from "../paths.js";
+import { CODING_CONNECTION_ENV, codingConnectionEnv } from "../kit/model-connection.js";
 import { DEFAULT_RUNTIME, runtimeNameFromEnv, UnsupportedRuntimeError, type RuntimeName } from "remote-worker/src/runtime/port.js";
 
 const LOCAL_ENTRY = join(REPO_ROOT, "runners", "remote-worker", "src", "local.ts");
@@ -539,11 +540,14 @@ interface Invocation {
  * asking this run to authenticate with it, and host mode's default has to stay
  * "the developer's own login" for the reason above: a bypassPermissions process
  * on a developer's filesystem should not silently acquire a shared credential
- * because a file elsewhere happened to define one.
+ * because a file elsewhere happened to define one. The same holds for
+ * `AEP_MODEL_API_KEY`: it is withheld unless `AEP_MODEL_*` names a connection,
+ * because the runner reads a bare one as a key for Anthropic's own API.
  *
  *   host                 → nothing; `claude login` answers
  *   host --api-key       → AEP_CODING_ANTHROPIC_KEY, else ANTHROPIC_API_KEY
  *   docker               → AEP_CODING_ANTHROPIC_KEY, else ANTHROPIC_API_KEY
+ *   either, connection   → AEP_MODEL_API_KEY only (as `dockerInvocation`)
  *
  * See ADR-0016 for the platform half.
  */
@@ -559,6 +563,18 @@ export function hostInvocation(opts: CodingRunOptions, runDir: string): Invocati
     AEP_LOCAL_RUN_DIR: runDir,
     AEP_LOCAL_SKILLS_DIR: opts.skillsDir,
   };
+  // A connection named by `AEP_MODEL_*` rides as a dispatch stamps it and
+  // authenticates with ITS key, the developer's `AEP_MODEL_API_KEY`, already in
+  // this env — never an Anthropic credential, which must not follow the run to
+  // another host.
+  const connection = codingConnectionEnv();
+  if (connection) {
+    Object.assign(env, connection);
+    delete env.ANTHROPIC_API_KEY;
+    delete env.CLAUDE_CODE_OAUTH_TOKEN;
+    return { command: "npx", args: ["tsx", LOCAL_ENTRY], env };
+  }
+  for (const name of CODING_CONNECTION_ENV) delete env[name];
   const coding = opts.useApiKey ? codingCredential() : undefined;
   if (coding) {
     applyCodingCredential(env, coding);
@@ -636,9 +652,12 @@ export function dockerInvocation(opts: CodingRunOptions, runDir: string, contain
   // Forward exactly ONE credential variable — the one this run will actually
   // authenticate with. Passing both names would hand the container a developer's
   // subscription token even on runs that bill the API key (which outranks it),
-  // putting a secret somewhere it is never read.
-  const coding = codingCredential();
-  const credentialVar = coding?.envVar ?? "ANTHROPIC_API_KEY";
+  // putting a secret somewhere it is never read. A connection named by
+  // `AEP_MODEL_*` authenticates with ITS key, as a dispatch mounts it — never an
+  // Anthropic credential, which must not follow the run to another host.
+  const connection = codingConnectionEnv();
+  const coding = connection ? undefined : codingCredential();
+  const credentialVar = connection ? "AEP_MODEL_API_KEY" : (coding?.envVar ?? "ANTHROPIC_API_KEY");
   const toolJar = toolJarOverlay();
   const args = [
     "run",
@@ -683,6 +702,7 @@ export function dockerInvocation(opts: CodingRunOptions, runDir: string, contain
     `AEP_LOCAL_SKILLS_DIR=${IMAGE_LIBRARY_DIR}`,
     // By name, like the credential: docker forwards each only when it is set.
     ...FORWARDED_AGENT_SETTINGS.flatMap((name) => ["-e", name]),
+    ...Object.keys(connection ?? {}).flatMap((name) => ["-e", name]),
     runnerImage(runtimeNameFromEnv()),
     "npx",
     "tsx",
@@ -692,7 +712,9 @@ export function dockerInvocation(opts: CodingRunOptions, runDir: string, contain
   // OWN environment, so the secret never lands in an argv that any user on the
   // machine can read out of `ps`.
   let env = process.env;
-  if (coding) {
+  if (connection) {
+    env = { ...process.env, ...connection };
+  } else if (coding) {
     env = { ...process.env };
     applyCodingCredential(env, coding);
   }
@@ -826,7 +848,9 @@ export async function runCodingAgent(opts: CodingRunOptions): Promise<CodingRunR
   const progressLog = createWriteStream(join(runDir, "progress.ndjson"), { flags: "w" });
 
   const mode = opts.mode ?? "docker";
-  const resolved = resolveRuntime(mode, codingCredential());
+  // A connection named by AEP_MODEL_* runs on its own key; the coding
+  // credential is not in play, so it cannot be what refuses the runtime.
+  const resolved = resolveRuntime(mode, codingConnectionEnv() ? undefined : codingCredential());
   if ("refusal" in resolved) {
     progressLog.end();
     if (!opts.silent) output.write(`  ✗ ${resolved.refusal}\n`);

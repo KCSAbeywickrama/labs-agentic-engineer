@@ -608,3 +608,89 @@ test("runtime: OpenCode is refused in host mode and with an OAuth coding token, 
   // Claude Code has neither restriction.
   assert.deepEqual(resolveRuntime("host", { value: "sk-ant-oat01-x", envVar: "CLAUDE_CODE_OAUTH_TOKEN" }, {}), { runtime: "claude-code" });
 });
+
+/** Run `body` with these variables set (undefined = unset), restoring each after. */
+function withEnv(vars: Record<string, string | undefined>, body: () => void): void {
+  const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+  for (const [k, v] of Object.entries(vars)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  try {
+    body();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+const OLLAMA = {
+  AEP_MODEL_FORMAT: "openai-compatible",
+  AEP_MODEL_BASE_URL: "https://ollama.com/v1",
+  AEP_MODEL_AUTH_SCHEME: "bearer",
+  AEP_MODEL_API_KEY: "ollama-key-0123456789",
+  AEP_MODEL_WEB_SEARCH: undefined,
+  AEP_MODEL_CONTEXT_WINDOW: undefined,
+  AEP_MODEL_OUTPUT_LIMIT: undefined,
+};
+
+// A connection named by AEP_MODEL_* is shaped like a dispatch: the connection
+// by name, the search strategy aep-api would stamp, and ITS key as the one
+// credential — never the developer's Anthropic key, which must not follow the
+// run to another host.
+test("docker mode forwards a named connection and its key, and no Anthropic credential", () => {
+  withEnv({ ...OLLAMA, ANTHROPIC_API_KEY: "sk-ant-from-dotenv", AEP_CODING_ANTHROPIC_KEY: "sk-ant-coding" }, () => {
+    const { args, env } = dockerInvocation(invocationOpts, "/r", "c1");
+    for (const name of ["AEP_MODEL_FORMAT", "AEP_MODEL_BASE_URL", "AEP_MODEL_AUTH_SCHEME", "AEP_MODEL_WEB_SEARCH", "AEP_MODEL_API_KEY"]) {
+      const at = args.indexOf(name);
+      assert.ok(at > 0 && args[at - 1] === "-e", `${name} is not forwarded by name`);
+    }
+    assert.equal(env.AEP_MODEL_WEB_SEARCH, "ollama-api", "the strategy aep-api stamps for ollama.com");
+    assert.ok(!args.includes("ANTHROPIC_API_KEY") && !args.includes("CLAUDE_CODE_OAUTH_TOKEN"));
+    assert.ok(!args.some((a) => a.includes("ollama-key")), "a secret in argv is readable by any user via ps");
+  });
+});
+
+test("host mode runs a named connection on its key, and no Anthropic credential", () => {
+  withEnv({ ...OLLAMA, ANTHROPIC_API_KEY: "sk-ant-from-dotenv", AEP_CODING_ANTHROPIC_KEY: "sk-ant-coding" }, () => {
+    const { env } = hostInvocation({ ...invocationOpts, useApiKey: true }, "/r");
+    assert.equal(env.AEP_MODEL_API_KEY, "ollama-key-0123456789");
+    assert.equal(env.AEP_MODEL_WEB_SEARCH, "ollama-api", "the strategy aep-api stamps for ollama.com");
+    assert.equal(env.ANTHROPIC_API_KEY, undefined, "an Anthropic key must not follow the run to another host");
+    assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, undefined);
+  });
+});
+
+// With no connection named, the runner reads a bare AEP_MODEL_API_KEY as a key
+// for Anthropic's own API — so one left over from deployments/.env would bill a
+// host run to it instead of `claude login`, or displace the coding key.
+const NO_CONNECTION = { ...OLLAMA, AEP_MODEL_FORMAT: undefined, AEP_MODEL_BASE_URL: undefined, AEP_MODEL_WEB_SEARCH: "none" };
+
+test("host mode withholds connection variables when no connection is named", () => {
+  withEnv({ ...NO_CONNECTION, AEP_CODING_ANTHROPIC_KEY: undefined }, () => {
+    const { env } = hostInvocation(invocationOpts, "/r");
+    for (const name of ["AEP_MODEL_API_KEY", "AEP_MODEL_AUTH_SCHEME", "AEP_MODEL_WEB_SEARCH"]) {
+      assert.equal(env[name], undefined, `${name} must not reach a host session that named no connection`);
+    }
+  });
+});
+
+test("host mode --api-key presents the coding key, not a leftover connection key", () => {
+  withEnv({ ...NO_CONNECTION, AEP_CODING_ANTHROPIC_KEY: "sk-ant-coding" }, () => {
+    const { env } = hostInvocation({ ...invocationOpts, useApiKey: true }, "/r");
+    assert.equal(env.ANTHROPIC_API_KEY, "sk-ant-coding");
+    assert.equal(env.AEP_MODEL_API_KEY, undefined, "the runner would prefer it over the coding key");
+  });
+});
+
+test("a hand-set search strategy is kept, and no connection means today's run", () => {
+  withEnv({ ...OLLAMA, AEP_MODEL_WEB_SEARCH: "none" }, () => {
+    assert.equal(dockerInvocation(invocationOpts, "/r", "c1").env.AEP_MODEL_WEB_SEARCH, "none");
+  });
+  withEnv({ ...OLLAMA, AEP_MODEL_FORMAT: undefined, AEP_MODEL_BASE_URL: undefined, AEP_CODING_ANTHROPIC_KEY: undefined }, () => {
+    const { args } = dockerInvocation(invocationOpts, "/r", "c1");
+    assert.ok(args.includes("ANTHROPIC_API_KEY") && !args.includes("AEP_MODEL_WEB_SEARCH"));
+  });
+});

@@ -17,7 +17,7 @@
  */
 
 // Every decision the CLI makes, in one place a test can drive without a real
-// promptfoo process: grader fallback, path resolution, the child's
+// promptfoo process: the judge, path resolution, the child's
 // environment, the stale-output guard, and the run-failure-vs-ordinary-
 // report choice. `bin/agent-eval.ts` is wiring only — it supplies the real
 // spawn and calls `runCli`.
@@ -30,6 +30,14 @@ import { buildPromptfooConfig } from "./config.js";
 import { readVerdict } from "./verdict.js";
 import { renderReport, renderRunFailureReport } from "./report.js";
 import { readToolStubs } from "./agent-doc.js";
+import {
+  agentModelEnv,
+  defaultJudgeProvider,
+  judgeEnv,
+  judgeProvider,
+  resolveConnection,
+  type JudgeProvider,
+} from "./connection.js";
 
 export interface SpawnResult {
   status: number | null;
@@ -55,11 +63,25 @@ export interface RunCliResult {
 }
 
 // The one mistake this CLI cannot make quietly: a key leaking into a log
-// line or a report. Nothing here writes ANTHROPIC_API_KEY on purpose, but
-// promptfoo's own stderr is a third party's text — scrub anything
-// key-shaped before it reaches anything written to disk.
-function redactKeys(text: string): string {
-  return text.replace(/sk-ant-[A-Za-z0-9_-]+/g, "«redacted»");
+// line or a report. Nothing here writes the model key on purpose, but
+// promptfoo's stderr is a third party's text and a transcript is the agent's,
+// and both land in files a PR carries. So every credential this process was
+// handed is scrubbed by VALUE — the connection's key has no fixed shape — and
+// anything shaped like an Anthropic key is scrubbed whether or not it is one
+// of them.
+const KEY_ENV_NAMES = ["AEP_EVAL_MODEL_API_KEY", "ANTHROPIC_API_KEY"] as const;
+
+// Shorter than this is not a credential but a word, and replacing every
+// occurrence of a word would mangle the report without protecting anything.
+const MIN_REDACTABLE_LENGTH = 8;
+
+function redactKeys(text: string, env: NodeJS.ProcessEnv): string {
+  let out = text;
+  for (const name of KEY_ENV_NAMES) {
+    const value = env[name]?.trim();
+    if (value !== undefined && value.length >= MIN_REDACTABLE_LENGTH) out = out.split(value).join("«redacted»");
+  }
+  return out.replace(/sk-ant-[A-Za-z0-9_-]+/g, "«redacted»");
 }
 
 function arg(argv: string[], name: string): string {
@@ -68,14 +90,16 @@ function arg(argv: string[], name: string): string {
   return argv[i + 1]!;
 }
 
-// `AGENT_EVAL_GRADER` unset falls back to the documented default; SET-BUT-
-// BLANK must fall back too. `?? default` alone would hand `""` straight to
+// The judge follows the connection, on promptfoo's own provider for its
+// format. `AGENT_EVAL_GRADER` names another one; SET-BUT-BLANK falls back to
+// the connection too. `??` alone would hand `""` straight to
 // `buildPromptfooConfig`, which rejects a blank grader on purpose — a `??`
 // only catches `undefined`/`null`, not an empty string.
-export function resolveGraderModel(env: NodeJS.ProcessEnv): string {
+export function resolveGrader(env: NodeJS.ProcessEnv): string | JudgeProvider {
   const fromEnv = env.AGENT_EVAL_GRADER;
   if (fromEnv !== undefined && fromEnv.trim() !== "") return fromEnv;
-  return "anthropic:messages:claude-sonnet-5";
+  const conn = resolveConnection(env);
+  return conn === undefined ? defaultJudgeProvider() : judgeProvider(conn);
 }
 
 /**
@@ -113,42 +137,8 @@ export function resolveBootTimeouts(env: NodeJS.ProcessEnv): {
 // coding agent's own OAuth token among them — that have no business
 // reaching a large third-party dependency tree. The model credential is not
 // listed here because it is not forwarded under the name it arrived as; see
-// resolveModelKey.
+// resolveConnection.
 const ALLOWED_ENV_KEYS = ["PATH", "HOME"] as const;
-
-/**
- * The org's Anthropic key, under either of the two names it can arrive as.
- *
- * In a build pod the platform mounts it as `AEP_EVAL_ANTHROPIC_API_KEY`. It
- * cannot use `ANTHROPIC_API_KEY` there: that name already belongs to Claude
- * Code, which ranks it above `CLAUDE_CODE_OAUTH_TOKEN`, so an org that bills
- * its coding agent to an OAuth token would have its whole coding session
- * silently moved onto this key instead (ADR-0016). Outside a pod —
- * a developer running the harness in the monorepo — `ANTHROPIC_API_KEY` is
- * the only key there is, so it is the fallback.
- *
- * `AEP_EVAL_KEY_MANAGED` is what tells the two apart, and it is why the
- * fallback is not unconditional. On a pod, `ANTHROPIC_API_KEY` is the
- * organisation's CODING credential — possibly an override it chose to bill
- * coding and nothing else — so falling back to it would grade agents on a
- * budget the org ring-fenced. The platform sets the declaration on every
- * dispatch, so its presence means: if no evaluation key came with it, this run
- * has none, and saying so is the documented behaviour.
- *
- * `CLAUDE_CODE_OAUTH_TOKEN` is NEVER a fallback. It is the platform's own
- * coding budget, and it authenticates none of the API calls the judge makes.
- *
- * `||`, not `??`: ESO can materialise an EMPTY secret, and an empty key is no
- * key rather than a key that fails to authenticate. The difference decides
- * whether the report says the agent never became ready or the judge is pointed
- * at an endpoint with a blank credential.
- */
-function resolveModelKey(env: NodeJS.ProcessEnv): string | undefined {
-  const evaluationKey = env.AEP_EVAL_ANTHROPIC_API_KEY || undefined;
-  if (evaluationKey !== undefined) return evaluationKey;
-  if (env.AEP_EVAL_KEY_MANAGED) return undefined;
-  return env.ANTHROPIC_API_KEY || undefined;
-}
 
 export function buildChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {
@@ -160,15 +150,13 @@ export function buildChildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     const value = env[key];
     if (value !== undefined) out[key] = value;
   }
-  // The agent under test and the judge share ONE credential — the org's
-  // Anthropic key — under the two names each expects. It travels as an
-  // environment variable and never through the emitted config file, which
-  // is written into the build's output directory.
-  const modelKey = resolveModelKey(env);
-  if (modelKey !== undefined) {
-    out.ANTHROPIC_API_KEY = modelKey;
-    out.MODEL_API_KEY = modelKey;
-  }
+  // The agent under test and the judge share ONE connection — the org's —
+  // each under the names it reads: `MODEL_*` for the agent (forwarded on by
+  // the provider), the format's own provider variables for the judge. The key
+  // travels as an environment variable and never through the emitted config
+  // file, which is written into the build's output directory.
+  const conn = resolveConnection(env);
+  if (conn !== undefined) Object.assign(out, agentModelEnv(conn), judgeEnv(conn));
   return out;
 }
 
@@ -203,8 +191,13 @@ function writeReportBestEffort(candidates: string[], markdown: string): string {
   return join(lastCandidate, "report.md");
 }
 
-function finishWithFailure(candidates: string[], component: string, error: string): RunCliResult {
-  const markdown = renderRunFailureReport({ component, error: redactKeys(error) });
+function finishWithFailure(
+  candidates: string[],
+  component: string,
+  error: string,
+  env: NodeJS.ProcessEnv,
+): RunCliResult {
+  const markdown = renderRunFailureReport({ component, error: redactKeys(error, env) });
   const reportPath = writeReportBestEffort(candidates, markdown);
   return { reportPath, markdown };
 }
@@ -246,7 +239,7 @@ export function runCli(opts: RunCliOptions): RunCliResult {
       JSON.stringify(
         buildPromptfooConfig(file, {
           providerPath: resolveProviderPath(),
-          graderModel: resolveGraderModel(opts.env),
+          grader: resolveGrader(opts.env),
           // The stubs are STARTED by the provider, inside the promptfoo
           // child, not here: `spawnPromptfoo` blocks this process's event
           // loop for the whole run, so a server listening here would never
@@ -284,22 +277,26 @@ export function runCli(opts: RunCliOptions): RunCliResult {
           `promptfoo produced no output (exit ${String(run.status)})\n${run.stderr}`,
         );
       }
-      outJson = JSON.parse(readFileSync(outJsonPath, "utf8"));
+      // Scrubbed in place: `out.json` sits beside the report in the build's
+      // output, and it holds every transcript and every judge reason verbatim.
+      const raw = redactKeys(readFileSync(outJsonPath, "utf8"), opts.env);
+      writeFileSync(outJsonPath, raw);
+      outJson = JSON.parse(raw);
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e);
-      return finishWithFailure([outDir], component, detail);
+      return finishWithFailure([outDir], component, detail, opts.env);
     }
 
     const verdict = readVerdict(outJson, file);
-    const markdown = renderReport(verdict, {
-      component,
-      promptChanged: opts.env.AGENT_EVAL_PROMPT_CHANGED === "1",
-    });
+    const markdown = redactKeys(
+      renderReport(verdict, { component, promptChanged: opts.env.AGENT_EVAL_PROMPT_CHANGED === "1" }),
+      opts.env,
+    );
     writeFileSync(reportPath, markdown);
     return { reportPath, markdown };
   } catch (e) {
     const detail = e instanceof Error ? (e.stack ?? e.message) : String(e);
     const candidates = outDir !== undefined ? [outDir, opts.cwd] : [opts.cwd];
-    return finishWithFailure(candidates, component, detail);
+    return finishWithFailure(candidates, component, detail, opts.env);
   }
 }

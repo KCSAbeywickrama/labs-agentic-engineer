@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/organization"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 
@@ -214,25 +215,25 @@ type agentLaunch struct {
 }
 
 // launchAgent resolves the run's credentials and launches the runner Job,
-// returning the launched run name. It writes no platform state: everything it
-// touches is either a read or the cluster.
-func (e *CodingExecutor) launchAgent(ctx context.Context, in agentLaunch) (string, error) {
+// returning the launched run name and the model host it runs on. It writes no
+// platform state: everything it touches is either a read or the cluster.
+func (e *CodingExecutor) launchAgent(ctx context.Context, in agentLaunch) (delivery.AgentLaunch, error) {
 	repo := in.repo
 	if repo == nil {
 		resolved, err := e.repos.GetRepo(ctx, in.orgID, in.projectID)
 		if err != nil || resolved == nil {
-			return "", fmt.Errorf("resolve project repo: %w", err)
+			return delivery.AgentLaunch{}, fmt.Errorf("resolve project repo: %w", err)
 		}
 		repo = resolved
 	}
 	name, email, login, err := e.identities.IdentityFor(ctx, in.orgID)
 	if err != nil {
-		return "", fmt.Errorf("resolve git identity: %w", err)
+		return delivery.AgentLaunch{}, fmt.Errorf("resolve git identity: %w", err)
 	}
 	// OpenChoreo Component dispatch: the only agent path. One Component per run
 	// cycle in the milestone's own project.
 	if e.ocJobs == nil {
-		return "", fmt.Errorf("no coding-agent dispatch path configured: set AGENT_RUNNER_IMAGE")
+		return delivery.AgentLaunch{}, fmt.Errorf("no coding-agent dispatch path configured: set AGENT_RUNNER_IMAGE")
 	}
 	return e.dispatchViaOC(ctx, in, repo, name, email, login)
 }
@@ -248,8 +249,12 @@ func (e *CodingExecutor) launchAgent(ctx context.Context, in agentLaunch) (strin
 // Credentials reach the pod through the ComponentType's ExternalSecret /
 // Workload secretEnv (refs only). Publisher client_credentials are the Job's
 // only platform credential (local and cloud).
+//
+// The launch reports the host of the connection whose credential it mounted:
+// the supervisor copies it onto the cycle, so the host a cycle's usage is priced
+// on is the one this Job was launched against.
 func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo *sourcecontrol.GitRepository,
-	name, email, login string) (string, error) {
+	name, email, login string) (delivery.AgentLaunch, error) {
 	// The organization's agent setting, copied onto THIS run. Copied, not
 	// referenced: a change applies from the next cycle, and a run that re-read
 	// the setting halfway through would produce a feed whose model names
@@ -257,12 +262,13 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 	// runtime decides which credential the run may mount.
 	agent, err := e.codingAgentEnv(ctx, in.orgID)
 	if err != nil {
-		return "", err
+		return delivery.AgentLaunch{}, err
 	}
-	anthropicSR, githubSR, err := e.resolveRunnerSecretRefs(ctx, in.orgID, agent.Runtime)
+	creds, err := e.resolveRunnerSecretRefs(ctx, in.orgID, agent.Runtime)
 	if err != nil {
-		return "", err
+		return delivery.AgentLaunch{}, err
 	}
+	githubSR := creds.github
 	disp := in.shape
 	platform := strings.TrimRight(e.platformURL, "/")
 	env := map[string]string{
@@ -296,27 +302,40 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		"AEP_RUN_DEADLINE_SECONDS": strconv.FormatInt(disp.deadline, 10),
 	}
 	env[envAgentRuntime] = string(agent.Runtime)
-	env[envAgentModel] = agent.Model
+	// The model connection the credential is for, and its model, copied onto
+	// the run for the same reason: a run in flight keeps the endpoint and the
+	// model its usage is billed against.
+	env[envAgentModel] = creds.model.Conn.Model
+	connEnv, modelKeyVar := modelEnv(creds.model)
+	for k, v := range connEnv {
+		env[k] = v
+	}
 	// Only a validation cycle is issue-anchored, so only it can name an issue.
 	// Absent rather than "0" for every other kind: the runner reads presence, and
 	// a stamped zero would be a number it has to know is not one.
 	if disp.validationIssue > 0 {
 		env[envValidationIssue] = strconv.Itoa(disp.validationIssue)
 	}
+	modelRef := creds.model.Ref
 	secretEnv := []SecretEnvRef{
-		{Key: anthropicEnvVarOrDefault(anthropicSR.EnvVar), SecretName: anthropicSR.SecretRefName, SecretKey: anthropicSR.Property},
+		{Key: modelKeyVar, SecretName: modelRef.Name, SecretKey: modelRef.Property},
 		{Key: envGitHubToken, SecretName: githubSR.SecretRefName, SecretKey: githubSR.Property},
 	}
-	if evalSR, ok := e.evaluationKeyRef(ctx, in.orgID); ok {
+	// The evaluation key and the connection it is for travel together or not
+	// at all — see envEvalModelFormat.
+	if evalConn, evalSR, ok := e.evaluationKeyRef(ctx, in.orgID); ok {
 		secretEnv = append(secretEnv, evalSR)
+		for k, v := range evalModelEnv(evalConn) {
+			env[k] = v
+		}
 	}
 	pub, tokenURL, err := e.publisherSecretEnv(ctx, in.orgID)
 	if err != nil {
-		return "", err
+		return delivery.AgentLaunch{}, err
 	}
 	env[envPublisherTokenURL] = tokenURL
 	secretEnv = append(secretEnv, pub...)
-	return e.ocJobs.Dispatch(ctx, OCDispatchInputs{
+	jobRef, err := e.ocJobs.Dispatch(ctx, OCDispatchInputs{
 		OrgID:                 in.orgID,
 		ProjectID:             in.projectID,
 		CycleID:               in.correlationID,
@@ -330,6 +349,10 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		Env:                   env,
 		SecretEnv:             secretEnv,
 	})
+	if err != nil {
+		return delivery.AgentLaunch{}, err
+	}
+	return delivery.AgentLaunch{JobRef: jobRef, ModelHost: creds.model.Conn.Host}, nil
 }
 
 // stageBuildSecret pre-stages the org's build git credential and returns the
@@ -387,35 +410,34 @@ func (e *CodingExecutor) RetryAuthFailedBuild(ctx context.Context, row *delivery
 	return run.Name, nil
 }
 
+// runnerCredentials is what every coding run mounts: the model credential,
+// with the connection it is for and its kind, and the org's GitHub credential.
+type runnerCredentials struct {
+	model  organization.CodingCredential
+	github SecretRef
+}
+
 // resolveRunnerSecretRefs resolves the two credentials every coding run mounts.
 //
-// The Anthropic side asks the organization domain WHICH credential a run on
+// The model side asks the organization domain WHICH credential a run on
 // runtime bills — its Claude subscription when it has one and the runtime is
-// Claude Code, its API key otherwise — and mounts whatever comes back under the
-// variable name that came back WITH it, since a subscription token has to
-// arrive as CLAUDE_CODE_OAUTH_TOKEN rather than ANTHROPIC_API_KEY. The runner
-// therefore needs no notion of the choice at all; it reads whichever of the two
-// is present. The resolver fails closed on a configured-but-unusable
-// subscription, so a run never silently bills API credits an org chose to
-// replace with its plan.
-func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID string, runtime orgconfig.AgentRuntime) (SecretRef, SecretRef, error) {
-	triplet, err := e.anthropicKey.ResolveCodingSecretRef(ctx, orgID, runtime)
+// Claude Code, the connection's key otherwise — and which connection it is
+// for. The domain answers in its own terms (a kind, never a variable name);
+// modelEnv maps that to the runner's env contract. The resolver fails closed
+// on a configured-but-unusable subscription, so a run never silently bills API
+// credits an org chose to replace with its plan.
+func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID string, runtime orgconfig.AgentRuntime) (runnerCredentials, error) {
+	cred, err := e.anthropicKey.ResolveCodingCredential(ctx, orgID, runtime)
 	if err != nil {
-		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: %w", err)
-	}
-	anthropicSR := SecretRef{
-		SecretRefName: triplet.Name,
-		KVPath:        triplet.KVPath,
-		Property:      triplet.Property,
-		EnvVar:        triplet.EnvVar,
+		return runnerCredentials{}, fmt.Errorf("coding dispatch: %w", err)
 	}
 
 	githubRow, err := e.githubCreds.GetByOrg(ctx, orgID)
 	if err != nil {
-		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: github credentials for org %q: %w", orgID, err)
+		return runnerCredentials{}, fmt.Errorf("coding dispatch: github credentials for org %q: %w", orgID, err)
 	}
 	if githubRow == nil {
-		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: github secret reference missing for org %q: org_credentials row not found", orgID)
+		return runnerCredentials{}, fmt.Errorf("coding dispatch: github secret reference missing for org %q: org_credentials row not found", orgID)
 	}
 	githubSR := SecretRef{
 		SecretRefName: derefStr(githubRow.SecretRefName),
@@ -423,46 +445,49 @@ func (e *CodingExecutor) resolveRunnerSecretRefs(ctx context.Context, orgID stri
 		Property:      derefStr(githubRow.SecretRefProperty),
 	}
 	if err := validateSecretRefTriplet("github", orgID, githubSR); err != nil {
-		return SecretRef{}, SecretRef{}, fmt.Errorf("coding dispatch: %w", err)
+		return runnerCredentials{}, fmt.Errorf("coding dispatch: %w", err)
 	}
-	return anthropicSR, githubSR, nil
+	return runnerCredentials{model: cred, github: githubSR}, nil
 }
 
-// evaluationKeyRef resolves the org's DEFAULT Anthropic key as the build's
-// agent-evaluation credential, reporting whether there is one to mount.
+// evaluationKeyRef resolves the org's connection key as the build's
+// agent-evaluation credential, with the connection it is for, reporting whether
+// there is one to mount.
 //
 // A build that generates an ai-agent evaluates it before opening its PR, and
 // that step needs a model twice over — once for the agent it boots, once for the
 // judge that grades it. Both are API calls, so the credential has to be an API
-// key; the default key always is (ADR-0036), while the coding credential may be
-// a Claude subscription token that authenticates neither.
+// key; the connection's key always is (ADR-0036), while the coding credential
+// may be a Claude subscription token that authenticates neither. Any format
+// will do: the harness reaches the connection the way the deployed agent will.
 //
 // An unresolvable key is NOT a dispatch failure, which is the one thing that
 // makes this different from every other credential here. Evaluation reports; it
-// never fails a build. An org that has connected no key still gets its work done
-// and its PR opened — the evaluation step simply reports that it could not run —
+// never fails a build. An org with no usable key still gets its work done and
+// its PR opened — the evaluation step simply reports that it could not run —
 // so a missing key must not cost the org a delivery. It is logged rather than
 // swallowed silently, because "the harness never became ready" is otherwise a
 // puzzling thing to read in a build report.
-func (e *CodingExecutor) evaluationKeyRef(ctx context.Context, orgID string) (SecretEnvRef, bool) {
-	triplet, err := e.anthropicKey.DefaultKeyRef(ctx, orgID)
+func (e *CodingExecutor) evaluationKeyRef(ctx context.Context, orgID string) (modelconn.Connection, SecretEnvRef, bool) {
+	conn, triplet, err := e.anthropicKey.KeyRef(ctx, orgID)
 	if err != nil {
-		slog.InfoContext(ctx, "coding dispatch: no default Anthropic key — the build will run without agent evaluation",
+		slog.InfoContext(ctx, "coding dispatch: no model connection key — the build will run without agent evaluation",
 			"org", orgID, "error", err)
-		return SecretEnvRef{}, false
+		return modelconn.Connection{}, SecretEnvRef{}, false
 	}
 	// A half-mirrored row resolves to a triplet ESO cannot follow. Mounting it
 	// would put the variable on the pod pointing at nothing, and the harness
 	// would report the agent as misbehaving rather than as unconfigured.
 	if triplet.Name == "" || triplet.Property == "" {
-		slog.WarnContext(ctx, "coding dispatch: default Anthropic secret reference is incomplete — the build will run without agent evaluation",
+		slog.WarnContext(ctx, "coding dispatch: the connection key's secret reference is incomplete — the build will run without agent evaluation",
 			"org", orgID)
-		return SecretEnvRef{}, false
+		return modelconn.Connection{}, SecretEnvRef{}, false
 	}
-	return SecretEnvRef{Key: envEvalAnthropicAPIKey, SecretName: triplet.Name, SecretKey: triplet.Property}, true
+	return conn, SecretEnvRef{Key: envEvalModelAPIKey, SecretName: triplet.Name, SecretKey: triplet.Property}, true
 }
 
-// codingAgentEnv resolves the runtime and the model this run is launched with.
+// codingAgentEnv resolves the runtime this run is launched with (the model
+// comes with the connection, from resolveRunnerSecretRefs).
 //
 // A missing resolver, or an org that never chose, both mean the platform
 // defaults. A resolver that ERRORS
@@ -478,17 +503,6 @@ func (e *CodingExecutor) codingAgentEnv(ctx context.Context, orgID string) (orgc
 		return orgconfig.AgentsProjection{}, fmt.Errorf("coding dispatch: coding-agent setting for org %q: %w", orgID, err)
 	}
 	return proj, nil
-}
-
-// anthropicEnvVarOrDefault names the Job's Anthropic SecretEnv entry from
-// organization.SecretRefTriplet.EnvVar (ANTHROPIC_API_KEY or
-// CLAUDE_CODE_OAUTH_TOKEN — ADR-0036), falling back to the runner's default
-// only if a resolver ever returns the zero value.
-func anthropicEnvVarOrDefault(envVar string) string {
-	if envVar == "" {
-		return envAnthropicAPIKey
-	}
-	return envVar
 }
 
 func validateSecretRefTriplet(credential, orgID string, ref SecretRef) error {

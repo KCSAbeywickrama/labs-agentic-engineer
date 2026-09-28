@@ -68,12 +68,17 @@ export function readApiRetry(message: unknown): ApiRetryInfo | undefined {
   const m = message as Record<string, unknown>;
   if (m.type !== "system" || m.subtype !== "api_retry") return undefined;
   const status = m.error_status;
+  const errorStatus = typeof status === "number" ? status : null;
+  const error = typeof m.error === "string" && m.error !== "" ? m.error : "unknown";
   return {
     attempt: num(m.attempt),
     maxRetries: num(m.max_retries),
     retryDelayMs: num(m.retry_delay_ms),
-    errorStatus: typeof status === "number" ? status : null,
-    error: typeof m.error === "string" && m.error !== "" ? m.error : "unknown",
+    errorStatus,
+    error,
+    // All Claude Code tells us about the provider's answer: no body, no
+    // headers. Still the evidence a provider-limit settle carries.
+    providerText: `${errorStatus ?? "no status"} ${error}`,
   };
 }
 

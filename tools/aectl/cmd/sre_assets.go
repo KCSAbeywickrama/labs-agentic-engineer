@@ -46,9 +46,9 @@ spec:
       remoteRef: { key: aep/thunder-clients/openchoreo-rca-agent, property: value }
 `
 
-// The SRE agent's Anthropic key: the org's key as saved in the AE Console, read
-// from the KV path aep-api published in the org's anthropic-secrets
-// SecretReference (sre_plane.go). Through the org secret store (OpenChoreo's
+// The SRE agent's Anthropic key: the org's model connection key as saved in the
+// AE Console, read from the KV path aep-api published in the org's
+// model-connection-secrets SecretReference (sre_plane.go). Through the org secret store (OpenChoreo's
 // "default" ClusterSecretStore, which every workload reading that path uses),
 // not the aep/* store above. The short refresh picks up a key re-saved
 // in the Console without a re-run.

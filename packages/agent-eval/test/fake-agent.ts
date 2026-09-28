@@ -40,7 +40,9 @@ export type FakeAgentMode =
   /** Ready, but every `/chat` answers 500. */
   | "chat-error"
   /** Ready, but `/chat` answers 200 with a body that is not the contract. */
-  | "chat-malformed";
+  | "chat-malformed"
+  /** Ready, and every `/chat` reply is the model-related environment it was given. */
+  | "echo-model-env";
 
 const SOURCE = `
 import { createServer } from "node:http";
@@ -90,6 +92,12 @@ const server = createServer((req, res) => {
     req.on("end", async () => {
       const body = JSON.parse(raw || "{}");
       if (mode === "chat-malformed") return send(res, 200, { nothing: "useful" });
+      if (mode === "echo-model-env") {
+        const seen = Object.fromEntries(
+          Object.entries(process.env).filter(([k]) => k.startsWith("MODEL_") || k.includes("API_KEY") || k.startsWith("ANTHROPIC_")),
+        );
+        return send(res, 200, { conversationId: body.conversationId ?? randomUUID(), text: JSON.stringify(seen), toolCalls: [] });
+      }
       let id = body.conversationId;
       if (id === undefined) {
         id = randomUUID();

@@ -39,8 +39,8 @@ const envRef = z
   .regex(/^\$\{env:[A-Za-z_][A-Za-z0-9_]*\}$/, "must be an ${env:...} reference");
 
 const modelSchema = z.strictObject({
-  // Decides which AI SDK adapter the build compiles against. It is a wire
-  // format, not a vendor preference, and cannot be inferred from url/name.
+  // Required by the schema but selects nothing: a generated agent picks its AI
+  // SDK adapter at runtime from MODEL_API_FORMAT, the org's model connection.
   provider: z.enum(["anthropic", "openai"]),
   name: z.string().min(1),
   url: envRef,

@@ -9,6 +9,7 @@ overrides:
   js-yaml: ^4.3.1
   promptfoo>js-yaml: 5.3.0
   '@apidevtools/json-schema-ref-parser>js-yaml': ^5.2.3
+  '@ai-sdk/provider@^4.0.0': 4.0.18
 
 importers:
 
@@ -709,6 +710,15 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@25.9.4)(@vitest/browser-playwright@4.1.10)(jsdom@26.1.0)(msw@2.14.6(@types/node@25.9.4)(typescript@5.9.3))(vite@7.3.6(@types/node@25.9.4)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.0))
 
+  packages/web-search:
+    devDependencies:
+      '@types/node':
+        specifier: ^25.6.0
+        version: 25.9.4
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.15
+
   playground:
     dependencies:
       '@aep/agent-stream':
@@ -816,12 +826,18 @@ importers:
       '@aep/collab-doc':
         specifier: workspace:*
         version: link:../../packages/collab-doc
+      '@aep/web-search':
+        specifier: workspace:*
+        version: link:../../packages/web-search
       '@ai-sdk/anthropic':
         specifier: ^4.0.0
         version: 4.0.12(zod@4.4.3)
       '@ai-sdk/devtools':
         specifier: ^1.0.4
         version: 1.0.4
+      '@ai-sdk/openai-compatible':
+        specifier: ^3.0.55
+        version: 3.0.57(zod@4.4.3)
       '@hocuspocus/provider':
         specifier: ^4.3.0
         version: 4.3.0(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31)
@@ -837,6 +853,12 @@ importers:
       pg:
         specifier: ^8.13.0
         version: 8.22.0
+      undici:
+        specifier: ^7.29.1
+        version: 7.29.1
+      unpdf:
+        specifier: ^1.8.1
+        version: 1.8.1(@napi-rs/canvas@1.0.9)
       ws:
         specifier: ^8.18.0
         version: 8.21.0
@@ -850,6 +872,9 @@ importers:
         specifier: ^4.3.6
         version: 4.4.3
     devDependencies:
+      '@aep/sse-cassette':
+        specifier: workspace:*
+        version: link:../../packages/sse-cassette
       '@hocuspocus/server':
         specifier: ^4.3.0
         version: 4.3.0(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31)
@@ -925,9 +950,21 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
+  '@ai-sdk/openai-compatible@3.0.57':
+    resolution: {integrity: sha512-TEY5Ng/bTJXrYy9wpdxK70gABdYejYedaKbmPCZLhBkPe21rmLzkGxAGkfPYgAfCKPaoAO9THrEhmwUZ4Xhg2Q==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   '@ai-sdk/provider-utils@4.0.52':
     resolution: {integrity: sha512-cUimyIz1jjwYoF9n6HO7sU+UBW7Nu3T4lW7562yRvEhM9/8JqlW4cecxSpkiafjRzAphZG2NfJ3/Ch5cHoCIhg==}
     engines: {node: '>=18.17'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider-utils@5.0.49':
+    resolution: {integrity: sha512-T+/H8DCvqJoCqLhltVatS7ffA779Iyk/ZZrgNXkrgv51E0n2Cd6eIdCmtwhCGIKqtbTtwCvTmQdAMv5Z8rOGHQ==}
+    engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
@@ -945,8 +982,8 @@ packages:
     resolution: {integrity: sha512-9Av6kg0t/IN/dcYAAmEJ4B9OPhcEJqwSR+GfHEA8olRkindXpUHadc3p3cyvgFUQFTVm1G5thtsmgZ9yVb2w3A==}
     engines: {node: '>=18'}
 
-  '@ai-sdk/provider@4.0.3':
-    resolution: {integrity: sha512-e0CpNWJUY7OxAFAnCZkw+ri9QOHWwTs1tXP42782KFGCU07qt8NiXCrCVowyCB5dP2r5/Uls+g2oPd8kOJn9dw==}
+  '@ai-sdk/provider@4.0.18':
+    resolution: {integrity: sha512-+GZJIgz1jk86pwEbb3f1BD2bdoSKyWE4Jg4YUc7NMnMozbWemSKYZcw2F4nMaO5qwsL5A8RmioAKW81YktRpIQ==}
     engines: {node: '>=22'}
 
   '@alcalzone/ansi-tokenize@0.3.1':
@@ -6691,6 +6728,7 @@ packages:
 
   libsql@0.5.29:
     resolution: {integrity: sha512-8lMP8iMgiBzzoNbAPQ59qdVcj6UaE/Vnm+fiwX4doX4Narook0a4GPKWBEv+CR8a1OwbfkgL18uBfBjWdF0Fzg==}
+    cpu: [x64, arm64, wasm32, arm]
     os: [darwin, linux, win32]
 
   light-my-request@6.6.0:
@@ -8611,6 +8649,15 @@ packages:
     resolution: {integrity: sha512-CJ1QgKmNg3CwvAv/kOFmtnEN05f0D/cn9QntgNOQlQF9dgvVTHj3t+8JPdjqawCHk7V/KA+fbUqzZ9XWhcqPUg==}
     engines: {node: '>= 4.0.0'}
 
+  unpdf@1.8.1:
+    resolution: {integrity: sha512-xkURhy2SoGpOIH0a1gLHNkASPIQYonadDJs2AQwPEfUakafeD9EA1WTWWsaR++gfTCXJpV27W7tU1nXuk82UKQ==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@napi-rs/canvas': ^0.1.69 || ^1.0.0
+    peerDependenciesMeta:
+      '@napi-rs/canvas':
+        optional: true
+
   unpipe@1.0.0:
     resolution: {integrity: sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ==}
     engines: {node: '>= 0.8'}
@@ -9109,13 +9156,13 @@ snapshots:
 
   '@ai-sdk/anthropic@4.0.12(zod@4.4.3)':
     dependencies:
-      '@ai-sdk/provider': 4.0.3
+      '@ai-sdk/provider': 4.0.18
       '@ai-sdk/provider-utils': 5.0.7(zod@4.4.3)
       zod: 4.4.3
 
   '@ai-sdk/devtools@1.0.4':
     dependencies:
-      '@ai-sdk/provider': 4.0.3
+      '@ai-sdk/provider': 4.0.18
       '@hono/node-server': 1.19.14(hono@4.12.29)
       hono: 4.12.29
 
@@ -9128,17 +9175,23 @@ snapshots:
 
   '@ai-sdk/gateway@4.0.16(zod@4.4.3)':
     dependencies:
-      '@ai-sdk/provider': 4.0.3
+      '@ai-sdk/provider': 4.0.18
       '@ai-sdk/provider-utils': 5.0.7(zod@4.4.3)
       '@vercel/oidc': 3.2.0
       zod: 4.4.3
 
   '@ai-sdk/gateway@4.0.16(zod@4.6.2)':
     dependencies:
-      '@ai-sdk/provider': 4.0.3
+      '@ai-sdk/provider': 4.0.18
       '@ai-sdk/provider-utils': 5.0.7(zod@4.6.2)
       '@vercel/oidc': 3.2.0
       zod: 4.6.2
+
+  '@ai-sdk/openai-compatible@3.0.57(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.18
+      '@ai-sdk/provider-utils': 5.0.49(zod@4.4.3)
+      zod: 4.4.3
 
   '@ai-sdk/provider-utils@4.0.52(zod@4.4.3)':
     dependencies:
@@ -9148,9 +9201,18 @@ snapshots:
       undici: 6.28.1
       zod: 4.4.3
 
+  '@ai-sdk/provider-utils@5.0.49(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.18
+      '@standard-schema/spec': 1.1.0
+      '@workflow/serde': 4.1.0
+      eventsource-parser: 3.1.0
+      undici: 7.29.1
+      zod: 4.4.3
+
   '@ai-sdk/provider-utils@5.0.7(zod@4.4.3)':
     dependencies:
-      '@ai-sdk/provider': 4.0.3
+      '@ai-sdk/provider': 4.0.18
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
       eventsource-parser: 3.1.0
@@ -9158,7 +9220,7 @@ snapshots:
 
   '@ai-sdk/provider-utils@5.0.7(zod@4.6.2)':
     dependencies:
-      '@ai-sdk/provider': 4.0.3
+      '@ai-sdk/provider': 4.0.18
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
       eventsource-parser: 3.1.0
@@ -9172,7 +9234,7 @@ snapshots:
     dependencies:
       json-schema: 0.4.0
 
-  '@ai-sdk/provider@4.0.3':
+  '@ai-sdk/provider@4.0.18':
     dependencies:
       json-schema: 0.4.0
 
@@ -13443,14 +13505,14 @@ snapshots:
   ai@7.0.22(zod@4.4.3):
     dependencies:
       '@ai-sdk/gateway': 4.0.16(zod@4.4.3)
-      '@ai-sdk/provider': 4.0.3
+      '@ai-sdk/provider': 4.0.18
       '@ai-sdk/provider-utils': 5.0.7(zod@4.4.3)
       zod: 4.4.3
 
   ai@7.0.22(zod@4.6.2):
     dependencies:
       '@ai-sdk/gateway': 4.0.16(zod@4.6.2)
-      '@ai-sdk/provider': 4.0.3
+      '@ai-sdk/provider': 4.0.18
       '@ai-sdk/provider-utils': 5.0.7(zod@4.6.2)
       zod: 4.6.2
 
@@ -18134,6 +18196,10 @@ snapshots:
 
   universalify@0.2.0:
     optional: true
+
+  unpdf@1.8.1(@napi-rs/canvas@1.0.9):
+    optionalDependencies:
+      '@napi-rs/canvas': 1.0.9
 
   unpipe@1.0.0: {}
 

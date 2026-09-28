@@ -441,7 +441,7 @@ type RegisteredAgent struct {
 	// there and read back, so it can only be reported, never derived.
 	ProxyURL string
 	// Skipped says this component was deliberately not governed, and Reason
-	// says why — an org with no connected Anthropic key, most often. Not a
+	// says why — an org with no model connection, most often. Not a
 	// failure: the agent deploys on the path that predates Agent Manager.
 	Skipped bool
 	Reason  string

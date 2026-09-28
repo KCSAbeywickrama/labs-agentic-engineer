@@ -125,7 +125,7 @@ describe("agent-building — the evaluation step", () => {
   // a pure re-wrap and — worse — pass a deletion that happened to leave the
   // phrase split differently.
   const credential = (
-    /\nThe organisation's Anthropic key is the credential,([\s\S]*?)\n\n/.exec(SKILL)?.[1] ?? ""
+    /\nThe organisation's model connection is the credential,([\s\S]*?)\n\n/.exec(SKILL)?.[1] ?? ""
   )
     .replace(/\s+/g, " ")
     .trim();
@@ -178,8 +178,8 @@ describe("agent-building — the evaluation step", () => {
     );
     assert.match(
       SKILL,
-      /AEP_EVAL_ANTHROPIC_API_KEY/,
-      "the reference no longer names the variable the platform mounts the org's key under",
+      /AEP_EVAL_MODEL_API_KEY/,
+      "the reference no longer names the variable the platform mounts the connection's key under",
     );
     assert.match(SKILL, /Never\s+`CLAUDE_CODE_OAUTH_TOKEN`/);
   });

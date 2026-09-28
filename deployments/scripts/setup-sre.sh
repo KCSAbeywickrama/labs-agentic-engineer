@@ -37,9 +37,10 @@
 #   4. `aectl sre install`, which enables the SRE agent on the observability
 #      plane setup-env-for-aectl.sh installed (at that plane's chart version,
 #      with the SRE image override), mounts the AE extension, and points the
-#      agent at the org's Anthropic key as saved in the AE Console.
+#      agent at the org's model connection key as saved in the AE Console
+#      (an Anthropic key: the SRE image calls Anthropic).
 #
-# The SRE agent has no key of its own: until the org's Anthropic key is saved
+# The SRE agent has no key of its own: until the org's model connection is saved
 # in the Console, its pod waits for it. Save the key, then re-run this script
 # (only step 4 then changes anything).
 #

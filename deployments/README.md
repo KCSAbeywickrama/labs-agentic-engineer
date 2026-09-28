@@ -17,16 +17,21 @@ OpenChoreo + ThunderID cluster, then hands off to the `aectl` CLI.
 ```bash
 # 1. One-shot bring-up — cluster + platform, via aectl (idempotent)
 make dev-env
-# Console: http://console.openchoreo.localhost:8080
-# aep-api: kubectl -n wso2-aep port-forward svc/aep-api 9090:9090
+# Console: http://console.ae.localhost:8080
+# aep-api: http://console.ae.localhost:8080/aep-api-service/ (the console proxies it)
+# Try it:  http://tryit.ae.localhost:8080
 
 # 2. Edit source, then run this to rebuild + redeploy just the changed image(s)
 make dev-update
+
+# 3. Build the coding-agent runner images (Claude Code + OpenCode) from this
+#    checkout and point the release at them; again after a runner change
+make dev-runner
 ```
 
 `make dev-env` also enables the OpenChoreo SRE agent on the observability
 plane and wires its alert → RCA → AE issue handoff (`scripts/setup-sre.sh`),
-using the org's Anthropic key saved in the Console. `WITH_OBSERVABILITY=0`
+using the org's model connection key saved in the Console (an Anthropic key). `WITH_OBSERVABILITY=0`
 skips the plane and the SRE agent; `WITH_SRE=0` skips only the agent;
 `WITH_AGENT_MANAGER=0` is the lean profile for SRE work. See
 `docs/developer-guide/sre-handoff-runbook.md`.
@@ -38,6 +43,21 @@ with `WITH_SKAFFOLD_CLIENT=1` (bootstraps `aectl`'s own Thunder admin client,
 itself), then runs `aectl-skaffold platform config import` (against
 `skaffold/defaults.yaml`) and `aectl-skaffold platform install --addons=all
 --platform-version=latest --platform-chart deployments/helm-charts/platform`.
+
+The observability plane is installed running, because Agent Manager's charts
+install against it, and `make dev-env` parks its heavy half (OpenSearch,
+Prometheus, collectors, adapters) as its last step. Parked, Agent Manager's
+trace and metric views and the console's archived cycle logs are empty; live
+logs and everything else work. `make obs-unpark` brings it back and
+`make obs-park` parks it again: unpark between builds on an 8 GiB VM, where
+the plane and a coding Job together overload the node. `WITH_OBSERVABILITY=0
+make dev-env` skips the plane, and with it Agent Manager.
+
+No model key is needed to bring this up: every agent runs on the calling
+org's model connection (format, base URL, key, model), connected in the
+console's welcome step or on Settings' **AI agents** card, and there is no
+platform fallback. aep-api hands it to the agents per turn (`X-Model-Key`
+plus the connection) and to each coding run at dispatch.
 
 `make dev-update` (`skaffold run`, `skaffold.yaml`) is one-shot, not a watch
 loop — run it again after every edit you want reflected in the cluster. It
@@ -78,9 +98,8 @@ worked around here.
   gateway id, secret path. **The binding record is the contract**, exactly as
   it is for Thunder (`design/two-tier-thunder.md`): `aep-api` reads it to
   decide whether an environment is governed at all, and an environment without
-  one deploys agents on the org's own Anthropic key, as before Agent Manager
-  existed. `scripts/verify-convergence.sh` check 15 asserts it is bound and
-  ACTIVE. What aep-api then does with it is
+  one deploys agents straight onto the org's model connection, as before Agent
+  Manager existed. What aep-api then does with it is
   `services/aep-api/internal/delivery/agentgovernance/design/governed-model-access.md`.
 
 ## What was removed from the previous v1
@@ -143,8 +162,8 @@ this repo's own bootstrap anymore. Check `skaffold/defaults.yaml` and
 `deployments/scripts/setup-env-for-aectl.sh`'s own output for current
 credentials on a given cluster.
 
-For GitHub repo provisioning, connect a PAT (or GitHub App) at **Settings → GitHub Integration**.
-For AI generation, connect an Anthropic key at **Settings → Anthropic Integration** — per-org, with no platform fallback.
+For GitHub repo provisioning, connect a PAT (or GitHub App) at **Settings → Credentials → GitHub**.
+For AI generation, connect a model on the **AI agents** card under **Settings → Credentials** (Anthropic's API or any public https endpoint speaking the Anthropic or OpenAI-compatible format) — per-org, with no platform fallback.
 
 ## Tear down
 

@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/contracts"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/modelcost"
 )
 
@@ -29,7 +30,7 @@ func TestUsageFromLogReadsTheResultLine(t *testing.T) {
 2026-07-21T10:00:01.000000000Z [oneshot] plain bootstrap line
 2026-07-21T10:00:02.000000000Z {"schemaVersion":1,"ts":"t","seq":9,"kind":"result","status":"success","usage":{"inputTokens":100,"outputTokens":20,"cacheReadTokens":3000,"cacheCreationTokens":40,"model":"claude-fable-5"}}
 `
-	u := usageFromLog(log)
+	u := terminalFromLog(log).usage
 	if u == nil {
 		t.Fatal("expected usage, got nil")
 	}
@@ -43,7 +44,7 @@ func TestUsageFromLogLastResultWins(t *testing.T) {
 	log := `{"schemaVersion":1,"ts":"t","seq":1,"kind":"result","status":"failure","usage":{"inputTokens":1,"outputTokens":1,"cacheReadTokens":0,"cacheCreationTokens":0,"model":"claude-fable-5"}}
 {"schemaVersion":1,"ts":"t","seq":2,"kind":"result","status":"success","usage":{"inputTokens":7,"outputTokens":3,"cacheReadTokens":0,"cacheCreationTokens":0,"model":"claude-fable-5"}}
 `
-	u := usageFromLog(log)
+	u := terminalFromLog(log).usage
 	if u == nil || u.InputTokens != 7 {
 		t.Fatalf("expected the last result's usage, got %+v", u)
 	}
@@ -52,7 +53,7 @@ func TestUsageFromLogLastResultWins(t *testing.T) {
 func TestUsageFromLogKeepsThePerModelSplit(t *testing.T) {
 	log := `{"schemaVersion":1,"ts":"t","seq":1,"kind":"result","status":"success","usage":{"inputTokens":110,"outputTokens":55,"cacheReadTokens":1000,"cacheCreationTokens":200,"model":"","models":[{"inputTokens":100,"outputTokens":50,"cacheReadTokens":1000,"cacheCreationTokens":200,"model":"claude-sonnet-5"},{"inputTokens":10,"outputTokens":5,"cacheReadTokens":0,"cacheCreationTokens":0,"model":"claude-haiku-4-5"}]}}
 `
-	u := usageFromLog(log)
+	u := terminalFromLog(log).usage
 	if u == nil {
 		t.Fatal("expected usage, got nil")
 	}
@@ -81,7 +82,7 @@ func TestUsageFromLogAbsentForPreCaptureRunners(t *testing.T) {
 	log := `{"schemaVersion":1,"ts":"t","seq":1,"kind":"result","status":"success"}
 some stray text mentioning "result" and "usage" but not JSON
 `
-	if u := usageFromLog(log); u != nil {
+	if u := terminalFromLog(log).usage; u != nil {
 		t.Fatalf("expected nil for a usage-less log, got %+v", u)
 	}
 }
@@ -96,7 +97,7 @@ func TestUsageFromLogReadsAV2RunSettledLine(t *testing.T) {
 	log := `2026-09-04T09:25:39.000000000Z {"v":2,"seq":1,"kind":"run_started","agentId":"lead","ts":"2026-09-04T09:25:39Z"}
 2026-09-04T09:55:02.000000000Z {"v":2,"seq":812,"kind":"run_settled","agentId":"lead","ts":"2026-09-04T09:55:02Z","outcome":"success","usage":{"inputTokens":110,"outputTokens":55,"cacheReadTokens":1000,"cacheCreationTokens":200,"model":"","models":[{"inputTokens":100,"outputTokens":50,"cacheReadTokens":1000,"cacheCreationTokens":200,"model":"claude-sonnet-5"},{"inputTokens":10,"outputTokens":5,"cacheReadTokens":0,"cacheCreationTokens":0,"model":"claude-haiku-4-5"}]}}
 `
-	u := usageFromLog(log)
+	u := terminalFromLog(log).usage
 	if u == nil {
 		t.Fatal("a v2 run settled with usage captured nothing — the run would be unbilled")
 	}
@@ -133,7 +134,7 @@ func TestUsageFromLogNeverSumsTurnEnded(t *testing.T) {
 {"v":2,"seq":20,"kind":"turn_ended","agentId":"lead","outcome":"success","usage":{"inputTokens":90,"outputTokens":25,"cacheReadTokens":0,"cacheCreationTokens":0,"model":"claude-fable-5"}}
 {"v":2,"seq":30,"kind":"run_settled","agentId":"lead","outcome":"success","usage":{"inputTokens":90,"outputTokens":25,"cacheReadTokens":0,"cacheCreationTokens":0,"model":"claude-fable-5"}}
 `
-	u := usageFromLog(log)
+	u := terminalFromLog(log).usage
 	if u == nil {
 		t.Fatal("expected usage, got nil")
 	}
@@ -152,7 +153,7 @@ func TestUsageFromLogPricesAnOpenCodeRun(t *testing.T) {
 	log := `2026-09-22T21:00:00.000000000Z {"v":2,"seq":1,"kind":"run_started","agentId":"ses_root","ts":"2026-09-22T21:00:00Z","runtime":"opencode","model":"claude-sonnet-5"}
 2026-09-22T21:09:00.000000000Z {"v":2,"seq":385,"kind":"run_settled","agentId":"ses_root","ts":"2026-09-22T21:09:00Z","outcome":"success","usage":{"inputTokens":1017,"outputTokens":1636,"cacheReadTokens":95000,"cacheCreationTokens":20500,"model":"","costUsd":0.076,"models":[{"inputTokens":17,"outputTokens":1536,"cacheReadTokens":95000,"cacheCreationTokens":13000,"model":"claude-sonnet-5"},{"inputTokens":1000,"outputTokens":100,"cacheReadTokens":0,"cacheCreationTokens":7500,"model":"claude-haiku-4-5"}]}}
 `
-	u := usageFromLog(log)
+	u := terminalFromLog(log).usage
 	if u == nil {
 		t.Fatal("an OpenCode run settled with usage captured nothing — the run would be unbilled")
 	}
@@ -162,13 +163,13 @@ func TestUsageFromLogPricesAnOpenCodeRun(t *testing.T) {
 	}
 
 	rates := []modelcost.ModelRate{
-		{ModelID: "claude-sonnet-5", InputPerMTok: 2, OutputPerMTok: 10, CacheReadPerMTok: 0.2, CacheWritePerMTok: 2.5},
-		{ModelID: "claude-haiku-4-5", InputPerMTok: 1, OutputPerMTok: 5, CacheReadPerMTok: 0.1, CacheWritePerMTok: 1.25},
+		{Host: modelconn.AnthropicHost, ModelID: "claude-sonnet-5", InputPerMTok: 2, OutputPerMTok: 10, CacheReadPerMTok: 0.2, CacheWritePerMTok: 2.5},
+		{Host: modelconn.AnthropicHost, ModelID: "claude-haiku-4-5", InputPerMTok: 1, OutputPerMTok: 5, CacheReadPerMTok: 0.1, CacheWritePerMTok: 1.25},
 	}
 	ts := make([]modelcost.Tokens, 0, len(slices))
 	for _, s := range slices {
 		ts = append(ts, modelcost.Tokens{
-			ModelID: s.Model, InputTokens: s.InputTokens, OutputTokens: s.OutputTokens,
+			Host: modelconn.AnthropicHost, ModelID: s.Model, InputTokens: s.InputTokens, OutputTokens: s.OutputTokens,
 			CacheReadTokens: s.CacheReadTokens, CacheCreationTokens: s.CacheCreationTokens,
 		})
 	}

@@ -87,7 +87,7 @@ func TestFindSREAgentDeploymentMissingNamesRCAEnabled(t *testing.T) {
 
 func secretReference(data ...interface{}) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]interface{}{
-		"metadata": map[string]interface{}{"name": orgAnthropicSecretRef, "namespace": "default"},
+		"metadata": map[string]interface{}{"name": orgModelKeySecretRefs[0], "namespace": "default"},
 		"spec":     map[string]interface{}{"data": data},
 	}}
 }

@@ -52,6 +52,7 @@
 // what `lib/run_loop.ts` measurably needs — see the note there.
 
 import type { components } from "../generated/aep-api";
+import type { ModelConnection } from "../lib/model_connection.js";
 import type { RunEventInput, RunEventUsage } from "../lib/progress/emitter.js";
 import type { RunEventTranslator, RunStream } from "../lib/run_loop.js";
 
@@ -213,6 +214,24 @@ export interface McpPolicy {
   onFatal?(err: Error): void;
 }
 
+/**
+ * The platform's own web search, as a local MCP server a runtime spawns: the
+ * run's search when its connection's strategy is one the runtime cannot run
+ * itself (`ollama-api` today; `lib/aep_web.ts` builds it).
+ *
+ * A command, not a URL: it is a stdio server, and both runtimes spawn one the
+ * same way. Its arguments name a private file, never a credential — a runtime's
+ * MCP config can end up on a command line. `tool` is the BARE tool name, which
+ * each adapter namespaces its own way, exactly as for `McpPolicy.tools`.
+ */
+export interface WebSearchServer {
+  /** The server's key in the runtime's MCP config. */
+  name: string;
+  command: string;
+  args: readonly string[];
+  tool: string;
+}
+
 /** What a run may read, and what it starts with already read. */
 export interface SkillsPolicy {
   /** Absolute path of the `.claude/skills/` mirror in the project clone. */
@@ -240,9 +259,9 @@ export interface SkillsPolicy {
  * Everything a runtime needs to start this platform's kind of run.
  *
  * Read it as the sentence "a coding run may author files under X, may not do Y,
- * may search for Z, may load these skills, bills to this model" — and note that
- * no field names a tool, a hook, an SDK option or a runtime. That is the test
- * for whether something belongs here.
+ * may search for Z, may load these skills, bills to this model on this
+ * connection" — and note that no field names a tool, a hook, an SDK option or a
+ * runtime. That is the test for whether something belongs here.
  */
 export interface RuntimePolicy {
   /** Absolute project root. It is also the session's working directory. */
@@ -258,18 +277,13 @@ export interface RuntimePolicy {
    */
   env: Record<string, string>;
   /**
-   * The model this run bills to — the organization's setting, reaching the pod
-   * as `AEP_AGENT_MODEL`. The ONE model of the run: the lead, every subagent and
-   * the runtime's own helper calls (titles, summaries) all run on it, because
-   * the platform is bring-your-own-key and a second model is one the org's key
-   * may not reach.
-   *
-   * Pinned rather than left to the runtime's default, which drifts across
-   * releases (seen live: an unpinned run resolved to `claude-sonnet-4-6`). The
-   * platform can only stamp a cost for a model it has a `model_rates` row for,
-   * so the settable list is narrower than the list a runtime can serve.
+   * The model this run bills to and the endpoint it is served from — the
+   * organization's connection, read from the dispatch's env
+   * (`lib/model_connection.ts`). `connection.model` is the ONE model of the run.
+   * Each adapter maps the connection to its own runtime's spelling; the
+   * credential is not on it (it rides `env`).
    */
-  model: string;
+  connection: ModelConnection;
   taskKind: TaskKind;
   /**
    * Developer diagnostics: the runtime's own debug log, its stderr, and whatever
@@ -280,8 +294,16 @@ export interface RuntimePolicy {
   logDir: string;
   write: WritePolicy;
   deniedCapabilities: readonly DeniedCapability[];
-  /** Deny a WebSearch query — a staged secret in it, today. */
-  webSearch: { deny: DenialReason };
+  /**
+   * How a run searches the web, and what a query may contain.
+   *
+   * `deny` gates every search path — a staged secret in a query, today.
+   * `server` is present when the platform supplies the search (the
+   * connection's strategy is not one the runtime runs itself); the runtime's
+   * own search is then off, as it is when the strategy is `none`. Which
+   * strategy applies is `connection.webSearch`.
+   */
+  webSearch: { deny: DenialReason; server?: WebSearchServer };
   /** Deny a WebFetch URL — SSRF, or a staged secret in it. */
   webFetch: { deny: DenialReason };
   skills: SkillsPolicy;
@@ -320,6 +342,15 @@ export interface ApiRetryInfo {
   errorStatus: number | null;
   /** The runtime's error CLASS — a closed enum, never free text. */
   error: string;
+  /**
+   * The provider's own words on this failure, as the runtime passed them on —
+   * OpenCode's retry `message`, Claude Code's status and error class. FREE
+   * TEXT, which is why it is a separate field from `error`: it never reaches
+   * the feed's retry line, only the provider-limit evidence
+   * (`lib/provider_limit.ts`), which caps it and scrubs it on the way out.
+   * Absent when the runtime said nothing beyond the class.
+   */
+  providerText?: string;
 }
 
 /**

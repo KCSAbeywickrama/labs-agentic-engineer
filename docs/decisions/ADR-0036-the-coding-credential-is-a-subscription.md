@@ -1,6 +1,7 @@
 # ADR-0036 — The coding credential is a Claude subscription, and the AI agents card saves as one unit
 
-**Status:** Accepted · 2026-09-24
+**Status:** Accepted · 2026-09-24 · Amended 2026-09-26 (the connection replaces
+the org's API key, last section)
 **Supersedes:** [ADR-0016](ADR-0016-coding-agent-key-is-an-override-not-a-peer.md)
 (the coding-agent key is an override on the org's key). Its reasons for one
 credential variable per run, for persisting `credential_kind`, for the kind-aware
@@ -99,3 +100,38 @@ transactions. A database error between them could leave a save half-applied.
   and the card moves the setting row with them.
 - `AnthropicCredentialService` no longer has `Connect`/`Disconnect`; the card's
   unit of work (`AgentSettingsService`) is the only writer of credential rows.
+
+## Amendment 2026-09-26 — the subscription rides on the model connection
+
+[ADR-0038](ADR-0038-an-organization-has-one-model-connection.md) replaces the
+org's Anthropic key with one model connection (format, base URL, key, model).
+The rules above hold with these changed facts:
+
+- **`llm` is the connection, not the org's API key.** It is patched field by
+  field and stored in `org_model_connections`; the key's bytes are in
+  `org_secrets` under `model/key`, mirrored to SM-API under the entity
+  `model-connection`. `org_anthropic_credentials` keeps its name and holds only
+  the Claude subscription (CHECK `org_anthropic_credentials_subscription_only`,
+  `role = 'coding'`). The model moved from `agents` to `llm`.
+- **Decision 3's rule gains a host condition.** A subscription needs the
+  `claude-code` runtime and a connection whose capabilities include
+  `claudeSubscription`: the Anthropic format on `api.anthropic.com`, the only
+  host a subscription token authenticates against. A patch that leaves either
+  deletes the stored token in the same transaction, as before. The refusals are
+  `agents_subscription_requires_claude_code`,
+  `agents_subscription_requires_anthropic_host` and
+  `agents_subscription_requires_connection` (which replaces
+  `agents_subscription_requires_api_key`). `anthropic_oauth_token_coding_only`
+  and the `sk-ant-` shape check apply only on `api.anthropic.com`.
+- **Decision 4's lock is `org_model:<org>`.** The unit of work also covers the
+  connection row. The probe runs through `platform/netguard` with no
+  redirects, and the key's copy is mirrored after commit as before.
+- **Decision 5's resolver answers a kind.** `ResolveCodingCredential(ctx, org,
+  runtime)` returns the connection, the secret reference and which kind it is
+  (the subscription or the connection key), never a variable name. Dispatch
+  maps the kind (`codingagent/model_env.go`): `CLAUDE_CODE_OAUTH_TOKEN` for
+  the subscription, `ANTHROPIC_API_KEY` for a key on Anthropic's own API,
+  `AEP_MODEL_API_KEY` for a key anywhere else. Exactly one reaches a run.
+- **Decision 6 records a disconnected connection.** `llm_disconnected_at` is
+  set when the connection is removed, and the onboarding alert names the model
+  connection.

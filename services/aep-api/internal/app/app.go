@@ -159,6 +159,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	orgRepo := organization.NewOrganizationRepository(db)
 	orgCredRepo := organization.NewOrgCredentialRepository(db, in.ColumnCipher)
 	orgAnthropicRepo := organization.NewOrgAnthropicRepository(db)
+	orgModelConnRepo := organization.NewOrgModelConnectionRepository(db)
 	orgAgentSettingsRepo := organization.NewOrgAgentSettingsRepository(db)
 	// The AI agents card's unit of work: one transaction over the Anthropic
 	// credential rows, the agent-settings row and the secret bytes.
@@ -254,7 +255,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// Secret-ref mirror writer. Constructed ahead of the credential / IDP service
 	// constructors so all consumers can attach via WithSecretRefWriter (the no-op
 	// case when smClient is nil is fine).
-	secretRefWriter := organization.NewSecretRefWriter(smClient, orgCredRepo, orgAnthropicRepo, idpRepo)
+	secretRefWriter := organization.NewSecretRefWriter(smClient, orgCredRepo, orgAnthropicRepo, idpRepo, orgModelConnRepo)
 
 	// Credentials + git-service services and controllers. The credential store,
 	// the App-token minter (post OpenBao key-load / dev seed / bot-identity load),
@@ -307,11 +308,18 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	buildCredService := organization.NewBuildCredentialsService(repoRepo, credResolver, gitSecretClient)
 	credService.WithBuildSecretCleaner(buildCredService)
 	anthropicCredService := organization.NewAnthropicCredentialService(orgAnthropicRepo, credStore)
-	// How the org's agents run: the one model, the coding runtime and the Claude
-	// subscription. ONE instance, read by three callers for three reasons:
-	// /config projects and saves it, the spec agents resolve the model per turn,
-	// and coding dispatch copies model + runtime onto the run it launches.
-	agentSettings := organization.NewAgentSettingsService(orgAgentSettingsRepo, orgRepo, anthropicCredService, agentsCardRepo,
+	// The org's model connection as every consumer outside organization reads
+	// it: the spec agents and task planning (the connection and its key), the
+	// ai-agent model access and build evaluation (its key's vault reference),
+	// coding dispatch (which credential a run mounts) and Agent Manager. Its
+	// `priced` reads the same rate card the usage stamps are priced from.
+	modelConnections := organization.NewModelConnectionService(orgModelConnRepo, orgAnthropicRepo, credStore, in.RateStamper).
+		WithSecretRefWriter(secretRefWriter)
+	// How the org's agents run: the model connection, the coding runtime and
+	// the Claude subscription. ONE instance, read by two callers: /config
+	// projects and saves it, and coding dispatch copies the runtime onto the run
+	// it launches.
+	agentSettings := organization.NewAgentSettingsService(orgAgentSettingsRepo, orgRepo, anthropicCredService, modelConnections, agentsCardRepo,
 		runnableAgentRuntimes(cfg))
 
 	// Task JWT manager — RS256. The public key is published on
@@ -339,9 +347,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// the Enabled() check.
 	credService.WithSecretRefWriter(secretRefWriter)
 	anthropicCredService.WithSecretRefWriter(secretRefWriter)
-	// A rotated org key must reach the Agent Manager provider that holds a copy
-	// of it, or every governed agent in the org keeps calling Anthropic with a
-	// revoked credential until the next deploy re-asserts it.
+	// A saved model connection must reach the Agent Manager provider that holds
+	// a copy of it, or every governed agent in the org keeps calling the old
+	// upstream with the old credential until the next deploy re-asserts it.
 	anthropicCredService.WithModelProvider(ampModelProviderPublisher{
 		amp: ampClientFactory{cfg: agentmanager.Config{
 			TokenURL:     cfg.AgentManager.TokenURL,
@@ -372,8 +380,8 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 
 	// File-mutation agents service (services/agents) — the requirements/design/
 	// chat generation and task-planning flows. Plain HS256 M2M bearer; the
-	// per-org Anthropic key and model are resolved per turn: the key is
-	// forwarded as X-Anthropic-Key, the model in the turn body.
+	// org's model connection is resolved per turn: the key is forwarded as
+	// X-Model-Key, the connection and model in the turn body.
 	agentsvcClient := agentsvc.New(agentsvc.Config{
 		BaseURL:  cfg.AgentsSvc.BaseURL,
 		Secret:   cfg.AgentsSvc.JWTSecret,
@@ -386,25 +394,21 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	filesSvc := spec.NewFilesService(repoService, gitOpsService)
 
 	// Unified genai committed-truth turn surface (shared-workspace-volume). It
-	// resolves the org Anthropic key (no platform fallback), snapshots the
+	// resolves the org's model connection (no platform fallback), snapshots the
 	// project repo + the org's _skills repo onto the workspace mount, and
 	// runs turns detached behind the durable agent_turns guard. Skills are
 	// NOT pushed inline anymore — agents reads the full catalog (embedded
 	// flow skills seeded into _skills + org skills) from the SkillsRef
 	// snapshot.
 	agentLLMForTurns := func(ctx context.Context, orgID string) (spec.AgentLLM, error) {
-		res, err := anthropicCredService.EffectiveKey(ctx, orgID)
+		conn, key, ok, err := modelConnections.Effective(ctx, orgID)
 		if err != nil {
 			return spec.AgentLLM{}, err
 		}
-		if res == nil || res.Source == "none" {
+		if !ok {
 			return spec.AgentLLM{}, nil // no key → a pre-202 4xx
 		}
-		model, err := agentSettings.Model(ctx, orgID)
-		if err != nil {
-			return spec.AgentLLM{}, err
-		}
-		return spec.AgentLLM{Key: res.Key, Model: model}, nil
+		return spec.AgentLLM{Key: key, Connection: conn}, nil
 	}
 	// SkillsRef source for genai + task-plan turns. Reconcile so platform
 	// skills shipped after first provision land before Head/Ensure.
@@ -483,10 +487,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// (NewBuildCredentialsService always returns a value; its gitSecrets are
 	// nil-safe internally), so the stager is always wired.
 	buildStager := buildSecretStagerAdapter{svc: buildCredService}
-	// anthropicCredService already satisfies projects.AnthropicKeyResolver
-	// structurally (DefaultKeyRef has the exact same signature) — no
-	// adapter needed, unlike buildStager above.
-	componentService := projects.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager, anthropicCredService, modelAccessSecretRefClient)
+	// modelConnections already satisfies projects.ModelKeyResolver
+	// structurally (KeyRef has the exact same signature) — no adapter
+	// needed, unlike buildStager above.
+	componentService := projects.NewComponentService(componentClient, observClient, artifactStore, repoService, buildStager, modelConnections, modelAccessSecretRefClient)
 	// deploymentService is built below, so the converger is attached after
 	// construction — an env-var edit pushes onto the live binding through the one
 	// writer rather than patching a field of it.
@@ -744,7 +748,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		componentClient, repoService, identities{cred: credService},
 		executionRepo,
 		cfg.AgentPlatformURL, cfg.AgentPlatformURL,
-		orgRepo, anthropicCredService, orgCredRepo, idpRepo)
+		orgRepo, modelConnections, orgCredRepo, idpRepo)
 	// Dispatch reads secret_ref_name only — it does not call
 	// EnsureOrgPublisher. POST /build provisions the SecretReference while the
 	// console JWT is still on ctx.
@@ -932,6 +936,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		DB:                   db,
 		CredService:          credService,
 		AnthropicCredService: anthropicCredService,
+		ModelConnections:     modelConnections,
 	}
 
 	// The consolidated /config orchestrator (docs/design/org-config-consolidation.md):
@@ -939,7 +944,6 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// platform IDP defaults so GET /config can render the default idp section
 	// without persisting a row on read.
 	orgConfigSvc := organization.NewService(
-		anthropicCredService,
 		credService,
 		disconnectSvc,
 		bearerSvc,
@@ -1431,8 +1435,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			refs:   modelAccessSecretRefClient,
 			orgs:   orgRepo,
 		},
-		Bindings: environmentClient,
-		OrgKeys:  ampOrgKeyReader{creds: anthropicCredService},
+		Endpoints:   ampEndpointStore{repo: organization.NewAIAgentModelEndpointRepository(db)},
+		Bindings:    environmentClient,
+		Connections: modelConnections,
 		// Only ai-agent components are governed; a wave's services and web apps
 		// are left alone.
 		Kinds: agentComponentKinds,
@@ -1551,6 +1556,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// running turn is failed and the D18 one-active guard released;
 		// locally-buffered streams get the terminal event.
 		spec.NewTurnSweeper(turnRepo, turnBroker, 0, 0),
+		// Moves each org's model connection key off its Anthropic-era storage
+		// names: migrate's phase20 copied the bytes at boot, and this switches
+		// the SM-API mirror at boot; the periodic passes retire the old copies
+		// once none of the org's cycles is open.
+		organization.NewModelKeyRename(organization.NewModelKeyRenameRepository(db, credStore), orgRepo, secretRefWriter, runCycleRepo),
 	}
 	// Disk-lifecycle reaper: global passes self-elect via non-blocking flock.
 	// Omitted when Fake() leaves Workspace nil (no disk at assemble time).
@@ -1559,12 +1569,14 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	}
 	// The pod-truth watcher: it classifies each dispatched cycle from the Pod
 	// OpenChoreo rendered for it, records a terminal agent reason when the agent
-	// died without a pull request, and banks the run's token spend. It writes no
+	// died without a pull request (or the run's failure record, when its model
+	// provider's limit stopped it), and banks the run's token spend. It writes no
 	// logs and deletes no components — history is the observability plane's and
 	// deletion is retention's. Always on (no longer gated on cluster-gateway-proxy).
 	watchers = append(watchers, codingagent.NewJobWatcher(runtimeClient, runCycleRepo, asServiceIdentity).
 		WithRecorder(runRecorder).
-		WithAgentDeathNotifier(agentDeathNotifier{runs: milestoneRunRepo, supervisor: runSupervisor}))
+		WithAgentDeathNotifier(agentDeathNotifier{runs: milestoneRunRepo, supervisor: runSupervisor}).
+		WithRunFailures(milestoneRunRepo))
 	slog.Info("codingagent.JobWatcher: enabled (OpenChoreo resource tree)")
 	// The milestone run supervisor's Temporal worker. Registered only when
 	// Temporal is configured (TEMPORAL_HOSTPORT set). The watcher dials in a

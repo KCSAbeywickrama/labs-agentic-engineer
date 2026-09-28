@@ -2,8 +2,11 @@
 
 **Status:** Accepted · 2026-08-23 · **shipped dormant** as of 2026-09-23: the
 harness and the scenario file exist, and every build skips evaluation because
-nothing sets `AEP_AGENT_EVAL=on` (the `agent-building` skill's gate). Turning
-it on, and proving a run end to end, is follow-up work.
+nothing sets `AEP_AGENT_EVAL=on` (the `agent-building` skill's gate). It was
+switched off when the harness forwarded only `MODEL_API_KEY`, failing every
+agent that also needs `MODEL_ENDPOINT` and `MODEL_NAME` at boot; it now forwards
+the whole `MODEL_*` connection. Turning it on, and proving a run end to end, is
+follow-up work.
 
 ## Context
 
@@ -72,8 +75,9 @@ e2e assertion.
    output — the right tool for post-deploy monitoring, once agents emit traces.
 
 7. **The model key is the org's default Anthropic key**, the same key the
-   deployed agent runs with, mounted on the pod as `AEP_EVAL_ANTHROPIC_API_KEY`
-   with `AEP_EVAL_KEY_MANAGED=1`. Never the coding credential: that is the
+   deployed agent runs with, mounted on the pod as `AEP_EVAL_MODEL_API_KEY`
+   with `AEP_EVAL_KEY_MANAGED=1` (the connection's key since the 2026-09-26
+   amendment below). Never the coding credential: that is the
    platform's coding budget, OAuth-shaped, and may be an override the org
    ring-fenced (ADR-0016). The spend — scenarios × turns × up to three rounds,
    plus grading — is a design decision, not a side effect.
@@ -98,3 +102,14 @@ e2e assertion.
 - Known gap at the time of shipping dormant: the design turn does not reliably
   emit the harness's scenario schema (one run wrote its own field names);
   embedding the schema in the `validation-criteria` skill is the fix.
+
+## Amendment 2026-09-26 — the evaluation key is the connection's
+
+Decision 7's key is the org's model connection key
+([ADR-0038](ADR-0038-an-organization-has-one-model-connection.md)), on any
+format. It is mounted as `AEP_EVAL_MODEL_API_KEY` (renamed from
+`AEP_EVAL_ANTHROPIC_API_KEY`), with the connection it is for beside it as plain
+values: `AEP_EVAL_MODEL_FORMAT`, `AEP_EVAL_MODEL_BASE_URL`,
+`AEP_EVAL_MODEL_NAME`, `AEP_EVAL_MODEL_AUTH_SCHEME`. The five are set together
+or not at all; `AEP_EVAL_KEY_MANAGED=1` is unchanged. The agent under test and
+its judge run on that connection unless `AGENT_EVAL_GRADER` names another judge.

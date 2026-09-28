@@ -67,11 +67,12 @@ defining its own `tools.openapi` costs a rename rather than a migration.
 platform inject the value: a dependency named `lunch-api` in `design.json`
 yields `LUNCH_API_URL`. `MODEL_*` needs no dependency at all — every `ai-agent`
 component gets model access from its component type, on the organisation's own
-key. `specs/` is committed to git.
+model connection. `specs/` is committed to git.
 
-**`model.provider` is required** — `anthropic` unless the requirements say
-otherwise. It decides which SDK the build compiles against, and it cannot be
-inferred from `url` or `name`. Omit it and the build guesses.
+**`model.provider` is required by the schema — write `anthropic`.** It does not
+choose the model or the SDK: the organisation's connection does, at runtime
+(`MODEL_API_FORMAT`), so the document stays true when the organisation switches
+connection. Never try to match it to the host the organisation uses today.
 
 ## Writing the body
 

@@ -25,8 +25,9 @@
 # The second is FROM the first, so it costs one binary, one plugin and a
 # pre-warmed home on top of a shared cache (ADR-0015). The dispatcher picks one
 # per the org's runtime; the playground picks one per AEP_AGENT_RUNTIME. This is the LOCAL/DEV path: every machine builds the :dev
-# tag once — self-contained, no shared registry needed. Dispatch reads it via
-# the compose AGENT_RUNNER_IMAGE env, which defaults to the same tag built here.
+# tag once — self-contained, no shared registry needed. `make dev-runner` runs
+# this and points the aep-platform release's codingAgentRunner.image and
+# .opencodeImage (aep-api's AGENT_RUNNER_IMAGE{,_OPENCODE}) at these tags.
 #
 # For released platforms the image is published to GHCR as
 # ghcr.io/wso2/aep/remote-worker:<version> by .github/workflows/release.yml
@@ -39,16 +40,48 @@
 # `bal library` tool, but only for playground runs — see
 # playground/src/engine/coding-run.ts).
 #
-# SKIP_IMPORT=1 builds without importing — used by setup.sh, which starts this
-# build in the background before the cluster exists and leaves the import to
-# setup-aep.sh so the multi-GB node import runs exactly once.
+# SKIP_IMPORT=1 builds without importing (e.g. ahead of the cluster).
 #
-# Called by setup-aep.sh (build + import at setup) and `make build-runner`.
+# Called by `make build-runner` and `make dev-runner`.
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/env.sh"
-# pin_node_image — keeps the imported tag out of kubelet's image GC.
-source "$SCRIPT_DIR/utils.sh"
+CLUSTER_NAME="${CLUSTER_NAME:-openchoreo}"
+
+# pin_node_image <repo:tag> labels an imported local-only tag
+# io.cri-containerd.pinned=pinned on every server/agent node, so kubelet's image
+# GC never evicts it (it has no registry to be pulled back from). An import
+# replaces the containerd record, so this runs after every import.
+#   0 — on every node and pinned; 1 — on every node, not pinned everywhere;
+#   2 — missing from a node: `k3d image import` can flake and still exit 0.
+pin_node_image() {
+    local image="$1" nodes eligible=0 found=0 pinned=0 node ref
+    nodes="$(k3d node list --no-headers 2>/dev/null \
+        | awk -v c="$CLUSTER_NAME" '$3 == c && ($2 == "server" || $2 == "agent") { print $1 }')"
+    for node in $nodes; do
+        eligible=$((eligible + 1))
+        # A local tag lands as docker.io/library/<repo>:<tag>; match the whole ref.
+        ref="$(docker exec "$node" ctr -n k8s.io images ls -q 2>/dev/null \
+            | grep -m1 -Fx -e "$image" -e "docker.io/library/$image" || true)"
+        [ -n "$ref" ] || continue
+        found=$((found + 1))
+        docker exec "$node" ctr -n k8s.io images label \
+            "$ref" io.cri-containerd.pinned=pinned >/dev/null 2>&1 && pinned=$((pinned + 1))
+    done
+    if [ "$eligible" -eq 0 ]; then
+        echo "⚠️  no server/agent node found for cluster '$CLUSTER_NAME' — cannot pin $image"
+        return 2
+    fi
+    if [ "$found" -lt "$eligible" ]; then
+        echo "⚠️  $image is missing from $((eligible - found))/$eligible node(s) — the import did not land"
+        return 2
+    fi
+    if [ "$pinned" -lt "$found" ]; then
+        echo "⚠️  could not pin $image on $((found - pinned))/$found node(s) — kubelet image GC may evict this local-only tag"
+        return 1
+    fi
+    echo "📌 pinned $image against kubelet image GC ($pinned/$eligible node(s))"
+    return 0
+}
 
 IMAGE="${AGENT_RUNNER_IMAGE:-aep-runner:dev}"
 IMAGE_OPENCODE="${AGENT_RUNNER_IMAGE_OPENCODE:-aep-runner-opencode:dev}"
@@ -103,6 +136,9 @@ build_target() {
     # again, for the agent-evaluation harness a build runs before opening an
     # ai-agent's PR. A build pod holds no monorepo, so the harness has to be in
     # the image or the step cannot run at all.
+    # --build-context web-search=<repo>/packages/web-search: and again, for the
+    # `aep-web` MCP server a run searches through when its model connection's
+    # search is Ollama's API.
     # --secret: never a --build-arg. Build args land in image history, and
     # release.yml publishes this image's builder stages to a public buildcache.
     # --target: always named. The Dockerfile's default (last) stage is the Claude
@@ -112,6 +148,7 @@ build_target() {
         --build-context "skills=$REPO_ROOT/skills" \
         --build-context "bal-library-tool=$BAL_TOOL_DIR" \
         --build-context "agent-eval=$REPO_ROOT/packages/agent-eval" \
+        --build-context "web-search=$REPO_ROOT/packages/web-search" \
         --secret "id=packagePAT,env=PACKAGE_PAT" \
         -f "$DOCKERFILE" -t "$tag" "$WORKER_DIR"
     echo "✅ built $tag"
@@ -137,9 +174,6 @@ if [ "${SKIP_IMPORT:-0}" = "1" ]; then
 elif command -v k3d &>/dev/null && k3d cluster list "$CLUSTER_NAME" &>/dev/null; then
     # A missing image is a FAILURE, not a warning: this tag is local-only, so a pod
     # that cannot find it has no registry to fall back on and the dispatch is dead.
-    # Both callers already expect a non-zero exit here and turn it into their own
-    # message (setup-aep.sh's "dispatch stays disabled until fixed", setup.sh's
-    # background-build branch), so exiting non-zero is what makes those fire.
     for tag in "$IMAGE" "$IMAGE_OPENCODE"; do
         if k3d image import "$tag" -c "$CLUSTER_NAME"; then
             # A successful import is not durable on its own: an idle local-only tag is
@@ -163,5 +197,5 @@ elif command -v k3d &>/dev/null && k3d cluster list "$CLUSTER_NAME" &>/dev/null;
         fi
     done
 else
-    echo "ℹ️  k3d cluster '$CLUSTER_NAME' not found — built the images only; setup-aep.sh imports them at cluster setup."
+    echo "ℹ️  k3d cluster '$CLUSTER_NAME' not found — built the images only; re-run once the cluster is up to import them."
 fi
