@@ -46,10 +46,11 @@ This service has **no JWT verification** (the conversation route documents the
 same: "behind the platform BFF, which authenticates; this service does not
 re-authenticate"). `agents-legacy` gated these routes with `requireOrgId` +
 `requireAnthropicKey`; per the migration plan we match the **current** posture
-and do not invent auth. The per-org Anthropic key still arrives on
-`X-Anthropic-Key` (aep-api always forwards it), and the org's model on the
-turn body's `model` → the route builds a per-turn model from both, with
-`AGENT_MODEL` as the default when no model is sent (dev/eval/playground).
+and do not invent auth. The org's model connection key arrives on
+`X-Model-Key` (aep-api always forwards it), and the connection and model on
+the turn body's `connection` and `model` → the route builds a per-turn model
+from them, with Anthropic's own API on `AGENT_MODEL` as the default when none
+is sent (dev/eval/playground).
 
 ## Cutover checklist (open items)
 

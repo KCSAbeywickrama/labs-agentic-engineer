@@ -14,7 +14,7 @@ different consumers, and they are not equivalent:
 
 | Consumer | How it reads the key |
 |---|---|
-| Design agent | `EffectiveKey` → `X-Anthropic-Key` header → `createModel` per turn |
+| Design agent | `EffectiveKey` → `X-Anthropic-Key` header → `createModel` per turn (now `ConnectionReader.Effective` → `X-Model-Key`, [ADR-0038](ADR-0038-an-organization-has-one-model-connection.md)) |
 | Coding agent | SM-API triplet → per-run ExternalSecret → runner `ANTHROPIC_API_KEY` |
 | Coding agent (workflow plane) | `ApplyWPSecret` → `anthropic-credentials` Secret → ClusterWorkflow |
 | RCA agent | `pushExternalSecret` → `RCA_LLM_API_KEY` ExternalSecret |

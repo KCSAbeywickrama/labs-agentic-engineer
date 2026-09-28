@@ -21,37 +21,31 @@ import (
 	"time"
 )
 
-// AnthropicRole names which reader an org's Anthropic key serves. An org always
-// has at most one row per role, so (OcOrgID, Role) is the table's primary key.
+// AnthropicRole names which reader an org's Anthropic credential serves. The
+// table is keyed (OcOrgID, Role); the only role is the Claude subscription
+// (CHECK org_anthropic_credentials_subscription_only).
 type AnthropicRole string
 
-const (
-	// AnthropicRoleDefault is the org's Anthropic API key. EVERY reader uses
-	// it — the spec agents, the coding agent, the RCA agent. An org without
-	// one cannot run any agent; there is no platform-provided fallback. Always
-	// an api_key (CHECK-enforced).
-	AnthropicRoleDefault AnthropicRole = "default"
-
-	// AnthropicRoleCoding is the optional Claude subscription the coding agent
-	// bills instead of the API key, read by coding-agent dispatch alone and
-	// only while the runtime is Claude Code. Always an oauth_token
-	// (CHECK-enforced), and it cannot outlive the default row (ADR-0036).
-	AnthropicRoleCoding AnthropicRole = "coding"
-)
+// AnthropicRoleCoding is the optional Claude subscription the coding agent
+// bills instead of the connection's key, read by coding-agent dispatch alone
+// and only while the runtime is Claude Code on Anthropic's own API. Always an
+// oauth_token (CHECK-enforced), and it cannot outlive the connection
+// (ADR-0036).
+const AnthropicRoleCoding AnthropicRole = "coding"
 
 // String renders the role for SQL binding and log fields.
 func (r AnthropicRole) String() string { return string(r) }
 
 // AnthropicCredentialKind names HOW a stored credential authenticates, which
-// decides both how it is validated and which environment variable it must be
-// delivered as. It is persisted rather than re-derived, because dispatch reads
-// the metadata row and never the secret bytes — it has nothing to sniff.
+// decides how it is validated. It is persisted rather than re-derived, because
+// readers of the metadata row never see the secret bytes — they have nothing to
+// sniff.
 type AnthropicCredentialKind string
 
 const (
 	// AnthropicCredentialAPIKey is a Console API key (`sk-ant-api…`),
-	// authenticated with the `x-api-key` header. The only kind the spec agents
-	// can use: they are AI SDK model calls, which speak API keys.
+	// authenticated with the `x-api-key` header. Never stored in this table; it
+	// names what a subscription token is not.
 	AnthropicCredentialAPIKey AnthropicCredentialKind = "api_key"
 
 	// AnthropicCredentialOAuth is a long-lived Claude Code OAuth token from
@@ -81,43 +75,20 @@ func AnthropicCredentialKindOf(key string) AnthropicCredentialKind {
 	return AnthropicCredentialAPIKey
 }
 
-// RunnerEnvVar is the environment variable a coding run must receive this
-// credential as.
-//
-// The two are mutually exclusive by necessity, not by preference: Claude Code
-// ranks `ANTHROPIC_API_KEY` ABOVE `CLAUDE_CODE_OAUTH_TOKEN`, so a container
-// holding both would authenticate with the API key and silently ignore the
-// token. Mounting exactly one is what makes the org's choice actually take
-// effect. See docs/decisions/ADR-0036 and
-// https://code.claude.com/docs/en/authentication#authentication-precedence.
-func (k AnthropicCredentialKind) RunnerEnvVar() string {
-	if k == AnthropicCredentialOAuth {
-		return "CLAUDE_CODE_OAUTH_TOKEN"
-	}
-	return "ANTHROPIC_API_KEY"
-}
-
-// SecretStoreKey is the `org_secrets` key holding this role's encrypted bytes.
-// The default role keeps the historical "anthropic/key"; the coding role keeps
-// "anthropic/coding-key", the key it held when it could also be an API key.
+// SecretStoreKey is the `org_secrets` key holding this role's encrypted bytes:
+// "anthropic/coding-key". Distinct from the connection key's modelKeyStoreKey.
 func (r AnthropicRole) SecretStoreKey() string {
-	if r == AnthropicRoleCoding {
-		return "anthropic/coding-key"
-	}
-	return "anthropic/key"
+	return "anthropic/" + string(r) + "-key"
 }
 
 // SecretRefEntity is the SM-API `EntityName` this role mirrors under. Distinct
-// per role so the key and the subscription token never share a vault path.
+// from the connection key's modelKeySecretEntity so the key and the
+// subscription token never share a vault path.
 func (r AnthropicRole) SecretRefEntity() string {
-	if r == AnthropicRoleCoding {
-		return "anthropic-coding"
-	}
-	return "anthropic"
+	return "anthropic-" + string(r)
 }
 
-// OrgAnthropicCredential is the per-org, per-role Anthropic API key metadata
-// row. The encrypted key bytes themselves live in
+// OrgAnthropicCredential is the per-org Claude subscription metadata row. The encrypted key bytes themselves live in
 // `org_secrets(oc_org_id, key=Role.SecretStoreKey())` alongside the GitHub PAT
 // — same `dbStore` (Postgres + AES-256-GCM) plumbing, different `key` value.
 // This table stores only non-secret projection fields.

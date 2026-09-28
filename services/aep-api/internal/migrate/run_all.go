@@ -61,10 +61,10 @@ func BaseModels() []any {
 		&sourcecontrol.WebhookDelivery{},
 		&sourcecontrol.WebhookPayload{},
 		&organization.Organization{},
-		// How the org's agents run: the one model every agent uses and the
-		// coding agent's runtime. A plain settings table with a text primary key
-		// and nothing to encrypt, so AutoMigrate expresses the whole schema;
-		// phase17 moves the rows of its predecessor, org_coding_agent_settings.
+		// How the org's agents run: the coding agent's runtime. A plain settings
+		// table with a text primary key and nothing to encrypt, so AutoMigrate
+		// expresses the whole schema; phase17 moves the rows of its
+		// predecessor, org_coding_agent_settings.
 		&organization.OrgAgentSettings{},
 		&delivery.Execution{},
 		&spec.AgentTurn{},
@@ -230,6 +230,28 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// org_coding_agent_settings → org_agent_settings: copy the rows into the
 		// table AutoMigrate created, then drop the old one.
 		ctxStep("phase17_org_agent_settings", RunPhase17OrgAgentSettings),
+		// Usage becomes host-aware: model_rates is re-keyed to (host, model_id)
+		// and turns, cycles, executions and the ledger gain model_host, every
+		// existing row backfilled to api.anthropic.com. Appended after
+		// model_rates_seed, which is why the seed counts a NULL-host row as the
+		// Anthropic one: on the upgrade boot it runs before the key is widened.
+		ctxStep("phase18_model_host", RunPhase18ModelHost),
+		// The model connection moves to its own table, org_model_connections:
+		// every active default credential becomes a connection on Anthropic's
+		// API with the org's model, the default rows go, the credential table
+		// keeps only the Claude subscription, and org_agent_settings loses its
+		// model column. Follows phase17 and every step that shaped
+		// org_anthropic_credentials.
+		ctxStep("phase19_model_connection", RunPhase19ModelConnection),
+		// The connection key's bytes move from org_secrets 'anthropic/key' to
+		// 'model/key' (copy only; organization.ModelKeyRename moves the SM-API
+		// mirror after assembly and retires the old copies). Follows phase19,
+		// which left the key under the old name.
+		ctxStep("phase20_model_key_rename", RunPhase20ModelKeyRename),
+		// The endpoint each governed ai-agent's key was stored beside, so the
+		// govern stage can tell when a connection switch moved its base path.
+		// A new table with no backfill; depends on nothing above it.
+		ctxStep("phase21_ai_agent_model_endpoints", RunPhase21AIAgentModelEndpoints),
 	}
 }
 

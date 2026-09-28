@@ -29,6 +29,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/organization"
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
@@ -45,7 +46,7 @@ import (
 // BFF reads ReleaseBindings via ListDeployments.
 type ComponentService interface {
 	// ModelAccessEnvVars yields the MODEL_* env vars an ai-agent needs, from
-	// the org's connected key. On the interface rather than the concrete type
+	// the org's model connection. On the interface rather than the concrete type
 	// so DeploymentService's wiring is checked by the COMPILER: the previous
 	// shape left it reachable only by type assertion, app.go never wired it,
 	// and every ai-agent deployed with no model key and 500'd on its first
@@ -90,38 +91,45 @@ type BuildSecretStager interface {
 	StageBuildSecret(ctx context.Context, ocOrgID, repoSlug, workflowRunName string) (secretRef string, err error)
 }
 
-// AnthropicKeyResolver is the narrow port EnsureComponent needs from
-// *organization.AnthropicCredentialService to wire an ai-agent component's
-// MODEL_API_KEY: the org's default-role Anthropic key's vault coordinates.
+// ModelKeyResolver is the narrow port ModelAccessEnvVars needs from the
+// organization domain's ConnectionReader: the org's model connection and its
+// key's vault coordinates.
 // Declared consumer-side (same pattern as OrgPublisher in trait_sync.go) so
-// this package takes only the one method it needs, not the concrete
-// service. Returns an *organization.NotFoundError when the org has no
-// active default key — see ModelAccessEnvVars.
-type AnthropicKeyResolver interface {
-	DefaultKeyRef(ctx context.Context, ocOrgID string) (organization.SecretRefTriplet, error)
+// this package takes only the one method it needs, not the whole reader.
+// Returns an *organization.NotFoundError when the org has no active
+// connection — see ModelAccessEnvVars.
+type ModelKeyResolver interface {
+	KeyRef(ctx context.Context, ocOrgID string) (modelconn.Connection, organization.SecretRefTriplet, error)
 }
 
 // -- model access for ai-agent components (see ai_agent_model_access.go) ----
 //
-// modelEndpointDefault / modelNameDefault are literals for now: no
-// multi-provider or multi-model choice exists yet (agent.afm.md's
-// model.provider is validated to "anthropic" | "openai" by the AFM schema,
-// but only Anthropic is wired end-to-end — ADR-0016). Named here, not
-// scattered as string literals, so a later "org-configurable model" change
-// has one place to touch.
+// The MODEL_* variables are the generated agent's contract with the platform
+// (skills/agent-building): every value comes from the org's model connection,
+// so the agent names no provider, URL or model of its own.
 const (
 	modelEndpointEnvVar = "MODEL_ENDPOINT"
 	modelNameEnvVar     = "MODEL_NAME"
 	modelAPIKeyEnvVar   = "MODEL_API_KEY"
+	// modelAPIFormatEnvVar is the API the agent's client speaks: the
+	// connection's format, `anthropic` or `openai-compatible`, on both paths.
+	modelAPIFormatEnvVar = "MODEL_API_FORMAT"
+	// modelAPIAuthSchemeEnvVar is how the key is presented on the DIRECT path
+	// (`x-api-key` or `bearer`). An Anthropic-format host other than
+	// Anthropic's own API takes the key as a Bearer token, which the Anthropic
+	// SDK sends only when asked to. The governed path leaves it unset: there
+	// modelAPIKeyHeaderEnvVar names the one header the proxy reads.
+	modelAPIAuthSchemeEnvVar = "MODEL_API_AUTH_SCHEME"
 
 	// modelAPIKeyHeaderEnvVar / ampModelAPIKeyHeader are a HACK, and carry an
 	// expiry date.
 	//
 	// Agent Manager's per-agent LLM proxy authenticates on a header of its own
 	// choosing — `API-Key` — and that name is not configurable today. The
-	// Anthropic client an AEP agent is built on sends its credential as
-	// `x-api-key` and offers no way to rename it, so a governed agent's request
-	// arrives at the proxy unauthenticated. Naming the header here, and having
+	// clients an AEP agent is built on send their credential as `x-api-key`
+	// (Anthropic format) or `Authorization: Bearer` (OpenAI-compatible), and
+	// the proxy reads neither, so a governed agent's request would arrive at
+	// the proxy unauthenticated on every format. Naming the header here, and having
 	// the agent template send the key under whatever name it finds, is what
 	// bridges the two until Agent Manager makes the proxy's header
 	// configurable — which its team has confirmed it will.
@@ -168,13 +176,11 @@ const (
 	traceloopTraceContentEnvVar = "TRACELOOP_TRACE_CONTENT"
 	traceloopTraceContentValue  = "false"
 
-	modelEndpointDefault = "https://api.anthropic.com/v1"
-	modelNameDefault     = "claude-sonnet-5"
-
 	// modelAccessSecretRefName is the org-scoped SecretReference every
 	// ai-agent component's MODEL_API_KEY points at — one per org, upserted
 	// (not per component), since every agent shares the organisation's one
-	// Anthropic key (ADR-0016) and there is nothing per-agent to provision.
+	// model connection key (ADR-0016, ADR-0038) and there is nothing per-agent
+	// to provision.
 	modelAccessSecretRefName = "ai-agent-model-access"
 	// modelAccessSecretRefRefresh mirrors pushExternalSecret's cadence for
 	// the same underlying credential.
@@ -199,16 +205,16 @@ type componentService struct {
 	// ai_agent_model_access.go). Optional — nil means "not configured" (tests /
 	// unit-only flows, or a deployment that hasn't wired the composition root
 	// yet).
-	modelKeyResolver AnthropicKeyResolver
+	modelKeyResolver ModelKeyResolver
 	secretRefClient  secretmanagersvc.OpenChoreoSecretReferenceClient
 }
 
 // NewComponentService builds the component service. repoSvc, buildCredSvc,
 // modelKeyResolver, and secretRefClient may be nil in tests / unit-only
 // flows; production wiring passes all four so TriggerBuild can pre-stage
-// the per-WorkflowRun build Secret and EnsureComponent can wire MODEL_* into
-// ai-agent components.
-func NewComponentService(client openchoreo.ComponentClient, observClient observability.Client, artifactStore *spec.ArtifactStore, repoSvc sourcecontrol.RepoService, buildCredSvc BuildSecretStager, modelKeyResolver AnthropicKeyResolver, secretRefClient secretmanagersvc.OpenChoreoSecretReferenceClient) ComponentService {
+// the per-WorkflowRun build Secret and ModelAccessEnvVars can compose MODEL_*
+// for ai-agent components.
+func NewComponentService(client openchoreo.ComponentClient, observClient observability.Client, artifactStore *spec.ArtifactStore, repoSvc sourcecontrol.RepoService, buildCredSvc BuildSecretStager, modelKeyResolver ModelKeyResolver, secretRefClient secretmanagersvc.OpenChoreoSecretReferenceClient) ComponentService {
 	return &componentService{
 		client:           client,
 		observClient:     observClient,
@@ -366,12 +372,6 @@ func (s *componentService) EnsureComponent(ctx context.Context, orgName, project
 		return fmt.Errorf("ensure component: apply spec for %q: %w", k8sName, err)
 	}
 	slog.InfoContext(ctx, "ensure component: OC Component ensured", "org", orgName, "project", projectName, "component", k8sName)
-
-	// Every ai-agent component gets the organisation's Anthropic key —
-	// MODEL_ENDPOINT/MODEL_NAME/MODEL_API_KEY — without declaring a
-	// dependency (ADR-0016). No-op for every other component type; see
-	// ai_agent_model_access.go. Best-effort: never fails EnsureComponent, so
-	// a model-access hiccup cannot block component creation or a build.
 	return nil
 }
 

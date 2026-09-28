@@ -175,8 +175,8 @@ func (l *loop) judgeVersion(ctx workflow.Context) (RunResult, error) {
 }
 
 // stateForUnlandedValidation maps an agent stage that never landed onto the run's
-// terminal state and reason. Every one of the four is an existing failure class,
-// which is the point: a validation run invents no new way to end.
+// terminal state and reason. Every one is an ending the dev loop has too, which
+// is the point: a validation run invents no new way to end.
 //
 // A conflict is the odd one and is reported as the conflict chain running out,
 // because from this workflow's position it has: the event plane has already minted
@@ -191,6 +191,8 @@ func stateForUnlandedValidation(res cycleResult) (state, reason string) {
 		return delivery.RunStateBlocked, delivery.RunReasonAgentQuotaBlocked
 	case cyclePublisherCredentials:
 		return delivery.RunStateBlocked, delivery.RunReasonPublisherCredentials
+	case cycleProviderLimit:
+		return delivery.RunStateBlocked, delivery.RunReasonModelProviderLimit
 	case cycleConflict:
 		return delivery.RunStateFailed, delivery.RunReasonConflictBudget
 	default:

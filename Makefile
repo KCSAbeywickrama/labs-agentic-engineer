@@ -48,7 +48,7 @@ LICENSE_HEADER := .github/license-header.txt
 LICENSE_MATCH = grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
 	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/|(^|/)\.(agents|claude)/'
 
-.PHONY: install gen build dev test lint eval-ui typecheck license license-check tools clean eval cover build-runner workflow-skill deadcode-ts deadcode-ts-check manifests-check dev-env dev-update bal-library-tool
+.PHONY: install gen build dev test lint eval-ui typecheck license license-check tools clean eval cover build-runner workflow-skill deadcode-ts deadcode-ts-check manifests-check dev-env dev-update dev-runner obs-park obs-unpark obs-status bal-library-tool
 
 install:
 	$(PNPM) install
@@ -147,10 +147,9 @@ deadcode-ts:
 deadcode-ts-check:
 	$(PNPM) run deadcode-ts:check
 
-# Local-dev helper (not a uniform verb): build + k3d-import the runner image
-# (one image, both task kinds). setup-aep.sh runs this automatically at setup;
-# use it to force a rebuild after changing runners/remote-worker/Dockerfile or
-# the runner's TS — `make build-runner FORCE=1`.
+# Local-dev helper (not a uniform verb): build + k3d-import the runner images
+# only — `make build-runner FORCE=1` to rebuild over an existing tag. The
+# release keeps its images until `make dev-runner` points it at them.
 build-runner:
 	FORCE=$(FORCE) bash deployments/scripts/build-runner.sh
 
@@ -219,11 +218,26 @@ dev-env:
 	./tools/aectl/aectl-skaffold platform config import --config skaffold/defaults.yaml
 	ANTHROPIC_API_KEY=none AEP_THUNDER_ADMIN_CLIENT_SECRET=ae-install-client-secret \
 		./tools/aectl/aectl-skaffold platform install --addons=all --platform-version=latest --platform-chart=deployments/helm-charts/platform
-	@if [ "$${WITH_AGENT_MANAGER:-1}" = "1" ]; then \
-		bash deployments/scripts/setup-agent-manager.sh; \
-	else \
+	@if [ "$${WITH_AGENT_MANAGER:-1}" != "1" ]; then \
 		echo "⏭️  Skipping Agent Manager (WITH_AGENT_MANAGER=0)"; \
+	elif [ "$${WITH_OBSERVABILITY:-1}" != "1" ]; then \
+		echo "⏭️  Skipping Agent Manager: it installs against the observability plane (WITH_OBSERVABILITY=0)"; \
+	else \
+		bash deployments/scripts/setup-agent-manager.sh; \
 	fi
+	@if [ "$${WITH_OBSERVABILITY:-1}" = "1" ]; then \
+		bash deployments/scripts/park-observability.sh down; \
+	fi
+
+# The observability plane's heavy half (OpenSearch, Prometheus, collectors,
+# adapters): `make dev-env` installs it running and parks it last. Unpark to
+# read traces, metrics or archived logs, between builds on an 8 GiB VM.
+obs-park:
+	bash deployments/scripts/park-observability.sh down
+obs-unpark:
+	bash deployments/scripts/park-observability.sh up
+obs-status:
+	bash deployments/scripts/park-observability.sh status
 
 # Edit source, then run this: builds only the images whose dependencies
 # changed and loads them into k3d (skaffold.yaml — build-only, tagged
@@ -242,7 +256,7 @@ dev-env:
 # no-op as far as the running pods are concerned.
 #
 # One-shot, not a watch loop. Run after `make dev-env`.
-# Console: http://console.openchoreo.localhost:8080
+# Console: http://console.ae.localhost:8080
 #
 # Named dev-update, not dev: `make dev` is the uniform verb (turbo run dev,
 # host-side TS dev servers per package) and already means something else.
@@ -259,14 +273,30 @@ dev-update:
 		ghcr.io/wso2/aep/collab:dev-local \
 		ghcr.io/wso2/aep/aep-mcp-server:dev-local \
 		ghcr.io/wso2/aep/console:dev-local \
+		ghcr.io/wso2/aep/tryit:dev-local \
 		--cluster openchoreo
 	helm upgrade aep-platform deployments/helm-charts/platform -n wso2-aep --reuse-values \
 		--set aepApi.image.repository=ghcr.io/wso2/aep/aep-api --set aepApi.image.tag=dev-local \
 		--set aepAgents.image.repository=ghcr.io/wso2/aep/agents --set aepAgents.image.tag=dev-local \
 		--set collab.image.repository=ghcr.io/wso2/aep/collab --set collab.image.tag=dev-local \
 		--set aepMcpServer.image.repository=ghcr.io/wso2/aep/aep-mcp-server --set aepMcpServer.image.tag=dev-local \
-		--set console.image.repository=ghcr.io/wso2/aep/console --set console.image.tag=dev-local
-	kubectl -n wso2-aep rollout restart deployment/aep-api deployment/aep-agents deployment/collab-server deployment/aep-mcp-server deployment/aep-console
+		--set console.image.repository=ghcr.io/wso2/aep/console --set console.image.tag=dev-local \
+		--set tryIt.image.repository=ghcr.io/wso2/aep/tryit --set tryIt.image.tag=dev-local
+	kubectl -n wso2-aep rollout restart deployment/aep-api deployment/aep-agents deployment/collab-server deployment/aep-mcp-server deployment/aep-console deployment/aep-tryit
+
+# Builds the coding-agent runner images from this checkout (Claude Code and
+# OpenCode, deployments/scripts/build-runner.sh), imports them into k3d, and
+# points the aep-platform release at them. The chart's defaults are the
+# released ghcr image and no OpenCode image, which takes OpenCode off the
+# runtime menu. Run after `make dev-env`, and again after changing
+# runners/remote-worker or a package it bakes in (agent-eval, web-search,
+# skills, bal-library-tool). Like dev-update, --reuse-values keeps aectl's
+# settings; the image values change, so Helm rolls aep-api by itself.
+dev-runner:
+	FORCE=1 bash deployments/scripts/build-runner.sh
+	helm upgrade aep-platform deployments/helm-charts/platform -n wso2-aep --reuse-values \
+		--set codingAgentRunner.image=aep-runner:dev \
+		--set codingAgentRunner.opencodeImage=aep-runner-opencode:dev
 
 clean:
 	$(TURBO) run build --force >/dev/null 2>&1 || true

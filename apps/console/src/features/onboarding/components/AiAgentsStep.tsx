@@ -19,24 +19,29 @@
 import { Alert, AlertTitle, Box, Typography } from "@wso2/oxygen-ui";
 import type { components } from "../../../generated/aep-api";
 import { AiAgentsCard } from "../../settings/components/AiAgentsCard";
-import { anthropicKeyWasDisconnected } from "../keyDisconnected";
+import { connectionWasDisconnected } from "../keyDisconnected";
 
 type ConfigProjection = components["schemas"]["ConfigProjection"];
 
-/** The wizard's AI step: the settings card itself, unframed, with an intro. */
+/**
+ * The wizard's "Connect a model" step: the settings card itself, unframed,
+ * with an intro. Continue saves the connection (the save probes it), and the
+ * wizard advances once `llm` is non-null.
+ */
 export function AiAgentsStep({ config }: { config: ConfigProjection }) {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      {anthropicKeyWasDisconnected(config) ? (
+      {connectionWasDisconnected(config) ? (
         <Alert severity="warning">
-          <AlertTitle>Your Anthropic key was disconnected</AlertTitle>
-          Agents cannot run until a new key is saved.
+          <AlertTitle>Your model connection was disconnected</AlertTitle>
+          Agents cannot run until a connection is saved.
         </Alert>
       ) : (
         <Typography variant="body2" color="text.secondary">
-          Paste your organization&apos;s Anthropic API key to continue. The
-          model and coding agent start on the platform&apos;s defaults and can
-          be changed here or later in Settings.
+          Connect the model your agents will use. Anthropic&apos;s API is filled
+          in; switch the format or change the URL for any other provider or your
+          own endpoint. Continue checks the connection and saves it; Test
+          connection is optional. You can change this later in Settings.
         </Typography>
       )}
       <AiAgentsCard config={config} onboarding />

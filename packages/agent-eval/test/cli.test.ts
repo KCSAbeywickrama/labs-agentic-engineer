@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join, isAbsolute } from "node:path";
 import {
   runCli,
-  resolveGraderModel,
+  resolveGrader,
   buildChildEnv,
   resolveBootTimeouts,
   type SpawnPromptfoo,
@@ -111,19 +111,40 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe("resolveGraderModel", () => {
-  it("defaults when unset", () => {
-    expect(resolveGraderModel({})).toBe("anthropic:messages:claude-sonnet-5");
+const OLLAMA_ENV = {
+  AEP_EVAL_KEY_MANAGED: "1",
+  AEP_EVAL_MODEL_API_KEY: "ollama-key-value-0123",
+  AEP_EVAL_MODEL_FORMAT: "openai-compatible",
+  AEP_EVAL_MODEL_BASE_URL: "https://ollama.com/v1",
+  AEP_EVAL_MODEL_NAME: "gpt-oss:20b",
+  AEP_EVAL_MODEL_AUTH_SCHEME: "bearer",
+};
+
+describe("resolveGrader", () => {
+  const FIRST_PARTY_JUDGE = {
+    id: "anthropic:messages:claude-sonnet-5",
+    config: { apiBaseUrl: "https://api.anthropic.com" },
+  };
+
+  it("defaults to Anthropic's API when the run has no connection", () => {
+    expect(resolveGrader({})).toEqual(FIRST_PARTY_JUDGE);
+  });
+
+  it("follows the connection", () => {
+    expect(resolveGrader(OLLAMA_ENV)).toEqual({
+      id: "openai:chat:gpt-oss:20b",
+      config: { apiBaseUrl: "https://ollama.com/v1" },
+    });
   });
 
   // A bare `env.AGENT_EVAL_GRADER ?? default` would let a set-but-blank env
   // var through as `""`, which `buildPromptfooConfig` rejects outright.
-  it("defaults when set but blank", () => {
-    expect(resolveGraderModel({ AGENT_EVAL_GRADER: "   " })).toBe("anthropic:messages:claude-sonnet-5");
+  it("follows the connection when AGENT_EVAL_GRADER is set but blank", () => {
+    expect(resolveGrader({ AGENT_EVAL_GRADER: "   " })).toEqual(FIRST_PARTY_JUDGE);
   });
 
-  it("uses the env value when genuinely set", () => {
-    expect(resolveGraderModel({ AGENT_EVAL_GRADER: "openai:gpt-4o" })).toBe("openai:gpt-4o");
+  it("uses AGENT_EVAL_GRADER when genuinely set, over the connection", () => {
+    expect(resolveGrader({ ...OLLAMA_ENV, AGENT_EVAL_GRADER: "openai:gpt-4o" })).toBe("openai:gpt-4o");
   });
 });
 
@@ -148,6 +169,8 @@ describe("resolveBootTimeouts", () => {
   });
 });
 
+// Which key the run has, and from where, is resolveConnection's (see
+// connection.test.ts); these pin what the promptfoo child is handed.
 describe("buildChildEnv", () => {
   it("forwards only the allowlisted keys plus the promptfoo disable flags", () => {
     const env = buildChildEnv({
@@ -160,91 +183,46 @@ describe("buildChildEnv", () => {
     });
     expect(env.PATH).toBe("/usr/bin");
     expect(env.HOME).toBe("/home/x");
-    expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-real");
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(env.SOME_OTHER_SECRET).toBeUndefined();
     expect(env.PROMPTFOO_DISABLE_TELEMETRY).toBe("1");
     expect(env.PROMPTFOO_DISABLE_UPDATE).toBe("1");
     expect(env.PROMPTFOO_DISABLE_SHARING).toBe("1");
-    // The agent under test reads the org's key under its own name; the
-    // judge reads it under promptfoo's. One credential, two names.
-    expect(env.MODEL_API_KEY).toBe("sk-ant-real");
   });
 
-  // In a build pod the org's key arrives as AEP_EVAL_ANTHROPIC_API_KEY, not as
-  // ANTHROPIC_API_KEY: that name already belongs to Claude Code, which ranks it
-  // above CLAUDE_CODE_OAUTH_TOKEN, so the platform cannot put the evaluation key
-  // there without moving an OAuth-billing org's whole coding session onto it.
-  it("prefers the build's evaluation key over ANTHROPIC_API_KEY", () => {
-    const env = buildChildEnv({
-      AEP_EVAL_ANTHROPIC_API_KEY: "sk-ant-eval",
-      ANTHROPIC_API_KEY: "sk-ant-other",
-      CLAUDE_CODE_OAUTH_TOKEN: "coding-token",
-    });
-    expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-eval");
-    expect(env.MODEL_API_KEY).toBe("sk-ant-eval");
-    expect(env.AEP_EVAL_ANTHROPIC_API_KEY).toBeUndefined();
-    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
-  });
-
-  // The pod's ANTHROPIC_API_KEY is the CODING credential, which an org may have
-  // ring-fenced for coding and nothing else. An org whose default key is gone
-  // but whose coding override is live dispatches with no evaluation key and a
-  // coding key sitting under the name the fallback reads — so on a pod there is
-  // no fallback at all, and the run reports that it could not evaluate.
-  it("does not fall back to the pod's coding credential", () => {
-    const env = buildChildEnv({
-      AEP_EVAL_KEY_MANAGED: "1",
-      ANTHROPIC_API_KEY: "sk-ant-the-orgs-coding-key",
-    });
-    expect("MODEL_API_KEY" in env).toBe(false);
-    expect("ANTHROPIC_API_KEY" in env).toBe(false);
-  });
-
-  // The declaration says who OWNS the credential, not whether there is one.
-  it("still uses the evaluation key the platform did mount", () => {
-    const env = buildChildEnv({
-      AEP_EVAL_KEY_MANAGED: "1",
-      AEP_EVAL_ANTHROPIC_API_KEY: "sk-ant-eval",
-      ANTHROPIC_API_KEY: "sk-ant-the-orgs-coding-key",
-    });
-    expect(env.MODEL_API_KEY).toBe("sk-ant-eval");
-    expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-eval");
-  });
-
-  // ESO can materialise an empty secret. "" is no key, not a key that fails to
-  // authenticate — the difference decides whether the report reads "never became
-  // ready" or sends the judge at an endpoint with a blank credential.
-  it("treats an empty key as no key", () => {
-    expect("MODEL_API_KEY" in buildChildEnv({ ANTHROPIC_API_KEY: "" })).toBe(false);
-    const env = buildChildEnv({ AEP_EVAL_ANTHROPIC_API_KEY: "", ANTHROPIC_API_KEY: "sk-ant-local" });
-    expect(env.MODEL_API_KEY).toBe("sk-ant-local");
-  });
-
-  // Outside a build pod — a developer running the harness in the monorepo —
-  // ANTHROPIC_API_KEY is the only key there is.
-  it("falls back to ANTHROPIC_API_KEY when no evaluation key is set", () => {
+  // A developer's key on Anthropic's API: the agent reads it as MODEL_API_KEY,
+  // the judge under promptfoo's ANTHROPIC_API_KEY. One credential, two names.
+  it("hands the developer's key to the agent and the judge, on Anthropic's API", () => {
     const env = buildChildEnv({ ANTHROPIC_API_KEY: "sk-ant-local" });
-    expect(env.ANTHROPIC_API_KEY).toBe("sk-ant-local");
-    expect(env.MODEL_API_KEY).toBe("sk-ant-local");
+    expect(env).toMatchObject({
+      ANTHROPIC_API_KEY: "sk-ant-local",
+      MODEL_API_KEY: "sk-ant-local",
+      MODEL_ENDPOINT: "https://api.anthropic.com/v1",
+      MODEL_NAME: "claude-sonnet-5",
+      MODEL_API_FORMAT: "anthropic",
+      MODEL_API_AUTH_SCHEME: "x-api-key",
+    });
   });
 
-  // The coding agent's OAuth token is not a model credential and never stands in
-  // for one: it is the platform's own coding budget, and it authenticates none
-  // of the API calls the judge makes.
-  it("never falls back to the coding agent's OAuth token", () => {
-    const env = buildChildEnv({ CLAUDE_CODE_OAUTH_TOKEN: "coding-token" });
-    expect("MODEL_API_KEY" in env).toBe(false);
+  it("hands the platform's connection to the agent and the judge, under the names each reads", () => {
+    const env = buildChildEnv({ ...OLLAMA_ENV, ANTHROPIC_API_KEY: "sk-ant-the-orgs-coding-key" });
+    expect(env).toMatchObject({
+      MODEL_API_KEY: "ollama-key-value-0123",
+      MODEL_ENDPOINT: "https://ollama.com/v1",
+      MODEL_NAME: "gpt-oss:20b",
+      MODEL_API_FORMAT: "openai-compatible",
+      MODEL_API_AUTH_SCHEME: "bearer",
+      OPENAI_API_KEY: "ollama-key-value-0123",
+    });
+    // The pod's coding key is nobody's credential here, and the connection's
+    // key is not presented to a provider family that is not its format's.
     expect("ANTHROPIC_API_KEY" in env).toBe(false);
+    expect("AEP_EVAL_MODEL_API_KEY" in env).toBe(false);
   });
 
-  it("never invents a MODEL_API_KEY when the org key is unset", () => {
-    expect("MODEL_API_KEY" in buildChildEnv({})).toBe(false);
-  });
-
-  it("omits an allowlisted key that was never set, rather than forwarding undefined", () => {
-    const env = buildChildEnv({});
-    expect("ANTHROPIC_API_KEY" in env).toBe(false);
+  it("gives the child no model variables at all when the run has no key", () => {
+    const env = buildChildEnv({ AEP_EVAL_KEY_MANAGED: "1", ANTHROPIC_API_KEY: "sk-ant-coding" });
+    expect(Object.keys(env).filter((k) => k.startsWith("MODEL_") || k.includes("API_KEY"))).toEqual([]);
   });
 });
 
@@ -419,6 +397,57 @@ describe("runCli", () => {
       spawnPromptfoo: spawn,
     });
     expect(text).not.toContain("sk-ant-secret");
+  });
+
+  it("never writes the connection's key into the emitted config", () => {
+    let text = "";
+    const spawn: SpawnPromptfoo = (args) => {
+      text = readFileSync(args[args.indexOf("-c") + 1]!, "utf8");
+      writeFileSync(args[args.indexOf("-o") + 1]!, JSON.stringify(FAILING_OUT_JSON));
+      return ok();
+    };
+    runCli({ argv: argv(), env: OLLAMA_ENV, cwd: dir, spawnPromptfoo: spawn });
+    expect(text).toContain("openai:chat:gpt-oss:20b");
+    expect(text).not.toContain(OLLAMA_ENV.AEP_EVAL_MODEL_API_KEY);
+  });
+
+  // report.md and out.json land in the build's output and then in the PR.
+  // The connection's key has no fixed shape, so it is scrubbed by value.
+  it("scrubs the key by value from a graded report and from out.json", () => {
+    const key = OLLAMA_ENV.AEP_EVAL_MODEL_API_KEY;
+    const leaking = structuredClone(FAILING_OUT_JSON);
+    leaking.results.results[0]!.gradingResult.componentResults[0]!.reason = `the agent printed ${key}`;
+    const spawn: SpawnPromptfoo = (args) => {
+      writeFileSync(args[args.indexOf("-o") + 1]!, JSON.stringify(leaking));
+      return ok();
+    };
+    const result = runCli({ argv: argv(), env: OLLAMA_ENV, cwd: dir, spawnPromptfoo: spawn });
+    expect(result.markdown).toContain("the agent printed «redacted»");
+    expect(readFileSync(result.reportPath, "utf8")).not.toContain(key);
+    expect(readFileSync(join(dir, "out", "out.json"), "utf8")).not.toContain(key);
+  });
+
+  it("scrubs the key by value from a run-failure report, and anything Anthropic-shaped", () => {
+    const key = OLLAMA_ENV.AEP_EVAL_MODEL_API_KEY;
+    const spawn: SpawnPromptfoo = () => ({ status: 1, stderr: `401 for ${key}; also sk-ant-api03-stray` });
+    const result = runCli({ argv: argv(), env: OLLAMA_ENV, cwd: dir, spawnPromptfoo: spawn });
+    expect(result.markdown).toMatch(/run itself failed/i);
+    expect(result.markdown).not.toContain(key);
+    expect(result.markdown).not.toContain("sk-ant-api03-stray");
+  });
+
+  // promptfoo would grade on "gpt-oss" — a model nobody chose — so the run
+  // says why it cannot grade instead.
+  it("reports an Anthropic-format judge it cannot name as a run failure", () => {
+    const spawn: SpawnPromptfoo = () => ok();
+    const result = runCli({
+      argv: argv(),
+      env: { ...OLLAMA_ENV, AEP_EVAL_MODEL_FORMAT: "anthropic" },
+      cwd: dir,
+      spawnPromptfoo: spawn,
+    });
+    expect(result.markdown).toMatch(/run itself failed/i);
+    expect(result.markdown).toContain("AGENT_EVAL_GRADER");
   });
 
   it("reports a missing --afm as a run failure rather than evaluating an agent with no tools wired", () => {

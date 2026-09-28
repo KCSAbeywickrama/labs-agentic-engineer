@@ -17,6 +17,7 @@
  */
 
 import type { ScenarioFile } from "./scenario.js";
+import type { JudgeProvider } from "./connection.js";
 
 export const THRESHOLD = 0.8;
 
@@ -35,13 +36,14 @@ export const THRESHOLD = 0.8;
  */
 export function buildPromptfooConfig(
   file: ScenarioFile,
-  opts: { providerPath: string; graderModel: string; providerConfig?: Record<string, unknown> },
+  opts: { providerPath: string; grader: string | JudgeProvider; providerConfig?: Record<string, unknown> },
 ): unknown {
   // An unpinned or missing grader makes a score meaningless between runs —
   // this is the whole harness's unit of measure, so refuse to build a config
   // that would silently grade with "whatever the caller forgot to set".
-  if (opts.graderModel.trim() === "") {
-    throw new Error("buildPromptfooConfig: graderModel must not be blank");
+  const graderId = typeof opts.grader === "string" ? opts.grader : opts.grader.id;
+  if (graderId.trim() === "") {
+    throw new Error("buildPromptfooConfig: the grader must not be blank");
   }
   return {
     description: `agent evaluation — ${file.component}`,
@@ -53,7 +55,7 @@ export function buildPromptfooConfig(
       { id: `file://${opts.providerPath}`, config: opts.providerConfig ?? {} },
     ],
     prompts: ["{{scenario.brief.goal}}"],
-    defaultTest: { options: { provider: opts.graderModel } },
+    defaultTest: { options: { provider: opts.grader } },
     tests: file.scenarios.map((s) => ({
       description: `${s.id}: ${s.brief.goal}`,
       vars: { scenario: s },

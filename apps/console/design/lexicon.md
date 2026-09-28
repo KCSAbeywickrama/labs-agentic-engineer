@@ -210,7 +210,8 @@ help — in that order, in the platform's recorded words:
 | The repository is gone | error · *check the repository connection in Settings* |
 | A run failed before the record existed | error · the terminal reason in words · *The platform recorded no further details for this run.* |
 | Cancelled | **no card** — a person stopping an increment is not a fault |
-| Blocked | no card — the existing quota / credentials message is that surface |
+| Blocked on the model provider's usage limit | warning · *ollama.com's usage limit was reached* · *The coding agent stopped when ollama.com refused further requests, and nothing from that build session was merged. Start the run again after it resets (14:05).* — the date joins the time when the reset is another day; with no reset stated, *Start the run again once it resets — the provider did not say when.* No host recorded: *The model provider's usage limit was reached* |
+| Blocked on quota or credentials | no card — the existing quota / credentials message is that surface |
 
 **Show details** opens the platform's facts as a dense list — `code` (with
 *permanent* / *retryable*), `attempts`, `window`, `recorded` (the platform's own
@@ -1528,8 +1529,36 @@ internal adapter or port name.
 | | |
 |---|---|
 | Card | **Coding agent** |
-| Fields | **Runtime** · **Model** |
+| Fields | **Runtime** (the model is the connection's, below) |
 | A runtime the platform cannot run | shown, disabled, with the reason — never hidden, so the choice is honest |
+| A runtime the connection's format cannot run | shown, disabled, *Needs the Anthropic Messages format.* |
+| A format change moved the runtime | *Coding moved to OpenCode: Claude Code speaks only the Anthropic Messages format.* |
+| Claude subscription | an optional **Claude subscription token** field inside the Claude Code tile, never a switch; *A Claude subscription token works only on Anthropic's own API.* elsewhere |
+
+## The model connection
+
+The one endpoint every agent calls, on Settings (the AI agents card) and in
+onboarding's **Connect a model** step. The user picks an **API format**, not a
+provider: no provider names in the controls, and the platform's host rules
+never reach the copy except as what a connection supports.
+
+| | |
+|---|---|
+| Section | **Model connection** · *Every agent uses this connection and model: requirements, design, task planning and coding.* |
+| Fields | **API format** (**Anthropic Messages** · **OpenAI-compatible**) · **Base URL** · **API key** · **Model** |
+| Model help | *Default for this format: \<model\> (\<note\>). Use the exact model ID your provider documents.* — the note only where the format has one (OpenAI-compatible: *Ollama's model ID*) |
+| Action | **Test connection** — optional; Save (onboarding: **Continue**) probes anyway |
+| Card chip | **ready** · **not connected** — two states only; a saved connection is usable by construction |
+| Probe status | *Connected to \<host\> · \<model\> is available*; unlisted and unlisting endpoints warn, never refuse |
+| Info box | where prompts go, then pricing (*Usage shows tokens, not dollars: the platform has no rate for \<model\>. Your provider bills you directly.*), web search and chat attachments |
+| Disconnect | **Disconnect the model connection?** · *Every agent stops until a new connection is saved.* |
+| Disconnected (onboarding) | *Your model connection was disconnected* · *Agents cannot run until a connection is saved.* |
+| Chat, an image the model cannot read | *\<file\> was not attached — \<model\> does not read images. Describe it in text, or switch to a model that reads images.* |
+| Chat, a PDF read as text | the attachment reads *· as text* |
+| Usage, a tokens-only figure | *not priced · billed by \<host\>* |
+
+"Anthropic key" is retired as a product word: the key belongs to the connection,
+whatever its host.
 
 ## Resources
 

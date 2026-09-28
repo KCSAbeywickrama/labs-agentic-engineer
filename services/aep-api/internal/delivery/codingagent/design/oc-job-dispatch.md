@@ -143,22 +143,32 @@ The runner's own guard fires a margin earlier, stops the tasks still live and
 settles with a reason on the feed. The margin is the runner's and is deliberately
 not stated here; duplicating it would let the two drift apart silently.
 
-## The org's runtime and model ride on the same env
+## The org's runtime and model connection ride on the same env
 
-`AEP_AGENT_RUNTIME` and `AEP_AGENT_MODEL` carry the
-organization's `agents` setting (ADR-0028) onto every cycle, beside the
-credential ref. The setting is read FIRST, because the runtime decides the
-credential: `ResolveCodingSecretRef(org, runtime)` returns the org's Claude
-subscription (mounted as `CLAUDE_CODE_OAUTH_TOKEN`) only when the runtime is
-Claude Code, and its API key (`ANTHROPIC_API_KEY`) otherwise; exactly one of the
-two reaches the run (ADR-0036). They are **copied, not referenced**: a
+`AEP_AGENT_RUNTIME` carries the organization's `agents` runtime (ADR-0028) and
+`AEP_AGENT_MODEL` its model connection's model
+([ADR-0038](../../../../../../docs/decisions/ADR-0038-an-organization-has-one-model-connection.md))
+onto every cycle, beside the credential ref. The runtime is read FIRST, because
+it decides the credential: `ResolveCodingCredential(org, runtime)` returns the org's Claude
+subscription only when the runtime is Claude Code, and its connection key
+otherwise, with the connection that key is for; exactly one credential reaches
+the run (ADR-0036). The organization domain answers with a KIND, never a
+variable name: `modelEnv` (`model_env.go`) is the one mapping onto the runner's
+contract. The connection rides as plain env (`AEP_MODEL_FORMAT`,
+`AEP_MODEL_BASE_URL`, `AEP_MODEL_AUTH_SCHEME`, `AEP_MODEL_WEB_SEARCH`, and
+`AEP_MODEL_CONTEXT_WINDOW` / `AEP_MODEL_OUTPUT_LIMIT` where the connection states
+them, never on `api.anthropic.com`), and the credential as one secret ref:
+`CLAUDE_CODE_OAUTH_TOKEN` for a subscription, `ANTHROPIC_API_KEY` for a key on
+Anthropic's own API, `AEP_MODEL_API_KEY` for a key on any other host. Each runtime adapter maps that to what its binary reads. They
+are **copied, not referenced**: a
 change applies from the next cycle, because a run that re-read the setting halfway through would leave a feed
-whose model names disagree with the tokens they were billed for. An org that
-never opened the setting gets the platform defaults, which is exactly what every
-dispatch carried before it existed — but a resolver that ERRORS fails the
-dispatch rather than falling back, since the org did choose something and
-launching on the defaults would bill it for a model it moved off without ever
-saying so.
+whose model names disagree with the tokens they were billed for. The dispatch
+also writes the connection's host on the cycle, so its usage is priced on
+`(host, model)`. An org that never chose a runtime gets the platform default, but a
+resolver that ERRORS fails the dispatch rather than falling back, since the org
+did choose something and launching on the default would bill it for a runtime
+it moved off without ever saying so. An org with no model connection fails the
+dispatch too: there is no platform key to fall back to.
 
 The runtime also picks the image: `AGENT_RUNNER_IMAGE` for Claude Code,
 `AGENT_RUNNER_IMAGE_OPENCODE` for OpenCode (two tags from one Dockerfile). Neither
@@ -168,7 +178,7 @@ binary. Such an installation does not offer OpenCode on `/config` either, so
 only an org that chose it before the image went missing reaches this failure. The dispatcher stamps the same runtime as the Component's `runtime`
 parameter and as the `aep.wso2.com/runtime` label on the Component and Workload.
 Which credential it mounts is the organization domain's answer for the run's
-runtime (`ResolveCodingSecretRef`): an OpenCode run is always handed the API key
+runtime (`ResolveCodingCredential`): an OpenCode run is always handed the API key
 ([ADR-0036](../../../../../../docs/decisions/ADR-0036-the-coding-credential-is-a-subscription.md)).
 
 The type name is also what wso2cloud's entitlement gate keys on
@@ -255,25 +265,31 @@ read a dynamic display name: `Coding cycle — milestone #<n> <title>`, or
 
 ## Two model credentials on one pod
 
-A cycle mounts the Anthropic credential the organization's coding runs bill
-(ADR-0036) — as `ANTHROPIC_API_KEY` or, for a Claude subscription on Claude
-Code, as `CLAUDE_CODE_OAUTH_TOKEN`, never both. That is the credential the agent's own session
-authenticates with.
+A cycle mounts the model credential the organization's coding runs bill
+(ADR-0036) — under the one variable `modelEnv` names, never two. That is the
+credential the agent's own session authenticates with.
 
-It also mounts the org's **default-role** key as `AEP_EVAL_ANTHROPIC_API_KEY`,
+It also mounts the org's **connection** key as `AEP_EVAL_MODEL_API_KEY`,
 for the agent-evaluation step a build runs before opening an ai-agent's PR. That
 step needs a model twice over — for the generated agent it boots and for the LLM
 judge that grades it — and both are API calls, so the credential has to be an API
-key. The default key always is; the coding one may be a subscription token that
-authenticates neither.
+key. The connection key always is; the coding one may be a subscription token
+that authenticates neither.
+
+The connection the key is for rides beside it as plain values, on every format:
+`AEP_EVAL_MODEL_FORMAT`, `AEP_EVAL_MODEL_BASE_URL`, `AEP_EVAL_MODEL_NAME` and
+`AEP_EVAL_MODEL_AUTH_SCHEME` (`evalModelEnv`). The harness boots the agent and
+runs its judge on the same connection the deployed agent will use. The five are
+set together or not at all: a URL with no key reaches a host the harness cannot
+authenticate against, and a key with no format would be read as Anthropic's.
 
 The separate variable is not decoration. `ANTHROPIC_API_KEY` belongs to Claude
 Code, which ranks it above `CLAUDE_CODE_OAUTH_TOKEN`, so mounting the evaluation
 key there would move a subscription org's whole coding session onto it — the
 silent mis-bill ADR-0036 keeps out.
 
-An org with no connected default key dispatches **without** the variable and the
-run proceeds: evaluation reports, it never fails a build, and a missing key must
+A dispatch whose connection key cannot be resolved for evaluation goes out
+**without** those variables and the run proceeds: evaluation reports, it never fails a build, and a missing key must
 not cost an org a delivery. That is the one credential here whose absence is not
 a dispatch failure — `evaluationKeyRef` logs it rather than returning an error,
 because "the agent never became ready" is otherwise a puzzling thing to read in
@@ -284,15 +300,15 @@ a build report.
 Every dispatch sets `AEP_EVAL_KEY_MANAGED=1` — a plain env var, not a
 credential, and set whether or not an evaluation key was resolved. It is a
 **declaration of ownership**: on this pod the platform decides the evaluation
-credential, so if `AEP_EVAL_ANTHROPIC_API_KEY` is not here, this run has none.
+credential, so if `AEP_EVAL_MODEL_API_KEY` is not here, this run has none.
 
 Without it the harness cannot read a pod correctly. Outside one —
 a developer in the monorepo — `ANTHROPIC_API_KEY` simply is "the key", and the
 harness falls back to it. On a pod that same name holds the **coding**
 credential, which may be the org's Claude subscription. An org whose
-subscription is live while its API key row is not active is the case that makes
-this concrete: the dispatch succeeds on the subscription, `DefaultKeyRef` finds
-nothing, and an unconditional fallback would then grade agents on the
+subscription is live while its connection key's vault reference is not (a failed
+mirror) is the case that makes this concrete: the dispatch succeeds on the
+subscription, `KeyRef` finds nothing, and an unconditional fallback would then grade agents on the
 subscription token — which cannot authenticate an API call — quietly, and
 contradicting what this note says happens. The declaration is what makes the
 documented behaviour the actual one.

@@ -22,6 +22,8 @@ type AgentsProjection = components["schemas"]["AgentsProjection"];
 type SubscriptionProjection = components["schemas"]["SubscriptionProjection"];
 type GitProviderProjection = components["schemas"]["GitProviderProjection"];
 type LLMProjection = components["schemas"]["LLMProjection"];
+type LLMFormatOption = components["schemas"]["LLMFormatOption"];
+type AgentRuntime = components["schemas"]["AgentRuntime"];
 type SkillDetailBody = components["schemas"]["SkillDetailBody"];
 type SkillUpdate = components["schemas"]["SkillUpdate"];
 type ApiError = components["schemas"]["Error"];
@@ -29,30 +31,37 @@ type ApiError = components["schemas"]["Error"];
 // Scenario switch for the Settings (#96) and Onboarding (#102) features.
 // Toggle in devtools:
 //   localStorage.setItem('aep:mock:settings',
-//     'empty' | 'partial' | 'connected' | 'subscription' | 'opencode'
+//     'empty' | 'partial' | 'connected' | 'subscription' | 'ollama' | 'opencode'
 //     | 'opencode-unavailable' | 'disconnected' | 'error' | 'sync-error')
 // "empty": nothing connected yet (the default — triggers the onboarding
 // gate; also exercises Settings' not-connected states).
-// "partial": GitHub connected, Anthropic not — the onboarding wizard opens
-// at its first incomplete step (resume-after-abandon, #102).
-// "connected": GitHub + Anthropic already connected (no onboarding); the AI
-// agents card shows the API key only.
+// "partial": GitHub connected, no model connection — the onboarding wizard
+// opens at "Connect a model" (resume-after-abandon, #102).
+// "connected": GitHub + a model connection on Anthropic's API (no
+// onboarding), Claude Code, no subscription.
 // "subscription": as "connected", plus a Claude subscription token billing
 // Claude Code.
+// "ollama": GitHub + an OpenAI-compatible connection on Ollama Cloud
+// (glm-5.3: text only, unpriced, Ollama web search), OpenCode.
 // "opencode": as "connected", with OpenCode chosen as the coding agent.
 // "opencode-unavailable": as "opencode", on an installation with no OpenCode
-// runner image — the org is stranded on a runtime it can no longer choose.
-// "disconnected": GitHub connected and the Anthropic key disconnected — the
-// wizard opens at its AI step and says the key was disconnected
-// (`llmDisconnectedAt`).
+// runner image — the org is stranded on a runtime it can no longer choose,
+// and no runtime runs the OpenAI-compatible format.
+// "disconnected": GitHub connected and the model connection disconnected —
+// the wizard opens at "Connect a model" and says so (`llmDisconnectedAt`).
 // "error": GET /config and GET /skills fail (load-error state).
 // "sync-error": config empty and POST /skills/sync fails — exercises the
 // wizard's bootstrap-failure step (Retry / Continue anyway, #102).
+//
+// The model probe (Test connection, and every save that changes the
+// connection) is simulated from what is typed; see the MODEL_PROBE_* sentinels
+// below and `probeConnection` in handlers/settings.ts.
 export type SettingsScenario =
   | "empty"
   | "partial"
   | "connected"
   | "subscription"
+  | "ollama"
   | "opencode"
   | "opencode-unavailable"
   | "disconnected"
@@ -99,17 +108,95 @@ export const githubConnectedFixture: GitProviderProjection = {
   selectedRepos: ["acme-dev/demo-shop"],
 };
 
-export const llmConnectedFixture: LLMProjection = {
-  kind: "anthropic",
-  credentialKind: "api_key",
-  status: "connected",
-  keyPrefix: "sk-ant-",
-  keyLast4: "wxyz",
-  connectedAt: "2026-06-01T12:05:00Z",
-  lastValidatedAt: "2026-07-01T09:00:00Z",
+// Model probe sentinels, read from what the reader types (host, key, model):
+// - a key containing "invalid" is rejected by the endpoint (401);
+// - a key containing "ratelimit" answers Test connection with 429
+//   `llm_test_rate_limited` (the platform's own 10-a-minute limit);
+// - a key containing "limit" proves the key but hits the provider's usage
+//   limit (`warning: provider_limit`);
+// - a host containing "internal", "localhost" or ending ".local" is refused
+//   as private; a host containing "unreachable" does not answer;
+// - a model missing from a known host's listing is `modelListed: no`, and a
+//   host with no listing here (anything but the three below) is `unknown`.
+export const MODEL_PROBE_REJECTED_KEY = "invalid";
+export const MODEL_PROBE_TEST_RATE_LIMIT_KEY = "ratelimit";
+export const MODEL_PROBE_PROVIDER_LIMIT_KEY = "limit";
+
+/** Each host's model listing, as its `GET /models` would answer. */
+export const modelListings: Record<string, string[]> = {
+  "api.anthropic.com": ["claude-sonnet-5", "claude-haiku-4-5", "claude-opus-5"],
+  "ollama.com": ["glm-5.3", "kimi-k3", "deepseek-v4-pro:0813", "gpt-oss:20b", "gpt-oss:120b"],
+  "openrouter.ai": ["z-ai/glm-5.3", "moonshotai/kimi-k3", "anthropic/claude-sonnet-5"],
 };
 
-// When the "disconnected" scenario's key was removed.
+/** Models Ollama's `/api/show` reports with `vision`. */
+export const ollamaVisionModels = ["kimi-k3"];
+
+/** The (host, model) pairs the platform holds a rate for. */
+export const pricedModels: Record<string, string[]> = {
+  "api.anthropic.com": ["claude-sonnet-5", "claude-haiku-4-5"],
+};
+
+const ANTHROPIC_URL = "https://api.anthropic.com/v1";
+
+/**
+ * The formats a connection may speak on an installation that runs
+ * `availableRuntimes`: Claude Code takes only the Anthropic format.
+ */
+export function llmFormatsFor(availableRuntimes: AgentRuntime[]): LLMFormatOption[] {
+  return [
+    {
+      kind: "anthropic",
+      defaultBaseURL: ANTHROPIC_URL,
+      defaultModel: "claude-sonnet-5",
+      runtimes: availableRuntimes.filter((r) => r === "claude-code" || r === "opencode"),
+    },
+    {
+      kind: "openai-compatible",
+      defaultBaseURL: null,
+      defaultModel: "glm-5.3",
+      runtimes: availableRuntimes.filter((r) => r === "opencode"),
+    },
+  ];
+}
+
+export const llmConnectedFixture: LLMProjection = {
+  kind: "anthropic",
+  baseURL: ANTHROPIC_URL,
+  model: "claude-sonnet-5",
+  keyPreview: "sk-a…wxyz",
+  connectedAt: "2026-06-01T12:05:00Z",
+  updatedAt: "2026-09-25T13:53:00Z",
+  updatedBy: "dev@acme.example",
+  priced: true,
+  capabilities: {
+    claudeSubscription: true,
+    webSearch: "anthropic-server-tool",
+    imageInput: "yes",
+    nativePdf: true,
+    generatedAgents: true,
+  },
+};
+
+export const llmOllamaFixture: LLMProjection = {
+  kind: "openai-compatible",
+  baseURL: "https://ollama.com/v1",
+  model: "glm-5.3",
+  keyPreview: "3f9a…c2d1",
+  connectedAt: "2026-09-25T13:50:00Z",
+  updatedAt: "2026-09-25T13:53:00Z",
+  updatedBy: "dev@acme.example",
+  priced: false,
+  capabilities: {
+    claudeSubscription: false,
+    webSearch: "ollama-api",
+    imageInput: "no",
+    nativePdf: false,
+    generatedAgents: true,
+  },
+};
+
+// When the "disconnected" scenario's connection was removed.
 export const llmDisconnectedAtFixture = "2026-09-20T08:00:00Z";
 
 // A `claude setup-token` value stored as the org's Claude subscription.
@@ -125,7 +212,6 @@ export const subscriptionFixture: SubscriptionProjection = {
 export const agentsOpenCodeFixture: AgentsProjection = {
   runtime: "opencode",
   availableRuntimes: ["claude-code", "opencode"],
-  model: "claude-sonnet-5",
   subscription: null,
   updatedAt: "2026-09-20T08:30:00Z",
   updatedBy: "dev@acme.example",
@@ -134,57 +220,22 @@ export const agentsOpenCodeFixture: AgentsProjection = {
 // An installation deployed without the OpenCode runner image.
 export const claudeCodeOnlyRuntimes: AgentsProjection["availableRuntimes"] = ["claude-code"];
 
-// Every org has an effective model and runtime, so this section is never
-// absent — unlike the credential sections. Null updatedAt/updatedBy is the
-// platform-defaults state: nobody has ever chosen, which the console must not
-// render as somebody having picked these very values.
+// Every org has an effective runtime, so this section is never absent —
+// unlike the connection. Null updatedAt/updatedBy is the platform-defaults
+// state: nobody has ever chosen, which the console must not render as
+// somebody having picked these very values.
 export const agentsDefaultsFixture: AgentsProjection = {
   runtime: "claude-code",
   availableRuntimes: ["claude-code", "opencode"],
-  model: "claude-sonnet-5",
   subscription: null,
   updatedAt: null,
   updatedBy: null,
 };
 
-// The one rule: a subscription needs Claude Code and a connected API key.
-// 400 + body.agents + the refusal's code, matching the real rejections
-// (judgeCard → patchconfig); the message names the fix.
-const subscriptionRequiresClaudeCodeMessage =
-  "a Claude subscription bills the coding agent only on Claude Code, and this save leaves the runtime on OpenCode. Choose Claude Code to use the subscription, or save OpenCode without one";
-
-export const subscriptionRequiresClaudeCode: ApiError = {
-  code: "agents_subscription_requires_claude_code",
-  message: subscriptionRequiresClaudeCodeMessage,
-  details: [{ field: "body.agents", message: subscriptionRequiresClaudeCodeMessage }],
-};
-
-const subscriptionRequiresApiKeyMessage =
-  "a Claude subscription sits beside the organization's Anthropic API key and cannot exist without it. Connect the API key in the same save, or first";
-
-export const subscriptionRequiresApiKey: ApiError = {
-  code: "agents_subscription_requires_api_key",
-  message: subscriptionRequiresApiKeyMessage,
-  details: [{ field: "body.agents", message: subscriptionRequiresApiKeyMessage }],
-};
-
-const runtimeUnavailableMessage =
-  'runtime "opencode" is not available on this installation, which has no runner image for it (available: claude-code)';
-
-export const runtimeUnavailable: ApiError = {
-  code: "agents_runtime_unavailable",
-  message: runtimeUnavailableMessage,
-  details: [{ field: "body.agents", message: runtimeUnavailableMessage }],
-};
-
-const subscriptionTokenRequiredMessage =
-  "a Claude subscription takes a token from `claude setup-token` (sk-ant-oat…); an Anthropic API key belongs in the organization's API key field";
-
-export const subscriptionTokenRequired: ApiError = {
-  code: "agents_subscription_token_required",
-  message: subscriptionTokenRequiredMessage,
-  details: [{ field: "body.agents", message: subscriptionTokenRequiredMessage }],
-};
+/** A refusal on one `/config` section, as the server shapes it. */
+export function sectionError(section: "llm" | "agents", code: string, message: string): ApiError {
+  return { code, message, details: [{ field: `body.${section}`, message }] };
+}
 
 export const gitProviderValidationError: ApiError = {
   code: "validation_failed",
@@ -193,17 +244,6 @@ export const gitProviderValidationError: ApiError = {
     {
       field: "body.gitProvider",
       message: "the provided PAT could not be validated against GitHub",
-    },
-  ],
-};
-
-export const llmValidationError: ApiError = {
-  code: "anthropic_key_invalid",
-  message: "the provided API key was rejected by Anthropic",
-  details: [
-    {
-      field: "body.llm",
-      message: "the provided API key was rejected by Anthropic",
     },
   ],
 };

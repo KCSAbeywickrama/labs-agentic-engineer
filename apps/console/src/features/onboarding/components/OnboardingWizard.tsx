@@ -33,7 +33,7 @@ import { SkillsBootstrapStep } from "./SkillsBootstrapStep";
 
 type ConfigProjection = components["schemas"]["ConfigProjection"];
 
-const STEPS = ["Connect GitHub", "Set up AI agents", "Set up skills"];
+const STEPS = ["Connect GitHub", "Connect a model", "Set up skills"];
 
 // The active step derives from server state, not local navigation: each
 // successful PATCH /config updates the query cache and the wizard advances.

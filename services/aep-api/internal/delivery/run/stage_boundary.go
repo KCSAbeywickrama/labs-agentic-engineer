@@ -454,6 +454,8 @@ func (l *loop) work(ctx workflow.Context, ends bookends) (RunResult, error) {
 			return l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonAgentQuotaBlocked)
 		case cyclePublisherCredentials:
 			return l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonPublisherCredentials)
+		case cycleProviderLimit:
+			return l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonModelProviderLimit)
 		default:
 			// File the deploy's work before looping, on whatever the cycle's
 			// RESULT was: a red cycle can also have a failed deployment now that

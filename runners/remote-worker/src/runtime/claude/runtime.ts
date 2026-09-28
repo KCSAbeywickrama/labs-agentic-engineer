@@ -30,7 +30,10 @@
 // enforces it.
 //
 //   policy.write               → a PreToolUse hook on Write/Edit/NotebookEdit
-//   policy.webSearch           → a PreToolUse hook on WebSearch
+//   policy.webSearch           → a PreToolUse hook on every search tool, and
+//                                the `aep-web` stdio server when it is given
+//   policy.connection          → the session's ANTHROPIC_* env (connection.ts),
+//                                and WebSearch denied off Anthropic's API
 //   policy.webFetch            → a PreToolUse hook on WebFetch
 //   policy.deniedCapabilities  → `disallowedTools`, via the mapping in tools.ts
 //   policy.skills.allow        → `skills:` (an allowlist, and it preloads nothing)
@@ -38,7 +41,7 @@
 //   policy.skills.dir          → discovered because `cwd` holds the mirror AND
 //                                the project setting source is admitted
 //   policy.mcp                 → an `http` server behind a loopback auth proxy
-//   policy.model               → `model:`, every alias's pin and the
+//   policy.connection.model    → `model:`, every alias's pin and the
 //                                subagent model (modelPinEnv)
 //   policy.debug               → the SDK's own debug/stderr/streaming options
 //   the prompt                 → a streaming input held open until the run loop
@@ -72,7 +75,8 @@ import { createWebSearchDlpHook } from "../../lib/websearch_dlp.js";
 import { createWorkspaceWriteGuard } from "../../lib/workspace_guard.js";
 import type { Runtime, RuntimeArtifact, RuntimePolicy, RuntimeSession } from "../port.js";
 import { createClaudeClassifier } from "./classify.js";
-import { buildMcpOptions, deniedTools } from "./tools.js";
+import { claudeCodeEnv } from "./connection.js";
+import { buildMcpOptions, deniedTools, webSearchOptions } from "./tools.js";
 import { createClaudeAdapter } from "./translate.js";
 
 /**
@@ -212,6 +216,11 @@ export function createClaudeCodeRuntime(): Runtime {
 }
 
 async function startClaudeCodeSession(prompt: string, policy: RuntimePolicy): Promise<RuntimeSession> {
+  // The connection first: a connection this runtime cannot run is refused
+  // before anything is started (connection.ts).
+  const sessionEnv = claudeCodeEnv(policy.connection, policy.env);
+  const search = webSearchOptions(policy.connection, policy.webSearch.server);
+
   // Endpoint Spec Discovery (B2) — register the platform's MCP server through a
   // loopback proxy so the bearer can rotate. The SDK only accepts static
   // Authorization headers; the proxy calls the policy's `token()` per request
@@ -246,7 +255,7 @@ async function startClaudeCodeSession(prompt: string, policy: RuntimePolicy): Pr
     policy.write.onDenied,
     policy.write.allowOutsideProject,
   );
-  const webSearchHook = createWebSearchDlpHook(policy.webSearch.deny);
+  const webSearchHook = createWebSearchDlpHook(policy.webSearch.deny, search.searchTools);
   const webFetchHook = createWebFetchGuardHook(policy.webFetch.deny);
   const sessionContextFile = path.join(policy.logDir, SESSION_CONTEXT_FILE);
   const recordContext = (r: SessionContextRecord): void => appendSessionContext(sessionContextFile, r);
@@ -274,16 +283,16 @@ async function startClaudeCodeSession(prompt: string, policy: RuntimePolicy): Pr
         // Pinned by the organization's setting rather than left to the SDK's own
         // default, which drifts across releases (seen live: an unpinned run
         // resolved to claude-sonnet-4-6).
-        model: policy.model,
+        model: policy.connection.model,
         // An ALLOWLIST, not a preload — a name absent here cannot be invoked at
         // all. Do NOT replace with 'all': the point of naming them is that the
         // BFF already decided which skills this build may use, and 'all' would
         // readmit whatever else a checkout happens to carry.
         skills: [...policy.skills.allow],
-        allowedTools,
+        allowedTools: [...allowedTools, ...search.allowedTools],
         // The boundary that actually holds under bypassPermissions — see tools.ts.
-        disallowedTools: deniedTools(policy.deniedCapabilities),
-        ...(mcpServers ? { mcpServers } : {}),
+        disallowedTools: [...deniedTools(policy.deniedCapabilities), ...search.disallowedTools],
+        ...(mcpServers || search.mcpServers ? { mcpServers: { ...mcpServers, ...search.mcpServers } } : {}),
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         persistSession: false,
@@ -292,7 +301,9 @@ async function startClaudeCodeSession(prompt: string, policy: RuntimePolicy): Pr
         // Every alias and the subagent model, bound to the org's one model —
         // see modelPinEnv. Spread last so a stray pin in the pod's own env
         // cannot point an alias at a model the org did not choose.
-        env: { ...policy.env, ...modelPinEnv(policy.model) },
+        // The connection's endpoint and credential (connection.ts) under
+        // Claude Code's own names.
+        env: { ...sessionEnv, ...modelPinEnv(policy.connection.model) },
         ...debugQueryOptions(debugSinks),
         // NOT canUseTool — the Task 12 spike found canUseTool is never invoked
         // for the server-executed WebSearch tool (confirmed under
@@ -321,7 +332,8 @@ async function startClaudeCodeSession(prompt: string, policy: RuntimePolicy): Pr
             },
           ],
           PreToolUse: [
-            { matcher: "WebSearch", hooks: [webSearchHook] },
+            // Every search path, the platform's own `aep-web` tool included.
+            ...search.searchTools.map((tool) => ({ matcher: tool, hooks: [webSearchHook] })),
             { matcher: "WebFetch", hooks: [webFetchHook] },
             // One matcher per authoring tool, same reasoning as the pair above:
             // the matcher grammar is unspecified, and each hook re-checks the

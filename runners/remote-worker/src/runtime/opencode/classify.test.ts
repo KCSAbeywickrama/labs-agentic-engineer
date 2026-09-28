@@ -50,16 +50,34 @@ test("classify: a retry is a RETRY, with a closed error word and no invented cei
   );
   assert.deepEqual(cls, {
     kind: "retry",
-    info: { attempt: 2, maxRetries: null, retryDelayMs: 5_000, errorStatus: 529, error: "overloaded" },
+    info: {
+      attempt: 2,
+      maxRetries: null,
+      retryDelayMs: 5_000,
+      errorStatus: 529,
+      error: "overloaded",
+      // Kept for the provider-limit evidence only…
+      providerText: "Overloaded: the provider said no (529)",
+    },
   });
-  // The provider's own text never reaches the line.
+  // …and never on the line.
   if (cls.kind !== "retry") throw new Error("unreachable");
   assert.equal(apiRetryLine(cls.info), "[api] retry 2 after overloaded (HTTP 529) — next attempt in 5s");
   const other = classify(ev("session.status", { status: { type: "retry", attempt: 1, message: "who knows", next: 0 } }));
   assert.deepEqual(other, {
     kind: "retry",
-    info: { attempt: 1, maxRetries: null, retryDelayMs: 0, errorStatus: null, error: "unknown" },
+    info: { attempt: 1, maxRetries: null, retryDelayMs: 0, errorStatus: null, error: "unknown", providerText: "who knows" },
   });
+});
+
+// A spent plan rarely says "429" in its text; it says it ran out. The class is
+// what the provider-limit rule counts, so these must read as a rate limit.
+test("classify: a usage limit or a quota reads as a rate limit", () => {
+  const classify = createOpencodeClassifier({ now: () => 1_000 });
+  for (const message of ["Weekly usage limit reached", "Quota exceeded for this API key"]) {
+    const cls = classify(ev("session.status", { sessionID: "root", status: { type: "retry", attempt: 1, message, next: 0 } }));
+    assert.equal(cls.kind === "retry" ? cls.info.error : cls.kind, "rate_limit", message);
+  }
 });
 
 test("classify: a permission ask is a denial the run says out loud", () => {

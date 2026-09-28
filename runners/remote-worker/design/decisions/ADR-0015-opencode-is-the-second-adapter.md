@@ -1,6 +1,6 @@
 # ADR-0015 — OpenCode is the second adapter, and it enforces the port with its own mechanisms
 
-**Status:** Accepted
+**Status:** Accepted · Amended 2026-09-26 (the run's model connection, last section)
 
 ## Context
 
@@ -182,3 +182,33 @@ fan-out call cannot reach a second one.
   the same run-event shape on the closest recorded pair (a 3 + 1 fan-out). One
   scripted session with a denied write and a commit, recorded from both
   runtimes, is the fixture still owed; those rows are pinned per adapter.
+
+## Amendment (2026-09-26): the model is served from the org's connection
+
+The organization's model now comes with a connection: a format, a base URL and
+a key ([root ADR-0038](../../../../docs/decisions/ADR-0038-an-organization-has-one-model-connection.md)).
+It reaches the pod as `AEP_MODEL_*` env, read only by `lib/model_connection.ts`
+onto `RuntimePolicy.connection`; absent means Anthropic's own API. Two facts
+above change:
+
+- **The `model` clause is spelled by the connection.** On Anthropic's own API
+  OpenCode keeps provider `anthropic` and the models.dev catalog, so the model
+  stays `anthropic/`-spelled. Anywhere else it runs provider `aep`
+  (`@ai-sdk/openai-compatible` or `@ai-sdk/anthropic` by format,
+  `enabled_providers: ["aep"]`), with the connection's context window and
+  output limit (128,000 and 32,000 when none is stated), so the model is
+  `aep/`-spelled. Usage is still reported in the platform's spelling. On
+  Claude Code, off Anthropic's own API, the adapter sets
+  `ANTHROPIC_BASE_URL` (the URL minus `/v1`) and
+  `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, and `modelPinEnv` still pins every alias.
+- **OpenCode reads the connection key as `AEP_MODEL_API_KEY`**
+  (`{env:AEP_MODEL_API_KEY}` in its provider block). The dispatch mounts a key
+  on Anthropic's own API as `ANTHROPIC_API_KEY` and any other as
+  `AEP_MODEL_API_KEY`; the adapter moves either into `AEP_MODEL_API_KEY` and
+  removes `ANTHROPIC_API_KEY` from the server's environment. A Claude
+  subscription token is still refused at start.
+
+Web search follows the connection's strategy (`AEP_MODEL_WEB_SEARCH`): with
+`ollama-api` both adapters mount the `aep-web` MCP server from
+`packages/web-search`, and anything other than `anthropic-server-tool` denies
+the built-in search tools (`runners/AGENTS.md`).

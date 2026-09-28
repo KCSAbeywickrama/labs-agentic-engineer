@@ -23,7 +23,7 @@ re-derivable against a newer chart without reading the script.
 |---|---|
 | `amp-values.yaml` | Values for the `wso2-amp-platform-resources-extension` chart — the promotion graph, the shared environment, and the project name |
 | `thunder-bootstrap/` | The composed ThunderID bootstrap documents, for the settings that exist once per server and cannot be held by two publishers |
-| `prefix-forked-workflow-templates.py` | Helm post-renderer for step 5, renaming Agent Manager's forked build templates so OpenChoreo keeps its own |
+| `forked-template-renamer/` | Helm post-renderer for step 5, renaming Agent Manager's forked build templates so OpenChoreo keeps its own; `plugin.yaml` wraps the script as the plugin Helm 4 requires |
 
 ## Why the Prometheus operator's CPU limit is raised
 

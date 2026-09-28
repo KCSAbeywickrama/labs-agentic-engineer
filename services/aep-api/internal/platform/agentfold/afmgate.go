@@ -77,9 +77,10 @@ var afmUnsupportedKeys = map[string]string{
 	"skills": "agent skills are not supported in this version",
 }
 
-// afmModelProviders mirrors the zod gate's model.provider enum. Decides which
-// AI SDK adapter the build compiles against — a v1 constraint, not a
-// preference; do not widen without widening the zod gate first.
+// afmModelProviders mirrors the zod gate's model.provider enum; do not widen
+// it without widening the zod gate first. The field is schema-required but
+// selects nothing: a generated agent picks its AI SDK adapter at runtime from
+// MODEL_API_FORMAT, the org's model connection.
 var afmModelProviders = map[string]bool{"anthropic": true, "openai": true}
 
 // afmIdentityModes mirrors the zod gate's x-aep.identity.mode enum.

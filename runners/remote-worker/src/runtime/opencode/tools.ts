@@ -28,6 +28,7 @@
 // call): invalid, question, bash, read, glob, grep, edit, write, task,
 // webfetch, todowrite, websearch, skill, apply_patch.
 
+import { onAnthropicAPI, type ModelConnection } from "../../lib/model_connection.js";
 import { deniedToolNames, type DeniedCapability } from "../port.js";
 
 /**
@@ -107,13 +108,25 @@ export function patchPaths(patchText: string): string[] {
  */
 export const BACKGROUND_PARAMETER = "background";
 
-/** The one provider this runtime is configured with today (ADR-0015). */
-export const PROVIDER_ID = "anthropic";
+/**
+ * The provider a run's connection is configured as.
+ *
+ * `anthropic` on Anthropic's own API, so the models.dev catalog supplies
+ * Claude's limits, and `aep` everywhere else: an id that matches no catalog
+ * entry, so the connection's own figures are the only ones (`config.ts`).
+ */
+export type ProviderId = "anthropic" | "aep";
 
-/** The platform's model id as OpenCode's config spells it: `anthropic/<id>`. */
-export function opencodeModel(platformModel: string): string {
-  return `${PROVIDER_ID}/${platformModel}`;
+export function providerId(connection: Pick<ModelConnection, "format" | "host">): ProviderId {
+  return onAnthropicAPI(connection) ? "anthropic" : "aep";
 }
+
+/** The platform's model id as OpenCode's config spells it: `<provider>/<id>`. */
+export function opencodeModel(provider: ProviderId, platformModel: string): string {
+  return `${provider}/${platformModel}`;
+}
+
+const PROVIDER_PREFIXES = ["anthropic/", "aep/"] as const;
 
 /**
  * An OpenCode model id back to the platform's spelling — the id `model_rates`
@@ -121,12 +134,19 @@ export function opencodeModel(platformModel: string): string {
  *
  * Measured: `message.updated` reports the undated alias the config named
  * (`claude-sonnet-5`, `claude-haiku-4-5`) as `modelID`, with the provider in its
- * own field, so this usually has nothing to strip. It strips anyway because the
- * config side does carry the prefix, and anything else is reported AS IS — an
- * unmapped id blanks the cycle's cost, which is the right loud failure.
+ * own field, so this usually has nothing to strip. It strips either provider's
+ * prefix anyway because the config side does carry it, and anything else is
+ * reported AS IS — an unmapped id blanks the cycle's cost, which is the right
+ * loud failure.
  */
 export function platformModel(modelId: string): string {
-  return modelId.startsWith(`${PROVIDER_ID}/`) ? modelId.slice(PROVIDER_ID.length + 1) : modelId;
+  const prefix = PROVIDER_PREFIXES.find((p) => modelId.startsWith(p));
+  return prefix ? modelId.slice(prefix.length) : modelId;
+}
+
+/** An MCP tool as OpenCode names it: `<server>_<tool>`. */
+export function opencodeMcpTool(server: string, tool: string): string {
+  return `${server}_${tool}`;
 }
 
 /**

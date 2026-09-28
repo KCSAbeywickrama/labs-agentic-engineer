@@ -49,6 +49,13 @@ type RunCycleRepository interface {
 	// per-cycle re-dispatch budget is spent. Guarded on the cycle being open.
 	NoteDispatch(ctx context.Context, id, jobRef string) (*RunCycle, error)
 
+	// NoteModelHost records the host of the model connection the cycle's agent
+	// was launched on. It is COPIED at dispatch, as the runtime and model are
+	// copied into the Job, so a connection changed mid-run neither reprices the
+	// cycle nor makes its usage name a host it never ran on; RecordUsage prices
+	// the capture against it. Guarded on the cycle being open.
+	NoteModelHost(ctx context.Context, id, host string) (*RunCycle, error)
+
 	// NotePullRequest records the pull request the agent actually opened, learned
 	// from the pull_request webhook — the platform never dictates branch identity
 	// or link, it observes them. Guarded on the cycle being open.
@@ -163,6 +170,13 @@ type RunCycleRepository interface {
 	// Org-scoped because it is derived from an already-org-resolved dispatch.
 	ListOpenCycleIDs(ctx context.Context, orgID, projectID string) ([]string, error)
 
+	// HasOpenCycle reports whether any of the org's cycles has not ended, in
+	// any project: an agent that may still be starting on the credential it
+	// was dispatched with. The model connection key's rename reads it before
+	// deleting the key's previous copy. A cycle row is appended before its Job
+	// is launched, so a dispatch in progress already counts.
+	HasOpenCycle(ctx context.Context, orgID string) (bool, error)
+
 	// DeleteByProject purges a project's cycle records — the project-delete
 	// cascade, paired with MilestoneRunRepository.DeleteByProject so a recreated
 	// same-named project starts with a clean timeline.
@@ -214,6 +228,10 @@ func (r *runCycleRepository) NoteDispatch(ctx context.Context, id, jobRef string
 		"attempts": gorm.Expr("attempts + 1"),
 		"job_ref":  jobRef,
 	})
+}
+
+func (r *runCycleRepository) NoteModelHost(ctx context.Context, id, host string) (*RunCycle, error) {
+	return r.updateOpen(ctx, id, map[string]any{"model_host": host})
 }
 
 func (r *runCycleRepository) NotePullRequest(ctx context.Context, id string, pr CyclePullRequest) (*RunCycle, error) {
@@ -387,6 +405,14 @@ func (r *runCycleRepository) ListOpenCycleIDs(ctx context.Context, orgID, projec
 	return ids, nil
 }
 
+func (r *runCycleRepository) HasOpenCycle(ctx context.Context, orgID string) (bool, error) {
+	var open bool
+	err := r.db.WithContext(ctx).Raw(
+		`SELECT EXISTS (SELECT 1 FROM run_cycles WHERE org_id = ? AND ended_at IS NULL)`, orgID,
+	).Scan(&open).Error
+	return open, err
+}
+
 func (r *runCycleRepository) DeleteByProject(ctx context.Context, orgID, projectID string) error {
 	return r.db.WithContext(ctx).
 		Where("org_id = ? AND project_id = ?", orgID, projectID).
@@ -401,12 +427,6 @@ func (r *runCycleRepository) RecordUsage(ctx context.Context, id string, u contr
 		"cache_creation_tokens": u.CacheCreationTokens,
 		"model_id":              u.Model,
 	}
-	// Stamp USD at capture from the rates in force now (#291): frozen on the row,
-	// never re-derived. Null when unpriceable (any token-bearing slice without a
-	// rate row).
-	if r.stamper != nil {
-		updates["cost_usd"] = stampCapturedCost(r.stamper, u)
-	}
 	// Both writes commit together or not at all. The ledger entry is copied out of
 	// the row this stamps, and PhaseUsageRollup reads the ledger ALONE — so a
 	// stamped row whose ledger copy failed is spend that exists on the cycle and
@@ -416,6 +436,17 @@ func (r *runCycleRepository) RecordUsage(ctx context.Context, id string, u contr
 	// Ordering inside the tx is load-bearing: the ledger copies the row, so the
 	// row is stamped first and the INSERT … SELECT reads it uncommitted.
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Stamp USD at capture from the rates in force now (#291): frozen on the
+		// row, never re-derived. Priced on the host the dispatch copied onto the
+		// row; null when unpriceable (any token-bearing slice without a
+		// (host, model) rate row).
+		if r.stamper != nil {
+			host, err := rowModelHost(tx, &RunCycle{}, id)
+			if err != nil {
+				return err
+			}
+			updates["cost_usd"] = stampCapturedCost(r.stamper, host, u)
+		}
 		// NOT applyOpen: see RecordUsage's contract — a closed cycle is exactly the
 		// case this has to serve.
 		if err := tx.Model(&RunCycle{}).
@@ -427,15 +458,34 @@ func (r *runCycleRepository) RecordUsage(ctx context.Context, id string, u contr
 	})
 }
 
+// rowModelHost reads the model host stamped on a usage row (a cycle or an
+// execution) — the host its capture is priced on. A missing row reads as no
+// host, which prices nil; the UPDATE that follows then touches nothing either.
+func rowModelHost(tx *gorm.DB, model any, id string) (string, error) {
+	var hosts []string
+	if err := tx.Model(model).
+		Where("id = ?", id).
+		Pluck("COALESCE(model_host, '')", &hosts).Error; err != nil {
+		return "", err
+	}
+	if len(hosts) == 0 {
+		return "", nil
+	}
+	return hosts[0], nil
+}
+
 // stampCapturedCost prices a capture for a row write (#291): the runner's
 // per-model split when present (each slice at its own rate, summed by
 // Stamper.SumCost's all-or-nothing rule), else the aggregate as one slice —
 // the pre-split runner shape, where a mixed run has model "" and stays null.
-func stampCapturedCost(stamper *modelcost.Stamper, u contracts.CapturedUsage) *float64 {
+// Every slice is on host: a run launches on one connection, so its models are
+// all that connection's.
+func stampCapturedCost(stamper *modelcost.Stamper, host string, u contracts.CapturedUsage) *float64 {
 	slices := u.PricingSlices()
 	ts := make([]modelcost.Tokens, 0, len(slices))
 	for _, s := range slices {
 		ts = append(ts, modelcost.Tokens{
+			Host:                host,
 			ModelID:             s.Model,
 			InputTokens:         s.InputTokens,
 			OutputTokens:        s.OutputTokens,

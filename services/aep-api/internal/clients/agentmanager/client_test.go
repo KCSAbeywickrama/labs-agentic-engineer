@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -111,33 +112,67 @@ func TestEnsureProviderSendsTheBuilderShape(t *testing.T) {
 	}
 }
 
-func TestProviderTemplateReadsAuthMetadata(t *testing.T) {
+// firstPartyProviderWire is the provider body an org on Anthropic's own API
+// already has in Agent Manager, with a fake key. The create and the update send
+// the same bytes, and a later change to the body is a change to this literal,
+// made on purpose.
+const firstPartyProviderWire = `{"accessControl":{"exceptions":[],"mode":"allow_all"},` +
+	`"context":"/aep-default-anthropic","gateways":["gw-1"],"id":"aep-default-anthropic",` +
+	`"name":"AEP default Anthropic",` +
+	`"security":{"apiKey":{"enabled":true,"in":"header","key":"X-API-Key"},"enabled":true},` +
+	`"template":"anthropic",` +
+	`"upstream":{"main":{"auth":{"header":"x-api-key","type":"api-key","value":"sk-ant-api03-FAKE-golden-key"},` +
+	`"url":"https://api.anthropic.com"}},"version":"v1.0"}`
+
+// The create and the update write one body, byte for byte: a PUT that
+// described the provider differently from the POST that made it would flip its
+// shape depending on which path wrote last.
+func TestProviderBodyIsTheSameBytesOnCreateAndUpdate(t *testing.T) {
+	var post, put string
+	exists := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/oauth2/token"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "t", "expires_in": 3600})
-		case strings.Contains(r.URL.Path, "/llm-provider-templates"):
-			_ = json.NewEncoder(w).Encode(map[string]any{"templates": []map[string]any{
-				{"id": "openai", "metadata": map[string]any{"endpointUrl": "https://api.openai.com"}},
-				{"id": "anthropic", "metadata": map[string]any{
-					"endpointUrl": "https://api.anthropic.com",
-					"auth":        map[string]any{"type": "api-key", "header": "x-api-key"},
-				}},
-			}})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/llm-providers"):
+			providers := []map[string]any{}
+			if exists {
+				providers = append(providers, map[string]any{"uuid": "prov-uuid", "id": "aep-default-anthropic"})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"providers": providers})
+		case r.Method == http.MethodPost:
+			b, _ := io.ReadAll(r.Body)
+			post, exists = string(b), true
+			_ = json.NewEncoder(w).Encode(map[string]any{"uuid": "prov-uuid", "id": "aep-default-anthropic"})
+		case r.Method == http.MethodPut:
+			b, _ := io.ReadAll(r.Body)
+			put = string(b)
+			_ = json.NewEncoder(w).Encode(map[string]any{})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer srv.Close()
 
-	c := New(Config{BaseURL: srv.URL, TokenURL: srv.URL + "/oauth2/token"})
-	got, err := c.ProviderTemplate(context.Background(), "default", "anthropic")
-	if err != nil {
-		t.Fatalf("ProviderTemplate: %v", err)
+	in := EnsureProviderInput{
+		Org: "default", ID: "aep-default-anthropic", Name: "AEP default Anthropic",
+		Version: "v1.0", Context: "/aep-default-anthropic", Template: "anthropic",
+		UpstreamURL: "https://api.anthropic.com", AuthType: "api-key",
+		AuthHeader: "x-api-key", APIKey: "sk-ant-api03-FAKE-golden-key", GatewayID: "gw-1",
 	}
-	if got.AuthHeader != "x-api-key" || got.AuthType != "api-key" ||
-		got.EndpointURL != "https://api.anthropic.com" {
-		t.Fatalf("template = %+v", got)
+	c := New(Config{BaseURL: srv.URL, TokenURL: srv.URL + "/oauth2/token"})
+	if _, err := c.EnsureProvider(context.Background(), in); err != nil {
+		t.Fatalf("EnsureProvider (create): %v", err)
+	}
+	in.ReassertCredential = true
+	if _, err := c.EnsureProvider(context.Background(), in); err != nil {
+		t.Fatalf("EnsureProvider (update): %v", err)
+	}
+	if post != firstPartyProviderWire {
+		t.Errorf("POST body changed:\n got %s\nwant %s", post, firstPartyProviderWire)
+	}
+	if put != firstPartyProviderWire {
+		t.Errorf("PUT body changed:\n got %s\nwant %s", put, firstPartyProviderWire)
 	}
 }
 
@@ -318,9 +353,8 @@ func TestFourXXIsPermanent(t *testing.T) {
 // "it exists" is what lets a stale copy go unnoticed until every governed agent
 // in the org starts failing at Anthropic.
 //
-// The write is conditional now (ReassertCredential), because a provider update
-// redeploys every proxy bound to it; this covers the case where the caller has
-// determined the key changed. Its twin,
+// The write is conditional (ReassertCredential); this covers the case where the
+// caller has determined the key changed. Its twin,
 // TestEnsureProviderSkipsTheCredentialWriteWhenUnchanged, covers the other.
 func TestEnsureProviderReassertsTheKeyWhenItExists(t *testing.T) {
 	var put map[string]any
@@ -371,6 +405,68 @@ func TestEnsureProviderReassertsTheKeyWhenItExists(t *testing.T) {
 	// would erase the PII policy they attached the moment a key is re-asserted.
 	if _, present := put["policies"]; present {
 		t.Error("update sent a policies field; it would overwrite the operator's guardrails")
+	}
+}
+
+// UpdateProviderCredential rewrites the key on a provider that exists and
+// creates nothing when none does: the credential write a Settings change makes
+// must not conjure a provider no deploy asked for.
+func TestUpdateProviderCredentialWritesOnlyAnExistingProvider(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		providers []map[string]any
+		wantFound bool
+	}{
+		{name: "exists", providers: []map[string]any{{"uuid": "prov-uuid", "id": "aep-default-anthropic"}}, wantFound: true},
+		{name: "absent", providers: []map[string]any{{"uuid": "other", "id": "someone-elses"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var put map[string]any
+			putPath := ""
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/oauth2/token"):
+					_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "t", "expires_in": 3600})
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/llm-providers"):
+					_ = json.NewEncoder(w).Encode(map[string]any{"providers": tc.providers})
+				case r.Method == http.MethodPut:
+					putPath = r.URL.Path
+					_ = json.NewDecoder(r.Body).Decode(&put)
+					_ = json.NewEncoder(w).Encode(map[string]any{})
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer srv.Close()
+
+			c := New(Config{BaseURL: srv.URL, TokenURL: srv.URL + "/oauth2/token"})
+			found, err := c.UpdateProviderCredential(context.Background(), EnsureProviderInput{
+				Org: "default", ID: "aep-default-anthropic", Name: "AEP Default Anthropic",
+				Version: "v1.0", Context: "/aep-default-anthropic", Template: "anthropic",
+				UpstreamURL: "https://api.anthropic.com", AuthType: "api-key",
+				AuthHeader: "x-api-key", APIKey: "cleared", GatewayID: "gw-1",
+			})
+			if err != nil {
+				t.Fatalf("UpdateProviderCredential: %v", err)
+			}
+			if found != tc.wantFound {
+				t.Fatalf("found = %v, want %v", found, tc.wantFound)
+			}
+			if !tc.wantFound {
+				if putPath != "" {
+					t.Fatalf("wrote %s for a provider that does not exist", putPath)
+				}
+				return
+			}
+			if !strings.HasSuffix(putPath, "/llm-providers/prov-uuid") {
+				t.Fatalf("PUT path = %q, want the provider's own resource", putPath)
+			}
+			auth := put["upstream"].(map[string]any)["main"].(map[string]any)["auth"].(map[string]any)
+			if auth["value"] != "cleared" {
+				t.Errorf("upstream auth value = %v, want the caller's", auth["value"])
+			}
+		})
 	}
 }
 
@@ -619,9 +715,8 @@ func TestAPersistent401IsNotRetriedForever(t *testing.T) {
 	}
 }
 
-// A provider update redeploys every LLM proxy bound to it, and a redeploy is
-// the window in which a proxy can lose its broadcast API keys. So an existing
-// provider is left alone unless the caller says the credential changed.
+// An existing provider is left alone unless the caller says the credential
+// changed (EnsureProviderInput.ReassertCredential).
 func TestEnsureProviderSkipsTheCredentialWriteWhenUnchanged(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

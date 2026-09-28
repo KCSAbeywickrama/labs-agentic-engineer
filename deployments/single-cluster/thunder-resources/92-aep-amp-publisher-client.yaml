@@ -32,7 +32,7 @@ inboundAuthConfig:
       tokenEndpointAuthMethod: "client_secret_basic"
       pkceRequired: false
       publicClient: false
-      scopes: ["amp:org:view","amp:project:create","amp:project:read","amp:agent:create","amp:agent:read","amp:agent:update","amp:llm-provider:create","amp:llm-provider:read","amp:llm-provider:update","amp:llm-provider:api-key-manage","amp:agent:api-key-manage","amp:llm-provider-template:read","amp:gateway:read","amp:environment:read"]
+      scopes: ["amp:org:view","amp:project:create","amp:project:read","amp:agent:create","amp:agent:read","amp:agent:update","amp:llm-provider:create","amp:llm-provider:read","amp:llm-provider:update","amp:llm-provider:api-key-manage","amp:agent:api-key-manage","amp:gateway:read","amp:environment:read"]
       # ouId on the application above sets the OU; `attributes` is what puts the
       # claims INTO the token. Without this block the mint succeeds, the token
       # carries the right audience and scopes, and every amp-api call still

@@ -455,11 +455,20 @@ test("startCodingRun: the prompt names the absolute project root and the contrac
 // The organization's setting reaches the pod as an env var, and an org that
 // never opened the page must get exactly the run it had.
 test("startCodingRun: the model is the org's setting, or the runtime's default", async () => {
-  assert.equal((await policyFor(dispatch())).model, "model-from-runtime");
-  assert.equal((await policyFor(dispatch(), { AEP_AGENT_MODEL: "claude-haiku-4-5" })).model, "claude-haiku-4-5");
+  assert.equal((await policyFor(dispatch())).connection.model, "model-from-runtime");
+  assert.equal(
+    (await policyFor(dispatch(), { AEP_AGENT_MODEL: "claude-haiku-4-5" })).connection.model,
+    "claude-haiku-4-5",
+  );
   // A blank stamp is the same as no stamp — a dispatcher that sends "" for an
   // unset setting must not pin the model to nothing.
-  assert.equal((await policyFor(dispatch(), { AEP_AGENT_MODEL: "" })).model, "model-from-runtime");
+  assert.equal((await policyFor(dispatch(), { AEP_AGENT_MODEL: "" })).connection.model, "model-from-runtime");
+});
+
+test("startCodingRun: no connection env is Anthropic's own API", async () => {
+  const { connection } = await policyFor(dispatch());
+  assert.equal(connection.format, "anthropic");
+  assert.equal(connection.host, "api.anthropic.com");
 });
 
 // A URL with no token must omit the server rather than register it

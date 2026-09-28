@@ -24,6 +24,7 @@ import { ApiRequestError, apiErrorMessage } from "../../../api/errors";
 
 type ConfigProjection = components["schemas"]["ConfigProjection"];
 type ConfigPatch = components["schemas"]["ConfigPatch"];
+type LLMPatch = components["schemas"]["LLMPatch"];
 type CreateSkillInput = components["schemas"]["CreateSkillInput"];
 type UpdateSkillInput = components["schemas"]["UpdateSkillInput"];
 
@@ -31,7 +32,7 @@ function errorMessage(error: unknown, fallback: string): string {
   return apiErrorMessage(error, fallback);
 }
 
-// --- Org config: GitHub + Anthropic (+ IDP, read-only here — out of scope
+// --- Org config: GitHub + the model connection (+ IDP, read-only here — out of scope
 // for this feature, issue #96) --------------------------------------------
 
 export function useConfig() {
@@ -63,6 +64,19 @@ export function useSaveAiSettings() {
     },
     onSuccess: (data: ConfigProjection) => {
       queryClient.setQueryData(configKeys.all, data);
+    },
+  });
+}
+
+// Test connection: probes the draft's connection without saving it. The
+// result (or refusal, whose `details[].field` and `code` name the field) is the
+// card's to draw; nothing is cached, since a test changes no server state.
+export function useTestConnection() {
+  return useMutation({
+    mutationFn: async (body: LLMPatch) => {
+      const { data, error } = await client.POST("/config/llm/test", { body });
+      if (error) throw new ApiRequestError(error, "Failed to test the connection");
+      return data;
     },
   });
 }

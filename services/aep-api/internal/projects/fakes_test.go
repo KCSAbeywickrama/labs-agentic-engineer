@@ -31,6 +31,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/organization"
+	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -150,19 +151,19 @@ func (s *stubComponentSvc) GetBuildLogs(context.Context, string, string, string,
 	panic("stubComponentSvc: GetBuildLogs not expected")
 }
 
-// --- AnthropicKeyResolver (ai-agent model access) -----------------------------
+// --- ModelKeyResolver (ai-agent model access) ---------------------------------
 
-type stubAnthropicKeyResolver struct {
-	DefaultKeyRefFunc func(ctx context.Context, ocOrgID string) (organization.SecretRefTriplet, error)
+type stubModelKeyResolver struct {
+	KeyRefFunc func(ctx context.Context, ocOrgID string) (modelconn.Connection, organization.SecretRefTriplet, error)
 }
 
-var _ AnthropicKeyResolver = (*stubAnthropicKeyResolver)(nil)
+var _ ModelKeyResolver = (*stubModelKeyResolver)(nil)
 
-func (s *stubAnthropicKeyResolver) DefaultKeyRef(ctx context.Context, ocOrgID string) (organization.SecretRefTriplet, error) {
-	if s.DefaultKeyRefFunc == nil {
-		panic("stubAnthropicKeyResolver: DefaultKeyRef not set")
+func (s *stubModelKeyResolver) KeyRef(ctx context.Context, ocOrgID string) (modelconn.Connection, organization.SecretRefTriplet, error) {
+	if s.KeyRefFunc == nil {
+		panic("stubModelKeyResolver: KeyRef not set")
 	}
-	return s.DefaultKeyRefFunc(ctx, ocOrgID)
+	return s.KeyRefFunc(ctx, ocOrgID)
 }
 
 // --- secretmanagersvc.OpenChoreoSecretReferenceClient (model access SecretReference) ---

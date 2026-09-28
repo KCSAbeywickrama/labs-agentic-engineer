@@ -127,24 +127,26 @@ deployment.
 
 ### Accessing the portal
 
-The console is at **http://console.openchoreo.localhost:8080**. Sign in with
+The console is at **http://console.ae.localhost:8080**. Sign in with
 the ThunderID admin account `setup-env-for-aectl.sh` creates
 (`admin` / `Admin@123` by default — see that script's output).
-If your OS doesn't resolve `*.localhost`, point `console.openchoreo.localhost`
-and `thunder.openchoreo.localhost` at `127.0.0.1` in `/etc/hosts`.
+If your OS doesn't resolve `*.localhost`, point `console.ae.localhost`,
+`tryit.ae.localhost` and `thunder.openchoreo.localhost` at `127.0.0.1` in
+`/etc/hosts`.
 
 Before the first project, connect the organization's credentials in the console —
 both are per-org, which is why bring-up doesn't ask for them:
 
-- **Settings → GitHub Integration** — the PAT (or GitHub App) that specs,
+- **Settings → Credentials → GitHub** — the PAT (or GitHub App) that specs,
   component repos, issues and PRs are created under.
-- **Settings → Anthropic Integration** — the key every agent turn and coding run
-  is billed to. There is no platform fallback, so nothing generates until it's
-  connected.
+- **Settings → Credentials → AI agents** — the model connection (Anthropic Messages or
+  OpenAI-compatible: format, base URL, key, model) every agent turn and coding
+  run is billed to. There is no platform fallback, so nothing generates until
+  it's connected.
 
-Reach the BFF with `kubectl -n wso2-aep port-forward svc/aep-api 9090:9090`
-(`skaffold run`'s one-shot model doesn't hold a port-forward open the way
-`skaffold dev` would). See
+Reach the BFF through the console, which proxies it:
+`http://console.ae.localhost:8080/aep-api-service/` (e.g. `…/healthz`), or
+directly with `kubectl -n wso2-aep port-forward svc/aep-api 9090:9090`. See
 [`deployments/README.md`](deployments/README.md)'s "Orphaned-but-kept" section
 — a couple of manifests the shared Helm chart already references by name
 aren't applied by `aectl platform install` yet, which affects builds and

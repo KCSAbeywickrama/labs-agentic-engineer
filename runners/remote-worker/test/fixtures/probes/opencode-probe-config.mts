@@ -38,6 +38,8 @@ import { fileURLToPath } from "node:url";
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../src");
 const { bootOpencode } = await import(path.join(SRC, "runtime/opencode/runtime.ts"));
 const { DENIED_CAPABILITIES } = await import(path.join(SRC, "runtime/port.ts"));
+const { readModelConnection } = await import(path.join(SRC, "lib/model_connection.ts"));
+const { providerId } = await import(path.join(SRC, "runtime/opencode/tools.ts"));
 
 const [projectDir, pluginDir] = process.argv.slice(2);
 if (!projectDir) {
@@ -46,12 +48,15 @@ if (!projectDir) {
 }
 const workspace = path.resolve(projectDir);
 const skillsDir = path.join(workspace, ".claude", "skills");
-const model = process.env.PROBE_MODEL || "claude-haiku-4-5";
+// The connection a dispatch would stamp, from the same AEP_MODEL_* env
+// (absent = Anthropic's own API); the key only has to be present.
+const connection = readModelConnection(process.env.PROBE_MODEL || "claude-haiku-4-5", process.env);
+const model = connection.model;
 
 const policy = {
   workspace,
   env: { ...process.env, ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "dummy-no-model-call" } as Record<string, string>,
-  model,
+  connection,
   taskKind: "implementation",
   debug: false,
   logDir: path.join(workspace, ".logs"),
@@ -70,7 +75,8 @@ const t0 = Date.now();
 try {
   const booted = await bootOpencode(policy, pluginDir ? { pluginDir: path.resolve(pluginDir) } : {});
   const cfg = (await booted.client.config.get()).data ?? {};
-  const tools = (await booted.client.tool.list({ query: { provider: "anthropic", model } })).data ?? [];
+  const tools = (await booted.client.tool.list({ query: { provider: providerId(connection), model } })).data ?? [];
+  const providers = (await booted.client.config.providers()).data?.providers ?? [];
   console.log(
     JSON.stringify(
       {
@@ -78,6 +84,7 @@ try {
         bootMs: Date.now() - t0,
         assertions: "guard plugin loaded; task/skill/todowrite/edit/write/bash visible; question hidden; task has no background; system transform live",
         skillsDiscovered: booted.skills,
+        providers: providers.map((p: { id: string }) => p.id),
         config: {
           model: cfg.model,
           small_model: cfg.small_model,

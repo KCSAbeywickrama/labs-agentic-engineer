@@ -34,6 +34,10 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
 )
 
+// ErrLLMTestRateLimited refuses a Test connection call over the per-org limit.
+// Mapped to 429 llm_test_rate_limited at the HTTP edge.
+var ErrLLMTestRateLimited = errors.New("orgconfig: too many connection tests")
+
 // ErrGitHubAppNotConfigured is returned by StartGitHubConnect when the GitHub
 // App OAuth client isn't wired on this deployment (the App-mode connect path is
 // unavailable). Mapped to 503 at the HTTP edge.
@@ -80,12 +84,12 @@ func sectionErrorFrom(section string, err error) error {
 // platform IDP defaults (used to synthesize a not-yet-persisted idp section on
 // GET) + the GitHub App connect parameters.
 type Service struct {
-	anthropicSvc  *AnthropicCredentialService
 	credentialSvc *CredentialService
 	disconnectSvc *OrgDisconnectService
 	bearerSvc     *BearerService
 	idpSvc        IDPService
 	agentSettings *AgentSettingsService
+	llmTests      *llmTestLimiter
 	platformIDP   PlatformIDPConfig
 
 	publicURL   string
@@ -97,7 +101,6 @@ type Service struct {
 // identical. Any dependency may be nil in narrow test harnesses that exercise
 // only a subset of sections; each handler nil-guards what it needs.
 func NewService(
-	anthropicSvc *AnthropicCredentialService,
 	credentialSvc *CredentialService,
 	disconnectSvc *OrgDisconnectService,
 	bearerSvc *BearerService,
@@ -109,11 +112,11 @@ func NewService(
 		publicURL = "http://localhost:8090"
 	}
 	return &Service{
-		anthropicSvc:  anthropicSvc,
 		credentialSvc: credentialSvc,
 		disconnectSvc: disconnectSvc,
 		bearerSvc:     bearerSvc,
 		idpSvc:        idpSvc,
+		llmTests:      newLLMTestLimiter(time.Now),
 		platformIDP:   platformIDP,
 		publicURL:     publicURL,
 		appClientID:   appClientID,
@@ -142,16 +145,12 @@ func (s *Service) WithAgentSettings(svc *AgentSettingsService) *Service {
 func (s *Service) Get(ctx context.Context, org string) (*orgconfig.ConfigProjection, error) {
 	out := &orgconfig.ConfigProjection{}
 
-	if s.anthropicSvc != nil {
-		proj, err := s.anthropicSvc.Status(ctx, org, AnthropicRoleDefault)
-		switch {
-		case err == nil:
-			out.LLM = llmProjectionFrom(proj)
-		case isNotFound(err):
-			out.LLM = nil
-		default:
+	if s.agentSettings != nil {
+		llm, err := s.agentSettings.Connection(ctx, org)
+		if err != nil {
 			return nil, fmt.Errorf("orgconfig get llm: %w", err)
 		}
+		out.LLM = llm
 	}
 
 	if s.credentialSvc != nil {
@@ -171,11 +170,14 @@ func (s *Service) Get(ctx context.Context, org string) (*orgconfig.ConfigProject
 	}
 
 	// Always present, even with no service wired: every org has an effective
-	// model and runtime, and the defaults ARE the answer for one that has never
-	// chosen. `updatedBy` is what tells a reader which of the two it is looking
-	// at, so there is nothing to fake here.
+	// runtime, and the default IS the answer for one that has never chosen.
+	// `updatedBy` is what tells a reader which of the two it is looking at, so
+	// there is nothing to fake here. The formats likewise: with no service,
+	// the default runtime is the only one on offer.
 	out.Agents = orgconfig.DefaultAgents()
+	out.LLMFormats = llmFormatsFor(out.Agents.AvailableRuntimes)
 	if s.agentSettings != nil {
+		out.LLMFormats = s.agentSettings.Formats()
 		proj, err := s.agentSettings.Effective(ctx, org)
 		if err != nil {
 			return nil, fmt.Errorf("orgconfig get agents: %w", err)
@@ -245,8 +247,10 @@ func (s *Service) Patch(ctx context.Context, org, actor string, p orgconfig.Conf
 	}
 
 	// 2. Probe phase — no writes. Any failure aborts the whole patch.
+	var probed cardProbe
 	if card {
-		if err := s.agentSettings.probe(ctx, org, p); err != nil {
+		var err error
+		if probed, err = s.agentSettings.probe(ctx, org, p); err != nil {
 			return nil, err
 		}
 	}
@@ -263,7 +267,7 @@ func (s *Service) Patch(ctx context.Context, org, actor string, p orgconfig.Conf
 	//    freshly-validated inputs. Ordered card → gitProvider → idp.
 	sections := []string{}
 	if card {
-		if err := s.agentSettings.apply(ctx, org, actor, p); err != nil {
+		if err := s.agentSettings.apply(ctx, org, actor, p, probed); err != nil {
 			return nil, err
 		}
 		if p.LLM.Sent {
@@ -297,7 +301,33 @@ func (s *Service) Patch(ctx context.Context, org, actor string, p orgconfig.Conf
 	// coarser RBAC compensated by section-level audit logging).
 	slog.InfoContext(ctx, "orgconfig.patched", "org", org, "sections", sections)
 
-	return s.Get(ctx, org)
+	out, err := s.Get(ctx, org)
+	if err != nil {
+		return nil, err
+	}
+	// What the save's probe found, so an unlisted model or a provider limit
+	// is shown to the reader who just saved (Continue in onboarding saves
+	// without a separate Test connection).
+	out.LLMCheck = probed.check
+	return out, nil
+}
+
+// TestLLM probes the connection w describes, merged over the org's saved one,
+// without writing anything (POST /config/llm/test). Rationed per org; a
+// refusal is a SectionError on llm, like the save's.
+func (s *Service) TestLLM(ctx context.Context, org string, w orgconfig.LLMPatch) (*orgconfig.LLMCheck, error) {
+	if s.agentSettings == nil {
+		return nil, fmt.Errorf("orgconfig test llm: service not configured")
+	}
+	if !s.llmTests.allow(org) {
+		slog.WarnContext(ctx, "model connection test: rate limited", "org", org)
+		return nil, ErrLLMTestRateLimited
+	}
+	check, err := s.agentSettings.testConnection(ctx, org, w)
+	if err != nil {
+		return nil, err
+	}
+	return &check, nil
 }
 
 // --- Action routes ----------------------------------------------------------
@@ -347,22 +377,6 @@ func (s *Service) DiscoverIDP(ctx context.Context, issuer string) (issuerOut, jw
 }
 
 // --- projection mappers -----------------------------------------------------
-
-func llmProjectionFrom(p *AnthropicProjection) *orgconfig.LLMProjection {
-	if p == nil {
-		return nil
-	}
-	return &orgconfig.LLMProjection{
-		Kind:            "anthropic",
-		CredentialKind:  p.CredentialKind.String(),
-		KeyPrefix:       p.KeyPrefix,
-		KeyLast4:        p.KeyLast4,
-		Status:          p.Status,
-		ConnectedAt:     p.ConnectedAt,
-		LastValidatedAt: p.LastValidatedAt,
-		ValidationError: p.ValidationError,
-	}
-}
 
 func gitProviderProjectionFrom(p *Projection) *orgconfig.GitProviderProjection {
 	if p == nil {

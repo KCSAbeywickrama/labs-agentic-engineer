@@ -50,6 +50,7 @@ func countWhere(t *testing.T, db *gorm.DB, sql string, args ...any) int64 {
 // new CHECK is in place and the one it replaced is gone.
 func TestPhase16_InstallsTheRoleKindCheck(t *testing.T) {
 	db := dbtest.New(t)
+	preModelConnectionShape(t, db)
 	if !constraintExists(t, db, "org_anthropic_credentials_role_kind") {
 		t.Fatal("org_anthropic_credentials_role_kind is missing")
 	}
@@ -63,6 +64,7 @@ func TestPhase16_InstallsTheRoleKindCheck(t *testing.T) {
 // no-op — as is phase13 running before it on the next boot.
 func TestPhase16_DeletesSeparateCodingKeysAndTheirBytes(t *testing.T) {
 	db := dbtest.New(t)
+	preModelConnectionShape(t, db)
 	ctx := context.Background()
 
 	// Back to the phase13 schema, which admitted a coding api_key.

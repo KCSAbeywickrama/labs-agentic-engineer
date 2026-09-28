@@ -256,3 +256,11 @@ test("guard decision: ignores tools it does not own and calls with no path", () 
   assert.equal(decide("write", {}), null);
   assert.equal(decide("write", "garbage"), null);
 });
+
+// The platform's aep-web search is refused by the same rule, in the same words,
+// as OpenCode's own websearch — the hook the runner owns, ahead of the server's.
+test("guard decision: the aep-web search tool is held to the WebSearch rule", () => {
+  const decide = createGuardDecision({ workspace: "/w", secrets: [SECRET] });
+  assert.equal(decide("aep-web_web_search", { query: `docs for ${SECRET}` }), WEBSEARCH_DENIAL_MESSAGE);
+  assert.equal(decide("aep-web_web_search", { query: "stripe payment intents" }), null);
+});

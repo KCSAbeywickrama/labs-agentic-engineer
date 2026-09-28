@@ -30,8 +30,8 @@ type GovernAgentInput struct {
 
 // GovernAgentOutcome distinguishes "governed" from "deliberately not governed".
 //
-// An environment with no AI gateway binding, or an org with no connected
-// Anthropic key, is Skipped — not an error. The deploy then proceeds on the
+// An environment with no AI gateway binding, or an org with no model
+// connection, is Skipped — not an error. The deploy then proceeds on the
 // path it used before Agent Manager existed, which is what keeps this feature
 // from breaking every environment that predates it.
 type GovernAgentOutcome struct {

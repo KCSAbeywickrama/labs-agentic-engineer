@@ -58,7 +58,11 @@ export interface OpencodeClassifierOptions {
  */
 function retryClass(message: string): string {
   if (/overload/i.test(message)) return "overloaded";
-  if (/rate.?limit|too many requests|\b429\b/i.test(message)) return "rate_limit";
+  // A spent plan is a rate limit too, and providers word it as a usage limit
+  // or a quota more often than with the status: without these the
+  // provider-limit rule (lib/provider_limit.ts) would never see the 429s it
+  // exists for, nor leave evidence of them.
+  if (/rate.?limit|too many requests|\b429\b|usage.?limit|quota/i.test(message)) return "rate_limit";
   if (/timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|socket/i.test(message)) return "connection";
   if (/\b5\d\d\b|server error|internal/i.test(message)) return "server_error";
   return "unknown";
@@ -80,6 +84,9 @@ function readRetry(status: Record<string, unknown>, now: number): ApiRetryInfo {
     retryDelayMs: next > 0 ? Math.max(0, next - now) : 0,
     errorStatus: retryStatus(message),
     error: retryClass(message),
+    // The text itself goes only where the provider-limit rule keeps its
+    // evidence, never onto the feed's line (see ApiRetryInfo.providerText).
+    ...(message ? { providerText: message } : {}),
   };
 }
 

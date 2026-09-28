@@ -103,10 +103,22 @@
 // `MessageClass` (`runtime/port.ts`), and the loop branches on that. The words
 // above say "a `result`" because the rules were measured on Claude Code; the
 // code says `turn_end` and `task_bookkeeping`.
+//
+// **A spent model plan ends the run; it does not wait out the deadline.** Every
+// retry the runtime reports is also fed to the provider-limit rule
+// (`lib/provider_limit.ts`), which ends the run through the same one
+// termination path the deadline takes, and the settle carries
+// `code: provider_limit` with the host and, when the provider stated one, the
+// reset time. aep-api reads that code and settles the run BLOCKED instead of
+// re-dispatching into the same answer. A runtime that gives up on the 429s
+// first (Claude Code's own retry ceiling is about a minute) settles the same
+// code, because the run still ended on its provider's refusal.
 
 import type { ApiRetryInfo, MessageClassifier } from "../runtime/port.js";
 import { checkPreload, preloadWarning } from "./skills_preload_check.js";
 import { emit as defaultEmit, LEAD_AGENT_ID, type RunEventInput, type RunEventUsage } from "./progress/emitter.js";
+import { scrubber } from "./progress/scrubber.js";
+import { createProviderLimits, type ProviderLimitHit, type ProviderLimits } from "./provider_limit.js";
 import type { RunWatchdog } from "./progress/watchdog.js";
 import { withTimeout } from "./with_timeout.js";
 
@@ -291,7 +303,16 @@ export interface RunTermination {
   readonly source: string;
   readonly why: string;
   readonly error: string;
+  /**
+   * What the one `run_settled` carries beyond its outcome and error, for an
+   * ending a consumer branches on — a provider limit's code, host and reset.
+   * Absent for every ending that is only explained, not acted on.
+   */
+  readonly settle?: RunSettleExtras;
 }
+
+/** The fields a `run_settled` may carry about WHY it failed, beyond `error`. */
+type RunSettleExtras = Pick<RunEventInput, "code" | "host" | "resetAt" | "providerDetail">;
 
 /**
  * The seam anything outside this loop ends a run through.
@@ -359,6 +380,13 @@ export interface RunLoopOptions {
    * deadline is exactly the run this loop read before either existed.
    */
   terminator?: RunTerminator;
+  /**
+   * The provider-limit rule for this run, carrying the connection's host —
+   * see `lib/provider_limit.ts`. Per run, like the classifier: it holds the
+   * current streak of 429s. Absent means one on the wall clock with no host,
+   * which only a replay (no 429s in it) ever runs with.
+   */
+  providerLimits?: ProviderLimits;
   /** Overrides INPUT_GRACE_MS; tests only. */
   inputGraceMs?: number;
 }
@@ -373,6 +401,7 @@ export async function consumeRun(stream: RunStream, opts: RunLoopOptions): Promi
   const emit = opts.emit ?? defaultEmit;
   const record = opts.record ?? (() => {});
   const { translate, classify, watchdog, deadline } = opts;
+  const limits = opts.providerLimits ?? createProviderLimits({ host: "" });
   const usageSoFar = (): { usage?: RunEventUsage } => {
     const usage = opts.usage?.();
     return usage ? { usage } : {};
@@ -453,6 +482,18 @@ export async function consumeRun(stream: RunStream, opts: RunLoopOptions): Promi
       if (cls.kind === "retry") {
         watchdog.observeRetry(cls.info);
         emit({ kind: "notice", agentId: LEAD_AGENT_ID, level: "warn", code: "api_retry", detail: apiRetryLine(cls.info) });
+        // A 429 is also a question for the provider-limit rule. Every one is
+        // kept as evidence in runtime.log — never on the feed, where the
+        // provider's text has no business — and a verdict of `provider_limit`
+        // ends the run here, through the one termination path, rather than
+        // waiting out a reset hours away behind the runtime's retries.
+        const hit = limits.observe(cls.info);
+        if (hit) {
+          record(providerLimitRecord(limits.host, hit));
+          if (hit.verdict === "provider_limit") {
+            return await terminateRun(providerTermination(limits.host, hit), stream, live, watchdog, emit, usageSoFar);
+          }
+        }
         continue;
       }
       // The other messages that explain a silence or an ending — a
@@ -499,6 +540,9 @@ export async function consumeRun(stream: RunStream, opts: RunLoopOptions): Promi
         // Only a model wait says the model is producing; a slow tool says
         // nothing about the model at all.
         if (cls.kind === "model_wait") watchdog.observeStream();
+        // Tokens arriving are the model ANSWERING, which ends a streak of 429s.
+        // A non-streaming wait (a session busy on its next attempt) is not.
+        if (cls.kind === "model_wait" && cls.streaming) limits.progress();
         for (const event of translate(message)) emit(event);
         continue;
       }
@@ -510,6 +554,7 @@ export async function consumeRun(stream: RunStream, opts: RunLoopOptions): Promi
       }
       const events = translate(message);
       watchdog.observe(events);
+      if (events.some(isModelAnswer)) limits.progress();
       for (const event of events) {
         // A `turn_ended` goes out where it happened AND is remembered: it is
         // informational, and the run's own ending is a separate event written
@@ -548,19 +593,30 @@ export async function consumeRun(stream: RunStream, opts: RunLoopOptions): Promi
     // under the recorder that phase 2 adds "the run never settled" is
     // indistinguishable from "the recording was lost". A settle that says it
     // does not know is a different, readable statement.
+    //
+    // A failure that ended mid-streak of 429s is the runtime giving up on its
+    // provider before the rule tripped, and it settles with the same code (see
+    // the header) — only on a failure: a run whose last turn succeeded was not
+    // stopped by anything.
+    const limited = (): RunSettleExtras => {
+      const hit = limits.open();
+      return hit ? providerLimitFields(limits.host, hit) : {};
+    };
     if (!lastTurn) {
       const error = "agent stream ended without result";
-      emit({ kind: "run_settled", agentId: LEAD_AGENT_ID, outcome: "failure", error, ...usageSoFar() });
+      emit({ kind: "run_settled", agentId: LEAD_AGENT_ID, outcome: "failure", error, ...usageSoFar(), ...limited() });
       return { exitCode: 1, error };
     }
     // The exit code follows the SETTLE, so the feed and the process cannot give
     // two answers about one run.
+    const outcome = lastTurn.outcome ?? "failure";
     emit({
       kind: "run_settled",
       agentId: LEAD_AGENT_ID,
-      outcome: lastTurn.outcome ?? "failure",
+      outcome,
       ...(lastTurn.error ? { error: lastTurn.error } : {}),
       ...(lastTurn.usage ? { usage: lastTurn.usage } : {}),
+      ...(outcome === "failure" ? limited() : {}),
     });
     if (lastTurn.outcome === "success") return { exitCode: 0 };
     return { exitCode: 1, error: lastTurn.error ?? "agent run failed" };
@@ -640,8 +696,90 @@ async function terminateRun(
     "stopping the live tasks",
   ).catch(() => {});
   // Read after the stop, so a task's last usage report is counted.
-  emit({ kind: "run_settled", agentId: LEAD_AGENT_ID, outcome: "failure", error: reason.error, ...usageSoFar() });
+  emit({
+    kind: "run_settled",
+    agentId: LEAD_AGENT_ID,
+    outcome: "failure",
+    error: reason.error,
+    ...usageSoFar(),
+    ...reason.settle,
+  });
   return { exitCode: 1, error: reason.error };
+}
+
+/**
+ * An event only a model that ANSWERED can produce: it called a tool, spawned
+ * an agent, wrote a plan entry, or finished a turn cleanly. The spawn and the
+ * plan entry are here because the translator puts no `tool_use` row on the
+ * feed for either — the `agent_started` and the `work_item` ARE those calls —
+ * and a lead recovering from its 429s by launching a wave is the ordinary
+ * shape of a run. What ends a streak of 429s is deliberately not any activity
+ * at all: a tool result from a command started before the limit hit, or a task
+ * notification, arrives while every model call is still being refused, and
+ * counting it would restart the five minutes forever.
+ */
+function isModelAnswer(event: RunEventInput): boolean {
+  switch (event.kind) {
+    case "tool_use":
+    case "agent_started":
+      return true;
+    case "work_item":
+      return event.source === "plan";
+    case "turn_ended":
+      return event.outcome === "success";
+    default:
+      return false;
+  }
+}
+
+/** Whose limit it is, for a sentence: the host, or the honest generic. */
+function providerName(host: string): string {
+  return host || "the model provider";
+}
+
+/** The settle fields a provider limit carries — the code aep-api branches on. */
+function providerLimitFields(host: string, hit: ProviderLimitHit): RunSettleExtras {
+  return {
+    code: "provider_limit",
+    ...(host ? { host } : {}),
+    ...(hit.resetAt ? { resetAt: hit.resetAt } : {}),
+    ...(hit.detail ? { providerDetail: hit.detail } : {}),
+  };
+}
+
+/** A provider limit's reason, built where the rule's wording lives. */
+function providerTermination(host: string, hit: ProviderLimitHit): RunTermination {
+  const who = providerName(host);
+  return {
+    source: "provider",
+    why: hit.resetAt
+      ? `${who}'s usage limit is reached; it resets at ${hit.resetAt}`
+      : `${who} refused every model call with HTTP 429 for ${budgetText(hit.waitedMs)} and stated no reset`,
+    error: `model provider limit reached on ${who}${hit.resetAt ? ` until ${hit.resetAt}` : ""}`,
+    settle: providerLimitFields(host, hit),
+  };
+}
+
+/**
+ * The evidence line for one 429, kept in runtime.log.
+ *
+ * What a spent plan actually returns is learned from production, not tested up
+ * front, so every 429 leaves one structured record. The runner has no response
+ * headers to record — the runtime made the call — so the retry delay it read off
+ * them stands in. The provider's text is scrubbed here because runtime.log is
+ * written raw.
+ */
+function providerLimitRecord(host: string, hit: ProviderLimitHit): Record<string, unknown> {
+  return {
+    type: "model_provider_429",
+    source: "runner",
+    host: providerName(host),
+    status: hit.status,
+    retryDelayMs: hit.retryDelayMs,
+    body: scrubber.scrub(hit.detail),
+    verdict: hit.verdict,
+    waitedMs: hit.waitedMs,
+  };
 }
 
 /** A budget as a person set it: whole minutes above a minute, seconds below. */

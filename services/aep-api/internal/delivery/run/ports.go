@@ -118,6 +118,7 @@ type RunStore interface {
 type CycleStore interface {
 	Append(ctx context.Context, cycle *delivery.RunCycle) (cycleID string, err error)
 	NoteDispatch(ctx context.Context, cycleID, jobRef string) error
+	NoteModelHost(ctx context.Context, cycleID, host string) error
 	Finish(ctx context.Context, cycleID, mergeSHA string) error
 	// SetValidationVerdict records one validation ATTEMPT's outcome on its own cycle
 	// row — the verdict, the issue it was dispatched at, and the DIGEST of the
@@ -261,7 +262,7 @@ type ValidationCoordinator interface {
 // the coding agent satisfies — the supervisor names a capability, not a
 // package.
 type Dispatcher interface {
-	Dispatch(ctx context.Context, req delivery.MilestoneDispatch) (jobRef string, err error)
+	Dispatch(ctx context.Context, req delivery.MilestoneDispatch) (delivery.AgentLaunch, error)
 }
 
 // Deployer promotes a cycle's built components into the environment and reports

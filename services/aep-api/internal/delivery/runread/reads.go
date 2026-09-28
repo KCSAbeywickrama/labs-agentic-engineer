@@ -234,6 +234,8 @@ func failureView(row *delivery.MilestoneRun) *gen.RunFailure {
 		FirstAt:     f.FirstAt,
 		LastAt:      f.LastAt,
 		Detail:      f.Detail,
+		Host:        f.Host,
+		ResetAt:     f.ResetAt,
 		WorkflowID:  delivery.MilestoneRunWorkflowID(row.Kind, row.OrgID, row.ProjectID, row.MilestoneNumber),
 	}
 }

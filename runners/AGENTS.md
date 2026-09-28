@@ -182,6 +182,16 @@ into the runner pod at `/app/skills` for live skill edits (see
   and the cluster's backstop cannot disagree; the runner subtracts its own
   margin, which is not the dispatcher's to know. Unset still means no guard,
   which is what the playground runs under.
+  **A spent model plan ends the run too.** Every retry a runtime reports is
+  fed to `lib/provider_limit.ts`: a 429 whose retry delay is five minutes or
+  more, or five minutes of 429 retries in one streak (a streak ends when the
+  model answers — a tool call or a clean turn, not any activity), ends the run
+  through the same termination path, and the one settle carries
+  `code: provider_limit`, `host` and, when the provider stated one, `resetAt`.
+  A runtime that gives up on its 429s first settles the same code. aep-api
+  settles such a run BLOCKED, not failed. Each 429 leaves one
+  `model_provider_429` record in `runtime.log`, never on the feed; the
+  provider's text reaches the settle only as the capped `providerDetail`.
 - **API retries are on the feed for every run; the rest of the diagnostics are
   developer-only files.** A stalled model turn used to be reported as bare
   silence. The SDK emits `system`/`api_retry` for every retryable failure and
@@ -342,7 +352,44 @@ into the runner pod at `/app/skills` for live skill edits (see
   under. An unrecognised runtime is an error, never a silent fallback: running
   the one we do have would bill an org for a runtime it did not choose. The model
   is no longer a literal in `runner.ts`, and it is the run's only model
-  (ADR-0015).
+  (ADR-0015). It rides `RuntimePolicy.connection` with the endpoint it is served
+  from: `lib/model_connection.ts` is the one reader of the `AEP_MODEL_*` env,
+  where absent means Anthropic's own API (every Job before it existed), and a
+  value it cannot read is an error, like an unknown runtime. Off Anthropic's
+  API a connection always states a context window (the platform's 128,000
+  fallback when the dispatch named none), because neither runtime compacts
+  correctly without one.
+  **The credential is not on the connection**: the dispatch mounts exactly one
+  (ADR-0036) and each adapter presents it under its own spelling.
+  `connectionKey` reads the key from `AEP_MODEL_API_KEY`, else
+  `ANTHROPIC_API_KEY` — the name a key on Anthropic's own API keeps, and the
+  only one a Job from an older aep-api carries. Claude Code
+  (`runtime/claude/connection.ts`) keeps the first-party env as it always was;
+  anywhere else it sets `ANTHROPIC_BASE_URL` (the URL minus `/v1`), the key as
+  `ANTHROPIC_AUTH_TOKEN` (Bearer) or `ANTHROPIC_API_KEY`,
+  `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, and DELETES every other Anthropic
+  credential, since the CLI would present a stray `ANTHROPIC_API_KEY` to the
+  other host; it refuses the OpenAI-compatible format and a subscription off
+  Anthropic's API before spawning. OpenCode runs provider `anthropic` on
+  Anthropic's API (the catalog supplies Claude's limits) and `aep` elsewhere
+  (`@ai-sdk/openai-compatible` or `@ai-sdk/anthropic`, the connection's limits,
+  `enabled_providers: ["aep"]`), always reading the key as
+  `{env:AEP_MODEL_API_KEY}`. The mapping is one table test,
+  `runtime/connection_env.test.ts`.
+- **Web search follows the connection's strategy** (`AEP_MODEL_WEB_SEARCH`).
+  `anthropic-server-tool` is Claude Code's built-in WebSearch, as before;
+  anything else denies it (the CLI offers it on any Anthropic-format host, where
+  the host cannot run it) and OpenCode's `websearch`. With `ollama-api` both
+  runtimes get `aep-web`, a stdio MCP server built from
+  `packages/web-search/src/aep-web.ts` — the spec agents' own implementation —
+  reached as the `web-search` named build context and bundled to
+  `$AEP_WEB_SEARCH_SERVER` (every builder passes it;
+  `src/web_search_packaging.test.ts` pins them). `lib/aep_web.ts` hands it the
+  key and the run's staged-secret values in a 0600 file, never env or argv (a
+  runtime's MCP config can reach a command line), and the server refuses a
+  query holding one of them in the WebSearch rule's own words; the runtimes'
+  hooks (`mcp__aep-web__web_search`, `aep-web_web_search`) apply the same rule
+  first.
 - Self-contained: all agent and SDK-specific wiring lives here.
 - **The runner's contract types are GENERATED and DELIBERATELY NOT COMMITTED.**
   `pnpm --filter remote-worker gen` (wired into root `make gen` via turbo) runs
@@ -502,8 +549,10 @@ into the runner pod at `/app/skills` for live skill edits (see
   installs promptfoo with `--omit=optional` (its optional provider SDKs are not
   the harness's; ~0.3 GB instead of ~2.5 GB — `packages/agent-eval/design/running-in-a-build-pod.md`)
   and sits before the runner's sources so a source edit does not re-run it.
-- **`AEP_EVAL_ANTHROPIC_API_KEY` is a THIRD credential on the pod** — the org's
-  default Anthropic key, for the evaluation step's agent and judge. It is not
+- **`AEP_EVAL_MODEL_API_KEY` is a THIRD credential on the pod** — the org's
+  connection key, on any format, for the evaluation step's agent and judge. The
+  connection rides beside it as plain `AEP_EVAL_MODEL_FORMAT` / `_BASE_URL` /
+  `_NAME` / `_AUTH_SCHEME`, all five set together or none. It is not
   `ANTHROPIC_API_KEY` because that name belongs to Claude Code, which ranks it
   above `CLAUDE_CODE_OAUTH_TOKEN` (docs/decisions ADR-0016). It is enrolled
   with the other mounted credentials in `credential_env.ts`: the agent invokes the

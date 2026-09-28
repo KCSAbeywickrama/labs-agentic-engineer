@@ -46,6 +46,20 @@ export interface ProviderConfig {
 const DEFAULT_FIRST_BOOT_TIMEOUT_MS = 20_000;
 
 /**
+ * What crosses from the promptfoo child into the agent under test: the model
+ * variables a deployed ai-agent is given (`agentModelEnv` in connection.ts
+ * composes them) and `PATH`. Everything else is decided per scenario.
+ */
+const AGENT_ENV_KEYS = [
+  "MODEL_API_KEY",
+  "MODEL_ENDPOINT",
+  "MODEL_NAME",
+  "MODEL_API_FORMAT",
+  "MODEL_API_AUTH_SCHEME",
+  "PATH",
+] as const;
+
+/**
  * promptfoo's unit is a prompt and its output; ours is a conversation. The
  * bridge is this provider: it runs the whole conversation and returns the
  * TRANSCRIPT as `output`, which promptfoo's rubrics then grade. promptfoo's
@@ -145,10 +159,11 @@ export default class AgentEvalProvider {
   }
 
   /**
-   * The child's whole environment. The model credential is read from THIS
-   * process rather than carried in the provider's config, because the config
-   * is written to disk under the build's output directory — a key belongs in
-   * an environment variable, never in a file a PR might carry.
+   * The child's whole environment. The model connection — key, endpoint,
+   * model, format and auth scheme, as the CLI composed them — is read from
+   * THIS process rather than carried in the provider's config, because the
+   * config is written to disk under the build's output directory — a key
+   * belongs in an environment variable, never in a file a PR might carry.
    *
    * `MEMORY_DB_*` is deliberately absent: the spec requires memory to be
    * exercised without Postgres, so the agent must serve this run from its own
@@ -157,7 +172,7 @@ export default class AgentEvalProvider {
    */
   private agentEnv(stubEnv: Record<string, string>): Record<string, string> {
     const env: Record<string, string> = { ...stubEnv };
-    for (const key of ["MODEL_API_KEY", "MODEL_NAME", "MODEL_ENDPOINT", "PATH"]) {
+    for (const key of AGENT_ENV_KEYS) {
       const value = process.env[key];
       if (value !== undefined) env[key] = value;
     }

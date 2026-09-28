@@ -153,7 +153,7 @@ async function main(): Promise<number> {
   primeScrubber([
     process.env.ANTHROPIC_API_KEY,
     process.env.CLAUDE_CODE_OAUTH_TOKEN,
-    process.env.AEP_EVAL_ANTHROPIC_API_KEY,
+    process.env.AEP_EVAL_MODEL_API_KEY,
   ]);
   emit(PROVISIONING);
 

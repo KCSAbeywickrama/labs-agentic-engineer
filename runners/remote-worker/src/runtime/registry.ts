@@ -48,20 +48,3 @@ export function createRuntime(name: RuntimeName = DEFAULT_RUNTIME): Runtime {
       throw new UnsupportedRuntimeError(name, "unknown runtime");
   }
 }
-
-/**
- * An organization setting the dispatcher stamps as env (`AEP_AGENT_MODEL`),
- * trimmed; unset or blank means `fallback`.
- *
- * `fallback` is the platform default, and it is the caller's to name rather than
- * this module's: the model a runtime should default to is the runtime's fact
- * (`Runtime.defaultModel`), not the registry's.
- */
-export function envOr(
-  key: "AEP_AGENT_MODEL",
-  fallback: string,
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  const raw = (env[key] ?? "").trim();
-  return raw === "" ? fallback : raw;
-}

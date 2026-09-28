@@ -25,6 +25,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/organization/listorgs"
 	"github.com/wso2/aep/aep-api/internal/organization/patchconfig"
 	"github.com/wso2/aep/aep-api/internal/organization/rotateidp"
+	"github.com/wso2/aep/aep-api/internal/organization/testllm"
 )
 
 // Every slice names its type Handler, so embedding them directly would be
@@ -32,6 +33,7 @@ import (
 type (
 	getconfigHandler        = getconfig.Handler
 	patchconfigHandler      = patchconfig.Handler
+	testllmHandler          = testllm.Handler
 	connectgithubHandler    = connectgithub.Handler
 	disconnectgithubHandler = disconnectgithub.Handler
 	rotateidpHandler        = rotateidp.Handler
@@ -44,6 +46,7 @@ type (
 type Handlers struct {
 	*getconfigHandler
 	*patchconfigHandler
+	*testllmHandler
 	*connectgithubHandler
 	*disconnectgithubHandler
 	*rotateidpHandler
@@ -53,7 +56,7 @@ type Handlers struct {
 
 // New assembles the domain: pure wiring, constructor injection only.
 //
-// The six /config ops share the one *organization.Service orchestrator;
+// The seven /config ops share the one *organization.Service orchestrator;
 // list-organizations reads the OrganizationService. Both are fail-LOUD: the
 // pre-migration handlers had no nil guard, so an unwired collaborator panics
 // exactly as it did before (the edge assigns deps.Organization directly, no
@@ -62,6 +65,7 @@ func New(d organization.Deps) (*Handlers, error) {
 	return &Handlers{
 		getconfigHandler:        getconfig.New(d.Config),
 		patchconfigHandler:      patchconfig.New(d.Config),
+		testllmHandler:          testllm.New(d.Config),
 		connectgithubHandler:    connectgithub.New(d.Config),
 		disconnectgithubHandler: disconnectgithub.New(d.Config),
 		rotateidpHandler:        rotateidp.New(d.Config),
