@@ -228,9 +228,25 @@ describe("failureCopy — a project with no environment to deploy into", () => {
     expect(copy?.details.detail).toContain("project names no deployment pipeline");
   });
 
+  it("says the code merged and built when the deploy stage met the fault", () => {
+    const copy = failureCopy(run({ terminalReason: "no-write-target", failure: noTarget() }));
+    expect(copy?.body).toContain("The code merged and built; nothing was deployed");
+  });
+
+  it("says nothing was coded when the coding agent's dispatch met the fault", () => {
+    const copy = failureCopy(run({ terminalReason: "no-write-target", failure: { ...noTarget(), phase: "coding" } }));
+    expect(copy?.title).toBe("The project has no environment to deploy into");
+    expect(copy?.body).toContain("Nothing was coded, built or deployed");
+    expect(copy?.body).not.toContain("merged and built");
+    expect(copy?.body).toContain("no fix task was filed");
+  });
+
   it("explains itself from the reason alone when the record was never written", () => {
     const copy = failureCopy(run({ terminalReason: "no-write-target" }));
     expect(copy?.title).toBe("The project has no environment to deploy into");
+    expect(copy?.body).not.toContain("merged and built");
+    expect(copy?.body).not.toContain("Nothing was coded");
+    expect(copy?.body).toContain("Retrying cannot fix this");
   });
 
   it("has a short label for the ledger", () => {
