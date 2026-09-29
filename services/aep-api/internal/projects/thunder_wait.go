@@ -144,7 +144,11 @@ type consumerDep struct {
 // that redeploys only the api must not shrink the set and un-register a web app
 // that is already live.
 type thunderPass struct {
-	deps []consumerDep
+	// environment is the project's write target, resolved once by the read
+	// that built this pass. The ExternalResourceBinding and the
+	// ThunderApplication CR it names both live there.
+	environment string
+	deps        []consumerDep
 }
 
 // newThunderPass resolves the project's consumer-URL wiring for one read.
@@ -159,7 +163,7 @@ type thunderPass struct {
 // component is deliberately NOT dropped: its previous release is usually still
 // serving at the same URL, and un-registering it because a NEW release failed to
 // render would sign users out of an app that is working.
-func (s *DeploymentService) newThunderPass(ctx context.Context, orgID, projectID string, withdrawing map[string]bool) (*thunderPass, error) {
+func (s *DeploymentService) newThunderPass(ctx context.Context, orgID, projectID, environment string, withdrawing map[string]bool) (*thunderPass, error) {
 	if s == nil || s.catalog == nil || s.resourceClient == nil || s.thunder == nil || s.store == nil {
 		return nil, nil
 	}
@@ -227,7 +231,7 @@ func (s *DeploymentService) newThunderPass(ctx context.Context, orgID, projectID
 		return o
 	}
 
-	pass := &thunderPass{deps: make([]consumerDep, 0, len(order))}
+	pass := &thunderPass{environment: environment, deps: make([]consumerDep, 0, len(order))}
 	for _, name := range order {
 		cd := byName[name]
 		for component := range cd.declaredBy {
@@ -286,7 +290,7 @@ func (s *DeploymentService) registerConsumerCallbacks(ctx context.Context, orgID
 		if len(dep.callbacks) == 0 {
 			continue
 		}
-		bindingName := ocname.ExternalResourceBindingName(projectID, dep.name, openchoreo.DevEnvironmentName)
+		bindingName := ocname.ExternalResourceBindingName(projectID, dep.name, pass.environment)
 		if err := s.resourceClient.PatchBindingEnvironmentConfigs(ctx, orgID, bindingName,
 			map[string]string{dep.marker.EnvConfig: strings.Join(dep.callbacks, ",")}); err != nil {
 			return fmt.Errorf("deployment: thunder wait: register callbacks for %q: %w", dep.name, err)
@@ -335,7 +339,7 @@ func (s *DeploymentService) applyThunderWait(ctx context.Context, orgID, project
 			}
 			continue
 		}
-		cr, gerr := s.thunder.FindByResource(ctx, ocname.ExternalResourceName(projectID, dep.name), openchoreo.DevEnvironmentName)
+		cr, gerr := s.thunder.FindByResource(ctx, ocname.ExternalResourceName(projectID, dep.name), pass.environment)
 		if gerr != nil {
 			if errors.Is(gerr, ErrThunderApplicationAPIMissing) {
 				continue

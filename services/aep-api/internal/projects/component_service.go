@@ -51,7 +51,7 @@ type ComponentService interface {
 	// shape left it reachable only by type assertion, app.go never wired it,
 	// and every ai-agent deployed with no model key and 500'd on its first
 	// turn. Nothing failed at deploy time, which is what made it expensive.
-	ModelAccessEnvVars(ctx context.Context, ocOrgID, component string) ([]openchoreo.WorkflowEnvVarRef, error)
+	ModelAccessEnvVars(ctx context.Context, ocOrgID, component, environment string) ([]openchoreo.WorkflowEnvVarRef, error)
 
 	ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*gen.ComponentList, error)
 	GetComponent(ctx context.Context, orgName, projectName, componentName string) (*gen.Component, error)

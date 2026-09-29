@@ -149,7 +149,7 @@ func TestModelAccessEnvVars_ReturnsTheConnectionsModelVars(t *testing.T) {
 				fakeSecretRefClient{},
 			).(*componentService)
 
-			got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+			got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent", modelAccessEnv)
 			if err != nil {
 				t.Fatalf("ModelAccessEnvVars: %v", err)
 			}
@@ -204,7 +204,7 @@ func TestModelAccessEnvVars_NoConnectedKeyIsNotAnError(t *testing.T) {
 				svc.SetAIGatewayBindings(fakeAIGatewayBindings{})
 			}
 
-			got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+			got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent", modelAccessEnv)
 			if err != nil {
 				t.Fatalf("an org with no key must not error, got: %v", err)
 			}
@@ -230,7 +230,7 @@ func TestModelAccessEnvVars_UnreadableConnectionFailsTheDeploy(t *testing.T) {
 				svc.SetAIGatewayBindings(fakeAIGatewayBindings{})
 			}
 
-			if _, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent"); err == nil {
+			if _, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent", modelAccessEnv); err == nil {
 				t.Fatal("an unreadable connection must fail composition")
 			}
 		})
@@ -278,7 +278,7 @@ func TestUpsertModelAccessSecretReference_UsesTheReleaseBindingNamespace(t *test
 			Property: "api-key",
 		}}, sr)
 
-	if _, err := svc.(*componentService).ModelAccessEnvVars(context.Background(), "default", "checkout-agent"); err != nil {
+	if _, err := svc.(*componentService).ModelAccessEnvVars(context.Background(), "default", "checkout-agent", modelAccessEnv); err != nil {
 		t.Fatalf("ModelAccessEnvVars: %v", err)
 	}
 	for _, ns := range gotNS {
@@ -321,7 +321,7 @@ func (f fakeAIGatewayBindings) GetAIGatewayBinding(context.Context, string, stri
 		return openchoreo.AIGatewayBinding{}, f.err
 	}
 	return openchoreo.AIGatewayBinding{
-		OrgID: "acme", Environment: openchoreo.DevEnvironmentName,
+		OrgID: "acme", Environment: modelAccessEnv,
 		Endpoint:  "http://ai-gateway.amp.localhost:8084",
 		AdminURL:  "http://api.amp.localhost:8080/api/v1",
 		GatewayID: "gw-uuid",
@@ -339,7 +339,7 @@ type noOTelBindings struct{ fakeAIGatewayBindings }
 
 func (noOTelBindings) GetAIGatewayBinding(context.Context, string, string) (openchoreo.AIGatewayBinding, error) {
 	return openchoreo.AIGatewayBinding{
-		OrgID: "acme", Environment: openchoreo.DevEnvironmentName,
+		OrgID: "acme", Environment: modelAccessEnv,
 		Endpoint:  "http://ai-gateway.amp.localhost:8084",
 		AdminURL:  "http://api.amp.localhost:8080/api/v1",
 		GatewayID: "gw-uuid",
@@ -374,7 +374,7 @@ func TestModelAccessEnvVars_PrefersTheAMPBinding(t *testing.T) {
 	).(*componentService)
 	svc.SetAIGatewayBindings(fakeAIGatewayBindings{})
 
-	got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+	got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent", modelAccessEnv)
 	if err != nil {
 		t.Fatalf("ModelAccessEnvVars: %v", err)
 	}
@@ -390,11 +390,11 @@ func TestModelAccessEnvVars_PrefersTheAMPBinding(t *testing.T) {
 	if endpoint.SecretKeyRef.Key != organization.AMPModelURLKey {
 		t.Errorf("MODEL_ENDPOINT key = %q, want %q", endpoint.SecretKeyRef.Key, organization.AMPModelURLKey)
 	}
-	if endpoint.SecretKeyRef.Name != organization.AMPModelKeySecretRefName("checkout-agent", openchoreo.DevEnvironmentName) {
+	if endpoint.SecretKeyRef.Name != organization.AMPModelKeySecretRefName("checkout-agent", modelAccessEnv) {
 		t.Errorf("MODEL_ENDPOINT refs %q, want the agent's own AMP secret", endpoint.SecretKeyRef.Name)
 	}
 	ref := byKey[modelAPIKeyEnvVar].ValueFrom.SecretKeyRef
-	want := organization.AMPModelKeySecretRefName("checkout-agent", openchoreo.DevEnvironmentName)
+	want := organization.AMPModelKeySecretRefName("checkout-agent", modelAccessEnv)
 	if ref.Name != want {
 		t.Errorf("MODEL_API_KEY refs %q, want the agent's own AMP key %q", ref.Name, want)
 	}
@@ -432,7 +432,7 @@ func TestModelAccessEnvVars_GovernedCarriesTheConnectionsModelAndFormat(t *testi
 			).(*componentService)
 			svc.SetAIGatewayBindings(fakeAIGatewayBindings{})
 
-			got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+			got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent", modelAccessEnv)
 			if err != nil {
 				t.Fatalf("ModelAccessEnvVars: %v", err)
 			}
@@ -489,7 +489,7 @@ func TestModelAccessEnvVars_FallsBackToTheOrgKey(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := tc.svc().ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+			got, err := tc.svc().ModelAccessEnvVars(context.Background(), "acme", "checkout-agent", modelAccessEnv)
 			if err != nil {
 				t.Fatalf("ModelAccessEnvVars: %v", err)
 			}
@@ -554,11 +554,11 @@ func tracingSvc(sr secretmanagersvc.OpenChoreoSecretReferenceClient) *componentS
 // A governed agent whose tracing token was stored exports spans to its
 // environment's gateway, authenticated with a credential of its own.
 func TestModelAccessEnvVars_AddsTracingWhenTheTokenIsStored(t *testing.T) {
-	modelRef := organization.AMPModelKeySecretRefName("checkout-agent", openchoreo.DevEnvironmentName)
-	tracingRef := organization.AMPTracingTokenSecretRefName("checkout-agent", openchoreo.DevEnvironmentName)
+	modelRef := organization.AMPModelKeySecretRefName("checkout-agent", modelAccessEnv)
+	tracingRef := organization.AMPTracingTokenSecretRefName("checkout-agent", modelAccessEnv)
 	sr := &selectiveSecretRefClient{present: map[string]bool{modelRef: true, tracingRef: true}}
 
-	got, err := tracingSvc(sr).ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+	got, err := tracingSvc(sr).ModelAccessEnvVars(context.Background(), "acme", "checkout-agent", modelAccessEnv)
 	if err != nil {
 		t.Fatalf("ModelAccessEnvVars: %v", err)
 	}
@@ -612,13 +612,13 @@ func TestModelAccessEnvVars_AddsTracingWhenTheTokenIsStored(t *testing.T) {
 // governs model traffic correctly and simply runs untraced. Composing a
 // tracing block with no endpoint would point the agent at a relative URL.
 func TestModelAccessEnvVars_OmitsTracingWithoutAnOTLPEndpoint(t *testing.T) {
-	modelRef := organization.AMPModelKeySecretRefName("checkout-agent", openchoreo.DevEnvironmentName)
-	tracingRef := organization.AMPTracingTokenSecretRefName("checkout-agent", openchoreo.DevEnvironmentName)
+	modelRef := organization.AMPModelKeySecretRefName("checkout-agent", modelAccessEnv)
+	tracingRef := organization.AMPTracingTokenSecretRefName("checkout-agent", modelAccessEnv)
 	sr := &selectiveSecretRefClient{present: map[string]bool{modelRef: true, tracingRef: true}}
 	svc := tracingSvc(sr)
 	svc.SetAIGatewayBindings(noOTelBindings{})
 
-	got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+	got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent", modelAccessEnv)
 	if err != nil {
 		t.Fatalf("ModelAccessEnvVars: %v", err)
 	}
@@ -643,10 +643,10 @@ func TestModelAccessEnvVars_OmitsTracingWithoutAnOTLPEndpoint(t *testing.T) {
 // cost the agent its traces, it stops the container from starting. A governed
 // agent with no tracing token must therefore compose NO tracing vars at all.
 func TestModelAccessEnvVars_OmitsTracingWhenNoTokenIsStored(t *testing.T) {
-	modelRef := organization.AMPModelKeySecretRefName("checkout-agent", openchoreo.DevEnvironmentName)
+	modelRef := organization.AMPModelKeySecretRefName("checkout-agent", modelAccessEnv)
 	sr := &selectiveSecretRefClient{present: map[string]bool{modelRef: true}}
 
-	got, err := tracingSvc(sr).ModelAccessEnvVars(context.Background(), "acme", "checkout-agent")
+	got, err := tracingSvc(sr).ModelAccessEnvVars(context.Background(), "acme", "checkout-agent", modelAccessEnv)
 	if err != nil {
 		t.Fatalf("ModelAccessEnvVars: %v", err)
 	}
@@ -663,5 +663,53 @@ func TestModelAccessEnvVars_OmitsTracingWhenNoTokenIsStored(t *testing.T) {
 	}
 	if byKey[modelAPIKeyEnvVar].ValueFrom == nil {
 		t.Error("MODEL_API_KEY missing — a missing tracing token must not disturb model access")
+	}
+}
+
+// modelAccessEnv is the write target the model-access tests compose for. A
+// name other than the historical "default" so a composition that ignored its
+// environment argument could not pass by accident.
+const modelAccessEnv = "development"
+
+// recordingAIGatewayBindings records which environment the AI gateway binding
+// was read for.
+type recordingAIGatewayBindings struct {
+	fakeAIGatewayBindings
+	asked []string
+}
+
+func (r *recordingAIGatewayBindings) GetAIGatewayBinding(ctx context.Context, org, environment string) (openchoreo.AIGatewayBinding, error) {
+	r.asked = append(r.asked, environment)
+	return r.fakeAIGatewayBindings.GetAIGatewayBinding(ctx, org, environment)
+}
+
+// Model access is composed for the environment the deploy writes into: the AI
+// gateway binding is read for it, and both AMP secret refs are named after it.
+// An agent composed against another environment's refs names SecretReferences
+// that were never written, and its container does not start.
+func TestModelAccessEnvVars_ComposesForTheGivenEnvironment(t *testing.T) {
+	sr := &selectiveSecretRefClient{present: map[string]bool{
+		organization.AMPModelKeySecretRefName("checkout-agent", "staging"):     true,
+		organization.AMPTracingTokenSecretRefName("checkout-agent", "staging"): true,
+	}}
+	svc := tracingSvc(sr)
+	bindings := &recordingAIGatewayBindings{}
+	svc.SetAIGatewayBindings(bindings)
+
+	got, err := svc.ModelAccessEnvVars(context.Background(), "acme", "checkout-agent", "staging")
+	if err != nil {
+		t.Fatalf("ModelAccessEnvVars: %v", err)
+	}
+	if len(bindings.asked) != 1 || bindings.asked[0] != "staging" {
+		t.Errorf("AI gateway binding read for %v, want [staging]", bindings.asked)
+	}
+	byKey := envByKey(got)
+	if ref := byKey[modelAPIKeyEnvVar].ValueFrom; ref == nil || ref.SecretKeyRef == nil ||
+		ref.SecretKeyRef.Name != organization.AMPModelKeySecretRefName("checkout-agent", "staging") {
+		t.Errorf("MODEL_API_KEY = %+v, want the staging AMP model key", byKey[modelAPIKeyEnvVar])
+	}
+	if ref := byKey[ampAgentAPIKeyEnvVar].ValueFrom; ref == nil || ref.SecretKeyRef == nil ||
+		ref.SecretKeyRef.Name != organization.AMPTracingTokenSecretRefName("checkout-agent", "staging") {
+		t.Errorf("tracing key = %+v, want the staging AMP tracing token", byKey[ampAgentAPIKeyEnvVar])
 	}
 }

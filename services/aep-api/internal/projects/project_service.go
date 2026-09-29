@@ -65,6 +65,7 @@ type Service struct {
 	kickoff        kickoffStarter         // fires `/start` on create (#562); may be nil
 	cells          projectCellProvisioner // per-environment cell namespaces; may be nil
 	endpointGate   *EndpointGate          // deploy stage: is a Ready binding reachable (status_stages.go); may be nil
+	writeTargets   writeTargetResolver    // deploy stage: which environment's bindings count (status_stages.go)
 }
 
 // projectCellProvisioner authors the ProjectReleaseBinding that gives a new
@@ -628,8 +629,8 @@ func translateHTTPError(err error) error {
 // provisionProjectCells creates the ProjectReleaseBinding for each environment
 // the project's deployment pipeline promotes through. Idempotent per
 // environment, so a partially-applied earlier attempt converges rather than
-// conflicting. The process write-target is that pipeline's source, resolved at
-// boot; this function does not union in extra names.
+// conflicting. The project's write target is this pipeline's root
+// (openchoreo.WriteTargets), so it is always among these environments.
 //
 // A project with no resolvable pipeline is an error, not an empty list: the
 // caller compensates on error, and silently returning "zero environments" would

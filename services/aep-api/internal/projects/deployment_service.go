@@ -85,6 +85,17 @@ type DeploymentService struct {
 	// nil composes every binding without one, which is the behaviour of an
 	// environment whose gateway publishes no verification half.
 	environments GatewayAssertionReader
+	// writeTargets resolves the environment a project's deploys write into.
+	// Required: Deploy, Converge and DeploymentState refuse to run without it,
+	// because there is no environment they could safely assume instead.
+	writeTargets writeTargetResolver
+}
+
+// writeTargetResolver names the environment a project writes into: the root of
+// its own deployment pipeline. Declared consumer-side so this package depends
+// on the one method it uses; openchoreo.WriteTargets satisfies it.
+type writeTargetResolver interface {
+	Resolve(ctx context.Context, org, project string) (string, error)
 }
 
 // GatewayAssertionReader is the narrow Environment-annotation read the
@@ -111,7 +122,7 @@ type envAuth struct {
 // it into the binding write itself. An org with no connected key yields
 // (nil, nil).
 type ModelAccessProvider interface {
-	ModelAccessEnvVars(ctx context.Context, orgID, component string) ([]openchoreo.WorkflowEnvVarRef, error)
+	ModelAccessEnvVars(ctx context.Context, orgID, component, environment string) ([]openchoreo.WorkflowEnvVarRef, error)
 }
 
 // ComponentEnvVarReader is the user's component config, consumer-side.
@@ -168,6 +179,29 @@ func (s *DeploymentService) SetModelAccess(m ModelAccessProvider) {
 	}
 }
 
+// SetWriteTargets wires the resolver that names each project's write target.
+func (s *DeploymentService) SetWriteTargets(w writeTargetResolver) {
+	if s != nil {
+		s.writeTargets = w
+	}
+}
+
+// writeTarget resolves the project's write target once for the operation.
+// A configuration fault is permanent: no retry makes a cyclic or missing
+// pipeline valid. Anything else (a network error, an OC 5xx) propagates
+// unchanged so Temporal retries it.
+func (s *DeploymentService) writeTarget(ctx context.Context, orgID, projectID string) (string, error) {
+	if s.writeTargets == nil {
+		return "", fmt.Errorf("deployment: write targets not configured")
+	}
+	env, err := s.writeTargets.Resolve(ctx, orgID, projectID)
+	var nwt *openchoreo.ErrNoWriteTarget
+	if errors.As(err, &nwt) {
+		return "", fmt.Errorf("%w: %w", delivery.ErrDeployPermanent, err)
+	}
+	return env, err
+}
+
 // SetGatewayAssertions wires the read that tells a service how to verify the
 // gateway's assertion. Optional: without it no component is handed a
 // verification half, and each keeps trusting only what the gateway's own
@@ -216,6 +250,20 @@ func (s *DeploymentService) Deploy(ctx context.Context, orgID, projectID string,
 	if s == nil || s.components == nil || s.store == nil {
 		return nil, fmt.Errorf("deployment: not configured")
 	}
+	env, err := s.writeTarget(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return s.deploy(ctx, orgID, projectID, env, targets)
+}
+
+// deploy is Deploy against an already resolved write target, so Converge,
+// which resolves it to find the live bindings, does not resolve it twice.
+func (s *DeploymentService) deploy(ctx context.Context, orgID, projectID, env string,
+	targets []delivery.DeployTarget) ([]delivery.ComponentDeploy, error) {
+	if s.store == nil {
+		return nil, fmt.Errorf("deployment: not configured")
+	}
 	design, err := s.store.ReadDesign(ctx, orgID, projectID)
 	if err != nil {
 		if spec.IsNotFound(err) {
@@ -234,7 +282,7 @@ func (s *DeploymentService) Deploy(ctx context.Context, orgID, projectID string,
 	// an environment that carries an AI gateway binding has promised its agents
 	// are governed, and half a governed wave is the state nobody can reason
 	// about afterwards.
-	if err := s.govern(ctx, orgID, projectID, targets); err != nil {
+	if err := s.govern(ctx, orgID, projectID, env, targets); err != nil {
 		return nil, err
 	}
 
@@ -242,13 +290,13 @@ func (s *DeploymentService) Deploy(ctx context.Context, orgID, projectID string,
 	// per component would issue the same reads N times for the same answer.
 	auth := envAuth{
 		Issuers:   s.resolveIssuers(ctx, orgID, design),
-		Assertion: s.resolveGatewayAssertion(ctx, orgID, design),
+		Assertion: s.resolveGatewayAssertion(ctx, orgID, env, design),
 	}
 
 	out := make([]delivery.ComponentDeploy, 0, len(targets))
 	var failures []error
 	for _, t := range targets {
-		outcome, derr := s.deployOne(ctx, orgID, projectID, t.Component, t.CommitSHA, design, auth)
+		outcome, derr := s.deployOne(ctx, orgID, projectID, t.Component, t.CommitSHA, env, design, auth)
 		out = append(out, outcome)
 		if derr != nil {
 			failures = append(failures, fmt.Errorf("component %q: %w", t.Component, derr))
@@ -262,7 +310,7 @@ func (s *DeploymentService) Deploy(ctx context.Context, orgID, projectID string,
 // The governor decides what is and is not an agent — this service does not
 // filter, because "which components are governed" is a governance question and
 // splitting it across two packages is how the two drift.
-func (s *DeploymentService) govern(ctx context.Context, orgID, projectID string, targets []delivery.DeployTarget) error {
+func (s *DeploymentService) govern(ctx context.Context, orgID, projectID, env string, targets []delivery.DeployTarget) error {
 	if s.governor == nil || len(targets) == 0 {
 		return nil
 	}
@@ -271,7 +319,7 @@ func (s *DeploymentService) govern(ctx context.Context, orgID, projectID string,
 			OrgID:       orgID,
 			ProjectID:   projectID,
 			Component:   t.Component,
-			Environment: openchoreo.DevEnvironmentName,
+			Environment: env,
 		})
 		if err != nil {
 			slog.ErrorContext(ctx, "deployment: agent governance failed; the deploy is refused",
@@ -333,9 +381,13 @@ func (s *DeploymentService) Converge(ctx context.Context, orgID, projectID strin
 	if s == nil || s.components == nil {
 		return nil
 	}
+	env, err := s.writeTarget(ctx, orgID, projectID)
+	if err != nil {
+		return err
+	}
 	live := make([]string, 0, len(components))
 	for _, name := range components {
-		summary, err := s.components.GetReleaseBindingStatus(ctx, orgID, projectID, name, openchoreo.DevEnvironmentName)
+		summary, err := s.components.GetReleaseBindingStatus(ctx, orgID, projectID, name, env)
 		if err != nil {
 			return fmt.Errorf("deployment: read binding for %q: %w", name, err)
 		}
@@ -346,14 +398,14 @@ func (s *DeploymentService) Converge(ctx context.Context, orgID, projectID strin
 	if len(live) == 0 {
 		return nil
 	}
-	_, err := s.Deploy(ctx, orgID, projectID, delivery.ConvergeTargets(live))
+	_, err = s.deploy(ctx, orgID, projectID, env, delivery.ConvergeTargets(live))
 	return err
 }
 
 // deployOne cuts the release and writes the binding for a single component.
-func (s *DeploymentService) deployOne(ctx context.Context, orgID, projectID, componentName, commitSHA string,
+func (s *DeploymentService) deployOne(ctx context.Context, orgID, projectID, componentName, commitSHA, env string,
 	design *spec.DesignFile, auth envAuth) (delivery.ComponentDeploy, error) {
-	outcome := delivery.ComponentDeploy{Component: componentName, Environment: openchoreo.DevEnvironmentName}
+	outcome := delivery.ComponentDeploy{Component: componentName, Environment: env}
 
 	comp := findDesignComponent(design, componentName)
 	if comp == nil {
@@ -384,7 +436,7 @@ func (s *DeploymentService) deployOne(ctx context.Context, orgID, projectID, com
 	desired := DesiredDeploymentFor(DeploymentInputs{
 		Component:     *comp,
 		ComponentName: componentName,
-		Environment:   openchoreo.DevEnvironmentName,
+		Environment:   env,
 		ReleaseName:   releaseName,
 		Issuers:       auth.Issuers,
 		// How a service proves the request reached it through the gateway. The
@@ -395,7 +447,7 @@ func (s *DeploymentService) deployOne(ctx context.Context, orgID, projectID, com
 		// THIS project carries as `aud`, and therefore what the gateway checks
 		// to reject one minted for any other.
 		Audience: ProjectAudience(orgID, projectID),
-		EnvVars:  s.envVarsWithModelAccess(ctx, orgID, projectID, componentName, comp.ComponentType),
+		EnvVars:  s.envVarsWithModelAccess(ctx, orgID, projectID, componentName, env, comp.ComponentType),
 		Files:    s.filesFor(ctx, orgID, projectID, componentName),
 		// The org IS the OC namespace components are created in, and that
 		// namespace is a segment of every managed API's gateway context path.
@@ -429,12 +481,12 @@ func (s *DeploymentService) deployOne(ctx context.Context, orgID, projectID, com
 // vars alone. Failing the deploy would be worse: the agent would not exist at
 // all, where an agent without MODEL_* comes up and reports 503 from /healthz —
 // a state an operator can see and fix by connecting a key.
-func (s *DeploymentService) envVarsWithModelAccess(ctx context.Context, orgID, projectID, componentName, componentType string) []openchoreo.WorkflowEnvVarRef {
+func (s *DeploymentService) envVarsWithModelAccess(ctx context.Context, orgID, projectID, componentName, env, componentType string) []openchoreo.WorkflowEnvVarRef {
 	envVars := s.envVarsFor(ctx, orgID, projectID, componentName)
 	if componentType != spec.ComponentTypeAIAgent || s.modelAccess == nil {
 		return envVars
 	}
-	modelVars, err := s.modelAccess.ModelAccessEnvVars(ctx, orgID, componentName)
+	modelVars, err := s.modelAccess.ModelAccessEnvVars(ctx, orgID, componentName, env)
 	if err != nil {
 		slog.WarnContext(ctx, "deployment: model access unavailable; ai-agent deploys without MODEL_* and will report 503 from /healthz",
 			"org", orgID, "project", projectID, "component", componentName, "error", err)
@@ -466,13 +518,17 @@ func (s *DeploymentService) DeploymentState(ctx context.Context, orgID, projectI
 	if s == nil || s.components == nil {
 		return nil, fmt.Errorf("deployment: not configured")
 	}
+	env, err := s.writeTarget(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
 	// Bindings first, because the consumer-URL registration below needs to know
 	// which components OpenChoreo is taking down before it decides what the
 	// project's callback set is.
 	summaries := make([]*openchoreo.ReleaseBindingSummary, len(components))
 	withdrawing := make(map[string]bool, len(components))
 	for i, name := range components {
-		summary, err := s.components.GetReleaseBindingStatus(ctx, orgID, projectID, name, openchoreo.DevEnvironmentName)
+		summary, err := s.components.GetReleaseBindingStatus(ctx, orgID, projectID, name, env)
 		if err != nil {
 			return nil, fmt.Errorf("deployment: read binding for %q: %w", name, err)
 		}
@@ -486,7 +542,7 @@ func (s *DeploymentService) DeploymentState(ctx context.Context, orgID, projectI
 	// before any component's verdict is folded. A dependency several web apps
 	// share holds one callback field, so a per-component write would have each
 	// component replace the last (see thunderPass).
-	pass, err := s.newThunderPass(ctx, orgID, projectID, withdrawing)
+	pass, err := s.newThunderPass(ctx, orgID, projectID, env, withdrawing)
 	if err != nil {
 		return nil, err
 	}
@@ -496,7 +552,7 @@ func (s *DeploymentService) DeploymentState(ctx context.Context, orgID, projectI
 
 	out := make([]delivery.ComponentDeploy, 0, len(components))
 	for i, name := range components {
-		st := componentDeployFrom(name, summaries[i])
+		st := componentDeployFrom(name, env, summaries[i])
 		if err := s.applyThunderWait(ctx, orgID, projectID, name, pass, summaries[i], &st); err != nil {
 			return nil, err
 		}
@@ -511,8 +567,8 @@ func (s *DeploymentService) DeploymentState(ctx context.Context, orgID, projectI
 // and "will never be ready" are different facts, and collapsing them would make
 // the supervisor either give up on a slow rollout or wait forever on a broken
 // one.
-func componentDeployFrom(name string, summary *openchoreo.ReleaseBindingSummary) delivery.ComponentDeploy {
-	out := delivery.ComponentDeploy{Component: name, Environment: openchoreo.DevEnvironmentName}
+func componentDeployFrom(name, env string, summary *openchoreo.ReleaseBindingSummary) delivery.ComponentDeploy {
+	out := delivery.ComponentDeploy{Component: name, Environment: env}
 	if summary == nil {
 		return out // no binding admitted yet — pending
 	}
@@ -649,20 +705,20 @@ func (s *DeploymentService) resolveIssuers(ctx context.Context, orgID string, de
 // deploy into one would make the feature a breaking change. A failure here logs
 // and composes a binding with no verification half, which is exactly what such
 // an environment gets anyway.
-func (s *DeploymentService) resolveGatewayAssertion(ctx context.Context, orgID string, design *spec.DesignFile) openchoreo.GatewayAssertion {
+func (s *DeploymentService) resolveGatewayAssertion(ctx context.Context, orgID, env string, design *spec.DesignFile) openchoreo.GatewayAssertion {
 	if s.environments == nil || !designHasProtectedAPI(design) {
 		return openchoreo.GatewayAssertion{}
 	}
-	assertion, err := s.environments.GetGatewayAssertion(ctx, orgID, openchoreo.DevEnvironmentName)
+	assertion, err := s.environments.GetGatewayAssertion(ctx, orgID, env)
 	if err != nil {
 		slog.WarnContext(ctx, "deployment: gateway assertion unresolved; deploying without a verification half",
-			"orgID", orgID, "environment", openchoreo.DevEnvironmentName, "error", err)
+			"orgID", orgID, "environment", env, "error", err)
 		return openchoreo.GatewayAssertion{}
 	}
 	if !assertion.Configured() {
 		slog.InfoContext(ctx, "deployment: environment gateway publishes no assertion key; "+
 			"protected services get no verification half",
-			"orgID", orgID, "environment", openchoreo.DevEnvironmentName)
+			"orgID", orgID, "environment", env)
 	}
 	return assertion
 }

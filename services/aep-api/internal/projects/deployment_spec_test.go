@@ -88,7 +88,7 @@ func TestDesiredDeploymentFor(t *testing.T) {
 			got := DesiredDeploymentFor(DeploymentInputs{
 				Component:     designComponent(t, tc.body),
 				ComponentName: "api",
-				Environment:   openchoreo.DevEnvironmentName,
+				Environment:   testWriteTarget,
 				ReleaseName:   "rel-1",
 			})
 
@@ -127,7 +127,7 @@ func TestDesiredDeploymentFor_AlwaysPinsAndActivates(t *testing.T) {
 	got := DesiredDeploymentFor(DeploymentInputs{
 		Component:     designComponent(t, svcJSON("api", "", "")),
 		ComponentName: "api",
-		Environment:   openchoreo.DevEnvironmentName,
+		Environment:   testWriteTarget,
 		ReleaseName:   "rel-7",
 	})
 	if got.Binding.ReleaseName != "rel-7" {
@@ -136,7 +136,7 @@ func TestDesiredDeploymentFor_AlwaysPinsAndActivates(t *testing.T) {
 	if got.Binding.State != openchoreo.ReleaseBindingStateActive {
 		t.Errorf("state = %q, want Active", got.Binding.State)
 	}
-	if got.Binding.ComponentName != "api" || got.Binding.Environment != openchoreo.DevEnvironmentName {
+	if got.Binding.ComponentName != "api" || got.Binding.Environment != testWriteTarget {
 		t.Errorf("binding identity wrong: %+v", got.Binding)
 	}
 }
@@ -150,7 +150,7 @@ func TestDesiredDeploymentFor_EmptyTraitConfigsAreAuthoritativeNotUnmanaged(t *t
 	got := DesiredDeploymentFor(DeploymentInputs{
 		Component:     designComponent(t, svcJSON("api", "", "")),
 		ComponentName: "api",
-		Environment:   openchoreo.DevEnvironmentName,
+		Environment:   testWriteTarget,
 		ReleaseName:   "rel-1",
 	})
 	if got.Binding.TraitEnvironmentConfigs == nil {
@@ -168,7 +168,7 @@ func TestDesiredDeploymentFor_CarriesWorkloadOverrides(t *testing.T) {
 	in := DeploymentInputs{
 		Component:     designComponent(t, svcJSON("api", "", "")),
 		ComponentName: "api",
-		Environment:   openchoreo.DevEnvironmentName,
+		Environment:   testWriteTarget,
 		ReleaseName:   "rel-1",
 		EnvVars:       []openchoreo.WorkflowEnvVarRef{{Key: "K", Value: "V"}},
 		Files:         []openchoreo.WorkflowFileVar{{Key: "env-config.js", MountPath: "/x", Value: "y"}},

@@ -146,7 +146,7 @@ func TestDeploy_BindingCarriesPinAndTraitConfigTogether(t *testing.T) {
 		"components/api/design.json": endUserServiceMd("api"),
 	}
 	oc := ocDeployments(map[string]string{})
-	svc := NewDeploymentService(oc, traitStoreWith(files))
+	svc := newTestDeploymentService(oc, traitStoreWith(files))
 
 	out, err := svc.Deploy(context.Background(), "acme", "proj", promoting("abc123def456", "api"))
 	if err != nil {
@@ -184,7 +184,7 @@ func TestDeploy_ReleaseNameIsDerivedFromTheCommit(t *testing.T) {
 		"components/api/design.json": plainServiceMd("api"),
 	}
 	oc := ocDeployments(map[string]string{})
-	svc := NewDeploymentService(oc, traitStoreWith(files))
+	svc := newTestDeploymentService(oc, traitStoreWith(files))
 
 	first, err := svc.Deploy(context.Background(), "acme", "proj", promoting("abc123def456", "api"))
 	if err != nil {
@@ -213,7 +213,7 @@ func TestDeploy_ProtectedAPIUsesTraitDefaultCORS(t *testing.T) {
 		"components/web/design.json": webAppMd("web"),
 	}
 	oc := ocDeployments(map[string]string{"web": "http://web.local/app/"})
-	svc := NewDeploymentService(oc, traitStoreWith(files))
+	svc := newTestDeploymentService(oc, traitStoreWith(files))
 
 	if _, err := svc.Deploy(context.Background(), "acme", "proj", promoting("abc123def456", "api", "s2s")); err != nil {
 		t.Fatalf("Deploy: %v", err)
@@ -271,7 +271,7 @@ func TestDeploy_PerComponentFailureContinuesThenSurfaces(t *testing.T) {
 		}
 		return nil
 	}
-	svc := NewDeploymentService(oc, traitStoreWith(files))
+	svc := newTestDeploymentService(oc, traitStoreWith(files))
 
 	out, err := svc.Deploy(context.Background(), "acme", "proj", promoting("abc123def456", "api", "two"))
 	if err == nil {
@@ -300,7 +300,7 @@ func TestConverge_DoesNotCutOrPinARelease(t *testing.T) {
 	oc.GetReleaseBindingStatusFunc = func(context.Context, string, string, string, string) (*openchoreo.ReleaseBindingSummary, error) {
 		return &openchoreo.ReleaseBindingSummary{ReadyStatus: "True"}, nil
 	}
-	svc := NewDeploymentService(oc, traitStoreWith(files))
+	svc := newTestDeploymentService(oc, traitStoreWith(files))
 
 	if err := svc.Converge(context.Background(), "acme", "proj", []string{"api"}); err != nil {
 		t.Fatalf("Converge: %v", err)
@@ -329,7 +329,7 @@ func TestConverge_SkipsComponentsWithNoBinding(t *testing.T) {
 	oc.GetReleaseBindingStatusFunc = func(context.Context, string, string, string, string) (*openchoreo.ReleaseBindingSummary, error) {
 		return nil, nil
 	}
-	svc := NewDeploymentService(oc, traitStoreWith(files))
+	svc := newTestDeploymentService(oc, traitStoreWith(files))
 
 	if err := svc.Converge(context.Background(), "acme", "proj", []string{"api"}); err != nil {
 		t.Fatalf("Converge: %v", err)
@@ -357,7 +357,7 @@ func TestDeploymentState_ClassifiesReadyFailedAndPending(t *testing.T) {
 			return byComponent[componentName], nil
 		},
 	}
-	svc := NewDeploymentService(oc, nil)
+	svc := newTestDeploymentService(oc, nil)
 
 	got, err := svc.DeploymentState(context.Background(), "acme", "proj",
 		[]string{"ready", "failed", "rolling", "unknown", "absent", "undeploy"})
@@ -397,7 +397,7 @@ func TestDeploymentState_FreshBindingIsPendingNotFailed(t *testing.T) {
 				return &openchoreo.ReleaseBindingSummary{ReadyStatus: "False", ReadyReason: reason}, nil
 			},
 		}
-		got, err := NewDeploymentService(oc, nil).DeploymentState(context.Background(), "acme", "proj", []string{"api"})
+		got, err := newTestDeploymentService(oc, nil).DeploymentState(context.Background(), "acme", "proj", []string{"api"})
 		if err != nil {
 			t.Fatalf("DeploymentState(%q): %v", reason, err)
 		}
@@ -407,5 +407,168 @@ func TestDeploymentState_FreshBindingIsPendingNotFailed(t *testing.T) {
 		if got[0].Ready {
 			t.Errorf("reason %q read as READY; it is not serving yet", reason)
 		}
+	}
+}
+
+// --- write target -------------------------------------------------------------
+
+// staticWriteTarget answers every Resolve with one fixed write target or error,
+// so a test can pin the environment a deploy writes into without an OC
+// pipeline behind it.
+type staticWriteTarget struct {
+	env string
+	err error
+}
+
+func (s staticWriteTarget) Resolve(context.Context, string, string) (string, error) {
+	return s.env, s.err
+}
+
+// testWriteTarget is the write target the pre-existing deployment tests resolve.
+// Their binding-name fixtures were computed against it.
+const testWriteTarget = "default"
+
+// newTestDeploymentService is NewDeploymentService with testWriteTarget wired,
+// which every Deploy, Converge and DeploymentState needs.
+func newTestDeploymentService(components openchoreo.ComponentClient, store *spec.ArtifactStore) *DeploymentService {
+	svc := NewDeploymentService(components, store)
+	svc.SetWriteTargets(staticWriteTarget{env: testWriteTarget})
+	return svc
+}
+
+// recordingAssertions records which environment the gateway assertion was
+// read for.
+type recordingAssertions struct{ asked []string }
+
+func (r *recordingAssertions) GetGatewayAssertion(_ context.Context, _, environment string) (openchoreo.GatewayAssertion, error) {
+	r.asked = append(r.asked, environment)
+	return openchoreo.GatewayAssertion{}, nil
+}
+
+// Every write and read a deploy issues is addressed to the project's resolved
+// write target: the binding, the governance input, the reported outcome and
+// the gateway assertion. One resolve per operation, passed down, so no part of
+// a deploy can land in a different environment from the rest.
+func TestDeploy_WritesIntoTheResolvedWriteTarget(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		spec.DesignRootFile:          traitRootMd(),
+		"components/api/design.json": endUserServiceMd("api"),
+		"components/web/design.json": webAppMd("web"),
+	}
+	oc := ocDeployments(map[string]string{})
+	svc := NewDeploymentService(oc, traitStoreWith(files))
+	svc.SetWriteTargets(staticWriteTarget{env: "development"})
+	g := &stubGovernor{out: delivery.GovernAgentOutcome{Skipped: true}}
+	svc.SetGovernor(g)
+	assertions := &recordingAssertions{}
+	svc.SetGatewayAssertions(assertions)
+
+	out, err := svc.Deploy(context.Background(), "acme", "proj", promoting("abc123def456", "api", "web"))
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	for _, c := range oc.ApplyReleaseBindingCalls() {
+		if c.In.Environment != "development" {
+			t.Errorf("binding for %q written into %q, want development", c.In.ComponentName, c.In.Environment)
+		}
+	}
+	if len(oc.ApplyReleaseBindingCalls()) != 2 {
+		t.Fatalf("want two binding writes, got %d", len(oc.ApplyReleaseBindingCalls()))
+	}
+	for _, in := range g.seen {
+		if in.Environment != "development" {
+			t.Errorf("governed %q for %q, want development", in.Component, in.Environment)
+		}
+	}
+	if len(g.seen) != 2 {
+		t.Fatalf("governor saw %d targets, want 2", len(g.seen))
+	}
+	for _, o := range out {
+		if o.Environment != "development" {
+			t.Errorf("outcome for %q reports %q, want development", o.Component, o.Environment)
+		}
+	}
+	if len(assertions.asked) != 1 || assertions.asked[0] != "development" {
+		t.Errorf("gateway assertion read for %v, want [development]", assertions.asked)
+	}
+}
+
+// A project whose write target cannot be resolved is a configuration fault:
+// the deploy fails before anything is written, carries the typed cause, and is
+// permanent because no retry makes a cyclic pipeline valid.
+func TestDeploy_UnresolvableWriteTargetIsPermanentAndWritesNothing(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		spec.DesignRootFile:          traitRootMd(),
+		"components/api/design.json": plainServiceMd("api"),
+	}
+	oc := ocDeployments(map[string]string{})
+	svc := NewDeploymentService(oc, traitStoreWith(files))
+	svc.SetWriteTargets(staticWriteTarget{err: &openchoreo.ErrNoWriteTarget{
+		Org: "acme", Project: "proj", Pipeline: "default", Cause: openchoreo.ErrPipelineCyclic,
+	}})
+
+	_, err := svc.Deploy(context.Background(), "acme", "proj", promoting("abc123def456", "api"))
+	var nwt *openchoreo.ErrNoWriteTarget
+	if !errors.As(err, &nwt) {
+		t.Fatalf("Deploy error = %v, want an *openchoreo.ErrNoWriteTarget", err)
+	}
+	if !errors.Is(err, delivery.ErrDeployPermanent) {
+		t.Errorf("Deploy error = %v, want it marked permanent", err)
+	}
+	if n := len(oc.ApplyReleaseBindingCalls()); n != 0 {
+		t.Errorf("wrote %d bindings with no write target", n)
+	}
+}
+
+// A transient resolve failure is NOT permanent: Temporal must retry it.
+func TestDeploy_TransientWriteTargetFailureStaysRetryable(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		spec.DesignRootFile:          traitRootMd(),
+		"components/api/design.json": plainServiceMd("api"),
+	}
+	oc := ocDeployments(map[string]string{})
+	svc := NewDeploymentService(oc, traitStoreWith(files))
+	svc.SetWriteTargets(staticWriteTarget{err: errors.New("openchoreo: 503")})
+
+	_, err := svc.Deploy(context.Background(), "acme", "proj", promoting("abc123def456", "api"))
+	if err == nil || errors.Is(err, delivery.ErrDeployPermanent) {
+		t.Fatalf("Deploy error = %v, want a retryable failure", err)
+	}
+}
+
+// Converge and DeploymentState read the bindings of the resolved write target.
+func TestConvergeAndDeploymentState_ReadTheResolvedWriteTarget(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		spec.DesignRootFile:          traitRootMd(),
+		"components/api/design.json": plainServiceMd("api"),
+	}
+	oc := ocDeployments(map[string]string{})
+	oc.GetReleaseBindingStatusFunc = func(context.Context, string, string, string, string) (*openchoreo.ReleaseBindingSummary, error) {
+		return &openchoreo.ReleaseBindingSummary{ReadyStatus: "True"}, nil
+	}
+	svc := NewDeploymentService(oc, traitStoreWith(files))
+	svc.SetWriteTargets(staticWriteTarget{env: "development"})
+
+	if err := svc.Converge(context.Background(), "acme", "proj", []string{"api"}); err != nil {
+		t.Fatalf("Converge: %v", err)
+	}
+	got, err := svc.DeploymentState(context.Background(), "acme", "proj", []string{"api"})
+	if err != nil {
+		t.Fatalf("DeploymentState: %v", err)
+	}
+	for _, c := range oc.GetReleaseBindingStatusCalls() {
+		if c.Environment != "development" {
+			t.Errorf("binding read from %q, want development", c.Environment)
+		}
+	}
+	if n := len(oc.GetReleaseBindingStatusCalls()); n != 2 {
+		t.Errorf("want one binding read each from Converge and DeploymentState, got %d", n)
+	}
+	if len(got) != 1 || got[0].Environment != "development" {
+		t.Errorf("DeploymentState = %+v, want the component reported in development", got)
 	}
 }

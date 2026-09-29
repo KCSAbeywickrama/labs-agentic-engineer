@@ -196,6 +196,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	namespaceClient := openchoreo.NewNamespaceClient(ocConfig)
 	environmentClient := openchoreo.NewEnvironmentClient(ocConfig)
 	componentClient := openchoreo.NewComponentClient(ocConfig)
+	// ONE write-target resolver for every consumer: each project writes into
+	// the root of its own deployment pipeline, resolved at use (never cached),
+	// so every package that writes or reads a project's bindings shares it.
+	writeTargets := openchoreo.NewWriteTargets(ocConfig)
 	// GitSecret client lands the per-org build git credential on the workflow
 	// plane (via OC → OpenBao → SecretReference). Used by BuildCredentialsService
 	// for both cloud (CP/WP split) and local k3d — one unified path.
@@ -456,6 +460,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// promotion ordering, so it is built once here instead of twice.
 	projectCellClient := openchoreo.NewProjectCellClient(ocConfig)
 	projectService.SetProjectCellProvisioner(projectCellClient)
+	projectService.SetWriteTargets(writeTargets)
 	// Build/deploy stage sources for the status poll (#184): the milestone-run
 	// index (one row read) + the org-scoped release-binding list —
 	// consumer-side ports wired here so projects imports neither.
@@ -587,6 +592,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// writes it once. Driven by the run supervisor's deploy stage, because
 	// components carry AutoDeploy=false and nothing else promotes a release.
 	deploymentService := projects.NewDeploymentService(componentClient, artifactStore)
+	deploymentService.SetWriteTargets(writeTargets)
 
 	// Thunder admin client + IDP service. Reads
 	// aep-system-client credentials from env (THUNDER_*) and exposes
