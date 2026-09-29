@@ -21,6 +21,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo/mocks"
 	"github.com/wso2/aep/aep-api/internal/gen"
 )
@@ -167,5 +168,65 @@ func TestCreateProject_RejectsProjectWithNoPipeline(t *testing.T) {
 	}
 	if len(cells.pipelines) != 0 {
 		t.Errorf("pipeline lookups: got %v, want none", cells.pipelines)
+	}
+}
+
+// A project whose pipeline names no write target can never deploy, so the
+// create fails with the typed cause and compensates, exactly as a cell
+// binding failure does (ADR-0039). A transient resolve failure compensates
+// too: the create cannot be retried against an existing OC Project.
+func TestCreateProject_CompensatesWhenTheWriteTargetCannotBeResolved(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		err     error
+		wantNWT bool
+	}{
+		{"no write target", &openchoreo.ErrNoWriteTarget{
+			Org: "acme", Project: "shop", Pipeline: "default", Cause: openchoreo.ErrPipelineCyclic,
+		}, true},
+		{"transient", errors.New("openchoreo: 503"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			oc := createdProjectOC("default")
+			deleted := ""
+			oc.DeleteProjectFunc = func(_ context.Context, _, projectName string) error {
+				deleted = projectName
+				return nil
+			}
+			svc := NewProjectService(oc, nil, nil, nil, nil)
+			svc.SetProjectCellProvisioner(&fakeCells{envs: []string{"default"}})
+			svc.SetWriteTargets(staticWriteTarget{err: tc.err})
+
+			_, err := svc.CreateProject(context.Background(), "acme", &gen.CreateProjectRequest{Name: "shop"})
+
+			if !errors.Is(err, tc.err) {
+				t.Fatalf("CreateProject error = %v, want %v", err, tc.err)
+			}
+			var nwt *openchoreo.ErrNoWriteTarget
+			if got := errors.As(err, &nwt); got != tc.wantNWT {
+				t.Errorf("errors.As(*ErrNoWriteTarget) = %v, want %v", got, tc.wantNWT)
+			}
+			if deleted != "shop" {
+				t.Errorf("compensating delete: got %q, want %q", deleted, "shop")
+			}
+		})
+	}
+}
+
+func TestCreateProject_SucceedsWithAResolvableWriteTarget(t *testing.T) {
+	t.Parallel()
+	oc := createdProjectOC("default")
+	oc.DeleteProjectFunc = func(context.Context, string, string) error {
+		t.Error("a deployable project must not be compensated away")
+		return nil
+	}
+	svc := NewProjectService(oc, nil, nil, nil, nil)
+	svc.SetProjectCellProvisioner(&fakeCells{envs: []string{"development"}})
+	svc.SetWriteTargets(staticWriteTarget{env: "development"})
+
+	if _, err := svc.CreateProject(context.Background(), "acme", &gen.CreateProjectRequest{Name: "shop"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
 	}
 }

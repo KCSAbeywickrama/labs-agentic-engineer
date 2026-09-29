@@ -289,14 +289,27 @@ func (s *Service) CreateProject(ctx context.Context, orgName string, req *gen.Cr
 	// it reports and cannot deploy a single component.
 	if s.cells != nil {
 		if cellErr := s.provisionProjectCells(ctx, orgName, project.Name, project.DeploymentPipeline); cellErr != nil {
-			if delErr := s.client.DeleteProject(ctx, orgName, project.Name); delErr != nil {
-				slog.ErrorContext(ctx, "failed to compensate project after cell provisioning failure",
-					"project", project.Name, "error", delErr)
-			}
+			s.compensateCreate(ctx, orgName, project.Name, "cell provisioning failure")
 			return nil, cellErr
 		}
 	} else {
 		slog.ErrorContext(ctx, "project cell provisioner not wired — project will have no cell namespace and cannot deploy",
+			"org", orgName, "project", project.Name)
+	}
+
+	// Every later write (dispatch, deploy) goes to the project's write target,
+	// so a project whose pipeline names none is refused here rather than
+	// created undeployable (ADR-0039). FATAL and compensating for the same
+	// reason as the cells above: the error is returned unchanged, so a caller
+	// can still tell *openchoreo.ErrNoWriteTarget from a transient failure,
+	// and neither is repaired by retrying a create OpenChoreo now answers 409.
+	if s.writeTargets != nil {
+		if _, wtErr := s.writeTargets.Resolve(ctx, orgName, project.Name); wtErr != nil {
+			s.compensateCreate(ctx, orgName, project.Name, "write target resolve failure")
+			return nil, wtErr
+		}
+	} else {
+		slog.ErrorContext(ctx, "write-target resolver not wired — the project's write target was not checked",
 			"org", orgName, "project", project.Name)
 	}
 
@@ -324,10 +337,7 @@ func (s *Service) CreateProject(ctx context.Context, orgName string, req *gen.Cr
 			// name. Every other repo failure stays best-effort (clone happens
 			// async and can be retried).
 			if sourcecontrol.IsRepoNameConflict(createErr) {
-				if delErr := s.client.DeleteProject(ctx, orgName, project.Name); delErr != nil {
-					slog.ErrorContext(ctx, "failed to compensate project after repo name conflict",
-						"project", project.Name, "error", delErr)
-				}
+				s.compensateCreate(ctx, orgName, project.Name, "repo name conflict")
 				return nil, createErr
 			}
 			slog.ErrorContext(ctx, "failed to provision repo", "project", project.Name, "error", createErr)
@@ -605,6 +615,16 @@ func applyRepoToProjectStatus(status *gen.ProjectStatus, repo *sourcecontrol.Git
 		return true
 	}
 	return false
+}
+
+// compensateCreate deletes the OC project a failed create just made, so the
+// failure leaves nothing behind. Best-effort: the create's own error is the
+// one the caller returns, and a failed delete is only logged.
+func (s *Service) compensateCreate(ctx context.Context, orgName, projectName, cause string) {
+	if delErr := s.client.DeleteProject(ctx, orgName, projectName); delErr != nil {
+		slog.ErrorContext(ctx, "failed to compensate project after "+cause,
+			"project", projectName, "error", delErr)
+	}
 }
 
 // translateHTTPError lifts OC-level sentinel errors (openchoreo.ErrNotFound
