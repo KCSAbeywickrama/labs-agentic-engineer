@@ -458,6 +458,10 @@ func (l *loop) work(ctx workflow.Context, ends bookends) (RunResult, error) {
 			return l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonPublisherCredentials)
 		case cycleProviderLimit:
 			return l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonModelProviderLimit)
+		case cycleNoWriteTarget:
+			// A configuration fault: settled directly, before the deploy-fix
+			// mint below, so no agent is dispatched at a pipeline.
+			return l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonNoWriteTarget)
 		default:
 			// File the deploy's work before looping, on whatever the cycle's
 			// RESULT was: a red cycle can also have a failed deployment now that
@@ -622,6 +626,10 @@ func (l *loop) runCycle(ctx workflow.Context, kind string, anchorIssue int) (cyc
 	switch {
 	case deployRes == cycleCancelled:
 		return cycleCancelled, nil
+	case deployRes == cycleNoWriteTarget:
+		// Ahead of a red build: the red build's fix issue could never deploy
+		// either, and the run has to settle on the configuration fault.
+		return cycleNoWriteTarget, nil
 	case buildRes == cycleRed:
 		return cycleRed, nil
 	default:

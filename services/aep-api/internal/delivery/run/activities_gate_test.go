@@ -71,7 +71,7 @@ func (r *recordingRuns) SetWaiting(_ context.Context, _, reason string, deps []s
 func TestCheckDeployReadiness_UnwiredFailsClosed(t *testing.T) {
 	acts := NewActivities(Deps{})
 
-	_, err := acts.CheckDeployReadiness(context.Background(), ProjectRef{OrgID: "acme", ProjectID: "shop"})
+	_, err := acts.CheckDeployReadiness(context.Background(), DeployGateInput{OrgID: "acme", ProjectID: "shop"})
 
 	require.Error(t, err, "an unwired gate must refuse, never wave the deploy through")
 	var appErr *temporal.ApplicationError
@@ -88,7 +88,7 @@ func TestCheckDeployReadiness_ReportsBothBlockersSeparately(t *testing.T) {
 		provisioning: []string{"postgres"},
 	}})
 
-	verdict, err := acts.CheckDeployReadiness(context.Background(), ProjectRef{OrgID: "acme", ProjectID: "shop"})
+	verdict, err := acts.CheckDeployReadiness(context.Background(), DeployGateInput{OrgID: "acme", ProjectID: "shop"})
 
 	require.NoError(t, err)
 	require.Equal(t, []string{"stripe"}, verdict.Unconfigured)
@@ -102,7 +102,7 @@ func TestCheckDeployReadiness_ReportsBothBlockersSeparately(t *testing.T) {
 func TestCheckDeployReadiness_ReadErrorIsRetryable(t *testing.T) {
 	acts := NewActivities(Deps{DeployGate: stubGate{err: errors.New("openchoreo unreachable")}})
 
-	_, err := acts.CheckDeployReadiness(context.Background(), ProjectRef{OrgID: "acme", ProjectID: "shop"})
+	_, err := acts.CheckDeployReadiness(context.Background(), DeployGateInput{OrgID: "acme", ProjectID: "shop"})
 
 	require.Error(t, err)
 	var appErr *temporal.ApplicationError
@@ -119,13 +119,36 @@ func TestCheckDeployReadiness_APermanentGateIsNonRetryable(t *testing.T) {
 	cause := fmt.Errorf("%w: no write target for acme/shop", delivery.ErrDeployPermanent)
 	acts := NewActivities(Deps{DeployGate: stubGate{err: cause}})
 
-	_, err := acts.CheckDeployReadiness(context.Background(), ProjectRef{OrgID: "acme", ProjectID: "shop"})
+	_, err := acts.CheckDeployReadiness(context.Background(), DeployGateInput{OrgID: "acme", ProjectID: "shop"})
 
 	var appErr *temporal.ApplicationError
 	require.True(t, errors.As(err, &appErr), "want an ApplicationError, got %v", err)
 	require.True(t, appErr.NonRetryable(), "no retry makes a missing write target appear")
 	require.Equal(t, errTypePermanentDeploy, appErr.Type(), "the workflow keys the deploy failure on this type")
 	require.Contains(t, appErr.Error(), "no write target", "the cause must survive to the run failure")
+}
+
+// TestCheckDeployReadiness_RecordsTheCauseOfAGateThatCanNeverOpen: the run
+// settles failed on no-write-target, and the record is what tells a reader why.
+// A retryable read failure records nothing: the next attempt may heal it.
+func TestCheckDeployReadiness_RecordsTheCauseOfAGateThatCanNeverOpen(t *testing.T) {
+	runs := &failureRuns{}
+	cause := fmt.Errorf("%w: no write target for acme/shop", delivery.ErrDeployPermanent)
+	acts := NewActivities(Deps{Runs: runs, DeployGate: stubGate{err: cause}})
+
+	_, _ = acts.CheckDeployReadiness(context.Background(), DeployGateInput{OrgID: "acme", ProjectID: "shop", RunID: "run-1"})
+
+	require.Len(t, runs.recorded, 1)
+	got := runs.recorded[0]
+	require.Equal(t, delivery.RunFailureCodeNoWriteTarget, got.Code)
+	require.Equal(t, delivery.RunPhaseDeploying, got.Phase)
+	require.True(t, got.Permanent)
+	require.Contains(t, got.Detail, "no write target for acme/shop")
+
+	runs.recorded = nil
+	acts = NewActivities(Deps{Runs: runs, DeployGate: stubGate{err: errors.New("openchoreo unreachable")}})
+	_, _ = acts.CheckDeployReadiness(context.Background(), DeployGateInput{OrgID: "acme", ProjectID: "shop", RunID: "run-1"})
+	require.Empty(t, runs.recorded, "a blip is not a failure to record")
 }
 
 // TestSetRunState_RoutesTheParksExplanationToSetWaiting pins the routing in

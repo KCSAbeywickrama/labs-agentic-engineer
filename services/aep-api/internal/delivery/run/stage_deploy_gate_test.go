@@ -248,12 +248,14 @@ func TestDeployGate_AResourceThatNeverProvisionsFailsTheCycle(t *testing.T) {
 		"the cause names the resource, which is the one fact the reader cannot derive")
 }
 
-// TestDeployGate_AGateThatCanNeverOpenFailsTheCycle. A project with no write
-// target has no environment for the gate to read. Parking on values would be a
-// hang under a reason that is not the cause, and returning the activity error
-// raw would fail the workflow before the row settles. It ends the cycle as a
-// deploy failure whose fix work names the cause.
-func TestDeployGate_AGateThatCanNeverOpenFailsTheCycle(t *testing.T) {
+// TestDeployGate_NoWriteTargetSettlesTheRunWithNoFixWork. A project with no
+// write target has no environment for the gate to read. Parking on values would
+// be a hang under a reason that is not the cause, and returning the activity
+// error raw would fail the workflow before the row settles. Nor is it a deploy
+// failure: filing fix work would dispatch the agent at a pipeline no code change
+// repairs. The run settles failed on its own reason, with nothing minted and no
+// further dispatch.
+func TestDeployGate_NoWriteTargetSettlesTheRunWithNoFixWork(t *testing.T) {
 	h := newHarness(t)
 	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
 	h.merges(1)
@@ -265,13 +267,12 @@ func TestDeployGate_AGateThatCanNeverOpenFailsTheCycle(t *testing.T) {
 	h.run(delivery.RunKindDev, 0)
 	res := h.result(t)
 
-	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonNoWriteTarget)
 	require.Equal(t, 0, h.deployCount(), "the gate never opened, so nothing was promoted")
 	parks, _ := h.parksOnValues()
 	require.Empty(t, parks, "a missing write target is not a credential a human can supply")
-	mints := h.deployMintInputs()
-	require.Len(t, mints, 1)
-	require.Contains(t, mints[0].Reasons["order-service"], "no write target", "the fix work names the cause")
+	require.Equal(t, 0, h.deployMintCount(), "no fix work: the agent cannot repair a pipeline")
+	require.Equal(t, 1, h.dispatchCount(), "no cycle is dispatched after the fault")
 }
 
 // TestDeployGate_TheValuesParkDoesNotSpendTheProvisioningBudget. The two waits

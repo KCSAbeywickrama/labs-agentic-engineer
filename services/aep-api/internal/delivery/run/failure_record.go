@@ -139,6 +139,22 @@ func planFailure(err error, attempt int) *delivery.RunFailure {
 	return f
 }
 
+// noWriteTargetFailure is the record of a deploy gate that can never open: the
+// project has no write target. Permanent on its first attempt; the detail is
+// the resolver's own words.
+func noWriteTargetFailure(err error, attempt int) *delivery.RunFailure {
+	now := time.Now().UTC()
+	return &delivery.RunFailure{
+		Code:      delivery.RunFailureCodeNoWriteTarget,
+		Phase:     delivery.RunPhaseDeploying,
+		Permanent: true,
+		Attempts:  attempt,
+		FirstAt:   now,
+		LastAt:    now,
+		Detail:    delivery.ScrubFailureDetail(err.Error()),
+	}
+}
+
 // recordPlanningFault writes the record (or clears a stale one) on the run
 // row. Best-effort: the fault the activity is about to return is the fact that
 // matters, and a bookkeeping write must not mask or replace it — the same

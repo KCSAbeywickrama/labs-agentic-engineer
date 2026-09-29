@@ -206,6 +206,38 @@ describe("failureCopy — runs with no record", () => {
   });
 });
 
+describe("failureCopy — a project with no environment to deploy into", () => {
+  const noTarget = (): RunFailure => ({
+    code: "no-write-target",
+    phase: "deploying",
+    permanent: true,
+    attempts: 1,
+    maxAttempts: 0,
+    firstAt: "2026-09-11T07:35:54Z",
+    lastAt: "2026-09-11T07:35:54Z",
+    detail: "no write target for acme/shop: project names no deployment pipeline",
+  });
+
+  it("names the pipeline, says no fix task was filed, and that retrying cannot help", () => {
+    const copy = failureCopy(run({ terminalReason: "no-write-target", failure: noTarget() }));
+    expect(copy?.tone).toBe("error");
+    expect(copy?.title).toBe("The project has no environment to deploy into");
+    expect(copy?.body).toContain("deployment pipeline");
+    expect(copy?.body).toContain("no fix task was filed");
+    expect(copy?.body).toContain("Retrying cannot fix this");
+    expect(copy?.details.detail).toContain("project names no deployment pipeline");
+  });
+
+  it("explains itself from the reason alone when the record was never written", () => {
+    const copy = failureCopy(run({ terminalReason: "no-write-target" }));
+    expect(copy?.title).toBe("The project has no environment to deploy into");
+  });
+
+  it("has a short label for the ledger", () => {
+    expect(failureLabel("no-write-target")).toBe("No environment to deploy into");
+  });
+});
+
 describe("failureCopy — nothing to explain", () => {
   it("draws nothing for a cancelled run, even with a record", () => {
     expect(failureCopy(run({ state: "cancelled", failure: sendgrid() }))).toBeUndefined();

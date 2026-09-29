@@ -531,6 +531,16 @@ type ProjectRef struct {
 	ProjectID string `json:"projectId"`
 }
 
+// DeployGateInput names the project whose deploy gate is read, and the run
+// that reads it: a gate that can never open is recorded on that run's failure
+// record. RunID is empty on an input from before it existed, which skips the
+// record; the field set is otherwise ProjectRef's, so older histories decode.
+type DeployGateInput struct {
+	OrgID     string `json:"orgId"`
+	ProjectID string `json:"projectId"`
+	RunID     string `json:"runId,omitempty"`
+}
+
 // DeployGateVerdict is what the gate saw, with the two blockers kept apart so
 // the workflow can tell "the platform is still working" from "a human has not
 // acted yet". Both empty means deploy.
@@ -551,7 +561,7 @@ type DeployGateVerdict struct {
 // The env is left empty so the readiness service resolves the project's write
 // target rather than the run package pinning an environment name it does not
 // own.
-func (a *Activities) CheckDeployReadiness(ctx context.Context, in ProjectRef) (DeployGateVerdict, error) {
+func (a *Activities) CheckDeployReadiness(ctx context.Context, in DeployGateInput) (DeployGateVerdict, error) {
 	if a.deployGate == nil {
 		return DeployGateVerdict{}, temporal.NewNonRetryableApplicationError(
 			"run: deploy gate not configured", "deploy-gate-not-configured", errNotConfigured)
@@ -559,7 +569,11 @@ func (a *Activities) CheckDeployReadiness(ctx context.Context, in ProjectRef) (D
 	unconfigured, provisioning, err := a.deployGate.DeploymentReadiness(ctx, in.OrgID, in.ProjectID, "")
 	if err != nil {
 		// A gate that cannot be read is retried; one that can never be read (the
-		// project has no write target) is an answer, and deployErr says so.
+		// project has no write target) is an answer, and deployErr says so. The
+		// answer is recorded first, so the settled run carries its cause.
+		if errors.Is(err, delivery.ErrDeployPermanent) {
+			a.recordPlanningFault(ctx, in.RunID, noWriteTargetFailure(err, activityAttempt(ctx)), activityAttempt(ctx))
+		}
 		return DeployGateVerdict{}, deployErr(err)
 	}
 	return DeployGateVerdict{Unconfigured: unconfigured, Provisioning: provisioning}, nil

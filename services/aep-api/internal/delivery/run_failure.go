@@ -95,6 +95,11 @@ const (
 	// on a BLOCKED run, and carries Host and ResetAt. Not permanent: the plan
 	// resets, and the user starts the run again.
 	RunFailureCodeModelProviderLimit = "model-provider-limit"
+	// RunFailureCodeNoWriteTarget — the deploy gate could not name the
+	// environment the project deploys into: its deployment pipeline is missing,
+	// empty or cyclic, or the project names none. Permanent; it explains
+	// RunReasonNoWriteTarget, and Detail carries the resolver's words.
+	RunFailureCodeNoWriteTarget = "no-write-target"
 )
 
 // Value / Scan make RunFailure encode itself as jsonb, for the same reason

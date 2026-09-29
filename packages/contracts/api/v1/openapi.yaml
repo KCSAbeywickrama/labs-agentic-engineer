@@ -6226,6 +6226,8 @@ components:
           description: Why a non-succeeded run stopped. Each value names exactly one failure class;
             empty while the run is non-terminal and on a succeeded run. agent-quota-blocked,
             publisher-credentials-missing and model-provider-limit explain state=blocked.
+            no-write-target is a failed run whose project's deployment pipeline names no
+            environment to deploy into; it files no fix work.
           type: string
         waitingReason:
           description: Why a `waiting` run is waiting. Empty for the ordinary between-cycles park,
@@ -8021,13 +8023,18 @@ components:
             repository, issue or credential is gone; `model-provider-limit` the
             model provider's usage limit stopped the coding agent — the run is
             `blocked`, not failed, and `host` and `resetAt` say whose limit and
-            until when.
+            until when; `no-write-target` the project's deployment pipeline
+            names no environment to deploy into (none referenced, or one that is
+            missing, empty or cyclic), so the deploy gate can never open; the
+            run fails with `terminalReason` no-write-target and no fix work, and
+            `detail` names the pipeline fault.
           enum:
           - dependency-unprovisionable
           - dependency-provision-failed
           - plan-turn-failed
           - repository-unavailable
           - model-provider-limit
+          - no-write-target
           type: string
           x-go-type: string
         phase:

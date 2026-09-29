@@ -276,7 +276,8 @@ func (l *loop) failDeploy(components []string, version delivery.VersionState, ca
 // is a few seconds of pod crash-looping after deploy, which is cosmetic.
 //
 // Returns cycleGreen when the gate opens, cycleCancelled if a human gave up,
-// and cycleDeployFailed when the provisioning budget runs out — in which case
+// cycleNoWriteTarget when the gate can never be read (the project has no write
+// target), and cycleDeployFailed when the provisioning budget runs out — in which case
 // promoting names the components the failure is filed against, since a resource
 // that will not provision is a stage-wide failure of the whole pass rather than
 // any one component's fault (see reasonForAll). Components this pass was NOT
@@ -322,19 +323,23 @@ func (l *loop) awaitDeployable(ctx workflow.Context, promoting []string,
 		}
 		var verdict DeployGateVerdict
 		if err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).CheckDeployReadiness,
-			ProjectRef{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID}).Get(ctx, &verdict); err != nil {
-			// A gate that can never open (the project has no write target) ends
-			// the cycle as a deploy failure naming the cause, the same way an
-			// unsatisfiable plan does. Returned raw it would fail the workflow
-			// before the row settles; a blip is still Temporal's to retry.
+			DeployGateInput{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID, RunID: l.in.RunID}).Get(ctx, &verdict); err != nil {
+			// A gate that can never open (the project has no write target) is a
+			// configuration fault, not a component that would not come up, so it
+			// is NOT a deploy failure: filing fix work would dispatch the agent at
+			// a pipeline no code change repairs. The activity has recorded the
+			// cause; the boundary settles the run on it. Returned raw it would
+			// fail the workflow before the row settles; a blip is still
+			// Temporal's to retry.
 			if !isPermanentDeploy(err) {
 				return cycleNone, err
 			}
 			if lerr := leaveValuesPark(); lerr != nil {
 				return cycleNone, lerr
 			}
-			l.failDeploy(promoting, version, err)
-			return cycleDeployFailed, nil
+			workflow.GetLogger(ctx).Error("deploy gate: project has no write target; the run cannot deploy",
+				"error", err)
+			return cycleNoWriteTarget, nil
 		}
 
 		switch {

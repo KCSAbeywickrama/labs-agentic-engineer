@@ -74,6 +74,11 @@ const (
 	// met after launch instead of at it: not a failure and not a spent budget,
 	// because re-dispatching would meet the same refusal until the plan resets.
 	cycleProviderLimit
+	// cycleNoWriteTarget — the deploy gate can never open, because the
+	// project's deployment pipeline names no environment to deploy into. A
+	// configuration fault: the run settles failed, with no fix issue and no
+	// further dispatch, since no code change repairs a pipeline.
+	cycleNoWriteTarget
 )
 
 // landing is how one dispatch attempt ended.

@@ -39,7 +39,7 @@ func checkDeployReadiness(t *testing.T, cause error) error {
 	t.Helper()
 	prov := provisioning.NewService(provisioning.Deps{WriteTargets: failingWriteTarget{err: cause}})
 	acts := run.NewActivities(run.Deps{DeployGate: deployGate{prov: prov}})
-	_, err := acts.CheckDeployReadiness(context.Background(), run.ProjectRef{OrgID: "acme", ProjectID: "shop"})
+	_, err := acts.CheckDeployReadiness(context.Background(), run.DeployGateInput{OrgID: "acme", ProjectID: "shop"})
 	return err
 }
 
