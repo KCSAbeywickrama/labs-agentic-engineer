@@ -63,13 +63,6 @@ func Run(opts Options) error {
 		ImpersonateOrgResolver: resolver,
 		SecretsProvider:        secretsProvider,
 	}
-	writeTarget, err := intapp.ResolveWriteTarget(context.Background(), cfg, seam)
-	if err != nil {
-		return fmt.Errorf("write-target: %w", err)
-	}
-	infra.WriteTarget = writeTarget
-	slog.Info("write-target resolved from DeploymentPipeline/default", "environment", writeTarget)
-
 	application, err := intapp.Assemble(cfg, infra, seam)
 	if err != nil {
 		return fmt.Errorf("app init failed: %w", err)

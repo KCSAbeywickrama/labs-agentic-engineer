@@ -110,24 +110,6 @@ func TestCodingAgentComponentNameBudgetCoversLongestWriteTarget(t *testing.T) {
 	}
 }
 
-func TestSetDevEnvironmentNameEmptyPanics(t *testing.T) {
-	orig := DevEnvironmentName
-	t.Cleanup(func() { SetDevEnvironmentName(orig) })
-
-	var panicked bool
-	func() {
-		defer func() {
-			if recover() != nil {
-				panicked = true
-			}
-		}()
-		SetDevEnvironmentName("")
-	}()
-	if !panicked {
-		t.Fatal("SetDevEnvironmentName(\"\") did not panic")
-	}
-}
-
 // TestNewCodingAgentRunNameIsStableAcrossRetries: a Temporal retry after a
 // crash must recreate the same Component name so CreateComponent's 409 path
 // re-reads instead of minting a second billed Component.

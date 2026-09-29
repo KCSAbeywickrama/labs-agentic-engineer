@@ -131,10 +131,6 @@ type Seam struct {
 // one produced; the comments call out the couplings.
 func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	var err error
-	if in.WriteTarget == "" {
-		return nil, fmt.Errorf("assemble: write-target is required (ResolveWriteTarget before Assemble; Fake sets default)")
-	}
-	openchoreo.SetDevEnvironmentName(in.WriteTarget)
 	db := in.DB
 	credStore := in.CredentialStore
 	minter := in.Minter
@@ -1784,4 +1780,15 @@ func runnableAgentRuntimes(cfg config.Config) []orgconfig.AgentRuntime {
 		runtimes = append(runtimes, orgconfig.AgentRuntimeOpenCode)
 	}
 	return runtimes
+}
+
+func ocClientConfig(cfg config.Config, seam Seam) openchoreo.Config {
+	return openchoreo.Config{
+		BaseURL:                  cfg.PlatformAPI.BaseURL,
+		HostHeader:               cfg.PlatformAPI.HostHeader,
+		AuthProvider:             seam.AuthProvider,
+		RequestAuthStrategy:      seam.RequestAuthStrategy,
+		ImpersonateOrgResolver:   seam.ImpersonateOrgResolver,
+		PreferPlainHTTPEndpoints: !cfg.PlatformAPI.DataPlaneGatewayTLS,
+	}
 }

@@ -19,19 +19,12 @@ package openchoreo
 import (
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 )
 
-const (
-	PlatformPipelineNamespace = "default"
-	PlatformPipelineName      = "default"
-)
-
 var (
-	ErrPipelineEmpty           = errors.New("deployment pipeline promotes through no source environment")
-	ErrPipelineSourceAmbiguous = errors.New("deployment pipeline has more than one source environment")
+	ErrPipelineEmpty = errors.New("deployment pipeline promotes through no source environment")
 	// ErrPipelineCyclic is a nonempty promotion graph with no never-a-target
 	// source (every source is also a target). Unlike ErrPipelineEmpty this
 	// will not become valid by waiting for setup.
@@ -42,46 +35,6 @@ var (
 	// render-name budgets derived from ocname.MaxEnvNameLen.
 	ErrWriteTargetTooLong = fmt.Errorf("write target is longer than %d characters", ocname.MaxEnvNameLen)
 )
-
-// PipelineSourceEnvironment returns the unique environment that appears as a
-// sourceEnvironmentRef and never as a target. That is the pipeline's lowest
-// environment — the write-target. Lexicographic order is not used.
-func PipelineSourceEnvironment(p *deploymentPipeline) (string, error) {
-	pipeID := PlatformPipelineNamespace + "/" + PlatformPipelineName
-	if p == nil {
-		return "", fmt.Errorf("%s: %w — run deployments/scripts/setup-aep.sh", pipeID, ErrPipelineEmpty)
-	}
-	sources := map[string]struct{}{}
-	targets := map[string]struct{}{}
-	for _, path := range p.Spec.PromotionPaths {
-		if n := path.SourceEnvironmentRef.Name; n != "" {
-			sources[n] = struct{}{}
-		}
-		for _, t := range path.TargetEnvironmentRefs {
-			if t.Name != "" {
-				targets[t.Name] = struct{}{}
-			}
-		}
-	}
-	var lowest []string
-	for s := range sources {
-		if _, isTarget := targets[s]; !isTarget {
-			lowest = append(lowest, s)
-		}
-	}
-	switch len(lowest) {
-	case 1:
-		return lowest[0], nil
-	case 0:
-		if len(sources) > 0 {
-			return "", fmt.Errorf("%s: %w", pipeID, ErrPipelineCyclic)
-		}
-		return "", fmt.Errorf("%s: %w — run deployments/scripts/setup-aep.sh", pipeID, ErrPipelineEmpty)
-	default:
-		slices.Sort(lowest)
-		return "", fmt.Errorf("%s: %w %v", pipeID, ErrPipelineSourceAmbiguous, lowest)
-	}
-}
 
 // PipelineRoot returns the pipeline's root environment by OpenChoreo's own
 // rule (component controller findRootEnvironment): the first promotion path,
