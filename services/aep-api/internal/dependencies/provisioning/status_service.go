@@ -218,8 +218,20 @@ func (s *Service) ConfigurationReadiness(ctx context.Context, orgID, projectID, 
 // itself short a value deploys with an empty credential, and the gate does not
 // catch it. That failure belongs to the org catalog surface, which is the only
 // place it can be seen or fixed; a project-scoped park can express neither.
+//
+// An empty env resolves the project's write target, and a resolve failure is
+// RETURNED rather than degraded like the console reads: this is a workflow gate,
+// and "nothing provisioned" would park the run on values forever under a reason
+// that is not the cause. The caller classifies it (a missing write target is
+// permanent, anything else is retried).
 func (s *Service) DeploymentReadiness(ctx context.Context, orgID, projectID, env string) (*DeploymentReadiness, error) {
-	env = s.readTarget(ctx, orgID, projectID, env)
+	if env == "" {
+		resolved, err := s.writeTarget(ctx, orgID, projectID)
+		if err != nil {
+			return nil, err
+		}
+		env = resolved
+	}
 	comps, err := s.design.ReadDesignComponents(ctx, orgID, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("provisioning: read design: %w", err)

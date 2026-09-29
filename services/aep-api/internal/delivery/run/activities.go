@@ -548,8 +548,9 @@ type DeployGateVerdict struct {
 // application with empty credentials, which is the exact outcome the gate
 // exists to prevent. Non-retryable, because no amount of waiting wires a port.
 //
-// The env is left empty so the readiness service applies its own default rather
-// than the run package pinning an environment name it does not own.
+// The env is left empty so the readiness service resolves the project's write
+// target rather than the run package pinning an environment name it does not
+// own.
 func (a *Activities) CheckDeployReadiness(ctx context.Context, in ProjectRef) (DeployGateVerdict, error) {
 	if a.deployGate == nil {
 		return DeployGateVerdict{}, temporal.NewNonRetryableApplicationError(
@@ -557,7 +558,9 @@ func (a *Activities) CheckDeployReadiness(ctx context.Context, in ProjectRef) (D
 	}
 	unconfigured, provisioning, err := a.deployGate.DeploymentReadiness(ctx, in.OrgID, in.ProjectID, "")
 	if err != nil {
-		return DeployGateVerdict{}, err
+		// A gate that cannot be read is retried; one that can never be read (the
+		// project has no write target) is an answer, and deployErr says so.
+		return DeployGateVerdict{}, deployErr(err)
 	}
 	return DeployGateVerdict{Unconfigured: unconfigured, Provisioning: provisioning}, nil
 }

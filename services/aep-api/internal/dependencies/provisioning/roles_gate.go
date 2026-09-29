@@ -502,10 +502,6 @@ func (s *Service) SignInCoordinates(ctx context.Context, orgID, projectID string
 	if s == nil || s.design == nil || s.bindings == nil || s.markers == nil {
 		return SignInClient{}
 	}
-	env := s.readTarget(ctx, orgID, projectID, "")
-	if env == "" {
-		return SignInClient{}
-	}
 	components, err := s.design.ReadDesignComponents(ctx, orgID, projectID)
 	if err != nil {
 		slog.DebugContext(ctx, "roles gate: no design to find the sign-in client on",
@@ -522,6 +518,12 @@ func (s *Service) SignInCoordinates(ctx context.Context, orgID, projectID string
 		for _, dep := range comp.Dependencies {
 			if dep.Kind != spec.DependencyKindPlatformResource || !byName[dep.ResourceType].EndUserAuth {
 				continue
+			}
+			// Resolved only now, so a project that signs nobody in costs no
+			// pipeline read.
+			env := s.readTarget(ctx, orgID, projectID, "")
+			if env == "" {
+				return SignInClient{}
 			}
 			name := ocname.ExternalResourceBindingName(projectID, dep.Name, env)
 			binding, berr := s.bindings.GetBinding(ctx, orgID, name)

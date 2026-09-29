@@ -18,6 +18,7 @@ package run
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -245,6 +246,32 @@ func TestDeployGate_AResourceThatNeverProvisionsFailsTheCycle(t *testing.T) {
 		"what this pass would have promoted is what could not be delivered; the resource is nobody's individual fault")
 	require.Contains(t, mints[0].Reasons["order-service"], "orders-db",
 		"the cause names the resource, which is the one fact the reader cannot derive")
+}
+
+// TestDeployGate_AGateThatCanNeverOpenFailsTheCycle. A project with no write
+// target has no environment for the gate to read. Parking on values would be a
+// hang under a reason that is not the cause, and returning the activity error
+// raw would fail the workflow before the row settles. It ends the cycle as a
+// deploy failure whose fix work names the cause.
+func TestDeployGate_AGateThatCanNeverOpenFailsTheCycle(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
+	h.merges(1)
+	h.set["gate"] = true
+	cause := fmt.Errorf("%w: no write target for acme/shop", delivery.ErrDeployPermanent)
+	h.env.OnActivity(h.acts.CheckDeployReadiness, mock.Anything, mock.Anything).
+		Return(DeployGateVerdict{}, deployErr(cause))
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonDeployBudget)
+	require.Equal(t, 0, h.deployCount(), "the gate never opened, so nothing was promoted")
+	parks, _ := h.parksOnValues()
+	require.Empty(t, parks, "a missing write target is not a credential a human can supply")
+	mints := h.deployMintInputs()
+	require.Len(t, mints, 1)
+	require.Contains(t, mints[0].Reasons["order-service"], "no write target", "the fix work names the cause")
 }
 
 // TestDeployGate_TheValuesParkDoesNotSpendTheProvisioningBudget. The two waits

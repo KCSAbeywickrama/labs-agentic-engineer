@@ -195,8 +195,8 @@ func TestDeprovisionProject_NoWriteTargetDeprovisionsNothing(t *testing.T) {
 	}
 }
 
-// The status reads degrade to "nothing provisioned" with a nil error.
-func TestStatusReads_NoWriteTargetReadAsNothingProvisioned(t *testing.T) {
+// The console reads degrade to "nothing provisioned" with a nil error.
+func TestConsoleReads_NoWriteTargetReadAsNothingProvisioned(t *testing.T) {
 	// A binding under the old constant must not be read: there is no
 	// environment to read it in.
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
@@ -209,19 +209,30 @@ func TestStatusReads_NoWriteTargetReadAsNothingProvisioned(t *testing.T) {
 	if err != nil || st.Status != "unknown" || st.Ready {
 		t.Fatalf("Status = %+v, %v; want unknown, nil", st, err)
 	}
-	dr, err := svc.DeploymentReadiness(ctx, "acme", "proj", "")
-	if err != nil {
-		t.Fatalf("DeploymentReadiness: %v", err)
-	}
-	if !reflect.DeepEqual(dr.Unconfigured, []string{"stripe"}) || !reflect.DeepEqual(dr.Provisioning, []string{"orders-db"}) {
-		t.Fatalf("DeploymentReadiness = %+v, want stripe unconfigured and orders-db provisioning", dr)
-	}
 	cr, err := svc.ConfigurationReadiness(ctx, "acme", "proj", "")
 	if err != nil {
 		t.Fatalf("ConfigurationReadiness: %v", err)
 	}
 	if cr.Configured || len(cr.Dependencies) != 1 || cr.Dependencies[0].State != ValueStateNotProvisioned {
 		t.Fatalf("ConfigurationReadiness = %+v, want stripe not-provisioned", cr)
+	}
+}
+
+// DeploymentReadiness is the run's deploy gate, not a console read: degrading
+// would park the run on values that are not the cause, so both a missing write
+// target and a transient failure come back as errors for the caller to classify.
+func TestDeploymentReadiness_ResolveFailureIsReturned(t *testing.T) {
+	for name, cause := range map[string]error{
+		"no write target": noWriteTarget(),
+		"transient":       errors.New("openchoreo: 503"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc := serviceWithTarget(staticWriteTarget{err: cause}, newFakeIssues(nil), &fakeExecStore{}, &fakeExtProv{}, &fakePlatProv{}, &fakeBindings{})
+			got, err := svc.DeploymentReadiness(context.Background(), "acme", "proj", "")
+			if !errors.Is(err, cause) || got != nil {
+				t.Fatalf("DeploymentReadiness = %+v, %v; want nil, %v", got, err, cause)
+			}
+		})
 	}
 }
 

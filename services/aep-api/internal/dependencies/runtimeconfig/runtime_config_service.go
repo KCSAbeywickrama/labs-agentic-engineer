@@ -19,6 +19,7 @@ package runtimeconfig
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -527,7 +528,7 @@ func renderEnvConfigJS(values map[string]interface{}) string {
 // writeTarget resolves the project's write target for one emission pass.
 func (s *RuntimeConfigService) writeTarget(ctx context.Context, orgID, projectID string) (string, error) {
 	if s.writeTargets == nil {
-		return "", fmt.Errorf("write targets not configured")
+		return "", errors.New("write targets not configured")
 	}
 	return s.writeTargets.Resolve(ctx, orgID, projectID)
 }

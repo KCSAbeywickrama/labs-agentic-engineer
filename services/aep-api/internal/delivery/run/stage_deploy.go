@@ -323,7 +323,18 @@ func (l *loop) awaitDeployable(ctx workflow.Context, promoting []string,
 		var verdict DeployGateVerdict
 		if err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).CheckDeployReadiness,
 			ProjectRef{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID}).Get(ctx, &verdict); err != nil {
-			return cycleNone, err
+			// A gate that can never open (the project has no write target) ends
+			// the cycle as a deploy failure naming the cause, the same way an
+			// unsatisfiable plan does. Returned raw it would fail the workflow
+			// before the row settles; a blip is still Temporal's to retry.
+			if !isPermanentDeploy(err) {
+				return cycleNone, err
+			}
+			if lerr := leaveValuesPark(); lerr != nil {
+				return cycleNone, lerr
+			}
+			l.failDeploy(promoting, version, err)
+			return cycleDeployFailed, nil
 		}
 
 		switch {

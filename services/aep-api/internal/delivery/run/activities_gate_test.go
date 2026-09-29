@@ -19,6 +19,7 @@ package run
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -108,6 +109,23 @@ func TestCheckDeployReadiness_ReadErrorIsRetryable(t *testing.T) {
 	if errors.As(err, &appErr) {
 		require.False(t, appErr.NonRetryable(), "a read failure is a blip; retrying is the right answer")
 	}
+}
+
+// TestCheckDeployReadiness_APermanentGateIsNonRetryable: a gate that can never
+// be read (the composition root marks a project with no write target
+// delivery.ErrDeployPermanent) is an answer, not a blip, so the run fails with
+// its cause instead of retrying or parking on it.
+func TestCheckDeployReadiness_APermanentGateIsNonRetryable(t *testing.T) {
+	cause := fmt.Errorf("%w: no write target for acme/shop", delivery.ErrDeployPermanent)
+	acts := NewActivities(Deps{DeployGate: stubGate{err: cause}})
+
+	_, err := acts.CheckDeployReadiness(context.Background(), ProjectRef{OrgID: "acme", ProjectID: "shop"})
+
+	var appErr *temporal.ApplicationError
+	require.True(t, errors.As(err, &appErr), "want an ApplicationError, got %v", err)
+	require.True(t, appErr.NonRetryable(), "no retry makes a missing write target appear")
+	require.Equal(t, errTypePermanentDeploy, appErr.Type(), "the workflow keys the deploy failure on this type")
+	require.Contains(t, appErr.Error(), "no write target", "the cause must survive to the run failure")
 }
 
 // TestSetRunState_RoutesTheParksExplanationToSetWaiting pins the routing in

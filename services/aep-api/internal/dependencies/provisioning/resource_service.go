@@ -54,7 +54,9 @@ func (s *Service) Provision(ctx context.Context, orgID, projectID, depName strin
 // readiness watcher finishes it out-of-band). An empty envs provisions into env.
 // An empty env is resolved here, once, after the dependency is validated, so a
 // wrong-kind or unknown dependency is still answered as such: the build path
-// passes the env it already resolved, the HTTP path passes "". It takes the gate number DIRECTLY so the build path can thread the
+// passes the env it already resolved, the HTTP path passes "".
+//
+// It takes the gate number DIRECTLY so the build path can thread the
 // just-minted number past GitHub's eventually-consistent issue list (issue #164);
 // the public Provision resolves it via findProvisionIssue for its HTTP callers. A
 // gateNumber of 0 authors the resource with no run admitted (a safe no-op gate).

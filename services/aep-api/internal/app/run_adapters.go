@@ -19,6 +19,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -364,8 +365,16 @@ type deployGate struct {
 	prov *provisioning.Service
 }
 
+// DeploymentReadiness marks a project with no write target
+// delivery.ErrDeployPermanent: it is a configuration fact, so the run fails
+// naming the cause instead of retrying. Any other read failure is returned as
+// is and retried.
 func (g deployGate) DeploymentReadiness(ctx context.Context, orgID, projectID, env string) ([]string, []string, error) {
 	readiness, err := g.prov.DeploymentReadiness(ctx, orgID, projectID, env)
+	var nwt *openchoreo.ErrNoWriteTarget
+	if errors.As(err, &nwt) {
+		return nil, nil, fmt.Errorf("%w: %w", delivery.ErrDeployPermanent, err)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
