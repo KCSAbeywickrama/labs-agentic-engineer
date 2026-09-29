@@ -52,3 +52,43 @@ func TestProjectCellClientGetPipeline_ClassifiesNotFound(t *testing.T) {
 		})
 	}
 }
+
+// A served pipeline must decode into promotion paths and resolve to its root.
+// This is the only test that drives getPipeline over a real 200 body.
+func TestProjectCellClientGetPipeline_DecodesPromotionPaths(t *testing.T) {
+	path := func(src string, targets ...string) map[string]any {
+		refs := []map[string]any{}
+		for _, n := range targets {
+			refs = append(refs, map[string]any{"name": n})
+		}
+		return map[string]any{
+			"sourceEnvironmentRef":  map[string]any{"name": src},
+			"targetEnvironmentRefs": refs,
+		}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if want := nsBase("acme") + "/deploymentpipelines/linear"; r.URL.Path != want {
+			t.Errorf("path %q, want %q", r.URL.Path, want)
+			http.Error(w, "bad path", http.StatusNotFound)
+			return
+		}
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"metadata": map[string]any{"name": "linear"},
+			"spec": map[string]any{"promotionPaths": []any{
+				path("development", "staging"),
+				path("staging", "production"),
+			}},
+		})
+	}))
+	defer srv.Close()
+
+	c := &projectCellClient{baseURL: srv.URL, http: srv.Client()}
+	p, err := c.getPipeline(context.Background(), "acme", "linear")
+	if err != nil {
+		t.Fatalf("getPipeline: %v", err)
+	}
+	got, err := PipelineRoot("linear", p)
+	if err != nil || got != "development" {
+		t.Fatalf("PipelineRoot = %q, err=%v, want development", got, err)
+	}
+}

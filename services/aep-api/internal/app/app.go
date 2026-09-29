@@ -1782,6 +1782,7 @@ func runnableAgentRuntimes(cfg config.Config) []orgconfig.AgentRuntime {
 	return runtimes
 }
 
+// ocClientConfig maps aep-api config and the auth seam onto the OpenChoreo client config.
 func ocClientConfig(cfg config.Config, seam Seam) openchoreo.Config {
 	return openchoreo.Config{
 		BaseURL:                  cfg.PlatformAPI.BaseURL,
