@@ -36,13 +36,18 @@ when it is needed.**
 
 4. **Writes fail, reads degrade.** A typed `*openchoreo.ErrNoWriteTarget` covers
    configuration faults only: no pipeline reference, a pipeline that is missing
-   (a live 404 maps to `ErrNotFound`), empty, cyclic or too long. Transient
-   OpenChoreo errors (network, 5xx, 401/403) propagate unchanged so Temporal
-   retries them. Project create fails and compensates. At the deploy gate the
-   error is permanent (`ErrDeployPermanent`); a permanent failure there or at
-   coding-agent dispatch settles the run `failed` with terminal reason and
-   `RunFailure` code `no-write-target`, mints no fix issue and dispatches no
-   agent. Console reads degrade instead: the project status deploy stage reads
+   (a live 404 maps to `ErrNotFound`), empty, cyclic or too long. A 404 on the
+   Project itself is not one: it propagates as not-found, never as
+   `ErrNoWriteTarget`. Transient OpenChoreo errors (network, 5xx, 401/403)
+   propagate unchanged so Temporal retries them. Project create resolves the
+   write target after provisioning its cells and, on any resolve failure, fails
+   and compensates; the typed error maps to 422 `no_write_target`. In the run
+   supervisor the fault carries `delivery.ErrNoWriteTarget` (beside
+   `ErrDeployPermanent` on deploy paths) and the Temporal type `NoWriteTarget`.
+   Met at coding-agent dispatch or at any deploy step (the gate, the version
+   read, a promote or a readiness poll), it settles the run `failed` with
+   terminal reason and `RunFailure` code `no-write-target`, mints no fix issue
+   and dispatches no agent. Console reads degrade instead: the project status deploy stage reads
    `none` with a WARN log, provisioning status and configuration readiness
    degrade, and the identity panel shows the directory unavailable.
 
