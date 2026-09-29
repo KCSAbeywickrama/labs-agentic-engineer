@@ -427,7 +427,8 @@ func (s *Service) ListOrgEnvironments(ctx context.Context, orgID string) ([]Envi
 // resolved unambiguously — a nil pipelines port, a listing/read failure, or
 // more than one candidate pipeline with none named "default".
 //
-// Resolution order:
+// Resolution order (openchoreo.ChooseOrgDefaultPipeline, shared with
+// WriteTargets.OrgDefaultRoot):
 //  1. The pipeline named "default" — the documented platform convention
 //     (DeploymentPipeline/default per namespace, created by setup and used
 //     whenever a project does not name one).
@@ -444,17 +445,8 @@ func (s *Service) resolvePipelineOrder(ctx context.Context, orgID string) (order
 		slog.WarnContext(ctx, "provisioning: list deployment pipelines failed; serving environments in OC list order with no promotion info", "org", orgID, "error", err)
 		return nil, false
 	}
-	pipelineName := ""
-	for _, n := range names {
-		if n == "default" {
-			pipelineName = n
-			break
-		}
-	}
-	if pipelineName == "" && len(names) == 1 {
-		pipelineName = names[0]
-	}
-	if pipelineName == "" {
+	pipelineName, ok := openchoreo.ChooseOrgDefaultPipeline(names)
+	if !ok {
 		slog.WarnContext(ctx, "provisioning: org has no resolvable deployment pipeline (no \"default\" and not exactly one candidate); serving environments in OC list order with no promotion info", "org", orgID, "candidates", names)
 		return nil, false
 	}

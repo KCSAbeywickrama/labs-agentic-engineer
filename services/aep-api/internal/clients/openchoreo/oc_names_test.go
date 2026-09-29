@@ -26,6 +26,7 @@ import (
 
 	ocgen "github.com/wso2/aep/aep-api/internal/clients/openchoreo/gen"
 	"github.com/wso2/aep/aep-api/internal/platform/k8sname"
+	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 )
 
 // TestNewBuildRunNameFitsLabelBudget guards the console "Build" path, which
@@ -83,11 +84,11 @@ func TestNewCodingAgentRunNameFitsOCJobLabelBudget(t *testing.T) {
 			if !strings.HasPrefix(friendly, "ca-") {
 				t.Errorf("NewCodingAgentRunName = %q, want ca- prefix", friendly)
 			}
-			if len(scoped) > CodingAgentComponentNameBudget() {
+			if len(scoped) > CodingAgentComponentNameBudget {
 				t.Errorf("scoped name %q is %d chars, over CodingAgentComponentNameBudget=%d",
-					scoped, len(scoped), CodingAgentComponentNameBudget())
+					scoped, len(scoped), CodingAgentComponentNameBudget)
 			}
-			jobLabel := scoped + "-" + DevEnvironmentName + "-" + strings.Repeat("a", ocJobNameHashLen)
+			jobLabel := scoped + "-" + strings.Repeat("e", ocname.MaxEnvNameLen) + "-" + strings.Repeat("a", ocJobNameHashLen)
 			if len(jobLabel) > k8sname.MaxLabelValueLen {
 				t.Errorf("OC Job label %q is %d chars, over MaxLabelValueLen=%d",
 					jobLabel, len(jobLabel), k8sname.MaxLabelValueLen)
@@ -96,20 +97,16 @@ func TestNewCodingAgentRunNameFitsOCJobLabelBudget(t *testing.T) {
 	}
 }
 
-func TestCodingAgentComponentNameBudgetFollowsWriteTarget(t *testing.T) {
-	orig := DevEnvironmentName
-	t.Cleanup(func() { SetDevEnvironmentName(orig) })
-
-	SetDevEnvironmentName("default")
-	wantDefault := k8sname.MaxLabelValueLen - (1 + len("default") + 1 + ocJobNameHashLen) // 46
-	if got := CodingAgentComponentNameBudget(); got != wantDefault {
-		t.Fatalf("default budget = %d, want %d", got, wantDefault)
+// The budget is a constant sized for the longest write target AEP accepts
+// (ocname.MaxEnvNameLen), so it is 63 - (1 + 11 + 1 + 8).
+func TestCodingAgentComponentNameBudgetCoversLongestWriteTarget(t *testing.T) {
+	if CodingAgentComponentNameBudget != 42 {
+		t.Fatalf("budget = %d, want 42", CodingAgentComponentNameBudget)
 	}
-
-	SetDevEnvironmentName("development")
-	wantDev := k8sname.MaxLabelValueLen - (1 + len("development") + 1 + ocJobNameHashLen) // 42
-	if got := CodingAgentComponentNameBudget(); got != wantDev {
-		t.Fatalf("development budget = %d, want %d", got, wantDev)
+	longest := strings.Repeat("e", ocname.MaxEnvNameLen)
+	label := strings.Repeat("c", CodingAgentComponentNameBudget) + "-" + longest + "-" + strings.Repeat("a", ocJobNameHashLen)
+	if len(label) != k8sname.MaxLabelValueLen {
+		t.Fatalf("job label = %d chars, want exactly %d", len(label), k8sname.MaxLabelValueLen)
 	}
 }
 
@@ -156,7 +153,7 @@ func TestCreateComponentRejectsOverlongCodingAgentName(t *testing.T) {
 	defer srv.Close()
 
 	c := NewComponentClient(Config{BaseURL: srv.URL}).(*componentClient)
-	overlong := strings.Repeat("x", CodingAgentComponentNameBudget()) // friendly alone fills the scoped budget once project is prefixed
+	overlong := strings.Repeat("x", CodingAgentComponentNameBudget) // friendly alone fills the scoped budget once project is prefixed
 	_, err := c.CreateComponent(context.Background(), "default", "hello-world-api-4", &CreateComponentRequest{
 		Name: overlong,
 		Type: CodingAgentComponentTypeRef,

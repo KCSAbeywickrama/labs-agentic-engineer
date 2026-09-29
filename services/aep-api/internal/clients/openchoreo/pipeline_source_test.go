@@ -156,3 +156,63 @@ func TestPipelineSourceEnvironment_ErrorNamesThePipeline(t *testing.T) {
 		t.Fatalf("empty error %v, want it to name default/default", err)
 	}
 }
+
+func pipelineOf(paths ...[2]any) *deploymentPipeline {
+	p := &deploymentPipeline{}
+	for _, path := range paths {
+		src := path[0].(string)
+		var tgts []string
+		if path[1] != nil {
+			tgts = path[1].([]string)
+		}
+		entry := struct {
+			SourceEnvironmentRef struct {
+				Name string `json:"name"`
+			} `json:"sourceEnvironmentRef"`
+			TargetEnvironmentRefs []struct {
+				Name string `json:"name"`
+			} `json:"targetEnvironmentRefs"`
+		}{}
+		entry.SourceEnvironmentRef.Name = src
+		for _, t := range tgts {
+			entry.TargetEnvironmentRefs = append(entry.TargetEnvironmentRefs, struct {
+				Name string `json:"name"`
+			}{Name: t})
+		}
+		p.Spec.PromotionPaths = append(p.Spec.PromotionPaths, entry)
+	}
+	return p
+}
+
+func TestPipelineRoot(t *testing.T) {
+	cases := []struct {
+		name    string
+		p       *deploymentPipeline
+		want    string
+		wantErr error
+	}{
+		{"k3d quickstart chain", pipelineOf([2]any{"development", []string{"staging"}}, [2]any{"staging", []string{"production"}}), "development", nil},
+		{"chain listed out of order", pipelineOf([2]any{"staging", []string{"production"}}, [2]any{"development", []string{"staging"}}), "development", nil},
+		{"single source, no targets", pipelineOf([2]any{"default", nil}), "default", nil},
+		{"two roots: first in list order wins", pipelineOf([2]any{"dev-b", []string{"prod"}}, [2]any{"dev-a", []string{"prod"}}), "dev-b", nil},
+		{"cyclic", pipelineOf([2]any{"a", []string{"b"}}, [2]any{"b", []string{"a"}}), "", ErrPipelineCyclic},
+		{"self edge", pipelineOf([2]any{"default", []string{"default"}}), "", ErrPipelineCyclic},
+		{"no promotion paths", &deploymentPipeline{}, "", ErrPipelineEmpty},
+		{"nil pipeline", nil, "", ErrPipelineEmpty},
+		{"only empty sources", pipelineOf([2]any{"", []string{"staging"}}), "", ErrPipelineCyclic},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := PipelineRoot("default", tc.p)
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("PipelineRoot = (%q, %v), want (%q, nil)", got, err, tc.want)
+			}
+		})
+	}
+}

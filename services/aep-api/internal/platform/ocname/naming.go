@@ -41,12 +41,11 @@ const (
 	// It is the strictest length limit any platform-resource backing store
 	// imposes, so it governs the bound for the OC Resource name below.
 	cnpgMaxClusterName = 50
-	// maxEnvNameLen is the longest environment slug AEP embeds in a render name.
-	// The write-target (openchoreo.DevEnvironmentName) is boot-resolved and must
-	// fit this bound; the bound stays at 11 so "development" (11 chars) still
-	// fits without moving any derived name budget. OpenChoreo environment names
-	// longer than 11 still need this constant raised — out of scope unless we hit one.
-	maxEnvNameLen = 11
+	// MaxEnvNameLen is the longest environment name AEP embeds in a render
+	// name. A project's write target (openchoreo.WriteTargets) longer than
+	// this is refused at resolve time rather than overflowing a derived name.
+	// 11 fits "development"; raising it moves every budget below.
+	MaxEnvNameLen = 11
 	// ocRenderDecoration is the overhead OpenChoreo adds when it renders a Resource
 	// into a per-env backing object. LIVE-VERIFIED on OC 1.1.1: the rendered object
 	// (e.g. the CloudNativePG Cluster) is named off the RESOURCE name, not the
@@ -54,7 +53,7 @@ const (
 	// "r-" (2) + "-" + env + "-" + an 8-char hash, plus one guard char for a wider
 	// hash. (The earlier #165 bound assumed r-<bindingName>-<hash> and bounded the
 	// binding name; that never governed the Cluster name, which overflowed at 52.)
-	ocRenderDecoration = 2 + 1 + maxEnvNameLen + 1 + 8 + 1 // 24
+	ocRenderDecoration = 2 + 1 + MaxEnvNameLen + 1 + 8 + 1 // 24
 	// maxOCResourceName is the longest a Resource metadata.name may be so its
 	// OC-rendered r-<name>-<env>-<hash> backing object stays within
 	// cnpgMaxClusterName. The render root is the RESOURCE name, so this bound lives
@@ -64,7 +63,7 @@ const (
 	// A binding is not a render root, and since the Resource name it derives from
 	// is already bounded to maxOCResourceName, a binding stays within this by
 	// construction; the bound is a defensive guard, not the CNPG-governing one.
-	maxOCBindingName = maxOCResourceName + 1 + maxEnvNameLen // 38
+	maxOCBindingName = maxOCResourceName + 1 + MaxEnvNameLen // 38
 )
 
 // boundName returns natural unchanged when it already fits max; otherwise it
