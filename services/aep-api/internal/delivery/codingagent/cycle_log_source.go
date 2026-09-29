@@ -61,26 +61,31 @@ func NewOCLogSource(runtime openchoreo.RuntimeClient) *OCLogSource {
 // It asks for the WHOLE log the platform still holds and cuts bytes off the end
 // of it, which is a viewer's bargain: fresh content now, and whatever scrolled
 // off comes back on the next poll.
-func (s *OCLogSource) Tail(ctx context.Context, orgName, projectName, componentName string, maxBytes int) (LiveTail, error) {
-	binding, err := s.Binding(ctx, orgName, projectName, componentName)
+func (s *OCLogSource) Tail(ctx context.Context, orgName, projectName, componentName, environment string, maxBytes int) (LiveTail, error) {
+	binding, err := s.Binding(ctx, orgName, projectName, componentName, environment)
 	if err != nil {
 		return LiveTail{}, err
 	}
 	return s.read(ctx, orgName, binding, time.Time{}, maxBytes)
 }
 
-// Binding resolves a cycle Component's release binding in the run environment.
+// Binding resolves a cycle Component's release binding in the environment its
+// Job was bound into. An empty environment is refused rather than looked up:
+// it is a caller that lost the cycle's environment, and "" names no binding.
 //
 // It is a separate call because the answer is FIXED for the attempt, and the
 // recorder polls once a second: resolving it on every read spent a whole
 // OpenChoreo round trip re-deriving a constant, and — worse — spent it BETWEEN
 // the moment the recorder chose its read window and the moment the log API
 // applied one, which is how a slow list came to cost a run its events.
-func (s *OCLogSource) Binding(ctx context.Context, orgName, projectName, componentName string) (string, error) {
+func (s *OCLogSource) Binding(ctx context.Context, orgName, projectName, componentName, environment string) (string, error) {
 	if s == nil || s.runtime == nil {
 		return "", fmt.Errorf("codingagent: live log source not configured")
 	}
-	binding, err := s.runtime.ReleaseBindingName(ctx, orgName, projectName, componentName, openchoreo.DevEnvironmentName)
+	if environment == "" {
+		return "", fmt.Errorf("codingagent: no environment to read %s's release binding in", componentName)
+	}
+	binding, err := s.runtime.ReleaseBindingName(ctx, orgName, projectName, componentName, environment)
 	if err != nil {
 		if errors.Is(err, openchoreo.ErrNotFound) {
 			return "", fmt.Errorf("%w: %s", ErrComponentGone, componentName)

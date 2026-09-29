@@ -241,3 +241,31 @@ func (f *fakeExecRepo) DistinctDeployedProjects(context.Context) ([]delivery.Dep
 // exercise the SHAPE of a launch, not the OC Component chain (which needs
 // cluster infra to unit-test).
 const noDispatchPathErr = "no coding-agent dispatch path configured"
+
+// fakeWriteTargets answers every project with one write target, or err, and
+// counts the resolves so a test can pin that a recorded environment is used
+// without asking.
+type fakeWriteTargets struct {
+	env string
+	err error
+
+	mu    sync.Mutex
+	calls int
+}
+
+func (f *fakeWriteTargets) Resolve(context.Context, string, string) (string, error) {
+	f.mu.Lock()
+	f.calls++
+	f.mu.Unlock()
+	return f.env, f.err
+}
+
+func (f *fakeWriteTargets) resolves() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+// testWriteTargets is the write target the tests that do not care about it
+// dispatch into.
+func testWriteTargets() *fakeWriteTargets { return &fakeWriteTargets{env: "development"} }

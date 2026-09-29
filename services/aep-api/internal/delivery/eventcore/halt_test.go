@@ -19,6 +19,7 @@ package eventcore
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -134,5 +135,39 @@ func TestHaltUnfinishedWork_DoesNotRepeatItselfOnAnAlreadyHaltedIssue(t *testing
 	if len(halted) != 0 || len(h.issues.commented) != 0 {
 		t.Fatalf("an already-halted issue is not re-halted: halted=%v commented=%v",
 			halted, h.issues.commented)
+	}
+}
+
+// The deploy-fix issue names the environment the failed binding lives in: the
+// project's write target the pass deployed into, never a boot-time constant.
+func TestMintDeployFixIssues_NamesTheEnvironment(t *testing.T) {
+	h := newHarness(t)
+	failed := []delivery.DeployTarget{{Component: "order-service", CommitSHA: "0123456789abcdef"}}
+
+	filed, err := h.events.MintDeployFixIssues(t.Context(), testOrg, testProject, 7, "dev-b",
+		failed, map[string]string{"order-service": "RenderingFailed"})
+	if err != nil {
+		t.Fatalf("MintDeployFixIssues: %v", err)
+	}
+	if len(filed) != 1 || len(h.issues.created) != 1 {
+		t.Fatalf("filed = %v, created = %d, want one issue", filed, len(h.issues.created))
+	}
+	if body := h.issues.created[0].Body; !strings.Contains(body, "- Environment: dev-b\n") {
+		t.Fatalf("body does not name the environment:\n%s", body)
+	}
+}
+
+// A failure no binding was read for (an unsatisfiable plan, a provisioning
+// timeout) has no environment to name, and the body names none rather than a
+// guess.
+func TestMintDeployFixIssues_NamesNoEnvironmentItWasNotGiven(t *testing.T) {
+	h := newHarness(t)
+	failed := []delivery.DeployTarget{{Component: "order-service", CommitSHA: "0123456789abcdef"}}
+
+	if _, err := h.events.MintDeployFixIssues(t.Context(), testOrg, testProject, 7, "", failed, nil); err != nil {
+		t.Fatalf("MintDeployFixIssues: %v", err)
+	}
+	if body := h.issues.created[0].Body; strings.Contains(body, "Environment:") {
+		t.Fatalf("body names an environment it was not given:\n%s", body)
 	}
 }

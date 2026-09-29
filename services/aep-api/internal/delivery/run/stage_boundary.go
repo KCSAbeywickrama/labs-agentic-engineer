@@ -262,6 +262,9 @@ type loop struct {
 	// two components at two different commits.
 	deployFailed   []delivery.DeployTarget
 	deployFailures map[string]string
+	// deployEnvironment is where the failed bindings live, from the poll that
+	// reported them. Empty for a failure no binding was read for.
+	deployEnvironment string
 	// cycleID is the current cycle's record id. Surfaced on the loop because the
 	// verdict write lands after the agent stage has returned.
 	cycleID string
@@ -1120,6 +1123,7 @@ func (l *loop) mintDeployFixIssues(ctx workflow.Context) error {
 			OrgID:           l.in.OrgID,
 			ProjectID:       l.in.ProjectID,
 			MilestoneNumber: l.in.MilestoneNumber,
+			Environment:     l.deployEnvironment,
 			Failed:          l.deployFailed,
 			Reasons:         l.deployFailures,
 		}).Get(ctx, nil)
@@ -1128,6 +1132,6 @@ func (l *loop) mintDeployFixIssues(ctx workflow.Context) error {
 	}
 	workflow.GetLogger(ctx).Info("deployment failed; filed fix work",
 		"components", delivery.TargetNames(l.deployFailed))
-	l.deployFailed, l.deployFailures = nil, nil
+	l.deployFailed, l.deployFailures, l.deployEnvironment = nil, nil, ""
 	return nil
 }

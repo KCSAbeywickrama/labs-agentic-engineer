@@ -74,8 +74,9 @@ const (
 	// met after launch instead of at it: not a failure and not a spent budget,
 	// because re-dispatching would meet the same refusal until the plan resets.
 	cycleProviderLimit
-	// cycleNoWriteTarget — the deploy gate can never open, because the
-	// project's deployment pipeline names no environment to deploy into. A
+	// cycleNoWriteTarget — the project's deployment pipeline names no
+	// environment to deploy into, met at the deploy gate (which can never open)
+	// or at dispatch (which has nowhere to bind the agent's Job). A
 	// configuration fault: the run settles failed, with no fix issue and no
 	// further dispatch, since no code change repairs a pipeline.
 	cycleNoWriteTarget
@@ -204,6 +205,11 @@ func (l *loop) dispatchUntilLanded(ctx workflow.Context, kind string, anchorIssu
 			// SecretReference it is missing.
 			if isPublisherCredentialsMissing(derr) {
 				return false, cyclePublisherCredentials, nil
+			}
+			// And again: the Job has no environment to be bound into, and
+			// re-attempting cannot make the project's pipeline name one.
+			if isNoWriteTarget(derr) {
+				return false, cycleNoWriteTarget, nil
 			}
 			continue
 		}
@@ -399,6 +405,17 @@ func isAgentQuotaBlocked(err error) bool {
 	var appErr *temporal.ApplicationError
 	if errors.As(err, &appErr) {
 		return appErr.Type() == delivery.ErrTypeAgentQuotaBlocked
+	}
+	return false
+}
+
+// isNoWriteTarget reports whether a dispatch failed because the project has no
+// write target. Matched on the ApplicationError TYPE for the same reason as the
+// quota refusal above.
+func isNoWriteTarget(err error) bool {
+	var appErr *temporal.ApplicationError
+	if errors.As(err, &appErr) {
+		return appErr.Type() == delivery.ErrTypeNoWriteTarget
 	}
 	return false
 }

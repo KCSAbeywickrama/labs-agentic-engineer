@@ -139,14 +139,15 @@ func planFailure(err error, attempt int) *delivery.RunFailure {
 	return f
 }
 
-// noWriteTargetFailure is the record of a deploy gate that can never open: the
-// project has no write target. Permanent on its first attempt; the detail is
-// the resolver's own words.
-func noWriteTargetFailure(err error, attempt int) *delivery.RunFailure {
+// noWriteTargetFailure is the record of a project with no write target, met at
+// the phase that needed one: the deploy gate, which can never open, or the
+// dispatch, which has no environment to bind the agent's Job into. Permanent
+// on its first attempt; the detail is the resolver's own words.
+func noWriteTargetFailure(err error, phase string, attempt int) *delivery.RunFailure {
 	now := time.Now().UTC()
 	return &delivery.RunFailure{
 		Code:      delivery.RunFailureCodeNoWriteTarget,
-		Phase:     delivery.RunPhaseDeploying,
+		Phase:     phase,
 		Permanent: true,
 		Attempts:  attempt,
 		FirstAt:   now,

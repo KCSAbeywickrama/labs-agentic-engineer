@@ -572,7 +572,8 @@ func (a *Activities) CheckDeployReadiness(ctx context.Context, in DeployGateInpu
 		// project has no write target) is an answer, and deployErr says so. The
 		// answer is recorded first, so the settled run carries its cause.
 		if errors.Is(err, delivery.ErrDeployPermanent) {
-			a.recordPlanningFault(ctx, in.RunID, noWriteTargetFailure(err, activityAttempt(ctx)), activityAttempt(ctx))
+			a.recordPlanningFault(ctx, in.RunID,
+				noWriteTargetFailure(err, delivery.RunPhaseDeploying, activityAttempt(ctx)), activityAttempt(ctx))
 		}
 		return DeployGateVerdict{}, deployErr(err)
 	}
@@ -736,11 +737,15 @@ func (a *Activities) PollDeployments(ctx context.Context, in WaitSetInput) (Cycl
 }
 
 // MintDeployFixIssuesInput names the components a pass could not get running,
-// each at the commit whose release it was promoting.
+// each at the commit whose release it was promoting, and the environment their
+// bindings live in. Environment is empty when the failure was not read off a
+// binding (an unsatisfiable plan, a provisioning timeout), and on an input
+// recorded before the field existed.
 type MintDeployFixIssuesInput struct {
 	OrgID           string                  `json:"orgId"`
 	ProjectID       string                  `json:"projectId"`
 	MilestoneNumber int                     `json:"milestoneNumber"`
+	Environment     string                  `json:"environment,omitempty"`
 	Failed          []delivery.DeployTarget `json:"failed"`
 	Reasons         map[string]string       `json:"reasons,omitempty"`
 }
@@ -758,7 +763,7 @@ func (a *Activities) MintDeployFixIssues(ctx context.Context, in MintDeployFixIs
 		return nil, nil
 	}
 	filed, err := a.deployMint.MintDeployFixIssues(ctx, in.OrgID, in.ProjectID, in.MilestoneNumber,
-		in.Failed, in.Reasons)
+		in.Environment, in.Failed, in.Reasons)
 	return filed, sourceControlErr(err)
 }
 
@@ -1028,25 +1033,30 @@ func (a *Activities) MintValidationRepairIssues(ctx context.Context, in MintVali
 // ---- dispatch --------------------------------------------------------------
 
 // DispatchAgent launches the cycle's agent run, records on the cycle the model
-// host it launched on, and returns the Job reference.
+// host it launched on and the environment its Job was bound into, and returns
+// the Job reference.
 //
-// The host is written HERE, not by NoteCycleDispatch, because only the launch
-// knows it and this activity's result is frozen by workflow history: it has
+// Both are written HERE, not by NoteCycleDispatch, because only the launch
+// knows them and this activity's result is frozen by workflow history: it has
 // always been the bare Job reference, and a run in flight across a deploy
-// replays that recorded value. Writing it before returning keeps the
-// copy-at-dispatch rule (the host is the one the Job was launched with) without
-// changing what the workflow reads back.
+// replays that recorded value. Writing them before returning keeps the
+// copy-at-dispatch rule (the host and environment are the ones the Job was
+// launched with) without changing what the workflow reads back.
 //
-// A failed host write is logged, not returned. The Job is already running, and
+// A failed write is logged, not returned. The Job is already running, and
 // this activity runs with retries off because a failed launch is agent death:
 // returning the error would spend a re-dispatch and launch a second agent beside
-// the first. The cost of the missed write is honest — the cycle's capture finds
-// no host and stamps a null cost, which the console shows as tokens only.
+// the first. The cost of the missed write is honest. The cycle's capture finds
+// no host and stamps a null cost, which the console shows as tokens only, and
+// its readers find no environment and resolve the project's write target
+// instead.
 //
-// Three non-retryable failure classes are stamped here (Temporal must not
-// retry any): agent death — a launch that did not happen, answered by the
-// cycle's re-dispatch budget; quota blocked — entitlement refused, not death;
-// publisher credentials missing — Job create cannot stamp the SecretReference.
+// Four non-retryable failure classes are stamped here (Temporal must not
+// retry any): agent death, a launch that did not happen, answered by the
+// cycle's re-dispatch budget; quota blocked, entitlement refused, not death;
+// publisher credentials missing, Job create cannot stamp the SecretReference;
+// no write target, the project's pipeline names no environment to bind the Job
+// into, so the run fails on it (and records why) without spending the budget.
 func (a *Activities) DispatchAgent(ctx context.Context, in delivery.MilestoneDispatch) (string, error) {
 	if a.dispatcher == nil || a.cycles == nil {
 		return "", errNotConfigured
@@ -1064,12 +1074,19 @@ func (a *Activities) DispatchAgent(ctx context.Context, in delivery.MilestoneDis
 		return "", temporal.NewNonRetryableApplicationError(
 			delivery.PublisherCredentialsMissingMessage, delivery.ErrTypePublisherCredentialsMissing, err)
 	}
+	if errors.Is(err, delivery.ErrNoWriteTarget) {
+		// Recorded first, as the deploy gate records the same fault, so the
+		// settled run carries the resolver's words.
+		a.recordPlanningFault(ctx, in.RunID,
+			noWriteTargetFailure(err, delivery.RunPhaseCoding, activityAttempt(ctx)), activityAttempt(ctx))
+		return "", temporal.NewNonRetryableApplicationError(err.Error(), delivery.ErrTypeNoWriteTarget, err)
+	}
 	if err != nil {
 		return "", err
 	}
-	if err := a.cycles.NoteModelHost(ctx, in.CycleID, launch.ModelHost); err != nil {
-		slog.WarnContext(ctx, "run: the agent launched but its model host was not recorded — the cycle's usage will be unpriced",
-			"cycle", in.CycleID, "host", launch.ModelHost, "error", err)
+	if err := a.cycles.NoteLaunch(ctx, in.CycleID, launch.ModelHost, launch.Environment); err != nil {
+		slog.WarnContext(ctx, "run: the agent launched but its host and environment were not recorded; the cycle's usage will be unpriced and its readers will resolve the project's write target",
+			"cycle", in.CycleID, "host", launch.ModelHost, "environment", launch.Environment, "error", err)
 	}
 	return launch.JobRef, nil
 }

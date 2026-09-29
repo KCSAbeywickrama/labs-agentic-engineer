@@ -233,6 +233,13 @@ detector is what would name it.
    log look identical to a reader and mean opposite things about the agent, so
    the platform never lets "gone" render as "silent".
 
+Every source is read in the environment the cycle's Job was bound into
+(`run_cycles.environment`), falling back to the project's write target for a
+cycle that recorded none; a legacy execution records none and always reads in
+the project's write target. A fallback that cannot be resolved is a failed read
+for the V1 surfaces and no verdict for the watcher, never a read in an empty
+environment.
+
 Which of the three can still answer is resolved once (`resolveCycleLog`), and
 its page is capped at `legacyProgressLimit` (200) with the head drop named on
 the feed. It survives for the VERSION build-progress stream, which stitches many

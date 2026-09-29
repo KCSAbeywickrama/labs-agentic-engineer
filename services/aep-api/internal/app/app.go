@@ -569,7 +569,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	runRecorder := codingagent.NewCycleRecorder(codingLogSource, runRecordings).
 		WithArchive(codingArchive)
 	agentProgressReader := codingagent.NewAgentProgressReader(
-		codingLogSource, codingAgentLogRepo).
+		codingLogSource, writeTargets, codingAgentLogRepo).
 		WithArchive(codingArchive).
 		WithRecordings(runRecordings)
 	execProgressSvc.WithCodingProgress(agentProgressReader)
@@ -781,7 +781,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		if retentionLimit <= 0 {
 			retentionLimit = codingagent.DefaultCodingAgentComponentRetention
 		}
-		ocDispatcher := codingagent.NewOCDispatcher(componentClient).
+		ocDispatcher := codingagent.NewOCDispatcher(componentClient, writeTargets).
 			WithImage(cfg.AgentRunnerImage).
 			WithOpenCodeImage(cfg.AgentRunnerImageOpenCode).
 			WithRetention(codingagent.NewComponentRetention(
@@ -1585,7 +1585,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// provider's limit stopped it), and banks the run's token spend. It writes no
 	// logs and deletes no components — history is the observability plane's and
 	// deletion is retention's. Always on (no longer gated on cluster-gateway-proxy).
-	watchers = append(watchers, codingagent.NewJobWatcher(runtimeClient, runCycleRepo, asServiceIdentity).
+	watchers = append(watchers, codingagent.NewJobWatcher(runtimeClient, runCycleRepo, writeTargets, asServiceIdentity).
 		WithRecorder(runRecorder).
 		WithAgentDeathNotifier(agentDeathNotifier{runs: milestoneRunRepo, supervisor: runSupervisor}).
 		WithRunFailures(milestoneRunRepo))

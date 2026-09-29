@@ -471,9 +471,13 @@ func targetsFor(names []string, v delivery.VersionState) []delivery.DeployTarget
 // pull request carries only tests and a report, so it rebuilds and redeploys
 // nothing and is Ready the moment it merges.
 type CycleDeployState struct {
-	Expected int      `json:"expected"`
-	Ready    int      `json:"ready"`
-	Failed   []string `json:"failed,omitempty"`
+	Expected int `json:"expected"`
+	// Environment is the one the read bindings live in, named on the fix work
+	// a failed deploy mints. Every outcome of one read shares it (the project's
+	// write target at the time of the read). Empty when nothing was read.
+	Environment string   `json:"environment,omitempty"`
+	Ready       int      `json:"ready"`
+	Failed      []string `json:"failed,omitempty"`
 	// Pending NAMES the components that have reached no verdict yet, where Ready
 	// is only counted.
 	//
@@ -516,6 +520,9 @@ func classifyCycleDeploys(expected int, states []delivery.ComponentDeploy) Cycle
 		out.Reasons[component] = reason
 	}
 	for _, st := range states {
+		if out.Environment == "" {
+			out.Environment = st.Environment
+		}
 		switch {
 		case st.Failed:
 			out.Failed = append(out.Failed, st.Component)

@@ -1391,6 +1391,24 @@ func TestDeployFailed_BecomesTheNextCyclesWork(t *testing.T) {
 		"OpenChoreo's own reason reaches the issue body")
 }
 
+// The deploy-fix issue names the environment the failed binding lives in, read
+// off the same poll that reported the failure.
+func TestDeployFailed_TheFixWorkNamesTheEnvironment(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1), workable(1, 1), MilestoneSnapshot{})
+	h.deploymentsAre(
+		CycleDeployState{Expected: 1, Environment: "dev-b", Failed: []string{"order-service"}},
+		CycleDeployState{Expected: 1, Ready: 1},
+	)
+	h.merges(2)
+
+	h.run(delivery.RunKindDev, 0)
+	_ = h.result(t)
+
+	require.Equal(t, 1, h.deployMintCount())
+	require.Equal(t, "dev-b", h.deployMints[0].Environment)
+}
+
 // TestDeployFailed_WithNoRecovery_SettlesOnTheDeployBudget: the components built
 // but never came up and nothing joined the milestone to fix them. The run must
 // NOT settle delivered — a version that compiled and does not run is exactly the
@@ -2440,6 +2458,31 @@ func TestProviderLimit_SettlesBlockedWithoutSpendingTheBudget(t *testing.T) {
 	require.Equal(t, 0, h.closed, "a blocked increment keeps its milestone open")
 	require.Equal(t, []FinishCycleInput{{CycleID: testCycleID}}, h.finishes,
 		"the cycle closes with no merge SHA, like any dispatch that landed nothing")
+}
+
+// A dispatch refused because the project has no write target settles the run
+// failed on its own reason at the first refusal: re-dispatching cannot make a
+// pipeline name an environment, and no fix issue can either.
+func TestNoWriteTargetAtDispatch_SettlesFailedWithoutSpendingTheBudget(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1))
+	h.dispatchIs("", temporal.NewNonRetryableApplicationError(
+		"no write target", delivery.ErrTypeNoWriteTarget, delivery.ErrNoWriteTarget))
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonNoWriteTarget)
+	require.Equal(t, 1, h.dispatchCount(),
+		"a missing write target must not be re-attempted as agent death")
+	require.Equal(t, 0, h.deployMintCount(), "no fix work: the agent cannot repair a pipeline")
+}
+
+// The validation workflow's own switch settles the same refusal the same way.
+func TestNoWriteTargetAtDispatch_FailsAValidationRunToo(t *testing.T) {
+	state, reason := stateForUnlandedValidation(cycleNoWriteTarget)
+	require.Equal(t, delivery.RunStateFailed, state)
+	require.Equal(t, delivery.RunReasonNoWriteTarget, reason)
 }
 
 // The validation workflow maps an unlanded agent stage through its own switch,

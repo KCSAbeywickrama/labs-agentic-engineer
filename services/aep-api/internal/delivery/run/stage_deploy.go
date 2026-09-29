@@ -234,6 +234,7 @@ func flattenWaves(waves [][]delivery.DeployTarget) []delivery.DeployTarget {
 // whole list would key at least one of them wrongly.
 func (l *loop) failDeploy(components []string, version delivery.VersionState, cause error) {
 	l.deployFailed = targetsFor(components, version)
+	l.deployEnvironment = ""
 	if cause != nil {
 		l.deployFailures = reasonForAll(components, cause)
 	}
@@ -499,7 +500,7 @@ func (l *loop) awaitDeployments(ctx workflow.Context, components []string,
 		}
 		if len(state.Failed) > 0 {
 			l.failDeploy(state.Failed, version, nil)
-			l.deployFailures = state.Reasons
+			l.deployFailures, l.deployEnvironment = state.Reasons, state.Environment
 			return cycleDeployFailed, nil
 		}
 		if state.Green() {
@@ -517,7 +518,7 @@ func (l *loop) awaitDeployments(ctx workflow.Context, components []string,
 			// no cause here because the deadline is not itself an error anyone can
 			// be filed against.
 			l.failDeploy(state.Pending, version, nil)
-			l.deployFailures = state.Reasons
+			l.deployFailures, l.deployEnvironment = state.Reasons, state.Environment
 			return cycleDeployFailed, nil
 		}
 
