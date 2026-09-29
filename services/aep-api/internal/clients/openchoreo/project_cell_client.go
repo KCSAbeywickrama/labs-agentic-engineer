@@ -152,8 +152,14 @@ func (c *projectCellClient) getPipeline(ctx context.Context, namespace, pipeline
 		return nil, fmt.Errorf("pipeline: namespace and pipeline name are required")
 	}
 	pipeline := &deploymentPipeline{}
-	if _, err := c.do(ctx, http.MethodGet,
-		nsBase(namespace)+"/deploymentpipelines/"+pipelineName, nil, pipeline); err != nil {
+	status, err := c.do(ctx, http.MethodGet,
+		nsBase(namespace)+"/deploymentpipelines/"+pipelineName, nil, pipeline)
+	if err != nil {
+		if status == http.StatusNotFound {
+			// do reports non-2xx as a plain error; classify the 404 so callers
+			// can tell a missing pipeline from a transient failure.
+			return nil, fmt.Errorf("get deployment pipeline %q: %w: %v", pipelineName, ErrNotFound, err)
+		}
 		return nil, fmt.Errorf("get deployment pipeline %q: %w", pipelineName, err)
 	}
 	return pipeline, nil

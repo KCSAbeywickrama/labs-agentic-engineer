@@ -56,6 +56,9 @@ func (e *ErrNoWriteTarget) Error() string {
 	if e.Project != "" {
 		scope += "/" + e.Project
 	}
+	if e.Pipeline == "" {
+		return fmt.Sprintf("no write target for %s: %v", scope, e.Cause)
+	}
 	return fmt.Sprintf("no write target for %s (pipeline %q): %v", scope, e.Pipeline, e.Cause)
 }
 
@@ -158,7 +161,6 @@ func (w *writeTargets) OrgWriteTargets(ctx context.Context, org string) ([]strin
 			return nil, nil, fmt.Errorf("resolve org write targets: %w", err)
 		}
 		for _, p := range page.Items {
-			var root string
 			if p.DeploymentPipeline == "" {
 				unresolved[p.Name] = &ErrNoWriteTarget{Org: org, Project: p.Name, Cause: ErrPipelineRefMissing}
 				continue
@@ -180,8 +182,7 @@ func (w *writeTargets) OrgWriteTargets(ctx context.Context, org string) ([]strin
 				unresolved[p.Name] = &own
 				continue
 			}
-			root = res.root
-			if !seen[root] {
+			if root := res.root; !seen[root] {
 				seen[root] = true
 				targets = append(targets, root)
 			}
