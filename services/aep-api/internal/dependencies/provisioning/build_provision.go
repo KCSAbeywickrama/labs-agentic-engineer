@@ -87,7 +87,8 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 	// down. A transient failure retries the activity with nothing written; a
 	// project whose pipeline yields no write target fails each input it would
 	// author as permanent (no retry makes a cyclic pipeline valid) and still runs
-	// the roles and agent gates, which do not write into an environment.
+	// the roles and agent gates. Both register into the write target too, but
+	// each resolves it through its own port and reports its own failure.
 	env, envErr := s.writeTarget(ctx, orgID, projectID)
 	var nwt *openchoreo.ErrNoWriteTarget
 	if envErr != nil && !errors.As(envErr, &nwt) {

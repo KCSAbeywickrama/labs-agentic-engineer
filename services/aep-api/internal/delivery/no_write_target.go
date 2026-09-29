@@ -18,14 +18,15 @@ package delivery
 
 import "errors"
 
-// ErrNoWriteTarget is the dispatch refusal when the project's deployment
-// pipeline names no environment to bind the coding agent's Job into. It is a
-// configuration fact, like the deploy gate's (RunReasonNoWriteTarget): no
-// re-dispatch can make the pipeline name one, so Temporal must not spend the
-// re-dispatch budget on it. The resolver's own error is wrapped beside it.
+// ErrNoWriteTarget marks a write refused because the project's deployment
+// pipeline names no environment to write into: the coding agent's dispatch,
+// and every deploy-phase step (beside ErrDeployPermanent). It is a
+// configuration fact (RunReasonNoWriteTarget): no retry or re-dispatch can
+// make the pipeline name one, so Temporal must not spend a budget on it. The
+// resolver's own error is wrapped beside it.
 var ErrNoWriteTarget = errors.New("no write target")
 
-// ErrTypeNoWriteTarget is the Temporal ApplicationError TYPE the dispatch
-// activity stamps. The workflow branches on the type because a sentinel does
-// not survive the activity boundary.
+// ErrTypeNoWriteTarget is the Temporal ApplicationError TYPE the dispatch and
+// deploy activities stamp. The workflow branches on the type because a
+// sentinel does not survive the activity boundary.
 const ErrTypeNoWriteTarget = "NoWriteTarget"

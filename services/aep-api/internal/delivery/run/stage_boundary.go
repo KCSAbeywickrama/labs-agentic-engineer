@@ -620,7 +620,9 @@ func (l *loop) runCycle(ctx workflow.Context, kind string, anchorIssue int) (cyc
 	l.st.Phase = delivery.RunPhaseDeploying
 	version, err := l.readVersionState(ctx)
 	if err != nil {
-		return cycleNone, err
+		// The version read resolves the write target too, and is the first step
+		// of the stage to do so.
+		return noWriteTargetResult(ctx, "version read", err)
 	}
 	deployRes, err := l.reconcileVersion(ctx, version)
 	if err != nil {
@@ -940,7 +942,7 @@ func (l *loop) pollMilestone(ctx workflow.Context) (MilestoneSnapshot, error) {
 func (l *loop) readVersionState(ctx workflow.Context) (delivery.VersionState, error) {
 	var out delivery.VersionState
 	if err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).ReadVersionState,
-		ProjectRef{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID}).Get(ctx, &out); err != nil {
+		ProjectRef{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID, RunID: l.in.RunID}).Get(ctx, &out); err != nil {
 		return delivery.VersionState{}, err
 	}
 	l.st.Version = out

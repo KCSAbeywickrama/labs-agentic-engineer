@@ -188,8 +188,9 @@ func (s *DeploymentService) SetWriteTargets(w writeTargetResolver) {
 
 // writeTarget resolves the project's write target once for the operation.
 // A configuration fault is permanent: no retry makes a cyclic or missing
-// pipeline valid. Anything else (a network error, an OC 5xx) propagates
-// unchanged so Temporal retries it.
+// pipeline valid. It also carries delivery.ErrNoWriteTarget, so the run
+// settles on the fault instead of filing deploy fix work. Anything else (a
+// network error, an OC 5xx) propagates unchanged so Temporal retries it.
 func (s *DeploymentService) writeTarget(ctx context.Context, orgID, projectID string) (string, error) {
 	if s.writeTargets == nil {
 		return "", fmt.Errorf("deployment: write targets not configured")
@@ -197,7 +198,7 @@ func (s *DeploymentService) writeTarget(ctx context.Context, orgID, projectID st
 	env, err := s.writeTargets.Resolve(ctx, orgID, projectID)
 	var nwt *openchoreo.ErrNoWriteTarget
 	if errors.As(err, &nwt) {
-		return "", fmt.Errorf("%w: %w", delivery.ErrDeployPermanent, err)
+		return "", fmt.Errorf("%w: %w: %w", delivery.ErrDeployPermanent, delivery.ErrNoWriteTarget, err)
 	}
 	return env, err
 }

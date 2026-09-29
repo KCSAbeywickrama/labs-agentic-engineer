@@ -529,6 +529,8 @@ func (a *Activities) PlanMilestone(ctx context.Context, in PlanMilestoneInput) e
 type ProjectRef struct {
 	OrgID     string `json:"orgId"`
 	ProjectID string `json:"projectId"`
+	// RunID, when set, is the run a missing write target is recorded on.
+	RunID string `json:"runId,omitempty"`
 }
 
 // DeployGateInput names the project whose deploy gate is read, and the run
@@ -571,10 +573,7 @@ func (a *Activities) CheckDeployReadiness(ctx context.Context, in DeployGateInpu
 		// A gate that cannot be read is retried; one that can never be read (the
 		// project has no write target) is an answer, and deployErr says so. The
 		// answer is recorded first, so the settled run carries its cause.
-		if errors.Is(err, delivery.ErrDeployPermanent) {
-			a.recordPlanningFault(ctx, in.RunID,
-				noWriteTargetFailure(err, delivery.RunPhaseDeploying, activityAttempt(ctx)), activityAttempt(ctx))
-		}
+		a.recordNoWriteTarget(ctx, in.RunID, err)
 		return DeployGateVerdict{}, deployErr(err)
 	}
 	return DeployGateVerdict{Unconfigured: unconfigured, Provisioning: provisioning}, nil
@@ -620,6 +619,7 @@ func (a *Activities) ReadVersionState(ctx context.Context, in ProjectRef) (deliv
 	}
 	states, err := a.deployRead.DeploymentState(ctx, in.OrgID, in.ProjectID, components)
 	if err != nil {
+		a.recordNoWriteTarget(ctx, in.RunID, err)
 		return delivery.VersionState{}, deployErr(err)
 	}
 	deploys := make(map[string]delivery.ComponentDeploy, len(states))
@@ -644,6 +644,8 @@ type PromoteInput struct {
 	OrgID     string                  `json:"orgId"`
 	ProjectID string                  `json:"projectId"`
 	Targets   []delivery.DeployTarget `json:"targets"`
+	// RunID, when set, is the run a missing write target is recorded on.
+	RunID string `json:"runId,omitempty"`
 }
 
 // PromoteWave promotes one wave: cut each component's release from the Workload
@@ -673,6 +675,7 @@ func (a *Activities) PromoteWave(ctx context.Context, in PromoteInput) ([]delive
 		slog.ErrorContext(ctx, "run: deploy failed",
 			"orgID", in.OrgID, "projectID", in.ProjectID,
 			"targets", delivery.TargetNames(in.Targets), "error", err)
+		a.recordNoWriteTarget(ctx, in.RunID, err)
 		return nil, deployErr(err)
 	}
 	return out, nil
@@ -719,6 +722,8 @@ type WaitSetInput struct {
 	OrgID      string   `json:"orgId"`
 	ProjectID  string   `json:"projectId"`
 	Components []string `json:"components"`
+	// RunID, when set, is the run a missing write target is recorded on.
+	RunID string `json:"runId,omitempty"`
 }
 
 // PollDeployments reads back each waited-on component's binding.
@@ -731,6 +736,7 @@ func (a *Activities) PollDeployments(ctx context.Context, in WaitSetInput) (Cycl
 	}
 	states, err := a.deployRead.DeploymentState(ctx, in.OrgID, in.ProjectID, in.Components)
 	if err != nil {
+		a.recordNoWriteTarget(ctx, in.RunID, err)
 		return CycleDeployState{}, deployErr(err)
 	}
 	return classifyCycleDeploys(len(in.Components), states), nil

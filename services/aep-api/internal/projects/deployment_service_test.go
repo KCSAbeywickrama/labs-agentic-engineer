@@ -517,6 +517,9 @@ func TestDeploy_UnresolvableWriteTargetIsPermanentAndWritesNothing(t *testing.T)
 	if !errors.Is(err, delivery.ErrDeployPermanent) {
 		t.Errorf("Deploy error = %v, want it marked permanent", err)
 	}
+	if !errors.Is(err, delivery.ErrNoWriteTarget) {
+		t.Errorf("Deploy error = %v, want it marked no-write-target so the run settles on it", err)
+	}
 	if n := len(oc.ApplyReleaseBindingCalls()); n != 0 {
 		t.Errorf("wrote %d bindings with no write target", n)
 	}
@@ -534,7 +537,7 @@ func TestDeploy_TransientWriteTargetFailureStaysRetryable(t *testing.T) {
 	svc.SetWriteTargets(staticWriteTarget{err: errors.New("openchoreo: 503")})
 
 	_, err := svc.Deploy(context.Background(), "acme", "proj", promoting("abc123def456", "api"))
-	if err == nil || errors.Is(err, delivery.ErrDeployPermanent) {
+	if err == nil || errors.Is(err, delivery.ErrDeployPermanent) || errors.Is(err, delivery.ErrNoWriteTarget) {
 		t.Fatalf("Deploy error = %v, want a retryable failure", err)
 	}
 }

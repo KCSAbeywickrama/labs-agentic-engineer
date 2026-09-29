@@ -24,6 +24,7 @@ import (
 	"go.temporal.io/sdk/temporal"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/delivery/run"
 	"github.com/wso2/aep/aep-api/internal/dependencies/provisioning"
 )
@@ -54,6 +55,9 @@ func TestDeployGate_NoWriteTargetIsNonRetryable(t *testing.T) {
 	var appErr *temporal.ApplicationError
 	if !errors.As(err, &appErr) || !appErr.NonRetryable() {
 		t.Fatalf("want a non-retryable ApplicationError, got %v", err)
+	}
+	if appErr.Type() != delivery.ErrTypeNoWriteTarget {
+		t.Fatalf("type = %q, want %q: the workflow settles the run on it", appErr.Type(), delivery.ErrTypeNoWriteTarget)
 	}
 	if !errors.Is(err, cause) {
 		t.Fatalf("the cause must survive: %v", err)

@@ -163,11 +163,11 @@ func (s *TeardownService) TeardownProject(ctx context.Context, orgID, projectID 
 //  3. **The platform's rows** — the bindings and the resource-server row.
 //
 // Step 3 runs even when step 1 or 2 failed, and even when the directory could
-// not be resolved at all. The one thing that stops it is a write target that
-// cannot be read: then there is no scope to key the rows by. The rows are keyed to a project that is being deleted:
+// not be resolved at all. The rows are keyed to a project that is being deleted:
 // leaving them would let a project recreated under the same name adopt stale
 // directory ids, which is a worse failure than an orphaned directory object that
-// the report has named.
+// the report has named. The one thing that stops it is a write target that
+// cannot be read: then there is no scope to key the rows by.
 //
 // Groups and users appear nowhere in the above. That is the invariant, not an
 // omission — see the file header and README.md.

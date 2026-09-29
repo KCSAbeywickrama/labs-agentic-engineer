@@ -139,6 +139,8 @@ type harness struct {
 	// are ABOUT a state the loop's own actions cannot produce, such as a
 	// component nothing ever bound.
 	versionOverride *delivery.VersionState
+	// versionErr, when set, is what every ReadVersionState answers instead.
+	versionErr error
 }
 
 // newHarness registers the activities whose behaviour never varies — the
@@ -814,6 +816,12 @@ func (h *harness) applyDefaults() {
 	// workflow rather than the assertion.
 	h.env.OnActivity(h.acts.ReadVersionState, mock.Anything, mock.Anything).
 		Return(func(context.Context, ProjectRef) (delivery.VersionState, error) {
+			h.mu.Lock()
+			verr := h.versionErr
+			h.mu.Unlock()
+			if verr != nil {
+				return delivery.VersionState{}, verr
+			}
 			return h.versionState(), nil
 		})
 	if !h.set["gate"] {
