@@ -363,6 +363,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			HostHeader:   cfg.AgentManager.HostHeader,
 		}},
 		bindings: environmentClient,
+		targets:  writeTargets,
 	})
 	validatorProbes := organization.NewValidatorProbes(credService, gitHost, credResolver, minter)
 	credValidator := secrets.NewValidator(db, validatorProbes, nil, cfg.CredentialValidatorInterval)
@@ -1458,6 +1459,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	provisioningSvc.SetAgentRegistrar(ampAgentRegistrar{
 		governor: agentGovernor,
 		kinds:    agentComponentKinds,
+		targets:  writeTargets,
 	})
 	// Model access is composed from the AI gateway binding when the environment
 	// has one: an Agent-Manager-governed agent gets the gateway's endpoint and
