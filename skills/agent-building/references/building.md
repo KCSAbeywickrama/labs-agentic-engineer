@@ -623,12 +623,12 @@ import { NodeTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { Resource } from "@opentelemetry/resources";
 import type {
+  LanguageModelCallEndEvent,
+  LanguageModelCallStartEvent,
   LanguageModelUsage,
   ModelMessage,
-  OnLanguageModelCallEndCallback,
-  OnLanguageModelCallStartCallback,
-  OnToolExecutionEndCallback,
-  OnToolExecutionStartCallback,
+  ToolExecutionEndEvent,
+  ToolExecutionStartEvent,
 } from "ai";
 
 const endpoint = process.env.AMP_OTEL_ENDPOINT;
@@ -667,12 +667,16 @@ if (endpoint && apiKey) {
   });
 }
 
-// The streamText callbacks that open and close the per-step spans.
+// The streamText callbacks that open and close the per-step spans. Declared
+// as METHODS, not function-typed properties: streamText types its callbacks by
+// the agent's own tool set, and only a method's parameter is checked loosely
+// enough to accept that narrower event. As properties, every agent with typed
+// tools fails to compile.
 export interface TurnHooks {
-  onLanguageModelCallStart: OnLanguageModelCallStartCallback;
-  onLanguageModelCallEnd: OnLanguageModelCallEndCallback;
-  onToolExecutionStart: OnToolExecutionStartCallback;
-  onToolExecutionEnd: OnToolExecutionEndCallback;
+  onLanguageModelCallStart(e: LanguageModelCallStartEvent): void;
+  onLanguageModelCallEnd(e: LanguageModelCallEndEvent): void;
+  onToolExecutionStart(e: ToolExecutionStartEvent): void;
+  onToolExecutionEnd(e: ToolExecutionEndEvent): void;
 }
 
 export interface TurnTrace {
@@ -710,6 +714,11 @@ export async function traceTurn<T extends { text: string; usage: LanguageModelUs
 
   const hooks: TurnHooks = {
     onLanguageModelCallStart: (e) => {
+      // A call that is retried starts again without having ended.
+      if (chat) {
+        chat.setStatus({ code: SpanStatusCode.ERROR, message: "model call retried" });
+        chat.end();
+      }
       chat = tracer.startSpan(
         `chat ${e.modelId}`,
         {
