@@ -20,8 +20,8 @@
 # ── Deployment pipeline ─────────────────────────────────────────────────────
 # OpenChoreo's samples (samples/getting-started/all.yaml) own
 # DeploymentPipeline/default and run development -> staging -> production.
-# aep-api resolves its write-target from this graph at boot: the environment
-# that is a source and never a target (openchoreo.PipelineSourceEnvironment).
+# aep-api resolves a project's write target from its pipeline's graph at use:
+# the first source that is never a target (openchoreo.WriteTargets, ADR-0039).
 # The chart's default single path {source: default, targets: []} is itself a
 # valid graph, so a flatten resolves cleanly to "default" and moves every
 # subsequent write into an environment with no environment Thunder or API

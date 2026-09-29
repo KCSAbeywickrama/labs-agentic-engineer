@@ -48,7 +48,7 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
 | design read · spec-stage snapshot | needs | `spec` — the Stage aggregate's spec column + component OpenAPI source |
 | `descriptorWriter` | needs | `spec` — stamps `specs/.agentic-engineer.toml` on create (best-effort; nil is a no-op) |
 | `kickoffStarter` (`SetKickoffStarter`) | needs | `spec` — fires the new project's opening `/start` turn (#562), after the descriptor commit the turn reads the idea from and before the create returns. Bounded + error-swallowing on its own side; nil is a no-op |
-| `projectCellProvisioner` (`SetProjectCellProvisioner`) | needs | `openchoreo` client — authors the `ProjectReleaseBinding` that materializes the project's cell namespace in each pipeline environment; the write-target is the pipeline source resolved at aep-api boot. NOT an optional port despite the setter: from OpenChoreo 1.2.0 a Project alone only cuts a ProjectRelease, so a project without a binding reports Ready and then fails every component deploy with `namespace ... not found`. A provisioning failure is fatal to the create and compensates; an UNSET provisioner logs at ERROR and lets the create through, because refusing to create projects at all is the worse failure |
+| `projectCellProvisioner` (`SetProjectCellProvisioner`) | needs | `openchoreo` client — authors the `ProjectReleaseBinding` that materializes the project's cell namespace in each pipeline environment; the project's write target is that pipeline's root (see `openchoreo.WriteTargets`, ADR-0039). NOT an optional port despite the setter: from OpenChoreo 1.2.0 a Project alone only cuts a ProjectRelease, so a project without a binding reports Ready and then fails every component deploy with `namespace ... not found`. A provisioning failure is fatal to the create and compensates; an UNSET provisioner logs at ERROR and lets the create through, because refusing to create projects at all is the worse failure |
 | `specTurnRows` (`SetSpecTurnSource`) | needs | `spec` — the newest `agent_turns` row (off `ix_agent_turns_project_newest`), folded into the Stage aggregate's `spec.agent`. Nil serves `""`, degrading to the pre-#562 reading rather than failing the poll |
 | build/exec status (`SetStageSources` port) | needs | `delivery` — the build/deploy columns of the Stage aggregate, wired at the root |
 | `runAbandoner` (`SetRunAbandoner`) | needs | `delivery` — ends the supervisors of a deleted project's live runs, wired at the root (nil is a no-op) |
@@ -140,7 +140,7 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
   except a call to `Deploy`. That is what lets the run supervisor place validation after a version is
   genuinely serving — see [ADR-0017](../../../../docs/decisions/ADR-0017-the-platform-owns-deploy.md).
 - **The deploy stage counts USER components only.** Every coding-agent cycle creates a real
-  dev-environment ReleaseBinding owned by the user's project, and that binding wraps a `batch/v1 Job`
+  ReleaseBinding in the write target owned by the user's project, and that binding wraps a `batch/v1 Job`
   for which OpenChoreo registers no health check — it reports `Ready=True` over a Job that is still
   running or has already failed. So the marked (`aep.wso2.com/internal`) ones are excluded in
   `ListProjectReleaseBindings`, exactly as `ListComponents` excludes the matching Components. Without

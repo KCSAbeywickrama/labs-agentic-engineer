@@ -108,7 +108,7 @@ func TestCreateProject_DoesNotBindOffPipelineEnvironments(t *testing.T) {
 		}
 	}
 	if _, ok := cells.bound["default"]; ok {
-		t.Errorf("bound unexpected default cell; write-target is resolved at boot, not appended here")
+		t.Errorf("bound unexpected default cell; the write target is resolved per project, not appended here")
 	}
 }
 

@@ -828,7 +828,7 @@ func buildCreateComponentBody(projectName string, req *CreateComponentRequest) o
 	//
 	// Verified local + dev cloud: in cloud, platform-api's ProvisionOrgUnit
 	// creates the per-org namespaced `service`/`web-application` ComponentTypes;
-	// locally, deployments/scripts/setup-aep.sh provisions the same namespaced
+	// locally, aectl and the platform chart provision the same namespaced
 	// types in the org ns (derived from the cluster-scoped definitions). So the
 	// kind=ComponentType reference resolves in both environments — no env branch.
 	// The type NAME (`deployment/service` etc.) is identical for both kinds.
@@ -1036,7 +1036,7 @@ func (c *componentClient) ListDeployments(ctx context.Context, orgName, projectN
 // OC call.
 //
 // Internally marked bindings are skipped, the same exclusion ListComponents
-// makes: every coding-agent cycle creates a real dev-environment binding owned
+// makes: every coding-agent cycle creates a real binding in the write target owned
 // by the user's project, and because that binding wraps a batch/v1 Job (which
 // OpenChoreo registers no health check for) it reports Ready=True regardless of
 // the Job's state. Folded into the deploy stage those bindings reported a
