@@ -314,7 +314,9 @@ The handler flow, exactly:
 //    conversationId present → loadConversation(id, userId); null → 404 { error: "conversation not found" }
 //    absent → id = crypto.randomUUID(), history = [] (no row yet — the first save creates it)
 // 4. const full = [...history, { role: "user", content: message }]
-// 5. const turn = await runTurn(full)     // see "Model access", "The model call"
+// 5. const turn = await traceTurn(
+//      { conversationId: id, model: config.modelName, system: genAiSystem, message },
+//      (hooks) => runTurn(full, hooks))   // see "The model call" and "Tracing"
 // 6. await saveConversation(id, userId, [...full, ...turn.steps.flatMap(s => s.response.messages)])
 //    — this INSERT..ON CONFLICT is the only place a row is created, so a turn
 //    that throws in step 5 leaves nothing in the store to orphan
@@ -505,10 +507,11 @@ streaming is how the turn reaches the model, not how it reaches the caller:
 ```ts
 // agent.ts
 import { streamText, stepCountIs, type ModelMessage } from "ai";
+import type { TurnHooks } from "./tracing.js";
 // SYSTEM_PROMPT and MAX_ITERATIONS from prompt.ts, tools from tools.ts,
 // modelSettings() — the ModelSettings above — from config.ts.
 
-export async function runTurn(messages: ModelMessage[]) {
+export async function runTurn(messages: ModelMessage[], hooks: TurnHooks) {
   let failure: unknown;
   const result = streamText({
     model: modelClient(modelSettings()),
@@ -518,6 +521,8 @@ export async function runTurn(messages: ModelMessage[]) {
     stopWhen: stepCountIs(MAX_ITERATIONS),
     // A provider error arrives HERE, not as the rejection below.
     onError: ({ error }) => { failure ??= error; },
+    // Opens and closes a span per model call and per tool call — "Tracing".
+    ...hooks,
   });
   // Awaiting these drives the stream, every tool step included, to its end.
   const [text, steps, toolCalls, usage] = await Promise.all([
@@ -585,22 +590,57 @@ an addition you make here:
 @opentelemetry/resources
 ```
 
-Write `src/tracing.ts` unconditionally. It is listed in the "Layout" tree, and
-it is inert when the platform sets no endpoint — the decision to export or not
-is made at runtime, below, never by omitting the file.
+### What a turn looks like in Agent Manager
+
+One trace per `/chat` turn, shaped as a tree:
+
+```
+invoke_agent <agent>          the turn: user message in, reply out, total tokens
+├── chat <model>              model call 1: messages sent, tool call requested
+├── execute_tool searchBooks  the tool: arguments in, result out
+└── chat <model>              model call 2: the tool result in, the reply out
+```
+
+Agent Manager decides what each span IS from `gen_ai.operation.name` —
+`invoke_agent`, `chat`, `execute_tool`. A span without it shows as `unknown`,
+and the trace view renders it as an opaque bar: that is what a single span
+wrapped around the whole turn produced before this section existed. Its viewer
+also reads every message and tool payload as a **JSON string**; an object or
+array attribute is dropped without a word.
+
+### `src/tracing.ts` — copy it whole
+
+Write it unconditionally. It is listed in the "Layout" tree, and it is inert
+when the platform sets no endpoint — the decision to export or not is made at
+runtime, below, never by omitting the file.
 
 ```ts
 // tracing.ts — imported for side effects from the top of main.ts, before
-// anything creates a model client.
-import { trace } from "@opentelemetry/api";
+// anything creates a model client. Also exports traceTurn, which main.ts
+// wraps every /chat turn in.
+import { context, trace, SpanKind, SpanStatusCode, type Span } from "@opentelemetry/api";
 import { NodeTracerProvider, BatchSpanProcessor } from "@opentelemetry/sdk-trace-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { Resource } from "@opentelemetry/resources";
+import type {
+  LanguageModelUsage,
+  ModelMessage,
+  OnLanguageModelCallEndCallback,
+  OnLanguageModelCallStartCallback,
+  OnToolExecutionEndCallback,
+  OnToolExecutionStartCallback,
+} from "ai";
 
 const endpoint = process.env.AMP_OTEL_ENDPOINT;
 const apiKey = process.env.AMP_AGENT_API_KEY;
+const agentName = process.env.OTEL_SERVICE_NAME ?? "agent";
 
-export const tracer = trace.getTracer("agent");
+// Prompts, completions, tool arguments and results go on spans unless the
+// platform sets this to "false". ON when unset, as Agent Manager's own
+// instrumentation defaults.
+const recordContent = process.env.TRACELOOP_TRACE_CONTENT !== "false";
+
+const tracer = trace.getTracer("agent");
 
 if (endpoint && apiKey) {
   const provider = new NodeTracerProvider({
@@ -609,9 +649,7 @@ if (endpoint && apiKey) {
     // in the org looks identical in the trace view — spans all correct, view
     // useless. The platform supplies the name in OTEL_SERVICE_NAME; a bare
     // NodeTracerProvider does not run resource detection, so read it.
-    resource: new Resource({
-      "service.name": process.env.OTEL_SERVICE_NAME ?? "agent",
-    }),
+    resource: new Resource({ "service.name": agentName }),
     spanProcessors: [
       new BatchSpanProcessor(
         new OTLPTraceExporter({
@@ -628,36 +666,222 @@ if (endpoint && apiKey) {
     void provider.shutdown().finally(() => process.exit(0));
   });
 }
-```
 
-Wrap every turn:
+// The streamText callbacks that open and close the per-step spans.
+export interface TurnHooks {
+  onLanguageModelCallStart: OnLanguageModelCallStartCallback;
+  onLanguageModelCallEnd: OnLanguageModelCallEndCallback;
+  onToolExecutionStart: OnToolExecutionStartCallback;
+  onToolExecutionEnd: OnToolExecutionEndCallback;
+}
 
-```ts
-import { tracer } from "./tracing.js";
+export interface TurnTrace {
+  conversationId: string;
+  model: string; // MODEL_NAME
+  system: string; // "anthropic" | "openai" — see "Tracing"
+  message: string; // this turn's user message
+}
 
-const model = config.modelName; // MODEL_NAME
-// The OpenTelemetry name of the API the client speaks, not of the host.
-const system = config.modelApiFormat === "openai-compatible" ? "openai" : "anthropic";
+// One agent turn: an `invoke_agent` span, with a `chat` child per model call
+// and an `execute_tool` child per tool call. Agent Manager classifies each
+// span by gen_ai.operation.name; a span without one shows as "unknown".
+export async function traceTurn<T extends { text: string; usage: LanguageModelUsage }>(
+  turn: TurnTrace,
+  run: (hooks: TurnHooks) => Promise<T>,
+): Promise<T> {
+  const agent = tracer.startSpan(`invoke_agent ${agentName}`, {
+    attributes: {
+      "gen_ai.operation.name": "invoke_agent",
+      "gen_ai.agent.name": agentName,
+      "gen_ai.conversation.id": turn.conversationId,
+      "gen_ai.system": turn.system,
+      "gen_ai.request.model": turn.model,
+    },
+  });
+  const parent = trace.setSpan(context.active(), agent);
+  if (recordContent) {
+    agent.setAttribute("gen_ai.input.messages", toMessages([{ role: "user", content: turn.message }]));
+  }
 
-const turn = await tracer.startActiveSpan(`chat ${model}`, async (span) => {
+  // Model calls in a turn run one after another, so one open span is enough;
+  // tool calls in a step may run in parallel, so they are keyed by call id.
+  let chat: Span | undefined;
+  const toolSpans = new Map<string, Span>();
+
+  const hooks: TurnHooks = {
+    onLanguageModelCallStart: (e) => {
+      chat = tracer.startSpan(
+        `chat ${e.modelId}`,
+        {
+          kind: SpanKind.CLIENT,
+          attributes: {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.system": turn.system,
+            "gen_ai.request.model": e.modelId,
+          },
+        },
+        parent,
+      );
+      if (recordContent) {
+        chat.setAttribute("gen_ai.input.messages", toMessages(e.messages));
+        if (e.instructions !== undefined) {
+          chat.setAttribute(
+            "gen_ai.system_instructions",
+            typeof e.instructions === "string" ? e.instructions : JSON.stringify(e.instructions),
+          );
+        }
+      }
+    },
+    onLanguageModelCallEnd: (e) => {
+      if (!chat) return;
+      chat.setAttributes({
+        "gen_ai.response.model": e.modelId,
+        "gen_ai.response.finish_reasons": [e.finishReason],
+        "gen_ai.usage.input_tokens": e.usage.inputTokens ?? 0,
+        "gen_ai.usage.output_tokens": e.usage.outputTokens ?? 0,
+      });
+      if (recordContent) {
+        chat.setAttribute(
+          "gen_ai.output.messages",
+          JSON.stringify([{ role: "assistant", parts: e.content.flatMap(toPart) }]),
+        );
+      }
+      chat.setStatus({ code: SpanStatusCode.OK });
+      chat.end();
+      chat = undefined;
+    },
+    onToolExecutionStart: (e) => {
+      const span = tracer.startSpan(
+        `execute_tool ${e.toolCall.toolName}`,
+        {
+          attributes: {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.name": e.toolCall.toolName,
+            "gen_ai.tool.call.id": e.toolCall.toolCallId,
+          },
+        },
+        parent,
+      );
+      if (recordContent) {
+        span.setAttribute("gen_ai.tool.call.arguments", JSON.stringify(e.toolCall.input ?? {}));
+      }
+      toolSpans.set(e.toolCall.toolCallId, span);
+    },
+    onToolExecutionEnd: (e) => {
+      const span = toolSpans.get(e.toolCall.toolCallId);
+      if (!span) return;
+      toolSpans.delete(e.toolCall.toolCallId);
+      if (e.toolOutput.type === "tool-error") {
+        span.setAttribute("error.type", "tool_error");
+        span.setStatus({ code: SpanStatusCode.ERROR, message: String(e.toolOutput.error) });
+      } else {
+        if (recordContent) {
+          span.setAttribute("gen_ai.tool.call.result", JSON.stringify(e.toolOutput.output ?? null));
+        }
+        span.setStatus({ code: SpanStatusCode.OK });
+      }
+      span.end();
+    },
+  };
+
   try {
-    const t = await runTurn(full); // see "Model access", "The model call"
-    span.setAttributes({
-      "gen_ai.system": system,
-      "gen_ai.request.model": model,
-      "gen_ai.usage.input_tokens": t.usage.inputTokens ?? 0,
-      "gen_ai.usage.output_tokens": t.usage.outputTokens ?? 0,
+    const result = await run(hooks);
+    agent.setAttributes({
+      "gen_ai.usage.input_tokens": result.usage.inputTokens ?? 0,
+      "gen_ai.usage.output_tokens": result.usage.outputTokens ?? 0,
     });
-    return t;
+    if (recordContent) {
+      agent.setAttribute("gen_ai.output.messages", toMessages([{ role: "assistant", content: result.text }]));
+    }
+    agent.setStatus({ code: SpanStatusCode.OK });
+    return result;
   } catch (err) {
-    span.recordException(err as Error);
-    span.setStatus({ code: 2 }); // ERROR
+    agent.recordException(err as Error);
+    agent.setAttribute("error.type", (err as Error)?.name ?? "Error");
+    agent.setStatus({ code: SpanStatusCode.ERROR, message: String((err as Error)?.message ?? err) });
     throw err;
   } finally {
-    span.end(); // a span never ended is a span never exported
+    // A failed model call never reaches its end callback: close what is open
+    // so no span is lost. A span never ended is a span never exported.
+    for (const span of [chat, ...toolSpans.values()]) {
+      if (!span) continue;
+      span.setStatus({ code: SpanStatusCode.ERROR, message: "turn ended before this step completed" });
+      span.end();
+    }
+    agent.end();
   }
-});
+}
+
+// OpenTelemetry GenAI message shape, as a JSON string — Agent Manager reads
+// these attributes as strings and drops anything else.
+type Part =
+  | { type: "text"; content: string }
+  | { type: "tool_call"; id: string; name: string; arguments: unknown }
+  | { type: "tool_call_response"; id: string; response: unknown };
+
+function toMessages(messages: ReadonlyArray<ModelMessage>): string {
+  return JSON.stringify(
+    messages.map((m) => ({
+      role: m.role,
+      parts: typeof m.content === "string"
+        ? [{ type: "text", content: m.content }]
+        : m.content.flatMap(toPart),
+    })),
+  );
+}
+
+// One message part. Reasoning, files and sources are not message content.
+function toPart(part: { type: string }): Part[] {
+  const p = part as { type: string } & Record<string, unknown>;
+  switch (p.type) {
+    case "text":
+      return [{ type: "text", content: String(p.text) }];
+    case "tool-call":
+      return [{ type: "tool_call", id: String(p.toolCallId), name: String(p.toolName), arguments: p.input }];
+    case "tool-result":
+      // The SDK wraps a result as { type: "json" | "text", value }; the value
+      // is the result.
+      return [{ type: "tool_call_response", id: String(p.toolCallId), response: (p.output as { value?: unknown })?.value ?? p.output }];
+    default:
+      return [];
+  }
+}
 ```
+
+The handler wraps each turn in it — step 5 of the handler flow — and `runTurn`
+spreads the hooks into `streamText` (see "The model call"). `genAiSystem` is the
+OpenTelemetry name of the API the client speaks, not of the host behind it:
+
+```ts
+const genAiSystem = config.modelApiFormat === "openai-compatible" ? "openai" : "anthropic";
+```
+
+**The hooks are the AI SDK's own lifecycle callbacks, not a wrapper around
+`execute`.** `onLanguageModelCallStart/End` fire once per model call and
+`onToolExecutionStart/End` once per tool call, with the messages, the model's
+output content, the tool input and the tool result in hand. Wrapping each
+generated tool's `execute` instead would see the tool but never the model call,
+and a turn would still show one opaque span per step.
+
+**Every span is closed on every path.** A model call that fails never reaches
+its end callback; the `finally` closes whatever is still open as `ERROR`, so a
+turn that dies in step 2 still shows step 1, the tool it ran, and where it
+stopped. A span never ended is a span never exported.
+
+### Content: on unless the platform says otherwise
+
+`TRACELOOP_TRACE_CONTENT` decides whether spans carry message content — the
+user's message, the system prompt, every model input and output, and tool
+arguments and results. The platform sets it (`true` by default, as Agent
+Manager's own instrumentation defaults); unset is treated as `true`, and only
+the exact value `false` turns content off. With it off, the tree, the timings,
+the token counts and the outcome are all still there — only the text is gone.
+
+Content is the agent's most sensitive traffic. **Never add a content attribute
+outside a `recordContent` check**, and never log it instead: the platform's
+switch is only a switch if every path honours it.
+
+### Mistakes that look like a broken collector
 
 **Reading the variables into config is not instrumenting.** An agent that
 loads `AMP_OTEL_ENDPOINT` and never constructs an exporter emits nothing, and
@@ -665,27 +889,10 @@ nothing about it looks broken — the pod is healthy, the turns succeed, and the
 trace store is simply empty. If you add the config entries, add the provider and
 the spans in the same change.
 
-**Instrument the turn by hand.** OpenLLMetry (`@traceloop/node-server-sdk`)
-does not auto-instrument the Vercel AI SDK: installing it produces a tracer that
-emits nothing for `streamText`, which reads as a broken collector rather than
-as a missing instrumentation. Wrap each turn in a span yourself, following
-the OpenTelemetry `gen_ai.*` semantic conventions:
-
-| attribute | value |
-|---|---|
-| `gen_ai.system` | from `MODEL_API_FORMAT`: `anthropic`, or `openai` for `openai-compatible` (the semantic conventions name the client's API, not the host behind it) |
-| `gen_ai.request.model` | `MODEL_NAME` |
-| `gen_ai.usage.input_tokens` | from the SDK result's `usage` |
-| `gen_ai.usage.output_tokens` | from the SDK result's `usage` |
-
-Name the span `chat <model>`, and record tool calls as child spans so a turn
-reads as one tree.
-
-**Respect `TRACELOOP_TRACE_CONTENT`.** When it is `false` — which is the
-platform default — never put prompts, completions, or tool arguments on a span.
-Model, token counts, latency and outcome are what the platform observes; message
-content is the agent's most sensitive traffic and exporting it is a decision with
-a privacy review behind it, not a default. Treat an unset value as `false`.
+**Instrument by hand; no auto-instrumentation covers this stack.** OpenLLMetry
+(`@traceloop/node-server-sdk`) does not instrument the Vercel AI SDK: installing
+it produces a tracer that emits nothing for `streamText`. Do not add it, and do
+not add any `@opentelemetry/*` package beyond the four above.
 
 ## Constraints
 
@@ -782,7 +989,7 @@ Nothing from `specs/` ships in the component. The image contains compiled code.
     ├── prompt.ts         # GENERATED from the AFM body
     ├── tools.ts          # GENERATED from the dependency's openapi.yaml
     ├── config.ts         # env, read once
-    ├── tracing.ts        # OpenTelemetry setup — see "Tracing"
+    ├── tracing.ts        # OpenTelemetry setup + traceTurn — see "Tracing"
     ├── agent.ts          # the AI SDK loop
     └── main.ts           # HTTP surface + per-request credential context
 ```
