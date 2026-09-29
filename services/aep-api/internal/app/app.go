@@ -665,15 +665,15 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		slog.Warn("roles ensure disabled — OPENBAO_ADDR is not set, so no environment's Thunder admin credential can be read; " +
 			"builds will not provision roles or test users")
 	} else {
-		// ONE place decides which environment's identity provider a build's roles
-		// belong to: the environment aep-api deploys and validates in.
+		// A build's roles belong to the identity provider of the environment its
+		// project writes into, resolved per project from its write target.
 		resolver := newIdentityTargetResolver(environmentClient, bindingKV,
-			openchoreo.DevEnvironmentName, cfg.ThunderEnvAdminRoute)
+			writeTargets, cfg.ThunderEnvAdminRoute)
 		identityTargets = resolver
 		rolesEnsure = identity.NewEnsureService(resolver, identityStore, artifactSvcGit)
 		groupCatalogSvc = identity.NewCatalogService(resolver, identityStore)
 		slog.Info("roles ensure wired — a build provisions specs/design/security.json's roles and test users on the environment's own Thunder",
-			"environment", openchoreo.DevEnvironmentName, "adminRoute", cfg.ThunderEnvAdminRoute)
+			"adminRoute", cfg.ThunderEnvAdminRoute)
 	}
 	identityPanel := identity.NewPanelService(identityTargets, identityStore)
 	// Late-bound: provisioning, which owns the sign-in binding, is built below.

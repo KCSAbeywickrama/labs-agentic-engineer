@@ -43,8 +43,10 @@ package identity
 // including an environment with no identity provider bound to it yet — leaves
 // `DirectoryAvailable` false and the store-derived fields intact, so the console
 // can say "unknown" rather than rendering absence as "does not exist". That is
-// why the resolver's pure Scope and its I/O-performing Resolve are separate
-// calls: the store rows can still be read when the directory cannot.
+// why the resolver's Scope (the project's write target) and its Resolve (the
+// binding and credential) are separate calls: the store rows can still be read
+// when the directory cannot. A write target that cannot be read degrades the
+// same way, to an empty unavailable panel.
 
 import (
 	"context"
@@ -272,7 +274,14 @@ func (s *PanelService) View(ctx context.Context, orgID, projectID string) (Panel
 		// unavailable panel rather than rows from a directory nobody named.
 		return PanelView{DirectoryAvailable: false}, nil
 	}
-	scope := s.targets.Scope(orgID)
+	scope, err := s.targets.Scope(ctx, orgID, projectID)
+	if err != nil {
+		// No write target: no environment to scope the platform's own record to.
+		// A read degrades rather than fails, so the console says "unknown".
+		slog.WarnContext(ctx, "roles panel: the project's write target cannot be read, degrading the read",
+			"org", orgID, "project", projectID, "error", err)
+		return PanelView{DirectoryAvailable: false}, nil
+	}
 	refs, err := s.store.ListProjectRefs(ctx, scope, projectID)
 	if err != nil {
 		return PanelView{}, err
@@ -293,7 +302,7 @@ func (s *PanelService) View(ctx context.Context, orgID, projectID string) (Panel
 	// fails exactly here, and reads as "unknown" for the same reason.
 	liveAccounts := map[string]string{}
 	var directory Directory
-	target, terr := s.targets.Resolve(ctx, orgID)
+	target, terr := s.targets.Resolve(ctx, scope)
 	if terr != nil {
 		slog.WarnContext(ctx, "roles panel: no identity provider for this environment, degrading the read",
 			"scope", scope.String(), "project", projectID, "error", terr)
@@ -606,7 +615,7 @@ func (s *PanelService) Rotate(ctx context.Context, orgID, projectID, username st
 	if err != nil {
 		return PasswordDisclosure{}, err
 	}
-	target, err := s.mutableDirectory(ctx, orgID)
+	target, err := s.mutableDirectory(ctx, scope)
 	if err != nil {
 		return PasswordDisclosure{}, err
 	}
@@ -672,7 +681,7 @@ func (s *PanelService) Delete(ctx context.Context, orgID, projectID, username st
 	if err != nil {
 		return DeleteResult{}, err
 	}
-	target, err := s.mutableDirectory(ctx, orgID)
+	target, err := s.mutableDirectory(ctx, scope)
 	if err != nil {
 		return DeleteResult{}, err
 	}
@@ -735,13 +744,13 @@ func unenrol(ctx context.Context, dir Directory, owned *TestUser) ([]string, err
 // than degrading. The read may say "unknown" when the identity provider cannot
 // be reached; a write has nothing to write to, and pretending otherwise would
 // report a rotation that never happened.
-func (s *PanelService) mutableDirectory(ctx context.Context, orgID string) (Target, error) {
+func (s *PanelService) mutableDirectory(ctx context.Context, scope Scope) (Target, error) {
 	if s.targets == nil {
 		return Target{}, errors.New("identity: no identity provider is configured; this account cannot be changed")
 	}
-	target, err := s.targets.Resolve(ctx, orgID)
+	target, err := s.targets.Resolve(ctx, scope)
 	if err != nil {
-		return Target{}, fmt.Errorf("identity: no identity provider for %s: %w", s.targets.Scope(orgID), err)
+		return Target{}, fmt.Errorf("identity: no identity provider for %s: %w", scope, err)
 	}
 	return target, nil
 }
@@ -759,7 +768,11 @@ func (s *PanelService) resolveOwned(ctx context.Context, orgID, projectID, usern
 		// environment is missing tells a caller nothing it can act on here.
 		return Scope{}, nil, ErrPanelNotFound
 	}
-	scope := s.targets.Scope(orgID)
+	// A mutation, so an unreadable write target fails it rather than degrading.
+	scope, err := s.targets.Scope(ctx, orgID, projectID)
+	if err != nil {
+		return Scope{}, nil, err
+	}
 	// Fence 1 — org + project. The reference rows are the only project-scoped
 	// thing here, so they are the only thing that can license the action.
 	refs, err := s.store.ListProjectRefs(ctx, scope, projectID)
