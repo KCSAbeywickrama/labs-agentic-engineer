@@ -179,6 +179,7 @@ func writtenByComposition(t *testing.T) (binding, value string) {
 	rc := pinResourceClient()
 	svc := runtimeconfig.NewRuntimeConfigService(pinOriginsClient(), rc, pinStore())
 	svc.SetResourceCatalog(pinRuntimeCatalog{})
+	svc.SetWriteTargets(pinWriteTarget{})
 
 	// Composition of EITHER web app registers the project's whole set; the
 	// deferred `ready` (no resolved outputs in this fixture) does not affect the

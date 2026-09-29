@@ -808,9 +808,10 @@ func TestRolesGate_TheTrailerCarriesTheSignInClientID(t *testing.T) {
 		},
 	}
 	issues := newFakeIssues(nil)
-	binding := ocname.ExternalResourceBindingName("workouts", "user-auth", openchoreo.DevEnvironmentName)
+	binding := ocname.ExternalResourceBindingName("workouts", "user-auth", testWriteTarget)
 	svc := NewService(Deps{
 		Issues: issues, Roles: roles, Markers: endUserAuthMarkers(),
+		WriteTargets: staticWriteTarget{env: testWriteTarget},
 		Design: fakeProjectDesign{byProject: map[string][]spec.DesignComponent{
 			"workouts": {{Name: "api", Dependencies: []spec.Dependency{
 				{Kind: spec.DependencyKindPlatformResource, Name: "user-auth", ResourceType: "thunder-app"},

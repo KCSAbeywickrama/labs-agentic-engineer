@@ -72,8 +72,10 @@ type DeploymentReadiness struct {
 // output names. External and platform-resource bindings share one naming form
 // (ExternalResourceBindingName), so one read path serves both. A missing binding
 // (not provisioned yet) reports "unknown", not an error — the status endpoint
-// stays 200 mid-provision.
+// stays 200 mid-provision. An empty env reads the project's write target, and
+// an unresolvable one reads as not provisioned (readTarget).
 func (s *Service) Status(ctx context.Context, orgID, projectID, depName, env string) (*DependencyStatus, error) {
+	env = s.readTarget(ctx, orgID, projectID, env)
 	out, binding, err := s.bindingStatus(ctx, orgID, projectID, depName, env)
 	if err != nil {
 		return nil, err
@@ -88,7 +90,7 @@ func (s *Service) Status(ctx context.Context, orgID, projectID, depName, env str
 	if keys, external := spec.UnionExternalConfigFor(comps, depName); external {
 		valueState, _, stateErr := externalValueState(binding, keys)
 		if stateErr != nil {
-			bindingName := ocname.ExternalResourceBindingName(projectID, depName, normalizedEnv(env))
+			bindingName := ocname.ExternalResourceBindingName(projectID, depName, env)
 			return nil, fmt.Errorf("provisioning: decode binding %q: %w", bindingName, stateErr)
 		}
 		out.ValueState = valueState
@@ -98,13 +100,12 @@ func (s *Service) Status(ctx context.Context, orgID, projectID, depName, env str
 
 // bindingStatus reports only OpenChoreo binding state. Callers that already
 // hold a design snapshot (notably platform gate settlement) use it to avoid a
-// second design read and the resulting TOCTOU/error-masking path.
+// second design read and the resulting TOCTOU/error-masking path. An empty env
+// (no write target) reads as not provisioned.
 func (s *Service) bindingStatus(ctx context.Context, orgID, projectID, depName, env string) (*DependencyStatus, *openchoreo.ResourceReleaseBinding, error) {
-	env = normalizedEnv(env)
-	bindingName := ocname.ExternalResourceBindingName(projectID, depName, env)
-	binding, err := s.bindings.GetBinding(ctx, orgID, bindingName)
+	binding, err := s.projectBinding(ctx, orgID, projectID, depName, env)
 	if err != nil {
-		return nil, nil, fmt.Errorf("provisioning: read binding %q: %w", bindingName, err)
+		return nil, nil, err
 	}
 	out := &DependencyStatus{Outputs: []string{}}
 	if binding == nil {
@@ -125,11 +126,19 @@ func (s *Service) bindingStatus(ctx context.Context, orgID, projectID, depName, 
 	return out, binding, nil
 }
 
-func normalizedEnv(env string) string {
+// projectBinding reads a project dependency's binding in env. An empty env is
+// the answer readTarget gives for an unresolvable write target, and there is no
+// binding to read in no environment, so it reads as not provisioned.
+func (s *Service) projectBinding(ctx context.Context, orgID, projectID, depName, env string) (*openchoreo.ResourceReleaseBinding, error) {
 	if env == "" {
-		return defaultEnv()
+		return nil, nil
 	}
-	return env
+	bindingName := ocname.ExternalResourceBindingName(projectID, depName, env)
+	binding, err := s.bindings.GetBinding(ctx, orgID, bindingName)
+	if err != nil {
+		return nil, fmt.Errorf("provisioning: read binding %q: %w", bindingName, err)
+	}
+	return binding, nil
 }
 
 // ConfigurationReadiness returns the whole project's external dependency value
@@ -148,7 +157,7 @@ func normalizedEnv(env string) string {
 // Configured therefore means "every external this project can supply is
 // configured", which is exactly the question the builds page asks.
 func (s *Service) ConfigurationReadiness(ctx context.Context, orgID, projectID, env string) (*ProjectDependencyReadiness, error) {
-	env = normalizedEnv(env)
+	env = s.readTarget(ctx, orgID, projectID, env)
 	comps, err := s.design.ReadDesignComponents(ctx, orgID, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("provisioning: read design: %w", err)
@@ -166,14 +175,13 @@ func (s *Service) ConfigurationReadiness(ctx context.Context, orgID, projectID, 
 			continue
 		}
 		keys := union[name]
-		bindingName := ocname.ExternalResourceBindingName(projectID, name, env)
-		binding, berr := s.bindings.GetBinding(ctx, orgID, bindingName)
+		binding, berr := s.projectBinding(ctx, orgID, projectID, name, env)
 		if berr != nil {
-			return nil, fmt.Errorf("provisioning: read binding %q: %w", bindingName, berr)
+			return nil, berr
 		}
 		state, missing, derr := externalValueState(binding, keys)
 		if derr != nil {
-			return nil, fmt.Errorf("provisioning: decode binding %q: %w", bindingName, derr)
+			return nil, fmt.Errorf("provisioning: decode binding %q: %w", ocname.ExternalResourceBindingName(projectID, name, env), derr)
 		}
 		if state != ValueStateConfigured {
 			result.Configured = false
@@ -211,7 +219,7 @@ func (s *Service) ConfigurationReadiness(ctx context.Context, orgID, projectID, 
 // catch it. That failure belongs to the org catalog surface, which is the only
 // place it can be seen or fixed; a project-scoped park can express neither.
 func (s *Service) DeploymentReadiness(ctx context.Context, orgID, projectID, env string) (*DeploymentReadiness, error) {
-	env = normalizedEnv(env)
+	env = s.readTarget(ctx, orgID, projectID, env)
 	comps, err := s.design.ReadDesignComponents(ctx, orgID, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("provisioning: read design: %w", err)
@@ -233,14 +241,13 @@ func (s *Service) DeploymentReadiness(ctx context.Context, orgID, projectID, env
 		if len(externals[name]) == 0 {
 			continue
 		}
-		bindingName := ocname.ExternalResourceBindingName(projectID, name, env)
-		binding, readErr := s.bindings.GetBinding(ctx, orgID, bindingName)
+		binding, readErr := s.projectBinding(ctx, orgID, projectID, name, env)
 		if readErr != nil {
-			return nil, fmt.Errorf("provisioning: read binding %q: %w", bindingName, readErr)
+			return nil, readErr
 		}
 		state, _, decodeErr := externalValueState(binding, externals[name])
 		if decodeErr != nil {
-			return nil, fmt.Errorf("provisioning: decode binding %q: %w", bindingName, decodeErr)
+			return nil, fmt.Errorf("provisioning: decode binding %q: %w", ocname.ExternalResourceBindingName(projectID, name, env), decodeErr)
 		}
 		if state != ValueStateConfigured {
 			out.Unconfigured = append(out.Unconfigured, name)
@@ -256,10 +263,9 @@ func (s *Service) DeploymentReadiness(ctx context.Context, orgID, projectID, env
 		}
 	}
 	for _, name := range sortedKeys(platform) {
-		bindingName := ocname.ExternalResourceBindingName(projectID, name, env)
-		binding, readErr := s.bindings.GetBinding(ctx, orgID, bindingName)
+		binding, readErr := s.projectBinding(ctx, orgID, projectID, name, env)
 		if readErr != nil {
-			return nil, fmt.Errorf("provisioning: read binding %q: %w", bindingName, readErr)
+			return nil, readErr
 		}
 		if binding == nil || !binding.IsReady() {
 			out.Provisioning = append(out.Provisioning, name)

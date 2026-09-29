@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/dependencies"
 	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 	"github.com/wso2/aep/aep-api/internal/spec"
@@ -82,6 +83,21 @@ type ProvisionFailure struct {
 // project's committed design (authorExternalPrepared) — the external dep need
 // not be separately registered anywhere.
 func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, projectID, tag string, milestoneNumber int, inputs []BuildProvisionInput) ([]ProvisionFailure, error) {
+	// The write target is resolved once, before anything is minted, and handed
+	// down. A transient failure retries the activity with nothing written; a
+	// project whose pipeline yields no write target fails each input it would
+	// author as permanent (no retry makes a cyclic pipeline valid) and still runs
+	// the roles and agent gates, which do not write into an environment.
+	env, envErr := s.writeTarget(ctx, orgID, projectID)
+	var nwt *openchoreo.ErrNoWriteTarget
+	if envErr != nil && !errors.As(envErr, &nwt) {
+		return nil, envErr
+	}
+	var noTarget error
+	if envErr != nil {
+		noTarget = fmt.Errorf("%w: %w", dependencies.ErrProvisionPermanent, envErr)
+	}
+
 	// Mint gates only when the drawer carried inputs. A not-ready dependency is
 	// always surfaced in the build drawer, so a build with no inputs needs no new
 	// gate — and a pure re-build must not churn a fresh gate for every already-ready
@@ -127,9 +143,13 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 	skipPlatform := false
 	for _, in := range inputs {
 		gate := gateByDep[strings.ToLower(in.Dependency)]
+		if noTarget != nil && (in.Kind == buildKindExternalConfig || in.Kind == buildKindPlatformResrc) {
+			failures = append(failures, ProvisionFailure{Component: in.Component, Dependency: in.Dependency, Reason: noTarget.Error(), Err: noTarget})
+			continue
+		}
 		switch in.Kind {
 		case buildKindExternalConfig:
-			if err := s.authorExternalPrepared(ctx, orgID, ocOrgID, projectID, in, gate); err != nil {
+			if err := s.authorExternalPrepared(ctx, orgID, ocOrgID, projectID, env, in, gate); err != nil {
 				// Err rides along so a permanent answer (a schema the ResourceType
 				// builder refuses) keeps its classification through aggregation —
 				// without it every external fault read as a blip and was retried.
@@ -139,7 +159,7 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 			if skipPlatform {
 				continue
 			}
-			if err := s.provisionResource(ctx, orgID, projectID, in.Dependency, gate, in.Parameters, nil, tag); err != nil {
+			if err := s.provisionResource(ctx, orgID, projectID, env, in.Dependency, gate, in.Parameters, nil, tag); err != nil {
 				failures = append(failures, ProvisionFailure{Component: in.Component, Dependency: in.Dependency, Reason: err.Error(), Err: err})
 				if errors.Is(err, dependencies.ErrProvisionPermanent) {
 					skipPlatform = true
@@ -168,7 +188,13 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 	// lands here with a fresh gate and no run — deriving `pending` forever and
 	// stranding every consumer coding task (issue #164). Settle it: admit+complete a
 	// provision run so its gate derives `deployed`, without re-authoring the resource.
-	failures = append(failures, s.settleReadyGates(ctx, orgID, projectID, provisioned)...)
+	// Without a write target there is no binding to read, so nothing settles.
+	if envErr != nil {
+		slog.WarnContext(ctx, "provisioning: no write target; ready gates not settled",
+			"org", orgID, "project", projectID, "error", envErr)
+		return failures, nil
+	}
+	failures = append(failures, s.settleReadyGates(ctx, orgID, projectID, env, provisioned)...)
 	return failures, nil
 }
 
@@ -180,7 +206,7 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 // hiccup must not fail the build (log + return nil). Binding reads are likewise
 // best-effort; only a failure while settling a confirmed-ready gate becomes a
 // ProvisionFailure the workflow can inspect.
-func (s *Service) settleReadyGates(ctx context.Context, orgID, projectID string, provisioned map[string]bool) []ProvisionFailure {
+func (s *Service) settleReadyGates(ctx context.Context, orgID, projectID, env string, provisioned map[string]bool) []ProvisionFailure {
 	comps, err := s.design.ReadDesignComponents(ctx, orgID, projectID)
 	if err != nil {
 		slog.WarnContext(ctx, "provisioning: settle read design failed", "error", err)
@@ -202,7 +228,7 @@ func (s *Service) settleReadyGates(ctx context.Context, orgID, projectID string,
 			seen[name] = true
 			// Only an already-Ready dep is settled here. A not-Ready dep is driven by
 			// its own drawer input (or is genuinely un-actionable) — leave it alone.
-			st, _, serr := s.bindingStatus(ctx, orgID, projectID, dep.Name, "")
+			st, _, serr := s.bindingStatus(ctx, orgID, projectID, dep.Name, env)
 			if serr != nil {
 				slog.WarnContext(ctx, "provisioning: settle read binding failed", "dependency", dep.Name, "error", serr)
 				continue
@@ -210,7 +236,7 @@ func (s *Service) settleReadyGates(ctx context.Context, orgID, projectID string,
 			if st == nil || !st.Ready {
 				continue
 			}
-			if cerr := s.completeReadyGate(ctx, orgID, projectID, dep.Name, comp.Name); cerr != nil {
+			if cerr := s.completeReadyGate(ctx, orgID, projectID, env, dep.Name, comp.Name); cerr != nil {
 				failures = append(failures, ProvisionFailure{Component: comp.Name, Dependency: dep.Name, Reason: cerr.Error()})
 			}
 		}
@@ -224,7 +250,7 @@ func (s *Service) settleReadyGates(ctx context.Context, orgID, projectID string,
 // authors NOTHING — the OC binding is already Ready, so re-authoring would only
 // re-write state. No open gate (issueNumber == 0) or an already-active run
 // (!admitted) is an idempotent no-op.
-func (s *Service) completeReadyGate(ctx context.Context, orgID, projectID, depName, component string) error {
+func (s *Service) completeReadyGate(ctx context.Context, orgID, projectID, env, depName, component string) error {
 	slog.DebugContext(ctx, "provisioning: settling already-ready gate", "dependency", depName, "component", component)
 	issueNumber, _, err := s.findProvisionIssue(ctx, orgID, projectID, depName)
 	if err != nil {
@@ -245,7 +271,7 @@ func (s *Service) completeReadyGate(ctx context.Context, orgID, projectID, depNa
 		// A provision run is already active for this gate (e.g. a concurrent settle).
 		return nil
 	}
-	ref := ocname.ExternalResourceBindingName(projectID, depName, defaultEnv())
+	ref := ocname.ExternalResourceBindingName(projectID, depName, env)
 	if _, serr := s.execs.StartWithRun(ctx, row.ID, ref); serr != nil {
 		slog.WarnContext(ctx, "provisioning: start settle provision run failed", "execution", row.ID, "error", serr)
 	}
@@ -257,7 +283,7 @@ func (s *Service) completeReadyGate(ctx context.Context, orgID, projectID, depNa
 // authorExternalPrepared runs the synchronous external-config provisioning flow
 // from design-derived plain/default values. It authors via AuthorPreparedValues;
 // no secret value is written to SM-API.
-func (s *Service) authorExternalPrepared(ctx context.Context, orgID, ocOrgID, projectID string, in BuildProvisionInput, gateNumber int) error {
+func (s *Service) authorExternalPrepared(ctx context.Context, orgID, ocOrgID, projectID, env string, in BuildProvisionInput, gateNumber int) error {
 	_ = ocOrgID // the author half needs no SM-API write; kept for symmetry with SaveValues.
 	// Read the design ONCE (mirrors SaveValues): validate the dep exists as an
 	// external dependency, then build the RT-authoring definition straight off
@@ -279,7 +305,7 @@ func (s *Service) authorExternalPrepared(ctx context.Context, orgID, ocOrgID, pr
 		Provider:    dep.Provider,
 		ConfigKeys:  keys,
 	}
-	byEnv := designPreparedValues(keys)
+	byEnv := designPreparedValues(keys, env)
 	// A copy (the definition names the registry) binds to the organization's
 	// type and takes the organization's values; a resource the project defined
 	// gets its own type and the design's defaults. The RECORD decides, not the
@@ -296,7 +322,7 @@ func (s *Service) authorExternalPrepared(ctx context.Context, orgID, ocOrgID, pr
 			// type NAME — so authoring from stale keys would bind to a type the
 			// organization does not have.
 			er.ConfigKeys = toConfigKeys(def.Config)
-			byEnv = designPreparedValues(er.ConfigKeys)
+			byEnv = designPreparedValues(er.ConfigKeys, env)
 			if cells := s.registeredEnvCells(ctx, orgID, in.Dependency); len(cells) > 0 {
 				byEnv = preparedValuesFromOrgCells(er.ConfigKeys, cells)
 			}
@@ -337,7 +363,7 @@ func (s *Service) authorExternalPrepared(ctx context.Context, orgID, ocOrgID, pr
 	}
 
 	if execID != "" {
-		ref := result.BindingByEnv[defaultEnv()]
+		ref := result.BindingByEnv[env]
 		if ref == "" {
 			ref = result.ResourceName
 		}
@@ -399,8 +425,9 @@ func recordResourceInstances(plane CatalogValuePlane, orgID, projectID, name str
 
 // designPreparedValues derives the only build-time authoring values the server
 // trusts: non-secret defaults (or empty strings) from the committed design. A
-// build never accepts carried config values or secret-store references.
-func designPreparedValues(keys []spec.ConfigKey) map[string]dependencies.PreparedEnvValues {
+// build never accepts carried config values or secret-store references. They
+// are authored into env, the project's write target.
+func designPreparedValues(keys []spec.ConfigKey, env string) map[string]dependencies.PreparedEnvValues {
 	plain := make(map[string]string, len(keys))
 	for _, key := range keys {
 		if !key.Secret {
@@ -408,6 +435,6 @@ func designPreparedValues(keys []spec.ConfigKey) map[string]dependencies.Prepare
 		}
 	}
 	return map[string]dependencies.PreparedEnvValues{
-		defaultEnv(): {Plain: plain},
+		env: {Plain: plain},
 	}
 }

@@ -1212,6 +1212,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		Providers:         orgEndpointCatalog,
 		Environments:      environmentLister{client: environmentClient},
 		Pipeline:          pipelineLister{client: projectCellClient},
+		WriteTargets:      writeTargets,
 		CatalogValuePlane: catalogValuePlane,
 		OrgSecrets:        secretRefWriter,
 		OrgResourceDocs:   orgResourceDocs,
@@ -1389,6 +1390,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// The platform tester's callback rides the same patch as the SPAs' own
 	// callbacks, and is what lets an agent-only project be signed in to at all.
 	runtimeConfigSvc.SetTryItCallbackURL(cfg.TryItCallbackURL)
+	// The bindings whose outputs drive window._env_ live in the project's write
+	// target, resolved per emission pass.
+	runtimeConfigSvc.SetWriteTargets(writeTargets)
 	// The pre-build ensure is now the Component CR alone. env-config.js used to be
 	// emitted here too and could not land — the binding it writes to does not
 	// exist before the first build — so it is a deploy-stage input instead, pulled
