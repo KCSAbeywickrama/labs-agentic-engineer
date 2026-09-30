@@ -21,12 +21,14 @@
 #
 # This is the official k3d single-cluster guide:
 #   https://openchoreo.dev/docs/getting-started/try-it-out/on-k3d-locally/
-# with two deviations, each called out at its own step below:
+# with three deviations, each called out at its own step below:
 #   1. the "Install ThunderID Identity Provider" sub-step of Step 3 is
 #      replaced (see "The Thunder step" below)
 #   2. a WSO2 API Platform operator install is added at the end of Step 2 —
 #      the official page has no equivalent step; it satisfies `aectl platform
 #      install`'s checkAPIPlatform prerequisite (see that step's own comment)
+#   3. Step 2's CoreDNS rewrite is extended to *.openchoreoapis.localhost, so
+#      pods can reach deployed endpoints by their public URL
 # Step 4's sample resources are applied as published: the environment `aectl
 # platform install` configures gateway ingress on is whichever one
 # oc.pipeline_source_environment names (`development` on this sample), imported
@@ -309,6 +311,27 @@ data:
       answer auto
     }
 EOF
+
+# The one deviation in this step: the official override covers only
+# *.openchoreo.localhost, not *.openchoreoapis.localhost, the data plane's
+# gateway host that every deployed endpoint URL is built on. Without it no pod
+# can reach a deployed endpoint by its public URL: the runner's endpoint
+# preflight (runners/remote-worker ADR-0006) fails ENOTFOUND and validation
+# never starts. Rewritten to host.k3d.internal like the official key, so the
+# request hairpins through the k3d load balancer with its Host header intact.
+# Its own key beside the official one, checked on every run: the apply above
+# prunes it on a re-run once setup-agent-manager.sh's own apply of this
+# ConfigMap has recorded it.
+OC_APIS_REWRITE='rewrite stop {
+  name regex (.+\.)?openchoreoapis\.localhost host.k3d.internal
+  answer auto
+}'
+if [ "$(kubectl get cm coredns-custom -n kube-system -o jsonpath='{.data.openchoreoapis\.override}')" != "$OC_APIS_REWRITE" ]; then
+    kubectl patch cm coredns-custom -n kube-system --type merge \
+        -p "$(V="$OC_APIS_REWRITE" python3 -c 'import json,os; print(json.dumps({"data": {"openchoreoapis.override": os.environ["V"]}}))')"
+    kubectl -n kube-system rollout restart deployment/coredns
+    kubectl -n kube-system rollout status deployment/coredns --timeout=120s
+fi
 
 # ── WSO2 API Platform operator ──────────────────────────────────────────────
 # Not part of the official k3d guide. `aectl platform install` requires the
