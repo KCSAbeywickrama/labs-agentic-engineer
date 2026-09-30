@@ -46,7 +46,7 @@ export function useBuildOffer(projectName: string): BuildOffer | null {
         ? buildOffer({
             features: workspace.features,
             designedFrom: spec.design.designedFrom,
-            productWide: spec.productWide,
+            productWide: workspace.productWide,
             lines,
             dependencies: design.dependencies,
             comments: design.comments,

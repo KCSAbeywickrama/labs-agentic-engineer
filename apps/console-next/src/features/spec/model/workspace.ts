@@ -16,11 +16,12 @@
  * under the License.
  */
 
-import type { FeatureStage, SpecFeature, SpecModel } from "../api/specModel";
+import type { FeatureStage, ProductWideItem, SpecFeature, SpecModel } from "../api/specModel";
 import { designLabel, designWork } from "./designWork";
 import { markdownFiles, PRD_PATH, PRODUCT_KEY, type MarkdownFile } from "./files";
 import { buildIdIndex, parseLine, type IdIndex, type LineBlock } from "./ids";
 import { blockingQuestions, type BlockingQuestion } from "./questions";
+import { productWideItems, readRequirements } from "./requirements";
 
 // The workspace as the user sees it, worked out from the spec model's state
 // and the live documents: each feature's chips, the ID index, the Fog, and
@@ -69,6 +70,8 @@ export interface DesignQueue {
 
 export interface Workspace {
   features: FeatureView[];
+  /** The product-wide items and their reach, read from product-wide.md (model/requirements.ts). */
+  productWide: ProductWideItem[];
   design: DesignQueue;
   files: MarkdownFile[];
   index: IdIndex;
@@ -225,7 +228,8 @@ export function withBuild(items: NextUpItem[], build: NextUpItem | null): NextUp
 export function deriveWorkspace(model: SpecModel, lines: ReadonlyMap<string, LineBlock[]>): Workspace {
   const files = markdownFiles(model.features);
   const { designedFrom } = model.design;
-  const work = designWork(model.features, designedFrom, lines, model.productWide);
+  const productWide = productWideItems(readRequirements(lines));
+  const work = designWork(model.features, designedFrom, lines, productWide);
   const design = { ...work, label: designLabel(work.toDesign, designedFrom) };
   const features = model.features.map((f) => {
     const own = lines.get(f.path) ?? [];
@@ -243,6 +247,7 @@ export function deriveWorkspace(model: SpecModel, lines: ReadonlyMap<string, Lin
   const leaving = new Set(model.proposal?.leavesFog.map((l) => l.text) ?? []);
   return {
     features,
+    productWide,
     design,
     files,
     index,

@@ -208,7 +208,7 @@ export const buildsHandlers = [
     const offer = buildOffer({
       features: workspace.features,
       designedFrom: model.design.designedFrom,
-      productWide: model.productWide,
+      productWide: workspace.productWide,
       lines,
       dependencies: design.dependencies,
       comments: design.comments,
@@ -220,7 +220,7 @@ export const buildsHandlers = [
       return refuse(422, { code: "validation_failed", message: "Not ready to build yet.", details: held });
     }
     const picked = workspace.features.filter((f) => selection.features.includes(f.id));
-    const carried = model.productWide
+    const carried = workspace.productWide
       .filter((p) => p.appliesTo === "all" || picked.some((f) => (p.appliesTo as string[]).includes(f.id)))
       .map((p) => p.id);
     const failing = offer.firstBuild && firstBuildFails() ? (FAILING_STORY[projectName] ?? null) : null;

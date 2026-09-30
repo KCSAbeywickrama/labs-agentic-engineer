@@ -140,3 +140,38 @@ describe("splitIds", () => {
     expect(splitIds("F2 Approvals, see F2.5")).toEqual([{ id: "F2" }, { text: " Approvals, see " }, { id: "F2.5" }]);
   });
 });
+
+describe("the clauses a line carries (skills/prd-contract)", () => {
+  it("reads a story's Needs and leaves them out of its words, keeping the IDs as links", () => {
+    const s = "F1.4 As an employee, I see my claims' status. [T&E Policy v3 · p.5] Needs: F2, F3.";
+    const parts = parseLine(s);
+    expect(parts.needs).toEqual(["F2", "F3"]);
+    expect(parts.appliesTo).toBeNull();
+    expect(parts.body).toBe("As an employee, I see my claims' status.");
+    expect(parts.refs.map((r) => r.id)).toEqual(["F2", "F3"]);
+  });
+
+  it("reads a product-wide item's reach, before or after its source", () => {
+    expect(parseLine("P1 Every edit is logged. Applies to: all.").appliesTo).toBe("all");
+    const late = parseLine("P3 Amounts in cents. Applies to: F1, F3. [org default]");
+    expect(late.appliesTo).toEqual(["F1", "F3"]);
+    expect(late.body).toBe("Amounts in cents.");
+  });
+});
+
+describe("a Retired section", () => {
+  const heading = (s: string): LineBlock => ({ kind: "heading", level: 2, text: s, emphasis: [] });
+  const index = buildIdIndex([], [
+    {
+      fileKey: "F2",
+      lines: [heading("User Stories"), line("F2.1 As a manager, I approve."), heading("Retired"), line("F2.3 moved to F5.1"), line("F2.6 dropped")],
+    },
+    { fileKey: "F5", lines: [heading("User Stories"), line("F5.1 As a manager, I see the route.")] },
+  ]);
+
+  it("is never a live line, and a move sends the old ID to its replacement", () => {
+    expect(resolveId(index, "F2.1")?.entry.fileKey).toBe("F2");
+    expect(resolveId(index, "F2.3")).toMatchObject({ entry: { id: "F5.1" }, retiredFrom: "F2.3" });
+    expect(resolveId(index, "F2.6")).toBeNull();
+  });
+});

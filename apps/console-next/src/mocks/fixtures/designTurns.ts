@@ -23,6 +23,7 @@ import { applyAgentToolCall, projectSpecDoc } from "../../features/spec/collab/s
 import { readSpecLines } from "../../features/spec/collab/useSpecLines";
 import { designBasis, designWork } from "../../features/spec/model/designWork";
 import { bundlePath } from "../../features/spec/model/files";
+import { productWideItems, readRequirements } from "../../features/spec/model/requirements";
 import type { components } from "../../generated/aep-api";
 import type { ScriptFrame } from "../chatServer";
 import { liveDesign, teachingSent, type DesignEffect } from "../designState";
@@ -76,13 +77,14 @@ function names(model: SpecModel, ids: string[]): string {
 function scriptDesign(projectName: string, text: string, model: SpecModel): DesignTurn {
   const design = liveDesign(projectName);
   const lines = readSpecLines(projectSpecDoc(projectName, model));
-  const { toDesign, outOfDate } = designWork(model.features, design.designedFrom, lines, model.productWide);
+  const productWide = productWideItems(readRequirements(lines));
+  const { toDesign, outOfDate } = designWork(model.features, design.designedFrom, lines, productWide);
   if (toDesign.length === 0) {
     const s = new Script().pause(500).say("The design is up to date with the spec. Nothing to design.");
     return { display: text, ...s.end() };
   }
   const designedFrom = Object.fromEntries(
-    toDesign.map((id) => [id, designBasis(model.features.find((f) => f.id === id)!, lines, model.productWide)]),
+    toDesign.map((id) => [id, designBasis(model.features.find((f) => f.id === id)!, lines, productWide)]),
   );
   const designed = model.features.filter((f) => design.designedFrom[f.id] !== undefined || toDesign.includes(f.id));
   const drafts = designCatalog(projectName, designed, lines, new Set(design.tweaks));
@@ -127,7 +129,8 @@ function scriptAddress(projectName: string, text: string, model: SpecModel, turn
   const room = projectSpecDoc(projectName, model);
   const scratch = new Y.Doc();
   Y.applyUpdate(scratch, Y.encodeStateAsUpdate(room));
-  const before = designWork(model.features, design.designedFrom, readSpecLines(scratch), model.productWide);
+  const productWide = productWideItems(readRequirements(readSpecLines(scratch)));
+  const before = designWork(model.features, design.designedFrom, readSpecLines(scratch), productWide);
 
   const s = new Script().pause(600).say(`Working through ${open.length} comment${open.length === 1 ? "" : "s"} together.`);
   const tweaks = new Set<DesignTweak>(design.tweaks);
@@ -156,7 +159,7 @@ function scriptAddress(projectName: string, text: string, model: SpecModel, turn
   const designedFrom = Object.fromEntries(
     [...specFeatures]
       .filter((id) => !before.outOfDate.includes(id))
-      .map((id) => [id, designBasis(model.features.find((f) => f.id === id)!, lines, model.productWide)]),
+      .map((id) => [id, designBasis(model.features.find((f) => f.id === id)!, lines, productWide)]),
   );
   const designed = model.features.filter((f) => design.designedFrom[f.id] !== undefined);
   const drafts = designCatalog(projectName, designed, lines, tweaks);

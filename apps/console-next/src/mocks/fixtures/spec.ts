@@ -16,171 +16,30 @@
  * under the License.
  */
 
+import acmeF1 from "@aep/contracts/requirements/acme-expenses/features/F1-submit-expenses.md?raw";
+import acmeF2 from "@aep/contracts/requirements/acme-expenses/features/F2-approvals.md?raw";
+import acmeF3 from "@aep/contracts/requirements/acme-expenses/features/F3-payroll-export.md?raw";
+import acmeF4 from "@aep/contracts/requirements/acme-expenses/features/F4-spending-reports.md?raw";
+import acmeF5 from "@aep/contracts/requirements/acme-expenses/features/F5-mileage-claims.md?raw";
+import acmePrd from "@aep/contracts/requirements/acme-expenses/prd.md?raw";
+import acmeProductWide from "@aep/contracts/requirements/acme-expenses/product-wide.md?raw";
 import type { Proposal, SpecModel } from "../../features/spec/api/specModel";
 
-// PROVISIONAL — mock-only until S3; see features/spec/api/specModel.ts.
+// PROVISIONAL — mock-only until the spec model is wired; see
+// features/spec/api/specModel.ts.
 //
-// Acme Expenses three weeks in: three features interviewed, two stubs. The
-// markdown follows skills/prd-contract (sections, the literal `*assumed*` tag,
-// permanent story numbers) and the spec model: prd.md is the product page,
-// each feature has its own file with `F<n>.<m>` stories, product-wide.md
-// holds the `P<n>` items. F2.3 moved to Mileage claims and now reads
-// "F5.1 (was F2.3)"; F2's out-of-scope line still names the old ID. Payroll
-// export's interview waits on a question in its Open Questions, tagged
-// `*blocking*`, with the two answers the agent offers nested under it.
+// Acme Expenses three weeks in: three features interviewed, two stubs. Its
+// files ARE the shared requirements fixture both readers are held to
+// (packages/contracts/requirements/acme-expenses, skills/prd-contract), so the
+// screens are approved on the same documents aep-api's parser is tested on.
+// F2.3 moved to Mileage claims and now reads "F5.1 (was F2.3)"; Approvals'
+// Retired section records it. Payroll export's interview waits on a question
+// in its Open Questions, tagged `*blocking*`, with the two answers the agent
+// offers nested under it.
 //
 // The agent has one change waiting for the user: an Auditor who can read
 // everything, which touches the Actors, Approvals, Payroll export and
 // product-wide, and takes the auditors' idea out of the Fog.
-
-const POLICY = "T&E policy";
-
-const acmePrd = `# Acme Expenses
-
-## Problem Statement
-
-Acme's 40 staff claim expenses on paper forms and email. Receipts get lost, managers approve late, and finance retypes every approved claim into Xero.
-
-## Solution
-
-An expense tracker: staff submit expenses with a receipt photo, managers approve claims, and finance sends approved claims to Xero every night.
-
-## Actors
-
-- Employee: submits expenses and claims.
-- Manager: approves or rejects their team's claims.
-- Finance: gives second approvals and runs the payroll export.
-
-## Features
-
-- F1 [Submit expenses](features/F1-submit-expenses.md)
-- F2 [Approvals](features/F2-approvals.md)
-- F3 [Payroll export](features/F3-payroll-export.md)
-- F4 [Spending reports](features/F4-spending-reports.md)
-- F5 [Mileage claims](features/F5-mileage-claims.md)
-
-## Fog
-
-- Corporate cards, once finance picks a card provider.
-- Per-diem rates for overseas trips.
-- Read-only access for the yearly external audit.
-
-## Product-wide
-
-Rules that apply to more than one feature, such as the audit log (P1) and company sign-in (P4), are on the [Product-wide](product-wide.md) page.
-
-## Out of Scope
-
-- A mobile app. Staff use the web app on their phones.
-`;
-
-const acmeF1 = `# Submit expenses
-
-## Purpose
-
-Employees record expenses with a receipt photo and submit them as a claim.
-
-## User Stories
-
-- F1.1 As an employee, I photograph a receipt and the amount and date are filled in for me.
-- F1.2 As an employee, I pick a category for each expense: meals, travel or supplies.
-- F1.3 As an employee, I save expenses as a draft and submit them later as one claim.
-- F1.4 As an employee, I see which of my claims are pending, approved or rejected.
-
-## Decisions
-
-- A receipt is required for any expense above $25. [${POLICY} p.4]
-- Meals are capped at $50 per day. [${POLICY} p.2]
-- A claim can hold expenses from any dates.
-- Amounts are entered as P3 describes; a submitted claim goes to F2 for approval.
-
-## Out of Scope
-
-- Corporate card transactions. Staff pay and claim back.
-`;
-
-const acmeF2 = `# Approvals
-
-## Purpose
-
-Managers approve or reject their team's claims; large claims also go to Finance.
-
-## User Stories
-
-- F2.1 As a manager, I see my team's pending claims in one list, oldest first.
-- F2.2 As a manager, I approve or reject a claim with a reason.
-- F2.4 As a manager going on leave, I name a deputy who approves in my place. *assumed*
-- F2.5 As finance, I give a second approval on any claim over $1,000, after the manager. [${POLICY} p.7]
-
-## Decisions
-
-- A claim is approved by the employee's line manager.
-- A rejected claim goes back to the employee to edit and resubmit. *assumed*
-- Every approval and rejection is kept, as P1 requires.
-
-## Out of Scope
-
-- Approving mileage: F2.3 moved to Mileage claims.
-`;
-
-const acmeF3 = `# Payroll export
-
-## Purpose
-
-Finance sends approved claims to Xero every night and fixes the ones that fail.
-
-## User Stories
-
-- F3.1 As finance, I have approved claims sent to Xero every night. [${POLICY} p.9]
-- F3.2 As finance, I see which claims failed to sync and why.
-- F3.3 As finance, I resend a failed claim after fixing it.
-
-## Decisions
-
-- Xero accepts up to 100 invoices per API call. [Xero API docs]
-- Each claim becomes one bill in Xero, with one line per expense.
-- A claim over $1,000 is sent only after its second approval (F2.5).
-
-## Open Questions
-
-1. Does finance post to one Xero organisation, or one per country? *blocking*
-   - Finance posts every claim to one Xero organisation.
-   - Each country has its own Xero organisation; a claim goes to the employee's country.
-`;
-
-const acmeF4 = `# Spending reports
-
-## Purpose
-
-Finance sees where the money goes, by team and category.
-`;
-
-const acmeF5 = `# Mileage claims
-
-## Purpose
-
-Staff claim for driving to client sites.
-
-## User Stories
-
-- F5.1 (was F2.3) As a manager, I see the route and distance when I approve a mileage expense.
-`;
-
-const acmeProductWide = `# Product-wide
-
-Rules that apply to more than one feature.
-
-## Requirements
-
-- P1 Every approval, rejection and edit is recorded in an audit log.
-- P2 Expense records are kept for 7 years. [${POLICY} p.10]
-- P3 Amounts are in the company currency, stored in cents.
-- P4 Staff sign in with company SSO. [org default]
-
-## Decisions
-
-- One currency only (USD). No multi-currency.
-`;
 
 const featurePath = (file: string) => `requirements/features/${file}.md`;
 
@@ -220,7 +79,7 @@ const auditorProposal: Proposal = {
     "requirements/product-wide.md": withLineAfter(
       acmeProductWide,
       "- P4 ",
-      "- P5 An auditor can read every claim, decision and export, and change none of them.",
+      "- P5 An auditor can read every claim, decision and export, and change none of them. Applies to: F2, F3.",
     ),
   },
 };
@@ -262,12 +121,6 @@ export const acmeExpensesSpec: SpecModel = {
       purpose: "Staff claim for driving to client sites.",
       stage: "Not interviewed",
     },
-  ],
-  productWide: [
-    { id: "P1", appliesTo: "all" },
-    { id: "P2", appliesTo: "all" },
-    { id: "P3", appliesTo: ["F1", "F3"] },
-    { id: "P4", appliesTo: "all" },
   ],
   documents: [
     {
@@ -362,7 +215,7 @@ Rules that apply to more than one feature.
 
 ## Requirements
 
-- P1 Staff sign in with company SSO. [org default]
+- P1 Staff sign in with company SSO. [org default] Applies to: all.
 `;
 
 export const triageAgentSpec: SpecModel = {
@@ -382,7 +235,6 @@ export const triageAgentSpec: SpecModel = {
       stage: "Interviewed",
     },
   ],
-  productWide: [{ id: "P1", appliesTo: "all" }],
   documents: [],
   design: { designedFrom: {}, openComments: 0, specChanges: [] },
   proposal: null,
@@ -398,7 +250,6 @@ export const triageAgentSpec: SpecModel = {
 export function freshSpec(productName: string): SpecModel {
   return {
     features: [],
-    productWide: [],
     documents: [],
     design: { designedFrom: {}, openComments: 0, specChanges: [] },
     proposal: null,

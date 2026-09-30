@@ -95,8 +95,8 @@ export function SpecFilePane({
   onOpen: (target: SpecTarget) => void;
 }) {
   const appliesTo = useMemo(
-    () => new Map(model.productWide.map((p) => [p.id, p.appliesTo] as const)),
-    [model.productWide],
+    () => new Map(workspace.productWide.map((p) => [p.id, p.appliesTo] as const)),
+    [workspace.productWide],
   );
   const leavingFog = useMemo(
     () => (model.proposal ? new Map(model.proposal.leavesFog.map((l) => [l.text, l.becomes] as const)) : null),
@@ -168,7 +168,7 @@ export function SpecFilePane({
           <StubNote projectName={projectName} feature={feature} />
         )
       )}
-      <ProductWideHere featureId={feature.id} items={model.productWide} workspace={workspace} onOpen={onOpen} />
+      <ProductWideHere featureId={feature.id} items={workspace.productWide} workspace={workspace} onOpen={onOpen} />
     </>
   );
 }

@@ -134,7 +134,6 @@ export interface DesignSummary {
 
 export interface SpecModel {
   features: SpecFeature[];
-  productWide: ProductWideItem[];
   documents: SourceDocument[];
   design: DesignSummary;
   /** The agent's pending cross-file change; at most one at a time. */

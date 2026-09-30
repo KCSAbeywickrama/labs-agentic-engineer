@@ -40,8 +40,11 @@ export const specHandlers = [
     if (!proposal || proposal.id !== params.proposalId) {
       return HttpResponse.json({ detail: "That change is no longer waiting." }, { status: 404 });
     }
-    if (params.verdict === "accept") model.productWide.push(...proposal.productWide);
-    else if (params.verdict !== "discard") return HttpResponse.json({ detail: "Unknown verdict." }, { status: 400 });
+    // Accepting needs no bookkeeping here: the proposal's lines are already in
+    // the documents, and product-wide reach is read from them.
+    if (params.verdict !== "accept" && params.verdict !== "discard") {
+      return HttpResponse.json({ detail: "Unknown verdict." }, { status: 400 });
+    }
     model.proposal = null;
     return HttpResponse.json<SpecModel>(specView(String(params.projectName)));
   }),

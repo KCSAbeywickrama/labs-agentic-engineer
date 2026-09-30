@@ -62,7 +62,11 @@ export interface LineParts {
   assumed: Span | null;
   /** The literal `*blocking*` tag closing the line: an open question the interview waits on (model/questions.ts). */
   blocking: Span | null;
-  /** The line's words alone: no ID, no "(was …)", no sources, no tag. */
+  /** A story's `Needs: F5.` clause: the features it waits on. Empty when it has none. */
+  needs: string[];
+  /** A product-wide item's `Applies to:` clause: feature IDs, or "all"; null when it has none. */
+  appliesTo: string[] | "all" | null;
+  /** The line's words alone: no ID, no "(was …)", no sources, no clause, no tag. */
   body: string;
 }
 
@@ -74,6 +78,16 @@ const WAS = /^\s*\(was (F\d+\.\d+|P\d+)\)/;
 const SOURCE = /\[[^[\]]+\]/g;
 const ID = /\b(?:F\d+(?:\.\d+)?|P\d+)\b/g;
 const TRAILING_PUNCTUATION = /^[\s.,;:]*$/;
+// The clauses a line carries after its words (skills/prd-contract, "Lines").
+// Found anywhere in the line, so one written slightly out of order still reads.
+const NEEDS = /\bNeeds:\s*(F\d+(?:\s*,\s*F\d+)*)\.?/i;
+const APPLIES_TO = /\bApplies to:\s*(all|F\d+(?:\s*,\s*F\d+)*)\.?/i;
+const FEATURE_ID = /F\d+/g;
+
+function clause(text: string, pattern: RegExp): { span: Span; ids: string } | null {
+  const m = pattern.exec(text);
+  return m ? { span: { start: m.index, end: m.index + m[0].length }, ids: m[1]! } : null;
+}
 
 function overlaps(a: Span, spans: Span[]): boolean {
   return spans.some((s) => a.start < s.end && s.start < a.end);
@@ -109,20 +123,31 @@ export function parseLine(text: string, emphasis: Span[] = []): LineParts {
   const assumed = closingTag(text, emphasis, "assumed");
   const blocking = closingTag(text, emphasis, "blocking");
 
+  const needsClause = clause(text, NEEDS);
+  const appliesClause = clause(text, APPLIES_TO);
+  const needs = needsClause ? [...needsClause.ids.matchAll(FEATURE_ID)].map((m) => m[0]) : [];
+  const appliesTo = !appliesClause
+    ? null
+    : appliesClause.ids.toLowerCase() === "all"
+      ? "all"
+      : [...appliesClause.ids.matchAll(FEATURE_ID)].map((m) => m[0]);
+
   const claimed: Span[] = [lead, was, assumed, blocking, ...sources].filter((s): s is Span => s !== null);
+  // The IDs a clause names stay quiet links; only the words leave the body.
   const refs = [...text.matchAll(ID)]
     .map((m) => ({ id: m[0], start: m.index, end: m.index + m[0].length }))
     .filter((r) => !overlaps(r, claimed));
+  const cut = [...claimed, needsClause?.span, appliesClause?.span].filter((s): s is Span => s !== undefined);
 
   let body = "";
   let at = 0;
-  for (const s of [...claimed].sort((a, b) => a.start - b.start)) {
+  for (const s of cut.sort((a, b) => a.start - b.start)) {
     body += text.slice(at, s.start);
     at = Math.max(at, s.end);
   }
   body += text.slice(at);
 
-  return { lead, was, refs, sources, assumed, blocking, body: body.replace(/\s+/g, " ").trim() };
+  return { lead, was, refs, sources, assumed, blocking, needs, appliesTo, body: body.replace(/\s+/g, " ").trim() };
 }
 
 /** Where an ID points: a feature (its file) or a line in a file. */
@@ -138,8 +163,19 @@ export interface IdEntry {
 
 export interface IdIndex {
   entries: ReadonlyMap<string, IdEntry>;
-  /** Retired ID → the ID that replaced it. */
+  /** Retired ID → the ID that replaced it, from "F5.1 (was F2.3)" and a Retired section's "F2.3 moved to F5.1". */
   retired: ReadonlyMap<string, string>;
+}
+
+/** The section a file's retired IDs are recorded in (skills/prd-contract, "IDs"). */
+export const RETIRED_SECTION = "Retired";
+
+const RETIRED_ENTRY = /^(F\d+(?:\.\d+)?|P\d+)\b(?:\s+moved to\s+(F\d+(?:\.\d+)?|P\d+)\b)?/i;
+
+/** A Retired section's entry: the ID it retires, and the ID that replaced it when it moved. */
+export function retiredEntry(text: string): { id: string; movedTo: string | null } | null {
+  const m = RETIRED_ENTRY.exec(text.trim());
+  return m ? { id: m[1]!, movedTo: m[2] ?? null } : null;
 }
 
 export interface IndexedFile {
@@ -158,7 +194,18 @@ export function buildIdIndex(
     entries.set(f.id, { id: f.id, fileKey: f.id, title: f.name, text: f.purpose });
   }
   for (const file of files) {
+    let inRetired = false;
     for (const line of file.lines) {
+      if (line.kind === "heading" && (line.level ?? 1) <= 2) {
+        inRetired = line.text.trim().toLowerCase() === RETIRED_SECTION.toLowerCase();
+        continue;
+      }
+      // A Retired entry records an ID that is gone: never a live line.
+      if (inRetired) {
+        const entry = line.kind === "listItem" ? retiredEntry(line.text) : null;
+        if (entry?.movedTo) retired.set(entry.id, entry.movedTo);
+        continue;
+      }
       const parts = parseLine(line.text, line.emphasis);
       if (!parts.lead) continue;
       // First home wins: the one-home rule says an ID lives in one file, so a

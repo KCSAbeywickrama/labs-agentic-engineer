@@ -219,7 +219,7 @@ describe("Acme Expenses, acted on", () => {
       buildOffer({
         features: view(doc).features,
         designedFrom: {},
-        productWide: acmeExpensesSpec.productWide,
+        productWide: view(doc).productWide,
         lines: readSpecLines(doc),
         dependencies: [],
         comments: [],
