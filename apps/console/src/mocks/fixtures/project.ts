@@ -1705,6 +1705,112 @@ const collaborationFiles: MockSpecFile[] = [
   ...settledSpecFiles.slice(1),
 ];
 
+// Two ai-agents for the Agent spec view: order-support-agent calls tools on
+// the mock's own orders-api and catalog-api and keeps the conversation
+// server-side; faq-agent has no tools and a body with extra headings.
+const orderSupportAgentAfm = `---
+spec_version: "0.4.0"
+name: "order-support-agent"
+description: >
+  Answers a shopper's questions about their own orders and helps them find
+  products, in plain language.
+max_iterations: 10
+
+model:
+  provider: "anthropic"
+  name: "\${env:MODEL_NAME}"
+  url: "\${env:MODEL_ENDPOINT}"
+  authentication:
+    type: "api-key"
+    api_key: "\${env:MODEL_API_KEY}"
+
+interfaces:
+  - type: webchat
+    exposure:
+      http:
+        path: "/chat"
+
+x-aep:
+  tools:
+    openapi:
+      - component: "orders-api"
+        baseUrl: "\${env:ORDERS_API_URL}"
+        allow: [getOrder, listOrders, cancelOrder]
+      - component: "catalog-api"
+        baseUrl: "\${env:CATALOG_API_URL}"
+        allow: [searchProducts, getProduct]
+  memory:
+    type: "server"
+  identity:
+    mode: "on-behalf-of"
+---
+
+# Role
+
+You help a signed-in shopper with their own orders: where an order is, what
+was in it, and whether it can still be cancelled. You also help them find
+products in the catalogue.
+
+# Instructions
+
+- Only ever look up the signed-in shopper's own orders.
+- Before cancelling an order, read it back (order number, items, total) and
+  get a clear yes.
+- If an order has already shipped, say it can no longer be cancelled and point
+  them to returns.
+- If a product search finds nothing, say so plainly; never invent a product.
+
+# Style
+
+Friendly and brief. Lead with the answer, then the detail.
+`;
+const faqAgentAfm = `---
+spec_version: "0.4.0"
+name: "faq-agent"
+description: >
+  Answers common questions about shipping, returns and payment from the
+  store's published policies.
+
+model:
+  provider: "anthropic"
+  name: "\${env:MODEL_NAME}"
+  url: "\${env:MODEL_ENDPOINT}"
+  authentication:
+    type: "api-key"
+    api_key: "\${env:MODEL_API_KEY}"
+
+interfaces:
+  - type: webchat
+    exposure:
+      http:
+        path: "/chat"
+
+x-aep:
+  memory:
+    type: "server"
+---
+
+This agent has no tools: every answer comes from the policies below.
+
+# Role
+
+You answer shoppers' general questions about how the store works.
+
+# Policies
+
+- Standard shipping takes 3 to 5 working days; express takes 1 to 2.
+- Returns are accepted within 30 days, unused and in the original packaging.
+- The store accepts cards and PayPal; it never asks for a card number in chat.
+
+# Escalation
+
+If a question is about a specific order, say you can't see orders and point
+the shopper to the order support chat.
+
+# Style
+
+Plain and short. Quote the policy rather than paraphrasing it.
+`;
 const fullFiles: MockSpecFile[] = [
   ...settledSpecFiles,
   { path: "specs/design/flows/browse-and-check-out.md", content: flowBrowseAndCheckout },
@@ -1726,6 +1832,8 @@ const fullFiles: MockSpecFile[] = [
     path: "specs/design/components/orders-api/design.json",
     content: ordersApiDesignJson,
   },
+  { path: "specs/design/components/order-support-agent/agent.afm.md", content: orderSupportAgentAfm },
+  { path: "specs/design/components/faq-agent/agent.afm.md", content: faqAgentAfm },
   // One file per capability, which is what the acceptance skill authors and what
   // the Validations page reads back as a set.
   ...DEFAULT_ACCEPTANCE_FEATURES,
