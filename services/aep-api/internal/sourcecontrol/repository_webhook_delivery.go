@@ -250,7 +250,7 @@ RETURNING delivery_id, oc_org_id, event, action, received_at, attempts`,
 }
 
 // MarkProcessed records successful processing on the delivery row so a
-// redelivery is acked without re-running. It releases the lease.
+// duplicate is acked without re-running. It releases the lease.
 func (s *DeliveryStore) MarkProcessed(ctx context.Context, deliveryID string) error {
 	now := s.now().UTC()
 	return s.db.WithContext(ctx).

@@ -59,9 +59,11 @@
 //
 // # Idempotency
 //
-// A webhook delivery whose handler failed is REDELIVERED and re-run (the
-// receiver's Persist reports the row as neither fresh nor processed, and
-// dispatch happens again), so every handler here must be safe to run twice.
+// A webhook delivery whose handler failed is RUN AGAIN: the receiver's
+// Replayer re-runs it from the delivery ledger for up to 15 minutes, and a
+// manual GitHub redelivery is one more duplicate of it. GitHub never
+// redelivers on its own, so nothing else does. Every handler here must
+// therefore be safe to run twice, after an attempt that got partway through.
 // Three mechanisms carry that weight, and none of them is a "have we seen
 // this" table:
 //
@@ -74,7 +76,20 @@
 //   - triggering a build counts the WorkflowRuns OpenChoreo already holds for
 //     (component, commit) and refuses to exceed the allowance — which is the
 //     SAME mechanism as the automatic re-trigger budget, so idempotency and
-//     the budget can never disagree.
+//     the budget can never disagree. The count comes before the credential is
+//     staged, so a duplicate that builds nothing stages nothing either.
+//
+// A late delivery is the other half of running twice: a replay can land after
+// the supervisor has closed the cycle it was about and opened the next. The
+// cycle writers write onto whatever cycle is open, so a delivery describing its
+// pull request as it stood before the open cycle began is not recorded onto it
+// (cycleAsOf). No other ordering between deliveries is assumed — GitHub
+// promises none, and each handler re-reads ground truth.
+//
+// And a delivery can be lost past every replay. What that costs is healed by
+// the sweeps, from ground truth rather than from the delivery: Sweep starts the
+// run a milestone's work is owed, and BuildSweep builds a merge whose fan-out
+// never happened.
 //
 // # Echo suppression is issues-only
 //

@@ -27,8 +27,8 @@ flowchart LR
 |---|---|---|
 | `issues` | file / search a project's issues | `POST`+`GET /projects/{projectName}/issues` |
 
-*Still in the domain root (not carved into slices): repo lifecycle, workspace, webhook register/receive,
-and installation lifecycle.*
+*Still in the domain root (not carved into slices): repo lifecycle, workspace, webhook register/receive
+(including the delivery ledger and its `webhook.Replayer`), and installation lifecycle.*
 
 ## Ports
 | Port | Dir | Peer · contract |
@@ -108,15 +108,32 @@ and installation lifecycle.*
   exactly the statement "the platform wrote this" and no call site can forget it. Branding is
   idempotent; a comment written BEFORE this shipped carries no marker and reads as human, which is an
   accepted gap (the alternative was pattern-matching five writers' openers).
-- **A stored delivery never carries a published credential.** Every verified webhook delivery's RAW
-  body is persisted to `webhook_payloads` for audit and nothing reads it back — so a comment the
+- **A webhook is acknowledged before its handlers run, and the delivery ledger is what retries it.**
+  GitHub closes a delivery's connection at 10 seconds and never redelivers on its own, so a handler
+  running on the request's context lost its work to the timeout for good (a merged cycle's build
+  fan-out, once). `webhook.Receive` verifies, persists and claims the delivery, answers `202`, and runs
+  the handlers under `async.Go` on `context.WithoutCancel` with a 2-minute budget. `webhook_deliveries`
+  carries a lease (`attempts`, `lease_until`): only the attempt holding it runs a delivery, so a
+  duplicate landing mid-handler is acknowledged without running twice, and a failed run is held for
+  its backoff (30s, doubling). `webhook.Replayer` re-runs due deliveries within 15 minutes of receipt,
+  5 attempts in all, claiming them with one `UPDATE` over `FOR UPDATE SKIP LOCKED`, so a delivery is
+  run by exactly one attempt across replicas; a pod lost mid-handler leaves its lease to lapse and is
+  replayed. The last failed attempt logs `webhook: delivery abandoned` and the row keeps its error.
+  What a delivery past its window was for is `eventcore`'s reconcile sweeps' to heal
+  (`webhook.ReplayHorizon` sets their grace). Every handler must stay idempotent: a replay re-runs
+  whatever the failed attempt got through. A routing failure is answered before anything is
+  persisted, so nothing replays it.
+- **A stored delivery never carries a published credential.** Every verified webhook delivery's
+  body is persisted to `webhook_payloads` — for audit, and as what the `Replayer` re-runs — so a comment the
   platform posts *on purpose* carrying credentials would land in the database in cleartext, the one
   place here where every other credential is sealed. The roles gate publishes each test user's login as
   an issue comment (ADR-0022), GitHub delivers that comment straight back, and `webhook/redact.go`
   rewrites the body before `Persist`. It keys on `PublishedCredentialsMarker` — declared beside
   `MachineCommentMarker` precisely because the writer is not the only party that has to know it — and
   matches on the part of it that survives JSON escaping, since Go's encoder turns `<` into `\u003c` and
-  a scan for the literal marker finds nothing. A body it cannot rewrite is dropped, not stored.
+  a scan for the literal marker finds nothing. A body it cannot rewrite is dropped, not stored. A
+  replay therefore runs the redacted copy; no registered handler reads a comment or issue body, and a
+  dropped body routes to no handler.
 - **`ListMilestoneIssueComments` is ONE call for a whole milestone's threads.** It is the version
   ledger's comment read and it rides a 5s console poll, so neither REST shape works — per-issue costs a
   call per issue and repo-wide answers the whole repository out of the budget the run loop needs; the
