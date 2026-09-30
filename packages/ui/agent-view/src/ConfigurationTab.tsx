@@ -20,7 +20,7 @@ import type { ReactNode } from "react";
 import { Stack, Typography } from "@wso2/oxygen-ui";
 
 import type { AgentModelConnection } from "./AgentView.js";
-import type { AgentSpec } from "./parse.js";
+import type { AgentAttachments, AgentSpec } from "./parse.js";
 import { mono, Panel, Row } from "./parts.js";
 
 /** Plain-language gloss for the interface types AFM defines. */
@@ -46,6 +46,30 @@ function memoryRow(memory: string): { value: string; note?: string } {
     return { value: "The web app remembers the conversation", note: "Sent back with every message." };
   }
   return { value: memory };
+}
+
+/** "application/pdf" → "PDF", "image/jpeg" → "JPEG": the subtype is the name people know. */
+function typeLabel(mediaType: string): string {
+  return (mediaType.split("/")[1] ?? mediaType).toUpperCase();
+}
+
+/** `x-aep.attachments`, or that the agent takes text alone (the default). */
+function AttachmentsPanel({ attachments }: { attachments: AgentAttachments | undefined }) {
+  return (
+    <Panel title="Attachments">
+      {attachments ? (
+        <>
+          <Row label="Types" value={attachments.types.map(typeLabel).join(", ")} />
+          <Row
+            label="Limits"
+            value={`Up to ${attachments.maxFiles} ${attachments.maxFiles === 1 ? "file" : "files"}, ${attachments.maxFileSizeMB} MB each`}
+          />
+        </>
+      ) : (
+        <Row label="Files" value="Text only, no files" />
+      )}
+    </Panel>
+  );
 }
 
 /**
@@ -115,6 +139,7 @@ export function ConfigurationTab({
           ))}
         </Panel>
       ) : null}
+      <AttachmentsPanel attachments={spec.attachments} />
       {memory ? (
         <Panel title="Memory">
           <Row label="Conversation" value={memory.value} note={memory.note} />

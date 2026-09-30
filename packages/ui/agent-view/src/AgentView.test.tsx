@@ -381,4 +381,23 @@ describe("AgentView — Configuration", () => {
     expect(screen.queryByText(/on-behalf-of/)).not.toBeInTheDocument();
     expect(screen.queryByText(/as the user/i)).not.toBeInTheDocument();
   });
+
+  it("says which files the agent takes, and how many and how large", () => {
+    const withFiles = AFM.replace(
+      '  memory:\n    type: "client"',
+      '  memory:\n    type: "client"\n  attachments:\n    types: [application/pdf, image/png]\n    maxFiles: 3\n    maxFileSizeMB: 5',
+    );
+    render(<AgentView spec={withFiles} />);
+    openTab("Configuration");
+
+    expect(screen.getByText("PDF, PNG")).toBeInTheDocument();
+    expect(screen.getByText("Up to 3 files, 5 MB each")).toBeInTheDocument();
+  });
+
+  it("says a text-only agent takes no files", () => {
+    render(<AgentView spec={AFM} />);
+    openTab("Configuration");
+
+    expect(screen.getByText("Text only, no files")).toBeInTheDocument();
+  });
 });
