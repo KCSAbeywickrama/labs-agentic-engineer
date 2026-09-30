@@ -249,6 +249,11 @@ ACME_EMAIL="${ACME_EMAIL:-}"
 ACME_SERVER="${ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}"
 TLS_SECRET_NAME="ae-public-tls"
 
+# Where a generated ae-install-client secret is kept. Root-only, and written
+# as soon as it is generated — see the guard at step 3c for why losing it
+# costs a rebuild rather than a retry.
+AE_INSTALL_CLIENT_SECRET_FILE="${AE_INSTALL_CLIENT_SECRET_FILE:-/root/.ae-install-client-secret}"
+
 # What a bare "localhost" must keep meaning: a loopback address on the
 # OPERATOR's own machine, not on this cluster. Backstage's dev origin
 # (:7007), the AMP console's (:3000) and the CLI redirect URIs (:8075,
@@ -1076,6 +1081,26 @@ if [ -z "${AE_INSTALL_CLIENT_SECRET:-}" ]; then
     else
         AE_INSTALL_CLIENT_SECRET="$(openssl rand -hex 24)"
         AE_INSTALL_CLIENT_SECRET_GENERATED=1
+        # Written the moment it is generated, not only printed at the end of a
+        # successful run. ThunderID imports the bundle carrying this secret in
+        # its pre-install hook, so the credential goes LIVE long before the
+        # script finishes — and a failure anywhere after that point used to
+        # lose the only copy, leaving a cluster whose one Administrator client
+        # nobody can authenticate as. There is no recovery from inside: a
+        # token minted without the resource indicator silently drops the
+        # `system` scope, and every other bundled client is too narrow to
+        # rotate this one. The file is the difference between re-running a
+        # step and rebuilding the cluster.
+        if (umask 077 && printf '%s' "$AE_INSTALL_CLIENT_SECRET" > "$AE_INSTALL_CLIENT_SECRET_FILE"); then
+            chmod 600 "$AE_INSTALL_CLIENT_SECRET_FILE" 2>/dev/null || true
+            echo "   🔑 generated admin client secret, stored at ${AE_INSTALL_CLIENT_SECRET_FILE}"
+        else
+            echo "❌ could not write ${AE_INSTALL_CLIENT_SECRET_FILE}." >&2
+            echo "   Refusing to bootstrap a credential with nowhere to keep it — set" >&2
+            echo "   AE_INSTALL_CLIENT_SECRET yourself, or point" >&2
+            echo "   AE_INSTALL_CLIENT_SECRET_FILE somewhere writable." >&2
+            exit 1
+        fi
     fi
 fi
 cat > "${BOOTSTRAP_DIR}/86-ae-install-client.yaml" <<YAML
@@ -1355,6 +1380,24 @@ echo "✅ Control Plane ready"
 if [ "$WITH_TLS" = "1" ]; then
     echo ""
     echo "   TLS — Let's Encrypt via cert-manager"
+
+    # A listener on 80, before anything is ordered. cert-manager attaches its
+    # solver HTTPRoutes to this Gateway, but ACME fetches the challenge on
+    # port 80 and the Gateway only listens on 8080 — so the route exists,
+    # k3d forwards host:80 to the node, and nothing answers. The challenge
+    # sits pending with "self check ... EOF", which reads like a network
+    # problem rather than a missing listener.
+    #
+    # It stays after issuance: renewals run the same challenge, and this is
+    # where an HTTP->HTTPS redirect would attach.
+    kubectl -n openchoreo-control-plane patch gateway gateway-default --type=json -p '
+[{"op":"add","path":"/spec/listeners/-","value":{
+  "name":"acme",
+  "port":80,
+  "protocol":"HTTP",
+  "allowedRoutes":{"namespaces":{"from":"All"}}
+}}]' 2>/dev/null || echo "   (acme listener already present)"
+    echo "   + port 80 listener for ACME challenges"
 
     ACME_EMAIL_FIELD=""
     [ -n "$ACME_EMAIL" ] && ACME_EMAIL_FIELD="  email: ${ACME_EMAIL}"
@@ -1656,9 +1699,22 @@ EOF
       --set openSearch.enabled=false \
       --set openSearchSetup.openSearchSecretName="opensearch-admin-credentials"
 
+    # The chart ships prometheus-operator at 40m CPU / 60Mi, which is under what
+    # it needs to reach a steady state on a cold cluster. It starts while the
+    # rest of the install is still loading the node, gets throttled to
+    # GOMAXPROCS=1, and its alertmanager ConfigMap informer misses the cache-sync
+    # deadline — the operator exits 1 about 19s in with "failed to sync cache for
+    # ConfigMap informer". Nothing then creates the Prometheus StatefulSet, so
+    # metrics-adapter crash-loops too on connection-refused, pointing at a
+    # Prometheus that was never built. Both look like distinct failures and
+    # neither names the limit.
     helm upgrade --install observability-metrics-prometheus \
       oci://ghcr.io/openchoreo/helm-charts/observability-metrics-prometheus \
-      --create-namespace --namespace openchoreo-observability-plane --version 0.6.1
+      --create-namespace --namespace openchoreo-observability-plane --version 0.6.1 \
+      --set kube-prometheus-stack.prometheusOperator.resources.requests.cpu=100m \
+      --set kube-prometheus-stack.prometheusOperator.resources.requests.memory=128Mi \
+      --set kube-prometheus-stack.prometheusOperator.resources.limits.cpu=500m \
+      --set kube-prometheus-stack.prometheusOperator.resources.limits.memory=256Mi
 
     helm upgrade observability-logs-opensearch \
       oci://ghcr.io/openchoreo/helm-charts/observability-logs-opensearch \
