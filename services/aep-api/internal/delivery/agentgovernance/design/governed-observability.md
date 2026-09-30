@@ -23,30 +23,44 @@ gateways in the same namespace:
 | `ai-gateway-<org>-<env>-gw-gateway-runtime:8084` | the per-agent LLM proxies |
 | `api-platform-<org>-<env>-gw-gateway-gateway-runtime:22893` | AMP's `/otel` route |
 
-Trace ingest belongs to the second — the `…-otel-restapi` that
-setup-environment-gateway.sh waits on is what serves it. Composing the OTLP
+Trace ingest belongs to the second — the gateway chart's own `…-otel-restapi`
+is what serves it. Composing the OTLP
 address from the AI gateway binding's endpoint yields a URL that answers **404**,
 and an agent reports that as nothing at all. That shipped once and was caught
 only by deploying a real agent and calling the endpoint from inside its pod.
 
-So the address is RECORDED, not derived: setup-environment-gateway.sh writes
+So the address is RECORDED, not derived: aectl's environment-IdP step
+(`tools/aectl/internal/envidp/gateway.go`, `gatewayOTelEndpoint`) writes
 `aep.wso2.com/otel-endpoint` onto the Environment, beside the AI gateway and
 Thunder bindings, and composition uses it verbatim. The route is part of the
 recorded value, so aep-api never has to know AMP spells it `/otel`, and a chart
-rename (the Service name really does contain `gateway-gateway`) changes one
-script rather than a constant in Go.
+rename (the Service name really does contain `gateway-gateway`) changes the
+provisioner rather than aep-api.
 
-The annotation is optional: an environment provisioned before it existed governs
-model traffic correctly and runs untraced, which is the safe direction.
+The annotation is optional: an environment provisioned without it governs model
+traffic correctly and runs untraced, which is the safe direction. It is also
+why a missing annotation is silent: the only sign is aep-api's "environment
+records no OTLP endpoint" log line on each reconcile, and `gateway_test.go`
+pins the value aectl writes for that reason.
 
 `/otel` on its own answers 404 and `/otel/v1/traces` without a key answers 401,
 so both halves are load-bearing and a misconfiguration is legible rather than
 silent.
 
-The third variable, `TRACELOOP_TRACE_CONTENT`, is set to `false`: spans carry
-model, token counts, latency and outcome, never prompts or completions.
-Exporting message content is a decision with a privacy review behind it, not a
-default inherited from an SDK.
+The third variable, `TRACELOOP_TRACE_CONTENT`, is set to `true`, matching Agent
+Manager's own default (`OTEL_TRACELOOP_TRACE_CONTENT` in agent-manager-service):
+spans carry the user's message, the system prompt, each model call's input and
+output, and tool arguments and results, so a trace shows why the agent answered
+what it did. `false` keeps the span tree, timings, token counts and outcome and
+drops only the text. Agent Manager's observer stores what it is sent and
+redacts nothing, so the agent's `recordContent` check is the only gate; with
+content off it also withholds error messages, which can echo request data.
+
+With content on, traces hold end-user text and whatever data tools return,
+readable by anyone with trace access for as long as traces are retained — a
+privacy and data-residency exposure the environment's owner accepts by leaving
+it on. The value is always composed explicitly, so the decision stays the
+platform's rather than an SDK default the agent inherits.
 
 ## Minting: two endpoints, one of which is a trap
 
@@ -133,7 +147,14 @@ broken collector rather than as missing instrumentation. Agents therefore emit
 `gen_ai.*` spans by hand; `skills/agent-building/references/building.md` carries
 the contract.
 
-**The collector is parked by default.** `setup.sh` scales the observability
-plane's heavy workloads to zero, so a correctly configured agent authenticates
-and then gets `503` from the gateway's upstream. `park-observability.sh up`
-brings it back.
+**Trace export is plain HTTP inside the cluster.** The recorded endpoint is the
+gateway runtime's in-cluster `http://` address, so the tracing token and span
+content cross the cluster network unencrypted — the same posture as the model
+traffic through the AI gateway (`:8084`) and component calls through the API
+gateway. Encrypting it is a platform-wide transport decision (a TLS listener
+agents trust, or a mesh), not a change to this route alone.
+
+**The collector can be parked.** `make dev-env` parks the observability
+plane's heavy workloads when run with `WITH_SRE=0`, so a correctly configured
+agent authenticates and then gets `503` from the gateway's upstream.
+`make obs-unpark` brings it back.

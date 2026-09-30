@@ -51,7 +51,14 @@ ENV_NAME="${2:-${OC_ENV:-development}}"
 
 CLUSTER_NAME="${CLUSTER_NAME:-openchoreo}"
 CLUSTER_CONTEXT="${CLUSTER_CONTEXT:-k3d-${CLUSTER_NAME}}"
-PUBLIC_THUNDER_URL="${PUBLIC_THUNDER_URL:-http://thunder.openchoreo.localhost:8080}"
+
+# The same DNS suffix the cluster was built on — required here too, since this
+# script registers a gateway address with amp-api and a wrong one is written
+# into a record rather than rejected. setup-agent-manager.sh exports it when it
+# calls this script; running it by hand means passing it.
+: "${AE_DOMAIN:?set AE_DOMAIN — the suffix this cluster is published under (localhost for local k3d)}"
+AMP_DOMAIN="amp.${AE_DOMAIN}"
+PUBLIC_THUNDER_URL="${PUBLIC_THUNDER_URL:-http://thunder.openchoreo.${AE_DOMAIN}:8080}"
 THUNDER_NS="${THUNDER_NS:-thunder}"
 THUNDER_RELEASE="${THUNDER_RELEASE:-thunder}"
 AMP_NS="${AMP_NS:-wso2-amp}"
@@ -68,8 +75,12 @@ WAIT_TIMEOUT="${WAIT_TIMEOUT:-600s}"
 # In-cluster for the runtime's own control-plane calls; public for ours, because
 # this script runs on the host.
 AMP_API_IN="http://amp-api.${AMP_NS}.svc.cluster.local:9000/api/v1"
-AMP_API_OUT="${AMP_API_URL:-http://api.amp.localhost:8080/api/v1}"
-VHOST="${AI_GATEWAY_VHOST:-http://ai-gateway.amp.localhost:8084}"
+AMP_API_OUT="${AMP_API_URL:-http://api.${AMP_DOMAIN}:8080/api/v1}"
+# The Agent Manager console a browser opens, for the console's "Manage in Agent
+# Manager" link on an agent's Deployments panel. Public, like AMP_API_OUT.
+# Optional to aep-api: without it an agent just has no link.
+AMP_CONSOLE_OUT="${AMP_CONSOLE_URL:-http://console.${AMP_DOMAIN}:8080}"
+VHOST="${AI_GATEWAY_VHOST:-http://ai-gateway.${AMP_DOMAIN}:8084}"
 
 kubectl() { command kubectl --context "$CLUSTER_CONTEXT" "$@"; }
 fail() { echo "❌ $1" >&2; [ $# -gt 1 ] && echo "   $2" >&2; exit 1; }
@@ -235,7 +246,8 @@ kubectl annotate environment "$ENV_NAME" -n "$ORG_NAME" --overwrite \
     "aep.wso2.com/aigateway-admin-url=${AMP_API_OUT}" \
     "aep.wso2.com/aigateway-gateway=${GW_ID}" \
     "aep.wso2.com/aigateway-secret-path=secret/aep/amp/${ORG_NAME}" \
-    "aep.wso2.com/aigateway-binding=${GW_NAME}" >/dev/null
+    "aep.wso2.com/aigateway-binding=${GW_NAME}" \
+    "aep.wso2.com/amp-console-url=${AMP_CONSOLE_OUT}" >/dev/null
 
 # The annotations ARE the binding, and aep-api reads them rather than being told:
 # a missing one is not a degraded gateway, it is an agent that keeps calling

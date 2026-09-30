@@ -16,6 +16,8 @@
  * under the License.
  */
 
+import type { AttachmentSpec } from "./attachments";
+
 /**
  * Everything the console hands the app in its launch URL: where to sign in
  * (issuer, client id, resource, scopes) and what to reach (the component's
@@ -29,6 +31,8 @@ export interface Launch {
   resource: string;
   scopes: string[];
   endpoint: string;
+  /** What the agent takes with a message, when it takes files. Only shapes the UI. */
+  attachments?: AttachmentSpec | undefined;
 }
 
 const ROUTE = "#/agent?";
@@ -53,7 +57,25 @@ export function parseLaunch(hash: string): Launch | null {
     // The console always sends openid first; an empty list still signs in.
     scopes: (query.get("scopes") ?? "openid").split(/\s+/).filter(Boolean),
     endpoint: read("endpoint"),
+    attachments: readAttachments(query),
   };
+}
+
+/** The agent's attachments spec from the link, or undefined if absent or malformed. */
+function readAttachments(query: URLSearchParams): AttachmentSpec | undefined {
+  const types = (query.get("attach_types") ?? "").split(",").filter(Boolean);
+  const maxFiles = Number(query.get("attach_max_files"));
+  const maxFileSizeMB = Number(query.get("attach_max_mb"));
+  if (
+    types.length === 0 ||
+    !Number.isInteger(maxFiles) ||
+    maxFiles < 1 ||
+    !Number.isInteger(maxFileSizeMB) ||
+    maxFileSizeMB < 1
+  ) {
+    return undefined;
+  }
+  return { types, maxFiles, maxFileSizeMB };
 }
 
 function isHttpUrl(value: string): boolean {

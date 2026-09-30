@@ -30,6 +30,25 @@ const launch = {
 };
 
 describe("tryItAppUrl", () => {
+  it("carries the agent's attachments spec", () => {
+    const url = new URL(
+      tryItAppUrl("http://tryit.test", {
+        ...launch,
+        attachments: { types: ["image/jpeg", "application/pdf"], maxFiles: 2, maxFileSizeMB: 5 },
+      }),
+    );
+    const query = new URLSearchParams(url.hash.slice("#/agent?".length));
+    expect(query.get("attach_types")).toBe("image/jpeg,application/pdf");
+    expect(query.get("attach_max_files")).toBe("2");
+    expect(query.get("attach_max_mb")).toBe("5");
+  });
+
+  it("omits the attachment params for a text-only agent", () => {
+    const url = new URL(tryItAppUrl("http://tryit.test", launch));
+    const query = new URLSearchParams(url.hash.slice("#/agent?".length));
+    expect(query.has("attach_types")).toBe(false);
+  });
+
   it("puts every public coordinate in the hash query, encoded", () => {
     const url = new URL(tryItAppUrl("http://tryit.aep.localhost:8095", launch));
     expect(url.origin).toBe("http://tryit.aep.localhost:8095");

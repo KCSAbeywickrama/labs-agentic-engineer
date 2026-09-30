@@ -167,14 +167,16 @@ const (
 	// that do not.
 	otelServiceNameEnvVar = "OTEL_SERVICE_NAME"
 
-	// TRACELOOP_TRACE_CONTENT is read by OpenLLMetry, whose default is to
-	// export prompts and completions. `false` keeps an agent's most sensitive
-	// traffic out of the trace store: spans still carry model, token counts and
-	// latency, which is what the platform's own observability needs. Turning it
-	// on is a per-deployment decision with a privacy review behind it, not a
-	// default inherited from the SDK.
+	// TRACELOOP_TRACE_CONTENT decides whether an agent's spans carry message
+	// content: prompts, completions, tool arguments and results. `true`
+	// matches Agent Manager's own default, so a trace shows what the model was
+	// told and what it answered. The value is always set explicitly, so the
+	// decision stays the platform's and never an SDK default the agent
+	// inherits; `false` keeps the tree, timings and token counts and drops only
+	// the text. Content is the agent's most sensitive traffic — see
+	// delivery/agentgovernance/design/governed-observability.md.
 	traceloopTraceContentEnvVar = "TRACELOOP_TRACE_CONTENT"
-	traceloopTraceContentValue  = "false"
+	traceloopTraceContentValue  = "true"
 
 	// modelAccessSecretRefName is the org-scoped SecretReference every
 	// ai-agent component's MODEL_API_KEY points at — one per org, upserted
@@ -200,6 +202,9 @@ type componentService struct {
 	// Nil on a deployment with no Agent Manager, which composes the pre-AMP
 	// direct-key path.
 	aiGatewayBindings AIGatewayBindingReader
+	// agentRecordName names an agent in Agent Manager, for the Deployments
+	// page's link to it. See SetAgentRecordNamer.
+	agentRecordName func(project, component string) string
 	// modelKeyResolver + secretRefClient back ModelAccessEnvVars, which the
 	// deploy stage calls while composing an ai-agent's ReleaseBinding (see
 	// ai_agent_model_access.go). Optional — nil means "not configured" (tests /
@@ -437,6 +442,7 @@ func (s *componentService) ListDeployments(ctx context.Context, orgName, project
 	if err != nil {
 		return nil, err
 	}
+	s.withAgentManagerLinks(ctx, orgName, projectName, componentName, list)
 	return list, nil
 }
 

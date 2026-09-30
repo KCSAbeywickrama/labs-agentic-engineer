@@ -42,6 +42,9 @@ already use or must use ("Payments: Stripe — finance has the account"). With
 no such given the line stays capability-only; the agent never proposes a
 provider here, and a provider line is never tagged `*assumed*` — choosing a
 service is the user's, on the dependency's definition at design.
+An agent is a product decision whose line says what the agent does ("Ticket
+category: suggested by an agent"); it runs on the organization's own model
+connection, so the line names no provider or model.
 Decisions taken from an org default are ordinary entries; a decision the agent
 made itself, because the user has not answered it yet, ends with the literal
 tag `*assumed*` — that exact emphasised word, no parentheses or brackets around

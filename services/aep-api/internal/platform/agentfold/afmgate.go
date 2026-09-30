@@ -86,6 +86,18 @@ var afmModelProviders = map[string]bool{"anthropic": true, "openai": true}
 // afmIdentityModes mirrors the zod gate's x-aep.identity.mode enum.
 var afmIdentityModes = map[string]bool{"on-behalf-of": true, "agent": true}
 
+// afmAttachmentTypes and the two limits mirror the zod gate's
+// attachmentsSchema (packages/agent-stream/src/agent-afm-schema.ts). The
+// two gates must agree on every document.
+var afmAttachmentTypes = map[string]bool{
+	"application/pdf": true, "image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true,
+}
+
+const (
+	afmAttachmentsMaxFiles      = 10
+	afmAttachmentsMaxFileSizeMB = 5
+)
+
 // Known-key sets, one per strictObject in frontMatterSchema
 // (agent-afm-schema.ts). Keep these — not a struct's field list — as the
 // single source of truth for "what shape does this object have"; the zod
@@ -101,11 +113,12 @@ var (
 	afmInterfaceKnownKeys   = map[string]bool{"type": true, "exposure": true}
 	afmExposureKnownKeys    = map[string]bool{"http": true}
 	afmExposureHTTPKeys     = map[string]bool{"path": true}
-	afmXAepKnownKeys        = map[string]bool{"tools": true, "memory": true, "identity": true}
+	afmXAepKnownKeys        = map[string]bool{"tools": true, "memory": true, "identity": true, "attachments": true}
 	afmToolsKnownKeys       = map[string]bool{"openapi": true}
 	afmOpenAPIToolKnownKeys = map[string]bool{"component": true, "baseUrl": true, "allow": true}
 	afmMemoryKnownKeys      = map[string]bool{"type": true}
 	afmIdentityKnownKeys    = map[string]bool{"mode": true}
+	afmAttachmentsKnownKeys = map[string]bool{"types": true, "maxFiles": true, "maxFileSizeMB": true}
 )
 
 // validateAgentAfm mirrors checkAgentAfm: parse the `---` front matter fence,
@@ -371,6 +384,51 @@ func validateAfmXAep(raw any) *designProblem {
 		mode, _ := ident["mode"].(string)
 		if !afmIdentityModes[mode] {
 			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("x-aep.identity.mode: %v is not an allowed value", ident["mode"])}
+		}
+	}
+	if attachments, present := xaep["attachments"]; present {
+		if problem := validateAfmAttachments(attachments); problem != nil {
+			return problem
+		}
+	}
+	return nil
+}
+
+// validateAfmAttachments mirrors the zod attachmentsSchema: types (non-empty,
+// no repeats, within afmAttachmentTypes), maxFiles 1..10, maxFileSizeMB 1..5,
+// all three required.
+func validateAfmAttachments(raw any) *designProblem {
+	att, ok := raw.(map[string]any)
+	if !ok {
+		return &designProblem{code: ErrSchemaViolation, message: "x-aep.attachments: must be an object"}
+	}
+	for k := range att {
+		if !afmAttachmentsKnownKeys[k] {
+			return &designProblem{code: ErrSchemaViolation, message: "x-aep.attachments: unknown property " + k}
+		}
+	}
+	types, ok := att["types"].([]any)
+	if !ok || len(types) == 0 {
+		return &designProblem{code: ErrSchemaViolation, message: "x-aep.attachments.types: must contain at least 1 element(s)"}
+	}
+	seen := map[string]bool{}
+	for i, t := range types {
+		s, _ := t.(string)
+		if !afmAttachmentTypes[s] {
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("x-aep.attachments.types[%d]: %v is not an allowed value", i, t)}
+		}
+		if seen[s] {
+			return &designProblem{code: ErrSchemaViolation, message: "x-aep.attachments.types: must not repeat a type"}
+		}
+		seen[s] = true
+	}
+	for _, limit := range []struct {
+		key string
+		max int
+	}{{"maxFiles", afmAttachmentsMaxFiles}, {"maxFileSizeMB", afmAttachmentsMaxFileSizeMB}} {
+		n, ok := asInt(att[limit.key])
+		if !ok || n < 1 || n > limit.max {
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("x-aep.attachments.%s: must be an integer from 1 to %d", limit.key, limit.max)}
 		}
 	}
 	return nil

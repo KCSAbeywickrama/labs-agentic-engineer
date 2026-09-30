@@ -6,6 +6,32 @@ platform:
     # run across multiple nodes — most cloud storage classes do not.
     access_mode: ""
 
+# The platform's browser-facing origins. Each is routed by Host header on the
+# same gateway port, so they are separate hostnames rather than paths, and
+# re-domaining an install means moving all of them together. Leave them as
+# they are for local k3d; `--console-url`, `--tryit-url` and `--api-url`
+# override one run.
+console:
+  # What users open, and the origin the console's OAuth redirect URIs are
+  # registered against during install.
+  public_url: "http://console.ae.localhost:8080"
+
+tryit:
+  # The platform's test app, served on its OWN hostname — the console links to
+  # it from "Try agent". One value feeds three places (this route's hostname,
+  # the console's link, and aep-api's TRY_IT_CALLBACK_URL, which registers
+  # {public_url}/callback as a redirect URI on every project's sign-in client),
+  # so moving the console without moving this one gives you a link that opens
+  # and a sign-in that is then refused as an unregistered redirect.
+  public_url: "http://tryit.ae.localhost:8080"
+
+aep_api:
+  # Public base aep-api builds user-facing links on (GitHub App redirect, the
+  # Settings page). Empty falls back to console.public_url, whose origin
+  # proxies the API — set this only where the two are genuinely separate
+  # origins.
+  public_url: ""
+
 oc:
   # In-cluster URL of the OpenChoreo platform API.
   # aep-api uses this to create Components, Deployments, and read pod logs.
@@ -81,6 +107,28 @@ gateway:
   # required for CI. Leave empty to be prompted during install.
   # Local: typically "openchoreoapis.localhost". Production: your public API hostname.
   hostname: "openchoreoapis.localhost"
+
+# The environment tier (T2 — see deployments/design/two-tier-thunder.md): the
+# per-environment identity provider and API gateway aectl installs alongside
+# the platform. These are the DNS SUFFIXES they are published under, not whole
+# hostnames — aectl composes "<env>-idp.<idp_base_domain>" and
+# "<env>-<org>.<gateway_base_domain>". Scheme and port are fixed to this
+# cluster's gateways (8080 and 19080).
+#
+# Both are browser-facing wherever the cluster is reachable by more than its
+# own host. A generated app sends its END USERS to the IdP to sign in
+# (thunder-app-operator republishes this as the app's OIDC issuer) and calls
+# its own API through the gateway, so leaving these on *.localhost while
+# moving the rest gives you a platform whose generated apps nobody can log
+# into.
+environment:
+  # Must equal Agent Manager's ENV_IDP_BASE_DOMAIN
+  # (deployments/scripts/setup-agent-manager.sh). Agent Manager composes the
+  # environment IdP's origin from this suffix rather than being told an
+  # address, so two different values leave the two products disagreeing on
+  # agent identity — with nothing failing at install time.
+  idp_base_domain: "openchoreo.localhost"
+  gateway_base_domain: "gateway.localhost"
 
 webhook:
   # Public URL registered on each GitHub repo's webhook.

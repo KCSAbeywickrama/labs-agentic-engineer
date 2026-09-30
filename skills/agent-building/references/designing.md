@@ -157,6 +157,25 @@ how the store is used is `references/building.md`. `client` remains valid for an
 agent whose caller genuinely owns the transcript (rare; say why in the
 description).
 
+## Attachments
+
+An agent whose work needs a file — a photo to read, a PDF to answer from —
+declares what it takes:
+
+```yaml
+x-aep:
+  attachments:
+    types: [image/jpeg, image/png]   # a subset of the ceiling types
+    maxFiles: 1                      # 1–10 per message
+    maxFileSizeMB: 5                 # 1–5, per file
+```
+
+Declare only what the feature needs: a receipt reader takes images and one
+file; a contract comparer takes PDFs and two. The ceilings — PDF, PNG, JPEG,
+GIF, WebP; 10 files; 5 MB each; 15 MB together — are the platform's, and the
+write-gate rejects anything past them. Omit the block for an agent that works
+from text alone: it then refuses files.
+
 ## Scenarios — how this agent's behaviour is graded
 
 Every `ai-agent` also gets `specs/validation/agent-scenarios.json`: the

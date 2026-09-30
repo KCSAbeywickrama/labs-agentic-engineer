@@ -181,6 +181,41 @@
             "mode"
           ],
           "additionalProperties": false
+        },
+        "attachments": {
+          "type": "object",
+          "properties": {
+            "types": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "application/pdf",
+                  "image/png",
+                  "image/jpeg",
+                  "image/gif",
+                  "image/webp"
+                ]
+              }
+            },
+            "maxFiles": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            },
+            "maxFileSizeMB": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5
+            }
+          },
+          "required": [
+            "types",
+            "maxFiles",
+            "maxFileSizeMB"
+          ],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
