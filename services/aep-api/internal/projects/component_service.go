@@ -200,6 +200,9 @@ type componentService struct {
 	// Nil on a deployment with no Agent Manager, which composes the pre-AMP
 	// direct-key path.
 	aiGatewayBindings AIGatewayBindingReader
+	// agentRecordName names an agent in Agent Manager, for the Deployments
+	// page's link to it. See SetAgentRecordNamer.
+	agentRecordName func(project, component string) string
 	// modelKeyResolver + secretRefClient back ModelAccessEnvVars, which the
 	// deploy stage calls while composing an ai-agent's ReleaseBinding (see
 	// ai_agent_model_access.go). Optional — nil means "not configured" (tests /
@@ -437,6 +440,7 @@ func (s *componentService) ListDeployments(ctx context.Context, orgName, project
 	if err != nil {
 		return nil, err
 	}
+	s.withAgentManagerLinks(ctx, orgName, projectName, componentName, list)
 	return list, nil
 }
 

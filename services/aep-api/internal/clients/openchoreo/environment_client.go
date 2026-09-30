@@ -350,6 +350,13 @@ const (
 	// port in the same namespace, so it cannot be derived from the AI gateway
 	// endpoint. Posting spans to the AI gateway answers 404.
 	annOTelEndpoint = "aep.wso2.com/otel-endpoint"
+
+	// annAMPConsoleURL is the public base of the Agent Manager console that
+	// governs this environment, written by setup-environment-aigateway.sh. The
+	// console links an agent's Deployments panel to its page there. Per
+	// environment for the same reason the admin URL is: two environments may be
+	// governed by different Agent Managers.
+	annAMPConsoleURL = "aep.wso2.com/amp-console-url"
 )
 
 // ErrNoAIGatewayBinding is the answer for an environment with no AI gateway.
@@ -394,6 +401,11 @@ type AIGatewayBinding struct {
 	// environment predates the annotation — tracing is then simply not
 	// composed, which is the safe direction.
 	OTelEndpoint string
+
+	// ConsoleURL is the public base of the Agent Manager console, without a
+	// trailing slash. Optional: an environment set up before the annotation
+	// existed governs exactly as before; its agents just get no console link.
+	ConsoleURL string
 }
 
 // GetAIGatewayBinding reads the environment's AI gateway binding off its
@@ -446,6 +458,7 @@ func aiGatewayBindingFromAnnotations(orgID, environment string, annotations map[
 		SecretPath:       strings.TrimSpace(annotations[annAIGatewaySecretPath]),
 		Name:             strings.TrimSpace(annotations[annAIGatewayBinding]),
 		OTelEndpoint:     strings.TrimSpace(annotations[annOTelEndpoint]),
+		ConsoleURL:       strings.TrimRight(strings.TrimSpace(annotations[annAMPConsoleURL]), "/"),
 	}
 	if binding.Endpoint == "" || binding.AdminURL == "" || binding.GatewayID == "" {
 		return AIGatewayBinding{}, ErrNoAIGatewayBinding

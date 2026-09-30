@@ -394,6 +394,24 @@ function ComponentPanel({
         )}
       </Stack>
       {d?.endpointUrl && <UrlRow url={d.endpointUrl} name={card.displayName} />}
+      {/* A governed agent's own page in Agent Manager, where its guardrails,
+          model binding and traces live. aep-api sends the URL only when this
+          environment's Agent Manager has registered the agent, so its absence
+          is the whole "not governed here" case. */}
+      {d?.agentManagerUrl && (
+        <Box sx={{ display: "flex", justifyContent: "flex-end", px: 2, pb: 1.25 }}>
+          <MuiLink
+            href={d.agentManagerUrl}
+            target="_blank"
+            rel="noreferrer"
+            variant="body2"
+            aria-label={`Manage ${card.displayName} in Agent Manager`}
+            sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
+          >
+            Manage in Agent Manager <ExternalLink size={12} aria-hidden />
+          </MuiLink>
+        </Box>
+      )}
       {isWebApp && talksTo.length > 0 && (
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pb: 1.25 }}>
           Talks to{" "}

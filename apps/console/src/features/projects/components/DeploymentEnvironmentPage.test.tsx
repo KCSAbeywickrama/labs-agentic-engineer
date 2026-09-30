@@ -729,6 +729,23 @@ describe("DeploymentEnvironmentPage — try it out (ADR-0032)", () => {
       mockAfmFiles = {};
     });
 
+    it("links a governed agent to its page in Agent Manager", () => {
+      const amp = "http://console.amp.localhost:8080/org/acme/project/expense/agents/triage-5703854a";
+      mockDeployments = [...devDeployments(), { ...agent(), agentManagerUrl: amp }];
+      render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
+
+      const link = screen.getByRole("link", { name: "Manage triage in Agent Manager" });
+      expect(link).toHaveAttribute("href", amp);
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveTextContent("Manage in Agent Manager");
+    });
+
+    it("offers no Agent Manager link when the environment does not govern the agent", () => {
+      render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
+
+      expect(screen.queryByRole("link", { name: "Manage triage in Agent Manager" })).toBeNull();
+    });
+
     it("carries the sign-in coordinates, the test users' scopes and the gateway URL", () => {
       mockSignIn = { issuer: "http://default-idp.amp.localhost:8080", clientId: "aep-dp-x-r-y" };
       render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
