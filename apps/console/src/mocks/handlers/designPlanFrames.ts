@@ -71,7 +71,7 @@ const CONTENT: Record<string, string> = {
         {
           name: "approver",
           description: "Approves submitted expenses.",
-          stories: [1],
+          stories: ["F1.1"],
           grants: ["expenses:read", "expenses:approve"],
           assignTo: ["Finance"],
         },

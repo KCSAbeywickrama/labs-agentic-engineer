@@ -42,7 +42,7 @@ function role(
   return {
     name,
     description: `What ${name} may do`,
-    stories: [1],
+    stories: ["F1.1"],
     grants: ["claims:read"],
     ...over,
   };

@@ -210,14 +210,14 @@ test("plan scope marks each story COVERED or NEEDS TASKS", () => {
     scope: {
       tag: "spec-v3",
       stories: [
-        { number: 1, title: "Sign in", covered: true },
-        { number: 4, covered: false },
+        { id: "F1.1", title: "Sign in", covered: true },
+        { id: "F2.4", covered: false },
       ],
     },
   });
   assert.match(out, /## Milestone scope \(spec spec-v3\)/);
-  assert.match(out, /- Story 1: Sign in — COVERED/);
-  assert.match(out, /- Story 4 — NEEDS TASKS/, "a story with no title still gets a row");
+  assert.match(out, /- Story F1\.1: Sign in — COVERED/);
+  assert.match(out, /- Story F2\.4 — NEEDS TASKS/, "a story with no title still gets a row");
 });
 
 test("an empty scope renders nothing", () => {

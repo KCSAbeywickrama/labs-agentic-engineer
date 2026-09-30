@@ -1,6 +1,6 @@
 ---
 name: design
-description: Use when generating a project's design from its PRD — the /design flow that turns specs/requirements/prd.md into the cell-first design under specs/design/, then mints the validation criteria. Also the flow for converging an existing design onto an amended PRD.
+description: Use when generating a project's design from its PRD — the /design flow that turns the requirements under specs/requirements/ into the cell-first design under specs/design/, then mints the validation criteria. Also the flow for converging an existing design onto an amended PRD.
 metadata:
   aep:
     kind: platform
@@ -9,17 +9,18 @@ metadata:
 
 # Design
 
-The design step: derive the complete design of the PRD from
-`specs/requirements/prd.md`, cell-first. The design covers EVERY story the
-PRD defines. The build gate checks the result mechanically — every story
+The design step: derive the complete design of the PRD from the requirements
+under `specs/requirements/` — the product page `prd.md`, one file per feature
+under `features/`, and `product-wide.md` (`prd-contract`) — cell-first. The
+design covers EVERY story the feature files define. The build gate checks the result mechanically — every story
 claimed by some component's design.json, every component enriched — so the
 way to a clean Build is to follow the order below.
 
 ## The PRD is the brief
 
-Design FROM `specs/requirements/prd.md`, and do not widen or narrow the scope:
-what the PRD says is what gets designed. A missing or empty PRD means the user
-needs `/start` first — stop and say so.
+Design FROM those files, and do not widen or narrow the scope: what the PRD
+says is what gets designed. No `prd.md`, or no feature with stories, means the
+user needs `/start` first — stop and say so.
 
 **Ask at design altitude.** A call this step has to make and only the user can
 settle — which provider, which of two shapes the PRD deliberately left open —
@@ -80,9 +81,9 @@ turn — apply them directly, and load one only if you find you do not have it.
    when it lands.
 2. **Component enrichment** (`architecture`) — the component set now exists, so
    `declare_plan` the per-component files before writing them. Fill each
-   component's design.json: language (org Tech stack default first), the PRD
-   `stories` it serves (every story the PRD defines must be claimed by some
-   component — the build gate checks coverage), dependencies (discover before
+   component's design.json: language (org Tech stack default first), the
+   `stories` it serves, by ID (`"F2.3"`; every story the feature files define
+   must be claimed by some component — the build gate checks coverage), dependencies (discover before
    you invent), description, pinned skills. A dependency is a cell node: a
    database or cache you introduce here goes into design.cell first
    (`component <id> as "…" database`, inside the cell) — the cell is the

@@ -124,7 +124,8 @@ type PlanScope struct {
 // PlanStory is one in-scope story; Covered means it already has Tasks and the
 // planner must leave it alone.
 type PlanStory struct {
-	Number  int    `json:"number"`
+	// ID is the story's ID, "F2.3".
+	ID      string `json:"id"`
 	Title   string `json:"title,omitempty"`
 	Covered bool   `json:"covered"`
 }

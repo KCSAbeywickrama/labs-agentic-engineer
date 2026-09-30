@@ -193,7 +193,7 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 	// exists for.
 	contextFiles := map[string]string{}
 	preload, slugs := s.assembleMilestoneTasks(ctx, orgID, projectID, milestoneNumber, contextFiles)
-	// The tag's story scope (#369): the PRD's story set drives DELTA
+	// The tag's story scope (#369): the requirements' story set drives DELTA
 	// planning — stories already covered by existing Tasks (their platform
 	// stamps) need no new work. Best-effort: a scope-less snapshot
 	// degrades to the legacy plan-everything behavior.
@@ -204,10 +204,10 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 		slog.WarnContext(ctx, "plan: story scope read failed — planning without milestone scope",
 			"project", projectID, "tag", versions.Latest, "error", serr)
 	}
-	covered := map[int]bool{}
+	covered := map[string]bool{}
 	for _, p := range preload {
-		for _, n := range delivery.ParseServesStories(p.Body) {
-			covered[n] = true
+		for _, id := range delivery.ParseServesStories(p.Body) {
+			covered[id] = true
 		}
 	}
 	// Freeze the set of issue numbers the agent actually received as context: an
@@ -350,16 +350,16 @@ func (s *PlanService) assembleMilestoneTasks(ctx context.Context, orgID, project
 // Platform-computed — the model never decides coverage, and never sees this as
 // anything but the section the agents service renders from it. nil when the
 // snapshot carries no readable stories.
-func planScopeFor(scope spec.BuildScope, covered map[int]bool) *agentsvc.PlanScope {
+func planScopeFor(scope spec.BuildScope, covered map[string]bool) *agentsvc.PlanScope {
 	if len(scope.InScope) == 0 {
 		return nil
 	}
 	stories := make([]agentsvc.PlanStory, 0, len(scope.InScope))
-	for _, n := range scope.InScope {
+	for _, id := range scope.InScope {
 		stories = append(stories, agentsvc.PlanStory{
-			Number:  n,
-			Title:   scope.StoryTitles[n],
-			Covered: covered[n],
+			ID:      id,
+			Title:   scope.StoryTitles[id],
+			Covered: covered[id],
 		})
 	}
 	return &agentsvc.PlanScope{Tag: scope.Tag, Stories: stories}

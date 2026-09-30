@@ -76,7 +76,7 @@ type planTap struct {
 	// componentStories maps a component id (lowercased) to its IN-SCOPE story
 	// citations (#369) — the source of the platform-stamped Serves-stories
 	// block. Nil on a scope-less legacy plan.
-	componentStories map[string][]int
+	componentStories map[string][]string
 	// rendered into the body as the App Path the agent works in. Empty when no
 	// design reader is wired.
 	appPaths map[string]string
@@ -113,7 +113,7 @@ type planTap struct {
 // the preloaded state and the app paths.
 // storiesFor resolves a component's in-scope story citations for the stamp;
 // nil when the scope carries none for it.
-func (t *planTap) storiesFor(component string) []int {
+func (t *planTap) storiesFor(component string) []string {
 	return t.componentStories[strings.ToLower(strings.TrimSpace(component))]
 }
 

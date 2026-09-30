@@ -17,17 +17,19 @@
 package spec
 
 // build_scope.go — the STORY SCOPE of one build (spec-agent redesign #369). A
-// version tag snapshots the PRD + design, so the milestone is the version's
-// ledger and task planning covers the PRD's stories. Computed here (the PRD's
-// User Stories section declares the story set; each component's design.json
-// claims the stories it serves) and consumed by delivery/build (milestone
-// identity) and delivery/task (delta planning + the Serves-stories stamp).
+// version tag snapshots the requirements + design, so the milestone is the
+// version's ledger and task planning covers the requirements' stories.
+// Computed here (the feature files declare the story set, read by reqspec;
+// each component's design.json claims the stories it serves) and consumed by
+// delivery/build (milestone identity) and delivery/task (delta planning + the
+// Serves-stories stamp).
 
 import (
 	"context"
 	"fmt"
-	"maps"
 	"slices"
+
+	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
 )
 
 // BuildScope is one tag's story scope. An empty InScope means the snapshot
@@ -36,14 +38,14 @@ import (
 type BuildScope struct {
 	// Tag is the spec version this scope was computed at (e.g. "v3").
 	Tag string
-	// InScope is the PRD's story set, ascending.
-	InScope []int
-	// StoryTitles maps a story number to its PRD story line (the text after
-	// "N. ").
-	StoryTitles map[int]string
+	// InScope is every story the requirements define, by ID ("F2.3"), in ID
+	// order.
+	InScope []string
+	// StoryTitles maps a story ID to its words (reqspec.Story.Text).
+	StoryTitles map[string]string
 	// ComponentStories maps a deployable component id to the stories its
-	// design.json claims (claims ∩ InScope), ascending.
-	ComponentStories map[string][]int
+	// design.json claims (claims ∩ InScope), in ID order.
+	ComponentStories map[string][]string
 }
 
 // MilestoneTitle is the title of the milestone this scope claims — the tag,
@@ -51,7 +53,7 @@ type BuildScope struct {
 func (s BuildScope) MilestoneTitle() string { return s.Tag }
 
 // BuildScopeAtTag computes the tag's story scope from the tagged snapshot. A
-// snapshot without a cell or readable PRD stories yields an empty scope (the
+// snapshot without a cell or readable stories yields an empty scope (the
 // legacy one-milestone-per-version behavior); the build gate normally makes
 // that impossible for freshly-cut tags.
 func (s *artifactService) BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (BuildScope, error) {
@@ -78,22 +80,25 @@ func (s *artifactService) BuildScopeAtTag(ctx context.Context, orgID, projectID,
 	if err != nil {
 		return scope, nil
 	}
-	stories := parsePRDStories(reqFiles[requirementsMainFile])
+	stories := reqspec.Parse(reqFiles).Stories()
 	if len(stories) == 0 {
 		return scope, nil
 	}
-	scope.InScope = slices.Sorted(maps.Keys(stories))
-	scope.StoryTitles = stories
-	scope.ComponentStories = map[string][]int{}
+	scope.StoryTitles = map[string]string{}
+	for _, st := range stories {
+		scope.InScope = append(scope.InScope, st.ID)
+		scope.StoryTitles[st.ID] = st.Text
+	}
+	scope.ComponentStories = map[string][]string{}
 	for id, claims := range componentStoryClaims(facts, designFiles) {
-		var served []int
-		for _, n := range claims {
-			if _, ok := stories[n]; ok {
-				served = append(served, n)
+		var served []string
+		for _, sid := range claims {
+			if _, ok := scope.StoryTitles[sid]; ok {
+				served = append(served, sid)
 			}
 		}
 		if len(served) > 0 {
-			slices.Sort(served)
+			slices.SortFunc(served, reqspec.CompareIDs)
 			scope.ComponentStories[id] = slices.Compact(served)
 		}
 	}

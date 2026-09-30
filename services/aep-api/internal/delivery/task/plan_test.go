@@ -333,9 +333,9 @@ func TestPlanIntoMilestone_WriteFailureIsAnError(t *testing.T) {
 // claimed stories — zero LLM discretion on either.
 func TestPlanIntoMilestone_DeltaScopeAndStamp(t *testing.T) {
 	rigScope = spec.BuildScope{
-		Tag: "v2", InScope: []int{1, 2},
-		StoryTitles:      map[int]string{1: "As a user, I want A.", 2: "As a user, I want B."},
-		ComponentStories: map[string][]int{"svc": {1, 2}},
+		Tag: "v2", InScope: []string{"F1.1", "F1.2"},
+		StoryTitles:      map[string]string{"F1.1": "As a user, I want A.", "F1.2": "As a user, I want B."},
+		ComponentStories: map[string][]string{"svc": {"F1.1", "F1.2"}},
 	}
 	defer func() { rigScope = spec.BuildScope{} }()
 
@@ -354,7 +354,7 @@ func TestPlanIntoMilestone_DeltaScopeAndStamp(t *testing.T) {
 	if scope.Tag != "v2" {
 		t.Errorf("scope tag = %q, want v2", scope.Tag)
 	}
-	want := agentsvc.PlanStory{Number: 1, Title: "As a user, I want A.", Covered: false}
+	want := agentsvc.PlanStory{ID: "F1.1", Title: "As a user, I want A.", Covered: false}
 	if !slices.Contains(scope.Stories, want) {
 		t.Errorf("scope missing the uncovered story: %+v", scope.Stories)
 	}
@@ -363,7 +363,7 @@ func TestPlanIntoMilestone_DeltaScopeAndStamp(t *testing.T) {
 	if len(created) != 1 {
 		t.Fatalf("created %d issues, want 1", len(created))
 	}
-	if got := delivery.ParseServesStories(created[0].Body); fmt.Sprint(got) != "[1 2]" {
-		t.Errorf("stamped stories = %v, want [1 2] (body: %q)", got, created[0].Body)
+	if got := delivery.ParseServesStories(created[0].Body); fmt.Sprint(got) != "[F1.1 F1.2]" {
+		t.Errorf("stamped stories = %v, want [F1.1 F1.2] (body: %q)", got, created[0].Body)
 	}
 }

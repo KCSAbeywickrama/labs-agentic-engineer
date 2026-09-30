@@ -21,3 +21,8 @@
   `services/agents/src/prompts/` (see that service's ADR-0003). A `strings.json`
   → Go/TS codegen pipeline used to live here; it is gone, and so is this
   package's `gen` script.
+- `requirements/` holds the requirements fixture both readers of
+  `specs/requirements/` are held to: aep-api's `internal/platform/reqspec` (Go)
+  and console-next's `features/spec/model/requirements.ts`. Each fixture folder
+  is written to `skills/prd-contract`, and its `expected.json` is the parse both
+  must yield. Change the contract, the fixture and both readers together.

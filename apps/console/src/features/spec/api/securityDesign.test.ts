@@ -50,7 +50,7 @@ function role(name: string): Role {
   return {
     name,
     description: `What ${name} may do`,
-    stories: [1],
+    stories: ["F1.1"],
     grants: ["orders:read"],
   };
 }
@@ -92,7 +92,7 @@ function richDoc(): SecurityDesign {
       {
         name: "Admin",
         description: "What Admin may do",
-        stories: [1, 2],
+        stories: ["F1.1", "F1.2"],
         grants: ["orders:read", "orders:read-all"],
         assignTo: ["Staff"],
         assignableBy: ["Admin"],
@@ -100,7 +100,7 @@ function richDoc(): SecurityDesign {
       {
         name: "Viewer",
         description: "What Viewer may do",
-        stories: [3],
+        stories: ["F1.3"],
         grants: ["orders:read"],
         enrolment: "self-service",
       },
@@ -118,7 +118,7 @@ const V1_DOCUMENT = JSON.stringify({
     {
       name: "Admin",
       description: "What Admin may do",
-      stories: [1],
+      stories: ["F1.1"],
       grantedBy: "an administrator",
       permissions: [{ component: "orders-api", actions: ["read"] }],
     },

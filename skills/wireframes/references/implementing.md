@@ -145,8 +145,8 @@ Screens
 - [ ] NewRisk → /risks/new — "Register" select not built: no registers endpoint
 
 Flows
-- [x] F1 · Approval queue — stories 2, 5
-- [ ] F2 · Log a risk — stories 1, 3 — breaks at NewRisk → RiskDetail: the
+- [x] Flow 1 · Approval queue — stories F2.1, F2.3
+- [ ] Flow 2 · Log a risk — stories F1.1, F1.2 — breaks at NewRisk → RiskDetail: the
       "Register" select is not built
 ```
 

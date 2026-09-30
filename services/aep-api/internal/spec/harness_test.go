@@ -242,5 +242,5 @@ func (r *rig) headSHA() string { return r.remote.HeadSHA(r.t) }
 func validComponentDesignJSON(name string) string {
 	return `{"name":"` + name + `","type":"service","version":"1.0.0","language":"go",` +
 		`"buildpack":"go","appPath":".","entrypoint":"main.go","exposure":"internet",` +
-		`"stories":[1],"dependencies":[],"description":"a service"}`
+		`"stories":["F1.1"],"dependencies":[],"description":"a service"}`
 }

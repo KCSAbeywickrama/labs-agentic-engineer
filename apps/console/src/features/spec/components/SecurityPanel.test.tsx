@@ -39,7 +39,7 @@ function role(name: string): SecurityDesign["roles"][number] {
   return {
     name,
     description: `What ${name} may do`,
-    stories: [1],
+    stories: ["F1.1"],
     grants: ["orders:read"],
   };
 }
@@ -72,7 +72,7 @@ const V1_DOCUMENT = JSON.stringify({
     {
       name: "Admin",
       description: "What Admin may do",
-      stories: [1],
+      stories: ["F1.1"],
       grantedBy: "an administrator",
       permissions: [{ component: "orders-api", actions: ["read"] }],
     },
@@ -721,7 +721,7 @@ describe("SecurityPanel — service-kind roles", () => {
         {
           name: "reconciliation-job",
           description: "Reconciles orders nightly",
-          stories: [4],
+          stories: ["F1.4"],
           kind: "service",
           grants: ["orders:read"],
         },
@@ -755,8 +755,8 @@ describe("SecurityPanel — role cards", () => {
     expect(
       screen.getByText("Submits and follows their own claims"),
     ).toBeInTheDocument();
-    expect(screen.getByText("Serves stories 1, 2.")).toBeInTheDocument();
-    expect(screen.getByText("Serves story 3.")).toBeInTheDocument();
+    expect(screen.getByText("Serves stories F1.1, F1.2.")).toBeInTheDocument();
+    expect(screen.getByText("Serves story F1.3.")).toBeInTheDocument();
     expect(screen.getByText("Handed out by Approver.")).toBeInTheDocument();
   });
 

@@ -67,7 +67,7 @@ function designText(): string {
       {
         name: "Admin",
         description: "What Admin may do",
-        stories: [1],
+        stories: ["F1.1"],
         grants: ["orders:read"],
       },
     ],

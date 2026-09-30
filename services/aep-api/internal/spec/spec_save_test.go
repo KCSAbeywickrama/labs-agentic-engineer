@@ -31,13 +31,14 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
-// validSpecSeed is a buildable spec: a PRD with a User Stories section, a
+// validSpecSeed is a buildable spec: a feature file with a story, a
 // design.cell declaring the components, and a valid design bundle (root + one
 // enriched component claiming the story, with its type artifact) — everything
 // the layout gates AND the build gate (#369) demand.
 func validSpecSeed() map[string]string {
 	return map[string]string{
-		"specs/requirements/prd.md":                "# PRD\n\n## User Stories\n\n1. As a user, I want the thing, so that value.\n",
+		"specs/requirements/prd.md":                "# PRD\n\n## Features\n\n- F1 [Core](features/F1-core.md)\n",
+		"specs/requirements/features/F1-core.md":   "# Core\n\n## User Stories\n\n- F1.1 As a user, I want the thing, so that value.\n",
 		"specs/design/design.cell":                 "component svc service\n",
 		"specs/design/components/svc/design.md":    "---\ntype: service\n---\n# svc\n",
 		"specs/design/components/svc/design.json":  validComponentDesignJSON("svc"),
@@ -235,7 +236,7 @@ func TestSaveSpec_LegacyDesignTagsExcluded(t *testing.T) {
 	r.tag("v1", specTagSubject+"v1")
 	r.tag("v1-1", "legacy design rev")
 	r.tag("v1-2", "legacy design rev")
-	r.seed(map[string]string{"specs/requirements/prd.md": "# PRD v2\n\n## User Stories\n\n1. As a user, I want the thing, so that value.\n"}, "spec edit")
+	r.seed(map[string]string{"specs/requirements/prd.md": "# PRD v2\n\n## Features\n\n- F1 [Core](features/F1-core.md)\n"}, "spec edit")
 
 	res, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{})
 	if err != nil {
@@ -269,16 +270,19 @@ func TestSaveSpec_AtProvidedCommit_TagsThatCommit(t *testing.T) {
 func TestBuildScopeAtTag(t *testing.T) {
 	t.Parallel()
 	seed := validSpecSeed()
-	seed["specs/requirements/prd.md"] = "# PRD\n\n## User Stories\n\n1. As a user, I want A, so that a.\n2. As a user, I want B, so that b.\n7. As a user, I want S, so that s.\n"
+	seed["specs/requirements/features/F1-core.md"] = "# Core\n\n## User Stories\n\n- F1.1 As a user, I want A, so that a.\n- F1.2 As a user, I want B, so that b.\n"
+	seed["specs/requirements/features/F2-notify.md"] = "# Notify\n\n## User Stories\n\n- F2.1 As a user, I want S, so that s.\n"
+	// A reference document is the user's source material, never a story source.
+	seed["specs/requirements/references/brief.md"] = "- F3.1 As a user, I want R, so that r.\n"
 	seed["specs/design/design.cell"] = "component svc service\ncomponent notify-svc service\n"
-	// svc claims stories 1, 2 and a junk number the PRD never defines;
-	// notify-svc claims 7. The scope reads the claims from each design.json.
+	// svc claims F1.1, F1.2 and a junk ID the requirements never define;
+	// notify-svc claims F2.1. The scope reads the claims from each design.json.
 	seed["specs/design/components/svc/design.json"] = `{"name":"svc","type":"service","version":"1.0.0","language":"go",` +
 		`"buildpack":"go","appPath":".","entrypoint":"main.go","exposure":"internet",` +
-		`"stories":[1,2,9],"dependencies":[],"description":"a service"}`
+		`"stories":["F1.2","F1.1","F9.9"],"dependencies":[],"description":"a service"}`
 	seed["specs/design/components/notify-svc/design.json"] = `{"name":"notify-svc","type":"service","version":"1.0.0","language":"go",` +
 		`"buildpack":"go","appPath":".","entrypoint":"main.go","exposure":"internet",` +
-		`"stories":[7],"dependencies":[],"description":"a service"}`
+		`"stories":["F2.1"],"dependencies":[],"description":"a service"}`
 	// A declared service owes the same artifacts as svc, or the layout gate
 	// refuses the save before any scope is read.
 	seed["specs/design/components/notify-svc/design.md"] = "---\ntype: service\n---\n# notify-svc\n"
@@ -299,14 +303,15 @@ func TestBuildScopeAtTag(t *testing.T) {
 	if scope.MilestoneTitle() != "v1" {
 		t.Errorf("MilestoneTitle() = %q, want the tag", scope.MilestoneTitle())
 	}
-	if fmt.Sprint(scope.InScope) != "[1 2 7]" {
+	if fmt.Sprint(scope.InScope) != "[F1.1 F1.2 F2.1]" {
 		t.Errorf("inScope = %v", scope.InScope)
 	}
-	if scope.StoryTitles[1] == "" || scope.StoryTitles[7] == "" {
+	if scope.StoryTitles["F1.1"] != "As a user, I want A, so that a." || scope.StoryTitles["F2.1"] == "" {
 		t.Errorf("story titles = %v", scope.StoryTitles)
 	}
-	// Claims are filtered to PRD stories (the junk 9 is dropped).
-	if fmt.Sprint(scope.ComponentStories["svc"]) != "[1 2]" || fmt.Sprint(scope.ComponentStories["notify-svc"]) != "[7]" {
+	// Claims are filtered to real stories (the junk F9.9 is dropped) and put in
+	// ID order.
+	if fmt.Sprint(scope.ComponentStories["svc"]) != "[F1.1 F1.2]" || fmt.Sprint(scope.ComponentStories["notify-svc"]) != "[F2.1]" {
 		t.Errorf("componentStories = %v", scope.ComponentStories)
 	}
 }
@@ -371,7 +376,7 @@ func TestSaveSpec_SuggestedNameCollision_RecomputesToNextName(t *testing.T) {
 	// wants a tag but must skip the taken v1 and land v2.
 	r.tag("v1", specTagSubject+"v1")
 	r.seed(map[string]string{
-		"specs/requirements/prd.md": "# PRD\n\n## User Stories\n\n1. As a user, I want the thing, so that value.\n\nmoved on\n",
+		"specs/requirements/prd.md": "# PRD\n\n## Features\n\n- F1 [Core](features/F1-core.md)\n\nmoved on\n",
 	}, "draft edit")
 
 	res, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{})

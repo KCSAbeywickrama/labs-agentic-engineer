@@ -1930,7 +1930,7 @@ const SECURITY_DOC = JSON.stringify(
       {
         name: "Shopper",
         description: "Buys things",
-        stories: [1],
+        stories: ["F1.1"],
         grants: ["orders:read"],
       },
     ],

@@ -908,7 +908,7 @@ func TestApply_ScaffoldsComponentsFromCell(t *testing.T) {
 // enrichment, and a later cell save must not touch the claim — scaffolds are
 // born without one.
 func TestApply_AuthoredStoriesSurviveCellSave(t *testing.T) {
-	enriched := `{"name":"lunch-api","type":"service","version":"0.1.0","language":"Go","buildpack":"docker","appPath":"lunch-api","entrypoint":"deployment/service","exposure":"intranet","dependencies":[],"description":"hand-written","stories":[9]}`
+	enriched := `{"name":"lunch-api","type":"service","version":"0.1.0","language":"Go","buildpack":"docker","appPath":"lunch-api","entrypoint":"deployment/service","exposure":"intranet","dependencies":[],"description":"hand-written","stories":["F9.1"]}`
 	r := newFilesRig(t, map[string]string{
 		"specs/design/components/lunch-api/design.json": enriched,
 	})
@@ -931,12 +931,12 @@ func TestApply_AuthoredStoriesSurviveCellSave(t *testing.T) {
 	if _, present := parsed["stories"]; present {
 		t.Errorf("scaffold carries stories = %v, want the agent to author it", parsed["stories"])
 	}
-	// The existing component's authored [9] survives the cell save.
+	// The existing component's authored ["F9.1"] survives the cell save.
 	if err := json.Unmarshal([]byte(r.remote.FileAt(t, "main", "specs/design/components/lunch-api/design.json")), &parsed); err != nil {
 		t.Fatalf("existing parse: %v", err)
 	}
-	if got := fmt.Sprint(parsed["stories"]); got != "[9]" {
-		t.Errorf("authored stories = %v, want [9] untouched", parsed["stories"])
+	if got := fmt.Sprint(parsed["stories"]); got != "[F9.1]" {
+		t.Errorf("authored stories = %v, want [F9.1] untouched", parsed["stories"])
 	}
 	if parsed["description"] != "hand-written" || parsed["language"] != "Go" {
 		t.Errorf("cell save clobbered enrichment: %v", parsed)

@@ -66,15 +66,17 @@ test("plan scope and task context are validated when present", () => {
   assert.ok(
     isTurnSpec({
       kind: "plan",
-      scope: { tag: "spec-v3", stories: [{ number: 1, title: "Sign in", covered: false }] },
+      scope: { tag: "spec-v3", stories: [{ id: "F1.1", title: "Sign in", covered: false }] },
       taskContext: [{ path: "tasks/1.md", body: "# Task" }],
     }),
   );
   // A story row without `covered` would silently plan over already-covered work.
   assert.equal(
-    isTurnSpec({ kind: "plan", scope: { tag: "t", stories: [{ number: 1 }] } }),
+    isTurnSpec({ kind: "plan", scope: { tag: "t", stories: [{ id: "F1.1" }] } }),
     false,
   );
+  // A numeric story row is the pre-feature shape; stories are IDs ("F1.1") now.
+  assert.equal(isTurnSpec({ kind: "plan", scope: { tag: "t", stories: [{ number: 1, covered: true }] } }), false);
   assert.equal(isTurnSpec({ kind: "plan", scope: { tag: 2, stories: [] } }), false);
   assert.equal(isTurnSpec({ kind: "plan", scope: { tag: "t" } }), false);
   assert.equal(isTurnSpec({ kind: "plan", taskContext: [{ path: "tasks/1.md" }] }), false);
@@ -82,7 +84,7 @@ test("plan scope and task context are validated when present", () => {
 });
 
 test("a title is optional on a story row", () => {
-  assert.ok(isTurnSpec({ kind: "plan", scope: { tag: "t", stories: [{ number: 3, covered: true }] } }));
+  assert.ok(isTurnSpec({ kind: "plan", scope: { tag: "t", stories: [{ id: "F1.3", covered: true }] } }));
 });
 
 test("unknown extra keys are tolerated", () => {

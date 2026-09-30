@@ -48,7 +48,7 @@ describe("patchGrants — the one edit the Security page makes", () => {
   });
 
   it("keeps the authored key order rather than the schema's", () => {
-    const source = `{\n  "roles": [\n    {\n      "grants": [],\n      "name": "Admin",\n      "description": "d",\n      "stories": [1]\n    }\n  ],\n  "version": 3\n}\n`;
+    const source = `{\n  "roles": [\n    {\n      "grants": [],\n      "name": "Admin",\n      "description": "d",\n      "stories": ["F1.1"]\n    }\n  ],\n  "version": 3\n}\n`;
     const result = patchGrants(source, "Admin", "orders:read", true);
     expect(result.ok).toBe(true);
     if (!result.ok) return;

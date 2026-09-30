@@ -773,7 +773,8 @@ export function isTurnAim(v: unknown): v is TurnAim {
 export interface PlanScope {
   /** The spec tag the milestone is pinned to. */
   tag: string;
-  stories: { number: number; title?: string; covered: boolean }[];
+  /** Each in-scope story by its ID ("F2.3"). */
+  stories: { id: string; title?: string; covered: boolean }[];
 }
 
 /** One existing-Task render passed as read-only planning context. */
@@ -953,7 +954,7 @@ function isPlanScopeOrAbsent(v: unknown): boolean {
     if (row === null || typeof row !== "object") return false;
     const r = row as Record<string, unknown>;
     return (
-      typeof r.number === "number" &&
+      typeof r.id === "string" &&
       typeof r.covered === "boolean" &&
       (r.title === undefined || typeof r.title === "string")
     );

@@ -1527,14 +1527,14 @@ const securityJson = `{
     {
       "name": "Shopper",
       "description": "Browses the catalogue and follows their own orders.",
-      "stories": [1, 2],
+      "stories": ["F1.1", "F1.2"],
       "grants": ["catalog:read", "orders:read", "orders:place"],
       "enrolment": "self-service"
     },
     {
       "name": "Compliance Admin",
       "description": "Approves held orders, refunds paid ones and audits the rest.",
-      "stories": [3, 7],
+      "stories": ["F1.3", "F1.7"],
       "grants": ["orders:read", "orders:read-all", "orders:approve", "orders:refund"],
       "assignTo": ["Compliance", "Administrators"],
       "assignableBy": ["Compliance Admin"]
@@ -1542,14 +1542,14 @@ const securityJson = `{
     {
       "name": "Viewer",
       "description": "Reads the catalogue and every order, and changes nothing.",
-      "stories": [4],
+      "stories": ["F1.4"],
       "grants": ["catalog:read", "orders:read", "orders:read-all"],
       "assignTo": ["Finance"]
     },
     {
       "name": "ledger-sync",
       "description": "Reconciles paid orders against the ledger nightly, with nobody signed in.",
-      "stories": [9],
+      "stories": ["F1.9"],
       "kind": "service",
       "grants": ["orders:read-all"]
     }

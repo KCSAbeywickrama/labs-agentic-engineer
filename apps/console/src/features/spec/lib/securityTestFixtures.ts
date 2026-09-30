@@ -87,8 +87,8 @@ export const EXPENSE_TRACKER_TEXT = `{
       "name": "Employee",
       "description": "Submits and follows their own claims",
       "stories": [
-        1,
-        2
+        "F1.1",
+        "F1.2"
       ],
       "grants": [
         "claims:read",
@@ -102,7 +102,7 @@ export const EXPENSE_TRACKER_TEXT = `{
       "name": "Approver",
       "description": "Approves or rejects submitted claims",
       "stories": [
-        3
+        "F1.3"
       ],
       "grants": [
         "claims:read",

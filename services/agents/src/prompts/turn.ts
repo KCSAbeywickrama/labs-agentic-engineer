@@ -329,7 +329,7 @@ function scopeBlock(scope: PlanScope | undefined): string {
   const rows = scope.stories
     .map((s) => {
       const status = s.covered ? "COVERED" : "NEEDS TASKS";
-      return s.title ? `- Story ${s.number}: ${s.title} — ${status}` : `- Story ${s.number} — ${status}`;
+      return s.title ? `- Story ${s.id}: ${s.title} — ${status}` : `- Story ${s.id} — ${status}`;
     })
     .join("\n");
   return (
