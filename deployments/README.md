@@ -14,6 +14,27 @@ the same install path a real user follows, not a repo-specific shortcut.
 Cluster bring-up (`scripts/setup-env-for-aectl.sh`) installs a plain upstream
 OpenChoreo + ThunderID cluster, then hands off to the `aectl` CLI.
 
+Every hostname on the cluster is composed onto one DNS suffix, `AE_DOMAIN`.
+`make dev-env` passes `localhost`, which reproduces the k3d install exactly;
+a cluster other machines reach passes its own (`<ip>.sslip.io`, or a wildcard
+domain you control) to the scripts directly. It is **required** rather than
+defaulted: ThunderID's bootstrap bundle is read once, by a pre-install hook
+Job, so a cluster built on the wrong suffix cannot be corrected — only
+deleted. The scripts refuse to start without it, before touching anything.
+
+The suffix is composed onto fixed parents (`openchoreo.`, `ae.`, `amp.`,
+`gateway.`, `am-gateway.`, `openchoreoapis.`) and never substituted for the
+bare token `localhost`, which still has to mean loopback on the operator's own
+machine — the Backstage and AMP console dev origins and the `occ`/`amctl`
+callback URIs are all registered against it.
+
+`aectl` reads its own config rather than the environment, so the same suffix
+appears in the config file you import (`console.public_url`, `tryit.public_url`,
+`gateway.hostname`, `environment.idp_base_domain`,
+`environment.gateway_base_domain`, `thunder.public_url`). On a non-localhost
+run the cluster script prints that block already composed, so it doesn't have
+to be written by hand.
+
 ```bash
 # 1. One-shot bring-up — cluster + platform, via aectl (idempotent).
 #    Builds this checkout's service images and installs onto them, so the

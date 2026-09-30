@@ -77,10 +77,23 @@ for doc in "${SUPERSEDED[@]}"; do
     fi
 done
 
+# Copied with the cluster's DNS suffix substituted in, rather than plain, so
+# the documents stay readable as the payloads they are while still following a
+# re-domained cluster. Exported by setup-env-for-aectl.sh, which calls this.
+#
+# The two parents are matched explicitly instead of rewriting the token
+# "localhost": these documents also carry loopback redirect URIs for CLIs that
+# run on the OPERATOR's machine (localhost:3000, :33418, :33419, 127.0.0.1),
+# and moving those registers a callback no client will ever present — which
+# fails at someone's first `amctl` login, nowhere near this line.
+: "${AE_DOMAIN:?set AE_DOMAIN — publish-amp-thunder-documents.sh is normally called by setup-env-for-aectl.sh, which exports it}"
+
 added=0
 for doc in "${DOCS_DIR}"/*.yaml; do
     [ -e "$doc" ] || fail "No documents found in ${DOCS_DIR}."
-    cp "$doc" "${BOOTSTRAP_DIR}/"
+    sed -e "s|amp\\.localhost|amp.${AE_DOMAIN}|g" \
+        -e "s|openchoreo\\.localhost|openchoreo.${AE_DOMAIN}|g" \
+        "$doc" > "${BOOTSTRAP_DIR}/$(basename "$doc")"
     added=$((added + 1))
 done
 

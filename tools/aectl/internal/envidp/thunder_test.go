@@ -31,8 +31,12 @@ func TestReleaseNameAndURLs(t *testing.T) {
 	if got, want := releaseName("acme", "prod"), "thunder-acme-prod"; got != want {
 		t.Errorf("releaseName = %q, want %q", got, want)
 	}
-	if got, want := publicURL("prod"), "http://prod-idp.openchoreo.localhost:8080"; got != want {
+	if got, want := publicURL("prod", defaultIDPBaseDomain), "http://prod-idp.openchoreo.localhost:8080"; got != want {
 		t.Errorf("publicURL = %q, want %q", got, want)
+	}
+	if got, want := publicURL("prod", "openchoreo.10.0.0.5.sslip.io"),
+		"http://prod-idp.openchoreo.10.0.0.5.sslip.io:8080"; got != want {
+		t.Errorf("publicURL with a configured base domain = %q, want %q", got, want)
 	}
 	if got, want := adminURL("thunder-acme-prod", "thunder-acme-prod"), "http://thunder-acme-prod-service.thunder-acme-prod.svc.cluster.local:8090"; got != want {
 		t.Errorf("adminURL = %q, want %q", got, want)
