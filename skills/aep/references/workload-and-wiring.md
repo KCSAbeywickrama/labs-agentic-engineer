@@ -121,7 +121,7 @@ configurations:
 |---|---|
 | `project` | same OpenChoreo project (implicit — always on) |
 | `namespace` | any component in the same Kubernetes namespace (cross-project) |
-| `internal` | across all namespaces in the cluster |
+| `internal` | across all namespaces in the cluster — reserved for platform components; a generated component lists `project`, `external` and (org-published only) `namespace` |
 | `external` | public internet via the ingress gateway |
 
 **A sibling SPA reaches a service through same-origin `/api`, not `external`.**
@@ -152,29 +152,32 @@ the component's public URL, which the platform patches into the `redirectUris`
 of an auth dependency that declares `consumer-url-env-config`. Without
 `external` there is no public URL, so the OAuth client is registered with no
 callback and sign-in fails at `/authorize`. `project` is the implicit
-same-project lane; write it anyway. A SPA never needs `internal` — nothing is
-routed to it through the API gateway. The **service it calls** is the other
-case, immediately below: all three of `project`, `internal`, `external`, and
-without `internal` every call through the SPA's `/api` proxy is a `503`.
+same-project lane; write it anyway. The **service it calls** lists the same
+pair, immediately below.
 
 **Provider endpoint visibility:** a service a sibling SPA calls lists
-`visibility: [project, internal, external]`. Each item earns its place:
+`visibility: [project, external]`. Each item earns its place:
 
-- `internal` — **required for a protected service.** It is the only value that
-  admits the API gateway to the component's NetworkPolicy. Without it the
-  gateway authenticates the caller and then cannot reach the upstream, so every
-  call through the SPA's `/api` proxy returns `503`.
-- `project` — the same-namespace lane, for a trusted service-to-service caller.
-- `external` — so the API remains curl-able on the public gateway.
+- `project` — the same-project lane. Components in one project talk over it:
+  the SPA's dependency binds `visibility: project`, and both its direct
+  `<DEP_NAME>_URL` and a trusted service-to-service caller ride it.
+- `external` — the public URL, so the API stays curl-able on the public
+  gateway, AND the value that admits the API gateway to the component's
+  NetworkPolicy (OpenChoreo lets gateway pods in from any namespace for an
+  `external` endpoint). A protected service's `/api` traffic arrives through
+  the gateway, so without `external` the gateway authenticates the caller and
+  then cannot reach the upstream: every call answers `503`.
 
-Write all three YAML list items. A single-item `project` list is wrong even when
-the SPA uses `/api`, and `design.json` `exposure: intranet` does not drop
-`external`. The SPA must not fetch that public URL — its nginx proxies to the
-gateway's IN-CLUSTER address (`react-webapp`). Org-published services still add
-`namespace` as below.
+Write both YAML list items, on every environment: `internal` is the platform's
+lane, and on WSO2 Cloud a component that lists it fails to render its
+ReleaseBinding (there is no internal gateway) and is refused for customer orgs.
+A single-item `project` list is wrong even when the SPA uses `/api`, and
+`design.json` `exposure: intranet` does not drop `external`. The SPA must not
+fetch that public URL — its nginx proxies to the gateway's IN-CLUSTER address
+(`react-webapp`). Org-published services still add `namespace` as below.
 
-`namespace` is NOT a substitute for `internal`: it widens pod-to-pod reach to
-sibling projects and grants the gateway nothing.
+`namespace` widens pod-to-pod reach to sibling projects and grants the gateway
+nothing; list it only for an org-published service.
 
 **Org-published services.** If the component's `design.json` sets
 `exposesAPI.orgPublished: true`, components in OTHER projects consume it — also

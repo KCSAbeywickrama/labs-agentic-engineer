@@ -428,12 +428,12 @@ component contract. Consumer connection to the sibling: `visibility: project`,
 `configurations.env` arrives as a `window._env_` entry.
 
 **Done when:** this app's dependency on the sibling is `visibility: project`
-(never `external`). The sibling *service's* own endpoint lists all three of
-`project`, `internal` and `external` — `internal` is what admits the gateway to
-the service's NetworkPolicy, and without it every `/api` call answers `503`.
-That file is the Go (or other backend) skill's to write: leave all three in
-place rather than stripping `external` because this SPA uses `/api`
-(`workload-and-wiring` covers what each item earns).
+(never `external`). The sibling *service's* own endpoint lists `project` and
+`external` — `external` is what admits the gateway to the service's
+NetworkPolicy, and without it every `/api` call answers `503`. That file is the
+Go (or other backend) skill's to write: leave both in place rather than
+stripping `external` because this SPA uses `/api` (`workload-and-wiring`
+covers what each item earns).
 
 ## Pitfalls
 
@@ -446,7 +446,7 @@ place rather than stripping `external` because this SPA uses `/api`
 | `/api` 502 on EVERY call, API pod healthy, the address is the public gateway vhost | nginx's `resolver` does not read `/etc/hosts`, so a `hostAliases` entry for the gateway vhost is invisible to it — and the `:19080` LoadBalancer routes strictly on that vhost anyway | `<DEP>_GATEWAY_URL` must be the gateway **runtime Service** on `:22893` (`…-gw-gateway-gateway-runtime.<org>-<env>.svc.cluster.local:22893`), whose router host is `*`. The platform sets it; do not override it with a vhost. |
 | `/api` 400 `no header value found for 'x-user-id'` | The proxy took the direct-Service lane, so nothing injected identity | Check the pod log line `aep-api-proxy: /api -> … [lane]`. `direct Service` means `<DEP>_GATEWAY_URL` was unset: the provider's design has no `exposesAPI.auth`, or the drop-in names the wrong variable. |
 | `/api` 404 from the gateway | The rewrite dropped the context prefix | `nginx/default.conf` must rewrite to `__API_CONTEXT__/$1`, not `/$1`. |
-| `/api` 503 through the gateway | The gateway authenticated but cannot reach the service | The provider endpoint needs `internal` in its `workload.yaml` visibility (`workload-and-wiring`). |
+| `/api` 503 through the gateway | The gateway authenticated but cannot reach the service | The provider endpoint needs `external` in its `workload.yaml` visibility, which admits the gateway (`workload-and-wiring`). |
 | Types in `src/generated/*` don't match the live service | Upstream `openapi.yaml` changed since last generation | Re-run the `openapi-typescript` command and commit the diff. |
 | Docker build succeeds but ships stale/hand-written shapes, or fails `ENOENT ../specs/...` | `src/generated/` or one of the three `*.gen.ts` tables wasn't committed — the per-component build context is this app's folder alone | Generate and commit ALL of them before PR. `gen-authz.mjs` says on stdout that the specs are out of reach and that it is keeping the committed outputs when it falls back; with any output missing it exits 1 and the image build fails. |
 | The deployed bundle gates a screen on an operation the design dropped, or a newly added handle reaches nothing | A **stale bundle**: `build` ran without `gen`, or the generated tables were committed before the last design change | `build` is `npm run gen && tsc --noEmit && vite build`; re-run `gen` and commit the diff whenever `security.json` or an `openapi.yaml` changes. A stale generated union type-checks green. |
