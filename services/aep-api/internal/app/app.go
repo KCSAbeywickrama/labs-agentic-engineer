@@ -865,7 +865,13 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// terminals for `kind=build` execution rows, and the run loop records its
 	// cycles in run_cycles instead — so for anything the run loop builds, this
 	// sweep is the only thing that observes a build finishing.
-	buildSweep := eventcore.NewBuildSweep(eventPlane, eventcoreRepoLister{repos: repoRepo}, 0)
+	//
+	// It is also the merge fan-out's reconcile: a merged cycle whose builds were
+	// never triggered gets them. Its grace outlasts every run the merge's own
+	// delivery can still get (webhook.ReplayHorizon), plus a margin, so the two
+	// never fan out one merge at once.
+	buildSweep := eventcore.NewBuildSweep(eventPlane, eventcoreRepoLister{repos: repoRepo}, 0).
+		WithReconcileGrace(webhook.ReplayHorizon + 3*time.Minute)
 	execWatcher := codingagent.NewExecWatcher(componentClient, executionRepo, asServiceIdentity, 0).
 		WithTaskNotifier(taskStreamHub).
 		// Build terminals reach the milestone-run loop through the root observer
