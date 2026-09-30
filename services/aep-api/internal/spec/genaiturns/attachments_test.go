@@ -60,7 +60,7 @@ func TestReadMultipartTurnFields(t *testing.T) {
 	r := buildMultipart(t, map[string]string{
 		"instruction": "what is wrong here?",
 		"collab":      "true",
-		"target":      "specs/requirements/requirements.md",
+		"scope":       `{"kind":"feature","feature":"F2"}`,
 	}, [][2]any{{"shot.png", "bytes"}})
 
 	got, err := readMultipartTurn(r)
@@ -73,8 +73,8 @@ func TestReadMultipartTurnFields(t *testing.T) {
 	if !got.Collab {
 		t.Error("collab should be true — a form field has no boolean type, so \"true\" must parse")
 	}
-	if got.Target != "specs/requirements/requirements.md" {
-		t.Errorf("target = %q", got.Target)
+	if got.Scope != `{"kind":"feature","feature":"F2"}` {
+		t.Errorf("scope = %q", got.Scope)
 	}
 	if len(got.Attachments) != 1 || got.Attachments[0].Name != "shot.png" {
 		t.Fatalf("attachments = %+v", got.Attachments)

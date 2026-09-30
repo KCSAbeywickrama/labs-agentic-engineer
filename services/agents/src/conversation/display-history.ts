@@ -44,6 +44,8 @@ export type DisplayMessage =
       attachments?: string[];
       /** What this message was aimed at (#666) — names, never content. */
       anchor?: TurnJournalEntry["anchor"];
+      /** What the user was looking at when they sent it (S6). */
+      scope?: TurnJournalEntry["scope"];
     };
 
 export function projectDisplayHistory(conv: Conversation): DisplayMessage[] {
@@ -61,6 +63,7 @@ export function projectDisplayHistory(conv: Conversation): DisplayMessage[] {
         ? { attachments: entry.attachments }
         : {}),
       ...(entry.anchor ? { anchor: entry.anchor } : {}),
+      ...(entry.scope ? { scope: entry.scope } : {}),
     };
   });
 }

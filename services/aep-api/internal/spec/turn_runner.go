@@ -61,12 +61,12 @@ type turnJob struct {
 	turnID           string
 	orgID            string
 	projectID        string
-	flow             string            // recognised `/<skill>` token ("start", "design", …); "" for plain chat
-	conversationID   string            // FE-chosen uuid (agent_turns key)
-	nsConversationID string            // namespaced agents-service id
-	turn             agentsvc.TurnSpec // what this turn is FOR (the agents service composes the text)
-	target           string            // spec-bundle path this turn should write to, when pinned
-	summary          string            // raw user instruction (feed line subject + journal display, #463)
+	flow             string               // recognised `/<skill>` token ("start", "design", …); "" for plain chat
+	conversationID   string               // FE-chosen uuid (agent_turns key)
+	nsConversationID string               // namespaced agents-service id
+	turn             agentsvc.TurnSpec    // what this turn is FOR (the agents service composes the text)
+	scope            *agentsvc.ScopeBlock // what the user was looking at (S6); nil = the whole product
+	summary          string               // raw user instruction (feed line subject + journal display, #463)
 	// attachments are this message's chat attachments (#428), captured at POST
 	// time like everything else here (D20). They live ONLY in this struct
 	// between the POST and the dispatch — nothing writes them to disk (ADR-0019)
@@ -327,7 +327,7 @@ func (s *Service) executeTurn(ctx context.Context, job turnJob) TurnTerminal {
 			Ref:            job.baseRef,
 			SkillsRef:      job.skillsRef,
 		},
-		Target:                 job.target,
+		Scope:                  job.scope,
 		FilesChangedExternally: filesChangedExternally,
 		PreviousTurnFailed:     previousTurnFailed,
 		MCP:                    s.mcpForTurn(ctx, job),

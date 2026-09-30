@@ -26,7 +26,7 @@
 import { randomUUID } from "node:crypto";
 import { stdout as output } from "node:process";
 import { renderPart, renderSummary } from "./kit/render.js";
-import type { StreamPart, TurnSpec } from "@aep/agent-stream";
+import type { StreamPart, TurnScope, TurnSpec } from "@aep/agent-stream";
 import { flowSpec, planSpec, startSpec } from "./engine/turn-spec.js";
 import { readReferences } from "./state/references.js";
 import { designGate, requirementsGate, tasksGate, type GateResult } from "./engine/gates.js";
@@ -48,8 +48,8 @@ export interface PhaseOutcome {
 }
 
 export interface PhaseOptions extends OpenOptions {
-  /** `--target <x>` → production's `\n\n(target: x)` suffix. */
-  target?: string;
+  /** `--scope F2|design-review` → the turn's scope, as the console sends it (S6). */
+  scope?: TurnScope;
   /** `--idea "<text>"` seeds/replaces the stored create prompt (requirements). */
   idea?: string;
   /** Quiet streaming (tests); default renders parts live. */
@@ -84,7 +84,7 @@ async function runPhaseTurn(projectDir: string, turn: TurnSpec, opts: PhaseOptio
     // so explicitly (#373: posture is channel state, not skill prose).
     const result = await runSpecTurn(session, turn, {
       headless: true,
-      ...(opts.target ? { target: opts.target } : {}),
+      ...(opts.scope ? { scope: opts.scope } : {}),
       ...(onPart ? { onPart } : {}),
     });
     return report(result, opts);
@@ -282,7 +282,7 @@ export async function chatTurn(
 ): Promise<PhaseOutcome & { pending?: PendingQuestions }> {
   const onPart = onPartFor(opts);
   const result = await runSpecTurn(session, turn, {
-    ...(opts.target ? { target: opts.target } : {}),
+    ...(opts.scope ? { scope: opts.scope } : {}),
     ...(onPart ? { onPart } : {}),
   });
   const outcome = report(result, opts);

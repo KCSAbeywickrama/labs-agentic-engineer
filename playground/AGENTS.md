@@ -101,7 +101,7 @@ No review/browse affordances: the playground auto-writes files and the user's
 editor (VS Code) is where browsing, diffs, and hand-edits happen — including
 authoring `issues/<n>.md` by hand (picked up automatically).
 
-Flags: `--idea`, `--target`, `--fresh` (rotate the general conversation),
+Flags: `--idea`, `--scope` (F2 or design-review), `--fresh` (rotate the general conversation),
 `--silent`, `--restore`, `--yes` (headless coding consent), `--host` +
 `--api-key` (coding-run mode and its auth). Every verb exits nonzero on failure
 — the edit-skill → rerun loop is scriptable.

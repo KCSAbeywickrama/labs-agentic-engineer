@@ -156,7 +156,10 @@ func SkillsRepoForTurns(skills *SkillService, repos RepoResolver) SkillsRepoReso
 type TurnInput struct {
 	ConversationID string
 	Instruction    string
-	Target         string
+	// Scope is what the user was looking at when they sent this message (S6):
+	// a feature, or the design review. Nil means the whole product, and such a
+	// turn reaches the agents service exactly as one sent before scopes existed.
+	Scope *agentsvc.ScopeBlock
 	// Collab makes this a room-scoped turn (#86 phase 4): the agents service
 	// joins the project's spec room as a live Yjs peer with the prompting
 	// user's bearer, edits the shared doc, and nothing is committed to git.
@@ -491,7 +494,7 @@ func (s *Service) StartTurn(ctx context.Context, orgID, projectID string, in Tur
 		conversationID:   in.ConversationID,
 		nsConversationID: nsConversationID,
 		turn:             turnSpec,
-		target:           in.Target,
+		scope:            in.Scope,
 		summary:          summary,
 		attachments:      in.Attachments,
 		aim:              in.Aim,

@@ -197,7 +197,7 @@ describe("one turn at a time", () => {
 });
 
 describe("the scope on every turn", () => {
-  it("scopes a feature's turn to its file, and the whole product to no target", async () => {
+  it("scopes a feature's turn to its ID, and the whole product to no scope", async () => {
     const { store, started, chat } = setup();
     await store.open(PROJECT);
     await store.send(PROJECT, "Add a yearly view", F4);
@@ -209,10 +209,10 @@ describe("the scope on every turn", () => {
     expect(started[0]).toEqual({
       instruction: "Add a yearly view",
       collab: true,
-      target: "specs/requirements/features/F4-spending-reports.md",
+      scope: { kind: "feature", feature: "F4" },
     });
     expect(started[1]).toEqual({ instruction: "Where are we?", collab: true });
-    expect(started[2]).toEqual({ instruction: "Tighten the layout", collab: true, scope: "design-review" });
+    expect(started[2]).toEqual({ instruction: "Tighten the layout", collab: true, scope: { kind: "design-review" } });
   });
 });
 
@@ -284,7 +284,7 @@ describe("answering a question card", () => {
     expect(await store.answer(PROJECT, card.id, [{ selected: ["Finance only"] }], F4)).toBe(true);
     expect(started[1]).toMatchObject({
       instruction: 'Answer to "Who reads the reports?": Finance only',
-      target: "specs/requirements/features/F4-spending-reports.md",
+      scope: { kind: "feature", feature: "F4" },
     });
     expect(chat().items.find((i) => i.id === card.id)).toMatchObject({ answers: [{ selected: ["Finance only"] }] });
   });

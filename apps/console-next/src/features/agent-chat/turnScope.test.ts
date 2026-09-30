@@ -39,14 +39,14 @@ describe("turnScopeFor (where the user is)", () => {
 
 describe("the scope on the wire", () => {
   it.each<[TurnScope, object]>([
-    [turnScopeFor("spec", approvals), { target: "specs/requirements/features/F2-approvals.md" }],
+    [turnScopeFor("spec", approvals), { scope: { kind: "feature", feature: "F2" } }],
     [{ kind: "product" }, {}],
-    [{ kind: "design" }, { scope: "design-review" }],
+    [{ kind: "design" }, { scope: { kind: "design-review" } }],
   ])("sends %o as %o, and reads it back", (scope, fields) => {
     const body = turnBody("Tighten this", scope);
     expect(body).toEqual({ instruction: "Tighten this", collab: true, ...fields });
     const read = scopeOfBody(body);
     expect(read.kind).toBe(scope.kind);
-    if (scope.kind === "feature") expect(read).toEqual({ kind: "feature", path: approvals.path });
+    if (scope.kind === "feature") expect(read).toEqual({ kind: "feature", featureId: "F2" });
   });
 });

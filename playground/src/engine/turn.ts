@@ -39,6 +39,7 @@ import {
   type StreamPart,
   type TurnConnection,
   type TurnRequest,
+  type TurnScope,
   type TurnSpec,
 } from "@aep/agent-stream";
 import { filterTurnSnapshot } from "@aep/agents/conversation/load-workspace";
@@ -70,8 +71,8 @@ export interface SpecTurnOptions {
   /** Overrides the project's general-conversation uuid (one-shot plan turns). */
   conversationUuid?: string;
   mcp?: { url: string; token: string };
-  /** The spec-bundle path this turn should write to, when one is pinned. */
-  target?: string;
+  /** What the user is looking at (S6): a feature, or the design review; absent = the whole product. */
+  scope?: TurnScope;
   /**
    * No interview is possible in this run (the one-shot phase verbs): the
    * service tells the agent to generate on stated assumptions instead of
@@ -114,7 +115,7 @@ export async function runSpecTurn(session: TurnSession, turn: TurnSpec, opts: Sp
     turn,
     workspace: ws.workspaceRef(conversationId, before, skills),
     ...(filesChangedExternally ? { filesChangedExternally: true } : {}),
-    ...(opts.target ? { target: opts.target } : {}),
+    ...(opts.scope ? { scope: opts.scope } : {}),
     ...(opts.headless ? { headless: true } : {}),
     ...(opts.mcp ? { mcp: opts.mcp } : {}),
     ...(session.connection ? { connection: session.connection } : {}),

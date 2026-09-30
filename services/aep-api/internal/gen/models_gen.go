@@ -1210,6 +1210,24 @@ func (e TurnInputMultipartIntent) Valid() bool {
 	}
 }
 
+// Defines values for TurnScopeKind.
+const (
+	DesignReview TurnScopeKind = "design-review"
+	Feature      TurnScopeKind = "feature"
+)
+
+// Valid indicates whether the value is a known member of the TurnScopeKind enum.
+func (e TurnScopeKind) Valid() bool {
+	switch e {
+	case DesignReview:
+		return true
+	case Feature:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TurnStatusCode.
 const (
 	TurnStatusCodeOutputTruncated TurnStatusCode = "output_truncated"
@@ -1737,6 +1755,11 @@ type ConversationMessage struct {
 
 	// Role Who the message is from, as the journal recorded it.
 	Role string `json:"role"`
+
+	// Scope What the user was looking at when they sent this message, so the agent reads it in that light: a feature's file open in the spec (`feature`, with its ID), or the design review (`design-review`). Absent means the whole product — the product page, any other spec file, or anywhere else in the project — and such a turn reads exactly as it did before scopes existed.
+	//
+	// A scope FOCUSES the turn; it fences nothing. The agent reads `prd.md` and the feature's file first, and may still change any file the message implies, saying in its reply which other files it touched. Every edit lands directly: what the agent decided on its own is tagged `*assumed*` in the requirements, and that tag is the user's review.
+	Scope TurnScope `json:"scope,omitempty"`
 }
 
 // ConversationMessageAuthor Who sent this message (#130 multi-user threads). Absent for the agent, and for history written before attribution existed.
@@ -3440,8 +3463,10 @@ type TurnInputBody struct {
 	// Deliberately a field and NOT a `/command` prefix on `instruction`: a command IS the user's message (the console adds nothing to a line they typed), and an anchored turn carries prose they wrote in their own words, so a prefix would put machinery in their voice. Mirrors the console's own resolve/reconsider intent, whose only job is the same. Absent for a turn with no anchor.
 	Intent TurnInputBodyIntent `json:"intent,omitempty"`
 
-	// Target Optional target (e.g. a doc type)
-	Target string `json:"target,omitempty"`
+	// Scope What the user was looking at when they sent this message, so the agent reads it in that light: a feature's file open in the spec (`feature`, with its ID), or the design review (`design-review`). Absent means the whole product — the product page, any other spec file, or anywhere else in the project — and such a turn reads exactly as it did before scopes existed.
+	//
+	// A scope FOCUSES the turn; it fences nothing. The agent reads `prd.md` and the feature's file first, and may still change any file the message implies, saying in its reply which other files it touched. Every edit lands directly: what the agent decided on its own is tagged `*assumed*` in the requirements, and that tag is the user's review.
+	Scope TurnScope `json:"scope,omitempty"`
 }
 
 // TurnInputBodyIntent What the user wants done with `anchor` — `change` rewrites the selected nodes in place, `discuss` opens the same selection as a grilling. Read by the agents service when it renders the anchor into the prompt; the two differ only in how that preamble is phrased.
@@ -3478,8 +3503,10 @@ type TurnInputMultipart struct {
 	// Deliberately a field and NOT a `/command` prefix on `instruction`: a command IS the user's message (the console adds nothing to a line they typed), and an anchored turn carries prose they wrote in their own words, so a prefix would put machinery in their voice. Mirrors the console's own resolve/reconsider intent, whose only job is the same. Absent for a turn with no anchor.
 	Intent TurnInputMultipartIntent `json:"intent,omitempty"`
 
-	// Target As `TurnInputBody.target`.
-	Target string `json:"target,omitempty"`
+	// Scope What the user was looking at when they sent this message, so the agent reads it in that light: a feature's file open in the spec (`feature`, with its ID), or the design review (`design-review`). Absent means the whole product — the product page, any other spec file, or anywhere else in the project — and such a turn reads exactly as it did before scopes existed.
+	//
+	// A scope FOCUSES the turn; it fences nothing. The agent reads `prd.md` and the feature's file first, and may still change any file the message implies, saying in its reply which other files it touched. Every edit lands directly: what the agent decided on its own is tagged `*assumed*` in the requirements, and that tag is the user's review.
+	Scope TurnScope `json:"scope,omitempty"`
 }
 
 // TurnInputMultipartIntent As `TurnInputBody.intent`. What the user wants done with `anchor` — `change` rewrites the selected nodes in place, `discuss` opens the same selection as a grilling. Read by the agents service when it renders the anchor into the prompt; the two differ only in how that preamble is phrased.
@@ -3492,6 +3519,18 @@ type TurnOutputBody struct {
 	// TurnID The started turn's id — poll/attach with it
 	TurnID string `json:"turnId"`
 }
+
+// TurnScope What the user was looking at when they sent this message, so the agent reads it in that light: a feature's file open in the spec (`feature`, with its ID), or the design review (`design-review`). Absent means the whole product — the product page, any other spec file, or anywhere else in the project — and such a turn reads exactly as it did before scopes existed.
+//
+// A scope FOCUSES the turn; it fences nothing. The agent reads `prd.md` and the feature's file first, and may still change any file the message implies, saying in its reply which other files it touched. Every edit lands directly: what the agent decided on its own is tagged `*assumed*` in the requirements, and that tag is the user's review.
+type TurnScope struct {
+	// Feature The feature's ID (`F2`) when `kind` is `feature`; absent otherwise.
+	Feature string        `json:"feature,omitempty"`
+	Kind    TurnScopeKind `json:"kind"`
+}
+
+// TurnScopeKind defines model for TurnScope.Kind.
+type TurnScopeKind string
 
 // TurnStatus One turn's lifecycle view (create-turn 202 → poll/attach).
 type TurnStatus struct {

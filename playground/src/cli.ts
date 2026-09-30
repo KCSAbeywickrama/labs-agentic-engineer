@@ -25,7 +25,7 @@
  *   pnpm play <dir> requirements|design|chat → run one phase; exit code = result
  *   pnpm play <dir> tasks|code|check|undo    → later steps of the impl plan
  *
- * Flags: --idea "<text>", --target "<x>", --fresh, --silent, --restore, --yes,
+ * Flags: --idea "<text>", --scope F<n>|design-review, --fresh, --silent, --restore, --yes,
  * -h/--help. `code` also takes --host (run the coding agent as a bare host
  * process instead of the default Docker-image run — see engine/coding-run.ts).
  */
@@ -34,6 +34,7 @@ import "./devtools-default.js"; // MUST be first: sets AGENT_DEVTOOLS before the
 import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { stdout as output } from "node:process";
+import { isTurnScope, type TurnScope } from "@aep/agent-stream";
 import * as clack from "@clack/prompts";
 import { loadRepoSkills } from "./kit/skills.js";
 import { parseStartCommand, parseFlowCommand } from "@aep/contracts/commands";
@@ -69,6 +70,13 @@ import type { WireOptions } from "./engine/wire/session.js";
 const COMMANDS = new Set(["requirements", "design", "tasks", "code", "wire", "chat", "check", "undo", "log", "menu"]);
 
 /** Bare `play`, `play help`, or `-h/--help` → the one-screen command reference. */
+/** `--scope F2` or `--scope design-review`, as the console sends it; anything else is a usage error. */
+function scopeFlag(raw: string): TurnScope {
+  const scope = raw === "design-review" ? { kind: "design-review" } : { kind: "feature", feature: raw };
+  if (!isTurnScope(scope)) throw new Error(`--scope must be a feature ID (F2) or design-review, not "${raw}"`);
+  return scope;
+}
+
 function printUsage(): void {
   output.write(
     [
@@ -86,7 +94,7 @@ function printUsage(): void {
       "",
       "Flags:",
       '  --idea "<text>"   the project idea — captured into specs/.agentic-engineer.toml',
-      '  --target "<x>"    narrow the phase to one component/target',
+      "  --scope <s>       what the user is looking at: a feature (F2) or design-review",
       "  --fresh           reset the conversation before the run (wire: drop the database volume)",
       "  --silent          suppress live turn rendering",
       "  --restore         restore the latest undo snapshot before the run",
@@ -299,7 +307,7 @@ async function main(): Promise<number> {
     args: process.argv.slice(2),
     options: {
       idea: { type: "string" },
-      target: { type: "string" },
+      scope: { type: "string" },
       fresh: { type: "boolean" },
       silent: { type: "boolean" },
       restore: { type: "boolean" },
@@ -328,7 +336,7 @@ async function main(): Promise<number> {
 
   const opts: CodeOptions = {
     ...(values.idea ? { idea: values.idea } : {}),
-    ...(values.target ? { target: values.target } : {}),
+    ...(values.scope ? { scope: scopeFlag(values.scope) } : {}),
     ...(values.fresh ? { fresh: true } : {}),
     ...(values.silent ? { silent: true } : {}),
     ...(values.restore ? { restore: true } : {}),

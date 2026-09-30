@@ -554,6 +554,26 @@ export interface TurnAim {
 export type TurnAimIntent = "change" | "discuss";
 
 /**
+ * A turn's scope (S6): what the user was looking at when they sent it — a
+ * feature's file open in the spec, or the design review. Absent means the
+ * whole product. It focuses the turn and fences nothing: the agent may change
+ * any file the message implies, and every edit lands directly.
+ */
+export type TurnScope = { kind: "feature"; feature: string } | { kind: "design-review" };
+
+const FEATURE_ID = /^F[0-9]+$/;
+
+export function isTurnScope(v: unknown): v is TurnScope {
+  if (v === null || typeof v !== "object") return false;
+  const s = v as Record<string, unknown>;
+  const keys = Object.keys(s);
+  if (s.kind === "feature") {
+    return typeof s.feature === "string" && FEATURE_ID.test(s.feature) && keys.every((k) => k === "kind" || k === "feature");
+  }
+  return s.kind === "design-review" && keys.every((k) => k === "kind");
+}
+
+/**
  * A turn's display record (#463): the raw client-sent instruction and the
  * acting user. `author` mirrors the console's live author shape
  * (`{id: email, displayName}`) so a rehydrated row is attributable — and
@@ -578,6 +598,11 @@ export interface TurnJournal {
    * record of what happened.
    */
   anchor?: TurnAnchor;
+  /**
+   * What the user was looking at when they sent this message (S6). Journaled
+   * so a reloaded thread can say which feature each message was about.
+   */
+  scope?: TurnScope;
 }
 
 /**
@@ -801,10 +826,11 @@ export interface TurnRequest {
    */
   turn: TurnSpec;
   /**
-   * The spec-bundle path this turn should write to, when the caller pins one.
-   * The service renders it into the instruction; callers never format it.
+   * What the user was looking at when they sent this turn (S6): a feature, or
+   * the design review. Absent → the whole product. The service renders it into
+   * the instruction and journals it; callers never format it.
    */
-  target?: string;
+  scope?: TurnScope;
   /**
    * The previous turn of this conversation FAILED (D20): its changes never
    * reached git, though the conversation history claims they did. The service

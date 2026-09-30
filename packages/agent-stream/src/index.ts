@@ -66,6 +66,7 @@ export type {
   TurnAnchor,
   TurnAnchorNode,
   TurnAim,
+  TurnScope,
   TurnAimIntent,
   WorkspaceRef,
   McpConfig,
@@ -98,6 +99,7 @@ export {
   isTurnAttachmentsOrAbsent,
   isTurnConnection,
   isTurnAim,
+  isTurnScope,
   TURN_AIM_LIMITS,
   isCollabConfig,
 } from "./contracts/sse-events.js";

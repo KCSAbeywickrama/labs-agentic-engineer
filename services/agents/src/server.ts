@@ -56,6 +56,7 @@ import {
   isCollabConfig,
   isSurface,
   isTurnAim,
+  isTurnScope,
   isTurnAttachmentsOrAbsent,
   isTurnConnection,
   SURFACES,
@@ -66,10 +67,11 @@ import {
   type Surface,
   type Toolset,
   type TurnAim,
+  type TurnScope,
   type TurnJournal,
   type TurnSpec,
 } from "@aep/agent-stream";
-import { composeInstruction, eagerSkillsFor, toolsetFor, wantsRegisterDraftTool } from "./prompts/turn.js";
+import { composeInstruction, eagerSkillsFor, scopeFactFor, toolsetFor, wantsRegisterDraftTool } from "./prompts/turn.js";
 import type { ConversationStore } from "./store/conversation-store.js";
 import { runConversationTurn, TurnGuard, ConcurrentTurnError } from "./conversation/run-conversation-turn.js";
 import { projectDisplayHistory } from "./conversation/display-history.js";
@@ -210,6 +212,7 @@ export function createApp(deps: CreateAppDeps): Express {
     const body = (req.body ?? {}) as {
       turn?: unknown;
       target?: unknown;
+      scope?: unknown;
       previousTurnFailed?: unknown;
       headless?: unknown;
       instruction?: unknown;
@@ -259,9 +262,22 @@ export function createApp(deps: CreateAppDeps): Express {
       return;
     }
     const turn: TurnSpec = body.turn;
-    if (body.target !== undefined && typeof body.target !== "string") {
-      res.status(400).json({ error: "target must be a string" });
+    // target (the free-text "spec-bundle path") is retired by scope (S6);
+    // reject it loudly, as the other retired fields are, so a stale caller
+    // learns rather than running a turn that ignores what it asked for.
+    if (body.target !== undefined) {
+      res.status(400).json({ error: "target is no longer accepted — send scope" });
       return;
+    }
+    // scope (S6): what the user was looking at. Parsed with the aim below and
+    // composed once the snapshot is read, so a feature scope can name its file.
+    let scope: TurnScope | undefined;
+    if (body.scope !== undefined) {
+      if (!isTurnScope(body.scope)) {
+        res.status(400).json({ error: 'scope must be { kind: "feature", feature: "F<n>" } or { kind: "design-review" }' });
+        return;
+      }
+      scope = body.scope;
     }
 
     // The caller's surface (#580): who is reading this turn's prose. The one
@@ -291,13 +307,6 @@ export function createApp(deps: CreateAppDeps): Express {
       }
       aim = body.aim;
     }
-    const instruction = composeInstruction(turn, {
-      target: typeof body.target === "string" ? body.target : undefined,
-      previousTurnFailed: body.previousTurnFailed === true,
-      headless: body.headless === true,
-      ...(aim ? { aim } : {}),
-    });
-
     // The pre-§12 inline contract is GONE — reject it loudly so a stale caller
     // cannot silently run a turn against the wrong file/skill supply.
     if (body.files !== undefined) {
@@ -352,6 +361,15 @@ export function createApp(deps: CreateAppDeps): Express {
       res.status(500).json({ error: err instanceof Error ? err.message : "workspace read failed" });
       return;
     }
+
+    // Composed after the snapshot read: a feature scope names its file, which
+    // only the turn's own files can say.
+    const instruction = composeInstruction(turn, {
+      previousTurnFailed: body.previousTurnFailed === true,
+      headless: body.headless === true,
+      ...(scope ? { scope: scopeFactFor(scope, Object.keys(files)) } : {}),
+      ...(aim ? { aim } : {}),
+    });
 
     // toolset: which domain tools to register (§9.3). DERIVED from the turn —
     // planning registers the task tools and no file tools, everything else
@@ -465,6 +483,8 @@ export function createApp(deps: CreateAppDeps): Express {
         // with the prompt would render a tag for a selection the agent was
         // never pointed at.
         ...(aim ? { anchor: aim.anchor } : {}),
+        // Likewise the scope the instruction was composed from (S6).
+        ...(scope ? { scope } : {}),
       };
     }
 

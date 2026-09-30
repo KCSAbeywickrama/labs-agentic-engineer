@@ -29,7 +29,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SURFACES } from "@aep/agent-stream";
-import { composeInstruction, eagerSkillsFor, toolsetFor, wantsRegisterDraftTool } from "../src/prompts/turn.js";
+import { composeInstruction, eagerSkillsFor, scopeFactFor, scopeNote, toolsetFor, wantsRegisterDraftTool } from "../src/prompts/turn.js";
 
 /** The platform skill library this monorepo publishes to every org. */
 const SKILLS_DIR = path.resolve(fileURLToPath(import.meta.url), "../../../../skills");
@@ -177,11 +177,40 @@ test("flow lists the reference documents, and lists NOTHING when there are none"
   assert.doesNotMatch(bare, /reference document/i);
 });
 
-test("target is rendered by the service, never formatted by the caller", () => {
-  const out = composeInstruction({ kind: "chat", text: "tighten the spec" }, { target: "specs/requirements/prd.md" });
-  assert.ok(out.endsWith("(target: specs/requirements/prd.md)"));
-  // Absent or blank → no suffix at all.
-  assert.doesNotMatch(composeInstruction({ kind: "chat", text: "x" }, { target: "  " }), /\(target:/);
+const APPROVALS = "specs/requirements/features/F2-approvals.md";
+
+test("a feature scope leads the instruction, names the file, and fences nothing (S6)", () => {
+  const scope = { kind: "feature", feature: "F2", file: APPROVALS } as const;
+  const out = composeInstruction({ kind: "chat", text: "deputies can approve up to 500" }, { scope });
+  assert.ok(out.startsWith(`The user is looking at feature F2, whose file is ${APPROVALS}`));
+  assert.match(out, /Read specs\/requirements\/prd\.md and that file before you change anything\./);
+  assert.match(out, /fences nothing/);
+  assert.match(out, /deputies can approve up to 500/);
+  // Unscoped → byte-identical to a turn sent before scopes existed.
+  assert.equal(composeInstruction({ kind: "chat", text: "x" }, {}), composeInstruction({ kind: "chat", text: "x" }));
+  assert.doesNotMatch(composeInstruction({ kind: "chat", text: "x" }), /looking at/);
+});
+
+test("a feature with no file yet is still named, with where its file goes", () => {
+  const out = scopeNote({ kind: "feature", feature: "F7", file: null });
+  assert.match(out, /feature F7, whose file \(specs\/requirements\/features\/F7-<name>\.md\) is not in the requirements yet/);
+  assert.doesNotMatch(out, /that file before/);
+});
+
+test("the design review scope reads the message as about the design", () => {
+  assert.match(scopeNote({ kind: "design-review" }), /^The user is in the design review/);
+});
+
+test("scopeFactFor finds a feature's file by its ID, never a longer ID's", () => {
+  const paths = [
+    "specs/requirements/prd.md",
+    "specs/requirements/features/F20-audit.md",
+    APPROVALS,
+    "specs/requirements/features/F2-approvals/notes.md",
+  ];
+  assert.deepEqual(scopeFactFor({ kind: "feature", feature: "F2" }, paths), { kind: "feature", feature: "F2", file: APPROVALS });
+  assert.deepEqual(scopeFactFor({ kind: "feature", feature: "F3" }, paths), { kind: "feature", feature: "F3", file: null });
+  assert.deepEqual(scopeFactFor({ kind: "design-review" }, paths), { kind: "design-review" });
 });
 
 test("a failed previous turn leads the instruction (D20)", () => {
@@ -192,16 +221,16 @@ test("a failed previous turn leads the instruction (D20)", () => {
 });
 
 test("headless forbids the question tools, and trails everything else", () => {
-  const out = composeInstruction({ kind: "start", idea: "a shop" }, { target: "specs/requirements/prd.md", headless: true });
+  const out = composeInstruction({ kind: "start", idea: "a shop" }, { headless: true });
   assert.match(out, /do not call ask_question or ask_questions/);
-  assert.ok(out.indexOf("(target:") < out.indexOf("No interview is possible"), "modifiers trail the body");
+  assert.ok(out.indexOf("Spec sources live under specs/") < out.indexOf("No interview is possible"), "headless trails the body");
 });
 
-test("plan carries no spec-paths rule and no target — it writes no spec files", () => {
-  const out = composeInstruction({ kind: "plan" }, { target: "specs/requirements/prd.md" });
+test("plan carries no spec-paths rule and no scope — it writes no spec files", () => {
+  const out = composeInstruction({ kind: "plan" }, { scope: { kind: "feature", feature: "F2", file: APPROVALS } });
   assert.ok(out.startsWith("Plan the implementation Tasks for this project."));
   assert.doesNotMatch(out, /Spec sources live under specs\//);
-  assert.doesNotMatch(out, /\(target:/);
+  assert.doesNotMatch(out, /looking at feature/);
 });
 
 test("plan scope marks each story COVERED or NEEDS TASKS", () => {

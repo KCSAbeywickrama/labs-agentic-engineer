@@ -81,7 +81,6 @@ func (h *Handler) CreateTurn(ctx context.Context, request gen.CreateTurnRequestO
 			return nil, err
 		}
 		in.Instruction = parsed.Instruction
-		in.Target = parsed.Target
 		in.Collab = parsed.Collab
 		in.Attachments = parsed.Attachments
 		anchor, err := parseAnchorField(parsed.Anchor)
@@ -93,20 +92,29 @@ func (h *Handler) CreateTurn(ctx context.Context, request gen.CreateTurnRequestO
 			return nil, err
 		}
 		in.Aim = aim
+		scope, err := parseScopeField(parsed.Scope)
+		if err != nil {
+			return nil, err
+		}
+		if in.Scope, err = scopeFromJSON(scope); err != nil {
+			return nil, err
+		}
 	case request.JSONBody != nil:
 		in.Instruction = request.JSONBody.Instruction
-		in.Target = request.JSONBody.Target
 		in.Collab = request.JSONBody.Collab
 		aim, err := aimFromJSON(request.JSONBody.Anchor, string(request.JSONBody.Intent))
 		if err != nil {
 			return nil, err
 		}
 		in.Aim = aim
+		if in.Scope, err = scopeFromJSON(request.JSONBody.Scope); err != nil {
+			return nil, err
+		}
 	default:
 		return nil, apierr.BadRequest("request body is required")
 	}
 	// The retired edge capped this body at 64 KiB (it carries no file content —
-	// useCase + instruction + target); the edge-wide 10 MiB cap alone would be
+	// useCase + instruction + scope); the edge-wide 10 MiB cap alone would be
 	// a 160x loosening on a payload that is buffered whole and forwarded to
 	// the agents service. Attachments are capped separately and on their own
 	// bytes (see attachments.go) — they are the one thing on this body that IS

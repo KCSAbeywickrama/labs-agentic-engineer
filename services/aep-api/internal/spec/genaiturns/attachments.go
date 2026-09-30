@@ -46,7 +46,7 @@ const (
 	attachmentsField = "files"
 	instructionField = "instruction"
 	collabField      = "collab"
-	targetField      = "target"
+	scopeField       = "scope"
 	anchorField      = "anchor"
 	intentField      = "intent"
 )
@@ -97,13 +97,15 @@ var chatAttachmentMediaTypes = map[string]string{
 // multipartTurn is the create-turn fields recovered from a multipart body.
 type multipartTurn struct {
 	Instruction string
-	Target      string
 	Collab      bool
 	// Anchor/Intent are the aim (#666), recovered as raw strings and validated
 	// with the JSON path's rules in aim.go — one place decides what a valid aim
 	// is, so the two request forms cannot drift into accepting different things.
-	Anchor      string
-	Intent      string
+	Anchor string
+	Intent string
+	// Scope is the raw `scope` part (S6), validated with the JSON path's rules
+	// in scope.go.
+	Scope       string
 	Attachments []agentsvc.TurnAttachment
 }
 
@@ -138,12 +140,12 @@ func readMultipartTurn(body *multipart.Reader) (multipartTurn, error) {
 			}
 			out.Instruction = v
 			continue
-		case targetField:
+		case scopeField:
 			v, err := readFormValue(part)
 			if err != nil {
 				return out, err
 			}
-			out.Target = v
+			out.Scope = v
 			continue
 		case anchorField:
 			v, err := readFormValue(part)

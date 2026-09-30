@@ -1697,6 +1697,41 @@ func TestStartTurnDispatchesChatAttachments(t *testing.T) {
 }
 
 // A JSON send must stay byte-identical to before the multipart arm existed.
+// A turn's scope (S6) rides to the agents service as sent, and a scope that
+// names nothing the agent can act on is refused before any turn exists.
+func TestStartTurnDispatchesScope(t *testing.T) {
+	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
+	r.fake.parts = []string{textPart("on it")}
+	m := manifestPart(nil, nil)
+	r.fake.manifest = &m
+
+	body, _ := json.Marshal(map[string]any{
+		"instruction": "deputies can approve up to 500",
+		"collab":      true,
+		"scope":       map[string]any{"kind": "feature", "feature": "F2"},
+	})
+	rec := r.h.AsOrg(testOrg).Post(turnsPath(convUUID), string(body))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("POST scoped turn: code %d (%s)", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		TurnID string `json:"turnId"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	r.waitTerminal(t, out.TurnID)
+	if got := r.fake.sentTurn(t, 0).req.Scope; got == nil || *got != (agentsvc.ScopeBlock{Kind: "feature", Feature: "F2"}) {
+		t.Errorf("dispatched scope = %+v, want feature F2", got)
+	}
+
+	bad, _ := json.Marshal(map[string]any{
+		"instruction": "tighten it",
+		"scope":       map[string]any{"kind": "feature", "feature": "Approvals"},
+	})
+	if rec := r.h.AsOrg(testOrg).Post(turnsPath(convUUID), string(bad)); rec.Code != http.StatusBadRequest {
+		t.Errorf("a scope naming no feature ID: code %d, want 400 (%s)", rec.Code, rec.Body.String())
+	}
+}
+
 func TestStartTurnJSONCarriesNoAttachments(t *testing.T) {
 	r := newGenaiRig(t, map[string]string{"specs/requirements/prd.md": "# Reqs\n"})
 	convUUID := "11111111-2222-3333-4444-666666666666"

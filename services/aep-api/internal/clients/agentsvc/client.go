@@ -155,9 +155,10 @@ type TurnRequest struct {
 	Connection             *TurnConnection `json:"connection,omitempty"`
 	Workspace              WorkspaceRef    `json:"workspace"`
 	FilesChangedExternally bool            `json:"filesChangedExternally,omitempty"`
-	// Target is the spec-bundle path this turn should write to, when the caller
-	// pins one. The agents service renders it; the BFF never formats it.
-	Target string `json:"target,omitempty"`
+	// Scope is what the user was looking at when they sent this turn (S6): a
+	// feature, or the design review; nil means the whole product. The agents
+	// service renders it and journals it; the BFF never formats it.
+	Scope *ScopeBlock `json:"scope,omitempty"`
 	// PreviousTurnFailed (D20) says the last terminal turn of this conversation
 	// failed: the conversation history claims work git never received, and the
 	// agents service leads the instruction with the note that reconciles them.
@@ -300,6 +301,15 @@ type JournalBlock struct {
 	// without these a reload would show the agent discussing a document that
 	// appears nowhere in the thread.
 	Attachments []string `json:"attachments,omitempty"`
+}
+
+// ScopeBlock is a turn's scope (S6). JSON field names match @aep/agent-stream's
+// TurnScope exactly.
+type ScopeBlock struct {
+	// Kind is "feature" or "design-review".
+	Kind string `json:"kind"`
+	// Feature is the feature's ID ("F2") for a feature scope.
+	Feature string `json:"feature,omitempty"`
 }
 
 // AimBlock is what a turn was aimed at (console #666). JSON field names match

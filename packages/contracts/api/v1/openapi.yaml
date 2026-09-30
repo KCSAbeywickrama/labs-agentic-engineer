@@ -806,6 +806,8 @@ paths:
                 contentType: application/json
               files:
                 contentType: application/octet-stream
+              scope:
+                contentType: application/json
             schema:
               $ref: '#/components/schemas/TurnInputMultipart'
         required: true
@@ -3548,6 +3550,8 @@ components:
         role:
           description: Who the message is from, as the journal recorded it.
           type: string
+        scope:
+          $ref: '#/components/schemas/TurnScope'
       required:
       - role
       type: object
@@ -8929,9 +8933,8 @@ components:
           - change
           - discuss
           type: string
-        target:
-          description: Optional target (e.g. a doc type)
-          type: string
+        scope:
+          $ref: '#/components/schemas/TurnScope'
       required:
       - instruction
       type: object
@@ -9001,9 +9004,8 @@ components:
           - change
           - discuss
           type: string
-        target:
-          description: As `TurnInputBody.target`.
-          type: string
+        scope:
+          $ref: '#/components/schemas/TurnScope'
       required:
       - instruction
       type: object
@@ -9015,6 +9017,34 @@ components:
           type: string
       required:
       - turnId
+      type: object
+    TurnScope:
+      additionalProperties: false
+      description: >
+        What the user was looking at when they sent this message, so the agent reads it in
+        that light: a feature's file open in the spec (`feature`, with its ID), or the
+        design review (`design-review`). Absent means the whole product — the product page,
+        any other spec file, or anywhere else in the project — and such a turn reads exactly
+        as it did before scopes existed.
+
+
+        A scope FOCUSES the turn; it fences nothing. The agent reads `prd.md` and the
+        feature's file first, and may still change any file the message implies, saying in
+        its reply which other files it touched. Every edit lands directly: what the agent
+        decided on its own is tagged `*assumed*` in the requirements, and that tag is the
+        user's review.
+      properties:
+        feature:
+          description: The feature's ID (`F2`) when `kind` is `feature`; absent otherwise.
+          pattern: ^F[0-9]+$
+          type: string
+        kind:
+          enum:
+          - feature
+          - design-review
+          type: string
+      required:
+      - kind
       type: object
     TurnStatus:
       additionalProperties: false

@@ -18,7 +18,6 @@
 
 import type { components } from "../../generated/aep-api";
 import type { SpecFeature } from "../spec/api/specModel";
-import { bundlePath, roomPathOf } from "../spec/model/files";
 import type { ProjectCard } from "../shell/scope";
 
 // A project has one conversation; each turn in it carries a scope, taken from
@@ -26,14 +25,9 @@ import type { ProjectCard } from "../shell/scope";
 // scopes the turn to that feature; the design card, to the design review;
 // anywhere else in the project, to the whole product.
 //
-// The contract has no scope field yet (backend S6). Until it does, this module
-// is the one place a scope meets the wire:
-//  - a feature rides the contract's own `target`, which is "the spec-bundle
-//    path this turn should write to": exactly what a feature scope means;
-//  - the whole product is the absence of a target, as it is today;
-//  - the design review has no field that fits, so it rides a PROVISIONAL
-//    `scope` field. aep-api ignores unknown JSON fields, so only MSW reads it.
-// When S6 lands, `turnBody` and `scopeOfBody` change and nothing else does.
+// This module is the one place a scope meets the wire, as the contract's
+// `scope` (TurnScope): a feature by its ID, or the design review; the whole
+// product is the absence of a scope. It focuses the agent and fences nothing.
 
 type TurnInputBody = components["schemas"]["TurnInputBody"];
 
@@ -43,13 +37,8 @@ export type TurnScope =
   | { kind: "feature"; featureId: string; name: string; path: string }
   | { kind: "design" };
 
-/** PROVISIONAL (S6): the one scope the contract cannot say yet. Read only by MSW. */
-interface ProvisionalScopeField {
-  scope?: "design-review";
-}
-
-/** A turn's request body: the contract's, plus the provisional scope field. */
-export type TurnBody = TurnInputBody & ProvisionalScopeField;
+/** A turn's request body. */
+export type TurnBody = TurnInputBody;
 
 /** The scope of a turn sent from here: the open card, and the feature open in the spec card. */
 export function turnScopeFor(
@@ -71,16 +60,16 @@ export function featureScope(feature: Pick<SpecFeature, "id" | "name" | "path">)
  */
 export function turnBody(instruction: string, scope: TurnScope): TurnBody {
   const body: TurnBody = { instruction, collab: true };
-  if (scope.kind === "feature") body.target = bundlePath(scope.path);
-  if (scope.kind === "design") body.scope = "design-review";
+  if (scope.kind === "feature") body.scope = { kind: "feature", feature: scope.featureId };
+  if (scope.kind === "design") body.scope = { kind: "design-review" };
   return body;
 }
 
-/** A body's scope, read back as the server would: a feature by its room path. */
-export type WireScope = { kind: "product" } | { kind: "feature"; path: string } | { kind: "design" };
+/** A body's scope, read back as the server would: a feature by its ID. */
+export type WireScope = { kind: "product" } | { kind: "feature"; featureId: string } | { kind: "design" };
 
 export function scopeOfBody(body: TurnBody): WireScope {
-  if (body.target) return { kind: "feature", path: roomPathOf(body.target) };
-  if (body.scope === "design-review") return { kind: "design" };
+  if (body.scope?.kind === "feature" && body.scope.feature) return { kind: "feature", featureId: body.scope.feature };
+  if (body.scope?.kind === "design-review") return { kind: "design" };
   return { kind: "product" };
 }

@@ -33,10 +33,10 @@ func TestResolveWriteTarget_SucceedsFirstTry(t *testing.T) {
 	got, err := resolveWriteTarget(context.Background(), func(context.Context) (string, error) {
 		return "development", nil
 	}, retrySpec{
-		budget:      time.Minute,
-		initial:     time.Second,
-		maxBackoff:  15 * time.Second,
-		sleep: func(context.Context, time.Duration) error { sleeps++; return nil },
+		budget:     time.Minute,
+		initial:    time.Second,
+		maxBackoff: 15 * time.Second,
+		sleep:      func(context.Context, time.Duration) error { sleeps++; return nil },
 	})
 	if err != nil || got != "development" || sleeps != 0 {
 		t.Fatalf("got %q err=%v sleeps=%d", got, err, sleeps)

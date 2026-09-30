@@ -313,7 +313,7 @@ function plural(n: number, word: string): string {
 export function scriptTurn(req: TurnRequest): ScriptedTurn {
   const { instruction, scope, model, progress, turnKey } = req;
   const text = instruction.trim();
-  const inScope = scope.kind === "feature" ? model.features.find((f) => f.path === scope.path) : undefined;
+  const inScope = scope.kind === "feature" ? model.features.find((f) => f.id === scope.featureId) : undefined;
 
   // The kickoff: the platform's `/start`, with the brief attached as the server does.
   if (text === START_COMMAND || text.startsWith(`${START_COMMAND} `)) {

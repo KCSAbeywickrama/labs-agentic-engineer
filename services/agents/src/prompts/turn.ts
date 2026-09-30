@@ -34,7 +34,7 @@
  * all send a `TurnSpec` and none of them composes.
  */
 
-import type { PlanContextFile, PlanScope, Toolset, TurnAim, TurnSpec } from "@aep/agent-stream";
+import type { PlanContextFile, PlanScope, Toolset, TurnAim, TurnScope, TurnSpec } from "@aep/agent-stream";
 
 // --- Wording -----------------------------------------------------------------
 
@@ -73,9 +73,19 @@ const REFERENCES_PREFIX =
 const SPEC_PATHS_RULE =
   "\n\nSpec sources live under specs/ (requirements under specs/requirements/, design under specs/design/) — when creating a file that does not exist yet, always use its full path, never a bare filename.";
 
-/** The caller-pinned spec-bundle target. */
-const TARGET_PREFIX = "\n\n(target: ";
-const TARGET_CLOSE = ")";
+/**
+ * The scope (S6): what the user was looking at when they sent the message. It
+ * FOCUSES the turn and fences nothing — decided with the user on 2026-09-30:
+ * every edit lands directly, and what the agent decides on the user's behalf
+ * is tagged `*assumed*` in the requirements, which is the user's review. So
+ * the note says what to read first and asks the agent to say where else it
+ * wrote, never to hold a change back.
+ */
+const SCOPE_READ_FIRST = "Read specs/requirements/prd.md and that file before you change anything.";
+const SCOPE_NO_FENCE =
+  "This focuses the turn and fences nothing: make every change the message implies, in the file it belongs in, and say in your reply which other files you changed.";
+const SCOPE_DESIGN_REVIEW =
+  "The user is in the design review, looking at the design under specs/design/: read their message as being about the design. A point that is really a change to a requirement is made in the requirements file it belongs in; say so in your reply.";
 
 /**
  * D20: the previous turn of this conversation FAILED, so the conversation
@@ -221,10 +231,35 @@ function supportingSkills(skill: string): string[] {
 
 // --- Composition -------------------------------------------------------------
 
+/**
+ * A turn's scope as the composer takes it: the feature scope carries the file
+ * the caller found for it (null when the feature has no file yet), so this
+ * module stays a pure function of facts.
+ */
+export type ScopeFact =
+  | { kind: "feature"; feature: string; file: string | null }
+  | { kind: "design-review" };
+
+const FEATURE_FILES = "specs/requirements/features/";
+
+/**
+ * A wire scope as a fact: a feature scope finds its file among the turn's
+ * paths (`features/F2-<slug>.md`, skills/prd-contract), or null when the
+ * feature has none yet.
+ */
+export function scopeFactFor(scope: TurnScope, paths: Iterable<string>): ScopeFact {
+  if (scope.kind === "design-review") return scope;
+  const prefix = `${FEATURE_FILES}${scope.feature}-`;
+  const files = [...paths]
+    .filter((path) => path.startsWith(prefix) && path.endsWith(".md") && !path.slice(prefix.length).includes("/"))
+    .sort();
+  return { kind: "feature", feature: scope.feature, file: files[0] ?? null };
+}
+
 /** Turn-level modifiers — facts the caller supplies, never text it formats. */
 export interface TurnModifiers {
-  /** The spec-bundle path this turn should write to. */
-  target?: string | undefined;
+  /** What the user was looking at when they sent this turn (S6); absent = the whole product. */
+  scope?: ScopeFact | undefined;
   /** D20: the previous turn of this conversation failed (see the note above). */
   previousTurnFailed?: boolean | undefined;
   /** No interview is possible in this run. */
@@ -241,14 +276,33 @@ export interface TurnModifiers {
 /**
  * A `TurnSpec` plus its modifiers, as the instruction text the agent receives.
  *
- * Shape: `[failure note] [aim note] <body> [spec-paths rule] [target] [headless note]`.
+ * Shape: `[failure note] [scope note] [aim note] <body> [spec-paths rule] [headless note]`.
  * The spec-paths rule is a property of the KIND — plan turns write no spec
- * files, so they never carry it — which is why it is not a caller flag.
+ * files, so they never carry it — which is why it is not a caller flag. A plan
+ * turn has no scope either: it plans from the whole design.
  */
 export function composeInstruction(turn: TurnSpec, mods: TurnModifiers = {}): string {
-  const body = turn.kind === "plan" ? planBody(turn) : specBody(turn) + SPEC_PATHS_RULE + target(mods.target);
+  const body = turn.kind === "plan" ? planBody(turn) : specBody(turn) + SPEC_PATHS_RULE;
   const lead = mods.previousTurnFailed ? PREVIOUS_TURN_FAILED_NOTE + "\n\n" : "";
-  return lead + aimNote(mods.aim) + body + (mods.headless ? HEADLESS_NOTE : "");
+  const scope = turn.kind === "plan" ? "" : scopeNote(mods.scope);
+  return lead + scope + aimNote(mods.aim) + body + (mods.headless ? HEADLESS_NOTE : "");
+}
+
+/**
+ * What the user was looking at, as the model reads it. Empty for an unscoped
+ * turn, so a turn about the whole product is byte-identical to one sent before
+ * scopes existed.
+ */
+export function scopeNote(scope: ScopeFact | undefined): string {
+  if (!scope) return "";
+  if (scope.kind === "design-review") return `${SCOPE_DESIGN_REVIEW}\n\n`;
+  const where = scope.file
+    ? `whose file is ${scope.file}`
+    : `whose file (specs/requirements/features/${scope.feature}-<name>.md) is not in the requirements yet`;
+  const sentences = [`The user is looking at feature ${scope.feature}, ${where}: read their message as being about that feature.`];
+  if (scope.file) sentences.push(SCOPE_READ_FIRST);
+  sentences.push(SCOPE_NO_FENCE);
+  return `${sentences.join(" ")}\n\n`;
 }
 
 /**
@@ -314,10 +368,7 @@ function references(paths: string[] | undefined): string {
   return listed.length === 0 ? "" : REFERENCES_PREFIX + listed.map((p) => `- ${p}`).join("\n");
 }
 
-function target(raw: string | undefined): string {
-  const trimmed = (raw ?? "").trim();
-  return trimmed === "" ? "" : TARGET_PREFIX + trimmed + TARGET_CLOSE;
-}
+
 
 /**
  * The milestone's story coverage. COVERED stories already have Tasks, so the

@@ -315,6 +315,18 @@ test("400 when the turn or workspace is missing; retired body shapes are rejecte
     assert.equal(inlineSkills.status, 400);
     assert.match(((await inlineSkills.json()) as { error: string }).error, /skills is no longer accepted/);
 
+    // target is retired by scope (S6).
+    const target = await post(wsBody({ target: "specs/requirements/prd.md" }));
+    assert.equal(target.status, 400);
+    assert.match(((await target.json()) as { error: string }).error, /target is no longer accepted — send scope/);
+
+    // A scope that names nothing the agent can act on is refused before the stream.
+    for (const scope of [{ kind: "feature", feature: "Approvals" }, { kind: "feature" }, { kind: "product" }]) {
+      const bad = await post(wsBody({ scope }));
+      assert.equal(bad.status, 400, JSON.stringify(scope));
+      assert.match(((await bad.json()) as { error: string }).error, /scope must be/);
+    }
+
     const noWorkspace = await post({ turn: { kind: "chat", text: "x" } });
     assert.equal(noWorkspace.status, 400);
     assert.match(((await noWorkspace.json()) as { error: string }).error, /workspace is required/);
