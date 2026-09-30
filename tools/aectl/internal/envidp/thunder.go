@@ -147,11 +147,10 @@ func ensureDomainUnchanged(ctx context.Context, c clients, cfg Config, inst *Thu
 		return nil
 	}
 	return fmt.Errorf(
-		"environment identity provider %s/%s is already published as %s, but this install computes %s.\n"+
-			"  The deployed release is not upgraded in place, so the two cannot be reconciled here and every\n"+
-			"  generated app would be handed an issuer this Thunder does not stamp.\n"+
-			"  Either keep the previous domain, or delete the environment tier (helm uninstall %s -n %s, and the\n"+
-			"  api-platform release beside it) and re-run so both are rebuilt on the new one.",
+		"environment identity provider %s/%s is already published as %s but this install computes %s; "+
+			"the deployed release is never upgraded in place, so keep the previous domain, or delete the "+
+			"environment tier (helm uninstall %s -n %s, and the api-platform release beside it) and re-run "+
+			"to rebuild both on the new one",
 		inst.Namespace, inst.Release, recorded, inst.PublicURL, inst.Release, inst.Namespace)
 }
 
