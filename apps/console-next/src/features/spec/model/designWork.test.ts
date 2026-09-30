@@ -23,13 +23,14 @@ import type { LineBlock } from "./ids";
 
 const li = (text: string, emphasis: LineBlock["emphasis"] = []): LineBlock => ({ kind: "listItem", text, emphasis });
 const h1 = (text: string): LineBlock => ({ kind: "heading", level: 1, text, emphasis: [] });
+const h2 = (text: string): LineBlock => ({ kind: "heading", level: 2, text, emphasis: [] });
 
 const F1_PATH = "requirements/features/F1.md";
 const F2_PATH = "requirements/features/F2.md";
 const PW_PATH = "requirements/product-wide.md";
 
 function feature(id: string, over: Partial<SpecFeature> = {}): SpecFeature {
-  return { id, name: id, path: `requirements/features/${id}.md`, purpose: "", stage: "Interviewed", blocking: null, ...over };
+  return { id, name: id, path: `requirements/features/${id}.md`, purpose: "", stage: "Interviewed", ...over };
 }
 
 const assumedLine = "F2.4 A deputy approves in my place. assumed";
@@ -78,10 +79,15 @@ describe("designBasis", () => {
 describe("designWork", () => {
   const designedFrom = { F1: designBasis(f1, spec(), productWide), F2: designBasis(f2, spec(), productWide) };
 
-  it("takes every interviewed, unblocked feature not designed yet", () => {
-    const blocked = feature("F3", { blocking: { question: "One Xero organisation?", why: "", options: [] } });
+  it("takes every interviewed feature not designed yet that no question in its file blocks", () => {
+    const blocked = feature("F3");
     const stub = feature("F4", { stage: "Not interviewed" });
-    expect(designWork([f1, f2, blocked, stub], {}, spec(), productWide)).toEqual({ toDesign: ["F1", "F2"], outOfDate: [] });
+    const question = "One Xero organisation? blocking";
+    const tag = { start: question.indexOf("blocking"), end: question.length };
+    const waiting = spec({ [blocked.path]: [h1("Payroll export"), h2("Open Questions"), li(question, [tag])] });
+    expect(designWork([f1, f2, blocked, stub], {}, waiting, productWide)).toEqual({ toDesign: ["F1", "F2"], outOfDate: [] });
+    const answered = spec({ [blocked.path]: [h1("Payroll export"), h2("Decisions"), li("One organisation.")] });
+    expect(designWork([f1, f2, blocked, stub], {}, answered, productWide).toDesign).toEqual(["F1", "F2", "F3"]);
   });
 
   it("has nothing to do while the spec reads as it was designed", () => {

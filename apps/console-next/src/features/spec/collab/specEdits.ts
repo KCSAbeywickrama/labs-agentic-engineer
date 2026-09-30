@@ -24,6 +24,7 @@ import { AGENT_INSERTION, markdownToNode } from "@aep/collab-doc";
 import type { AgentWriter, Proposal, ProposalVerdict } from "../api/specModel";
 import { PRD_PATH } from "../model/files";
 import { parseLine } from "../model/ids";
+import { blockingEntries } from "../model/questions";
 import { docLines, type DocLine } from "./docLines";
 import { specSchema } from "./specSchema";
 
@@ -244,6 +245,24 @@ export function settleAssumedLine(doc: Y.Doc, path: string, text: string, action
     if (!line) return;
     if (action === "keep") removeAssumedTag(tr, line);
     else deleteLine(tr, line);
+  });
+}
+
+/**
+ * Answer a feature's blocking question, in one Yjs transaction: its entry
+ * (with the options nested under it) leaves Open Questions, and the answer is
+ * a settled line in the feature's Decisions. The entry is found by its words;
+ * false when no blocking question in the file has them any more (it was
+ * answered or edited meanwhile), and then nothing is written.
+ */
+export function answerBlockingQuestion(doc: Y.Doc, path: string, question: string, answer: string): boolean {
+  const words = answer.trim();
+  if (!words) return false;
+  return editFile(doc, path, (tr) => {
+    const entry = blockingEntries(docLines(tr.doc)).find((e) => e.question === question);
+    if (!entry) return;
+    deleteLine(tr, entry.line);
+    appendToSection(tr, "Decisions", words);
   });
 }
 

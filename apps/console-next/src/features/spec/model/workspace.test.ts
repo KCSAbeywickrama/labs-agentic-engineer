@@ -32,8 +32,8 @@ import {
 } from "./workspace";
 
 function feature(id: string, name: string, over: Partial<FeatureView> = {}): FeatureView {
-  const base: SpecFeature = { id, name, path: `requirements/features/${id}.md`, purpose: "", stage: "Interviewed", blocking: null };
-  return { ...base, chips: [], toConfirm: 0, designOutOfDate: false, ...over };
+  const base: SpecFeature = { id, name, path: `requirements/features/${id}.md`, purpose: "", stage: "Interviewed" };
+  return { ...base, chips: [], blocking: [], toConfirm: 0, designOutOfDate: false, ...over };
 }
 
 const li = (text: string, emphasis: LineBlock["emphasis"] = []): LineBlock => ({ kind: "listItem", text, emphasis });
@@ -61,22 +61,20 @@ describe("sectionItems", () => {
 });
 
 describe("chips and rail state", () => {
-  const blocking = { question: "One Xero organisation?", why: "", options: [] };
-
   it("marks a blocked feature and one with lines to confirm", () => {
-    expect(featureChips({ blocking }, 2)).toEqual([
+    expect(featureChips(true, 2)).toEqual([
       { tone: "warning", label: "blocked" },
       { tone: "warning", label: "2 to confirm" },
     ]);
-    expect(featureChips({ blocking: null }, 0)).toEqual([]);
+    expect(featureChips(false, 0)).toEqual([]);
   });
 
   it("marks a design that is out of date", () => {
-    expect(featureChips({ blocking: null }, 0, true)).toEqual([{ tone: "primary", label: "design out of date" }]);
+    expect(featureChips(false, 0, true)).toEqual([{ tone: "primary", label: "design out of date" }]);
   });
 
   it("shows the first chip in the rail, else the stage", () => {
-    expect(railState({ stage: "Interviewed", chips: featureChips({ blocking }, 0) })).toEqual({ tone: "warning", label: "blocked" });
+    expect(railState({ stage: "Interviewed", chips: featureChips(true, 0) })).toEqual({ tone: "warning", label: "blocked" });
     expect(railState({ stage: "Interviewed", chips: [] })).toEqual({ tone: null, label: "interviewed" });
     expect(railState({ stage: "Not interviewed", chips: [] })).toEqual({ tone: null, label: "not yet" });
     expect(railState({ stage: "Designed", chips: [] })).toEqual({ tone: "success", label: "designed" });
@@ -87,9 +85,9 @@ describe("nextUp", () => {
   const features = [
     feature("F1", "Submit expenses"),
     feature("F2", "Approvals", { toConfirm: 2 }),
-    feature("F3", "Payroll export", { blocking: { question: "One Xero organisation?", why: "", options: [] } }),
+    feature("F3", "Payroll export", { blocking: [{ question: "One Xero organisation?", options: [] }] }),
     feature("F4", "Spending reports", { stage: "Not interviewed" }),
-    feature("F5", "Mileage claims", { stage: "Not interviewed", blocking: { question: "Rate per mile?", why: "", options: [] } }),
+    feature("F5", "Mileage claims", { stage: "Not interviewed", blocking: [{ question: "Rate per mile?", options: [] }] }),
   ];
 
   it("orders blocking questions, lines to confirm, interviews, design, comments, then Fog", () => {

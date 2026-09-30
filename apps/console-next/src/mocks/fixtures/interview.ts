@@ -27,6 +27,8 @@ import { START_COMMAND } from "@aep/contracts/commands";
 import type { WireScope } from "../../features/agent-chat/turnScope";
 import type { SpecFeature, SpecModel } from "../../features/spec/api/specModel";
 import { bundlePath } from "../../features/spec/model/files";
+import type { LineBlock } from "../../features/spec/model/ids";
+import { blockingQuestions } from "../../features/spec/model/questions";
 import type { components } from "../../generated/aep-api";
 import type { InterviewEffect, InterviewProgress, ScriptFrame } from "../chatServer";
 
@@ -282,6 +284,8 @@ export interface TurnRequest {
   instruction: string;
   scope: WireScope;
   model: SpecModel;
+  /** Every spec file's lines as the user has them now (the local doc stands in for the room). */
+  lines: ReadonlyMap<string, LineBlock[]>;
   progress: InterviewProgress | undefined;
   /** The project's brief, for the kickoff. */
   prompt: string | undefined;
@@ -373,7 +377,7 @@ export function scriptTurn(req: TurnRequest): ScriptedTurn {
   if (scope.kind === "product") {
     const interviewedCount = model.features.filter((f) => f.stage === "Interviewed" || f.stage === "Designed").length;
     const toInterview = model.features.filter((f) => f.stage === "Not interviewed").map((f) => f.name);
-    const blocked = model.features.filter((f) => f.blocking).map((f) => f.name);
+    const blocked = model.features.filter((f) => blockingQuestions(req.lines.get(f.path) ?? []).length > 0).map((f) => f.name);
     const lines = [
       model.features.length === 0
         ? "There are no features yet; I'll propose them from the brief."

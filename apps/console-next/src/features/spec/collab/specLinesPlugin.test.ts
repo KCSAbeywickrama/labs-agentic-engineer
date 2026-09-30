@@ -21,6 +21,7 @@ import * as Y from "yjs";
 import { yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
 import { markdownToNode, setDocFile, setDocFileAsAgent } from "@aep/collab-doc";
 import { parseLine } from "../model/ids";
+import { blockingEntries } from "../model/questions";
 import { docLines } from "./docLines";
 import { specSchema } from "./specSchema";
 import { lineMarks, type LineMark } from "./specLinesPlugin";
@@ -31,8 +32,10 @@ import { lineMarks, type LineMark } from "./specLinesPlugin";
 function marksOf(markdown: string) {
   const doc = markdownToNode(markdown);
   const spanned = (m: LineMark) => ("at" in m ? "" : doc.textBetween(m.from, m.to, "\n"));
-  return docLines(doc).flatMap((line) =>
-    lineMarks(line, parseLine(line.text, line.emphasis)).map((m) => ({ ...m, text: spanned(m) })),
+  const lines = docLines(doc);
+  const blocking = new Set(blockingEntries(lines).map((e) => e.line));
+  return lines.flatMap((line) =>
+    lineMarks(line, parseLine(line.text, line.emphasis), blocking.has(line)).map((m) => ({ ...m, text: spanned(m) })),
   );
 }
 
@@ -57,6 +60,19 @@ describe("lineMarks", () => {
     ]);
     expect(marks[0]).toMatchObject({ lineId: null, assumed: true, proposed: false });
     expect(marks[2]).toMatchObject({ body: "A rejected claim goes back to the employee." });
+  });
+
+  it("highlights a blocking question with its options, and marks the tag itself", () => {
+    const marks = marksOf("## Open Questions\n\n1. One Xero organisation? *blocking*\n   - One for every claim.\n   - One per country.\n");
+    expect(marks.map((m) => [m.kind, m.text])).toEqual([
+      ["line", "One Xero organisation? blocking\nOne for every claim.\nOne per country."],
+      ["blocking", "blocking"],
+    ]);
+    expect(marks[0]).toMatchObject({ blocking: true, assumed: false, proposed: false });
+  });
+
+  it("draws a blocking tag outside Open Questions as nothing but emphasis", () => {
+    expect(marksOf("## Decisions\n\n- Claims go to Xero. *blocking*\n")).toEqual([]);
   });
 
   it("draws a line of the agent's pending proposal as proposed, with no actions of its own", () => {

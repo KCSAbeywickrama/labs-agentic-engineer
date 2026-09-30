@@ -30,6 +30,8 @@ export interface LineBlock {
   kind: "heading" | "paragraph" | "listItem";
   /** Heading level; absent for other blocks. */
   level?: number;
+  /** How deep a list entry is nested: 1 for a top-level entry, 2 for one under it. Absent for other blocks. */
+  depth?: number;
   text: string;
   /** Italic runs, as offsets into `text`. The `*assumed*` tag is one. */
   emphasis: { start: number; end: number }[];
@@ -58,6 +60,8 @@ export interface LineParts {
   sources: Span[];
   /** The literal `*assumed*` tag closing the line (prd-contract). */
   assumed: Span | null;
+  /** The literal `*blocking*` tag closing the line: an open question the interview waits on (model/questions.ts). */
+  blocking: Span | null;
   /** The line's words alone: no ID, no "(was …)", no sources, no tag. */
   body: string;
 }
@@ -75,7 +79,15 @@ function overlaps(a: Span, spans: Span[]): boolean {
   return spans.some((s) => a.start < s.end && s.start < a.end);
 }
 
-/** Split a line into its ID, sources, tag and words. */
+/** A tag closing the line: the italic `word` with nothing after it but punctuation. */
+function closingTag(text: string, emphasis: Span[], word: string): Span | null {
+  const tag = emphasis
+    .filter((e) => text.slice(e.start, e.end).trim() === word && TRAILING_PUNCTUATION.test(text.slice(e.end)))
+    .at(-1);
+  return tag ? { start: tag.start, end: tag.end } : null;
+}
+
+/** Split a line into its ID, sources, tags and words. */
 export function parseLine(text: string, emphasis: Span[] = []): LineParts {
   const leadMatch = LEAD.exec(text);
   const lead = leadMatch ? { id: leadMatch[1]!, start: 0, end: leadMatch[0].length } : null;
@@ -94,13 +106,10 @@ export function parseLine(text: string, emphasis: Span[] = []): LineParts {
     end: m.index + m[0].length,
   }));
 
-  // The tag is an italic "assumed" with nothing after it but punctuation.
-  const tag = emphasis
-    .filter((e) => text.slice(e.start, e.end).trim() === "assumed" && TRAILING_PUNCTUATION.test(text.slice(e.end)))
-    .at(-1);
-  const assumed = tag ? { start: tag.start, end: tag.end } : null;
+  const assumed = closingTag(text, emphasis, "assumed");
+  const blocking = closingTag(text, emphasis, "blocking");
 
-  const claimed: Span[] = [lead, was, assumed, ...sources].filter((s): s is Span => s !== null);
+  const claimed: Span[] = [lead, was, assumed, blocking, ...sources].filter((s): s is Span => s !== null);
   const refs = [...text.matchAll(ID)]
     .map((m) => ({ id: m[0], start: m.index, end: m.index + m[0].length }))
     .filter((r) => !overlaps(r, claimed));
@@ -113,7 +122,7 @@ export function parseLine(text: string, emphasis: Span[] = []): LineParts {
   }
   body += text.slice(at);
 
-  return { lead, was, refs, sources, assumed, body: body.replace(/\s+/g, " ").trim() };
+  return { lead, was, refs, sources, assumed, blocking, body: body.replace(/\s+/g, " ").trim() };
 }
 
 /** Where an ID points: a feature (its file) or a line in a file. */

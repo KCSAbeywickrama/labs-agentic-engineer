@@ -18,7 +18,6 @@
 
 import { http, HttpResponse } from "msw";
 import {
-  PROVISIONAL_ANSWER_PATH,
   PROVISIONAL_PROPOSAL_PATH,
   PROVISIONAL_SPEC_CHANGES_SEEN_PATH,
   PROVISIONAL_SPEC_PATH,
@@ -34,19 +33,6 @@ export const specHandlers = [
   http.get(`*${PROVISIONAL_SPEC_PATH}`, ({ params }) =>
     HttpResponse.json<SpecModel>(specView(String(params.projectName))),
   ),
-
-  // The agent takes the answer; on the mock the question is simply settled.
-  http.post(`*${PROVISIONAL_ANSWER_PATH}`, async ({ params, request }) => {
-    const model = liveSpec(String(params.projectName));
-    const feature = model.features.find((f) => f.id === params.featureId);
-    const body = (await request.json()) as { answer?: unknown };
-    if (!feature?.blocking) return HttpResponse.json({ detail: "No question is waiting on that feature." }, { status: 404 });
-    if (typeof body.answer !== "string" || !body.answer.trim()) {
-      return HttpResponse.json({ detail: "An answer is required." }, { status: 422 });
-    }
-    feature.blocking = null;
-    return HttpResponse.json<SpecModel>(specView(String(params.projectName)));
-  }),
 
   http.post(`*${PROVISIONAL_PROPOSAL_PATH}`, ({ params }) => {
     const model = liveSpec(String(params.projectName));

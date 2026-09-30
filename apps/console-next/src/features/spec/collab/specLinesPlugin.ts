@@ -19,7 +19,9 @@
 // How a spec document reads, as ProseMirror decorations over the markdown it
 // is: the markdown itself is never rewritten. A story's ID is drawn as a quiet
 // mono ID at the start of its line, a line tagged `*assumed*` is highlighted
-// and offers Keep, Remove and I'll edit (assumedLines.ts acts on them), a line
+// and offers Keep, Remove and I'll edit (assumedLines.ts acts on them), a
+// blocking question in Open Questions (model/questions.ts) is highlighted with
+// its options, its tag marked (the box under the file answers it), a line
 // of the agent's pending proposal is drawn as proposed, a source is a small
 // tag, and every other ID is a quiet link (the editor's hover and click read
 // `data-spec-id`). On the product page the Features list gives way to the
@@ -36,6 +38,7 @@ import type { Node as PmNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { parseLine, type LineParts, type Span } from "../model/ids";
+import { blockingEntries } from "../model/questions";
 import { docLines, type DocLine } from "./docLines";
 
 /** What an assumed line's buttons do; the button carries it as `data-assumed`. */
@@ -71,29 +74,33 @@ export interface SpecLinesOptions {
 
 /** A decoration to draw, as data: what `build` turns into ProseMirror's. */
 export type LineMark =
-  | { kind: "line"; from: number; to: number; lineId: string | null; assumed: boolean; proposed: boolean }
+  | { kind: "line"; from: number; to: number; lineId: string | null; assumed: boolean; blocking: boolean; proposed: boolean }
   | { kind: "actions" | "proposed"; at: number; body: string }
-  | { kind: "sid" | "was" | "source" | "assumed"; from: number; to: number }
+  | { kind: "sid" | "was" | "source" | "assumed" | "blocking"; from: number; to: number }
   | { kind: "ref"; from: number; to: number; id: string };
 
 /**
  * What one line draws: its highlight, its ID, its tags and its links, and at
  * its end the actions on an assumed line or the proposed tag. A proposed line
  * is the agent's until accepted, so it offers no actions of its own.
+ * `blocking`: the line is a blocking question of the file's Open Questions;
+ * a `*blocking*` tag anywhere else is only emphasis.
  */
 export function lineMarks(
   line: Pick<DocLine, "lineFrom" | "lineTo" | "posAt" | "text" | "proposed">,
   parts: LineParts,
+  blocking = false,
 ): LineMark[] {
   const marks: LineMark[] = [];
   const at = (span: Span) => ({ from: line.posAt(span.start), to: line.posAt(span.end) });
-  if (parts.lead || parts.assumed || line.proposed) {
+  if (parts.lead || parts.assumed || blocking || line.proposed) {
     marks.push({
       kind: "line",
       from: line.lineFrom,
       to: line.lineTo,
       lineId: parts.lead?.id ?? null,
       assumed: parts.assumed !== null,
+      blocking,
       proposed: line.proposed,
     });
   }
@@ -101,6 +108,7 @@ export function lineMarks(
   if (parts.was) marks.push({ kind: "was", ...at(parts.was) });
   for (const source of parts.sources) marks.push({ kind: "source", ...at(source) });
   if (parts.assumed) marks.push({ kind: "assumed", ...at(parts.assumed) });
+  if (blocking && parts.blocking) marks.push({ kind: "blocking", ...at(parts.blocking) });
   for (const ref of parts.refs) marks.push({ kind: "ref", id: ref.id, ...at(ref) });
   const end = line.posAt(line.text.length);
   if (line.proposed) marks.push({ kind: "proposed", at: end, body: parts.body });
@@ -131,9 +139,10 @@ function tagDom(className: string, text: string): HTMLElement {
   return el;
 }
 
-function lineClass(mark: { assumed: boolean; proposed: boolean }): string {
+function lineClass(mark: { assumed: boolean; blocking: boolean; proposed: boolean }): string {
   if (mark.proposed) return "aep-line aep-line--proposed";
-  return mark.assumed ? "aep-line aep-line--assumed" : "aep-line";
+  if (mark.assumed) return "aep-line aep-line--assumed";
+  return mark.blocking ? "aep-line aep-line--blocking" : "aep-line";
 }
 
 function toDecoration(mark: LineMark): Decoration {
@@ -248,9 +257,11 @@ function leavingFogDecorations(list: PmNode, contentStart: number, leaving: Read
 
 function build(doc: PmNode, opts: SpecLinesOptions): DecorationSet {
   const decorations = sectionDecorations(doc, opts);
-  for (const line of docLines(doc)) {
+  const lines = docLines(doc);
+  const blocking = new Set(blockingEntries(lines).map((e) => e.line));
+  for (const line of lines) {
     const parts = parseLine(line.text, line.emphasis);
-    for (const mark of lineMarks(line, parts)) decorations.push(toDecoration(mark));
+    for (const mark of lineMarks(line, parts, blocking.has(line))) decorations.push(toDecoration(mark));
     const changed = parts.lead ? opts.designChanged?.get(parts.lead.id) : undefined;
     if (changed) {
       decorations.push(Decoration.node(line.lineFrom, line.lineTo, { class: "aep-line--design" }));

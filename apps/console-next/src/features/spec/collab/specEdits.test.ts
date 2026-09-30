@@ -20,10 +20,13 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { hasPendingAgentMarks, readDocFile, setDocFile, setDocFileAsAgent } from "@aep/collab-doc";
 import { acmeExpensesSpec } from "../../../mocks/fixtures/spec";
+import { buildOffer } from "../../builds/model/picker";
+import { specLeg } from "../../projects/model/track";
 import { deriveWorkspace } from "../model/workspace";
 import { docLines, type DocLine } from "./docLines";
 import { applyAgentToolCall, seedSpecDoc } from "./specDoc";
 import {
+  answerBlockingQuestion,
   appendToSection,
   deleteLine,
   deleteSectionItem,
@@ -114,6 +117,46 @@ describe("deleteSectionItem", () => {
   });
 });
 
+describe("answering a blocking question", () => {
+  const XERO = "Does finance post to one Xero organisation, or one per country?";
+  const md = `## Decisions
+
+- Each claim becomes one bill.
+
+## Open Questions
+
+1. ${XERO} *blocking*
+   - Finance posts every claim to one Xero organisation.
+   - Each country has its own Xero organisation.
+2. Which currency do refunds use?
+`;
+
+  it("takes the entry and its options out of Open Questions and adds the answer to Decisions, in one transaction", () => {
+    const doc = docWith(md);
+    let transactions = 0;
+    doc.on("afterTransaction", () => transactions++);
+    expect(answerBlockingQuestion(doc, PATH, XERO, "Finance posts every claim to one Xero organisation.")).toBe(true);
+    expect(transactions).toBe(1);
+    expect(readDocFile(doc, PATH)).toBe(
+      "## Decisions\n\n- Each claim becomes one bill.\n- Finance posts every claim to one Xero organisation.\n\n## Open Questions\n\n1. Which currency do refunds use?",
+    );
+  });
+
+  it("takes the user's own words as the decision, and the list with its last entry", () => {
+    const doc = docWith(`## Open Questions\n\n1. ${XERO} *blocking*\n`);
+    answerBlockingQuestion(doc, PATH, XERO, "  One organisation per legal entity.  ");
+    expect(readDocFile(doc, PATH)).toBe("## Open Questions\n\n## Decisions\n\n- One organisation per legal entity.");
+  });
+
+  it("writes nothing when the question is no longer in the file, or the answer is empty", () => {
+    const doc = docWith(md);
+    const before = readDocFile(doc, PATH);
+    expect(answerBlockingQuestion(doc, PATH, "Some other question?", "Yes.")).toBe(false);
+    expect(answerBlockingQuestion(doc, PATH, XERO, "  ")).toBe(false);
+    expect(readDocFile(doc, PATH)).toBe(before);
+  });
+});
+
 describe("settling a proposal", () => {
   const base = "## User Stories\n\n- F2.1 As a manager, I see pending claims.\n";
   const proposed = `${base}- F2.6 As an auditor, I see every decision. *assumed*\n`;
@@ -168,6 +211,38 @@ describe("Acme Expenses, acted on", () => {
     const after = view(doc);
     expect(after.features.find((f) => f.id === "F2")?.chips).toEqual([{ tone: "warning", label: "1 to confirm" }]);
     expect(after.nextUp.find((i) => i.kind === "confirm")?.label).toBe("Confirm 1 line in Approvals");
+  });
+
+  it("answering Payroll export's question unblocks it: chip, Next up, the track and the build picker", () => {
+    const f3 = acmeExpensesSpec.features.find((f) => f.id === "F3")!;
+    const offer = (doc: Y.Doc) =>
+      buildOffer({
+        features: view(doc).features,
+        designedFrom: {},
+        productWide: acmeExpensesSpec.productWide,
+        lines: readSpecLines(doc),
+        dependencies: [],
+        comments: [],
+        artifacts: [],
+        builds: [],
+      }).rows.find((r) => r.id === "F3");
+    const doc = seeded();
+    const before = view(doc);
+    const question = before.features.find((f) => f.id === "F3")!.blocking[0]!;
+    expect(before.features.find((f) => f.id === "F3")?.chips.map((c) => c.label)).toEqual(["blocked"]);
+    expect(before.nextUp[0]).toMatchObject({ kind: "blocking", label: `Answer "${question.question}"` });
+    expect(specLeg(before.features).summary).toBe("1 question to answer");
+    expect(offer(doc)?.detail).toEqual(["blocked by a question"]);
+
+    answerBlockingQuestion(doc, f3.path, question.question, question.options[0]!);
+    const after = view(doc);
+    expect(after.features.find((f) => f.id === "F3")?.blocking).toEqual([]);
+    expect(after.features.find((f) => f.id === "F3")?.chips).toEqual([]);
+    expect(after.nextUp.map((i) => i.kind)).not.toContain("blocking");
+    expect(after.design.toDesign).toContain("F3");
+    expect(specLeg(after.features).summary).toBe("2 lines to confirm");
+    expect(offer(doc)?.detail).toEqual(["not designed yet"]);
+    expect(readDocFile(doc, f3.path)).toContain(`- ${question.options[0]}`);
   });
 
   it("accepting the Auditor lands its lines in both features, product-wide and the Actors, and empties the Fog idea", () => {

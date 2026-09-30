@@ -21,19 +21,19 @@ import { env } from "../../../config/env";
 
 // PROVISIONAL — MOCK-ONLY until S3 lands the spec model's contract.
 //
-// The spec workspace needs the spec model: each feature's stage, its blocking
-// question, which product-wide items apply where, the source documents, the
-// agent's pending proposal, and the markdown of every file. The user answers a
-// blocking question and accepts or discards a proposal here too. Nothing in aep-api serves that yet (backend item
-// S3). Until it does, the shape lives here, behind this one module, and only
+// The spec workspace needs the spec model: each feature's stage, which
+// product-wide items apply where, the source documents, the agent's pending
+// proposal, and the markdown of every file. The user accepts or discards a
+// proposal here too. Nothing in aep-api serves that yet (backend item S3). Until it does, the shape lives here, behind this one module, and only
 // MSW answers it (mocks/handlers/spec.ts, on a path that is not in the
 // contract). When S3 ships, this module becomes a call on the generated client
 // with contract types, and the handler and these hand-written types go.
 //
 // What is NOT here, on purpose: anything the documents already say. The ID
-// index, the Fog, the lines still to confirm and Next up are all worked out in
-// the browser from the live documents (model/workspace.ts), so an edit shows
-// in them at once and nothing says the same thing twice.
+// index, the Fog, the lines still to confirm, the questions a feature waits on
+// (model/questions.ts) and Next up are all worked out in the browser from the
+// live documents (model/workspace.ts), so an edit shows in them at once and
+// nothing says the same thing twice.
 //
 // `files` and a proposal's `writes` are the stand-in for the collab room: the
 // local doc is seeded from them (collab/specDoc.ts). When the provider is
@@ -46,15 +46,6 @@ import { env } from "../../../config/env";
 /** Where a feature is in its journey. */
 export type FeatureStage = "Not interviewed" | "Interviewing" | "Interviewed" | "Designed";
 
-/** A question the interview cannot go on without. */
-export interface BlockingQuestion {
-  question: string;
-  /** Why it blocks: what depends on the answer. */
-  why: string;
-  /** The answers the agent offers, each worded as the decision it becomes. */
-  options: string[];
-}
-
 export interface SpecFeature {
   /** "F2". */
   id: string;
@@ -63,7 +54,6 @@ export interface SpecFeature {
   path: string;
   purpose: string;
   stage: FeatureStage;
-  blocking: BlockingQuestion | null;
 }
 
 /** A product-wide item and the features it applies to. Its words are in product-wide.md. */
@@ -156,9 +146,6 @@ export interface SpecModel {
 /** The provisional path MSW serves; `:projectName` is the project's slug. */
 export const PROVISIONAL_SPEC_PATH = "/api/v1/projects/:projectName/provisional/spec";
 
-/** Answering a feature's blocking question: POST `{ answer }`, answered with the model. */
-export const PROVISIONAL_ANSWER_PATH = `${PROVISIONAL_SPEC_PATH}/features/:featureId/answer`;
-
 /** Accepting or discarding a proposal: POST, answered with the model. */
 export const PROVISIONAL_PROPOSAL_PATH = `${PROVISIONAL_SPEC_PATH}/proposals/:proposalId/:verdict`;
 
@@ -184,23 +171,6 @@ export function useSpecModel(projectName: string) {
   return useQuery({
     queryKey: specKey(projectName),
     queryFn: async () => readModel(await fetch(url(PROVISIONAL_SPEC_PATH, { projectName })), "Couldn't load the spec"),
-  });
-}
-
-/** Answer a feature's blocking question; the model comes back unblocked. */
-export function useAnswerBlocking(projectName: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: { featureId: string; answer: string }) =>
-      readModel(
-        await fetch(url(PROVISIONAL_ANSWER_PATH, { projectName, featureId: input.featureId }), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ answer: input.answer }),
-        }),
-        "Couldn't send your answer",
-      ),
-    onSuccess: (model) => queryClient.setQueryData(specKey(projectName), model),
   });
 }
 

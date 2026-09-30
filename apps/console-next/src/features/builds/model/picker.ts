@@ -124,8 +124,9 @@ function heldBecause(input: PickerInput, f: PickerInput["features"][number]): { 
   const reasons: string[] = [];
   const dependency = input.dependencies.find((d) => d.featureId === f.id && d.answer === null);
   if (dependency) reasons.push(`waiting on ${dependency.needs}`);
-  const early = f.blocking !== null || f.stage === "Not interviewed" || f.stage === "Interviewing";
-  if (f.blocking) reasons.push("blocked by a question");
+  const blocked = f.blocking.length > 0;
+  const early = blocked || f.stage === "Not interviewed" || f.stage === "Interviewing";
+  if (blocked) reasons.push("blocked by a question");
   else if (f.stage === "Not interviewed") reasons.push("not interviewed yet");
   else if (f.stage === "Interviewing") reasons.push("being interviewed");
   else if (input.designedFrom[f.id] === undefined) reasons.push("not designed yet");

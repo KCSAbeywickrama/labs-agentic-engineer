@@ -80,6 +80,13 @@ describe("parseLine", () => {
     const mid = "What is assumed here stays.";
     expect(parseLine(mid, [text(mid, "assumed")]).assumed).toBeNull();
   });
+
+  it("reads the italic blocking tag closing a question, and leaves the question's words", () => {
+    const line = "Does finance post to one Xero organisation? blocking";
+    const tag = text(line, "blocking");
+    expect(parseLine(line, [tag])).toMatchObject({ blocking: tag, assumed: null, body: "Does finance post to one Xero organisation?" });
+    expect(parseLine(line).blocking).toBeNull();
+  });
 });
 
 const line = (s: string, emphasis: LineBlock["emphasis"] = []): LineBlock => ({ kind: "listItem", text: s, emphasis });

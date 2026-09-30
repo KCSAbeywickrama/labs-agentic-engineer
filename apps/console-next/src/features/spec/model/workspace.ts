@@ -20,11 +20,13 @@ import type { FeatureStage, SpecFeature, SpecModel } from "../api/specModel";
 import { designLabel, designWork } from "./designWork";
 import { markdownFiles, PRD_PATH, PRODUCT_KEY, type MarkdownFile } from "./files";
 import { buildIdIndex, parseLine, type IdIndex, type LineBlock } from "./ids";
+import { blockingQuestions, type BlockingQuestion } from "./questions";
 
 // The workspace as the user sees it, worked out from the spec model's state
 // and the live documents: each feature's chips, the ID index, the Fog, and
-// Next up. Pure, so a keystroke that removes an `*assumed*` tag changes the
-// chip and Next up on the next render, with nothing to keep in sync.
+// Next up. Pure, so a keystroke that removes an `*assumed*` tag, or an answer
+// that takes a `*blocking*` question out of the file, changes the chip and
+// Next up on the next render, with nothing to keep in sync.
 
 export type ChipTone = "warning" | "primary" | "success";
 
@@ -36,6 +38,8 @@ export interface Chip {
 
 export interface FeatureView extends SpecFeature {
   chips: Chip[];
+  /** The questions its interview waits on, from its file's Open Questions (model/questions.ts). */
+  blocking: BlockingQuestion[];
   /** Lines tagged `*assumed*` in its file. */
   toConfirm: number;
   /** Designed, but its spec has changed since (model/designWork.ts). */
@@ -103,9 +107,9 @@ export function sectionItems(lines: LineBlock[], heading: string): string[] {
   return out;
 }
 
-export function featureChips(feature: Pick<SpecFeature, "blocking">, toConfirm: number, designOutOfDate = false): Chip[] {
+export function featureChips(blocked: boolean, toConfirm: number, designOutOfDate = false): Chip[] {
   const chips: Chip[] = [];
-  if (feature.blocking) chips.push({ tone: "warning", label: "blocked" });
+  if (blocked) chips.push({ tone: "warning", label: "blocked" });
   if (toConfirm > 0) chips.push({ tone: "warning", label: `${toConfirm} to confirm` });
   if (designOutOfDate) chips.push({ tone: "primary", label: "design out of date" });
   return chips;
@@ -148,14 +152,15 @@ export function nextUp(input: {
   const { features, design, openComments, fog } = input;
   const items: NextUpItem[] = [];
   for (const f of features) {
-    if (!f.blocking) continue;
-    items.push({
-      kind: "blocking",
-      label: `Answer "${f.blocking.question}"`,
-      why: `unblocks ${f.name}`,
-      urgent: true,
-      target: { card: "spec", file: f.id, at: "blocking" },
-    });
+    for (const { question } of f.blocking) {
+      items.push({
+        kind: "blocking",
+        label: `Answer "${question}"`,
+        why: `unblocks ${f.name}`,
+        urgent: true,
+        target: { card: "spec", file: f.id, at: "blocking" },
+      });
+    }
   }
   for (const f of features) {
     if (f.toConfirm === 0) continue;
@@ -168,7 +173,7 @@ export function nextUp(input: {
     });
   }
   for (const f of features) {
-    if (f.stage !== "Not interviewed" || f.blocking) continue;
+    if (f.stage !== "Not interviewed" || f.blocking.length > 0) continue;
     items.push({
       kind: "interview",
       label: `Interview ${f.name}`,
@@ -223,9 +228,11 @@ export function deriveWorkspace(model: SpecModel, lines: ReadonlyMap<string, Lin
   const work = designWork(model.features, designedFrom, lines, model.productWide);
   const design = { ...work, label: designLabel(work.toDesign, designedFrom) };
   const features = model.features.map((f) => {
-    const toConfirm = countAssumed(lines.get(f.path) ?? []);
+    const own = lines.get(f.path) ?? [];
+    const toConfirm = countAssumed(own);
+    const blocking = blockingQuestions(own);
     const designOutOfDate = work.outOfDate.includes(f.id);
-    return { ...f, toConfirm, designOutOfDate, chips: featureChips(f, toConfirm, designOutOfDate) };
+    return { ...f, blocking, toConfirm, designOutOfDate, chips: featureChips(blocking.length > 0, toConfirm, designOutOfDate) };
   });
   const index = buildIdIndex(
     model.features,

@@ -28,18 +28,18 @@ type Feature = TrackInput["features"][number];
 const feature = (name: string, over: Partial<Feature> = {}): Feature => ({
   name,
   stage: "Interviewed",
-  blocking: null,
+  blocking: [],
   toConfirm: 0,
   ...over,
 });
-const question = { question: "One Xero organisation?", why: "", options: [] };
+const question = { question: "One Xero organisation?", options: [] };
 
 // As seeded: two features ready for design, Payroll export held by a
 // question, Approvals with two lines to confirm, two stubs.
 const acme: Feature[] = [
   feature("Submit expenses"),
   feature("Approvals", { toConfirm: 2 }),
-  feature("Payroll export", { blocking: question }),
+  feature("Payroll export", { blocking: [question] }),
   feature("Spending reports", { stage: "Not interviewed" }),
   feature("Mileage claims", { stage: "Not interviewed" }),
 ];
@@ -85,7 +85,7 @@ describe("the spec leg", () => {
 
   it("waits on a blocking question first, then lines to confirm, then interviews", () => {
     expect(projectTrack(beforeDesign).spec).toEqual({ state: "waiting", summary: "1 question to answer" });
-    const answered = acme.map((f) => ({ ...f, blocking: null }));
+    const answered = acme.map((f) => ({ ...f, blocking: [] }));
     expect(projectTrack({ ...beforeDesign, features: answered }).spec).toEqual({ state: "waiting", summary: "2 lines to confirm" });
     const confirmed = answered.map((f) => ({ ...f, toConfirm: 0 }));
     expect(projectTrack({ ...beforeDesign, features: confirmed }).spec).toEqual({
@@ -95,7 +95,7 @@ describe("the spec leg", () => {
   });
 
   it("is done once every feature is interviewed and nothing waits", () => {
-    const features = acme.map((f) => ({ ...f, stage: "Interviewed" as const, blocking: null, toConfirm: 0 }));
+    const features = acme.map((f) => ({ ...f, stage: "Interviewed" as const, blocking: [], toConfirm: 0 }));
     expect(projectTrack({ ...beforeDesign, features }).spec).toEqual({ state: "done", summary: "5 features" });
   });
 });

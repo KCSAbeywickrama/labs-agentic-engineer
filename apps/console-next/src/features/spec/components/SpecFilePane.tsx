@@ -150,13 +150,19 @@ export function SpecFilePane({
     );
   }
 
-  const feature = workspace.features.find((f) => f.id === file.key) ?? { ...file.feature, chips: [], toConfirm: 0, designOutOfDate: false };
+  const feature = workspace.features.find((f) => f.id === file.key) ?? {
+    ...file.feature,
+    chips: [],
+    blocking: [],
+    toConfirm: 0,
+    designOutOfDate: false,
+  };
   return (
     <>
       <FeatureKicker feature={feature} />
       <SpecEditor key={file.path} {...editorProps} designChanged={designChanged} />
-      {feature.blocking ? (
-        <BlockingQuestionBox projectName={projectName} doc={doc} feature={feature} blocking={feature.blocking} />
+      {feature.blocking.length > 0 ? (
+        feature.blocking.map((q) => <BlockingQuestionBox key={q.question} doc={doc} feature={feature} blocking={q} />)
       ) : (
         (feature.stage === "Not interviewed" || feature.stage === "Interviewing") && (
           <StubNote projectName={projectName} feature={feature} />

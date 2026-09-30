@@ -73,7 +73,7 @@ export function specLeg(features: TrackInput["features"]): TrackLeg {
   if (features.length === 0) return { state: "live", summary: "Writing the spec" };
   const interviewing = features.find((f) => f.stage === "Interviewing");
   if (interviewing) return { state: "live", summary: `Interviewing ${interviewing.name}` };
-  const questions = features.filter((f) => f.blocking !== null).length;
+  const questions = features.reduce((n, f) => n + f.blocking.length, 0);
   if (questions > 0) return { state: "waiting", summary: `${plural(questions, "question")} to answer` };
   const toConfirm = features.reduce((n, f) => n + f.toConfirm, 0);
   if (toConfirm > 0) return { state: "waiting", summary: `${plural(toConfirm, "line")} to confirm` };

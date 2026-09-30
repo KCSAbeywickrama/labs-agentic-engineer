@@ -16,42 +16,44 @@
  * under the License.
  */
 
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import { Box, Button, TextField, Typography } from "@wso2/oxygen-ui";
 import type * as Y from "yjs";
-import type { BlockingQuestion, SpecFeature } from "../api/specModel";
-import { useAnswerBlockingQuestion } from "../useSpecActions";
+import type { SpecFeature } from "../api/specModel";
+import { answerBlockingQuestion } from "../collab/specEdits";
+import type { BlockingQuestion } from "../model/questions";
 import { soft } from "./Tag";
 
 /**
- * The question a feature's interview waits on, on the feature's page: why it
- * blocks, the answers the agent offers, and room for the user's own. The
- * answer unblocks the feature and lands in its Decisions.
+ * A question a feature's interview waits on, on the feature's page, as its
+ * file's Open Questions has it: the answers the agent offers, and room for
+ * the user's own. Answering is an edit to the file (collab/specEdits.ts): the
+ * question leaves Open Questions and the answer lands in Decisions, so the
+ * box, the chip and Next up go with it.
  */
 export function BlockingQuestionBox({
-  projectName,
   doc,
   feature,
   blocking,
 }: {
-  projectName: string;
   doc: Y.Doc;
-  feature: Pick<SpecFeature, "id" | "path">;
+  feature: Pick<SpecFeature, "name" | "path">;
   blocking: BlockingQuestion;
 }) {
-  const { answer, pending, error } = useAnswerBlockingQuestion(projectName, doc);
+  const headingId = useId();
   const [own, setOwn] = useState("");
+  const answer = (text: string) => answerBlockingQuestion(doc, feature.path, blocking.question, text);
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (own.trim()) void answer(feature, own.trim());
+    if (own.trim()) answer(own);
   };
 
   return (
     <Box
       data-anchor="blocking"
       component="section"
-      aria-labelledby="blocking-question"
+      aria-labelledby={headingId}
       sx={{
         mt: 2.25,
         maxWidth: "72ch",
@@ -69,46 +71,41 @@ export function BlockingQuestionBox({
       <Typography sx={{ fontSize: "0.75rem", fontWeight: 600, letterSpacing: "0.02em", color: "warning.main" }}>
         BLOCKING QUESTION
       </Typography>
-      <Typography id="blocking-question" component="h2" sx={{ fontWeight: 600, fontSize: "0.875rem" }}>
+      <Typography id={headingId} component="h2" sx={{ fontWeight: 600, fontSize: "0.875rem" }}>
         {blocking.question}
       </Typography>
       <Typography variant="body2" color="text.secondary">
-        {blocking.why} The interview waits for your answer. It does not stop a build of the other features.
+        {feature.name}'s interview waits for your answer. It does not stop a build of the other features.
       </Typography>
-      <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 0.75 }}>
-        {blocking.options.map((option) => (
-          <Button
-            key={option}
-            size="small"
-            variant="outlined"
-            color="warning"
-            disabled={pending}
-            onClick={() => void answer(feature, option)}
-            sx={{ textAlign: "start", justifyContent: "flex-start", bgcolor: "background.paper" }}
-          >
-            {option}
-          </Button>
-        ))}
-      </Box>
+      {blocking.options.length > 0 && (
+        <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 0.75 }}>
+          {blocking.options.map((option) => (
+            <Button
+              key={option}
+              size="small"
+              variant="outlined"
+              color="warning"
+              onClick={() => answer(option)}
+              sx={{ textAlign: "start", justifyContent: "flex-start", bgcolor: "background.paper" }}
+            >
+              {option}
+            </Button>
+          ))}
+        </Box>
+      )}
       <Box component="form" onSubmit={onSubmit} sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, alignItems: "flex-start" }}>
         <TextField
           size="small"
           value={own}
           onChange={(e) => setOwn(e.target.value)}
-          placeholder="Or answer in your own words"
-          disabled={pending}
+          placeholder={blocking.options.length > 0 ? "Or answer in your own words" : "Answer in your own words"}
           slotProps={{ htmlInput: { "aria-label": "Your answer" } }}
           sx={{ flex: "1 1 220px", bgcolor: "background.paper" }}
         />
-        <Button type="submit" size="small" variant="contained" disabled={pending || !own.trim()}>
+        <Button type="submit" size="small" variant="contained" disabled={!own.trim()}>
           Answer
         </Button>
       </Box>
-      {error && (
-        <Typography role="alert" variant="body2" color="error">
-          {error.message}. Try again.
-        </Typography>
-      )}
     </Box>
   );
 }

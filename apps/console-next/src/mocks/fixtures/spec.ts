@@ -25,7 +25,9 @@ import type { Proposal, SpecModel } from "../../features/spec/api/specModel";
 // permanent story numbers) and the spec model: prd.md is the product page,
 // each feature has its own file with `F<n>.<m>` stories, product-wide.md
 // holds the `P<n>` items. F2.3 moved to Mileage claims and now reads
-// "F5.1 (was F2.3)"; F2's out-of-scope line still names the old ID.
+// "F5.1 (was F2.3)"; F2's out-of-scope line still names the old ID. Payroll
+// export's interview waits on a question in its Open Questions, tagged
+// `*blocking*`, with the two answers the agent offers nested under it.
 //
 // The agent has one change waiting for the user: an Auditor who can read
 // everything, which touches the Actors, Approvals, Payroll export and
@@ -138,6 +140,12 @@ Finance sends approved claims to Xero every night and fixes the ones that fail.
 - Xero accepts up to 100 invoices per API call. [Xero API docs]
 - Each claim becomes one bill in Xero, with one line per expense.
 - A claim over $1,000 is sent only after its second approval (F2.5).
+
+## Open Questions
+
+1. Does finance post to one Xero organisation, or one per country? *blocking*
+   - Finance posts every claim to one Xero organisation.
+   - Each country has its own Xero organisation; a claim goes to the employee's country.
 `;
 
 const acmeF4 = `# Spending reports
@@ -225,7 +233,6 @@ export const acmeExpensesSpec: SpecModel = {
       path: featurePath("F1-submit-expenses"),
       purpose: "Employees record expenses with a receipt photo and submit them as a claim.",
       stage: "Interviewed",
-      blocking: null,
     },
     {
       id: "F2",
@@ -233,7 +240,6 @@ export const acmeExpensesSpec: SpecModel = {
       path: featurePath("F2-approvals"),
       purpose: "Managers approve or reject their team's claims; large claims also go to Finance.",
       stage: "Interviewed",
-      blocking: null,
     },
     {
       id: "F3",
@@ -241,14 +247,6 @@ export const acmeExpensesSpec: SpecModel = {
       path: featurePath("F3-payroll-export"),
       purpose: "Finance sends approved claims to Xero every night and fixes the ones that fail.",
       stage: "Interviewed",
-      blocking: {
-        question: "Does finance post to one Xero organisation, or one per country?",
-        why: "Every Payroll export story depends on which Xero organisation a claim goes to.",
-        options: [
-          "Finance posts every claim to one Xero organisation.",
-          "Each country has its own Xero organisation; a claim goes to the employee's country.",
-        ],
-      },
     },
     {
       id: "F4",
@@ -256,7 +254,6 @@ export const acmeExpensesSpec: SpecModel = {
       path: featurePath("F4-spending-reports"),
       purpose: "Finance sees where the money goes, by team and category.",
       stage: "Not interviewed",
-      blocking: null,
     },
     {
       id: "F5",
@@ -264,7 +261,6 @@ export const acmeExpensesSpec: SpecModel = {
       path: featurePath("F5-mileage-claims"),
       purpose: "Staff claim for driving to client sites.",
       stage: "Not interviewed",
-      blocking: null,
     },
   ],
   productWide: [
@@ -377,7 +373,6 @@ export const triageAgentSpec: SpecModel = {
       path: featurePath("F1-classify-tickets"),
       purpose: "Every incoming ticket is sorted by urgency before anyone reads it.",
       stage: "Interviewed",
-      blocking: null,
     },
     {
       id: "F2",
@@ -385,7 +380,6 @@ export const triageAgentSpec: SpecModel = {
       path: featurePath("F2-draft-replies"),
       purpose: "The agent drafts a first reply for each ticket, for a person to send.",
       stage: "Interviewed",
-      blocking: null,
     },
   ],
   productWide: [{ id: "P1", appliesTo: "all" }],

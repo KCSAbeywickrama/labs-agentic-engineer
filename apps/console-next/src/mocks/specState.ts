@@ -27,7 +27,7 @@ import { acmeExpensesSpec, freshSpec, triageAgentSpec } from "./fixtures/spec";
 // features/spec/api/specModel.ts. Deleted when the workspace reads the contract.
 //
 // Each project's model is copied from its fixture on first read and changed
-// in place by the user's answers and verdicts, for as long as the page lives:
+// in place by the user's verdicts on proposals, for as long as the page lives:
 // a reload starts those over, as the local spec doc does. What the agent's
 // interviews did is laid over it on every read, from the mock agent server
 // (chatServer.ts), which keeps them across a reload with the conversation;
@@ -48,7 +48,7 @@ function displayName(projectName: string): string {
   return project?.displayName ?? projectName;
 }
 
-/** The model the user's answers and verdicts change. */
+/** The model the user's verdicts change. */
 export function liveSpec(projectName: string): SpecModel {
   let model = live.get(projectName);
   if (!model) {

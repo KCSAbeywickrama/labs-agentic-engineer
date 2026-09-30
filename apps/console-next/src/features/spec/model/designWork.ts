@@ -19,17 +19,18 @@
 import type { ProductWideItem, SpecFeature } from "../api/specModel";
 import { PRODUCT_WIDE_PATH } from "./files";
 import { parseLine, type LineBlock } from "./ids";
+import { blockingQuestions } from "./questions";
 
 // Which features the next design turn takes, worked out from the live spec.
 //
-// Design runs over every interviewed, unblocked feature. Once designed, a
-// feature carries the spec it was designed from (its basis): the words of its
-// own file and of every product-wide item that reaches it. When the live spec
-// no longer reads the same, that feature's design is out of date, and only it
-// goes into "Update design". A new product-wide item marks every feature it
-// applies to. Lines of a pending proposal are not the spec until accepted,
-// and confirming an assumed line (dropping the tag) changes no words, so
-// neither moves a basis.
+// Design runs over every interviewed feature that no question in its file
+// blocks (model/questions.ts). Once designed, a feature carries the spec it
+// was designed from (its basis): the words of its own file and of every
+// product-wide item that reaches it. When the live spec no longer reads the
+// same, that feature's design is out of date, and only it goes into "Update
+// design". A new product-wide item marks every feature it applies to. Lines of
+// a pending proposal are not the spec until accepted, and confirming an
+// assumed line (dropping the tag) changes no words, so neither moves a basis.
 
 type Lines = ReadonlyMap<string, LineBlock[]>;
 
@@ -59,9 +60,10 @@ export function designBasis(
   return [...own, ...shared].filter((w) => w.length > 0).join("\n");
 }
 
-/** Interviewed and not waiting on a question: design can take it. */
-export function isDesignable(feature: Pick<SpecFeature, "stage" | "blocking">): boolean {
-  return (feature.stage === "Interviewed" || feature.stage === "Designed") && feature.blocking === null;
+/** Interviewed and not waiting on a question in its file: design can take it. */
+export function isDesignable(feature: Pick<SpecFeature, "path" | "stage">, lines: Lines): boolean {
+  const interviewed = feature.stage === "Interviewed" || feature.stage === "Designed";
+  return interviewed && blockingQuestions(lines.get(feature.path) ?? []).length === 0;
 }
 
 export interface DesignWork {
@@ -72,7 +74,7 @@ export interface DesignWork {
 }
 
 export function designWork(
-  features: Pick<SpecFeature, "id" | "path" | "stage" | "blocking">[],
+  features: Pick<SpecFeature, "id" | "path" | "stage">[],
   designedFrom: Readonly<Record<string, string>>,
   lines: Lines,
   productWide: ProductWideItem[],
@@ -80,7 +82,7 @@ export function designWork(
   const outOfDate: string[] = [];
   const toDesign: string[] = [];
   for (const f of features) {
-    if (!isDesignable(f)) continue;
+    if (!isDesignable(f, lines)) continue;
     const basis = designedFrom[f.id];
     if (basis === undefined) {
       toDesign.push(f.id);

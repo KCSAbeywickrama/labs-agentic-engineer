@@ -26,7 +26,6 @@ const approvals: SpecFeature = {
   path: "requirements/features/F2-approvals.md",
   purpose: "",
   stage: "Interviewed",
-  blocking: null,
 };
 const policy = { id: "tne-policy", title: "Policy.pdf", pages: 1, rows: [] };
 const model = { features: [approvals], documents: [policy] };

@@ -17,21 +17,15 @@
  */
 
 import type * as Y from "yjs";
-import {
-  useAnswerBlocking,
-  useSettleProposal,
-  type Proposal,
-  type ProposalVerdict,
-  type SpecFeature,
-} from "./api/specModel";
-import { appendToSection, editFile, settleProposalInDoc } from "./collab/specEdits";
+import { useSettleProposal, type Proposal, type ProposalVerdict } from "./api/specModel";
+import { settleProposalInDoc } from "./collab/specEdits";
 
-// The user's answers to what the agent left on the documents, each in two
-// halves: the spec model's state (provisional; MSW on the mock) and the words
-// in the doc. The doc is written once the state has changed, so a failed
-// request leaves both as they were (its error is the hook's `error`).
-// `mutateAsync`, not per-call callbacks: the doc is written even when the box
-// that asked has gone.
+// The user's verdict on the agent's proposal, in two halves: the spec model's
+// state (provisional; MSW on the mock) and the words in the doc. The doc is
+// written once the state has changed, so a failed request leaves both as they
+// were (its error is the hook's `error`). `mutateAsync`, not per-call
+// callbacks: the doc is written even when the bar that asked has gone. An
+// answer to a blocking question is the doc alone (collab/specEdits.ts).
 
 async function settled(request: Promise<unknown>): Promise<boolean> {
   try {
@@ -40,16 +34,6 @@ async function settled(request: Promise<unknown>): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/** Answer a feature's blocking question: it is unblocked, and the answer is a settled decision in its file. */
-export function useAnswerBlockingQuestion(projectName: string, doc: Y.Doc) {
-  const mutation = useAnswerBlocking(projectName);
-  const answer = async (feature: Pick<SpecFeature, "id" | "path">, text: string) => {
-    if (!(await settled(mutation.mutateAsync({ featureId: feature.id, answer: text })))) return;
-    editFile(doc, feature.path, (tr) => appendToSection(tr, "Decisions", text));
-  };
-  return { answer, pending: mutation.isPending, error: mutation.error };
 }
 
 /** Accept or discard the agent's proposal, in the model and in the documents. */

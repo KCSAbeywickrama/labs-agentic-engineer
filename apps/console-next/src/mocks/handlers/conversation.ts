@@ -19,6 +19,8 @@
 import { http, HttpResponse } from "msw";
 import { SSE_DONE } from "@aep/agent-stream";
 import { scopeOfBody, type TurnBody } from "../../features/agent-chat/turnScope";
+import { projectSpecDoc } from "../../features/spec/collab/specDoc";
+import { readSpecLines } from "../../features/spec/collab/useSpecLines";
 import type { components } from "../../generated/aep-api";
 import { MOCK_USER } from "../../auth/mockSession";
 import {
@@ -108,10 +110,12 @@ export function startMockTurn(projectName: string, body: TurnBody): MockTurn {
     });
   }
   const created = createdProjects().find((c) => c.project.name === projectName);
+  const model = specView(projectName);
   const scripted = scriptTurn({
     instruction: body.instruction,
     scope,
-    model: specView(projectName),
+    model,
+    lines: readSpecLines(projectSpecDoc(projectName, model)),
     progress: interviewProgress(projectName),
     prompt: created?.prompt,
     turnKey,

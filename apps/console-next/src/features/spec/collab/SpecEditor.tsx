@@ -68,6 +68,8 @@ const documentSx = {
   "& .ProseMirror a": { color: "primary.main", textUnderlineOffset: "2px", cursor: "pointer" },
   "& .aep-line": { borderRadius: 1.5 },
   "& .aep-line--assumed": { bgcolor: soft("warning", 0.14) },
+  // A blocking question and its options: the warning's wash, a rule down the left.
+  "& .aep-line--blocking": { bgcolor: soft("warning", 0.14), boxShadow: "inset 2px 0 0 var(--oxygen-palette-warning-main)" },
   // The agent's pending proposal: its colour, a rule down the left.
   "& .aep-line--proposed": { bgcolor: soft("info"), boxShadow: "inset 2px 0 0 var(--oxygen-palette-info-main)" },
   // Changed by a design comment: the accent's wash, a rule down the left.
@@ -89,7 +91,7 @@ const documentSx = {
     px: 0.5,
     whiteSpace: "nowrap",
   },
-  "& .aep-assumed": { fontSize: "0.75rem", color: "warning.main" },
+  "& .aep-assumed, & .aep-blocking": { fontSize: "0.75rem", color: "warning.main" },
   "& .aep-ref": quietLinkSx,
   "& .aep-aps": { fontSize: "0.6875rem", color: "text.secondary", ml: 1, whiteSpace: "nowrap" },
   "& .aep-hidden": { display: "none" },

@@ -25,7 +25,11 @@ import type { LineBlock } from "../model/ids";
 // docBlocks). A list entry is the paragraph INSIDE its `listItem`: that is the
 // textblock that carries the words, so its item-ness comes from the parent.
 // Text the agent wrote and the user has not reviewed carries the
-// agentInsertion mark (@aep/collab-doc); a line with any is `proposed`.
+// agentInsertion mark (@aep/collab-doc); a line with any is `proposed`. A list
+// entry's depth counts the lists around it, so an entry's nested bullets (a
+// blocking question's options) are told from its siblings.
+
+const LISTS = new Set(["bulletList", "orderedList"]);
 
 /** A run of the agent's pending text, as offsets into the line's text. */
 export interface AgentRun {
@@ -56,7 +60,16 @@ interface Segment {
   length: number;
 }
 
-function line(node: PmNode, pos: number, parent: { node: PmNode; pos: number; first: boolean } | null): DocLine {
+interface Parent {
+  node: PmNode;
+  pos: number;
+  /** The textblock is the parent's first child. */
+  first: boolean;
+  /** How many lists the parent is inside. */
+  lists: number;
+}
+
+function line(node: PmNode, pos: number, parent: Parent): DocLine {
   let text = "";
   const segments: Segment[] = [];
   const emphasis: LineBlock["emphasis"] = [];
@@ -81,10 +94,12 @@ function line(node: PmNode, pos: number, parent: { node: PmNode; pos: number; fi
     if (previous?.end === start) previous.end = text.length;
     else emphasis.push({ start, end: text.length });
   });
-  const inItem = parent?.node.type.name === "listItem" && parent.first;
+  const listItem = parent.node.type.name === "listItem";
+  const inItem = listItem && parent.first;
   return {
-    kind: node.type.name === "heading" ? "heading" : parent?.node.type.name === "listItem" ? "listItem" : "paragraph",
+    kind: node.type.name === "heading" ? "heading" : listItem ? "listItem" : "paragraph",
     ...(node.type.name === "heading" ? { level: Number(node.attrs.level) } : {}),
+    ...(listItem ? { depth: parent.lists } : {}),
     text,
     emphasis,
     proposed: agentRuns.length > 0,
@@ -103,16 +118,16 @@ function line(node: PmNode, pos: number, parent: { node: PmNode; pos: number; fi
 /** Every textblock of the document, in order. */
 export function docLines(doc: PmNode): DocLine[] {
   const out: DocLine[] = [];
-  const walk = (node: PmNode, contentStart: number) => {
+  const walk = (node: PmNode, contentStart: number, lists: number) => {
     node.forEach((child, offset) => {
       const pos = contentStart + offset;
       if (child.isTextblock) {
-        out.push(line(child, pos, { node, pos: contentStart - 1, first: offset === 0 }));
+        out.push(line(child, pos, { node, pos: contentStart - 1, first: offset === 0, lists }));
       } else if (!child.isLeaf) {
-        walk(child, pos + 1);
+        walk(child, pos + 1, lists + (LISTS.has(child.type.name) ? 1 : 0));
       }
     });
   };
-  walk(doc, 0);
+  walk(doc, 0, 0);
   return out;
 }

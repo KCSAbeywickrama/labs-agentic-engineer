@@ -45,20 +45,20 @@ const feature = (id: string, name: string, over: Partial<Feature> = {}): Feature
   name,
   path: path(id),
   stage: "Designed",
-  blocking: null,
+  blocking: [],
   toConfirm: 0,
   designOutOfDate: false,
   ...over,
 });
 
-const question = { question: "One Xero organisation?", why: "", options: [] };
+const question = { question: "One Xero organisation?", options: [] };
 
 // Acme Expenses once Design has run: Submit expenses and Approvals designed,
 // Payroll export held by a question and waiting on Xero, two stubs.
 const features: Feature[] = [
   feature("F1", "Submit expenses"),
   feature("F2", "Approvals", { toConfirm: 2 }),
-  feature("F3", "Payroll export", { stage: "Interviewed", blocking: question }),
+  feature("F3", "Payroll export", { stage: "Interviewed", blocking: [question] }),
   feature("F4", "Spending reports", { stage: "Not interviewed" }),
   feature("F5", "Mileage claims", { stage: "Not interviewed" }),
 ];
