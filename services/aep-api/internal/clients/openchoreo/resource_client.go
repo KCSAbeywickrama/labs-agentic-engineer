@@ -34,9 +34,9 @@ import (
 
 // ResourceClient authors the OpenChoreo Resource model (openchoreo.dev/v1alpha1,
 // shipped v1.1) used to wire external resources (and platform-resources) into
-// consuming Workloads. The generated `gen` client is pinned to a spec version
-// that predates v1.1 and has no Resource types, so this client is hand-rolled
-// over the same authenticated transport (buildRetryConfig + authRequestEditor
+// consuming Workloads. It was written while the generated `gen` client's spec
+// pin predated v1.1 and had no Resource types, so it is hand-rolled over the
+// same authenticated transport (buildRetryConfig + authRequestEditor
 // in transport.go) rather than over gen.ClientWithResponses.
 //
 // Authoring chain (the BFF owns every step — Resources have NO AutoDeploy):

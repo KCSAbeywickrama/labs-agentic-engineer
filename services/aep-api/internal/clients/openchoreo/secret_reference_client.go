@@ -122,7 +122,7 @@ func (c *secretReferenceClient) DeleteSecretReference(ctx context.Context, cpNS,
 //	spec.template.type=Opaque
 func buildSecretReferenceBody(req secretmanagersvc.CreateSecretReferenceRequest) gen.SecretReference {
 	ns := req.Namespace
-	opaque := gen.Opaque
+	opaque := gen.SecretTemplateTypeOpaque
 	data := make([]gen.SecretDataSource, 0, len(req.SecretKeys))
 	for _, key := range req.SecretKeys {
 		prop := key

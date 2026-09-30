@@ -51,8 +51,8 @@ import (
 // Cell bindings follow each pipeline's promotion order only — read the pipeline,
 // not every Environment in the namespace.
 //
-// The generated `gen` client is pinned to a spec version that predates all of
-// this (see services/aep-api/Makefile, OC_SPEC_VERSION), so this is hand-rolled
+// It was written while the generated `gen` client's spec pin predated all of
+// this (see services/aep-api/Makefile, OC_SPEC_VERSION), so it is hand-rolled
 // over the same authenticated transport, exactly like ResourceClient.
 type ProjectCellClient interface {
 	// ListPipelineNames returns the names of every DeploymentPipeline in the
