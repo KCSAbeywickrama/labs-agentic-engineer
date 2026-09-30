@@ -419,6 +419,9 @@ const deploymentsByScenario: Partial<
         status: "Ready",
         releaseName: "demo-shop-booking-agent-j0k1l2",
         endpointUrl: "https://booking-agent.dev.acme-aep.io",
+        // Governed by Agent Manager in development, so the panel links to the
+        // agent's page there (the name is agentgovernance.AgentRecordName's).
+        agentManagerUrl: "http://console.amp.localhost:8080/org/default/project/demo-shop/agents/booking-agent-138632a1",
         createdAt: "2026-07-12T05:02:00Z",
       },
     ],
