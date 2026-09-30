@@ -330,7 +330,28 @@ API_PLATFORM_GATEWAY_IMAGE_VERSION="1.2.1"
 
 API_PLATFORM_VALUES="$(mktemp)"
 BOOTSTRAP_DIR="$(mktemp -d)"
-trap 'rm -rf "$BOOTSTRAP_DIR"; rm -f "$API_PLATFORM_VALUES"' EXIT
+UPSTREAM_VALUES_DIR="$(mktemp -d)"
+trap 'rm -rf "$BOOTSTRAP_DIR" "$UPSTREAM_VALUES_DIR"; rm -f "$API_PLATFORM_VALUES"' EXIT
+
+# oc_values fetches one of the guide's own values files and re-domains it,
+# printing the path to the local copy. The guide hardcodes
+# "openchoreo.localhost" in values-cp.yaml (the portal base URL, the API and
+# gateway hostnames, and all four IdP URLs) and values-op.yaml (the observer's
+# own HTTPRoute hostname and OBSERVER_BASE_URL, the RCA and FinOps agent
+# hostnames, the auth server). Passed unmodified those would leave the control
+# plane addressing an issuer nothing serves and the ClusterObservabilityPlane's
+# observerURL pointing at a host with no route — the plane installs green and
+# every build log and archived cycle log comes back empty.
+#
+# Only the "openchoreo." parent is rewritten, for the reason the derived block
+# above gives. At AE_DOMAIN=localhost this is a literal no-op, so the file is
+# byte-identical to what upstream publishes.
+oc_values() {
+    local rel="$1" out="${UPSTREAM_VALUES_DIR}/$(basename "$1")"
+    curl -fsSL "${RAW}/install/k3d/${rel}" \
+        | sed "s/openchoreo\\.localhost/${OC_DOMAIN}/g" > "$out"
+    echo "$out"
+}
 cat > "$API_PLATFORM_VALUES" <<'YAML'
 # Bumped for the Agent Manager convergence (operator 0.6.0 -> 0.11.0, gateway
 # chart 1.0.1 -> 1.2.2). What changed in the gateway chart's value schema:
@@ -1104,7 +1125,7 @@ helm upgrade --install openchoreo-control-plane \
     oci://ghcr.io/openchoreo/helm-charts/openchoreo-control-plane \
     --version "${OC_VERSION}" \
     --namespace openchoreo-control-plane --create-namespace \
-    --values "${RAW}/install/k3d/single-cluster/values-cp.yaml" \
+    --values "$(oc_values single-cluster/values-cp.yaml)" \
     --wait --timeout 600s
 
 echo "⏳ Waiting for Control Plane..."
@@ -1292,7 +1313,7 @@ EOF
 
     helm upgrade --install openchoreo-observability-plane oci://ghcr.io/openchoreo/helm-charts/openchoreo-observability-plane \
       --version "${OC_VERSION}" --namespace openchoreo-observability-plane \
-      --values "${RAW}/install/k3d/single-cluster/values-op.yaml" --timeout 25m
+      --values "$(oc_values single-cluster/values-op.yaml)" --timeout 25m
 
     helm upgrade --install observability-logs-opensearch \
       oci://ghcr.io/openchoreo/helm-charts/observability-logs-opensearch \

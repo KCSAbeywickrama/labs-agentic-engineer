@@ -93,6 +93,19 @@ func installThunder(ctx context.Context, c clients, cfg Config) (*ThunderInstanc
 		return inst, nil
 	}
 
+	// BIND never upgrades a release it did not create, so a domain that has
+	// moved since the last install cannot be applied to the deployed chart —
+	// its publicUrl, jwt.issuer and httproute hostname stay as installed,
+	// while the binding record written a few lines later would carry the new
+	// one. thunder-app-operator republishes that record as every generated
+	// app's OIDC issuer, so the apps would be told to trust an issuer this
+	// Thunder never stamps, and every end-user sign-in would fail with
+	// nothing in the install output to say why. Refuse instead, and say what
+	// the two values are.
+	if err := ensureDomainUnchanged(ctx, c, cfg, inst); err != nil {
+		return nil, err
+	}
+
 	if probeErr := verifyThunderReachable(ctx, c, cfg, inst); probeErr != nil {
 		if repairErr := repairAepSystemClient(ctx, c, cfg, inst); repairErr != nil {
 			return nil, fmt.Errorf("aep-system-client cannot mint on existing release %s (%v), and repair failed: %w", release, probeErr, repairErr)
@@ -112,6 +125,34 @@ func installThunder(ctx context.Context, c clients, cfg Config) (*ThunderInstanc
 		}
 	}
 	return inst, nil
+}
+
+// ensureDomainUnchanged compares the issuer recorded by the last install with
+// the one this run computed, and refuses when they differ. The binding record
+// is the right thing to read: it is what the operator and aep-api actually
+// consume, so a disagreement there is the disagreement that matters. No
+// record yet (a release created outside this package, or an install
+// interrupted before the record was written) is not an error — there is
+// nothing to contradict.
+func ensureDomainUnchanged(ctx context.Context, c clients, cfg Config, inst *ThunderInstance) error {
+	cm, err := c.k8s.CoreV1().ConfigMaps(inst.Namespace).Get(ctx, BindingName(cfg.Org, cfg.Env), metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("read binding record %s/%s: %w", inst.Namespace, BindingName(cfg.Org, cfg.Env), err)
+	}
+	recorded := cm.Data[keyIssuer]
+	if recorded == "" || recorded == inst.PublicURL {
+		return nil
+	}
+	return fmt.Errorf(
+		"environment identity provider %s/%s is already published as %s, but this install computes %s.\n"+
+			"  The deployed release is not upgraded in place, so the two cannot be reconciled here and every\n"+
+			"  generated app would be handed an issuer this Thunder does not stamp.\n"+
+			"  Either keep the previous domain, or delete the environment tier (helm uninstall %s -n %s, and the\n"+
+			"  api-platform release beside it) and re-run so both are rebuilt on the new one.",
+		inst.Namespace, inst.Release, recorded, inst.PublicURL, inst.Release, inst.Namespace)
 }
 
 // resolveSystemClientSecret reuses the secret already stored in

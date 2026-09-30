@@ -64,6 +64,10 @@ type gatewayIngressDeps struct {
 	applyConfig     func(ctx context.Context, gwName, gwNamespace, hostname string) error
 	confirm         func(string) bool
 	prompt          func(label, defaultValue string) (string, error)
+	// configuredHost reads the host already on the ClusterDataPlane, for the
+	// branch where ingress needs no configuring. Optional: a nil one simply
+	// skips the read-back.
+	configuredHost func(context.Context) (string, error)
 	// hostnameOverride, when non-empty, bypasses the interactive hostname prompt
 	// and confirmation — used by the CI path (gateway.hostname in config).
 	hostnameOverride string
@@ -75,6 +79,18 @@ var defaultGatewayIngressDeps = gatewayIngressDeps{
 	applyConfig:     applyGatewayIngressConfig,
 	confirm:         ui.Confirm,
 	prompt:          ui.Prompt,
+	configuredHost:  readClusterDataPlaneIngressHost,
+}
+
+// readClusterDataPlaneIngressHost returns the external ingress host already
+// on ClusterDataPlane/default, or "" when there is none to read.
+func readClusterDataPlaneIngressHost(ctx context.Context) (string, error) {
+	out, err := execKubectl(ctx, "get", "clusterdataplane", "default", "-o",
+		"jsonpath={.spec.gateway.ingress.external.http.host}")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func isGatewayIngressConfigured(ctx context.Context) (bool, error) {
@@ -187,6 +203,18 @@ func runGatewayIngressCheck(ctx context.Context, deps gatewayIngressDeps) error 
 	}
 	if ok {
 		sp.Success("External gateway ingress configured")
+		// Every re-install takes this branch, including one whose first run
+		// took the interactive path below. Config carries no hostname there,
+		// so without reading the live one back, gateway.hostname is empty and
+		// tryItOverrides emits no --set — and since `platform install` does
+		// not pass --reuse-values, Helm resets tryIt.gatewayHosts to the
+		// chart's default. The allowlist a working install had would silently
+		// revert on its next upgrade.
+		if viper.GetString("gateway.hostname") == "" && deps.configuredHost != nil {
+			if host, err := deps.configuredHost(ctx); err == nil && host != "" {
+				viper.Set("gateway.hostname", host)
+			}
+		}
 		return nil
 	}
 	sp.Fail("External gateway ingress not configured")
