@@ -41,6 +41,8 @@ type ProjectClient interface {
 
 type projectClient struct {
 	oc *ocgen.ClientWithResponses
+	// labels are stamped on every write (Config.ResourceLabels).
+	labels resourceLabels
 }
 
 func NewProjectClient(cfg Config) ProjectClient {
@@ -48,7 +50,7 @@ func NewProjectClient(cfg Config) ProjectClient {
 	if err != nil {
 		panic(fmt.Errorf("init openchoreo project client: %w", err))
 	}
-	return &projectClient{oc: oc}
+	return &projectClient{oc: oc, labels: newResourceLabels(cfg.ResourceLabels)}
 }
 
 func (c *projectClient) ListProjects(ctx context.Context, orgName string, limit int, cursor string) (*gen.ProjectList, error) {
@@ -105,7 +107,9 @@ func (c *projectClient) GetProject(ctx context.Context, orgName, projectName str
 }
 
 func (c *projectClient) CreateProject(ctx context.Context, orgName string, body *gen.CreateProjectRequest) (*gen.Project, error) {
-	resp, err := c.oc.CreateProjectWithResponse(ctx, orgName, buildCreateProjectBody(body))
+	req := buildCreateProjectBody(body)
+	c.labels.stamp(&req.Metadata)
+	resp, err := c.oc.CreateProjectWithResponse(ctx, orgName, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create project: %w", err)
 	}

@@ -181,6 +181,8 @@ type componentClient struct {
 	// preferPlainHTTP picks the http external URL when a binding advertises both
 	// (Config.PreferPlainHTTPEndpoints explains why).
 	preferPlainHTTP bool
+	// labels are stamped on every write (Config.ResourceLabels).
+	labels resourceLabels
 }
 
 func NewComponentClient(cfg Config) ComponentClient {
@@ -188,7 +190,7 @@ func NewComponentClient(cfg Config) ComponentClient {
 	if err != nil {
 		panic(fmt.Errorf("init openchoreo component client: %w", err))
 	}
-	return &componentClient{oc: oc, preferPlainHTTP: cfg.PreferPlainHTTPEndpoints}
+	return &componentClient{oc: oc, preferPlainHTTP: cfg.PreferPlainHTTPEndpoints, labels: newResourceLabels(cfg.ResourceLabels)}
 }
 
 // -- Conversions -------------------------------------------------------------
@@ -579,7 +581,9 @@ func (c *componentClient) CreateComponent(ctx context.Context, orgName, projectN
 		}
 	}
 
-	resp, err := c.oc.CreateComponentWithResponse(ctx, orgName, buildCreateComponentBody(projectName, req))
+	body := buildCreateComponentBody(projectName, req)
+	c.labels.stamp(&body.Metadata)
+	resp, err := c.oc.CreateComponentWithResponse(ctx, orgName, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create component: %w", err)
 	}
@@ -689,6 +693,9 @@ func (c *componentClient) ApplyComponentSpec(ctx context.Context, orgName, proje
 		// binding's pin, with the loser's release silently serving.
 		autoBuild, autoDeploy := desired.AutoBuild, desired.AutoDeploy
 		comp.Spec.AutoBuild, comp.Spec.AutoDeploy = &autoBuild, &autoDeploy
+		// Every write re-asserts the resource labels, which is also what labels a
+		// Component written before they were configured.
+		c.labels.stamp(&comp.Metadata)
 
 		updResp, err := c.oc.UpdateComponentWithResponse(ctx, orgName, ocgen.ComponentNameParam(scopedComp), ocgen.UpdateComponentJSONRequestBody(comp))
 		if err != nil {
@@ -788,6 +795,7 @@ func (c *componentClient) putTraitEnvironmentConfigs(ctx context.Context, orgNam
 		merged[inst] = cloneParameterMap(params)
 	}
 	rb.Spec.TraitEnvironmentConfigs = &merged
+	c.labels.stamp(&rb.Metadata)
 
 	updResp, uerr := c.oc.UpdateReleaseBindingWithResponse(ctx, orgName, ocgen.ReleaseBindingNameParam(bindingName), ocgen.UpdateReleaseBindingJSONRequestBody(rb))
 	if uerr != nil {
@@ -1296,6 +1304,7 @@ func (c *componentClient) createWorkflowRun(ctx context.Context, orgName string,
 			opName, n, len(n), k8sname.MaxLabelValueLen)
 	}
 
+	c.labels.stamp(&body.Metadata)
 	resp, err := c.oc.CreateWorkflowRunWithResponse(ctx, orgName, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to %s: %w", opName, err)

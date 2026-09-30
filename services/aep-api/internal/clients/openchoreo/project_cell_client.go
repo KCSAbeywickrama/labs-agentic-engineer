@@ -171,6 +171,8 @@ type projectCellClient struct {
 	baseURL string
 	http    resourceHTTPDoer
 	editor  func(ctx context.Context, req *http.Request) error
+	// labels are stamped on every write (Config.ResourceLabels).
+	labels resourceLabels
 }
 
 func newProjectCellClient(cfg Config) *projectCellClient {
@@ -182,6 +184,7 @@ func newProjectCellClient(cfg Config) *projectCellClient {
 		baseURL: cfg.BaseURL,
 		http:    requests.NewRetryableHTTPClient(inner, buildRetryConfig(cfg)),
 		editor:  authRequestEditor(cfg),
+		labels:  newResourceLabels(cfg.ResourceLabels),
 	}
 }
 
@@ -344,6 +347,7 @@ func (c *projectCellClient) EnsureProjectReleaseBinding(ctx context.Context, nam
 			Environment: environment,
 		},
 	}
+	c.labels.stampOC(&binding.Metadata)
 	code, err := c.do(ctx, http.MethodPost, nsBase(namespace)+"/projectreleasebindings", binding, nil)
 	if err == nil || code == http.StatusConflict {
 		return nil

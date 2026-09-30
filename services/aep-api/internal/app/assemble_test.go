@@ -197,3 +197,15 @@ func TestAssemble_Degradations(t *testing.T) {
 		}
 	})
 }
+
+// ResourceLabels are stamped on every OpenChoreo write, so a label the API
+// server would reject must fail the boot rather than every write after it.
+func TestAssemble_RefusesInvalidResourceLabels(t *testing.T) {
+	_, err := Assemble(baseCfg(), Fake(), Seam{ResourceLabels: map[string]string{"cloud.wso2.com/product-name": "not a label value"}})
+	if err == nil {
+		t.Fatal("Assemble with an invalid resource label = nil error, want a refusal")
+	}
+	if _, err := Assemble(baseCfg(), Fake(), Seam{ResourceLabels: map[string]string{"cloud.wso2.com/product-name": "app-factory"}}); err != nil {
+		t.Fatalf("Assemble with a valid resource label = %v, want nil", err)
+	}
+}

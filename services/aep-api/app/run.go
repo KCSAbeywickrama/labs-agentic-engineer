@@ -62,6 +62,7 @@ func Run(opts Options) error {
 		RequestAuthStrategy:    opts.RequestAuthStrategy,
 		ImpersonateOrgResolver: resolver,
 		SecretsProvider:        secretsProvider,
+		ResourceLabels:         opts.ResourceLabels,
 	}
 	application, err := intapp.Assemble(cfg, infra, seam)
 	if err != nil {

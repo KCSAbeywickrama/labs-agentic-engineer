@@ -118,6 +118,10 @@ type Seam struct {
 	// SecretsProvider is the write-only secrets delivery channel.
 	// Nil = delivery off (no secret writes, no external-secret cleanup).
 	SecretsProvider secretmanagersvc.Provider
+
+	// ResourceLabels are stamped on every OpenChoreo resource AEP writes
+	// (openchoreo.Config.ResourceLabels). Nil = none.
+	ResourceLabels map[string]string
 }
 
 // Assemble wires the entire service graph from config + a resolved Infra and
@@ -131,6 +135,9 @@ type Seam struct {
 // one produced; the comments call out the couplings.
 func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	var err error
+	if err := openchoreo.ValidateResourceLabels(seam.ResourceLabels); err != nil {
+		return nil, fmt.Errorf("openchoreo resource labels: %w", err)
+	}
 	db := in.DB
 	credStore := in.CredentialStore
 	minter := in.Minter
@@ -1802,5 +1809,6 @@ func ocClientConfig(cfg config.Config, seam Seam) openchoreo.Config {
 		RequestAuthStrategy:      seam.RequestAuthStrategy,
 		ImpersonateOrgResolver:   seam.ImpersonateOrgResolver,
 		PreferPlainHTTPEndpoints: !cfg.PlatformAPI.DataPlaneGatewayTLS,
+		ResourceLabels:           seam.ResourceLabels,
 	}
 }

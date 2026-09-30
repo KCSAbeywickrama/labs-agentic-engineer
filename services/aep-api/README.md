@@ -97,13 +97,15 @@ path or secrets backend:
 | `RequestAuthStrategy` | all-M2M / never pass-through (**direct-OC mode**) |
 | `ImpersonateOrgResolver` (+ optional late-bound builder) | no `X-Impersonate-Org` |
 | `SecretsProvider` | secrets delivery off (no KV writes / SecretReference authoring) |
+| `ResourceLabels` | no extra labels on OpenChoreo writes |
 
 **OSS `cmd/aep-api`** runs in **direct-OC mode**: M2M `AuthProvider` when service
 auth is configured, `DirectOCStrategy` (always M2M), a nil impersonation
 resolver, and an OpenBao-direct `SecretsProvider` when `OPENBAO_ADDR` is set.
 An **overlay module** is a separate process entry that imports the same `app`
 package and injects different `Options` — typically a **PAS strategy** for auth
-and an sm-api-backed `SecretsProvider` for cloud delivery. The sm-api client
+an sm-api-backed `SecretsProvider` for cloud delivery, and the wso2cloud
+`ResourceLabels` (`cloud.wso2.com/product-name`). The sm-api client
 lives in the overlay (outside OSS CI); that is an accepted trade-off — public
 coverage never exercised it either. Detail →
 [`design/composition-seam.md`](design/composition-seam.md).
