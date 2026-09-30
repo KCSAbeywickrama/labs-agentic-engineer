@@ -782,7 +782,11 @@ export async function traceTurn<T extends { text: string; usage: LanguageModelUs
       toolSpans.delete(e.toolCall.toolCallId);
       if (e.toolOutput.type === "tool-error") {
         span.setAttribute("error.type", "tool_error");
-        span.setStatus({ code: SpanStatusCode.ERROR, message: String(e.toolOutput.error) });
+        // An error message can carry the provider's response body: content.
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          ...(recordContent ? { message: String(e.toolOutput.error) } : {}),
+        });
       } else {
         if (recordContent) {
           span.setAttribute("gen_ai.tool.call.result", JSON.stringify(e.toolOutput.output ?? null));
@@ -805,9 +809,14 @@ export async function traceTurn<T extends { text: string; usage: LanguageModelUs
     agent.setStatus({ code: SpanStatusCode.OK });
     return result;
   } catch (err) {
-    agent.recordException(err as Error);
+    // The class name is metadata; the message and stack are content.
     agent.setAttribute("error.type", (err as Error)?.name ?? "Error");
-    agent.setStatus({ code: SpanStatusCode.ERROR, message: String((err as Error)?.message ?? err) });
+    if (recordContent) {
+      agent.recordException(err as Error);
+      agent.setStatus({ code: SpanStatusCode.ERROR, message: String((err as Error)?.message ?? err) });
+    } else {
+      agent.setStatus({ code: SpanStatusCode.ERROR });
+    }
     throw err;
   } finally {
     // A failed model call never reaches its end callback: close what is open
@@ -888,7 +897,10 @@ the token counts and the outcome are all still there — only the text is gone.
 
 Content is the agent's most sensitive traffic. **Never add a content attribute
 outside a `recordContent` check**, and never log it instead: the platform's
-switch is only a switch if every path honours it.
+switch is only a switch if every path honours it. Error messages count: a
+provider's error can echo the request or the data behind it, so with content
+off a failed span carries its `error.type` and an `ERROR` status, and no
+message or recorded exception.
 
 ### Mistakes that look like a broken collector
 
