@@ -596,11 +596,10 @@ func TestModelAccessEnvVars_AddsTracingWhenTheTokenIsStored(t *testing.T) {
 	if got := byKey[otelServiceNameEnvVar].Value; got != "checkout-agent" {
 		t.Errorf("OTEL_SERVICE_NAME = %q, want the component name", got)
 	}
-	// Prompts and completions are the agent's most sensitive traffic. Whether
-	// they are exported is a deliberate platform decision, not a default
-	// inherited from whatever the SDK ships with.
-	if got := byKey[traceloopTraceContentEnvVar].Value; got != "false" {
-		t.Errorf("TRACELOOP_TRACE_CONTENT = %q, want false", got)
+	// Whether prompts and completions are exported is a platform decision the
+	// agent reads, never one it makes: the platform always says so explicitly.
+	if got := byKey[traceloopTraceContentEnvVar].Value; got != "true" {
+		t.Errorf("TRACELOOP_TRACE_CONTENT = %q, want true", got)
 	}
 	// Tracing is additive: the agent still reaches its model exactly as before.
 	if byKey[modelAPIKeyEnvVar].ValueFrom == nil {

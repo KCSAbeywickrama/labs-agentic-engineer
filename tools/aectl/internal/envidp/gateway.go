@@ -54,6 +54,17 @@ func gatewayVhost(org, env string) string {
 }
 func gatewayBackendJWTSecretName(release string) string { return release + "-backend-jwt" }
 func gatewayTokenSecretName(release string) string      { return release + "-token" }
+func gatewayRuntimeService(release string) string       { return release + "-gw-gateway-gateway-runtime" }
+
+// gatewayOTelEndpoint is the OTLP base AMP's trace ingest answers on: the
+// chart's own otel RestApi, served by THIS gateway's runtime — not the AI
+// gateway beside it, where the same path 404s. The /otel route is part of the
+// value so aep-api composes AMP_OTEL_ENDPOINT from it verbatim and never has
+// to know how AMP spells it; an exporter appends only /v1/traces.
+func gatewayOTelEndpoint(org, env string) string {
+	return fmt.Sprintf("http://%s.%s:22893/otel",
+		gatewayRuntimeService(gatewayRelease(org, env)), gatewayNamespace(org, env))
+}
 
 // assertion is the backend-JWT signing keypair's public half plus the
 // metadata a downstream service verifies against — what gets published onto
@@ -66,7 +77,10 @@ type assertion struct {
 
 // installGateway installs (or binds to) this environment's API Platform
 // gateway, wired to the given Thunder binding as its only ThunderKeyManager,
-// and publishes its backend-JWT assertion certificate onto the Environment.
+// and publishes its backend-JWT assertion certificate and OTLP endpoint onto
+// the Environment. Without the endpoint annotation aep-api composes no
+// tracing variables, and every agent in the environment runs untraced with
+// nothing but an aep-api log line to say so.
 //
 // bootstrap.enabled is always false here: this package never registers with
 // Agent Manager (no amp-api call), matching
@@ -124,8 +138,9 @@ func installGateway(ctx context.Context, c clients, cfg Config, inst *ThunderIns
 		"aep.wso2.com/gateway-assertion-issuer="+assert.issuer,
 		"aep.wso2.com/gateway-assertion-header="+assert.header,
 		"aep.wso2.com/gateway-assertion-certificate="+assert.certificate,
+		"aep.wso2.com/otel-endpoint="+gatewayOTelEndpoint(cfg.Org, cfg.Env),
 	); err != nil {
-		return fmt.Errorf("annotate Environment with gateway assertion: %w", err)
+		return fmt.Errorf("annotate Environment with gateway assertion and OTLP endpoint: %w", err)
 	}
 	return nil
 }
@@ -326,7 +341,7 @@ func waitForGateway(ctx context.Context, c clients, namespace, release string) e
 		"apigateway/"+release, "-n", namespace, "--timeout=300s"); err != nil {
 		return fmt.Errorf("apigateway not programmed: %w", err)
 	}
-	runtimeSvc := release + "-gw-gateway-gateway-runtime"
+	runtimeSvc := gatewayRuntimeService(release)
 	if _, err := c.applyKubectl(ctx, "wait", "--for=condition=Available",
 		"deployment/"+runtimeSvc, "-n", namespace, "--timeout=300s"); err != nil {
 		return fmt.Errorf("gateway runtime not available: %w", err)

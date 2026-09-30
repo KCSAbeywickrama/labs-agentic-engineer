@@ -167,14 +167,16 @@ const (
 	// that do not.
 	otelServiceNameEnvVar = "OTEL_SERVICE_NAME"
 
-	// TRACELOOP_TRACE_CONTENT is read by OpenLLMetry, whose default is to
-	// export prompts and completions. `false` keeps an agent's most sensitive
-	// traffic out of the trace store: spans still carry model, token counts and
-	// latency, which is what the platform's own observability needs. Turning it
-	// on is a per-deployment decision with a privacy review behind it, not a
-	// default inherited from the SDK.
+	// TRACELOOP_TRACE_CONTENT decides whether an agent's spans carry message
+	// content: prompts, completions, tool arguments and results. `true`
+	// matches Agent Manager's own default, so a trace shows what the model was
+	// told and what it answered. The value is always set explicitly, so the
+	// decision stays the platform's and never an SDK default the agent
+	// inherits; `false` keeps the tree, timings and token counts and drops only
+	// the text. Content is the agent's most sensitive traffic — see
+	// delivery/agentgovernance/design/governed-observability.md.
 	traceloopTraceContentEnvVar = "TRACELOOP_TRACE_CONTENT"
-	traceloopTraceContentValue  = "false"
+	traceloopTraceContentValue  = "true"
 
 	// modelAccessSecretRefName is the org-scoped SecretReference every
 	// ai-agent component's MODEL_API_KEY points at — one per org, upserted
