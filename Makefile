@@ -13,6 +13,7 @@
 #   make typecheck    typecheck TS (tsc) + Go (go vet)
 #   make license      add license headers to all in-scope sources
 #   make license-check  fail if any in-scope source is missing a header
+#   make e2e-walk     the live walk (tests/e2e) against dev-env; on demand only
 #   make tools        install pinned Go tools (golangci-lint)
 #   make clean        remove build output and caches
 
@@ -48,7 +49,7 @@ LICENSE_HEADER := .github/license-header.txt
 LICENSE_MATCH = grep -E '\.(go|ts|tsx|sh)$$|(^|/)Dockerfile$$' | \
 	grep -vE '\.gen\.(go|ts)$$|_mock\.go$$|/mocks/|/node_modules/|/dist/|/generated/|(^|/)\.(agents|claude)/'
 
-.PHONY: install gen build dev test lint eval-ui typecheck license license-check tools clean eval cover build-runner workflow-skill deadcode-ts deadcode-ts-check manifests-check dev-env dev-images dev-update dev-runner obs-park obs-unpark obs-status bal-library-tool
+.PHONY: install gen build dev test lint eval-ui typecheck license license-check tools clean eval cover build-runner workflow-skill deadcode-ts deadcode-ts-check manifests-check dev-env dev-images dev-update dev-runner obs-park obs-unpark obs-status bal-library-tool e2e-walk
 
 install:
 	$(PNPM) install
@@ -134,6 +135,12 @@ license-check:
 
 tools:
 	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
+
+# The live walk (tests/e2e/README.md): drives the new console through the
+# Acme Expenses example against a running dev-env with real agents. On demand
+# only, never part of `make test`; E2E_CREATE=1 lets it create a real project.
+e2e-walk:
+	bash tests/e2e/acme-expenses-walk.sh
 
 # TS dead-code gate (knip) — the counterpart of services/aep-api's Go
 # `deadcode-check`. Whole-program unused-export/file/dependency analysis over the

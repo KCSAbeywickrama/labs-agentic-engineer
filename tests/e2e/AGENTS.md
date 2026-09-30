@@ -1,13 +1,19 @@
 # AGENTS.md — tests/e2e
 
-End-to-end browser tests (Playwright) against the real local stack. Every test
-maps to a user-facing flow in [`apps/console/PRD.md`](../../apps/console/PRD.md).
+End-to-end walks of the new console (`apps/console-next`) against the real
+local stack, driven by `agent-browser` from bash. How to run: `README.md`.
 
-**Status:** nothing here yet.
+**Status:** `acme-expenses-walk.sh`, the live walk of the running example;
+steps 1–2 (sign-in, New project). Add a step only once its screen is wired to
+aep-api; no placeholders for steps that are not.
 
 ## Conventions
 
 - Run against the cluster from `deployments/` (`make dev-env` once, `make
   dev-update` after each source edit) — no mocked infra.
-- One spec per scenario; keep selectors resilient (roles/labels over CSS).
-- Verify flows manually with the `agent-browser` skill before writing the spec.
+- Locate by role and accessible name (`find role … --name … --exact`); CSS only
+  for an element with no role, with a comment saying why.
+- Every check waits with a timeout and fails with `step N failed: <what>`.
+- Anything that creates real resources (repositories, agent turns) stays behind
+  `E2E_CREATE=1` and is cleaned up in the exit trap.
+- Walk the flow by hand with agent-browser before scripting it.
