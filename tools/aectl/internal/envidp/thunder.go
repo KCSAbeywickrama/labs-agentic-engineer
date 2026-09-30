@@ -78,7 +78,7 @@ func installThunder(ctx context.Context, c clients, cfg Config) (*ThunderInstanc
 		Release:            release,
 		Namespace:          namespace,
 		AdminURL:           adminURL(release, namespace),
-		PublicURL:          publicURL(cfg.Env),
+		PublicURL:          publicURL(cfg.Env, cfg.idpBaseDomain()),
 		SystemClientSecret: secret,
 	}
 	inst.SystemResourceIdentifier = thunder.SystemResourceIdentifier(inst.PublicURL)

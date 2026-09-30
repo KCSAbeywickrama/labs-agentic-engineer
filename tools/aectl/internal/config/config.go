@@ -49,6 +49,9 @@ var ConfigMapKeys = []string{
 	"thunder.url",
 	"thunder.admin_client_id",
 	"thunder.public_url",
+	"console.public_url",
+	"tryit.public_url",
+	"aep_api.public_url",
 	"oc.api_url",
 	"oc.observability_api_url",
 	"oc.system_namespace",
@@ -62,6 +65,8 @@ var ConfigMapKeys = []string{
 	"webhook.delivery_url",
 	"webhook.local_smee.enabled",
 	"gateway.hostname",
+	"environment.idp_base_domain",
+	"environment.gateway_base_domain",
 }
 
 // keyKind describes the expected type of a config value for validation.
@@ -86,7 +91,18 @@ var keyRegistry = map[string]configKeyMeta{
 	"thunder.url":             {required: true, kind: kindURL},
 	"thunder.admin_client_id": {required: true, kind: kindString},
 	"thunder.public_url":      {required: true, kind: kindURL},
-	"oc.api_url":              {required: true, kind: kindURL},
+	// The platform's three browser-facing origins. All optional: each is bound
+	// to a flag carrying the local default, so a file that omits them installs
+	// the same cluster it always did. Set them together — re-domaining one and
+	// not the others is the failure that looks like a working install, since
+	// the console links to Try-it and aep-api registers Try-it's callback as a
+	// redirect URI.
+	"console.public_url": {required: false, kind: kindURL},
+	"tryit.public_url":   {required: false, kind: kindURL},
+	// Empty falls back to console.public_url, whose origin proxies the API.
+	// Set it only where the two are genuinely different origins.
+	"aep_api.public_url": {required: false, kind: kindURL},
+	"oc.api_url":         {required: true, kind: kindURL},
 	// In-cluster URL of the OpenChoreo Observer. Empty leaves the chart's own
 	// default (see values.yaml's observer.baseURL) — build-log reading and
 	// coding-cycle log archiving degrade gracefully when neither is reachable.
@@ -120,6 +136,22 @@ var keyRegistry = map[string]configKeyMeta{
 	// gateway.hostname, when set, lets `aectl platform install` configure the
 	// external gateway ingress non-interactively (CI-friendly path).
 	"gateway.hostname": {required: false, kind: kindString},
+	// The DNS suffixes the environment tier is published under:
+	// "<env>-idp.<idp_base_domain>" for its identity provider and
+	// "<env>-<org>.<gateway_base_domain>" for its API gateway. Bare domains,
+	// not URLs — the scheme and port are fixed to this cluster's gateways.
+	//
+	// Both are browser-facing on any cluster reachable by more than its own
+	// host: a generated app sends its END USERS to the first to sign in, and
+	// calls its own API through the second. Empty takes the k3d convention
+	// (openchoreo.localhost / gateway.localhost — see internal/envidp).
+	//
+	// idp_base_domain must equal Agent Manager's ENV_IDP_BASE_DOMAIN. Agent
+	// Manager composes that origin rather than being told an address, so two
+	// different values leave the products disagreeing on agent identity with
+	// nothing failing at install time.
+	"environment.idp_base_domain":     {required: false, kind: kindString},
+	"environment.gateway_base_domain": {required: false, kind: kindString},
 }
 
 // Init sets env-var bindings. All config values must come from the cluster

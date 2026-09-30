@@ -94,7 +94,12 @@
 #     hosted login page renders unstyled or fails to load fonts/images, add a
 #     `csp` server_config document for it (see that file for the mechanism).
 #
-# Usage: bash deployments/scripts/setup-env-for-aectl.sh
+# Usage: AE_DOMAIN=localhost bash deployments/scripts/setup-env-for-aectl.sh
+#   AE_DOMAIN               REQUIRED. The DNS suffix every hostname on this
+#                           cluster is published under — "localhost" for local
+#                           k3d, "<ip>.sslip.io" or a wildcard domain you own
+#                           for a cluster other machines reach. Pass the same
+#                           value to setup-agent-manager.sh.
 #   WITH_BUILD=0            skip the workflow plane (Step 6, optional upstream)
 #   WITH_OBSERVABILITY=0    skip the observability plane (Step 7, optional upstream)
 #   WITH_SKAFFOLD_CLIENT=1  also bootstrap ae-install-client (see step 3b) — the
@@ -127,6 +132,53 @@ THUNDER_ADMIN_PASSWORD="Admin@123"
 WITH_BUILD="${WITH_BUILD:-1}"
 WITH_OBSERVABILITY="${WITH_OBSERVABILITY:-1}"
 WITH_SKAFFOLD_CLIENT="${WITH_SKAFFOLD_CLIENT:-0}"
+
+# ============================================================================
+# AE_DOMAIN — the DNS suffix every hostname on this cluster is published under
+# ============================================================================
+#
+# "localhost" reproduces the k3d install exactly; anything else re-domains the
+# whole cluster in one value (e.g. 10.0.0.5.sslip.io on a shared VM, or a
+# wildcard record you own). Every product hostname is COMPOSED from it below,
+# never substituted for the bare token "localhost" — see the derived block.
+#
+# Deliberately required rather than defaulted. ThunderID's bootstrap bundle is
+# read once, by a pre-install hook Job that then deletes itself, so a silent
+# default is not a wrong flag you can re-run past: it is a cluster that has to
+# be deleted and rebuilt. Failing here costs nothing and happens before the
+# first object is created.
+: "${AE_DOMAIN:?set AE_DOMAIN — the DNS suffix for this cluster.
+   local k3d : AE_DOMAIN=localhost
+   shared VM : AE_DOMAIN=<ip>.sslip.io, or a wildcard domain you control
+   Hostnames are composed onto it (console.ae.\$AE_DOMAIN,
+   thunder.openchoreo.\$AE_DOMAIN, ...), so pass the SUFFIX only.}"
+
+case "$AE_DOMAIN" in
+    *://*)  echo "❌ AE_DOMAIN is a domain, not a URL: ${AE_DOMAIN}" >&2; exit 1 ;;
+    *:*)    echo "❌ AE_DOMAIN must not carry a port: ${AE_DOMAIN}" >&2; exit 1 ;;
+    */*)    echo "❌ AE_DOMAIN must not carry a path: ${AE_DOMAIN}" >&2; exit 1 ;;
+    .*|*.)  echo "❌ AE_DOMAIN must not start or end with a dot: ${AE_DOMAIN}" >&2; exit 1 ;;
+esac
+
+# The five parents are structure, not configuration: charts, CoreDNS rewrites
+# and Agent Manager's own composed origins all expect these exact labels. Only
+# the suffix moves. With AE_DOMAIN=localhost every value below is identical to
+# what this script produced before it took a parameter.
+OC_DOMAIN="openchoreo.${AE_DOMAIN}"          # thunder, api, observer, portal
+DP_INGRESS_HOST="openchoreoapis.${AE_DOMAIN}" # ClusterDataPlane external ingress
+AE_CONSOLE_DOMAIN="ae.${AE_DOMAIN}"          # console, tryit
+export AE_DOMAIN OC_DOMAIN DP_INGRESS_HOST AE_CONSOLE_DOMAIN
+
+# Dots escaped for CoreDNS's `name regex`, computed once here rather than
+# inside the heredoc that uses it — expansion and backslashes in an unquoted
+# heredoc are a bad combination to debug.
+OC_DOMAIN_RE="${OC_DOMAIN//./\\.}"
+
+# What a bare "localhost" must keep meaning: a loopback address on the
+# OPERATOR's own machine, not on this cluster. Backstage's dev origin
+# (:7007), the AMP console's (:3000) and the CLI redirect URIs (:8075,
+# :33418, :33419) are all of that kind, which is why no substitution here
+# touches the token itself.
 
 RAW="https://raw.githubusercontent.com/openchoreo/openchoreo/${OC_BRANCH}"
 
@@ -232,7 +284,31 @@ spec:
 EOF
 
 echo "   CoreDNS rewrite"
-kubectl apply -f "${RAW}/install/k3d/common/coredns-custom.yaml"
+# The guide's own coredns-custom.yaml, with the suffix taken from AE_DOMAIN.
+# Applied from here rather than fetched because upstream's copy hardcodes
+# "openchoreo.localhost", which is the one thing that moves. For
+# AE_DOMAIN=localhost this ConfigMap is byte-identical to theirs.
+#
+# What it buys: a pod resolving a cluster hostname gets host.k3d.internal —
+# the k3d loadbalancer — rather than its own loopback or (on a re-domained
+# cluster) a round trip out to the node's external address.
+#
+# setup-agent-manager.sh merges its own rewrites into this same ConfigMap and
+# key, so the name and the "<suffix>.override" data key are a contract
+# between the two scripts.
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  openchoreo.override: |
+    rewrite stop {
+      name regex (.+\\.)?${OC_DOMAIN_RE} host.k3d.internal
+      answer auto
+    }
+EOF
 
 # ── WSO2 API Platform operator ──────────────────────────────────────────────
 # Not part of the official k3d guide. `aectl platform install` requires the
@@ -488,7 +564,7 @@ cat > "${BOOTSTRAP_DIR}/71-fix-system-resource-server-identifier.yaml" <<YAML
 # identifier: https://localhost:8090/mcp — NOT templated to this
 # deployment's actual publicUrl. The native /console app derives its OWN
 # OAuth resource_identifier from configuration.server.publicUrl
-# ("http://thunder.openchoreo.localhost:8080/mcp" here), so login redirects
+# ("http://thunder.${OC_DOMAIN}:8080/mcp" here), so login redirects
 # back with "invalid_target" unless the two match. This document
 # re-declares the SAME resource server (same id -> update, not duplicate),
 # resources tree preserved verbatim, only identifier corrected.
@@ -496,7 +572,7 @@ resource_type: resource_server
 id: "01900000-0000-7000-8000-000000000020"
 name: System
 description: System resource server
-identifier: "http://thunder.openchoreo.localhost:8080/mcp"
+identifier: "http://thunder.${OC_DOMAIN}:8080/mcp"
 ouHandle: default
 resources:
   - name: System
@@ -517,7 +593,7 @@ inboundAuthConfig:
     config:
       clientId: "openchoreo-backstage-client"
       clientSecret: "backstage-portal-secret"
-      redirectUris: ["http://openchoreo.localhost:8080/api/auth/openchoreo-auth/handler/frame"]
+      redirectUris: ["http://${OC_DOMAIN}:8080/api/auth/openchoreo-auth/handler/frame"]
       grantTypes: ["authorization_code","client_credentials","refresh_token"]
       responseTypes: ["code"]
       tokenEndpointAuthMethod: "client_secret_post"
@@ -784,12 +860,14 @@ YAML
 # call (fetching /.well-known/openid-configuration from the console/portal
 # origin) has no Access-Control-Allow-Origin header and the sign-in silently
 # fails. Origins match the official page's values-thunder.yaml.
-cat > "${BOOTSTRAP_DIR}/95-cors.yaml" <<'YAML'
+cat > "${BOOTSTRAP_DIR}/95-cors.yaml" <<YAML
 resource_type: server_config
 name: cors
 value:
   allowedOrigins:
-    - "http://openchoreo.localhost:8080"
+    - "http://${OC_DOMAIN}:8080"
+    # Backstage's own dev server, on the OPERATOR's machine — a real loopback,
+    # so it stays "localhost" whatever this cluster is published as.
     - "http://localhost:7007"
 YAML
 
@@ -983,15 +1061,15 @@ helm upgrade --install thunder "${THUNDER_CHART}" \
     --set "httproute.enabled=true" \
     --set "httproute.parentRefs[0].name=gateway-default" \
     --set "httproute.parentRefs[0].namespace=openchoreo-control-plane" \
-    --set "httproute.hostnames[0]=thunder.openchoreo.localhost" \
+    --set "httproute.hostnames[0]=thunder.${OC_DOMAIN}" \
     --set "configuration.server.httpOnly=true" \
-    --set "configuration.server.publicUrl=http://thunder.openchoreo.localhost:8080" \
-    --set "configuration.jwt.issuer=http://thunder.openchoreo.localhost:8080" \
+    --set "configuration.server.publicUrl=http://thunder.${OC_DOMAIN}:8080" \
+    --set "configuration.jwt.issuer=http://thunder.${OC_DOMAIN}:8080" \
     --set "configuration.database.config.type=sqlite" \
     --set "configuration.database.runtime_transient.type=sqlite" \
     --set "configuration.database.entity.type=sqlite" \
     --set "configuration.database.runtime_persistent.type=sqlite" \
-    --set "configuration.passkey.allowedOrigins[0]=http://openchoreo.localhost:8080" \
+    --set "configuration.passkey.allowedOrigins[0]=http://${OC_DOMAIN}:8080" \
     --set "persistence.enabled=true" \
     --set "setup.enabled=true" \
     --set-string "setup.admin.username=${THUNDER_ADMIN_USER}" \
@@ -1003,7 +1081,7 @@ helm upgrade --install thunder "${THUNDER_CHART}" \
 echo "⏳ Waiting for ThunderID..."
 kubectl wait -n thunder --for=condition=available --timeout=300s deployment -l app.kubernetes.io/name=thunderid
 
-echo "✅ ThunderID ready at http://thunder.openchoreo.localhost:8080 (${THUNDER_ADMIN_USER} / ${THUNDER_ADMIN_PASSWORD})"
+echo "✅ ThunderID ready at http://thunder.${OC_DOMAIN}:8080 (${THUNDER_ADMIN_USER} / ${THUNDER_ADMIN_PASSWORD})"
 
 # ── 3c. Entitlement claim: sub -> client_id ──────────────────────────────
 # ThunderID 1.0.0 puts a client_credentials token's subject in the `client_id`
@@ -1098,7 +1176,7 @@ $(echo "$AGENT_CA" | sed 's/^/        /')
     ingress:
       external:
         http:
-          host: openchoreoapis.localhost
+          host: ${DP_INGRESS_HOST}
           listenerName: http
           port: 19080
         name: gateway-default
@@ -1251,7 +1329,7 @@ spec:
     clientCA:
       value: |
 $(echo "$AGENT_CA" | sed 's/^/        /')
-  observerURL: http://observer.openchoreo.localhost:11080
+  observerURL: http://observer.${OC_DOMAIN}:11080
 EOF
     kubectl patch clusterdataplane default --type merge \
         -p '{"spec":{"observabilityPlaneRef":{"kind":"ClusterObservabilityPlane","name":"default"}}}'
@@ -1273,11 +1351,38 @@ echo "============================================"
 # the steps `make dev-env` runs after it, so listing all four flat would send
 # someone to a URL that is not answering yet and read as a broken install.
 echo "  Serving now"
-printf "    %-16s%-50s(%s / %s)\n" "OpenChoreo" "http://openchoreo.localhost:8080" "${THUNDER_ADMIN_USER}" "${THUNDER_ADMIN_PASSWORD}"
-printf "    %-16s%-50s(%s / %s)\n" "ThunderID" "http://thunder.openchoreo.localhost:8080/console" "${THUNDER_ADMIN_USER}" "${THUNDER_ADMIN_PASSWORD}"
+printf "    %-16s%-50s(%s / %s)\n" "OpenChoreo" "http://${OC_DOMAIN}:8080" "${THUNDER_ADMIN_USER}" "${THUNDER_ADMIN_PASSWORD}"
+printf "    %-16s%-50s(%s / %s)\n" "ThunderID" "http://thunder.${OC_DOMAIN}:8080/console" "${THUNDER_ADMIN_USER}" "${THUNDER_ADMIN_PASSWORD}"
 echo ""
 echo "  Still to install — \`make dev-env\` runs both of these next"
-printf "    %-16s%-50s%s\n" "AEP" "http://console.ae.localhost:8080" "aectl platform install"
-printf "    %-16s%-50s%s\n" "Agent Manager" "http://console.amp.localhost:8080" "setup-agent-manager.sh"
+printf "    %-16s%-50s%s\n" "AEP" "http://console.${AE_CONSOLE_DOMAIN}:8080" "aectl platform install"
+printf "    %-16s%-50s%s\n" "Agent Manager" "http://console.amp.${AE_DOMAIN}:8080" "setup-agent-manager.sh"
+
+# aectl reads its own config file, which AE_DOMAIN cannot reach — so the same
+# suffix lives in seven keys there as well. Printing them already composed is
+# what keeps the two from disagreeing: a cluster on one domain and a config on
+# another installs without complaint and fails in a browser.
+if [ "$AE_DOMAIN" != "localhost" ]; then
+    echo ""
+    echo "  Put these in the aectl config you import next"
+    echo "  (\`aectl platform config import --config <file>\`):"
+    cat <<EOF
+
+    console:
+      public_url: "http://console.${AE_CONSOLE_DOMAIN}:8080"
+    tryit:
+      public_url: "http://tryit.${AE_CONSOLE_DOMAIN}:8080"
+    gateway:
+      hostname: "${DP_INGRESS_HOST}"
+    environment:
+      idp_base_domain: "${OC_DOMAIN}"
+      gateway_base_domain: "gateway.${AE_DOMAIN}"
+    thunder:
+      public_url: "http://thunder.${OC_DOMAIN}:8080"
+EOF
+    echo ""
+    echo "  And pass the same suffix to Agent Manager:  AE_DOMAIN=${AE_DOMAIN}"
+fi
+
 echo ""
 echo "  Cleanup:  k3d cluster delete ${CLUSTER_NAME}"

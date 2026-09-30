@@ -252,6 +252,14 @@ func runGatewayIngressCheck(ctx context.Context, deps gatewayIngressDeps) error 
 		sp2.Fail("Failed to configure gateway ingress")
 		return err
 	}
+	// Record what the prompt chose, so everything downstream that needs the
+	// data-plane ingress host reads one value whichever path set it. Without
+	// this, gateway.hostname stays empty on the interactive path and
+	// tryItOverrides falls back to the chart's own default — an allowlist
+	// naming a host this cluster does not publish, which refuses every launch
+	// URL before sign-in.
+	viper.Set("gateway.hostname", hostname)
+
 	sp2.Success(fmt.Sprintf("External gateway ingress configured (ClusterDataPlane + Environment/%s: %s → %s, port 19080)", ocPipelineSourceEnvironment(), hostname, gwName))
 	return nil
 }

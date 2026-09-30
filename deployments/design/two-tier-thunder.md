@@ -33,6 +33,19 @@ product's, and why a record rather than a naming convention: **ADR-0029**.
       vhost <env>-<org>.gateway.localhost:19080
 ```
 
+Both T2 hostnames above are the **defaults**, not constants. The suffixes come
+from `environment.idp_base_domain` and `environment.gateway_base_domain`
+(`internal/envidp`'s `Config.IDPBaseDomain`/`GatewayBaseDomain`), which an
+install re-domains together with the rest of the cluster; empty takes the k3d
+convention shown here. They are two keys because the two share only their
+trailing labels — `openchoreo.` and `gateway.` are different parents. The
+scheme and ports are fixed: 8080 and 19080 are this cluster's control- and
+data-plane gateways, and moving them is the TLS question, not this one.
+
+`idp_base_domain` must carry the same string as Agent Manager's
+`ENV_IDP_BASE_DOMAIN`, for the reason in "Facts that cost a day each" below:
+Agent Manager composes that origin rather than being told one.
+
 A platform-IdP token is **not** valid at an environment's gateway, and neither
 is a sibling environment's. That is the point of the tier: a gateway terminates
 a managed API's authentication, so it must terminate against exactly one
@@ -256,10 +269,18 @@ bash deployments/scripts/verify-convergence.sh
 
 ## Facts that cost a day each
 
-- **The gateway vhost is `<env>-<org>.gateway.localhost`** — environment first.
-  That is the chart's derivation, the two only coincide when org and env are the
-  same word, and the vhost is **write-once** in Agent Manager once registered:
-  a wrong one can be warned about but not corrected.
+- **The gateway vhost is `<env>-<org>.<gateway_base_domain>`** — environment
+  first. That is the chart's derivation, the two only coincide when org and env
+  are the same word, and the vhost is **write-once** in Agent Manager once
+  registered: a wrong one can be warned about but not corrected. Only the
+  suffix is configurable; the `<env>-<org>` order is structure.
+- **The environment IdP's suffix is browser-facing, and not only to
+  operators.** thunder-app-operator republishes the URL built from
+  `idp_base_domain` as every generated app's OIDC issuer, so an end user
+  signing in to a generated app is redirected there. On a cluster reachable by
+  more than its own host, leaving it on `*.localhost` while re-domaining
+  everything else breaks that sign-in — and it breaks in the app, not in
+  anything the install touches.
 - **`amp-api-client` is `client_secret_basic`** (curl `-u`), while
   `aep-system-client` is `client_secret_post`. Mixing them up reads as bad
   credentials.

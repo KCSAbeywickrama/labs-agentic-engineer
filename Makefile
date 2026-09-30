@@ -244,9 +244,17 @@ workflow-skill:
 # rather than after it: skaffold needs the k3d cluster to import into, and
 # the install needs the images to already be there, so the pods come up on
 # them first time instead of pulling `:latest` and being swapped afterwards.
+# The DNS suffix every hostname on the cluster is composed onto. "localhost"
+# is this flow's whole world, so it is fixed here rather than a knob — a VM
+# install passes its own (an sslip.io name, or a wildcard domain) to the
+# scripts directly, and the scripts refuse to run without one. Overridable in
+# case someone wants to drive a non-local cluster through the same targets:
+#   make dev-env AE_DOMAIN=10.0.0.5.sslip.io
+AE_DOMAIN ?= localhost
+
 dev-env:
 	cd tools/aectl && go build -o aectl-skaffold .
-	WITH_SKAFFOLD_CLIENT=1 bash deployments/scripts/setup-env-for-aectl.sh
+	AE_DOMAIN=$(AE_DOMAIN) WITH_SKAFFOLD_CLIENT=1 bash deployments/scripts/setup-env-for-aectl.sh
 	$(MAKE) dev-images
 	./tools/aectl/aectl-skaffold platform config import --config skaffold/defaults.yaml
 	ANTHROPIC_API_KEY=none AEP_THUNDER_ADMIN_CLIENT_SECRET=ae-install-client-secret \
@@ -256,7 +264,7 @@ dev-env:
 	elif [ "$${WITH_OBSERVABILITY:-1}" != "1" ]; then \
 		echo "⏭️  Skipping Agent Manager: it installs against the observability plane (WITH_OBSERVABILITY=0)"; \
 	else \
-		bash deployments/scripts/setup-agent-manager.sh; \
+		AE_DOMAIN=$(AE_DOMAIN) bash deployments/scripts/setup-agent-manager.sh; \
 	fi
 	@if [ "$${WITH_OBSERVABILITY:-1}" != "1" ]; then \
 		echo "⏭️  Skipping the SRE agent (WITH_OBSERVABILITY=0)"; \
