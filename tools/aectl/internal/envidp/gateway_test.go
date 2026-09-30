@@ -49,6 +49,22 @@ func TestGatewayNaming(t *testing.T) {
 	if got, want := gatewayBackendJWTSecretName("api-platform-acme-prod"), "api-platform-acme-prod-backend-jwt"; got != want {
 		t.Errorf("gatewayBackendJWTSecretName = %q, want %q", got, want)
 	}
+	// The doubled "gateway-gateway" is the chart's real Service name.
+	if got, want := gatewayRuntimeService("api-platform-acme-prod"), "api-platform-acme-prod-gw-gateway-gateway-runtime"; got != want {
+		t.Errorf("gatewayRuntimeService = %q, want %q", got, want)
+	}
+}
+
+// The OTLP base aep-api composes AMP_OTEL_ENDPOINT from, verbatim. It must
+// name the API Platform gateway's runtime (not the AI gateway, which 404s),
+// in the environment's gateway namespace, and carry the /otel route — an
+// exporter appends only /v1/traces.
+func TestGatewayOTelEndpoint(t *testing.T) {
+	got := gatewayOTelEndpoint("default", "development")
+	want := "http://api-platform-default-development-gw-gateway-gateway-runtime.default-development:22893/otel"
+	if got != want {
+		t.Errorf("gatewayOTelEndpoint = %q, want %q", got, want)
+	}
 }
 
 func TestEnsureEncryptionKey_GeneratesAnd32Bytes(t *testing.T) {

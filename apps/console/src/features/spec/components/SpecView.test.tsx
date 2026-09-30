@@ -60,6 +60,13 @@ const mockSearch = vi.hoisted(() => ({
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => mockNavigate,
   useSearch: () => mockSearch.current,
+  Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
+}));
+
+// The Agent spec's Model panel reads the org's model connection. Stubbed like
+// every other query here: these tests render without a QueryClientProvider.
+vi.mock("../../settings/api/queries", () => ({
+  useConfig: () => ({ isPending: false, isError: false, data: { llm: null } }),
 }));
 
 // --- oxygen-ui: only useAppShell needs a stub (it throws outside an

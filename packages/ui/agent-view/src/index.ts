@@ -17,7 +17,7 @@
  */
 
 export { AgentView } from "./AgentView.js";
-export type { AgentViewProps, AgentToolStatusInfo } from "./AgentView.js";
+export type { AgentViewProps, AgentToolStatusInfo, AgentModelConnection } from "./AgentView.js";
 export { parseAgentAfm, isParseError } from "./parse.js";
 export type {
   AgentAttachments,
