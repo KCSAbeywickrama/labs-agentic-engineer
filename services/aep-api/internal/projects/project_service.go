@@ -41,6 +41,10 @@ var (
 	ErrProjectNotFound = errors.New("project not found")
 	ErrUnauthorized    = errors.New("unauthorized")
 	ErrForbidden       = errors.New("forbidden")
+	// ErrProjectTypeNotFound is a created Project that OpenChoreo reports it
+	// cannot reconcile because its ProjectType does not exist. It is the org's
+	// configuration to fix; retrying the create cannot help.
+	ErrProjectTypeNotFound = errors.New("project type not found")
 )
 
 // Service handles business logic for project operations. edge.Deps holds it as a
@@ -66,7 +70,20 @@ type Service struct {
 	cells          projectCellProvisioner // per-environment cell namespaces; may be nil
 	endpointGate   *EndpointGate          // deploy stage: is a Ready binding reachable (status_stages.go); may be nil
 	writeTargets   writeTargetResolver    // deploy stage: which environment's bindings count (status_stages.go)
+	cellWait       cellReadyWait          // how long CreateProject waits for the cells to report Ready
 }
+
+// cellReadyWait bounds CreateProject's wait for the Project and its
+// ProjectReleaseBindings to report Ready.
+type cellReadyWait struct {
+	timeout  time.Duration
+	interval time.Duration
+}
+
+// defaultCellReadyWait is long enough for the Project controller to cut a
+// ProjectRelease and the data plane to create the cell namespaces, and short
+// enough to hold a create request open.
+var defaultCellReadyWait = cellReadyWait{timeout: 30 * time.Second, interval: time.Second}
 
 // projectCellProvisioner authors the ProjectReleaseBinding that gives a new
 // project its cell namespace in each environment its pipeline promotes
@@ -81,6 +98,8 @@ type Service struct {
 type projectCellProvisioner interface {
 	PipelineEnvironments(ctx context.Context, namespace, pipelineName string) ([]string, error)
 	EnsureProjectReleaseBinding(ctx context.Context, namespace, projectName, environment string) error
+	ProjectReadiness(ctx context.Context, namespace, projectName string) (openchoreo.Readiness, error)
+	ProjectReleaseBindingReadiness(ctx context.Context, namespace, projectName, environment string) (openchoreo.Readiness, error)
 }
 
 // SetEndpointGate wires the reachability gate the deploy stage's counts are
@@ -209,6 +228,7 @@ func NewProjectService(
 		webhookSvc:  webhookSvc,
 		artifactSvc: artifactSvc,
 		execs:       execs,
+		cellWait:    defaultCellReadyWait,
 	}
 }
 
@@ -287,10 +307,20 @@ func (s *Service) CreateProject(ctx context.Context, orgName string, req *gen.Cr
 	// cannot fix them, because OpenChoreo now answers 409. Leaving the project
 	// in place instead would leave a project that looks healthy in every status
 	// it reports and cannot deploy a single component.
+	//
+	// Then wait (bounded) for OpenChoreo to report the Project and every
+	// binding Ready. A Project whose ProjectType is missing never reconciles,
+	// so that one is fatal and compensating too; anything slower than the
+	// bound is kept, and its status reports why.
 	if s.cells != nil {
-		if cellErr := s.provisionProjectCells(ctx, orgName, project.Name, project.DeploymentPipeline); cellErr != nil {
+		envs, cellErr := s.provisionProjectCells(ctx, orgName, project.Name, project.DeploymentPipeline)
+		if cellErr != nil {
 			s.compensateCreate(ctx, orgName, project.Name, "cell provisioning failure")
 			return nil, cellErr
+		}
+		if waitErr := s.awaitProjectCells(ctx, orgName, project.Name, envs); waitErr != nil {
+			s.compensateCreate(ctx, orgName, project.Name, "missing project type")
+			return nil, waitErr
 		}
 	} else {
 		slog.ErrorContext(ctx, "project cell provisioner not wired — project will have no cell namespace and cannot deploy",
@@ -656,23 +686,85 @@ func translateHTTPError(err error) error {
 // caller compensates on error, and silently returning "zero environments" would
 // turn a misconfigured pipeline into the exact undeployable project this whole
 // path exists to prevent.
-func (s *Service) provisionProjectCells(ctx context.Context, orgName, projectName, pipelineName string) error {
+func (s *Service) provisionProjectCells(ctx context.Context, orgName, projectName, pipelineName string) ([]string, error) {
 	if pipelineName == "" {
-		return fmt.Errorf("project %q has no deployment pipeline, cannot provision cell namespaces", projectName)
+		return nil, fmt.Errorf("project %q has no deployment pipeline, cannot provision cell namespaces", projectName)
 	}
 	envs, err := s.cells.PipelineEnvironments(ctx, orgName, pipelineName)
 	if err != nil {
-		return fmt.Errorf("resolve environments for pipeline %q: %w", pipelineName, err)
+		return nil, fmt.Errorf("resolve environments for pipeline %q: %w", pipelineName, err)
 	}
 	if len(envs) == 0 {
-		return fmt.Errorf("deployment pipeline %q promotes through no environments", pipelineName)
+		return nil, fmt.Errorf("deployment pipeline %q promotes through no environments", pipelineName)
 	}
 	for _, env := range envs {
 		if bindErr := s.cells.EnsureProjectReleaseBinding(ctx, orgName, projectName, env); bindErr != nil {
-			return fmt.Errorf("provision cell namespace for %q in %q: %w", projectName, env, bindErr)
+			return nil, fmt.Errorf("provision cell namespace for %q in %q: %w", projectName, env, bindErr)
 		}
 	}
-	slog.InfoContext(ctx, "project cell namespaces provisioned",
-		"org", orgName, "project", projectName, "environments", envs)
-	return nil
+	return envs, nil
+}
+
+// awaitProjectCells polls until the Project and the binding in each of envs
+// report Ready, for at most s.cellWait.timeout. It returns an error only for a
+// Project that can never reconcile (ErrProjectTypeNotFound). A read failure or
+// a resource still progressing when the bound runs out is logged and the
+// create goes on: the project may yet reconcile, and its status says why not.
+func (s *Service) awaitProjectCells(ctx context.Context, orgName, projectName string, envs []string) error {
+	waitCtx, cancel := context.WithTimeout(ctx, s.cellWait.timeout)
+	defer cancel()
+	for {
+		waitingOn, err := s.projectCellsPending(waitCtx, orgName, projectName, envs)
+		if err != nil {
+			return err
+		}
+		if waitingOn == "" {
+			slog.InfoContext(ctx, "project cell namespaces provisioned",
+				"org", orgName, "project", projectName, "environments", envs)
+			return nil
+		}
+		select {
+		case <-waitCtx.Done():
+			slog.WarnContext(ctx, "project cell namespaces not ready within the create wait; project status reports the reason",
+				"org", orgName, "project", projectName, "environments", envs,
+				"waitingOn", waitingOn, "wait", s.cellWait.timeout)
+			return nil
+		case <-time.After(s.cellWait.interval):
+		}
+	}
+}
+
+// projectCellsPending reads the Project and its bindings once. It returns
+// what is not Ready yet ("" when everything is), or ErrProjectTypeNotFound.
+func (s *Service) projectCellsPending(ctx context.Context, orgName, projectName string, envs []string) (string, error) {
+	project, err := s.cells.ProjectReadiness(ctx, orgName, projectName)
+	if err != nil {
+		return "project readiness unreadable: " + err.Error(), nil
+	}
+	if !project.Ready {
+		if project.Reason == openchoreo.ReasonProjectTypeNotFound {
+			return "", fmt.Errorf("%w: project %q: %s", ErrProjectTypeNotFound, projectName, project.Message)
+		}
+		return "project: " + readinessText(project), nil
+	}
+	for _, env := range envs {
+		binding, err := s.cells.ProjectReleaseBindingReadiness(ctx, orgName, projectName, env)
+		if err != nil {
+			return "binding " + env + " readiness unreadable: " + err.Error(), nil
+		}
+		if !binding.Ready {
+			return "binding " + env + ": " + readinessText(binding), nil
+		}
+	}
+	return "", nil
+}
+
+func readinessText(r openchoreo.Readiness) string {
+	if r.Reason == "" {
+		return "not reported yet"
+	}
+	if r.Message == "" {
+		return r.Reason
+	}
+	return r.Reason + ": " + r.Message
 }

@@ -92,3 +92,88 @@ func TestProjectCellClientGetPipeline_DecodesPromotionPaths(t *testing.T) {
 		t.Fatalf("PipelineRoot = %q, err=%v, want development", got, err)
 	}
 }
+
+// The readiness reads return the resource's Ready condition as OpenChoreo
+// reports it, from the path the resource lives at.
+func TestProjectCellClient_Readiness(t *testing.T) {
+	ready := func(status, reason, message string) map[string]any {
+		return map[string]any{"conditions": []any{
+			map[string]any{"type": "Synced", "status": "True", "reason": "ReleaseSynced"},
+			map[string]any{"type": "Ready", "status": status, "reason": reason, "message": message},
+		}}
+	}
+	cases := []struct {
+		name   string
+		path   string
+		status map[string]any
+		read   func(*projectCellClient) (Readiness, error)
+		want   Readiness
+	}{
+		{
+			name:   "project type missing",
+			path:   nsBase("acme") + "/projects/shop",
+			status: ready("False", "ProjectTypeNotFound", `ClusterProjectType "default" not found`),
+			read: func(c *projectCellClient) (Readiness, error) {
+				return c.ProjectReadiness(context.Background(), "acme", "shop")
+			},
+			want: Readiness{Reason: "ProjectTypeNotFound", Message: `ClusterProjectType "default" not found`},
+		},
+		{
+			name:   "binding ready",
+			path:   nsBase("acme") + "/projectreleasebindings/shop-development",
+			status: ready("True", "Ready", ""),
+			read: func(c *projectCellClient) (Readiness, error) {
+				return c.ProjectReleaseBindingReadiness(context.Background(), "acme", "shop", "development")
+			},
+			want: Readiness{Ready: true, Reason: "Ready"},
+		},
+		{
+			name:   "no conditions yet",
+			path:   nsBase("acme") + "/projects/shop",
+			status: map[string]any{},
+			read: func(c *projectCellClient) (Readiness, error) {
+				return c.ProjectReadiness(context.Background(), "acme", "shop")
+			},
+			want: Readiness{},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != tc.path {
+					t.Errorf("%s %q, want GET %q", r.Method, r.URL.Path, tc.path)
+					http.Error(w, "bad path", http.StatusNotFound)
+					return
+				}
+				writeJSON(t, w, http.StatusOK, map[string]any{
+					"metadata": map[string]any{"name": "x"},
+					"status":   tc.status,
+				})
+			}))
+			defer srv.Close()
+			got, err := tc.read(&projectCellClient{baseURL: srv.URL, http: srv.Client()})
+			if err != nil {
+				t.Fatalf("read: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("readiness = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A failed read is an error, never a not-ready verdict: the caller must not
+// mistake an unreachable API for a resource that reconciled badly.
+func TestProjectCellClient_ReadinessReadFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"error":"down"}`, http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	c := &projectCellClient{baseURL: srv.URL, http: srv.Client()}
+	if _, err := c.ProjectReadiness(context.Background(), "acme", "shop"); err == nil {
+		t.Error("ProjectReadiness: want error on 503")
+	}
+	if _, err := c.ProjectReleaseBindingReadiness(context.Background(), "acme", "shop", "development"); err == nil {
+		t.Error("ProjectReleaseBindingReadiness: want error on 503")
+	}
+}

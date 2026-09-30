@@ -55,6 +55,10 @@ func RequireComponentSlugs(projectName, componentName string) error {
 // project's deployment pipeline names no write target (ADR-0039).
 const codeNoWriteTarget = "no_write_target"
 
+// codeProjectTypeNotFound is the envelope code for a create refused because
+// OpenChoreo cannot find the org's ProjectType for the new project.
+const codeProjectTypeNotFound = "project_type_not_found"
+
 // MapProjectError translates project + OpenChoreo sentinel errors into the
 // envelope. The feature sentinels (translated from OC by the service's
 // translateHTTPError) carry the fixed user-facing messages; any remaining raw
@@ -74,6 +78,10 @@ func MapProjectError(err error) error {
 		// The project's pipeline names no write target: the caller's
 		// configuration to fix, so the resolver's words go back verbatim.
 		return apierr.New(http.StatusUnprocessableEntity, codeNoWriteTarget, nwt.Error(), nil)
+	case errors.Is(err, ErrProjectTypeNotFound):
+		// The org's platform did not seed the ProjectType every project
+		// references: configuration to fix, in OpenChoreo's words.
+		return apierr.New(http.StatusUnprocessableEntity, codeProjectTypeNotFound, err.Error(), nil)
 	case errors.Is(err, openchoreo.ErrPaymentRequired):
 		// Prefer the platform sentence (quota / inactive subscription) over the
 		// bare sentinel — the console already renders Error.message in an Alert.

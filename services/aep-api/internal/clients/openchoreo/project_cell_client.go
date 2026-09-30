@@ -77,6 +77,49 @@ type ProjectCellClient interface {
 	// promotion. Re-asserting our own release-less body over it would silently
 	// undo that.
 	EnsureProjectReleaseBinding(ctx context.Context, namespace, projectName, environment string) error
+
+	// ProjectReadiness reads the Project's Ready condition: True once its
+	// (Cluster)ProjectType resolved and a ProjectRelease is in place.
+	ProjectReadiness(ctx context.Context, namespace, projectName string) (Readiness, error)
+
+	// ProjectReleaseBindingReadiness reads the Ready condition of the binding
+	// EnsureProjectReleaseBinding authored for (project, environment): True
+	// once the cell namespace exists and is healthy on the data plane.
+	ProjectReleaseBindingReadiness(ctx context.Context, namespace, projectName, environment string) (Readiness, error)
+}
+
+// ReasonProjectTypeNotFound is the Project Ready reason OpenChoreo reports
+// when the referenced (Cluster)ProjectType does not exist.
+const ReasonProjectTypeNotFound = "ProjectTypeNotFound"
+
+// Readiness is a resource's Ready condition as OpenChoreo reports it. The zero
+// value is a resource the controller has not reported on yet.
+type Readiness struct {
+	Ready   bool
+	Reason  string
+	Message string
+}
+
+// conditionedObject is the read-only slice of any CR needed for its Ready
+// condition.
+type conditionedObject struct {
+	Status struct {
+		Conditions []struct {
+			Type    string `json:"type"`
+			Status  string `json:"status"`
+			Reason  string `json:"reason"`
+			Message string `json:"message"`
+		} `json:"conditions"`
+	} `json:"status"`
+}
+
+func (o *conditionedObject) readiness() Readiness {
+	for _, c := range o.Status.Conditions {
+		if c.Type == "Ready" {
+			return Readiness{Ready: c.Status == "True", Reason: c.Reason, Message: c.Message}
+		}
+	}
+	return Readiness{}
 }
 
 // ProjectReleaseBinding is the slice of the CR this client authors and reads.
@@ -252,11 +295,39 @@ func (c *projectCellClient) PipelineEnvironments(ctx context.Context, namespace,
 	return envs, nil
 }
 
+func (c *projectCellClient) ProjectReadiness(ctx context.Context, namespace, projectName string) (Readiness, error) {
+	if namespace == "" || projectName == "" {
+		return Readiness{}, fmt.Errorf("project readiness: namespace and project are required")
+	}
+	return c.readiness(ctx, nsBase(namespace)+"/projects/"+projectName)
+}
+
+func (c *projectCellClient) ProjectReleaseBindingReadiness(ctx context.Context, namespace, projectName, environment string) (Readiness, error) {
+	if namespace == "" || projectName == "" || environment == "" {
+		return Readiness{}, fmt.Errorf("project release binding readiness: namespace, project and environment are required")
+	}
+	return c.readiness(ctx, nsBase(namespace)+"/projectreleasebindings/"+projectReleaseBindingName(projectName, environment))
+}
+
+func (c *projectCellClient) readiness(ctx context.Context, path string) (Readiness, error) {
+	obj := &conditionedObject{}
+	if _, err := c.do(ctx, http.MethodGet, path, nil, obj); err != nil {
+		return Readiness{}, fmt.Errorf("read readiness: %w", err)
+	}
+	return obj.readiness(), nil
+}
+
+// projectReleaseBindingName is the name EnsureProjectReleaseBinding gives the
+// binding for (project, environment).
+func projectReleaseBindingName(projectName, environment string) string {
+	return projectName + "-" + environment
+}
+
 func (c *projectCellClient) EnsureProjectReleaseBinding(ctx context.Context, namespace, projectName, environment string) error {
 	if namespace == "" || projectName == "" || environment == "" {
 		return fmt.Errorf("ensure project release binding: namespace, project and environment are required")
 	}
-	name := projectName + "-" + environment
+	name := projectReleaseBindingName(projectName, environment)
 	binding := &ProjectReleaseBinding{
 		APIVersion: ocResourceAPIVersion,
 		Kind:       "ProjectReleaseBinding",

@@ -114,3 +114,21 @@ func TestMapProjectError_NoWriteTargetIsUnprocessable(t *testing.T) {
 		t.Fatalf("message = %q, want the resolver's words %q", ae.Message, cause.Error())
 	}
 }
+
+// A project whose ProjectType is missing is the org's configuration to fix,
+// not a server fault: 422 with OpenChoreo's words.
+func TestMapProjectError_ProjectTypeNotFoundIsUnprocessable(t *testing.T) {
+	t.Parallel()
+	cause := fmt.Errorf("%w: project \"shop\": ProjectType \"default\" not found", ErrProjectTypeNotFound)
+	err := MapProjectError(cause)
+	var ae *apierr.Error
+	if !errors.As(err, &ae) {
+		t.Fatalf("want *apierr.Error, got %T (%v)", err, err)
+	}
+	if ae.Status != http.StatusUnprocessableEntity || ae.Code != codeProjectTypeNotFound {
+		t.Fatalf("got status=%d code=%q, want 422 %s", ae.Status, ae.Code, codeProjectTypeNotFound)
+	}
+	if ae.Message != cause.Error() {
+		t.Fatalf("message = %q, want %q", ae.Message, cause.Error())
+	}
+}
