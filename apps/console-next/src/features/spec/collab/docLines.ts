@@ -24,14 +24,14 @@ import type { LineBlock } from "../model/ids";
 // The walk from a live ProseMirror document to its lines (after the console's
 // docBlocks). A list entry is the paragraph INSIDE its `listItem`: that is the
 // textblock that carries the words, so its item-ness comes from the parent.
-// Text the agent wrote and the user has not reviewed carries the
-// agentInsertion mark (@aep/collab-doc); a line with any is `proposed`. A list
+// Text the agent wrote carries the agentInsertion mark (@aep/collab-doc) with
+// when it wrote it, so a fresh write can be highlighted as it lands. A list
 // entry's depth counts the lists around it, so an entry's nested bullets (a
 // blocking question's options) are told from its siblings.
 
 const LISTS = new Set(["bulletList", "orderedList"]);
 
-/** A run of the agent's pending text, as offsets into the line's text. */
+/** A run of the agent's text, as offsets into the line's text. */
 export interface AgentRun {
   start: number;
   end: number;
@@ -46,8 +46,7 @@ export interface DocLine extends LineBlock {
   /** The range a whole-line highlight covers: its list item when it is one, else the block. */
   lineFrom: number;
   lineTo: number;
-  proposed: boolean;
-  /** The agent's pending text in the line, in order. */
+  /** The agent's text in the line, in order. */
   agentRuns: AgentRun[];
   /** The document position of an offset into `text`. */
   posAt: (offset: number) => number;
@@ -102,7 +101,6 @@ function line(node: PmNode, pos: number, parent: Parent): DocLine {
     ...(listItem ? { depth: parent.lists } : {}),
     text,
     emphasis,
-    proposed: agentRuns.length > 0,
     agentRuns,
     from: pos,
     to: pos + node.nodeSize,

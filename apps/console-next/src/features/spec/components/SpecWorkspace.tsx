@@ -16,16 +16,15 @@
  * under the License.
  */
 
-import { useEffect, useMemo, useRef, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import { Box, Button, Skeleton } from "@wso2/oxygen-ui";
 import { EmptyState } from "../../../components/EmptyState";
 import { PHONE } from "../../shell/layout";
 import { useSeeDesignChanges } from "../api/specModel";
 import { specTabDot } from "../model/designChanges";
-import { namedFiles, openFile } from "../model/files";
+import { openFile } from "../model/files";
 import { useOpenSpecTarget, useSpecWorkspace } from "../useSpecWorkspace";
 import { FilePicker, FileRail } from "./FileRail";
-import { ProposalBar } from "./ProposalBar";
 import { SpecFilePane } from "./SpecFilePane";
 
 /** What `at` names in the open file: the first line to confirm, a line by ID, or a named place. */
@@ -96,12 +95,6 @@ export function SpecWorkspace({
   const scroller = useRef<HTMLDivElement>(null);
   const open = model.data ? openFile(model.data, file) : null;
   useReveal(scroller, open?.key ?? "", workspace ? at : undefined);
-  const proposal = model.data?.proposal ?? null;
-  const features = model.data?.features;
-  const proposalFiles = useMemo(
-    () => (proposal && features ? namedFiles(features, proposal.files) : []),
-    [proposal, features],
-  );
 
   // Opening the spec is seeing what design feedback changed in it: the Spec
   // tab's dot goes. The changed lines stay marked until their comments are resolved.
@@ -137,7 +130,6 @@ export function SpecWorkspace({
           features={workspace.features}
           documents={model.data.documents}
           current={open.key}
-          proposed={proposalFiles.map((f) => f.key)}
         />
       )}
       <Box
@@ -154,15 +146,6 @@ export function SpecWorkspace({
       >
         {ready ? (
           <>
-            {proposal && (
-              <ProposalBar
-                projectName={projectName}
-                doc={doc}
-                proposal={proposal}
-                files={proposalFiles}
-                current={open.key}
-              />
-            )}
             <FilePicker
               projectName={projectName}
               features={workspace.features}

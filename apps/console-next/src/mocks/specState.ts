@@ -26,10 +26,9 @@ import { acmeExpensesSpec, freshSpec, triageAgentSpec } from "./fixtures/spec";
 // PROVISIONAL — mock-only until S3 lands the spec model's contract; see
 // features/spec/api/specModel.ts. Deleted when the workspace reads the contract.
 //
-// Each project's model is copied from its fixture on first read and changed
-// in place by the user's verdicts on proposals, for as long as the page lives:
-// a reload starts those over, as the local spec doc does. What the agent's
-// interviews did is laid over it on every read, from the mock agent server
+// Each project's model is copied from its fixture on first read, and lives
+// as long as the page: a reload starts it over, as the local spec doc does.
+// What the agent's interviews did is laid over it on every read, from the mock agent server
 // (chatServer.ts), which keeps them across a reload with the conversation;
 // so is what the design review did (designState.ts): the designed features'
 // stage, the design summary, and a spec line a design comment rewrote.

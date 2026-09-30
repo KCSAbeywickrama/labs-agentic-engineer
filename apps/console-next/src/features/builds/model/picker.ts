@@ -108,7 +108,6 @@ function applies(item: ProductWideItem, featureId: string): boolean {
 /** The words of a product-wide item, from the live product-wide.md. */
 function productWideText(lines: ReadonlyMap<string, LineBlock[]>, id: string): string {
   for (const line of lines.get(PRODUCT_WIDE_PATH) ?? []) {
-    if (line.proposed) continue;
     const parts = parseLine(line.text, line.emphasis);
     if (parts.lead?.id === id) return parts.body;
   }

@@ -23,7 +23,7 @@ import acmeF4 from "@aep/contracts/requirements/acme-expenses/features/F4-spendi
 import acmeF5 from "@aep/contracts/requirements/acme-expenses/features/F5-mileage-claims.md?raw";
 import acmePrd from "@aep/contracts/requirements/acme-expenses/prd.md?raw";
 import acmeProductWide from "@aep/contracts/requirements/acme-expenses/product-wide.md?raw";
-import type { Proposal, SpecModel } from "../../features/spec/api/specModel";
+import type { SpecModel } from "../../features/spec/api/specModel";
 
 // PROVISIONAL — mock-only until the spec model is wired; see
 // features/spec/api/specModel.ts.
@@ -36,53 +36,8 @@ import type { Proposal, SpecModel } from "../../features/spec/api/specModel";
 // Retired section records it. Payroll export's interview waits on a question
 // in its Open Questions, tagged `*blocking*`, with the two answers the agent
 // offers nested under it.
-//
-// The agent has one change waiting for the user: an Auditor who can read
-// everything, which touches the Actors, Approvals, Payroll export and
-// product-wide, and takes the auditors' idea out of the Fog.
 
 const featurePath = (file: string) => `requirements/features/${file}.md`;
-
-/** The agent's write: `markdown` with `line` added after the line starting `after`. */
-function withLineAfter(markdown: string, after: string, line: string): string {
-  const start = markdown.indexOf(after);
-  if (start < 0) throw new Error(`fixture: no line starting "${after}"`);
-  const end = markdown.indexOf("\n", start);
-  return `${markdown.slice(0, end + 1)}${line}\n${markdown.slice(end + 1)}`;
-}
-
-const auditorProposal: Proposal = {
-  id: "auditor",
-  title: "Add an Auditor who can read everything",
-  summary: "4 changes across Actors, Approvals, Payroll export and Product-wide",
-  by: { agent: "spec-agent", at: "2026-09-29T15:42:00Z" },
-  files: [
-    "requirements/prd.md",
-    featurePath("F2-approvals"),
-    featurePath("F3-payroll-export"),
-    "requirements/product-wide.md",
-  ],
-  leavesFog: [{ text: "Read-only access for the yearly external audit.", becomes: "the Auditor" }],
-  productWide: [{ id: "P5", appliesTo: ["F2", "F3"] }],
-  writes: {
-    "requirements/prd.md": withLineAfter(acmePrd, "- Finance:", "- Auditor: reads every claim and decision; changes nothing."),
-    [featurePath("F2-approvals")]: withLineAfter(
-      acmeF2,
-      "- F2.5 ",
-      "- F2.6 As an auditor, I see every approval decision with its reason. *assumed*",
-    ),
-    [featurePath("F3-payroll-export")]: withLineAfter(
-      acmeF3,
-      "- F3.3 ",
-      "- F3.4 As an auditor, I export a year of approved claims. *assumed*",
-    ),
-    "requirements/product-wide.md": withLineAfter(
-      acmeProductWide,
-      "- P4 ",
-      "- P5 An auditor can read every claim, decision and export, and change none of them. Applies to: F2, F3.",
-    ),
-  },
-};
 
 export const acmeExpensesSpec: SpecModel = {
   features: [
@@ -139,7 +94,6 @@ export const acmeExpensesSpec: SpecModel = {
     },
   ],
   design: { designedFrom: {}, openComments: 0, specChanges: [] },
-  proposal: auditorProposal,
   files: {
     "requirements/prd.md": acmePrd,
     [featurePath("F1-submit-expenses")]: acmeF1,
@@ -237,7 +191,6 @@ export const triageAgentSpec: SpecModel = {
   ],
   documents: [],
   design: { designedFrom: {}, openComments: 0, specChanges: [] },
-  proposal: null,
   files: {
     "requirements/prd.md": triagePrd,
     [featurePath("F1-classify-tickets")]: triageF1,
@@ -252,7 +205,6 @@ export function freshSpec(productName: string): SpecModel {
     features: [],
     documents: [],
     design: { designedFrom: {}, openComments: 0, specChanges: [] },
-    proposal: null,
     files: {
       "requirements/prd.md": `# ${productName}\n\n## Features\n\nThe agent proposes features once it has read your brief.\n`,
       "requirements/product-wide.md": "# Product-wide\n\nRules that apply to more than one feature.\n",

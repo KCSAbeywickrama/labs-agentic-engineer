@@ -78,8 +78,8 @@ export function cardTitle(card: ProjectCard): string {
 /**
  * What a message sent from here would be about, for the line above the
  * composer: the design card talks about the design review; a feature open in
- * the spec card narrows it to that feature, and a change reaching past it
- * comes back as a proposal; everywhere else in a project, the whole product.
+ * the spec card narrows it to that feature, and a change reaching past it is
+ * made there too; everywhere else in a project, the whole product.
  */
 export function chatTopic(
   card: ProjectCard | null,
@@ -87,7 +87,7 @@ export function chatTopic(
 ): { topic: string; note: string | null } {
   if (card === "design") return { topic: "the design review", note: null };
   if (card === "spec" && openFeature) {
-    return { topic: openFeature, note: "A change to other features comes back as a proposal." };
+    return { topic: openFeature, note: "A change that reaches other features is made there too." };
   }
   return { topic: "the whole product", note: null };
 }

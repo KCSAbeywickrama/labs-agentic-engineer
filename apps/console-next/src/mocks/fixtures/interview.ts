@@ -399,7 +399,7 @@ export function scriptTurn(req: TurnRequest): ScriptedTurn {
     display: text,
     ...new Script()
       .pause(500)
-      .say(`Noted for ${about}. A change that reaches other features comes back to you as a proposal first.`)
+      .say(`Noted for ${about}. A change that reaches other features is made there too, and I'll say which.`)
       .end(),
     progress,
   };

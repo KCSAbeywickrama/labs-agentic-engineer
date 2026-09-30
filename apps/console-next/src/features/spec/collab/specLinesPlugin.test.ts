@@ -22,9 +22,9 @@ import { yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
 import { markdownToNode, setDocFile, setDocFileAsAgent } from "@aep/collab-doc";
 import { parseLine } from "../model/ids";
 import { blockingEntries } from "../model/questions";
-import { docLines } from "./docLines";
+import { docLines, type DocLine } from "./docLines";
 import { specSchema } from "./specSchema";
-import { lineMarks, type LineMark } from "./specLinesPlugin";
+import { FRESH_MS, lineMarks, type LineMark } from "./specLinesPlugin";
 
 // Decoration ranges, on a document parsed by the same pipeline the room uses:
 // what each range covers is checked by the text it spans.
@@ -58,7 +58,7 @@ describe("lineMarks", () => {
       ["assumed", "assumed"],
       ["actions", ""],
     ]);
-    expect(marks[0]).toMatchObject({ lineId: null, assumed: true, proposed: false });
+    expect(marks[0]).toMatchObject({ lineId: null, assumed: true });
     expect(marks[2]).toMatchObject({ body: "A rejected claim goes back to the employee." });
   });
 
@@ -68,28 +68,40 @@ describe("lineMarks", () => {
       ["line", "One Xero organisation? blocking\nOne for every claim.\nOne per country."],
       ["blocking", "blocking"],
     ]);
-    expect(marks[0]).toMatchObject({ blocking: true, assumed: false, proposed: false });
+    expect(marks[0]).toMatchObject({ blocking: true, assumed: false });
   });
 
   it("draws a blocking tag outside Open Questions as nothing but emphasis", () => {
     expect(marksOf("## Decisions\n\n- Claims go to Xero. *blocking*\n")).toEqual([]);
   });
 
-  it("draws a line of the agent's pending proposal as proposed, with no actions of its own", () => {
+  it("washes what the agent has just written, and nothing once it is older than FRESH_MS", () => {
     const doc = new Y.Doc();
     setDocFile(doc, "f.md", "- F2.5 As finance, I approve.\n");
+    const at = "2026-09-30T12:00:00.000Z";
     setDocFileAsAgent(doc, "f.md", "- F2.5 As finance, I approve.\n- F2.6 As an auditor, I read it. *assumed*\n", "test", {
-      agent: "spec-agent",
-      at: "t1",
+      agent: "Spec Agent",
+      at,
     });
     const pm = yXmlFragmentToProseMirrorRootNode(doc.getXmlFragment("f.md"), specSchema);
-    const [settled, proposed] = docLines(pm);
-    expect(settled!.proposed).toBe(false);
-    const marks = lineMarks(proposed!, parseLine(proposed!.text, proposed!.emphasis));
-    expect(marks.map((m) => m.kind)).toEqual(["line", "sid", "assumed", "proposed"]);
-    expect(marks[0]).toMatchObject({ lineId: "F2.6", proposed: true });
-    // The tag sits at the end of the line's words.
-    expect(marks.at(-1)).toMatchObject({ kind: "proposed", at: proposed!.to - 1 });
+    const [settled, written] = docLines(pm);
+    const writtenAt = Date.parse(at);
+    const fresh = (line: DocLine, now: number) =>
+      lineMarks(line, parseLine(line.text, line.emphasis), false, now).filter((m) => m.kind === "fresh");
+    expect(fresh(settled!, writtenAt + 1000)).toEqual([]);
+    expect(fresh(written!, writtenAt + 1000)).toEqual([{ kind: "fresh", from: written!.posAt(0), to: written!.posAt(written!.text.length) }]);
+    expect(fresh(written!, writtenAt + FRESH_MS)).toEqual([]);
+    // Written, not proposed: an assumed line the agent wrote offers its actions at once.
+    expect(lineMarks(written!, parseLine(written!.text, written!.emphasis)).map((m) => m.kind)).toContain("actions");
+  });
+
+  it("draws a Needs or Applies to clause as a quiet tag", () => {
+    const doc = markdownToNode("- P1 Every edit is logged. Applies to: all.\n");
+    const [line] = docLines(doc);
+    const marks = lineMarks(line!, parseLine(line!.text, line!.emphasis));
+    const clause = marks.find((m) => m.kind === "clause");
+    expect(clause).toBeDefined();
+    expect(doc.textBetween((clause as { from: number }).from, (clause as { to: number }).to)).toBe("Applies to: all.");
   });
 
   it("covers the whole list item for the line, and marks a moved line's old ID", () => {

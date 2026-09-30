@@ -78,7 +78,7 @@ describe("chatTopic", () => {
   it("narrows to the feature open in the spec card, and says where other changes go", () => {
     expect(chatTopic("spec", "Approvals")).toEqual({
       topic: "Approvals",
-      note: "A change to other features comes back as a proposal.",
+      note: "A change that reaches other features is made there too.",
     });
   });
 

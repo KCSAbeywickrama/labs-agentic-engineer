@@ -25,13 +25,13 @@ import type { BuiltLine } from "../api/builds";
 // live spec. A line with its own ID (a story, "F2.4") is followed by its ID,
 // so rewording it is an edit; a line without one (a decision) is known only
 // by its words, so rewording it retires the old line and adds a new one.
-// Headings and a pending proposal's lines are not the spec, and dropping an
-// `*assumed*` tag changes no words: none of them is a change.
+// Headings are not the spec, and dropping an `*assumed*` tag changes no
+// words: neither is a change.
 
 /** A feature file's lines as a build reads them. */
 export function builtLines(lines: LineBlock[]): BuiltLine[] {
   return lines
-    .filter((l) => !l.proposed && l.kind !== "heading")
+    .filter((l) => l.kind !== "heading")
     .map((l) => ({ id: parseLine(l.text, l.emphasis).lead?.id ?? null, words: lineWords(l) }))
     .filter((l) => l.words.length > 0);
 }

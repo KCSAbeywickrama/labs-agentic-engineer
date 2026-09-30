@@ -35,8 +35,6 @@ export interface LineBlock {
   text: string;
   /** Italic runs, as offsets into `text`. The `*assumed*` tag is one. */
   emphasis: { start: number; end: number }[];
-  /** The agent wrote it as part of a change still waiting for the user's review. */
-  proposed?: boolean;
 }
 
 export interface Span {
@@ -66,6 +64,8 @@ export interface LineParts {
   needs: string[];
   /** A product-wide item's `Applies to:` clause: feature IDs, or "all"; null when it has none. */
   appliesTo: string[] | "all" | null;
+  /** Where the `Needs:` and `Applies to:` clauses sit, for drawing them as quiet tags. */
+  clauses: Span[];
   /** The line's words alone: no ID, no "(was …)", no sources, no clause, no tag. */
   body: string;
 }
@@ -147,7 +147,8 @@ export function parseLine(text: string, emphasis: Span[] = []): LineParts {
   }
   body += text.slice(at);
 
-  return { lead, was, refs, sources, assumed, blocking, needs, appliesTo, body: body.replace(/\s+/g, " ").trim() };
+  const clauses = [needsClause?.span, appliesClause?.span].filter((s): s is Span => s !== undefined);
+  return { lead, was, refs, sources, assumed, blocking, needs, appliesTo, clauses, body: body.replace(/\s+/g, " ").trim() };
 }
 
 /** Where an ID points: a feature (its file) or a line in a file. */

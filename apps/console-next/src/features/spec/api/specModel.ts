@@ -22,9 +22,8 @@ import { env } from "../../../config/env";
 // PROVISIONAL — MOCK-ONLY until S3 lands the spec model's contract.
 //
 // The spec workspace needs the spec model: each feature's stage, which
-// product-wide items apply where, the source documents, the agent's pending
-// proposal, and the markdown of every file. The user accepts or discards a
-// proposal here too. Nothing in aep-api serves that yet (backend item S3). Until it does, the shape lives here, behind this one module, and only
+// product-wide items apply where, the source documents, and the markdown of
+// every file. Nothing in aep-api serves that yet. Until it does, the shape lives here, behind this one module, and only
 // MSW answers it (mocks/handlers/spec.ts, on a path that is not in the
 // contract). When S3 ships, this module becomes a call on the generated client
 // with contract types, and the handler and these hand-written types go.
@@ -35,10 +34,9 @@ import { env } from "../../../config/env";
 // live documents (model/workspace.ts), so an edit shows in them at once and
 // nothing says the same thing twice.
 //
-// `files` and a proposal's `writes` are the stand-in for the collab room: the
-// local doc is seeded from them (collab/specDoc.ts). When the provider is
-// wired, the room holds the files and the agent's marked writes, and both
-// fields are deleted.
+// `files` is the stand-in for the collab room: the local doc is seeded from it
+// (collab/specDoc.ts). When the provider is wired, the room holds the files
+// and the agent's marked writes, and the field is deleted.
 //
 // Plain `fetch`, as in builds/api/builds.ts: the path is not in the contract,
 // and no real server answers it, so there is no token to attach.
@@ -79,31 +77,6 @@ export interface AgentWriter {
 }
 
 /**
- * A change the agent proposes across files, waiting for the user. Its lines
- * are already in the documents, marked as the agent's pending writes, so the
- * user can edit them before accepting. Accept keeps them and discard drops
- * them, both in the doc (collab/specEdits.ts).
- */
-export interface Proposal {
-  id: string;
-  title: string;
-  /** "3 changes across Actors, Approvals and Payroll export". */
-  summary: string;
-  /** Whose marks in the doc are this proposal's lines. */
-  by: AgentWriter;
-  /** Room paths of the files it changes, in rail order. */
-  files: string[];
-  /** Fog entries it takes out of the Fog on accept, and what each becomes. */
-  leavesFog: { text: string; becomes: string }[];
-  /** Product-wide items it adds, with their reach once accepted. */
-  productWide: ProductWideItem[];
-  /** The agent's writes (room path → markdown as the agent wrote it). The collab room replaces this. */
-  writes: Record<string, string>;
-}
-
-export type ProposalVerdict = "accept" | "discard";
-
-/**
  * A spec line a design comment changed: the comment was really a
  * requirement, so addressing it rewrote the line. It stays marked in the spec
  * until the comment is resolved; `seen` turns true once the user has opened
@@ -136,17 +109,12 @@ export interface SpecModel {
   features: SpecFeature[];
   documents: SourceDocument[];
   design: DesignSummary;
-  /** The agent's pending cross-file change; at most one at a time. */
-  proposal: Proposal | null;
   /** Markdown by room path ("requirements/prd.md"). The collab room replaces this. */
   files: Record<string, string>;
 }
 
 /** The provisional path MSW serves; `:projectName` is the project's slug. */
 export const PROVISIONAL_SPEC_PATH = "/api/v1/projects/:projectName/provisional/spec";
-
-/** Accepting or discarding a proposal: POST, answered with the model. */
-export const PROVISIONAL_PROPOSAL_PATH = `${PROVISIONAL_SPEC_PATH}/proposals/:proposalId/:verdict`;
 
 /** The user has seen the spec lines design comments changed: POST, answered with the model. */
 export const PROVISIONAL_SPEC_CHANGES_SEEN_PATH = `${PROVISIONAL_SPEC_PATH}/design-changes/seen`;
@@ -170,19 +138,6 @@ export function useSpecModel(projectName: string) {
   return useQuery({
     queryKey: specKey(projectName),
     queryFn: async () => readModel(await fetch(url(PROVISIONAL_SPEC_PATH, { projectName })), "Couldn't load the spec"),
-  });
-}
-
-/** Accept or discard the pending proposal; the model comes back without it. */
-export function useSettleProposal(projectName: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: { proposalId: string; verdict: ProposalVerdict }) =>
-      readModel(
-        await fetch(url(PROVISIONAL_PROPOSAL_PATH, { projectName, ...input }), { method: "POST" }),
-        input.verdict === "accept" ? "Couldn't accept the change" : "Couldn't discard the change",
-      ),
-    onSuccess: (model) => queryClient.setQueryData(specKey(projectName), model),
   });
 }
 

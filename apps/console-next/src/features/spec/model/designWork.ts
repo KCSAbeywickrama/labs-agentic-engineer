@@ -28,9 +28,9 @@ import { blockingQuestions } from "./questions";
 // was designed from (its basis): the words of its own file and of every
 // product-wide item that reaches it. When the live spec no longer reads the
 // same, that feature's design is out of date, and only it goes into "Update
-// design". A new product-wide item marks every feature it applies to. Lines of
-// a pending proposal are not the spec until accepted, and confirming an
-// assumed line (dropping the tag) changes no words, so neither moves a basis.
+// design". A new product-wide item marks every feature it applies to.
+// Confirming an assumed line (dropping the tag) changes no words, so it moves
+// no basis.
 
 type Lines = ReadonlyMap<string, LineBlock[]>;
 
@@ -46,12 +46,11 @@ export function designBasis(
   lines: Lines,
   productWide: ProductWideItem[],
 ): string {
-  const own = (lines.get(feature.path) ?? []).filter((l) => !l.proposed).map(lineWords);
+  const own = (lines.get(feature.path) ?? []).map(lineWords);
   const reach = new Set(
     productWide.filter((p) => p.appliesTo === "all" || p.appliesTo.includes(feature.id)).map((p) => p.id),
   );
   const shared = (lines.get(PRODUCT_WIDE_PATH) ?? [])
-    .filter((l) => !l.proposed)
     .filter((l) => {
       const lead = parseLine(l.text, l.emphasis).lead;
       return lead !== null && reach.has(lead.id);

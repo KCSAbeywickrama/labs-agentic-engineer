@@ -52,7 +52,7 @@ export function InterviewFollowUp({ projectName, path }: { projectName: string; 
   const feature = workspace.features.find((f) => f.path === path);
   if (!feature) return null;
 
-  const assumed = (lines.get(path) ?? []).filter((l) => !l.proposed && parseLine(l.text, l.emphasis).assumed);
+  const assumed = (lines.get(path) ?? []).filter((l) => parseLine(l.text, l.emphasis).assumed);
   // The next feature to interview, by Next up's own rule.
   const nextFeature = workspace.features.find(
     (f) =>

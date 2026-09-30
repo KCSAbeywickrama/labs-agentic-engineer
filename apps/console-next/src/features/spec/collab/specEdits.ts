@@ -20,16 +20,13 @@ import type { Node as PmNode } from "@tiptap/pm/model";
 import { Transform } from "@tiptap/pm/transform";
 import type * as Y from "yjs";
 import { updateYFragment, yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
-import { AGENT_INSERTION, markdownToNode } from "@aep/collab-doc";
-import type { AgentWriter, Proposal, ProposalVerdict } from "../api/specModel";
-import { PRD_PATH } from "../model/files";
 import { parseLine } from "../model/ids";
 import { blockingEntries } from "../model/questions";
 import { docLines, type DocLine } from "./docLines";
 import { specSchema } from "./specSchema";
 
 // The edits the user makes to the spec by acting on what the agent left in it
-// (a line to confirm, a question answered, a proposal settled), as steps on a
+// (a line to confirm, a question answered), as steps on a
 // ProseMirror Transform. The editor runs them on its own transaction when the
 // action is in the open file; `editFile` runs them on a file's fragment
 // directly when it is not. Either way the change lands in the Y.Doc, so once
@@ -110,54 +107,6 @@ export function appendToSection(tr: Transform, title: string, text: string): voi
   tr.insert(found.headingEnd, nodes.bulletList!.create(null, item));
 }
 
-/** Delete a section's list entry by its words. False when there is no such entry. */
-export function deleteSectionItem(tr: Transform, title: string, text: string): boolean {
-  const found = section(tr.doc, title);
-  if (!found || found.next?.type.name !== "bulletList") return false;
-  const listEnd = found.nextPos + found.next.nodeSize;
-  const line = docLines(tr.doc).find(
-    (l) => l.kind === "listItem" && l.from > found.nextPos && l.to < listEnd && l.text.trim() === text.trim(),
-  );
-  if (!line) return false;
-  deleteLine(tr, line);
-  return true;
-}
-
-function sameWriter(a: AgentWriter, b: AgentWriter): boolean {
-  return a.agent === b.agent && a.at === b.at;
-}
-
-/** Accept a writer's pending lines: the marks go, the words (the user's edits to them too) stay. */
-export function acceptAgentWrites(tr: Transform, by: AgentWriter): void {
-  const type = tr.doc.type.schema.marks[AGENT_INSERTION];
-  if (!type) return;
-  tr.doc.descendants((node, pos) => {
-    if (!node.isText) return;
-    const mark = node.marks.find((m) => m.type === type);
-    if (mark && sameWriter({ agent: String(mark.attrs.agent), at: String(mark.attrs.at) }, by)) {
-      tr.removeMark(pos, pos + node.nodeSize, mark);
-    }
-  });
-}
-
-/**
- * Discard a writer's pending lines. A line the writer began is its line, and
- * goes whole, the user's edits in it with it; in a line it only added to,
- * just the added text goes.
- */
-export function discardAgentWrites(tr: Transform, by: AgentWriter): void {
-  const lines = docLines(tr.doc).filter((l) => l.agentRuns.some((r) => sameWriter(r.by, by)));
-  // From the end, so each line's positions still hold when it is reached.
-  for (const line of lines.reverse()) {
-    const runs = line.agentRuns.filter((r) => sameWriter(r.by, by));
-    if (runs[0]?.start === 0) {
-      deleteLine(tr, line);
-      continue;
-    }
-    for (const run of runs.reverse()) tr.delete(line.posAt(run.start), line.posAt(run.end));
-  }
-}
-
 /**
  * A markdown file's fragment, or null when the doc has no such file. Never
  * creates one: opening a file is not writing it.
@@ -192,44 +141,6 @@ export function editFile(
   return true;
 }
 
-/** The document without the agent's review marks: what its markdown reads back as. */
-function withoutAgentMarks(doc: PmNode): PmNode {
-  const type = doc.type.schema.marks[AGENT_INSERTION];
-  return type ? new Transform(doc).removeMark(0, doc.content.size, type).doc : doc;
-}
-
-/**
- * Replace only the span where the document and `next` differ. The span is
- * found with the review marks set aside (`next` comes from markdown, which
- * carries none), so a pending line the change does not reach keeps its mark.
- */
-function replaceChangedSpan(tr: Transform, next: PmNode): void {
-  const current = withoutAgentMarks(tr.doc);
-  const start = current.content.findDiffStart(next.content);
-  if (start === null) return;
-  let { a: endA, b: endB } = current.content.findDiffEnd(next.content)!;
-  // Repeated content can put the ends before the start; the span still has to cover the change.
-  const overlap = start - Math.min(endA, endB);
-  if (overlap > 0) {
-    endA += overlap;
-    endB += overlap;
-  }
-  tr.replace(start, endA, next.slice(start, endB));
-}
-
-/**
- * Bring a markdown file of the doc to new content written by someone other
- * than the user in the editor (the agent), as the smallest edit: only the span
- * that changed is replaced, so everything else in the file stays as it is,
- * the user's text and another writer's pending lines, marks and all. The new
- * words carry no review mark: this is a write, not a proposal. False when
- * the file is not in the doc or nothing changed.
- */
-export function rewriteFile(doc: Y.Doc, path: string, markdown: string, origin: unknown): boolean {
-  const next = specSchema.nodeFromJSON(markdownToNode(markdown).toJSON());
-  return editFile(doc, path, (tr) => replaceChangedSpan(tr, next), origin);
-}
-
 /**
  * Settle an assumed line of a file from outside its editor (the chat's walk
  * of what an interview assumed): keep drops the `*assumed*` tag, remove
@@ -240,7 +151,7 @@ export function rewriteFile(doc: Y.Doc, path: string, markdown: string, origin: 
 export function settleAssumedLine(doc: Y.Doc, path: string, text: string, action: "keep" | "remove"): boolean {
   return editFile(doc, path, (tr) => {
     const line = docLines(tr.doc).find(
-      (l) => !l.proposed && l.text === text && parseLine(l.text, l.emphasis).assumed !== null,
+      (l) => l.text === text && parseLine(l.text, l.emphasis).assumed !== null,
     );
     if (!line) return;
     if (action === "keep") removeAssumedTag(tr, line);
@@ -263,26 +174,5 @@ export function answerBlockingQuestion(doc: Y.Doc, path: string, question: strin
     if (!entry) return;
     deleteLine(tr, entry.line);
     appendToSection(tr, "Decisions", words);
-  });
-}
-
-/**
- * Settle a proposal in the doc. Accept keeps its lines, as the user left
- * them, and takes the ideas it shapes out of the Fog; discard drops its lines
- * and leaves the Fog as it was.
- */
-export function settleProposalInDoc(
-  doc: Y.Doc,
-  proposal: Pick<Proposal, "by" | "files" | "leavesFog">,
-  verdict: ProposalVerdict,
-): void {
-  for (const path of proposal.files) {
-    editFile(doc, path, (tr) =>
-      verdict === "accept" ? acceptAgentWrites(tr, proposal.by) : discardAgentWrites(tr, proposal.by),
-    );
-  }
-  if (verdict !== "accept") return;
-  editFile(doc, PRD_PATH, (tr) => {
-    for (const { text } of proposal.leavesFog) deleteSectionItem(tr, "Fog", text);
   });
 }

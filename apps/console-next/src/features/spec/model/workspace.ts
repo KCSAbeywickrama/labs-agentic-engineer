@@ -89,11 +89,10 @@ export function isSmallProduct(featureCount: number): boolean {
 }
 
 /**
- * Lines still tagged `*assumed*`: each one is the user's to confirm. A line of
- * a pending proposal is not counted until the proposal is accepted.
+ * Lines still tagged `*assumed*`: each one is the user's to confirm.
  */
 export function countAssumed(lines: LineBlock[]): number {
-  return lines.filter((l) => !l.proposed && parseLine(l.text, l.emphasis).assumed !== null).length;
+  return lines.filter((l) => parseLine(l.text, l.emphasis).assumed !== null).length;
 }
 
 /** The list entries under a document's `## <heading>`, in order. */
@@ -243,8 +242,6 @@ export function deriveWorkspace(model: SpecModel, lines: ReadonlyMap<string, Lin
     files.map((f) => ({ fileKey: f.key, lines: lines.get(f.path) ?? [] })),
   );
   const fog = sectionItems(lines.get(PRD_PATH) ?? [], "Fog");
-  // An idea a pending proposal takes out of the Fog is being shaped already.
-  const leaving = new Set(model.proposal?.leavesFog.map((l) => l.text) ?? []);
   return {
     features,
     productWide,
@@ -256,7 +253,7 @@ export function deriveWorkspace(model: SpecModel, lines: ReadonlyMap<string, Lin
       features,
       design,
       openComments: model.design.openComments,
-      fog: fog.filter((text) => !leaving.has(text)),
+      fog,
     }),
     small: isSmallProduct(features.length),
   };

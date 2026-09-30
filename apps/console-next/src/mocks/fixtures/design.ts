@@ -493,7 +493,6 @@ function slug(text: string): string {
 /** An acceptance file written from a feature's stories: one rule per story, tagged with it. */
 function storiesFeature(feature: SpecFeature, lines: LineBlock[]): string {
   const rules = lines
-    .filter((l) => !l.proposed)
     .map((l) => parseLine(l.text, l.emphasis))
     .filter((p) => p.lead?.id.startsWith(`${feature.id}.`))
     .map(

@@ -70,17 +70,19 @@ const documentSx = {
   "& .aep-line--assumed": { bgcolor: soft("warning", 0.14) },
   // A blocking question and its options: the warning's wash, a rule down the left.
   "& .aep-line--blocking": { bgcolor: soft("warning", 0.14), boxShadow: "inset 2px 0 0 var(--oxygen-palette-warning-main)" },
-  // The agent's pending proposal: its colour, a rule down the left.
-  "& .aep-line--proposed": { bgcolor: soft("info"), boxShadow: "inset 2px 0 0 var(--oxygen-palette-info-main)" },
+  // What the agent just wrote: a green wash that fades as it lands (FRESH_MS).
+  "@keyframes aep-fresh": { from: { backgroundColor: soft("success", 0.28) }, to: { backgroundColor: "transparent" } },
+  "& .aep-fresh": { borderRadius: 0.5, animation: "aep-fresh 5s ease-out forwards" },
   // Changed by a design comment: the accent's wash, a rule down the left.
   "& .aep-line--design": { bgcolor: soft("primary"), boxShadow: "inset 2px 0 0 var(--oxygen-palette-primary-main)" },
   "& .aep-dtag": { ...ptagSx, color: "primary.main", display: "inline-block" },
-  "& .aep-ptag": ptagSx,
   "& .aep-asm": { display: "inline-flex", flexWrap: "wrap", gap: 0.5, ml: 0.75, verticalAlign: "baseline", "& button": pillSx("warning") },
   "& .aep-line--by-you": { textDecoration: "underline dotted var(--oxygen-palette-success-main)", textUnderlineOffset: "4px" },
   "& .aep-you": { fontSize: "0.6875rem", color: "success.main", whiteSpace: "nowrap", ml: 1, textDecoration: "none", display: "inline-block" },
   "& .aep-sid": { fontFamily: "monospace", fontSize: "0.75rem", color: "text.secondary" },
   "& .aep-was": { fontSize: "0.75rem", color: "text.secondary" },
+  // A Needs or Applies to clause: quiet words, not a tag, as the IDs in it are links.
+  "& .aep-clause": { fontSize: "0.75rem", color: "text.secondary" },
   "& .aep-source": {
     fontFamily: "monospace",
     fontSize: "0.6875rem",
@@ -93,7 +95,6 @@ const documentSx = {
   },
   "& .aep-assumed, & .aep-blocking": { fontSize: "0.75rem", color: "warning.main" },
   "& .aep-ref": quietLinkSx,
-  "& .aep-aps": { fontSize: "0.6875rem", color: "text.secondary", ml: 1, whiteSpace: "nowrap" },
   "& .aep-hidden": { display: "none" },
   "& .aep-fog": {
     listStyle: "none",
@@ -103,8 +104,6 @@ const documentSx = {
     gap: 0.75,
     "& > li": { border: "1px dashed", borderColor: "divider", borderRadius: 2, px: 1.5, py: 1, color: "text.secondary" },
     "& > li + li": { mt: 0 },
-    "& > li.aep-fog-gone": { textDecoration: "line-through", borderColor: "info.main", bgcolor: soft("info") },
-    "& .aep-ptag": { ...ptagSx, textDecoration: "none", display: "inline-block" },
   },
   // The feature rows are the app's own component, not document text: none of
   // the document's list or link styling reaches them.
@@ -131,8 +130,6 @@ export function SpecEditor({
   onOpen,
   featureRows,
   hideFog = false,
-  appliesTo = null,
-  leavingFog = null,
   designChanged = null,
 }: {
   fragment: Y.XmlFragment;
@@ -144,8 +141,6 @@ export function SpecEditor({
   /** Drawn in place of the Features list (the product page). */
   featureRows?: ReactNode;
   hideFog?: boolean;
-  appliesTo?: ReadonlyMap<string, string[] | "all"> | null;
-  leavingFog?: ReadonlyMap<string, string> | null;
   designChanged?: ReadonlyMap<string, string> | null;
 }) {
   const withRows = featureRows !== undefined;
@@ -156,12 +151,12 @@ export function SpecEditor({
         StarterKit.configure({ undoRedo: false, link: { openOnClick: false } }),
         AgentInsertion,
         Collaboration.configure({ fragment }),
-        SpecLines.configure({ featureRows: withRows, hideFog, appliesTo, leavingFog, designChanged }),
+        SpecLines.configure({ featureRows: withRows, hideFog, designChanged }),
         AssumedLines,
       ],
       onBlur: ({ editor: blurred }) => leaveAssumedEdit(blurred.view),
     },
-    [fragment, withRows, hideFog, appliesTo, leavingFog, designChanged],
+    [fragment, withRows, hideFog, designChanged],
   );
 
   // The rows draw into the slot the decorations leave in the document. The

@@ -68,12 +68,6 @@ describe("designBasis", () => {
     expect(designBasis(f2, confirmed, productWide)).toBe(designBasis(f2, spec(), productWide));
   });
 
-  it("leaves out a pending proposal's lines", () => {
-    const pending = spec({
-      [F2_PATH]: [...spec().get(F2_PATH)!, { ...li("F2.6 As an auditor, I see every decision."), proposed: true }],
-    });
-    expect(designBasis(f2, pending, productWide)).toBe(designBasis(f2, spec(), productWide));
-  });
 });
 
 describe("designWork", () => {

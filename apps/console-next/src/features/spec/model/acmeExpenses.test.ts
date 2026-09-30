@@ -36,7 +36,7 @@ function workspaceOf(model: SpecModel) {
 }
 
 describe("Acme Expenses, seeded", () => {
-  const { doc, workspace } = workspaceOf(acmeExpensesSpec);
+  const { workspace } = workspaceOf(acmeExpensesSpec);
 
   it("reads Approvals' two assumed lines as 2 to confirm, and Payroll export as blocked", () => {
     const chips = Object.fromEntries(workspace.features.map((f) => [f.id, f.chips.map((c) => c.label)]));
@@ -49,19 +49,12 @@ describe("Acme Expenses, seeded", () => {
     expect(resolveId(workspace.index, "F2.3")).toMatchObject({ entry: { id: "F5.1", fileKey: "F5" }, retiredFrom: "F2.3" });
   });
 
-  it("works out Next up from the documents, leaving out the Fog idea the proposal shapes", () => {
+  it("works out Next up from the documents", () => {
     expect(workspace.fog).toHaveLength(3);
-    expect(workspace.nextUp.map((i) => i.kind)).toEqual(["blocking", "confirm", "interview", "interview", "design", "fog", "fog"]);
+    expect(workspace.nextUp.map((i) => i.kind)).toEqual(["blocking", "confirm", "interview", "interview", "design", "fog", "fog", "fog"]);
     expect(workspace.small).toBe(false);
   });
 
-  it("seeds the proposal's lines as the agent's pending writes, not yet to confirm", () => {
-    const f2 = readSpecLines(doc).get("requirements/features/F2-approvals.md")!;
-    expect(f2.filter((l) => l.proposed).map((l) => l.text)).toEqual([
-      "F2.6 As an auditor, I see every approval decision with its reason. assumed",
-    ]);
-    expect(resolveId(workspace.index, "P5")?.entry.fileKey).toBe("product-wide");
-  });
 });
 
 describe("Triage agent, seeded", () => {

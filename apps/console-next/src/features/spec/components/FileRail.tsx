@@ -52,15 +52,12 @@ function RailItem({
   fileKey,
   current,
   sub = false,
-  proposed = false,
   children,
 }: {
   projectName: string;
   fileKey: string;
   current: string;
   sub?: boolean;
-  /** The pending proposal changes this file: its name takes the proposal colour. */
-  proposed?: boolean;
   children: ReactNode;
 }) {
   const selected = fileKey === current;
@@ -86,7 +83,6 @@ function RailItem({
         fontWeight: selected ? 600 : 400,
         bgcolor: selected ? soft("primary") : "transparent",
         "&:hover": { bgcolor: selected ? soft("primary") : "action.hover" },
-        ...(proposed ? { "& .rail-name": { color: "info.main" } } : {}),
       }}
     >
       {children}
@@ -108,16 +104,14 @@ function FeatureItem({
   feature,
   projectName,
   current,
-  proposed,
 }: {
   feature: FeatureView;
   projectName: string;
   current: string;
-  proposed: boolean;
 }) {
   const state = railState(feature);
   return (
-    <RailItem projectName={projectName} fileKey={feature.id} current={current} sub proposed={proposed}>
+    <RailItem projectName={projectName} fileKey={feature.id} current={current} sub>
       <Box component="span" sx={{ fontFamily: "monospace", fontSize: "0.72rem", width: 22, flexShrink: 0, color: current === feature.id ? "primary.main" : "text.secondary" }}>
         {feature.id}
       </Box>
@@ -138,14 +132,11 @@ export function FileRail({
   features,
   documents,
   current,
-  proposed,
 }: {
   projectName: string;
   features: FeatureView[];
   documents: SourceDocument[];
   current: string;
-  /** Keys of the files the pending proposal changes. */
-  proposed: string[];
 }) {
   return (
     <Box
@@ -167,21 +158,16 @@ export function FileRail({
       }}
     >
       <Eyebrow>Requirements</Eyebrow>
-      <RailItem projectName={projectName} fileKey={PRODUCT_KEY} current={current} proposed={proposed.includes(PRODUCT_KEY)}>
+      <RailItem projectName={projectName} fileKey={PRODUCT_KEY} current={current}>
         <Name>Product</Name>
       </RailItem>
       {features.length > 0 && (
         <Typography sx={{ fontSize: "0.75rem", color: "text.secondary", px: 1.25, pt: 0.75, pb: 0.25 }}>Features</Typography>
       )}
       {features.map((f) => (
-        <FeatureItem key={f.id} feature={f} projectName={projectName} current={current} proposed={proposed.includes(f.id)} />
+        <FeatureItem key={f.id} feature={f} projectName={projectName} current={current} />
       ))}
-      <RailItem
-        projectName={projectName}
-        fileKey={PRODUCT_WIDE_KEY}
-        current={current}
-        proposed={proposed.includes(PRODUCT_WIDE_KEY)}
-      >
+      <RailItem projectName={projectName} fileKey={PRODUCT_WIDE_KEY} current={current}>
         <Name>Product-wide</Name>
       </RailItem>
       {documents.length > 0 && <Eyebrow>Documents</Eyebrow>}

@@ -33,7 +33,7 @@ import { parseLine, type LineBlock } from "./ids";
 // (collab/specEdits.ts), so no blocking state lives outside the file. A tag
 // with no options is still a question, answered in the user's own words;
 // options under an entry with no tag are an ordinary open question, which
-// gates nothing. A line of the agent's pending proposal counts once accepted.
+// gates nothing.
 
 export const OPEN_QUESTIONS = "Open Questions";
 
@@ -74,7 +74,7 @@ export function blockingEntries<L extends LineBlock>(lines: readonly L[]): Block
     if (open && depth > open.depth) continue;
     open = null;
     const parts = parseLine(line.text, line.emphasis);
-    if (line.proposed || !parts.blocking) continue;
+    if (!parts.blocking) continue;
     const entry: BlockingEntry<L> = { question: parts.body, options: [], line };
     out.push(entry);
     open = { entry, depth };

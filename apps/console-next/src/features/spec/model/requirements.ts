@@ -27,7 +27,7 @@ import { blockingQuestions, type BlockingQuestion } from "./questions";
 // skills/prd-contract, and are held to one fixture:
 // packages/contracts/requirements/acme-expenses and the parse it must yield
 // (expected.json there). This one reads the LIVE lines, so an edit shows at
-// once; a line of a pending proposal is not the spec until it is accepted.
+// once.
 
 export interface RequirementsStory {
   id: string;
@@ -77,12 +77,11 @@ interface Section {
   lines: LineBlock[];
 }
 
-/** A file's title and its `## ` sections, leaving out a pending proposal's lines. */
+/** A file's title and its `## ` sections. */
 function sectionsOf(lines: readonly LineBlock[]): { title: string; sections: Section[] } {
   let title = "";
   const sections: Section[] = [];
   for (const line of lines) {
-    if (line.proposed) continue;
     if (line.kind === "heading" && line.level === 1 && !title && sections.length === 0) {
       title = line.text.trim();
     } else if (line.kind === "heading" && (line.level ?? 1) <= 2) {

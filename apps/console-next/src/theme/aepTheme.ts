@@ -33,7 +33,6 @@ interface Scheme {
   success: string;
   error: string;
   warning: string;
-  /** Proposals: a change the agent suggests, not yet in the document. */
   info: string;
   /** Contrast text on the status colours. */
   onStatus: string;

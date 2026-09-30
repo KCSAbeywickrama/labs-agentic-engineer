@@ -20,7 +20,7 @@ import type { ReactNode } from "react";
 import { Box } from "@wso2/oxygen-ui";
 import type { ChipTone } from "../model/workspace";
 
-/** A soft wash of a palette colour, from its CSS-variable channel. `info` is the proposal colour. */
+/** A soft wash of a palette colour, from its CSS-variable channel. */
 export function soft(tone: ChipTone | "info", alpha = 0.12): string {
   return `rgba(var(--oxygen-palette-${tone}-mainChannel) / ${alpha})`;
 }

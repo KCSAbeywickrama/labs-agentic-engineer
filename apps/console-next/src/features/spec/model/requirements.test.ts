@@ -42,7 +42,7 @@ function fixtureFiles(): Record<string, string> {
 
 function linesOf(files: Record<string, string>) {
   const doc = new Y.Doc();
-  seedSpecDoc(doc, { files, proposal: null });
+  seedSpecDoc(doc, { files });
   return readSpecLines(doc);
 }
 

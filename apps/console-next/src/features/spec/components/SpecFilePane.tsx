@@ -94,15 +94,6 @@ export function SpecFilePane({
   file: OpenFile;
   onOpen: (target: SpecTarget) => void;
 }) {
-  const appliesTo = useMemo(
-    () => new Map(workspace.productWide.map((p) => [p.id, p.appliesTo] as const)),
-    [workspace.productWide],
-  );
-  const leavingFog = useMemo(
-    () => (model.proposal ? new Map(model.proposal.leavesFog.map((l) => [l.text, l.becomes] as const)) : null),
-    [model.proposal],
-  );
-
   const featureId = file.kind === "feature" ? file.key : null;
   const designChanged = useMemo(
     () => (featureId ? designChangedLines(model.design.specChanges, featureId) : null),
@@ -132,7 +123,6 @@ export function SpecFilePane({
           {...editorProps}
           featureRows={<FeatureRows projectName={projectName} features={workspace.features} />}
           hideFog={workspace.small}
-          leavingFog={leavingFog}
         />
       </>
     );
@@ -145,7 +135,7 @@ export function SpecFilePane({
           <span>product-wide.md</span>
           <span>rules that apply to more than one feature</span>
         </DocKicker>
-        <SpecEditor key={file.path} {...editorProps} appliesTo={appliesTo} />
+        <SpecEditor key={file.path} {...editorProps} />
       </>
     );
   }

@@ -17,10 +17,8 @@
  */
 
 import { describe, expect, it } from "vitest";
-import * as Y from "yjs";
-import { markdownToNode, setDocFile, setDocFileAsAgent } from "@aep/collab-doc";
+import { markdownToNode } from "@aep/collab-doc";
 import { docLines } from "../collab/docLines";
-import { readSpecLines } from "../collab/useSpecLines";
 import { blockingEntries, blockingQuestions } from "./questions";
 
 // Read through the same pipeline the room uses (markdown → document → lines),
@@ -84,13 +82,6 @@ describe("blockingQuestions", () => {
     expect(blockingQuestions(linesOf(md))).toEqual([]);
   });
 
-  it("leaves out a question the agent proposes until the proposal is accepted", () => {
-    const doc = new Y.Doc();
-    const base = "## Open Questions\n\n1. Refund currency?\n";
-    setDocFile(doc, "f.md", base);
-    setDocFileAsAgent(doc, "f.md", `${base}2. ${XERO} *blocking*\n`, "test", { agent: "spec-agent", at: "t1" });
-    expect(blockingQuestions(readSpecLines(doc).get("f.md")!)).toEqual([]);
-  });
 
   it("keeps the entry's line, whose range covers its options", () => {
     const [entry] = blockingEntries(linesOf(`## Open Questions\n\n1. ${XERO} *blocking*\n   - One organisation.\n`));

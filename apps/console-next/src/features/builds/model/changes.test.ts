@@ -36,8 +36,8 @@ const v1 = builtLines([
 ]);
 
 describe("builtLines", () => {
-  it("keeps each line's own ID and words, without headings, the assumed tag, or a pending proposal", () => {
-    const lines = builtLines([h2("User Stories"), li(assumed, [tag]), { ...li("F2.6 Proposed."), proposed: true }]);
+  it("keeps each line's own ID and words, without headings or the assumed tag", () => {
+    const lines = builtLines([h2("User Stories"), li(assumed, [tag])]);
     expect(lines).toEqual([{ id: "F2.4", words: "F2.4 A deputy approves in my place." }]);
   });
 });

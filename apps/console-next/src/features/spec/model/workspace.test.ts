@@ -47,9 +47,6 @@ describe("countAssumed", () => {
     expect(countAssumed([li(tagged, [tag]), li(tagged), li("F2.4 A deputy approves. assumed", [{ start: 24, end: 31 }])])).toBe(2);
   });
 
-  it("leaves out a pending proposal's lines until it is accepted", () => {
-    expect(countAssumed([li(tagged, [tag]), { ...li(tagged, [tag]), proposed: true }])).toBe(1);
-  });
 });
 
 describe("sectionItems", () => {

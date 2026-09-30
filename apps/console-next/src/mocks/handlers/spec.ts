@@ -18,13 +18,12 @@
 
 import { http, HttpResponse } from "msw";
 import {
-  PROVISIONAL_PROPOSAL_PATH,
   PROVISIONAL_SPEC_CHANGES_SEEN_PATH,
   PROVISIONAL_SPEC_PATH,
   type SpecModel,
 } from "../../features/spec/api/specModel";
 import { liveDesign, saveDesign } from "../designState";
-import { liveSpec, specView } from "../specState";
+import { specView } from "../specState";
 
 // PROVISIONAL — mock-only until S3 lands the spec model's contract; see
 // features/spec/api/specModel.ts and mocks/specState.ts.
@@ -33,21 +32,6 @@ export const specHandlers = [
   http.get(`*${PROVISIONAL_SPEC_PATH}`, ({ params }) =>
     HttpResponse.json<SpecModel>(specView(String(params.projectName))),
   ),
-
-  http.post(`*${PROVISIONAL_PROPOSAL_PATH}`, ({ params }) => {
-    const model = liveSpec(String(params.projectName));
-    const proposal = model.proposal;
-    if (!proposal || proposal.id !== params.proposalId) {
-      return HttpResponse.json({ detail: "That change is no longer waiting." }, { status: 404 });
-    }
-    // Accepting needs no bookkeeping here: the proposal's lines are already in
-    // the documents, and product-wide reach is read from them.
-    if (params.verdict !== "accept" && params.verdict !== "discard") {
-      return HttpResponse.json({ detail: "Unknown verdict." }, { status: 400 });
-    }
-    model.proposal = null;
-    return HttpResponse.json<SpecModel>(specView(String(params.projectName)));
-  }),
 
   // The user opened the Spec tab: the lines design comments changed are seen.
   http.post(`*${PROVISIONAL_SPEC_CHANGES_SEEN_PATH}`, ({ params }) => {
