@@ -50,9 +50,10 @@ Read them, then take the coverage walk against what they say:
 - **Interview only where the documents are silent, ambiguous, or contradict
   each other.** A contradiction between two documents is a real question, and
   a good one: quote both and ask which holds.
-- **Cite what informed what.** Where a PRD section rests on a document, say so
-  in the section, by filename. The user must be able to see their material
-  landed, and a later reader must be able to trace a decision to its source.
+- **Cite what informed what.** A line a document states carries that
+  document's source tag, with the page, sheet or heading (`prd-contract`). The
+  user must be able to see their material landed, and a later reader must be
+  able to trace a decision to its source.
 
 No documents listed is the ordinary case: the instruction says nothing and
 you interview from the idea alone, exactly as below.
@@ -73,8 +74,8 @@ The walk is **planning, not turns**: you take it silently, in full, before the
 user sees a single question. For each section:
 
 - **Consult the organization skill first.** A question its defaults answer is
-  never asked — record the default as a plain Product Decision instead. A
-  section fully covered by defaults and the brief needs nothing.
+  never asked — record the default as a decision tagged `[org default]`
+  instead. A section fully covered by defaults and the brief needs nothing.
 - **External services: givens, never choices.** For each capability the
   product needs from a third party (payments, email, shipping, maps…), call
   `list_external_resources` first: a Registered External resource that fits
@@ -133,9 +134,9 @@ order this flow runs them in.
    "keep it as assumed" option: confirming is settling, and a round that ends
    with the same tags it began with did no work.
 4. **Keep going until you converge.** Each round amends the PRD in place — it
-   is the running record, never a draft you rewrite at the end, and story
-   numbers are permanent from the first write on. Later rounds take up what the
-   document exposed: a section the walk left thin, a story whose actor is
+   is the running record, never a draft you rewrite at the end, and IDs are
+   permanent from the first write on. Later rounds take up what the document
+   exposed: a section the walk left thin, a story whose actor is
    undefined, something the user's own answers opened. Converge when every flag
    still standing would change nothing but its own line if the user overturned
    it — the same blast-radius test, run to decide you are done.
@@ -147,9 +148,12 @@ arrives while one stands, re-present that form and wait for the answer.
 
 ## Write the PRD
 
-Write `specs/requirements/prd.md` — always that full path. Follow the
-`prd-contract` skill exactly: it defines every section, the story numbering
-rules, and what the PRD deliberately excludes.
+Write the requirements under `specs/requirements/` — always the full path:
+the product page `prd.md`, one file per feature under `features/`, and
+`product-wide.md`. Follow the `prd-contract` skill exactly: it defines which
+file each line belongs in, every section, the ID rules, and what the
+requirements deliberately exclude. Group the stories into features as you
+write them — every story belongs to exactly one feature.
 
 Anything genuinely unanswerable now goes to **Open Questions** — mark it, never
 guess it.
@@ -157,9 +161,9 @@ guess it.
 ## Running /start again
 
 `specs/requirements/prd.md` already exists → this is an **amendment**, never a
-rewrite: append new stories with fresh numbers (story numbers are permanent),
-update only the sections the change touches, and leave the user's hand-edits
-alone. Regenerate from scratch only when the user explicitly asks, and confirm
+rewrite: new stories take fresh IDs in their feature (IDs are permanent),
+update only the files and sections the change touches, and leave the user's
+hand-edits alone. Regenerate from scratch only when the user explicitly asks, and confirm
 before overwriting. A scoped change earns fewer questions than a cold start —
 the document is already there to ask against, so ask narrowly and often rather
 than broadly and once.

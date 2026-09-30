@@ -9,9 +9,9 @@ metadata:
 
 # Settle
 
-One unsettled point in `specs/requirements/prd.md`, taken to a decision. The
-instruction names the point — the line the user clicked. A bare instruction
-means the **Open Questions** list.
+One unsettled point in the requirements under `specs/requirements/`, taken to
+a decision. The instruction names the point — the line the user clicked. A bare
+instruction means the **Open Questions** lists.
 
 The PRD carries **two kinds of unsettled**, and they are not the same job:
 
@@ -32,9 +32,11 @@ of Scope line it justified. So settling is one question, then a **sweep for
 everything the old answer held up**.
 
 Amending only the line the user clicked leaves the PRD agreeing with itself in
-one place and contradicting itself everywhere else. Story numbers stay permanent
-through all of it: a story the new answer kills becomes an Out of Scope line,
-never a deleted number.
+one place and contradicting itself everywhere else. The sweep crosses files: a
+product-wide answer can change lines in every feature it applies to. IDs stay
+permanent through all of it: a story the new answer kills is retired
+(`prd-contract`), never renumbered or reused, and becomes an Out of Scope line
+when the user still wants it on record.
 
 The sweep ends at the PRD. When a settled point would also change a design that
 already exists, say so in the close and leave it to the user.

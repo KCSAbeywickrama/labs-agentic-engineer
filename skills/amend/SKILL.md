@@ -1,6 +1,6 @@
 ---
 name: amend
-description: Use for a scoped change to an existing PRD — adding a feature or adding an actor. The instruction names the scope; touch nothing outside it.
+description: Use for a scoped change to existing requirements — adding a feature or adding an actor. The instruction names the scope; touch nothing outside it.
 metadata:
   aep:
     kind: platform
@@ -9,17 +9,18 @@ metadata:
 
 # Amend
 
-A scoped edit to `specs/requirements/prd.md`. The instruction names the scope —
-a feature to add, an actor to add, or a feature to deepen. **Scope is the
-contract**: sections the scope doesn't touch stay byte-identical, and story
-numbers only ever append (they are permanent — designs, criteria, and tasks
-cite them).
+A scoped edit to the requirements under `specs/requirements/`. The instruction
+names the scope — a feature to add or an actor to add. **Scope is the
+contract**: files and sections the scope doesn't touch stay byte-identical, and
+IDs are only ever added — an ID is never edited or reused, because designs,
+criteria, and tasks cite it.
 
 Revising a point the document already carries is the `settle` skill's job, not
 this one: that edit propagates by design, and propagation is the opposite of
 the promise made above.
 
-The PRD's shape is defined by the `prd-contract` skill — follow it when writing.
+The requirements' shape and ID rules are defined by the `prd-contract` skill —
+follow it when writing.
 The `grilling` skill owns the question mechanics for every branch below.
 
 **The document is already there to ask against**, so amend starts where `start`
@@ -30,22 +31,33 @@ inside the scope — rounds are cheap, a widened edit is not.
 ## Add a feature
 
 Interview for what the feature does, for whom, and any policy it implies —
-skipping what the instruction already says. Then:
+skipping what the instruction already says. Then place it by `prd-contract`'s
+feature rule:
 
-- append the feature's stories with fresh numbers — a feature that should
-  not ship yet is an Out of Scope line instead,
-- record any new product decisions (org defaults answer silently, as ever; a
-  new external capability follows `prd-contract`'s rule — a Registered External
-  resource or a service the user already uses is a given, anything else stays
-  capability-only).
+- **A new capability a user would name** is a new feature: create
+  `features/F<n>-<slug>.md` with the next feature ID, and add its one line to
+  the Features list in `prd.md`. Its stories are `F<n>.1`, `F<n>.2`, …; its
+  own decisions, out-of-scope lines and open questions go in its file.
+- **Stories that belong to an existing feature** are an amendment to that
+  feature: add them to its file with that feature's next story IDs.
+- **An idea that cannot be named with a purpose yet** is a Fog entry in
+  `prd.md`, not a feature.
+- **Work that should not ship yet** is an Out of Scope line instead.
 
-Done when every new story has a number and an actor the Actors section
-defines.
+Record what the new stories need: a feature they wait on is a `Needs:` line
+(`prd-contract`), and a rule that applies to more than one feature goes in
+`product-wide.md` with the next P ID. New decisions follow the contract as
+ever: org defaults answer silently, and a new external capability is a
+Registered External resource or a service the user already uses, else
+capability-only.
+
+Done when every new story has an ID and names an actor `prd.md` defines.
 
 ## Add an actor
 
-Define the actor in **Actors** (product-level: name + what they can broadly
-see/do), then add or amend **only the stories their arrival implies**.
+Define the actor in `prd.md`'s **Actors** (product-level: name + what they can
+broadly see/do), then add or amend **only the stories their arrival implies**,
+each in the feature it belongs to.
 
 Two entrances reach this branch, and the second is the common one:
 
@@ -58,5 +70,5 @@ Two entrances reach this branch, and the second is the common one:
 
 ## Close
 
-Summarize exactly what changed — new story numbers, sections touched — in a few
+Summarize exactly what changed — new IDs, files and sections touched — in a few
 lines. The rest of the flow (design, build) stays untouched by this skill.

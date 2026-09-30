@@ -36,7 +36,7 @@ import { flowSpec, startSpec } from "@aep/playground/src/engine/turn-spec.js";
 // and the agents service composes identical wording for both.
 const designTurn = flowSpec("design");
 import { PROJECTS_HOME } from "./config.js";
-import { prepareProject, readProjectFile } from "./project.js";
+import { listRequirementFiles, prepareProject, readProjectFile } from "./project.js";
 import type { ChainScenario, DesignScenario, RequirementsScenario, Rubric, TasksScenario } from "./scenario.js";
 import { decisionsDigest, type SimAnswer } from "./sim-user.js";
 import { runConversationalSection, type SectionRunResult } from "./drivers/conversational.js";
@@ -73,7 +73,9 @@ const clip = (s: string): string =>
   s.length > CLIP ? `${s.slice(0, CLIP)}\n…(clipped at ${CLIP} characters — later files were NOT judged)` : s;
 
 function requirementsArtifact(projectDir: string): string {
-  return readProjectFile(projectDir, "specs/requirements/prd.md");
+  return listRequirementFiles(projectDir)
+    .map((rel) => `--- ${rel} ---\n${readProjectFile(projectDir, rel)}`)
+    .join("\n\n");
 }
 
 function designArtifact(projectDir: string): string {
@@ -213,7 +215,7 @@ export async function runRequirementsScenario(sc: RequirementsScenario, runName:
   }
   const outcome = await scoreConversational(projectDir, run, sc.rubric, []);
   return finishRun("requirements-section", sc.brief.name, runName, run.records, [outcome], {
-    "specs/requirements/prd.md": requirementsArtifact(projectDir),
+    "specs/requirements/": requirementsArtifact(projectDir),
   });
 }
 
@@ -282,7 +284,7 @@ export async function runChainScenario(sc: ChainScenario, runName: string): Prom
   }
 
   return finishRun("chain", sc.brief.name, runName, records, outcomes, {
-    "specs/requirements/prd.md": requirementsArtifact(projectDir),
+    "specs/requirements/": requirementsArtifact(projectDir),
     "specs/design/": designArtifact(projectDir),
     "issues/": tasksArtifact(projectDir),
   });
