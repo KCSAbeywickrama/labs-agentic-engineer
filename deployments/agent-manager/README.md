@@ -23,7 +23,7 @@ re-derivable against a newer chart without reading the script.
 |---|---|
 | `amp-values.yaml` | Values for the `wso2-amp-platform-resources-extension` chart — the promotion graph, the shared environment, and the project name |
 | `thunder-bootstrap/` | The composed ThunderID bootstrap documents, for the settings that exist once per server and cannot be held by two publishers |
-| `forked-template-renamer/` | Helm post-renderer for step 5, renaming Agent Manager's forked build templates so OpenChoreo keeps its own; `plugin.yaml` wraps the script as the plugin Helm 4 requires |
+| `platform-resources-post-renderer/` | Helm post-renderer for step 5: renames Agent Manager's forked build templates so OpenChoreo keeps its own, and drops the chart's `ProjectType/default` so AEP's platform chart keeps owning it; `plugin.yaml` wraps the script as the plugin Helm 4 requires |
 
 ## Why the Prometheus operator's CPU limit is raised
 
@@ -114,6 +114,30 @@ than installing a surprise. After the install the script reads the cluster:
 every `amp-*` template must exist, and none of OpenChoreo's five may have been
 adopted into the release. That second check is the one that matters — an
 adopted template changes how AEP builds, and nothing else would report it.
+
+## Why Agent Manager's ProjectType/default is dropped
+
+`setup-agent-manager.sh` does this in step 5, in the same post-renderer.
+
+Both products reference a namespaced `ProjectType/default` in the org
+namespace: Agent Manager's service compiles the name in, and aep-api sends it
+on every project create, because that is the type the wso2cloud org bootstrap
+seeds into every org. Locally AEP's platform chart stands in for that bootstrap
+(`localOrgProvisioning`) and renders it, and `aectl platform install` runs
+before this script, so the chart's own copy would stop the install with
+`invalid ownership metadata`. The two copies are the same object, so Agent
+Manager's is dropped and its projects run on AEP's.
+
+Handing the object over to Agent Manager's release instead would not hold:
+Helm re-stamps ownership on every upgrade, so the two releases would take it
+from each other, and uninstalling Agent Manager would delete the type every AEP
+project runs on. The post-renderer drops the copy only while its spec matches
+AEP's template and refuses otherwise, and step 5 reads the owner back.
+
+A cluster installed before this change has Agent Manager's release owning the
+object, so the next `aectl platform install` stops on it. Reinstall from
+scratch, or delete the object and re-run `aectl platform install` then this
+script.
 
 ## Chart versions
 

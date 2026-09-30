@@ -34,14 +34,15 @@ oc:
   # The k8s namespace of the one org AEP ships with — AEP is single-org
   # today, so this is that default org's home namespace: where its Project,
   # Environment(s), DeploymentPipeline, and (when local_org_provisioning.enabled,
-  # see below) per-org ComponentTypes all live.
+  # see below) per-org ComponentTypes and ProjectType all live.
   default_org_namespace: "default"
 
   local_org_provisioning:
-    # Creates per-org OC ComponentTypes (service, web-application) directly
-    # from the Helm chart. Required for local k3d installs where OC's
-    # ProvisionOrgUnit is not running. Must be false in production — OC
-    # handles this per-org automatically there.
+    # Creates the per-org OC ComponentTypes (service, web-application,
+    # ai-agent) and ProjectType/default directly from the Helm chart.
+    # Required for local k3d installs where the platform's org provisioning
+    # is not running. Must be false in production — the platform handles
+    # this per-org automatically there.
     enabled: true
 
   # Whether the data-plane gateway this cluster's components deploy behind

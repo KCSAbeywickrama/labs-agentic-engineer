@@ -75,8 +75,9 @@ environment:
 # Only the project's name moves. `projectType` has no name value: the chart
 # hardcodes ProjectType/default as a contract with amp-api's compiled-in
 # client.DefaultProjectTypeName, and a namespaced ProjectType resolves only
-# from within openchoreoNamespace. ProjectType/default and OpenChoreo's
-# ClusterProjectType/default are different kinds and do not contend.
+# from within openchoreoNamespace. AEP references the same object, and AEP's
+# platform chart owns it: setup-agent-manager.sh's post-renderer drops the
+# chart's copy (see README.md).
 #
 # Set this before the first install. Changing it afterwards is a Helm
 # delete-then-create: the old Project and its ProjectReleaseBinding go, and the

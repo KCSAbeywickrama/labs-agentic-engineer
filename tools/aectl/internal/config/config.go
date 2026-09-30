@@ -94,9 +94,9 @@ var keyRegistry = map[string]configKeyMeta{
 	"oc.system_namespace":      {required: true, kind: kindString},
 	// The k8s namespace of the one org AEP ships with — AEP is single-org
 	// today, so this is that default org's home namespace: where its Project,
-	// Environment(s), DeploymentPipeline, and per-org ComponentTypes
-	// (localOrgProvisioning) all live. Empty falls back to "default" (see
-	// ocOrgNamespace in cmd/platform_gateway.go).
+	// Environment(s), DeploymentPipeline, and per-org ComponentTypes and
+	// ProjectType (localOrgProvisioning) all live. Empty falls back to
+	// "default" (see ocOrgNamespace in cmd/platform_gateway.go).
 	"oc.default_org_namespace": {required: false, kind: kindString},
 	// The OpenChoreo Environment aectl configures gateway ingress and the
 	// environment Thunder on at install time: the root of the default org's
