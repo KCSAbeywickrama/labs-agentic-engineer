@@ -16,9 +16,10 @@
  * under the License.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Alert, Avatar, Box, Button, Chip, CircularProgress, Divider, IconButton, Paper, Stack, TextField, Typography } from "@wso2/oxygen-ui";
-import { Bot, LogOut, RefreshCw, Send, User, Wrench } from "@wso2/oxygen-ui-icons-react";
+import { Bot, LogOut, Paperclip, RefreshCw, Send, User, Wrench, X } from "@wso2/oxygen-ui-icons-react";
+import { screenFiles, toAttachment, type Attachment } from "./attachments";
 import { sendTurn, type ToolCall, type TurnResult } from "./chat";
 import type { Launch } from "./launch";
 
@@ -47,21 +48,56 @@ export function AgentScreen({
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [files, setFiles] = useState<File[]>([]);
+  const [refusals, setRefusals] = useState<string[]>([]);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   const send = async () => {
     const message = draft.trim();
-    if (!message || sending) return;
-    setDraft("");
+    if ((!message && files.length === 0) || sending) return;
+    const attached = files;
     setSending(true);
-    setEntries((prior) => [...prior, { kind: "user", text: message }]);
-    const result = await sendTurn(launch.endpoint, token, conversationId ? { message, conversationId } : { message });
+    // Read every file before anything is cleared: one that cannot be read
+    // (moved or deleted since it was picked) leaves the composer as it was.
+    const read = await Promise.allSettled(attached.map(toAttachment));
+    const unreadable = attached.filter((_, i) => read[i]!.status === "rejected");
+    if (unreadable.length > 0) {
+      setRefusals(unreadable.map((f) => `${f.name}: could not be read — pick it again`));
+      setSending(false);
+      return;
+    }
+    const attachments = read.map((r) => (r as PromiseFulfilledResult<Attachment>).value);
+    setDraft("");
+    setFiles([]);
+    setRefusals([]);
+    setEntries((prior) => [...prior, { kind: "user", text: message || attached.map((f) => f.name).join(", ") }]);
+    const turn = {
+      message,
+      ...(conversationId ? { conversationId } : {}),
+      ...(attachments.length > 0 ? { attachments } : {}),
+    };
+    const result = await sendTurn(launch.endpoint, token, turn);
     if (result.kind === "reply") {
       setConversationId(result.conversationId || undefined);
       setEntries((prior) => [...prior, { kind: "assistant", text: result.text, toolCalls: result.toolCalls }]);
     } else {
+      // The agent keeps no files, so a retry must resend them: give them back,
+      // with the text that went with them. A text-only turn clears as before.
+      if (attached.length > 0) {
+        setFiles(attached);
+        setDraft(message);
+      }
       setEntries((prior) => [...prior, { kind: "notice", result }]);
     }
     setSending(false);
+  };
+
+  const addFiles = (list: FileList | File[] | null) => {
+    if (!launch.attachments || !list) return;
+    const { accepted, rejected } = screenFiles(files, Array.from(list), launch.attachments);
+    setFiles((prior) => [...prior, ...accepted]);
+    setRefusals(rejected.map((r) => `${r.name}: ${r.reason}`));
+    if (fileInput.current) fileInput.current.value = "";
   };
 
   const reset = () => {
@@ -127,6 +163,26 @@ export function AgentScreen({
         }}
         sx={{ px: 2, py: 2, bgcolor: "background.paper" }}
       >
+        {(files.length > 0 || refusals.length > 0) && (
+          <Stack spacing={0.5} sx={{ maxWidth: 760, mx: "auto", mb: 1 }}>
+            <Stack direction="row" spacing={0.5} sx={{ flexWrap: "wrap" }}>
+              {files.map((f) => (
+                <Chip
+                  key={f.name}
+                  size="small"
+                  label={f.name}
+                  onDelete={() => setFiles((prior) => prior.filter((p) => p !== f))}
+                  deleteIcon={<X size={12} aria-label={`Remove ${f.name}`} />}
+                />
+              ))}
+            </Stack>
+            {refusals.map((r) => (
+              <Typography key={r} variant="caption" color="error">
+                {r}
+              </Typography>
+            ))}
+          </Stack>
+        )}
         <Paper
           variant="outlined"
           sx={{
@@ -143,6 +199,27 @@ export function AgentScreen({
             "&:focus-within": { borderColor: "primary.main" },
           }}
         >
+          {launch.attachments && (
+            <>
+              <input
+                ref={fileInput}
+                type="file"
+                hidden
+                multiple={launch.attachments.maxFiles > 1}
+                accept={launch.attachments.types.join(",")}
+                aria-label="Attach files"
+                onChange={(event) => addFiles(event.target.files)}
+              />
+              <IconButton
+                aria-label="Choose files"
+                disabled={sending}
+                onClick={() => fileInput.current?.click()}
+                sx={{ width: 36, height: 36 }}
+              >
+                <Paperclip size={16} aria-hidden />
+              </IconButton>
+            </>
+          )}
           <TextField
             id="tryit-message"
             value={draft}
@@ -167,7 +244,7 @@ export function AgentScreen({
           <IconButton
             type="submit"
             aria-label="Send"
-            disabled={sending || draft.trim() === ""}
+            disabled={sending || (draft.trim() === "" && files.length === 0)}
             sx={{
               bgcolor: "primary.main",
               color: "primary.contrastText",

@@ -30,6 +30,7 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { Copy, ExternalLink, FlaskConical } from "@wso2/oxygen-ui-icons-react";
+import type { AgentAttachments } from "@aep/ui-agent-view";
 import { StatusChip } from "../../../components/StatusChip";
 import { env } from "../../../config/env";
 import { thunderUsersConsoleHref } from "../../../config/thunderConsole";
@@ -287,12 +288,15 @@ function ComponentPanel({
   type,
   talksTo,
   testUsers,
+  attachments,
   onTryApi,
 }: {
   card: DeploymentCard;
   type: string | undefined;
   talksTo: string[];
   testUsers: TestUsersProps | null;
+  /** The agent's `x-aep.attachments`, when it takes files. */
+  attachments: AgentAttachments | undefined;
   onTryApi: () => void;
 }) {
   const chip = cardChip(card);
@@ -367,6 +371,7 @@ function ComponentPanel({
               // ID token's `sub` is a UUID. Both are public claims of a test user.
               scopes: ["openid", "profile", "email", ...new Set(testUsers.logins.flatMap((login) => login.scopes))],
               endpoint: d.endpointUrl,
+              attachments,
             })}
             target="_blank"
             rel="noreferrer"
@@ -410,11 +415,14 @@ function ComponentPanel({
  * their own heading when the project has no web app at all). The services
  * follow in the board's order.
  */
+const NO_ATTACHMENTS: ReadonlyMap<string, AgentAttachments> = new Map();
+
 export function TryItOutCard({
   cards,
   types,
   talksTo,
   testUsers,
+  attachmentsByComponent = NO_ATTACHMENTS,
   onTryApi,
 }: {
   cards: DeploymentCard[];
@@ -422,6 +430,8 @@ export function TryItOutCard({
   talksTo: (componentName: string) => string[];
   /** The accounts, when this environment has them (a green development). */
   testUsers: TestUsersProps | null;
+  /** Each agent's `x-aep.attachments`, by component; absent means none takes files. */
+  attachmentsByComponent?: ReadonlyMap<string, AgentAttachments>;
   onTryApi: (componentName: string) => void;
 }) {
   // Stable: the web apps keep their order among themselves, and so do the rest.
@@ -450,6 +460,7 @@ export function TryItOutCard({
             type={types.get(card.componentName)}
             talksTo={talksTo(card.componentName)}
             testUsers={testUsers && withAccounts(card) ? testUsers : null}
+            attachments={attachmentsByComponent.get(card.componentName)}
             onTryApi={() => onTryApi(card.componentName)}
           />
         ))}

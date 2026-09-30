@@ -45,6 +45,16 @@ describe("sendTurn", () => {
     expect(JSON.parse(String(init.body))).toEqual({ message: "hi" });
   });
 
+  it("sends attachments with the turn", async () => {
+    const fetchMock = vi.fn(async () => json({ conversationId: "c1", text: "read it" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendTurn("http://gw/c-http", "tok", { message: "", attachments: [{ name: "a.jpg", mediaType: "image/jpeg", data: "AA==" }] });
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ message: "", attachments: [{ name: "a.jpg", mediaType: "image/jpeg", data: "AA==" }] });
+  });
+
   it("continues a conversation by naming it", async () => {
     const fetchMock = vi.fn(async () => json({ conversationId: "c1", text: "ok" }));
     vi.stubGlobal("fetch", fetchMock);

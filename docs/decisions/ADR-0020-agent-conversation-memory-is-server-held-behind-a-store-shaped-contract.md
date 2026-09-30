@@ -16,7 +16,7 @@ history it is responsible for: the wire no longer carries one.
 **`POST /chat`** is the entire wire contract, for every `ai-agent`:
 
 ```
-in:  { conversationId?: string, message: string }
+in:  { conversationId?: string, message: string, attachments?: [{ name, mediaType, data }] }
 out: { conversationId: string, text: string, toolCalls: unknown[] }
 ```
 
@@ -122,3 +122,31 @@ access already is (ADR-0016).
   the same JSONB aggregate, load-append-save and org fence — and the end state
   is that store, extracted and given an end-user fence. The shapes rejected on
   the way are under *Alternatives considered*.
+
+## Amendment 2026-09-29 — attachments
+
+An agent whose `agent.afm.md` declares `x-aep.attachments` accepts files with a
+message: `attachments: [{ name, mediaType, data /* base64 */ }]`, within the
+types and limits it declares (platform ceilings: PDF, PNG, JPEG, GIF, WebP; 10
+files; 5 MiB each; 15 MiB total; 24 MiB body). `message` may be empty when
+files are present. Files ride ONE turn: the model sees them with that message,
+and the stored history keeps `[attached: <name> (<mediaType>)]` in their place
+— no file data is stored. Statuses: 413 over the body cap; 400 for files the
+declaration does not allow (or any files to an agent without one); 422
+`{ error, files }` when a provider call carrying files is rejected — a fixed
+message, the provider body logged only. AFM 0.4.0 defines nothing for files, so
+the declaration is a platform extension beside `x-aep.memory` and
+`x-aep.identity`.
+
+**Agents built before this amendment ignore `attachments`:** they read only
+`message`, so a turn carrying text and files is answered from the text alone.
+The console's Try it link reads the declaration from the design, not the
+deployed build, so until such an agent is rebuilt its test page can offer an
+attach control whose files it never sees. From this amendment on, an agent
+refuses any body field outside `{ conversationId, message, attachments }`, so
+the next contract change fails loudly instead of silently.
+
+Rejected: keeping files in history like the console chat (ADR-0019) — heavy
+rows and a token cost on every later turn; multipart or upload-then-reference
+transport — a parser or file storage in every agent. Base64 inside the JSON
+message is what model APIs themselves do for small per-message files.

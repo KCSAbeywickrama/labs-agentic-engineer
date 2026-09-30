@@ -16,6 +16,8 @@
  * under the License.
  */
 
+import type { Attachment } from "./attachments";
+
 /** What one turn to the agent came back as. */
 export type TurnResult =
   | { kind: "reply"; conversationId: string; text: string; toolCalls: ToolCall[] }
@@ -35,6 +37,7 @@ export interface ToolCall {
 export interface Turn {
   message: string;
   conversationId?: string;
+  attachments?: Attachment[];
 }
 
 /**
@@ -48,7 +51,11 @@ export async function sendTurn(endpoint: string, token: string, turn: Turn): Pro
     response = await fetch(`${endpoint.replace(/\/+$/, "")}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify(turn.conversationId ? turn : { message: turn.message }),
+      body: JSON.stringify({
+        message: turn.message,
+        ...(turn.conversationId ? { conversationId: turn.conversationId } : {}),
+        ...(turn.attachments && turn.attachments.length > 0 ? { attachments: turn.attachments } : {}),
+      }),
     });
   } catch (error) {
     return { kind: "unreachable", message: error instanceof Error ? error.message : String(error) };

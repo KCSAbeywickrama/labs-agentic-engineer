@@ -34,7 +34,8 @@ import { runStamp } from "../../builds/lib/format";
 import { mergedCycle } from "../../builds/lib/runView";
 import { isRegisteredExternal } from "../../marketplace/kind";
 import { useExternalResources } from "../../settings/api/queries";
-import { useDesignDependencies } from "../../spec/api/queries";
+import { useDesignDependencies, useSpecFileContents, useSpecFiles } from "../../spec/api/queries";
+import { isParseError, parseAgentAfm, type AgentAttachments } from "@aep/ui-agent-view";
 import { useValidationEvidence } from "../../validation/api/counts";
 import {
   useComponentsDeployments,
@@ -89,6 +90,9 @@ const LinkButton = createLink(Button);
  * name, and every section says when a read is still out or failed rather than
  * drawing an empty state that would be a claim.
  */
+
+const AGENT_AFM_PATH = /^specs\/design\/components\/([^/]+)\/agent\.afm\.md$/;
+
 export function DeploymentEnvironmentPage({
   projectName,
   environment: segment,
@@ -107,6 +111,24 @@ export function DeploymentEnvironmentPage({
   const components = useProjectComponents(projectName);
   const componentNames = (components.data?.items ?? []).map((c) => c.name);
   const deployments = useComponentsDeployments(projectName, componentNames);
+  // What each agent accepts, read from its agent.afm.md: the Try it link
+  // carries it so the test app offers an attach control only where the agent
+  // takes files.
+  const specFiles = useSpecFiles(projectName);
+  const afmFiles = useMemo(
+    () => (specFiles.data ?? []).filter((f) => AGENT_AFM_PATH.test(f.path)),
+    [specFiles.data],
+  );
+  const afmContents = useSpecFileContents(projectName, afmFiles);
+  const attachmentsByComponent = useMemo(() => {
+    const map = new Map<string, AgentAttachments>();
+    for (const [path, content] of Object.entries(afmContents)) {
+      const spec = parseAgentAfm(content);
+      const component = AGENT_AFM_PATH.exec(path)?.[1];
+      if (component && !isParseError(spec) && spec.attachments) map.set(component, spec.attachments);
+    }
+    return map;
+  }, [afmContents]);
   const status = useProjectStatus(projectName);
   const deploy = status.data?.deploy;
 
@@ -465,6 +487,7 @@ export function DeploymentEnvironmentPage({
           types={types}
           talksTo={(name) => talksTo(dependencies.data, name)}
           testUsers={green ? testUsers : null}
+          attachmentsByComponent={attachmentsByComponent}
           onTryApi={setContractComponent}
         />
 
