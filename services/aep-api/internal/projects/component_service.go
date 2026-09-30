@@ -207,6 +207,16 @@ type componentService struct {
 	// yet).
 	modelKeyResolver ModelKeyResolver
 	secretRefClient  secretmanagersvc.OpenChoreoSecretReferenceClient
+	// autoRCADisabled turns the default auto-RCA alert rule off for this
+	// deployment (AUTO_RCA_ENABLED=false). Zero value = on.
+	autoRCADisabled bool
+}
+
+// SetAutoRCAEnabled sets whether EnsureComponent attaches the default auto-RCA
+// alert rule (config AUTO_RCA_ENABLED). DeploymentService takes the same value
+// for the trait's per-environment config.
+func (s *componentService) SetAutoRCAEnabled(enabled bool) {
+	s.autoRCADisabled = !enabled
 }
 
 // NewComponentService builds the component service. repoSvc, buildCredSvc,
@@ -318,9 +328,10 @@ func (s *componentService) EnsureComponent(ctx context.Context, orgName, project
 	// for every environment), so it is written HERE, before the build cuts the
 	// release that freezes the Component's trait list.
 	desired := DesiredDeploymentFor(DeploymentInputs{
-		Component:     *comp,
-		ComponentName: k8sName,
-		Audience:      ProjectAudience(orgName, projectName),
+		Component:       *comp,
+		ComponentName:   k8sName,
+		Audience:        ProjectAudience(orgName, projectName),
+		AutoRCADisabled: s.autoRCADisabled,
 	})
 	if desired.APIOperationsProblem != "" {
 		slog.WarnContext(ctx, "ensure component: OpenAPI contract not projected onto gateway operations; "+

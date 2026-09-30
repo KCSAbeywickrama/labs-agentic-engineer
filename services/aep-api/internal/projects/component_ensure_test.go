@@ -210,3 +210,45 @@ func TestEnsureComponent_NoStoreOrRepo_Errors(t *testing.T) {
 		t.Error("nil repo service must error")
 	}
 }
+
+// The Component carries the auto-RCA alert rule by default, and none when the
+// deployment has auto-RCA off (AUTO_RCA_ENABLED=false, ticket 15). The trait
+// list written here is what the next release freezes.
+func TestEnsureComponent_AutoRCAAlertRuleFollowsTheDeploymentSwitch(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		var capturedSpec *openchoreo.ComponentSpecDesired
+		oc := &ocmocks.ComponentClientMock{
+			CreateComponentFunc: func(_ context.Context, _, _ string, req *openchoreo.CreateComponentRequest) (*gen.Component, error) {
+				return &gen.Component{Name: req.Name}, nil
+			},
+			ApplyComponentSpecFunc: func(_ context.Context, _, _, _ string, d openchoreo.ComponentSpecDesired) error {
+				capturedSpec = &d
+				return nil
+			},
+		}
+		files := map[string]string{
+			spec.DesignRootFile: "# Overview\n",
+			"components/order-service/design.json": "{\n  \"name\": \"order-service\",\n  \"type\": \"service\",\n" +
+				"  \"description\": \"body\",\n  \"dependencies\": []\n}\n",
+		}
+		store := spec.NewArtifactStore(&artifactstest.FakeArtifactService{
+			ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) { return files, nil },
+		})
+		repo := &sourcecontrol.GitRepository{RepoURL: "https://github.com/acme/widgets", DefaultBranch: "main"}
+		svc := NewComponentService(oc, nil, store, ensureRepoSvc{repo: repo}, nil, nil, nil)
+		svc.(interface{ SetAutoRCAEnabled(bool) }).SetAutoRCAEnabled(enabled)
+
+		if err := svc.EnsureComponent(context.Background(), "acme", "widgets", "order-service"); err != nil {
+			t.Fatalf("EnsureComponent: %v", err)
+		}
+		has := false
+		for _, tr := range capturedSpec.Traits {
+			if tr.Name == "observability-alert-rule" {
+				has = true
+			}
+		}
+		if has != enabled {
+			t.Fatalf("auto-RCA enabled=%v: alert-rule trait attached = %v (traits %+v)", enabled, has, capturedSpec.Traits)
+		}
+	}
+}

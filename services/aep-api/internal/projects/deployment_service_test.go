@@ -19,7 +19,9 @@ package projects
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
@@ -573,5 +575,127 @@ func TestConvergeAndDeploymentState_ReadTheResolvedWriteTarget(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Environment != "development" {
 		t.Errorf("DeploymentState = %+v, want the component reported in development", got)
+	}
+}
+
+// orderedEnsurer records each Component re-assert into a log it shares with
+// the fake OpenChoreo, so a test can read the order of the two writes.
+type orderedEnsurer struct {
+	mu  *sync.Mutex
+	log *[]string
+	err error
+}
+
+func (e orderedEnsurer) EnsureComponent(_ context.Context, org, project, component string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	*e.log = append(*e.log, "ensure "+org+"/"+project+"/"+component)
+	return e.err
+}
+
+// A release freezes the Component's traits, so whatever the Component carries
+// when the release is cut is what deploys. The build's fan-out wrote those
+// traits, possibly long before, and nothing had re-asserted them since: a
+// trait change after the build (a design edit, auto-RCA turned off) never
+// reached a release. The deploy re-asserts the Component spec first (ticket 15).
+func TestDeploy_ReassertsTheComponentSpecBeforeCuttingTheRelease(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		spec.DesignRootFile:          traitRootMd(),
+		"components/api/design.json": plainServiceMd("api"),
+	}
+	var (
+		mu  sync.Mutex
+		log []string
+	)
+	oc := ocDeployments(map[string]string{})
+	oc.EnsureReleaseFunc = func(_ context.Context, _, _, component, releaseName string) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		log = append(log, "release "+component)
+		return releaseName, nil
+	}
+	svc := newTestDeploymentService(oc, traitStoreWith(files))
+	svc.SetComponentEnsurer(orderedEnsurer{mu: &mu, log: &log})
+
+	if _, err := svc.Deploy(context.Background(), "acme", "proj", promoting("abc123def456", "api")); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	if want := []string{"ensure acme/proj/api", "release api"}; !reflect.DeepEqual(log, want) {
+		t.Fatalf("writes = %v, want the Component re-asserted before its release is cut %v", log, want)
+	}
+}
+
+// A Component that cannot be re-asserted must not be released from its stale
+// traits: that is the release OpenChoreo refuses, or worse, one it accepts.
+func TestDeploy_FailedComponentReassertCutsNoRelease(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		spec.DesignRootFile:          traitRootMd(),
+		"components/api/design.json": plainServiceMd("api"),
+	}
+	var (
+		mu  sync.Mutex
+		log []string
+	)
+	oc := ocDeployments(map[string]string{})
+	svc := newTestDeploymentService(oc, traitStoreWith(files))
+	svc.SetComponentEnsurer(orderedEnsurer{mu: &mu, log: &log, err: errors.New("oc 503")})
+
+	if _, err := svc.Deploy(context.Background(), "acme", "proj", promoting("abc123def456", "api")); err == nil {
+		t.Fatal("Deploy with a failed Component re-assert = nil error, want the failure surfaced")
+	}
+	if n := len(oc.EnsureReleaseCalls()); n != 0 {
+		t.Fatalf("a release was cut from a Component that could not be re-asserted (%d calls)", n)
+	}
+}
+
+// Converge re-asserts wiring on the binding only; it cuts nothing, so it has no
+// Component spec to refresh for a release.
+func TestConverge_DoesNotReassertTheComponent(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		spec.DesignRootFile:          traitRootMd(),
+		"components/api/design.json": plainServiceMd("api"),
+	}
+	var (
+		mu  sync.Mutex
+		log []string
+	)
+	oc := ocDeployments(map[string]string{})
+	oc.GetReleaseBindingStatusFunc = func(context.Context, string, string, string, string) (*openchoreo.ReleaseBindingSummary, error) {
+		return &openchoreo.ReleaseBindingSummary{ReadyStatus: "True"}, nil
+	}
+	svc := newTestDeploymentService(oc, traitStoreWith(files))
+	svc.SetComponentEnsurer(orderedEnsurer{mu: &mu, log: &log})
+
+	if err := svc.Converge(context.Background(), "acme", "proj", []string{"api"}); err != nil {
+		t.Fatalf("Converge: %v", err)
+	}
+	if len(log) != 0 {
+		t.Fatalf("converge re-asserted the Component: %v", log)
+	}
+}
+
+// With auto-RCA off the binding carries no config for the alert rule: the
+// Component no longer attaches it, and config for a trait instance the
+// Component does not have is refused.
+func TestDeploy_AutoRCADisabledWritesNoAlertRuleConfig(t *testing.T) {
+	t.Parallel()
+	files := map[string]string{
+		spec.DesignRootFile:          traitRootMd(),
+		"components/api/design.json": plainServiceMd("api"),
+	}
+	for _, disabled := range []bool{false, true} {
+		oc := ocDeployments(map[string]string{})
+		svc := newTestDeploymentService(oc, traitStoreWith(files))
+		svc.SetAutoRCAEnabled(!disabled)
+		if _, err := svc.Deploy(context.Background(), "acme", "proj", promoting("abc123def456", "api")); err != nil {
+			t.Fatalf("Deploy: %v", err)
+		}
+		_, has := oc.ApplyReleaseBindingCalls()[0].In.TraitEnvironmentConfigs["api-auto-rca-error"]
+		if has == disabled {
+			t.Fatalf("auto-RCA disabled=%v: alert-rule config present = %v", disabled, has)
+		}
 	}
 }

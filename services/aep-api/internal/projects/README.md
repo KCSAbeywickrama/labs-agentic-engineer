@@ -84,8 +84,19 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
 - **The projection is pure; the service does the I/O.** `DesiredDeploymentFor` takes facts and returns the
   Component CR's trait shape AND the binding's per-environment config together, because a trait attached
   without its config does not degrade — it fails the whole binding render. The two halves land at different
-  times (the shape pre-build, since a ComponentRelease freezes it; the config at deploy, since it needs a
-  release to bind) and that split is forced by OpenChoreo, not chosen.
+  times (the shape on the Component, since a ComponentRelease freezes it; the config at deploy, since it needs
+  a release to bind) and that split is forced by OpenChoreo, not chosen. The shape is written before the build
+  (`EnsureComponent` from the fan-out) AND re-asserted by the deploy immediately before it cuts the release
+  (`SetComponentEnsurer`): the build can be long past, and a trait change since (a design edit, auto-RCA
+  turned off) would otherwise never reach a release, or reach one the platform refuses. A failed re-assert
+  fails that component's deploy rather than releasing stale traits. Converge cuts nothing and re-asserts only
+  the binding.
+- **Auto-RCA is one switch for both halves.** The default "error → RCA" `observability-alert-rule` trait rides
+  every service component unless its design sets `disableAutoRca` or the deployment sets
+  `AUTO_RCA_ENABLED=false`. `ComponentService` (the trait) and `DeploymentService` (its config) take the same
+  value from the composition root. wso2cloud runs with it off: its org ComponentTypes accept only the org's
+  namespaced alert-rule `Trait`, whose contract (`notificationChannel`, `enableAiRootCauseAnalysis`) is not the
+  `ClusterTrait` one attached here, so a release carrying it is refused, and SRE self-healing is outside v1.
 - **The gateway's operation table is projected, and refused rather than guessed** (`api_operations.go`).
   A component behind END-USER sign-in gets one `operations` row per (method, path) in its openapi.yaml —
   `public: true`, a `jwt-auth v1` policy carrying one `scopes.anyOf` handle, or a `jwt-auth v1` policy with

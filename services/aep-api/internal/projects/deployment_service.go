@@ -71,6 +71,13 @@ type DeploymentService struct {
 	// environment, overriding the per-(org, environment) derivation. Empty — the
 	// normal case — derives it (see gateway_address.go).
 	gatewayHostOverride string
+	// ensurer re-asserts a Component's spec (its traits) before the deploy cuts
+	// a release from it. Optional: nil cuts from whatever the Component
+	// carries, which is the behaviour before this existed.
+	ensurer ComponentEnsurer
+	// autoRCADisabled turns the default auto-RCA alert rule off for this
+	// deployment (AUTO_RCA_ENABLED=false). Zero value = on.
+	autoRCADisabled bool
 	// catalog, resourceClient, and thunder are the thunder-callback wait
 	// ports. Any nil (including a nil store) skips the wait so existing
 	// OC-only DeploymentState tests stay green without new wiring.
@@ -229,6 +236,30 @@ func (s *DeploymentService) SetConfigSources(envVars ComponentEnvVarReader, file
 func (s *DeploymentService) SetAPIGatewayHostOverride(host string) {
 	if s != nil {
 		s.gatewayHostOverride = host
+	}
+}
+
+// ComponentEnsurer re-asserts a Component's spec from the design: the same
+// write the build fan-out makes before a build (ComponentService.EnsureComponent).
+type ComponentEnsurer interface {
+	EnsureComponent(ctx context.Context, orgName, projectName, componentName string) error
+}
+
+// SetComponentEnsurer wires the Component re-assert the deploy makes before it
+// cuts a release (see deployOne).
+func (s *DeploymentService) SetComponentEnsurer(c ComponentEnsurer) {
+	if s != nil {
+		s.ensurer = c
+	}
+}
+
+// SetAutoRCAEnabled sets whether the default auto-RCA alert rule's per-
+// environment config is written (config AUTO_RCA_ENABLED). It must agree with
+// ComponentService's setting, which decides whether the Component attaches the
+// trait at all; the composition root passes both the same value.
+func (s *DeploymentService) SetAutoRCAEnabled(enabled bool) {
+	if s != nil {
+		s.autoRCADisabled = !enabled
 	}
 }
 
@@ -427,6 +458,19 @@ func (s *DeploymentService) deployOne(ctx context.Context, orgID, projectID, com
 	// must not be able to move which release is serving.
 	var releaseName string
 	if commitSHA != "" {
+		// A release FREEZES the Component's traits, so re-assert the Component's
+		// spec from the design first. The build's fan-out wrote those traits,
+		// possibly long before, and a trait change since (a design edit, auto-RCA
+		// turned off) would otherwise never reach a release — or reach one the
+		// platform refuses, as a release cut from a ClusterTrait the org's
+		// ComponentType does not allow is refused (ticket 15). A failed re-assert
+		// fails this component's deploy (retryable) rather than releasing stale
+		// traits.
+		if s.ensurer != nil {
+			if err := s.ensurer.EnsureComponent(ctx, orgID, projectID, componentName); err != nil {
+				return outcome, fmt.Errorf("re-assert component before release: %w", err)
+			}
+		}
 		releaseName = delivery.ReleaseNameFor(projectID, componentName, commitSHA)
 		if _, err := s.components.EnsureRelease(ctx, orgID, projectID, componentName, releaseName); err != nil {
 			return outcome, fmt.Errorf("cut release: %w", permanentIfMissing(err))
@@ -455,6 +499,7 @@ func (s *DeploymentService) deployOne(ctx context.Context, orgID, projectID, com
 		ComponentNamespace:  orgID,
 		GatewayHostOverride: s.gatewayHostOverride,
 		ProtectedSiblings:   ProtectedSiblingsOf(design, *comp),
+		AutoRCADisabled:     s.autoRCADisabled,
 	})
 	if desired.APIOperationsProblem != "" {
 		slog.WarnContext(ctx, "deployment: OpenAPI contract not projected onto gateway operations; "+

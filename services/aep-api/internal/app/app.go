@@ -1498,6 +1498,15 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// address is derived per deploy beside the context-path builder it has to
 	// agree with (projects.APIGatewayHost). Empty is the normal case.
 	deploymentService.SetAPIGatewayHostOverride(cfg.APIGatewayHost)
+	// Auto-RCA's alert rule is two writes, the trait on the Component and its
+	// per-environment config on the binding, so both writers take the one
+	// switch. The deploy re-asserts the Component before it cuts a release: a
+	// release freezes the Component's traits, and the build wrote them earlier.
+	deploymentService.SetAutoRCAEnabled(cfg.AutoRCAEnabled)
+	deploymentService.SetComponentEnsurer(componentService)
+	if cs, ok := componentService.(interface{ SetAutoRCAEnabled(bool) }); ok {
+		cs.SetAutoRCAEnabled(cfg.AutoRCAEnabled)
+	}
 	// How a protected service verifies that a request reached it through the
 	// gateway. Read off the Environment's annotations — the same projection the
 	// Thunder binding arrives on, and the only one this process can see from
