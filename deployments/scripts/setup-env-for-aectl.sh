@@ -211,18 +211,10 @@ OC_DOMAIN_RE="${OC_DOMAIN//./\\.}"
 # One toggle drives the scheme AND both gateway ports, because they move
 # together: a cluster does not serve https on 8080. The ports are the ones
 # k3d already publishes for each plane's TLS listener.
-WITH_TLS="${WITH_TLS:-0}"
-if [ "$WITH_TLS" = "1" ]; then
-    SCHEME="https"
-    CP_PORT=8443     # control plane: consoles, ThunderID, the environment IdP
-    DP_PORT=19443    # data plane: deployed components and agents
-    DP_LISTENER="https"
-else
-    SCHEME="http"
-    CP_PORT=8080
-    DP_PORT=19080
-    DP_LISTENER="http"
-fi
+# Shared with setup-agent-manager.sh, which installs against the gateways this
+# script provisions but runs from its own shell — the two must not drift.
+# shellcheck source=lib/tls-env.sh
+. "${SCRIPT_DIR}/lib/tls-env.sh"
 # The ClusterDataPlane's ingress names the listener as well as the port, and
 # the ComponentType templates build every component's HTTPRoute from it — so
 # a mismatch here does not fail the install, it publishes endpoints on a
