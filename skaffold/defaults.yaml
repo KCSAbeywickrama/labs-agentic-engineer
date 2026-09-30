@@ -112,8 +112,8 @@ gateway:
 # per-environment identity provider and API gateway aectl installs alongside
 # the platform. These are the DNS SUFFIXES they are published under, not whole
 # hostnames — aectl composes "<env>-idp.<idp_base_domain>" and
-# "<env>-<org>.<gateway_base_domain>". Scheme and port are fixed to this
-# cluster's gateways (8080 and 19080).
+# "<env>-<org>.<gateway_base_domain>". Scheme and port come from tls.enabled
+# below (8080/19080 plain, 8443/19443 TLS).
 #
 # Both are browser-facing wherever the cluster is reachable by more than its
 # own host. A generated app sends its END USERS to the IdP to sign in
@@ -129,6 +129,22 @@ environment:
   # agent identity — with nothing failing at install time.
   idp_base_domain: "openchoreo.localhost"
   gateway_base_domain: "gateway.localhost"
+
+# Whether this cluster's public endpoints are served over HTTPS. One toggle,
+# because the scheme and both gateway ports move together — 8080/19080 plain,
+# 8443/19443 TLS. A cluster does not serve https on 8080.
+#
+# This decides whether an end user can sign in to a GENERATED APP at all.
+# Browsers expose crypto.subtle only in a secure context, the OIDC login needs
+# it for PKCE, and the environment identity provider's URL is built from this.
+# false is correct only on localhost, which browsers already treat as secure;
+# on any other domain the login cannot complete over plain HTTP.
+#
+# Must agree with WITH_TLS in deployments/scripts/setup-env-for-aectl.sh —
+# that script stamps the platform IdP's issuer and provisions the certificate,
+# and a disagreement installs clean, then fails at the first sign-in.
+tls:
+  enabled: false
 
 webhook:
   # Public URL registered on each GitHub repo's webhook.

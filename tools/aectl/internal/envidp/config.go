@@ -75,6 +75,14 @@ const (
 	// suffixes, not whole hostnames — see Config.IDPBaseDomain.
 	defaultIDPBaseDomain     = "openchoreo.localhost"
 	defaultGatewayBaseDomain = "gateway.localhost"
+
+	// The ports each plane's gateway serves on, plain and TLS. They move with
+	// the scheme rather than independently: a cluster does not serve https on
+	// 8080, so one flag picks the pair.
+	idpPlainPort     = 8080
+	idpTLSPort       = 8443
+	gatewayPlainPort = 19080
+	gatewayTLSPort   = 19443
 )
 
 // Config parameterizes Install. Org and Env are explicit fields, not
@@ -144,6 +152,21 @@ type Config struct {
 	// Also browser-facing: it fronts the APIs a generated app calls.
 	GatewayBaseDomain string
 
+	// TLS is whether this cluster's public endpoints are served over HTTPS,
+	// and it moves the scheme and both gateway ports together.
+	//
+	// Not a preference. A browser exposes crypto.subtle only in a secure
+	// context, and a generated app's OIDC login needs it for PKCE — so on any
+	// domain other than localhost, end users cannot sign in to a generated app
+	// at all without this. (*.localhost is a secure context by definition,
+	// which is why the local flow never needed it.)
+	//
+	// Must match WITH_TLS in deployments/scripts/setup-env-for-aectl.sh: that
+	// script stamps the platform IdP's issuer, and a T2 that advertises a
+	// different scheme than the cluster serves is the same class of mismatch
+	// as a wrong domain.
+	TLS bool
+
 	// Kubeconfig is forwarded to every kubectl/helm invocation; empty uses
 	// the default (~/.kube/config or in-cluster).
 	Kubeconfig string
@@ -205,19 +228,41 @@ func (c Config) gatewayBaseDomain() string {
 	return defaultGatewayBaseDomain
 }
 
+// scheme and the port helpers resolve the pair TLS selects, so no call site
+// has to remember that https goes with 8443 and http with 8080.
+func (c Config) scheme() string {
+	if c.TLS {
+		return "https"
+	}
+	return "http"
+}
+
+func (c Config) idpPort() int {
+	if c.TLS {
+		return idpTLSPort
+	}
+	return idpPlainPort
+}
+
+func (c Config) gatewayPort() int {
+	if c.TLS {
+		return gatewayTLSPort
+	}
+	return gatewayPlainPort
+}
+
 // publicURL is the URL this package exposes T2 on: an httproute on the same
-// shared data-plane gateway and domain the platform IdP (T1) already uses
+// shared control-plane gateway and domain the platform IdP (T1) already uses
 // (see deployments/scripts/setup-env-for-aectl.sh's
-// "thunder.openchoreo.localhost" convention for T1), rather than Agent
+// "thunder.openchoreo.<domain>" convention for T1), rather than Agent
 // Manager's own "<env>-idp.amp.localhost" — this package has no Agent
 // Manager routing to depend on.
 //
-// The port is not configurable. 8080 is the k3d control-plane gateway the
-// whole install is built around, the same one T1, the consoles and every
-// HTTPRoute on that tier answer on; moving it is the TLS conversation
-// (scheme, port, and CA trust for T2's JWKS fetch of T1), not this one.
-func publicURL(env, baseDomain string) string {
-	return fmt.Sprintf("http://%s-idp.%s:8080", env, baseDomain)
+// Scheme and port come from Config.TLS, because they are what a browser
+// judges: this URL becomes every generated app's OIDC issuer, and a PKCE
+// login against a plain-http issuer cannot complete outside localhost.
+func publicURL(env, baseDomain, scheme string, port int) string {
+	return fmt.Sprintf("%s://%s-idp.%s:%d", scheme, env, baseDomain, port)
 }
 
 // validReleaseName rejects a releaseName result that is not a legal Helm

@@ -173,12 +173,81 @@ esac
 OC_DOMAIN="openchoreo.${AE_DOMAIN}"          # thunder, api, observer, portal
 DP_INGRESS_HOST="openchoreoapis.${AE_DOMAIN}" # ClusterDataPlane external ingress
 AE_CONSOLE_DOMAIN="ae.${AE_DOMAIN}"          # console, tryit
-export AE_DOMAIN OC_DOMAIN DP_INGRESS_HOST AE_CONSOLE_DOMAIN
+
+# The environment tier's identity provider. aectl installs it behind the
+# CONTROL-plane gateway (envidp's thunderChartSpec pins httproute.parentRefs
+# to gateway-default/openchoreo-control-plane), so it belongs on the same
+# certificate and listener as everything else here — unlike that environment's
+# API gateway, which is a separate Gateway on the data plane.
+#
+# The name follows the Environment that aectl provisions into, which is the
+# source of DeploymentPipeline/default's promotion graph — "development" on
+# the guide's own samples, and what oc.pipeline_source_environment says.
+AE_ENV="${AE_ENV:-development}"
+OC_ENV_IDP_HOST="${AE_ENV}-idp.${OC_DOMAIN}"
+
+# The Environment's NAMESPACE — a different axis from its name, and the one
+# aectl's oc.default_org_namespace sets. Both appear in the data-plane
+# hostnames, which the ComponentType templates and the environment gateway
+# build as "<env>-<org>.<suffix>" — environment first.
+AE_ORG="${AE_ORG:-default}"
+export AE_DOMAIN OC_DOMAIN DP_INGRESS_HOST AE_CONSOLE_DOMAIN AE_ENV AE_ORG OC_ENV_IDP_HOST
 
 # Dots escaped for CoreDNS's `name regex`, computed once here rather than
 # inside the heredoc that uses it — expansion and backslashes in an unquoted
 # heredoc are a bad combination to debug.
 OC_DOMAIN_RE="${OC_DOMAIN//./\\.}"
+
+# ============================================================================
+# WITH_TLS — whether the public endpoints are served over HTTPS
+# ============================================================================
+#
+# Off reproduces the plain-HTTP cluster exactly. On is not a preference: a
+# browser exposes crypto.subtle only in a secure context, and the console's
+# OIDC login needs it for PKCE, so on any domain other than localhost the
+# sign-in cannot complete without TLS. (*.localhost is a secure context by
+# definition, which is why the local flow never needed this.)
+#
+# One toggle drives the scheme AND both gateway ports, because they move
+# together: a cluster does not serve https on 8080. The ports are the ones
+# k3d already publishes for each plane's TLS listener.
+WITH_TLS="${WITH_TLS:-0}"
+if [ "$WITH_TLS" = "1" ]; then
+    SCHEME="https"
+    CP_PORT=8443     # control plane: consoles, ThunderID, the environment IdP
+    DP_PORT=19443    # data plane: deployed components and agents
+    DP_LISTENER="https"
+else
+    SCHEME="http"
+    CP_PORT=8080
+    DP_PORT=19080
+    DP_LISTENER="http"
+fi
+# The ClusterDataPlane's ingress names the listener as well as the port, and
+# the ComponentType templates build every component's HTTPRoute from it — so
+# a mismatch here does not fail the install, it publishes endpoints on a
+# listener that is not serving them.
+export WITH_TLS SCHEME CP_PORT DP_PORT DP_LISTENER
+
+# Let's Encrypt cannot answer a challenge for a name that resolves to a
+# private address, and there is nothing to secure on a loopback-only cluster,
+# so the combination is refused rather than half-configured.
+if [ "$WITH_TLS" = "1" ] && [ "$AE_DOMAIN" = "localhost" ]; then
+    echo "❌ WITH_TLS=1 with AE_DOMAIN=localhost." >&2
+    echo "   *.localhost is already a secure context in browsers, and no CA will" >&2
+    echo "   issue for it. Use WITH_TLS=0 locally." >&2
+    exit 1
+fi
+
+# The ACME account is per-cluster and its address receives expiry warnings.
+# Empty registers without one, which Let's Encrypt allows.
+ACME_EMAIL="${ACME_EMAIL:-}"
+# Staging issues untrusted certs from a CA with far higher rate limits — the
+# right target while iterating on this path, because sslip.io is NOT on the
+# Public Suffix List, so every sslip.io user on the internet shares one
+# 50-certificates-per-week bucket for the production CA.
+ACME_SERVER="${ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}"
+TLS_SECRET_NAME="ae-public-tls"
 
 # What a bare "localhost" must keep meaning: a loopback address on the
 # OPERATOR's own machine, not on this cluster. Backstage's dev origin
@@ -214,7 +283,31 @@ if ! k3d cluster list "${CLUSTER_NAME}" >/dev/null 2>&1; then
     if docker info --format '{{.Name}}' 2>/dev/null | grep -qi colima; then
         export K3D_FIX_DNS=0
     fi
-    curl -fsSL "${RAW}/install/k3d/single-cluster/config.yaml" | k3d cluster create --config=-
+    # The guide's config publishes 8080/8443/19080/19443/... but not 80, and
+    # ACME's HTTP-01 challenge is only ever served on 80 — the CA fetches
+    # http://<name>/.well-known/acme-challenge/<token> and the protocol allows
+    # no other port. Without this mapping cert-manager's solver is reachable
+    # from inside the cluster and from nowhere else, so every order times out.
+    #
+    # Added to the fetched config rather than by `k3d cluster edit` after the
+    # fact: port mappings belong to the cluster's definition, and an edit
+    # recreates the load balancer anyway.
+    CLUSTER_CONFIG="$(mktemp)"
+    curl -fsSL "${RAW}/install/k3d/single-cluster/config.yaml" -o "$CLUSTER_CONFIG"
+    if [ "$WITH_TLS" = "1" ]; then
+        python3 - "$CLUSTER_CONFIG" <<'PY'
+import sys, yaml
+path = sys.argv[1]
+cfg = yaml.safe_load(open(path))
+ports = cfg.setdefault("ports", [])
+if not any(p.get("port", "").startswith("80:") for p in ports):
+    ports.append({"port": "80:80", "nodeFilters": ["loadbalancer"]})
+yaml.safe_dump(cfg, open(path, "w"), default_flow_style=False, width=10**6)
+PY
+        echo "   + port 80 published (ACME HTTP-01)"
+    fi
+    k3d cluster create --config="$CLUSTER_CONFIG"
+    rm -f "$CLUSTER_CONFIG"
 else
     echo "⏭️  Cluster '${CLUSTER_NAME}' already exists"
 fi
@@ -241,9 +334,27 @@ kubectl apply --server-side \
   -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.1/standard-install.yaml
 
 echo "   cert-manager"
+# config.enableGatewayAPI is what lets cert-manager solve an HTTP-01 challenge
+# on this cluster at all. It answers a challenge by starting a solver pod and
+# routing the challenge path to it — as an Ingress where an ingress controller
+# exists, as an HTTPRoute where Gateway API does. There is no ingress
+# controller here (OpenChoreo routes through kgateway), so without this the
+# order retries until it expires, with nothing in the logs but a challenge
+# stuck pending.
+#
+# Not to be confused with the ExperimentalGatewayAPISupport feature gate,
+# which this chart already defaults to true: the gate compiles the support in,
+# this switch turns it on.
+CERT_MANAGER_SET=()
+if [ "$WITH_TLS" = "1" ]; then
+    CERT_MANAGER_SET=(--set "config.apiVersion=controller.config.cert-manager.io/v1alpha1"
+                      --set "config.kind=ControllerConfiguration"
+                      --set "config.enableGatewayAPI=true")
+fi
 helm upgrade --install cert-manager oci://quay.io/jetstack/charts/cert-manager \
   --namespace cert-manager --create-namespace --version v1.19.4 \
-  --set crds.enabled=true --wait --timeout "${COLD_PULL_TIMEOUT}"
+  --set crds.enabled=true "${CERT_MANAGER_SET[@]}" \
+  --wait --timeout "${COLD_PULL_TIMEOUT}"
 
 echo "   External Secrets Operator"
 helm upgrade --install external-secrets oci://ghcr.io/external-secrets/charts/external-secrets \
@@ -377,6 +488,17 @@ oc_values() {
     local rel="$1" out="${UPSTREAM_VALUES_DIR}/$(basename "$1")"
     curl -fsSL "${RAW}/install/k3d/${rel}" \
         | sed "s/openchoreo\\.localhost/${OC_DOMAIN}/g" > "$out"
+    # With TLS the control-plane URLs in these files have to move scheme AND
+    # port, not just domain. values-cp.yaml carries OpenChoreo's four IdP
+    # URLs (issuer, jwks, authorize, token) and its own baseUrl; the issuer
+    # there must equal what Thunder stamps into `iss` or the control plane
+    # rejects every token the platform presents.
+    #
+    # Scoped to :8080 on this cluster's own domain so the observability
+    # plane's 11080 endpoints and any loopback URL are left alone.
+    if [ "$WITH_TLS" = "1" ]; then
+        sed -i "s|http://\\([A-Za-z0-9.-]*\\)${OC_DOMAIN}:8080|${SCHEME}://\\1${OC_DOMAIN}:${CP_PORT}|g" "$out"
+    fi
     echo "$out"
 }
 cat > "$API_PLATFORM_VALUES" <<'YAML'
@@ -620,7 +742,7 @@ resource_type: resource_server
 id: "01900000-0000-7000-8000-000000000020"
 name: System
 description: System resource server
-identifier: "http://thunder.${OC_DOMAIN}:8080/mcp"
+identifier: "${SCHEME}://thunder.${OC_DOMAIN}:${CP_PORT}/mcp"
 ouHandle: default
 resources:
   - name: System
@@ -641,7 +763,7 @@ inboundAuthConfig:
     config:
       clientId: "openchoreo-backstage-client"
       clientSecret: "backstage-portal-secret"
-      redirectUris: ["http://${OC_DOMAIN}:8080/api/auth/openchoreo-auth/handler/frame"]
+      redirectUris: ["${SCHEME}://${OC_DOMAIN}:${CP_PORT}/api/auth/openchoreo-auth/handler/frame"]
       grantTypes: ["authorization_code","client_credentials","refresh_token"]
       responseTypes: ["code"]
       tokenEndpointAuthMethod: "client_secret_post"
@@ -913,7 +1035,7 @@ resource_type: server_config
 name: cors
 value:
   allowedOrigins:
-    - "http://${OC_DOMAIN}:8080"
+    - "${SCHEME}://${OC_DOMAIN}:${CP_PORT}"
     # Backstage's own dev server, on the OPERATOR's machine — a real loopback,
     # so it stays "localhost" whatever this cluster is published as.
     - "http://localhost:7007"
@@ -1130,13 +1252,13 @@ helm upgrade --install thunder "${THUNDER_CHART}" \
     --set "httproute.parentRefs[0].namespace=openchoreo-control-plane" \
     --set "httproute.hostnames[0]=thunder.${OC_DOMAIN}" \
     --set "configuration.server.httpOnly=true" \
-    --set "configuration.server.publicUrl=http://thunder.${OC_DOMAIN}:8080" \
-    --set "configuration.jwt.issuer=http://thunder.${OC_DOMAIN}:8080" \
+    --set "configuration.server.publicUrl=${SCHEME}://thunder.${OC_DOMAIN}:${CP_PORT}" \
+    --set "configuration.jwt.issuer=${SCHEME}://thunder.${OC_DOMAIN}:${CP_PORT}" \
     --set "configuration.database.config.type=sqlite" \
     --set "configuration.database.runtime_transient.type=sqlite" \
     --set "configuration.database.entity.type=sqlite" \
     --set "configuration.database.runtime_persistent.type=sqlite" \
-    --set "configuration.passkey.allowedOrigins[0]=http://${OC_DOMAIN}:8080" \
+    --set "configuration.passkey.allowedOrigins[0]=${SCHEME}://${OC_DOMAIN}:${CP_PORT}" \
     --set "persistence.enabled=true" \
     --set "setup.enabled=true" \
     --set-string "setup.admin.username=${THUNDER_ADMIN_USER}" \
@@ -1148,7 +1270,7 @@ helm upgrade --install thunder "${THUNDER_CHART}" \
 echo "⏳ Waiting for ThunderID..."
 kubectl wait -n thunder --for=condition=available --timeout=300s deployment -l app.kubernetes.io/name=thunderid
 
-echo "✅ ThunderID ready at http://thunder.${OC_DOMAIN}:8080 (${THUNDER_ADMIN_USER} / ${THUNDER_ADMIN_PASSWORD})"
+echo "✅ ThunderID ready at ${SCHEME}://thunder.${OC_DOMAIN}:${CP_PORT} (${THUNDER_ADMIN_USER} / ${THUNDER_ADMIN_PASSWORD})"
 
 # ── 3c. Entitlement claim: sub -> client_id ──────────────────────────────
 # ThunderID 1.0.0 puts a client_credentials token's subject in the `client_id`
@@ -1219,6 +1341,96 @@ echo "✅ Entitlement claim is client_id"
 
 echo "✅ Control Plane ready"
 
+# ── TLS for the control-plane gateway ───────────────────────────────────────
+#
+# Runs here because gateway-default is created by the control-plane chart: the
+# Certificate's HTTP-01 solver routes through that Gateway, and the HTTPS
+# listener is added to it.
+#
+# The listener is patched in rather than shipped by the chart, which offers no
+# value for a second one. `sectionName` is deliberately absent from the
+# HTTPRoutes the platform creates, so they attach to every listener whose
+# hostname matches — adding the listener is enough to serve the same routes
+# over TLS, with no change to any route.
+if [ "$WITH_TLS" = "1" ]; then
+    echo ""
+    echo "   TLS — Let's Encrypt via cert-manager"
+
+    ACME_EMAIL_FIELD=""
+    [ -n "$ACME_EMAIL" ] && ACME_EMAIL_FIELD="  email: ${ACME_EMAIL}"
+
+    kubectl apply -f - <<EOF
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: ae-letsencrypt
+spec:
+  acme:
+    server: ${ACME_SERVER}
+${ACME_EMAIL_FIELD}
+    privateKeySecretRef:
+      name: ae-letsencrypt-account
+    solvers:
+      - http01:
+          gatewayHTTPRoute:
+            parentRefs:
+              - name: gateway-default
+                namespace: openchoreo-control-plane
+                kind: Gateway
+EOF
+
+    # One certificate, every public name. A single order costs one of the
+    # 50-per-week the CA allows per registered domain — and sslip.io is not on
+    # the Public Suffix List, so that bucket is shared with every sslip.io user
+    # on the internet. Asking once for all names is the difference between one
+    # slot and eleven.
+    kubectl apply -f - <<EOF
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ae-public-tls
+  namespace: openchoreo-control-plane
+spec:
+  secretName: ${TLS_SECRET_NAME}
+  issuerRef:
+    name: ae-letsencrypt
+    kind: ClusterIssuer
+  dnsNames:
+    - console.${AE_CONSOLE_DOMAIN}
+    - tryit.${AE_CONSOLE_DOMAIN}
+    - thunder.${OC_DOMAIN}
+    - api.${OC_DOMAIN}
+    - observer.${OC_DOMAIN}
+    - ${OC_ENV_IDP_HOST}
+    - console.amp.${AE_DOMAIN}
+    - api.amp.${AE_DOMAIN}
+EOF
+
+    echo "   ⏳ waiting for the certificate (ACME HTTP-01 over port 80)..."
+    if ! kubectl wait -n openchoreo-control-plane --for=condition=Ready \
+        certificate/ae-public-tls --timeout=300s; then
+        echo "❌ certificate was not issued." >&2
+        echo "   Check:  kubectl -n openchoreo-control-plane describe certificate ae-public-tls" >&2
+        echo "           kubectl get challenges -A" >&2
+        echo "   A 'too many certificates already issued' order means the shared" >&2
+        echo "   sslip.io rate limit is exhausted — retry later, or use a domain" >&2
+        echo "   you control. ACME_SERVER can point at the staging CA to iterate." >&2
+        exit 1
+    fi
+
+    kubectl -n openchoreo-control-plane patch gateway gateway-default --type=json -p "$(cat <<EOF
+[{"op":"add","path":"/spec/listeners/-","value":{
+  "name":"https",
+  "port":${CP_PORT},
+  "protocol":"HTTPS",
+  "allowedRoutes":{"namespaces":{"from":"All"}},
+  "tls":{"mode":"Terminate","certificateRefs":[{"name":"${TLS_SECRET_NAME}","kind":"Secret"}]}
+}}]
+EOF
+)"
+    echo "✅ HTTPS listener on gateway-default:${CP_PORT}"
+fi
+
 # ============================================================================
 # Step 4: Default resources (official page, Step 4 — unchanged)
 # ============================================================================
@@ -1262,11 +1474,64 @@ $(echo "$AGENT_CA" | sed 's/^/        /')
       external:
         http:
           host: ${DP_INGRESS_HOST}
-          listenerName: http
-          port: 19080
+          listenerName: ${DP_LISTENER}
+          port: ${DP_PORT}
         name: gateway-default
         namespace: openchoreo-data-plane
 EOF
+
+# ── TLS for the data-plane gateway ──────────────────────────────────────────
+#
+# A second Certificate rather than a reference to the control plane's: a
+# Gateway's certificateRefs are namespace-local, so sharing one would need a
+# ReferenceGrant across planes. Two self-contained certificates are simpler to
+# reason about and to delete, at the cost of one more ACME order.
+#
+# Two names live here, and both are browser-facing for a generated app: the
+# host its own endpoints are published on, and the vhost it calls its API
+# through. A page served over https cannot call a plain-http API, so if the
+# control plane has TLS this plane needs it too.
+if [ "$WITH_TLS" = "1" ]; then
+    echo ""
+    echo "   TLS — data-plane gateway"
+
+    kubectl apply -f - <<EOF
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ae-dataplane-tls
+  namespace: openchoreo-data-plane
+spec:
+  secretName: ${TLS_SECRET_NAME}
+  issuerRef:
+    name: ae-letsencrypt
+    kind: ClusterIssuer
+  dnsNames:
+    - ${AE_ENV}-${AE_ORG}.${DP_INGRESS_HOST}
+    - ${AE_ENV}-${AE_ORG}.gateway.${AE_DOMAIN}
+EOF
+
+    echo "   ⏳ waiting for the data-plane certificate..."
+    if ! kubectl wait -n openchoreo-data-plane --for=condition=Ready \
+        certificate/ae-dataplane-tls --timeout=300s; then
+        echo "❌ data-plane certificate was not issued." >&2
+        echo "   kubectl -n openchoreo-data-plane describe certificate ae-dataplane-tls" >&2
+        exit 1
+    fi
+
+    kubectl -n openchoreo-data-plane patch gateway gateway-default --type=json -p "$(cat <<EOF
+[{"op":"add","path":"/spec/listeners/-","value":{
+  "name":"https",
+  "port":${DP_PORT},
+  "protocol":"HTTPS",
+  "allowedRoutes":{"namespaces":{"from":"All"}},
+  "tls":{"mode":"Terminate","certificateRefs":[{"name":"${TLS_SECRET_NAME}","kind":"Secret"}]}
+}}]
+EOF
+)"
+    echo "✅ HTTPS listener on the data-plane gateway:${DP_PORT}"
+fi
+
 echo "✅ Data Plane ready"
 
 # ============================================================================
@@ -1440,13 +1705,13 @@ echo "  Serving now"
 # answers nothing — and a URL in a success summary that does not load is read
 # as a broken install, which is the thing this block exists to avoid.
 if [ "${WITH_OC_PORTAL:-1}" = "1" ]; then
-    printf "    %-16s%-50s(%s / %s)\n" "OpenChoreo" "http://${OC_DOMAIN}:8080" "${THUNDER_ADMIN_USER}" "${THUNDER_ADMIN_PASSWORD}"
+    printf "    %-16s%-50s(%s / %s)\n" "OpenChoreo" "${SCHEME}://${OC_DOMAIN}:${CP_PORT}" "${THUNDER_ADMIN_USER}" "${THUNDER_ADMIN_PASSWORD}"
 fi
-printf "    %-16s%-50s(%s / %s)\n" "ThunderID" "http://thunder.${OC_DOMAIN}:8080/console" "${THUNDER_ADMIN_USER}" "${THUNDER_ADMIN_PASSWORD}"
+printf "    %-16s%-50s(%s / %s)\n" "ThunderID" "${SCHEME}://thunder.${OC_DOMAIN}:${CP_PORT}/console" "${THUNDER_ADMIN_USER}" "${THUNDER_ADMIN_PASSWORD}"
 echo ""
 echo "  Still to install — \`make dev-env\` runs both of these next"
-printf "    %-16s%-50s%s\n" "AEP" "http://console.${AE_CONSOLE_DOMAIN}:8080" "aectl platform install"
-printf "    %-16s%-50s%s\n" "Agent Manager" "http://console.amp.${AE_DOMAIN}:8080" "setup-agent-manager.sh"
+printf "    %-16s%-50s%s\n" "AEP" "${SCHEME}://console.${AE_CONSOLE_DOMAIN}:${CP_PORT}" "aectl platform install"
+printf "    %-16s%-50s%s\n" "Agent Manager" "${SCHEME}://console.amp.${AE_DOMAIN}:${CP_PORT}" "setup-agent-manager.sh"
 
 # aectl reads its own config file, which AE_DOMAIN cannot reach — so the same
 # suffix lives in seven keys there as well. Printing them already composed is
@@ -1459,16 +1724,16 @@ if [ "$AE_DOMAIN" != "localhost" ]; then
     cat <<EOF
 
     console:
-      public_url: "http://console.${AE_CONSOLE_DOMAIN}:8080"
+      public_url: "${SCHEME}://console.${AE_CONSOLE_DOMAIN}:${CP_PORT}"
     tryit:
-      public_url: "http://tryit.${AE_CONSOLE_DOMAIN}:8080"
+      public_url: "${SCHEME}://tryit.${AE_CONSOLE_DOMAIN}:${CP_PORT}"
     gateway:
       hostname: "${DP_INGRESS_HOST}"
     environment:
       idp_base_domain: "${OC_DOMAIN}"
       gateway_base_domain: "gateway.${AE_DOMAIN}"
     thunder:
-      public_url: "http://thunder.${OC_DOMAIN}:8080"
+      public_url: "${SCHEME}://thunder.${OC_DOMAIN}:${CP_PORT}"
 EOF
     echo ""
     echo "  And pass the same suffix to Agent Manager:  AE_DOMAIN=${AE_DOMAIN}"

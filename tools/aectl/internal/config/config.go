@@ -67,6 +67,7 @@ var ConfigMapKeys = []string{
 	"gateway.hostname",
 	"environment.idp_base_domain",
 	"environment.gateway_base_domain",
+	"tls.enabled",
 }
 
 // keyKind describes the expected type of a config value for validation.
@@ -152,6 +153,21 @@ var keyRegistry = map[string]configKeyMeta{
 	// nothing failing at install time.
 	"environment.idp_base_domain":     {required: false, kind: kindString},
 	"environment.gateway_base_domain": {required: false, kind: kindString},
+	// Whether this cluster's public endpoints are served over HTTPS. One
+	// toggle, because the scheme and both gateway ports move together — a
+	// cluster does not serve https on 8080.
+	//
+	// It decides whether an end user can sign in to a GENERATED APP at all:
+	// browsers expose crypto.subtle only in a secure context, the OIDC login
+	// needs it for PKCE, and the environment identity provider's URL is built
+	// from this. Off is correct only on localhost, which browsers already
+	// treat as secure.
+	//
+	// Must agree with WITH_TLS in deployments/scripts/setup-env-for-aectl.sh:
+	// that script stamps the platform IdP's issuer and provisions the
+	// certificate, and a disagreement is the same class of mismatch as a
+	// wrong domain — it installs clean and fails at the first sign-in.
+	"tls.enabled": {required: false, kind: kindBool},
 }
 
 // Init sets env-var bindings. All config values must come from the cluster
