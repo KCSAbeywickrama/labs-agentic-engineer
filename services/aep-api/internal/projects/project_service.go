@@ -73,17 +73,26 @@ type Service struct {
 	cellWait       cellReadyWait          // how long CreateProject waits for the cells to report Ready
 }
 
-// cellReadyWait bounds CreateProject's wait for the Project and its
-// ProjectReleaseBindings to report Ready.
+// cellReadyWait bounds the two readiness waits on a new project: the Project
+// itself, inside the create request, and its ProjectReleaseBindings, watched
+// after the response.
 type cellReadyWait struct {
-	timeout  time.Duration
-	interval time.Duration
+	projectTimeout  time.Duration
+	projectInterval time.Duration
+	cellsTimeout    time.Duration
+	cellsInterval   time.Duration
 }
 
-// defaultCellReadyWait is long enough for the Project controller to cut a
-// ProjectRelease and the data plane to create the cell namespaces, and short
-// enough to hold a create request open.
-var defaultCellReadyWait = cellReadyWait{timeout: 30 * time.Second, interval: time.Second}
+// defaultCellReadyWait: OpenChoreo reports the Project Ready (or
+// ProjectTypeNotFound) in the second it is created, so the create request can
+// afford to wait for that. The cell namespaces come from a data plane that can
+// take minutes (2-4 in wso2cloud dev), so they are never waited on inline.
+var defaultCellReadyWait = cellReadyWait{
+	projectTimeout:  10 * time.Second,
+	projectInterval: 250 * time.Millisecond,
+	cellsTimeout:    5 * time.Minute,
+	cellsInterval:   5 * time.Second,
+}
 
 // projectCellProvisioner authors the ProjectReleaseBinding that gives a new
 // project its cell namespace in each environment its pipeline promotes
@@ -308,20 +317,22 @@ func (s *Service) CreateProject(ctx context.Context, orgName string, req *gen.Cr
 	// in place instead would leave a project that looks healthy in every status
 	// it reports and cannot deploy a single component.
 	//
-	// Then wait (bounded) for OpenChoreo to report the Project and every
-	// binding Ready. A Project whose ProjectType is missing never reconciles,
-	// so that one is fatal and compensating too; anything slower than the
-	// bound is kept, and its status reports why.
+	// Then wait (bounded, seconds) for OpenChoreo to report the Project Ready.
+	// A Project whose ProjectType is missing never reconciles, so that one is
+	// fatal and compensating too. The cell namespaces take minutes on a remote
+	// data plane, so the request does not wait for them: a detached watch logs
+	// when they are Ready, or what they are still waiting on.
 	if s.cells != nil {
 		envs, cellErr := s.provisionProjectCells(ctx, orgName, project.Name, project.DeploymentPipeline)
 		if cellErr != nil {
 			s.compensateCreate(ctx, orgName, project.Name, "cell provisioning failure")
 			return nil, cellErr
 		}
-		if waitErr := s.awaitProjectCells(ctx, orgName, project.Name, envs); waitErr != nil {
+		if waitErr := s.awaitProjectReady(ctx, orgName, project.Name); waitErr != nil {
 			s.compensateCreate(ctx, orgName, project.Name, "missing project type")
 			return nil, waitErr
 		}
+		s.watchProjectCells(ctx, orgName, project.Name, envs)
 	} else {
 		slog.ErrorContext(ctx, "project cell provisioner not wired — project will have no cell namespace and cannot deploy",
 			"org", orgName, "project", project.Name)
@@ -705,58 +716,94 @@ func (s *Service) provisionProjectCells(ctx context.Context, orgName, projectNam
 	return envs, nil
 }
 
-// awaitProjectCells polls until the Project and the binding in each of envs
-// report Ready, for at most s.cellWait.timeout. It returns an error only for a
-// Project that can never reconcile (ErrProjectTypeNotFound). A read failure or
-// a resource still progressing when the bound runs out is logged and the
-// create goes on: the project may yet reconcile, and its status says why not.
-func (s *Service) awaitProjectCells(ctx context.Context, orgName, projectName string, envs []string) error {
-	waitCtx, cancel := context.WithTimeout(ctx, s.cellWait.timeout)
+// awaitProjectReady polls the Project's Ready condition for at most
+// s.cellWait.projectTimeout. It returns an error only for a Project that can
+// never reconcile (ErrProjectTypeNotFound). A read failure, or a Project not
+// Ready within the bound, is logged and the create goes on: the project may yet
+// reconcile, and its status says why not.
+func (s *Service) awaitProjectReady(ctx context.Context, orgName, projectName string) error {
+	waitCtx, cancel := context.WithTimeout(ctx, s.cellWait.projectTimeout)
 	defer cancel()
+	waitingOn := "project: not reported yet"
 	for {
-		waitingOn, err := s.projectCellsPending(waitCtx, orgName, projectName, envs)
-		if err != nil {
-			return err
-		}
-		if waitingOn == "" {
-			slog.InfoContext(ctx, "project cell namespaces provisioned",
-				"org", orgName, "project", projectName, "environments", envs)
+		project, err := s.cells.ProjectReadiness(waitCtx, orgName, projectName)
+		switch {
+		case err != nil && waitCtx.Err() != nil:
+			// The deadline cut this read short; keep the last real state.
+		case err != nil:
+			waitingOn = "project readiness unreadable: " + err.Error()
+		case project.Ready:
 			return nil
+		case project.Reason == openchoreo.ReasonProjectTypeNotFound:
+			return fmt.Errorf("%w: project %q: %s", ErrProjectTypeNotFound, projectName, project.Message)
+		default:
+			waitingOn = "project: " + readinessText(project)
 		}
 		select {
 		case <-waitCtx.Done():
-			slog.WarnContext(ctx, "project cell namespaces not ready within the create wait; project status reports the reason",
-				"org", orgName, "project", projectName, "environments", envs,
-				"waitingOn", waitingOn, "wait", s.cellWait.timeout)
+			slog.WarnContext(ctx, "project not Ready within the create wait; project status reports the reason",
+				"org", orgName, "project", projectName, "waitingOn", waitingOn, "wait", s.cellWait.projectTimeout)
 			return nil
-		case <-time.After(s.cellWait.interval):
+		case <-time.After(s.cellWait.projectInterval):
 		}
 	}
 }
 
-// projectCellsPending reads the Project and its bindings once. It returns
-// what is not Ready yet ("" when everything is), or ErrProjectTypeNotFound.
-func (s *Service) projectCellsPending(ctx context.Context, orgName, projectName string, envs []string) (string, error) {
-	project, err := s.cells.ProjectReadiness(ctx, orgName, projectName)
-	if err != nil {
-		return "project readiness unreadable: " + err.Error(), nil
-	}
-	if !project.Ready {
-		if project.Reason == openchoreo.ReasonProjectTypeNotFound {
-			return "", fmt.Errorf("%w: project %q: %s", ErrProjectTypeNotFound, projectName, project.Message)
+// watchProjectCells logs, off the request, when the project's cell namespaces
+// are Ready. "provisioned" is logged only then; a watch that runs out logs what
+// it was still waiting on.
+func (s *Service) watchProjectCells(ctx context.Context, orgName, projectName string, envs []string) {
+	async.Go(context.WithoutCancel(ctx), "project cells watch", func(bg context.Context) {
+		if waitingOn := s.awaitProjectCells(bg, orgName, projectName, envs); waitingOn != "" {
+			slog.WarnContext(bg, "project cell namespaces not Ready within the watch; project status reports the reason",
+				"org", orgName, "project", projectName, "environments", envs,
+				"waitingOn", waitingOn, "wait", s.cellWait.cellsTimeout)
+			return
 		}
-		return "project: " + readinessText(project), nil
+		slog.InfoContext(bg, "project cell namespaces provisioned",
+			"org", orgName, "project", projectName, "environments", envs)
+	})
+}
+
+// awaitProjectCells polls the binding in each of envs for at most
+// s.cellWait.cellsTimeout. It returns "" once all are Ready, else the last
+// state OpenChoreo reported for one that is not.
+func (s *Service) awaitProjectCells(ctx context.Context, orgName, projectName string, envs []string) string {
+	waitCtx, cancel := context.WithTimeout(ctx, s.cellWait.cellsTimeout)
+	defer cancel()
+	waitingOn := "bindings: not read yet"
+	for {
+		pending, done := s.bindingsPending(waitCtx, orgName, projectName, envs)
+		if done {
+			return ""
+		}
+		if pending != "" {
+			waitingOn = pending
+		}
+		select {
+		case <-waitCtx.Done():
+			return waitingOn
+		case <-time.After(s.cellWait.cellsInterval):
+		}
 	}
+}
+
+// bindingsPending reads each binding once. done reports all Ready; otherwise
+// pending names the first that is not, or is "" when the only failure was a
+// read the wait's own deadline cut short.
+func (s *Service) bindingsPending(ctx context.Context, orgName, projectName string, envs []string) (pending string, done bool) {
 	for _, env := range envs {
 		binding, err := s.cells.ProjectReleaseBindingReadiness(ctx, orgName, projectName, env)
-		if err != nil {
-			return "binding " + env + " readiness unreadable: " + err.Error(), nil
-		}
-		if !binding.Ready {
-			return "binding " + env + ": " + readinessText(binding), nil
+		switch {
+		case err != nil && ctx.Err() != nil:
+			return "", false
+		case err != nil:
+			return "binding " + env + " readiness unreadable: " + err.Error(), false
+		case !binding.Ready:
+			return "binding " + env + ": " + readinessText(binding), false
 		}
 	}
-	return "", nil
+	return "", true
 }
 
 func readinessText(r openchoreo.Readiness) string {

@@ -46,6 +46,9 @@ type fakeCells struct {
 	binding      []readinessRead
 	projectReads int
 	bindingReads int
+	// failOnDone makes a read under a finished context fail with the context's
+	// error, as the HTTP client does when the wait's deadline cuts it short.
+	failOnDone bool
 }
 
 type readinessRead struct {
@@ -63,14 +66,20 @@ func next(seq []readinessRead, n int) (openchoreo.Readiness, error) {
 	return seq[n].r, seq[n].err
 }
 
-func (f *fakeCells) ProjectReadiness(context.Context, string, string) (openchoreo.Readiness, error) {
+func (f *fakeCells) ProjectReadiness(ctx context.Context, _, _ string) (openchoreo.Readiness, error) {
+	if f.failOnDone && ctx.Err() != nil {
+		return openchoreo.Readiness{}, ctx.Err()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.projectReads++
 	return next(f.project, f.projectReads-1)
 }
 
-func (f *fakeCells) ProjectReleaseBindingReadiness(context.Context, string, string, string) (openchoreo.Readiness, error) {
+func (f *fakeCells) ProjectReleaseBindingReadiness(ctx context.Context, _, _, _ string) (openchoreo.Readiness, error) {
+	if f.failOnDone && ctx.Err() != nil {
+		return openchoreo.Readiness{}, ctx.Err()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.bindingReads++
@@ -273,8 +282,12 @@ func TestCreateProject_SucceedsWithAResolvableWriteTarget(t *testing.T) {
 	}
 }
 
-// fastCellWait keeps the readiness wait's bound and poll short in tests.
-var fastCellWait = cellReadyWait{timeout: 200 * time.Millisecond, interval: 5 * time.Millisecond}
+// fastCellWait keeps both of the readiness waits' bounds and polls short in
+// tests.
+var fastCellWait = cellReadyWait{
+	projectTimeout: 200 * time.Millisecond, projectInterval: 5 * time.Millisecond,
+	cellsTimeout: 200 * time.Millisecond, cellsInterval: 5 * time.Millisecond,
+}
 
 // A Project whose ProjectType does not exist never reconciles: no
 // ProjectRelease, no cell namespace, nothing can deploy. The create fails
@@ -309,44 +322,39 @@ func TestCreateProject_FailsAndCompensatesWhenTheProjectTypeIsMissing(t *testing
 	}
 }
 
-// The create waits for the Project and every binding to report Ready, not
-// just for the binding POSTs to be accepted.
-func TestCreateProject_WaitsForProjectAndBindingsReady(t *testing.T) {
+// The create request waits for the Project only. Its cell namespaces take
+// minutes on a remote data plane, and a request held open for them is what
+// made creating a project slow: the bindings are watched after the response.
+func TestCreateProject_DoesNotWaitForTheCellNamespaces(t *testing.T) {
 	t.Parallel()
 	oc := createdProjectOC("default")
-	notYet := readinessRead{r: openchoreo.Readiness{Reason: "NamespaceProgressing"}}
-	ready := readinessRead{r: openchoreo.Readiness{Ready: true, Reason: "Ready"}}
-	cells := &fakeCells{
-		envs:    []string{"development", "staging"},
-		project: []readinessRead{{r: openchoreo.Readiness{}}, ready},
-		binding: []readinessRead{notYet, notYet, ready},
+	oc.DeleteProjectFunc = func(context.Context, string, string) error {
+		t.Error("a healthy project must not be compensated away")
+		return nil
 	}
+	cells := &fakeCells{envs: []string{"development"},
+		binding: []readinessRead{{r: openchoreo.Readiness{Reason: "NamespaceProgressing"}}}}
 	svc := NewProjectService(oc, nil, nil, nil, nil)
 	svc.SetProjectCellProvisioner(cells)
-	svc.cellWait = cellReadyWait{timeout: 5 * time.Second, interval: time.Millisecond}
+	svc.cellWait = fastCellWait
+	svc.cellWait.cellsTimeout = time.Minute
 
+	start := time.Now()
 	if _, err := svc.CreateProject(context.Background(), "acme", &gen.CreateProjectRequest{Name: "shop"}); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	cells.mu.Lock()
-	defer cells.mu.Unlock()
-	if cells.projectReads < 2 {
-		t.Errorf("project reads = %d, want the wait to poll past the first not-Ready read", cells.projectReads)
-	}
-	// Two not-ready binding reads, then both environments read Ready.
-	if cells.bindingReads < 4 {
-		t.Errorf("binding reads = %d, want the wait to poll until every binding is Ready", cells.bindingReads)
+	if took := time.Since(start); took > 5*time.Second {
+		t.Errorf("CreateProject took %v, want it not to wait out the cells' %v bound", took, svc.cellWait.cellsTimeout)
 	}
 }
 
-// Slowness is not failure: a project still reconciling when the bound runs out
-// is kept (its status reports the reason), and so is one whose readiness could
-// not be read.
+// Slowness is not failure: a Project whose readiness cannot be read, or that
+// has not reported within the bound, is kept (its status reports the reason).
 func TestCreateProject_KeepsAProjectThatIsNotReadyWithinTheBound(t *testing.T) {
 	t.Parallel()
 	for name, cells := range map[string]*fakeCells{
-		"binding still progressing": {envs: []string{"development"},
-			binding: []readinessRead{{r: openchoreo.Readiness{Reason: "NamespaceProgressing"}}}},
+		"project not reported yet": {envs: []string{"development"},
+			project: []readinessRead{{r: openchoreo.Readiness{}}}},
 		"readiness unreadable": {envs: []string{"development"},
 			project: []readinessRead{{err: errors.New("openchoreo: 503")}}},
 	} {
@@ -365,5 +373,50 @@ func TestCreateProject_KeepsAProjectThatIsNotReadyWithinTheBound(t *testing.T) {
 				t.Fatalf("CreateProject: %v", err)
 			}
 		})
+	}
+}
+
+// The cells watch polls every binding until all are Ready.
+func TestAwaitProjectCells_PollsUntilEveryBindingIsReady(t *testing.T) {
+	t.Parallel()
+	notYet := readinessRead{r: openchoreo.Readiness{Reason: "NamespaceProgressing"}}
+	ready := readinessRead{r: openchoreo.Readiness{Ready: true, Reason: "Ready"}}
+	cells := &fakeCells{binding: []readinessRead{notYet, notYet, ready}}
+	svc := NewProjectService(createdProjectOC("default"), nil, nil, nil, nil)
+	svc.SetProjectCellProvisioner(cells)
+	svc.cellWait = fastCellWait
+	svc.cellWait.cellsTimeout = 5 * time.Second
+
+	waitingOn := svc.awaitProjectCells(context.Background(), "acme", "shop", []string{"development", "staging"})
+
+	if waitingOn != "" {
+		t.Fatalf("awaitProjectCells = %q, want every binding Ready", waitingOn)
+	}
+	cells.mu.Lock()
+	defer cells.mu.Unlock()
+	// Two not-ready reads, then both environments read Ready.
+	if cells.bindingReads < 4 {
+		t.Errorf("binding reads = %d, want the watch to poll until every binding is Ready", cells.bindingReads)
+	}
+}
+
+// When the bound runs out, the watch reports the last state OpenChoreo
+// actually returned, not the cancellation of the read the deadline cut short.
+func TestAwaitProjectCells_ReportsTheLastRealStateAtTheDeadline(t *testing.T) {
+	t.Parallel()
+	cells := &fakeCells{binding: []readinessRead{{r: openchoreo.Readiness{
+		Reason: "NamespaceProgressing", Message: `Namespace "dp-x" has no observed status yet`,
+	}}}, failOnDone: true}
+	svc := NewProjectService(createdProjectOC("default"), nil, nil, nil, nil)
+	svc.SetProjectCellProvisioner(cells)
+	svc.cellWait = fastCellWait
+
+	waitingOn := svc.awaitProjectCells(context.Background(), "acme", "shop", []string{"development"})
+
+	if !strings.Contains(waitingOn, "NamespaceProgressing") {
+		t.Errorf("awaitProjectCells = %q, want the binding's last reported reason", waitingOn)
+	}
+	if strings.Contains(waitingOn, "deadline") || strings.Contains(waitingOn, "canceled") {
+		t.Errorf("awaitProjectCells = %q, want no read cancelled by the wait's own deadline", waitingOn)
 	}
 }
