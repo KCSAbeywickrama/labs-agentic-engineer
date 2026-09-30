@@ -229,3 +229,60 @@ func TestRunGatewayIngressCheck_HostnameOverride_GatewayForwarding(t *testing.T)
 		t.Errorf("applyConfig received gwNamespace = %q, want %q", capturedGwNs, "openchoreo-data-plane")
 	}
 }
+
+// TestRunGatewayIngressCheck_AlreadyConfigured_RestoresHostname covers every
+// re-install: the ingress needs no work, so the branch returns early. Without
+// the read-back, gateway.hostname stays empty on a cluster whose first install
+// took the interactive path, tryItOverrides emits no --set, and Helm resets
+// tryIt.gatewayHosts to the chart default on the upgrade.
+func TestRunGatewayIngressCheck_AlreadyConfigured_RestoresHostname(t *testing.T) {
+	t.Cleanup(func() { viper.Set("gateway.hostname", "") })
+	viper.Set("gateway.hostname", "")
+
+	deps := gatewayIngressDeps{
+		isConfigured:   func(context.Context) (bool, error) { return true, nil },
+		configuredHost: func(context.Context) (string, error) { return "myapis.example.com", nil },
+	}
+	if err := runGatewayIngressCheck(context.Background(), deps); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got, want := viper.GetString("gateway.hostname"), "myapis.example.com"; got != want {
+		t.Errorf("gateway.hostname = %q, want %q read back from the cluster", got, want)
+	}
+}
+
+// TestRunGatewayIngressCheck_AlreadyConfigured_KeepsConfiguredHostname
+// asserts the read-back never overwrites a value config already supplied —
+// config is the source of truth on that path, and the cluster may still be
+// carrying an older host mid-migration.
+func TestRunGatewayIngressCheck_AlreadyConfigured_KeepsConfiguredHostname(t *testing.T) {
+	t.Cleanup(func() { viper.Set("gateway.hostname", "") })
+	viper.Set("gateway.hostname", "fromconfig.example.com")
+
+	deps := gatewayIngressDeps{
+		isConfigured:   func(context.Context) (bool, error) { return true, nil },
+		configuredHost: func(context.Context) (string, error) { return "stale.example.com", nil },
+	}
+	if err := runGatewayIngressCheck(context.Background(), deps); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got, want := viper.GetString("gateway.hostname"), "fromconfig.example.com"; got != want {
+		t.Errorf("gateway.hostname = %q, want the configured %q", got, want)
+	}
+}
+
+// TestRunGatewayIngressCheck_AlreadyConfigured_ReadBackFailureIsNotFatal:
+// the read-back is an improvement on the old behaviour, not a new
+// precondition, so a cluster that cannot answer it still installs.
+func TestRunGatewayIngressCheck_AlreadyConfigured_ReadBackFailureIsNotFatal(t *testing.T) {
+	t.Cleanup(func() { viper.Set("gateway.hostname", "") })
+	viper.Set("gateway.hostname", "")
+
+	deps := gatewayIngressDeps{
+		isConfigured:   func(context.Context) (bool, error) { return true, nil },
+		configuredHost: func(context.Context) (string, error) { return "", fmt.Errorf("connection refused") },
+	}
+	if err := runGatewayIngressCheck(context.Background(), deps); err != nil {
+		t.Fatalf("read-back failure must not fail the install, got: %v", err)
+	}
+}

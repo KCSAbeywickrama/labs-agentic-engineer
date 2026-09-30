@@ -244,9 +244,26 @@ workflow-skill:
 # rather than after it: skaffold needs the k3d cluster to import into, and
 # the install needs the images to already be there, so the pods come up on
 # them first time instead of pulling `:latest` and being swapped afterwards.
+# The DNS suffix every hostname on the cluster is composed onto. This flow is
+# localhost and nothing else, and dev-env enforces that below rather than
+# accepting an override it cannot honour: the config it imports two lines
+# later, skaffold/defaults.yaml, is pinned to localhost URLs. An override here
+# would re-domain the CLUSTER while the PLATFORM installed onto it kept
+# console.ae.localhost, thunder.openchoreo.localhost and an environment tier
+# to match — a split-brain install that comes up green and fails at the first
+# sign-in. A cluster on any other suffix runs the scripts directly, with a
+# config file carrying the same suffix (deployments/README.md).
+AE_DOMAIN ?= localhost
+
 dev-env:
+	@if [ "$(AE_DOMAIN)" != "localhost" ]; then \
+		echo "❌ dev-env is the localhost flow: it imports skaffold/defaults.yaml, whose URLs are localhost." >&2; \
+		echo "   AE_DOMAIN=$(AE_DOMAIN) would re-domain the cluster and leave the platform on localhost." >&2; \
+		echo "   For another suffix, run the scripts directly with a matching config — see deployments/README.md." >&2; \
+		exit 1; \
+	fi
 	cd tools/aectl && go build -o aectl-skaffold .
-	WITH_SKAFFOLD_CLIENT=1 bash deployments/scripts/setup-env-for-aectl.sh
+	AE_DOMAIN=$(AE_DOMAIN) WITH_SKAFFOLD_CLIENT=1 bash deployments/scripts/setup-env-for-aectl.sh
 	$(MAKE) dev-images
 	./tools/aectl/aectl-skaffold platform config import --config skaffold/defaults.yaml
 	ANTHROPIC_API_KEY=none AEP_THUNDER_ADMIN_CLIENT_SECRET=ae-install-client-secret \
@@ -256,7 +273,7 @@ dev-env:
 	elif [ "$${WITH_OBSERVABILITY:-1}" != "1" ]; then \
 		echo "⏭️  Skipping Agent Manager: it installs against the observability plane (WITH_OBSERVABILITY=0)"; \
 	else \
-		bash deployments/scripts/setup-agent-manager.sh; \
+		AE_DOMAIN=$(AE_DOMAIN) bash deployments/scripts/setup-agent-manager.sh; \
 	fi
 	@if [ "$${WITH_OBSERVABILITY:-1}" != "1" ]; then \
 		echo "⏭️  Skipping the SRE agent (WITH_OBSERVABILITY=0)"; \

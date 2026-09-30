@@ -32,7 +32,7 @@
 #     DeploymentPipeline/default runs development -> staging -> production and
 #     Environment/development exists (setup-env-for-aectl.sh, steps 4-7)
 #   * ThunderID 1.0.0 as release AND namespace `thunder`, bootstrapped from the
-#     ConfigMap named below, serving on thunder.openchoreo.localhost:8080
+#     ConfigMap named below, serving on thunder.openchoreo.<AE_DOMAIN>:8080
 #   * `aectl platform install` finished — AEP's platform chart, the environment
 #     Thunder for `development`, and that environment's API Platform gateway
 #
@@ -78,11 +78,34 @@ OBSERVABILITY_METRICS_VERSION="0.6.1"
 CLUSTER_NAME="${CLUSTER_NAME:-openchoreo}"
 CLUSTER_CONTEXT="${CLUSTER_CONTEXT:-k3d-${CLUSTER_NAME}}"
 
+# ============================================================================
+# AE_DOMAIN — the same DNS suffix setup-env-for-aectl.sh built the cluster on
+# ============================================================================
+#
+# Required, and for the same reason it is there: Agent Manager publishes into
+# the ThunderID bundle that script already imported, so a mismatch here is not
+# a re-runnable mistake — the two products end up disagreeing about hostnames
+# that can no longer be re-imported.
+#
+# Every *.amp, *.am-gateway and *.gateway hostname below is composed from it,
+# including the chart defaults this script overrides. With AE_DOMAIN=localhost
+# each one equals the chart's own default, so the local path is unchanged.
+: "${AE_DOMAIN:?set AE_DOMAIN — the same suffix passed to setup-env-for-aectl.sh
+   local k3d : AE_DOMAIN=localhost
+   shared VM : the value that script printed at the end of its run}"
+
+AMP_DOMAIN="amp.${AE_DOMAIN}"                 # amp-api, amp-console, its Thunder
+AGENTS_DOMAIN="am-gateway.${AE_DOMAIN}"       # an agent's own inbound API
+GW_DOMAIN="gateway.${AE_DOMAIN}"              # the environment API gateway vhost
+# Exported for the AI gateway script this one calls in its last step, which
+# has the same guard and would otherwise refuse.
+export AE_DOMAIN
+
 # The cluster's own coordinates. These must match what `aectl platform install`
 # ran against — skaffold/defaults.yaml is the source for the first three.
 OC_ENV="${OC_ENV:-development}"              # oc.pipeline_source_environment
 ORG_NS="${ORG_NS:-default}"                  # oc.default_org_namespace
-PUBLIC_THUNDER_URL="${PUBLIC_THUNDER_URL:-http://thunder.openchoreo.localhost:8080}"
+PUBLIC_THUNDER_URL="${PUBLIC_THUNDER_URL:-http://thunder.openchoreo.${AE_DOMAIN}:8080}"
 THUNDER_NS="${THUNDER_NS:-thunder}"
 THUNDER_RELEASE="${THUNDER_RELEASE:-thunder}"
 BOOTSTRAP_CM="${BOOTSTRAP_CM:-openchoreo-thunderid-bootstrap}"
@@ -109,7 +132,7 @@ WP_NS="openchoreo-workflow-plane"
 # Agent Manager addresses an environment's IdP as "<handle>.<base domain>:8080"
 # (ThunderOriginFromHandle, with TLS off) — it stores an origin it COMPOSES, it
 # is not told one. aectl has already provisioned this environment's IdP at
-# "<env>-idp.openchoreo.localhost", so pointing Agent Manager at that instance
+# "<env>-idp.${ENV_IDP_BASE_DOMAIN}", so pointing Agent Manager at that instance
 # rather than standing up a second one is a matter of making the value it
 # computes come out right: the base domain below, plus the handle registered in
 # the final step.
@@ -119,10 +142,10 @@ WP_NS="openchoreo-workflow-plane"
 # a column to store it, and a body carrying one is accepted with 200 and a
 # generated handle rather than refused — so composing the right value is the
 # only lever, and a `url` that looks like it worked is the trap.
-ENV_IDP_BASE_DOMAIN="${ENV_IDP_BASE_DOMAIN:-openchoreo.localhost}"
+ENV_IDP_BASE_DOMAIN="${ENV_IDP_BASE_DOMAIN:-openchoreo.${AE_DOMAIN}}"
 ENV_IDP_HANDLE="${ENV_IDP_HANDLE:-${OC_ENV}-idp}"
 ENV_IDP_RELEASE="thunder-${ORG_NS}-${OC_ENV}"
-AMP_API_URL="${AMP_API_URL:-http://api.amp.localhost:8080/api/v1}"
+AMP_API_URL="${AMP_API_URL:-http://api.${AMP_DOMAIN}:8080/api/v1}"
 
 PUBLIC_THUNDER_HOST="${PUBLIC_THUNDER_URL#*://}"
 PUBLIC_THUNDER_HOST="${PUBLIC_THUNDER_HOST%%:*}"
@@ -205,37 +228,42 @@ echo "   Thunder: reachable at ${THUNDER_SVC_HOST}:8090"
 # ============================================================================
 # Step 1: CoreDNS rewrites for Agent Manager's hostnames
 # ============================================================================
-# The charts keep their own *.amp.localhost defaults everywhere except the
-# Thunder addresses, which move to this deployment's. macOS resolves any
-# *.localhost host-side, but IN-CLUSTER callers need these too: the gateway
-# extension's bootstrap Job calls api.amp.localhost, and agents resolve their
-# own gateway vhost.
+# The charts' own hostnames are re-composed onto AE_DOMAIN at install (step
+# 7), but IN-CLUSTER callers still have to resolve them: the gateway
+# extension's bootstrap Job calls api.<amp domain>, and agents resolve their
+# own gateway vhost. A host-side resolver answering *.localhost (macOS) or a
+# wildcard record does nothing for a pod.
 #
 # Rewritten to host.k3d.internal rather than to a Service, so the request
 # hairpins out to the k3d load balancer and back in through the gateway with
 # its Host header intact — which is what vhost matching needs. OpenChoreo's own
-# coredns-custom.yaml does the same for *.openchoreo.localhost; this adds the
+# coredns-custom.yaml does the same for the OpenChoreo suffix; this adds the
 # keys beside it rather than replacing the ConfigMap.
 echo ""
-echo "1️⃣  CoreDNS rewrites for *.amp.localhost and the agent gateway hosts"
+echo "1️⃣  CoreDNS rewrites for *.${AMP_DOMAIN} and the agent gateway hosts"
+
+# Dots escaped once for CoreDNS's `name regex`; the suffix is AE_DOMAIN, so
+# these rewrites follow the cluster wherever it is published.
+AE_DOMAIN_RE="${AE_DOMAIN//./\\.}"
 
 coredns_changed=0
 for key in amp agentmanager am-gateway gateway; do
     cm_key="${key//-/}.override"
     host="${key//-/\\-}"
     desired="rewrite stop {
-  name regex (.+\\.)?${host}\\.localhost host.k3d.internal
+  name regex (.+\\.)?${host}\\.${AE_DOMAIN_RE} host.k3d.internal
   answer auto
 }"
     current="$(kubectl get cm coredns-custom -n kube-system -o jsonpath="{.data.${cm_key}}" 2>/dev/null || true)"
     [ "$current" = "$desired" ] && continue
     kubectl get cm coredns-custom -n kube-system -o json 2>/dev/null \
-        | CM_KEY="$cm_key" REWRITE_HOST="$host" python3 -c "
+        | CM_KEY="$cm_key" REWRITE_HOST="$host" SUFFIX_RE="$AE_DOMAIN_RE" python3 -c "
 import json, os, sys
 cm = json.load(sys.stdin)
 cm.setdefault('data', {})[os.environ['CM_KEY']] = (
     'rewrite stop {\n'
-    '  name regex (.+\\\\.)?' + os.environ['REWRITE_HOST'] + '\\\\.localhost host.k3d.internal\n'
+    '  name regex (.+\\\\.)?' + os.environ['REWRITE_HOST']
+    + '\\\\.' + os.environ['SUFFIX_RE'] + ' host.k3d.internal\n'
     '  answer auto\n'
     '}'
 )
@@ -367,7 +395,7 @@ echo "5️⃣  Platform resources extension"
 
 DP_INGRESS_HOST="$(kubectl get clusterdataplane default \
     -o jsonpath='{.spec.gateway.ingress.external.http.host}' 2>/dev/null || true)"
-DP_INGRESS_HOST="${DP_INGRESS_HOST:-openchoreoapis.localhost}"
+DP_INGRESS_HOST="${DP_INGRESS_HOST:-openchoreoapis.${AE_DOMAIN}}"
 
 # The chart also forks five of OpenChoreo's build templates under OpenChoreo's
 # own names. OpenChoreo applies those five client-side, so they carry no Helm
@@ -467,14 +495,39 @@ echo "   ✅ sandbox controller ready"
 # base URL stays public (the System resource server identifier is derived from
 # it) while the connection resolves to the Service.
 #
+# Every other hostname the chart ships is composed from AE_DOMAIN too — its
+# own HTTPRoute hosts (api/console/cp), the console's redirect URIs and API
+# base, and the agent/gateway base domains. At AE_DOMAIN=localhost each of
+# these equals the chart's own default, so they are inert on the local path
+# and are what re-domains Agent Manager on any other cluster. Helm accepts an
+# unknown --set path in silence, so these were taken from
+# `helm show values wso2-agent-manager` at ${AMP_VERSION} rather than guessed;
+# re-check them on a chart bump, and see the live-pod grep below.
+#
+# One of them is not a pure re-domain: otel.exporterEndpoint ships pointing at
+# "default-default", the chart's own (env, org) pair, which is wrong on this
+# cluster whatever the domain. It is set here to ${OC_ENV}-${ORG_NS} like the
+# console's instrumentationUrl beside it, which this script has always
+# overridden — the two address the same gateway and disagreeing was a bug.
+#
 # The chart runs its own DB-migration and JWT-key-generation Jobs.
 echo ""
 echo "7️⃣  Agent Manager (amp-api, amp-console, PostgreSQL)"
 helm upgrade --install amp "${AMP_REGISTRY}/wso2-agent-manager" \
     --version "$AMP_VERSION" \
     --namespace "$AMP_NS" --create-namespace --kube-context "$CLUSTER_CONTEXT" \
-    --set "console.config.instrumentationUrl=http://${OC_ENV}-${ORG_NS}.gateway.localhost:19080/otel" \
-    --set "agentManagerService.config.amObserverPublicURL=http://traces.amp.localhost:11080" \
+    --set "console.config.instrumentationUrl=http://${OC_ENV}-${ORG_NS}.${GW_DOMAIN}:19080/otel" \
+    --set "agentManagerService.config.otel.exporterEndpoint=http://${OC_ENV}-${ORG_NS}.${GW_DOMAIN}:19080/otel" \
+    --set "agentManagerService.config.amObserverPublicURL=http://traces.${AMP_DOMAIN}:11080" \
+    --set "agentManagerService.ocIngress.hostname=api.${AMP_DOMAIN}" \
+    --set "agentManagerService.ocIngress.gatewayMgmt.hostnames[0]=cp.${AMP_DOMAIN}" \
+    --set "agentManagerService.config.serverPublicURL=http://api.${AMP_DOMAIN}:8080" \
+    --set-string "agentManagerService.config.agentsBaseDomain=${AGENTS_DOMAIN}" \
+    --set-string "agentManagerService.config.gatewayBaseDomain=${GW_DOMAIN}" \
+    --set "console.ocIngress.hostname=console.${AMP_DOMAIN}" \
+    --set "console.config.apiBaseUrl=http://api.${AMP_DOMAIN}:8080" \
+    --set "console.config.auth.signInRedirectURL=http://console.${AMP_DOMAIN}:8080/login" \
+    --set "console.config.auth.signOutRedirectURL=http://console.${AMP_DOMAIN}:8080/login" \
     --set "agentManagerService.config.keyManager.issuer=${PUBLIC_THUNDER_URL}" \
     --set "agentManagerService.config.thunder.baseURL=${PUBLIC_THUNDER_URL}" \
     --set "console.config.auth.baseUrl=${PUBLIC_THUNDER_URL}" \
@@ -710,8 +763,8 @@ echo "============================================"
 echo "  ✅ Agent Manager installed"
 echo "============================================"
 echo ""
-echo "  Console: http://console.amp.localhost:8080"
-echo "  API:     http://api.amp.localhost:8080"
+echo "  Console: http://console.${AMP_DOMAIN}:8080"
+echo "  API:     http://api.${AMP_DOMAIN}:8080"
 echo ""
 echo "  ${OC_ENV} is registered against the identity provider aectl installed"
 echo "  (${ENV_IDP_RELEASE}), not a second one. Agent Manager's own"

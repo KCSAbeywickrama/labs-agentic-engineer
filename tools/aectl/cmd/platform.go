@@ -70,8 +70,6 @@ var (
 	initPlatformVersion     string
 	initPlatformRelease     string
 	initPlatformNamespace   string
-	initConsoleURL          string
-	initAPIURL              string
 	initBuildPlaneNamespace string
 	initRegistryService     string
 	initOCNamespace         string
@@ -94,6 +92,76 @@ var platformServiceChartKeys = []string{
 	"aepMcpServer",
 	"console",
 	"tryIt",
+}
+
+// The local defaults for the two public URLs that have one. They are the
+// flags' defaults and the accessors' fallback, declared once so a flag and
+// the value a command actually reads cannot drift apart.
+const (
+	defaultConsoleURL = "http://console.ae.localhost:8080"
+	defaultTryItURL   = "http://tryit.ae.localhost:8080"
+)
+
+// consolePublicURL, tryItPublicURL and aepAPIPublicURL are the platform's
+// browser-facing origins, resolved the way every other setting here is:
+// config file, overridden by the flag bound to it, with the local default
+// underneath. Reading them through viper rather than a flag variable is what
+// makes the config file reachable at all — a bound flag's own default is the
+// last thing viper consults, below the file, so a variable bound with
+// StringVar would hold the default and silently win over a configured value.
+func consolePublicURL() string {
+	if u := viper.GetString("console.public_url"); u != "" {
+		return u
+	}
+	return defaultConsoleURL
+}
+
+func tryItPublicURL() string {
+	if u := viper.GetString("tryit.public_url"); u != "" {
+		return u
+	}
+	return defaultTryItURL
+}
+
+// aepAPIPublicURL falls back to the console's origin, which proxies the API.
+// The key exists for the deployment where the two are genuinely separate
+// origins; on every other one, setting the console URL is enough.
+func aepAPIPublicURL() string {
+	if u := viper.GetString("aep_api.public_url"); u != "" {
+		return u
+	}
+	return consolePublicURL()
+}
+
+// tryItOverrides returns the helm --set pairs for the Try-it app's two
+// browser-facing values. Both used to be left at the chart's defaults, which
+// made them the only public URLs on the platform that an install could not
+// move — every other one follows --console-url or config.
+//
+// publicURL is agreed by three places the chart derives from this one value
+// (the HTTPRoute hostname, the console's VITE_TRY_IT_URL, and aep-api's
+// TRY_IT_CALLBACK_URL, which registers {publicURL}/callback as a redirect URI
+// on every project's sign-in client). Two of the three agreeing is the failure
+// that looks like a working install: the link opens and the sign-in is then
+// refused as an unregistered redirect. Setting it here keeps all three on one
+// value from the first install rather than a follow-up helm upgrade.
+//
+// gatewayHostname is the ClusterDataPlane's ingress host — the allowlist
+// Try-it refuses a launch URL against. It is the same gateway.hostname
+// checkOrConfigureGatewayIngress already patched onto ClusterDataPlane and
+// Environment, so passing it costs nothing and removes a second copy that
+// could drift. Empty leaves the chart default: that is a cluster whose
+// gateway ingress was configured by hand with nothing in config to read, and
+// inventing a host for it would be worse than the default.
+func tryItOverrides(publicURL, gatewayHostname string) []string {
+	var args []string
+	if publicURL != "" {
+		args = append(args, "--set", "tryIt.publicURL="+publicURL)
+	}
+	if gatewayHostname != "" {
+		args = append(args, "--set", "tryIt.gatewayHosts="+gatewayHostname)
+	}
+	return args
 }
 
 // imageTagOverrides returns the helm --set pairs that re-point every platform
@@ -139,8 +207,12 @@ func init() {
 	initCmd.Flags().StringVar(&initPlatformVersion, "platform-version", "latest", "Platform version to pull from GHCR (ignored when --platform-chart is set)")
 	initCmd.Flags().StringVar(&initPlatformRelease, "platform-release", "aep-platform", "Helm release name for the platform chart")
 	initCmd.Flags().StringVar(&initPlatformNamespace, "namespace", "wso2-aep", "Kubernetes namespace")
-	initCmd.Flags().StringVar(&initConsoleURL, "console-url", "http://console.ae.localhost:8080", "Public URL of the AEP console")
-	initCmd.Flags().StringVar(&initAPIURL, "api-url", "", "Public base aep-api builds user-facing links on (GitHub App redirect, Settings page); defaults to --console-url, whose origin proxies the API")
+	initCmd.Flags().String("console-url", defaultConsoleURL, "Public URL of the AEP console (overrides config)")
+	_ = viper.BindPFlag("console.public_url", initCmd.Flags().Lookup("console-url"))
+	initCmd.Flags().String("api-url", "", "Public base aep-api builds user-facing links on (GitHub App redirect, Settings page) (overrides config); empty defaults to the console URL, whose origin proxies the API")
+	_ = viper.BindPFlag("aep_api.public_url", initCmd.Flags().Lookup("api-url"))
+	initCmd.Flags().String("tryit-url", defaultTryItURL, "Public URL of the Try-it app (overrides config). It is served on its OWN hostname, not a path under the console's, so re-domaining an install means moving both")
+	_ = viper.BindPFlag("tryit.public_url", initCmd.Flags().Lookup("tryit-url"))
 	initCmd.Flags().StringVar(&initBuildPlaneNamespace, "build-plane-namespace", "openchoreo-workflow-plane", "Namespace of the OpenChoreo build/workflow plane (must already exist, incl. its image registry)")
 	initCmd.Flags().StringVar(&initRegistryService, "registry-service", "registry", "Name of the build-plane image registry Service (the coding-agent build pushes/pulls here)")
 	initCmd.Flags().StringVar(&initOCNamespace, "oc-namespace", "", "Namespace where OpenChoreo control-plane is installed (overrides config)")
@@ -288,16 +360,13 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	}
 
 	thunderURL := viper.GetString("thunder.url")
-	apiURL := initAPIURL
-	if apiURL == "" {
-		apiURL = initConsoleURL
-	}
+	consoleURL := consolePublicURL()
 	helmArgs := []string{
 		"upgrade", "--install", initPlatformRelease,
 		"-n", initPlatformNamespace,
 		"--create-namespace",
-		"--set", "console.publicURL=" + initConsoleURL,
-		"--set", "aepApi.publicURL=" + apiURL,
+		"--set", "console.publicURL=" + consoleURL,
+		"--set", "aepApi.publicURL=" + aepAPIPublicURL(),
 		"--set", "console.thunderPublicURL=" + viper.GetString("thunder.public_url"),
 		"--set", "thunder.adminURL=" + thunderURL,
 		"--set", "thunder.jwksURL=" + thunderURL + "/oauth2/jwks",
@@ -317,6 +386,7 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 			chartLabel = "aep-platform@" + initPlatformVersion
 		}
 	}
+	helmArgs = append(helmArgs, tryItOverrides(tryItPublicURL(), viper.GetString("gateway.hostname"))...)
 	helmArgs = append(helmArgs, imageTagOverrides(initImageTag)...)
 	if mode := viper.GetString("platform.workspaces.access_mode"); mode != "" {
 		helmArgs = append(helmArgs, "--set", "workspaces.accessMode="+mode)
@@ -368,7 +438,7 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	ui.Step("Registering Thunder OAuth clients")
 	if err := doThunderSetup(ctx, k8sClient, initPlatformNamespace,
 		viper.GetString("thunder.namespace"),
-		initConsoleURL,
+		consoleURL,
 	); err != nil {
 		return err
 	}
@@ -390,11 +460,18 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		Org: ocOrgNamespace(), Env: ocPipelineSourceEnvironment(),
 		PlatformThunderURL:       thunderURL,
 		PlatformThunderPublicURL: viper.GetString("thunder.public_url"),
-		Kubeconfig:               kubeconfig,
-		OpenBaoNamespace:         ocOpenBaoNamespace,
-		OpenBaoRelease:           ocOpenBaoRelease,
-		OpenBaoServiceAccount:    ocOpenBaoSA,
-		OpenBaoWriteRole:         ocWriteRole,
+		// Empty leaves envidp on the k3d convention. Both are browser-facing
+		// — the environment IdP is where a generated app sends its end users
+		// to sign in — so a cluster reachable by more than its own host has
+		// to set them, and idp_base_domain has to match Agent Manager's
+		// ENV_IDP_BASE_DOMAIN.
+		IDPBaseDomain:         viper.GetString("environment.idp_base_domain"),
+		GatewayBaseDomain:     viper.GetString("environment.gateway_base_domain"),
+		Kubeconfig:            kubeconfig,
+		OpenBaoNamespace:      ocOpenBaoNamespace,
+		OpenBaoRelease:        ocOpenBaoRelease,
+		OpenBaoServiceAccount: ocOpenBaoSA,
+		OpenBaoWriteRole:      ocWriteRole,
 	}); err != nil {
 		return fmt.Errorf("install environment identity provider: %w", err)
 	}
@@ -414,7 +491,7 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 	if err := installAddons(ctx, k8sClient, platformVersion); err != nil {
 		return err
 	}
-	ui.Ready(initConsoleURL)
+	ui.Ready(consoleURL)
 	return nil
 }
 

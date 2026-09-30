@@ -40,11 +40,17 @@ func TestGatewayNaming(t *testing.T) {
 	// env FIRST, org second — the chart derives its kgateway hostname this
 	// way (see setup-environment-gateway.sh's own comment on why swapping the
 	// order silently breaks the registered vhost).
-	if got, want := gatewayHostname("acme", "prod"), "prod-acme.gateway.localhost"; got != want {
+	if got, want := gatewayHostname("acme", "prod", defaultGatewayBaseDomain), "prod-acme.gateway.localhost"; got != want {
 		t.Errorf("gatewayHostname = %q, want %q", got, want)
 	}
-	if got, want := gatewayVhost("acme", "prod"), "http://prod-acme.gateway.localhost:19080"; got != want {
+	if got, want := gatewayVhost("acme", "prod", defaultGatewayBaseDomain), "http://prod-acme.gateway.localhost:19080"; got != want {
 		t.Errorf("gatewayVhost = %q, want %q", got, want)
+	}
+	// A re-domained cluster moves the suffix and nothing else: env-org order
+	// and the data-plane port are structure, not configuration.
+	if got, want := gatewayVhost("acme", "prod", "gateway.10.0.0.5.sslip.io"),
+		"http://prod-acme.gateway.10.0.0.5.sslip.io:19080"; got != want {
+		t.Errorf("gatewayVhost with a configured base domain = %q, want %q", got, want)
 	}
 	if got, want := gatewayBackendJWTSecretName("api-platform-acme-prod"), "api-platform-acme-prod-backend-jwt"; got != want {
 		t.Errorf("gatewayBackendJWTSecretName = %q, want %q", got, want)
@@ -153,7 +159,8 @@ func TestRenderGatewayValues(t *testing.T) {
 		AdminURL:  "http://thunder-default-default-service.thunder-default-default.svc.cluster.local:8090",
 	}
 	assert := assertion{issuer: "aep-gateway-default-default", header: "x-jwt-assertion"}
-	values, err := renderGatewayValues("default", "default", "default-default", inst, assert, "-----BEGIN RSA PRIVATE KEY-----\nABC\n-----END RSA PRIVATE KEY-----\n")
+	cfg := Config{Org: "default", Env: "default"}
+	values, err := renderGatewayValues(cfg, "default-default", inst, assert, "-----BEGIN RSA PRIVATE KEY-----\nABC\n-----END RSA PRIVATE KEY-----\n")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
