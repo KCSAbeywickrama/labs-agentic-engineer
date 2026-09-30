@@ -102,6 +102,10 @@
 #                           k3d, "<ip>.sslip.io" or a wildcard domain you own
 #                           for a cluster other machines reach. Pass the same
 #                           value to setup-agent-manager.sh.
+#   WITH_OC_PORTAL=0        leave OpenChoreo's Backstage portal out of the
+#                           control plane. AEP reads nothing from it, and its
+#                           liveness probe is too tight for its own startup on
+#                           a cold cluster — see Step 3.
 #   WITH_BUILD=0            skip the workflow plane (Step 6, optional upstream)
 #   WITH_OBSERVABILITY=0    skip the observability plane (Step 7, optional upstream)
 #   WITH_SKAFFOLD_CLIENT=1  also bootstrap ae-install-client (see step 3b) — the
@@ -933,6 +937,25 @@ YAML
 # 84-aep-system-role.yaml) rather than a role AEP owns, so ae-install-client
 # holds every permission that role carries — not a hand-picked copy of them.
 if [ "$WITH_SKAFFOLD_CLIENT" = "1" ]; then
+# This client holds Thunder's Administrator role, and Thunder answers on the
+# same public gateway as everything else — so on any cluster reachable beyond
+# its own host, a secret published in this file is an admin token for anyone
+# who reads the repo. It is generated instead, and printed at the end of the
+# run for the `aectl platform install` that consumes it.
+#
+# localhost keeps the fixed literal: `make dev-env` passes exactly that string
+# as AEP_THUNDER_ADMIN_CLIENT_SECRET, the cluster is reachable only from the
+# machine that built it, and a generated secret there would break the one
+# flow that cannot prompt for it. Set AE_INSTALL_CLIENT_SECRET to pin it
+# anywhere (re-running an install against an existing Thunder, say).
+if [ -z "${AE_INSTALL_CLIENT_SECRET:-}" ]; then
+    if [ "$AE_DOMAIN" = "localhost" ]; then
+        AE_INSTALL_CLIENT_SECRET="ae-install-client-secret"
+    else
+        AE_INSTALL_CLIENT_SECRET="$(openssl rand -hex 24)"
+        AE_INSTALL_CLIENT_SECRET_GENERATED=1
+    fi
+fi
 cat > "${BOOTSTRAP_DIR}/86-ae-install-client.yaml" <<YAML
 resource_type: application
 id: ae-install-client
@@ -944,7 +967,7 @@ inboundAuthConfig:
   - type: oauth2
     config:
       clientId: "ae-install-client"
-      clientSecret: "ae-install-client-secret"
+      clientSecret: "${AE_INSTALL_CLIENT_SECRET}"
       grantTypes: ["client_credentials"]
       tokenEndpointAuthMethod: "client_secret_post"
       pkceRequired: false
@@ -1144,11 +1167,29 @@ echo "✅ ThunderID ready at http://thunder.${OC_DOMAIN}:8080 (${THUNDER_ADMIN_U
 
 echo ""
 echo "   Control Plane"
+# WITH_OC_PORTAL=0 leaves OpenChoreo's Backstage portal out of the control
+# plane. Nothing in AEP reads it — aep-api talks to openchoreo-api, and the
+# platform ships its own console — so it is one more deployment to schedule
+# and wait for, on the plane whose readiness gates every later step.
+#
+# It is also the one component here that does not reliably come up. Its
+# liveness probe allows 30s + 3 x 10s before the first kill with a 1s
+# per-check timeout, and plugin init (auth, catalog, scaffolder) has not
+# finished by then on a cold cluster — so kubelet SIGKILLs it mid-startup,
+# the restart begins again, and the release never satisfies `--wait`. A longer
+# timeout here does not help: the loop is deterministic, not slow.
+OC_PORTAL_SET=()
+if [ "${WITH_OC_PORTAL:-1}" != "1" ]; then
+    OC_PORTAL_SET=(--set backstage.enabled=false)
+    echo "   ⏭️  OpenChoreo portal (Backstage) disabled (WITH_OC_PORTAL=0)"
+fi
+
 helm upgrade --install openchoreo-control-plane \
     oci://ghcr.io/openchoreo/helm-charts/openchoreo-control-plane \
     --version "${OC_VERSION}" \
     --namespace openchoreo-control-plane --create-namespace \
     --values "$(oc_values single-cluster/values-cp.yaml)" \
+    "${OC_PORTAL_SET[@]}" \
     --wait --timeout 600s
 
 echo "⏳ Waiting for Control Plane..."
@@ -1395,7 +1436,12 @@ echo "============================================"
 # the steps `make dev-env` runs after it, so listing all four flat would send
 # someone to a URL that is not answering yet and read as a broken install.
 echo "  Serving now"
-printf "    %-16s%-50s(%s / %s)\n" "OpenChoreo" "http://${OC_DOMAIN}:8080" "${THUNDER_ADMIN_USER}" "${THUNDER_ADMIN_PASSWORD}"
+# That hostname is the Backstage portal's route, so with the portal skipped it
+# answers nothing — and a URL in a success summary that does not load is read
+# as a broken install, which is the thing this block exists to avoid.
+if [ "${WITH_OC_PORTAL:-1}" = "1" ]; then
+    printf "    %-16s%-50s(%s / %s)\n" "OpenChoreo" "http://${OC_DOMAIN}:8080" "${THUNDER_ADMIN_USER}" "${THUNDER_ADMIN_PASSWORD}"
+fi
 printf "    %-16s%-50s(%s / %s)\n" "ThunderID" "http://thunder.${OC_DOMAIN}:8080/console" "${THUNDER_ADMIN_USER}" "${THUNDER_ADMIN_PASSWORD}"
 echo ""
 echo "  Still to install — \`make dev-env\` runs both of these next"
@@ -1426,6 +1472,21 @@ if [ "$AE_DOMAIN" != "localhost" ]; then
 EOF
     echo ""
     echo "  And pass the same suffix to Agent Manager:  AE_DOMAIN=${AE_DOMAIN}"
+fi
+
+# Printed once, here, and stored nowhere this script controls: it is the
+# Administrator credential for an IdP on a reachable gateway, so it is not
+# going into a file next to the config. `aectl platform install` reads it from
+# the environment and seeds it into OpenBao itself.
+if [ "${AE_INSTALL_CLIENT_SECRET_GENERATED:-0}" = "1" ]; then
+    echo ""
+    echo "  ⚠️  Generated admin client secret — copy it now, it is not stored:"
+    echo ""
+    echo "    export AEP_THUNDER_ADMIN_CLIENT_SECRET=${AE_INSTALL_CLIENT_SECRET}"
+    echo ""
+    echo "  Pin it with AE_INSTALL_CLIENT_SECRET=... if you re-run this script"
+    echo "  against the same Thunder; the bundle is imported once and the"
+    echo "  secret cannot be re-derived afterwards."
 fi
 
 echo ""
