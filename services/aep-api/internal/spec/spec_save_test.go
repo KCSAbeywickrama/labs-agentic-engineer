@@ -275,11 +275,12 @@ func TestBuildScopeAtTag(t *testing.T) {
 	// A reference document is the user's source material, never a story source.
 	seed["specs/requirements/references/brief.md"] = "- F3.1 As a user, I want R, so that r.\n"
 	seed["specs/design/design.cell"] = "component svc service\ncomponent notify-svc service\n"
-	// svc claims F1.1, F1.2 and a junk ID the requirements never define;
-	// notify-svc claims F2.1. The scope reads the claims from each design.json.
+	// svc claims F1.2 and F1.1 (out of order); notify-svc claims F2.1. The
+	// scope reads the claims from each design.json. (A claim of an ID the
+	// requirements do not define is refused by the gate before any tag.)
 	seed["specs/design/components/svc/design.json"] = `{"name":"svc","type":"service","version":"1.0.0","language":"go",` +
 		`"buildpack":"go","appPath":".","entrypoint":"main.go","exposure":"internet",` +
-		`"stories":["F1.2","F1.1","F9.9"],"dependencies":[],"description":"a service"}`
+		`"stories":["F1.2","F1.1"],"dependencies":[],"description":"a service"}`
 	seed["specs/design/components/notify-svc/design.json"] = `{"name":"notify-svc","type":"service","version":"1.0.0","language":"go",` +
 		`"buildpack":"go","appPath":".","entrypoint":"main.go","exposure":"internet",` +
 		`"stories":["F2.1"],"dependencies":[],"description":"a service"}`
@@ -309,8 +310,7 @@ func TestBuildScopeAtTag(t *testing.T) {
 	if scope.StoryTitles["F1.1"] != "As a user, I want A, so that a." || scope.StoryTitles["F2.1"] == "" {
 		t.Errorf("story titles = %v", scope.StoryTitles)
 	}
-	// Claims are filtered to real stories (the junk F9.9 is dropped) and put in
-	// ID order.
+	// Claims are put in ID order.
 	if fmt.Sprint(scope.ComponentStories["svc"]) != "[F1.1 F1.2]" || fmt.Sprint(scope.ComponentStories["notify-svc"]) != "[F2.1]" {
 		t.Errorf("componentStories = %v", scope.ComponentStories)
 	}

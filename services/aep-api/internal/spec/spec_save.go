@@ -30,6 +30,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -212,6 +213,13 @@ func validateSpecBundles(reqFiles, designFiles map[string]string) error {
 			Path:    RequirementsDir + "/" + requirementsMainFile,
 			Code:    codeMissingRequirements,
 			Message: "prd.md missing — populate the PRD before building",
+		})
+	}
+	// The requirements' own IDs (skills/prd-contract, "IDs"): one home each,
+	// never reused, and every feature a need or an Applies to names is live.
+	for _, p := range reqspec.Parse(reqFiles).Problems() {
+		files = append(files, FileValidationError{
+			Path: RequirementsDir + "/" + p.Path, Code: p.Code, Message: p.Message,
 		})
 	}
 	if err := validateDesignBundle(designFiles); err != nil {

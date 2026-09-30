@@ -32,6 +32,7 @@
 package reqspec
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
@@ -68,6 +69,14 @@ type Spec struct {
 	// RetiredProductWide are the P IDs the product-wide files' Retired
 	// sections record.
 	RetiredProductWide []string `json:"retiredProductWide,omitempty"`
+
+	// moves maps a retired ID to the ID that replaced it, from a Retired
+	// entry ("F2.3 moved to F5.1") or a "was" record ("F5.1 (was F2.3)").
+	moves map[string]string
+	// retired holds every retired ID the files record.
+	retired map[string]bool
+	// problems are what the parse found wrong with the files themselves.
+	problems []Problem
 }
 
 // Feature is one feature file.
@@ -108,6 +117,8 @@ type Item struct {
 	// AppliesTo is feature IDs, or the single entry "all".
 	AppliesTo []string `json:"appliesTo,omitempty"`
 	Assumed   bool     `json:"assumed,omitempty"`
+	// path is the product-wide file it is in, for a problem to point at.
+	path string
 }
 
 // Question is a blocking question and the answers offered for it.
@@ -128,15 +139,17 @@ const (
 // Parse reads the requirements folder. files maps a path relative to
 // specs/requirements/ to its content; files outside the contract are ignored.
 func Parse(files map[string]string) Spec {
-	var spec Spec
+	spec := Spec{moves: map[string]string{}, retired: map[string]bool{}}
 	for rel, content := range files {
 		if m := featureFileRE.FindStringSubmatch(rel); m != nil {
-			spec.Features = append(spec.Features, parseFeature(m[1], rel, content))
+			f, problems := parseFeature(m[1], rel, content, &spec)
+			spec.Features = append(spec.Features, f)
+			spec.problems = append(spec.problems, problems...)
 		}
 	}
 	slices.SortFunc(spec.Features, func(a, b Feature) int { return CompareIDs(a.ID, b.ID) })
 
-	spec.RetiredFeatures = retiredIDs(readDoc(files[ProductFile]))
+	spec.RetiredFeatures = spec.retire(readDoc(files[ProductFile]))
 
 	for rel, content := range files {
 		if rel != ProductWideFile && !productWideTopicRE.MatchString(rel) {
@@ -148,16 +161,18 @@ func Parse(files map[string]string) Spec {
 			if !strings.HasPrefix(l.id, "P") {
 				continue
 			}
-			spec.ProductWide = append(spec.ProductWide, Item{ID: l.id, Text: l.text, AppliesTo: l.appliesTo, Assumed: l.tag == tagAssumed})
+			spec.ProductWide = append(spec.ProductWide, Item{ID: l.id, Text: l.text, AppliesTo: l.appliesTo, Assumed: l.tag == tagAssumed, path: rel})
 		}
-		spec.RetiredProductWide = append(spec.RetiredProductWide, retiredIDs(doc)...)
+		spec.RetiredProductWide = append(spec.RetiredProductWide, spec.retire(doc)...)
 	}
 	slices.SortFunc(spec.ProductWide, func(a, b Item) int { return CompareIDs(a.ID, b.ID) })
 	slices.SortFunc(spec.RetiredProductWide, CompareIDs)
+	spec.problems = append(spec.problems, spec.idProblems()...)
 	return spec
 }
 
-func parseFeature(id, rel, content string) Feature {
+func parseFeature(id, rel, content string, spec *Spec) (Feature, []Problem) {
+	var problems []Problem
 	doc := readDoc(content)
 	f := Feature{ID: id, Name: doc.title, Path: rel}
 	if f.Name == "" {
@@ -170,8 +185,17 @@ func parseFeature(id, rel, content string) Feature {
 	}
 	for _, it := range doc.section(sectionUserStories).items {
 		l := parseLine(it.text)
-		if !strings.HasPrefix(l.id, id+".") {
+		if l.id == "" {
 			continue
+		}
+		if !strings.HasPrefix(l.id, id+".") {
+			problems = append(problems, Problem{Path: rel, Code: CodeStoryOutsideFeature,
+				Message: fmt.Sprintf("%s is a story of %s, not %s: a story's ID starts with its own feature's — move it with a new ID, recording the old one (\"(was %s)\")", l.id, featureOf(l.id), id, l.id)})
+			continue
+		}
+		if l.was != "" {
+			spec.moves[l.was] = l.id
+			spec.retired[l.was] = true
 		}
 		f.Stories = append(f.Stories, Story{ID: l.id, Was: l.was, Text: l.text, Needs: l.needs, Assumed: l.tag == tagAssumed})
 	}
@@ -192,19 +216,30 @@ func parseFeature(id, rel, content string) Feature {
 		}
 		f.Blocking = append(f.Blocking, Question{Question: l.text, Options: it.children})
 	}
-	f.Retired = retiredIDs(doc)
-	return f
+	f.Retired = spec.retire(doc)
+	return f, problems
 }
 
-var retiredLeadRE = regexp.MustCompile(`^(F\d+(?:\.\d+)?|P\d+)\b`)
+var (
+	retiredLeadRE = regexp.MustCompile(`^(F\d+(?:\.\d+)?|P\d+)\b`)
+	retiredToRE   = regexp.MustCompile(`(?i)\b(?:moved to|merged into)\s+(F\d+(?:\.\d+)?|P\d+)\b`)
+)
 
-// retiredIDs reads a file's Retired section: each entry leads with the ID it
-// retires ("F2.3 moved to F5.1", "F6 Budget alerts dropped").
-func retiredIDs(doc document) []string {
+// retire reads a file's Retired section: each entry leads with the ID it
+// retires, and names its replacement when it moved ("F2.3 moved to F5.1",
+// "F4 Spending reports merged into F3", "F6 Budget alerts dropped"). It records
+// both on the spec and returns the retired IDs.
+func (s *Spec) retire(doc document) []string {
 	var out []string
 	for _, it := range doc.section(sectionRetired).items {
-		if m := retiredLeadRE.FindStringSubmatch(it.text); m != nil {
-			out = append(out, m[1])
+		m := retiredLeadRE.FindStringSubmatch(it.text)
+		if m == nil {
+			continue
+		}
+		out = append(out, m[1])
+		s.retired[m[1]] = true
+		if to := retiredToRE.FindStringSubmatch(it.text); to != nil {
+			s.moves[m[1]] = to[1]
 		}
 	}
 	return out

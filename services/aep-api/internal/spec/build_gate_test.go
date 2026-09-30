@@ -17,6 +17,7 @@
 package spec
 
 import (
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -452,5 +453,54 @@ func TestBuildGate_RolesDocumentValidatedEvenWithoutSignIn(t *testing.T) {
 	errs := gateErrors(t, files)
 	if !slices.Contains(codesOf(errs), codeUnknownRoleStory) {
 		t.Fatalf("want %s, got %+v", codeUnknownRoleStory, errs)
+	}
+}
+
+// A design that cites a story the requirements no longer have names what to
+// cite instead: a retired story its replacement, a feature its stories.
+func TestBuildGate_StaleStoryCitations(t *testing.T) {
+	reqs := map[string]string{}
+	for k, v := range gateRequirements {
+		reqs[k] = v
+	}
+	reqs["features/F1-ordering.md"] = strings.Replace(reqs["features/F1-ordering.md"], "- F1.3 dropped", "- F1.3 moved to F2.1", 1)
+	files := completeDesignFiles()
+	files["components/lunch-web/design.json"] = enriched("lunch-web", "web-application", "F1.1", "F1.2", "F1.3", "F2", "F9.9")
+	var got []string
+	for _, e := range validateBuildGate(reqs, files) {
+		if e.Code == codeStaleStoryCitation {
+			got = append(got, e.Message)
+		}
+	}
+	want := []string{
+		"`stories` cites F1.3 — F1.3 is retired: it is now F2.1; cite F2.1",
+		"`stories` cites F2 — F2 is not a story; cite the stories it holds",
+		"`stories` cites F9.9 — F9.9 is not in the requirements; cite a real story or drop it",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("stale citations =\n%v\nwant\n%v", got, want)
+	}
+}
+
+// The requirements' own ID problems refuse the save, pointing at the file.
+func TestValidateSpecBundles_RequirementIDProblems(t *testing.T) {
+	reqs := map[string]string{}
+	for k, v := range gateRequirements {
+		reqs[k] = v
+	}
+	reqs["features/F2-notifications.md"] += "- F2.1 As a member, I get the same message twice.\n"
+	err := validateSpecBundles(reqs, completeDesignFiles())
+	var ve *SpecValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want a SpecValidationError, got %v", err)
+	}
+	found := false
+	for _, f := range ve.Files {
+		if f.Path == RequirementsDir+"/features/F2-notifications.md" && f.Code == "DUPLICATE_ID" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want DUPLICATE_ID on the feature file, got %+v", ve.Files)
 	}
 }

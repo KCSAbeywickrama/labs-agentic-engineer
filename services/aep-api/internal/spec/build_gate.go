@@ -56,6 +56,9 @@ const (
 	codeInvalidDesignCell        = "INVALID_DESIGN_CELL"
 	codeMissingUserStories       = "MISSING_USER_STORIES"
 	codeUncoveredStory           = "UNCOVERED_STORY"
+	// codeStaleStoryCitation — a design.json cites a story the requirements
+	// do not have: retired (the message names its replacement) or unknown.
+	codeStaleStoryCitation = "STALE_STORY_CITATION"
 	codeUnenrichedComponent      = "UNENRICHED_COMPONENT"
 	codeMissingComponentArtifact = "MISSING_COMPONENT_ARTIFACT"
 	// codeMissingRolesDocument — the design has sign-in but declares no roles.
@@ -133,10 +136,17 @@ func validateBuildGate(reqFiles, designFiles map[string]string) []FileValidation
 	for _, st := range stories {
 		defined[st.ID] = true
 	}
+	spec := reqspec.Parse(reqFiles)
 	claimed := map[string]bool{}
-	for _, ids := range componentStoryClaims(facts, designFiles) {
-		for _, id := range ids {
+	for _, c := range facts.Components {
+		for _, id := range designJSONStories(designFiles["components/"+c.ID+"/design.json"]) {
 			claimed[id] = true
+			if !defined[id] {
+				errs = append(errs, FileValidationError{
+					Path: "components/" + c.ID + "/design.json", Code: codeStaleStoryCitation,
+					Message: fmt.Sprintf("`stories` cites %s — %s", id, notAStory(spec, id)),
+				})
+			}
 		}
 	}
 	for _, st := range stories {
@@ -148,7 +158,7 @@ func validateBuildGate(reqFiles, designFiles map[string]string) []FileValidation
 		}
 	}
 
-	errs = append(errs, validateRolesDocument(designFiles, defined)...)
+	errs = append(errs, validateRolesDocument(designFiles, spec)...)
 
 	// The openapi.yaml SECURITY gate over EVERY component (task 1.6). The save
 	// gate runs the same rules per file, but a save only ever holds the siblings
@@ -226,8 +236,12 @@ func validateBuildGate(reqFiles, designFiles map[string]string) []FileValidation
 //
 // The story cross-check lives here rather than in securityspec because only the
 // gate sees the requirements: securityspec validates one file, this validates
-// the bundle. stories is the set of story IDs the requirements define.
-func validateRolesDocument(designFiles map[string]string, stories map[string]bool) []FileValidationError {
+// the bundle.
+func validateRolesDocument(designFiles map[string]string, spec reqspec.Spec) []FileValidationError {
+	stories := map[string]bool{}
+	for _, st := range spec.Stories() {
+		stories[st.ID] = true
+	}
 	raw, present := designFiles[securityspec.BundleKey]
 	hasRoles := present && strings.TrimSpace(raw) != ""
 
@@ -279,8 +293,7 @@ func validateRolesDocument(designFiles map[string]string, stories map[string]boo
 			if !stories[id] {
 				errs = append(errs, FileValidationError{
 					Path: securityspec.BundleKey, Code: codeUnknownRoleStory,
-					Message: fmt.Sprintf("role %q cites story %s, which the requirements do not define — "+
-						"cite a real story or drop it", role.Name, id),
+					Message: fmt.Sprintf("role %q cites story %s — %s", role.Name, id, notAStory(spec, id)),
 				})
 			}
 		}
@@ -348,6 +361,22 @@ func hasEndUserSignIn(designFiles map[string]string) bool {
 		}
 	}
 	return false
+}
+
+// notAStory says why a cited ID is not one of the requirements' stories, and
+// what to cite instead when the requirements say.
+func notAStory(spec reqspec.Spec, id string) string {
+	c := spec.Cite(id)
+	switch {
+	case c.Status == reqspec.Live:
+		return fmt.Sprintf("%s is not a story; cite the stories it holds", id)
+	case c.Status == reqspec.Retired && c.Replacement != "":
+		return c.Describe(id) + "; cite " + c.Replacement
+	case c.Status == reqspec.Retired:
+		return c.Describe(id) + "; drop it"
+	default:
+		return c.Describe(id) + "; cite a real story or drop it"
+	}
 }
 
 // componentStoryClaims maps each cell component to the stories its design.json
