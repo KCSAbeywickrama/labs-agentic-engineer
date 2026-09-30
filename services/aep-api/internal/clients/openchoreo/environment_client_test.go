@@ -477,3 +477,28 @@ func TestGatewayAssertionFromAnnotations_CertWithoutIssuerIsAbsent(t *testing.T)
 		t.Fatalf("an absent assertion must carry nothing, got %+v", got)
 	}
 }
+
+func TestAIGatewayBindingFromAnnotations_ConsoleURL(t *testing.T) {
+	ann := map[string]string{
+		annAIGatewayEndpoint: "http://ai-gateway.amp.localhost:8084",
+		annAIGatewayAdminURL: "http://api.amp.localhost:8080/api/v1",
+		annAIGatewayGateway:  "gw-uuid",
+		annAMPConsoleURL:     "  http://console.amp.localhost:8080/ ",
+	}
+	got, err := aiGatewayBindingFromAnnotations("default", "development", ann)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got.ConsoleURL != "http://console.amp.localhost:8080" {
+		t.Errorf("ConsoleURL = %q, want the trimmed URL without a trailing slash", got.ConsoleURL)
+	}
+
+	delete(ann, annAMPConsoleURL)
+	got, err = aiGatewayBindingFromAnnotations("default", "development", ann)
+	if err != nil {
+		t.Fatalf("a binding without a console URL must still govern: %v", err)
+	}
+	if got.ConsoleURL != "" {
+		t.Errorf("ConsoleURL = %q, want empty", got.ConsoleURL)
+	}
+}

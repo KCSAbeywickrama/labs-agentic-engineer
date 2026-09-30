@@ -1462,6 +1462,14 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	}); ok {
 		cs.SetAIGatewayBindings(environmentClient)
 	}
+	// The Deployments page links a governed agent to its page in Agent Manager,
+	// under the name the govern stage registered it by — the one naming, shared,
+	// so the link and the registration cannot disagree.
+	if cs, ok := componentService.(interface {
+		SetAgentRecordNamer(func(project, component string) string)
+	}); ok {
+		cs.SetAgentRecordNamer(agentgovernance.AgentRecordName)
+	}
 	// Endpoint deploy-wait: after OC Ready, a component that advertises an
 	// external URL stays pending until that URL answers. OC reports Ready when
 	// the control plane is done, which on a cloud plane is minutes before a

@@ -65,7 +65,7 @@ Walk the PRD's own sections, in its own order:
 2. **Actors** — who uses the system, at product altitude.
 3. **Journey & stories** — what each actor does, end to end.
 4. **Product decisions** — policy choices: sign-in, notifications, integrations
-   (see **External services** below).
+   (see **External services** and **Agents** below).
 5. **Out of scope** — what this project is explicitly not; anything that should
    not ship now belongs here, not in the story list.
 
@@ -85,6 +85,13 @@ user sees a single question. For each section:
   only. Never ask which service they would LIKE, never propose one, never
   tag a provider `*assumed*` — the choice is made on the dependency's
   definition at design, with the design agent's suggestions in front of them.
+- **Agents: suggest one where it fits.** On this platform, work an LLM does is
+  done by an agent. Where a story holds such work (reading documents or images,
+  sorting free text, summarising, drafting, answering in the user's own
+  words…), suggest an agent for it once, unless the brief already asks for
+  one. A yes is a Product Decision naming what the agent does; a no is an Out
+  of Scope line. An agent runs on the organization's own model connection, so
+  it needs no `list_external_resources` call and no provider question.
 - **Note the questions whose answers would change the document**, and only
   those. Skip what the brief already answers.
 

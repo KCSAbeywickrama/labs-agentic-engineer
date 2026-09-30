@@ -96,6 +96,24 @@ func TestValidateAgentAfm(t *testing.T) {
 		{"no role section", func(s string) string {
 			return strings.Replace(s, "# Role", "# Purpose", 1)
 		}, "lunch-agent", "# Role"},
+		{"attachments within ceilings are accepted", func(s string) string {
+			return strings.Replace(s, "x-aep:\n", "x-aep:\n  attachments:\n    types: [image/jpeg, image/png]\n    maxFiles: 1\n    maxFileSizeMB: 5\n", 1)
+		}, "lunch-agent", ""},
+		{"attachment type outside the ceiling list is rejected", func(s string) string {
+			return strings.Replace(s, "x-aep:\n", "x-aep:\n  attachments:\n    types: [image/heic]\n    maxFiles: 1\n    maxFileSizeMB: 5\n", 1)
+		}, "lunch-agent", "x-aep.attachments.types"},
+		{"maxFiles above 10 is rejected", func(s string) string {
+			return strings.Replace(s, "x-aep:\n", "x-aep:\n  attachments:\n    types: [application/pdf]\n    maxFiles: 11\n    maxFileSizeMB: 5\n", 1)
+		}, "lunch-agent", "x-aep.attachments.maxFiles"},
+		{"maxFileSizeMB above 5 is rejected", func(s string) string {
+			return strings.Replace(s, "x-aep:\n", "x-aep:\n  attachments:\n    types: [application/pdf]\n    maxFiles: 1\n    maxFileSizeMB: 6\n", 1)
+		}, "lunch-agent", "x-aep.attachments.maxFileSizeMB"},
+		{"attachments missing a limit is rejected", func(s string) string {
+			return strings.Replace(s, "x-aep:\n", "x-aep:\n  attachments:\n    types: [application/pdf]\n    maxFileSizeMB: 5\n", 1)
+		}, "lunch-agent", "x-aep.attachments.maxFiles"},
+		{"repeated attachment type is rejected", func(s string) string {
+			return strings.Replace(s, "x-aep:\n", "x-aep:\n  attachments:\n    types: [image/png, image/png]\n    maxFiles: 1\n    maxFileSizeMB: 5\n", 1)
+		}, "lunch-agent", "x-aep.attachments.types"},
 		{"memory type server is accepted", func(s string) string {
 			return strings.Replace(s, "        allow: [addItem]\n", "        allow: [addItem]\n  memory:\n    type: \"server\"\n", 1)
 		}, "lunch-agent", ""},

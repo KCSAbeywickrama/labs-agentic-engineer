@@ -65,6 +65,24 @@ const openApiToolSchema = z.strictObject({
   allow: z.array(z.string().min(1)).min(1),
 });
 
+/**
+ * What an agent may be sent with a message, and the platform ceilings any
+ * declaration must stay within. The ceilings are the console chat's (ADR-0019),
+ * derived from the model's per-request budget; the Go gate (afmgate.go) mirrors
+ * them and must give the same verdict.
+ */
+export const ATTACHMENT_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+export const ATTACHMENT_CEILINGS = { maxFiles: 10, maxFileSizeMB: 5, maxTotalMB: 15 } as const;
+
+const attachmentsSchema = z.strictObject({
+  types: z
+    .array(z.enum(ATTACHMENT_TYPES))
+    .min(1)
+    .refine((types) => new Set(types).size === types.length, "must not repeat a type"),
+  maxFiles: z.number().int().min(1).max(ATTACHMENT_CEILINGS.maxFiles),
+  maxFileSizeMB: z.number().int().min(1).max(ATTACHMENT_CEILINGS.maxFileSizeMB),
+});
+
 const frontMatterSchema = z.strictObject({
   spec_version: z.literal("0.4.0"),
   name: z.string().min(1),
@@ -78,6 +96,7 @@ const frontMatterSchema = z.strictObject({
       tools: z.strictObject({ openapi: z.array(openApiToolSchema).min(1) }).optional(),
       memory: z.strictObject({ type: z.enum(["client", "server"]) }).optional(),
       identity: z.strictObject({ mode: z.enum(["on-behalf-of", "agent"]) }).optional(),
+      attachments: attachmentsSchema.optional(),
     })
     .optional(),
 });

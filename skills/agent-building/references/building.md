@@ -24,6 +24,7 @@ the component, and neither is read at runtime** — you compile them into code.
 | the markdown body of `specs/design/components/<agent>/agent.afm.md` | `src/prompt.ts` — the body as a string constant | **verbatim**; never edit, extend or "improve" it |
 | `x-aep.tools.openapi[].allow` in that document, plus `specs/design/components/<dep>/openapi.yaml` | `src/tools.ts` — one tool per allowed operation | only allow-listed operations; the sibling's contract stays where it lives |
 | `model`, `max_iterations` | `src/config.ts`, `src/prompt.ts` constants | env var names come from the design's dependencies |
+| `x-aep.attachments` | the `ATTACHMENTS` constant in `src/config.ts`, or `null` when the block is absent | copy `types`, `maxFiles`, `maxFileSizeMB` exactly |
 
 The document's front matter uses AFM's own keys — `model`, `interfaces`,
 `skills`, `max_iterations` — and puts everything platform-specific under
@@ -98,7 +99,7 @@ port: Number(process.env.PORT ?? 9090),
 
 | Route | Behaviour |
 |---|---|
-| `POST /chat` | `{ conversationId?, message }` in; **`{ conversationId, text, toolCalls }` out**. History lives in the agent's conversation store, never on the wire |
+| `POST /chat` | `{ conversationId?, message, attachments? }` in; **`{ conversationId, text, toolCalls }` out**. History lives in the agent's conversation store, never on the wire |
 | `GET /healthz` | `200 {ok:true}`, or `503 {ok:false, missing:[…], store:"initialising"}` — `missing` lists UNSET env-var names, `store` is `"ready"` or `"initialising"`. They are separate: a fully-configured agent whose database is still provisioning has an EMPTY `missing` and `store:"initialising"` |
 
 The response shape is fixed, not yours to choose:
@@ -123,20 +124,85 @@ id continues the same conversation.
 conversation that does not exist under this user answers **404** — the same
 404 whether the id is foreign or simply wrong, so an id leaks nothing.
 
-**Message shapes never cross the wire.** `message` arrives as a plain string;
-`ModelMessage[]` lives only between your store and the model call. There is
-nothing for a caller to normalise and nothing for it to mis-render.
+**Message shapes never cross the wire.** `message` arrives as a plain string,
+and `attachments` — only when the document declares `x-aep.attachments` — as
+`[{ name, mediaType, data }]` with base64 `data`; `ModelMessage[]` lives only
+between your store and the model call. There is nothing for a caller to
+normalise and nothing for it to mis-render.
 
-**Then validate, and answer 400.** A `message` that is missing, not a string,
-or empty is a bad REQUEST, not a server error — letting it through to the
-model call throws, which becomes a 500 and reads as the agent being
-broken:
+**Read the body with a cap, then validate, and answer 400.** A turn can carry
+files, so read at most 24 MiB — 15 MiB of files is 20 MiB of base64, plus
+framing — and answer **413** past it without reading on. A `message` that is
+missing or not a string, a turn with neither text nor files, or a file the
+document does not allow is a bad REQUEST, not a server error — letting it
+through to the model call throws, which becomes a 500 and reads as the agent
+being broken:
 
 ```ts
-if (typeof body.message !== "string" || body.message.trim() === "") {
-  return sendJson(res, 400, { error: "expected { message: string }" });
+// src/config.ts: from x-aep.attachments, or null when the document declares none.
+export const ATTACHMENTS: { types: string[]; maxFiles: number; maxFileSizeMB: number } | null = null;
+const BODY_CAP = 24 * 1024 * 1024;
+
+// Keep at most BODY_CAP. Past it, answer 413 ONCE and keep reading without
+// keeping anything, so the client finishes sending and actually sees the 413 —
+// destroying the request or closing the socket mid-upload resets the
+// connection and the caller gets a network error instead. Past twice the cap,
+// stop draining and drop it. Resolves null when the request was refused.
+function readBody(req: IncomingMessage, res: ServerResponse): Promise<string | null> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let over = false;
+    const refuse = () => { over = true; chunks.length = 0; sendJson(res, 413, { error: "request too large" }); };
+    if (Number(req.headers["content-length"] ?? 0) > BODY_CAP) refuse();
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > 2 * BODY_CAP) { req.destroy(); return; }
+      if (over) return;
+      if (size > BODY_CAP) { refuse(); return; }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(over ? null : Buffer.concat(chunks).toString("utf8")));
+    req.on("error", () => resolve(null));
+    req.on("close", () => { if (!req.complete) resolve(null); });
+  });
 }
+
+type Attachment = { name: string; mediaType: string; data: string };
+
+// The whole request vocabulary. A field outside it is refused, so a caller
+// speaking a newer contract than this agent was built for hears so, instead of
+// having the field silently ignored.
+const BODY_FIELDS = new Set(["conversationId", "message", "attachments"]);
+
+function validate(body: any): { message: string; attachments: Attachment[] } | { error: string } {
+  const unknown = Object.keys(body ?? {}).find((key) => !BODY_FIELDS.has(key));
+  if (unknown) return { error: `unknown field: ${unknown}` };
+  const message = typeof body?.message === "string" ? body.message.trim() : null;
+  const attachments: Attachment[] = Array.isArray(body?.attachments) ? body.attachments : [];
+  if (message === null) return { error: "expected { message: string }" };
+  if (attachments.length > 0 && !ATTACHMENTS) return { error: "this agent does not accept attachments" };
+  if (message === "" && attachments.length === 0) return { error: "expected a message or attachments" };
+  if (ATTACHMENTS && attachments.length > ATTACHMENTS.maxFiles) return { error: `at most ${ATTACHMENTS.maxFiles} files per message` };
+  let total = 0;
+  for (const a of attachments) {
+    if (typeof a?.name !== "string" || typeof a?.mediaType !== "string" || typeof a?.data !== "string") return { error: "each attachment needs name, mediaType and data" };
+    if (!ATTACHMENTS!.types.includes(a.mediaType)) return { error: `${a.name}: this agent does not accept ${a.mediaType}` };
+    const bytes = Buffer.byteLength(a.data, "base64");
+    if (bytes > ATTACHMENTS!.maxFileSizeMB * 1024 * 1024) return { error: `${a.name}: larger than ${ATTACHMENTS!.maxFileSizeMB} MB` };
+    total += bytes;
+  }
+  if (total > 15 * 1024 * 1024) return { error: "the files together are over 15 MB" };
+  return { message, attachments };
+}
+
+// in the handler — `attachments` is declared before the try, so the catch can read it:
+// const raw = await readBody(req, res); if (raw === null) return;
+// const v = validate(JSON.parse(raw)); if ("error" in v) return sendJson(res, 400, { error: v.error });
+// message = v.message; attachments = v.attachments;
 ```
+
+A body that is not JSON is the same 400 (`expected { message: string }`).
 
 ## Conversation store
 
@@ -309,15 +375,23 @@ The handler flow, exactly:
 
 ```ts
 // 1. gate: 401 without x-user-id (unchanged)
-// 2. parse { conversationId?, message }; message must be a non-empty string → else 400
+// 2. readBody (413 past 24 MiB) and validate (above) → else 400
 // 3. await ensureStore() — 500 while the DB isn't ready yet; then:
 //    conversationId present → loadConversation(id, userId); null → 404 { error: "conversation not found" }
 //    absent → id = crypto.randomUUID(), history = [] (no row yet — the first save creates it)
-// 4. const full = [...history, { role: "user", content: message }]
+// 4. the user message: text plus one file part per attachment (the AI SDK's own parts)
+//    const user = { role: "user", content: [
+//      ...(message ? [{ type: "text", text: message }] : []),
+//      ...attachments.map((a) => ({ type: "file", data: a.data, mediaType: a.mediaType, filename: a.name })),
+//    ] };
+//    const full = [...history, user]
 // 5. const turn = await traceTurn(
 //      { conversationId: id, model: config.modelName, system: genAiSystem, message },
-//      (hooks) => runTurn(full, hooks))   // see "The model call" and "Tracing"
-// 6. await saveConversation(id, userId, [...full, ...turn.steps.flatMap(s => s.response.messages)])
+//      (hooks) => runTurn(full, hooks))   // see "Model access", "The model call" and "Tracing"
+// 6. store text, not files — each file part becomes a note naming it:
+//    const stored = { ...user, content: user.content.map((p) => p.type === "file"
+//      ? { type: "text", text: `[attached: ${p.filename} (${p.mediaType})]` } : p) };
+//    await saveConversation(id, userId, [...history, stored, ...turn.steps.flatMap(s => s.response.messages)])
 //    — this INSERT..ON CONFLICT is the only place a row is created, so a turn
 //    that throws in step 5 leaves nothing in the store to orphan
 // 7. sendJson(res, 200, { conversationId: id, text: turn.text, toolCalls: turn.toolCalls })
@@ -344,7 +418,8 @@ server.on("request", (req, res) => {
 ```
 
 Log the error, never the request body or the `Authorization` header — a chat
-turn carries the user's own words and their bearer.
+turn carries the user's own words and their bearer. Log attachment names and
+sizes, never their data.
 
 **A guardrail block is the ONE upstream error you relay.** When an agent's model
 access is governed, the gateway can refuse a turn on policy grounds and answers
@@ -378,12 +453,20 @@ function guardrailBlock(err: unknown): { name: string; reason: string } | null {
 // in the handler's catch:
 const g = guardrailBlock(err);
 if (g) return sendJson(res, 422, { error: g.reason, guardrail: g.name });
+// A provider rejecting a turn that carried files: say which files, in a FIXED
+// message. The provider body stays in the log — never forward it (see below).
+const status = (err as { statusCode?: number })?.statusCode;
+if (attachments.length > 0 && (status === 400 || status === 413 || status === 415)) {
+  console.error("model rejected attached files:", attachments.map((a) => `${a.name} (${a.mediaType})`), err);
+  return sendJson(res, 422, { error: "the model could not read the attached file(s)", files: attachments.map((a) => a.name) });
+}
 console.error("chat turn failed:", err);
 return sendJson(res, 500, { error: "internal error" });
 ```
 
 **RELAY THIS ONE SHAPE AND NOTHING ELSE.** Do not "improve" this into forwarding
-upstream errors generally. An upstream failure body can carry the gateway's
+upstream errors generally. (The file-rejection 422 above relays nothing: its
+message is fixed and names only the caller's own files.) An upstream failure body can carry the gateway's
 address, the provider handle, the model account, an SDK stack trace — and in some
 error shapes the request headers, which is where `MODEL_API_KEY` lives. A
 default-relay catch is a credential-disclosure bug, not a better error message.

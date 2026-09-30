@@ -135,6 +135,29 @@ describe("parseAgentAfm — memory and identity", () => {
   });
 });
 
+describe("parseAgentAfm — attachments", () => {
+  test("reads x-aep.attachments", () => {
+    const spec = parsed(
+      BOOKING_AGENT.replace(
+        "x-aep:\n",
+        "x-aep:\n  attachments:\n    types: [image/jpeg, application/pdf]\n    maxFiles: 2\n    maxFileSizeMB: 5\n",
+      ),
+    );
+
+    expect(spec.attachments).toEqual({ types: ["image/jpeg", "application/pdf"], maxFiles: 2, maxFileSizeMB: 5 });
+  });
+
+  test("leaves attachments undefined when a limit is missing", () => {
+    const spec = parsed(BOOKING_AGENT.replace("x-aep:\n", "x-aep:\n  attachments:\n    types: [image/jpeg]\n"));
+
+    expect(spec.attachments).toBeUndefined();
+  });
+
+  test("leaves attachments undefined for a text-only agent", () => {
+    expect(parsed(BOOKING_AGENT).attachments).toBeUndefined();
+  });
+});
+
 describe("parseAgentAfm — prompt body", () => {
   test("splits the body into its headed sections, in document order", () => {
     const spec = parsed(BOOKING_AGENT);

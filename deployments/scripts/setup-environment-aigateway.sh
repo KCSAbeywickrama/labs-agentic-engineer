@@ -76,6 +76,10 @@ WAIT_TIMEOUT="${WAIT_TIMEOUT:-600s}"
 # this script runs on the host.
 AMP_API_IN="http://amp-api.${AMP_NS}.svc.cluster.local:9000/api/v1"
 AMP_API_OUT="${AMP_API_URL:-http://api.${AMP_DOMAIN}:8080/api/v1}"
+# The Agent Manager console a browser opens, for the console's "Manage in Agent
+# Manager" link on an agent's Deployments panel. Public, like AMP_API_OUT.
+# Optional to aep-api: without it an agent just has no link.
+AMP_CONSOLE_OUT="${AMP_CONSOLE_URL:-http://console.${AMP_DOMAIN}:8080}"
 VHOST="${AI_GATEWAY_VHOST:-http://ai-gateway.${AMP_DOMAIN}:8084}"
 
 kubectl() { command kubectl --context "$CLUSTER_CONTEXT" "$@"; }
@@ -242,7 +246,8 @@ kubectl annotate environment "$ENV_NAME" -n "$ORG_NAME" --overwrite \
     "aep.wso2.com/aigateway-admin-url=${AMP_API_OUT}" \
     "aep.wso2.com/aigateway-gateway=${GW_ID}" \
     "aep.wso2.com/aigateway-secret-path=secret/aep/amp/${ORG_NAME}" \
-    "aep.wso2.com/aigateway-binding=${GW_NAME}" >/dev/null
+    "aep.wso2.com/aigateway-binding=${GW_NAME}" \
+    "aep.wso2.com/amp-console-url=${AMP_CONSOLE_OUT}" >/dev/null
 
 # The annotations ARE the binding, and aep-api reads them rather than being told:
 # a missing one is not a degraded gateway, it is an agent that keeps calling
