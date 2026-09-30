@@ -17,6 +17,7 @@
 package webhook
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/organization"
+	"github.com/wso2/aep/aep-api/internal/platform/async"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -63,7 +65,7 @@ type WebhookController interface {
 type webhookController struct {
 	verifier   *Verifier
 	deliveries *sourcecontrol.DeliveryStore
-	router     *Router
+	runner     deliveryRunner
 	lookup     OcOrgIDLookup // served by CredentialService
 	cache      *RoutingCache // 60s in-process cache
 }
@@ -74,7 +76,7 @@ func NewWebhookController(verifier *Verifier, deliveries *sourcecontrol.Delivery
 	return &webhookController{
 		verifier:   verifier,
 		deliveries: deliveries,
-		router:     router,
+		runner:     deliveryRunner{deliveries: deliveries, router: router},
 		lookup:     lookup,
 		cache:      cache,
 	}
@@ -142,7 +144,7 @@ func (c *webhookController) Receive(w http.ResponseWriter, r *http.Request) {
 
 	action := actionFromPayload(body)
 	res, err := c.deliveries.Persist(ctx, deliveryID, ocOrgID, event, action,
-		redactPublishedCredentials(body))
+		redactPublishedCredentials(body), deliveryLease)
 	if err != nil {
 		slog.ErrorContext(ctx, "webhook: persist failed",
 			"deliveryId", deliveryID, "event", event, "error", err, "result", "persist_failed")
@@ -156,24 +158,34 @@ func (c *webhookController) Receive(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-
-	// Dispatch synchronously. Errors drive the ack: 5xx → GitHub retries;
-	// the dedup row is preserved so retries re-enter the handler.
-	if err := c.router.Dispatch(ctx, event, body); err != nil {
-		_ = c.deliveries.MarkFailed(ctx, deliveryID, err.Error())
-		slog.ErrorContext(ctx, "webhook: handler failed",
-			"deliveryId", deliveryID, "event", event, "error", err, "result", "handler_failed")
-		http.Error(w, "handler", http.StatusInternalServerError)
+	if !res.Claimed {
+		// A duplicate of a delivery another attempt holds: its first run is still
+		// going, or it failed and is inside its retry backoff. Either way the
+		// holder settles it, and running it here too would run it twice.
+		slog.InfoContext(ctx, "webhook: duplicate of a held delivery — ack without running",
+			"deliveryId", deliveryID, "event", event, "action", action, "ocOrgId", ocOrgID, "result", "held")
+		w.WriteHeader(http.StatusAccepted)
 		return
 	}
 
-	if err := c.deliveries.MarkProcessed(ctx, deliveryID); err != nil {
-		slog.WarnContext(ctx, "webhook: mark processed failed",
-			"deliveryId", deliveryID, "error", err)
+	// Ack FIRST, then run the handlers detached from the request. GitHub closes
+	// a delivery's connection at 10 seconds, which cancels r.Context(); a
+	// handler running on it lost every in-flight GitHub and OpenChoreo call
+	// with it. The handlers get context.WithoutCancel (the correlation id
+	// survives, the cancellation does not) under their own handlerBudget, and
+	// this attempt holds the delivery's lease until it settles. A pod that dies
+	// mid-run leaves the lease to lapse, and the Replayer runs it again.
+	slog.InfoContext(ctx, "webhook: accepted — dispatching",
+		"deliveryId", deliveryID, "event", event, "action", action, "ocOrgId", ocOrgID,
+		"attempt", res.Attempts, "result", "dispatched")
+	w.WriteHeader(http.StatusAccepted)
+	attempt := deliveryAttempt{
+		deliveryID: deliveryID, event: event, action: action, ocOrgID: ocOrgID,
+		attempt: res.Attempts, payload: body, source: "receiver",
 	}
-	slog.InfoContext(ctx, "webhook: accepted",
-		"deliveryId", deliveryID, "event", event, "action", action, "ocOrgId", ocOrgID, "result", "accepted")
-	w.WriteHeader(http.StatusOK)
+	async.Go(context.WithoutCancel(ctx), "webhook:"+event, func(ctx context.Context) {
+		c.runner.run(ctx, attempt)
+	})
 }
 
 func actionFromPayload(body []byte) string {

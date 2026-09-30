@@ -1531,6 +1531,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// execution-row terminals; the trait-sync + credential-validator watchers
 	// are unchanged.
 	watchers := []Watcher{
+		// Re-runs webhook deliveries that were persisted but never processed (a
+		// failed handler, a run lost with its pod), within webhook.ReplayHorizon
+		// of their receipt. The receiver acks before its handlers run, so this —
+		// not GitHub, which never redelivers on its own — is what retries them.
+		webhook.NewReplayer(deliveryStore, webhookRouter, 0),
 		// The event plane's reconcile backstop: a milestone with open work and no
 		// live run gets one. It heals a webhook GitHub never delivered and the
 		// adoption-versus-settle race, and walks only milestones the platform has
