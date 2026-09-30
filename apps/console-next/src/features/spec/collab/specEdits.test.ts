@@ -1,0 +1,287 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { describe, expect, it } from "vitest";
+import * as Y from "yjs";
+import { hasPendingAgentMarks, readDocFile, setDocFile, setDocFileAsAgent } from "@aep/collab-doc";
+import { acmeExpensesSpec } from "../../../mocks/fixtures/spec";
+import { deriveWorkspace } from "../model/workspace";
+import { docLines, type DocLine } from "./docLines";
+import { applyAgentToolCall, seedSpecDoc } from "./specDoc";
+import {
+  appendToSection,
+  deleteLine,
+  deleteSectionItem,
+  editFile,
+  removeAssumedTag,
+  settleAssumedLine,
+  settleProposalInDoc,
+} from "./specEdits";
+import { readSpecLines } from "./useSpecLines";
+
+// Each edit runs through the Y.Doc (editFile) and is read back as the
+// markdown the committer would write.
+
+const PATH = "requirements/features/F2-approvals.md";
+const BY = { agent: "spec-agent", at: "t1" };
+
+function docWith(markdown: string): Y.Doc {
+  const doc = new Y.Doc();
+  setDocFile(doc, PATH, markdown);
+  return doc;
+}
+
+type Tr = Parameters<Parameters<typeof editFile>[2]>[0];
+
+/** Type at a position as the editor does: the text takes the marks there. */
+function type(tr: Tr, pos: number, text: string) {
+  tr.insert(pos, tr.doc.type.schema.text(text, tr.doc.resolve(pos).marks()));
+}
+
+/** Run an edit on the line whose text starts with `start`. */
+function onLine(doc: Y.Doc, start: string, edit: (tr: Tr, line: DocLine) => void) {
+  return editFile(doc, PATH, (tr) => {
+    const line = docLines(tr.doc).find((l) => l.text.startsWith(start));
+    if (!line) throw new Error(`no line starting "${start}"`);
+    edit(tr, line);
+  });
+}
+
+describe("settling an assumed line", () => {
+  const md = "## Decisions\n\n- A claim is approved by the line manager.\n- A rejected claim goes back to the employee. *assumed*\n";
+
+  it("keeps its words and drops the tag", () => {
+    const doc = docWith(md);
+    onLine(doc, "A rejected", (tr, line) => expect(removeAssumedTag(tr, line)).toBe(true));
+    expect(readDocFile(doc, PATH)).toBe(
+      "## Decisions\n\n- A claim is approved by the line manager.\n- A rejected claim goes back to the employee.",
+    );
+  });
+
+  it("does nothing to a line with no tag", () => {
+    const doc = docWith(md);
+    expect(onLine(doc, "A claim", (tr, line) => expect(removeAssumedTag(tr, line)).toBe(false))).toBe(false);
+  });
+
+  it("removes the line, and the list with its last line", () => {
+    const doc = docWith(md);
+    onLine(doc, "A rejected", (tr, line) => deleteLine(tr, line));
+    expect(readDocFile(doc, PATH)).toBe("## Decisions\n\n- A claim is approved by the line manager.");
+    onLine(doc, "A claim", (tr, line) => deleteLine(tr, line));
+    expect(readDocFile(doc, PATH)).toBe("## Decisions");
+  });
+});
+
+describe("appendToSection", () => {
+  it("adds a settled line at the end of the section's list", () => {
+    const doc = docWith("## Decisions\n\n- One.\n\n## Out of Scope\n\n- Two.\n");
+    editFile(doc, PATH, (tr) => appendToSection(tr, "Decisions", "Finance posts to one Xero organisation."));
+    expect(readDocFile(doc, PATH)).toBe(
+      "## Decisions\n\n- One.\n- Finance posts to one Xero organisation.\n\n## Out of Scope\n\n- Two.",
+    );
+  });
+
+  it("starts the list, or the section, when there is none", () => {
+    const doc = docWith("## Decisions\n\n## Out of Scope\n\n- Two.\n");
+    editFile(doc, PATH, (tr) => appendToSection(tr, "Decisions", "One."));
+    expect(readDocFile(doc, PATH)).toBe("## Decisions\n\n- One.\n\n## Out of Scope\n\n- Two.");
+    const bare = docWith("# Payroll export\n");
+    editFile(bare, PATH, (tr) => appendToSection(tr, "Decisions", "One."));
+    expect(readDocFile(bare, PATH)).toBe("# Payroll export\n\n## Decisions\n\n- One.");
+  });
+});
+
+describe("deleteSectionItem", () => {
+  it("deletes the entry with those words in that section only", () => {
+    const doc = docWith("## Fog\n\n- Cards.\n- Audits.\n\n## Out of Scope\n\n- Audits.\n");
+    editFile(doc, PATH, (tr) => expect(deleteSectionItem(tr, "Fog", "Audits.")).toBe(true));
+    expect(readDocFile(doc, PATH)).toBe("## Fog\n\n- Cards.\n\n## Out of Scope\n\n- Audits.");
+  });
+});
+
+describe("settling a proposal", () => {
+  const base = "## User Stories\n\n- F2.1 As a manager, I see pending claims.\n";
+  const proposed = `${base}- F2.6 As an auditor, I see every decision. *assumed*\n`;
+  const proposal = { by: BY, files: [PATH], leavesFog: [] };
+
+  function proposedDoc(): Y.Doc {
+    const doc = docWith(base);
+    setDocFileAsAgent(doc, PATH, proposed, "agent", BY);
+    return doc;
+  }
+
+  it("accept keeps the lines, with the user's edit to them, and clears the marks", () => {
+    const doc = proposedDoc();
+    onLine(doc, "F2.6", (tr, line) => type(tr, line.posAt("F2.6 As an auditor, I see every decision".length), " and its reason"));
+    settleProposalInDoc(doc, proposal, "accept");
+    expect(hasPendingAgentMarks(doc, PATH)).toBe(false);
+    expect(readDocFile(doc, PATH)).toBe(
+      "## User Stories\n\n- F2.1 As a manager, I see pending claims.\n- F2.6 As an auditor, I see every decision and its reason. *assumed*",
+    );
+  });
+
+  it("discard drops the lines, the user's edit to them too, and leaves the rest", () => {
+    const doc = proposedDoc();
+    onLine(doc, "F2.6", (tr, line) => type(tr, line.posAt(line.text.length), " Soon."));
+    settleProposalInDoc(doc, proposal, "discard");
+    expect(hasPendingAgentMarks(doc, PATH)).toBe(false);
+    expect(readDocFile(doc, PATH)).toBe("## User Stories\n\n- F2.1 As a manager, I see pending claims.");
+  });
+
+  it("leaves another writer's pending lines alone", () => {
+    const doc = proposedDoc();
+    settleProposalInDoc(doc, { ...proposal, by: { agent: "spec-agent", at: "t2" } }, "discard");
+    expect(readDocFile(doc, PATH)).toBe(proposed.trimEnd());
+  });
+});
+
+describe("Acme Expenses, acted on", () => {
+  const f2 = acmeExpensesSpec.features.find((f) => f.id === "F2")!;
+  const seeded = () => {
+    const doc = new Y.Doc();
+    seedSpecDoc(doc, acmeExpensesSpec);
+    return doc;
+  };
+  const view = (doc: Y.Doc) => deriveWorkspace(acmeExpensesSpec, readSpecLines(doc));
+
+  it("settling an assumed line is one fewer to confirm, in the chip and in Next up", () => {
+    const doc = seeded();
+    editFile(doc, f2.path, (tr) => {
+      const line = docLines(tr.doc).find((l) => l.text.startsWith("A rejected claim"))!;
+      removeAssumedTag(tr, line);
+    });
+    const after = view(doc);
+    expect(after.features.find((f) => f.id === "F2")?.chips).toEqual([{ tone: "warning", label: "1 to confirm" }]);
+    expect(after.nextUp.find((i) => i.kind === "confirm")?.label).toBe("Confirm 1 line in Approvals");
+  });
+
+  it("accepting the Auditor lands its lines in both features, product-wide and the Actors, and empties the Fog idea", () => {
+    const doc = seeded();
+    settleProposalInDoc(doc, acmeExpensesSpec.proposal!, "accept");
+    expect(readDocFile(doc, f2.path)).toContain("- F2.6 As an auditor, I see every approval decision with its reason. *assumed*");
+    expect(readDocFile(doc, "requirements/features/F3-payroll-export.md")).toContain("- F3.4 As an auditor");
+    expect(readDocFile(doc, "requirements/product-wide.md")).toContain("- P5 An auditor can read");
+    const prd = readDocFile(doc, "requirements/prd.md")!;
+    expect(prd).toContain("- Auditor: reads every claim and decision; changes nothing.");
+    expect(prd).not.toContain("yearly external audit");
+    // The accepted stories are the user's to confirm now.
+    expect(view(doc).features.map((f) => f.toConfirm)).toEqual([0, 3, 1, 0, 0]);
+  });
+
+  it("discarding the Auditor leaves every file as it was before the agent wrote", () => {
+    const doc = seeded();
+    settleProposalInDoc(doc, acmeExpensesSpec.proposal!, "discard");
+    const before = new Y.Doc();
+    seedSpecDoc(before, { ...acmeExpensesSpec, proposal: null });
+    for (const path of acmeExpensesSpec.proposal!.files) expect(readDocFile(doc, path)).toBe(readDocFile(before, path));
+  });
+});
+
+describe("settling an assumed line from the chat", () => {
+  const markdown = "# Approvals\n\n## Decisions\n\n- A rejected claim goes back to the employee. *assumed*\n- A claim is approved by the line manager.\n";
+  const line = "A rejected claim goes back to the employee. assumed";
+
+  it("keeps the words and drops the tag", () => {
+    const doc = docWith(markdown);
+    expect(settleAssumedLine(doc, PATH, line, "keep")).toBe(true);
+    expect(readDocFile(doc, PATH)).toContain("- A rejected claim goes back to the employee.\n");
+    expect(readDocFile(doc, PATH)).not.toContain("assumed");
+  });
+
+  it("removes the line", () => {
+    const doc = docWith(markdown);
+    expect(settleAssumedLine(doc, PATH, line, "remove")).toBe(true);
+    expect(readDocFile(doc, PATH)).not.toContain("rejected claim");
+    expect(readDocFile(doc, PATH)).toContain("line manager");
+  });
+
+  it("does nothing when the line was settled meanwhile", () => {
+    const doc = docWith(markdown.replace(" *assumed*", ""));
+    expect(settleAssumedLine(doc, PATH, line, "keep")).toBe(false);
+  });
+});
+
+describe("the agent's file writes, applied to the local doc", () => {
+  const stub = "# Approvals\n\n## Purpose\n\nManagers approve claims.\n";
+  const edit = {
+    type: "tool-result",
+    toolName: "editFile",
+    toolCallId: "w1",
+    input: {
+      path: `specs/${PATH}`,
+      // As the agent read it: the doc's markdown carries no trailing newline.
+      oldString: "Managers approve claims.",
+      newString: "Managers approve claims.\n\n## Decisions\n\n- Deputies approve on leave. *assumed*",
+    },
+    output: { ok: true, op: "edit", path: `specs/${PATH}` },
+  };
+
+  it("applies an edit to the room path, as the agents service matched it", () => {
+    const doc = docWith(stub);
+    expect(applyAgentToolCall(doc, edit)).toBe(true);
+    expect(readDocFile(doc, PATH)).toContain("- Deputies approve on leave. *assumed*");
+  });
+
+  it("leaves a pending proposal in the file pending, and marks none of its own words", () => {
+    // Address comments edits F2.2 while the Auditor proposal's F2.6 waits in the same file.
+    const doc = new Y.Doc();
+    seedSpecDoc(doc, acmeExpensesSpec);
+    const f2 = acmeExpensesSpec.features.find((f) => f.id === "F2")!;
+    const from = "- F2.2 As a manager, I approve or reject a claim with a reason.";
+    expect(readDocFile(doc, f2.path)).toContain(from);
+    const addressed = {
+      type: "tool-result",
+      toolName: "editFile",
+      toolCallId: "c1",
+      input: { path: `specs/${f2.path}`, oldString: from, newString: from.replace(" with a reason.", " with a reason, after seeing its receipts.") },
+    };
+    expect(applyAgentToolCall(doc, addressed)).toBe(true);
+
+    const lines = readSpecLines(doc).get(f2.path)!;
+    const proposed = lines.filter((l) => l.proposed).map((l) => l.text);
+    expect(proposed).toEqual(["F2.6 As an auditor, I see every approval decision with its reason. assumed"]);
+    expect(lines.find((l) => l.text.startsWith("F2.2"))).toMatchObject({
+      text: "F2.2 As a manager, I approve or reject a claim with a reason, after seeing its receipts.",
+      proposed: false,
+    });
+    // Still the proposal's to settle: discarding it takes its line and leaves the agent's edit.
+    settleProposalInDoc(doc, acmeExpensesSpec.proposal!, "discard");
+    expect(readDocFile(doc, f2.path)).not.toContain("F2.6");
+    expect(readDocFile(doc, f2.path)).toContain("after seeing its receipts.");
+  });
+
+  it("changes only what it wrote, so the user's typing at the same time survives", () => {
+    const doc = docWith("# Approvals\n\n- Managers approve claims.\n- Finance pays.\n");
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(doc));
+    // The user types in one line while the agent's write to another lands.
+    editFile(peer, PATH, (tr) => {
+      const line = docLines(tr.doc).find((l) => l.text.startsWith("Finance"))!;
+      type(tr, line.posAt(line.text.length - 1), " monthly");
+    });
+    const agentEdit = { ...edit, input: { path: `specs/${PATH}`, oldString: "Managers approve", newString: "Line managers approve" } };
+    expect(applyAgentToolCall(doc, agentEdit)).toBe(true);
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer));
+    expect(readDocFile(doc, PATH)).toBe("# Approvals\n\n- Line managers approve claims.\n- Finance pays monthly.");
+  });
+
+  it("ignores a tool that writes no file", () => {
+    const doc = docWith(stub);
+    expect(applyAgentToolCall(doc, { type: "tool-result", toolName: "ask_question", input: { question: "?" } })).toBe(false);
+  });
+});

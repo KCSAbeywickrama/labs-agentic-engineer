@@ -1,0 +1,67 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { useCallback, useMemo } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { useSpecModel, type SpecFeature } from "./api/specModel";
+import { useSpecDoc } from "./collab/specDoc";
+import { useSpecLines } from "./collab/useSpecLines";
+import { deriveWorkspace } from "./model/workspace";
+
+/**
+ * The spec workspace for a project: the model's state, the live doc, and what
+ * both work out to (feature chips, the ID index, Fog, Next up). The spec card
+ * and the overview's feature list read the same one, so a line confirmed in
+ * the card is one fewer "to confirm" on the overview.
+ */
+export function useSpecWorkspace(projectName: string) {
+  const model = useSpecModel(projectName);
+  const doc = useSpecDoc(projectName);
+  const lines = useSpecLines(doc);
+  const workspace = useMemo(
+    () => (model.data && lines ? deriveWorkspace(model.data, lines) : null),
+    [model.data, lines],
+  );
+  return { model, doc, lines, workspace };
+}
+
+/** Where opening something in the spec goes: a file, and a line or place in it. */
+export interface SpecTarget {
+  file: string;
+  at?: string;
+}
+
+/** Open a file of the spec card (and a line in it), from anywhere in the project. */
+export function useOpenSpecTarget(projectName: string) {
+  const navigate = useNavigate();
+  return useCallback(
+    (target: SpecTarget) =>
+      void navigate({
+        to: "/projects/$projectName/spec",
+        params: { projectName },
+        search: { file: target.file, ...(target.at ? { at: target.at } : {}) },
+      }),
+    [navigate, projectName],
+  );
+}
+
+/** The feature a spec file key opens, or null when it is not a feature. */
+export function useSpecFeature(projectName: string, fileKey: string | null): SpecFeature | null {
+  const features = useSpecModel(projectName).data?.features;
+  return (fileKey && features?.find((f) => f.id === fileKey)) || null;
+}

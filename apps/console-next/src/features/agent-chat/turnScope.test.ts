@@ -1,0 +1,52 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { describe, expect, it } from "vitest";
+import { scopeOfBody, turnBody, turnScopeFor, type TurnScope } from "./turnScope";
+
+const approvals = { id: "F2", name: "Approvals", path: "requirements/features/F2-approvals.md" };
+
+describe("turnScopeFor (where the user is)", () => {
+  it("is the feature open in the spec card", () => {
+    expect(turnScopeFor("spec", approvals)).toEqual({ kind: "feature", featureId: "F2", name: "Approvals", path: approvals.path });
+  });
+
+  it("is the design review on the design card", () => {
+    expect(turnScopeFor("design", null)).toEqual({ kind: "design" });
+  });
+
+  it("is the whole product anywhere else in the project", () => {
+    expect(turnScopeFor("spec", null)).toEqual({ kind: "product" });
+    expect(turnScopeFor(null, null)).toEqual({ kind: "product" });
+    expect(turnScopeFor("builds", approvals)).toEqual({ kind: "product" });
+  });
+});
+
+describe("the scope on the wire", () => {
+  it.each<[TurnScope, object]>([
+    [turnScopeFor("spec", approvals), { target: "specs/requirements/features/F2-approvals.md" }],
+    [{ kind: "product" }, {}],
+    [{ kind: "design" }, { scope: "design-review" }],
+  ])("sends %o as %o, and reads it back", (scope, fields) => {
+    const body = turnBody("Tighten this", scope);
+    expect(body).toEqual({ instruction: "Tighten this", collab: true, ...fields });
+    const read = scopeOfBody(body);
+    expect(read.kind).toBe(scope.kind);
+    if (scope.kind === "feature") expect(read).toEqual({ kind: "feature", path: approvals.path });
+  });
+});

@@ -5,12 +5,15 @@
   // `--production` so *.test.ts never count as consumers (the Go "no -test").
   //
   // Scope: only these two workspaces, plus @aep/web-search (web search for the
-  // agents service and the runner's `aep-web` MCP server); every other
-  // pnpm workspace is ignored. knip AUTO-DETECTS entries (agents via its package.json `exports`
+  // agents service and the runner's `aep-web` MCP server) and
+  // @aep/console-next (the new console, gated from its first commit); every
+  // other pnpm workspace is ignored. knip AUTO-DETECTS entries (agents via its package.json `exports`
   // map, the playground via its `play: tsx src/cli.ts` script) — do NOT add a
-  // per-workspace `entry`/`project` override, it silently breaks detection.
+  // per-workspace `entry`/`project` override for those two, it silently breaks
+  // detection.
   "ignoreWorkspaces": [
     "apps/*",
+    "!apps/console-next",
     "evals/*",
     "packages/*",
     "!packages/web-search",
@@ -37,6 +40,18 @@
     "services/agents/src/shared/mock-model.ts",
     "skills/**"
   ],
+  // @aep/console-next: TanStack file routes are consumed only by the generated
+  // route tree, which is gitignored and so invisible to knip; each route file is
+  // an entry instead. The test setup and the verbatim-served public/ files are
+  // not production source. The `!` suffix marks entries and project files as
+  // production ones, which is all `--production` reads.
+  "workspaces": {
+    "apps/console-next": {
+      "entry": ["src/main.tsx!", "src/routes/**/*.tsx!"],
+      "project": ["src/**/*.{ts,tsx}!"],
+      "ignore": ["public/**", "src/test-setup.ts"]
+    }
+  },
   // An export used within its own file is not dead — this codebase deliberately
   // exports internal helpers so unit tests can drive them directly. Only truly
   // orphaned exports are reported.
