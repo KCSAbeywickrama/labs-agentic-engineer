@@ -67,16 +67,6 @@ type Config struct {
 	// opt-out. Read from PLATFORM_RESOURCES_ENABLED.
 	PlatformResourcesEnabled bool
 
-	// AutoRCAEnabled gates the default "error → RCA" observability-alert-rule
-	// trait the platform attaches to every service component (a component can
-	// still opt out in its design with `disableAutoRca`). Defaults TRUE, an
-	// opt-out like PlatformResourcesEnabled. A deployment turns it off when its
-	// platform cannot take the trait: wso2cloud's org ComponentTypes accept only
-	// the org's own namespaced alert-rule Trait, whose contract differs from the
-	// ClusterTrait this platform attaches, so a release carrying it is refused.
-	// Read from AUTO_RCA_ENABLED.
-	AutoRCAEnabled bool
-
 	// AutoMergeCodingPRs gates auto-merge of coding-agent pull requests: when
 	// true, a coding-agent PR is squash-merged the moment it opens, removing the
 	// human review gate and letting the path-based build fan-out deploy the fix

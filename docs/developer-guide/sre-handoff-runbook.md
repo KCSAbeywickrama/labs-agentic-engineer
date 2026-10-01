@@ -120,7 +120,10 @@ bash deployments/scripts/setup-sre.sh
 
 1. generates the handoff bearer at `aep/aep-mcp-token` once and keeps it;
 2. runs `aectl platform update --set sreHandoff.enabled=true` against the
-   local chart and waits for `aep-api` and `aep-mcp-server` to roll out;
+   local chart and waits for `aep-api` and `aep-mcp-server` to roll out. With
+   the handoff configured, `aep-api` also attaches the default "error → RCA"
+   `observability-alert-rule` trait to every service component (a design can
+   opt out with `disableAutoRca`); without it, none is attached;
 3. applies the `observability-alert-rule` ClusterTrait, which
    `aectl platform install` does not; and
 4. runs `aectl sre install` (next section).
@@ -248,6 +251,13 @@ If the same symptom appears now, check in this order:
 4. The create returns `200` with `deduped` or `suppressed`. This is expected:
    an open issue already tracks the incident, or a human closed it as
    `not_planned`. See [Issue outcomes](#issue-outcomes).
+
+### A service has no alert rule
+
+`aep-api` attaches the auto-RCA alert rule only while the SRE handoff is
+configured (`SRE_HANDOFF_TOKEN` and `SRE_HANDOFF_ORG` both set). A release keeps
+the traits it was cut with, so a service deployed before the handoff was
+configured gets the rule at its next commit, not by redeploying the same one.
 
 ### Alert rule is ready, but SRE never runs
 

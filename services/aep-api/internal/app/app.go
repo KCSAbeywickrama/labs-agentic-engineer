@@ -138,6 +138,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	if err := openchoreo.ValidateResourceLabels(seam.ResourceLabels); err != nil {
 		return nil, fmt.Errorf("openchoreo resource labels: %w", err)
 	}
+	// The SRE handoff credential, when configured, is both the edge's verifier
+	// and the signal that the SRE loop is wired (auto-RCA below).
+	sreHandoff := authn.NewSREHandoffVerifier(cfg.SREHandoffToken, cfg.SREHandoffOrg)
 	db := in.DB
 	credStore := in.CredentialStore
 	minter := in.Minter
@@ -947,7 +950,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		ConfigRepo:          configRepo,
 		ThunderJWKS:         thunderJWKS,
 		OrganizationService: organizationService,
-		SREHandoffAuth:      authn.NewSREHandoffVerifier(cfg.SREHandoffToken, cfg.SREHandoffOrg),
+		SREHandoffAuth:      sreHandoff,
 
 		DB:                   db,
 		CredService:          credService,
@@ -1506,17 +1509,21 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// address is derived per deploy beside the context-path builder it has to
 	// agree with (projects.APIGatewayHost). Empty is the normal case.
 	deploymentService.SetAPIGatewayHostOverride(cfg.APIGatewayHost)
-	// Auto-RCA's alert rule is two writes, the trait on the Component and its
-	// per-environment config on the binding, so both writers take the one
-	// switch. The deploy re-asserts the Component before it cuts a release: a
+	// The default auto-RCA alert rule exists to start the SRE loop (an error
+	// log → an alert → the OpenChoreo SRE agent's RCA → handed back to this
+	// platform), so it is attached only where that loop is wired: the SRE
+	// handoff is configured. It is two writes, the trait on the Component and
+	// its per-environment config on the binding, so both writers take the one
+	// value. The deploy re-asserts the Component before it cuts a release: a
 	// release freezes the Component's traits, and the build wrote them earlier.
-	deploymentService.SetAutoRCAEnabled(cfg.AutoRCAEnabled)
+	autoRCAEnabled := sreHandoff != nil
+	deploymentService.SetAutoRCAEnabled(autoRCAEnabled)
 	deploymentService.SetComponentEnsurer(componentService)
 	autoRCA, ok := componentService.(projects.AutoRCASwitch)
 	if !ok {
 		return nil, fmt.Errorf("component service does not take the auto-RCA switch (projects.AutoRCASwitch)")
 	}
-	autoRCA.SetAutoRCAEnabled(cfg.AutoRCAEnabled)
+	autoRCA.SetAutoRCAEnabled(autoRCAEnabled)
 	// How a protected service verifies that a request reached it through the
 	// gateway. Read off the Environment's annotations — the same projection the
 	// Thunder binding arrives on, and the only one this process can see from

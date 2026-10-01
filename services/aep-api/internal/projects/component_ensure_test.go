@@ -212,7 +212,7 @@ func TestEnsureComponent_NoStoreOrRepo_Errors(t *testing.T) {
 }
 
 // The Component carries the auto-RCA alert rule by default, and none when the
-// deployment has auto-RCA off (AUTO_RCA_ENABLED=false, ticket 15). The trait
+// deployment has auto-RCA off (no SRE handoff configured). The trait
 // list written here is what the next release freezes.
 func TestEnsureComponent_AutoRCAAlertRuleFollowsTheDeploymentSwitch(t *testing.T) {
 	for _, enabled := range []bool{true, false} {

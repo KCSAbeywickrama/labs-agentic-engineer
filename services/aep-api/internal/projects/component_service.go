@@ -213,12 +213,12 @@ type componentService struct {
 	modelKeyResolver ModelKeyResolver
 	secretRefClient  secretmanagersvc.OpenChoreoSecretReferenceClient
 	// autoRCADisabled turns the default auto-RCA alert rule off for this
-	// deployment (AUTO_RCA_ENABLED=false). Zero value = on.
+	// deployment (no SRE handoff configured). Zero value = on.
 	autoRCADisabled bool
 }
 
 // AutoRCASwitch is how the composition root hands the component service the
-// deployment's auto-RCA switch (config AUTO_RCA_ENABLED). It is a port of its
+// deployment's auto-RCA switch (on when the SRE handoff is configured). It is a port of its
 // own rather than a ComponentService method: that interface is what the HTTP
 // handlers hold, and a wiring switch is not theirs to flip.
 type AutoRCASwitch interface {

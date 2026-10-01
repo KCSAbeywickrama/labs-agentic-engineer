@@ -116,7 +116,7 @@ type DeploymentInputs struct {
 	// consumer can choose the authenticated lane (see gateway_address.go).
 	ProtectedSiblings []ProtectedSibling
 	// AutoRCADisabled turns the default "error → RCA" alert rule off for the
-	// whole deployment (config AUTO_RCA_ENABLED=false), on top of a component's
+	// whole deployment (no SRE handoff configured), on top of a component's
 	// own design opt-out. Negative so the zero value keeps the default on.
 	AutoRCADisabled bool
 }

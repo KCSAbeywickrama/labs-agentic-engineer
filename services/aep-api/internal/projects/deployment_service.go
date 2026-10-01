@@ -76,7 +76,7 @@ type DeploymentService struct {
 	// carries, which is the behaviour before this existed.
 	ensurer ComponentEnsurer
 	// autoRCADisabled turns the default auto-RCA alert rule off for this
-	// deployment (AUTO_RCA_ENABLED=false). Zero value = on.
+	// deployment (no SRE handoff configured). Zero value = on.
 	autoRCADisabled bool
 	// catalog, resourceClient, and thunder are the thunder-callback wait
 	// ports. Any nil (including a nil store) skips the wait so existing
@@ -254,7 +254,7 @@ func (s *DeploymentService) SetComponentEnsurer(c ComponentEnsurer) {
 }
 
 // SetAutoRCAEnabled sets whether the default auto-RCA alert rule's per-
-// environment config is written (config AUTO_RCA_ENABLED). It must agree with
+// environment config is written (on when the SRE handoff is configured). It must agree with
 // ComponentService's setting, which decides whether the Component attaches the
 // trait at all; the composition root passes both the same value.
 func (s *DeploymentService) SetAutoRCAEnabled(enabled bool) {
@@ -459,13 +459,13 @@ func (s *DeploymentService) deployOne(ctx context.Context, orgID, projectID, com
 	var releaseName string
 	if commitSHA != "" {
 		// A release FREEZES the Component's traits, so re-assert the Component's
-		// spec from the design first. The build's fan-out wrote those traits,
-		// possibly long before, and a trait change since (a design edit, auto-RCA
-		// turned off) would otherwise never reach a release — or reach one the
-		// platform refuses, as a release cut from a ClusterTrait the org's
-		// ComponentType does not allow is refused (ticket 15). A failed re-assert
-		// fails this component's deploy (retryable) rather than releasing stale
-		// traits.
+		// spec from the design first: the build's fan-out wrote those traits,
+		// possibly long before. This reaches a release only when this commit's
+		// release has not been cut yet — release names are per commit, and
+		// EnsureRelease keeps an existing one — so a trait change since (a design
+		// edit, the SRE handoff turned on or off) lands at the component's next
+		// commit, not by redeploying the same one. A failed re-assert fails this
+		// component's deploy (retryable) rather than releasing stale traits.
 		if s.ensurer != nil {
 			if err := s.ensurer.EnsureComponent(ctx, orgID, projectID, componentName); err != nil {
 				return outcome, fmt.Errorf("re-assert component before release: %w", err)
