@@ -353,6 +353,13 @@ func runSreInstall(cmd *cobra.Command, args []string) error {
 			if err := helmPinLogsAdapter(ctx, p, logs); err != nil {
 				return err
 			}
+			// The plane's alert-rule controller reconciles a rule only when
+			// its spec changes, so rules synced before the swap keep the
+			// monitors the stock adapter compiled. A restart re-syncs every
+			// rule through the new adapter, which the upgrade waited for.
+			if err := rolloutRestart(ctx, client, sreObsNamespace, "controller-manager"); err != nil {
+				return fmt.Errorf("restart the observability controller-manager to re-sync alert rules: %w", err)
+			}
 		} else {
 			ui.Warn(fmt.Sprintf("No %s release in %q — aep-api's auto-RCA rule watches \"error\" assuming a case-insensitive adapter, so check that this plane's logs module matches regardless of case.", obsLogsChart, sreObsNamespace))
 		}
@@ -816,7 +823,7 @@ func helmPinLogsAdapter(ctx context.Context, p sreParams, logs chartRelease) err
 		"--reuse-values",
 		"--set", "adapter.image.repository="+p.AdapterRepo,
 		"--set", "adapter.image.tag="+p.AdapterTag,
-		"--timeout", "15m")
+		"--wait", "--timeout", "15m")
 }
 
 func helmInstallObsLogs(ctx context.Context, p sreParams) error {

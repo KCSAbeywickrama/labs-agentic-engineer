@@ -40,7 +40,10 @@ loggers. `--adapter-image` (default
 `tharindulak/observability-logs-opensearch-adapter:0.5.1-case-insensitive`)
 sets the adapter on the logs release either way: on the one aectl installs,
 and on an existing plane's release at that release's chart version, with its
-values kept (`helmPinLogsAdapter`). If an existing plane has no
+values kept (`helmPinLogsAdapter`). On an existing plane aectl then
+restarts the plane's `controller-manager`: it reconciles an alert rule only
+when the rule's spec changes, so without a restart the rules synced before
+the swap keep the monitors the stock adapter compiled. If an existing plane has no
 `observability-logs-opensearch` release, aectl warns and changes nothing.
 Drop the pin once an upstream adapter release matches case-insensitively.
 
