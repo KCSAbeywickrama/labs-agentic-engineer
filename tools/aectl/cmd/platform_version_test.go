@@ -117,7 +117,7 @@ func TestSplitVersion(t *testing.T) {
 func TestVersionAtLeast_MinOCVersion(t *testing.T) {
 	got, err := versionAtLeast("1.2.4", minOCVersion)
 	if err != nil {
-		t.Fatalf("versionAtLeast(%q, %q) error = %v", "1.2.5", minOCVersion, err)
+		t.Fatalf("versionAtLeast(%q, %q) error = %v", "1.2.4", minOCVersion, err)
 	}
 	if got {
 		t.Errorf("versionAtLeast(%q, %q) = true, want false", "1.2.4", minOCVersion)
@@ -125,7 +125,7 @@ func TestVersionAtLeast_MinOCVersion(t *testing.T) {
 
 	got, err = versionAtLeast("1.2.5", minOCVersion)
 	if err != nil {
-		t.Fatalf("versionAtLeast(%q, %q) error = %v", "1.3.0", minOCVersion, err)
+		t.Fatalf("versionAtLeast(%q, %q) error = %v", "1.2.5", minOCVersion, err)
 	}
 	if !got {
 		t.Errorf("versionAtLeast(%q, %q) = false, want true", "1.2.5", minOCVersion)
