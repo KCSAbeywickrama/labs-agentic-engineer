@@ -49,6 +49,30 @@ type BuildScope struct {
 	// ComponentStories maps a deployable component id to the stories its
 	// design.json claims (claims ∩ InScope), in ID order.
 	ComponentStories map[string][]string
+	// Features are the features the version carries, in ID order: the planner
+	// cuts one Task per feature per component (B3).
+	Features []ScopeFeature
+	// ProductWide are the product-wide items the version carries, in ID order:
+	// each component's Foundation Task builds them.
+	ProductWide []ScopeItem
+}
+
+// ScopeFeature is one feature a version carries.
+type ScopeFeature struct {
+	ID   string
+	Name string
+	// Needs are the carried features this one is built after, in ID order;
+	// one built by an earlier version is already in the code and is left out.
+	// See featureOrder for how a story's own need joins them.
+	Needs []string
+}
+
+// ScopeItem is one product-wide item a version carries.
+type ScopeItem struct {
+	ID   string
+	Text string
+	// AppliesTo is feature IDs, or the single entry "all".
+	AppliesTo []string
 }
 
 // MilestoneTitle is the title of the milestone this scope claims — the tag,
@@ -88,14 +112,12 @@ func (s *artifactService) BuildScopeAtTag(ctx context.Context, orgID, projectID,
 	if len(stories) == 0 {
 		return scope, nil
 	}
-	carried := map[string]bool{}
-	if plan, ok := s.versionScope(ctx, ref, tag); ok {
-		carried = storySet(spec, plan)
-	} else {
-		for _, st := range stories {
-			carried[st.ID] = true
-		}
+	plan, ok := s.versionScope(ctx, ref, tag)
+	if !ok {
+		plan = everything(spec)
 	}
+	carried := storySet(spec, plan)
+	scope.Features, scope.ProductWide = scopeOf(spec, plan)
 	scope.StoryTitles = map[string]string{}
 	for _, st := range stories {
 		if !carried[st.ID] {
@@ -118,6 +140,85 @@ func (s *artifactService) BuildScopeAtTag(ctx context.Context, orgID, projectID,
 		}
 	}
 	return scope, nil
+}
+
+// everything is the plan of a version cut before builds were selections: it
+// carried every feature with stories and every product-wide item.
+func everything(spec reqspec.Spec) reqspec.BuildPlan {
+	var plan reqspec.BuildPlan
+	for _, f := range spec.Features {
+		if len(f.Stories) > 0 {
+			plan.Features = append(plan.Features, f.ID)
+		}
+	}
+	for _, it := range spec.ProductWide {
+		plan.ProductWide = append(plan.ProductWide, it.ID)
+	}
+	return plan
+}
+
+// scopeOf names what a plan carries for the planner: each carried feature
+// with the carried features it is built after, and each carried product-wide
+// item.
+func scopeOf(spec reqspec.Spec, plan reqspec.BuildPlan) ([]ScopeFeature, []ScopeItem) {
+	order := featureOrder(spec, plan.Features)
+	var features []ScopeFeature
+	for _, f := range spec.Features {
+		if slices.Contains(plan.Features, f.ID) {
+			features = append(features, ScopeFeature{ID: f.ID, Name: f.Name, Needs: order[f.ID]})
+		}
+	}
+	var items []ScopeItem
+	for _, it := range spec.ProductWide {
+		if slices.Contains(plan.ProductWide, it.ID) {
+			items = append(items, ScopeItem{ID: it.ID, Text: it.Text, AppliesTo: it.AppliesTo})
+		}
+	}
+	return features, items
+}
+
+// featureOrder is the build order among the carried features: what each is
+// built after. A feature file's `Needs:` comes first, as the whole feature
+// waits on it; a story's own need joins only when it closes no loop — Claims'
+// "see the decision" story needs Approvals while Approvals needs Claims, and
+// Claims is still built first, its one story landing on top of a stub.
+func featureOrder(spec reqspec.Spec, carried []string) map[string][]string {
+	order := map[string][]string{}
+	reaches := func(from, to string) bool {
+		seen := map[string]bool{}
+		stack := []string{from}
+		for len(stack) > 0 {
+			n := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if n == to {
+				return true
+			}
+			if !seen[n] {
+				seen[n] = true
+				stack = append(stack, order[n]...)
+			}
+		}
+		return false
+	}
+	add := func(f, need string) {
+		if need != f && slices.Contains(carried, f) && slices.Contains(carried, need) && !slices.Contains(order[f], need) && !reaches(need, f) {
+			order[f] = append(order[f], need)
+		}
+	}
+	for _, f := range spec.Features {
+		for _, n := range f.Needs {
+			add(f.ID, n)
+		}
+	}
+	for _, f := range spec.Features {
+		for _, n := range f.Waits() {
+			add(f.ID, n)
+		}
+	}
+	for id := range order {
+		slices.SortFunc(order[id], reqspec.CompareIDs)
+	}
+	return order
 }
 
 // versionScope is a version's plan, read from its tag's annotation, or false

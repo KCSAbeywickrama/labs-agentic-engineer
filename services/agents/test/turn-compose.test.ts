@@ -259,6 +259,21 @@ test("plan scope marks each story COVERED or NEEDS TASKS", () => {
   assert.match(out, /- Story F2\.4 — NEEDS TASKS/, "a story with no title still gets a row");
 });
 
+test("plan scope lists the version's features with their needs, and its product-wide items", () => {
+  const out = composeInstruction({
+    kind: "plan",
+    scope: {
+      tag: "v2",
+      stories: [{ id: "F2.1", title: "Approve a claim", covered: false }],
+      features: [{ id: "F1", name: "Submit a claim" }, { id: "F2", name: "Approvals", needs: ["F1"] }],
+      productWide: [{ id: "P1", text: "Amounts in the user's currency", appliesTo: ["all"] }],
+    },
+  });
+  assert.match(out, /- F1 Submit a claim\n- F2 Approvals — needs F1/);
+  assert.match(out, /- P1: Amounts in the user's currency \(applies to all\)/);
+  assert.ok(out.indexOf("- F2 Approvals") < out.indexOf("- Story F2.1"), "features come before the stories");
+});
+
 test("an empty scope renders nothing", () => {
   // The base directive mentions a "Milestone scope" section, so match the
   // HEADING — the thing the block actually emits.

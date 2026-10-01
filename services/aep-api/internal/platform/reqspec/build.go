@@ -121,7 +121,7 @@ func PlanBuild(spec Spec, built Built, pick Pick, unavailable map[string]string)
 			continue
 		}
 		for _, f := range spec.Features {
-			if reaches(it, f.ID) && (built.Features[f.ID] || f.Designable()) {
+			if it.Reaches(f.ID) && (built.Features[f.ID] || f.Designable()) {
 				queue = append(queue, want{id: f.ID, by: id})
 			}
 		}
@@ -184,14 +184,25 @@ func PlanBuild(spec Spec, built Built, pick Pick, unavailable map[string]string)
 		if built.ProductWide[it.ID] {
 			continue
 		}
-		if slices.ContainsFunc(plan.Features, func(id string) bool { return reaches(it, id) }) {
+		if slices.ContainsFunc(plan.Features, func(id string) bool { return it.Reaches(id) }) {
 			plan.ProductWide = append(plan.ProductWide, it.ID)
 		}
 	}
 	return plan, refusals
 }
 
-// reaches reports whether a product-wide item applies to a feature.
-func reaches(it Item, featureID string) bool {
+// Reaches reports whether the product-wide item applies to a feature.
+func (it Item) Reaches(featureID string) bool {
 	return slices.Contains(it.AppliesTo, "all") || slices.Contains(it.AppliesTo, featureID)
+}
+
+// Waits is every feature this one waits on: the file's `Needs:` and each
+// story's, once each, in ID order.
+func (f Feature) Waits() []string {
+	out := slices.Clone(f.Needs)
+	for _, st := range f.Stories {
+		out = append(out, st.Needs...)
+	}
+	slices.SortFunc(out, CompareIDs)
+	return slices.Compact(out)
 }

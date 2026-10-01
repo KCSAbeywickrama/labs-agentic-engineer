@@ -50,6 +50,8 @@ export interface IssueFileData {
   dependsOn: string[];
   origin?: string;
   key?: string;
+  /** The feature the Task builds in its component ("F2", "foundation"), when the planner named one (B3). */
+  feature?: string;
   body?: string;
 }
 
@@ -67,7 +69,7 @@ function yamlFlowList(items: string[]): string {
 /**
  * Mirror of Go `TaskContextFile.Render` (field order fixed: issueNumber,
  * component, title, dependsOn, origin, then optionals), extended with the
- * playground's `key` line (extra frontmatter keys are ignored by
+ * playground's `key` and `feature` lines (extra frontmatter keys are ignored by
  * `parseTaskContextFile` — tolerated by design). No status field: an issue's
  * done-ness is never cached here — it is read fresh from the project tree
  * each run, not from a flag a prior run wrote.
@@ -80,6 +82,7 @@ export function renderTaskContextFile(f: IssueFileData): string {
   out += `dependsOn: ${yamlFlowList(f.dependsOn)}\n`;
   out += `origin: ${yamlQuote(f.origin ?? "spec-plan")}\n`;
   if (f.key) out += `key: ${yamlQuote(f.key)}\n`;
+  if (f.feature) out += `feature: ${yamlQuote(f.feature)}\n`;
   out += "---\n";
   const body = (f.body ?? "").trim();
   if (body !== "") out += `\n${body}\n`;
@@ -114,6 +117,8 @@ export interface Issue extends TaskContextFile {
   file: string;
   /** The dedupe key, when the frontmatter carries one. */
   key?: string;
+  /** The feature the Task builds, when the planner named one (B3). */
+  feature?: string;
 }
 
 export interface FoldOutcome {
@@ -135,6 +140,7 @@ interface PlanTaskOkOutput {
   dependsOn: string[];
   origin: string;
   rationale: string;
+  feature?: string;
 }
 
 interface UpdateTaskOkOutput {
@@ -238,6 +244,7 @@ export class FsIssueStore {
           dependsOn: op.dependsOn,
           origin: op.origin,
           key,
+          ...(op.feature ? { feature: op.feature } : {}),
           body: `> **Rationale:** ${op.rationale}`,
         };
         this.write(data);
@@ -250,6 +257,7 @@ export class FsIssueStore {
           body: data.body ?? "",
           file: `issues/${issueNumber}.md`,
           key,
+          ...(op.feature ? { feature: op.feature } : {}),
         };
         existingKeys.add(key);
         takenTitles.add(normTitle(op.title));
@@ -292,6 +300,7 @@ export class FsIssueStore {
         dependsOn: target.dependsOn,
         origin: target.origin,
         ...(target.key ? { key: target.key } : {}),
+        ...(target.feature ? { feature: target.feature } : {}),
         body: target.body,
       });
       if (!outcome.created.includes(target) && !outcome.updated.includes(target)) outcome.updated.push(target);

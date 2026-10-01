@@ -25,3 +25,8 @@ drift.
   design.cell, and the Gherkin acceptance criteria under specs/validation/acceptance/.
   Its requirements still predate feature files, and its design.json files cite
   no stories; it is refreshed when the design flow moves to per-feature design.
+- `expense-tracker-design/` — design output of the `design-expense-tracker`
+  run (2026-10-01, the per-feature design flow), frozen as produced:
+  `expense-api` + `expense-webapp`, each citing F1.1–F3.1, with design.cell,
+  security.json and one acceptance file per feature. The tasks scenario of the
+  same name plans from it with a v1 scope naming all three features.

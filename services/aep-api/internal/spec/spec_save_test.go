@@ -316,6 +316,10 @@ func TestBuildScopeAtTag(t *testing.T) {
 	if fmt.Sprint(scope.ComponentStories["svc"]) != "[F1.1 F1.2]" || fmt.Sprint(scope.ComponentStories["notify-svc"]) != "[F2.1]" {
 		t.Errorf("componentStories = %v", scope.ComponentStories)
 	}
+	// A version cut without a pick carries every feature with stories (B3).
+	if fmt.Sprint(scope.Features) != "[{F1 Core []} {F2 Notify []}]" {
+		t.Errorf("features = %v", scope.Features)
+	}
 }
 
 // -- the save's shared plumbing: the commit it pins, and the name it lands ----

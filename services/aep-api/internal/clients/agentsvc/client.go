@@ -119,6 +119,27 @@ const (
 type PlanScope struct {
 	Tag     string      `json:"tag"`
 	Stories []PlanStory `json:"stories"`
+	// Features are the features the version carries, in ID order: one Task
+	// per feature per component (B3).
+	Features []PlanFeature `json:"features,omitempty"`
+	// ProductWide are the product-wide items the version carries, built by
+	// each component's Foundation Task.
+	ProductWide []PlanItem `json:"productWide,omitempty"`
+}
+
+// PlanFeature is one feature a version carries, and the carried features it
+// waits on.
+type PlanFeature struct {
+	ID    string   `json:"id"`
+	Name  string   `json:"name,omitempty"`
+	Needs []string `json:"needs,omitempty"`
+}
+
+// PlanItem is one product-wide item a version carries.
+type PlanItem struct {
+	ID        string   `json:"id"`
+	Text      string   `json:"text,omitempty"`
+	AppliesTo []string `json:"appliesTo,omitempty"`
 }
 
 // PlanStory is one in-scope story; Covered means it already has Tasks and the

@@ -280,7 +280,7 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 
 	tap := newPlanTap(detached, orgID, projectID, s.issues, s.writer)
 	tap.milestone = milestoneNumber
-	tap.componentStories = scope.ComponentStories
+	tap.withScope(scope)
 	tap.appPaths = s.componentPaths(ctx, orgID, projectID)
 	tap.state = preload
 	tap.existingSlugs = slugs
@@ -366,7 +366,14 @@ func planScopeFor(scope spec.BuildScope, covered map[string]bool) *agentsvc.Plan
 			Covered: covered[id],
 		})
 	}
-	return &agentsvc.PlanScope{Tag: scope.Tag, Stories: stories}
+	out := &agentsvc.PlanScope{Tag: scope.Tag, Stories: stories}
+	for _, f := range scope.Features {
+		out.Features = append(out.Features, agentsvc.PlanFeature{ID: f.ID, Name: f.Name, Needs: f.Needs})
+	}
+	for _, it := range scope.ProductWide {
+		out.ProductWide = append(out.ProductWide, agentsvc.PlanItem{ID: it.ID, Text: it.Text, AppliesTo: it.AppliesTo})
+	}
+	return out
 }
 
 // planContextFor carries the milestone's existing-Task renders as facts, sorted

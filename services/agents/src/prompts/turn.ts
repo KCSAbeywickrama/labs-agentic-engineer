@@ -391,9 +391,36 @@ function scopeBlock(scope: PlanScope | undefined): string {
   return (
     `\n\n## Milestone scope (spec ${scope.tag})\n\n` +
     "Plan Tasks so every story marked NEEDS TASKS below is covered. COVERED stories already have Tasks — leave them alone.\n\n" +
+    featureRows(scope) +
     rows +
     "\n"
   );
+}
+
+/**
+ * The features and product-wide items the version carries (B3): what the
+ * planner cuts Tasks by. Empty for a scope that names none, which keeps a
+ * story-only scope's block byte-identical.
+ */
+function featureRows(scope: PlanScope): string {
+  let out = "";
+  if (scope.features?.length) {
+    const rows = scope.features.map((f) => {
+      const name = f.name ? ` ${f.name}` : "";
+      const needs = f.needs?.length ? ` — needs ${f.needs.join(", ")}` : "";
+      return `- ${f.id}${name}${needs}`;
+    });
+    out += "Features this version builds — one Task per feature per component that serves it:\n\n" + rows.join("\n") + "\n\n";
+  }
+  if (scope.productWide?.length) {
+    const rows = scope.productWide.map((p) => {
+      const text = p.text ? `: ${p.text}` : "";
+      const applies = p.appliesTo?.length ? ` (applies to ${p.appliesTo.join(", ")})` : "";
+      return `- ${p.id}${text}${applies}`;
+    });
+    out += "Product-wide requirements this version carries — each component's foundation Task builds them:\n\n" + rows.join("\n") + "\n\n";
+  }
+  return out === "" ? "" : out + "Stories:\n\n";
 }
 
 /**

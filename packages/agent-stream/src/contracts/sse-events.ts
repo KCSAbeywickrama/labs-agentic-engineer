@@ -800,6 +800,13 @@ export interface PlanScope {
   tag: string;
   /** Each in-scope story by its ID ("F2.3"). */
   stories: { id: string; title?: string; covered: boolean }[];
+  /**
+   * The features the version carries, in ID order, each with the carried
+   * features it waits on: one Task per feature per component (B3).
+   */
+  features?: { id: string; name?: string; needs?: string[] }[];
+  /** The product-wide items the version carries: each component's Foundation Task builds them. */
+  productWide?: { id: string; text?: string; appliesTo?: string[] }[];
 }
 
 /** One existing-Task render passed as read-only planning context. */
@@ -976,7 +983,7 @@ function isPlanScopeOrAbsent(v: unknown): boolean {
   const s = v as Record<string, unknown>;
   if (typeof s.tag !== "string") return false;
   if (!Array.isArray(s.stories)) return false;
-  return s.stories.every((row) => {
+  const storiesOk = s.stories.every((row) => {
     if (row === null || typeof row !== "object") return false;
     const r = row as Record<string, unknown>;
     return (
@@ -985,6 +992,30 @@ function isPlanScopeOrAbsent(v: unknown): boolean {
       (r.title === undefined || typeof r.title === "string")
     );
   });
+  return (
+    storiesOk &&
+    isRowsOrAbsent(s.features, (r) => optionalString(r.name) && optionalStrings(r.needs)) &&
+    isRowsOrAbsent(s.productWide, (r) => optionalString(r.text) && optionalStrings(r.appliesTo))
+  );
+}
+
+/** Absent, or an array of rows that each carry a string `id` and pass `rest`. */
+function isRowsOrAbsent(v: unknown, rest: (r: Record<string, unknown>) => boolean): boolean {
+  if (v === undefined) return true;
+  if (!Array.isArray(v)) return false;
+  return v.every((row) => {
+    if (row === null || typeof row !== "object") return false;
+    const r = row as Record<string, unknown>;
+    return typeof r.id === "string" && rest(r);
+  });
+}
+
+function optionalString(v: unknown): boolean {
+  return v === undefined || typeof v === "string";
+}
+
+function optionalStrings(v: unknown): boolean {
+  return v === undefined || (Array.isArray(v) && v.every((x) => typeof x === "string"));
 }
 
 function isPlanContextOrAbsent(v: unknown): boolean {

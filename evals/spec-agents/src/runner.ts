@@ -271,7 +271,7 @@ export async function runDesignScenario(sc: DesignScenario, runName: string): Pr
 
 export async function runTasksScenario(sc: TasksScenario, runName: string): Promise<EvalRunOutput> {
   const projectDir = prepareProject(runName, sc.fixture);
-  const run = await runTaskPlanSection(projectDir);
+  const run = await runTaskPlanSection(projectDir, sc.scope);
   const outcome = await scoreTasks(projectDir, run, sc.rubric);
   return finishRun("tasks-section", sc.name, runName, run.records, [outcome], {
     "issues/": tasksArtifact(projectDir),

@@ -32,7 +32,7 @@
  * See `services/agents/design/ADR-0003`.
  */
 
-import type { PlanContextFile, TurnSpec } from "@aep/agent-stream";
+import type { PlanContextFile, PlanScope, TurnSpec } from "@aep/agent-stream";
 
 /** An ordinary chat line, sent as the user typed it. */
 export function chatSpec(text: string): TurnSpec {
@@ -65,11 +65,16 @@ export function startSpec(idea: string | null | undefined, references?: string[]
 /**
  * A plan turn. The existing-Task renders are platform state — they cannot ride
  * the workspace snapshot, so they travel on the turn, exactly as aep-api sends
- * them in production (`planContextFor`, internal/delivery/task/plan.go).
+ * them in production (`planContextFor`, internal/delivery/task/plan.go). The
+ * milestone scope is the platform's too (`planScopeFor`); the playground has
+ * no versions to compute it from, so a caller that wants one supplies it.
  */
-export function planSpec(contextFiles: Record<string, string>): TurnSpec {
+export function planSpec(contextFiles: Record<string, string>, scope?: PlanScope): TurnSpec {
   const paths = Object.keys(contextFiles).sort();
-  if (paths.length === 0) return { kind: "plan" };
   const taskContext: PlanContextFile[] = paths.map((path) => ({ path, body: contextFiles[path]! }));
-  return { kind: "plan", taskContext };
+  return {
+    kind: "plan",
+    ...(scope ? { scope } : {}),
+    ...(taskContext.length > 0 ? { taskContext } : {}),
+  };
 }
