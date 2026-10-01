@@ -205,7 +205,7 @@ const REFERENCE_RULES: Record<string, string[]> = {
     "it listens on port **9090**",
     "**starts with no required environment variables**",
     "no stubs, no mocks",
-    "**`workload.yaml` is your prompt's to give.**",
+    "**You write the whole `workload.yaml`, from `workload-and-wiring.md` beside this",
     "**CORS belongs to the gateway**",
     "Author a file anywhere but inside the project",
     "Read anything unrelated to this run",
@@ -232,6 +232,9 @@ const REFERENCE_RULES: Record<string, string[]> = {
     "**Copy a `wiring` object verbatim**",
     "A `platform-resource` with no `wiring` is broken input",
     "**One that already exists is edited, never regenerated.**",
+    // The whole-file shape is the author's completion bar: a dependency entry
+    // pasted as the file ships with no endpoint and fails to deploy.
+    "**Done when:** the file opens with `apiVersion` and `metadata.name`",
     "**A sibling SPA reaches a service through same-origin `/api`, not `external`.**",
     "**Provider endpoint visibility:** a service a sibling SPA calls lists",
   ],

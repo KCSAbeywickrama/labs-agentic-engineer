@@ -433,10 +433,9 @@ moves. Keep the patterns to these two and do not write an unanchored
 **Done when:** Dockerfile COPYs the drop-in to `/docker-entrypoint.d/` and has
 no `ENTRYPOINT` line, and `.dockerignore` sits beside it.
 
-`workload.yaml` follows your prompt — as given when it carries one, else per the
-component contract. Consumer connection to the sibling: `visibility: project`,
-`envBindings.address: <DEP_NAME>_URL` (pod, for nginx). Any default under
-`configurations.env` arrives as a `window._env_` entry.
+`workload.yaml` per the component contract. Consumer connection to the sibling:
+`visibility: project`, `envBindings.address: <DEP_NAME>_URL` (pod, for nginx).
+Any default under `configurations.env` arrives as a `window._env_` entry.
 
 **Done when:** this app's dependency on the sibling is `visibility: project`
 (never `external`). The sibling *service's* own endpoint `visibility` is the
