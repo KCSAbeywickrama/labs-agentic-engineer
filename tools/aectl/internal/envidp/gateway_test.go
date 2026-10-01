@@ -43,12 +43,12 @@ func TestGatewayNaming(t *testing.T) {
 	if got, want := gatewayHostname("acme", "prod", defaultGatewayBaseDomain), "prod-acme.gateway.localhost"; got != want {
 		t.Errorf("gatewayHostname = %q, want %q", got, want)
 	}
-	if got, want := gatewayVhost("acme", "prod", defaultGatewayBaseDomain), "http://prod-acme.gateway.localhost:19080"; got != want {
+	if got, want := gatewayVhost("acme", "prod", defaultGatewayBaseDomain, "http", gatewayPlainPort), "http://prod-acme.gateway.localhost:19080"; got != want {
 		t.Errorf("gatewayVhost = %q, want %q", got, want)
 	}
 	// A re-domained cluster moves the suffix and nothing else: env-org order
 	// and the data-plane port are structure, not configuration.
-	if got, want := gatewayVhost("acme", "prod", "gateway.10.0.0.5.sslip.io"),
+	if got, want := gatewayVhost("acme", "prod", "gateway.10.0.0.5.sslip.io", "http", gatewayPlainPort),
 		"http://prod-acme.gateway.10.0.0.5.sslip.io:19080"; got != want {
 		t.Errorf("gatewayVhost with a configured base domain = %q, want %q", got, want)
 	}
@@ -202,5 +202,41 @@ func TestIndentBlock(t *testing.T) {
 	want := "  a\n  b\n  c"
 	if got != want {
 		t.Errorf("indentBlock = %q, want %q", got, want)
+	}
+}
+
+// TestRenderGatewayValues_RouteHostnameFollowsDomain covers the value the
+// chart keeps separate from vhost. Its own default is
+// "<env>-<org>.gateway.localhost" whenever this is empty, so a re-domained
+// cluster that sets only vhost advertises one host and routes another —
+// visible nowhere except a generated app failing to reach its own API.
+func TestRenderGatewayValues_RouteHostnameFollowsDomain(t *testing.T) {
+	inst := &ThunderInstance{
+		PublicURL: "https://development-idp.openchoreo.10.0.0.5.sslip.io:8443",
+		AdminURL:  "http://thunder-default-development-service.thunder-default-development.svc.cluster.local:8090",
+	}
+	cfg := Config{
+		Org:               "default",
+		Env:               "development",
+		GatewayBaseDomain: "gateway.10.0.0.5.sslip.io",
+		TLS:               true,
+	}
+	values, err := renderGatewayValues(cfg, "default-development", inst,
+		assertion{issuer: "aep-gateway-default-development", header: "x-jwt-assertion"},
+		"-----BEGIN RSA PRIVATE KEY-----\nABC\n-----END RSA PRIVATE KEY-----\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Bare host on the route, full URL on the vhost — the chart wants each in
+	// its own shape.
+	if !strings.Contains(values, "hostname: development-default.gateway.10.0.0.5.sslip.io") {
+		t.Errorf("route hostname missing or not re-domained:\n%s", values)
+	}
+	if !strings.Contains(values, "vhost: https://development-default.gateway.10.0.0.5.sslip.io:19443") {
+		t.Errorf("vhost missing or not on the TLS port:\n%s", values)
+	}
+	if strings.Contains(values, "gateway.localhost") {
+		t.Errorf("rendered values still carry a .localhost gateway host:\n%s", values)
 	}
 }

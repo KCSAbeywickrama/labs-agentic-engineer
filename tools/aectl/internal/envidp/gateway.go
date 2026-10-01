@@ -52,11 +52,14 @@ func gatewayHostname(org, env, baseDomain string) string {
 	return fmt.Sprintf("%s-%s.%s", env, org, baseDomain)
 }
 
-// gatewayVhost's port, like publicURL's, is fixed: 19080 is the k3d
-// data-plane gateway every component endpoint on this cluster is published
-// behind, including the ClusterDataPlane ingress aectl patches.
-func gatewayVhost(org, env, baseDomain string) string {
-	return fmt.Sprintf("http://%s:19080", gatewayHostname(org, env, baseDomain))
+// gatewayVhost is the address a generated app's own API is called on, so its
+// scheme and port follow Config.TLS for the same reason publicURL's do: the
+// app is fetched by a browser, and a page served over https cannot call a
+// plain-http API. 19080/19443 are the k3d data-plane gateway ports every
+// component endpoint is published behind, including the ClusterDataPlane
+// ingress aectl patches.
+func gatewayVhost(org, env, baseDomain, scheme string, port int) string {
+	return fmt.Sprintf("%s://%s:%d", scheme, gatewayHostname(org, env, baseDomain), port)
 }
 func gatewayBackendJWTSecretName(release string) string { return release + "-backend-jwt" }
 func gatewayTokenSecretName(release string) string      { return release + "-token" }
@@ -266,12 +269,27 @@ func ensureControlPlaneTokenSecret(ctx context.Context, c clients, namespace, re
 	return nil
 }
 
+// gatewayValuesTemplate is the values file setup-environment-gateway.sh
+// itself builds. Two fields name the same gateway and are NOT
+// interchangeable:
+//
+//	vhost     the full URL the gateway is advertised at, scheme and port
+//	          included — what a generated app is told to call.
+//	hostname  the bare host kgateway routes on. The chart defaults it to
+//	          "<env>-<org>.gateway.localhost" whenever it is empty, entirely
+//	          independently of vhost.
+//
+// Setting only vhost on a re-domained cluster is therefore the quietest
+// possible failure: the advertised URL and the routed hostname disagree, the
+// install reports success, and it surfaces as a generated app unable to reach
+// its own API.
 const gatewayValuesTemplate = `
 agentManager:
   orgName: {{ .Org }}
 gateway:
   environment: {{ .Env }}
   vhost: {{ .Vhost }}
+  hostname: {{ .RouteHostname }}
 apiGateway:
   namespace: {{ .Namespace }}
   config:
@@ -303,10 +321,11 @@ bootstrap:
 `
 
 type gatewayValuesData struct {
-	Org, Env, Namespace                  string
-	Vhost, ThunderIssuer, ThunderJWKSURL string
-	AssertionIssuer                      string
-	SigningKeyIndented                   string
+	Org, Env, Namespace           string
+	Vhost, RouteHostname          string
+	ThunderIssuer, ThunderJWKSURL string
+	AssertionIssuer               string
+	SigningKeyIndented            string
 }
 
 // renderGatewayValues builds the values file setup-environment-gateway.sh
@@ -323,7 +342,8 @@ func renderGatewayValues(cfg Config, namespace string, inst *ThunderInstance, as
 		Org:                cfg.Org,
 		Env:                cfg.Env,
 		Namespace:          namespace,
-		Vhost:              gatewayVhost(cfg.Org, cfg.Env, cfg.gatewayBaseDomain()),
+		Vhost:              gatewayVhost(cfg.Org, cfg.Env, cfg.gatewayBaseDomain(), cfg.scheme(), cfg.gatewayPort()),
+		RouteHostname:      gatewayHostname(cfg.Org, cfg.Env, cfg.gatewayBaseDomain()),
 		ThunderIssuer:      inst.PublicURL,
 		ThunderJWKSURL:     strings.TrimRight(inst.AdminURL, "/") + "/oauth2/jwks",
 		AssertionIssuer:    assert.issuer,

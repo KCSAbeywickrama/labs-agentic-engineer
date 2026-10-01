@@ -101,11 +101,17 @@ GW_DOMAIN="gateway.${AE_DOMAIN}"              # the environment API gateway vhos
 # has the same guard and would otherwise refuse.
 export AE_DOMAIN
 
+# Must match the WITH_TLS this cluster was built with. Agent Manager stores the
+# URLs below in its own database and hands them to browsers; getting the scheme
+# wrong here installs cleanly and fails later, in someone else's browser.
+# shellcheck source=lib/tls-env.sh
+. "${SCRIPT_DIR}/lib/tls-env.sh"
+
 # The cluster's own coordinates. These must match what `aectl platform install`
 # ran against — skaffold/defaults.yaml is the source for the first three.
 OC_ENV="${OC_ENV:-development}"              # oc.pipeline_source_environment
 ORG_NS="${ORG_NS:-default}"                  # oc.default_org_namespace
-PUBLIC_THUNDER_URL="${PUBLIC_THUNDER_URL:-http://thunder.openchoreo.${AE_DOMAIN}:8080}"
+PUBLIC_THUNDER_URL="${PUBLIC_THUNDER_URL:-${SCHEME}://thunder.openchoreo.${AE_DOMAIN}:${CP_PORT}}"
 THUNDER_NS="${THUNDER_NS:-thunder}"
 THUNDER_RELEASE="${THUNDER_RELEASE:-thunder}"
 BOOTSTRAP_CM="${BOOTSTRAP_CM:-openchoreo-thunderid-bootstrap}"
@@ -145,10 +151,16 @@ WP_NS="openchoreo-workflow-plane"
 ENV_IDP_BASE_DOMAIN="${ENV_IDP_BASE_DOMAIN:-openchoreo.${AE_DOMAIN}}"
 ENV_IDP_HANDLE="${ENV_IDP_HANDLE:-${OC_ENV}-idp}"
 ENV_IDP_RELEASE="thunder-${ORG_NS}-${OC_ENV}"
-AMP_API_URL="${AMP_API_URL:-http://api.${AMP_DOMAIN}:8080/api/v1}"
+AMP_API_URL="${AMP_API_URL:-${SCHEME}://api.${AMP_DOMAIN}:${CP_PORT}/api/v1}"
 
 PUBLIC_THUNDER_HOST="${PUBLIC_THUNDER_URL#*://}"
 PUBLIC_THUNDER_HOST="${PUBLIC_THUNDER_HOST%%:*}"
+# Stays on https:8443 regardless of WITH_TLS, for the reason in the block above:
+# ThunderID refuses a plain-http JWKS URL for a trusted issuer, so there is no
+# non-TLS form of this value to fall back to. On a WITH_TLS=0 cluster nothing
+# serves 8443 and Agent Manager's environment registration cannot succeed —
+# which is a real limit of the plain-HTTP path, not something to paper over by
+# sending a URL ThunderID will reject.
 PLATFORM_THUNDER_JWKS_URL="https://${PUBLIC_THUNDER_HOST}:8443/oauth2/jwks"
 
 kubectl() { command kubectl --context "$CLUSTER_CONTEXT" "$@"; }
@@ -510,24 +522,34 @@ echo "   ✅ sandbox controller ready"
 # console's instrumentationUrl beside it, which this script has always
 # overridden — the two address the same gateway and disagreeing was a bug.
 #
+# amObserverPublicURL is the one value that does NOT follow SCHEME. The
+# observability plane's Gateway has a single plain-HTTP listener on 11080 and
+# no certificate, so on a WITH_TLS=1 cluster this stays http:// by choice, not
+# by oversight (OBS_SCHEME/OBS_PORT in lib/tls-env.sh). The consequence is
+# real: anything the console fetches from it is mixed content on an HTTPS page
+# and the browser blocks it, so the traces view does not work over TLS.
+# Server-to-server callers are unaffected. Fixing it means giving that plane a
+# certificate and an HTTPS listener, or routing the hostname through the
+# control-plane gateway already on ${CP_PORT}.
+#
 # The chart runs its own DB-migration and JWT-key-generation Jobs.
 echo ""
 echo "7️⃣  Agent Manager (amp-api, amp-console, PostgreSQL)"
 helm upgrade --install amp "${AMP_REGISTRY}/wso2-agent-manager" \
     --version "$AMP_VERSION" \
     --namespace "$AMP_NS" --create-namespace --kube-context "$CLUSTER_CONTEXT" \
-    --set "console.config.instrumentationUrl=http://${OC_ENV}-${ORG_NS}.${GW_DOMAIN}:19080/otel" \
-    --set "agentManagerService.config.otel.exporterEndpoint=http://${OC_ENV}-${ORG_NS}.${GW_DOMAIN}:19080/otel" \
-    --set "agentManagerService.config.amObserverPublicURL=http://traces.${AMP_DOMAIN}:11080" \
+    --set "console.config.instrumentationUrl=${SCHEME}://${OC_ENV}-${ORG_NS}.${GW_DOMAIN}:${DP_PORT}/otel" \
+    --set "agentManagerService.config.otel.exporterEndpoint=${SCHEME}://${OC_ENV}-${ORG_NS}.${GW_DOMAIN}:${DP_PORT}/otel" \
+    --set "agentManagerService.config.amObserverPublicURL=${OBS_SCHEME}://traces.${AMP_DOMAIN}:${OBS_PORT}" \
     --set "agentManagerService.ocIngress.hostname=api.${AMP_DOMAIN}" \
     --set "agentManagerService.ocIngress.gatewayMgmt.hostnames[0]=cp.${AMP_DOMAIN}" \
-    --set "agentManagerService.config.serverPublicURL=http://api.${AMP_DOMAIN}:8080" \
+    --set "agentManagerService.config.serverPublicURL=${SCHEME}://api.${AMP_DOMAIN}:${CP_PORT}" \
     --set-string "agentManagerService.config.agentsBaseDomain=${AGENTS_DOMAIN}" \
     --set-string "agentManagerService.config.gatewayBaseDomain=${GW_DOMAIN}" \
     --set "console.ocIngress.hostname=console.${AMP_DOMAIN}" \
-    --set "console.config.apiBaseUrl=http://api.${AMP_DOMAIN}:8080" \
-    --set "console.config.auth.signInRedirectURL=http://console.${AMP_DOMAIN}:8080/login" \
-    --set "console.config.auth.signOutRedirectURL=http://console.${AMP_DOMAIN}:8080/login" \
+    --set "console.config.apiBaseUrl=${SCHEME}://api.${AMP_DOMAIN}:${CP_PORT}" \
+    --set "console.config.auth.signInRedirectURL=${SCHEME}://console.${AMP_DOMAIN}:${CP_PORT}/login" \
+    --set "console.config.auth.signOutRedirectURL=${SCHEME}://console.${AMP_DOMAIN}:${CP_PORT}/login" \
     --set "agentManagerService.config.keyManager.issuer=${PUBLIC_THUNDER_URL}" \
     --set "agentManagerService.config.thunder.baseURL=${PUBLIC_THUNDER_URL}" \
     --set "console.config.auth.baseUrl=${PUBLIC_THUNDER_URL}" \
@@ -763,8 +785,8 @@ echo "============================================"
 echo "  ✅ Agent Manager installed"
 echo "============================================"
 echo ""
-echo "  Console: http://console.${AMP_DOMAIN}:8080"
-echo "  API:     http://api.${AMP_DOMAIN}:8080"
+echo "  Console: ${SCHEME}://console.${AMP_DOMAIN}:${CP_PORT}"
+echo "  API:     ${SCHEME}://api.${AMP_DOMAIN}:${CP_PORT}"
 echo ""
 echo "  ${OC_ENV} is registered against the identity provider aectl installed"
 echo "  (${ENV_IDP_RELEASE}), not a second one. Agent Manager's own"
