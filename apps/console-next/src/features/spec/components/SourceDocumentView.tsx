@@ -36,7 +36,9 @@ export function SourceDocumentView({
   return (
     <Box sx={{ maxWidth: "72ch" }}>
       <DocKicker>
-        <span>Document · {document.pages} pages · read once, cited by page</span>
+        <span>
+          Document{document.pages > 0 ? ` · ${document.pages} pages` : ""} · read once, cited by place
+        </span>
       </DocKicker>
       <Typography component="h1" sx={{ fontSize: "1.5rem", fontWeight: 600, mt: 0.25, mb: 1.25 }}>
         {document.title}
@@ -44,6 +46,7 @@ export function SourceDocumentView({
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         What the agent took from it, and where each point landed. A point from it is the user's own word, cited by
         page; nothing from it is marked assumed.
+        {document.rows.length === 0 && " The agent writes this when it reads the document at the kickoff."}
       </Typography>
       <Box sx={{ overflowX: "auto" }}>
         <Table size="small" aria-label="What the document says">
@@ -55,8 +58,8 @@ export function SourceDocumentView({
             </TableRow>
           </TableHead>
           <TableBody>
-            {document.rows.map((row) => (
-              <TableRow key={row.page}>
+            {document.rows.map((row, i) => (
+              <TableRow key={`${row.page}-${i}`}>
                 <TableCell sx={{ fontFamily: "monospace", whiteSpace: "nowrap", verticalAlign: "top" }}>{row.page}</TableCell>
                 <TableCell sx={{ verticalAlign: "top" }}>{row.says}</TableCell>
                 <TableCell sx={{ verticalAlign: "top", color: row.landedIn ? "text.primary" : "text.secondary" }}>

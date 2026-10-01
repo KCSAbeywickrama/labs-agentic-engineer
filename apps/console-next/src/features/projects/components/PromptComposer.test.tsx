@@ -100,7 +100,7 @@ describe("PromptComposer attachments (#383)", () => {
   // into one notice and then close both at once.
   it("raises one notice per rejected file and dismisses them independently", () => {
     render(<Host />);
-    attach(["spec.docx", "spec.docx", "prd.md"]);
+    attach(["spec.odt", "spec.odt", "prd.md"]);
 
     // The supported file still lands.
     expect(screen.getByText("prd.md")).toBeInTheDocument();

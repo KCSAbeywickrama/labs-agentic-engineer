@@ -23,6 +23,7 @@ specs/requirements/
   features/F2-approvals.md
   product-wide.md                 everything that spans more than one feature
   product-wide/security.md        a topic split out of product-wide.md (optional)
+  sources/t-e-policy-v3.md        what one attached document says, and where it landed
 ```
 
 **One home.** Each story, decision, out-of-scope line and open question lives
@@ -164,6 +165,38 @@ Rules that apply to more than one feature.
   are global, so a move changes no citation.
 - Where the user says "fast", write a measurable version tagged `*assumed*`
   ("pages load in under 2 s").
+
+## sources/&lt;document&gt;.md — what a document gave
+
+When the user attached documents, each gets a coverage file: what it says,
+place by place, and where each point landed in the requirements — or that it
+landed nowhere and why. It is how the user sees their material was read, and
+the one place that says what was left out.
+
+```markdown
+# T&E Policy v3.pdf
+
+Pages: 14
+
+- p.3: A receipt is required for any expense above $25. → F1.5
+- p.4: Meals are capped at $50 per day. → F1
+- p.9: Approved claims post to Xero every night. → F3.2
+- p.10: Expense records are kept for seven years. → P2
+- p.12: Corporate cards are reconciled monthly. → not used: corporate cards are out of scope
+```
+
+- The title is the document's name exactly as it was attached (a converted
+  Office file keeps its own name: `Rates.xlsx`, not `Rates.xlsx.md`). The file
+  name is that name as a slug.
+- `Pages:` is how many pages it has; leave the line out for a document with no
+  pages (a sheet, a deck counts slides).
+- One line per point that matters to the product, in the document's order: the
+  place (a page `p.3`, a sheet `Rates tab`, a slide `slide 4`, a heading), what
+  it says in its own words, then `→` and the ID of the line or the feature it
+  landed in, or `not used:` and why. A point that landed is cited by that line
+  too (`[T&E Policy v3 · p.3]`).
+- It is written with the requirements it explains, and changes when they do: a
+  point moved to another feature moves its arrow.
 
 ## IDs
 

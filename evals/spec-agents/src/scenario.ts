@@ -42,6 +42,13 @@ export const briefSchema = z.object({
   traits: z.array(z.string()).optional(),
   /** Per-scenario override of the agent-turn cap (#354). */
   maxTurns: z.number().int().min(1).max(30).optional(),
+  /**
+   * Documents the user attached (S5), by file name under
+   * scenarios/fixtures/references/: copied into the project's
+   * specs/requirements/references/ and listed to the kickoff, as the platform
+   * overlays them.
+   */
+  references: z.array(z.string().min(1)).optional(),
 });
 export type ScenarioBrief = z.infer<typeof briefSchema>;
 

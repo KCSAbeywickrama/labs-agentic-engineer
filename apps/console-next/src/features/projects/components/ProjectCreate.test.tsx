@@ -102,8 +102,8 @@ describe("ProjectCreate reference documents (#383)", () => {
 
   it("rejects an unsupported extension with a per-file notice", () => {
     render(<ProjectCreate />);
-    attach("spec.docx");
-    expect(screen.queryByText(/spec\.docx \(/)).toBeNull();
+    attach("spec.odt");
+    expect(screen.queryByText(/spec\.odt \(/)).toBeNull();
     expect(screen.getByText(/files are accepted/i)).toBeTruthy();
   });
 
@@ -112,7 +112,7 @@ describe("ProjectCreate reference documents (#383)", () => {
   // other standing.
   it("keeps one notice per rejected file, dismissed one at a time", () => {
     render(<ProjectCreate />);
-    attachAll(["spec.docx", "spec.docx"]);
+    attachAll(["spec.odt", "spec.odt"]);
     expect(screen.getAllByText(/was not attached/i)).toHaveLength(2);
 
     fireEvent.click(screen.getAllByRole("button", { name: /close/i })[0]!);

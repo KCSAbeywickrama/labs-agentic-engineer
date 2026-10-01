@@ -52,9 +52,19 @@ Read them, then take the coverage walk against what they say:
   each other.** A contradiction between two documents is a real question, and
   a good one: quote both and ask which holds.
 - **Cite what informed what.** A line a document states carries that
-  document's source tag, with the page, sheet or heading (`prd-contract`). The
+  document's source tag, with the page, sheet or heading (`prd-contract`), and
+  keeps the document's own words where they are already a requirement. The
   user must be able to see their material landed, and a later reader must be
   able to trace a decision to its source.
+- **Write each document's coverage file** (`sources/<document>.md`,
+  `prd-contract`) in the same pass: every point that matters to the product,
+  place by place, with where it landed or why it did not. A point you leave out
+  of the requirements is still listed, as `not used:` with the reason — that
+  line is the user's one chance to see it was read and set aside.
+
+An Office document arrives converted to markdown (`Policy.docx.md`): cite and
+title it by its own name, `Policy.docx`, and its headings, sheets or slides as
+the place.
 
 No documents listed is the ordinary case: the instruction says nothing and
 you interview from the idea alone, exactly as below.

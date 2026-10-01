@@ -57,11 +57,11 @@ describe("screenReferenceFiles", () => {
   it("rejects other extensions with a reason naming the accepted set", () => {
     const { accepted, rejected } = screenReferenceFiles(
       [],
-      [file("spec.docx", "x")],
+      [file("spec.odt", "x")],
     );
     expect(accepted).toEqual([]);
     expect(rejected).toHaveLength(1);
-    expect(rejected[0]?.name).toBe("spec.docx");
+    expect(rejected[0]?.name).toBe("spec.odt");
     // Office formats are out on purpose: the models don't read them natively,
     // so accepting one would store bytes no turn can use.
     expect(rejected[0]?.reason).toMatch(/\.pdf/);

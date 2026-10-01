@@ -26,7 +26,7 @@
  * a section before deciding to continue; the .eval.ts scorers only extract.
  */
 
-import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { openSession } from "@aep/playground/src/engine/session.js";
 import { flowSpec, startSpec } from "@aep/playground/src/engine/turn-spec.js";
@@ -35,7 +35,7 @@ import { flowSpec, startSpec } from "@aep/playground/src/engine/turn-spec.js";
 // token; the evals run without aep-api, so they state the same thing directly —
 // and the agents service composes identical wording for both.
 const designTurn = flowSpec("design");
-import { PROJECTS_HOME } from "./config.js";
+import { FIXTURES_DIR, PROJECTS_HOME } from "./config.js";
 import { listRequirementFiles, prepareProject, readProjectFile } from "./project.js";
 import type { ChainScenario, DesignScenario, RequirementsScenario, Rubric, TasksScenario } from "./scenario.js";
 import { decisionsDigest, type SimAnswer } from "./sim-user.js";
@@ -204,6 +204,16 @@ function finishRun(
   };
 }
 
+/** Copy the attached documents where the platform overlays them, and name them for the kickoff. */
+function attachReferences(projectDir: string, names: string[]): string[] {
+  return names.map((name) => {
+    const rel = `specs/requirements/references/${name}`;
+    mkdirSync(join(projectDir, "specs/requirements/references"), { recursive: true });
+    cpSync(join(FIXTURES_DIR, "references", name), join(projectDir, rel));
+    return rel;
+  });
+}
+
 /** A feature file's ID: `F2` for specs/requirements/features/F2-approvals.md. */
 const FEATURE_FILE_ID = /^specs\/requirements\/features\/(F\d+)-[^/]+\.md$/;
 
@@ -219,7 +229,8 @@ async function runRequirementsSection(
   projectDir: string,
   brief: RequirementsScenario["brief"],
 ): Promise<SectionRunResult> {
-  const runs = [await runConversationalSection(session, "requirements", startSpec(brief.idea), brief)];
+  const references = attachReferences(projectDir, brief.references ?? []);
+  const runs = [await runConversationalSection(session, "requirements", startSpec(brief.idea, references), brief)];
   if (!runs[0]!.error) {
     const features = listRequirementFiles(projectDir).flatMap((f) => FEATURE_FILE_ID.exec(f)?.[1] ?? []);
     for (const id of features) {

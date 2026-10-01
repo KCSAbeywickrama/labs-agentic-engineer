@@ -3958,7 +3958,7 @@ type ListIssuesParams struct {
 
 // PutProjectReferencesMultipartBody defines parameters for PutProjectReferences.
 type PutProjectReferencesMultipartBody struct {
-	// Files Reference documents. Two groups, both readable by the models: binary read natively as file parts (`.pdf`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`), and text read as workspace files (`.md`, `.txt`, `.csv`, `.tsv`, `.json`, `.yaml`, `.yml`, `.xml`, `.html`, `.rst`). At most 10 documents, each at most 5 MiB measured on the raw bytes. Office formats are not accepted — the models do not read them natively.
+	// Files Reference documents. Two groups, both readable by the models: binary read natively as file parts (`.pdf`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`), and text read as workspace files (`.md`, `.txt`, `.csv`, `.tsv`, `.json`, `.yaml`, `.yml`, `.xml`, `.html`, `.rst`). At most 10 documents, each at most 5 MiB measured on the raw bytes. Office documents (`.docx`, `.xlsx`, `.pptx`) are converted to markdown on upload — the models do not read them natively — and stored as `<name>.md`: a Word document's headings, paragraphs and tables, a workbook's sheets as tables, a deck's slides. One that cannot be read is refused with 400.
 	Files []openapi_types.File `json:"files"`
 }
 

@@ -77,8 +77,9 @@ var referenceNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,199}
 // API spec actually arrives in.
 //
 // Deliberately absent: .docx / .xlsx / .pptx. The models do not read Office
-// formats natively — those need the code-execution Skills route — so accepting
-// one here would store bytes no turn can use.
+// formats natively, so the upload converts one to markdown first (S5,
+// platform/officetext) and stores it as `<name>.md`; the bytes themselves are
+// never stored.
 var referenceExtensions = map[string]bool{
 	// Binary, read natively as file parts.
 	".pdf": true, ".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,

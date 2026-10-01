@@ -22,6 +22,7 @@ import { interviewingIn, useProjectChat } from "../agent-chat/useProjectChat";
 import { sourceDocuments, useMockSpecExtras, useSpecState, type SpecFeature, type SpecModel } from "./api/specModel";
 import { useSpecDoc } from "./collab/specDoc";
 import { useSpecLines } from "./collab/useSpecLines";
+import { withCoverage } from "./model/coverage";
 import { deriveFeatures } from "./model/features";
 import { deriveWorkspace } from "./model/workspace";
 
@@ -41,7 +42,7 @@ export function useSpecModel(projectName: string) {
     const designedFrom = state.data.designedFrom;
     return {
       features: deriveFeatures(lines, designedFrom, interviewing),
-      documents: sourceDocuments(state.data),
+      documents: withCoverage(sourceDocuments(state.data), lines),
       design: {
         designedFrom,
         openComments: extras.data?.openComments ?? 0,

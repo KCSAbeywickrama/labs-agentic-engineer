@@ -37,19 +37,24 @@ const NATIVE_EXTENSIONS = ["pdf", "png", "jpg", "jpeg", "gif", "webp"] as const;
 
 /**
  * Read as text: the formats a requirements brief, an API spec or a data sample
- * arrives in. Office formats are absent on purpose: the models do not read
- * them natively, so accepting one would store bytes no turn can use.
+ * arrives in.
  */
 const TEXT_EXTENSIONS = [
   "md", "txt", "csv", "tsv", "json", "yaml", "yml", "xml", "html", "rst",
 ] as const;
 
+/**
+ * Word, Excel and PowerPoint: the models do not read them, so the server
+ * converts each to markdown on upload (S5) and the turns read its words.
+ */
+const OFFICE_EXTENSIONS = ["docx", "xlsx", "pptx"] as const;
+
 /** The file input's `accept`, so the picker and the screening agree. */
-export const REFERENCE_ACCEPT = [...NATIVE_EXTENSIONS, ...TEXT_EXTENSIONS]
+export const REFERENCE_ACCEPT = [...NATIVE_EXTENSIONS, ...TEXT_EXTENSIONS, ...OFFICE_EXTENSIONS]
   .map((e) => `.${e}`)
   .join(",");
 
-const ACCEPTED_EXTENSIONS = new Set<string>([...NATIVE_EXTENSIONS, ...TEXT_EXTENSIONS]);
+const ACCEPTED_EXTENSIONS = new Set<string>([...NATIVE_EXTENSIONS, ...TEXT_EXTENSIONS, ...OFFICE_EXTENSIONS]);
 
 /** The per-file ceiling on raw bytes; the server enforces the same. */
 export const MAX_REFERENCE_FILE_BYTES = 5 * 1024 * 1024;

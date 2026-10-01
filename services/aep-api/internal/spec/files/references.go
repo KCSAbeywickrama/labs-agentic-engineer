@@ -28,6 +28,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/gen"
 	"github.com/wso2/aep/aep-api/internal/platform/apierr"
 	"github.com/wso2/aep/aep-api/internal/platform/gitfs"
+	"github.com/wso2/aep/aep-api/internal/platform/officetext"
 	"github.com/wso2/aep/aep-api/internal/platform/tenant"
 )
 
@@ -109,6 +110,17 @@ func readReferenceParts(body *multipart.Reader) ([]gitfs.ReferenceDoc, error) {
 		if len(content) > gitfs.MaxReferenceBytes {
 			return nil, apierr.BadRequest(fmt.Sprintf(
 				"%q exceeds the %d MiB per-document limit", name, gitfs.MaxReferenceBytes>>20))
+		}
+		// An Office document is stored as the markdown it converts to (S5): the
+		// models do not read Office formats, and every turn should read its
+		// words. The name keeps the original's (Policy.docx.md), which is what
+		// the agent cites it by.
+		if ext := strings.ToLower(path.Ext(name)); officetext.Extensions[ext] {
+			text, cerr := officetext.Markdown(ext, content)
+			if cerr != nil {
+				return nil, apierr.BadRequest(fmt.Sprintf("%q could not be read as a %s file", part.FileName(), ext))
+			}
+			name, content = name+".md", []byte(text)
 		}
 		docs = append(docs, gitfs.ReferenceDoc{Name: name, Content: content})
 	}

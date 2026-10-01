@@ -17,6 +17,7 @@
 package spec_test
 
 import (
+	"archive/zip"
 	"bytes"
 	"mime/multipart"
 	"net/http"
@@ -343,13 +344,35 @@ func TestPutReferences_ReplacesThePreviousSet(t *testing.T) {
 func TestPutReferences_UnsupportedTypeIs400(t *testing.T) {
 	r := newFilesRig(t, nil)
 
-	rec := r.putReferences(t, map[string][]byte{"spec.docx": []byte("PK\x03\x04")})
+	rec := r.putReferences(t, map[string][]byte{"spec.odt": []byte("PK\x03\x04")})
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("code %d, want 400 for .docx: %s", rec.Code, firstBytes(rec.Body.String(), 200))
+		t.Fatalf("code %d, want 400 for .odt: %s", rec.Code, firstBytes(rec.Body.String(), 200))
 	}
 	names, _ := r.engine.ListReferences(t.Context(), r.workspaceRef())
 	if len(names) != 0 {
 		t.Fatalf("stored %v on a rejected upload — nothing should have been written", names)
+	}
+}
+
+// An Office document is converted to markdown on upload (S5) and stored by
+// its own name plus .md; one that is not really an Office file is refused.
+func TestPutReferences_OfficeDocumentIsStoredAsMarkdown(t *testing.T) {
+	r := newFilesRig(t, nil)
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	f, _ := zw.Create("word/document.xml")
+	_, _ = f.Write([]byte(`<w:document xmlns:w="w"><w:body><w:p><w:r><w:t>Receipts above $25.</w:t></w:r></w:p></w:body></w:document>`))
+	_ = zw.Close()
+
+	if rec := r.putReferences(t, map[string][]byte{"policy.docx": buf.Bytes()}); rec.Code != http.StatusNoContent {
+		t.Fatalf("code %d: %s", rec.Code, rec.Body.String())
+	}
+	names, _ := r.engine.ListReferences(t.Context(), r.workspaceRef())
+	if len(names) != 1 || names[0] != "policy.docx.md" {
+		t.Fatalf("stored %v, want [policy.docx.md]", names)
+	}
+	if rec := r.putReferences(t, map[string][]byte{"broken.xlsx": []byte("not a zip")}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("a broken workbook got %d, want 400", rec.Code)
 	}
 }
 
