@@ -19,6 +19,7 @@ package provisioning
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
@@ -255,10 +256,22 @@ func (s *Service) registeredEnvCells(ctx context.Context, orgID, name string) []
 // the org's environments when the process-local plane is empty. Secret values
 // are never copied — only status, and SecretStorePath when the vault key can
 // be derived from the request JWT.
+//
+// With no environment list the cells fall back to the org's own write target
+// (OrgDefaultRoot): there is no project in view to resolve one for. If that is
+// unresolvable too the read degrades to no cells.
 func (s *Service) synthesizeRegisteredEnvCells(ctx context.Context, orgID string, def openchoreo.ExternalResourceDefinition) []EnvCell {
-	envs := []string{defaultEnv()}
+	var envs []string
 	if infos, err := s.ListOrgEnvironments(ctx, orgID); err == nil && len(infos) > 0 {
 		envs = environmentNames(infos)
+	} else {
+		root, rerr := s.orgDefaultRoot(ctx, orgID)
+		if rerr != nil {
+			slog.WarnContext(ctx, "provisioning: no environments and no org write target; synthesizing no env cells",
+				"org", orgID, "resource", def.Name, "listError", err, "error", rerr)
+			return nil
+		}
+		envs = []string{root}
 	}
 	keys := toConfigKeys(def.Config)
 	if len(keys) == 0 {

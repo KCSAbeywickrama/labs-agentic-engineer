@@ -51,4 +51,13 @@ type Options struct {
 	// when OPENBAO_ADDR is set; an overlay may inject its own provider.
 	// Nil = secrets delivery off (degrade cleanly; no plaintext substitute).
 	SecretsProvider secretsprovider.Provider
+
+	// ResourceLabels are stamped on every OpenChoreo resource AEP writes, for
+	// the platform in front of OpenChoreo rather than for AEP. wso2cloud needs
+	// `cloud.wso2.com/product-name` on them: its platform API stamps the label
+	// on a write made with a user's token but not on one made with the
+	// impersonating service token, which is how every background write goes
+	// out, and its build workflow will not render without it. Validated at boot
+	// (an invalid key or value fails startup). Nil = none (local, direct OC).
+	ResourceLabels map[string]string
 }

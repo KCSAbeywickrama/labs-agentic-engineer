@@ -460,8 +460,12 @@ func runAEPInit(cmd *cobra.Command, args []string) error {
 		// to sign in — so a cluster reachable by more than its own host has
 		// to set them, and idp_base_domain has to match Agent Manager's
 		// ENV_IDP_BASE_DOMAIN.
-		IDPBaseDomain:         viper.GetString("environment.idp_base_domain"),
-		GatewayBaseDomain:     viper.GetString("environment.gateway_base_domain"),
+		IDPBaseDomain:     viper.GetString("environment.idp_base_domain"),
+		GatewayBaseDomain: viper.GetString("environment.gateway_base_domain"),
+		// Moves the environment tier's scheme and both gateway ports together.
+		// Must match WITH_TLS in the cluster setup script — see tls.enabled in
+		// internal/config for why a disagreement is silent until first login.
+		TLS:                   viper.GetBool("tls.enabled"),
 		Kubeconfig:            kubeconfig,
 		OpenBaoNamespace:      ocOpenBaoNamespace,
 		OpenBaoRelease:        ocOpenBaoRelease,

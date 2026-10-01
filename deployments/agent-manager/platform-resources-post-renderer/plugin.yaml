@@ -2,10 +2,10 @@
 # takes the script's path). setup-agent-manager.sh step 5 installs this
 # directory and passes the plugin's name to --post-renderer.
 apiVersion: v1
-name: aep-prefix-forked-workflow-templates
+name: aep-amp-platform-resources
 type: postrenderer/v1
 runtime: subprocess
 version: 1.0.0
 runtimeConfig:
   platformCommand:
-    - command: ${HELM_PLUGIN_DIR}/prefix-forked-workflow-templates.py
+    - command: ${HELM_PLUGIN_DIR}/post-render.py

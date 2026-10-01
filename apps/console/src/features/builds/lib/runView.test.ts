@@ -492,6 +492,10 @@ describe("terminalReasonText", () => {
     );
   });
 
+  it("spells a project with no write target", () => {
+    expect(terminalReasonText("no-write-target")).toMatch(/deployment pipeline/);
+  });
+
   it("passes an unmapped reason through so it still reaches the user", () => {
     expect(terminalReasonText("a-reason-from-the-future")).toBe(
       "a-reason-from-the-future",

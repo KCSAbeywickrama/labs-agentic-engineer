@@ -318,6 +318,15 @@ If the symptom appears, check in this order:
    an open issue already tracks the incident, or a human closed it as
    `not_planned`. See [Issue outcomes](#issue-outcomes).
 
+### A service has no alert rule
+
+`aep-api` attaches the default "error → RCA" alert rule to service components
+(a design can opt out with `disableAutoRca`) only while it pushes the SRE
+agent's configuration: `aectl sre install --org` has set the platform chart's
+`sreAgent.*` (`SRE_AGENT_ORG` and the rest on `aep-api`). A release keeps
+the traits it was cut with, so a service deployed before the handoff was
+configured gets the rule at its next commit, not by redeploying the same one.
+
 ### Alert rule is ready, but SRE never runs
 
 Check that the observability workloads are running:

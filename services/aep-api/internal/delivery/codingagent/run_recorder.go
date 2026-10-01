@@ -182,6 +182,10 @@ func (r *CycleRecorder) WithIntervals(live, idle time.Duration) *CycleRecorder {
 // attempt is left alone, and a cycle whose recording is already closed is not
 // restarted.
 //
+// The cycle arrives with its Environment set: the watcher fills it from the
+// row, or from the project's write target for a row that recorded none, and
+// the session reads its binding and archive there.
+//
 // ctx must be the watcher's own long-lived context — the session outlives the
 // tick that started it and stops when the process does. That is why this takes
 // the watcher's ctx rather than deriving one: a session on a per-tick context
@@ -510,7 +514,7 @@ func (s *recordingSession) releaseBinding(ctx context.Context) (name string, cac
 	if s.binding != "" {
 		return s.binding, true, nil
 	}
-	name, err = s.rec.src.Binding(ctx, s.cycle.OrgID, s.cycle.ProjectID, s.cycle.JobRef)
+	name, err = s.rec.src.Binding(ctx, s.cycle.OrgID, s.cycle.ProjectID, s.cycle.JobRef, s.cycle.Environment)
 	if err != nil {
 		return "", false, err
 	}
@@ -749,6 +753,7 @@ func (s *recordingSession) repairFromArchive(ctx context.Context, out []repaired
 		OrgName:       s.cycle.OrgID,
 		ProjectName:   s.cycle.ProjectID,
 		ComponentName: s.cycle.JobRef,
+		Environment:   s.cycle.Environment,
 		From:          s.cycle.CreatedAt.UTC().Add(-5 * time.Minute),
 		To:            s.rec.now().UTC(),
 	})

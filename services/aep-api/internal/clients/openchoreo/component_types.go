@@ -152,21 +152,6 @@ type ComponentTrait struct {
 
 // -- Deployment (ReleaseBinding) ---------------------------------------------
 
-// DevEnvironmentName is the process write-target: the OpenChoreo environment
-// every project auto-deploys to. ResolvePlatformWriteTarget sets it at boot
-// from DeploymentPipeline/default's unique source environment. The initial
-// "default" matches setup-aep.sh so unit tests that never boot Run keep
-// working; Assemble refuses to start if Infra.WriteTarget is empty, so a
-// live process never serves the initial value by accident.
-var DevEnvironmentName = "default"
-
-func SetDevEnvironmentName(name string) {
-	if name == "" {
-		panic("openchoreo: empty write-target")
-	}
-	DevEnvironmentName = name
-}
-
 // ComponentSpecDesired is the platform-owned half of a Component's spec: the
 // trait shape and the build/deploy policy.
 //

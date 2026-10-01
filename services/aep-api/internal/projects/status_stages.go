@@ -27,6 +27,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 
@@ -142,6 +143,23 @@ func (s *Service) SetStageSources(runs milestoneRunRows, bindings bindingsReader
 // no turns gets — so the overview degrades to its pre-#562 reading rather than
 // failing the poll.
 func (s *Service) SetSpecTurnSource(turns specTurnRows) { s.specTurns = turns }
+
+// SetWriteTargets wires the resolver that names the environment the deploy
+// stage counts bindings in. Unwired, the stage reads as none (see
+// writeTarget), the same answer an unresolvable pipeline gets.
+func (s *Service) SetWriteTargets(w writeTargetResolver) {
+	if s != nil {
+		s.writeTargets = w
+	}
+}
+
+// writeTarget resolves the project's write target for the deploy stage.
+func (s *Service) writeTarget(ctx context.Context, orgName, projectName string) (string, error) {
+	if s.writeTargets == nil {
+		return "", fmt.Errorf("project status: write targets not wired")
+	}
+	return s.writeTargets.Resolve(ctx, orgName, projectName)
+}
 
 // Spec-stage agent activity (the spec.agent contract enum).
 const (
@@ -347,21 +365,29 @@ func (s *Service) populateStages(ctx context.Context, orgName, projectName strin
 	// Deploy stage: version + denominator computed alongside the row read
 	// above (the design at the DEPLOYED tag — what that build actually
 	// implemented; HEAD may hold newer spec edits no build has seen); status
-	// + numerator from the dev-environment bindings. ready and total come
+	// + numerator from the write target's bindings. ready and total come
 	// from independent sources, so ready > total is possible transiently
 	// (component removed from the design between builds) — informational
 	// counts, deliberately not reconciled.
 	status.Deploy.Version = deployVer
 	status.Deploy.Components.Total = deployTotal
-	var dev []openchoreo.ReleaseBindingSummary
-	for _, b := range bindings {
-		if b.Environment == openchoreo.DevEnvironmentName && !b.Undeploy {
-			dev = append(dev, b)
+	var live []openchoreo.ReleaseBindingSummary
+	if env, err := s.writeTarget(ctx, orgName, projectName); err != nil {
+		// A read degrades rather than fails: a project whose pipeline cannot
+		// name a write target has nothing deployed that this stage could count,
+		// and the other stages still have an answer worth serving.
+		slog.WarnContext(ctx, "project status: write target unresolved; deploy stage reads as none",
+			"org", orgName, "project", projectName, "error", err)
+	} else {
+		for _, b := range bindings {
+			if b.Environment == env && !b.Undeploy {
+				live = append(live, b)
+			}
 		}
 	}
-	dev = s.holdUnreachable(ctx, dev)
-	status.Deploy.Status = deployStageStatus(dev)
-	status.Deploy.Components.Ready = int64(countReady(dev))
+	live = s.holdUnreachable(ctx, live)
+	status.Deploy.Status = deployStageStatus(live)
+	status.Deploy.Components.Ready = int64(countReady(live))
 
 	// Validation: the newest verdict for the version the build stage just named —
 	// a column on a row already read above, so the poll costs nothing extra.

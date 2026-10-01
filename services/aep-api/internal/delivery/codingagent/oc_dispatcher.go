@@ -131,10 +131,13 @@ const (
 
 // OCDispatcher creates the ephemeral coding-agent Component chain:
 // EnsureComponentType → CreateComponent → EnsureWorkload → EnsureRelease →
-// EnsureReleaseBinding into openchoreo.DevEnvironmentName.
+// EnsureReleaseBinding into the project's write target.
 type OCDispatcher struct {
 	oc        OCJobSurface
 	retention RetentionEnforcer
+	// targets names the environment each cycle's Job is bound into: the
+	// project's write target, resolved once per dispatch.
+	targets writeTargetResolver
 	// images is the runner image per runtime, used when OCDispatchInputs.Image
 	// is empty. Two tags built from one Dockerfile, sharing every heavy layer.
 	images map[orgconfig.AgentRuntime]runnerImage
@@ -149,9 +152,17 @@ type runnerImage struct {
 	setting string
 }
 
-// NewOCDispatcher wires the dispatcher against an OC surface.
-func NewOCDispatcher(oc OCJobSurface) *OCDispatcher {
-	return &OCDispatcher{oc: oc, images: map[orgconfig.AgentRuntime]runnerImage{
+// OCDispatchResult is what one dispatch launched: the Component (= RunName)
+// and the environment its Job was bound into.
+type OCDispatchResult struct {
+	RunName     string
+	Environment string
+}
+
+// NewOCDispatcher wires the dispatcher against an OC surface and the resolver
+// that names each project's write target.
+func NewOCDispatcher(oc OCJobSurface, targets writeTargetResolver) *OCDispatcher {
+	return &OCDispatcher{oc: oc, targets: targets, images: map[orgconfig.AgentRuntime]runnerImage{
 		orgconfig.AgentRuntimeClaudeCode: {setting: "AGENT_RUNNER_IMAGE"},
 		orgconfig.AgentRuntimeOpenCode:   {setting: "AGENT_RUNNER_IMAGE_OPENCODE"},
 	}}
@@ -181,14 +192,25 @@ func (d *OCDispatcher) WithRetention(r RetentionEnforcer) *OCDispatcher {
 	return d
 }
 
-// Dispatch launches one cycle and returns the Component (= RunName).
-func (d *OCDispatcher) Dispatch(ctx context.Context, in OCDispatchInputs) (string, error) {
+// Dispatch launches one cycle and reports the Component (= RunName) and the
+// environment its Job was bound into.
+//
+// The write target is resolved before anything is written. A project whose
+// pipeline names none is refused with delivery.ErrNoWriteTarget before
+// CreateComponent, so no billed Component is minted for a Job that could not
+// be bound anywhere. A transient resolve failure is returned as it is, like any
+// other launch failure.
+func (d *OCDispatcher) Dispatch(ctx context.Context, in OCDispatchInputs) (OCDispatchResult, error) {
 	if err := d.validate(in); err != nil {
-		return "", err
+		return OCDispatchResult{}, err
+	}
+	environment, err := d.writeTarget(ctx, in)
+	if err != nil {
+		return OCDispatchResult{}, err
 	}
 
 	if err := d.oc.EnsureComponentType(ctx, in.OrgID, openchoreo.CodingAgentComponentType()); err != nil {
-		return "", fmt.Errorf("oc dispatch: ensure ComponentType: %w", err)
+		return OCDispatchResult{}, fmt.Errorf("oc dispatch: ensure ComponentType: %w", err)
 	}
 
 	if d.retention != nil {
@@ -216,9 +238,9 @@ func (d *OCDispatcher) Dispatch(ctx context.Context, in OCDispatchInputs) (strin
 	}
 	if _, err := d.oc.CreateComponent(ctx, in.OrgID, in.ProjectID, req); err != nil {
 		if errors.Is(err, openchoreo.ErrPaymentRequired) {
-			return "", fmt.Errorf("%w: create component %q", delivery.ErrAgentQuotaExceeded, in.RunName)
+			return OCDispatchResult{}, fmt.Errorf("%w: create component %q", delivery.ErrAgentQuotaExceeded, in.RunName)
 		}
-		return "", fmt.Errorf("oc dispatch: create component %q: %w", in.RunName, err)
+		return OCDispatchResult{}, fmt.Errorf("oc dispatch: create component %q: %w", in.RunName, err)
 	}
 
 	if err := d.oc.EnsureWorkload(ctx, in.OrgID, in.ProjectID, openchoreo.WorkloadInput{
@@ -227,19 +249,38 @@ func (d *OCDispatcher) Dispatch(ctx context.Context, in OCDispatchInputs) (strin
 		Env:           workloadEnv(in),
 		Labels:        labels,
 	}); err != nil {
-		return "", fmt.Errorf("oc dispatch: workload for %q: %w", in.RunName, err)
+		return OCDispatchResult{}, fmt.Errorf("oc dispatch: workload for %q: %w", in.RunName, err)
 	}
 
 	releaseName, err := d.oc.EnsureRelease(ctx, in.OrgID, in.ProjectID, in.RunName, releaseNameFor(in.ProjectID, in.RunName))
 	if err != nil {
-		return "", fmt.Errorf("oc dispatch: release for %q: %w", in.RunName, err)
+		return OCDispatchResult{}, fmt.Errorf("oc dispatch: release for %q: %w", in.RunName, err)
 	}
 	if err := d.oc.EnsureReleaseBinding(ctx, in.OrgID, in.ProjectID, in.RunName,
-		openchoreo.DevEnvironmentName, releaseName); err != nil {
-		return "", fmt.Errorf("oc dispatch: release binding for %q: %w", in.RunName, err)
+		environment, releaseName); err != nil {
+		return OCDispatchResult{}, fmt.Errorf("oc dispatch: release binding for %q: %w", in.RunName, err)
 	}
 
-	return in.RunName, nil
+	return OCDispatchResult{RunName: in.RunName, Environment: environment}, nil
+}
+
+// writeTarget resolves the environment this cycle's Job is bound into. The
+// resolver's configuration fact (*openchoreo.ErrNoWriteTarget) is marked with
+// the delivery sentinel the supervisor classifies; anything else is returned
+// as a plain launch failure.
+func (d *OCDispatcher) writeTarget(ctx context.Context, in OCDispatchInputs) (string, error) {
+	if d.targets == nil {
+		return "", fmt.Errorf("oc dispatch: %w", errNoWriteTargetResolver)
+	}
+	environment, err := d.targets.Resolve(ctx, in.OrgID, in.ProjectID)
+	var nwt *openchoreo.ErrNoWriteTarget
+	if errors.As(err, &nwt) {
+		return "", fmt.Errorf("oc dispatch: %w: %w", delivery.ErrNoWriteTarget, err)
+	}
+	if err != nil {
+		return "", fmt.Errorf("oc dispatch: resolve write target: %w", err)
+	}
+	return environment, nil
 }
 
 // resolveImage picks the runner image: an explicit one on the inputs, else the

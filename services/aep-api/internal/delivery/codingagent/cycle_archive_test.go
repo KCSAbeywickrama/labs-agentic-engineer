@@ -55,7 +55,7 @@ func TestCycleArchive_QueriesTheComponentScopeAndRendersTimestampedText(t *testi
 
 	from := time.Date(2026, 8, 6, 9, 55, 0, 0, time.UTC)
 	text, err := NewObserverArchive(obs, rt).CycleArchive(context.Background(), ArchiveScope{
-		OrgName: "acme", ProjectName: "shop", ComponentName: "ca-abc",
+		OrgName: "acme", ProjectName: "shop", ComponentName: "ca-abc", Environment: "dev-b",
 		From: from, To: from.Add(time.Hour),
 	})
 	if err != nil {
@@ -64,8 +64,11 @@ func TestCycleArchive_QueriesTheComponentScopeAndRendersTimestampedText(t *testi
 	if obs.got.Component != openchoreo.ScopedComponentName("shop", "ca-abc") {
 		t.Fatalf("component = %q, want the scoped name", obs.got.Component)
 	}
-	if obs.got.Namespace != "acme" || obs.got.Environment != openchoreo.DevEnvironmentName {
+	if obs.got.Namespace != "acme" || obs.got.Environment != "dev-b" {
 		t.Fatalf("unexpected scope: %+v", obs.got)
+	}
+	if len(rt.bindingEnvs) != 1 || rt.bindingEnvs[0] != "dev-b" {
+		t.Fatalf("component check read in %v, want [dev-b]", rt.bindingEnvs)
 	}
 	if !strings.HasPrefix(text, "2026-08-06T10:00:01Z first\n") {
 		t.Fatalf("unexpected text %q", text)
@@ -80,7 +83,7 @@ func TestCycleArchive_DeletedComponentIsComponentGone(t *testing.T) {
 	rt := &fakeRuntime{bindingErr: fmt.Errorf("%w: gone", openchoreo.ErrNotFound)}
 
 	_, err := NewObserverArchive(obs, rt).CycleArchive(context.Background(), ArchiveScope{
-		OrgName: "acme", ProjectName: "shop", ComponentName: "ca-abc",
+		OrgName: "acme", ProjectName: "shop", ComponentName: "ca-abc", Environment: "development",
 	})
 	if !errors.Is(err, ErrComponentGone) {
 		t.Fatalf("err = %v, want ErrComponentGone", err)
@@ -92,7 +95,7 @@ func TestCycleArchive_DeletedComponentIsComponentGone(t *testing.T) {
 
 func TestCycleArchive_NoObserverIsUnavailable(t *testing.T) {
 	_, err := NewObserverArchive(nil, &fakeRuntime{}).CycleArchive(context.Background(), ArchiveScope{
-		OrgName: "acme", ProjectName: "shop", ComponentName: "ca-abc",
+		OrgName: "acme", ProjectName: "shop", ComponentName: "ca-abc", Environment: "development",
 	})
 	if !errors.Is(err, ErrArchiveUnavailable) {
 		t.Fatalf("err = %v, want ErrArchiveUnavailable", err)
@@ -103,7 +106,7 @@ func TestCycleArchive_ObserverFailureIsUnavailable(t *testing.T) {
 	obs := &fakeObserver{err: errors.New("observer: 503")}
 
 	_, err := NewObserverArchive(obs, &fakeRuntime{}).CycleArchive(context.Background(), ArchiveScope{
-		OrgName: "acme", ProjectName: "shop", ComponentName: "ca-abc",
+		OrgName: "acme", ProjectName: "shop", ComponentName: "ca-abc", Environment: "development",
 	})
 	if !errors.Is(err, ErrArchiveUnavailable) {
 		t.Fatalf("err = %v, want ErrArchiveUnavailable", err)
@@ -114,7 +117,7 @@ func TestCycleArchive_EmptyResultIsEmptyTextNotAnError(t *testing.T) {
 	obs := &fakeObserver{}
 
 	text, err := NewObserverArchive(obs, &fakeRuntime{}).CycleArchive(context.Background(), ArchiveScope{
-		OrgName: "acme", ProjectName: "shop", ComponentName: "ca-abc",
+		OrgName: "acme", ProjectName: "shop", ComponentName: "ca-abc", Environment: "development",
 	})
 	if err != nil {
 		t.Fatalf("CycleArchive: %v", err)

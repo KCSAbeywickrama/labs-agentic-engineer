@@ -58,7 +58,15 @@ CLUSTER_CONTEXT="${CLUSTER_CONTEXT:-k3d-${CLUSTER_NAME}}"
 # calls this script; running it by hand means passing it.
 : "${AE_DOMAIN:?set AE_DOMAIN — the suffix this cluster is published under (localhost for local k3d)}"
 AMP_DOMAIN="amp.${AE_DOMAIN}"
-PUBLIC_THUNDER_URL="${PUBLIC_THUNDER_URL:-http://thunder.openchoreo.${AE_DOMAIN}:8080}"
+
+# Same contract as AE_DOMAIN above: setup-agent-manager.sh exports WITH_TLS when
+# it calls this script, and re-deriving here is what makes a by-hand run come
+# out the same rather than silently defaulting to plain HTTP.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/tls-env.sh
+. "${SCRIPT_DIR}/lib/tls-env.sh"
+
+PUBLIC_THUNDER_URL="${PUBLIC_THUNDER_URL:-${SCHEME}://thunder.openchoreo.${AE_DOMAIN}:${CP_PORT}}"
 THUNDER_NS="${THUNDER_NS:-thunder}"
 THUNDER_RELEASE="${THUNDER_RELEASE:-thunder}"
 AMP_NS="${AMP_NS:-wso2-amp}"
@@ -75,11 +83,11 @@ WAIT_TIMEOUT="${WAIT_TIMEOUT:-600s}"
 # In-cluster for the runtime's own control-plane calls; public for ours, because
 # this script runs on the host.
 AMP_API_IN="http://amp-api.${AMP_NS}.svc.cluster.local:9000/api/v1"
-AMP_API_OUT="${AMP_API_URL:-http://api.${AMP_DOMAIN}:8080/api/v1}"
+AMP_API_OUT="${AMP_API_URL:-${SCHEME}://api.${AMP_DOMAIN}:${CP_PORT}/api/v1}"
 # The Agent Manager console a browser opens, for the console's "Manage in Agent
 # Manager" link on an agent's Deployments panel. Public, like AMP_API_OUT.
 # Optional to aep-api: without it an agent just has no link.
-AMP_CONSOLE_OUT="${AMP_CONSOLE_URL:-http://console.${AMP_DOMAIN}:8080}"
+AMP_CONSOLE_OUT="${AMP_CONSOLE_URL:-${SCHEME}://console.${AMP_DOMAIN}:${CP_PORT}}"
 VHOST="${AI_GATEWAY_VHOST:-http://ai-gateway.${AMP_DOMAIN}:8084}"
 
 kubectl() { command kubectl --context "$CLUSTER_CONTEXT" "$@"; }

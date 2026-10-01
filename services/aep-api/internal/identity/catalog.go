@@ -157,7 +157,13 @@ func (s *CatalogService) Enabled() bool {
 // showed one org's design agent the group names another org had created; with a
 // directory per (org, environment) that disclosure is closed by construction.
 func (s *CatalogService) List(ctx context.Context, orgID string) ([]CatalogEntry, error) {
-	target, err := s.targets.Resolve(ctx, orgID)
+	// No project: the catalog is the org's, so it reads the org default's
+	// identity provider.
+	scope, err := s.targets.Scope(ctx, orgID, "")
+	if err != nil {
+		return nil, err
+	}
+	target, err := s.targets.Resolve(ctx, scope)
 	if err != nil {
 		return nil, err
 	}

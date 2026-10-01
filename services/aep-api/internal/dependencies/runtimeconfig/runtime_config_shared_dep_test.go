@@ -60,7 +60,7 @@ func TestEmit_SharedAuthDependencyRegistersEveryWebAppsCallback(t *testing.T) {
 
 	// Composing ONE web app's env-config.js still registers the whole project's
 	// set — the field belongs to the dependency, not to the app being composed.
-	if _, ready := svc.buildEnvValues(ctx, "acme", "proj", design, componentNamed(t, design, "guest")); !ready {
+	if _, ready := svc.buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, componentNamed(t, design, "guest")); !ready {
 		t.Fatal("want ready=true for the guest web app")
 	}
 
@@ -85,7 +85,7 @@ func TestEmit_SharedAuthDependencyWritesTheSameValueForEveryWebApp(t *testing.T)
 	svc := svcWithCatalog(oc, rc, nil, &fakeCatalog{markers: authMarkers("thunder-app")})
 
 	for _, name := range []string{"guest", "admin", "guest", "admin"} {
-		if _, ready := svc.buildEnvValues(ctx, "acme", "proj", design, componentNamed(t, design, name)); !ready {
+		if _, ready := svc.buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, componentNamed(t, design, name)); !ready {
 			t.Fatalf("want ready=true for %s", name)
 		}
 	}
@@ -112,7 +112,7 @@ func TestEmit_SharedAuthDependencySkipsUnresolvedWebApps(t *testing.T) {
 	rc := rcOutputs(authOutputs(), nil)
 	svc := svcWithCatalog(oc, rc, nil, &fakeCatalog{markers: authMarkers("thunder-app")})
 
-	if _, ready := svc.buildEnvValues(ctx, "acme", "proj", design, componentNamed(t, design, "admin")); !ready {
+	if _, ready := svc.buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, componentNamed(t, design, "admin")); !ready {
 		t.Fatal("want ready=true for the admin web app")
 	}
 

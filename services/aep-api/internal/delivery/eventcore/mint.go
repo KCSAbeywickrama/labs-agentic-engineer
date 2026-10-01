@@ -93,8 +93,17 @@ func (e *Events) mintFixIssue(ctx context.Context, run *delivery.MilestoneRun, e
 // promotes each component at its own newest green build (delivery.DeployTarget):
 // a single commit for the whole list would key at least one issue against a
 // commit that component was never built at.
+//
+// The environment is the project's write target the failed bindings live in,
+// as the supervisor read it. It is left out of the body when the supervisor
+// has none (a failure no binding was read for): naming a guess would send the
+// agent to look at a deployment that is not the one that failed.
 func (e *Events) MintDeployFixIssues(ctx context.Context, orgID, projectID string, milestoneNumber int,
-	failed []delivery.DeployTarget, reasons map[string]string) ([]int, error) {
+	environment string, failed []delivery.DeployTarget, reasons map[string]string) ([]int, error) {
+	envLine := ""
+	if environment != "" {
+		envLine = fmt.Sprintf("- Environment: %s\n", environment)
+	}
 	filed := make([]int, 0, len(failed))
 	for _, target := range failed {
 		component, commitSHA := target.Component, target.CommitSHA
@@ -105,14 +114,14 @@ func (e *Events) MintDeployFixIssues(ctx context.Context, orgID, projectID strin
 				"Deployment details:\n\n"+
 				"- Component: %s\n"+
 				"- Merge commit: %s\n"+
-				"- Environment: %s\n"+
+				"%s"+
 				"- OpenChoreo reported: %s\n\n"+
 				"Look for a runtime problem rather than a compile one: a container that exits at startup, a missing "+
 				"or misnamed environment variable, a port that does not match the declared endpoint, a health check "+
 				"the app never satisfies, or a declared dependency the workload cannot reach. Fix it, then include "+
 				"this issue in your pull request's Resolves list.",
 			component, delivery.ShortSHA(commitSHA), component, commitSHA,
-			openchoreoDevEnvironment, orNone(reason))
+			envLine, orNone(reason))
 
 		number, _, err := e.p.Writer.Mint(ctx, orgID, projectID, delivery.IssueSpec{
 			Title:     fmt.Sprintf("Fix the failed deployment for %s", component),
@@ -130,10 +139,6 @@ func (e *Events) MintDeployFixIssues(ctx context.Context, orgID, projectID strin
 	}
 	return filed, nil
 }
-
-// openchoreoDevEnvironment is named here rather than imported so this package
-// keeps no dependency on the OpenChoreo client for one string in one issue body.
-const openchoreoDevEnvironment = "default"
 
 // mintConflictIssue files the conflict issue for a pull request that would not
 // merge. It NAMES the pull request — the single structured reference the issue

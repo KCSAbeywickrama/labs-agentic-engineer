@@ -49,7 +49,7 @@ func (c *componentClient) EnsureComponentType(ctx context.Context, orgName strin
 		return fmt.Errorf("ensure componenttype: body metadata.name is required")
 	}
 
-	raw, err := json.Marshal(body)
+	raw, err := json.Marshal(c.labels.stampedObject(body))
 	if err != nil {
 		return fmt.Errorf("ensure componenttype %q: marshal body: %w", name, err)
 	}

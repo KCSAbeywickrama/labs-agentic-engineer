@@ -20,8 +20,8 @@
 # ── Deployment pipeline ─────────────────────────────────────────────────────
 # OpenChoreo's samples (samples/getting-started/all.yaml) own
 # DeploymentPipeline/default and run development -> staging -> production.
-# aep-api resolves its write-target from this graph at boot: the environment
-# that is a source and never a target (openchoreo.PipelineSourceEnvironment).
+# aep-api resolves a project's write target from its pipeline's graph at use:
+# the first source that is never a target (openchoreo.WriteTargets, ADR-0039).
 # The chart's default single path {source: default, targets: []} is itself a
 # valid graph, so a flatten resolves cleanly to "default" and moves every
 # subsequent write into an environment with no environment Thunder or API
@@ -75,8 +75,9 @@ environment:
 # Only the project's name moves. `projectType` has no name value: the chart
 # hardcodes ProjectType/default as a contract with amp-api's compiled-in
 # client.DefaultProjectTypeName, and a namespaced ProjectType resolves only
-# from within openchoreoNamespace. ProjectType/default and OpenChoreo's
-# ClusterProjectType/default are different kinds and do not contend.
+# from within openchoreoNamespace. AEP references the same object, and AEP's
+# platform chart owns it: setup-agent-manager.sh's post-renderer drops the
+# chart's copy (see README.md).
 #
 # Set this before the first install. Changing it afterwards is a Helm
 # delete-then-create: the old Project and its ProjectReleaseBinding go, and the

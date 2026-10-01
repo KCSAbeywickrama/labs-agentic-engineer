@@ -27,6 +27,31 @@ import (
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 )
 
+// The binding is looked up in the environment the caller names: the one the
+// cycle's Job was bound into.
+func TestOCLogSource_BindingIsReadInTheNamedEnvironment(t *testing.T) {
+	rt := &fakeRuntime{}
+
+	if _, err := NewOCLogSource(rt).Binding(context.Background(), "acme", "shop", "ca-abc", "dev-b"); err != nil {
+		t.Fatalf("Binding: %v", err)
+	}
+	if len(rt.bindingEnvs) != 1 || rt.bindingEnvs[0] != "dev-b" {
+		t.Fatalf("binding read in %v, want [dev-b]", rt.bindingEnvs)
+	}
+}
+
+// No environment is a caller bug, and is refused rather than read as "".
+func TestOCLogSource_BindingRefusesAnEmptyEnvironment(t *testing.T) {
+	rt := &fakeRuntime{}
+
+	if _, err := NewOCLogSource(rt).Binding(context.Background(), "acme", "shop", "ca-abc", ""); err == nil {
+		t.Fatal("Binding with no environment succeeded, want a refusal")
+	}
+	if rt.bindingCalls != 0 {
+		t.Fatalf("binding calls = %d, want none", rt.bindingCalls)
+	}
+}
+
 func TestOCLogSource_TailReturnsPodTextAndPhase(t *testing.T) {
 	rt := &fakeRuntime{
 		pod: openchoreo.RuntimePod{Found: true, Name: "p1", Phase: "Running"},
@@ -36,7 +61,7 @@ func TestOCLogSource_TailReturnsPodTextAndPhase(t *testing.T) {
 		},
 	}
 
-	got, err := NewOCLogSource(rt).Tail(context.Background(), "acme", "shop", "ca-abc", logPageBytes)
+	got, err := NewOCLogSource(rt).Tail(context.Background(), "acme", "shop", "ca-abc", "development", logPageBytes)
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
@@ -62,7 +87,7 @@ func TestOCLogSource_TailKeepsTheNewestBytes(t *testing.T) {
 		},
 	}
 
-	got, err := NewOCLogSource(rt).Tail(context.Background(), "acme", "shop", "ca-abc", 64)
+	got, err := NewOCLogSource(rt).Tail(context.Background(), "acme", "shop", "ca-abc", "development", 64)
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
@@ -79,7 +104,7 @@ func TestOCLogSource_TailKeepsTheNewestBytes(t *testing.T) {
 func TestOCLogSource_MissingComponentIsComponentGone(t *testing.T) {
 	rt := &fakeRuntime{bindingErr: fmt.Errorf("%w: gone", openchoreo.ErrNotFound)}
 
-	_, err := NewOCLogSource(rt).Tail(context.Background(), "acme", "shop", "ca-abc", logPageBytes)
+	_, err := NewOCLogSource(rt).Tail(context.Background(), "acme", "shop", "ca-abc", "development", logPageBytes)
 	if !errors.Is(err, ErrComponentGone) {
 		t.Fatalf("err = %v, want ErrComponentGone", err)
 	}
@@ -88,7 +113,7 @@ func TestOCLogSource_MissingComponentIsComponentGone(t *testing.T) {
 func TestOCLogSource_UnscheduledPodIsEmptyNotAnError(t *testing.T) {
 	rt := &fakeRuntime{pod: openchoreo.RuntimePod{}}
 
-	got, err := NewOCLogSource(rt).Tail(context.Background(), "acme", "shop", "ca-abc", logPageBytes)
+	got, err := NewOCLogSource(rt).Tail(context.Background(), "acme", "shop", "ca-abc", "development", logPageBytes)
 	if err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
@@ -143,7 +168,7 @@ func TestOCLogSource_TailStillAsksForTheWholeLog(t *testing.T) {
 		pod:  openchoreo.RuntimePod{Found: true, Name: "p1", Phase: "Running"},
 		logs: []openchoreo.PodLogLine{{Timestamp: time.Date(2026, 9, 8, 9, 29, 44, 0, time.UTC), Log: "line"}},
 	}
-	if _, err := NewOCLogSource(rt).Tail(context.Background(), "acme", "shop", "ca-abc", logPageBytes); err != nil {
+	if _, err := NewOCLogSource(rt).Tail(context.Background(), "acme", "shop", "ca-abc", "development", logPageBytes); err != nil {
 		t.Fatalf("Tail: %v", err)
 	}
 	if rt.logSince != 0 {

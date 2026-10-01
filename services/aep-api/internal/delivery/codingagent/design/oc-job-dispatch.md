@@ -14,8 +14,16 @@ a dispatch resumable: every create in the chain treats `409 Conflict` as success
 and re-fetches, so a dispatch that crashed halfway re-runs over the same names.
 
 The chain is **Component → Workload (per-cycle env + secret-env refs) →
-GenerateRelease → ReleaseBinding** on the project's `development` environment.
-OC renders the `batch/v1 Job` into the project's `dp-…` release namespace and
+GenerateRelease → ReleaseBinding** into the project's **write target** (the root
+of its own deployment pipeline), resolved once per dispatch before anything is
+written. A project whose pipeline names none is refused before
+`CreateComponent`, so no billed Component is minted; the run settles failed
+(`no-write-target`) without spending the re-dispatch budget. The environment the
+Job was bound into is recorded on the cycle (`run_cycles.environment`, beside
+`model_host`), and the watcher, the recorder, the log source and the archive
+read the cycle there. A cycle with none recorded (dispatched before the column
+existed, or whose launch write failed) falls back to the project's write target
+at read time, and says so in the log. OC renders the `batch/v1 Job` into the project's `dp-…` release namespace and
 materialises the cycle's ExternalSecrets from the org's secret store — the
 platform writes no secret material, only references. SecretReference CRs that
 a Workload `secretKeyRef`s must live in the same control-plane namespace as

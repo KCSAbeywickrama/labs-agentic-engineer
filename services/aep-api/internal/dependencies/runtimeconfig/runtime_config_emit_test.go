@@ -191,10 +191,25 @@ func componentNamed(t *testing.T, d *spec.DesignFile, name string) *spec.DesignC
 	return nil
 }
 
+// testWriteTarget is the write target the pre-existing tests resolve. Their
+// binding-name fixtures were computed against it.
+const testWriteTarget = "default"
+
+// staticWriteTarget answers every project with one write target, or with err.
+type staticWriteTarget struct {
+	env string
+	err error
+}
+
+func (s staticWriteTarget) Resolve(context.Context, string, string) (string, error) {
+	return s.env, s.err
+}
+
 // svcWithCatalog builds a service and wires the catalog port (nil catalog left
 // unwired to exercise the defer-when-unwired path).
 func svcWithCatalog(oc openchoreo.ComponentClient, rc openchoreo.ResourceClient, store *spec.ArtifactStore, cat resourceMarkerCatalog) *RuntimeConfigService {
 	s := NewRuntimeConfigService(oc, rc, store)
+	s.SetWriteTargets(staticWriteTarget{env: testWriteTarget})
 	if cat != nil {
 		s.SetResourceCatalog(cat)
 	}
@@ -345,7 +360,7 @@ func Test_buildEnvValues_genericEmission(t *testing.T) {
 		cat := &fakeCatalog{markers: authMarkers("thunder-app")}
 		svc := svcWithCatalog(oc, rc, nil, cat)
 
-		out, ready := svc.buildEnvValues(ctx, "acme", "proj", design, web)
+		out, ready := svc.buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
 		if !ready {
 			t.Fatalf("want ready=true; got false (out=%v)", out)
 		}
@@ -401,7 +416,7 @@ func Test_buildEnvValues_genericEmission(t *testing.T) {
 		cat := &fakeCatalog{markers: authMarkers("thunder-app")}
 		svc := svcWithCatalog(oc, rc, nil, cat)
 
-		out, ready := svc.buildEnvValues(ctx, "acme", "proj", design, web)
+		out, ready := svc.buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
 		if !ready {
 			t.Fatalf("want ready=true; got false (out=%v)", out)
 		}
@@ -450,7 +465,7 @@ func Test_buildEnvValues_genericEmission(t *testing.T) {
 		}}
 		svc := svcWithCatalog(oc, rc, nil, cat)
 
-		_, ready := svc.buildEnvValues(ctx, "acme", "proj", design, web)
+		_, ready := svc.buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
 		if !ready {
 			t.Fatalf("want ready=true")
 		}
@@ -474,7 +489,7 @@ func Test_buildEnvValues_genericEmission(t *testing.T) {
 		cat := &fakeCatalog{markers: map[string]dependencies.TypeMarkers{}} // no markers for postgres
 		svc := svcWithCatalog(oc, rc, nil, cat)
 
-		out, ready := svc.buildEnvValues(ctx, "acme", "proj", design, web)
+		out, ready := svc.buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
 		if !ready {
 			t.Fatalf("want ready=true; got false (out=%v)", out)
 		}
@@ -501,7 +516,7 @@ func Test_buildEnvValues_genericEmission(t *testing.T) {
 		cat := &fakeCatalog{markers: authMarkers("thunder-app")}
 		svc := svcWithCatalog(oc, rc, nil, cat)
 
-		out, ready := svc.buildEnvValues(ctx, "acme", "proj", design, web)
+		out, ready := svc.buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
 		if !ready {
 			t.Fatalf("want ready=true; got false (out=%v)", out)
 		}
@@ -549,7 +564,7 @@ func Test_buildEnvValues_defers(t *testing.T) {
 		web := componentNamed(t, design, "web")
 
 		oc := ocResolving(map[string]string{})
-		out, ready := NewRuntimeConfigService(oc, nil, nil).buildEnvValues(ctx, "acme", "proj", design, web)
+		out, ready := NewRuntimeConfigService(oc, nil, nil).buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
 		if !ready {
 			t.Fatalf("want ready=true; sibling API URL is not a window._env_ key; got false (out=%v)", out)
 		}
@@ -577,7 +592,7 @@ func Test_buildEnvValues_defers(t *testing.T) {
 				return nil, errors.New("oc: transient")
 			},
 		}
-		out, ready := NewRuntimeConfigService(oc, nil, nil).buildEnvValues(ctx, "acme", "proj", design, web)
+		out, ready := NewRuntimeConfigService(oc, nil, nil).buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
 		if !ready {
 			t.Fatalf("want ready=true when sibling ListDeployments is unused; got false (out=%v)", out)
 		}
@@ -594,7 +609,7 @@ func Test_buildEnvValues_defers(t *testing.T) {
 		web := componentNamed(t, design, "web")
 
 		oc := &ocmocks.ComponentClientMock{}
-		out, ready := NewRuntimeConfigService(oc, nil, nil).buildEnvValues(ctx, "acme", "proj", design, web)
+		out, ready := NewRuntimeConfigService(oc, nil, nil).buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
 		if !ready {
 			t.Fatalf("want ready=true; a non-service dep is skipped, not deferred")
 		}
@@ -613,7 +628,7 @@ func Test_buildEnvValues_defers(t *testing.T) {
 
 		oc := ocResolving(map[string]string{"api": "http://api.local", "web": "http://web.local"})
 		cat := &fakeCatalog{markers: authMarkers("thunder-app")}
-		out, ready := svcWithCatalog(oc, nil, nil, cat).buildEnvValues(ctx, "acme", "proj", design, web)
+		out, ready := svcWithCatalog(oc, nil, nil, cat).buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
 		if ready {
 			t.Fatalf("want ready=false when the resource client is unwired")
 		}
@@ -630,7 +645,7 @@ func Test_buildEnvValues_defers(t *testing.T) {
 		oc := ocResolving(map[string]string{"api": "http://api.local", "web": "http://web.local"})
 		rc := rcOutputs(authOutputs(), nil)
 		// No SetResourceCatalog → nil catalog.
-		out, ready := NewRuntimeConfigService(oc, rc, nil).buildEnvValues(ctx, "acme", "proj", design, web)
+		out, ready := NewRuntimeConfigService(oc, rc, nil).buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
 		if ready {
 			t.Fatalf("want ready=false when the catalog is unwired")
 		}
@@ -647,7 +662,7 @@ func Test_buildEnvValues_defers(t *testing.T) {
 		oc := ocResolving(map[string]string{"api": "http://api.local", "web": "http://web.local"})
 		rc := rcOutputs(authOutputs(), nil)
 		cat := &fakeCatalog{err: errors.New("oc: catalog unreachable")}
-		out, ready := svcWithCatalog(oc, rc, nil, cat).buildEnvValues(ctx, "acme", "proj", design, web)
+		out, ready := svcWithCatalog(oc, rc, nil, cat).buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
 		if ready {
 			t.Fatalf("want ready=false when the catalog fetch fails")
 		}
@@ -666,7 +681,7 @@ func Test_buildEnvValues_defers(t *testing.T) {
 		oc := ocResolving(map[string]string{"api": "http://api.local", "web": "http://web.local"})
 		rc := rcOutputs(nil, nil) // binding has no status yet
 		cat := &fakeCatalog{markers: authMarkers("thunder-app")}
-		out, ready := svcWithCatalog(oc, rc, nil, cat).buildEnvValues(ctx, "acme", "proj", design, web)
+		out, ready := svcWithCatalog(oc, rc, nil, cat).buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
 		if ready {
 			t.Fatalf("want ready=false when the binding outputs are not ready")
 		}
@@ -685,7 +700,7 @@ func Test_buildEnvValues_defers(t *testing.T) {
 		oc := ocResolving(map[string]string{"api": "http://api.local", "web": "http://web.local"})
 		rc := rcOutputs(map[string]string{}, nil) // status present, zero outputs
 		cat := &fakeCatalog{markers: authMarkers("thunder-app")}
-		_, ready := svcWithCatalog(oc, rc, nil, cat).buildEnvValues(ctx, "acme", "proj", design, web)
+		_, ready := svcWithCatalog(oc, rc, nil, cat).buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
 		if ready {
 			t.Fatalf("want ready=false when the binding has zero outputs")
 		}
@@ -703,7 +718,7 @@ func Test_buildEnvValues_defers(t *testing.T) {
 		oc := ocResolving(map[string]string{"api": "http://api.local", "web": "http://web.local"})
 		rc := rcOutputs(authOutputs(), errors.New("oc: patch failed"))
 		cat := &fakeCatalog{markers: authMarkers("thunder-app")}
-		out, ready := svcWithCatalog(oc, rc, nil, cat).buildEnvValues(ctx, "acme", "proj", design, web)
+		out, ready := svcWithCatalog(oc, rc, nil, cat).buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
 		if !ready {
 			t.Fatalf("want ready=true; a failed callback registration is not a missing start-up value")
 		}
@@ -734,7 +749,7 @@ func Test_buildEnvValues_defers(t *testing.T) {
 		oc := ocResolving(map[string]string{"api": "http://api.local"})
 		rc := rcOutputs(authOutputs(), nil)
 		cat := &fakeCatalog{markers: authMarkers("thunder-app")}
-		out, ready := svcWithCatalog(oc, rc, nil, cat).buildEnvValues(ctx, "acme", "proj", design, web)
+		out, ready := svcWithCatalog(oc, rc, nil, cat).buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
 		if !ready {
 			t.Fatalf("want ready=true; the SPA's own URL is not a value the SPA reads")
 		}
@@ -786,7 +801,7 @@ func Test_buildEnvValues_defers(t *testing.T) {
 			return nil, errors.New("oc down")
 		}
 		cat := &fakeCatalog{markers: authMarkers("thunder-app")}
-		_, ready := svcWithCatalog(oc, rc, nil, cat).buildEnvValues(ctx, "acme", "proj", design, web)
+		_, ready := svcWithCatalog(oc, rc, nil, cat).buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
 		if ready {
 			t.Fatalf("want ready=false when GetBinding errors")
 		}

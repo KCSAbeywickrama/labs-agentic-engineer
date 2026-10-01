@@ -100,7 +100,7 @@ func (w *ResourceWatcher) reconcile(ctx context.Context, row *delivery.Execution
 		w.svc.failProvisionRow(ctx, row.OrgID, row.ProjectID, row.IssueNumber, row.ID, reason)
 		return
 	}
-	// row.RunName is the development binding name; row.OrgID is the OC namespace.
+	// row.RunName is the write target's binding name; row.OrgID is the OC namespace.
 	b, err := w.svc.bindings.GetBinding(ctx, row.OrgID, row.RunName)
 	if err != nil {
 		slog.WarnContext(ctx, "resource watcher: get binding failed", "binding", row.RunName, "error", err)

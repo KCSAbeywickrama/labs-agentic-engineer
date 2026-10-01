@@ -39,6 +39,15 @@ func (s *Service) DeprovisionProject(ctx context.Context, orgID, projectID strin
 		slog.WarnContext(ctx, "provisioning: read design for teardown failed — skipping deprovision", "project", projectID, "error", err)
 		return nil
 	}
+	// Resolved while the OC Project still exists: the caller deprovisions
+	// before it deletes the project. No environment is guessed on failure; the
+	// caller treats the error as best-effort.
+	env, err := s.writeTarget(ctx, orgID, projectID)
+	if err != nil {
+		slog.ErrorContext(ctx, "provisioning: write target unresolvable; skipping deprovision", "org", orgID, "project", projectID, "error", err)
+		return fmt.Errorf("provisioning: deprovision project %q: %w", projectID, err)
+	}
+	envs := []string{env}
 	seen := map[string]bool{}
 	var errs []error
 	for _, c := range comps {
@@ -51,14 +60,14 @@ func (s *Service) DeprovisionProject(ctx context.Context, orgID, projectID strin
 			case spec.DependencyKindExternal:
 				seen[key] = true
 				if s.extProv != nil {
-					if derr := s.extProv.Deprovision(ctx, orgID, projectID, d.Name, []string{defaultEnv()}); derr != nil {
+					if derr := s.extProv.Deprovision(ctx, orgID, projectID, d.Name, envs); derr != nil {
 						errs = append(errs, fmt.Errorf("deprovision external %q: %w", d.Name, derr))
 					}
 				}
 			case spec.DependencyKindPlatformResource:
 				seen[key] = true
 				if s.platProv != nil {
-					if derr := s.platProv.Deprovision(ctx, orgID, projectID, d.Name, []string{defaultEnv()}); derr != nil {
+					if derr := s.platProv.Deprovision(ctx, orgID, projectID, d.Name, envs); derr != nil {
 						errs = append(errs, fmt.Errorf("deprovision platform-resource %q: %w", d.Name, derr))
 					}
 				}

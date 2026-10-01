@@ -134,6 +134,13 @@ everything on the cluster. That is a naming defect in that chart (it already
 prefixes a fifth as `amp-generate-workload`), to be fixed there rather than
 worked around here.
 
+The same chart renders the org's `ProjectType/default`, which the platform
+chart owns (`localOrgProvisioning`; every project AEP creates references it).
+`setup-agent-manager.sh` drops Agent Manager's identical copy in its
+post-renderer. On a cluster where Agent Manager's release already owns that
+object, `aectl platform install` stops on it: see
+[`agent-manager/README.md`](agent-manager/README.md) for the reinstall.
+
 - **One AI gateway per environment, alongside the API gateway.** Agent Manager
   has two: the **API gateway** fronts an agent's own inbound API, the **AI
   gateway** is the LLM proxy an agent calls outbound, and guardrails run on the

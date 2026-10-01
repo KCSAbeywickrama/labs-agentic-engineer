@@ -28,6 +28,21 @@ spec:
           ports:
             - containerPort: {{ .Values.collab.port }}
               name: http
+          # Boot is slow and variable: the image runs from TypeScript source via
+          # tsx, so the first request is served only after the runtime has
+          # compiled it. Liveness alone gives 5s + 3x10s, and on a loaded node
+          # that expires while the process is still starting — the kubelet then
+          # kills it before it can listen, which reads as a crash loop whose
+          # logs end mid-startup with no error in them. A startupProbe holds
+          # liveness off until the port answers, and only then applies the tight
+          # interval that makes liveness useful for a hung process.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 40
+            timeoutSeconds: 3
           livenessProbe:
             httpGet:
               path: /healthz

@@ -75,6 +75,29 @@ func (e *Events) fanOutBuilds(ctx context.Context, orgID, projectID string, run 
 		return nil
 	}
 
+	return e.buildMergedComponents(ctx, orgID, projectID, run, mergeSHA, diff.Components)
+}
+
+// buildMergedComponents triggers the merge build of every component in the set
+// that has none yet: the fan-out's second half, and the whole of the build
+// sweep's reconcile (build_sweep.go), which is handed the same set.
+//
+// It counts FIRST and stages only when something is left to build. Staging is a
+// delete-then-create of the org's one clone credential, so a duplicate of an
+// already-built merge — a replayed or redelivered pull_request.closed — that
+// staged anyway would pull the credential out from under the builds cloning
+// with it. The per-component trigger below still counts again (ensureBuildRun),
+// so a build that appeared in between is not duplicated either.
+func (e *Events) buildMergedComponents(ctx context.Context, orgID, projectID string, run *delivery.MilestoneRun,
+	mergeSHA string, components []string) error {
+	pending, err := e.componentsWithoutBuild(ctx, orgID, projectID, mergeSHA, components)
+	if err != nil {
+		return err
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+
 	// Stage the org's clone credential ONCE, before the fan-out, and hand every
 	// component the same reference. The credential is per-org and every component
 	// would stage byte-identical content, so staging inside the goroutines below
@@ -93,7 +116,7 @@ func (e *Events) fanOutBuilds(ctx context.Context, orgID, projectID string, run 
 		errs []error
 		wg   sync.WaitGroup
 	)
-	for _, component := range diff.Components {
+	for _, component := range pending {
 		wg.Add(1)
 		go func(component string) {
 			defer wg.Done()
@@ -129,6 +152,23 @@ func (e *Events) fanOutBuilds(ctx context.Context, orgID, projectID string, run 
 	}
 	wg.Wait()
 	return errors.Join(errs...)
+}
+
+// componentsWithoutBuild keeps the components that have no WorkflowRun at the
+// merge SHA: the ones a merge build is still owed to. It counts the same fact
+// ensureBuildRun counts (the runs' names), so the two can never disagree.
+func (e *Events) componentsWithoutBuild(ctx context.Context, orgID, projectID, mergeSHA string, components []string) ([]string, error) {
+	var pending []string
+	for _, component := range components {
+		runs, err := e.p.Builds.ListBuildRuns(ctx, orgID, projectID, component)
+		if err != nil {
+			return nil, err
+		}
+		if attemptsFor(runs, delivery.BuildRunNamePrefix(projectID, component, mergeSHA)) < mergeBuildLimit {
+			pending = append(pending, component)
+		}
+	}
+	return pending, nil
 }
 
 // ensureComponent provisions a component's OpenChoreo Component CR before its

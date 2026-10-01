@@ -308,7 +308,7 @@ func TestPlanDeploymentWaves_OrdersFromTheStoredDesign(t *testing.T) {
 		"components/api/design.json": plainServiceMd("api"),
 		"components/web/design.json": webAppDependingOn("web", "api"),
 	}
-	svc := NewDeploymentService(&mocks.ComponentClientMock{}, traitStoreWith(files))
+	svc := newTestDeploymentService(&mocks.ComponentClientMock{}, traitStoreWith(files))
 
 	plan, err := svc.PlanDeploymentWaves(context.Background(), "acme", "proj",
 		versionOf(wiringBehind("web"), wiringBehind("api")))
@@ -326,7 +326,7 @@ func TestPlanDeploymentWaves_OrdersFromTheStoredDesign(t *testing.T) {
 // the same way, and the two must not disagree about it.
 func TestPlanDeploymentWaves_NoDesignIsOneWave(t *testing.T) {
 	t.Parallel()
-	svc := NewDeploymentService(&mocks.ComponentClientMock{},
+	svc := newTestDeploymentService(&mocks.ComponentClientMock{},
 		spec.NewArtifactStore(&artifactstest.FakeArtifactService{
 			ListDesignFilesFunc: func(context.Context, string, string) (map[string]string, error) {
 				return nil, spec.ErrArtifactNotFound

@@ -33,7 +33,7 @@ const (
 	chainTestRelease = "widgets-ca-run-release"
 )
 
-var chainTestEnv = DevEnvironmentName
+const chainTestEnv = "development"
 
 func newTestComponentClient(t *testing.T, srv *httptest.Server) ComponentClient {
 	t.Helper()

@@ -77,3 +77,25 @@ func TestPanelView_OmitsSignInWithoutAClient(t *testing.T) {
 		t.Fatalf("SignIn = %+v; want nil", view.SignIn)
 	}
 }
+
+// A write target that cannot be read degrades the READ: an unavailable panel,
+// never an error the console would render as a failure.
+func TestPanelView_DegradesWhenTheScopeCannotBeRead(t *testing.T) {
+	targets := newFakeTargets(newFakeDirectory())
+	targets.scopeErr = errors.New("pipeline default is cyclic")
+	p := NewPanelService(targets, newFakeStore())
+
+	view, err := p.View(context.Background(), "acme", "workouts")
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	if view.DirectoryAvailable {
+		t.Fatal("DirectoryAvailable = true with no scope")
+	}
+	if len(targets.scoped) != 1 || targets.scoped[0] != [2]string{"acme", "workouts"} {
+		t.Fatalf("Scope calls = %v, want one for the viewed project", targets.scoped)
+	}
+	if targets.resolved != 0 {
+		t.Fatalf("resolved %d times without a scope", targets.resolved)
+	}
+}
