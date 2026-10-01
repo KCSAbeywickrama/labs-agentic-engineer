@@ -494,10 +494,28 @@ trap 'rm -rf "$BOOTSTRAP_DIR" "$UPSTREAM_VALUES_DIR"; rm -f "$API_PLATFORM_VALUE
 # Only the "openchoreo." parent is rewritten, for the reason the derived block
 # above gives. At AE_DOMAIN=localhost this is a literal no-op, so the file is
 # byte-identical to what upstream publishes.
+#
+# Written through a temporary file and moved into place, and every step is
+# checked. Two reasons, both of which bite silently:
+#
+#   * `sed -i` is not portable. GNU takes a bare -i; BSD/macOS reads the next
+#     argument as the backup suffix and then misparses the script. This runs on
+#     whatever machine the operator is on.
+#   * A failure here cannot propagate. The caller uses $(oc_values ...) in an
+#     argument, and a non-zero command substitution neither trips `set -e` nor
+#     stops the helm call — it would install against a half-written file, or
+#     worse, a STALE one left by an earlier run. Emitting nothing on failure is
+#     what makes the caller fail loudly instead.
 oc_values() {
-    local rel="$1" out="${UPSTREAM_VALUES_DIR}/$(basename "$1")"
-    curl -fsSL "${RAW}/install/k3d/${rel}" \
-        | sed "s/openchoreo\\.localhost/${OC_DOMAIN}/g" > "$out"
+    local rel="$1" out="${UPSTREAM_VALUES_DIR}/$(basename "$1")" tmp
+    tmp="$(mktemp "${out}.XXXXXX")" || {
+        echo "❌ could not create a temporary file for ${rel}" >&2; return 1; }
+    if ! curl -fsSL "${RAW}/install/k3d/${rel}" \
+        | sed "s/openchoreo\\.localhost/${OC_DOMAIN}/g" > "$tmp"; then
+        rm -f "$tmp"
+        echo "❌ could not fetch or rewrite ${RAW}/install/k3d/${rel}" >&2
+        return 1
+    fi
     # With TLS the control-plane URLs in these files have to move scheme AND
     # port, not just domain. values-cp.yaml carries OpenChoreo's four IdP
     # URLs (issuer, jwks, authorize, token) and its own baseUrl; the issuer
@@ -507,8 +525,21 @@ oc_values() {
     # Scoped to :8080 on this cluster's own domain so the observability
     # plane's 11080 endpoints and any loopback URL are left alone.
     if [ "$WITH_TLS" = "1" ]; then
-        sed -i "s|http://\\([A-Za-z0-9.-]*\\)${OC_DOMAIN}:8080|${SCHEME}://\\1${OC_DOMAIN}:${CP_PORT}|g" "$out"
+        if ! sed "s|http://\\([A-Za-z0-9.-]*\\)${OC_DOMAIN}:8080|${SCHEME}://\\1${OC_DOMAIN}:${CP_PORT}|g" \
+            "$tmp" > "${tmp}.tls"; then
+            rm -f "$tmp" "${tmp}.tls"
+            echo "❌ could not apply the TLS rewrite to ${rel}" >&2
+            return 1
+        fi
+        mv "${tmp}.tls" "$tmp" || {
+            rm -f "$tmp" "${tmp}.tls"
+            echo "❌ could not replace ${rel} with its TLS rewrite" >&2
+            return 1; }
     fi
+    mv "$tmp" "$out" || {
+        rm -f "$tmp"
+        echo "❌ could not move ${rel} into place" >&2
+        return 1; }
     echo "$out"
 }
 
@@ -531,9 +562,22 @@ oc_values() {
 # public network, and pointing it at 8443 would mean the pod validating a public
 # certificate for a name (host.k3d.internal) the certificate cannot carry.
 oc_manifest() {
-    local rel="$1" out="${UPSTREAM_VALUES_DIR}/$(basename "$1")"
-    curl -fsSL "${RAW}/${rel}" \
-        | sed "s/openchoreo\\.localhost/${OC_DOMAIN}/g" > "$out"
+    local rel="$1" out="${UPSTREAM_VALUES_DIR}/$(basename "$1")" tmp
+    # Same temporary-file discipline as oc_values, and for the same reason: the
+    # caller substitutes this into `kubectl apply -f`, where a failure here
+    # would otherwise apply a half-written or stale manifest.
+    tmp="$(mktemp "${out}.XXXXXX")" || {
+        echo "❌ could not create a temporary file for ${rel}" >&2; return 1; }
+    if ! curl -fsSL "${RAW}/${rel}" \
+        | sed "s/openchoreo\\.localhost/${OC_DOMAIN}/g" > "$tmp"; then
+        rm -f "$tmp"
+        echo "❌ could not fetch or rewrite ${RAW}/${rel}" >&2
+        return 1
+    fi
+    mv "$tmp" "$out" || {
+        rm -f "$tmp"
+        echo "❌ could not move ${rel} into place" >&2
+        return 1; }
     echo "$out"
 }
 cat > "$API_PLATFORM_VALUES" <<'YAML'
@@ -1804,6 +1848,14 @@ printf "    %-16s%-50s%s\n" "Agent Manager" "${SCHEME}://console.amp.${AE_DOMAIN
 # suffix lives in seven keys there as well. Printing them already composed is
 # what keeps the two from disagreeing: a cluster on one domain and a config on
 # another installs without complaint and fails in a browser.
+#
+# tls.enabled rides along for the same reason the hostnames do. It is what
+# moves the ENVIRONMENT tier's scheme and ports (envidp's Thunder and API
+# gateway), and aectl composes those from config, not from anything this script
+# sets. Omitted on a TLS cluster, the environment tier is addressed over plain
+# HTTP on the wrong ports — which installs without complaint and fails at the
+# first generated app's login.
+if [ "$WITH_TLS" = "1" ]; then TLS_ENABLED_YAML=true; else TLS_ENABLED_YAML=false; fi
 if [ "$AE_DOMAIN" != "localhost" ]; then
     echo ""
     echo "  Put these in the aectl config you import next"
@@ -1819,6 +1871,8 @@ if [ "$AE_DOMAIN" != "localhost" ]; then
     environment:
       idp_base_domain: "${OC_DOMAIN}"
       gateway_base_domain: "gateway.${AE_DOMAIN}"
+    tls:
+      enabled: ${TLS_ENABLED_YAML}
     thunder:
       public_url: "${SCHEME}://thunder.${OC_DOMAIN}:${CP_PORT}"
 EOF
@@ -1826,15 +1880,22 @@ EOF
     echo "  And pass the same suffix to Agent Manager:  AE_DOMAIN=${AE_DOMAIN}"
 fi
 
-# Printed once, here, and stored nowhere this script controls: it is the
-# Administrator credential for an IdP on a reachable gateway, so it is not
-# going into a file next to the config. `aectl platform install` reads it from
-# the environment and seeds it into OpenBao itself.
+# Printed here AND written to AE_INSTALL_CLIENT_SECRET_FILE at the moment it is
+# generated (step 3c). It is the Administrator credential for an IdP on a
+# reachable gateway, so the file is root-only — but it has to exist: ThunderID
+# imports the bundle carrying this secret from a pre-install hook, so the
+# credential goes live long before this script finishes, and a failure after
+# that point used to leave a cluster whose one Administrator client nobody
+# could authenticate as. `aectl platform install` reads it from the
+# environment and seeds it into OpenBao itself.
 if [ "${AE_INSTALL_CLIENT_SECRET_GENERATED:-0}" = "1" ]; then
     echo ""
-    echo "  ⚠️  Generated admin client secret — copy it now, it is not stored:"
+    echo "  ⚠️  Generated admin client secret:"
     echo ""
     echo "    export AEP_THUNDER_ADMIN_CLIENT_SECRET=${AE_INSTALL_CLIENT_SECRET}"
+    echo ""
+    echo "  Also stored at ${AE_INSTALL_CLIENT_SECRET_FILE} (mode 600), so a"
+    echo "  lost terminal is not a lost cluster."
     echo ""
     echo "  Pin it with AE_INSTALL_CLIENT_SECRET=... if you re-run this script"
     echo "  against the same Thunder; the bundle is imported once and the"

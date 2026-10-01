@@ -107,9 +107,18 @@ for doc in "${DOCS_DIR}"/*.yaml; do
     #
     # Scoped to this cluster's own suffix, so the loopback redirect URIs these
     # documents also carry (localhost:3000, 127.0.0.1:33418) are untouched.
+    #
+    # Rewritten through a temporary file rather than with `sed -i`, which is
+    # not portable: GNU takes a bare -i, BSD/macOS reads the next argument as
+    # the backup suffix and then misparses the script. This runs on whatever
+    # machine the operator installs from.
     if [ "${WITH_TLS:-0}" = "1" ]; then
-        sed -i "s|http://\\([A-Za-z0-9.-]*\\)\\.${AE_DOMAIN_RE}:8080|https://\\1.${AE_DOMAIN}:8443|g" \
-            "${BOOTSTRAP_DIR}/$(basename "$doc")"
+        published="${BOOTSTRAP_DIR}/$(basename "$doc")"
+        sed "s|http://\\([A-Za-z0-9.-]*\\)\\.${AE_DOMAIN_RE}:8080|https://\\1.${AE_DOMAIN}:8443|g" \
+            "$published" > "${published}.tls" \
+            || fail "Could not apply the TLS rewrite to $(basename "$doc")."
+        mv "${published}.tls" "$published" \
+            || fail "Could not replace $(basename "$doc") with its TLS rewrite."
     fi
     added=$((added + 1))
 done
