@@ -20,8 +20,10 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
 // GET /projects/{p}/versions (B5): what each version built. A build keeps no
@@ -84,4 +86,75 @@ func (s *artifactService) ListVersions(ctx context.Context, orgID, projectID str
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+// ValidationScope is what a version validates (B4): every feature built in it
+// or an earlier version, minus the stories no version has built yet.
+type ValidationScope struct {
+	// Features are the features built in this version or an earlier one.
+	Features []string
+	// HeldBack are stories of those features held back by the version that
+	// last built each: they wait on a feature nobody built.
+	HeldBack []string
+	// Built names what this version itself built ("F3 Payroll export").
+	Built []string
+	// Earlier are the versions before it, newest first: where "was passing"
+	// looks.
+	Earlier []string
+}
+
+// ValidationScope reads what a version validates from the tag annotations of
+// it and the versions before it. ok is false when the version names nothing it
+// built (cut before builds were selections): it validates the whole oracle.
+func (s *artifactService) ValidationScope(ctx context.Context, orgID, projectID, version string) (ValidationScope, bool, error) {
+	var out ValidationScope
+	_, ref, err := s.readyRef(ctx, orgID, projectID)
+	if err != nil {
+		return out, false, err
+	}
+	tags, err := s.listVersionTags(ctx, ref)
+	if err != nil {
+		return out, false, fmt.Errorf("list tags: %w", err)
+	}
+	versions := versionTags(tags) // newest first
+	at := slices.IndexFunc(versions, func(t sourcecontrol.TagInfo) bool { return t.Name == version })
+	if at < 0 {
+		return out, false, nil
+	}
+	plan, ok := parseScope(versions[at].Body)
+	if !ok {
+		return out, false, nil
+	}
+	for _, t := range versions[at+1:] {
+		out.Earlier = append(out.Earlier, t.Name)
+	}
+	// Oldest first, so the version that last built a feature has the last word
+	// on which of its stories it held back.
+	heldBy := map[string][]string{}
+	for i := len(versions) - 1; i >= at; i-- {
+		p, ok := parseScope(versions[i].Body)
+		if !ok {
+			continue
+		}
+		for _, f := range p.Features {
+			heldBy[f] = slices.DeleteFunc(slices.Clone(p.HeldBack), func(id string) bool { return !strings.HasPrefix(id, f+".") })
+		}
+	}
+	for f, held := range heldBy {
+		out.Features = append(out.Features, f)
+		out.HeldBack = append(out.HeldBack, held...)
+	}
+	slices.SortFunc(out.Features, reqspec.CompareIDs)
+	slices.SortFunc(out.HeldBack, reqspec.CompareIDs)
+
+	files, err := s.readBundleAtTag(ctx, ref, version, requirementsPrefix, requirementsBundleFilter)
+	if err != nil {
+		return out, false, fmt.Errorf("read requirements at %s: %w", version, err)
+	}
+	for _, f := range reqspec.Parse(files).Features {
+		if slices.Contains(plan.Features, f.ID) {
+			out.Built = append(out.Built, f.ID+" "+f.Name)
+		}
+	}
+	return out, true, nil
 }

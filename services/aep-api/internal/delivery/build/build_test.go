@@ -1261,3 +1261,23 @@ func TestGetPreflight_Unconfigured503(t *testing.T) {
 		t.Fatalf("503 envelope = %+v", e)
 	}
 }
+
+// The ledger row counts regressions from the version's newest JUDGED attempt
+// (B4) — a repair run in flight after it is the version's newest run, but it
+// has not judged anything yet.
+func TestListBuilds_CarriesTheLatestJudgedRegressionCount(t *testing.T) {
+	spy := newPlanSpy()
+	spy.rows = []delivery.MilestoneRun{
+		{MilestoneNumber: 3, MilestoneTitle: "v2", Kind: delivery.RunKindTask, State: delivery.RunStateRunning},
+		{MilestoneNumber: 3, MilestoneTitle: "v2", Kind: delivery.RunKindValidation, State: delivery.RunStateFailed,
+			ValidationVerdict: delivery.ValidationVerdictFailed, ValidationRegressions: 2},
+		{MilestoneNumber: 3, MilestoneTitle: "v2", Kind: delivery.RunKindValidation, State: delivery.RunStateFailed,
+			ValidationVerdict: delivery.ValidationVerdictFailed, ValidationRegressions: 5},
+	}
+	svc := withPlanPath(newSvc(fakeRepos{}, &fakeTagger{}), spy)
+
+	_, rawBody := listBuilds(t, svc, "shop")
+	if got := decodeBody[gen.BuildList](t, rawBody).Builds[0]; got.Regressions != 2 {
+		t.Errorf("regressions = %d, want 2 (the newest judged attempt's)", got.Regressions)
+	}
+}

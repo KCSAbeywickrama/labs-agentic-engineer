@@ -602,6 +602,14 @@ func TestSaveSpec_ABuildIsASelection(t *testing.T) {
 		t.Errorf("v2 built %+v", f)
 	}
 
+	// What v2 validates (B4): everything built so far, and the version before
+	// it to compare with.
+	vs, ok, err := r.svc.ValidationScope(ctx, r.org, r.proj, v2.Tag)
+	if err != nil || !ok || fmt.Sprint(vs.Features) != "[F1 F2]" || fmt.Sprint(vs.Built) != "[F2 Notify]" ||
+		fmt.Sprint(vs.Earlier) != "["+v1.Tag+"]" {
+		t.Errorf("ValidationScope(%s) = %+v, %v, %v", v2.Tag, vs, ok, err)
+	}
+
 	// The same pick again on the same tree is the same version.
 	again, err := r.svc.SaveSpec(ctx, r.org, r.proj, SaveRequest{Pick: &reqspec.Pick{Features: []string{"F2"}}})
 	if err != nil || again.Status != SpecSaveUnchanged || again.Tag != v2.Tag {

@@ -1621,8 +1621,11 @@ type BuildSummary struct {
 	MilestoneNumber int64 `json:"milestoneNumber"`
 
 	// Reason The run's terminal reason for a failed version (empty otherwise), surfaced beside the Failed badge in the console. A cancelled version carries none — a person abandoning an increment is not a fault with a cause to report.
-	Reason    string    `json:"reason,omitempty"`
-	StartedAt time.Time `json:"startedAt"`
+	Reason string `json:"reason,omitempty"`
+
+	// Regressions How many scenarios the version's latest validation failed that passed in the previous validated version (B4). Absent when none.
+	Regressions int       `json:"regressions,omitempty"`
+	StartedAt   time.Time `json:"startedAt"`
 
 	// Status What became of this version. `cancelled` is its own value rather than a flavour of `failed`, because the two are different facts and a reader acts on them differently — a failure is the platform reporting it could not deliver the increment, while a cancel is a person deciding not to. Folding them lost that; a build somebody deliberately stopped rendered as Failed, with no reason beside it to say why, while the same page's run row said Cancelled two lines below.
 	Status BuildSummaryStatus `json:"status"`
@@ -3649,6 +3652,12 @@ type Usage struct {
 	OutputTokens int64  `json:"outputTokens"`
 }
 
+// ValidationBaseline The previous validated version — the newest earlier version whose validation reached a verdict — at its final attempt, which "was passing" compares with (B4).
+type ValidationBaseline struct {
+	Commit  string `json:"commit"`
+	Version string `json:"version"`
+}
+
 // ValidationDetail One version's validation history, already filtered to what asks the question.
 // `runs` holds only runs that ATTEMPTED validation — ones holding at least one VALIDATION cycle, which is the fact rather than the kind: a task run never holds one, and a run that did ask the criteria is listed whatever its kind says it was for. Each run's `cycles` holds only its VALIDATION cycles. Both filters are applied here rather than by the client: they are the platform's own rules, and the surface that re-derived them read a newer non-validating run as the version's answer and hid a real verdict. The views are the same MilestoneRunView and RunCycleView the run story serves, so one projection describes a cycle everywhere.
 type ValidationDetail struct {
@@ -3679,14 +3688,23 @@ type ValidationList struct {
 
 // ValidationSnapshot One attempt's report and the criteria it was judged against, read at a single commit.
 type ValidationSnapshot struct {
+	Baseline *ValidationBaseline `json:"baseline,omitempty"`
+
 	// Commit The commit both halves were read at — the cycle's merge SHA, or empty when the attempt is still running and the criteria came from HEAD.
 	Commit string `json:"commit"`
 
 	// Criteria Every specs/validation/acceptance/*.feature file at that commit. The report annotates these; they are the spine the view renders and the report is the overlay.
 	Criteria []AcceptanceCriteriaFile `json:"criteria"`
 
+	// Regressions The failed scenarios that passed in the baseline, by key — the feature's ID, the rule and the scenario, joined with " / " ("F2 / A manager sees pending claims / The queue"). Empty when none, or with no baseline.
+	Regressions []string `json:"regressions,omitempty"`
+
 	// Report The raw tests/acceptance/report.json at that commit, verbatim, for the client's own parser to read. Null while the attempt is still running: it has not committed one yet, and an absent report is not the same fact as an empty one.
-	Report *string `json:"report,omitempty"`
+	Report *string                 `json:"report,omitempty"`
+	Scope  *ValidationVersionScope `json:"scope,omitempty"`
+
+	// StillFailing The failed scenarios that failed in the baseline too, keyed as regressions.
+	StillFailing []string `json:"stillFailing,omitempty"`
 }
 
 // ValidationState Where a version's validation stands — the one vocabulary every surface renders it with.
@@ -3715,6 +3733,12 @@ type ValidationSummary struct {
 	// failed and unreported fail the run only once its validation attempts are spent: while attempts remain the run repairs and re-validates, and reads awaiting-fix in the meantime.
 	State ValidationState `json:"state"`
 	Tag   string          `json:"tag"`
+}
+
+// ValidationVersionScope What a version validates (B4) — every feature built in it or an earlier version, minus the stories no version has built yet. Absent for a version cut before builds were selections, which validates its whole oracle; a scenario outside the scope was not run and counts for nothing.
+type ValidationVersionScope struct {
+	Features []string `json:"features"`
+	HeldBack []string `json:"heldBack"`
 }
 
 // VersionFeature A feature as a version built it.

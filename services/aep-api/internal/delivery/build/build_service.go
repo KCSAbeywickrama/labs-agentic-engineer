@@ -190,6 +190,9 @@ type BuildSummary struct {
 	// costs the ledger no extra read. The dependency NAMES are deliberately not
 	// here — see the contract.
 	WaitingReason string `json:"waitingReason,omitempty" enum:"external-values"`
+	// Regressions counts the scenarios the version's latest validation failed
+	// that passed in the previous validated version (B4).
+	Regressions int `json:"regressions,omitempty"`
 }
 
 // BuildList is the list-project-builds response, newest build first.

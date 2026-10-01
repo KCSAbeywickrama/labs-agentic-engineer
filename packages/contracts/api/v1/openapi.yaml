@@ -4268,6 +4268,10 @@ components:
             this says what went wrong in it — and cheap for the ledger, which is built from the
             run row that holds it.
           type: string
+        regressions:
+          description: How many scenarios the version's latest validation failed that passed in the
+            previous validated version (B4). Absent when none.
+          type: integer
         reason:
           description: The run's terminal reason for a failed version (empty otherwise), surfaced
             beside the Failed badge in the console. A cancelled version carries none — a person
@@ -9559,6 +9563,38 @@ components:
       - milestoneNumber
       - state
       type: object
+    ValidationVersionScope:
+      additionalProperties: false
+      description: What a version validates (B4) — every feature built in it or an earlier version,
+        minus the stories no version has built yet. Absent for a version cut before builds were
+        selections, which validates its whole oracle; a scenario outside the scope was not run and
+        counts for nothing.
+      properties:
+        features:
+          items:
+            type: string
+          type: array
+        heldBack:
+          items:
+            type: string
+          type: array
+      required:
+      - features
+      - heldBack
+      type: object
+    ValidationBaseline:
+      additionalProperties: false
+      description: The previous validated version — the newest earlier version whose validation
+        reached a verdict — at its final attempt, which "was passing" compares with (B4).
+      properties:
+        version:
+          type: string
+        commit:
+          type: string
+      required:
+      - version
+      - commit
+      type: object
     ValidationSnapshot:
       additionalProperties: false
       description: >-
@@ -9583,6 +9619,26 @@ components:
           type: string
           nullable: true
           x-go-type: '*string'
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/ValidationVersionScope'
+          x-go-type-skip-optional-pointer: false
+        baseline:
+          allOf:
+          - $ref: '#/components/schemas/ValidationBaseline'
+          x-go-type-skip-optional-pointer: false
+        regressions:
+          description: The failed scenarios that passed in the baseline, by key — the feature's ID,
+            the rule and the scenario, joined with " / " ("F2 / A manager sees pending claims / The
+            queue"). Empty when none, or with no baseline.
+          items:
+            type: string
+          type: array
+        stillFailing:
+          description: The failed scenarios that failed in the baseline too, keyed as regressions.
+          items:
+            type: string
+          type: array
       required:
       - commit
       - criteria

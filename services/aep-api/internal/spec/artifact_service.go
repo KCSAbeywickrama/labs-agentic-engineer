@@ -158,6 +158,9 @@ type ArtifactService interface {
 	// ListVersions lists what each version built, oldest first: the features
 	// it carried with their lines at its tag, and its product-wide items (B5).
 	ListVersions(ctx context.Context, orgID, projectID string) ([]Version, error)
+	// ValidationScope reads what a version validates (B4); ok is false for a
+	// version that names nothing it built.
+	ValidationScope(ctx context.Context, orgID, projectID, version string) (ValidationScope, bool, error)
 	// GetDesignAtTag reads the design bundle at a spec version tag — the tag a
 	// build carries. The name is the user's (ADR-0030) and is not parsed: the
 	// tag either resolves or it does not.

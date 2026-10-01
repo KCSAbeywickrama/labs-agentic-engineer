@@ -67,6 +67,10 @@ func (f *fakeArtifactSvc) BuildVersionFacts(ctx context.Context, orgID, projectI
 	return f.BuildVersionFactsFunc(ctx, orgID, projectID)
 }
 
+func (f *fakeArtifactSvc) ValidationScope(context.Context, string, string, string) (ValidationScope, bool, error) {
+	panic("spec test: ValidationScope is not faked")
+}
+
 func (f *fakeArtifactSvc) ListVersions(ctx context.Context, orgID, projectID string) ([]Version, error) {
 	if f.ListVersionsFunc == nil {
 		panic("spec test: ListVersions called but ListVersionsFunc is not set")

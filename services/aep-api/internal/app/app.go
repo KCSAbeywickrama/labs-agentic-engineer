@@ -1273,7 +1273,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// files are the oracle.
 	validationReads := runread.NewValidationReads(milestoneRunRepo, runCycleRepo,
 		acceptanceCriteria{files: filesSvc}).
-		WithRecordings(agentProgressReader)
+		WithRecordings(agentProgressReader).
+		// The same reading of an attempt the run made (B4): the judge needs no
+		// minter, only the reads.
+		WithJudge(runValidation{files: filesSvc, versions: artifactSvcGit, runs: milestoneRunRepo, cycles: runCycleRepo})
 
 	deliveryDeps := deliveryhttpapi.Deps{
 		BuildSvc:      buildSvc,
@@ -1613,7 +1616,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			PRs:        issueService,
 			Design:     designComponents{store: artifactStore},
 			Builds:     runBuilds{oc: componentClient},
-			Validation: runValidation{svc: validationSvc, files: filesSvc},
+			Validation: runValidation{svc: validationSvc, files: filesSvc, versions: artifactSvcGit, runs: milestoneRunRepo, cycles: runCycleRepo},
 			// The coding executor launches the cycle's runner Job and answers with
 			// its Job ref. It mints no execution row — the cycle record is the
 			// supervisor's own bookkeeping.

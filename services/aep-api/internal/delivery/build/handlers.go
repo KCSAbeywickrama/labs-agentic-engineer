@@ -242,6 +242,7 @@ func toBuildList(l BuildList) gen.BuildList {
 			FailureCode:     b.FailureCode,
 			StartedAt:       b.StartedAt,
 			WaitingReason:   gen.BuildSummaryWaitingReason(b.WaitingReason),
+			Regressions:     b.Regressions,
 		}
 		s.CompletedAt = b.CompletedAt // nil while running — omitted on the wire
 		builds = append(builds, s)

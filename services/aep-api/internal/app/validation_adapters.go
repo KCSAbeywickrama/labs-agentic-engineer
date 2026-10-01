@@ -104,6 +104,20 @@ func (a acceptanceCriteria) CriteriaAt(ctx context.Context, orgID, projectID, at
 	return out, nil
 }
 
+// criteriaAt is the oracle at one commit as validation's own type: the
+// version's scope reads its rules' story tags from it.
+func (a acceptanceCriteria) criteriaAt(ctx context.Context, orgID, projectID, at string) ([]validation.AcceptanceCriteriaFile, error) {
+	files, err := a.CriteriaAt(ctx, orgID, projectID, at)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]validation.AcceptanceCriteriaFile, 0, len(files))
+	for _, f := range files {
+		out = append(out, validation.AcceptanceCriteriaFile{Path: f.Path, Content: f.Content})
+	}
+	return out, nil
+}
+
 // HasValidationCriteria satisfies the event plane's ValidationOracle: the same
 // read, reduced to the yes/no the revalidate guard asks. Deliberately does not
 // parse — a malformed oracle still means "there is something here to validate",
