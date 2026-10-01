@@ -217,9 +217,19 @@ type componentService struct {
 	autoRCADisabled bool
 }
 
+// AutoRCASwitch is how the composition root hands the component service the
+// deployment's auto-RCA switch (config AUTO_RCA_ENABLED). It is a port of its
+// own rather than a ComponentService method: that interface is what the HTTP
+// handlers hold, and a wiring switch is not theirs to flip.
+type AutoRCASwitch interface {
+	SetAutoRCAEnabled(enabled bool)
+}
+
+var _ AutoRCASwitch = (*componentService)(nil)
+
 // SetAutoRCAEnabled sets whether EnsureComponent attaches the default auto-RCA
-// alert rule (config AUTO_RCA_ENABLED). DeploymentService takes the same value
-// for the trait's per-environment config.
+// alert rule. DeploymentService takes the same value for the trait's
+// per-environment config.
 func (s *componentService) SetAutoRCAEnabled(enabled bool) {
 	s.autoRCADisabled = !enabled
 }

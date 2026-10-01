@@ -1512,9 +1512,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// release freezes the Component's traits, and the build wrote them earlier.
 	deploymentService.SetAutoRCAEnabled(cfg.AutoRCAEnabled)
 	deploymentService.SetComponentEnsurer(componentService)
-	if cs, ok := componentService.(interface{ SetAutoRCAEnabled(bool) }); ok {
-		cs.SetAutoRCAEnabled(cfg.AutoRCAEnabled)
+	autoRCA, ok := componentService.(projects.AutoRCASwitch)
+	if !ok {
+		return nil, fmt.Errorf("component service does not take the auto-RCA switch (projects.AutoRCASwitch)")
 	}
+	autoRCA.SetAutoRCAEnabled(cfg.AutoRCAEnabled)
 	// How a protected service verifies that a request reached it through the
 	// gateway. Read off the Environment's annotations — the same projection the
 	// Thunder binding arrives on, and the only one this process can see from

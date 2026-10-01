@@ -236,7 +236,11 @@ func TestEnsureComponent_AutoRCAAlertRuleFollowsTheDeploymentSwitch(t *testing.T
 		})
 		repo := &sourcecontrol.GitRepository{RepoURL: "https://github.com/acme/widgets", DefaultBranch: "main"}
 		svc := NewComponentService(oc, nil, store, ensureRepoSvc{repo: repo}, nil, nil, nil)
-		svc.(interface{ SetAutoRCAEnabled(bool) }).SetAutoRCAEnabled(enabled)
+		switcher, ok := svc.(AutoRCASwitch)
+		if !ok {
+			t.Fatal("the component service must take the deployment's auto-RCA switch (AutoRCASwitch)")
+		}
+		switcher.SetAutoRCAEnabled(enabled)
 
 		if err := svc.EnsureComponent(context.Background(), "acme", "widgets", "order-service"); err != nil {
 			t.Fatalf("EnsureComponent: %v", err)
