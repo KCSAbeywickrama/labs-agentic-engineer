@@ -1566,9 +1566,16 @@ type BuildProgressRun struct {
 // BuildProgressRunKind What the run DOES, and the section marker the console renders — `dev` delivered the version, `task` worked a defect inside it, `validation` re-judged it. Same vocabulary as MilestoneRunView.kind.
 type BuildProgressRunKind string
 
+// BuildRepair A repair build (B4), "Fix" on a version whose validation failed. It cuts `<of>.<n>` ("v1.1") at the fixed version's commit, so it builds the same features from the same specs; the scenarios the fixed version's final validation failed become its work as repair issues, and nothing is planned. selection, version and inputs are ignored. A version with no failing scenario refuses with 409.
+type BuildRepair struct {
+	// Of The version to fix ("v1"). A repair of a repair fixes the version it fixed.
+	Of string `json:"of"`
+}
+
 // BuildRequest defines model for BuildRequest.
 type BuildRequest struct {
 	Inputs []BuildInputItem `json:"inputs,omitempty"`
+	Repair *BuildRepair     `json:"repair,omitempty"`
 
 	// Selection What this version builds (B1): the features the user picked, and any product-wide requirement added since the last build that they picked on its own. The server plans the rest — every unbuilt feature a picked one needs, every unbuilt product-wide requirement that reaches one — and holds back a story that needs a feature neither built nor in this build. A feature whose design is out of date, that waits on an open dependency, or that has not been interviewed cannot be built; picking one (or one a pick needs) refuses the build with a FEATURE_NOT_BUILDABLE row naming why. Absent, the build carries every feature that can be designed.
 	Selection BuildSelection `json:"selection,omitempty"`

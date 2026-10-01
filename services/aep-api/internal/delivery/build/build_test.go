@@ -69,6 +69,13 @@ type fakeTagger struct {
 	// pick and blocked record what the build asked the version to carry.
 	pick    *reqspec.Pick
 	blocked map[string]string
+	// repairOf records the version a repair build asked to fix.
+	repairOf string
+}
+
+func (f *fakeTagger) TagRepair(_ context.Context, _, _, of string) (string, error) {
+	f.repairOf = of
+	return of + ".1", f.err
 }
 
 func (f *fakeTagger) BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (spec.BuildScope, error) {
@@ -1279,5 +1286,60 @@ func TestListBuilds_CarriesTheLatestJudgedRegressionCount(t *testing.T) {
 	_, rawBody := listBuilds(t, svc, "shop")
 	if got := decodeBody[gen.BuildList](t, rawBody).Builds[0]; got.Regressions != 2 {
 		t.Errorf("regressions = %d, want 2 (the newest judged attempt's)", got.Regressions)
+	}
+}
+
+// fakeRepairer answers what the fixed version failed, and records the repair
+// issues filed — and when, against the run start.
+type fakeRepairer struct {
+	failures int
+	spy      *planSpy
+	filedTo  int
+	startedB int
+}
+
+func (f *fakeRepairer) FailuresOf(context.Context, string, string, string) (int, error) {
+	return f.failures, nil
+}
+
+func (f *fakeRepairer) FileRepairs(_ context.Context, _, _ string, milestone int, _ string) error {
+	f.filedTo = milestone
+	f.startedB = len(f.spy.startedRuns())
+	return nil
+}
+
+func repairSvc(tagger *fakeTagger, repairs *fakeRepairer, spy *planSpy) *build.Service {
+	return withPlanPath(build.NewService(build.Deps{Repos: fakeRepos{}, Tagger: tagger, Repairs: repairs}), spy)
+}
+
+// "Fix" on a failed version builds a repair version (B4): v1.1 at v1's
+// commit, its milestone holding v1's failures as repair issues BEFORE the run
+// starts, and no planning turn — the repair issues are the work.
+func TestRepair_CutsAPointReleaseWorkingTheFailures(t *testing.T) {
+	spy := newPlanSpy()
+	tagger := &fakeTagger{}
+	repairs := &fakeRepairer{failures: 2, spy: spy}
+	svc := repairSvc(tagger, repairs, spy)
+
+	tag, err := svc.Repair(context.Background(), "org", "shop", "v1")
+	if err != nil || tag != "v1.1" || tagger.repairOf != "v1" {
+		t.Fatalf("repair = %q, %v (asked to fix %q)", tag, err, tagger.repairOf)
+	}
+	spy.awaitStart(t)
+	if repairs.filedTo != 9 || repairs.startedB != 0 {
+		t.Errorf("repairs filed to milestone %d with %d runs already started, want the claimed milestone before the start", repairs.filedTo, repairs.startedB)
+	}
+	if req := spy.startedRuns()[0]; !req.Rebuild || req.Tag != "v1.1" {
+		t.Errorf("started %+v, want v1.1 with Rebuild set: nothing to plan", req)
+	}
+}
+
+func TestRepair_RefusesAVersionWithNothingToFix(t *testing.T) {
+	spy := newPlanSpy()
+	tagger := &fakeTagger{}
+	_, err := repairSvc(tagger, &fakeRepairer{spy: spy}, spy).Repair(context.Background(), "org", "shop", "v1")
+	var ee *build.EdgeError
+	if !errors.As(err, &ee) || ee.Status != 409 || tagger.repairOf != "" {
+		t.Errorf("err = %v, tagged %q, want a 409 that cuts no tag", err, tagger.repairOf)
 	}
 }

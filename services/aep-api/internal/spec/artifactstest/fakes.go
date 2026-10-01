@@ -41,6 +41,7 @@ type FakeArtifactService struct {
 	ListSpecVersionTagsFunc       func(ctx context.Context, orgID, projectID string) (*spec.TagList, error)
 	ListVersionsFunc              func(ctx context.Context, orgID, projectID string) ([]spec.Version, error)
 	ValidationScopeFunc           func(ctx context.Context, orgID, projectID, version string) (spec.ValidationScope, bool, error)
+	TagRepairFunc                 func(ctx context.Context, orgID, projectID, of string) (string, error)
 	GetDesignAtTagFunc            func(ctx context.Context, orgID, projectID, tag string) (map[string]string, error)
 	GetDesignAtCommitFunc         func(ctx context.Context, orgID, projectID, commitSHA string) (map[string]string, error)
 	StatusSnapshotFunc            func(ctx context.Context, orgID, projectID string) (*spec.StatusSnapshot, error)
@@ -94,6 +95,13 @@ func (f *FakeArtifactService) ValidationScope(ctx context.Context, orgID, projec
 		panic("artifactstest: ValidationScope called but ValidationScopeFunc is not set")
 	}
 	return f.ValidationScopeFunc(ctx, orgID, projectID, version)
+}
+
+func (f *FakeArtifactService) TagRepair(ctx context.Context, orgID, projectID, of string) (string, error) {
+	if f.TagRepairFunc == nil {
+		panic("artifactstest: TagRepair called but TagRepairFunc is not set")
+	}
+	return f.TagRepairFunc(ctx, orgID, projectID, of)
 }
 
 func (f *FakeArtifactService) GetDesignAtTag(ctx context.Context, orgID, projectID, tag string) (map[string]string, error) {

@@ -53,6 +53,10 @@ func (v buildVersionFacts) BuildVersionFacts(ctx context.Context, orgID, project
 	return v.art.BuildVersionFacts(ctx, orgID, projectID)
 }
 
+func (t buildSpecTagger) TagRepair(ctx context.Context, orgID, projectID, of string) (string, error) {
+	return t.art.TagRepair(ctx, orgID, projectID, of)
+}
+
 func (t buildSpecTagger) BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (spec.BuildScope, error) {
 	return t.art.BuildScopeAtTag(ctx, orgID, projectID, tag)
 }

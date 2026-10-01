@@ -79,6 +79,8 @@ type Service struct {
 	tagger SpecTagger
 	coord  *InputsCoordinator
 	design PreflightDesignReader
+	// repairs is the validation side of a repair build; nil refuses one.
+	repairs Repairer
 	// plan is the milestone plan path (milestone_plan.go), wired separately via
 	// SetPlanPath because its gate resolver is built after this service. Nil
 	// means the build stops at the tag cut.
@@ -102,11 +104,13 @@ type Deps struct {
 	// design reader wired fails OPEN (no dependency can be classified),
 	// mirroring Coord/Tasks.
 	Design PreflightDesignReader
+	// Repairs backs the repair build (B4). Nil refuses one.
+	Repairs Repairer
 }
 
 // NewService wires the build service.
 func NewService(d Deps) *Service {
-	return &Service{repos: d.Repos, tagger: d.Tagger, coord: d.Coord, design: d.Design}
+	return &Service{repos: d.Repos, tagger: d.Tagger, coord: d.Coord, design: d.Design, repairs: d.Repairs}
 }
 
 // --- wire shapes (names drive the generated schema names — keep them exactly

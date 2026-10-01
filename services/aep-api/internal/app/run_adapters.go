@@ -240,6 +240,41 @@ func (a runValidation) CloseValidationIssue(ctx context.Context, orgID, projectI
 	return a.svc.CloseValidationIssue(ctx, orgID, projectID, issue, verdict, repairs)
 }
 
+// FailuresOf satisfies build's Repairer: how many scenarios the version's
+// final validation attempt failed, within its scope.
+func (a runValidation) FailuresOf(ctx context.Context, orgID, projectID, version string) (int, error) {
+	j, ok, err := a.finalJudgement(ctx, orgID, projectID, version)
+	if err != nil || !ok {
+		return 0, err
+	}
+	return len(j.Failures()), nil
+}
+
+// FileRepairs satisfies build's Repairer: the version's final failures become
+// the repair version's work, filed as the run would have filed them.
+func (a runValidation) FileRepairs(ctx context.Context, orgID, projectID string, milestoneNumber int, version string) error {
+	j, ok, err := a.finalJudgement(ctx, orgID, projectID, version)
+	if err != nil || !ok {
+		return err
+	}
+	_, err = a.svc.MintRepairIssues(ctx, orgID, projectID, milestoneNumber, j)
+	return err
+}
+
+// finalJudgement is the version's final validation attempt, read as its
+// version; ok is false when it was never judged.
+func (a runValidation) finalJudgement(ctx context.Context, orgID, projectID, version string) (validation.Judgement, bool, error) {
+	if a.runs == nil || a.cycles == nil {
+		return validation.Judgement{}, false, nil
+	}
+	at, err := a.finalAttempt(ctx, orgID, projectID, version)
+	if err != nil || at == "" {
+		return validation.Judgement{}, false, err
+	}
+	j, err := a.judge(ctx, orgID, projectID, version, at)
+	return j, err == nil, err
+}
+
 // Standing satisfies runread's ValidationJudge: the same reading the run
 // made, for the console's per-feature view.
 func (a runValidation) Standing(ctx context.Context, orgID, projectID, version, at string) (runread.ValidationStanding, error) {

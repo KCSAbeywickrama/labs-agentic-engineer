@@ -73,6 +73,7 @@ func (h *Handler) ListProjectVersions(ctx context.Context, request gen.ListProje
 			Features:    make([]gen.VersionFeature, 0, len(v.Features)),
 			ProductWide: nonNil(v.ProductWide),
 			HeldBack:    nonNil(v.HeldBack),
+			Fixes:       v.Fixes,
 		}
 		for _, f := range v.Features {
 			vf := gen.VersionFeature{ID: f.ID, Name: f.Name, Lines: make([]gen.VersionLine, 0, len(f.Lines))}

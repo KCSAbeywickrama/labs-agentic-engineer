@@ -1184,9 +1184,20 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// The public build surface: its InputsCoordinator runs pre-tag work (collect
 	// external specs, derive end-user auth), derives unset external authoring from
 	// the design, and carries the provision payload into the dev workflow.
+	// The project's single validation task. The RUN mints it, at
+	// deployed-green: minting it at plan time would put an issue in the working
+	// set that nothing can work until every component is deployed.
+	validationSvc := validation.NewService(validation.Deps{
+		Issues:   issueService,
+		Writer:   deliveryIssues,
+		Criteria: acceptanceCriteria{files: filesSvc},
+	})
 	buildSvc := build.NewService(build.Deps{
 		Repos:  repoFullNameLookup{repos: repoRepo},
 		Tagger: buildSpecTagger{art: artifactSvcGit},
+		// A repair build (B4) reads the fixed version's final validation the
+		// way the run read it, and files its failures as the run would have.
+		Repairs: runValidation{svc: validationSvc, files: filesSvc, versions: artifactSvcGit, runs: milestoneRunRepo, cycles: runCycleRepo},
 		Coord: build.NewInputsCoordinator(
 			designService,                          // SpecCollector (CollectSpec)
 			buildDesignDeriver{svc: designService}, // DesignFactDeriver (sentinel translation)
@@ -1305,14 +1316,6 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		return nil, fmt.Errorf("assemble delivery domain: %w", err)
 	}
 	params.Deps.Delivery = deliveryHandlers
-	// The project's single validation task. The RUN mints it, at
-	// deployed-green: minting it at plan time would put an issue in the working
-	// set that nothing can work until every component is deployed.
-	validationSvc := validation.NewService(validation.Deps{
-		Issues:   issueService,
-		Writer:   deliveryIssues,
-		Criteria: acceptanceCriteria{files: filesSvc},
-	})
 	// A planned Task's prose body names the App Path the agent works in — the
 	// same component → appPath read the merged-PR build fan-out matches against.
 	taskPlan.SetComponentPaths(designComponents{store: artifactStore})

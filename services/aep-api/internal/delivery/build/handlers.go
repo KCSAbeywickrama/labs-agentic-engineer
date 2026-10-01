@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 	"github.com/wso2/aep/aep-api/internal/platform/apierr"
@@ -86,6 +87,16 @@ func (h *Handler) BuildProject(ctx context.Context, request gen.BuildProjectRequ
 			slog.ErrorContext(ctx, "publisher provision for build failed", "error", err)
 			return nil, apierr.ServiceUnavailable("publisher credentials unavailable")
 		}
+	}
+	if request.Body != nil && request.Body.Repair != nil {
+		tag, err := h.svc.Repair(ctx, org, request.ProjectName, strings.TrimSpace(request.Body.Repair.Of))
+		if err != nil {
+			return nil, mapBuildRunError(err)
+		}
+		if h.activity != nil {
+			h.activity.RecordSpecPublished(ctx, org, request.ProjectName, tag)
+		}
+		return gen.BuildProject200JSONResponse(gen.BuildResponse{Tag: tag}), nil
 	}
 	var inputs []BuildInputItem
 	var version string

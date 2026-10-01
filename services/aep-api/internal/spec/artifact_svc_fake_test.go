@@ -67,6 +67,10 @@ func (f *fakeArtifactSvc) BuildVersionFacts(ctx context.Context, orgID, projectI
 	return f.BuildVersionFactsFunc(ctx, orgID, projectID)
 }
 
+func (f *fakeArtifactSvc) TagRepair(context.Context, string, string, string) (string, error) {
+	panic("spec test: TagRepair is not faked")
+}
+
 func (f *fakeArtifactSvc) ValidationScope(context.Context, string, string, string) (ValidationScope, bool, error) {
 	panic("spec test: ValidationScope is not faked")
 }

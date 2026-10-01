@@ -18,7 +18,9 @@ package spec
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 
@@ -42,6 +44,8 @@ type Version struct {
 	ProductWide []string
 	// HeldBack are carried features' stories it did not build.
 	HeldBack []string
+	// Fixes is the version a repair build fixes ("v1" for v1.1); "" otherwise.
+	Fixes string
 }
 
 // VersionFeature is a feature as a version built it.
@@ -77,7 +81,7 @@ func (s *artifactService) ListVersions(ctx context.Context, orgID, projectID str
 		if err != nil {
 			return nil, fmt.Errorf("read requirements at %s: %w", t.Name, err)
 		}
-		v := Version{Name: t.Name, ProductWide: plan.ProductWide, HeldBack: plan.HeldBack}
+		v := Version{Name: t.Name, ProductWide: plan.ProductWide, HeldBack: plan.HeldBack, Fixes: fixesOf(t.Body)}
 		for _, f := range reqspec.Parse(files).Features {
 			if slices.Contains(plan.Features, f.ID) {
 				v.Features = append(v.Features, VersionFeature{ID: f.ID, Name: f.Name, Lines: reqspec.FeatureLines(files, f.ID)})
@@ -157,4 +161,51 @@ func (s *artifactService) ValidationScope(ctx context.Context, orgID, projectID,
 		}
 	}
 	return out, true, nil
+}
+
+// ErrNothingToRepair: the version named is not one a repair can fix.
+var ErrNothingToRepair = errors.New("not a version that can be repaired")
+
+// TagRepair cuts a repair version of `of` (B4): "v1.1", then "v1.2", at the
+// same commit as `of`, so it carries the same specs and builds the same
+// features. Its annotation is `of`'s with a `Fixes:` line. A repair of a
+// repair fixes the version the repair fixed.
+func (s *artifactService) TagRepair(ctx context.Context, orgID, projectID, of string) (string, error) {
+	_, ref, err := s.readyRef(ctx, orgID, projectID)
+	if err != nil {
+		return "", err
+	}
+	tags, err := s.listVersionTags(ctx, ref)
+	if err != nil {
+		return "", fmt.Errorf("list tags: %w", err)
+	}
+	versions := versionTags(tags)
+	at := slices.IndexFunc(versions, func(t sourcecontrol.TagInfo) bool { return t.Name == of })
+	if at < 0 {
+		return "", fmt.Errorf("%w: no version named %q", ErrNothingToRepair, of)
+	}
+	fixed := versions[at]
+	if base := fixesOf(fixed.Body); base != "" {
+		of = base
+	}
+	plan, ok := parseScope(fixed.Body)
+	if !ok {
+		return "", fmt.Errorf("%w: %s names nothing it built", ErrNothingToRepair, of)
+	}
+	n := 1
+	for _, t := range versions {
+		if fixesOf(t.Body) == of {
+			n++
+		}
+	}
+	name := fmt.Sprintf("%s.%d", of, n)
+	if verr := ValidateVersionName(name); verr != nil {
+		return "", fmt.Errorf("%w: %w", ErrVersionNameInvalid, verr)
+	}
+	message := scopeBody(plan) + "\n" + scopeFixes + " " + of
+	if err := s.createVersionTag(ctx, ref, &tags, &name, message, fixed.CommitHash, false); err != nil {
+		return "", err
+	}
+	slog.InfoContext(ctx, "spec tagged a repair", "project", projectID, "tag", name, "fixes", of, "commit", fixed.CommitHash)
+	return name, nil
 }

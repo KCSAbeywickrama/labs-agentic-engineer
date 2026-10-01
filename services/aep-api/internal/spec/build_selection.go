@@ -51,7 +51,19 @@ const (
 	scopeFeatures    = "Features:"
 	scopeProductWide = "Product-wide:"
 	scopeHeldBack    = "Held back:"
+	// scopeFixes names the version a repair build fixes (B4).
+	scopeFixes = "Fixes:"
 )
+
+// fixesOf is the version a repair version's annotation says it fixes, or "".
+func fixesOf(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), scopeFixes); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
+}
 
 // scopeBody renders a plan as the annotation lines that follow the subject.
 func scopeBody(plan reqspec.BuildPlan) string {

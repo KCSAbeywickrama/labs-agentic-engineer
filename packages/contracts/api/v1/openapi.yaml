@@ -4079,6 +4079,10 @@ components:
             $ref: '#/components/schemas/BuildInputItem'
           type: array
           nullable: true
+        repair:
+          allOf:
+          - $ref: '#/components/schemas/BuildRepair'
+          x-go-type-skip-optional-pointer: false
         selection:
           $ref: '#/components/schemas/BuildSelection'
         version:
@@ -4086,6 +4090,22 @@ components:
             a valid tag name; a name already in use is a 409. Ignored when the spec tree is
             unchanged, because that build reuses the existing version.
           type: string
+      type: object
+    BuildRepair:
+      additionalProperties: false
+      description: >
+        A repair build (B4), "Fix" on a version whose validation failed. It cuts
+        `<of>.<n>` ("v1.1") at the fixed version's commit, so it builds the same
+        features from the same specs; the scenarios the fixed version's final
+        validation failed become its work as repair issues, and nothing is
+        planned. selection, version and inputs are ignored. A version with no
+        failing scenario refuses with 409.
+      properties:
+        of:
+          description: The version to fix ("v1"). A repair of a repair fixes the version it fixed.
+          type: string
+      required:
+      - of
       type: object
     BuildSelection:
       additionalProperties: false

@@ -17,6 +17,8 @@
 package spec
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -44,5 +46,40 @@ func TestFeatureOrder(t *testing.T) {
 	// F1 built earlier: F2 waits on nothing this version brings.
 	if got := featureOrder(spec, []string{"F2", "F3"}); fmt.Sprint(got["F2"]) != "[]" || fmt.Sprint(got["F3"]) != "[F2]" {
 		t.Errorf("with F1 built = %v", got)
+	}
+}
+
+// A repair version (B4) is a point release at the fixed version's commit,
+// carrying its features, recorded as fixing it, and taking no number of its own.
+func TestTagRepair(t *testing.T) {
+	t.Parallel()
+	seed := validSpecSeed()
+	r := newRig(t, seed)
+	ctx := context.Background()
+	v1, err := r.svc.SaveSpec(ctx, r.org, r.proj, SaveRequest{Pick: &reqspec.Pick{Features: []string{"F1"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := r.svc.TagRepair(ctx, r.org, r.proj, v1.Tag)
+	if err != nil || first != v1.Tag+".1" {
+		t.Fatalf("TagRepair = %q, %v", first, err)
+	}
+	// A repair of the repair fixes the version the repair fixed.
+	if second, err := r.svc.TagRepair(ctx, r.org, r.proj, first); err != nil || second != v1.Tag+".2" {
+		t.Fatalf("TagRepair(%s) = %q, %v", first, second, err)
+	}
+	versions, err := r.svc.ListVersions(ctx, r.org, r.proj)
+	if err != nil || len(versions) != 3 {
+		t.Fatalf("versions = %+v, %v", versions, err)
+	}
+	if v := versions[1]; v.Fixes != v1.Tag || fmt.Sprint(v.Features[0].ID) != "F1" {
+		t.Errorf("repair = %+v, want F1 fixing %s", v, v1.Tag)
+	}
+	if _, err := r.svc.TagRepair(ctx, r.org, r.proj, "v9"); !errors.Is(err, ErrNothingToRepair) {
+		t.Errorf("repair of an unknown version = %v", err)
+	}
+	facts, err := r.svc.BuildVersionFacts(ctx, r.org, r.proj)
+	if err != nil || facts.SuggestedVersion != "v2" {
+		t.Errorf("next suggested = %+v, %v, want v2: a repair takes no number", facts, err)
 	}
 }
