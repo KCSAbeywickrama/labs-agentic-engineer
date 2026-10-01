@@ -440,10 +440,17 @@ EOF
 # Its own key beside the official one, checked on every run: the apply above
 # prunes it on a re-run once setup-agent-manager.sh's own apply of this
 # ConfigMap has recorded it.
-OC_APIS_REWRITE='rewrite stop {
-  name regex (.+\.)?openchoreoapis\.localhost host.k3d.internal
+#
+# Built from DP_INGRESS_HOST rather than the literal openchoreoapis.localhost:
+# that suffix is only correct when AE_DOMAIN is localhost, and on a re-domained
+# cluster the data plane's gateway host is openchoreoapis.<AE_DOMAIN>. Left
+# literal, the rewrite matches nothing there and reintroduces exactly the
+# ENOTFOUND this key exists to prevent — silently, because a rewrite that
+# matches no name is not an error.
+OC_APIS_REWRITE="rewrite stop {
+  name regex (.+\\.)?${DP_INGRESS_HOST//./\\.} host.k3d.internal
   answer auto
-}'
+}"
 if [ "$(kubectl get cm coredns-custom -n kube-system -o jsonpath='{.data.openchoreoapis\.override}')" != "$OC_APIS_REWRITE" ]; then
     kubectl patch cm coredns-custom -n kube-system --type merge \
         -p "$(V="$OC_APIS_REWRITE" python3 -c 'import json,os; print(json.dumps({"data": {"openchoreoapis.override": os.environ["V"]}}))')"
