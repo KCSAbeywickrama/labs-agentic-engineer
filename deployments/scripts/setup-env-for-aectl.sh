@@ -498,6 +498,31 @@ oc_values() {
     fi
     echo "$out"
 }
+
+# Same rewrite for a manifest applied straight from upstream rather than passed
+# to helm as values.
+#
+# generate-workload-k3d.yaml is why this exists. Its build step does NOT address
+# the control plane by hostname — it connects to host.k3d.internal:8080 and
+# routes with an explicit `Host:` header, and that header ships hardcoded as
+# `thunder.openchoreo.localhost` / `api.openchoreo.localhost`. On a re-domained
+# cluster those names match no HTTPRoute, so the gateway answers 404, curl
+# --fail-with-body exits 22, and the build dies at "Requesting OAuth token"
+# naming neither the domain nor the header. The component is created and the
+# image is built; only the workload publish fails, so the console sits on
+# "building" with a red step and no cause in it.
+#
+# The URL stays http://host.k3d.internal:8080 under WITH_TLS=1 on purpose: the
+# control-plane Gateway keeps its 8080 listener beside 8443, this hop is a build
+# pod reaching the node over the docker bridge rather than anything crossing the
+# public network, and pointing it at 8443 would mean the pod validating a public
+# certificate for a name (host.k3d.internal) the certificate cannot carry.
+oc_manifest() {
+    local rel="$1" out="${UPSTREAM_VALUES_DIR}/$(basename "$1")"
+    curl -fsSL "${RAW}/${rel}" \
+        | sed "s/openchoreo\\.localhost/${OC_DOMAIN}/g" > "$out"
+    echo "$out"
+}
 cat > "$API_PLATFORM_VALUES" <<'YAML'
 # Bumped for the Agent Manager convergence (operator 0.6.0 -> 0.11.0, gateway
 # chart 1.0.1 -> 1.2.2). What changed in the gateway chart's value schema:
@@ -1590,11 +1615,12 @@ if [ "$WITH_BUILD" = "1" ]; then
       --version "${OC_VERSION}" --namespace openchoreo-workflow-plane \
       --values "${RAW}/install/k3d/single-cluster/values-wp.yaml"
 
+    # Re-domained on the way in rather than applied by URL — see oc_manifest.
     kubectl apply \
-      -f "${RAW}/samples/getting-started/workflow-templates/checkout-source.yaml" \
-      -f "${RAW}/samples/getting-started/workflow-templates.yaml" \
-      -f "${RAW}/samples/getting-started/workflow-templates/publish-image-k3d.yaml" \
-      -f "${RAW}/samples/getting-started/workflow-templates/generate-workload-k3d.yaml"
+      -f "$(oc_manifest samples/getting-started/workflow-templates/checkout-source.yaml)" \
+      -f "$(oc_manifest samples/getting-started/workflow-templates.yaml)" \
+      -f "$(oc_manifest samples/getting-started/workflow-templates/publish-image-k3d.yaml)" \
+      -f "$(oc_manifest samples/getting-started/workflow-templates/generate-workload-k3d.yaml)"
 
     kubectl wait -n openchoreo-workflow-plane --for=condition=Ready certificate/cluster-agent-workflowplane-tls --timeout=120s
     AGENT_CA=$(kubectl get secret cluster-agent-tls -n openchoreo-workflow-plane -o jsonpath='{.data.ca\.crt}' | base64 -d)
