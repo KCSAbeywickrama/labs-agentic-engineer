@@ -19,8 +19,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ScopeRoles } from "@aep/ui-openapi-view";
 import { env } from "../../../config/env";
-import { specKey } from "../../spec/api/specModel";
+import { mockSpecKey } from "../../spec/api/specModel";
 
+// The design review's shape. On the platform it is worked out from the room
+// (../useDesignModel.ts); the mock serves it whole, on the paths below, which
+// are not in the contract. Commenting has no platform backend yet (E5,
+// parked), so its mutations are the mock's alone.
+//
+// What follows is the mock's original note.
+//
 // PROVISIONAL — MOCK-ONLY until E1/E4/E5 land the design review's contract.
 //
 // The design card needs the design review: the artifacts the design turn
@@ -82,7 +89,9 @@ export type ArtifactSource =
   | { kind: "contract"; design: string; openapi: string | null; roles?: ScopeRoles }
   | { kind: "security"; rows: { subject: string; rule: string }[] }
   /** A feature's acceptance file, Gherkin with rules tagged `@story-F2.3` (@aep/ui-acceptance-view). */
-  | { kind: "acceptance"; path: string; content: string };
+  | { kind: "acceptance"; path: string; content: string }
+  /** A design document as the design writes it: prose around one mermaid diagram (a flow, the domain model). */
+  | { kind: "document"; path: string; markdown: string };
 
 export type ArtifactKind = ArtifactSource["kind"];
 
@@ -173,6 +182,8 @@ export interface DesignModel {
   comments: DesignComment[];
   /** This user has done the feedback loop once: the teaching box folds away. */
   taught: boolean;
+  /** Whether comments can be pinned, addressed and resolved here (E5: the mock only, for now). */
+  commenting: boolean;
 }
 
 /** The provisional path MSW serves; `:projectName` is the project's slug. */
@@ -208,11 +219,13 @@ function post(body?: unknown): RequestInit {
     : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
 }
 
-export function useDesignModel(projectName: string) {
+/** The mock's design review, whole; never asked for on the platform. */
+export function useMockDesignModel(projectName: string, enabled: boolean) {
   return useQuery({
     queryKey: designKey(projectName),
     queryFn: async () =>
       readModel(await fetch(url(PROVISIONAL_DESIGN_PATH, { projectName })), "Couldn't load the design"),
+    enabled,
   });
 }
 
@@ -226,7 +239,7 @@ function useDesignMutation<T>(projectName: string, send: (input: T) => Promise<D
     mutationFn: send,
     onSuccess: (model) => {
       queryClient.setQueryData(designKey(projectName), model);
-      void queryClient.invalidateQueries({ queryKey: specKey(projectName) });
+      void queryClient.invalidateQueries({ queryKey: mockSpecKey(projectName) });
     },
   });
 }

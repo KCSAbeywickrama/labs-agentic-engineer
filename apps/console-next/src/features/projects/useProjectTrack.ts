@@ -20,7 +20,7 @@ import { useMemo } from "react";
 import { useBuilds } from "../builds/api/builds";
 import { useBuildOffer } from "../builds/buildPicker";
 import { useBuildOutcome } from "../builds/hooks/useBuildOutcome";
-import { useDesignModel } from "../design/api/designModel";
+import { useDesignModel } from "../design/useDesignModel";
 import { useSpecWorkspace } from "../spec/useSpecWorkspace";
 import { projectTrack, type ProjectTrack } from "./model/track";
 

@@ -22,7 +22,7 @@ import { EmptyState } from "../../../components/EmptyState";
 import { BuildButton } from "../../builds/components/BuildButton";
 import { PHONE } from "../../shell/layout";
 import { useSpecWorkspace } from "../../spec/useSpecWorkspace";
-import { useDesignModel } from "../api/designModel";
+import { useDesignModel } from "../useDesignModel";
 import { blockingDependencies, openArtifact } from "../model/artifacts";
 import { openComments } from "../model/comments";
 import { useDepthFilter } from "../useDepthFilter";

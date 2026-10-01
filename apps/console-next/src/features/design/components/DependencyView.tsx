@@ -62,6 +62,11 @@ export function DependencyView({
               </Button>
             ))}
           </Box>
+          {dependency.options.length === 0 && (
+            <Typography variant="body2" color="text.secondary">
+              Settle it in the chat: tell the agent what to use, and it updates the design.
+            </Typography>
+          )}
           {settle.isError && <Alert severity="error">{settle.error.message}</Alert>}
         </>
       )}

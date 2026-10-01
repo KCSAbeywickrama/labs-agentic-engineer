@@ -40,6 +40,7 @@ import { TeachingBox } from "./TeachingBox";
 import { FlowView } from "./viewers/FlowView";
 import { AcceptanceArtifact, ArchitectureArtifact, ContractArtifact, PrototypeArtifact } from "./viewers/PackagedViewers";
 import { DataModelView, RolesView, SecurityView } from "./viewers/RecordViews";
+import { DocumentView } from "./viewers/DocumentView";
 
 const FeatureLink = createLink(ButtonBase);
 
@@ -83,6 +84,8 @@ function ArtifactBody({
       return <SecurityView source={source} />;
     case "acceptance":
       return <AcceptanceArtifact source={source} />;
+    case "document":
+      return <DocumentView markdown={source.markdown} />;
   }
 }
 
@@ -163,7 +166,8 @@ export function ArtifactView({
           ))}
         </Box>
       </Box>
-      <TeachingBox taught={design.taught} />
+      {design.commenting && <TeachingBox taught={design.taught} />}
+      {design.commenting && (
       <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, flexWrap: "wrap" }}>
         {interactive ? (
           <Segmented
@@ -180,8 +184,9 @@ export function ArtifactView({
           {mode === "comment" ? "Click anything to pin a comment" : "Switch to Comment to pin one"}
         </Typography>
       </Box>
+      )}
       <CommentSurface
-        commenting={mode === "comment"}
+        commenting={design.commenting && mode === "comment"}
         pins={pins}
         fallbackLabel={view ? `the ${view} screen` : artifact.title}
         onPick={setDraft}
@@ -190,6 +195,7 @@ export function ArtifactView({
         <ArtifactBody artifact={artifact} projectName={projectName} onScreen={onScreen} />
       </CommentSurface>
       {failure && <Alert severity="error">{failure.message}</Alert>}
+      {design.commenting && (
       <CommentsPanel
         comments={comments}
         gone={gone}
@@ -206,6 +212,7 @@ export function ArtifactView({
         onResolve={(id) => resolve.mutate(id)}
         onReply={(id, text) => reply.mutate({ commentId: id, text })}
       />
+      )}
     </Box>
   );
 }

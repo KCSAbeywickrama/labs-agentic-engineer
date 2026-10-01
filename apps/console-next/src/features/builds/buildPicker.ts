@@ -18,7 +18,7 @@
 
 import { createContext, useCallback, useContext, useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useDesignModel } from "../design/api/designModel";
+import { useDesignModel } from "../design/useDesignModel";
 import { useSpecWorkspace } from "../spec/useSpecWorkspace";
 import { useBuilds } from "./api/builds";
 import { buildOffer, offeredRows, type BuildOffer } from "./model/picker";

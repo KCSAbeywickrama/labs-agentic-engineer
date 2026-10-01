@@ -176,6 +176,7 @@ export function designView(projectName: string): DesignModel {
     dependencies: design.dependencies,
     comments: design.comments.map(publicComment),
     taught: design.taught,
+    commenting: true,
   };
 }
 
