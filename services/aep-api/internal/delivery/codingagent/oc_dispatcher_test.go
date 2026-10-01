@@ -122,14 +122,14 @@ func ocDispatchInputs() OCDispatchInputs {
 
 func TestOCDispatcher_HappyCreateChain(t *testing.T) {
 	fake := &fakeOCSurface{}
-	d := NewOCDispatcher(fake)
+	d := NewOCDispatcher(fake, testWriteTargets())
 
 	got, err := d.Dispatch(context.Background(), ocDispatchInputs())
 	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
-	if got != "ca-11111111-2608061200" {
-		t.Errorf("Dispatch returned %q, want RunName", got)
+	if got.RunName != "ca-11111111-2608061200" {
+		t.Errorf("Dispatch returned %q, want RunName", got.RunName)
 	}
 	want := []string{"ensure-type", "create-component", "ensure-workload", "ensure-release", "ensure-binding"}
 	if fmt.Sprint(fake.calls) != fmt.Sprint(want) {
@@ -157,8 +157,8 @@ func TestOCDispatcher_HappyCreateChain(t *testing.T) {
 			t.Errorf("label %s = %q, want %q", key, fake.create.Labels[key], wantVal)
 		}
 	}
-	if fake.bind[0] != openchoreo.DevEnvironmentName {
-		t.Errorf("bound env = %q, want %q", fake.bind[0], openchoreo.DevEnvironmentName)
+	if fake.bind[0] != "development" {
+		t.Errorf("bound env = %q, want the project's write target", fake.bind[0])
 	}
 	if fake.bind[1] != fake.rel {
 		t.Errorf("binding release %q != generated release %q", fake.bind[1], fake.rel)
@@ -168,19 +168,75 @@ func TestOCDispatcher_HappyCreateChain(t *testing.T) {
 	}
 }
 
+// The Job is bound into the project's own write target, and the result says
+// which one so the cycle can record it.
+func TestOCDispatcher_BindsIntoTheProjectsWriteTarget(t *testing.T) {
+	fake := &fakeOCSurface{}
+	d := NewOCDispatcher(fake, &fakeWriteTargets{env: "dev-b"})
+
+	got, err := d.Dispatch(context.Background(), ocDispatchInputs())
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if fake.bind[0] != "dev-b" {
+		t.Errorf("bound env = %q, want dev-b", fake.bind[0])
+	}
+	want := OCDispatchResult{RunName: "ca-11111111-2608061200", Environment: "dev-b"}
+	if got != want {
+		t.Errorf("Dispatch = %+v, want %+v", got, want)
+	}
+}
+
+// A project whose pipeline names no write target is refused before
+// CreateComponent, so no billed Component is minted for a Job that could not
+// be bound anywhere, and the refusal carries the delivery sentinel the
+// supervisor classifies.
+func TestOCDispatcher_NoWriteTargetFailsBeforeCreate(t *testing.T) {
+	fake := &fakeOCSurface{}
+	cause := &openchoreo.ErrNoWriteTarget{Org: "acme", Project: "widgets", Cause: openchoreo.ErrPipelineRefMissing}
+	d := NewOCDispatcher(fake, &fakeWriteTargets{err: cause})
+
+	_, err := d.Dispatch(context.Background(), ocDispatchInputs())
+	if !errors.Is(err, delivery.ErrNoWriteTarget) {
+		t.Fatalf("want delivery.ErrNoWriteTarget, got %v", err)
+	}
+	var nwt *openchoreo.ErrNoWriteTarget
+	if !errors.As(err, &nwt) {
+		t.Errorf("the resolver's cause must survive, got %v", err)
+	}
+	if len(fake.calls) != 0 {
+		t.Errorf("chain = %v, want nothing written", fake.calls)
+	}
+}
+
+// A transient resolve failure is not a configuration fact: it is returned as a
+// plain launch error, and still nothing is created.
+func TestOCDispatcher_TransientResolveFailureIsNotNoWriteTarget(t *testing.T) {
+	fake := &fakeOCSurface{}
+	d := NewOCDispatcher(fake, &fakeWriteTargets{err: fmt.Errorf("%w: 503", openchoreo.ErrInternalServerError)})
+
+	_, err := d.Dispatch(context.Background(), ocDispatchInputs())
+	if err == nil || errors.Is(err, delivery.ErrNoWriteTarget) {
+		t.Fatalf("want a plain launch error, got %v", err)
+	}
+	if len(fake.calls) != 0 {
+		t.Errorf("chain = %v, want nothing written", fake.calls)
+	}
+}
+
 func TestOCDispatcher_ConflictIsSuccess(t *testing.T) {
 	// Mirrors ComponentClient: CreateComponent 409 → refetch → nil error.
 	// Dispatch must still walk Workload → Release → Binding over the existing
 	// Component name.
 	fake := &fakeOCSurface{simulateCreateConflict: true}
-	d := NewOCDispatcher(fake)
+	d := NewOCDispatcher(fake, testWriteTargets())
 
 	got, err := d.Dispatch(context.Background(), ocDispatchInputs())
 	if err != nil {
 		t.Fatalf("Dispatch after conflict-as-success: %v", err)
 	}
-	if got != "ca-11111111-2608061200" {
-		t.Errorf("got %q", got)
+	if got.RunName != "ca-11111111-2608061200" {
+		t.Errorf("got %q", got.RunName)
 	}
 	want := []string{
 		"ensure-type", "create-component", "create-conflict-refetch",
@@ -198,7 +254,7 @@ func TestOCDispatcher_402MapsToQuotaExceeded(t *testing.T) {
 	fake := &fakeOCSurface{
 		createErr: fmt.Errorf("%w: create component ca-x: quota", openchoreo.ErrPaymentRequired),
 	}
-	d := NewOCDispatcher(fake)
+	d := NewOCDispatcher(fake, testWriteTargets())
 
 	_, err := d.Dispatch(context.Background(), ocDispatchInputs())
 	if !errors.Is(err, delivery.ErrAgentQuotaExceeded) {
@@ -211,7 +267,7 @@ func TestOCDispatcher_402MapsToQuotaExceeded(t *testing.T) {
 
 func TestOCDispatcher_ValidationDisplayName(t *testing.T) {
 	fake := &fakeOCSurface{}
-	d := NewOCDispatcher(fake)
+	d := NewOCDispatcher(fake, testWriteTargets())
 	in := ocDispatchInputs()
 	in.Kind = "validation"
 
@@ -226,14 +282,14 @@ func TestOCDispatcher_ValidationDisplayName(t *testing.T) {
 func TestOCDispatcher_RetentionErrorContinuesCreate(t *testing.T) {
 	fake := &fakeOCSurface{}
 	ret := &fakeRetention{err: errors.New("list internal components: unavailable")}
-	d := NewOCDispatcher(fake).WithRetention(ret)
+	d := NewOCDispatcher(fake, testWriteTargets()).WithRetention(ret)
 
 	got, err := d.Dispatch(context.Background(), ocDispatchInputs())
 	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
-	if got != "ca-11111111-2608061200" {
-		t.Errorf("got %q, want RunName", got)
+	if got.RunName != "ca-11111111-2608061200" {
+		t.Errorf("got %q, want RunName", got.RunName)
 	}
 	want := []string{"ensure-type", "create-component", "ensure-workload", "ensure-release", "ensure-binding"}
 	if fmt.Sprint(fake.calls) != fmt.Sprint(want) {
@@ -245,7 +301,7 @@ func TestOCDispatcher_RetentionCalledBeforeCreate(t *testing.T) {
 	var order []string
 	fake := &fakeOCSurface{orderLog: &order}
 	ret := &fakeRetention{orderLog: &order}
-	d := NewOCDispatcher(fake).WithRetention(ret)
+	d := NewOCDispatcher(fake, testWriteTargets()).WithRetention(ret)
 
 	if _, err := d.Dispatch(context.Background(), ocDispatchInputs()); err != nil {
 		t.Fatalf("Dispatch: %v", err)

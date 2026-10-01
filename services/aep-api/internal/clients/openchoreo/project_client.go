@@ -27,6 +27,10 @@ import (
 
 //go:generate go run github.com/matryer/moq@v0.7.1 -rm -fmt goimports -pkg mocks -out mocks/project_client_mock.go . ProjectClient
 
+// defaultProjectTypeName is the namespaced ProjectType every project AEP
+// creates references. The org's platform seeds it (see buildCreateProjectBody).
+const defaultProjectTypeName = "default"
+
 // ProjectClient defines operations for managing OpenChoreo projects.
 type ProjectClient interface {
 	ListProjects(ctx context.Context, orgName string, limit int, cursor string) (*gen.ProjectList, error)
@@ -37,6 +41,8 @@ type ProjectClient interface {
 
 type projectClient struct {
 	oc *ocgen.ClientWithResponses
+	// labels are stamped on every write (Config.ResourceLabels).
+	labels resourceLabels
 }
 
 func NewProjectClient(cfg Config) ProjectClient {
@@ -44,7 +50,7 @@ func NewProjectClient(cfg Config) ProjectClient {
 	if err != nil {
 		panic(fmt.Errorf("init openchoreo project client: %w", err))
 	}
-	return &projectClient{oc: oc}
+	return &projectClient{oc: oc, labels: newResourceLabels(cfg.ResourceLabels)}
 }
 
 func (c *projectClient) ListProjects(ctx context.Context, orgName string, limit int, cursor string) (*gen.ProjectList, error) {
@@ -101,7 +107,9 @@ func (c *projectClient) GetProject(ctx context.Context, orgName, projectName str
 }
 
 func (c *projectClient) CreateProject(ctx context.Context, orgName string, body *gen.CreateProjectRequest) (*gen.Project, error) {
-	resp, err := c.oc.CreateProjectWithResponse(ctx, orgName, buildCreateProjectBody(body))
+	req := buildCreateProjectBody(body)
+	c.labels.stamp(&req.Metadata)
+	resp, err := c.oc.CreateProjectWithResponse(ctx, orgName, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create project: %w", err)
 	}
@@ -159,9 +167,26 @@ func projectToModel(p ocgen.Project) gen.Project {
 	}
 }
 
+// buildCreateProjectBody assembles the CreateProject request body.
 func buildCreateProjectBody(req *gen.CreateProjectRequest) ocgen.CreateProjectJSONRequestBody {
+	// Reference the per-org NAMESPACED ProjectType/default (not the
+	// cluster-scoped ClusterProjectType). Why: OpenChoreo's API defaults a
+	// typeless create to ClusterProjectType/default, and wso2cloud has none —
+	// its org bootstrap seeds a namespaced ProjectType/default into every org
+	// namespace instead, so a typeless Project sits at ProjectTypeNotFound and
+	// never gets a ProjectRelease or a cell namespace. Same rule as
+	// buildCreateComponentBody's kind=ComponentType.
+	//
+	// Locally the platform chart stands in for that bootstrap: with
+	// localOrgProvisioning it renders the same ProjectType/default into the org
+	// namespace. So the reference resolves in both environments — no lookup, no
+	// fallback, no env branch.
+	ptKind := ocgen.ProjectTypeRefKindProjectType
 	body := ocgen.Project{
 		Metadata: ocgen.ObjectMeta{Name: req.Name},
+		Spec: &ocgen.ProjectSpec{
+			Type: &ocgen.ProjectTypeRef{Kind: &ptKind, Name: defaultProjectTypeName},
+		},
 	}
 	if req.DisplayName != "" || req.Description != "" {
 		ann := map[string]string{}
@@ -174,12 +199,10 @@ func buildCreateProjectBody(req *gen.CreateProjectRequest) ocgen.CreateProjectJS
 		body.Metadata.Annotations = &ann
 	}
 	if req.DeploymentPipeline != "" {
-		body.Spec = &ocgen.ProjectSpec{
-			DeploymentPipelineRef: &struct {
-				Kind *ocgen.ProjectSpecDeploymentPipelineRefKind `json:"kind,omitempty"`
-				Name string                                      `json:"name"`
-			}{Name: req.DeploymentPipeline},
-		}
+		body.Spec.DeploymentPipelineRef = &struct {
+			Kind *ocgen.ProjectSpecDeploymentPipelineRefKind `json:"kind,omitempty"`
+			Name string                                      `json:"name"`
+		}{Name: req.DeploymentPipeline}
 	}
 	return body
 }

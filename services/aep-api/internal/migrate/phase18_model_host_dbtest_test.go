@@ -266,7 +266,7 @@ func populateUsage(t *testing.T, db *gorm.DB, stamper *modelcost.Stamper, org st
 		if err := cycleRepo.Append(ctx, c); err != nil {
 			t.Fatalf("append %s: %v", capture.kind, err)
 		}
-		if _, err := cycleRepo.NoteModelHost(ctx, c.ID, modelconn.AnthropicHost); err != nil {
+		if _, err := cycleRepo.NoteLaunch(ctx, c.ID, modelconn.AnthropicHost, "development"); err != nil {
 			t.Fatalf("note host %s: %v", capture.kind, err)
 		}
 		if err := cycleRepo.RecordUsage(ctx, c.ID, capture.usage); err != nil {

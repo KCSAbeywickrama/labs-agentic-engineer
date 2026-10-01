@@ -1175,6 +1175,11 @@ type fakeTargets struct {
 	// identity provider" case. Scope keeps working, which is what lets the panel
 	// degrade instead of failing.
 	err error
+	// scopeErr, when set, is what Scope answers — the project's write target
+	// could not be read, so not even the platform's own rows are addressable.
+	scopeErr error
+	// scoped records every (org, project) Scope was asked for, in order.
+	scoped [][2]string
 	// resolved counts Resolve calls, so a test can see the directory being
 	// looked up once per operation rather than per role.
 	resolved int
@@ -1184,18 +1189,22 @@ type fakeTargets struct {
 
 func newFakeTargets(dir Directory) *fakeTargets { return &fakeTargets{dir: dir} }
 
-func (f *fakeTargets) Scope(orgID string) Scope {
-	return Scope{OrgID: orgID, Environment: testEnvironment}
+func (f *fakeTargets) Scope(_ context.Context, orgID, projectID string) (Scope, error) {
+	f.scoped = append(f.scoped, [2]string{orgID, projectID})
+	if f.scopeErr != nil {
+		return Scope{}, f.scopeErr
+	}
+	return Scope{OrgID: orgID, Environment: testEnvironment}, nil
 }
 
-func (f *fakeTargets) Resolve(_ context.Context, orgID string) (Target, error) {
+func (f *fakeTargets) Resolve(_ context.Context, scope Scope) (Target, error) {
 	f.resolved++
-	f.orgs = append(f.orgs, orgID)
+	f.orgs = append(f.orgs, scope.OrgID)
 	if f.err != nil {
 		return Target{}, f.err
 	}
 	return Target{
-		OrgID: orgID, Environment: testEnvironment,
+		OrgID: scope.OrgID, Environment: scope.Environment,
 		Issuer: testIssuer, Directory: f.dir,
 	}, nil
 }

@@ -262,6 +262,9 @@ type loop struct {
 	// two components at two different commits.
 	deployFailed   []delivery.DeployTarget
 	deployFailures map[string]string
+	// deployEnvironment is where the failed bindings live, from the poll that
+	// reported them. Empty for a failure no binding was read for.
+	deployEnvironment string
 	// cycleID is the current cycle's record id. Surfaced on the loop because the
 	// verdict write lands after the agent stage has returned.
 	cycleID string
@@ -458,6 +461,10 @@ func (l *loop) work(ctx workflow.Context, ends bookends) (RunResult, error) {
 			return l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonPublisherCredentials)
 		case cycleProviderLimit:
 			return l.settle(ctx, delivery.RunStateBlocked, delivery.RunReasonModelProviderLimit)
+		case cycleNoWriteTarget:
+			// A configuration fault: settled directly, before the deploy-fix
+			// mint below, so no agent is dispatched at a pipeline.
+			return l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonNoWriteTarget)
 		default:
 			// File the deploy's work before looping, on whatever the cycle's
 			// RESULT was: a red cycle can also have a failed deployment now that
@@ -613,7 +620,9 @@ func (l *loop) runCycle(ctx workflow.Context, kind string, anchorIssue int) (cyc
 	l.st.Phase = delivery.RunPhaseDeploying
 	version, err := l.readVersionState(ctx)
 	if err != nil {
-		return cycleNone, err
+		// The version read resolves the write target too, and is the first step
+		// of the stage to do so.
+		return noWriteTargetResult(ctx, "version read", err)
 	}
 	deployRes, err := l.reconcileVersion(ctx, version)
 	if err != nil {
@@ -622,6 +631,10 @@ func (l *loop) runCycle(ctx workflow.Context, kind string, anchorIssue int) (cyc
 	switch {
 	case deployRes == cycleCancelled:
 		return cycleCancelled, nil
+	case deployRes == cycleNoWriteTarget:
+		// Ahead of a red build: the red build's fix issue could never deploy
+		// either, and the run has to settle on the configuration fault.
+		return cycleNoWriteTarget, nil
 	case buildRes == cycleRed:
 		return cycleRed, nil
 	default:
@@ -929,7 +942,7 @@ func (l *loop) pollMilestone(ctx workflow.Context) (MilestoneSnapshot, error) {
 func (l *loop) readVersionState(ctx workflow.Context) (delivery.VersionState, error) {
 	var out delivery.VersionState
 	if err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).ReadVersionState,
-		ProjectRef{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID}).Get(ctx, &out); err != nil {
+		ProjectRef{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID, RunID: l.in.RunID}).Get(ctx, &out); err != nil {
 		return delivery.VersionState{}, err
 	}
 	l.st.Version = out
@@ -1112,6 +1125,7 @@ func (l *loop) mintDeployFixIssues(ctx workflow.Context) error {
 			OrgID:           l.in.OrgID,
 			ProjectID:       l.in.ProjectID,
 			MilestoneNumber: l.in.MilestoneNumber,
+			Environment:     l.deployEnvironment,
 			Failed:          l.deployFailed,
 			Reasons:         l.deployFailures,
 		}).Get(ctx, nil)
@@ -1120,6 +1134,6 @@ func (l *loop) mintDeployFixIssues(ctx workflow.Context) error {
 	}
 	workflow.GetLogger(ctx).Info("deployment failed; filed fix work",
 		"components", delivery.TargetNames(l.deployFailed))
-	l.deployFailed, l.deployFailures = nil, nil
+	l.deployFailed, l.deployFailures, l.deployEnvironment = nil, nil, ""
 	return nil
 }

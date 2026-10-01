@@ -85,7 +85,9 @@ func (s *TeardownService) Enabled() bool {
 type TeardownReport struct {
 	// Scope is the (org, environment) whose identity provider was worked on. It
 	// is filled in even when the directory could not be reached, because the
-	// scope is pure (TargetResolver.Scope) and the store rows are keyed by it.
+	// scope is read separately (TargetResolver.Scope) and the store rows are
+	// keyed by it. It is empty only when the project's write target could not
+	// be read.
 	Scope Scope
 	// ProjectID is the project whose objects these were.
 	ProjectID string
@@ -164,7 +166,8 @@ func (s *TeardownService) TeardownProject(ctx context.Context, orgID, projectID 
 // not be resolved at all. The rows are keyed to a project that is being deleted:
 // leaving them would let a project recreated under the same name adopt stale
 // directory ids, which is a worse failure than an orphaned directory object that
-// the report has named.
+// the report has named. The one thing that stops it is a write target that
+// cannot be read: then there is no scope to key the rows by.
 //
 // Groups and users appear nowhere in the above. That is the invariant, not an
 // omission — see the file header and README.md.
@@ -173,12 +176,20 @@ func (s *TeardownService) Teardown(ctx context.Context, orgID, projectID string)
 	if !s.Enabled() {
 		return report
 	}
-	// Scope is pure and cannot fail, so the rows are addressable even when the
-	// directory is not. That split is the whole reason TargetResolver has two
-	// methods.
-	report.Scope = s.targets.Scope(orgID)
+	// The scope comes from the project's write target, read while the project
+	// still exists (the project delete runs this before the OC Project delete).
+	// Without it neither the directory nor the rows can be addressed, so the
+	// failure is reported and nothing else runs. With it the rows are
+	// addressable even when the directory is not; that split is the reason
+	// TargetResolver has two methods.
+	scope, err := s.targets.Scope(ctx, orgID, projectID)
+	if err != nil {
+		report.fail(ctx, "read the project's write target", err)
+		return report
+	}
+	report.Scope = scope
 
-	if target, err := s.targets.Resolve(ctx, orgID); err != nil {
+	if target, err := s.targets.Resolve(ctx, scope); err != nil {
 		// No directory: the objects stand, and the report says so. The rows
 		// below still go.
 		report.fail(ctx, "resolve the environment's identity provider", err)

@@ -103,15 +103,18 @@ type fakeRecordSource struct {
 	binding    string
 	bindingErr error
 	bindings   int
-	seen       chan struct{}
+	// bindingEnvs is the environment each Binding call asked for.
+	bindingEnvs []string
+	seen        chan struct{}
 }
 
 // Binding resolves the attempt's release binding, counting the calls: it is
 // fixed for the attempt, so how OFTEN it is asked for is part of the contract.
-func (f *fakeRecordSource) Binding(_ context.Context, _, _, _ string) (string, error) {
+func (f *fakeRecordSource) Binding(_ context.Context, _, _, _, environment string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.bindings++
+	f.bindingEnvs = append(f.bindingEnvs, environment)
 	if f.bindingErr != nil {
 		return "", f.bindingErr
 	}
@@ -217,16 +220,18 @@ func (f *fakeRecordSource) bindingCalls() int {
 // first: while the Component exists the lines are still there, and the archive
 // is the fallback for what the pod can no longer give back.
 type spyArchive struct {
-	mu    sync.Mutex
-	text  string
-	err   error
-	calls int
+	mu     sync.Mutex
+	text   string
+	err    error
+	calls  int
+	scopes []ArchiveScope
 }
 
-func (a *spyArchive) CycleArchive(context.Context, ArchiveScope) (string, error) {
+func (a *spyArchive) CycleArchive(_ context.Context, scope ArchiveScope) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.calls++
+	a.scopes = append(a.scopes, scope)
 	return a.text, a.err
 }
 
@@ -597,6 +602,37 @@ func TestRecorder_ArchiveBackfillRepairsAGapTheLivePodCannot(t *testing.T) {
 	}
 	if archive.reads() != 1 {
 		t.Errorf("the archive was read %d times, want 1 — at most one repair per page", archive.reads())
+	}
+}
+
+// A session reads its binding, and asks the archive, in the environment the
+// cycle's Job was bound into.
+func TestRecorder_ReadsInTheCyclesEnvironment(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2026, 9, 4, 9, 25, 39, 0, time.UTC)
+	f := newRecorderFixture(t, at.Add(3*time.Second),
+		v1LogLine(1, at, `"kind":"log","summary":"one"`),
+		v1LogLine(4, at.Add(3*time.Second), `"kind":"log","summary":"four"`),
+	)
+	f.cycle.Environment = "dev-b"
+	archive := &spyArchive{}
+	f.rec.WithArchive(archive)
+
+	s := f.session(t, 1)
+	if done, _ := s.poll(context.Background()); done {
+		t.Fatal("a Running pod ended the session")
+	}
+	f.src.mu.Lock()
+	envs := append([]string(nil), f.src.bindingEnvs...)
+	f.src.mu.Unlock()
+	if len(envs) != 1 || envs[0] != "dev-b" {
+		t.Fatalf("binding read in %v, want [dev-b]", envs)
+	}
+	archive.mu.Lock()
+	defer archive.mu.Unlock()
+	if len(archive.scopes) == 0 || archive.scopes[0].Environment != "dev-b" {
+		t.Fatalf("archive scopes = %+v, want the gap repair asked in dev-b", archive.scopes)
 	}
 }
 

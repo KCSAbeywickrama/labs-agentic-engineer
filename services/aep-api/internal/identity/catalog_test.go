@@ -261,3 +261,30 @@ func TestCatalogFailsWhenTheEnvironmentHasNoIdentityProvider(t *testing.T) {
 		t.Fatal("List succeeded for an environment with no identity provider")
 	}
 }
+
+// The catalog is the org's, not any one project's, so it asks for the org
+// default's identity provider: an empty project in the Scope call.
+func TestCatalogScopesToTheOrgDefault(t *testing.T) {
+	targets := newFakeTargets(newFakeDirectory())
+
+	if _, err := NewCatalogService(targets, newFakeStore()).List(context.Background(), catalogOrg); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(targets.scoped) != 1 || targets.scoped[0] != [2]string{catalogOrg, ""} {
+		t.Fatalf("Scope calls = %v, want one for (%q, \"\")", targets.scoped, catalogOrg)
+	}
+}
+
+// A write target that cannot be read fails the catalog like a missing identity
+// provider does, and nothing is resolved without a scope.
+func TestCatalogFailsWhenTheScopeCannotBeRead(t *testing.T) {
+	targets := newFakeTargets(newFakeDirectory())
+	targets.scopeErr = errors.New("pipeline default is cyclic")
+
+	if _, err := NewCatalogService(targets, newFakeStore()).List(context.Background(), catalogOrg); err == nil {
+		t.Fatal("List succeeded with no scope")
+	}
+	if targets.resolved != 0 {
+		t.Fatalf("resolved %d times without a scope", targets.resolved)
+	}
+}

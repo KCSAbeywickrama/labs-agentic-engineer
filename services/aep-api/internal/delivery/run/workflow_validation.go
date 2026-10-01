@@ -193,6 +193,8 @@ func stateForUnlandedValidation(res cycleResult) (state, reason string) {
 		return delivery.RunStateBlocked, delivery.RunReasonPublisherCredentials
 	case cycleProviderLimit:
 		return delivery.RunStateBlocked, delivery.RunReasonModelProviderLimit
+	case cycleNoWriteTarget:
+		return delivery.RunStateFailed, delivery.RunReasonNoWriteTarget
 	case cycleConflict:
 		return delivery.RunStateFailed, delivery.RunReasonConflictBudget
 	default:

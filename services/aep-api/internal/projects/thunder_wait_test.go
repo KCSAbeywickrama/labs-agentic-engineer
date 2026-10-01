@@ -144,7 +144,7 @@ func newThunderWaitHarness(t *testing.T, opts thunderWaitOpts) *thunderWaitHarne
 		},
 	}
 	thunder := &fakeThunderReader{view: opts.cr, err: opts.thunderErr}
-	svc := NewDeploymentService(oc, traitStoreWith(map[string]string{
+	svc := newTestDeploymentService(oc, traitStoreWith(map[string]string{
 		spec.DesignRootFile:                             traitRootMd(),
 		"components/" + opts.component + "/design.json": opts.designBody,
 	}))
@@ -275,8 +275,8 @@ func TestDeploymentState_WebAppThunderPlaceholderIsNotReady(t *testing.T) {
 		t.Fatal("placeholder mismatch must stay pending, not Failed")
 	}
 	assertRedirectPatch(t, h.rc, thunderWaitCallback, 1)
-	if h.thunder.gets != 1 || h.thunder.resource != thunderWaitCRName || h.thunder.env != openchoreo.DevEnvironmentName {
-		t.Errorf("Thunder FindByResource = %d %s/%s, want 1 %s/%s", h.thunder.gets, h.thunder.resource, h.thunder.env, thunderWaitCRName, openchoreo.DevEnvironmentName)
+	if h.thunder.gets != 1 || h.thunder.resource != thunderWaitCRName || h.thunder.env != testWriteTarget {
+		t.Errorf("Thunder FindByResource = %d %s/%s, want 1 %s/%s", h.thunder.gets, h.thunder.resource, h.thunder.env, thunderWaitCRName, testWriteTarget)
 	}
 }
 

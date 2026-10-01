@@ -163,6 +163,15 @@ const (
 	// run's failure record carries the host and, when the provider stated one,
 	// the reset time the console's sentence names.
 	RunReasonModelProviderLimit = "model-provider-limit"
+	// RunReasonNoWriteTarget — the project's deployment pipeline names no
+	// environment to write into (no pipeline ref, a missing, empty or cyclic
+	// pipeline), so the coding agent cannot be dispatched and the deploy stage
+	// (gate, version read, promote, readiness poll) cannot proceed. A
+	// configuration fault, not a component that would not come up: no fix
+	// issue is filed and no agent is dispatched at it, because no code change
+	// can repair a pipeline. The run's failure record
+	// (RunFailureCodeNoWriteTarget) carries the cause.
+	RunReasonNoWriteTarget = "no-write-target"
 
 	// Validation verdicts — what the run learned about the deployed system. Empty
 	// until the validation cycle settles.

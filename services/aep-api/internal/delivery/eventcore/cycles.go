@@ -19,6 +19,7 @@ package eventcore
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
@@ -28,14 +29,18 @@ import (
 // an unmerged one on crash resume), so the platform records what actually
 // happened rather than what it asked for.
 //
+// Every writer fed by a delivery also passes the moment that delivery DESCRIBES
+// (the pull request's updated_at), and writes nothing when it predates the open
+// cycle: see cycleAsOf.
+//
 // Both writers are best-effort. The repository guards every mutator on the
 // cycle still being open, so a redelivered webhook changes no row and returns
 // (nil, nil) — and a bookkeeping failure must never fail webhook processing,
 // because the merge and the build fan-out are the parts that matter.
 
 // noteCyclePR records the pull request the agent opened on the run's open cycle.
-func (e *Events) noteCyclePR(ctx context.Context, run *delivery.MilestoneRun, pr delivery.CyclePullRequest) {
-	cycle := e.openCycle(ctx, run)
+func (e *Events) noteCyclePR(ctx context.Context, run *delivery.MilestoneRun, pr delivery.CyclePullRequest, asOf time.Time) {
+	cycle := e.cycleAsOf(ctx, run, asOf)
 	if cycle == nil {
 		return
 	}
@@ -73,8 +78,8 @@ func keepKnownURL(pr delivery.CyclePullRequest, cycle *delivery.RunCycle) delive
 // matched issues, and the boundary read the supervisor dispatches on returns
 // counts, so an unrecorded matched set is unrecoverable the moment the merge
 // lands.
-func (e *Events) noteCycleMergeDecision(ctx context.Context, run *delivery.MilestoneRun, decision mergeDecision) {
-	cycle := e.openCycle(ctx, run)
+func (e *Events) noteCycleMergeDecision(ctx context.Context, run *delivery.MilestoneRun, decision mergeDecision, asOf time.Time) {
+	cycle := e.cycleAsOf(ctx, run, asOf)
 	if cycle == nil {
 		return
 	}
@@ -105,8 +110,8 @@ func (e *Events) noteCycleMergeRefused(ctx context.Context, run *delivery.Milest
 // closeCycle stamps the merge onto the run's open cycle and closes it. It also
 // backfills branch/PR when the pull_request.opened delivery was missed, so a
 // cycle that only ever saw its merge still records what landed.
-func (e *Events) closeCycle(ctx context.Context, run *delivery.MilestoneRun, pr delivery.CyclePullRequest, mergeSHA string) {
-	cycle := e.openCycle(ctx, run)
+func (e *Events) closeCycle(ctx context.Context, run *delivery.MilestoneRun, pr delivery.CyclePullRequest, mergeSHA string, asOf time.Time) {
+	cycle := e.cycleAsOf(ctx, run, asOf)
 	if cycle == nil {
 		return
 	}
@@ -125,6 +130,29 @@ func (e *Events) closeCycle(ctx context.Context, run *delivery.MilestoneRun, pr 
 		slog.WarnContext(ctx, "eventcore: finish cycle failed",
 			"cycle", cycle.ID, "merge", delivery.ShortSHA(mergeSHA), "error", err)
 	}
+}
+
+// cycleAsOf is openCycle for a write fed by a delivery: it also returns nil
+// when the delivery describes its pull request as it stood BEFORE the open cycle
+// began (asOf earlier than the cycle's creation).
+//
+// Such a delivery is about an earlier cycle. It arrives late — replayed after a
+// failure, or redelivered by hand — once the supervisor has closed that cycle
+// and opened the next, and the writers write onto whatever cycle is open: a late
+// merge would close the new cycle with the old cycle's SHA, and a late opened
+// would relabel it with the old pull request. The moment is the pull request's
+// updated_at, not its creation, because a conflict cycle's rebase force-pushes
+// to the SAME pull request: an older pull request is normal, and its push made
+// during the cycle is news. A zero asOf (a payload without the field) is not
+// judged, which is the behaviour before the guard existed.
+func (e *Events) cycleAsOf(ctx context.Context, run *delivery.MilestoneRun, asOf time.Time) *delivery.RunCycle {
+	cycle := e.openCycle(ctx, run)
+	if cycle == nil || asOf.IsZero() || cycle.CreatedAt.IsZero() || !asOf.Before(cycle.CreatedAt) {
+		return cycle
+	}
+	slog.InfoContext(ctx, "eventcore: delivery predates the open cycle — not recorded onto it",
+		"run", run.ID, "cycle", cycle.ID, "describes", asOf, "cycleOpened", cycle.CreatedAt)
+	return nil
 }
 
 // openCycle returns the run's latest cycle when it is still open, or nil. A

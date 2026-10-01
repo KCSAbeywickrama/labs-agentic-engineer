@@ -62,7 +62,7 @@ func TestGovern_FailureRefusesTheDeploy(t *testing.T) {
 	svc := NewDeploymentService(nil, nil)
 	svc.SetGovernor(&stubGovernor{err: errors.New("amp unreachable")})
 
-	err := svc.govern(context.Background(), "acme", "shop", []delivery.DeployTarget{
+	err := svc.govern(context.Background(), "acme", "shop", testWriteTarget, []delivery.DeployTarget{
 		{Component: "checkout-agent"},
 	})
 	if err == nil {
@@ -78,7 +78,7 @@ func TestGovern_OffersEveryTargetAndCarriesTheEnvironment(t *testing.T) {
 	svc := NewDeploymentService(nil, nil)
 	svc.SetGovernor(g)
 
-	if err := svc.govern(context.Background(), "acme", "shop", []delivery.DeployTarget{
+	if err := svc.govern(context.Background(), "acme", "shop", testWriteTarget, []delivery.DeployTarget{
 		{Component: "checkout-agent"}, {Component: "catalog-api"},
 	}); err != nil {
 		t.Fatalf("govern: %v", err)
@@ -104,7 +104,7 @@ func TestGovern_OffersEveryTargetAndCarriesTheEnvironment(t *testing.T) {
 func TestGovern_UnwiredIsANoOp(t *testing.T) {
 	t.Parallel()
 	svc := NewDeploymentService(nil, nil)
-	if err := svc.govern(context.Background(), "acme", "shop", []delivery.DeployTarget{
+	if err := svc.govern(context.Background(), "acme", "shop", testWriteTarget, []delivery.DeployTarget{
 		{Component: "checkout-agent"},
 	}); err != nil {
 		t.Fatalf("unwired governor must be a no-op: %v", err)

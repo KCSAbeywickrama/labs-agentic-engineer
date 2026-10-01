@@ -211,3 +211,30 @@ func TestBuildTerminal_RedMainWithNoDeployedVersionWritesNothing(t *testing.T) {
 		t.Fatalf("with no deployed version there is nothing to attribute a red main to, got %v", h.issues.titles())
 	}
 }
+
+// A late duplicate of a merge (a replay, a redelivery) finds every build
+// already there. Staging is a delete-then-create of the org's one clone
+// credential, so staging anyway would pull it out from under the builds that
+// are cloning with it right now.
+func TestPullRequestMerged_LateDuplicateDoesNotRestageTheCredential(t *testing.T) {
+	h := newHarness(t, aRun("run-1", 7, delivery.RunStateRunning))
+	h.cycles.latest = aCycle("cycle-1", "run-1")
+	h.prs.files = []string{"services/order/main.go", "apps/web/src/app.tsx"}
+	merged := prBody("closed", "aep/m7-c1", "Resolves #12", 42, false, true, testMergeSHA)
+
+	if err := h.deliver(t, "pull_request", merged); err != nil {
+		t.Fatalf("first delivery: %v", err)
+	}
+	if h.builds.staged != 1 {
+		t.Fatalf("the fan-out stages once, got %d", h.builds.staged)
+	}
+	if err := h.deliver(t, "pull_request", merged); err != nil {
+		t.Fatalf("duplicate delivery: %v", err)
+	}
+	if h.builds.staged != 1 {
+		t.Fatalf("a duplicate that builds nothing must not re-stage the credential, got %d stages", h.builds.staged)
+	}
+	if len(h.builds.triggered) != 2 {
+		t.Fatalf("the duplicate must trigger nothing, got %v", h.builds.triggered)
+	}
+}

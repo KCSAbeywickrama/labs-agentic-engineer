@@ -87,7 +87,8 @@ func newTeardownFixture(t *testing.T) *teardownFixture {
 	}
 
 	targets := newFakeTargets(dir)
-	scope := targets.Scope(teardownOrg)
+	scope, _ := targets.Scope(ctx, teardownOrg, teardownProject)
+	targets.scoped = nil
 	store := newFakeStore()
 	identifier := ResourceServerIdentifier(teardownOrg, teardownProject)
 
@@ -333,8 +334,8 @@ func TestTeardown_ADirectoryFailureStillForgetsTheRows(t *testing.T) {
 
 // TestTeardown_AnUnreachableDirectoryStillForgetsTheRows is the same rule one
 // level up: the whole directory half is skipped when the environment's identity
-// provider cannot be resolved, and the rows still go. Scope is pure, so the
-// rows are addressable even when nothing else is.
+// provider cannot be resolved, and the rows still go. Scope is a separate read,
+// so the rows are addressable even when the directory is not.
 func TestTeardown_AnUnreachableDirectoryStillForgetsTheRows(t *testing.T) {
 	t.Parallel()
 	f := newTeardownFixture(t)
@@ -352,6 +353,49 @@ func TestTeardown_AnUnreachableDirectoryStillForgetsTheRows(t *testing.T) {
 		t.Errorf("report scope = %v, want %v", report.Scope, f.scope)
 	}
 	assertRowsForgotten(t, f)
+}
+
+// TestTeardown_AnUnreadableScopeIsReportedAndTouchesNothing: with no write
+// target there is no scope, so neither the directory nor the rows can be
+// addressed. The teardown reports the failure and returns; the project delete
+// logs it and carries on (it is best-effort there).
+func TestTeardown_AnUnreadableScopeIsReportedAndTouchesNothing(t *testing.T) {
+	t.Parallel()
+	f := newTeardownFixture(t)
+	boom := errors.New("project has no deployment pipeline")
+	f.targets.scopeErr = boom
+
+	report := f.svc.Teardown(context.Background(), teardownOrg, teardownProject)
+
+	if !errors.Is(report.Err(), boom) {
+		t.Fatalf("report error = %v, want the scope's", report.Err())
+	}
+	if !errors.Is(f.svc.TeardownProject(context.Background(), teardownOrg, teardownProject), boom) {
+		t.Fatal("TeardownProject must answer the scope failure for the project delete to log")
+	}
+	if f.targets.resolved != 0 || len(f.dir.writes()) != 0 {
+		t.Fatalf("resolved=%d writes=%v with no scope", f.targets.resolved, f.writeSteps())
+	}
+	bindings, err := f.store.ListRoleBindings(context.Background(), f.scope, teardownProject)
+	if err != nil {
+		t.Fatalf("list role bindings: %v", err)
+	}
+	if len(bindings) == 0 {
+		t.Fatal("the rows were deleted without a scope to address them by")
+	}
+}
+
+// TestTeardown_ScopesToTheDeletedProject: the teardown resolves the project's
+// own write target, which is why it runs before the OC Project delete.
+func TestTeardown_ScopesToTheDeletedProject(t *testing.T) {
+	t.Parallel()
+	f := newTeardownFixture(t)
+
+	f.svc.Teardown(context.Background(), teardownOrg, teardownProject)
+
+	if len(f.targets.scoped) != 1 || f.targets.scoped[0] != [2]string{teardownOrg, teardownProject} {
+		t.Fatalf("Scope calls = %v, want one for (%q, %q)", f.targets.scoped, teardownOrg, teardownProject)
+	}
 }
 
 // TestTeardown_NotConfiguredIsANoOp: the composition root wires this feature

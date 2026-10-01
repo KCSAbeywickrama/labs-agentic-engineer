@@ -98,8 +98,8 @@ gateway's contract:
   request did not come through the gateway.
 
 - **Verification is what makes the header lane safe.** The boundary that keeps
-  unrefereed traffic off your service is the `visibility: internal` line and the
-  NetworkPolicy behind it. The signature is what makes a breach of that boundary
+  unrefereed traffic off your service is the component's NetworkPolicy: it admits
+  the project's own pods and the platform gateway, and nothing else. The signature is what makes a breach of that boundary
   survivable: a pod that reaches your service directly can set every `x-user-*`
   header it likes and **cannot produce an assertion**, because it does not hold
   the environment's signing key. That is the property a header check could never

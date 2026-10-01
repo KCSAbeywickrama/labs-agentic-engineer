@@ -29,6 +29,12 @@ var _ openchoreo.ProjectCellClient = &ProjectCellClientMock{}
 //			PipelineEnvironmentsFunc: func(ctx context.Context, namespace string, pipelineName string) ([]string, error) {
 //				panic("mock out the PipelineEnvironments method")
 //			},
+//			ProjectReadinessFunc: func(ctx context.Context, namespace string, projectName string) (openchoreo.Readiness, error) {
+//				panic("mock out the ProjectReadiness method")
+//			},
+//			ProjectReleaseBindingReadinessFunc: func(ctx context.Context, namespace string, projectName string, environment string) (openchoreo.Readiness, error) {
+//				panic("mock out the ProjectReleaseBindingReadiness method")
+//			},
 //		}
 //
 //		// use mockedProjectCellClient in code that requires openchoreo.ProjectCellClient
@@ -44,6 +50,12 @@ type ProjectCellClientMock struct {
 
 	// PipelineEnvironmentsFunc mocks the PipelineEnvironments method.
 	PipelineEnvironmentsFunc func(ctx context.Context, namespace string, pipelineName string) ([]string, error)
+
+	// ProjectReadinessFunc mocks the ProjectReadiness method.
+	ProjectReadinessFunc func(ctx context.Context, namespace string, projectName string) (openchoreo.Readiness, error)
+
+	// ProjectReleaseBindingReadinessFunc mocks the ProjectReleaseBindingReadiness method.
+	ProjectReleaseBindingReadinessFunc func(ctx context.Context, namespace string, projectName string, environment string) (openchoreo.Readiness, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -74,10 +86,32 @@ type ProjectCellClientMock struct {
 			// PipelineName is the pipelineName argument value.
 			PipelineName string
 		}
+		// ProjectReadiness holds details about calls to the ProjectReadiness method.
+		ProjectReadiness []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Namespace is the namespace argument value.
+			Namespace string
+			// ProjectName is the projectName argument value.
+			ProjectName string
+		}
+		// ProjectReleaseBindingReadiness holds details about calls to the ProjectReleaseBindingReadiness method.
+		ProjectReleaseBindingReadiness []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Namespace is the namespace argument value.
+			Namespace string
+			// ProjectName is the projectName argument value.
+			ProjectName string
+			// Environment is the environment argument value.
+			Environment string
+		}
 	}
-	lockEnsureProjectReleaseBinding sync.RWMutex
-	lockListPipelineNames           sync.RWMutex
-	lockPipelineEnvironments        sync.RWMutex
+	lockEnsureProjectReleaseBinding    sync.RWMutex
+	lockListPipelineNames              sync.RWMutex
+	lockPipelineEnvironments           sync.RWMutex
+	lockProjectReadiness               sync.RWMutex
+	lockProjectReleaseBindingReadiness sync.RWMutex
 }
 
 // EnsureProjectReleaseBinding calls EnsureProjectReleaseBindingFunc.
@@ -197,5 +231,89 @@ func (mock *ProjectCellClientMock) PipelineEnvironmentsCalls() []struct {
 	mock.lockPipelineEnvironments.RLock()
 	calls = mock.calls.PipelineEnvironments
 	mock.lockPipelineEnvironments.RUnlock()
+	return calls
+}
+
+// ProjectReadiness calls ProjectReadinessFunc.
+func (mock *ProjectCellClientMock) ProjectReadiness(ctx context.Context, namespace string, projectName string) (openchoreo.Readiness, error) {
+	if mock.ProjectReadinessFunc == nil {
+		panic("ProjectCellClientMock.ProjectReadinessFunc: method is nil but ProjectCellClient.ProjectReadiness was just called")
+	}
+	callInfo := struct {
+		Ctx         context.Context
+		Namespace   string
+		ProjectName string
+	}{
+		Ctx:         ctx,
+		Namespace:   namespace,
+		ProjectName: projectName,
+	}
+	mock.lockProjectReadiness.Lock()
+	mock.calls.ProjectReadiness = append(mock.calls.ProjectReadiness, callInfo)
+	mock.lockProjectReadiness.Unlock()
+	return mock.ProjectReadinessFunc(ctx, namespace, projectName)
+}
+
+// ProjectReadinessCalls gets all the calls that were made to ProjectReadiness.
+// Check the length with:
+//
+//	len(mockedProjectCellClient.ProjectReadinessCalls())
+func (mock *ProjectCellClientMock) ProjectReadinessCalls() []struct {
+	Ctx         context.Context
+	Namespace   string
+	ProjectName string
+} {
+	var calls []struct {
+		Ctx         context.Context
+		Namespace   string
+		ProjectName string
+	}
+	mock.lockProjectReadiness.RLock()
+	calls = mock.calls.ProjectReadiness
+	mock.lockProjectReadiness.RUnlock()
+	return calls
+}
+
+// ProjectReleaseBindingReadiness calls ProjectReleaseBindingReadinessFunc.
+func (mock *ProjectCellClientMock) ProjectReleaseBindingReadiness(ctx context.Context, namespace string, projectName string, environment string) (openchoreo.Readiness, error) {
+	if mock.ProjectReleaseBindingReadinessFunc == nil {
+		panic("ProjectCellClientMock.ProjectReleaseBindingReadinessFunc: method is nil but ProjectCellClient.ProjectReleaseBindingReadiness was just called")
+	}
+	callInfo := struct {
+		Ctx         context.Context
+		Namespace   string
+		ProjectName string
+		Environment string
+	}{
+		Ctx:         ctx,
+		Namespace:   namespace,
+		ProjectName: projectName,
+		Environment: environment,
+	}
+	mock.lockProjectReleaseBindingReadiness.Lock()
+	mock.calls.ProjectReleaseBindingReadiness = append(mock.calls.ProjectReleaseBindingReadiness, callInfo)
+	mock.lockProjectReleaseBindingReadiness.Unlock()
+	return mock.ProjectReleaseBindingReadinessFunc(ctx, namespace, projectName, environment)
+}
+
+// ProjectReleaseBindingReadinessCalls gets all the calls that were made to ProjectReleaseBindingReadiness.
+// Check the length with:
+//
+//	len(mockedProjectCellClient.ProjectReleaseBindingReadinessCalls())
+func (mock *ProjectCellClientMock) ProjectReleaseBindingReadinessCalls() []struct {
+	Ctx         context.Context
+	Namespace   string
+	ProjectName string
+	Environment string
+} {
+	var calls []struct {
+		Ctx         context.Context
+		Namespace   string
+		ProjectName string
+		Environment string
+	}
+	mock.lockProjectReleaseBindingReadiness.RLock()
+	calls = mock.calls.ProjectReleaseBindingReadiness
+	mock.lockProjectReleaseBindingReadiness.RUnlock()
 	return calls
 }
