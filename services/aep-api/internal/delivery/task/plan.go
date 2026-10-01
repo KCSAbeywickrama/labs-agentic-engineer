@@ -221,10 +221,14 @@ func (s *PlanService) startPlanLocked(ctx context.Context, orgID, projectID stri
 	// Workspace snapshot refs (D9): the design/requirements context is read
 	// from snapshots/<baseRef>/; the task-planning skill is a flow skill
 	// seeded into the org's _skills repo (Phase 1), read from its snapshot.
+	//
+	// The base is the version's TAG, not main's tip (B2): the plan is for the
+	// spec that was versioned, and an edit made to the requirements or the
+	// design since must not leak into it. The scope above reads the same tag.
 	ws := s.git.Workspace()
-	baseRef, err := ws.Head(ctx, ref, "")
+	baseRef, err := ws.Head(ctx, ref, "tags/"+versions.Latest)
 	if err != nil {
-		return nil, fmt.Errorf("resolve base ref: %w", err)
+		return nil, fmt.Errorf("resolve the version %s: %w", versions.Latest, err)
 	}
 	// Skills resolve failures are typed: both arms mean the org's _skills repo
 	// is unusable right now (row missing/unprovisionable, or the backing repo

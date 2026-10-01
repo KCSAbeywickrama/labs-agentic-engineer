@@ -286,6 +286,7 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 		"AEP_IDENTITY_LOGIN":  login,
 		"AEP_CORRELATION_ID":  in.correlationID,
 		"AEP_TASK_KIND":       taskKindOrDefault(disp.taskKind),
+		envSpecTag:            disp.specTag,
 		"WORKSPACE_BASE_PATH": codingAgentWorkspacePath,
 		// Unconditional, and deliberately not tied to whether a key was resolved
 		// below — see envEvalKeyManaged.
@@ -573,6 +574,10 @@ const validationTaskKind = "validation"
 // agent only as prose inside AEP_PROMPT.
 const envValidationIssue = "AEP_VALIDATION_ISSUE"
 
+// envSpecTag carries the version a cycle builds to the runner, which pins the
+// clone's specs/ to it (B2).
+const envSpecTag = "AEP_SPEC_TAG"
+
 // validationDeadlineSeconds bounds a validation run (2h): a browser boots once
 // and every scenario in specs/validation/acceptance/ is then driven through it
 // in sequence, which is longer than a coding run.
@@ -620,6 +625,10 @@ type dispatchShape struct {
 	// issue it was only told about in prose: AEP_TASK_ID is the cycle's uuid,
 	// and the number is otherwise buried in the free text of AEP_PROMPT.
 	validationIssue int
+	// specTag is the version the cycle builds; it reaches the pod as
+	// AEP_SPEC_TAG, and the runner pins specs/ to it (B2). "" leaves specs/ as
+	// the clone has it.
+	specTag string
 }
 
 // buildValidationPrompt is the validation-runner directive, mirroring

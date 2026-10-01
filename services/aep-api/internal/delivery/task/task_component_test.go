@@ -352,6 +352,7 @@ func TestPlan_InProgress_409(t *testing.T) {
 	iss := newIssues()
 	bt := &blockingTurn{started: make(chan struct{}), release: make(chan struct{})}
 	fx := workspacetest.New(t, map[string]string{"specs/design/design.md": "# d"})
+	fx.Origin.Tag(t, "v1", "spec version v1")
 	skillsOrigin := gittest.NewRemote(t, gittest.WithSeed(map[string]string{
 		"skills/task-planning/SKILL.md": "---\nname: task-planning\nmetadata:\n  aep:\n    kind: platform\n---\nbody",
 	}, "seed"))

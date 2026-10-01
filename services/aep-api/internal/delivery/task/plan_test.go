@@ -102,6 +102,10 @@ var rigScope spec.BuildScope
 func newPlanRig(t *testing.T, seed map[string]string, specTag string) *planRig {
 	t.Helper()
 	fx := workspacetest.New(t, seed)
+	// The plan reads the version's tag, never main's tip (B2): cut it.
+	if specTag != "" {
+		fx.Origin.Tag(t, specTag, "spec version "+specTag)
+	}
 	skillsOrigin := gittest.NewRemote(t, gittest.WithSeed(map[string]string{
 		"skills/task-planning/SKILL.md": "---\nname: task-planning\ndescription: plan tasks\nmetadata:\n  aep:\n    kind: platform\n---\n# Task planning",
 	}, "seed skills"))
@@ -223,6 +227,7 @@ func TestPlanIntoMilestone_SkillsRepoGone_TypedError(t *testing.T) {
 		"specs/design/components/hello-world-api/design.json": `{"name":"hello-world-api"}`,
 		"specs/requirements/prd.md":                           "# reqs",
 	})
+	fx.Origin.Tag(t, "v1", "spec version v1")
 	repoRow := &sourcecontrol.GitRepository{OrgID: "org1", ProjectID: "proj1", RepoURL: fx.Origin.URL(),
 		DefaultBranch: "main", RepoSlug: workspacetest.DefaultSlug, Status: "ready"}
 	staleSkills := &sourcecontrol.GitRepository{OrgID: "org1", ProjectID: spec.SkillsRepoSentinelProjectID,
@@ -365,5 +370,20 @@ func TestPlanIntoMilestone_DeltaScopeAndStamp(t *testing.T) {
 	}
 	if got := delivery.ParseServesStories(created[0].Body); fmt.Sprint(got) != "[F1.1 F1.2]" {
 		t.Errorf("stamped stories = %v, want [F1.1 F1.2] (body: %q)", got, created[0].Body)
+	}
+}
+
+// The plan turn reads the version it plans, not main's tip (B2): an edit made
+// to the spec after the version was cut never reaches the planner.
+func TestPlanIntoMilestone_ReadsTheVersionNotMain(t *testing.T) {
+	r := newPlanRig(t, map[string]string{"specs/design/design.md": "# d\n"}, "v2")
+	versioned := r.fx.Origin.HeadSHA(t)
+	r.fx.Origin.Seed(t, map[string]string{"specs/design/design.md": "# edited after v2\n"}, "edit after the version")
+	r.turn.script = "data: [DONE]\n\n"
+	if err := r.svc.PlanIntoMilestone(context.Background(), "org1", "proj1", 7); err != nil {
+		t.Fatalf("PlanIntoMilestone: %v", err)
+	}
+	if got := r.turn.req.Workspace.Ref; got != versioned {
+		t.Errorf("plan read %s, want the version's commit %s", got, versioned)
 	}
 }
