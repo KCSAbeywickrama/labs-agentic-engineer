@@ -17,8 +17,8 @@
 // Package kubeobs is the Kubernetes API the SRE agent reconciler speaks to on
 // the observability plane: it patches the AE-owned Secret, stamps the
 // Deployment's pod-template hash annotation, scales it, and reads the
-// Deployment and its pods back. Plain net/http over the API's REST paths, the
-// same shape as clients/thunderapp: no client-go.
+// Deployment back. Plain net/http over the API's REST paths, the same shape
+// as clients/thunderapp: no client-go.
 //
 // A Secret request or response is never put into an error or a log: its body
 // carries the SRE agent's model key and MCP token. An error names the method,
@@ -32,8 +32,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -97,12 +95,11 @@ func (c *Client) Scale(ctx context.Context, ns, deploy string, replicas int32) e
 	return c.do(ctx, http.MethodPatch, deploymentPath(ns, deploy)+"/scale", body, nil, false)
 }
 
-// Deployment reads the Deployment's rollout state and its pod selector
-// (spec.selector.matchLabels).
-func (c *Client) Deployment(ctx context.Context, ns, deploy string) (sreagent.DeploymentState, map[string]string, error) {
+// Deployment reads the Deployment's rollout state.
+func (c *Client) Deployment(ctx context.Context, ns, deploy string) (sreagent.DeploymentState, error) {
 	var d deployment
 	if err := c.do(ctx, http.MethodGet, deploymentPath(ns, deploy), nil, &d, false); err != nil {
-		return sreagent.DeploymentState{}, nil, err
+		return sreagent.DeploymentState{}, err
 	}
 	// An unset spec.replicas is the API's default of 1.
 	replicas := int32(1)
@@ -116,56 +113,11 @@ func (c *Client) Deployment(ctx context.Context, ns, deploy string) (sreagent.De
 		Generation:         d.Metadata.Generation,
 		ObservedGeneration: d.Status.ObservedGeneration,
 		TemplateHash:       d.Spec.Template.Metadata.Annotations[sreagent.HashAnnotation],
-	}, d.Spec.Selector.MatchLabels, nil
-}
-
-// Pods lists the pods selector matches in ns, each with the hash its template
-// carried and why its first container is down, if it is. An empty selector is
-// refused: it would match every pod in the namespace.
-func (c *Client) Pods(ctx context.Context, ns string, selector map[string]string) ([]sreagent.PodState, error) {
-	if len(selector) == 0 {
-		return nil, fmt.Errorf("kubeobs: pods in %s: empty label selector", ns)
-	}
-	q := url.Values{}
-	q.Set("labelSelector", labelSelector(selector))
-	var list podList
-	if err := c.do(ctx, http.MethodGet, "/api/v1/namespaces/"+ns+"/pods?"+q.Encode(), nil, &list, false); err != nil {
-		return nil, err
-	}
-	out := make([]sreagent.PodState, 0, len(list.Items))
-	for _, p := range list.Items {
-		st := sreagent.PodState{Hash: p.Metadata.Annotations[sreagent.HashAnnotation]}
-		if cs := p.Status.ContainerStatuses; len(cs) > 0 {
-			s := cs[0]
-			if s.State.Waiting != nil {
-				st.WaitingReason = s.State.Waiting.Reason
-			}
-			switch {
-			case s.State.Terminated != nil:
-				st.TerminatedReason = s.State.Terminated.Reason
-				st.ExitCode = s.State.Terminated.ExitCode
-			case s.LastState.Terminated != nil:
-				st.ExitCode = s.LastState.Terminated.ExitCode
-			}
-		}
-		out = append(out, st)
-	}
-	return out, nil
+	}, nil
 }
 
 func deploymentPath(ns, deploy string) string {
 	return "/apis/apps/v1/namespaces/" + ns + "/deployments/" + deploy
-}
-
-// labelSelector renders matchLabels as k=v pairs, sorted so the query is
-// stable.
-func labelSelector(m map[string]string) string {
-	pairs := make([]string, 0, len(m))
-	for k, v := range m {
-		pairs = append(pairs, k+"="+v)
-	}
-	sort.Strings(pairs)
-	return strings.Join(pairs, ",")
 }
 
 // do sends one request, a merge patch when in is set, and decodes a 2xx body
@@ -256,9 +208,6 @@ type deployment struct {
 	} `json:"metadata"`
 	Spec struct {
 		Replicas *int32 `json:"replicas"`
-		Selector struct {
-			MatchLabels map[string]string `json:"matchLabels"`
-		} `json:"selector"`
 		Template struct {
 			Metadata struct {
 				Annotations map[string]string `json:"annotations"`
@@ -270,28 +219,4 @@ type deployment struct {
 		UpdatedReplicas    int32 `json:"updatedReplicas"`
 		AvailableReplicas  int32 `json:"availableReplicas"`
 	} `json:"status"`
-}
-
-type podList struct {
-	Items []struct {
-		Metadata struct {
-			Annotations map[string]string `json:"annotations"`
-		} `json:"metadata"`
-		Status struct {
-			ContainerStatuses []struct {
-				State     containerState `json:"state"`
-				LastState containerState `json:"lastState"`
-			} `json:"containerStatuses"`
-		} `json:"status"`
-	} `json:"items"`
-}
-
-type containerState struct {
-	Waiting *struct {
-		Reason string `json:"reason"`
-	} `json:"waiting"`
-	Terminated *struct {
-		Reason   string `json:"reason"`
-		ExitCode int32  `json:"exitCode"`
-	} `json:"terminated"`
 }

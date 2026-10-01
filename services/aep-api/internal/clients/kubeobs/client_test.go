@@ -154,7 +154,7 @@ func TestDeployment(t *testing.T) {
 	  },
 	  "status": {"observedGeneration": 3, "updatedReplicas": 1, "availableReplicas": 1}
 	}`)
-	dep, sel, err := c.Deployment(context.Background(), "ns", "sre-agent")
+	dep, err := c.Deployment(context.Background(), "ns", "sre-agent")
 	if err != nil {
 		t.Fatalf("Deployment: %v", err)
 	}
@@ -166,14 +166,11 @@ func TestDeployment(t *testing.T) {
 	if dep != want {
 		t.Errorf("state = %+v, want %+v", dep, want)
 	}
-	if len(sel) != 1 || sel["app.kubernetes.io/name"] != "sre-agent" {
-		t.Errorf("selector = %v", sel)
-	}
 }
 
 func TestDeployment_ScaledToZeroAndNoAnnotation(t *testing.T) {
 	c, _ := apiserver(t, http.StatusOK, `{"spec":{"replicas":0,"selector":{"matchLabels":{"a":"b"}},"template":{"metadata":{}}}}`)
-	dep, _, err := c.Deployment(context.Background(), "ns", "sre-agent")
+	dep, err := c.Deployment(context.Background(), "ns", "sre-agent")
 	if err != nil {
 		t.Fatalf("Deployment: %v", err)
 	}
@@ -184,51 +181,9 @@ func TestDeployment_ScaledToZeroAndNoAnnotation(t *testing.T) {
 
 func TestDeployment_NotFound(t *testing.T) {
 	c, _ := apiserver(t, http.StatusNotFound, `{"kind":"Status","message":"deployments.apps \"sre-agent\" not found"}`)
-	_, _, err := c.Deployment(context.Background(), "ns", "sre-agent")
+	_, err := c.Deployment(context.Background(), "ns", "sre-agent")
 	if err == nil || !strings.Contains(err.Error(), "404") || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("err = %v, want the 404 with the apiserver's message", err)
-	}
-}
-
-func TestPods(t *testing.T) {
-	c, got := apiserver(t, http.StatusOK, `{"items": [
-	  {"metadata": {"annotations": {"aep.wso2.com/sre-llm-hash": "h1"}},
-	   "status": {"containerStatuses": [{
-	     "state": {"waiting": {"reason": "CrashLoopBackOff"}},
-	     "lastState": {"terminated": {"exitCode": 3, "reason": "Error"}}}]}},
-	  {"metadata": {"annotations": {"aep.wso2.com/sre-llm-hash": "h0"}},
-	   "status": {"containerStatuses": [{"state": {"terminated": {"reason": "Error", "exitCode": 1}}}]}},
-	  {"metadata": {}, "status": {}}
-	]}`)
-	pods, err := c.Pods(context.Background(), "ns", map[string]string{"b": "2", "a": "1"})
-	if err != nil {
-		t.Fatalf("Pods: %v", err)
-	}
-	if got.Method != http.MethodGet || got.Path != "/api/v1/namespaces/ns/pods" {
-		t.Errorf("request = %s %s", got.Method, got.Path)
-	}
-	if got.Query != "labelSelector=a%3D1%2Cb%3D2" {
-		t.Errorf("query = %q, want the selector's labels sorted", got.Query)
-	}
-	want := []sreagent.PodState{
-		{Hash: "h1", WaitingReason: "CrashLoopBackOff", ExitCode: 3},
-		{Hash: "h0", TerminatedReason: "Error", ExitCode: 1},
-		{},
-	}
-	if len(pods) != len(want) {
-		t.Fatalf("pods = %+v, want %+v", pods, want)
-	}
-	for i := range want {
-		if pods[i] != want[i] {
-			t.Errorf("pod %d = %+v, want %+v", i, pods[i], want[i])
-		}
-	}
-}
-
-func TestPods_RefusesAnEmptySelector(t *testing.T) {
-	c, _ := apiserver(t, http.StatusOK, `{"items":[]}`)
-	if _, err := c.Pods(context.Background(), "ns", nil); err == nil {
-		t.Fatal("an empty selector lists every pod in the namespace: want an error")
 	}
 }
 

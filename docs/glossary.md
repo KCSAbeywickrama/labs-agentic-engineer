@@ -594,12 +594,16 @@ anything the agent asserts.
 
 ### SRE model connection
 The organization's optional, second model connection just for the OpenChoreo
-SRE (RCA) agent: OpenAI-compatible and Bearer only, `/config` section
-`sreLlm`, one row per org in `org_sre_model_connections` (absent = none), the
-key in `org_secrets` `sre-model/key`. When absent, the agent falls back to
-the org's own model connection if it carries the `SREAgent` capability; with
-neither, the agent has no model and aep-api scales it to zero. See
-[ADR-0038's amendment](decisions/ADR-0038-an-organization-has-one-model-connection.md#amendment-2026-09-29--the-sre-agent-may-use-its-own-connection)
+SRE (RCA) agent: OpenAI-compatible and Bearer only, one row per org in
+`org_sre_model_connections` (absent = none), the key in `org_secrets`
+`sre-model/key`. There is no console or `/config` surface for it — it is set,
+and rotated, only by `aectl sre install`'s install-time seed
+(`--llm-api-key-file`/`--llm-model`), which is authoritative: a changed seed
+replaces whatever is stored, a refused seed or no seed leaves it alone. When
+absent, the agent falls back to the org's own model connection if it carries
+the `SREAgent` capability; with neither, the agent has no model and aep-api
+scales it to zero. See
+[ADR-0038's amendment](decisions/ADR-0038-an-organization-has-one-model-connection.md#amendment-2026-10-01--the-sre-model-connection-is-set-at-install-only)
 and `services/aep-api/design/sre-model-connection.md`.
 
 ### Connection fingerprint

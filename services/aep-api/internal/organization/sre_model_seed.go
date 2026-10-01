@@ -17,9 +17,10 @@
 // sre_model_seed.go — the install-time SRE model seed `aectl sre install`
 // writes without a user token (Task A2's `sre-model-seed` Secret,
 // config.SREAgentConfig.Seed). ApplySeed is the one place that seed is turned
-// into an SRE model connection: it runs the same Check/Persist path a console
-// save takes, applies at most once per distinct seed, and never blocks the
-// sreagent reconciler's pass on a refusal.
+// into an SRE model connection, and the only way the connection is ever set
+// or rotated: it is authoritative, so a changed seed is probed (the same
+// Check/Persist path) and, on success, replaces whatever connection is
+// stored. It never blocks the sreagent reconciler's pass on a refusal.
 package organization
 
 import (
@@ -42,8 +43,8 @@ import (
 const seedAppliedStoreKey = "sre-model/seed-applied"
 
 // Seed is an install-time SRE model connection candidate: the three values
-// `aectl sre install` seeds via config.SREAgentConfig.Seed, before any user
-// has signed in to save one from the console.
+// `aectl sre install` seeds via config.SREAgentConfig.Seed — the only way
+// this connection is ever set.
 type Seed struct {
 	BaseURL, Model, APIKey string
 }
@@ -52,37 +53,27 @@ type Seed struct {
 type SeedOutcome string
 
 const (
-	// SeedApplied means the seed was validated, probed and persisted.
+	// SeedApplied means the seed was validated, probed and persisted,
+	// replacing whatever SRE model connection was stored.
 	SeedApplied SeedOutcome = "applied"
-	// SeedSkippedStored means the org already has an SRE model connection;
-	// the seed was not even probed.
-	SeedSkippedStored SeedOutcome = "skipped-stored"
 	// SeedSkippedSeen means this exact seed was already tried (applied or
 	// refused) and nothing about it has changed since.
 	SeedSkippedSeen SeedOutcome = "skipped-seen"
-	// SeedRefused means the seed failed validation or the probe; the SRE
-	// agent stays unconfigured (or on the org connection) until a console
-	// save or a changed seed succeeds.
+	// SeedRefused means the seed failed validation or the probe; whatever
+	// connection was stored (if any) is left as it was.
 	SeedRefused SeedOutcome = "refused"
 )
 
-// ApplySeed applies seed as org's SRE model connection the first time it is
-// asked to: nothing happens when a connection is already stored (a console
-// save always wins over a seed), and nothing happens twice for the same seed
-// (tracked by a hash of its three values under seedAppliedStoreKey), so a
-// reconciler pass that calls this on every tick costs one org_secrets read
-// once the seed has been tried. A validation/probe refusal is recorded and
-// returned as SeedRefused rather than an error: the caller (the sreagent
-// reconciler) must keep reconciling on whatever connection already applies.
+// ApplySeed is authoritative over the org's SRE model connection: whenever
+// seed's hash differs from the last one tried (tracked under
+// seedAppliedStoreKey), it is probed and, on success, persisted — replacing
+// any connection already stored. A refusal leaves the stored connection (if
+// any) untouched and is recorded so the same seed is not retried every pass.
+// The same seed hash is always SeedSkippedSeen, whatever its last outcome. A
+// validation/probe refusal is returned as SeedRefused rather than an error:
+// the caller (the sreagent reconciler) must keep reconciling on whatever
+// connection already applies.
 func (s *SreModelConnectionService) ApplySeed(ctx context.Context, org string, seed Seed) (SeedOutcome, error) {
-	stored, err := s.conns.GetByOrg(ctx, org)
-	if err != nil {
-		return "", fmt.Errorf("sre model seed: read: %w", err)
-	}
-	if stored != nil {
-		return SeedSkippedStored, nil
-	}
-
 	hash := seedHash(seed)
 	marker, err := s.seedMarker(ctx, org)
 	if err != nil {
@@ -119,7 +110,7 @@ func (s *SreModelConnectionService) ApplySeed(ctx context.Context, org string, s
 
 // seedHash is sha256(baseURL \x00 model \x00 apiKey) hex: the identity a seed
 // is remembered by, so a changed value (a rotated key, a different model) is
-// tried again even though the org still has no stored connection.
+// tried again and, on success, replaces whatever connection is stored.
 func seedHash(seed Seed) string {
 	sum := sha256.Sum256([]byte(seed.BaseURL + "\x00" + seed.Model + "\x00" + seed.APIKey))
 	return hex.EncodeToString(sum[:])

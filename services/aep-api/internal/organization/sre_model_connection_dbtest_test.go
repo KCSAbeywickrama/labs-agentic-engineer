@@ -22,8 +22,9 @@ package organization_test
 // (dbtest.New): absent is nil-not-error, an upsert is readable back with the
 // fixed OpenAI-compatible/Bearer shape, a second upsert replaces the row
 // rather than erroring, and delete is idempotent. On top of it,
-// SreModelConnectionService's Set → Projection round trip over the real
-// store: the key is stored and previewed, never projected.
+// SreModelConnectionService's Check → Persist round trip over the real
+// store (the path ApplySeed takes): the key is stored and EffectiveSRE reads
+// it back, never echoed anywhere.
 //
 // External test package: an in-package dbtest file would be an import cycle
 // (dbtest imports migrate, which imports organization), same as
@@ -31,9 +32,7 @@ package organization_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -209,7 +208,7 @@ func (orgWithoutConnection) KeyRef(context.Context, string) (modelconn.Connectio
 	return modelconn.Connection{}, organization.SecretRefTriplet{}, &organization.NotFoundError{What: "org_model_connections"}
 }
 
-func TestSreModelConnectionService_SetThenProjection(t *testing.T) {
+func TestSreModelConnectionService_CheckPersistThenEffectiveSRE(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
 	store, err := secrets.NewDBStore(db, []byte(sreModelConnDBAESKey))
@@ -219,29 +218,24 @@ func TestSreModelConnectionService_SetThenProjection(t *testing.T) {
 	endpoint := newModelEndpoint(t, http.StatusOK)
 	svc := organization.NewSreModelConnectionService(organization.NewOrgSreModelConnectionRepository(db), store,
 		organization.NewAgentsCardRepository(db, store), orgWithoutConnection{}).WithProbeClient(endpoint.client())
+	repo := organization.NewOrgSreModelConnectionRepository(db)
 	ctx := context.Background()
 	key, baseURL, model := "sre-db-key-0123456789abcdef", "https://gw.example.com/v1", "glm-5.3"
 
-	if err := svc.Set(ctx, "acme", "user@acme.test", orgconfig.SreLlmWrite{BaseURL: &baseURL, APIKey: &key, Model: &model}); err != nil {
-		t.Fatalf("Set: %v", err)
+	draft, err := svc.Check(ctx, "acme", orgconfig.SreLlmWrite{BaseURL: &baseURL, APIKey: &key, Model: &model})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if err := svc.Persist(ctx, "acme", "user@acme.test", draft); err != nil {
+		t.Fatalf("Persist: %v", err)
 	}
 
-	proj, err := svc.Projection(ctx, "acme")
+	row, err := repo.GetByOrg(ctx, "acme")
 	if err != nil {
-		t.Fatalf("Projection: %v", err)
+		t.Fatalf("GetByOrg: %v", err)
 	}
-	if proj == nil || proj.BaseURL != baseURL || proj.Host != "gw.example.com" || proj.Model != model || proj.UpdatedBy != "user@acme.test" {
-		t.Fatalf("Projection = %+v, want the saved connection", proj)
-	}
-	if proj.KeyPreview != "sre-…cdef" {
-		t.Errorf("keyPreview = %q, want %q", proj.KeyPreview, "sre-…cdef")
-	}
-	raw, err := json.Marshal(proj)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if strings.Contains(string(raw), key) {
-		t.Fatalf("the projection carries the key: %s", raw)
+	if row == nil || row.BaseURL != baseURL || row.Host != "gw.example.com" || row.Model != model || row.UpdatedBy != "user@acme.test" {
+		t.Fatalf("row = %+v, want the saved connection", row)
 	}
 
 	stored, err := store.Get(ctx, "acme", "sre-model/key")
@@ -254,15 +248,5 @@ func TestSreModelConnectionService_SetThenProjection(t *testing.T) {
 	}
 	if eff.Source != organization.SRESourceOverride || eff.Conn.Host != "gw.example.com" || eff.Key != key {
 		t.Errorf("EffectiveSRE = {%s %s}, want the override with its key", eff.Source, eff.Conn.Host)
-	}
-
-	if err := svc.Clear(ctx, "acme", "user@acme.test"); err != nil {
-		t.Fatalf("Clear: %v", err)
-	}
-	if proj, err := svc.Projection(ctx, "acme"); err != nil || proj != nil {
-		t.Fatalf("Projection after Clear = %+v, %v; want nil, nil", proj, err)
-	}
-	if _, err := store.Get(ctx, "acme", "sre-model/key"); err == nil {
-		t.Fatal("the key outlived Clear")
 	}
 }

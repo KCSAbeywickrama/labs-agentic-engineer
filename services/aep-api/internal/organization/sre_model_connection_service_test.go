@@ -22,19 +22,15 @@ package organization
 // commit.
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/platform/modelconn"
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
-	"github.com/wso2/aep/aep-api/internal/platform/patch"
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 )
 
@@ -209,9 +205,20 @@ func wantSectionError(t *testing.T, err error, code string) *SectionError {
 	return se
 }
 
-// --- Set ---------------------------------------------------------------------
+// --- Check + Persist ----------------------------------------------------------
 
-func TestSreModelConnectionService_Set(t *testing.T) {
+// setSre is Check then Persist, the production path a save takes: the only
+// production caller is ApplySeed (sre_model_seed.go), which composes them the
+// same way — probe once, write the already-probed draft.
+func setSre(ctx context.Context, s *SreModelConnectionService, org, actor string, w orgconfig.SreLlmWrite) error {
+	d, err := s.Check(ctx, org, w)
+	if err != nil {
+		return err
+	}
+	return s.Persist(ctx, org, actor, d)
+}
+
+func TestSreModelConnectionService_CheckAndPersist(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("refuses a probe failure and stores nothing", func(t *testing.T) {
@@ -219,7 +226,7 @@ func TestSreModelConnectionService_Set(t *testing.T) {
 		prober := &sreProber{err: &ValidationError{Code: "llm_key_rejected", Message: "a.example rejected the key (401)"}}
 		s := newSreService(w, prober, sreOrgConn{})
 
-		err := s.Set(ctx, sreOrg, sreActor, orgconfig.SreLlmWrite{
+		err := setSre(ctx, s, sreOrg, sreActor, orgconfig.SreLlmWrite{
 			BaseURL: ptr("https://a.example/v1"), APIKey: ptr(sreKey), Model: ptr("gpt-4o-mini"),
 		})
 		se := wantSectionError(t, err, "llm_key_rejected")
@@ -245,7 +252,7 @@ func TestSreModelConnectionService_Set(t *testing.T) {
 		prober := &sreProber{}
 		s := newSreService(w, prober, sreOrgConn{})
 
-		err := s.Set(ctx, sreOrg, sreActor, orgconfig.SreLlmWrite{
+		err := setSre(ctx, s, sreOrg, sreActor, orgconfig.SreLlmWrite{
 			BaseURL: ptr("http://x"), APIKey: ptr(sreKey), Model: ptr("gpt-4o-mini"),
 		})
 		wantSectionError(t, err, "llm_base_url_invalid")
@@ -263,7 +270,7 @@ func TestSreModelConnectionService_Set(t *testing.T) {
 		prober := &sreProber{}
 		s := newSreService(w, prober, sreOrgConn{})
 
-		err := s.Set(ctx, sreOrg, sreActor, orgconfig.SreLlmWrite{BaseURL: ptr("https://b.example/v1")})
+		err := setSre(ctx, s, sreOrg, sreActor, orgconfig.SreLlmWrite{BaseURL: ptr("https://b.example/v1")})
 		wantSectionError(t, err, "llm_key_required_for_new_host")
 		if len(prober.targets) != 0 {
 			t.Errorf("probe called %d times: the stored key must never reach b.example", len(prober.targets))
@@ -278,7 +285,7 @@ func TestSreModelConnectionService_Set(t *testing.T) {
 		prober := &sreProber{}
 		s := newSreService(w, prober, sreOrgConn{})
 
-		err := s.Set(ctx, sreOrg, sreActor, orgconfig.SreLlmWrite{
+		err := setSre(ctx, s, sreOrg, sreActor, orgconfig.SreLlmWrite{
 			BaseURL: ptr("https://a.example/v1"), APIKey: ptr("short"), Model: ptr("gpt-4o-mini"),
 		})
 		wantSectionError(t, err, "llm_key_too_short")
@@ -295,7 +302,7 @@ func TestSreModelConnectionService_Set(t *testing.T) {
 		prober := &sreProber{}
 		s := newSreService(w, prober, sreOrgConn{})
 
-		err := s.Set(ctx, sreOrg, sreActor, orgconfig.SreLlmWrite{BaseURL: ptr("https://a.example/v1"), APIKey: ptr(sreKey)})
+		err := setSre(ctx, s, sreOrg, sreActor, orgconfig.SreLlmWrite{BaseURL: ptr("https://a.example/v1"), APIKey: ptr(sreKey)})
 		wantSectionError(t, err, "llm_field_required")
 		if len(prober.targets) != 0 {
 			t.Errorf("probe called %d times, want 0", len(prober.targets))
@@ -307,7 +314,7 @@ func TestSreModelConnectionService_Set(t *testing.T) {
 		prober := &sreProber{}
 		s := newSreService(w, prober, sreOrgConn{})
 
-		if err := s.Set(ctx, sreOrg, sreActor, orgconfig.SreLlmWrite{
+		if err := setSre(ctx, s, sreOrg, sreActor, orgconfig.SreLlmWrite{
 			BaseURL: ptr("https://A.example/v1/"), APIKey: ptr(sreKey), Model: ptr("gpt-4o-mini"),
 		}); err != nil {
 			t.Fatalf("Set: %v", err)
@@ -339,7 +346,7 @@ func TestSreModelConnectionService_Set(t *testing.T) {
 		prober := &sreProber{}
 		s := newSreService(w, prober, sreOrgConn{})
 
-		if err := s.Set(ctx, sreOrg, sreActor, orgconfig.SreLlmWrite{Model: ptr("gpt-4o")}); err != nil {
+		if err := setSre(ctx, s, sreOrg, sreActor, orgconfig.SreLlmWrite{Model: ptr("gpt-4o")}); err != nil {
 			t.Fatalf("Set: %v", err)
 		}
 		if len(prober.targets) != 1 || prober.targets[0].Key != sreKey || prober.targets[0].Host != "a.example" {
@@ -359,7 +366,7 @@ func TestSreModelConnectionService_Set(t *testing.T) {
 		prober := &sreProber{}
 		s := newSreService(w, prober, sreOrgConn{})
 
-		if err := s.Set(ctx, sreOrg, sreActor, orgconfig.SreLlmWrite{
+		if err := setSre(ctx, s, sreOrg, sreActor, orgconfig.SreLlmWrite{
 			BaseURL: ptr("https://b.example/v1"), APIKey: ptr(sreOtherKey),
 		}); err != nil {
 			t.Fatalf("Set: %v", err)
@@ -380,7 +387,7 @@ func TestSreModelConnectionService_Set(t *testing.T) {
 		// Another save lands between this one's probe and its transaction.
 		s.card = racingCard{sreCard{w}, func() { seedSre(w, "b.example", sreOtherKey) }}
 
-		err := s.Set(ctx, sreOrg, sreActor, orgconfig.SreLlmWrite{Model: ptr("gpt-4o")})
+		err := setSre(ctx, s, sreOrg, sreActor, orgconfig.SreLlmWrite{Model: ptr("gpt-4o")})
 		var se *SectionError
 		if !errors.As(err, &se) || se.Section != "sreLlm" || se.Status != http.StatusConflict {
 			t.Fatalf("want a 409 SectionError on sreLlm, got %v", err)
@@ -400,64 +407,6 @@ type racingCard struct {
 func (c racingCard) Tx(ctx context.Context, fn func(tx AgentsCardTx) error) error {
 	c.race()
 	return c.sreCard.Tx(ctx, fn)
-}
-
-// --- Service.Patch probes the SRE model connection once ----------------------
-
-// TestServicePatch_SreLlm_ProbesOnce guards the /config PATCH sequencing:
-// Patch's probe phase calls Check, and the persist phase must write the draft
-// Check already validated and probed rather than probing it again. A flaky
-// second probe must not be able to leave sreLlm unwritten after sibling
-// sections already committed.
-func TestServicePatch_SreLlm_ProbesOnce(t *testing.T) {
-	ctx := context.Background()
-	w := newSreWorld()
-	prober := &sreProber{}
-	sre := newSreService(w, prober, sreOrgConn{})
-	svc := NewService(nil, nil, nil, nil, PlatformIDPConfig{}, "", "").WithSreModel(sre)
-
-	_, err := svc.Patch(ctx, sreOrg, sreActor, orgconfig.ConfigPatch{
-		SreLLM: patch.Field[orgconfig.SreLlmWrite]{Sent: true, Value: orgconfig.SreLlmWrite{
-			BaseURL: ptr("https://a.example/v1"), APIKey: ptr(sreKey), Model: ptr("gpt-4o-mini"),
-		}},
-	})
-	if err != nil {
-		t.Fatalf("Patch: %v", err)
-	}
-	if len(prober.targets) != 1 {
-		t.Fatalf("probe calls = %d, want 1 (Patch must not probe twice per save)", len(prober.targets))
-	}
-	if w.row == nil || w.row.Host != "a.example" || w.key(sreOrg) != sreKey {
-		t.Fatalf("row = %+v key = %q, want a.example with the sent key written", w.row, w.key(sreOrg))
-	}
-}
-
-// --- Clear -------------------------------------------------------------------
-
-func TestSreModelConnectionService_Clear(t *testing.T) {
-	ctx := context.Background()
-	w := newSreWorld()
-	seedSre(w, "a.example", sreKey)
-	s := newSreService(w, &sreProber{}, sreOrgConn{})
-
-	if err := s.Clear(ctx, sreOrg, sreActor); err != nil {
-		t.Fatalf("Clear: %v", err)
-	}
-	if w.row != nil {
-		t.Errorf("row = %+v, want deleted", w.row)
-	}
-	if got := w.key(sreOrg); got != "" {
-		t.Errorf("stored key = %q, want deleted", got)
-	}
-	wantEvents := []string{"lock:org_anthropic:" + sreOrg, "lock:org_model:" + sreOrg, "commit", "onChange:" + sreOrg}
-	if !slices.Equal(w.events, wantEvents) {
-		t.Errorf("events = %v, want %v", w.events, wantEvents)
-	}
-
-	// Idempotent.
-	if err := s.Clear(ctx, sreOrg, sreActor); err != nil {
-		t.Fatalf("second Clear: %v", err)
-	}
 }
 
 // --- reads -------------------------------------------------------------------
@@ -502,123 +451,6 @@ func TestSreModelConnectionService_EffectiveSRE(t *testing.T) {
 		}
 		if eff.Source != SRESourceNone || eff.Key != "" {
 			t.Errorf("eff = {%s key set=%v}, want none", eff.Source, eff.Key != "")
-		}
-	})
-}
-
-func TestSreModelConnectionService_Projection(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("none is nil", func(t *testing.T) {
-		s := newSreService(newSreWorld(), &sreProber{}, sreOrgConn{})
-		proj, err := s.Projection(ctx, sreOrg)
-		if err != nil || proj != nil {
-			t.Fatalf("Projection = %+v, %v; want nil, nil", proj, err)
-		}
-	})
-
-	t.Run("a stored connection, the key previewed only", func(t *testing.T) {
-		w := newSreWorld()
-		seedSre(w, "a.example", sreKey)
-		s := newSreService(w, &sreProber{}, sreOrgConn{})
-
-		proj, err := s.Projection(ctx, sreOrg)
-		if err != nil {
-			t.Fatalf("Projection: %v", err)
-		}
-		want := orgconfig.SreLlmProjection{BaseURL: "https://a.example/v1", Host: "a.example", Model: "gpt-4o-mini",
-			KeyPreview: keyPreview(sreKey), ConnectedAt: w.row.ConnectedAt, UpdatedAt: w.row.UpdatedAt, UpdatedBy: "someone@acme.test"}
-		if proj == nil || *proj != want {
-			t.Fatalf("Projection = %+v, want %+v", proj, want)
-		}
-	})
-}
-
-// --- GET /config's sreAgent ----------------------------------------------------
-
-// sreStatus answers for owner only (ok=false for any other org), or fails
-// every read with err.
-type sreStatus struct {
-	owner, status, reason string
-	err                   error
-}
-
-func (s sreStatus) Status(_ context.Context, org string) (string, string, bool, error) {
-	if s.err != nil {
-		return "", "", false, s.err
-	}
-	if org != s.owner {
-		return "", "", false, nil
-	}
-	return s.status, s.reason, true, nil
-}
-
-func TestService_Get_SreAgent(t *testing.T) {
-	ctx := context.Background()
-	w := newSreWorld()
-	seedSre(w, "a.example", sreKey)
-	sre := newSreService(w, &sreProber{}, sreOrgConn{})
-
-	t.Run("null without a status reader", func(t *testing.T) {
-		out, err := NewService(nil, nil, nil, nil, PlatformIDPConfig{}, "", "").WithSreModel(sre).Get(ctx, sreOrg)
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if out.SreAgent != nil {
-			t.Errorf("sreAgent = %+v, want nil", out.SreAgent)
-		}
-		if out.SreLLM == nil || out.SreLLM.Host != "a.example" {
-			t.Errorf("sreLlm = %+v, want the stored connection", out.SreLLM)
-		}
-	})
-
-	t.Run("the effective connection and the status with one", func(t *testing.T) {
-		out, err := NewService(nil, nil, nil, nil, PlatformIDPConfig{}, "", "").WithSreModel(sre).
-			WithSREAgentStatus(sreStatus{owner: sreOrg, status: "failed", reason: "helm upgrade failed"}).Get(ctx, sreOrg)
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		want := orgconfig.SreAgentProjection{Enabled: true, Source: "override", Model: "gpt-4o-mini",
-			Host: "a.example", Status: "failed", Reason: "helm upgrade failed"}
-		if out.SreAgent == nil || *out.SreAgent != want {
-			t.Errorf("sreAgent = %+v, want %+v", out.SreAgent, want)
-		}
-	})
-
-	t.Run("null for an org the observability plane does not serve", func(t *testing.T) {
-		out, err := NewService(nil, nil, nil, nil, PlatformIDPConfig{}, "", "").WithSreModel(sre).
-			WithSREAgentStatus(sreStatus{owner: "globex", status: "running"}).Get(ctx, sreOrg)
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if out.SreAgent != nil {
-			t.Errorf("sreAgent = %+v, want nil (another org owns the SRE agent)", out.SreAgent)
-		}
-	})
-
-	t.Run("failed, not an error, when the status cannot be read", func(t *testing.T) {
-		var buf bytes.Buffer
-		prev := slog.Default()
-		slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
-		defer slog.SetDefault(prev)
-
-		out, err := NewService(nil, nil, nil, nil, PlatformIDPConfig{}, "", "").WithSreModel(sre).
-			WithSREAgentStatus(sreStatus{err: errors.New("dial tcp: connection refused")}).Get(ctx, sreOrg)
-		if err != nil {
-			t.Fatalf("Get: %v, want GET /config to stay loadable", err)
-		}
-		want := orgconfig.SreAgentProjection{Enabled: true, Source: "override", Model: "gpt-4o-mini",
-			Host: "a.example", Status: "failed",
-			Reason: "SRE agent status unavailable: cannot read the observability plane"}
-		if out.SreAgent == nil || *out.SreAgent != want {
-			t.Errorf("sreAgent = %+v, want %+v", out.SreAgent, want)
-		}
-		logged := buf.String()
-		if !strings.Contains(logged, `"level":"WARN"`) || !strings.Contains(logged, "connection refused") {
-			t.Errorf("want a warning carrying the read error, got %q", logged)
-		}
-		if strings.Contains(logged, sreKey) {
-			t.Error("the warning carries the SRE model key")
 		}
 	})
 }

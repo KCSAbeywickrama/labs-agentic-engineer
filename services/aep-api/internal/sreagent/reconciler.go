@@ -45,8 +45,7 @@ type Kube interface {
 	PatchSecretData(ctx context.Context, ns, name string, data map[string][]byte) error
 	PatchTemplateAnnotation(ctx context.Context, ns, deploy, key, value string) error
 	Scale(ctx context.Context, ns, deploy string, replicas int32) error
-	Deployment(ctx context.Context, ns, deploy string) (DeploymentState, map[string]string, error)
-	Pods(ctx context.Context, ns string, selector map[string]string) ([]PodState, error)
+	Deployment(ctx context.Context, ns, deploy string) (DeploymentState, error)
 }
 
 // Reconciler converges the stock SRE agent of the one org cfg names on its
@@ -109,37 +108,6 @@ func (r *Reconciler) Kick(org string) {
 	}
 }
 
-// Status reports how org's SRE agent rollout stands (see StatusOf). ok=false
-// for any org but the one this observability plane serves. It reads only: a
-// token not minted yet reads as a rollout still to come.
-func (r *Reconciler) Status(ctx context.Context, org string) (status, reason string, ok bool, err error) {
-	if org != r.cfg.Org {
-		return "", "", false, nil
-	}
-	eff, err := r.eff(ctx, org)
-	if err != nil {
-		return "", "", false, fmt.Errorf("sre agent status: effective connection: %w", err)
-	}
-	tok, _, err := r.tokens.Get(ctx, org)
-	if err != nil {
-		return "", "", false, fmt.Errorf("sre agent status: %w", err)
-	}
-	d := DesiredFrom(eff, tok)
-	if !d.Configured {
-		return string(StatusUnconfigured), "", true, nil
-	}
-	dep, selector, err := r.kube.Deployment(ctx, r.cfg.Namespace, r.cfg.Deployment)
-	if err != nil {
-		return "", "", false, fmt.Errorf("sre agent status: %w", err)
-	}
-	pods, err := r.kube.Pods(ctx, r.cfg.Namespace, selector)
-	if err != nil {
-		return "", "", false, fmt.Errorf("sre agent status: %w", err)
-	}
-	st, why := StatusOf(d, dep, pods)
-	return string(st), why, true, nil
-}
-
 func (r *Reconciler) pass(ctx context.Context) {
 	if err := r.reconcile(ctx); err != nil {
 		slog.WarnContext(ctx, "sreagent.reconcile_failed", "err", err)
@@ -164,7 +132,7 @@ func (r *Reconciler) reconcile(ctx context.Context) error {
 		return err
 	}
 	d := DesiredFrom(eff, tok)
-	dep, _, err := r.kube.Deployment(ctx, ns, r.cfg.Deployment)
+	dep, err := r.kube.Deployment(ctx, ns, r.cfg.Deployment)
 	if err != nil {
 		return err
 	}

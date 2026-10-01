@@ -49,7 +49,6 @@ import {
   skillsLoadError,
   skillsSyncError,
   skillsRepoUrl,
-  sreAgentProjectionFixture,
   subscriptionFixture,
   subscriptionValidationError,
   type SettingsScenario,
@@ -63,8 +62,6 @@ type LLMProjection = components["schemas"]["LLMProjection"];
 type LLMPatch = components["schemas"]["LLMPatch"];
 type LLMCheck = components["schemas"]["LLMCheck"];
 type LLMCapabilities = components["schemas"]["LLMCapabilities"];
-type SreLlmProjection = components["schemas"]["SreLlmProjection"];
-type SreAgentProjection = components["schemas"]["SreAgentProjection"];
 type CreateSkillInput = components["schemas"]["CreateSkillInput"];
 type UpdateSkillInput = components["schemas"]["UpdateSkillInput"];
 type SkillUpdate = components["schemas"]["SkillUpdate"];
@@ -101,9 +98,6 @@ let llmDisconnectedAt: string | null = null;
 // `subscription` is the Claude subscription coding runs bill (null = they
 // bill the connection's key).
 let agents: AgentsProjection = { ...agentsDefaultsFixture };
-// The org's SRE model connection: its own endpoint and key, so it is never
-// cascaded when the org connection is cleared.
-let sreLlm: SreLlmProjection | null = null;
 let skills: SkillDetailBody[] = [];
 let skillUpdates: SkillUpdate[] = [];
 let initialized = false;
@@ -247,21 +241,6 @@ function importSkill(name: string, source: string): ImportResult {
   };
 }
 
-// This mock server DOES push the SRE agent's configuration, so the row can
-// be exercised without a real cluster: an override always runs; otherwise
-// the org connection runs it when it has the `sreAgent` capability, else
-// there is nothing to run. Real rollout states (`applying`, `failed`) are
-// out of scope for the mock — there is no reconciler here to fail.
-function sreAgentProjection(): SreAgentProjection {
-  if (sreLlm !== null) {
-    return sreAgentProjectionFixture({ source: "override", host: sreLlm.host, model: sreLlm.model, status: "running" });
-  }
-  if (llm !== null && llm.capabilities.sreAgent) {
-    return sreAgentProjectionFixture({ source: "organization", host: hostOf(llm.baseURL), model: llm.model, status: "running" });
-  }
-  return sreAgentProjectionFixture();
-}
-
 function configProjection(): ConfigProjection {
   return {
     gitProvider,
@@ -269,8 +248,6 @@ function configProjection(): ConfigProjection {
     ...(llm === null && llmDisconnectedAt ? { llmDisconnectedAt } : {}),
     agents,
     llmFormats: llmFormatsFor(agents.availableRuntimes),
-    sreLlm,
-    sreAgent: sreAgentProjection(),
     idp: {
       kind: "platform",
       issuer: "https://idp.aep.local",
@@ -549,26 +526,6 @@ export const settingsHandlers = [
     // cannot present one, and only Anthropic's own API takes one.
     if (agents.runtime !== "claude-code" || !llm?.capabilities.claudeSubscription) {
       agents = { ...agents, subscription: null };
-    }
-
-    if (body.sreLlm !== undefined) {
-      if (body.sreLlm === null) {
-        sreLlm = null;
-      } else {
-        // Patched field by field over the saved connection, as the server does.
-        const baseURL = (body.sreLlm.baseURL ?? sreLlm?.baseURL ?? "").replace(/\/+$/, "");
-        const host = hostOf(baseURL);
-        const now = new Date().toISOString();
-        sreLlm = {
-          baseURL,
-          host,
-          model: body.sreLlm.model ?? sreLlm?.model ?? "",
-          keyPreview: body.sreLlm.apiKey ? keyPreview(body.sreLlm.apiKey) : (sreLlm?.keyPreview ?? ""),
-          connectedAt: sreLlm !== null && sreLlm.host === host ? sreLlm.connectedAt : now,
-          updatedAt: now,
-          updatedBy: "dev@acme.example",
-        };
-      }
     }
 
     if (body.gitProvider != null) {

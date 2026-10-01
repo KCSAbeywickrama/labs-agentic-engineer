@@ -173,7 +173,6 @@ type configHarness struct {
 	anth  *anthropicFake // the Claude subscription probe
 	model *modelEndpoint // the model connection's endpoint, for every host
 	conns *organization.ModelConnectionService
-	sre   *organization.SreModelConnectionService
 }
 
 // newConfigHarness assembles the real orgconfig.Service over one shared dbtest
@@ -232,10 +231,8 @@ func newConfigHarnessProbing(t *testing.T, thunder thundersvc.Client, appClientI
 	anthropicSvc := organization.NewAnthropicCredentialService(anthropicRepo, store).WithAnthropicAPIBase(anth.URL)
 	conns := organization.NewModelConnectionService(organization.NewOrgModelConnectionRepository(db), anthropicRepo, store, sonnetRates())
 	cardRepo := organization.NewAgentsCardRepository(db, store)
-	sre := organization.NewSreModelConnectionService(organization.NewOrgSreModelConnectionRepository(db), store, cardRepo, conns)
 	if !guarded {
 		conns.WithProbeClient(model.client())
-		sre.WithProbeClient(model.client())
 	}
 	credSvc := organization.NewCredentialService(organization.NewOrgCredentialRepository(db, nil), store, minter, configEnvSec, "", "", nil).WithGitHubAPIBase(gh.URL)
 	disconnectSvc := organization.NewOrgDisconnectService(credSvc, nil)
@@ -247,12 +244,12 @@ func newConfigHarnessProbing(t *testing.T, thunder thundersvc.Client, appClientI
 		organization.PlatformIDPConfig{Issuer: platformIss, JWKSURL: platformJWKS},
 		"http://localhost:8090", appClientID,
 	).WithAgentSettings(organization.NewAgentSettingsService(organization.NewOrgAgentSettingsRepository(db),
-		organization.NewOrganizationRepository(db), anthropicSvc, conns, cardRepo, runtimes)).WithSreModel(sre)
+		organization.NewOrganizationRepository(db), anthropicSvc, conns, cardRepo, runtimes))
 
 	// The harness wires the DOMAIN, not a loose service: the edge embeds
 	// organization's handlers, so this assembles the same graph production does.
 	h := componenttest.New(t, componenttest.Options{Deps: edge.Deps{Organization: mustNewOrgHandlers(t, organization.Deps{Config: svc})}})
-	return &configHarness{h: h, db: db, gh: gh, anth: anth, model: model, conns: conns, sre: sre}
+	return &configHarness{h: h, db: db, gh: gh, anth: anth, model: model, conns: conns}
 }
 
 // mustNewOrgHandlers assembles the real organization domain around the given

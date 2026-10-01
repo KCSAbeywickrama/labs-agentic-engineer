@@ -505,8 +505,11 @@ type SREAgentConfig struct {
 	// Seed is the install-time SRE model connection `aectl sre install`
 	// writes without a user token (Task A2's `sre-model-seed` Secret, read
 	// from SRE_AGENT_SEED_API_KEY / SRE_AGENT_SEED_MODEL /
-	// SRE_AGENT_SEED_BASE_URL). organization.SreModelConnectionService.ApplySeed
-	// applies it at most once per distinct value.
+	// SRE_AGENT_SEED_BASE_URL). It is the only way to set or rotate the SRE
+	// model connection: organization.SreModelConnectionService.ApplySeed
+	// probes it whenever its hash changes and, on success, persists it,
+	// replacing whatever connection is stored. An unset Seed leaves the
+	// stored connection untouched.
 	Seed SREAgentSeed
 }
 

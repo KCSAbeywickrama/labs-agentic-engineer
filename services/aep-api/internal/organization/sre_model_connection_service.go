@@ -16,8 +16,9 @@
 
 // sre_model_connection_service.go — the org's SRE model connection: the
 // OpenAI-compatible endpoint, over a Bearer key of its own, that the
-// OpenChoreo SRE agent calls instead of the org's model connection (the
-// /config `sreLlm` section).
+// OpenChoreo SRE agent calls instead of the org's model connection. Set only
+// by the install-time seed (sre_model_seed.go's ApplySeed, via Check/Persist
+// below); there is no console or PATCH /config path onto it.
 //
 // A save follows the org connection's rules (ADR-0038 §5): https only, a key
 // of at least 12 characters, and a move to another origin only with the key
@@ -45,7 +46,8 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/secrets"
 )
 
-// sreSection is the /config section this service answers for.
+// sreSection labels this service's SectionError refusals (sre_model_seed.go
+// logs se.Code; there is no HTTP body.<section> pointer for it anymore).
 const sreSection = "sreLlm"
 
 // SreModelConnectionService — see file doc.
@@ -83,8 +85,8 @@ func (s *SreModelConnectionService) WithProbeClient(c *http.Client) *SreModelCon
 	return s
 }
 
-// OnChange registers f to run after every committed save or clear, with the
-// org it changed. One callback: a second call replaces the first.
+// OnChange registers f to run after every committed save, with the org it
+// changed. One callback: a second call replaces the first.
 func (s *SreModelConnectionService) OnChange(f func(org string)) {
 	s.onChange = f
 }
@@ -103,31 +105,19 @@ type sreDraft struct {
 }
 
 // Check validates w merged over the org's stored connection and probes the
-// result, writing nothing: the /config PATCH's probe phase, so a refusal here
-// leaves every other section of the patch unwritten too. The returned draft
-// is already probed; hand it to Persist to write it without probing again.
+// result, writing nothing: ApplySeed's probe phase, so a refused seed leaves
+// the stored connection untouched. The returned draft is already probed; hand
+// it to Persist to write it without probing again.
 func (s *SreModelConnectionService) Check(ctx context.Context, org string, w orgconfig.SreLlmWrite) (sreDraft, error) {
 	return s.probed(ctx, org, w)
 }
 
-// Set saves w merged over the org's stored connection, field by field: it
-// validates and probes the result, then writes the row and, when w carries
-// one, the key, in one transaction under the card's lock. A refusal is a
-// SectionError on sreLlm and writes nothing. OnChange runs after the commit.
-func (s *SreModelConnectionService) Set(ctx context.Context, org, actor string, w orgconfig.SreLlmWrite) error {
-	d, err := s.Check(ctx, org, w)
-	if err != nil {
-		return err
-	}
-	return s.Persist(ctx, org, actor, d)
-}
-
 // Persist writes a draft Check already validated and probed, without probing
-// it again: the /config PATCH's persist phase, once every section's probe
-// phase has passed. The row it was judged against is re-read inside the
-// transaction, under the card's lock, so a connection that moved between
-// Check and Persist is still a conflict (sameRow) rather than a write of a
-// connection nothing probed. OnChange runs after the commit.
+// it again: ApplySeed's persist phase, once the probe has passed. The row it
+// was judged against is re-read inside the transaction, under the card's
+// lock, so a connection that moved between Check and Persist is still a
+// conflict (sameRow) rather than a write of a connection nothing probed.
+// OnChange runs after the commit.
 func (s *SreModelConnectionService) Persist(ctx context.Context, org, actor string, d sreDraft) error {
 	now := s.now().UTC()
 	err := s.card.Tx(ctx, func(tx AgentsCardTx) error {
@@ -163,30 +153,6 @@ func (s *SreModelConnectionService) Persist(ctx context.Context, org, actor stri
 		return err
 	}
 	slog.InfoContext(ctx, "sre_model.set", "org", org, "actor", actor, "host", d.Host)
-	s.changed(org)
-	return nil
-}
-
-// Clear removes the org's SRE model connection, row and key, so the SRE agent
-// falls back to the org's connection. Idempotent. OnChange runs after the
-// commit.
-func (s *SreModelConnectionService) Clear(ctx context.Context, org, actor string) error {
-	err := s.card.Tx(ctx, func(tx AgentsCardTx) error {
-		if err := lockCard(tx.AdvisoryLock, org); err != nil {
-			return err
-		}
-		if err := tx.DeleteSreModelConnection(org); err != nil {
-			return fmt.Errorf("sre model connection: delete row: %w", err)
-		}
-		if err := tx.Secrets().Delete(ctx, org, sreModelKeyStoreKey); err != nil {
-			return fmt.Errorf("sre model connection: store delete: %w", err)
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	slog.InfoContext(ctx, "sre_model.cleared", "org", org, "actor", actor)
 	s.changed(org)
 	return nil
 }
@@ -312,30 +278,4 @@ func (s *SreModelConnectionService) EffectiveSRE(ctx context.Context, org string
 		orgConn = &conn
 	}
 	return ResolveEffectiveSRE(override, overrideKey, orgConn, orgKey), nil
-}
-
-// Projection is the org's SRE model connection as GET /config shows it, nil
-// when it has none. The key is previewed, never returned.
-func (s *SreModelConnectionService) Projection(ctx context.Context, org string) (*orgconfig.SreLlmProjection, error) {
-	row, err := s.conns.GetByOrg(ctx, org)
-	if err != nil || row == nil {
-		return nil, err
-	}
-	key, err := s.storedKey(ctx, org)
-	if err != nil {
-		return nil, err
-	}
-	preview := ""
-	if key != "" {
-		preview = keyPreview(key)
-	}
-	return &orgconfig.SreLlmProjection{
-		BaseURL:     row.BaseURL,
-		Host:        row.Host,
-		Model:       row.Model,
-		KeyPreview:  preview,
-		ConnectedAt: row.ConnectedAt,
-		UpdatedAt:   row.UpdatedAt,
-		UpdatedBy:   row.UpdatedBy,
-	}, nil
 }

@@ -128,23 +128,23 @@ connect-callback controller, and the S2S credentials-refresh.*
   (`ResolveCodingCredential`), all from `org_model_connections`. No consumer outside this domain reads
   the rows for a key.
 - **Which connection the SRE agent runs on is stated once** (`ResolveEffectiveSRE`, read through
-  `SreModelConnectionService.EffectiveSRE`): the SRE model connection (`/config` `sreLlm`) when set,
-  else the org's connection when it has the `SREAgent` capability, else none. An `sreLlm` save follows
-  the connection's rules (https, keys of 12+ characters, a new host only with its key), is probed
-  before any section of the patch is written, and writes under the card's lock. Both services'
-  `OnChange` run after every committed change of their connection. `GET /config`'s `sreAgent` is set
-  only for the org the SRE agent serves (`SREAgentStatusReader` answers ok=false for any other), and a
-  failed status read shows as `failed`, never as a failed GET.
-- **An install-time SRE model seed applies at most once** (`SreModelConnectionService.ApplySeed`,
-  `sre_model_seed.go`): `aectl sre install` writes the seed as env vars
-  (`config.SREAgentConfig.Seed`, read by the sreagent `Reconciler` through a `Seeder` it does not
-  otherwise depend on); a stored connection always wins over a seed (never even probed); otherwise
-  the seed runs the same Check/Persist path a console save takes, actor `aectl-seed`. A hash of the
-  seed's three values under `org_secrets` `sre-model/seed-applied` (`<hash>:applied` or
-  `<hash>:refused`) remembers whether this exact seed was already tried, so a reconciler pass that
-  calls it every tick costs one read once tried; a changed seed (a different model, a rotated key) is
-  tried again. A refusal is logged and returned as an outcome, never an error — it must not stop the
-  reconciler from reconciling whatever connection already applies.
+  `SreModelConnectionService.EffectiveSRE`): the SRE model connection when set, else the org's
+  connection when it has the `SREAgent` capability, else none. There is no PATCH /config section or
+  console row for the SRE model connection — `Check`/`Persist` are reachable only from the
+  install-time seed below. Both services' `OnChange` run after every committed change of their
+  connection, so the reconciler's push stays current.
+- **An install-time SRE model seed is the only way to set or rotate it, and is authoritative**
+  (`SreModelConnectionService.ApplySeed`, `sre_model_seed.go`): `aectl sre install` writes the seed as
+  env vars (`config.SREAgentConfig.Seed`, read by the sreagent `Reconciler` through a `Seeder` it does
+  not otherwise depend on). A seed hash that differs from the last one tried is probed through the
+  same Check/Persist path, actor `aectl-seed`, and on success **replaces whatever connection is
+  stored**; a refusal leaves the stored connection (if any) untouched. A hash of the seed's three
+  values under `org_secrets` `sre-model/seed-applied` (`<hash>:applied` or `<hash>:refused`) remembers
+  whether this exact seed was already tried, so a reconciler pass that calls it every tick costs one
+  read once tried; a changed seed (a different model, a rotated key) is tried again. No seed
+  configured means `ApplySeed` is never called, so the stored connection is left alone. A refusal is
+  logged and returned as an outcome, never an error — it must not stop the reconciler from
+  reconciling whatever connection already applies.
 - **Publisher SecretReference for coding Jobs is fail-closed on `POST /build`.**
   `ProvisionPublisherForBuild` (actor `build-provision`) ensures the Thunder publisher app and stamps
   `secret_ref_name` while the console JWT is on ctx. A missing or disabled `SecretRefWriter` returns

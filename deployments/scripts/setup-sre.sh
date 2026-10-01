@@ -35,14 +35,16 @@
 #      the org's LLM key/model and handoff token into the agent's Secret.
 #
 # The SRE agent has no key of its own: it waits at 0 replicas until an SRE
-# model applies (saved in the Console), which aep-api then pushes, with no
-# re-run of this script.
+# model connection applies, which aep-api then pushes, with no re-run of this
+# script. There is no console or API save for that connection — the
+# install-time seed below is the only way to set or rotate it.
 #
 # Optionally, set SRE_LLM_API_KEY_FILE (path to a file holding the key) and
 # SRE_LLM_MODEL (and SRE_LLM_BASE_URL) to have `aectl sre install` seed an
-# install-time SRE model connection instead of waiting on a Console/API save
-# — see "Seed the SRE model at install" in
-# docs/developer-guide/sre-handoff-runbook.md.
+# install-time SRE model connection; re-running with a changed key/model
+# rotates it — see "Seed the SRE model at install" in
+# docs/developer-guide/sre-handoff-runbook.md. Omitting them leaves whatever
+# connection is already stored untouched.
 #
 # Every step is idempotent.
 

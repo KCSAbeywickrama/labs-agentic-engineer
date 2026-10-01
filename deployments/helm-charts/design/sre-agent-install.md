@@ -75,7 +75,8 @@ absent, then installs/upgrades (idempotent). It then:
    arrive at the agent only through that one Secret, which aep-api's
    `internal/sreagent.Reconciler` keeps converged with the org's resolved
    [SRE model connection](../../../services/aep-api/design/sre-model-connection.md)
-   (60-second tick, plus an immediate kick on every relevant Console save).
+   (60-second tick, plus an immediate kick on a changed install-time seed or a
+   Console save of the org's own model connection).
    The reconciler scales the Deployment to 0 while unconfigured and back to
    1 once a connection resolves.
 4. **A Helm post-renderer** (`aectl sre post-render`, a hidden subcommand;

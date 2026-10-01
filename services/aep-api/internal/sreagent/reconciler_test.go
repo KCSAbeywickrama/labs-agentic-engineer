@@ -41,12 +41,10 @@ const (
 
 var testCfg = config.SREAgentConfig{Org: testOrg, Namespace: "obs", Deployment: "sre-agent", Secret: "sre-agent-aep"}
 
-// fakeKube records every write, in order, and serves dep and pods back.
+// fakeKube records every write, in order, and serves dep back.
 type fakeKube struct {
 	mu       sync.Mutex
 	dep      DeploymentState
-	selector map[string]string
-	pods     []PodState
 	calls    []string
 	secret   map[string][]byte
 	depErr   error
@@ -76,20 +74,14 @@ func (k *fakeKube) Scale(_ context.Context, ns, deploy string, replicas int32) e
 	return k.scaleErr
 }
 
-func (k *fakeKube) Deployment(_ context.Context, ns, deploy string) (DeploymentState, map[string]string, error) {
+func (k *fakeKube) Deployment(_ context.Context, ns, deploy string) (DeploymentState, error) {
 	k.mu.Lock()
-	dep, sel, err, reads := k.dep, k.selector, k.depErr, k.reads
+	dep, err, reads := k.dep, k.depErr, k.reads
 	k.mu.Unlock()
 	if reads != nil {
 		reads <- struct{}{}
 	}
-	return dep, sel, err
-}
-
-func (k *fakeKube) Pods(_ context.Context, ns string, selector map[string]string) ([]PodState, error) {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	return k.pods, nil
+	return dep, err
 }
 
 func (k *fakeKube) writes() []string {
@@ -383,55 +375,4 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.w.Write(p)
-}
-
-func TestStatus(t *testing.T) {
-	ctx := context.Background()
-	d := DesiredFrom(override, testToken)
-
-	t.Run("another org is not served", func(t *testing.T) {
-		r := NewReconciler(testCfg, &fakeKube{}, effective(override), fixedTokens{})
-		if _, _, ok, err := r.Status(ctx, "globex"); ok || err != nil {
-			t.Fatalf("ok=%v err=%v, want ok=false", ok, err)
-		}
-	})
-
-	t.Run("unconfigured without reading the cluster", func(t *testing.T) {
-		r := NewReconciler(testCfg, &fakeKube{depErr: errors.New("unreachable")}, effective(none), fixedTokens{})
-		st, _, ok, err := r.Status(ctx, testOrg)
-		if err != nil || !ok || st != string(StatusUnconfigured) {
-			t.Fatalf("status=%q ok=%v err=%v", st, ok, err)
-		}
-	})
-
-	t.Run("running once rolled out", func(t *testing.T) {
-		kube := &fakeKube{selector: map[string]string{"app": "sre-agent"}, pods: []PodState{{Hash: d.Hash()}},
-			dep: DeploymentState{Replicas: 1, UpdatedReplicas: 1, AvailableReplicas: 1, TemplateHash: d.Hash()}}
-		r := NewReconciler(testCfg, kube, effective(override), fixedTokens{})
-		st, reason, ok, err := r.Status(ctx, testOrg)
-		if err != nil || !ok || st != string(StatusRunning) || reason != "" {
-			t.Fatalf("status=%q reason=%q ok=%v err=%v", st, reason, ok, err)
-		}
-		if got := kube.writes(); len(got) != 0 {
-			t.Fatalf("Status wrote %q, want a read only", got)
-		}
-	})
-
-	t.Run("failed with the crashloop reason", func(t *testing.T) {
-		kube := &fakeKube{selector: map[string]string{"app": "sre-agent"},
-			pods: []PodState{{Hash: d.Hash(), WaitingReason: "CrashLoopBackOff", ExitCode: 1}},
-			dep:  DeploymentState{Replicas: 1, TemplateHash: d.Hash()}}
-		r := NewReconciler(testCfg, kube, effective(override), fixedTokens{})
-		st, reason, ok, err := r.Status(ctx, testOrg)
-		if err != nil || !ok || st != string(StatusFailed) || reason == "" {
-			t.Fatalf("status=%q reason=%q ok=%v err=%v", st, reason, ok, err)
-		}
-	})
-
-	t.Run("a read error is returned", func(t *testing.T) {
-		r := NewReconciler(testCfg, &fakeKube{depErr: errors.New("forbidden")}, effective(override), fixedTokens{})
-		if _, _, _, err := r.Status(ctx, testOrg); err == nil {
-			t.Fatal("want the read error")
-		}
-	})
 }

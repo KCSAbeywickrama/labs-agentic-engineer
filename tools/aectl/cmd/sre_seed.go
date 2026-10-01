@@ -15,13 +15,15 @@
 // under the License.
 
 // sre_seed.go — the install-time SRE model connection seed `aectl sre
-// install --llm-api-key-file/--llm-model[/--llm-base-url]` writes, so aep-api
-// can bring the SRE agent up without a Console/API save (Task A2). aep-api
-// applies it at most once per distinct seed via
-// organization.SreModelConnectionService.ApplySeed
-// (services/aep-api/internal/organization/sre_model_seed.go); this file only
-// resolves the three values from flags and writes them into the Secret the
-// platform chart's sreAgent.seed.secretName wires to aep-api's env.
+// install --llm-api-key-file/--llm-model[/--llm-base-url]` writes (Task A2).
+// This is the only way the SRE agent's model connection is ever set or
+// rotated — there is no console or API save for it. aep-api is authoritative
+// over a changed seed via organization.SreModelConnectionService.ApplySeed
+// (services/aep-api/internal/organization/sre_model_seed.go): it probes a
+// seed whose hash differs from the last one tried and, on success, replaces
+// whatever connection is stored; this file only resolves the three values
+// from flags and writes them into the Secret the platform chart's
+// sreAgent.seed.secretName wires to aep-api's env.
 package cmd
 
 import (

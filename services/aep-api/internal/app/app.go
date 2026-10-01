@@ -981,10 +981,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		organization.PlatformIDPConfig{Issuer: cfg.PlatformIDP.Issuer, JWKSURL: cfg.PlatformIDP.JWKSURL},
 		cfg.BFFPublicURL,
 		cfg.GitHubAppClientID,
-	).WithAgentSettings(agentSettings).WithSreModel(sreModelConnections)
-	if sreAgent != nil {
-		orgConfigSvc.WithSREAgentStatus(sreAgent)
-	}
+	).WithAgentSettings(agentSettings)
 
 	// Strict-handler feature dependencies — everything the contract-first
 	// /api/v1 edge serves (internal/api/handlers_*.go).

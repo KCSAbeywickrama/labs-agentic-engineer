@@ -21,7 +21,6 @@ package sreagent
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 
 	"github.com/wso2/aep/aep-api/internal/organization"
 )
@@ -82,43 +81,4 @@ type DeploymentState struct {
 	ObservedGeneration int64
 	Generation         int64
 	TemplateHash       string
-}
-
-type PodState struct {
-	Hash             string
-	WaitingReason    string
-	TerminatedReason string
-	ExitCode         int32
-}
-
-type Status string
-
-const (
-	StatusUnconfigured Status = "unconfigured"
-	StatusApplying     Status = "applying"
-	StatusRunning      Status = "running"
-	StatusFailed       Status = "failed"
-)
-
-// StatusOf reads the console's SRE agent status off the Deployment and its
-// pods: failed wins over applying, so a crashlooping new pod never reads as
-// "still applying".
-func StatusOf(d Desired, dep DeploymentState, pods []PodState) (Status, string) {
-	if !d.Configured {
-		return StatusUnconfigured, ""
-	}
-	want := d.Hash()
-	for _, p := range pods {
-		if p.Hash != want {
-			continue
-		}
-		if p.WaitingReason == "CrashLoopBackOff" || p.TerminatedReason == "Error" {
-			return StatusFailed, fmt.Sprintf("SRE agent exited (code %d, %s): the model or key was rejected at startup", p.ExitCode, p.WaitingReason+p.TerminatedReason)
-		}
-	}
-	if dep.TemplateHash != want || dep.ObservedGeneration < dep.Generation ||
-		dep.UpdatedReplicas < dep.Replicas || dep.AvailableReplicas < dep.Replicas {
-		return StatusApplying, ""
-	}
-	return StatusRunning, ""
 }

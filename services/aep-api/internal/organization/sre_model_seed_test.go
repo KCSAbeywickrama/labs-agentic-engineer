@@ -17,8 +17,10 @@
 package organization
 
 // UNIT tier: SreModelConnectionService.ApplySeed over the same in-memory
-// fakes as sre_model_connection_service_test.go. What it applies, what it
-// skips, and that a seen hash (applied or refused) is never retried.
+// fakes as sre_model_connection_service_test.go. ApplySeed is authoritative:
+// a changed seed hash is probed and, on success, replaces whatever is
+// stored; a refusal leaves the stored connection alone; a seen hash (applied
+// or refused) is never retried.
 
 import (
 	"bytes"
@@ -55,10 +57,15 @@ func TestApplySeed_AppliesWhenNothingStored(t *testing.T) {
 	}
 }
 
-func TestApplySeed_SkipsWhenStored(t *testing.T) {
+// TestApplySeed_ChangedSeedReplacesStored is the core authoritative-seed
+// behavior: a seed whose hash differs from the last one tried is probed even
+// though the org already has a stored connection, and on success REPLACES it
+// — a console save is no longer the only thing that can win here; the seed
+// always can.
+func TestApplySeed_ChangedSeedReplacesStored(t *testing.T) {
 	ctx := context.Background()
 	w := newSreWorld()
-	seedSre(w, "a.example", sreKey)
+	seedSre(w, "a.example", sreKey) // a connection stored by an earlier seed
 	prober := &sreProber{}
 	s := newSreService(w, prober, sreOrgConn{})
 	seed := Seed{BaseURL: "https://b.example/v1", Model: "gpt-4o", APIKey: sreOtherKey}
@@ -67,14 +74,14 @@ func TestApplySeed_SkipsWhenStored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplySeed: %v", err)
 	}
-	if outcome != SeedSkippedStored {
-		t.Fatalf("outcome = %q, want %q", outcome, SeedSkippedStored)
+	if outcome != SeedApplied {
+		t.Fatalf("outcome = %q, want %q", outcome, SeedApplied)
 	}
-	if len(prober.targets) != 0 {
-		t.Errorf("probe called %d times, want 0 (a stored connection is never probed)", len(prober.targets))
+	if len(prober.targets) != 1 {
+		t.Errorf("probe calls = %d, want 1 (a changed seed is probed even with a connection already stored)", len(prober.targets))
 	}
-	if w.row.Host != "a.example" {
-		t.Errorf("row = %+v, want the stored connection left alone", w.row)
+	if w.row == nil || w.row.Host != "b.example" || w.key(sreOrg) != sreOtherKey {
+		t.Errorf("row=%+v key=%q, want the stored connection replaced by the new seed", w.row, w.key(sreOrg))
 	}
 }
 
@@ -88,11 +95,6 @@ func TestApplySeed_SkipsSameHashAfterApplied(t *testing.T) {
 	if _, err := s.ApplySeed(ctx, sreOrg, seed); err != nil {
 		t.Fatalf("first ApplySeed: %v", err)
 	}
-	// A console removal clears the row/key but not the seed marker: only the
-	// marker should gate a retry of the unchanged seed.
-	if err := s.Clear(ctx, sreOrg, sreActor); err != nil {
-		t.Fatalf("Clear: %v", err)
-	}
 	prober.targets = nil
 
 	outcome, err := s.ApplySeed(ctx, sreOrg, seed)
@@ -105,17 +107,21 @@ func TestApplySeed_SkipsSameHashAfterApplied(t *testing.T) {
 	if len(prober.targets) != 0 {
 		t.Errorf("probe called %d times on a seen hash, want 0", len(prober.targets))
 	}
-	if w.row != nil {
-		t.Errorf("row = %+v, want none (the seen seed was not re-applied)", w.row)
+	if w.row == nil || w.row.Host != "a.example" {
+		t.Errorf("row = %+v, want the already-applied connection left as it was", w.row)
 	}
 }
 
-func TestApplySeed_SkipsSameHashAfterRefused(t *testing.T) {
+// TestApplySeed_RefusedChangedSeedKeepsStored: a changed seed that fails
+// validation/probe leaves whatever connection was already stored exactly as
+// it was, and is marked refused so it isn't retried on an unchanged seed.
+func TestApplySeed_RefusedChangedSeedKeepsStored(t *testing.T) {
 	ctx := context.Background()
 	w := newSreWorld()
-	prober := &sreProber{err: &ValidationError{Code: "llm_key_rejected", Message: "a.example rejected the key (401)"}}
+	seedSre(w, "a.example", sreKey)
+	prober := &sreProber{err: &ValidationError{Code: "llm_key_rejected", Message: "b.example rejected the key (401)"}}
 	s := newSreService(w, prober, sreOrgConn{})
-	seed := Seed{BaseURL: "https://a.example/v1", Model: "gpt-4o-mini", APIKey: sreKey}
+	seed := Seed{BaseURL: "https://b.example/v1", Model: "gpt-4o", APIKey: sreOtherKey}
 
 	outcome, err := s.ApplySeed(ctx, sreOrg, seed)
 	if err != nil {
@@ -123,6 +129,9 @@ func TestApplySeed_SkipsSameHashAfterRefused(t *testing.T) {
 	}
 	if outcome != SeedRefused {
 		t.Fatalf("outcome = %q, want %q", outcome, SeedRefused)
+	}
+	if w.row == nil || w.row.Host != "a.example" || w.key(sreOrg) != sreKey {
+		t.Errorf("row=%+v key=%q, want the stored connection left alone on a refusal", w.row, w.key(sreOrg))
 	}
 	if got, want := seedMarkerOf(w, sreOrg), seedHash(seed)+":refused"; got != want {
 		t.Errorf("marker = %q, want %q", got, want)
@@ -139,36 +148,8 @@ func TestApplySeed_SkipsSameHashAfterRefused(t *testing.T) {
 	if len(prober.targets) != 0 {
 		t.Errorf("probe called %d times on a seen refusal, want 0", len(prober.targets))
 	}
-}
-
-func TestApplySeed_ChangedSeedAfterRemovalAppliesAgain(t *testing.T) {
-	ctx := context.Background()
-	w := newSreWorld()
-	prober := &sreProber{}
-	s := newSreService(w, prober, sreOrgConn{})
-	seed := Seed{BaseURL: "https://a.example/v1", Model: "gpt-4o-mini", APIKey: sreKey}
-
-	if _, err := s.ApplySeed(ctx, sreOrg, seed); err != nil {
-		t.Fatalf("first ApplySeed: %v", err)
-	}
-	if err := s.Clear(ctx, sreOrg, sreActor); err != nil {
-		t.Fatalf("Clear: %v", err)
-	}
-	prober.targets = nil
-
-	changed := Seed{BaseURL: "https://a.example/v1", Model: "gpt-4o", APIKey: sreKey}
-	outcome, err := s.ApplySeed(ctx, sreOrg, changed)
-	if err != nil {
-		t.Fatalf("second ApplySeed: %v", err)
-	}
-	if outcome != SeedApplied {
-		t.Fatalf("outcome = %q, want %q", outcome, SeedApplied)
-	}
-	if len(prober.targets) != 1 {
-		t.Errorf("probe calls = %d, want 1 (a changed seed is tried again)", len(prober.targets))
-	}
-	if w.row == nil || w.row.Model != "gpt-4o" {
-		t.Errorf("row = %+v, want the changed model applied", w.row)
+	if w.row.Host != "a.example" {
+		t.Errorf("row = %+v, want still the stored connection", w.row)
 	}
 }
 

@@ -47,35 +47,3 @@ func TestHashChangesWithAnyValue(t *testing.T) {
 		t.Fatal("key rotation must change the hash (forces a restart)")
 	}
 }
-
-func TestStatusOf_CrashLoopIsFailed(t *testing.T) {
-	d := Desired{Configured: true, Model: "openai:m", APIKey: "k"}
-	dep := DeploymentState{Replicas: 1, TemplateHash: d.Hash(), Generation: 2, ObservedGeneration: 2}
-	st, reason := StatusOf(d, dep, []PodState{{Hash: d.Hash(), WaitingReason: "CrashLoopBackOff", ExitCode: 3}})
-	if st != StatusFailed || reason == "" {
-		t.Fatalf("%s %q", st, reason)
-	}
-}
-
-func TestStatusOf(t *testing.T) {
-	d := Desired{Configured: true, Model: "openai:m", APIKey: "k"}
-	h := d.Hash()
-	cases := []struct {
-		name string
-		dep  DeploymentState
-		pods []PodState
-		want Status
-	}{
-		{"old hash on template", DeploymentState{Replicas: 1, TemplateHash: "old"}, nil, StatusApplying},
-		{"rolled out and available", DeploymentState{Replicas: 1, UpdatedReplicas: 1, AvailableReplicas: 1, TemplateHash: h, Generation: 3, ObservedGeneration: 3}, []PodState{{Hash: h}}, StatusRunning},
-		{"new pod not ready yet", DeploymentState{Replicas: 1, TemplateHash: h, Generation: 3, ObservedGeneration: 3}, []PodState{{Hash: h, WaitingReason: "ContainerCreating"}}, StatusApplying},
-	}
-	for _, tc := range cases {
-		if got, _ := StatusOf(d, tc.dep, tc.pods); got != tc.want {
-			t.Errorf("%s: got %s want %s", tc.name, got, tc.want)
-		}
-	}
-	if got, _ := StatusOf(Desired{}, DeploymentState{}, nil); got != StatusUnconfigured {
-		t.Errorf("unconfigured: %s", got)
-	}
-}

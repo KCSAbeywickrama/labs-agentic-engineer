@@ -203,3 +203,17 @@ outside the per-org dispatch model. See
 [`services/aep-api/design/sre-model-connection.md`](../../services/aep-api/design/sre-model-connection.md)
 for delivery (aep-api pushes the resolved connection into the agent's
 Secret; the agent never reads AE's database).
+
+## Amendment 2026-10-01 — the SRE model connection is set at install only
+
+Supplying a separate OpenAI-compatible key next to the org's own connection
+was a stop-gap; there is no console row or `/config` section for it anymore.
+It is set, and rotated, only by `aectl sre install`'s install-time seed
+(`--llm-api-key-file`/`--llm-model`/`--llm-base-url`), and the seed is
+authoritative: a re-run whose seed hash differs from the last one tried is
+probed and, on success, **replaces** whatever connection is stored; a refusal
+leaves the stored connection untouched; no seed configured leaves it alone
+too (re-running the installer without a key file never wipes it). Removal is
+`aectl sre uninstall`, unchanged. See
+[`services/aep-api/design/sre-model-connection.md`](../../services/aep-api/design/sre-model-connection.md)
+for the mechanism.

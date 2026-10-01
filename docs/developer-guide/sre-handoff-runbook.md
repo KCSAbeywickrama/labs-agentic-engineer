@@ -46,24 +46,24 @@ cannot call Anthropic's Messages API. An org's model connection may be
 Anthropic-format, so AE resolves what the agent runs on rather than always
 reusing the org's default connection:
 
-1. The org's **SRE model connection** (Console: Settings > Credentials >
-   **SRE agent model**, under the model connection card) — OpenAI-compatible,
-   Bearer, its own key — if saved.
+1. The org's **SRE model connection** — OpenAI-compatible, Bearer, its own
+   key — if one is stored. There is no console or `/config` surface for it:
+   it is set, and rotated, only by `aectl sre install`'s install-time seed
+   (`--llm-api-key-file`/`--llm-model`; see [Seed the SRE model at
+   install](#seed-the-sre-model-at-install)).
 2. Else the org's own model connection, if it carries the `SREAgent`
    capability (any `openai-compatible` connection).
 3. Else the agent has no model, and aep-api scales its Deployment to 0.
 
 See
 [`services/aep-api/design/sre-model-connection.md`](../../services/aep-api/design/sre-model-connection.md)
-for the full resolution and push mechanics. There is no console-live path to
-the running pod: aep-api's reconciler pushes the resolved connection's model,
-key, base URL and a minted MCP token into the AE-owned Secret
-`sre-agent-aep` in the observability-plane namespace, on a save, and on a
-60-second tick. `aectl sre install --org <org>` is what wires *which* org's
-connection a given plane serves (`SRE_AGENT_ORG` / `SRE_AGENT_NAMESPACE` /
-`SRE_AGENT_DEPLOYMENT` / `SRE_AGENT_SECRET` on aep-api, set via the platform
-chart's `sreAgent.*` values) — it does not take a key on the command line;
-the key always comes from the Console save.
+for the full resolution and push mechanics. aep-api's reconciler pushes the
+resolved connection's model, key, base URL and a minted MCP token into the
+AE-owned Secret `sre-agent-aep` in the observability-plane namespace, on a
+save, and on a 60-second tick. `aectl sre install --org <org>` is what wires
+*which* org's connection a given plane serves (`SRE_AGENT_ORG` /
+`SRE_AGENT_NAMESPACE` / `SRE_AGENT_DEPLOYMENT` / `SRE_AGENT_SECRET` on
+aep-api, set via the platform chart's `sreAgent.*` values).
 
 The key value must not be placed in the image, checked into config, or
 logged.
@@ -74,7 +74,7 @@ logged.
    and the observability plane.
 2. AEP and the SRE agent share one Thunder (`thunder.openchoreo.localhost:8080`).
 3. The AEP org is connected to GitHub. For the SRE agent to have a model, it
-   needs either its own SRE model connection or an OpenAI-compatible org
+   needs either a seeded SRE model connection or an OpenAI-compatible org
    model connection (see Credentials above); the coding agent uses the org's
    main model connection regardless of format.
 4. The target project and components were **created through AEP** and
@@ -96,10 +96,10 @@ WITH_AGENT_MANAGER=0 make dev-env
 | `WITH_SRE` | `1` | `0` keeps the plane but skips the SRE agent. |
 | `WITH_AGENT_MANAGER` | `1` | `0` skips Agent Manager. |
 
-Then save a model for the SRE agent (an OpenAI-compatible SRE model
-connection, or an OpenAI-compatible org model connection) in the Console. AE
-pushes it in on its own reconcile tick; to force it immediately, re-run the
-SRE step:
+Then give the SRE agent a model: seed an SRE model connection at install time
+(`--llm-api-key-file`/`--llm-model`, below) or connect an OpenAI-compatible
+org model connection. AE pushes it in on its own reconcile tick; to force it
+immediately, re-run the SRE step:
 
 ```bash
 bash deployments/scripts/setup-sre.sh
@@ -155,11 +155,10 @@ go test ./cmd -run 'SRE|Extensions'
 
 ## Seed the SRE model at install
 
-`aectl sre install` can seed the org's SRE model connection at install time,
-so the agent has a model before anyone opens the Console. Write the key to a
-`0600` file, pass it and the model to the install command, and delete the
-file afterwards — the key is only ever read from a file, never taken as a
-flag value or logged.
+`aectl sre install` seeds the org's SRE model connection at install time —
+the only way to set or rotate it. Write the key to a `0600` file, pass it and
+the model to the install command, and delete the file afterwards — the key
+is only ever read from a file, never taken as a flag value or logged.
 
 ```bash
 umask 077
@@ -192,25 +191,29 @@ kubectl -n openchoreo-observability-plane get secret sre-agent-aep -o jsonpath='
 
 Rules the seed follows (`organization.SreModelConnectionService.ApplySeed`,
 [`sre-model-connection.md`](../../services/aep-api/design/sre-model-connection.md)):
+the seed is the **only** way to set or rotate the SRE model connection — there
+is no console or API save for it.
 
-- **A Console/API save always wins.** The seed is never applied, and never
-  even probed, once the org has a stored SRE model connection.
-- **A given seed is applied at most once**, tracked by a hash of its three
-  values in `org_secrets`. Re-running `aectl sre install` with the same
-  `--llm-*` values is a no-op; a changed value (a new model, a rotated key)
-  is tried again. Re-running with a changed key or model also rolls aep-api
-  (a pod-template annotation stamped with the seed's hash), so the new seed
-  is actually read — still applied only if the org has no stored SRE model
-  connection yet.
-- **A console removal is not re-seeded.** Disconnecting the SRE model
-  connection in the Console does not bring the old seed back — the marker
-  for that seed's hash still says it was already tried.
+- **The seed is authoritative.** A seed hash that differs from the last one
+  tried (tracked in `org_secrets`) is probed and, on success, **replaces**
+  whatever SRE model connection is currently stored, even if one is already
+  stored.
+- **The same `--llm-*` values are a no-op.** Re-running `aectl sre install`
+  with an unchanged seed skips both the probe and the write. A changed value
+  (a new model, a rotated key) is tried again, and also rolls aep-api (a
+  pod-template annotation stamped with the seed's hash), so the new value is
+  actually read.
+- **No `--llm-*` flags leaves the stored connection alone.** Re-running
+  `aectl sre install` (or `setup-sre.sh`) without a key file never wipes a
+  connection an earlier install seeded.
 - **A refused seed is logged once and not retried.** A validation or probe
-  failure is logged as `sre_model.seed_refused` and marked tried; nothing
-  retries it until the seed's values change or a Console/API save succeeds.
-- **Rotating the key is a Console/API concern**, same as the org's main
-  model connection — re-running `aectl sre install` with a new key only
-  takes effect when the org still has no stored connection.
+  failure is logged as `sre_model.seed_refused`, leaves the stored connection
+  (if any) untouched, and is marked tried; nothing retries it until the
+  seed's values change again.
+- **Rotating the key**: re-run the install command with a new key file —
+  `aectl sre install --org <org> --platform-chart ... --llm-api-key-file
+  <new-key-file> --llm-model <model>` — the changed hash is probed and
+  replaces the stored connection on success.
 
 The key lives in the Secret `sre-model-seed` in `wso2-aep` until you delete
 it. That is safe once the seed has applied (`kubectl -n wso2-aep get secret
@@ -219,12 +222,6 @@ sre-model-seed` no longer being read by anything on the next reconcile):
 ```bash
 kubectl -n wso2-aep delete secret sre-model-seed
 ```
-
-**Without aectl**, save the SRE model connection directly through the same
-probe/persist path a Console save takes: `PATCH /config` with a `sreLlm`
-body, through `http://console.ae.localhost:8080/aep-api-service/api/v1/config`
-with a signed-in user's token. This is a save, not a seed — it always wins
-over, and is never touched by, the install-time seed above.
 
 ## Migration from the patched agent
 
@@ -288,11 +285,6 @@ dispatch.
   attention reason.
 - The notification bell includes SRE attention items for alert-linked issues
   with `unverified_fix`, `no_change_verdict`, or `escalated`.
-- Settings > Credentials shows the **SRE agent model** row under the model
-  connection card: inherited from the org connection, overridden by a saved
-  SRE model connection, or unavailable (naming why), plus a status chip
-  (`Applying…` / `Running` / `Failed: <reason>` / `Not running`) — visible
-  only to the org this plane's agent actually serves.
 
 ## Troubleshooting findings
 
@@ -339,10 +331,10 @@ agent is not ready, alerts are not evaluated and no RCA request reaches the
 SRE agent.
 
 If the SRE agent's replicas are `0`, aep-api has resolved no model for it
-(see [Credentials](#credentials)): save an SRE model connection or an
-OpenAI-compatible org model connection in the Console, wait for the next
-60-second reconcile tick (or re-run `bash deployments/scripts/setup-sre.sh`
-to force it), and check:
+(see [Credentials](#credentials)): seed an SRE model connection
+(`--llm-api-key-file`/`--llm-model`) or connect an OpenAI-compatible org
+model connection, wait for the next 60-second reconcile tick (or re-run
+`bash deployments/scripts/setup-sre.sh` to force it), and check:
 
 ```bash
 kubectl -n openchoreo-observability-plane get secret sre-agent-aep -o jsonpath='{.data.RCA_MODEL_NAME}' | base64 -d
@@ -350,7 +342,6 @@ kubectl -n openchoreo-observability-plane get deploy sre-agent -o jsonpath='{.sp
 ```
 
 If SRE receives the RCA request but fails to authenticate to its model
-provider, check the pushed Secret against what the Console shows for the
-resolved connection (`GET /config`'s `sreAgent.host`/`sreAgent.model`) —
-they should match; if not, the reconciler has not yet converged, or the
-connection's host changed without a fresh key.
+provider, check the pushed Secret's `RCA_LLM_BASE_URL`/`RCA_MODEL_NAME`
+against what was seeded or connected; if they don't match, the reconciler
+has not yet converged, or the connection's host changed without a fresh key.
