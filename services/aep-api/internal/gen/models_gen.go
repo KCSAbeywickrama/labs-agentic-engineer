@@ -3205,6 +3205,26 @@ type SkillUpdateList struct {
 	Updates []SkillUpdate `json:"updates"`
 }
 
+// SourceDocument defines model for SourceDocument.
+type SourceDocument struct {
+	ID string `json:"id"`
+
+	// Pages How many pages it has; 0 when unknown.
+	Pages int `json:"pages"`
+
+	// Rows What it says, page by page, and where each point landed in the spec (S5); empty until its coverage is worked out.
+	Rows  []SourceDocumentRow `json:"rows"`
+	Title string              `json:"title"`
+}
+
+// SourceDocumentRow defines model for SourceDocumentRow.
+type SourceDocumentRow struct {
+	// LandedIn The spec line ID it landed in ("F2.4"), or null when it landed nowhere.
+	LandedIn *string `json:"landedIn"`
+	Page     string  `json:"page"`
+	Says     string  `json:"says"`
+}
+
 // SpecStage Spec-stage aggregate on ProjectStatus (#184). Approved/draft is derived, not stored — version set and not dirty = approved (vN); dirty = draft changes (vN+); no version = unpublished draft; exists false = no spec yet.
 type SpecStage struct {
 	// Agent Whether an agent is working on this project's spec right now, and how the last attempt ended (#562). `never-started` — no turn has EVER run for this project; `""` — a turn has run and the newest one completed; `working` — a turn is in flight; `failed` — the newest turn ended in failure and none has run since. `never-started` is distinct from `""` because the two need opposite treatment: one means the journey has not begun and the user needs a way to begin it, the other means it is under way between turns and offering to restart it would supersede a live interview. Derived from the newest `agent_turns` row for the project, which is what `exists`/`version`/`dirty` cannot say: all three read committed git, and a kickoff writes nothing until it lands. The overview's spec card needs it to say *Writing requirements* while the platform-fired `/start` runs, and the spec view needs it to explain an empty workspace instead of offering a file picker.
@@ -3231,6 +3251,15 @@ type SpecStage struct {
 
 	// Version The newest spec version's name; "" if never published.
 	Version string `json:"version"`
+}
+
+// SpecState defines model for SpecState.
+type SpecState struct {
+	// DesignedFrom Each designed feature by ID, and the basis its last design read — its file's lines by their words, then the product-wide items that reach it (reqspec.Basis, held to the shared fixture's basis.json). A feature no design run covered is absent.
+	DesignedFrom map[string]string `json:"designedFrom"`
+
+	// Documents The source documents the user attached, by name.
+	Documents []SourceDocument `json:"documents"`
 }
 
 // SpecVersion What one version built.

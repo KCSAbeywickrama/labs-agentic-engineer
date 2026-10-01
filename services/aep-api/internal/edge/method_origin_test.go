@@ -127,6 +127,7 @@ var opOwner = map[string]string{
 	"ListProjectBuilds":             embedDelivery,
 	"ListProjectTags":               embedSpec,
 	"ListProjectVersions":           embedSpec,
+	"GetSpecState":                  embedSpec,
 	"ListProjectUsage":              embedProjects,
 	"ListProjects":                  embedProjects,
 	"ListRcaAgentReports":           embedOps,

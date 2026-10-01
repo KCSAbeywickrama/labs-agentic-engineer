@@ -2585,6 +2585,41 @@ paths:
       summary: Stream a milestone run's per-cycle agent progress as SSE
       tags:
       - Runs
+  /projects/{projectName}/spec/state:
+    get:
+      description: What the spec workspace needs that its documents do not say (N5). The
+        documents themselves are the collab room; the features, their stages, the ID index and
+        Next up are worked out from them in the console. This serves the rest — each designed
+        feature's basis (what its last design read, by the same reading the build gate uses, so
+        the console can say a design is out of date as the spec is edited) and the source
+        documents the user attached.
+      operationId: get-spec-state
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecState'
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: Get the spec workspace's state
+      tags:
+      - Projects
   /projects/{projectName}/spec/collab-session:
     get:
       operationId: get-spec-collab-session
@@ -8522,6 +8557,64 @@ components:
           nullable: true
       required:
       - tags
+      type: object
+    SpecState:
+      additionalProperties: false
+      properties:
+        designedFrom:
+          additionalProperties:
+            type: string
+          description: Each designed feature by ID, and the basis its last design read — its file's
+            lines by their words, then the product-wide items that reach it (reqspec.Basis, held to
+            the shared fixture's basis.json). A feature no design run covered is absent.
+          type: object
+        documents:
+          description: The source documents the user attached, by name.
+          items:
+            $ref: '#/components/schemas/SourceDocument'
+          type: array
+      required:
+      - designedFrom
+      - documents
+      type: object
+    SourceDocument:
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        pages:
+          description: How many pages it has; 0 when unknown.
+          type: integer
+        rows:
+          description: What it says, page by page, and where each point landed in the spec (S5);
+            empty until its coverage is worked out.
+          items:
+            $ref: '#/components/schemas/SourceDocumentRow'
+          type: array
+      required:
+      - id
+      - title
+      - pages
+      - rows
+      type: object
+    SourceDocumentRow:
+      additionalProperties: false
+      properties:
+        page:
+          type: string
+        says:
+          type: string
+        landedIn:
+          description: The spec line ID it landed in ("F2.4"), or null when it landed nowhere.
+          type: string
+          nullable: true
+          x-go-type: '*string'
+      required:
+      - page
+      - says
+      - landedIn
       type: object
     SpecVersionList:
       additionalProperties: false

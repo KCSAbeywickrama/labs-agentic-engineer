@@ -94,3 +94,23 @@ func nonNil(ids []string) []string {
 	}
 	return ids
 }
+
+// GetSpecState serves what the spec workspace needs beside its documents (N5).
+func (h *Handler) GetSpecState(ctx context.Context, request gen.GetSpecStateRequestObject) (gen.GetSpecStateResponseObject, error) {
+	org := tenant.BoundOrgFromContext(ctx)
+	st, err := h.artifacts.SpecState(ctx, org, request.ProjectName)
+	if err != nil {
+		switch {
+		case errors.Is(err, sourcecontrol.ErrRepoNotFound), errors.Is(err, sourcecontrol.ErrRepoNotReady):
+			return nil, apierr.NotFound("project repository not found")
+		default:
+			return nil, apierr.Internal("internal error")
+		}
+	}
+	out := gen.SpecState{DesignedFrom: st.DesignedFrom, Documents: make([]gen.SourceDocument, 0, len(st.Documents))}
+	for _, name := range st.Documents {
+		// Coverage (what each page says and where it landed) is S5's.
+		out.Documents = append(out.Documents, gen.SourceDocument{ID: name, Title: name, Rows: []gen.SourceDocumentRow{}})
+	}
+	return gen.GetSpecState200JSONResponse(out), nil
+}

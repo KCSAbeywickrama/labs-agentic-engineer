@@ -163,6 +163,8 @@ type ArtifactService interface {
 	ValidationScope(ctx context.Context, orgID, projectID, version string) (ValidationScope, bool, error)
 	// TagRepair cuts a repair version of `of` (B4).
 	TagRepair(ctx context.Context, orgID, projectID, of string) (string, error)
+	// SpecState reads what the spec workspace needs beside its documents (N5).
+	SpecState(ctx context.Context, orgID, projectID string) (SpecState, error)
 	// GetDesignAtTag reads the design bundle at a spec version tag — the tag a
 	// build carries. The name is the user's (ADR-0030) and is not parsed: the
 	// tag either resolves or it does not.

@@ -83,3 +83,31 @@ func TestTagRepair(t *testing.T) {
 		t.Errorf("next suggested = %+v, %v, want v2: a repair takes no number", facts, err)
 	}
 }
+
+// The spec workspace's state (N5): each designed feature's basis as its last
+// design read it — so an edit since shows as out of date in the console — and
+// nothing for a feature no design covered.
+func TestSpecState_DesignedFrom(t *testing.T) {
+	t.Parallel()
+	seed := validSpecSeed()
+	seed["specs/requirements/features/F2-notify.md"] = "# Notify\n\n## User Stories\n\n- F2.1 As a user, I want S, so that s.\n"
+	r := newRig(t, seed)
+	designedAt := r.headSHA()
+	r.svc.SetDesignRunsResolver(func(context.Context, string, string) ([]DesignRun, error) {
+		return []DesignRun{{BaseRef: designedAt, Features: []string{"F2"}}}, nil
+	})
+	r.seed(map[string]string{
+		"specs/requirements/features/F2-notify.md": "# Notify\n\n## User Stories\n\n- F2.1 As a user, I want S by Slack, so that s.\n",
+	}, "F2 edit")
+
+	st, err := r.svc.SpecState(context.Background(), r.org, r.proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.DesignedFrom["F1"]; ok {
+		t.Errorf("F1 was never designed, but has a basis")
+	}
+	if got := st.DesignedFrom["F2"]; got != "Notify\nUser Stories\nF2.1 As a user, I want S, so that s." {
+		t.Errorf("F2's basis = %q, want what the design read, before the edit", got)
+	}
+}
