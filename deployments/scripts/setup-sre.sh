@@ -54,7 +54,16 @@ CLUSTER_NAME="${CLUSTER_NAME:-openchoreo}"
 CLUSTER_CONTEXT="${CLUSTER_CONTEXT:-k3d-${CLUSTER_NAME}}"
 AEP_NS="${AEP_NS:-wso2-aep}"
 OBS_NS="${OBS_NS:-openchoreo-observability-plane}"
-AECTL="${AECTL:-$REPO_ROOT/tools/aectl/aectl-skaffold}"
+# The local-dev binary when it is there (make dev-env builds it under that
+# name), otherwise whatever `aectl` is on PATH — which on an install from a
+# release is the only one that exists, and needs no Go toolchain on the host.
+if [ -n "${AECTL:-}" ]; then
+    :
+elif [ -x "$REPO_ROOT/tools/aectl/aectl-skaffold" ]; then
+    AECTL="$REPO_ROOT/tools/aectl/aectl-skaffold"
+else
+    AECTL="$(command -v aectl || true)"
+fi
 PLATFORM_CHART="${PLATFORM_CHART:-$REPO_ROOT/deployments/helm-charts/platform}"
 HANDOFF_SECRET="aep-sre-handoff-secrets"
 ALERT_RULE_TRAIT="$REPO_ROOT/deployments/manifests/api-platform/observability-alert-rule-trait.yaml"
@@ -73,7 +82,8 @@ echo "============================================"
 [ "$(command kubectl config current-context 2>/dev/null)" = "$CLUSTER_CONTEXT" ] \
     || fail "current kubectl context is not $CLUSTER_CONTEXT" \
             "kubectl config use-context $CLUSTER_CONTEXT"
-[ -x "$AECTL" ] || fail "$AECTL not found" "make dev-env builds it (cd tools/aectl && go build -o aectl-skaffold .)"
+[ -n "$AECTL" ] && [ -x "$AECTL" ] \
+    || fail "no aectl found" "install a release onto PATH, or build the local-dev copy with 'make dev-env'"
 kubectl get deployment aep-api -n "$AEP_NS" &>/dev/null \
     || fail "aep-api is not installed in $AEP_NS" "run aectl platform install first (make dev-env)"
 kubectl get deployment observer -n "$OBS_NS" &>/dev/null \
