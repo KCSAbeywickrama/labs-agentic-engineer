@@ -43,7 +43,9 @@ names.
 substitute your own store** — say so in one line and stop the run.
 
 **Copy a `wiring` object verbatim** — every field and every `envBindings` pair,
-unchanged. It is already byte-identical to the entry that belongs there.
+unchanged. It is already byte-identical to its one entry under `dependencies:`
+in the file below; the dependency around it (`kind`, `name`) stays in
+`design.json`.
 
 **Those env-var names are the keys the platform populates at runtime**: an output
 arrives under that name and no other. Never rename one, never invent one.
@@ -104,6 +106,11 @@ dependencies:                    # what you resolved above — omit a half you h
       envBindings:                 # dependency's `wiring` object — verbatim
         <output-name>: <ENV_VAR>
 ```
+
+**Done when:** the file opens with `apiVersion` and `metadata.name`, lists the
+component's own endpoint under `endpoints:`, and holds one `dependencies:` entry
+per `design.json` dependency that has wiring. A file missing its own endpoint
+deploys with no Service port, and the ReleaseBinding fails to apply.
 
 **A `web-application` may declare its own safe defaults** under
 `configurations.env`; they become `window._env_` entries the browser reads (the
