@@ -134,10 +134,9 @@ from each other, and uninstalling Agent Manager would delete the type every AEP
 project runs on. The post-renderer drops the copy only while its spec matches
 AEP's template and refuses otherwise, and step 5 reads the owner back.
 
-A cluster installed before this change has Agent Manager's release owning the
-object, so the next `aectl platform install` stops on it. Reinstall from
-scratch, or delete the object and re-run `aectl platform install` then this
-script.
+On a cluster where Agent Manager's release owns that object, `aectl platform
+install` stops on it. Reinstall from scratch, or delete the object and re-run
+`aectl platform install` then this script.
 
 ## Chart versions
 

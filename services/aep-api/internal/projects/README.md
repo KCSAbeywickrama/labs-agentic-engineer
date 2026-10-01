@@ -97,7 +97,7 @@ delivery's kernel: shared behaviour belongs in the root the slices import.
   `AUTO_RCA_ENABLED=false`. `ComponentService` (the trait) and `DeploymentService` (its config) take the same
   value from the composition root. wso2cloud runs with it off: its org ComponentTypes accept only the org's
   namespaced alert-rule `Trait`, whose contract (`notificationChannel`, `enableAiRootCauseAnalysis`) is not the
-  `ClusterTrait` one attached here, so a release carrying it is refused, and SRE self-healing is outside v1.
+  `ClusterTrait` one attached here, so a release carrying it is refused, and wso2cloud offers no SRE self-healing.
 - **The gateway's operation table is projected, and refused rather than guessed** (`api_operations.go`).
   A component behind END-USER sign-in gets one `operations` row per (method, path) in its openapi.yaml —
   `public: true`, a `jwt-auth v1` policy carrying one `scopes.anyOf` handle, or a `jwt-auth v1` policy with

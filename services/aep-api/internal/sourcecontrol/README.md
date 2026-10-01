@@ -27,8 +27,8 @@ flowchart LR
 |---|---|---|
 | `issues` | file / search a project's issues | `POST`+`GET /projects/{projectName}/issues` |
 
-*Still in the domain root (not carved into slices): repo lifecycle, workspace, webhook register/receive
-(including the delivery ledger and its `webhook.Replayer`), and installation lifecycle.*
+*In the domain root rather than a slice: repo lifecycle, workspace, webhook register/receive (including
+the delivery ledger and its `webhook.Replayer`), and installation lifecycle.*
 
 ## Ports
 | Port | Dir | Peer · contract |
