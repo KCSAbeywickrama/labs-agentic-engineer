@@ -42,6 +42,7 @@ package webhook
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -197,7 +198,7 @@ func TestDeliveryStore_MarkFailed_HoldsTheDeliveryForItsBackoff(t *testing.T) {
 	if _, err := store.Persist(ctx, "back-1", "org-acme", "push", "", []byte(`{}`), testLease); err != nil {
 		t.Fatalf("Persist: %v", err)
 	}
-	if err := store.MarkFailed(ctx, "back-1", "boom", time.Minute); err != nil {
+	if err := store.MarkFailed(ctx, "back-1", 1, "boom", time.Minute); err != nil {
 		t.Fatalf("MarkFailed: %v", err)
 	}
 	// Inside the backoff nobody may claim it...
@@ -229,7 +230,7 @@ func failedDelivery(t *testing.T, store *sourcecontrol.DeliveryStore, id string)
 		[]byte(`{"n":"`+id+`"}`), testLease); err != nil {
 		t.Fatalf("Persist %s: %v", id, err)
 	}
-	if err := store.MarkFailed(ctx, id, "boom", 0); err != nil {
+	if err := store.MarkFailed(ctx, id, 1, "boom", 0); err != nil {
 		t.Fatalf("MarkFailed %s: %v", id, err)
 	}
 }
@@ -322,7 +323,7 @@ func TestDeliveryStore_ClaimReplayable_SkipsWhatIsNotDue(t *testing.T) {
 	if _, err := store.Persist(ctx, "processed", "org-acme", "push", "", []byte(`{}`), testLease); err != nil {
 		t.Fatalf("Persist: %v", err)
 	}
-	if err := store.MarkProcessed(ctx, "processed"); err != nil {
+	if err := store.MarkProcessed(ctx, "processed", 1); err != nil {
 		t.Fatalf("MarkProcessed: %v", err)
 	}
 	// In flight: the receiver's own attempt still holds the lease.
@@ -333,7 +334,7 @@ func TestDeliveryStore_ClaimReplayable_SkipsWhatIsNotDue(t *testing.T) {
 	if _, err := store.Persist(ctx, "backing-off", "org-acme", "push", "", []byte(`{}`), testLease); err != nil {
 		t.Fatalf("Persist: %v", err)
 	}
-	if err := store.MarkFailed(ctx, "backing-off", "boom", time.Minute); err != nil {
+	if err := store.MarkFailed(ctx, "backing-off", 1, "boom", time.Minute); err != nil {
 		t.Fatalf("MarkFailed: %v", err)
 	}
 	// Exhausted: failed on every one of its attempts.
@@ -343,7 +344,7 @@ func TestDeliveryStore_ClaimReplayable_SkipsWhatIsNotDue(t *testing.T) {
 		if err != nil || len(got) != 1 || got[0].DeliveryID != "exhausted" {
 			t.Fatalf("attempt %d of the exhausted delivery must be claimable, got %+v, %v", i+1, got, err)
 		}
-		if err := store.MarkFailed(ctx, "exhausted", "boom", 0); err != nil {
+		if err := store.MarkFailed(ctx, "exhausted", got[0].Attempts, "boom", 0); err != nil {
 			t.Fatalf("MarkFailed: %v", err)
 		}
 	}
@@ -357,6 +358,79 @@ func TestDeliveryStore_ClaimReplayable_SkipsWhatIsNotDue(t *testing.T) {
 	}
 }
 
+// An attempt settles only the claim it holds. Once its lease lapses and another
+// attempt takes the delivery over, the old holder's outcome is refused rather
+// than written over the new holder's: otherwise its backoff would release a
+// lease the new holder still needs, and a third run could start.
+func TestDeliveryStore_StaleHolderCannotSettleATakenOverDelivery(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	ctx := context.Background()
+	clock := newTestClock()
+	store := sourcecontrol.NewDeliveryStore(db).WithClock(clock.Now)
+
+	if _, err := store.Persist(ctx, "fence-1", "org-acme", "push", "", []byte(`{}`), testLease); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+	clock.Advance(testLease + time.Second)
+	res, err := store.Persist(ctx, "fence-1", "org-acme", "push", "", []byte(`{}`), testLease)
+	if err != nil || !res.Claimed || res.Attempts != 2 {
+		t.Fatalf("attempt 2 must take the lapsed delivery over, got %+v, %v", res, err)
+	}
+
+	if err := store.MarkFailed(ctx, "fence-1", 1, "late failure", 0); !errors.Is(err, sourcecontrol.ErrDeliveryLeaseLost) {
+		t.Fatalf("attempt 1 failing after a takeover = %v, want ErrDeliveryLeaseLost", err)
+	}
+	if err := store.MarkProcessed(ctx, "fence-1", 1); !errors.Is(err, sourcecontrol.ErrDeliveryLeaseLost) {
+		t.Fatalf("attempt 1 finishing after a takeover = %v, want ErrDeliveryLeaseLost", err)
+	}
+	// Attempt 2 still holds its lease: nobody else may claim the delivery.
+	if res, err := store.Persist(ctx, "fence-1", "org-acme", "push", "", []byte(`{}`), testLease); err != nil || res.Claimed {
+		t.Fatalf("the stale holder must not have released attempt 2's lease, got %+v, %v", res, err)
+	}
+	if err := store.MarkProcessed(ctx, "fence-1", 2); err != nil {
+		t.Fatalf("the current holder settles its own attempt: %v", err)
+	}
+}
+
+// A delivery that leaves the replay window unprocessed is given up on, and that
+// is recorded once: nothing replays it again, and the next pass reports nothing.
+func TestDeliveryStore_AbandonExpired_RecordsEachAgedOutDeliveryOnce(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	ctx := context.Background()
+	clock := newTestClock()
+	store := sourcecontrol.NewDeliveryStore(db).WithClock(clock.Now)
+
+	failedDelivery(t, store, "aged-out")
+	if _, err := store.Persist(ctx, "done", "org-acme", "push", "", []byte(`{}`), testLease); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+	if err := store.MarkProcessed(ctx, "done", 1); err != nil {
+		t.Fatalf("MarkProcessed: %v", err)
+	}
+	clock.Advance(replayQuery.Window + time.Minute)
+	failedDelivery(t, store, "still-in-window")
+
+	got, err := store.AbandonExpired(ctx, replayQuery.Window)
+	if err != nil {
+		t.Fatalf("AbandonExpired: %v", err)
+	}
+	if len(got) != 1 || got[0].DeliveryID != "aged-out" {
+		t.Fatalf("only the unprocessed delivery past the window is abandoned, got %+v", got)
+	}
+	if again, err := store.AbandonExpired(ctx, replayQuery.Window); err != nil || len(again) != 0 {
+		t.Fatalf("an abandonment is recorded once, got %+v, %v", again, err)
+	}
+	var row sourcecontrol.WebhookDelivery
+	if err := db.Where("delivery_id = ?", "aged-out").First(&row).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if row.AbandonedAt == nil || row.ProcessedAt != nil || row.ProcessError == "" {
+		t.Fatalf("an abandoned delivery keeps its error and stays unprocessed, stamped abandoned: %+v", row)
+	}
+}
+
 func TestDeliveryStore_Persist_DuplicateAfterProcessingIsDeduped(t *testing.T) {
 	t.Parallel()
 	db := dbtest.New(t)
@@ -366,7 +440,7 @@ func TestDeliveryStore_Persist_DuplicateAfterProcessingIsDeduped(t *testing.T) {
 	if _, err := store.Persist(ctx, "done-1", "org-acme", "pull_request", "closed", []byte(`{}`), testLease); err != nil {
 		t.Fatalf("first Persist: %v", err)
 	}
-	if err := store.MarkProcessed(ctx, "done-1"); err != nil {
+	if err := store.MarkProcessed(ctx, "done-1", 1); err != nil {
 		t.Fatalf("MarkProcessed: %v", err)
 	}
 	// Replay of finished work: the existing row has processed_at set → dedup.
@@ -390,10 +464,10 @@ func TestDeliveryStore_MarkProcessed_ClearsErrorAndStampsTime(t *testing.T) {
 	if _, err := store.Persist(ctx, "mp-1", "org-acme", "push", "", []byte(`{}`), testLease); err != nil {
 		t.Fatalf("Persist: %v", err)
 	}
-	if err := store.MarkFailed(ctx, "mp-1", "boom", 0); err != nil {
+	if err := store.MarkFailed(ctx, "mp-1", 1, "boom", 0); err != nil {
 		t.Fatalf("MarkFailed: %v", err)
 	}
-	if err := store.MarkProcessed(ctx, "mp-1"); err != nil {
+	if err := store.MarkProcessed(ctx, "mp-1", 1); err != nil {
 		t.Fatalf("MarkProcessed: %v", err)
 	}
 
@@ -418,7 +492,7 @@ func TestDeliveryStore_MarkFailed_RecordsErrorLeavesUnprocessed(t *testing.T) {
 	if _, err := store.Persist(ctx, "mf-1", "org-acme", "push", "", []byte(`{}`), testLease); err != nil {
 		t.Fatalf("Persist: %v", err)
 	}
-	if err := store.MarkFailed(ctx, "mf-1", "image push denied", 0); err != nil {
+	if err := store.MarkFailed(ctx, "mf-1", 1, "image push denied", 0); err != nil {
 		t.Fatalf("MarkFailed: %v", err)
 	}
 

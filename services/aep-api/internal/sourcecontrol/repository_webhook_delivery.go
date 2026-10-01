@@ -137,7 +137,7 @@ func (s *DeliveryStore) claim(ctx context.Context, deliveryID string, now, lease
 	var claimed []WebhookDelivery
 	err := s.db.WithContext(ctx).Raw(`
 UPDATE webhook_deliveries
-   SET attempts = attempts + 1, lease_until = ?
+   SET attempts = attempts + 1, lease_until = ?, abandoned_at = NULL
  WHERE delivery_id = ?
    AND processed_at IS NULL
    AND (lease_until IS NULL OR lease_until <= ?)
@@ -197,6 +197,7 @@ UPDATE webhook_deliveries
  WHERE delivery_id IN (
          SELECT delivery_id FROM webhook_deliveries
           WHERE processed_at IS NULL
+            AND abandoned_at IS NULL
             AND received_at > @since
             AND attempts < @max
             AND (lease_until IS NULL OR lease_until <= @now)
@@ -204,6 +205,7 @@ UPDATE webhook_deliveries
           LIMIT @limit
           FOR UPDATE SKIP LOCKED)
    AND processed_at IS NULL
+   AND abandoned_at IS NULL
    AND attempts < @max
    AND (lease_until IS NULL OR lease_until <= @now)
 RETURNING delivery_id, oc_org_id, event, action, received_at, attempts`,
@@ -249,33 +251,91 @@ RETURNING delivery_id, oc_org_id, event, action, received_at, attempts`,
 	return out, nil
 }
 
-// MarkProcessed records successful processing on the delivery row so a
-// duplicate is acked without re-running. It releases the lease.
-func (s *DeliveryStore) MarkProcessed(ctx context.Context, deliveryID string) error {
+// ErrDeliveryLeaseLost is returned when an attempt tries to settle a delivery
+// that another attempt has since taken over: its lease lapsed while it ran.
+// The newer attempt owns the outcome, so the stale one writes nothing.
+var ErrDeliveryLeaseLost = errors.New("webhook delivery: lease lost to a newer attempt")
+
+// MarkProcessed records the attempt's success so a duplicate is acked without
+// re-running, and releases the lease. It settles only `attempt`'s own claim
+// (ErrDeliveryLeaseLost otherwise).
+func (s *DeliveryStore) MarkProcessed(ctx context.Context, deliveryID string, attempt int) error {
 	now := s.now().UTC()
-	return s.db.WithContext(ctx).
-		Model(&WebhookDelivery{}).
-		Where("delivery_id = ?", deliveryID).
-		Updates(map[string]any{
-			"processed_at":  &now,
-			"process_error": "",
-			"lease_until":   nil,
-		}).Error
+	return s.settle(ctx, deliveryID, attempt, map[string]any{
+		"processed_at":  &now,
+		"process_error": "",
+		"lease_until":   nil,
+	})
 }
 
-// MarkFailed records a processing error so on-call can audit, and holds the
-// delivery for retryIn: the lease is moved to that moment, which is the retry
-// backoff. processed_at stays null, so the replay (or a duplicate delivery)
-// re-runs the handler once the backoff has passed.
-func (s *DeliveryStore) MarkFailed(ctx context.Context, deliveryID string, errMsg string, retryIn time.Duration) error {
+// MarkFailed records the attempt's error for audit and holds the delivery for
+// retryIn: the lease moves to that moment, which is the retry backoff.
+// processed_at stays null, so the replay (or a duplicate delivery) re-runs the
+// handler once the backoff has passed. It settles only `attempt`'s own claim.
+func (s *DeliveryStore) MarkFailed(ctx context.Context, deliveryID string, attempt int, errMsg string, retryIn time.Duration) error {
 	retryAt := s.now().UTC().Add(retryIn)
-	return s.db.WithContext(ctx).
+	return s.settle(ctx, deliveryID, attempt, map[string]any{
+		"process_error": errMsg,
+		"lease_until":   &retryAt,
+	})
+}
+
+// MarkAbandoned records that the replay gives the delivery up after `attempt`
+// failed as its last: nothing will replay it again.
+func (s *DeliveryStore) MarkAbandoned(ctx context.Context, deliveryID string, attempt int) error {
+	now := s.now().UTC()
+	return s.settle(ctx, deliveryID, attempt, map[string]any{"abandoned_at": &now})
+}
+
+// settle writes an attempt's outcome, fenced on the attempt still being the
+// delivery's current one. attempts only grows, and only by a claim, so a match
+// proves no other attempt has taken the delivery over since.
+func (s *DeliveryStore) settle(ctx context.Context, deliveryID string, attempt int, fields map[string]any) error {
+	res := s.db.WithContext(ctx).
 		Model(&WebhookDelivery{}).
-		Where("delivery_id = ?", deliveryID).
-		Updates(map[string]any{
-			"process_error": errMsg,
-			"lease_until":   &retryAt,
-		}).Error
+		Where("delivery_id = ? AND attempts = ?", deliveryID, attempt).
+		Updates(fields)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrDeliveryLeaseLost
+	}
+	return nil
+}
+
+// AbandonedDelivery is a delivery AbandonExpired gave up on.
+type AbandonedDelivery struct {
+	DeliveryID string
+	OcOrgID    string
+	Event      string
+	Action     string
+	Attempts   int
+}
+
+// AbandonExpired stamps abandoned every unprocessed delivery received longer ago
+// than window and not yet abandoned, and returns them, so each is reported
+// exactly once. One still inside its lease is left to its holder.
+func (s *DeliveryStore) AbandonExpired(ctx context.Context, window time.Duration) ([]AbandonedDelivery, error) {
+	now := s.now().UTC()
+	var rows []WebhookDelivery
+	err := s.db.WithContext(ctx).Raw(`
+UPDATE webhook_deliveries
+   SET abandoned_at = @now
+ WHERE processed_at IS NULL
+   AND abandoned_at IS NULL
+   AND received_at <= @since
+   AND (lease_until IS NULL OR lease_until <= @now)
+RETURNING delivery_id, oc_org_id, event, action, attempts`,
+		map[string]any{"now": now, "since": now.Add(-window)}).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("abandon expired deliveries: %w", err)
+	}
+	out := make([]AbandonedDelivery, len(rows))
+	for i, r := range rows {
+		out[i] = AbandonedDelivery{DeliveryID: r.DeliveryID, OcOrgID: r.OcOrgID, Event: r.Event, Action: r.Action, Attempts: r.Attempts}
+	}
+	return out, nil
 }
 
 func isUniqueViolation(err error) bool {

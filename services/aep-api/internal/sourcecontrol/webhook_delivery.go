@@ -43,6 +43,11 @@ type WebhookDelivery struct {
 	// the one column is both the in-flight lease and the retry backoff. Nil on
 	// a processed row, and on rows written before the column existed.
 	LeaseUntil *time.Time `gorm:"index" json:"leaseUntil,omitempty"`
+	// AbandonedAt is when the replay gave the delivery up: its last attempt
+	// failed, or it aged out of the replay window unprocessed. Nothing replays an
+	// abandoned delivery; a manual redelivery may still take it over, which
+	// clears this.
+	AbandonedAt *time.Time `json:"abandonedAt,omitempty"`
 }
 
 // WebhookPayload holds the raw event body. Split from WebhookDelivery so

@@ -28,7 +28,8 @@ import (
 // so a faster tick would only find nothing due.
 const defaultReplayInterval = 30 * time.Second
 
-// replayBatch bounds one pass. Deliveries left over wait for the next tick.
+// replayBatch bounds the runs one pass makes. Deliveries left over wait for the
+// next tick.
 const replayBatch = 20
 
 // Replayer re-runs deliveries that were persisted but never processed: a
@@ -43,10 +44,17 @@ const replayBatch = 20
 // one (processed, or failed and held for deliveryBackoff) and logs the
 // abandonment of a delivery whose last attempt failed.
 //
-// Within a pass deliveries run one at a time, oldest receipt first. That is an
-// order of convenience, not a guarantee the handlers rely on: GitHub itself
-// promises no order, and the handlers re-read ground truth instead (see
-// eventcore's Idempotency notes).
+// Within a pass deliveries run one at a time, oldest receipt first, and each is
+// CLAIMED only as its run starts. Claiming a batch up front would let the later
+// rows' leases lapse while they wait in line, and a duplicate delivery or another
+// replica could then run one at the same moment. The order is one of
+// convenience, not a guarantee the handlers rely on: GitHub itself promises no
+// order, and the handlers re-read ground truth instead (see eventcore's
+// Idempotency notes).
+//
+// Each pass first records the deliveries that aged out of replayWindow
+// unprocessed as abandoned (DeliveryStore.AbandonExpired), logged once at ERROR,
+// so a delivery the replay gives up on never just goes quiet.
 type Replayer struct {
 	deliveries *sourcecontrol.DeliveryStore
 	runner     deliveryRunner
@@ -81,19 +89,32 @@ func (r *Replayer) Run(ctx context.Context) {
 	}
 }
 
-// Once claims the deliveries due now and runs each of them. Exported so a test
-// can drive a pass directly.
+// Once records the deliveries that aged out, then claims and runs the ones due
+// now, one at a time, up to replayBatch. Exported so a test can drive a pass.
 func (r *Replayer) Once(ctx context.Context) error {
-	due, err := r.deliveries.ClaimReplayable(ctx, sourcecontrol.ReplayQuery{
-		Window:      replayWindow,
-		MaxAttempts: maxDeliveryAttempts,
-		Lease:       deliveryLease,
-		Limit:       replayBatch,
-	})
+	expired, err := r.deliveries.AbandonExpired(ctx, replayWindow)
 	if err != nil {
 		return err
 	}
-	for _, d := range due {
+	for _, d := range expired {
+		slog.ErrorContext(ctx, "webhook: delivery abandoned — it aged out of the replay window unprocessed",
+			"deliveryId", d.DeliveryID, "event", d.Event, "action", d.Action, "ocOrgId", d.OcOrgID,
+			"attempts", d.Attempts, "result", "abandoned")
+	}
+	for i := 0; i < replayBatch && ctx.Err() == nil; i++ {
+		due, err := r.deliveries.ClaimReplayable(ctx, sourcecontrol.ReplayQuery{
+			Window:      replayWindow,
+			MaxAttempts: maxDeliveryAttempts,
+			Lease:       deliveryLease,
+			Limit:       1,
+		})
+		if err != nil {
+			return err
+		}
+		if len(due) == 0 {
+			return nil
+		}
+		d := due[0]
 		slog.InfoContext(ctx, "webhook: replaying an unprocessed delivery",
 			"deliveryId", d.DeliveryID, "event", d.Event, "action", d.Action, "ocOrgId", d.OcOrgID,
 			"attempt", d.Attempts, "result", "replaying")

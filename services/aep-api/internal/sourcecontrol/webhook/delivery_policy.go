@@ -43,8 +43,10 @@ const maxDeliveryAttempts = 5
 const replayWindow = 15 * time.Minute
 
 // deliveryBackoffBase is the wait after a first failed attempt; each further
-// failure doubles it (30s, 1m, 2m, 4m), which fits every attempt inside
-// replayWindow.
+// failure doubles it (30s, 1m, 2m, 4m). With fast failures every attempt fits
+// inside replayWindow. With slow ones (each run to the full handlerBudget) the
+// later attempts fall past it; the delivery is then recorded abandoned when it
+// ages out (DeliveryStore.AbandonExpired) rather than replayed.
 const deliveryBackoffBase = 30 * time.Second
 
 // deliveryBackoff is the hold after the given failed attempt (1-based).

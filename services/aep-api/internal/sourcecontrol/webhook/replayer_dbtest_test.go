@@ -69,7 +69,7 @@ func (h *replayHarness) receivedAndFailed(t *testing.T, id string, backoff time.
 		[]byte(`{"action":"closed"}`), deliveryLease); err != nil {
 		t.Fatalf("Persist: %v", err)
 	}
-	if err := h.store.MarkFailed(ctx, id, "context canceled", backoff); err != nil {
+	if err := h.store.MarkFailed(ctx, id, 1, "context canceled", backoff); err != nil {
 		t.Fatalf("MarkFailed: %v", err)
 	}
 }
@@ -165,8 +165,8 @@ func TestReplayer_StopsAtTheAttemptCap(t *testing.T) {
 		t.Fatalf("a delivery that used its %d attempts must not run again, got %d replays", maxDeliveryAttempts, got)
 	}
 	row := h.row(t, "always-failing")
-	if row.ProcessedAt != nil || row.Attempts != maxDeliveryAttempts || row.ProcessError == "" {
-		t.Fatalf("an abandoned delivery keeps its attempts and last error for audit, got %+v", row)
+	if row.ProcessedAt != nil || row.Attempts != maxDeliveryAttempts || row.ProcessError == "" || row.AbandonedAt == nil {
+		t.Fatalf("a delivery that failed its last attempt is stamped abandoned and keeps its attempts and last error, got %+v", row)
 	}
 }
 
@@ -181,5 +181,81 @@ func TestReplayer_LeavesDeliveriesOlderThanTheWindow(t *testing.T) {
 	}
 	if h.handler.count() != 0 {
 		t.Fatalf("a delivery older than the replay window is the reconcile's, not the replay's, got %d runs", h.handler.count())
+	}
+	// And it is recorded as given up on, not left looking like work in progress.
+	if row := h.row(t, "from-yesterday"); row.AbandonedAt == nil {
+		t.Fatalf("a delivery that aged out of the window must be stamped abandoned, got %+v", row)
+	}
+}
+
+// clockHandler advances the shared test clock by `advance` on its first call and
+// runs `then`, so a test can stand inside a long handler run and look around.
+type clockHandler struct {
+	mu      sync.Mutex
+	calls   []string
+	clock   *testClock
+	advance time.Duration
+	then    func()
+}
+
+func (h *clockHandler) Handle(_ context.Context, _, _ string, payload []byte) error {
+	h.mu.Lock()
+	h.calls = append(h.calls, string(payload))
+	first := len(h.calls) == 1
+	h.mu.Unlock()
+	if first {
+		h.clock.Advance(h.advance)
+		if h.then != nil {
+			h.then()
+		}
+	}
+	return nil
+}
+
+// A delivery is claimed when its run starts, never while it waits behind
+// another one. Claiming a whole batch up front let the later rows' leases lapse
+// in the queue, so a duplicate delivery or a second replica could take one over
+// and run it at the same moment this pass did.
+func TestReplayer_ClaimsADeliveryOnlyWhenItsRunStarts(t *testing.T) {
+	t.Parallel()
+	clock := newTestClock()
+	db := dbtest.New(t)
+	store := sourcecontrol.NewDeliveryStore(db).WithClock(clock.Now)
+	ctx := context.Background()
+	for _, id := range []string{"first", "second"} {
+		if _, err := store.Persist(ctx, id, "org-acme", "pull_request", "closed",
+			[]byte(`{"action":"closed","id":"`+id+`"}`), deliveryLease); err != nil {
+			t.Fatalf("Persist: %v", err)
+		}
+		if err := store.MarkFailed(ctx, id, 1, "boom", 0); err != nil {
+			t.Fatalf("MarkFailed: %v", err)
+		}
+		clock.Advance(time.Second) // receipt order: first, then second
+	}
+
+	var duplicate sourcecontrol.PersistResult
+	handler := &clockHandler{clock: clock, advance: deliveryLease + time.Minute}
+	handler.then = func() {
+		// Mid-way through the first run, past any lease the pass could have
+		// taken at its start, the second delivery is redelivered by hand.
+		res, err := store.Persist(ctx, "second", "org-acme", "pull_request", "closed", []byte(`{}`), deliveryLease)
+		if err != nil {
+			t.Errorf("duplicate Persist: %v", err)
+		}
+		duplicate = res
+	}
+	router := NewRouter()
+	router.Register("pull_request", "", handler)
+	if err := NewReplayer(store, router, 0).Once(ctx); err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	if !duplicate.Claimed {
+		t.Fatalf("the waiting delivery must still be free for the duplicate to claim, got %+v", duplicate)
+	}
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
+	if len(handler.calls) != 1 {
+		t.Fatalf("the pass must run only what it claimed; the duplicate owns the second delivery now, got runs %v", handler.calls)
 	}
 }

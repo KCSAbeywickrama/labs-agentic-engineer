@@ -18,6 +18,7 @@ package webhook
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -50,6 +51,22 @@ type deliveryRunner struct {
 	router     *Router
 }
 
+// settled reports whether the attempt's outcome was recorded. A newer attempt
+// that took the delivery over owns the outcome, so a stale one is logged and
+// stops; any other failure is logged and the lease simply lapses into a replay.
+func (r deliveryRunner) settled(ctx context.Context, attrs []any, err error) bool {
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, sourcecontrol.ErrDeliveryLeaseLost):
+		slog.WarnContext(ctx, "webhook: a newer attempt took the delivery over — outcome not recorded",
+			append(attrs, "result", "lease_lost")...)
+	default:
+		slog.WarnContext(ctx, "webhook: could not record the attempt's outcome", append(attrs, "error", err)...)
+	}
+	return false
+}
+
 // run executes the handlers under handlerBudget. ctx must already be detached
 // from any request (the receiver passes context.WithoutCancel of its own).
 func (r deliveryRunner) run(ctx context.Context, a deliveryAttempt) {
@@ -66,12 +83,13 @@ func (r deliveryRunner) run(ctx context.Context, a deliveryAttempt) {
 	}
 	if err != nil {
 		retryIn := deliveryBackoff(a.attempt)
-		if merr := r.deliveries.MarkFailed(settleCtx, a.deliveryID, err.Error(), retryIn); merr != nil {
-			slog.WarnContext(ctx, "webhook: mark failed failed", append(attrs, "error", merr)...)
+		if !r.settled(ctx, attrs, r.deliveries.MarkFailed(settleCtx, a.deliveryID, a.attempt, err.Error(), retryIn)) {
+			return
 		}
 		if a.attempt >= maxDeliveryAttempts {
 			// Terminal: no replay will pick this delivery up again. What it was
 			// for is the reconcile sweeps' to heal from ground truth.
+			r.settled(ctx, attrs, r.deliveries.MarkAbandoned(settleCtx, a.deliveryID, a.attempt))
 			slog.ErrorContext(ctx, "webhook: delivery abandoned — handler failed on its last attempt",
 				append(attrs, "error", err, "result", "abandoned")...)
 			return
@@ -80,8 +98,8 @@ func (r deliveryRunner) run(ctx context.Context, a deliveryAttempt) {
 			append(attrs, "error", err, "retryIn", retryIn.String(), "result", "handler_failed")...)
 		return
 	}
-	if merr := r.deliveries.MarkProcessed(settleCtx, a.deliveryID); merr != nil {
-		slog.WarnContext(ctx, "webhook: mark processed failed", append(attrs, "error", merr)...)
+	if !r.settled(ctx, attrs, r.deliveries.MarkProcessed(settleCtx, a.deliveryID, a.attempt)) {
+		return
 	}
 	slog.InfoContext(ctx, "webhook: processed", append(attrs, "result", "processed")...)
 }
