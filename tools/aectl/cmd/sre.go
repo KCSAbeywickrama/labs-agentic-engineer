@@ -461,7 +461,7 @@ func printSreCompletion(p sreParams, seed *sreModelSeed) {
 	ui.Detail("(component UID + name labels, incident.enabled, triggerAiRca: true).")
 	ui.Detail("Guide: docs/developer-guide/sre-handoff-runbook.md")
 	if seed != nil {
-		ui.Detail(fmt.Sprintf("SRE model seed written (model %s @ %s); aep-api applies it within ~1 minute unless the org already has an SRE model connection — check Settings → SRE agent model or kubectl -n %s get deploy sre-agent", seed.Model, seed.BaseURL, p.ObsNamespace))
+		ui.Detail(fmt.Sprintf("SRE model seed written (model %s @ %s); aep-api probes it and, if it is new, replaces the org's SRE model connection within ~1 minute; a refused seed keeps the current one (aep-api logs sre_model.seed_refused). Check: kubectl -n %s get deploy sre-agent", seed.Model, seed.BaseURL, p.ObsNamespace))
 	}
 	fmt.Println()
 }
