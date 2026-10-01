@@ -17,7 +17,11 @@
  */
 
 import { describe, expect, it } from "vitest";
+import * as Y from "yjs";
 import type { ProductWideItem, SpecFeature } from "../api/specModel";
+import { seedSpecDoc } from "../collab/specDoc";
+import { readSpecLines } from "../collab/useSpecLines";
+import { productWideItems, readRequirements } from "./requirements";
 import { designBasis, designLabel, designWork } from "./designWork";
 import type { LineBlock } from "./ids";
 
@@ -108,5 +112,36 @@ describe("designLabel", () => {
     expect(designLabel(["F2", "F3"], { F2: "x" })).toBe("Design 2 features");
     expect(designLabel(["F2"], { F2: "x" })).toBe("Update design · 1 feature");
     expect(designLabel([], { F2: "x" })).toBeNull();
+  });
+});
+
+// The shared fixture the Go reader is held to as well
+// (services/aep-api/internal/platform/reqspec Basis): the platform records what
+// a design read, and this compares the live spec with it, so the two must read
+// the files identically or every design would read out of date.
+const FIXTURE = "../../../../../../packages/contracts/requirements/acme-expenses/";
+const raw = import.meta.glob<string>("../../../../../../packages/contracts/requirements/acme-expenses/**/*.{md,json}", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
+
+describe("designBasis on the shared fixture", () => {
+  it("reads each feature's basis as basis.json says", () => {
+    const files = Object.fromEntries(
+      Object.entries(raw)
+        .filter(([path]) => path.endsWith(".md"))
+        .map(([path, content]) => [`requirements/${path.slice(FIXTURE.length)}`, content]),
+    );
+    const doc = new Y.Doc();
+    seedSpecDoc(doc, { files });
+    const lines = readSpecLines(doc);
+    const requirements = readRequirements(lines);
+    const expected = JSON.parse(raw[`${FIXTURE}basis.json`]!) as Record<string, string>;
+    const productWide = productWideItems(requirements);
+    const got = Object.fromEntries(
+      requirements.features.map((f) => [f.id, designBasis({ id: f.id, path: `requirements/${f.path}` }, lines, productWide)]),
+    );
+    expect(got).toEqual(expected);
   });
 });

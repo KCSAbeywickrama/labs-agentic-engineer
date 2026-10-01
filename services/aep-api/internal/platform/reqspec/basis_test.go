@@ -103,3 +103,24 @@ func TestFeatureLines_SharedFixture(t *testing.T) {
 		t.Errorf("FeatureLines(acme-expenses) differs from feature-lines.json\n--- got\n%s\n--- want\n%s", g, w)
 	}
 }
+
+// A feature's basis, held to the shared fixture the console's reader is held
+// to (console-next spec/model/designWork.ts designBasis): the platform records
+// what a design read, and the console compares its live basis with it to say
+// a design is out of date, so the two must read the files identically.
+func TestBasis_SharedFixture(t *testing.T) {
+	files := readFixture(t, acmeFixture)
+	raw, err := os.ReadFile(filepath.Join(acmeFixture, "basis.json"))
+	if err != nil {
+		t.Fatalf("read basis.json: %v", err)
+	}
+	var want map[string]string
+	if err := json.Unmarshal(raw, &want); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range Parse(files).Features {
+		if got := Basis(files, f.ID); got != want[f.ID] {
+			t.Errorf("Basis(%s) differs from basis.json\n--- got\n%s\n--- want\n%s", f.ID, got, want[f.ID])
+		}
+	}
+}
