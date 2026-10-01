@@ -239,3 +239,20 @@ describe("a later build: what changed since, and a new product-wide item", () =>
     expect(nextUpBuild(later({ builds: [{ ...v1, status: "building" }] }))).toBeNull();
   });
 });
+
+// Seen on the live walk: a v1 whose build failed (its planning never got past
+// a gate) left nothing to pick — every feature read "built in v1, unchanged".
+describe("after a version whose build failed", () => {
+  it("offers its features again, under the same version, as a first build", () => {
+    const failed = {
+      version: "v1",
+      status: "failed" as const,
+      features: [{ id: "F1", name: "Submit expenses", lines: builtLines(lines.get(path("F1"))!) }],
+      productWide: ["P1"],
+    };
+    const offer = buildOffer(input({ builds: [failed] }));
+    expect(offer.version).toBe("v1");
+    expect(offer.firstBuild).toBe(true);
+    expect(row(offer, "F1")).toMatchObject({ state: "offered", detail: expect.arrayContaining(["new"]) });
+  });
+});

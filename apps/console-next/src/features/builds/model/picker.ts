@@ -134,7 +134,10 @@ function heldBecause(input: PickerInput, f: PickerInput["features"][number]): { 
 }
 
 export function buildOffer(input: PickerInput): BuildOffer {
-  const { builds, features, productWide } = input;
+  const { features, productWide } = input;
+  // A version whose build failed built nothing: its features are offered again
+  // (rebuilding the same spec reuses its version), and it takes no number.
+  const builds = input.builds.filter((b) => b.status !== "failed");
   const firstBuild = builds.length === 0;
   // A repair build (v1.1) is a point release of the version it fixes, not a version of its own.
   const version = `v${builds.filter((b) => !b.fixes).length + 1}`;
@@ -197,7 +200,7 @@ export function buildOffer(input: PickerInput): BuildOffer {
   return {
     version,
     firstBuild,
-    running: builds.find((b) => b.status === "building") ?? null,
+    running: input.builds.find((b) => b.status === "building") ?? null,
     rows: [...itemRows, ...featureRows],
     foundation,
     foundationBuiltIn: builds.find((b) => foundation.some((id) => b.productWide.includes(id)))?.version ?? null,
