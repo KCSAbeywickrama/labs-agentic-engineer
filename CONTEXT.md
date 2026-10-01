@@ -462,19 +462,23 @@ reports, so the overview renders the whole pipeline from a single read.
 _Avoid_: phase (the legacy flat field), pipeline state.
 
 **Spec version**:
-The `v<N>` tag: a snapshot of a validated requirements+design pair, cut at the
-moment a build starts. Implementation lands *after* the version is cut; the
-version names what the build implements, not the resulting code state.
+The tag a build cuts (`v<N>` unless the user names it): a snapshot of a validated
+requirements+design pair, cut at the moment a build starts, whose annotation records
+what the build carries (its features, product-wide items and held-back stories).
+Implementation lands *after* the version is cut; the version names what the build
+implements, not the resulting code state. A **repair version** (`v1.1`) is a point
+release of the version it fixes: the same specs, its failures as the work.
 _Avoid_: release, build number.
 
 **Open question**:
-A numbered entry under `## Open Questions` in the PRD — a recorded gap in the spec, and
+An entry under `## Open Questions` in a requirements file — a recorded gap in the spec, and
 specifically one the agent may not close by assuming: a fact only the user holds. Deliberately
-a property of the *document*, not of any conversation. It **gates nothing** — design and build
-both proceed with open questions outstanding. An entry marked *deferred* is one the user has
-declined for now, which tells the agent to stop raising it rather than releasing any gate.
+a property of the *document*, not of any conversation. An ordinary one gates nothing — design
+and build proceed with it outstanding; a **blocking question** (below) is the exception. An
+entry marked *deferred* is one the user has declined for now, which tells the agent to stop
+raising it.
 _Avoid_: interview question (the agent's live request for the user's input, which is a
-mechanism for closing an open question, not the thing itself); blocker (it blocks nothing).
+mechanism for closing an open question, not the thing itself).
 
 **Dirty (spec)**:
 The spec content has moved past the latest spec version in committed truth.
@@ -529,3 +533,64 @@ An OpenChoreo CR that names a vault path for a secret. It lives in the same
 control-plane namespace as the Workload that consumes it. The vault path's
 `wc-…` segment (`OrgBaseNamespace`) is a storage key, not that namespace.
 _Avoid_: treating OrgBaseNamespace as the SecretReference CR namespace.
+
+## Requirements model (`skills/prd-contract`, `services/aep-api/internal/platform/reqspec`)
+
+**Feature**:
+A capability a user would name ("Approvals"), with its own file
+`specs/requirements/features/F<n>-<slug>.md` and ID `F<n>`. The unit that is
+interviewed, designed, built and validated one at a time.
+_Avoid_: epic, module, component (a component is the design's).
+
+**Story ID**:
+`F<n>.<m>`: a story's stable ID inside its feature's file. A moved story gets a new ID
+that records the old (`F5.1 (was F2.3)`); a retired ID is never reused. Designs,
+acceptance tags (`@story-F2.3`) and task issues cite stories by it.
+_Avoid_: story number (the flat `#7` scheme it replaced).
+
+**Product-wide requirement**:
+A `P<n>` item in `product-wide.md`: a rule more than one feature must meet, with
+`Applies to:` naming the features or `all`. A build that carries a feature carries the
+P items that reach it.
+_Avoid_: NFR, global story.
+
+**Fog**:
+The `## Fog` list on the product page: ideas not yet shaped enough to be a feature.
+_Avoid_: backlog, parking lot.
+
+**Blocking question**:
+An open question closed by `*blocking*`, whose answer would change every story of its
+feature (Xero or ADP for a payroll export). The feature waits on it: it is neither
+interviewed past it, designed nor built until it is answered.
+_Avoid_: open question (the ordinary kind, which gates nothing).
+
+**Assumed line**:
+A line closed by `*assumed*`: one the agent decided because the user has not answered
+it. The tag is the user's review; it comes off when they confirm or change the line.
+_Avoid_: proposal, draft line (there are no proposals; edits land directly).
+
+**Design review**:
+The design card: one catalog of what a design yields — prototype, flows, roles, data
+model, architecture, contracts, security, acceptance — each tagged business or
+technical, filtered All · Business · Technical.
+_Avoid_: design approval (nothing is approved; designs go out of date per feature).
+
+**Basis (of a feature)**:
+What a feature's design reads: its file's lines by their words, then the product-wide
+items that reach it (`reqspec.Basis`). A feature's design is out of date when its basis
+now differs from the basis at the commit its last design read. Confirming an assumed
+line or adding a source moves no basis.
+_Avoid_: spec hash.
+
+**Built scope**:
+What a version validates: every feature built in it or an earlier version, minus the
+stories no version has built yet (held back). A feature designed but not built is
+listed, not run.
+_Avoid_: test scope, oracle (the oracle is every acceptance file; the scope is a subset).
+
+**Regression**:
+A scenario that passed in the previous validated version's final attempt and fails in
+this one. It gets its own repair issue, labelled `regression`. One that failed there
+too is *still failing*; one absent there is a plain failure.
+_Avoid_: recurrence (a later attempt of the same version meeting the same failure).
+
