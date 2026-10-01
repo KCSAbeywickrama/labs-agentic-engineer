@@ -29,7 +29,7 @@ import type { TurnBody, TurnScope } from "./turnScope";
 // real parser.
 
 const PROJECT = "acme";
-const F4: TurnScope = { kind: "feature", featureId: "F4", name: "Spending reports", path: "requirements/features/F4-spending-reports.md" };
+const F4: TurnScope = { kind: "feature", featureId: "F4", name: "Spending reports", path: "specs/requirements/features/F4-spending-reports.md" };
 const PRODUCT: TurnScope = { kind: "product" };
 
 /** A stream the test feeds frame by frame, and ends when it chooses. */

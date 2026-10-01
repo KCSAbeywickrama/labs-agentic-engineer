@@ -365,7 +365,7 @@ function acmeCatalog(designed: ReadonlySet<string>, tweaks: ReadonlySet<DesignTw
       title: "Prototype: the expense web app",
       depth: "business",
       features: all,
-      source: { kind: "prototype", path: "design/components/expense-web/wireframes.dsl", dsl: expenseWebDsl(tweaks) },
+      source: { kind: "prototype", path: "specs/design/components/expense-web/wireframes.dsl", dsl: expenseWebDsl(tweaks) },
     },
   ];
   if (both) {
@@ -471,7 +471,7 @@ function acmeCatalog(designed: ReadonlySet<string>, tweaks: ReadonlySet<DesignTw
       title: "Acceptance: F1-submit-expenses.feature",
       depth: "business",
       features: ["F1"],
-      source: { kind: "acceptance", path: "validation/acceptance/F1-submit-expenses.feature", content: SUBMIT_FEATURE },
+      source: { kind: "acceptance", path: "specs/validation/acceptance/F1-submit-expenses.feature", content: SUBMIT_FEATURE },
     });
   }
   if (designed.has("F2")) {
@@ -480,7 +480,7 @@ function acmeCatalog(designed: ReadonlySet<string>, tweaks: ReadonlySet<DesignTw
       title: "Acceptance: F2-approvals.feature",
       depth: "business",
       features: ["F2"],
-      source: { kind: "acceptance", path: "validation/acceptance/F2-approvals.feature", content: approvalsFeature(tweaks) },
+      source: { kind: "acceptance", path: "specs/validation/acceptance/F2-approvals.feature", content: approvalsFeature(tweaks) },
     });
   }
   return out;
@@ -516,7 +516,7 @@ function genericCatalog(features: SpecFeature[], lines: ReadonlyMap<string, Line
       title: `Acceptance: ${file}`,
       depth: "business",
       features: [f.id],
-      source: { kind: "acceptance", path: `validation/acceptance/${file}`, content: storiesFeature(f, lines.get(f.path) ?? []) },
+      source: { kind: "acceptance", path: `specs/validation/acceptance/${file}`, content: storiesFeature(f, lines.get(f.path) ?? []) },
     };
   });
 }

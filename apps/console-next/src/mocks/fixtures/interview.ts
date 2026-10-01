@@ -26,7 +26,6 @@ import {
 import { parseInterviewCommand, START_COMMAND } from "@aep/contracts/commands";
 import type { WireScope } from "../../features/agent-chat/turnScope";
 import type { SpecFeature, SpecModel } from "../../features/spec/api/specModel";
-import { bundlePath } from "../../features/spec/model/files";
 import type { LineBlock } from "../../features/spec/model/ids";
 import { blockingQuestions } from "../../features/spec/model/questions";
 import type { components } from "../../generated/aep-api";
@@ -359,7 +358,7 @@ export function scriptTurn(req: TurnRequest): ScriptedTurn {
     const s = new Script()
       .pause(600)
       .say(`Thanks. Writing up ${interviewed.name}.`)
-      .edit(`${turnKey}-w`, bundlePath(interviewed.path), up.oldString, up.newString)
+      .edit(`${turnKey}-w`, interviewed.path, up.oldString, up.newString)
       .say(
         `${interviewed.name} is written: ${up.stories === 1 ? "1 new story" : `${up.stories} new stories`} and ${plural(up.decisions, "decision")}. ` +
           "One line is my assumption. Keep it, remove it or edit it below, or on the page.",

@@ -28,7 +28,7 @@ import {
   type ChatItem,
 } from "./chatLog";
 
-const F4 = "requirements/features/F4-spending-reports.md";
+const F4 = "specs/requirements/features/F4-spending-reports.md";
 const Q = { question: "Who reads the reports?", options: [{ label: "Finance only" }] };
 
 describe("historyItems", () => {
@@ -60,7 +60,7 @@ describe("historyItems", () => {
         role: "assistant",
         content: [
           { type: "text", text: "Writing it up." },
-          { type: "tool-call", toolCallId: "w1", toolName: "editFile", input: { path: `specs/${F4}` } },
+          { type: "tool-call", toolCallId: "w1", toolName: "editFile", input: { path: F4 } },
           { type: "text", text: "Done. One more thing:" },
           { type: "tool-call", toolCallId: "q1", toolName: "ask_question", input: Q },
         ],
@@ -201,7 +201,7 @@ describe("interviewWriteUp", () => {
 
   it("is none for a write still streaming, or a file that is not a feature", () => {
     expect(interviewWriteUp(interview(wrote(F4, "writing")), paths)).toBeNull();
-    expect(interviewWriteUp(interview(wrote("requirements/prd.md"), text), paths)).toBeNull();
+    expect(interviewWriteUp(interview(wrote("specs/requirements/prd.md"), text), paths)).toBeNull();
   });
 });
 

@@ -19,7 +19,7 @@
 import { describe, expect, it } from "vitest";
 import { scopeOfBody, turnBody, turnScopeFor, type TurnScope } from "./turnScope";
 
-const approvals = { id: "F2", name: "Approvals", path: "requirements/features/F2-approvals.md" };
+const approvals = { id: "F2", name: "Approvals", path: "specs/requirements/features/F2-approvals.md" };
 
 describe("turnScopeFor (where the user is)", () => {
   it("is the feature open in the spec card", () => {

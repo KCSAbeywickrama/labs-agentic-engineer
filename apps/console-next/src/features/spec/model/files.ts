@@ -25,22 +25,12 @@ import type { SourceDocument, SpecFeature } from "../api/specModel";
 export const PRODUCT_KEY = "prd";
 export const PRODUCT_WIDE_KEY = "product-wide";
 
-/** Room paths: the repo path with `specs/` stripped, as every collab peer names them. */
-export const PRD_PATH = "requirements/prd.md";
-export const PRODUCT_WIDE_PATH = "requirements/product-wide.md";
-
-/** Where the spec lives in the repo: a spec-bundle path is the room path under it. */
-const SPEC_BUNDLE_ROOT = "specs/";
-
-/** The spec-bundle path of a room path, as the agent and the turn's `target` name it. */
-export function bundlePath(roomPath: string): string {
-  return `${SPEC_BUNDLE_ROOT}${roomPath}`;
-}
-
-/** The room path of a spec-bundle path; a path outside the bundle is returned as it is. */
-export function roomPathOf(path: string): string {
-  return path.startsWith(SPEC_BUNDLE_ROOT) ? path.slice(SPEC_BUNDLE_ROOT.length) : path;
-}
+/**
+ * Room paths are the repo paths, verbatim (`specs/requirements/prd.md`): the
+ * collab room keys every file by it, and so do the agent and a turn's `target`.
+ */
+export const PRD_PATH = "specs/requirements/prd.md";
+export const PRODUCT_WIDE_PATH = "specs/requirements/product-wide.md";
 
 /** A markdown file of the spec, by its URL key and its room path. */
 export interface MarkdownFile {
@@ -95,7 +85,7 @@ export function openFile(
 /**
  * A link's target path, resolved against the file it is written in, as a
  * relative link in the repo would be: `features/F2-approvals.md` from
- * `requirements/prd.md` is `requirements/features/F2-approvals.md`.
+ * `specs/requirements/prd.md` is `specs/requirements/features/F2-approvals.md`.
  */
 export function resolveHref(fromPath: string, href: string): string | null {
   if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("/") || href.startsWith("#")) return null;

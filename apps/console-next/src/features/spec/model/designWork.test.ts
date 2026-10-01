@@ -29,12 +29,12 @@ const li = (text: string, emphasis: LineBlock["emphasis"] = []): LineBlock => ({
 const h1 = (text: string): LineBlock => ({ kind: "heading", level: 1, text, emphasis: [] });
 const h2 = (text: string): LineBlock => ({ kind: "heading", level: 2, text, emphasis: [] });
 
-const F1_PATH = "requirements/features/F1.md";
-const F2_PATH = "requirements/features/F2.md";
-const PW_PATH = "requirements/product-wide.md";
+const F1_PATH = "specs/requirements/features/F1.md";
+const F2_PATH = "specs/requirements/features/F2.md";
+const PW_PATH = "specs/requirements/product-wide.md";
 
 function feature(id: string, over: Partial<SpecFeature> = {}): SpecFeature {
-  return { id, name: id, path: `requirements/features/${id}.md`, purpose: "", stage: "Interviewed", ...over };
+  return { id, name: id, path: `specs/requirements/features/${id}.md`, purpose: "", stage: "Interviewed", ...over };
 }
 
 const assumedLine = "F2.4 A deputy approves in my place. assumed";
@@ -131,7 +131,7 @@ describe("designBasis on the shared fixture", () => {
     const files = Object.fromEntries(
       Object.entries(raw)
         .filter(([path]) => path.endsWith(".md"))
-        .map(([path, content]) => [`requirements/${path.slice(FIXTURE.length)}`, content]),
+        .map(([path, content]) => [`specs/requirements/${path.slice(FIXTURE.length)}`, content]),
     );
     const doc = new Y.Doc();
     seedSpecDoc(doc, { files });
@@ -140,7 +140,7 @@ describe("designBasis on the shared fixture", () => {
     const expected = JSON.parse(raw[`${FIXTURE}basis.json`]!) as Record<string, string>;
     const productWide = productWideItems(requirements);
     const got = Object.fromEntries(
-      requirements.features.map((f) => [f.id, designBasis({ id: f.id, path: `requirements/${f.path}` }, lines, productWide)]),
+      requirements.features.map((f) => [f.id, designBasis({ id: f.id, path: `specs/requirements/${f.path}` }, lines, productWide)]),
     );
     expect(got).toEqual(expected);
   });

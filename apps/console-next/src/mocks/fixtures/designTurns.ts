@@ -23,7 +23,6 @@ import type { SpecModel } from "../../features/spec/api/specModel";
 import { applyAgentToolCall, projectSpecDoc } from "../../features/spec/collab/specDoc";
 import { readSpecLines } from "../../features/spec/collab/useSpecLines";
 import { designBasis, designWork } from "../../features/spec/model/designWork";
-import { bundlePath } from "../../features/spec/model/files";
 import { productWideItems, readRequirements } from "../../features/spec/model/requirements";
 import type { components } from "../../generated/aep-api";
 import type { ScriptFrame } from "../chatServer";
@@ -144,7 +143,7 @@ function scriptAddress(projectName: string, text: string, model: SpecModel, turn
     const feature = feedback.spec && model.features.find((f) => f.id === feedback.spec!.featureId);
     const current = feature ? readDocFile(scratch, feature.path) : undefined;
     if (feedback.spec && feature && current?.includes(feedback.spec.from)) {
-      const edit = { path: bundlePath(feature.path), oldString: feedback.spec.from, newString: feedback.spec.to };
+      const edit = { path: feature.path, oldString: feedback.spec.from, newString: feedback.spec.to };
       s.edit(`${turnKey}-c${comment.n}`, edit.path, edit.oldString, edit.newString);
       applyAgentToolCall(scratch, { type: "tool-result", toolCallId: `${turnKey}-c${comment.n}`, toolName: "editFile", input: edit });
       file = { path: feature.path, content: readDocFile(scratch, feature.path) ?? "" };

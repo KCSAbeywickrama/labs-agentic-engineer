@@ -66,10 +66,10 @@ export interface Requirements {
 
 type Lines = ReadonlyMap<string, LineBlock[]>;
 
-const ROOT = "requirements/";
+const ROOT = "specs/requirements/";
 const PRODUCT = `${ROOT}prd.md`;
-const FEATURE_FILE = /^requirements\/features\/(F\d+)-[^/]+\.md$/;
-const PRODUCT_WIDE_FILE = /^requirements\/product-wide(?:\.md|\/[^/]+\.md)$/;
+const FEATURE_FILE = /^specs\/requirements\/features\/(F\d+)-[^/]+\.md$/;
+const PRODUCT_WIDE_FILE = /^specs\/requirements\/product-wide(?:\.md|\/[^/]+\.md)$/;
 const NEEDS_LINE = /^needs:/i;
 
 interface Section {

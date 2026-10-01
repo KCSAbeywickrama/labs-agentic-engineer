@@ -45,7 +45,7 @@ const cycle = (id: string, kind: "coding" | "validation", events: StampedRunEven
 });
 
 const planned = [
-  read(1, "requirements/prd.md"),
+  read(1, "specs/requirements/prd.md"),
   item(2, "foundation", "Foundation · API", "pending"),
   item(2, "F1-api", "F1 Submit expenses · API", "pending"),
 ];
@@ -68,7 +68,7 @@ describe("a run's steps, from its progress stream", () => {
       ["F1 Submit expenses · API", "queued"],
       ["Validate", "queued"],
     ]);
-    expect(steps.phases[0]?.log).toEqual(["$ Read requirements/prd.md"]);
+    expect(steps.phases[0]?.log).toEqual(["$ Read specs/requirements/prd.md"]);
   });
 
   it("runs an entry from in progress to completed, its log its owner's events in that window", () => {
@@ -83,7 +83,7 @@ describe("a run's steps, from its progress stream", () => {
     ];
     const steps = runSteps({ state: "running" }, [cycle("c1", "coding", events)]);
     const [plan, foundation, f1] = steps.phases;
-    expect(plan).toMatchObject({ state: "done", log: ["$ Read requirements/prd.md"] });
+    expect(plan).toMatchObject({ state: "done", log: ["$ Read specs/requirements/prd.md"] });
     expect(foundation).toMatchObject({ state: "done", log: ["$ Write api/src/app.ts"], durationMs: 6_000 });
     expect(f1).toMatchObject({ state: "live", log: ["$ Write api/src/claims/routes.ts"], durationMs: null });
     expect(steps.current).toBe(2);

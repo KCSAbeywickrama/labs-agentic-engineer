@@ -76,8 +76,8 @@ describe("foldTurn", () => {
       { type: "turn-committed" },
     ]);
     expect(of("activity")).toEqual([
-      { toolCallId: "w1", op: "edit", path: "requirements/features/F4-spending-reports.md", state: "writing" },
-      { toolCallId: "w1", op: "edit", path: "requirements/features/F4-spending-reports.md", state: "done" },
+      { toolCallId: "w1", op: "edit", path: "specs/requirements/features/F4-spending-reports.md", state: "writing" },
+      { toolCallId: "w1", op: "edit", path: "specs/requirements/features/F4-spending-reports.md", state: "done" },
     ]);
     expect(of("wrote")).toEqual(["w1"]);
     expect(of("ended")).toEqual(["completed"]);
@@ -94,7 +94,7 @@ describe("foldTurn", () => {
       },
     ]);
     expect(of("activity")).toEqual([
-      { toolCallId: "w1", op: "edit", path: "requirements/features/F4-spending-reports.md", state: "failed", errorText: "oldString did not match" },
+      { toolCallId: "w1", op: "edit", path: "specs/requirements/features/F4-spending-reports.md", state: "failed", errorText: "oldString did not match" },
     ]);
     expect(of("wrote")).toEqual([]);
   });

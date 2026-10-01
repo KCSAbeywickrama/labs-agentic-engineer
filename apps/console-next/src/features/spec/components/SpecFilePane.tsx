@@ -42,7 +42,7 @@ import { Tag } from "./Tag";
 
 /** The file's path as the repo shows it under requirements/. */
 function shortPath(path: string): string {
-  return path.replace(/^requirements\//, "");
+  return path.replace(/^specs\/requirements\//, "");
 }
 
 /** The product-wide items that reach this feature. */

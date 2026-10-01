@@ -48,7 +48,7 @@ export interface SpecFeature {
   /** "F2". */
   id: string;
   name: string;
-  /** Its file in the spec room, e.g. "requirements/features/F2-approvals.md". */
+  /** Its file in the spec room, e.g. "specs/requirements/features/F2-approvals.md". */
   path: string;
   purpose: string;
   stage: FeatureStage;
@@ -109,7 +109,7 @@ export interface SpecModel {
   features: SpecFeature[];
   documents: SourceDocument[];
   design: DesignSummary;
-  /** Markdown by room path ("requirements/prd.md"). The collab room replaces this. */
+  /** Markdown by room path ("specs/requirements/prd.md"). The collab room replaces this. */
   files: Record<string, string>;
 }
 

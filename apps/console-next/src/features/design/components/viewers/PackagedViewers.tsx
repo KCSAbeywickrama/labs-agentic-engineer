@@ -100,5 +100,5 @@ export function ContractArtifact({ source }: { source: Source<"contract"> }) {
 
 /** A feature's acceptance file: its rules, each tagged with the story it proves, and their scenarios. */
 export function AcceptanceArtifact({ source }: { source: Source<"acceptance"> }) {
-  return <AcceptanceView features={[{ path: `specs/${source.path}`, content: source.content }]} noPadding fullWidth />;
+  return <AcceptanceView features={[{ path: source.path, content: source.content }]} noPadding fullWidth />;
 }

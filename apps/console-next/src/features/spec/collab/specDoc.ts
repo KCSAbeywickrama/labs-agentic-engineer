@@ -21,7 +21,6 @@ import * as Y from "yjs";
 import { applyToolCall, FileBundle, isFileMutationTool, type StreamPart } from "@aep/agent-stream";
 import { deleteDocFile, isMarkdownPath, readDocFile, setDocFile, setDocFileAsAgent } from "@aep/collab-doc";
 import { useSpecModel, type SpecModel } from "../api/specModel";
-import { roomPathOf } from "../model/files";
 
 // The project's spec document: ONE Y.Doc per project, every markdown file a
 // Y.XmlFragment keyed by its room path (@aep/collab-doc's model). Everything
@@ -100,7 +99,7 @@ export function applyAgentToolCall(doc: Y.Doc, part: StreamPart): boolean {
   if (!part.toolName || !isFileMutationTool(part.toolName)) return false;
   const input = part.input as { path?: unknown } | undefined;
   if (typeof input?.path !== "string") return false;
-  const path = roomPathOf(input.path);
+  const path = input.path;
   const before = readDocFile(doc, path);
   const bundle = new FileBundle(before === undefined ? {} : { [path]: before });
   applyToolCall(bundle, { ...part, input: { ...input, path } });

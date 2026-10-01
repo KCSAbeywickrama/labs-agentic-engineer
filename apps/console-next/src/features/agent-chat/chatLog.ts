@@ -27,7 +27,6 @@ import {
   type QuestionAnswer,
 } from "@aep/agent-stream";
 import { parseDesignCommand, parseInterviewCommand, START_COMMAND } from "@aep/contracts/commands";
-import { roomPathOf } from "../spec/model/files";
 import type { ConversationMessage } from "./api/conversation";
 import { parseQuestionsInput } from "./questionCards";
 
@@ -68,7 +67,7 @@ export type ChatItem =
       turnId: string;
       toolCallId: string;
       op: Op;
-      /** The room path ("requirements/features/F4-spending-reports.md"). */
+      /** The room path ("specs/requirements/features/F4-spending-reports.md"). */
       path: string;
       /** `writing` while its body streams; `done` once written; `failed` when the bundle refused it. */
       state: "writing" | "done" | "failed";
@@ -317,7 +316,7 @@ export function historyItems(history: ConversationMessage[]): ChatItem[] {
           turnId: "history",
           toolCallId,
           op: opForTool(p.toolName),
-          path: roomPathOf(path),
+          path,
           state: "done",
         });
       }

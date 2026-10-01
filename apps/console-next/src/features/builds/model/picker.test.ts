@@ -36,8 +36,8 @@ import {
 const li = (text: string): LineBlock => ({ kind: "listItem", text, emphasis: [] });
 const h1 = (text: string): LineBlock => ({ kind: "heading", level: 1, text, emphasis: [] });
 
-const path = (id: string) => `requirements/features/${id}.md`;
-const PW = "requirements/product-wide.md";
+const path = (id: string) => `specs/requirements/features/${id}.md`;
+const PW = "specs/requirements/product-wide.md";
 
 type Feature = PickerInput["features"][number];
 const feature = (id: string, name: string, over: Partial<Feature> = {}): Feature => ({

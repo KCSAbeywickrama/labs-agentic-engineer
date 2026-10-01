@@ -39,7 +39,7 @@ describe("builtLines on the shared fixture", () => {
     const files = Object.fromEntries(
       Object.entries(raw)
         .filter(([path]) => path.endsWith(".md"))
-        .map(([path, content]) => [`requirements/${path.slice(FIXTURE.length)}`, content]),
+        .map(([path, content]) => [`specs/requirements/${path.slice(FIXTURE.length)}`, content]),
     );
     const doc = new Y.Doc();
     seedSpecDoc(doc, { files });
@@ -48,7 +48,7 @@ describe("builtLines on the shared fixture", () => {
     const got = Object.fromEntries(
       [...lines.keys()]
         .flatMap((path) => {
-          const m = /^requirements\/features\/(F\d+)-/.exec(path);
+          const m = /^specs\/requirements\/features\/(F\d+)-/.exec(path);
           return m ? [[m[1]!, builtLines(lines.get(path) ?? [])] as const] : [];
         })
         .sort(([a], [b]) => a.localeCompare(b)),

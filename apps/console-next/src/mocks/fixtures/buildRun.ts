@@ -252,10 +252,10 @@ export function runScript(input: RunInput): RunScript {
         ...input.criteria.map((c): EventBody => ({ kind: "tool_use", tool: "Read", summary: c.path })),
       ]
     : [
-        { kind: "tool_use", tool: "Read", summary: "requirements/prd.md" },
-        { kind: "tool_use", tool: "Read", summary: "requirements/product-wide.md" },
-        ...input.features.map((f): EventBody => ({ kind: "tool_use", tool: "Read", summary: `requirements/features/${f.id}-${slug(f.name)}.md` })),
-        { kind: "tool_use", tool: "Read", summary: "design/architecture.cell" },
+        { kind: "tool_use", tool: "Read", summary: "specs/requirements/prd.md" },
+        { kind: "tool_use", tool: "Read", summary: "specs/requirements/product-wide.md" },
+        ...input.features.map((f): EventBody => ({ kind: "tool_use", tool: "Read", summary: `specs/requirements/features/${f.id}-${slug(f.name)}.md` })),
+        { kind: "tool_use", tool: "Read", summary: "specs/design/architecture.cell" },
       ];
   spread(codingStart, PLAN_MS * 0.7, [
     { kind: "run_started", taskKind: "implementation", runtime: "claude-code", model: MODEL },

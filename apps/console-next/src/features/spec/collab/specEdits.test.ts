@@ -39,7 +39,7 @@ import { readSpecLines } from "./useSpecLines";
 // Each edit runs through the Y.Doc (editFile) and is read back as the
 // markdown the committer would write.
 
-const PATH = "requirements/features/F2-approvals.md";
+const PATH = "specs/requirements/features/F2-approvals.md";
 
 function docWith(markdown: string): Y.Doc {
   const doc = new Y.Doc();
@@ -231,12 +231,12 @@ describe("the agent's file writes, applied to the local doc", () => {
     toolName: "editFile",
     toolCallId: "w1",
     input: {
-      path: `specs/${PATH}`,
+      path: PATH,
       // As the agent read it: the doc's markdown carries no trailing newline.
       oldString: "Managers approve claims.",
       newString: "Managers approve claims.\n\n## Decisions\n\n- Deputies approve on leave. *assumed*",
     },
-    output: { ok: true, op: "edit", path: `specs/${PATH}` },
+    output: { ok: true, op: "edit", path: PATH },
   };
 
   it("applies an edit to the room path, as the agents service matched it", () => {
@@ -254,7 +254,7 @@ describe("the agent's file writes, applied to the local doc", () => {
       type: "tool-result",
       toolName: "editFile",
       toolCallId: "c1",
-      input: { path: `specs/${f2.path}`, oldString: from, newString: from.replace(" with a reason.", " with a reason, after seeing its receipts.") },
+      input: { path: f2.path, oldString: from, newString: from.replace(" with a reason.", " with a reason, after seeing its receipts.") },
     };
     expect(applyAgentToolCall(doc, addressed)).toBe(true);
     expect(readDocFile(doc, f2.path)).toContain("with a reason, after seeing its receipts.");
@@ -275,7 +275,7 @@ describe("the agent's file writes, applied to the local doc", () => {
       const line = docLines(tr.doc).find((l) => l.text.startsWith("Finance"))!;
       type(tr, line.posAt(line.text.length - 1), " monthly");
     });
-    const agentEdit = { ...edit, input: { path: `specs/${PATH}`, oldString: "Managers approve", newString: "Line managers approve" } };
+    const agentEdit = { ...edit, input: { path: PATH, oldString: "Managers approve", newString: "Line managers approve" } };
     expect(applyAgentToolCall(doc, agentEdit)).toBe(true);
     Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer));
     expect(readDocFile(doc, PATH)).toBe("# Approvals\n\n- Line managers approve claims.\n- Finance pays monthly.");

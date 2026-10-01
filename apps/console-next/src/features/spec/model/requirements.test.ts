@@ -36,7 +36,7 @@ function fixtureFiles(): Record<string, string> {
   return Object.fromEntries(
     Object.entries(raw)
       .filter(([path]) => path.endsWith(".md"))
-      .map(([path, content]) => [`requirements/${path.slice(FIXTURE.length)}`, content]),
+      .map(([path, content]) => [`specs/requirements/${path.slice(FIXTURE.length)}`, content]),
   );
 }
 
@@ -64,10 +64,10 @@ describe("readRequirements", () => {
   it("reads a product-wide topic file and orders IDs numerically", () => {
     const requirements = readRequirements(
       linesOf({
-        "requirements/product-wide.md": "# Product-wide\n\n## Requirements\n\n- P2 Kept 7 years. Applies to: all.\n",
-        "requirements/product-wide/security.md": "# Security\n\n## Requirements\n\n- P10 Sessions end after 8 hours. Applies to: F1.\n",
-        "requirements/features/F10-audit.md": "# Audit\n\n## User Stories\n\n- F10.1 As an auditor, I export a year.\n",
-        "requirements/features/F2-approvals.md": "# Approvals\n\n## User Stories\n\n- F2.10 As a manager, I see ten.\n- F2.9 As a manager, I see nine.\n",
+        "specs/requirements/product-wide.md": "# Product-wide\n\n## Requirements\n\n- P2 Kept 7 years. Applies to: all.\n",
+        "specs/requirements/product-wide/security.md": "# Security\n\n## Requirements\n\n- P10 Sessions end after 8 hours. Applies to: F1.\n",
+        "specs/requirements/features/F10-audit.md": "# Audit\n\n## User Stories\n\n- F10.1 As an auditor, I export a year.\n",
+        "specs/requirements/features/F2-approvals.md": "# Approvals\n\n## User Stories\n\n- F2.10 As a manager, I see ten.\n- F2.9 As a manager, I see nine.\n",
       }),
     );
     expect(requirements.productWide.map((p) => p.id)).toEqual(["P2", "P10"]);

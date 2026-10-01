@@ -27,7 +27,6 @@ import {
   type Op,
   type StreamPart,
 } from "@aep/agent-stream";
-import { roomPathOf } from "../spec/model/files";
 import type { TurnStatus } from "./api/turns";
 import { isTurnStreamNotFound } from "./api/turns";
 import { turnFailureText, type TurnFailure } from "./lib/turnFailure";
@@ -164,7 +163,7 @@ export async function foldTurn(input: {
         const path = readToolInputPath(st.buf);
         if (path) {
           st.shown = true;
-          sink.activity({ toolCallId: part.id, op: opForTool(st.toolName), path: roomPathOf(path), state: "writing" });
+          sink.activity({ toolCallId: part.id, op: opForTool(st.toolName), path, state: "writing" });
         }
         break;
       }
@@ -194,7 +193,7 @@ export async function foldTurn(input: {
         sink.activity({
           toolCallId: part.toolCallId ?? "",
           op: change.op,
-          path: roomPathOf(change.path),
+          path: change.path,
           state: ok ? "done" : "failed",
           ...(change.result && !change.result.ok ? { errorText: change.result.message } : {}),
         });

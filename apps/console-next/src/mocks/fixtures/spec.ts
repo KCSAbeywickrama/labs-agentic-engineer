@@ -37,7 +37,7 @@ import type { SpecModel } from "../../features/spec/api/specModel";
 // in its Open Questions, tagged `*blocking*`, with the two answers the agent
 // offers nested under it.
 
-const featurePath = (file: string) => `requirements/features/${file}.md`;
+const featurePath = (file: string) => `specs/requirements/features/${file}.md`;
 
 export const acmeExpensesSpec: SpecModel = {
   features: [
@@ -95,13 +95,13 @@ export const acmeExpensesSpec: SpecModel = {
   ],
   design: { designedFrom: {}, openComments: 0, specChanges: [] },
   files: {
-    "requirements/prd.md": acmePrd,
+    "specs/requirements/prd.md": acmePrd,
     [featurePath("F1-submit-expenses")]: acmeF1,
     [featurePath("F2-approvals")]: acmeF2,
     [featurePath("F3-payroll-export")]: acmeF3,
     [featurePath("F4-spending-reports")]: acmeF4,
     [featurePath("F5-mileage-claims")]: acmeF5,
-    "requirements/product-wide.md": acmeProductWide,
+    "specs/requirements/product-wide.md": acmeProductWide,
   },
 };
 
@@ -192,10 +192,10 @@ export const triageAgentSpec: SpecModel = {
   documents: [],
   design: { designedFrom: {}, openComments: 0, specChanges: [] },
   files: {
-    "requirements/prd.md": triagePrd,
+    "specs/requirements/prd.md": triagePrd,
     [featurePath("F1-classify-tickets")]: triageF1,
     [featurePath("F2-draft-replies")]: triageF2,
-    "requirements/product-wide.md": triageProductWide,
+    "specs/requirements/product-wide.md": triageProductWide,
   },
 };
 
@@ -206,8 +206,8 @@ export function freshSpec(productName: string): SpecModel {
     documents: [],
     design: { designedFrom: {}, openComments: 0, specChanges: [] },
     files: {
-      "requirements/prd.md": `# ${productName}\n\n## Features\n\nThe agent proposes features once it has read your brief.\n`,
-      "requirements/product-wide.md": "# Product-wide\n\nRules that apply to more than one feature.\n",
+      "specs/requirements/prd.md": `# ${productName}\n\n## Features\n\nThe agent proposes features once it has read your brief.\n`,
+      "specs/requirements/product-wide.md": "# Product-wide\n\nRules that apply to more than one feature.\n",
     },
   };
 }

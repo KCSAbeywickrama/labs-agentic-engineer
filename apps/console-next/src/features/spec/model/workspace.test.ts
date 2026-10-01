@@ -32,7 +32,7 @@ import {
 } from "./workspace";
 
 function feature(id: string, name: string, over: Partial<FeatureView> = {}): FeatureView {
-  const base: SpecFeature = { id, name, path: `requirements/features/${id}.md`, purpose: "", stage: "Interviewed" };
+  const base: SpecFeature = { id, name, path: `specs/requirements/features/${id}.md`, purpose: "", stage: "Interviewed" };
   return { ...base, chips: [], blocking: [], toConfirm: 0, designOutOfDate: false, ...over };
 }
 

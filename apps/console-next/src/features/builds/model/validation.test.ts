@@ -20,7 +20,7 @@ import { describe, expect, it } from "vitest";
 import { groupByFeature, validationOutcome } from "./validation";
 
 const approvals = {
-  path: "validation/acceptance/F2-approvals.feature",
+  path: "specs/validation/acceptance/F2-approvals.feature",
   content: `Feature: F2 Approvals
   Managers approve or reject their team's claims.
 
@@ -44,7 +44,7 @@ const approvals = {
 
 // No story tags at all: the feature's own F-number title groups it.
 const payroll = {
-  path: "validation/acceptance/F3-payroll.feature",
+  path: "specs/validation/acceptance/F3-payroll.feature",
   content: `Feature: F3 Payroll export
 
   Scenario: Approved claims reach Xero overnight
