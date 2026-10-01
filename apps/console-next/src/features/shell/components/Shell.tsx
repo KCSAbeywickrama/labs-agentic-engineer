@@ -24,8 +24,10 @@ import { ChatPanel } from "../../agent-chat/components/ChatPanel";
 import { useRefreshOnTurnEnd } from "../../agent-chat/useProjectChat";
 import { ChatPanelContext, type ChatPanelControls } from "../chatPanel";
 import { shellScope } from "../scope";
-import { CHAT_WIDTH, PHONE, PHONE_QUERY, RAIL_WIDTH } from "../layout";
+import { CHAT_OVERLAY_WIDTH, PHONE, PHONE_QUERY, RAIL_WIDTH } from "../layout";
+import { useChatWidth } from "../useChatWidth";
 import { ActivityRail } from "./ActivityRail";
+import { ChatResizeHandle } from "./ChatResizeHandle";
 
 function atPhoneWidth(): boolean {
   return window.matchMedia(PHONE_QUERY).matches;
@@ -36,8 +38,9 @@ function atPhoneWidth(): boolean {
  * area where the routes draw (a base page, and a card over it).
  *
  * The chat exists only inside a project: the Projects grid and New project
- * have no org-level chat. It starts open on a wide screen and closed at phone
- * width, where it opens as an overlay beside the rail.
+ * have no org-level chat. It starts open on a wide screen, beside the page in
+ * the golden ratio and resizable (`useChatWidth`), and closed at phone width,
+ * where it opens as an overlay beside the rail.
  */
 export function Shell() {
   const matches = useMatches();
@@ -53,6 +56,7 @@ export function Shell() {
   const project = scope.kind === "project" ? scope : null;
   const chatShown = project !== null && chatOpen;
 
+  const chatWidth = useChatWidth();
   const chatControls = useMemo<ChatPanelControls>(() => ({ open: () => setChatOpen(true) }), []);
   useRefreshOnTurnEnd();
 
@@ -89,9 +93,10 @@ export function Shell() {
         {chatShown && (
           <Box
             sx={{
-              width: CHAT_WIDTH,
+              width: chatWidth.width,
               flexShrink: 0,
               height: "100%",
+              position: "relative",
               bgcolor: "var(--aep-shell-chat)",
               borderRight: 1,
               borderColor: "divider",
@@ -100,7 +105,7 @@ export function Shell() {
                 left: RAIL_WIDTH,
                 top: 0,
                 bottom: 0,
-                width: `min(${CHAT_WIDTH}px, calc(100vw - ${RAIL_WIDTH}px))`,
+                width: `min(${CHAT_OVERLAY_WIDTH}px, calc(100vw - ${RAIL_WIDTH}px))`,
                 zIndex: (t) => t.zIndex.drawer,
                 boxShadow: "var(--aep-shell-card-shadow)",
               },
@@ -121,6 +126,7 @@ export function Shell() {
                 onClose={() => setChatOpen(false)}
               />
             </ErrorBoundary>
+            <ChatResizeHandle width={chatWidth.width} onResize={chatWidth.resizeTo} onReset={chatWidth.reset} />
           </Box>
         )}
         <Box

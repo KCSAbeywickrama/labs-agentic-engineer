@@ -24,4 +24,5 @@ export const PHONE_QUERY = "(max-width: 860px)";
 export const PHONE = `@media ${PHONE_QUERY}`;
 
 export const RAIL_WIDTH = 52;
-export const CHAT_WIDTH = 360;
+/** The chat's width as an overlay at phone width; beside the page it is `chatWidth`'s. */
+export const CHAT_OVERLAY_WIDTH = 360;
