@@ -18,7 +18,9 @@
 
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { designCommand } from "@aep/contracts/commands";
 import { canSend, chatStore, useProjectChat } from "../agent-chat/useProjectChat";
+import { useSpecWorkspace } from "../spec/useSpecWorkspace";
 import { useChatPanel } from "../shell/chatPanel";
 import { designKey } from "./api/designModel";
 
@@ -31,8 +33,8 @@ import { designKey } from "./api/designModel";
  * While a turn runs they wait, as the composer does.
  */
 export function useDesignTurns(projectName: string): {
-  /** Send the design turn, in the words of its action ("Design 2 features"). */
-  design: (label: string) => void;
+  /** Send the design turn for the features that need it: `/design F1 F2`. */
+  design: () => void;
   addressComments: (count: number) => void;
   /** Whether one can start now: the chat is loaded and no turn is running. */
   ready: boolean;
@@ -41,6 +43,7 @@ export function useDesignTurns(projectName: string): {
   const panel = useChatPanel();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const toDesign = useSpecWorkspace(projectName).workspace?.design.toDesign ?? [];
 
   const send = async (text: string) => {
     panel.open();
@@ -51,9 +54,9 @@ export function useDesignTurns(projectName: string): {
 
   return {
     ready: canSend(chat),
-    design: (label) => {
+    design: () => {
       void navigate({ to: "/projects/$projectName/design", params: { projectName } });
-      void send(label);
+      void send(designCommand(toDesign));
     },
     addressComments: (count) => void send(`Address comments · ${count}`),
   };

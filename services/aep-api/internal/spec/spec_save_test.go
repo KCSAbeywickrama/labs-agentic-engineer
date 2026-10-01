@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -480,6 +481,68 @@ func TestBuildScopeAtTag_RefusesANameNoVersionCouldCarry(t *testing.T) {
 	for _, name := range []string{"../heads/main", "has space", "", ".hidden", "ends.lock", "a..b"} {
 		if _, err := r.svc.BuildScopeAtTag(ctx, r.org, r.proj, name); !errors.Is(err, ErrInvalidVersionTag) {
 			t.Errorf("BuildScopeAtTag(%q) err = %v, want ErrInvalidVersionTag", name, err)
+		}
+	}
+}
+
+// A design goes out of date per feature (E1): a change to one feature's
+// words refuses the build naming that feature, and leaves every other
+// feature's design standing.
+func TestSaveSpec_DesignOutOfDatePerFeature(t *testing.T) {
+	t.Parallel()
+	seed := validSpecSeed()
+	seed["specs/requirements/features/F2-notify.md"] = "# Notify\n\n## User Stories\n\n- F2.1 As a user, I want S, so that s.\n"
+	seed["specs/design/components/svc/design.json"] = `{"name":"svc","type":"service","version":"1.0.0","language":"go",` +
+		`"buildpack":"go","appPath":".","entrypoint":"main.go","exposure":"internet",` +
+		`"stories":["F1.1","F2.1"],"dependencies":[],"description":"a service"}`
+	r := newRig(t, seed)
+	designedAt := r.headSHA()
+	r.svc.SetDesignRunsResolver(func(context.Context, string, string) ([]DesignRun, error) {
+		// One bare `/design` at the seed: it covered every designable feature.
+		return []DesignRun{{BaseRef: designedAt}}, nil
+	})
+
+	// Confirming nothing, touching only the product page: no feature moved.
+	r.seed(map[string]string{"specs/requirements/prd.md": "# PRD\n\nA new problem statement.\n"}, "frame edit")
+	if _, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{}); err != nil {
+		t.Fatalf("a product-page edit refused the build: %v", err)
+	}
+
+	r.seed(map[string]string{
+		"specs/requirements/features/F2-notify.md": "# Notify\n\n## User Stories\n\n- F2.1 As a user, I want S by Slack, so that s.\n",
+	}, "F2 edit")
+	_, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{})
+	var ve *SpecValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want the stale feature refused, got %v", err)
+	}
+	if len(ve.Files) != 1 || ve.Files[0].Code != codeDesignOutdated || ve.Files[0].Path != "specs/requirements/features/F2-notify.md" {
+		t.Fatalf("want only F2 out of date, got %+v", ve.Files)
+	}
+
+	// A later `/design F2` at the new commit designs F2 again; F1 keeps its
+	// design from the first run.
+	redesignedAt := r.headSHA()
+	r.svc.SetDesignRunsResolver(func(context.Context, string, string) ([]DesignRun, error) {
+		return []DesignRun{{BaseRef: redesignedAt, Features: []string{"F2"}}, {BaseRef: designedAt}}, nil
+	})
+	if _, err := r.svc.SaveSpec(context.Background(), r.org, r.proj, SaveRequest{}); err != nil {
+		t.Fatalf("after F2's update the build was refused: %v", err)
+	}
+}
+
+func TestDesignedFeatures(t *testing.T) {
+	for line, want := range map[string][]string{
+		"/design":                 nil,
+		"/design F1 F2":           {"F1", "F2"},
+		"/design F2, F10 and F2":  {"F2", "F10"},
+		"/design the whole thing": nil,
+		"/interview F2":           nil,
+		"Design 2 features":       nil,
+		"  /design F3  ":          {"F3"},
+	} {
+		if got := DesignedFeatures(line); !reflect.DeepEqual(got, want) {
+			t.Errorf("DesignedFeatures(%q) = %v, want %v", line, got, want)
 		}
 	}
 }

@@ -368,6 +368,19 @@ func (m *memTurnRepo) GetActive(_ context.Context, orgID, projectID string) (*sp
 	return nil, nil
 }
 
+func (m *memTurnRepo) CompletedFlows(_ context.Context, orgID, projectID, flow string, limit int) ([]spec.AgentTurn, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []spec.AgentTurn
+	for i := len(m.rows) - 1; i >= 0 && len(out) < limit; i-- { // newest first
+		r := m.rows[i]
+		if r.OrgID == orgID && r.ProjectID == projectID && r.Flow == flow && r.Status == "completed" {
+			out = append(out, *r)
+		}
+	}
+	return out, nil
+}
+
 func (m *memTurnRepo) NewestCompletedFlow(_ context.Context, orgID, projectID, flow string) (*spec.AgentTurn, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

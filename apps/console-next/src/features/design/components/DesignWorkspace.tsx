@@ -82,7 +82,7 @@ export function DesignActions({ projectName }: { projectName: string }) {
         </Button>
       )}
       {label && design.revision > 0 && (
-        <Button size="small" variant="outlined" disabled={!turns.ready || running} onClick={() => turns.design(label)}>
+        <Button size="small" variant="outlined" disabled={!turns.ready || running} onClick={() => turns.design()}>
           {design.running?.kind === "design" ? "Designing…" : label}
         </Button>
       )}
@@ -150,7 +150,7 @@ export function DesignWorkspace({ projectName, art }: { projectName: string; art
                 Nothing is designed yet. Design takes every interviewed feature, including lines still marked assumed.
               </Typography>
               {label ? (
-                <Button size="small" variant="contained" disabled={!turns.ready} onClick={() => turns.design(label)}>
+                <Button size="small" variant="contained" disabled={!turns.ready} onClick={() => turns.design()}>
                   {label}
                 </Button>
               ) : (

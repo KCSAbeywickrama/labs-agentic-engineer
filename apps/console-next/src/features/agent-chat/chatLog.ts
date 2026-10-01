@@ -26,7 +26,7 @@ import {
   type Op,
   type QuestionAnswer,
 } from "@aep/agent-stream";
-import { parseInterviewCommand, START_COMMAND } from "@aep/contracts/commands";
+import { parseDesignCommand, parseInterviewCommand, START_COMMAND } from "@aep/contracts/commands";
 import { roomPathOf } from "../spec/model/files";
 import type { ConversationMessage } from "./api/conversation";
 import { parseQuestionsInput } from "./questionCards";
@@ -212,6 +212,8 @@ export function userLineText(text: string): string {
   if (trimmed.startsWith(`${START_COMMAND} `)) return trimmed.slice(START_COMMAND.length + 1).trim();
   const interview = parseInterviewCommand(trimmed);
   if (interview) return `Interview ${interview.featureId}.`;
+  const design = parseDesignCommand(trimmed);
+  if (design) return design.featureIds.length > 0 ? `Design ${design.featureIds.join(", ")}.` : "Design the features.";
   return text;
 }
 

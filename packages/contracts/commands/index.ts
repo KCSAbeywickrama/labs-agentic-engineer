@@ -128,3 +128,19 @@ export function parseInterviewCommand(line: string): { featureId: string } | nul
   const m = /^\/interview\s+(F[0-9]+)\s*$/.exec(line.trim());
   return m ? { featureId: m[1]! } : null;
 }
+
+/**
+ * `/design F1 F2` — design the named features (the `design` skill); a bare
+ * `/design` designs every feature that can be designed. The features a run
+ * named are what the build later checks each feature's design against.
+ */
+export function designCommand(featureIds: readonly string[]): string {
+  return featureIds.length > 0 ? `${DESIGN_COMMAND} ${featureIds.join(" ")}` : DESIGN_COMMAND;
+}
+
+/** The features a `/design` line names (empty for a bare one), or null for any other line. */
+export function parseDesignCommand(line: string): { featureIds: string[] } | null {
+  const m = /^\/design(?:\s+([\s\S]*))?$/.exec(line.trim());
+  if (!m) return null;
+  return { featureIds: [...new Set((m[1] ?? "").match(/\bF[0-9]+\b/g) ?? [])] };
+}

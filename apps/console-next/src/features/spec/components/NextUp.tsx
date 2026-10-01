@@ -109,7 +109,7 @@ export function NextUp({
   if (all.length === 0) return null;
   const onTurn = (item: NextUpItem) => {
     if (item.kind === "build") return build.open;
-    if (item.kind === "design") return design.ready ? () => design.design(item.label) : null;
+    if (item.kind === "design") return design.ready ? () => design.design() : null;
     if (item.kind !== "interview") return null;
     const { target } = item;
     const feature = target.card === "spec" ? features.find((f) => f.id === target.file) : undefined;

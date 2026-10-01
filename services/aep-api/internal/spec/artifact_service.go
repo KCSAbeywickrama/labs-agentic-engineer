@@ -169,12 +169,13 @@ type ArtifactService interface {
 	// because equal-by-accident is the failure that ships a stale design.
 	RequirementsFingerprintAt(ctx context.Context, orgID, projectID, at string) (string, error)
 
-	// SetDesignBaselineResolver wires the build gate's staleness input (#575):
-	// the commit the newest successful design run read the project at. On the
-	// interface because the composition root has to reach it, and it cannot be
-	// a constructor argument — the turn store it reads from is built after this
-	// service. nil is a documented no-op: the gate keeps working without it.
-	SetDesignBaselineResolver(f func(ctx context.Context, orgID, projectID string) (string, error))
+	// SetDesignRunsResolver wires the build gate's staleness input (#575, E1):
+	// the project's completed design runs, newest first — the commit each read
+	// and the features it designed. On the interface because the composition
+	// root has to reach it, and it cannot be a constructor argument — the turn
+	// store it reads from is built after this service. nil is a documented
+	// no-op: the gate keeps working without it.
+	SetDesignRunsResolver(f func(ctx context.Context, orgID, projectID string) ([]DesignRun, error))
 	// ComponentCountAtTag counts the design components at a spec tag — the
 	// deploy stage's denominator. Local-only; unknown tag errors.
 	ComponentCountAtTag(ctx context.Context, orgID, projectID, tag string) (int, error)
@@ -183,23 +184,31 @@ type ArtifactService interface {
 type artifactService struct {
 	repo sourcecontrol.RepoRepository
 	git  GitGateway
-	// designBaseline resolves the commit the newest successful design run read
-	// the project at, or "" when it has never designed. The build gate needs it
-	// to refuse a design the requirements have moved past (#575).
+	// designRuns lists the project's completed design runs, newest first. The
+	// build gate needs them to refuse a feature whose requirements have moved
+	// past its design (#575, per feature since E1).
 	//
 	// A function rather than a port because it is one fact, and optional
 	// because the gate must keep working without it: a service assembled with
-	// no baseline resolver simply does not run the staleness check, which is
-	// the pre-#575 behaviour rather than a build that can never start.
-	designBaseline func(ctx context.Context, orgID, projectID string) (string, error)
+	// no resolver simply does not run the staleness check, which is the
+	// pre-#575 behaviour rather than a build that can never start.
+	designRuns func(ctx context.Context, orgID, projectID string) ([]DesignRun, error)
 }
 
-// SetDesignBaselineResolver wires the staleness check's input (#575). Wired at
+// DesignRun is one completed design run: the commit it read the project at,
+// and the features it designed — nil when it named none, which means every
+// feature that was designable at that commit.
+type DesignRun struct {
+	BaseRef  string
+	Features []string
+}
+
+// SetDesignRunsResolver wires the staleness check's input (#575). Wired at
 // the composition root from the agent-turn store; nil is a documented no-op.
-func (s *artifactService) SetDesignBaselineResolver(
-	f func(ctx context.Context, orgID, projectID string) (string, error),
+func (s *artifactService) SetDesignRunsResolver(
+	f func(ctx context.Context, orgID, projectID string) ([]DesignRun, error),
 ) {
-	s.designBaseline = f
+	s.designRuns = f
 }
 
 // NewArtifactService builds the workspace-backed ArtifactService. `git` is the

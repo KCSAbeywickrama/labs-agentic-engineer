@@ -151,8 +151,7 @@ const PLAN_CONTEXT_HEADER = "\n\n## Existing open Tasks in this version (referen
  * lives here with the rest of it, not in the parsers, which only ever yield
  * facts (`@aep/contracts/commands`, `internal/spec/start_command.go`).
  *
- * `/interview` and `/design` are absent because their token already IS their
- * skill; an unlisted token stays a plain skill load, which is what keeps
+ * `/interview` is absent because its token already IS its skill; an unlisted token stays a plain skill load, which is what keeps
  * `/<org-skill>` working. `/feature`, `/actor`, `/amend` and `/settle` are the
  * console's older doors into what is now one loop, the `refine` skill.
  *
@@ -165,6 +164,9 @@ const COMMAND_FLOWS: Record<string, { skill: string; scope: (subject: string) =>
   actor: { skill: "refine", scope: (s) => (s ? `Add an actor: ${s}` : "Add an actor.") },
   amend: { skill: "refine", scope: (s) => s },
   settle: { skill: "refine", scope: (s) => (s ? `Settle this point: ${s}` : "Settle the Open Questions, one at a time.") },
+  // `/design F1 F2` names the features this run designs (E1); bare, it designs
+  // every designable feature, and the skill says so.
+  design: { skill: "design", scope: (s) => (s ? `Design these features: ${s}` : "") },
   // The plural walks every open dependency; the singular's token IS its skill.
   "resolve-dependencies": {
     skill: "resolve-dependency",

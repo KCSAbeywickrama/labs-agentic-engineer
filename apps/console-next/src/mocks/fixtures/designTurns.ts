@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import { parseDesignCommand } from "@aep/contracts/commands";
 import * as Y from "yjs";
 import { readDocFile } from "@aep/collab-doc";
 import type { SpecModel } from "../../features/spec/api/specModel";
@@ -46,7 +47,6 @@ type ConversationMessage = components["schemas"]["ConversationMessage"];
 //    interview's write), and replies on each comment.
 // What each does lands when the turn has finished (designState.ts).
 
-const DESIGN = /^(design|update design)\b/i;
 const ADDRESS = /^address comments\b/i;
 
 const DESIGN_NOTE: Record<string, string> = {
@@ -202,7 +202,7 @@ export function scriptDesignTurn(req: {
   turnKey: string;
 }): DesignTurn | null {
   const text = req.instruction.trim();
-  if (DESIGN.test(text)) return scriptDesign(req.projectName, text, req.model);
+  if (parseDesignCommand(text)) return scriptDesign(req.projectName, text, req.model);
   if (ADDRESS.test(text)) return scriptAddress(req.projectName, text, req.model, req.turnKey);
   return null;
 }

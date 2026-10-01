@@ -166,6 +166,11 @@ type TurnRepository interface {
 	// strength of work that did not land.
 	NewestCompletedFlow(ctx context.Context, orgID, projectID, flow string) (*AgentTurn, error)
 
+	// CompletedFlows returns up to `limit` of the project's COMPLETED turns of
+	// one flow, newest first. The build gate reads the design runs this way to
+	// find, per feature, the run that last designed it (E1).
+	CompletedFlows(ctx context.Context, orgID, projectID, flow string, limit int) ([]AgentTurn, error)
+
 	// Newest returns the project's most recent turn row, running or terminal,
 	// across every conversation — or (nil, nil) when nothing has ever run.
 	//
@@ -403,6 +408,19 @@ func (r *turnRepository) NewestCompletedFlow(ctx context.Context, orgID, project
 		return nil, err
 	}
 	return &t, nil
+}
+
+// CompletedFlows reads the newest completed runs of one flow off the
+// (org_id, project_id) index.
+func (r *turnRepository) CompletedFlows(ctx context.Context, orgID, projectID, flow string, limit int) ([]AgentTurn, error) {
+	var turns []AgentTurn
+	err := r.db.WithContext(ctx).
+		Where("org_id = ? AND project_id = ? AND flow = ? AND status = ?",
+			orgID, projectID, flow, turnStatusCompleted).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&turns).Error
+	return turns, err
 }
 
 func (r *turnRepository) SweepStale(ctx context.Context, olderThan time.Time) ([]AgentTurn, error) {

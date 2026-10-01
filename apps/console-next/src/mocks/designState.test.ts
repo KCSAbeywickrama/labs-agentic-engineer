@@ -50,14 +50,14 @@ describe("the design review across a reload", () => {
 
   it("keeps what a finished design turn did, so Design is not offered, or run, again", async () => {
     const first = await loadPage();
-    const design = first.startMockTurn(PROJECT, turnBody("Design 2 features", { kind: "design" }));
+    const design = first.startMockTurn(PROJECT, turnBody("/design F1 F2", { kind: "design" }));
     expect(said(design)).toContain("Designed Approvals");
     vi.setSystemTime(Date.now() + 60_000);
 
     const reloaded = await loadPage();
     const stages = reloaded.specView(PROJECT).features.map((f) => [f.id, f.stage]);
     expect(stages).toEqual(expect.arrayContaining([["F1", "Designed"], ["F2", "Designed"]]));
-    const again = reloaded.startMockTurn(PROJECT, turnBody("Design 2 features", { kind: "design" }));
+    const again = reloaded.startMockTurn(PROJECT, turnBody("/design F1 F2", { kind: "design" }));
     expect(said(again)).toBe("The design is up to date with the spec. Nothing to design.");
   });
 });

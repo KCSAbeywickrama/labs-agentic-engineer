@@ -105,6 +105,6 @@ func (f *fakeArtifactSvc) ComponentCountAtTag(ctx context.Context, orgID, projec
 	return f.ComponentCountAtTagFunc(ctx, orgID, projectID, tag)
 }
 
-// SetDesignBaselineResolver is wiring, not behaviour — the fakes ignore it.
-func (f *fakeArtifactSvc) SetDesignBaselineResolver(func(ctx context.Context, orgID, projectID string) (string, error)) {
+// SetDesignRunsResolver is wiring, not behaviour — the fakes ignore it.
+func (f *fakeArtifactSvc) SetDesignRunsResolver(func(ctx context.Context, orgID, projectID string) ([]DesignRun, error)) {
 }

@@ -54,6 +54,17 @@ test("flow points at the skill, with the user's trailing text after a blank line
   );
 });
 
+test("/design names the features this run designs, and bare designs every designable one", () => {
+  assert.ok(
+    composeInstruction({ kind: "flow", skill: "design", text: "F1 F2" }).startsWith(
+      "Load the design skill and follow it.\n\nDesign these features: F1 F2",
+    ),
+  );
+  assert.ok(
+    composeInstruction({ kind: "flow", skill: "design" }).startsWith("Load the design skill and follow it.\n\nSpec sources"),
+  );
+});
+
 test("the resolve command carries the user's answer after the dependency's name, verbatim", () => {
   // The definition's Service card sends `/resolve-dependency <name> <answer>`;
   // the token IS its skill, so the trailing text rides through untouched for

@@ -144,7 +144,7 @@ func validateBuildGate(reqFiles, designFiles map[string]string) []FileValidation
 			if !defined[id] {
 				errs = append(errs, FileValidationError{
 					Path: "components/" + c.ID + "/design.json", Code: codeStaleStoryCitation,
-					Message: fmt.Sprintf("`stories` cites %s — %s", id, notAStory(spec, id)),
+					Message: fmt.Sprintf("`stories` cites %s — %s", id, notAStory(spec, id, "cite")),
 				})
 			}
 		}
@@ -293,7 +293,7 @@ func validateRolesDocument(designFiles map[string]string, spec reqspec.Spec) []F
 			if !stories[id] {
 				errs = append(errs, FileValidationError{
 					Path: securityspec.BundleKey, Code: codeUnknownRoleStory,
-					Message: fmt.Sprintf("role %q cites story %s — %s", role.Name, id, notAStory(spec, id)),
+					Message: fmt.Sprintf("role %q cites story %s — %s", role.Name, id, notAStory(spec, id, "cite")),
 				})
 			}
 		}
@@ -364,18 +364,19 @@ func hasEndUserSignIn(designFiles map[string]string) bool {
 }
 
 // notAStory says why a cited ID is not one of the requirements' stories, and
-// what to cite instead when the requirements say.
-func notAStory(spec reqspec.Spec, id string) string {
+// what to cite instead when the requirements say. verb is what the citing
+// file does with a story: a design.json cites one, an acceptance file tags one.
+func notAStory(spec reqspec.Spec, id, verb string) string {
 	c := spec.Cite(id)
 	switch {
 	case c.Status == reqspec.Live:
-		return fmt.Sprintf("%s is not a story; cite the stories it holds", id)
+		return fmt.Sprintf("%s is not a story; %s the stories it holds", id, verb)
 	case c.Status == reqspec.Retired && c.Replacement != "":
-		return c.Describe(id) + "; cite " + c.Replacement
+		return c.Describe(id) + "; " + verb + " " + c.Replacement
 	case c.Status == reqspec.Retired:
 		return c.Describe(id) + "; drop it"
 	default:
-		return c.Describe(id) + "; cite a real story or drop it"
+		return c.Describe(id) + "; " + verb + " a real story or drop it"
 	}
 }
 

@@ -489,7 +489,7 @@ func TestValidateSpecBundles_RequirementIDProblems(t *testing.T) {
 		reqs[k] = v
 	}
 	reqs["features/F2-notifications.md"] += "- F2.1 As a member, I get the same message twice.\n"
-	err := validateSpecBundles(reqs, completeDesignFiles())
+	err := validateSpecBundles(reqs, completeDesignFiles(), nil)
 	var ve *SpecValidationError
 	if !errors.As(err, &ve) {
 		t.Fatalf("want a SpecValidationError, got %v", err)

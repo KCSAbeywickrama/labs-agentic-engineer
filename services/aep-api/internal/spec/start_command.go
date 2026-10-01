@@ -170,3 +170,23 @@ func (s *Service) listReferenceDocs(ctx context.Context, ref sourcecontrol.RepoR
 	slices.Sort(out)
 	return out
 }
+
+// designCommandFeature matches a feature ID in a `/design` line's text.
+var designCommandFeature = regexp.MustCompile(`\bF[0-9]+\b`)
+
+// DesignedFeatures reads which features a design run was asked to design from
+// the line that started it: `/design F1 F2` names them; a bare `/design` (or
+// text naming none) is nil, which means every feature designable at the time.
+func DesignedFeatures(line string) []string {
+	m := slashCommandPattern.FindStringSubmatch(strings.TrimSpace(line))
+	if m == nil || m[1] != "design" {
+		return nil
+	}
+	var ids []string
+	for _, id := range designCommandFeature.FindAllString(m[2], -1) {
+		if !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
