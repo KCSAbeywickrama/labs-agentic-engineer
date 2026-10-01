@@ -31,7 +31,7 @@ const VersionLink = createLink(ButtonBase);
 
 function useRowState(projectName: string, row: VersionRow) {
   const { outcome } = useBuildOutcome(projectName, isBuilding(row.status) ? undefined : row.version);
-  return versionState(row.status, outcome);
+  return versionState(row.status, outcome, row.regressions);
 }
 
 function RailRow({ projectName, row, selected }: { projectName: string; row: VersionRow; selected: boolean }) {

@@ -21,7 +21,7 @@ import { groupByFeature, validationOutcome } from "./validation";
 
 const approvals = {
   path: "validation/acceptance/F2-approvals.feature",
-  content: `Feature: Approvals
+  content: `Feature: F2 Approvals
   Managers approve or reject their team's claims.
 
   @story-F2.1
@@ -57,14 +57,14 @@ const report = JSON.stringify({
   schemaVersion: 2,
   scenarios: [
     {
-      feature: "Approvals",
+      feature: "F2 Approvals",
       rule: "A manager sees the team's pending claims, oldest first",
       scenario: "The oldest claim is first",
       outcome: "passed",
       steps: [{ keyword: "Given", text: "Priya submitted claim 42 on Monday", exit: 0 }],
     },
     {
-      feature: "Approvals",
+      feature: "F2 Approvals",
       rule: "A deputy approves while the manager is on leave",
       scenario: "A deputy approves while the manager is on leave",
       outcome: "failed",
@@ -78,9 +78,9 @@ const report = JSON.stringify({
   ],
 });
 
-describe("validation grouped by feature (provisional until B4)", () => {
-  it("files each scenario under the feature its story tag names, inherited from its rule", () => {
-    const groups = groupByFeature([payroll, approvals], report);
+describe("validation grouped by feature", () => {
+  it("files each scenario under its feature by ID, from the Feature line or else its story tag", () => {
+    const groups = groupByFeature({ criteria: [payroll, approvals], report: report });
     expect(groups.map((g) => [g.id, g.name, g.scenarios.map((s) => s.story)])).toEqual([
       ["F2", "Approvals", ["F2.1", "F2.4"]],
       ["F3", "Payroll export", [null]],
@@ -88,7 +88,7 @@ describe("validation grouped by feature (provisional until B4)", () => {
   });
 
   it("says what a failing scenario expected and got, with the steps that led there", () => {
-    const [f2] = groupByFeature([approvals], report);
+    const [f2] = groupByFeature({ criteria: [approvals], report: report });
     expect(f2).toMatchObject({ passed: 1, judged: 2 });
     expect(f2?.scenarios[1]).toEqual({
       name: "A deputy approves while the manager is on leave",
@@ -104,22 +104,59 @@ describe("validation grouped by feature (provisional until B4)", () => {
         "  $ agent-browser wait --text 'Claim 43'  (exit 1)",
         "  observed: an empty queue",
       ],
+      standing: null,
     });
   });
 
   it("lists every scenario as pending before the attempt has committed a report", () => {
-    const [f2] = groupByFeature([approvals], null);
+    const [f2] = groupByFeature({ criteria: [approvals], report: null });
     expect(f2?.scenarios.map((s) => s.outcome)).toEqual(["pending", "pending"]);
     expect(f2).toMatchObject({ passed: 0, judged: 0 });
   });
 
   it("adds up to the version's result: how many passed, and which failed", () => {
-    expect(validationOutcome(groupByFeature([approvals, payroll], report))).toEqual({
+    expect(validationOutcome(groupByFeature({ criteria: [approvals, payroll], report: report }))).toEqual({
       passed: 2,
       total: 3,
       failing: [
-        { featureId: "F2", featureName: "Approvals", story: "F2.4", name: "A deputy approves while the manager is on leave" },
+        {
+          featureId: "F2",
+          featureName: "Approvals",
+          story: "F2.4",
+          name: "A deputy approves while the manager is on leave",
+          standing: null,
+        },
       ],
+      regressions: 0,
     });
+  });
+
+  // B4: the version's reading of the attempt.
+  const deputyKey = "F2 / A deputy approves while the manager is on leave / A deputy approves while the manager is on leave";
+
+  it("marks a failure that passed in the previous validated version as a regression", () => {
+    const groups = groupByFeature({ criteria: [approvals], report, regressions: [deputyKey] });
+    expect(groups[0]?.scenarios[1]?.standing).toBe("regression");
+    expect(validationOutcome(groups).regressions).toBe(1);
+    const still = groupByFeature({ criteria: [approvals], report, stillFailing: [deputyKey] });
+    expect(still[0]?.scenarios[1]?.standing).toBe("still-failing");
+  });
+
+  it("does not run a feature not built yet, nor a rule whose stories are held back", () => {
+    const groups = groupByFeature({
+      criteria: [approvals, payroll],
+      report,
+      scope: { features: ["F2"], heldBack: ["F2.4"] },
+    });
+    expect(groups.map((g) => [g.id, g.notBuilt, g.scenarios.map((s) => s.outcome)])).toEqual([
+      ["F2", false, ["passed", "not-run"]],
+      ["F3", true, ["not-run"]],
+    ]);
+    expect(validationOutcome(groups)).toMatchObject({ passed: 1, total: 1, failing: [] });
+  });
+
+  it("keeps a renamed feature's results: the report is matched by the feature's ID", () => {
+    const renamed = report.replaceAll('"F2 Approvals"', '"F2 Claim review"');
+    expect(groupByFeature({ criteria: [approvals], report: renamed })[0]).toMatchObject({ passed: 1, judged: 2 });
   });
 });

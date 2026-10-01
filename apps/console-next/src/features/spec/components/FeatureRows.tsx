@@ -18,6 +18,7 @@
 
 import { createLink } from "@tanstack/react-router";
 import { Box, ButtonBase } from "@wso2/oxygen-ui";
+import { useFailingIn } from "../../builds/hooks/useFailingIn";
 import { stageTone, type FeatureView } from "../model/workspace";
 import { Tag } from "./Tag";
 
@@ -30,6 +31,7 @@ const RowLink = createLink(ButtonBase);
  * project overview shows the same rows.
  */
 export function FeatureRows({ projectName, features }: { projectName: string; features: FeatureView[] }) {
+  const failingIn = useFailingIn(projectName);
   if (features.length === 0) return null;
   return (
     <Box
@@ -69,13 +71,14 @@ export function FeatureRows({ projectName, features }: { projectName: string; fe
             <Box component="span" sx={{ gridColumn: "2 / 4", fontSize: "0.8125rem", color: "text.secondary" }}>
               {f.purpose}
             </Box>
-            {f.chips.length > 0 && (
+            {(f.chips.length > 0 || failingIn.has(f.id)) && (
               <Box component="span" sx={{ gridColumn: "2 / 4", display: "inline-flex", flexWrap: "wrap", gap: 0.5 }}>
                 {f.chips.map((c) => (
                   <Tag key={c.label} tone={c.tone}>
                     {c.label}
                   </Tag>
                 ))}
+                {failingIn.has(f.id) && <Tag tone="warning">failing in {failingIn.get(f.id)}</Tag>}
               </Box>
             )}
           </RowLink>

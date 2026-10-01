@@ -184,10 +184,10 @@ export function useStartBuild(projectName: string) {
 export function useStartFix(projectName: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (fix: { of: string; stories: string[] }): Promise<string> => {
+    mutationFn: async (of: string): Promise<string> => {
       const { data, error } = await client.POST("/projects/{projectName}/build", {
         params: { path: { projectName } },
-        body: fixBody(fix.of, fix.stories),
+        body: fixBody(of),
       });
       if (error || data === undefined) throw buildRefusal(error);
       return data.tag ?? "";

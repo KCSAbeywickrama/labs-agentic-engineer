@@ -232,7 +232,7 @@ const OPENAPI_ROLES = {
 };
 
 function approvalsFeature(t: ReadonlySet<DesignTweak>): string {
-  return `Feature: Approvals
+  return `Feature: F2 Approvals
   Managers approve or reject their team's claims; large claims also go to Finance.
 
   @story-F2.1
@@ -286,7 +286,7 @@ ${t.has("receipts") ? "      And Sam has opened its receipt\n" : ""}      When S
 `;
 }
 
-const SUBMIT_FEATURE = `Feature: Submit expenses
+const SUBMIT_FEATURE = `Feature: F1 Submit expenses
   Employees record expenses with a receipt photo and submit them as a claim.
 
   @story-F1.1
@@ -505,7 +505,7 @@ function storiesFeature(feature: SpecFeature, lines: LineBlock[]): string {
       When it is used as the story says
       Then the story holds`,
     );
-  return `Feature: ${feature.name}\n  ${feature.purpose}\n${rules.join("\n")}\n`;
+  return `Feature: ${feature.id} ${feature.name}\n  ${feature.purpose}\n${rules.join("\n")}\n`;
 }
 
 function genericCatalog(features: SpecFeature[], lines: ReadonlyMap<string, LineBlock[]>): ArtifactDraft[] {

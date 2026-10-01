@@ -39,7 +39,7 @@ export function NextStepsBar({ projectName, next }: { projectName: string; next:
     switch (step.kind) {
       case "fix":
         fix.mutate(
-          { of: step.version, stories: step.stories },
+          step.version,
           {
             onSuccess: (tag) => {
               const version = tag || `${step.version}.1`;

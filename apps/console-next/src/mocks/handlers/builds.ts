@@ -97,13 +97,20 @@ function newRun(projectName: string, build: Omit<ProjectBuild, "status">, failin
   };
 }
 
-/** A repair build of `of`: the same features, which re-runs every scenario. */
-function startRepair(projectName: string, repair: { of: string; stories: string[] }): Response {
+/**
+ * A repair build of `of`: the same features, working what `of` failed, which
+ * re-runs every scenario. Like the server, it refuses a version with nothing
+ * failing, and a repair of a repair fixes the version it fixed.
+ */
+function startRepair(projectName: string, repair: { of: string }): Response {
   const builds = mockBuilds(projectName);
   const fixed = builds.find((b) => b.build.version === repair.of);
   if (!fixed) return refuse(404, { code: "not_found", message: `No version named ${repair.of}.` });
-  const version = `${repair.of}.${builds.filter((b) => b.build.fixes === repair.of).length + 1}`;
-  addBuild(newRun(projectName, { ...fixed.build, version, fixes: repair.of }, null, repair));
+  const failing = fixed.run.failing;
+  if (!failing) return refuse(409, { code: "conflict", message: `${repair.of} has no failing scenario to fix` });
+  const of = fixed.build.fixes ?? repair.of;
+  const version = `${of}.${builds.filter((b) => b.build.fixes === of).length + 1}`;
+  addBuild(newRun(projectName, { ...fixed.build, version, fixes: of }, null, { of, stories: [failing] }));
   return HttpResponse.json<BuildResponse>({ tag: version });
 }
 
@@ -197,8 +204,12 @@ export const buildsHandlers = [
   http.get("*/api/v1/projects/:projectName/validations/:tag/cycles/:cycleId/report", ({ params }) => {
     const build = byTag(String(params.projectName), String(params.tag));
     const snapshot = build ? snapshotAt(scriptOf(build), elapsed(build), String(params.cycleId)) : null;
-    if (!snapshot) return refuse(404, { code: "not_found", message: "No report for this attempt." });
-    return HttpResponse.json(snapshot);
+    if (!build || !snapshot) return refuse(404, { code: "not_found", message: "No report for this attempt." });
+    // The version validates every feature built in it or before (B4).
+    const builds = mockBuilds(String(params.projectName));
+    const upTo = builds.slice(0, builds.findIndex((b) => b.build.version === build.build.version) + 1);
+    const features = [...new Set(upTo.flatMap((b) => b.build.features.map((f) => f.id)))];
+    return HttpResponse.json({ ...snapshot, scope: { features, heldBack: [] } });
   }),
 
   http.post("*/api/v1/projects/:projectName/build", async ({ params, request }): Promise<Response> => {

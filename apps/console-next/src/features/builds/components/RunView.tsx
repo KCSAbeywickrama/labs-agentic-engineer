@@ -207,6 +207,9 @@ export function RunView({ projectName, row, rows }: { projectName: string; row: 
           <ValidationByFeature
             projectName={projectName}
             groups={result.groups}
+            version={row.version}
+            builtHere={row.fixes ? [] : row.featureIds}
+            baseline={result.baseline}
             settled={Boolean(result.outcome)}
             failingActions={next && <NextStepsBar projectName={projectName} next={next} />}
           />

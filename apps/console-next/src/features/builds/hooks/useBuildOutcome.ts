@@ -32,15 +32,19 @@ export interface BuildOutcome {
   groups: FeatureResults[] | null;
   /** The settled result; null while validation has not finished. */
   outcome: ValidationOutcome | null;
+  /** The previous validated version the failures are read against; null when none. */
+  baseline: string | null;
   error: Error | null;
 }
 
 /**
- * A version's validation, read as today's console reads it: the version's
- * delivery run (list-build-runs), its validation cycle, and that attempt's
- * report with the criteria it judged (get-validation-report), grouped by
- * feature. `liveCycle` is the stream's fresher record of the validation
- * cycle, when a card is watching the run; without it the run poll says.
+ * A version's validation: its newest validation attempt among the version's
+ * runs (list-build-runs) — on the platform that is a run of its own, started
+ * once the dev run has delivered, not a cycle of the dev run — and that
+ * attempt's report with the criteria it judged and the version's reading of
+ * it (get-validation-report), grouped by feature. `liveCycle` is the stream's
+ * fresher record of a validation cycle, when a card is watching a run that
+ * holds one; without it the run poll says.
  */
 export function useBuildOutcome(
   projectName: string,
@@ -49,12 +53,21 @@ export function useBuildOutcome(
 ): BuildOutcome {
   const runs = useBuildRuns(projectName, tag);
   const run = runs.data ? deliveryRun(runs.data.runs) : undefined;
-  const polled = run?.cycles.filter((c) => c.kind === "validation").at(-1);
+  // Newest first, so the first run holding a validation cycle holds the newest attempt.
+  const validating = runs.data?.runs.find((r) => r.cycles.some((c) => c.kind === "validation"));
+  const polled = validating?.cycles.filter((c) => c.kind === "validation").at(-1);
   const validation = liveCycle ?? polled;
   const settled = Boolean(validation?.endedAt);
   const snapshot = useValidationSnapshot(projectName, tag ?? "", validation?.id ?? "", Boolean(validation), settled);
   const data = snapshot.data;
-  const groups = useMemo(() => (data ? groupByFeature(data.criteria, data.report) : null), [data]);
+  const groups = useMemo(() => (data ? groupByFeature(data) : null), [data]);
   const outcome = useMemo(() => (settled && groups && data?.report ? validationOutcome(groups) : null), [settled, groups, data]);
-  return { run, validation, groups, outcome, error: runs.error ?? snapshot.error ?? null };
+  return {
+    run,
+    validation,
+    groups,
+    outcome,
+    baseline: data?.baseline?.version ?? null,
+    error: runs.error ?? snapshot.error ?? null,
+  };
 }

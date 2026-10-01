@@ -38,15 +38,15 @@ describe("the build selection on the wire", () => {
 });
 
 describe("a repair build on the wire", () => {
-  it("names the version it fixes and the failing stories, and reads back as the server would", () => {
-    const body = fixBody("v1", ["F2.4"]);
-    expect(body).toEqual({ inputs: [], repair: { of: "v1", stories: ["F2.4"] } });
-    expect(repairOfBody(body)).toEqual({ of: "v1", stories: ["F2.4"] });
+  it("names the version it fixes, and reads back as the server would", () => {
+    const body = fixBody("v1");
+    expect(body).toEqual({ repair: { of: "v1" } });
+    expect(repairOfBody(body)).toEqual({ of: "v1" });
     expect(selectionOfBody(body)).toBeNull();
   });
 
   it("reads a body without a repair, or a malformed one, as none", () => {
     expect(repairOfBody(buildBody({ features: ["F1"], productWide: [] }))).toBeNull();
-    expect(repairOfBody({ repair: { of: "v1", stories: [4] } } as never)).toBeNull();
+    expect(repairOfBody({ repair: { of: 4 } } as never)).toBeNull();
   });
 });

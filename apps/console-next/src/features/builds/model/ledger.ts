@@ -34,11 +34,15 @@ export interface VersionRow {
   fixes: string | null;
   /** The features it built, by name. */
   features: string[];
+  /** The same features, by ID. */
+  featureIds: string[];
+  /** Failing scenarios its latest validation found that passed in the version before (B4). */
+  regressions: number;
 }
 
 /** The ledger's rows, newest first, as the ledger read orders them. */
 export function versionRows(
-  summaries: Pick<BuildSummary, "tag" | "status">[],
+  summaries: Pick<BuildSummary, "tag" | "status" | "regressions">[],
   builds: Pick<ProjectBuild, "version" | "fixes" | "features">[],
 ): VersionRow[] {
   return summaries.map((s) => {
@@ -48,6 +52,8 @@ export function versionRows(
       status: s.status,
       fixes: build?.fixes ?? null,
       features: build?.features.map((f) => f.name) ?? [],
+      featureIds: build?.features.map((f) => f.id) ?? [],
+      regressions: s.regressions ?? 0,
     };
   });
 }
@@ -72,11 +78,15 @@ export type LedgerTone = "primary" | "success" | "warning" | "error";
 export function versionState(
   status: BuildSummary["status"],
   outcome: ValidationOutcome | null,
+  regressions = 0,
 ): { label: string; tone: LedgerTone | null } {
   if (isBuilding(status)) return { label: "building", tone: "primary" };
   if (status === "failed") return { label: "failed", tone: "error" };
   if (status === "cancelled") return { label: "cancelled", tone: null };
   if (!outcome) return { label: "built", tone: null };
-  if (outcome.failing.length > 0) return { label: `${outcome.failing.length} failing`, tone: "warning" };
+  if (outcome.failing.length > 0) {
+    const regressed = regressions > 0 ? ` · ${regressions} regression${regressions === 1 ? "" : "s"}` : "";
+    return { label: `${outcome.failing.length} failing${regressed}`, tone: "warning" };
+  }
   return { label: "passing", tone: "success" };
 }

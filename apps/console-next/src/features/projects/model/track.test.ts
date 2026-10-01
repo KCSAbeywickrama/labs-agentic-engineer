@@ -172,7 +172,7 @@ describe("the build leg", () => {
       builds: [{ version: "v1", status: "built" as const }],
       offer: { version: "v2", rows: [row("F1", "fixed"), row("F2", "fixed")] },
     };
-    const failing = { featureId: "F2", featureName: "Approvals", story: "F2.4", name: "A deputy approves" };
+    const failing = { featureId: "F2", featureName: "Approvals", story: "F2.4", name: "A deputy approves", standing: null };
     expect(projectTrack({ ...built, latestOutcome: { passed: 10, total: 11, failing: [failing] } }).build).toEqual({
       state: "waiting",
       summary: "v1 built · F2.4 failing",

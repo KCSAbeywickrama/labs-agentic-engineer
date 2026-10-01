@@ -33,8 +33,8 @@ describe("the version ledger", () => {
 
   it("lists the versions newest first, with what each built and what a repair fixes", () => {
     expect(rows).toEqual([
-      { version: "v1.1", status: "in_progress", fixes: "v1", features: ["Submit expenses", "Approvals"] },
-      { version: "v1", status: "completed", fixes: null, features: ["Submit expenses", "Approvals"] },
+      { version: "v1.1", status: "in_progress", fixes: "v1", features: ["Submit expenses", "Approvals"], featureIds: ["F1", "F2"], regressions: 0 },
+      { version: "v1", status: "completed", fixes: null, features: ["Submit expenses", "Approvals"], featureIds: ["F1", "F2"], regressions: 0 },
     ]);
     expect(fixedBy(rows, "v1")?.version).toBe("v1.1");
     expect(fixedBy(rows, "v1.1")).toBeNull();
@@ -48,11 +48,24 @@ describe("the version ledger", () => {
   });
 
   it("says each version's state in words: building, passing, how many fail, or failed", () => {
-    const failing = [{ featureId: "F2", featureName: "Approvals", story: "F2.4", name: "A deputy approves" }];
+    const failing = [{ featureId: "F2", featureName: "Approvals", story: "F2.4", name: "A deputy approves", standing: null }];
     expect(versionState("in_progress", null)).toEqual({ label: "building", tone: "primary" });
-    expect(versionState("completed", { passed: 10, total: 11, failing })).toEqual({ label: "1 failing", tone: "warning" });
-    expect(versionState("completed", { passed: 11, total: 11, failing: [] })).toEqual({ label: "passing", tone: "success" });
+    expect(versionState("completed", { passed: 10, total: 11, failing, regressions: 0 })).toEqual({ label: "1 failing", tone: "warning" });
+    expect(versionState("completed", { passed: 11, total: 11, failing: [], regressions: 0 })).toEqual({ label: "passing", tone: "success" });
     expect(versionState("completed", null)).toEqual({ label: "built", tone: null });
     expect(versionState("failed", null)).toEqual({ label: "failed", tone: "error" });
+  });
+});
+
+describe("regressions on the ledger row", () => {
+  it("adds the regression count to a failing version's label", () => {
+    const failing = [
+      { featureId: "F2", featureName: "Approvals", story: "F2.1", name: "The queue", standing: "regression" as const },
+      { featureId: "F3", featureName: "Payroll", story: null, name: "Export", standing: null },
+    ];
+    expect(versionState("completed", { passed: 9, total: 11, failing, regressions: 1 }, 1)).toEqual({
+      label: "2 failing · 1 regression",
+      tone: "warning",
+    });
   });
 });

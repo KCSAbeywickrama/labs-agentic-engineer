@@ -20,7 +20,9 @@ import { useMemo } from "react";
 import { Typography } from "@wso2/oxygen-ui";
 import type * as Y from "yjs";
 import { EmptyState } from "../../../components/EmptyState";
+import { Link } from "@tanstack/react-router";
 import { SinceBuild } from "../../builds/components/SinceBuild";
+import { useFailingIn } from "../../builds/hooks/useFailingIn";
 import type { ProductWideItem, SpecModel } from "../api/specModel";
 import { designChangedLines } from "../model/designChanges";
 import { fileFragment } from "../collab/specEdits";
@@ -65,7 +67,8 @@ function ProductWideHere({
   );
 }
 
-function FeatureKicker({ feature }: { feature: FeatureView }) {
+function FeatureKicker({ projectName, feature }: { projectName: string; feature: FeatureView }) {
+  const failingIn = useFailingIn(projectName).get(feature.id);
   return (
     <DocKicker>
       <span>{feature.id}</span>
@@ -76,6 +79,11 @@ function FeatureKicker({ feature }: { feature: FeatureView }) {
           {c.label}
         </Tag>
       ))}
+      {failingIn && (
+        <Link to="/projects/$projectName/builds/$version" params={{ projectName, version: failingIn }}>
+          <Tag tone="warning">failing in {failingIn}</Tag>
+        </Link>
+      )}
     </DocKicker>
   );
 }
@@ -154,7 +162,7 @@ export function SpecFilePane({
   };
   return (
     <>
-      <FeatureKicker feature={feature} />
+      <FeatureKicker projectName={projectName} feature={feature} />
       <SpecEditor key={file.path} {...editorProps} designChanged={designChanged} />
       {feature.blocking.length > 0 ? (
         feature.blocking.map((q) => <BlockingQuestionBox key={q.question} doc={doc} feature={feature} blocking={q} />)

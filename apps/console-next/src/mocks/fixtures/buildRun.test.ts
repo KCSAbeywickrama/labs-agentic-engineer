@@ -63,7 +63,7 @@ function streamed(script: RunScript, t: number): RunProgressCycle[] {
 
 function resultAt(script: RunScript, t: number) {
   const snapshot = snapshotAt(script, t, script.validation.id);
-  return snapshot ? groupByFeature(snapshot.criteria, snapshot.report) : null;
+  return snapshot ? groupByFeature(snapshot) : null;
 }
 
 describe("Acme Expenses' first build, scripted", () => {
@@ -114,6 +114,6 @@ describe("Acme Expenses' first build, scripted", () => {
     const fix = runScript({ ...v1, version: "v1.1", runId: "run-2", repair: { of: "v1", stories: ["F2.4"] }, failing: null });
     const steps = runSteps(runAt(fix, fix.end), streamed(fix, fix.end));
     expect(steps.phases.map((p) => p.label)).toEqual(["Plan", "F2 Approvals · API fix", "Validate"]);
-    expect(validationOutcome(resultAt(fix, fix.end)!)).toEqual({ passed: 11, total: 11, failing: [] });
+    expect(validationOutcome(resultAt(fix, fix.end)!)).toEqual({ passed: 11, total: 11, failing: [], regressions: 0 });
   });
 });

@@ -20,9 +20,9 @@ import { describe, expect, it } from "vitest";
 import { finishedNote, nextSteps, startedNote } from "./nextSteps";
 import type { FeatureResults } from "./validation";
 
-const deputy = { featureId: "F2", featureName: "Approvals", story: "F2.4", name: "A deputy approves while the manager is on leave" };
-const failing = { passed: 10, total: 11, failing: [deputy] };
-const passing = { passed: 11, total: 11, failing: [] };
+const deputy = { featureId: "F2", featureName: "Approvals", story: "F2.4", name: "A deputy approves while the manager is on leave", standing: null };
+const failing = { passed: 10, total: 11, failing: [deputy], regressions: 0 };
+const passing = { passed: 11, total: 11, failing: [], regressions: 0 };
 const spending = { id: "F4", name: "Spending reports" };
 
 const group = (id: string, name: string, passed: number, total: number): FeatureResults => ({
@@ -30,6 +30,8 @@ const group = (id: string, name: string, passed: number, total: number): Feature
   name,
   passed,
   judged: total,
+  runs: total,
+  notBuilt: false,
   scenarios: Array.from({ length: total }, (_, i) => ({
     name: `${name} ${i}`,
     story: null,
@@ -37,6 +39,7 @@ const group = (id: string, name: string, passed: number, total: number): Feature
     expected: null,
     got: null,
     excerpt: [],
+    standing: null,
   })),
 });
 

@@ -23,12 +23,12 @@ import type { components } from "../../generated/aep-api";
 // applies to. It rides the contract's `selection`; the server plans the rest
 // (what the picked features need) and refuses a feature that cannot be built.
 //
-// A repair build (Fix on a failing scenario: v1.1 fixes v1) rides a
-// PROVISIONAL `repair` field naming the version and the stories that failed
-// in it: the contract has no way to ask for one yet (backend B4). aep-api
-// ignores unknown JSON fields, so only MSW reads it.
+// A repair build (Fix on a failing scenario: v1.1 fixes v1) rides the
+// contract's `repair`, naming the version to fix; the server files the
+// scenarios that version's final validation failed as the repair's work.
 
 type BuildRequest = components["schemas"]["BuildRequest"];
+type BuildRepair = components["schemas"]["BuildRepair"];
 
 /** What goes into a build: features by ID ("F1"), and new product-wide items ("P5"). */
 export interface BuildSelection {
@@ -36,19 +36,8 @@ export interface BuildSelection {
   productWide: string[];
 }
 
-/** What a repair build fixes: the version, and the stories whose scenarios failed in it. */
-export interface BuildRepair {
-  of: string;
-  stories: string[];
-}
-
-/** PROVISIONAL (B4): the repair, which the contract cannot carry yet. Read only by MSW. */
-interface ProvisionalRepairField {
-  repair?: BuildRepair;
-}
-
-/** A build's request body: the contract's, plus the provisional repair. */
-export type BuildBody = BuildRequest & ProvisionalRepairField;
+/** A build's request body. */
+export type BuildBody = BuildRequest;
 
 /**
  * The request body that starts a build of this selection. No inputs and no
@@ -73,15 +62,12 @@ export function selectionOfBody(body: BuildBody): BuildSelection | null {
 }
 
 /** The request body that starts a repair build of a version, fixing what failed in it. */
-export function fixBody(of: string, stories: string[]): BuildBody {
-  return { inputs: [], repair: { of, stories: [...stories] } };
+export function fixBody(of: string): BuildBody {
+  return { repair: { of } };
 }
 
 /** A body's repair, read back as the server would; null when it asks for none or a malformed one. */
 export function repairOfBody(body: BuildBody): BuildRepair | null {
   const r = body.repair as Partial<BuildRepair> | undefined;
-  if (!r || typeof r.of !== "string" || !Array.isArray(r.stories) || !r.stories.every((x) => typeof x === "string")) {
-    return null;
-  }
-  return { of: r.of, stories: r.stories };
+  return r && typeof r.of === "string" && r.of !== "" ? { of: r.of } : null;
 }
