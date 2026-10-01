@@ -67,7 +67,14 @@ function running(turnId: string, instruction?: string): TurnStatus {
   };
 }
 
-function setup(options: { history?: ConversationMessage[]; active?: TurnStatus | null; api?: Partial<ChatApi> } = {}) {
+function setup(
+  options: {
+    history?: ConversationMessage[];
+    active?: TurnStatus | null;
+    api?: Partial<ChatApi>;
+    beforeTurn?: (projectName: string) => Promise<void>;
+  } = {},
+) {
   const started: TurnBody[] = [];
   let next = 0;
   const streams = new Map<string, ReadableStream<Uint8Array>>();
@@ -84,7 +91,12 @@ function setup(options: { history?: ConversationMessage[]; active?: TurnStatus |
     ...options.api,
   };
   const onAgentWrite = vi.fn();
-  const store = createChatStore({ api, onAgentWrite, pollDelay: () => 60_000 });
+  const store = createChatStore({
+    api,
+    onAgentWrite,
+    pollDelay: () => 60_000,
+    ...(options.beforeTurn ? { beforeTurn: options.beforeTurn } : {}),
+  });
   const ended = vi.fn();
   store.onTurnEnd(ended);
   return { store, api, started, streams, onAgentWrite, ended, chat: () => store.get(PROJECT) };
@@ -333,3 +345,29 @@ describe("the held kickoff", () => {
     expect(api.startTurn).not.toHaveBeenCalled();
   });
 });
+
+// The room is committed before a turn starts, so the commit the turn records
+// as its base holds what its agent reads (seen on the live walk: a design
+// recorded the stubs it never read, and every feature read out of date).
+describe("before a turn", () => {
+  it("commits the room first, and a failure to commit does not stop the turn", async () => {
+    const order: string[] = [];
+    const { store, api } = setup({
+      beforeTurn: async () => {
+        order.push("flush");
+        throw new Error("room offline");
+      },
+      api: {
+        startTurn: vi.fn(async () => {
+          order.push("start");
+          return "t1";
+        }),
+      },
+    });
+    await store.open(PROJECT);
+    expect(await store.send(PROJECT, "Design F1.", PRODUCT)).toBe(true);
+    expect(order).toEqual(["flush", "start"]);
+    expect(api.startTurn).toHaveBeenCalledOnce();
+  });
+});
+

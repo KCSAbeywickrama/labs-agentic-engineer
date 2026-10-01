@@ -108,19 +108,24 @@ func readDoc(content string) document {
 			inPara = false
 			continue
 		case strings.HasPrefix(trimmed, "## "):
-			doc.sections = append(doc.sections, section{title: strings.TrimSpace(trimmed[3:])})
+			doc.sections = append(doc.sections, section{title: unescape(strings.TrimSpace(trimmed[3:]))})
 			cur = &doc.sections[len(doc.sections)-1]
 			closeAll()
 		case strings.HasPrefix(trimmed, "# ") && doc.title == "" && cur == nil:
-			doc.title = strings.TrimSpace(trimmed[2:])
+			doc.title = unescape(strings.TrimSpace(trimmed[2:]))
 		case strings.HasPrefix(trimmed, "#"):
 			closeAll()
 		case cur == nil:
 			// Text above the first section: nothing the contract reads.
 		default:
 			indent := len(raw) - len(strings.TrimLeft(raw, " \t"))
+			// The text as markdown means it: the collab room's serializer
+			// escapes what would otherwise be markup (`\[org default\]`), and a
+			// line ending in `\` is a hard break. The console reads the room's
+			// unescaped text, so this reader must too.
+			trimmed = unescape(trimmed)
 			if m := listItemRE.FindStringSubmatch(raw); m != nil {
-				text := strings.TrimSpace(m[2])
+				text := unescape(strings.TrimSpace(m[2]))
 				if len(m[1]) >= 2 && inItem {
 					last := &cur.items[len(cur.items)-1]
 					last.children = append(last.children, text)
@@ -150,4 +155,14 @@ func readDoc(content string) document {
 		sawBlank = false
 	}
 	return doc
+}
+
+var escapedRE = regexp.MustCompile(`\\([!-/:-@\[-` + "`" + `{-~])`)
+
+// unescape reads a line of markdown as its words: a backslash escape is the
+// character it escapes (CommonMark: any ASCII punctuation), and a trailing
+// backslash — a hard line break — is dropped.
+func unescape(s string) string {
+	s = strings.TrimSuffix(strings.TrimRight(s, " "), "\\")
+	return strings.TrimSpace(escapedRE.ReplaceAllString(s, "$1"))
 }

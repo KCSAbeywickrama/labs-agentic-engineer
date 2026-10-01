@@ -22,6 +22,7 @@ import {
   applyNote,
   applySelection,
   extractStreamingQuestions,
+  isFreeTextOption,
   isQuestionAnswered,
   normalizeAnswers,
   parseQuestionsInput,
@@ -211,6 +212,17 @@ describe("isQuestionAnswered / isFreeTextOption", () => {
     expect(isQuestionAnswered(OPTS, { selected: ["Something else"], freeText: "custom roles: admin only" })).toBe(true);
     // A concrete option alongside the hatch still answers.
     expect(isQuestionAnswered(OPTS, { selected: ["Web", "Escape"] })).toBe(true);
+  });
+
+  // Seen on the live walk: "Fixed list: Laptop, Projector, Camera, Other"
+  // contains the word but is a real answer, and the card never let it send.
+  it("is an escape hatch only when the label opens with one", () => {
+    expect(isFreeTextOption({ label: "Other" })).toBe(true);
+    expect(isFreeTextOption({ label: "Something else — tell me" })).toBe(true);
+    expect(isFreeTextOption({ label: "Fixed list: Laptop, Projector, Camera, Other" })).toBe(false);
+    expect(isFreeTextOption({ label: "Per role, as the policy describes" })).toBe(false);
+    const fixed = { question: "q", options: [{ label: "Fixed list: Laptop, Projector, Camera, Other" }] };
+    expect(isQuestionAnswered(fixed, { selected: ["Fixed list: Laptop, Projector, Camera, Other"] })).toBe(true);
   });
 
   it("keeps the parsed freeText flag off the wire", () => {

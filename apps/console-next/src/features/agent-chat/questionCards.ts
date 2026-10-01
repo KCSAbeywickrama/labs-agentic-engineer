@@ -151,12 +151,14 @@ export function extractStreamingQuestions(toolName: string | undefined, buf: str
 /**
  * An option whose selection means TYPING the real answer, when the agent did
  * not set the explicit `freeText` flag: "Other", "Something else"… A bare
- * "Something else" with nothing typed answers nothing.
+ * "Something else" with nothing typed answers nothing. Only a label that
+ * OPENS with the escape is one: "Fixed list: Laptop, Projector, Camera,
+ * Other" is a real answer that happens to contain the word.
  */
 export function isFreeTextOption(opt: AskQuestionOption): boolean {
   return (
     opt.freeText === true ||
-    /\b(other|something else|type (in|my)|describe|own answer|specify|custom)\b/i.test(opt.label)
+    /^\s*(other|something else|let me (type|describe)|type (in|my)|(my|your) own( answer)?|describe (it|my)|specify|custom)\b/i.test(opt.label)
   );
 }
 

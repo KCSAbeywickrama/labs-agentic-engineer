@@ -22,6 +22,7 @@ import { parseInterviewCommand, START_COMMAND } from "@aep/contracts/commands";
 import { designKey } from "../design/api/designModel";
 import { specKey } from "../spec/api/specModel";
 import { applyAgentWrite } from "../spec/collab/specDoc";
+import { flushSpecRoom } from "../spec/collab/specRoom";
 import { fetchConversationMessages, fetchCurrentConversationId } from "./api/conversation";
 import { getActiveTurn, getTurn, openTurnStream, startTurn } from "./api/turns";
 import { createChatStore, type ProjectChat } from "./chatStore";
@@ -38,6 +39,7 @@ export const chatStore = createChatStore({
     openStream: openTurnStream,
   },
   onAgentWrite: applyAgentWrite,
+  beforeTurn: flushSpecRoom,
 });
 
 /** A project's chat, kept current while the caller is mounted. */

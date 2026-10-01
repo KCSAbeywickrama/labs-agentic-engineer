@@ -82,6 +82,12 @@ export interface ChatStoreOptions {
   onAgentWrite?: (projectName: string, part: StreamPart) => void;
   /** How long to wait before asking again whether someone else's turn is running. */
   pollDelay?: (chat: ProjectChat, pollsSoFar: number) => number;
+  /**
+   * Run before a turn is started: commit the room's pending edits, so the
+   * commit the turn records as its base is what its agent reads. A failure
+   * here does not stop the turn.
+   */
+  beforeTurn?: (projectName: string) => Promise<void>;
 }
 
 /** A turn to show and fold: the running one the server named, or one just started here. */
@@ -119,7 +125,7 @@ interface Entry {
 }
 
 export function createChatStore(options: ChatStoreOptions) {
-  const { api, onAgentWrite } = options;
+  const { api, onAgentWrite, beforeTurn } = options;
   const pollDelay = options.pollDelay ?? foreignTurnPollDelay;
   const entries = new Map<string, Entry>();
   const turnEndListeners = new Set<(projectName: string, outcome: TurnOutcome) => void>();
@@ -323,6 +329,7 @@ export function createChatStore(options: ChatStoreOptions) {
     }));
     let turnId: string;
     try {
+      await beforeTurn?.(projectName).catch(() => undefined);
       turnId = await api.startTurn(projectName, e.conversationId, turnBody(instruction, scope));
     } catch (err) {
       update(projectName, (s) => ({

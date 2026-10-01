@@ -247,6 +247,8 @@ class SpecRoom {
 }
 
 const rooms = new Map<string, SpecRoom>();
+/** The open room of each project, by project name: what a turn flushes before it starts. */
+const byProject = new Map<string, SpecRoom>();
 
 function roomOf(name: string): SpecRoom {
   let room = rooms.get(name);
@@ -261,10 +263,20 @@ function roomOf(name: string): SpecRoom {
 export function useSpecRoom(orgHandle: string | null, projectName: string, enabled: boolean): RoomState & { flush: () => Promise<void> } {
   const name = orgHandle ? `spec-${orgHandle}-${projectName}` : null;
   const room = enabled && name ? roomOf(name) : null;
+  if (room) byProject.set(projectName, room);
   const subscribe = useCallback((fn: () => void) => (room ? room.subscribe(fn) : () => undefined), [room]);
   const state = useSyncExternalStore(subscribe, () => room?.state ?? IDLE);
   const flush = useCallback(() => room?.flush() ?? Promise.resolve(), [room]);
   return { ...state, flush };
+}
+
+/**
+ * Commit a project's room now, when it is open: before an agent turn starts,
+ * so the commit the turn records as its base holds what the room holds — the
+ * design's record of what it read depends on it. Nothing to do otherwise.
+ */
+export function flushSpecRoom(projectName: string): Promise<void> {
+  return byProject.get(projectName)?.flush() ?? Promise.resolve();
 }
 
 const IDLE: RoomState = { doc: null, status: "connecting", flushError: null };
