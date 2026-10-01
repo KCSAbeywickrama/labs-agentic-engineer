@@ -28,12 +28,12 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func TestFindObsPlaneReleaseReadsChartVersion(t *testing.T) {
+func TestFindChartReleaseReadsChartVersion(t *testing.T) {
 	out := []byte(`[
 		{"name":"observability-logs-opensearch","chart":"observability-logs-opensearch-0.5.3"},
 		{"name":"openchoreo-observability-plane","chart":"openchoreo-observability-plane-1.2.5"}
 	]`)
-	rel, found, err := findObsPlaneRelease(out)
+	rel, found, err := findChartRelease(out, obsPlaneChart)
 	if err != nil || !found {
 		t.Fatalf("found=%v err=%v", found, err)
 	}
@@ -42,16 +42,30 @@ func TestFindObsPlaneReleaseReadsChartVersion(t *testing.T) {
 	}
 }
 
-func TestFindObsPlaneReleaseKeepsPrereleaseVersion(t *testing.T) {
+func TestFindChartReleaseFindsLogsModule(t *testing.T) {
+	out := []byte(`[
+		{"name":"openchoreo-observability-plane","chart":"openchoreo-observability-plane-1.2.5"},
+		{"name":"logs","chart":"observability-logs-opensearch-0.5.3"}
+	]`)
+	rel, found, err := findChartRelease(out, obsLogsChart)
+	if err != nil || !found {
+		t.Fatalf("found=%v err=%v", found, err)
+	}
+	if rel.Name != "logs" || rel.Version != "0.5.3" {
+		t.Fatalf("got %+v", rel)
+	}
+}
+
+func TestFindChartReleaseKeepsPrereleaseVersion(t *testing.T) {
 	out := []byte(`[{"name":"observability-plane","chart":"openchoreo-observability-plane-1.0.1-hotfix.1"}]`)
-	rel, found, err := findObsPlaneRelease(out)
+	rel, found, err := findChartRelease(out, obsPlaneChart)
 	if err != nil || !found || rel.Version != "1.0.1-hotfix.1" {
 		t.Fatalf("rel=%+v found=%v err=%v", rel, found, err)
 	}
 }
 
-func TestFindObsPlaneReleaseNoneInstalled(t *testing.T) {
-	_, found, err := findObsPlaneRelease([]byte(`[{"name":"x","chart":"observability-logs-opensearch-0.5.3"}]`))
+func TestFindChartReleaseNoneInstalled(t *testing.T) {
+	_, found, err := findChartRelease([]byte(`[{"name":"x","chart":"observability-logs-opensearch-0.5.3"}]`), obsPlaneChart)
 	if err != nil || found {
 		t.Fatalf("found=%v err=%v", found, err)
 	}

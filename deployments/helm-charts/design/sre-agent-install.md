@@ -29,6 +29,21 @@ No AE-forked image, no `RCA_LLM_API_KEY_FILE` credential file: the agent
 takes its model, key and MCP token as plain environment variables, sourced
 from a Secret (below).
 
+### Logs adapter
+
+The one non-stock image. aep-api files a single "error → RCA" rule per
+service component and relies on the logs adapter matching it regardless of
+case. The stock `observability-logs-opensearch` adapter (0.5.x and 0.6.0)
+compiles a rule's `query` into a case-sensitive `wildcard: *error*`, so it
+misses lines that only say `ERROR` or `Error`, which covers most structured
+loggers. `--adapter-image` (default
+`tharindulak/observability-logs-opensearch-adapter:0.5.1-case-insensitive`)
+sets the adapter on the logs release either way: on the one aectl installs,
+and on an existing plane's release at that release's chart version, with its
+values kept (`helmPinLogsAdapter`). If an existing plane has no
+`observability-logs-opensearch` release, aectl warns and changes nothing.
+Drop the pin once an upstream adapter release matches case-insensitively.
+
 ### Why a v1.3.0 image on an OpenChoreo 1.2.5 plane
 
 AE stays on OpenChoreo 1.2.5 because Agent Manager needs OpenChoreo 1.2: its
@@ -241,6 +256,10 @@ Tracked follow-ups:
   `sreAgent.enabled`: it admits only `gateway-default`'s proxy pods. With
   the SRE agent off, `aep-mcp-server:3400` is guarded only by aep-api JWT
   validation.
+- **The logs adapter image is personal** (`tharindulak/...`, see
+  [Logs adapter](#logs-adapter)). Mirror it to WSO2/GHCR and pin by digest
+  for production, until the case-insensitive match ships upstream
+  (`openchoreo/community-modules`).
 - **OpenSearch** is dev-sized (256M heap, no HA); no global LLM cost cap.
   One alert measured about 290k tokens on `gpt-5.4` in the proof.
 - **The sqlite report store is a single point of failure.** See

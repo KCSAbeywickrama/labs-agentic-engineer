@@ -339,6 +339,16 @@ If `opensearch-master`, `logs-adapter-opensearch`, `fluent-bit`, or the SRE
 agent is not ready, alerts are not evaluated and no RCA request reaches the
 SRE agent.
 
+If the rule fires for some error lines but not others, check the logs
+adapter's image. A stock adapter matches the rule's "error" case-sensitively,
+so a line that only says `ERROR` never fires it. `aectl sre install` sets the
+case-insensitive adapter (`--adapter-image`); re-run `setup-sre.sh` if the
+image below is the stock `ghcr.io/openchoreo/...` one:
+
+```bash
+kubectl -n openchoreo-observability-plane get deploy logs-adapter-opensearch -o jsonpath='{.spec.template.spec.containers[0].image}'
+```
+
 If the SRE agent's replicas are `0`, aep-api has resolved no model for it
 (see [Credentials](#credentials)): seed an SRE model connection
 (`--llm-api-key-file`/`--llm-model`) or connect an OpenAI-compatible org

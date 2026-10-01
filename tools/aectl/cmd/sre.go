@@ -133,7 +133,7 @@ func init() {
 	f.StringVar(&sreRcaImageRepo, "rca-image-repo", "ghcr.io/openchoreo/sre-agent", "RCA/SRE agent image repository")
 	f.StringVar(&sreRcaImageTag, "rca-image-tag", "v1.3.0@sha256:25e5e6c423d049460f4a60d95497747c2a99b02713faf8523a38ef8e6a85c599", "RCA/SRE agent image tag (digest-pinned so both architectures resolve the same build)")
 	f.StringVar(&sreRcaPullPolicy, "rca-image-pull-policy", "IfNotPresent", "RCA/SRE agent image pull policy")
-	f.StringVar(&sreAdapterImage, "adapter-image", "docker.io/tharindulak/observability-logs-opensearch-adapter:0.5.1-case-insensitive", "logs-adapter image (repo:tag)")
+	f.StringVar(&sreAdapterImage, "adapter-image", "docker.io/tharindulak/observability-logs-opensearch-adapter:0.5.1-case-insensitive", "logs-adapter image (repo:tag), set on the logs release aectl installs and on an existing plane's; the stock adapter matches log alert rules case-sensitively")
 	f.BoolVar(&sreAEHandoff, "ae-handoff", true, "Enable the RCA->AEP coding-agent handoff (mounts the SRE remediation extension)")
 	f.StringVar(&sreObserverHost, "observer-hostname", "observer.openchoreo.localhost", "Observer gateway hostname")
 	f.StringVar(&sreRcaHost, "rca-hostname", "rca-agent.openchoreo.localhost", "RCA agent gateway hostname")
@@ -276,7 +276,7 @@ func runSreInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	// 1. Detect the plane.
-	plane, adopt, err := installedObsPlane(ctx, sreObsNamespace)
+	plane, adopt, err := installedRelease(ctx, sreObsNamespace, obsPlaneChart)
 	if err != nil {
 		return err
 	}
@@ -344,6 +344,17 @@ func runSreInstall(cmd *cobra.Command, args []string) error {
 	if adopt {
 		if err := helmEnableSREAgent(ctx, p, plane); err != nil {
 			return err
+		}
+		logs, found, err := installedRelease(ctx, sreObsNamespace, obsLogsChart)
+		if err != nil {
+			return err
+		}
+		if found {
+			if err := helmPinLogsAdapter(ctx, p, logs); err != nil {
+				return err
+			}
+		} else {
+			ui.Warn(fmt.Sprintf("No %s release in %q — aep-api's auto-RCA rule watches \"error\" assuming a case-insensitive adapter, so check that this plane's logs module matches regardless of case.", obsLogsChart, sreObsNamespace))
 		}
 		if _, err := client.AppsV1().DaemonSets(sreObsNamespace).Get(ctx, "fluent-bit", metav1.GetOptions{}); err != nil {
 			ui.Warn(fmt.Sprintf("No fluent-bit DaemonSet in %q — container logs are not collected, so log alerts never fire.", sreObsNamespace))
@@ -774,7 +785,7 @@ func helmMajorVersion(ctx context.Context) int {
 
 // helmEnableSREAgent turns on the SRE agent of a plane aectl did not install:
 // that release, at its own chart version, with its values kept.
-func helmEnableSREAgent(ctx context.Context, p sreParams, plane obsPlaneRelease) error {
+func helmEnableSREAgent(ctx context.Context, p sreParams, plane chartRelease) error {
 	vals, cleanup, err := writeTempValues("sre-agent", sreAgentValuesTmpl, p)
 	if err != nil {
 		return err
@@ -791,6 +802,23 @@ func helmEnableSREAgent(ctx context.Context, p sreParams, plane obsPlaneRelease)
 	return runSREAgentHelm(ctx, "obs-plane (SRE agent)", args)
 }
 
+// helmPinLogsAdapter sets --adapter-image on the logs module of a plane aectl
+// did not install: that release, at its own chart version, with its values
+// kept. The stock adapter compiles a log alert rule into a case-sensitive
+// wildcard, and aep-api files one "error" rule per component on the
+// assumption it is not, so a stock adapter misses every "ERROR" line.
+func helmPinLogsAdapter(ctx context.Context, p sreParams, logs chartRelease) error {
+	return runHelm(ctx, "obs-logs (adapter image)",
+		"upgrade", logs.Name,
+		"oci://ghcr.io/openchoreo/helm-charts/"+obsLogsChart,
+		"--namespace", p.ObsNamespace,
+		"--version", logs.Version,
+		"--reuse-values",
+		"--set", "adapter.image.repository="+p.AdapterRepo,
+		"--set", "adapter.image.tag="+p.AdapterTag,
+		"--timeout", "15m")
+}
+
 func helmInstallObsLogs(ctx context.Context, p sreParams) error {
 	vals, cleanup, err := writeTempValues("obs-logs", sreObsLogsValuesTmpl, p)
 	if err != nil {
@@ -798,8 +826,8 @@ func helmInstallObsLogs(ctx context.Context, p sreParams) error {
 	}
 	defer cleanup()
 	return runHelm(ctx, "obs-logs",
-		"upgrade", "--install", "observability-logs-opensearch",
-		"oci://ghcr.io/openchoreo/helm-charts/observability-logs-opensearch",
+		"upgrade", "--install", obsLogsChart,
+		"oci://ghcr.io/openchoreo/helm-charts/"+obsLogsChart,
 		"--namespace", p.ObsNamespace, "--create-namespace",
 		"--version", sreObsLogsVersion,
 		"--values", vals, "--timeout", "15m")

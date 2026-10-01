@@ -34,39 +34,43 @@ import (
 // obsPlaneChart is the chart name of every observability plane release.
 const obsPlaneChart = "openchoreo-observability-plane"
 
-// obsPlaneRelease is an installed observability plane Helm release.
-type obsPlaneRelease struct {
+// obsLogsChart is the chart name of the OpenSearch logs module, whose adapter
+// compiles log alert rules into OpenSearch monitors.
+const obsLogsChart = "observability-logs-opensearch"
+
+// chartRelease is an installed Helm release of a known chart.
+type chartRelease struct {
 	Name    string // release name, e.g. "openchoreo-observability-plane"
 	Version string // chart version, e.g. "1.2.5"
 }
 
-// findObsPlaneRelease picks the observability plane release out of
-// `helm list -o json` output. found is false when none is installed.
-func findObsPlaneRelease(helmListJSON []byte) (rel obsPlaneRelease, found bool, err error) {
+// findChartRelease picks the release of chart out of `helm list -o json`
+// output. found is false when none is installed.
+func findChartRelease(helmListJSON []byte, chart string) (rel chartRelease, found bool, err error) {
 	var releases []struct {
 		Name  string `json:"name"`
 		Chart string `json:"chart"`
 	}
 	if err := json.Unmarshal(helmListJSON, &releases); err != nil {
-		return obsPlaneRelease{}, false, fmt.Errorf("parse helm list output: %w", err)
+		return chartRelease{}, false, fmt.Errorf("parse helm list output: %w", err)
 	}
 	for _, r := range releases {
 		// helm reports "<chart>-<version>"; versions may carry their own
 		// dashes (1.0.1-hotfix.1), so strip the known chart prefix.
-		if v, ok := strings.CutPrefix(r.Chart, obsPlaneChart+"-"); ok && v != "" {
-			return obsPlaneRelease{Name: r.Name, Version: v}, true, nil
+		if v, ok := strings.CutPrefix(r.Chart, chart+"-"); ok && v != "" {
+			return chartRelease{Name: r.Name, Version: v}, true, nil
 		}
 	}
-	return obsPlaneRelease{}, false, nil
+	return chartRelease{}, false, nil
 }
 
-// installedObsPlane returns the observability plane release in ns, if any.
-func installedObsPlane(ctx context.Context, ns string) (obsPlaneRelease, bool, error) {
+// installedRelease returns the release of chart in ns, if any.
+func installedRelease(ctx context.Context, ns, chart string) (chartRelease, bool, error) {
 	out, err := exec.CommandContext(ctx, "helm", "list", "-n", ns, "-o", "json").Output()
 	if err != nil {
-		return obsPlaneRelease{}, false, fmt.Errorf("helm list -n %s: %w", ns, err)
+		return chartRelease{}, false, fmt.Errorf("helm list -n %s: %w", ns, err)
 	}
-	return findObsPlaneRelease(out)
+	return findChartRelease(out, chart)
 }
 
 // sreAgentComponents are the app.kubernetes.io/component labels the SRE agent
