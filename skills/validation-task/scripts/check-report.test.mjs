@@ -28,7 +28,8 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const CHECKER = join(dirname(fileURLToPath(import.meta.url)), "check-report.mjs");
+const HERE = dirname(fileURLToPath(import.meta.url));
+const CHECKER = join(HERE, "check-report.mjs");
 
 const FEATURE = `Feature: Lists
 
@@ -40,17 +41,25 @@ const FEATURE = `Feature: Lists
       And it shows today's date
 `;
 
+/** What a non-passed outcome owes beyond its steps, so a case can drop one. */
+const NON_PASSED = {
+  reproduced: "yes",
+  note: "nothing further",
+  evidence: { network: [], console: [], snapshotFile: "tests/acceptance/snapshots/dup.txt" },
+};
+
 /** Runs the checker over one report and returns { code, out }. */
-function check(steps, outcome = "passed") {
+function check(steps, outcome = "passed", overrides = {}) {
   const dir = mkdtempSync(join(tmpdir(), "acc-check-"));
   try {
     mkdirSync(join(dir, "specs/validation/acceptance"), { recursive: true });
-    mkdirSync(join(dir, "tests/acceptance"), { recursive: true });
+    mkdirSync(join(dir, "tests/acceptance/snapshots"), { recursive: true });
     writeFileSync(join(dir, "specs/validation/acceptance/lists.feature"), FEATURE);
+    writeFileSync(join(dir, "tests/acceptance/snapshots/dup.txt"), '- listitem "Milk"\n');
     writeFileSync(
       join(dir, "tests/acceptance/report.json"),
       JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 3,
         commit: "abc123",
         isolation: "each scenario owns its own list",
         scenarios: [
@@ -62,9 +71,8 @@ function check(steps, outcome = "passed") {
             scenario: "Adding a duplicate",
             outcome,
             steps,
-            ...(outcome === "failed"
-              ? { evidence: { network: [], console: [] } }
-              : {}),
+            ...(outcome === "passed" ? {} : NON_PASSED),
+            ...overrides,
           },
         ],
       }),
@@ -81,6 +89,14 @@ function check(steps, outcome = "passed") {
 
 const WHEN = { keyword: "When", text: "Dan adds it again", command: "agent-browser click @e3", exit: 0 };
 const THEN = { keyword: "Then", text: "the row appears", command: 'agent-browser wait --text "Milk"', exit: 0 };
+const AND_OK = {
+  keyword: "And",
+  text: "it shows today's date",
+  command: "agent-browser get value @e1",
+  exit: 0,
+  observed: "2026-09-18",
+};
+const FAILING = [WHEN, { ...THEN, exit: 1, observed: "the row never appeared" }, AND_OK];
 
 // Gherkin says a continuation IS the keyword above it, and the step that settles
 // a scenario is routinely the continuation. Matching the raw keyword made every
@@ -95,11 +111,7 @@ test("an `And` continuing a `Then` is an assertion, and must be backed like one"
 });
 
 test("an `And` that IS backed passes", () => {
-  const { code, out } = check([
-    WHEN,
-    THEN,
-    { keyword: "And", text: "it shows today's date", command: "agent-browser get value @e1", exit: 0, observed: "2026-09-18" },
-  ]);
+  const { code, out } = check([WHEN, THEN, AND_OK]);
   assert.equal(code, 0, out);
 });
 
@@ -111,17 +123,90 @@ test("a `When` that prints a value must record what it read", () => {
   const { code, out } = check([
     { keyword: "When", text: "Dan adds it again", command: 'agent-browser get count ".item"', exit: 0 },
     THEN,
-    { keyword: "And", text: "it shows today's date", command: "agent-browser get value @e1", exit: 0, observed: "2026-09-18" },
+    AND_OK,
   ]);
   assert.equal(code, 2, `a value-returning When with no observed must fail:\n${out}`);
   assert.match(out, /a When carries no `observed`/);
 });
 
 test("a nonzero exit on any step must say what was there instead", () => {
-  const { code, out } = check(
-    [WHEN, { ...THEN, exit: 1 }, { keyword: "And", text: "it shows today's date", command: "agent-browser get value @e1", exit: 0, observed: "2026-09-18" }],
-    "failed",
-  );
+  const { code, out } = check([WHEN, { ...THEN, exit: 1 }, AND_OK], "failed");
   assert.equal(code, 2, `a nonzero exit with no observed must fail:\n${out}`);
   assert.match(out, /carries no `observed` and the command exited nonzero/);
+});
+
+test("a failure carrying everything it owes passes", () => {
+  const { code, out } = check(FAILING, "failed");
+  assert.equal(code, 0, out);
+});
+
+// A failure that passes on a second pass is a race, not a logic defect, and
+// nothing else in the report separates the two. Unrecoverable once the run ends,
+// so the gate is here rather than in prose.
+test("a non-passed scenario must say whether it reproduced", () => {
+  const { code, out } = check(FAILING, "failed", { reproduced: undefined });
+  assert.equal(code, 2, `a failure with no \`reproduced\` must fail:\n${out}`);
+  assert.match(out, /`reproduced` is undefined/);
+});
+
+test("`reproduced` outside its vocabulary is refused", () => {
+  const { code, out } = check(FAILING, "failed", { reproduced: "sometimes" });
+  assert.equal(code, 2, out);
+  assert.match(out, /must be one of yes, no, unattempted/);
+});
+
+// The schema's other fields are what the agent was asked for. This one is where it
+// says what nobody thought to ask — the class of observation that three real runs
+// put in invented keys because there was nowhere to put it.
+test("a non-passed scenario must carry a note", () => {
+  const { code, out } = check(FAILING, "failed", { note: "   " });
+  assert.equal(code, 2, `a failure with a blank \`note\` must fail:\n${out}`);
+  assert.match(out, /no `note`/);
+});
+
+// Capture nobody reads is the mistake a real run already made eleven times in one
+// report, every one of them the same stale page.
+test("a pass may not carry evidence", () => {
+  const { code, out } = check([WHEN, THEN, AND_OK], "passed", {
+    evidence: { network: [], console: [] },
+  });
+  assert.equal(code, 2, `a passed carrying evidence must fail:\n${out}`);
+  assert.match(out, /nothing reads it on a pass/);
+});
+
+// A block is the outcome a person has to judge from the report alone, and the
+// network trace is what separates "the control was disabled so I never tried" from
+// "I attempted it against the API and this came back".
+test("a block owes network and console too", () => {
+  const { code, out } = check([WHEN, { ...THEN, command: "", exit: undefined, observed: "the control was [disabled]" }], "blocked", {
+    evidence: undefined,
+  });
+  assert.equal(code, 2, `a blocked with no evidence must fail:\n${out}`);
+  assert.match(out, /blocked with no `evidence`/);
+});
+
+test("a block does not owe the page tree", () => {
+  const { code, out } = check(
+    [WHEN, { ...THEN, command: "", exit: undefined, observed: "the control was [disabled]" }],
+    "blocked",
+    { evidence: { network: [], console: [] } },
+  );
+  assert.equal(code, 0, out);
+});
+
+// A path to a file that was never written reads exactly like evidence until
+// somebody follows it — and that is the one moment it cannot be recovered.
+test("a snapshotFile that does not resolve is refused", () => {
+  const { code, out } = check(FAILING, "failed", {
+    evidence: { network: [], console: [], snapshotFile: "tests/acceptance/snapshots/gone.txt" },
+  });
+  assert.equal(code, 2, out);
+  assert.match(out, /does not exist/);
+});
+
+test("a failure may state the gap instead of capturing it", () => {
+  const { code, out } = check(FAILING, "failed", {
+    evidence: { notCaptured: "the page navigated away before it could be read" },
+  });
+  assert.equal(code, 0, out);
 });

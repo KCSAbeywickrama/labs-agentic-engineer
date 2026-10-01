@@ -262,8 +262,15 @@ interface Outcome {
    * the run never reached.
    */
   steps: Step[];
-  /** Required on `failed`, meaningless anywhere else. */
+  /** Required on every non-passed outcome, and refused on a pass. */
   capture?: Capture;
+  /**
+   * Whether the outcome held when the scenario was driven again: yes | no |
+   * unattempted. Required on every non-passed outcome.
+   */
+  reproduced?: "yes" | "no" | "unattempted";
+  /** The run's one sentence on what the other fields do not hold. */
+  note?: string;
 }
 
 interface Artifacts {
@@ -345,14 +352,21 @@ const ISOLATION =
   "the change in the result count rather than on an absolute total — sound because " +
   "the platform runs one validation at a time per version.";
 
-/** schemaVersion 2, keyed by scenario, as `report.go` and the run's checker read it. */
+/**
+ * Where the assembler puts a failure's page tree. The report NAMES it rather than
+ * carrying it, so a reader pays for the tree only when it opens it.
+ */
+const snapshotPath = (scenario: string) =>
+  `tests/acceptance/snapshots/${scenario.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}.txt`;
+
+/** schemaVersion 3, keyed by scenario, as `report.go` and the run's checker read it. */
 function reportFor(
   outcomes: Record<string, Outcome>,
   located: Map<string, Located>,
 ): string {
   return JSON.stringify(
     {
-      schemaVersion: 2,
+      schemaVersion: 3,
       generatedAt: "2026-07-20T10:00:00.000Z",
       commit: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
       baseUrl: "https://demo-shop--development.openchoreoapis.localhost:19080/",
@@ -377,7 +391,20 @@ function reportFor(
             ...(e.exit !== undefined ? { exit: e.exit } : {}),
             ...(e.observed !== undefined ? { observed: e.observed } : {}),
           })),
-          ...(outcome.capture !== undefined ? { evidence: outcome.capture } : {}),
+          ...(outcome.reproduced !== undefined ? { reproduced: outcome.reproduced } : {}),
+          ...(outcome.note !== undefined ? { note: outcome.note } : {}),
+          ...(outcome.capture !== undefined
+            ? {
+                evidence: {
+                  network: outcome.capture.network,
+                  console: outcome.capture.console,
+                  // The tree is named, not embedded — see `snapshotPath`.
+                  ...(outcome.capture.snapshot !== undefined
+                    ? { snapshotFile: snapshotPath(name) }
+                    : {}),
+                },
+              }
+            : {}),
         };
       }),
     },
@@ -464,6 +491,8 @@ const FAIL_STOCK: Outcome = {
   // The request LEFT and the server said yes. That is what makes this a stock
   // rule the shop does not enforce, rather than a form that failed to submit —
   // and the step trace above reads identically for both.
+  reproduced: "yes",
+  note: "The over-count survived a reload, so the cart was persisted rather than only rendered.",
   capture: {
     network: [{ method: "POST", url: "/cart/items", status: 201 }],
     console: [],
@@ -484,6 +513,11 @@ const BLOCKED_STOCK: Outcome = {
         'The quantity control on the product page is a select whose options stop at the stock count — it offers "1" and "2" and nothing else, and the free-text box the desktop layout used is absent here. There is no enabled control through which a quantity of 3 can be entered, so the action this step describes cannot be attempted through the UI. `agent-browser network requests` confirms no POST /cart/items left the page.',
     },
   ],
+  reproduced: "unattempted",
+  note: "The select is bounded by the stock count, so this may be the shop refusing correctly rather than a defect.",
+  // Empty, and that is the finding: nothing was attempted, so nothing left the
+  // page. An absent list would say only that nobody looked.
+  capture: { network: [], console: [] },
 };
 
 // Unjudgeable: the answer lives outside the running app. Honest, and not a defect.
@@ -497,6 +531,9 @@ const UNJUDGEABLE_TLS: Outcome = {
         "Whether the details left the browser encrypted is a property of the transport, not of anything the shop renders: the page shows a confirmation either way, and the development deployment terminates TLS at the gateway ahead of the app. Nothing in the running system can settle this, so it is reported rather than guessed at.",
     },
   ],
+  reproduced: "unattempted",
+  note: "nothing further",
+  capture: { network: [{ method: "POST", url: "/checkout/pay", status: 201 }], console: [] },
 };
 
 // Everything settled, everything green. The two scenarios a run cannot settle are
@@ -598,9 +635,22 @@ export function validationFiles(
   if (drifted) names.add(DRIFTED);
   const { files } = featureFiles(names);
 
+  // The page trees live beside the report, one file per failure, because the
+  // report only names them. A named file that is not there reads exactly like
+  // evidence until somebody follows it, and the run's own checker refuses that.
+  const snapshots = reported
+    ? Object.entries(outcomes)
+        .filter(([, o]) => o.capture?.snapshot !== undefined)
+        .map(([scenario, o]) => ({
+          path: snapshotPath(scenario),
+          content: `${o.capture?.snapshot ?? ""}\n`,
+        }))
+    : [];
+
   return [
     ...files,
     ...(reported ? [{ path: REPORT_PATH, content: reportFor(outcomes, located) }] : []),
+    ...snapshots,
   ];
 }
 

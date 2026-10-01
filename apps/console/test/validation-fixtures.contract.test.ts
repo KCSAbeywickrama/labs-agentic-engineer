@@ -52,9 +52,14 @@ afterEach(() => {
 
 function layOut(files: { path: string; content: string }[]): string {
   const root = mkdtempSync(join(tmpdir(), "aep-mock-"));
-  mkdirSync(join(root, "specs/validation/acceptance"), { recursive: true });
-  mkdirSync(join(root, "tests/acceptance"), { recursive: true });
-  for (const f of files) writeFileSync(join(root, f.path), f.content);
+  // Each file makes its own directory: a real run writes page trees into
+  // `tests/acceptance/snapshots/`, and a harness that only pre-creates the two
+  // directories it happens to know about would fail on the next one a fixture
+  // grows rather than on anything the checker has an opinion about.
+  for (const f of files) {
+    mkdirSync(dirname(join(root, f.path)), { recursive: true });
+    writeFileSync(join(root, f.path), f.content);
+  }
   return root;
 }
 
