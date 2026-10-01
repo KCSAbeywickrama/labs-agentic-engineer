@@ -321,7 +321,9 @@ func (s *Service) CreateProject(ctx context.Context, orgName string, req *gen.Cr
 	// A Project whose ProjectType is missing never reconciles, so that one is
 	// fatal and compensating too. The cell namespaces take minutes on a remote
 	// data plane, so the request does not wait for them: a detached watch logs
-	// when they are Ready, or what they are still waiting on.
+	// when they are Ready, or what they are still waiting on. The watch starts
+	// at the end, once nothing left can compensate the project away.
+	var cellEnvs []string
 	if s.cells != nil {
 		envs, cellErr := s.provisionProjectCells(ctx, orgName, project.Name, project.DeploymentPipeline)
 		if cellErr != nil {
@@ -332,7 +334,7 @@ func (s *Service) CreateProject(ctx context.Context, orgName string, req *gen.Cr
 			s.compensateCreate(ctx, orgName, project.Name, "missing project type")
 			return nil, waitErr
 		}
-		s.watchProjectCells(ctx, orgName, project.Name, envs)
+		cellEnvs = envs
 	} else {
 		slog.ErrorContext(ctx, "project cell provisioner not wired — project will have no cell namespace and cannot deploy",
 			"org", orgName, "project", project.Name)
@@ -458,6 +460,9 @@ func (s *Service) CreateProject(ctx context.Context, orgName string, req *gen.Cr
 		}
 	}
 
+	if s.cells != nil {
+		s.watchProjectCells(ctx, orgName, project.Name, cellEnvs)
+	}
 	return project, nil
 }
 

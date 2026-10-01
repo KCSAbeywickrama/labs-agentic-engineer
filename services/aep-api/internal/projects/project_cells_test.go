@@ -420,3 +420,29 @@ func TestAwaitProjectCells_ReportsTheLastRealStateAtTheDeadline(t *testing.T) {
 		t.Errorf("awaitProjectCells = %q, want no read cancelled by the wait's own deadline", waitingOn)
 	}
 }
+
+// The cell watch follows a project the create KEPT. A create refused after the
+// Project was written (no write target, a repo-name conflict) deletes it again,
+// and a watch started before that check would poll the deleted project's
+// bindings for minutes and end on a misleading "still waiting" WARN.
+func TestCreateProject_ARefusedCreateStartsNoCellWatch(t *testing.T) {
+	t.Parallel()
+	oc := createdProjectOC("default")
+	oc.DeleteProjectFunc = func(context.Context, string, string) error { return nil }
+	cells := &fakeCells{envs: []string{"development"},
+		binding: []readinessRead{{r: openchoreo.Readiness{Reason: "NamespaceProgressing"}}}}
+	svc := NewProjectService(oc, nil, nil, nil, nil)
+	svc.SetProjectCellProvisioner(cells)
+	svc.cellWait = fastCellWait
+	svc.SetWriteTargets(staticWriteTarget{err: errors.New("openchoreo: 503")})
+
+	if _, err := svc.CreateProject(context.Background(), "acme", &gen.CreateProjectRequest{Name: "shop"}); err == nil {
+		t.Fatal("CreateProject with an unresolvable write target = nil error, want the refusal")
+	}
+	time.Sleep(20 * fastCellWait.cellsInterval)
+	cells.mu.Lock()
+	defer cells.mu.Unlock()
+	if cells.bindingReads != 0 {
+		t.Fatalf("a refused create must start no cell watch, got %d binding reads", cells.bindingReads)
+	}
+}
