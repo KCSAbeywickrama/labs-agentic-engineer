@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/platform/orgconfig"
@@ -59,8 +60,8 @@ const (
 	// SeedSkippedSeen means this exact seed was already tried (applied or
 	// refused) and nothing about it has changed since.
 	SeedSkippedSeen SeedOutcome = "skipped-seen"
-	// SeedRefused means the seed failed validation or the probe; whatever
-	// connection was stored (if any) is left as it was.
+	// SeedRefused means validation or the probe refused the seed itself
+	// (seedRefusal); whatever connection was stored (if any) is left as it was.
 	SeedRefused SeedOutcome = "refused"
 )
 
@@ -70,9 +71,10 @@ const (
 // any connection already stored. A refusal leaves the stored connection (if
 // any) untouched and is recorded so the same seed is not retried every pass.
 // The same seed hash is always SeedSkippedSeen, whatever its last outcome. A
-// validation/probe refusal is returned as SeedRefused rather than an error:
-// the caller (the sreagent reconciler) must keep reconciling on whatever
-// connection already applies.
+// refusal (seedRefusal) is returned as SeedRefused rather than an error: the
+// caller (the sreagent reconciler) must keep reconciling on whatever
+// connection already applies. A transient failure is returned as an error and
+// records nothing, so the next pass retries the seed.
 func (s *SreModelConnectionService) ApplySeed(ctx context.Context, org string, seed Seed) (SeedOutcome, error) {
 	hash := seedHash(seed)
 	marker, err := s.seedMarker(ctx, org)
@@ -86,12 +88,11 @@ func (s *SreModelConnectionService) ApplySeed(ctx context.Context, org string, s
 	w := orgconfig.SreLlmWrite{BaseURL: &seed.BaseURL, APIKey: &seed.APIKey, Model: &seed.Model}
 	draft, err := s.Check(ctx, org, w)
 	if err != nil {
-		var se *SectionError
-		if errors.As(err, &se) {
-			slog.WarnContext(ctx, "sre_model.seed_refused", "org", org, "code", se.Code)
-		} else {
-			slog.WarnContext(ctx, "sre_model.seed_refused", "org", org, "code", "")
+		code, refused := seedRefusal(err)
+		if !refused {
+			return "", fmt.Errorf("sre model seed: check: %w", err)
 		}
+		slog.WarnContext(ctx, "sre_model.seed_refused", "org", org, "code", code)
 		if werr := s.writeSeedMarker(ctx, org, hash+":refused"); werr != nil {
 			return "", werr
 		}
@@ -106,6 +107,20 @@ func (s *SreModelConnectionService) ApplySeed(ctx context.Context, org string, s
 	}
 	slog.InfoContext(ctx, "sre_model.seeded", "org", org, "host", draft.Host, "model", draft.Model)
 	return SeedApplied, nil
+}
+
+// seedRefusal reports whether err from Check is a verdict on the seed itself
+// (a 422, such as a rejected key or a non-https URL), which is remembered so
+// the same seed is not probed again. llm_unreachable is a 422 too, but it
+// means the probe got no answer, which says nothing about the seed. That and
+// every other failure (an upstream 5xx, a failed read) are transient: ApplySeed
+// returns them and the reconciler's next pass tries the seed again.
+func seedRefusal(err error) (code string, refused bool) {
+	var se *SectionError
+	if !errors.As(err, &se) || se.Status != http.StatusUnprocessableEntity || se.Code == "llm_unreachable" {
+		return "", false
+	}
+	return se.Code, true
 }
 
 // seedHash is sha256(baseURL \x00 model \x00 apiKey) hex: the identity a seed

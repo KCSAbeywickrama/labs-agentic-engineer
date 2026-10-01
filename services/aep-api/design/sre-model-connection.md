@@ -23,8 +23,9 @@ Resolving what the SRE agent actually runs on
 
 1. **The SRE model connection**, if one is saved.
 2. **The org's own model connection**, if it has the `SREAgent` capability
-   (`modelconn.CapabilitiesOf`; true for any `openai-compatible` connection —
-   the agent speaks that format, never Anthropic Messages).
+   (`modelconn.CapabilitiesOf`; true for an `openai-compatible` connection
+   with Bearer auth — the agent speaks that format, never Anthropic
+   Messages).
 3. **Unconfigured** — no model, agent scaled to zero (below).
 
 ## Delivery: aep-api pushes, the agent never asks
@@ -84,11 +85,16 @@ remembered under the `org_secrets` key `sre-model/seed-applied`:
   `Check`, and on success **persisted, replacing whatever connection is
   currently stored** (`Persist(ctx, org, "aectl-seed", draft)`), then marked
   `"<hash>:applied"`.
-- **Refused**: the probe or validation failed. Whatever connection was
-  stored (if any) is left exactly as it was. Logged
-  (`sre_model.seed_refused`, with the refusal's `SectionError` code) and
-  marked `"<hash>:refused"` so it is not retried until the seed's values
-  change again.
+- **Refused**: validation or the probe refused the seed itself (a 422, such
+  as `llm_key_rejected`). Whatever connection was stored (if any) is left
+  exactly as it was. Logged (`sre_model.seed_refused`, with the refusal's
+  `SectionError` code) and marked `"<hash>:refused"` so it is not retried
+  until the seed's values change again.
+- **Transient failure**: the probe got no answer (`llm_unreachable`), the
+  provider returned a 5xx (`llm_upstream_error`), or a read failed. Nothing
+  is stored or marked; the reconciler logs `sreagent.seed_failed` and the
+  next pass tries the same seed again, so a provider or database blip at
+  install does not lock out a valid seed.
 - **Same hash as last tried** (applied or refused): skipped, no re-probe.
 - **No seed configured** (`config.SREAgentConfig.Seed.Present() == false`):
   `ApplySeed` is never called (`sreagent.Reconciler.WithSeeder` is only

@@ -195,7 +195,7 @@ connection.
 
 Resolving what the agent runs on checks, in order: the SRE model connection,
 if saved; else the org's own model connection, if it carries the `SREAgent`
-capability (any `openai-compatible` connection); else unconfigured, and the
+capability (an `openai-compatible` connection with Bearer auth); else unconfigured, and the
 agent is scaled to zero. This is not a second peer connection in the sense
 §1 rejects — every other agent still reads exactly one connection — it is a
 narrow, single-purpose override for the one workload this platform runs

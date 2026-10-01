@@ -117,7 +117,7 @@ After `aectl platform install`, install the SRE integration:
 
 ```bash
 cd tools/aectl
-go run . sre install --org <org> --platform-chart deployments/helm-charts/platform
+go run . sre install --org <org> --platform-chart ../../deployments/helm-charts/platform
 ```
 
 `--org` is required — it is the org whose resolved SRE model connection this
@@ -165,7 +165,7 @@ umask 077
 echo -n "$OPEN_API_KEY" > /tmp/sre-llm-key
 
 cd tools/aectl
-go run . sre install --org <org> --platform-chart deployments/helm-charts/platform \
+go run . sre install --org <org> --platform-chart ../../deployments/helm-charts/platform \
     --llm-api-key-file /tmp/sre-llm-key --llm-model gpt-5.4
 
 rm /tmp/sre-llm-key
@@ -206,10 +206,12 @@ is no console or API save for it.
 - **No `--llm-*` flags leaves the stored connection alone.** Re-running
   `aectl sre install` (or `setup-sre.sh`) without a key file never wipes a
   connection an earlier install seeded.
-- **A refused seed is logged once and not retried.** A validation or probe
-  failure is logged as `sre_model.seed_refused`, leaves the stored connection
-  (if any) untouched, and is marked tried; nothing retries it until the
-  seed's values change again.
+- **A refused seed is logged once and not retried.** A refusal of the seed
+  itself, such as a rejected key, is logged as `sre_model.seed_refused`,
+  leaves the stored connection (if any) untouched, and is marked tried;
+  nothing retries it until the seed's values change again. A transient
+  failure (no answer from the provider, a provider 5xx) is logged as
+  `sreagent.seed_failed` and retried on the next pass.
 - **Rotating the key**: re-run the install command with a new key file —
   `aectl sre install --org <org> --platform-chart ... --llm-api-key-file
   <new-key-file> --llm-model <model>` — the changed hash is probed and

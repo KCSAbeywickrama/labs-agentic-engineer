@@ -204,9 +204,11 @@ workflow-skill:
 # The SRE agent (deployments/scripts/setup-sre.sh) then wires the OpenChoreo
 # SRE agent's alert → RCA → AE issue handoff onto the observability plane
 # (OpenSearch, Fluent Bit, the logs adapter) the cluster bring-up installed.
-# The agent waits at 0 replicas until an SRE model applies (the org's model
-# connection with the SREAgent capability, or the SRE override, saved in the
-# Console); aep-api then pushes it to the agent, with no re-run needed.
+# The agent waits at 0 replicas until an SRE model applies: the SRE override
+# seeded at install (SRE_LLM_API_KEY_FILE + SRE_LLM_MODEL, passed to
+# `aectl sre install`), or else the org's model connection saved in the
+# Console, when it has the SREAgent capability. aep-api then pushes it to the
+# agent, with no re-run needed.
 #
 #   WITH_OBSERVABILITY=0  skips the observability plane, and with it the SRE
 #                         agent (the agent has nothing to read alerts from)

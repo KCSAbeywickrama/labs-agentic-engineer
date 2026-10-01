@@ -20,7 +20,7 @@ package organization
 // fakes as sre_model_connection_service_test.go. ApplySeed is authoritative:
 // a changed seed hash is probed and, on success, replaces whatever is
 // stored; a refusal leaves the stored connection alone; a seen hash (applied
-// or refused) is never retried.
+// or refused) is never retried, and a transient failure is not seen.
 
 import (
 	"bytes"
@@ -150,6 +150,45 @@ func TestApplySeed_RefusedChangedSeedKeepsStored(t *testing.T) {
 	}
 	if w.row.Host != "a.example" {
 		t.Errorf("row = %+v, want still the stored connection", w.row)
+	}
+}
+
+// TestApplySeed_TransientFailureIsRetried: a probe that says nothing about
+// the seed itself (the provider erroring, or no answer at all) is returned as
+// an error and leaves no marker, so the next pass tries the same seed again
+// and applies it once the provider answers.
+func TestApplySeed_TransientFailureIsRetried(t *testing.T) {
+	for name, probeErr := range map[string]error{
+		"upstream 5xx": &UpstreamError{Code: "llm_upstream_error", Message: "b.example returned 502"},
+		"unreachable":  &ValidationError{Code: "llm_unreachable", Message: "could not reach b.example: the request timed out"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			w := newSreWorld()
+			seedSre(w, "a.example", sreKey)
+			prober := &sreProber{err: probeErr}
+			s := newSreService(w, prober, sreOrgConn{})
+			seed := Seed{BaseURL: "https://b.example/v1", Model: "gpt-4o", APIKey: sreOtherKey}
+
+			if _, err := s.ApplySeed(ctx, sreOrg, seed); err == nil {
+				t.Fatal("ApplySeed: want an error for a transient failure")
+			}
+			if got := seedMarkerOf(w, sreOrg); got != "" {
+				t.Fatalf("marker = %q, want none so the seed is retried", got)
+			}
+			if w.row.Host != "a.example" {
+				t.Fatalf("row = %+v, want the stored connection left alone", w.row)
+			}
+
+			prober.err = nil
+			outcome, err := s.ApplySeed(ctx, sreOrg, seed)
+			if err != nil || outcome != SeedApplied {
+				t.Fatalf("retry: outcome=%q err=%v, want %q", outcome, err, SeedApplied)
+			}
+			if w.row.Host != "b.example" {
+				t.Errorf("row = %+v, want the seed applied on retry", w.row)
+			}
+		})
 	}
 }
 
