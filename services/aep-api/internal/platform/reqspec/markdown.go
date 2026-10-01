@@ -17,6 +17,7 @@
 package reqspec
 
 import (
+	"html"
 	"regexp"
 	"strings"
 )
@@ -159,10 +160,11 @@ func readDoc(content string) document {
 
 var escapedRE = regexp.MustCompile(`\\([!-/:-@\[-` + "`" + `{-~])`)
 
-// unescape reads a line of markdown as its words: a backslash escape is the
-// character it escapes (CommonMark: any ASCII punctuation), and a trailing
-// backslash — a hard line break — is dropped.
+// unescape reads a line of markdown as its words: an entity reference is the
+// character it names (`&amp;`, which the room's serializer writes for `&`), a
+// backslash escape is the character it escapes (CommonMark: any ASCII
+// punctuation), and a trailing backslash — a hard line break — is dropped.
 func unescape(s string) string {
 	s = strings.TrimSuffix(strings.TrimRight(s, " "), "\\")
-	return strings.TrimSpace(escapedRE.ReplaceAllString(s, "$1"))
+	return strings.TrimSpace(html.UnescapeString(escapedRE.ReplaceAllString(s, "$1")))
 }

@@ -27,15 +27,18 @@ import (
 func TestEscapedMarkdownReadsAsItsWords(t *testing.T) {
 	escaped := map[string]string{
 		"product-wide.md":          "# Product-wide\n\n## Requirements\n\n- P1 Every user signs in via SSO. Applies to: all. \\[org default\\]\n",
-		"features/F1-inventory.md": "# Inventory\n\n## User Stories\n\n- F1.1 As a manager, I add an item \\(name, tag\\).\\\n",
+		"features/F1-inventory.md": "# Borrow &amp; Return\n\n## User Stories\n\n- F1.1 As a manager, I add an item \\(name, tag\\).\\\n",
 	}
 	plain := map[string]string{
 		"product-wide.md":          "# Product-wide\n\n## Requirements\n\n- P1 Every user signs in via SSO. Applies to: all. [org default]\n",
-		"features/F1-inventory.md": "# Inventory\n\n## User Stories\n\n- F1.1 As a manager, I add an item (name, tag).\n",
+		"features/F1-inventory.md": "# Borrow & Return\n\n## User Stories\n\n- F1.1 As a manager, I add an item (name, tag).\n",
 	}
 	got, want := Parse(escaped), Parse(plain)
 	if got.ProductWide[0].Text != want.ProductWide[0].Text || strings.Join(got.ProductWide[0].AppliesTo, ",") != "all" {
 		t.Errorf("P1 = %+v, want %+v", got.ProductWide[0], want.ProductWide[0])
+	}
+	if got.Features[0].Name != "Borrow & Return" {
+		t.Errorf("name = %q, want the entity read as its character", got.Features[0].Name)
 	}
 	if Basis(escaped, "F1") != Basis(plain, "F1") {
 		t.Errorf("basis\n%q\nwant\n%q", Basis(escaped, "F1"), Basis(plain, "F1"))
