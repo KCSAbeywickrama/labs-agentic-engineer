@@ -348,9 +348,15 @@ if [ "$WITH_TLS" = "1" ]; then
                       --set "config.kind=ControllerConfiguration"
                       --set "config.enableGatewayAPI=true")
 fi
+#
+# Expanded as ${A[@]+"${A[@]}"} rather than "${A[@]}": under `set -u` bash 3.2
+# — which is what /bin/bash still is on macOS, so it is what `make dev-env`
+# runs — treats an EMPTY array's expansion as an unbound variable and aborts.
+# WITH_TLS=0 is exactly the case that leaves it empty, so the plain form breaks
+# the local path while working everywhere TLS is on.
 helm upgrade --install cert-manager oci://quay.io/jetstack/charts/cert-manager \
   --namespace cert-manager --create-namespace --version v1.19.4 \
-  --set crds.enabled=true "${CERT_MANAGER_SET[@]}" \
+  --set crds.enabled=true ${CERT_MANAGER_SET[@]+"${CERT_MANAGER_SET[@]}"} \
   --wait --timeout "${COLD_PULL_TIMEOUT}"
 
 echo "   External Secrets Operator"
@@ -1353,7 +1359,7 @@ helm upgrade --install openchoreo-control-plane \
     --version "${OC_VERSION}" \
     --namespace openchoreo-control-plane --create-namespace \
     --values "$(oc_values single-cluster/values-cp.yaml)" \
-    "${OC_PORTAL_SET[@]}" \
+    ${OC_PORTAL_SET[@]+"${OC_PORTAL_SET[@]}"} \
     --wait --timeout 600s
 
 echo "⏳ Waiting for Control Plane..."
