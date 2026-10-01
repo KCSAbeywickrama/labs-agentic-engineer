@@ -2678,6 +2678,41 @@ paths:
       summary: List spec version tags
       tags:
       - Projects
+  /projects/{projectName}/versions:
+    get:
+      description: What each version built (B5) — the features it carried, each with its lines as
+        they were at the version's tag, and the product-wide requirements it carried — oldest
+        first. The console compares a feature's live lines with the version that last built it to
+        say what changed since. Only versions cut as a selection are listed; one cut before builds
+        were selections names nothing it built. A version's contents never change, so a reader
+        refetches only when a build starts.
+      operationId: list-project-versions
+      parameters:
+      - description: Project name (DNS-label slug)
+        in: path
+        name: projectName
+        required: true
+        schema:
+          description: Project name (DNS-label slug)
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecVersionList'
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+          description: Error
+      security:
+      - userJWT: []
+      summary: List what each spec version built
+      tags:
+      - Projects
   /projects/{projectName}/tasks:
     get:
       operationId: list-tasks
@@ -8463,6 +8498,81 @@ components:
           nullable: true
       required:
       - tags
+      type: object
+    SpecVersionList:
+      additionalProperties: false
+      properties:
+        versions:
+          description: Oldest first.
+          items:
+            $ref: '#/components/schemas/SpecVersion'
+          type: array
+      required:
+      - versions
+      type: object
+    SpecVersion:
+      additionalProperties: false
+      description: What one version built.
+      properties:
+        name:
+          description: The version's name, the tag the build cut ("v2").
+          type: string
+        features:
+          description: Every feature the version carried, picked or pulled in, in ID order.
+          items:
+            $ref: '#/components/schemas/VersionFeature'
+          type: array
+        productWide:
+          description: The product-wide requirements it carried ("P1").
+          items:
+            type: string
+          type: array
+        heldBack:
+          description: Stories of carried features it did not build, as each waits on a feature
+            neither built nor in the version ("F1.3").
+          items:
+            type: string
+          type: array
+        fixes:
+          description: A repair build names the version it fixes ("v1.1" fixes "v1"); it builds the
+            same features. Absent for a version of its own.
+          type: string
+      required:
+      - name
+      - features
+      - productWide
+      - heldBack
+      type: object
+    VersionFeature:
+      additionalProperties: false
+      description: A feature as a version built it.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        lines:
+          description: The feature's lines at the version's tag, in file order, headings left out.
+          items:
+            $ref: '#/components/schemas/VersionLine'
+          type: array
+      required:
+      - id
+      - name
+      - lines
+      type: object
+    VersionLine:
+      additionalProperties: false
+      description: One line of a feature's file. A line with its own ID ("F2.4") is followed by it, so
+        rewording it is an edit; one without (a decision) is known only by its words. Sources,
+        Needs/Applies-to clauses and the closing assumed/blocking tag are not words.
+      properties:
+        id:
+          type: string
+        words:
+          type: string
+      required:
+      - words
       type: object
     TaskDetail:
       additionalProperties: false

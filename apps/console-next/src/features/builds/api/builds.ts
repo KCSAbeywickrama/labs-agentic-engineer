@@ -16,26 +16,23 @@
  * under the License.
  */
 
+import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { client } from "../../../api/client";
 import { apiErrorMessage } from "../../../api/errors";
-import { env } from "../../../config/env";
+import type { components } from "../../../generated/aep-api";
 import { buildBody, fixBody, type BuildSelection } from "../buildSelection";
-import { runKeys } from "./runs";
+import { runKeys, useVersionLedger } from "./runs";
 
-// PROVISIONAL — the builds list is MOCK-ONLY until B1 lands the builds model.
-//
-// The build picker needs each version built so far: which features went in,
-// the spec each was built from (to say what changed since), and the
-// product-wide items it carried. Nothing in aep-api serves that yet (backend
-// item B1). Until it does, the shape lives here, behind this one module, and
-// only MSW answers it (mocks/handlers/builds.ts, on a path that is not in the
-// contract). When B1 ships, this becomes a call on the generated client with
-// contract types, and the handler and these hand-written types go.
-//
-// Starting a build is NOT provisional: it is today's POST
-// /projects/{projectName}/build, called and refused as the console calls it
-// (useBuildProject). Only the selection it carries is (buildSelection.ts).
+// The builds so far, as the picker, the track and the Builds card read them:
+// each version, what it built (list-project-versions: the features it
+// carried with their lines at its tag, and its product-wide items), and how
+// its run went (the version ledger, list-project-builds). What a version
+// built never changes, so it is read again only when a build starts or ends;
+// the ledger polls while a version is moving.
+
+type SpecVersion = components["schemas"]["SpecVersion"];
+type BuildSummary = components["schemas"]["BuildSummary"];
 
 /** A line of a feature's spec as it was built: its own ID when it has one, and its words. */
 export interface BuiltLine {
@@ -63,28 +60,65 @@ export interface ProjectBuild {
   fixes?: string;
 }
 
-/** The provisional path MSW serves; `:projectName` is the project's slug. */
-export const PROVISIONAL_BUILDS_PATH = "/api/v1/projects/:projectName/provisional/builds";
-
 export function buildsKey(projectName: string) {
-  return ["projects", projectName, "provisional-builds"] as const;
+  return ["projects", projectName, "versions"] as const;
 }
 
-/** While a build runs, as often as the console polls its run rows. */
-const BUILDING_POLL_MS = 5_000;
+/**
+ * A version's state, from its ledger row. A version with no row yet was cut
+ * a moment ago and its run is starting, so it is building.
+ */
+function statusOf(row: BuildSummary | undefined): BuildStatus {
+  switch (row?.status) {
+    case "completed":
+      return "built";
+    case "failed":
+    case "cancelled":
+      return "failed";
+    default:
+      return "building";
+  }
+}
 
-/** The project's builds, oldest first. Polls while one is building, so its end reaches the track and the chat. */
+/** The project's builds, oldest first: what each version built, with its ledger state. */
+export function projectBuilds(versions: SpecVersion[], ledger: BuildSummary[]): ProjectBuild[] {
+  return versions.map((v) => ({
+    version: v.name,
+    status: statusOf(ledger.find((row) => row.tag === v.name)),
+    features: v.features.map((f) => ({
+      id: f.id,
+      name: f.name,
+      lines: f.lines.map((l) => ({ id: l.id ?? null, words: l.words })),
+    })),
+    productWide: v.productWide,
+    ...(v.fixes ? { fixes: v.fixes } : {}),
+  }));
+}
+
+/** The project's builds, oldest first. The ledger half polls while one is building, so its end reaches the track and the chat. */
 export function useBuilds(projectName: string) {
-  return useQuery({
+  const versions = useQuery({
     queryKey: buildsKey(projectName),
-    queryFn: async (): Promise<ProjectBuild[]> => {
-      const path = PROVISIONAL_BUILDS_PATH.replace(":projectName", encodeURIComponent(projectName));
-      const response = await fetch(`${env.apiBaseUrl}${path}`);
-      if (!response.ok) throw new Error("Couldn't load the builds");
-      return (await response.json()) as ProjectBuild[];
+    queryFn: async (): Promise<SpecVersion[]> => {
+      const { data, error } = await client.GET("/projects/{projectName}/versions", {
+        params: { path: { projectName } },
+      });
+      if (error || data === undefined) throw new Error(apiErrorMessage(error, "Couldn't load the builds"));
+      return data.versions;
     },
-    refetchInterval: (query) => (query.state.data?.some((b) => b.status === "building") ? BUILDING_POLL_MS : false),
+    staleTime: Infinity,
   });
+  const ledger = useVersionLedger(projectName);
+  const data = useMemo(
+    () => (versions.data && ledger.data ? projectBuilds(versions.data, ledger.data) : undefined),
+    [versions.data, ledger.data],
+  );
+  return {
+    data,
+    isError: versions.isError || ledger.isError,
+    error: versions.error ?? ledger.error,
+    refetch: () => Promise.all([versions.refetch(), ledger.refetch()]),
+  };
 }
 
 /** One unmet condition of the build gate's 422 refusal (the console's #372). */

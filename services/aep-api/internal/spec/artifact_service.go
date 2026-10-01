@@ -155,6 +155,9 @@ type ArtifactService interface {
 	// ListSpecVersionTags lists the spec version tags (newest first by creation
 	// time) with the latest tag and whether specs/ moved since it (#117).
 	ListSpecVersionTags(ctx context.Context, orgID, projectID string) (*TagList, error)
+	// ListVersions lists what each version built, oldest first: the features
+	// it carried with their lines at its tag, and its product-wide items (B5).
+	ListVersions(ctx context.Context, orgID, projectID string) ([]Version, error)
 	// GetDesignAtTag reads the design bundle at a spec version tag — the tag a
 	// build carries. The name is the user's (ADR-0030) and is not parsed: the
 	// tag either resolves or it does not.

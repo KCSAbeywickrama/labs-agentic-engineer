@@ -23,7 +23,7 @@ import { parseLine, type LineBlock } from "../../spec/model/ids";
 import type { FeatureView, NextUpItem } from "../../spec/model/workspace";
 import type { ProjectBuild } from "../api/builds";
 import type { BuildSelection } from "../buildSelection";
-import { builtLines, changeWords, lineChanges } from "./changes";
+import { builtLines, changeWords, lastBuildOf, lineChanges } from "./changes";
 
 // The build picker, "What goes into v2?", worked out from the live spec, the
 // design review and the builds so far. Pure, so an edit that puts a design
@@ -138,7 +138,6 @@ export function buildOffer(input: PickerInput): BuildOffer {
   const firstBuild = builds.length === 0;
   // A repair build (v1.1) is a point release of the version it fixes, not a version of its own.
   const version = `v${builds.filter((b) => !b.fixes).length + 1}`;
-  const lastBuilt = (id: string) => [...builds].reverse().find((b) => b.features.some((f) => f.id === id));
   const builtIds = new Set(builds.flatMap((b) => b.features.map((f) => f.id)));
   const builtItems = new Set(builds.flatMap((b) => b.productWide));
   // New since the last build, and reaching something already built: what
@@ -157,11 +156,10 @@ export function buildOffer(input: PickerInput): BuildOffer {
       const state = held.near ? "disabled" : "fixed";
       return { kind: "feature", id: f.id, name: f.name, state, detail: held.reasons, warn: held.near };
     }
-    const built = lastBuilt(f.id);
+    const built = lastBuildOf(builds, f.id);
     let change = "new";
     if (built) {
-      const was = built.features.find((b) => b.id === f.id)!.lines;
-      const words = changeWords(lineChanges(was, builtLines(input.lines.get(f.path) ?? [])));
+      const words = changeWords(lineChanges(built.lines, builtLines(input.lines.get(f.path) ?? [])));
       const reached = newItems.filter((p) => applies(p, f.id)).map((p) => p.id);
       const parts = [words, reached.length ? `affected by ${reached.join(", ")}` : ""].filter(Boolean);
       if (parts.length === 0) {

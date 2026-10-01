@@ -17,7 +17,10 @@
 package reqspec
 
 import (
+	"encoding/json"
 	"maps"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -77,5 +80,26 @@ func TestBasisMovesOnlyWhenTheWordsTheDesignReadsMove(t *testing.T) {
 	}
 	if Basis(files, "F9") != "" {
 		t.Error("a feature with no file has no basis")
+	}
+}
+
+// A feature's lines as a build keeps them, held to the shared fixture the
+// console's reader is held to as well (console-next builds/model/changes.ts).
+func TestFeatureLines_SharedFixture(t *testing.T) {
+	files := readFixture(t, acmeFixture)
+	got := map[string][]Line{}
+	for _, f := range Parse(files).Features {
+		got[f.ID] = FeatureLines(files, f.ID)
+	}
+	raw, err := os.ReadFile(filepath.Join(acmeFixture, "feature-lines.json"))
+	if err != nil {
+		t.Fatalf("read feature-lines.json: %v", err)
+	}
+	var want map[string][]Line
+	if err := json.Unmarshal(raw, &want); err != nil {
+		t.Fatal(err)
+	}
+	if g, w := canonical(t, got), canonical(t, want); g != w {
+		t.Errorf("FeatureLines(acme-expenses) differs from feature-lines.json\n--- got\n%s\n--- want\n%s", g, w)
 	}
 }

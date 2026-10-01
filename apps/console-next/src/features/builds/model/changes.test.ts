@@ -17,8 +17,48 @@
  */
 
 import { describe, expect, it } from "vitest";
+import * as Y from "yjs";
+import { seedSpecDoc } from "../../spec/collab/specDoc";
+import { readSpecLines } from "../../spec/collab/useSpecLines";
 import type { LineBlock } from "../../spec/model/ids";
-import { builtLines, changeWords, lineChanges } from "./changes";
+import { builtLines, changeWords, featureChanges, lastBuildOf, lineChanges } from "./changes";
+
+// The shared fixture the Go reader is held to as well
+// (services/aep-api/internal/platform/reqspec FeatureLines): the lines a build
+// keeps of each feature must read the same on both sides, or every feature
+// would show as changed since it was built.
+const FIXTURE = "../../../../../../packages/contracts/requirements/acme-expenses/";
+const raw = import.meta.glob<string>("../../../../../../packages/contracts/requirements/acme-expenses/**/*.{md,json}", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
+
+describe("builtLines on the shared fixture", () => {
+  it("keeps each feature's lines as feature-lines.json says", () => {
+    const files = Object.fromEntries(
+      Object.entries(raw)
+        .filter(([path]) => path.endsWith(".md"))
+        .map(([path, content]) => [`requirements/${path.slice(FIXTURE.length)}`, content]),
+    );
+    const doc = new Y.Doc();
+    seedSpecDoc(doc, { files });
+    const lines = readSpecLines(doc);
+    const expected = JSON.parse(raw[`${FIXTURE}feature-lines.json`]!) as Record<string, { id?: string; words: string }[]>;
+    const got = Object.fromEntries(
+      [...lines.keys()]
+        .flatMap((path) => {
+          const m = /^requirements\/features\/(F\d+)-/.exec(path);
+          return m ? [[m[1]!, builtLines(lines.get(path) ?? [])] as const] : [];
+        })
+        .sort(([a], [b]) => a.localeCompare(b)),
+    );
+    const want = Object.fromEntries(
+      Object.entries(expected).map(([id, ls]) => [id, ls.map((l) => ({ id: l.id ?? null, words: l.words }))]),
+    );
+    expect(got).toEqual(want);
+  });
+});
 
 const li = (text: string, emphasis: LineBlock["emphasis"] = []): LineBlock => ({ kind: "listItem", text, emphasis });
 const h2 = (text: string): LineBlock => ({ kind: "heading", level: 2, text, emphasis: [] });
@@ -73,5 +113,31 @@ describe("lineChanges since the last build", () => {
       li("A claim is approved by the employee's line manager."),
     ]);
     expect(changeWords(lineChanges(v1, now))).toBe("1 added, 1 retired");
+  });
+});
+
+describe("featureChanges", () => {
+  const line = (words: string, id: string | null = null) => ({ id, words });
+  it("names each change: an edit with the words it was built with, an added and a retired line", () => {
+    const built = [line("F2.1 I see pending claims.", "F2.1"), line("F2.2 I approve.", "F2.2"), line("Managers approve.")];
+    const now = [line("F2.1 I see pending claims, oldest first.", "F2.1"), line("Finance approves too."), line("Managers approve.")];
+    expect(featureChanges(built, now)).toEqual({
+      added: [line("Finance approves too.")],
+      edited: [{ id: "F2.1", was: "F2.1 I see pending claims.", now: "F2.1 I see pending claims, oldest first." }],
+      retired: [line("F2.2 I approve.", "F2.2")],
+    });
+  });
+
+  it("finds the build that last carried a feature", () => {
+    const build = (version: string, ids: string[]) => ({
+      version,
+      status: "built" as const,
+      features: ids.map((id) => ({ id, name: id, lines: [line(`${id} v${version}`)] })),
+      productWide: [],
+    });
+    const builds = [build("v1", ["F1", "F2"]), build("v2", ["F2"]), build("v3", ["F3"])];
+    expect(lastBuildOf(builds, "F2")?.version).toBe("v2");
+    expect(lastBuildOf(builds, "F1")?.version).toBe("v1");
+    expect(lastBuildOf(builds, "F4")).toBeNull();
   });
 });

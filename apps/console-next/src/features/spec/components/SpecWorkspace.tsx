@@ -90,7 +90,7 @@ export function SpecWorkspace({
   file?: string | undefined;
   at?: string | undefined;
 }) {
-  const { model, doc, workspace } = useSpecWorkspace(projectName);
+  const { model, doc, lines, workspace } = useSpecWorkspace(projectName);
   const onOpen = useOpenSpecTarget(projectName);
   const scroller = useRef<HTMLDivElement>(null);
   const open = model.data ? openFile(model.data, file) : null;
@@ -121,7 +121,7 @@ export function SpecWorkspace({
     );
   }
 
-  const ready = model.data && doc && workspace && open;
+  const ready = model.data && doc && lines && workspace && open;
   return (
     <Box sx={{ display: "flex", height: "100%", minHeight: 0 }}>
       {ready && (
@@ -157,6 +157,7 @@ export function SpecWorkspace({
               model={model.data}
               workspace={workspace}
               doc={doc}
+              lines={lines}
               file={open}
               onOpen={onOpen}
             />

@@ -3223,6 +3223,30 @@ type SpecStage struct {
 	Version string `json:"version"`
 }
 
+// SpecVersion What one version built.
+type SpecVersion struct {
+	// Features Every feature the version carried, picked or pulled in, in ID order.
+	Features []VersionFeature `json:"features"`
+
+	// Fixes A repair build names the version it fixes ("v1.1" fixes "v1"); it builds the same features. Absent for a version of its own.
+	Fixes string `json:"fixes,omitempty"`
+
+	// HeldBack Stories of carried features it did not build, as each waits on a feature neither built nor in the version ("F1.3").
+	HeldBack []string `json:"heldBack"`
+
+	// Name The version's name, the tag the build cut ("v2").
+	Name string `json:"name"`
+
+	// ProductWide The product-wide requirements it carried ("P1").
+	ProductWide []string `json:"productWide"`
+}
+
+// SpecVersionList defines model for SpecVersionList.
+type SpecVersionList struct {
+	// Versions Oldest first.
+	Versions []SpecVersion `json:"versions"`
+}
+
 // StartConnectInputBody defines model for StartConnectInputBody.
 type StartConnectInputBody struct {
 	// InstallationID Optional installation to pin (set when the user picks a candidate from the 2+ picker)
@@ -3691,6 +3715,21 @@ type ValidationSummary struct {
 	// failed and unreported fail the run only once its validation attempts are spent: while attempts remain the run repairs and re-validates, and reads awaiting-fix in the meantime.
 	State ValidationState `json:"state"`
 	Tag   string          `json:"tag"`
+}
+
+// VersionFeature A feature as a version built it.
+type VersionFeature struct {
+	ID string `json:"id"`
+
+	// Lines The feature's lines at the version's tag, in file order, headings left out.
+	Lines []VersionLine `json:"lines"`
+	Name  string        `json:"name"`
+}
+
+// VersionLine One line of a feature's file. A line with its own ID ("F2.4") is followed by it, so rewording it is an edit; one without (a decision) is known only by its words. Sources, Needs/Applies-to clauses and the closing assumed/blocking tag are not words.
+type VersionLine struct {
+	ID    string `json:"id,omitempty"`
+	Words string `json:"words"`
 }
 
 // Warning defines model for Warning.

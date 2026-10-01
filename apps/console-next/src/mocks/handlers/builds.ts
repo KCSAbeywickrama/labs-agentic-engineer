@@ -17,7 +17,7 @@
  */
 
 import { http, HttpResponse } from "msw";
-import { PROVISIONAL_BUILDS_PATH, type ProjectBuild } from "../../features/builds/api/builds";
+import type { ProjectBuild } from "../../features/builds/api/builds";
 import { repairOfBody, selectionOfBody, type BuildBody } from "../../features/builds/buildSelection";
 import { builtLines } from "../../features/builds/model/changes";
 import { buildOffer, type PickRow } from "../../features/builds/model/picker";
@@ -32,12 +32,13 @@ import { specView } from "../specState";
 
 type BuildResponse = components["schemas"]["BuildResponse"];
 type BuildList = components["schemas"]["BuildList"];
+type SpecVersionList = components["schemas"]["SpecVersionList"];
 type BuildRunList = components["schemas"]["BuildRunList"];
 type ApiError = components["schemas"]["Error"];
 
-// PROVISIONAL — the builds list is mock-only until B1; see
-// features/builds/api/builds.ts. Starting a build answers the contract's
-// POST /projects/{projectName}/build, reading the provisional selection (or
+// What each version built answers list-project-versions, off the builds the
+// mock keeps. Starting a build answers the contract's POST
+// /projects/{projectName}/build, reading the selection (or the provisional
 // repair) off its body (buildSelection.ts). The server checks the selection
 // against the spec and the design as they are now, as the platform's build
 // gate would, and refuses one it cannot build with the gate's 422 detail rows.
@@ -152,8 +153,20 @@ function progressStream(build: MockBuild, signal: AbortSignal): ReadableStream<U
 }
 
 export const buildsHandlers = [
-  http.get(`*${PROVISIONAL_BUILDS_PATH}`, ({ params }) =>
-    HttpResponse.json<ProjectBuild[]>(projectBuilds(String(params.projectName))),
+  http.get("*/api/v1/projects/:projectName/versions", ({ params }) =>
+    HttpResponse.json<SpecVersionList>({
+      versions: mockBuilds(String(params.projectName)).map(({ build }) => ({
+        name: build.version,
+        features: build.features.map((f) => ({
+          id: f.id,
+          name: f.name,
+          lines: f.lines.map((l) => (l.id ? { id: l.id, words: l.words } : { words: l.words })),
+        })),
+        productWide: build.productWide,
+        heldBack: [],
+        ...(build.fixes ? { fixes: build.fixes } : {}),
+      })),
+    }),
   ),
 
   http.get("*/api/v1/projects/:projectName/builds", ({ params }) => {

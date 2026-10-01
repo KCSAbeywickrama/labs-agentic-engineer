@@ -34,22 +34,35 @@ type section struct {
 	title      string
 	items      []item
 	paragraphs []string
+	// order is every line in the order the file has them, each pointing into
+	// items or paragraphs, so a continuation line still lands on its own.
+	order []lineRef
 }
+
+// lineRef points at one line of a section: an item (child -1), one of its
+// children, or a paragraph (item -1).
+type lineRef struct{ item, child, para int }
 
 type item struct {
 	text     string
 	children []string
 }
 
-// lines is every line of text in the section: each item, its children, and
-// each paragraph.
+// lines is every line of text in the section — each item, its children, and
+// each paragraph — in the order the file has them.
 func (s section) lines() []string {
-	var out []string
-	for _, it := range s.items {
-		out = append(out, it.text)
-		out = append(out, it.children...)
+	out := make([]string, 0, len(s.order))
+	for _, r := range s.order {
+		switch {
+		case r.para >= 0:
+			out = append(out, s.paragraphs[r.para])
+		case r.child >= 0:
+			out = append(out, s.items[r.item].children[r.child])
+		default:
+			out = append(out, s.items[r.item].text)
+		}
 	}
-	return append(out, s.paragraphs...)
+	return out
 }
 
 // section returns the first section with the title, or an empty one.
@@ -111,9 +124,11 @@ func readDoc(content string) document {
 				if len(m[1]) >= 2 && inItem {
 					last := &cur.items[len(cur.items)-1]
 					last.children = append(last.children, text)
+					cur.order = append(cur.order, lineRef{item: len(cur.items) - 1, child: len(last.children) - 1, para: -1})
 					inChild = true
 				} else {
 					cur.items = append(cur.items, item{text: text})
+					cur.order = append(cur.order, lineRef{item: len(cur.items) - 1, child: -1, para: -1})
 					inItem, inChild = true, false
 				}
 				inPara = false
@@ -128,6 +143,7 @@ func readDoc(content string) document {
 				appendTo(&cur.paragraphs[len(cur.paragraphs)-1], trimmed)
 			} else {
 				cur.paragraphs = append(cur.paragraphs, trimmed)
+				cur.order = append(cur.order, lineRef{item: -1, child: -1, para: len(cur.paragraphs) - 1})
 				inItem, inChild, inPara = false, false, true
 			}
 		}

@@ -68,3 +68,36 @@ func lineWords(text string) string {
 	l := parseLine(text)
 	return strings.TrimSpace(l.id + " " + l.text)
 }
+
+// Line is one line of a feature's file as a build keeps it, to say later what
+// changed since: its own ID when it leads with one ("F2.4"), and its words.
+// A line with an ID is followed by it, so rewording it is an edit; one
+// without (a decision) is known only by its words.
+type Line struct {
+	ID    string `json:"id,omitempty"`
+	Words string `json:"words"`
+}
+
+// FeatureLines is every line of a feature's file under its sections, in file
+// order, by its words — headings left out, and a line left with no words (a
+// bare `Needs:` clause) dropped. The console reads its live lines the same
+// way (console-next builds/model/changes.ts builtLines); both are held to
+// the shared fixture's feature-lines.json. nil when the feature has no file.
+func FeatureLines(files map[string]string, featureID string) []Line {
+	for rel, content := range files {
+		if m := featureFileRE.FindStringSubmatch(rel); m == nil || m[1] != featureID {
+			continue
+		}
+		var out []Line
+		for _, s := range readDoc(content).sections {
+			for _, text := range s.lines() {
+				l := parseLine(text)
+				if words := strings.TrimSpace(l.id + " " + l.text); words != "" {
+					out = append(out, Line{ID: l.id, Words: words})
+				}
+			}
+		}
+		return out
+	}
+	return nil
+}

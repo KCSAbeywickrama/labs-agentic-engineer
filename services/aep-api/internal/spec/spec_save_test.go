@@ -588,6 +588,20 @@ func TestSaveSpec_ABuildIsASelection(t *testing.T) {
 		t.Fatalf("v2 scope = %v, want F2's story only", scope.InScope)
 	}
 
+	// What each version built, oldest first, with each feature's lines as the
+	// version's tag holds them (B5).
+	versions, err := r.svc.ListVersions(ctx, r.org, r.proj)
+	if err != nil {
+		t.Fatalf("ListVersions: %v", err)
+	}
+	if len(versions) != 2 || versions[0].Name != v1.Tag || versions[1].Name != v2.Tag {
+		t.Fatalf("versions = %+v, want %s then %s", versions, v1.Tag, v2.Tag)
+	}
+	if f := versions[1].Features; len(f) != 1 || f[0].ID != "F2" || f[0].Name != "Notify" ||
+		fmt.Sprint(f[0].Lines) != "[{ Tells people.} {F2.1 F2.1 As a user, I want S, so that s.}]" {
+		t.Errorf("v2 built %+v", f)
+	}
+
 	// The same pick again on the same tree is the same version.
 	again, err := r.svc.SaveSpec(ctx, r.org, r.proj, SaveRequest{Pick: &reqspec.Pick{Features: []string{"F2"}}})
 	if err != nil || again.Status != SpecSaveUnchanged || again.Tag != v2.Tag {

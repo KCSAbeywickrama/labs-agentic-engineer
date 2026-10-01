@@ -20,11 +20,13 @@ import { useMemo } from "react";
 import { Typography } from "@wso2/oxygen-ui";
 import type * as Y from "yjs";
 import { EmptyState } from "../../../components/EmptyState";
+import { SinceBuild } from "../../builds/components/SinceBuild";
 import type { ProductWideItem, SpecModel } from "../api/specModel";
 import { designChangedLines } from "../model/designChanges";
 import { fileFragment } from "../collab/specEdits";
 import { SpecEditor } from "../collab/SpecEditor";
 import type { OpenFile } from "../model/files";
+import type { LineBlock } from "../model/ids";
 import { stageTone, type FeatureView, type Workspace } from "../model/workspace";
 import type { SpecTarget } from "../useSpecWorkspace";
 import { BlockingQuestionBox } from "./BlockingQuestionBox";
@@ -84,6 +86,7 @@ export function SpecFilePane({
   model,
   workspace,
   doc,
+  lines,
   file,
   onOpen,
 }: {
@@ -91,6 +94,8 @@ export function SpecFilePane({
   model: SpecModel;
   workspace: Workspace;
   doc: Y.Doc;
+  /** The live lines of every file, as the editor holds them. */
+  lines: ReadonlyMap<string, LineBlock[]>;
   file: OpenFile;
   onOpen: (target: SpecTarget) => void;
 }) {
@@ -159,6 +164,7 @@ export function SpecFilePane({
         )
       )}
       <ProductWideHere featureId={feature.id} items={workspace.productWide} workspace={workspace} onOpen={onOpen} />
+      <SinceBuild projectName={projectName} featureId={feature.id} lines={lines.get(file.path) ?? []} />
     </>
   );
 }

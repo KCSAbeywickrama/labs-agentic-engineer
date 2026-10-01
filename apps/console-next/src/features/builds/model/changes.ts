@@ -18,7 +18,7 @@
 
 import { lineWords } from "../../spec/model/designWork";
 import { parseLine, type LineBlock } from "../../spec/model/ids";
-import type { BuiltLine } from "../api/builds";
+import type { BuiltLine, ProjectBuild } from "../api/builds";
 
 // What changed in a feature's spec since it was last built. A build keeps
 // each feature's lines as it built them; the picker compares them with the
@@ -42,34 +42,64 @@ export interface LineChanges {
   retired: number;
 }
 
-/** How many of each word appear in `a` beyond those in `b`. */
-function unmatched(a: string[], b: string[]): number {
+/** A line with its own ID whose words changed since the build, with the words it was built with. */
+export interface EditedLine {
+  id: string;
+  was: string;
+  now: string;
+}
+
+/** What changed in a feature's lines since the build, line by line, in file order. */
+export interface FeatureChanges {
+  added: BuiltLine[];
+  edited: EditedLine[];
+  retired: BuiltLine[];
+}
+
+/** The lines of `a` left over once each line of `b` with the same words has claimed one. */
+function unmatched(a: BuiltLine[], b: BuiltLine[]): BuiltLine[] {
   const left = new Map<string, number>();
-  for (const w of b) left.set(w, (left.get(w) ?? 0) + 1);
-  let n = 0;
-  for (const w of a) {
-    const k = left.get(w) ?? 0;
-    if (k > 0) left.set(w, k - 1);
-    else n += 1;
+  for (const l of b) left.set(l.words, (left.get(l.words) ?? 0) + 1);
+  return a.filter((l) => {
+    const k = left.get(l.words) ?? 0;
+    if (k > 0) left.set(l.words, k - 1);
+    return k === 0;
+  });
+}
+
+export function featureChanges(built: BuiltLine[], now: BuiltLine[]): FeatureChanges {
+  const then = new Map(built.flatMap((l) => (l.id ? [[l.id, l.words] as const] : [])));
+  const current = new Set(now.flatMap((l) => (l.id ? [l.id] : [])));
+  const free = (lines: BuiltLine[]) => lines.filter((l) => !l.id);
+  const freeAdded = new Set(unmatched(free(now), free(built)));
+  const freeRetired = new Set(unmatched(free(built), free(now)));
+  const added: BuiltLine[] = [];
+  const edited: EditedLine[] = [];
+  for (const l of now) {
+    if (!l.id) {
+      if (freeAdded.has(l)) added.push(l);
+      continue;
+    }
+    const was = then.get(l.id);
+    if (was === undefined) added.push(l);
+    else if (was !== l.words) edited.push({ id: l.id, was, now: l.words });
   }
-  return n;
+  const retired = built.filter((l) => (l.id ? !current.has(l.id) : freeRetired.has(l)));
+  return { added, edited, retired };
 }
 
 export function lineChanges(built: BuiltLine[], now: BuiltLine[]): LineChanges {
-  const byId = (lines: BuiltLine[]) => new Map(lines.flatMap((l) => (l.id ? [[l.id, l.words] as const] : [])));
-  const free = (lines: BuiltLine[]) => lines.filter((l) => !l.id).map((l) => l.words);
-  const then = byId(built);
-  const current = byId(now);
-  let added = unmatched(free(now), free(built));
-  let retired = unmatched(free(built), free(now));
-  let edited = 0;
-  for (const [id, words] of current) {
-    const was = then.get(id);
-    if (was === undefined) added += 1;
-    else if (was !== words) edited += 1;
+  const changes = featureChanges(built, now);
+  return { added: changes.added.length, edited: changes.edited.length, retired: changes.retired.length };
+}
+
+/** The build that last carried a feature, and its lines as built; null before its first. */
+export function lastBuildOf(builds: ProjectBuild[], featureId: string): { version: string; lines: BuiltLine[] } | null {
+  for (const b of [...builds].reverse()) {
+    const f = b.features.find((x) => x.id === featureId);
+    if (f) return { version: b.version, lines: f.lines };
   }
-  for (const id of then.keys()) if (!current.has(id)) retired += 1;
-  return { added, edited, retired };
+  return null;
 }
 
 /** "1 added, 2 edited"; empty when nothing changed. */
