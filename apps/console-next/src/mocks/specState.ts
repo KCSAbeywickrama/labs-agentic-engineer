@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import type { SpecModel } from "../features/spec/api/specModel";
+import type { MockSpecModel } from "./fixtures/spec";
 import { interviewEffects } from "./chatServer";
 import { createdProjects } from "./createdProjects";
 import { designFileWrites, designSummary } from "./designState";
@@ -33,12 +33,12 @@ import { acmeExpensesSpec, freshSpec, triageAgentSpec } from "./fixtures/spec";
 // so is what the design review did (designState.ts): the designed features'
 // stage, the design summary, and a spec line a design comment rewrote.
 
-const seeds: Record<string, SpecModel> = {
+const seeds: Record<string, MockSpecModel> = {
   "acme-expenses": acmeExpensesSpec,
   "triage-agent": triageAgentSpec,
 };
 
-const live = new Map<string, SpecModel>();
+const live = new Map<string, MockSpecModel>();
 
 function displayName(projectName: string): string {
   const project =
@@ -48,7 +48,7 @@ function displayName(projectName: string): string {
 }
 
 /** The model the user's verdicts change. */
-export function liveSpec(projectName: string): SpecModel {
+export function liveSpec(projectName: string): MockSpecModel {
   let model = live.get(projectName);
   if (!model) {
     model = structuredClone(seeds[projectName] ?? freshSpec(displayName(projectName)));
@@ -58,7 +58,7 @@ export function liveSpec(projectName: string): SpecModel {
 }
 
 /** The model as served: the live one, with each interview's stage and written file, and the design's. */
-export function specView(projectName: string): SpecModel {
+export function specView(projectName: string): MockSpecModel {
   const model = liveSpec(projectName);
   const effects = interviewEffects(projectName);
   const design = designSummary(projectName);

@@ -17,28 +17,43 @@
  */
 
 import { http, HttpResponse } from "msw";
-import {
-  PROVISIONAL_SPEC_CHANGES_SEEN_PATH,
-  PROVISIONAL_SPEC_PATH,
-  type SpecModel,
-} from "../../features/spec/api/specModel";
+import { MOCK_SPEC_CHANGES_SEEN_PATH, MOCK_SPEC_PATH, type MockSpecExtras } from "../../features/spec/api/specModel";
+import type { components } from "../../generated/aep-api";
+import type { MockSpecModel } from "../fixtures/spec";
 import { liveDesign, saveDesign } from "../designState";
 import { specView } from "../specState";
 
-// PROVISIONAL — mock-only until S3 lands the spec model's contract; see
-// features/spec/api/specModel.ts and mocks/specState.ts.
+type SpecState = components["schemas"]["SpecState"];
+
+// The spec state (get-spec-state) the way the platform serves it, off the
+// mock's model; and, on a mock-only path, what the mock stands in for: the
+// files the local doc is seeded from (the room's, on the platform) and the
+// design comments' marks on the spec (E5, parked).
+
+function specState(model: MockSpecModel): SpecState {
+  return {
+    designedFrom: model.design.designedFrom,
+    documents: model.documents.map((d) => ({ id: d.id, title: d.title, pages: d.pages, rows: d.rows })),
+  };
+}
+
+function extras(model: MockSpecModel): MockSpecExtras {
+  return { files: model.files, openComments: model.design.openComments, specChanges: model.design.specChanges };
+}
 
 export const specHandlers = [
-  http.get(`*${PROVISIONAL_SPEC_PATH}`, ({ params }) =>
-    HttpResponse.json<SpecModel>(specView(String(params.projectName))),
+  http.get("*/api/v1/projects/:projectName/spec/state", ({ params }) =>
+    HttpResponse.json<SpecState>(specState(specView(String(params.projectName)))),
   ),
 
+  http.get(`*${MOCK_SPEC_PATH}`, ({ params }) => HttpResponse.json<MockSpecExtras>(extras(specView(String(params.projectName))))),
+
   // The user opened the Spec tab: the lines design comments changed are seen.
-  http.post(`*${PROVISIONAL_SPEC_CHANGES_SEEN_PATH}`, ({ params }) => {
+  http.post(`*${MOCK_SPEC_CHANGES_SEEN_PATH}`, ({ params }) => {
     const projectName = String(params.projectName);
     const design = liveDesign(projectName);
     design.comments = design.comments.map((c) => ({ ...c, specSeen: true }));
     saveDesign(projectName, design);
-    return HttpResponse.json<SpecModel>(specView(projectName));
+    return HttpResponse.json<MockSpecExtras>(extras(specView(projectName)));
   }),
 ];

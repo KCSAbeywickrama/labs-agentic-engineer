@@ -110,7 +110,7 @@ export function SpecWorkspace({
       <Box sx={{ p: 3.5 }}>
         <EmptyState
           title="Couldn't open the spec"
-          description={model.error.message}
+          description={model.error?.message ?? "Something went wrong."}
           action={
             <Button variant="outlined" onClick={() => void model.refetch()}>
               Try again
@@ -121,14 +121,15 @@ export function SpecWorkspace({
     );
   }
 
-  const ready = model.data && doc && lines && workspace && open;
+  const data = model.data;
+  const ready = data && doc && lines && workspace && open;
   return (
     <Box sx={{ display: "flex", height: "100%", minHeight: 0 }}>
       {ready && (
         <FileRail
           projectName={projectName}
           features={workspace.features}
-          documents={model.data.documents}
+          documents={data.documents}
           current={open.key}
         />
       )}
@@ -149,12 +150,12 @@ export function SpecWorkspace({
             <FilePicker
               projectName={projectName}
               features={workspace.features}
-              documents={model.data.documents}
+              documents={data.documents}
               current={open.key}
             />
             <SpecFilePane
               projectName={projectName}
-              model={model.data}
+              model={data}
               workspace={workspace}
               doc={doc}
               lines={lines}

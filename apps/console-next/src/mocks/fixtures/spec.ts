@@ -25,6 +25,9 @@ import acmePrd from "@aep/contracts/requirements/acme-expenses/prd.md?raw";
 import acmeProductWide from "@aep/contracts/requirements/acme-expenses/product-wide.md?raw";
 import type { SpecModel } from "../../features/spec/api/specModel";
 
+/** The mock's spec: the model the platform's state and the live documents add up to, plus the files the room would hold. */
+export type MockSpecModel = SpecModel & { files: Record<string, string> };
+
 // PROVISIONAL — mock-only until the spec model is wired; see
 // features/spec/api/specModel.ts.
 //
@@ -39,7 +42,7 @@ import type { SpecModel } from "../../features/spec/api/specModel";
 
 const featurePath = (file: string) => `specs/requirements/features/${file}.md`;
 
-export const acmeExpensesSpec: SpecModel = {
+export const acmeExpensesSpec: MockSpecModel = {
   features: [
     {
       id: "F1",
@@ -172,7 +175,7 @@ Rules that apply to more than one feature.
 - P1 Staff sign in with company SSO. [org default] Applies to: all.
 `;
 
-export const triageAgentSpec: SpecModel = {
+export const triageAgentSpec: MockSpecModel = {
   features: [
     {
       id: "F1",
@@ -200,7 +203,7 @@ export const triageAgentSpec: SpecModel = {
 };
 
 /** Any other project, a new one included: the kickoff has not written features yet. */
-export function freshSpec(productName: string): SpecModel {
+export function freshSpec(productName: string): MockSpecModel {
   return {
     features: [],
     documents: [],

@@ -18,6 +18,7 @@
 
 import { env } from "../config/env";
 import { mockAccessToken } from "./mockSession";
+import type { User } from "oidc-client-ts";
 import { getUserManager } from "./userManager";
 
 // Token access for non-React code: the API client attaches it. Mode-aware so
@@ -42,6 +43,21 @@ export function renewAccessToken(): Promise<string | null> {
       renewInFlight = null;
     });
   return renewInFlight;
+}
+
+/**
+ * Called with each silently renewed access token, for a long-lived connection
+ * (the collab room) that must keep presenting a valid one. Returns the
+ * unsubscribe.
+ */
+export function subscribeAccessTokenRefresh(cb: (token: string) => void): () => void {
+  if (env.authMode === "mock") return () => {};
+  const um = getUserManager();
+  const handler = (user: User) => {
+    if (user.access_token) cb(user.access_token);
+  };
+  um.events.addUserLoaded(handler);
+  return () => um.events.removeUserLoaded(handler);
 }
 
 // Full re-auth, preserving where the user was (restored by the provider's

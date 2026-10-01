@@ -119,11 +119,11 @@ describe("a turn's lifecycle", () => {
     streams.set("t1", stream.body);
 
     const sent = store.send(PROJECT, "  What is left to do?  ", PRODUCT);
-    expect(chat().turn).toEqual({ phase: "starting" });
+    expect(chat().turn).toEqual({ phase: "starting", instruction: "What is left to do?" });
     expect(chat().items[0]).toMatchObject({ kind: "user", text: "What is left to do?", state: "sending" });
     expect(await sent).toBe(true);
     expect(chat().items[0]).toMatchObject({ state: "sent", turnId: "t1" });
-    await vi.waitFor(() => expect(chat().turn).toEqual({ phase: "running", turnId: "t1" }));
+    await vi.waitFor(() => expect(chat().turn).toEqual({ phase: "running", turnId: "t1", instruction: "What is left to do?" }));
 
     stream.send({ type: "text-delta", delta: "Two features " });
     stream.send({ type: "text-delta", delta: "are left." });

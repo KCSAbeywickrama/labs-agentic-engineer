@@ -17,29 +17,26 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { client } from "../../../api/client";
+import { apiErrorMessage } from "../../../api/errors";
 import { env } from "../../../config/env";
+import type { components } from "../../../generated/aep-api";
 
-// PROVISIONAL — MOCK-ONLY until S3 lands the spec model's contract.
-//
-// The spec workspace needs the spec model: each feature's stage, which
-// product-wide items apply where, the source documents, and the markdown of
-// every file. Nothing in aep-api serves that yet. Until it does, the shape lives here, behind this one module, and only
-// MSW answers it (mocks/handlers/spec.ts, on a path that is not in the
-// contract). When S3 ships, this module becomes a call on the generated client
-// with contract types, and the handler and these hand-written types go.
-//
-// What is NOT here, on purpose: anything the documents already say. The ID
-// index, the Fog, the lines still to confirm, the questions a feature waits on
-// (model/questions.ts) and Next up are all worked out in the browser from the
-// live documents (model/workspace.ts), so an edit shows in them at once and
+// The spec workspace's model (N5). Almost all of it is the documents: the
+// collab room holds every file, and the features, their stages, the ID index,
+// the Fog, the lines to confirm and Next up are worked out from the live lines
+// in the browser (useSpecWorkspace.ts, model/), so an edit shows at once and
 // nothing says the same thing twice.
 //
-// `files` is the stand-in for the collab room: the local doc is seeded from it
-// (collab/specDoc.ts). When the provider is wired, the room holds the files
-// and the agent's marked writes, and the field is deleted.
+// What the documents cannot say comes from the platform: each designed
+// feature's basis (what its last design read) and the attached documents —
+// get-spec-state, here.
 //
-// Plain `fetch`, as in builds/api/builds.ts: the path is not in the contract,
-// and no real server answers it, so there is no token to attach.
+// MOCK MODE ONLY: the local doc stands in for the room, seeded from the mock's
+// files, and the design comments' marks on the spec (E5, parked) come from the
+// mock too, on a path that is not in the contract.
+
+type SpecStateWire = components["schemas"]["SpecState"];
 
 /** Where a feature is in its journey. */
 export type FeatureStage = "Not interviewed" | "Interviewing" | "Interviewed" | "Designed";
@@ -109,19 +106,55 @@ export interface SpecModel {
   features: SpecFeature[];
   documents: SourceDocument[];
   design: DesignSummary;
-  /** Markdown by room path ("specs/requirements/prd.md"). The collab room replaces this. */
-  files: Record<string, string>;
 }
 
-/** The provisional path MSW serves; `:projectName` is the project's slug. */
-export const PROVISIONAL_SPEC_PATH = "/api/v1/projects/:projectName/provisional/spec";
-
-/** The user has seen the spec lines design comments changed: POST, answered with the model. */
-export const PROVISIONAL_SPEC_CHANGES_SEEN_PATH = `${PROVISIONAL_SPEC_PATH}/design-changes/seen`;
-
-/** The spec model's query key: what changes the model (an agent turn) invalidates. */
+/** The spec state's query key: what an agent turn invalidates. */
 export function specKey(projectName: string) {
-  return ["projects", projectName, "provisional-spec"] as const;
+  return ["projects", projectName, "spec-state"] as const;
+}
+
+/** What the platform says beside the documents: each designed feature's basis, and the attached documents. */
+export function useSpecState(projectName: string) {
+  return useQuery({
+    queryKey: specKey(projectName),
+    queryFn: async (): Promise<SpecStateWire> => {
+      const { data, error } = await client.GET("/projects/{projectName}/spec/state", {
+        params: { path: { projectName } },
+      });
+      if (error || data === undefined) throw new Error(apiErrorMessage(error, "Couldn't load the spec"));
+      return data;
+    },
+  });
+}
+
+/** The documents, as the workspace shows them. */
+export function sourceDocuments(state: SpecStateWire): SourceDocument[] {
+  return state.documents.map((d) => ({
+    id: d.id,
+    title: d.title,
+    pages: d.pages,
+    rows: d.rows.map((r) => ({ page: r.page, says: r.says, landedIn: r.landedIn ?? null })),
+  }));
+}
+
+// ---- MOCK MODE ONLY ---------------------------------------------------------
+
+/** What the mock stands in for: the room's files, and the design comments' marks on the spec (E5, parked). */
+export interface MockSpecExtras {
+  /** Markdown by room path ("specs/requirements/prd.md"): the local doc's seed. */
+  files: Record<string, string>;
+  openComments: number;
+  specChanges: DesignSpecChange[];
+}
+
+/** The mock-only path MSW serves; `:projectName` is the project's slug. */
+export const MOCK_SPEC_PATH = "/api/v1/projects/:projectName/mock/spec";
+
+/** The user has seen the spec lines design comments changed: POST, answered with the extras. */
+export const MOCK_SPEC_CHANGES_SEEN_PATH = `${MOCK_SPEC_PATH}/design-changes/seen`;
+
+export function mockSpecKey(projectName: string) {
+  return ["projects", projectName, "mock-spec"] as const;
 }
 
 function url(template: string, params: Record<string, string>): string {
@@ -129,27 +162,30 @@ function url(template: string, params: Record<string, string>): string {
   return `${env.apiBaseUrl}${path}`;
 }
 
-async function readModel(response: Response, failure: string): Promise<SpecModel> {
+async function readExtras(response: Response, failure: string): Promise<MockSpecExtras> {
   if (!response.ok) throw new Error(failure);
-  return (await response.json()) as SpecModel;
+  return (await response.json()) as MockSpecExtras;
 }
 
-export function useSpecModel(projectName: string) {
+/** The mock's extras; never asked for on the platform. */
+export function useMockSpecExtras(projectName: string) {
   return useQuery({
-    queryKey: specKey(projectName),
-    queryFn: async () => readModel(await fetch(url(PROVISIONAL_SPEC_PATH, { projectName })), "Couldn't load the spec"),
+    queryKey: mockSpecKey(projectName),
+    queryFn: async () => readExtras(await fetch(url(MOCK_SPEC_PATH, { projectName })), "Couldn't load the spec"),
+    enabled: env.apiMode === "mock",
   });
 }
 
-/** Mark the spec lines design comments changed as seen: the Spec tab's dot goes. */
+/** Mark the spec lines design comments changed as seen: the Spec tab's dot goes. A no-op on the platform (E5). */
 export function useSeeDesignChanges(projectName: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async () =>
-      readModel(
-        await fetch(url(PROVISIONAL_SPEC_CHANGES_SEEN_PATH, { projectName }), { method: "POST" }),
-        "Couldn't update the spec",
-      ),
-    onSuccess: (model) => queryClient.setQueryData(specKey(projectName), model),
+      env.apiMode === "mock"
+        ? readExtras(await fetch(url(MOCK_SPEC_CHANGES_SEEN_PATH, { projectName }), { method: "POST" }), "Couldn't update the spec")
+        : null,
+    onSuccess: (extras) => {
+      if (extras) queryClient.setQueryData(mockSpecKey(projectName), extras);
+    },
   });
 }

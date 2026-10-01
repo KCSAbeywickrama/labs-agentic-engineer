@@ -20,9 +20,14 @@ Against a `make dev-env` cluster:
 
 ```sh
 API_PROXY_TARGET=http://console.ae.localhost:8080/aep-api-service \
+COLLAB_PROXY_TARGET=ws://console.ae.localhost:8080 \
 VITE_THUNDER_URL=http://thunder.openchoreo.localhost:8080 \
 pnpm --filter @aep/console-next dev
 ```
+
+The spec is the collab room: the app opens it at `/collab` on its own origin,
+and the dev server forwards that to `COLLAB_PROXY_TARGET` (the in-cluster
+console forwards its `/collab` to the collab server, so pointing at it works).
 
 aectl registers only the in-cluster console's `/callback` on
 `aep-console-client`, so sign-in from :8091 needs `http://localhost:8091` and

@@ -19,7 +19,7 @@
 import { parseDesignCommand } from "@aep/contracts/commands";
 import * as Y from "yjs";
 import { readDocFile } from "@aep/collab-doc";
-import type { SpecModel } from "../../features/spec/api/specModel";
+import type { MockSpecModel } from "./spec";
 import { applyAgentToolCall, projectSpecDoc } from "../../features/spec/collab/specDoc";
 import { readSpecLines } from "../../features/spec/collab/useSpecLines";
 import { designBasis, designWork } from "../../features/spec/model/designWork";
@@ -68,12 +68,12 @@ export interface DesignTurn {
   design?: DesignEffect;
 }
 
-function names(model: SpecModel, ids: string[]): string {
+function names(model: MockSpecModel, ids: string[]): string {
   const list = ids.map((id) => model.features.find((f) => f.id === id)?.name ?? id);
   return list.length <= 1 ? (list[0] ?? "") : `${list.slice(0, -1).join(", ")} and ${list.at(-1)}`;
 }
 
-function scriptDesign(projectName: string, text: string, model: SpecModel): DesignTurn {
+function scriptDesign(projectName: string, text: string, model: MockSpecModel): DesignTurn {
   const design = liveDesign(projectName);
   const lines = readSpecLines(projectSpecDoc(projectName, model));
   const productWide = productWideItems(readRequirements(lines));
@@ -117,7 +117,7 @@ function scriptDesign(projectName: string, text: string, model: SpecModel): Desi
   };
 }
 
-function scriptAddress(projectName: string, text: string, model: SpecModel, turnKey: string): DesignTurn {
+function scriptAddress(projectName: string, text: string, model: MockSpecModel, turnKey: string): DesignTurn {
   const design = liveDesign(projectName);
   const open = design.comments.filter((c) => c.status === "open");
   if (open.length === 0) {
@@ -197,7 +197,7 @@ export function addressedReply(designOnly: number, specToo: number): string {
 export function scriptDesignTurn(req: {
   projectName: string;
   instruction: string;
-  model: SpecModel;
+  model: MockSpecModel;
   turnKey: string;
 }): DesignTurn | null {
   const text = req.instruction.trim();

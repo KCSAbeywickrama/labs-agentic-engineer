@@ -18,10 +18,39 @@
 
 import { useCallback, useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useSpecModel, type SpecFeature } from "./api/specModel";
+import { interviewingIn, useProjectChat } from "../agent-chat/useProjectChat";
+import { sourceDocuments, useMockSpecExtras, useSpecState, type SpecFeature, type SpecModel } from "./api/specModel";
 import { useSpecDoc } from "./collab/specDoc";
 import { useSpecLines } from "./collab/useSpecLines";
+import { deriveFeatures } from "./model/features";
 import { deriveWorkspace } from "./model/workspace";
+
+/**
+ * The spec model: the features worked out from the live documents, with the
+ * platform's word on what a design has read, and the attached documents. The
+ * design comments' marks on the spec are the mock's alone until commenting
+ * ships (E5); on the platform there are none.
+ */
+export function useSpecModel(projectName: string) {
+  const state = useSpecState(projectName);
+  const extras = useMockSpecExtras(projectName);
+  const lines = useSpecLines(useSpecDoc(projectName));
+  const interviewing = interviewingIn(useProjectChat(projectName));
+  const data = useMemo((): SpecModel | undefined => {
+    if (!state.data || !lines) return undefined;
+    const designedFrom = state.data.designedFrom;
+    return {
+      features: deriveFeatures(lines, designedFrom, interviewing),
+      documents: sourceDocuments(state.data),
+      design: {
+        designedFrom,
+        openComments: extras.data?.openComments ?? 0,
+        specChanges: extras.data?.specChanges ?? [],
+      },
+    };
+  }, [state.data, lines, interviewing, extras.data]);
+  return { data, isError: state.isError, error: state.error, refetch: state.refetch };
+}
 
 /**
  * The spec workspace for a project: the model's state, the live doc, and what

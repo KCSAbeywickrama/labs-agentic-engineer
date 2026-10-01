@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { START_COMMAND } from "@aep/contracts/commands";
+import { parseInterviewCommand, START_COMMAND } from "@aep/contracts/commands";
 import { designKey } from "../design/api/designModel";
 import { specKey } from "../spec/api/specModel";
 import { applyAgentWrite } from "../spec/collab/specDoc";
@@ -46,6 +46,12 @@ export function useProjectChat(projectName: string): ProjectChat {
   const chat = useSyncExternalStore(subscribe, () => chatStore.get(projectName));
   useEffect(() => chatStore.watch(projectName), [projectName]);
   return chat;
+}
+
+/** The feature an interview is running for right now ("F2"), from the turn's instruction; null otherwise. */
+export function interviewingIn(chat: ProjectChat): string | null {
+  const instruction = chat.turn.phase === "idle" ? undefined : chat.turn.instruction;
+  return (instruction && parseInterviewCommand(instruction)?.featureId) || null;
 }
 
 /** Whether a message can go now: the chat is loaded and no turn is running. */

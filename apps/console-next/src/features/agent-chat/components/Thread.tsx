@@ -19,7 +19,7 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Box, Button, CircularProgress, Typography } from "@wso2/oxygen-ui";
 import { CircleAlert, Sparkles } from "@wso2/oxygen-ui-icons-react";
-import { useSpecModel } from "../../spec/api/specModel";
+import { useSpecModel } from "../../spec/useSpecWorkspace";
 import { answerableQuestionId, interviewWriteUp, userLineText, type ChatItem } from "../chatLog";
 import type { TurnScope } from "../turnScope";
 import { chatStore, useProjectChat } from "../useProjectChat";

@@ -52,6 +52,10 @@ export const env = {
     import.meta.env.VITE_API_MODE,
     import.meta.env.VITE_AUTH_MODE,
   ),
+  // Mock mode (VITE_API_MODE=mock, dev only) runs the API on MSW. The few
+  // things only the platform has — the collab room, above all — are stood in
+  // for locally when it is set.
+  apiMode: import.meta.env.DEV && import.meta.env.VITE_API_MODE === "mock" ? ("mock" as const) : ("platform" as const),
   // Thunder OIDC issuer: the REST/OIDC root, not the admin SPA. The dev
   // default is the dev-thunder-setup container, as for the console.
   thunderUrl: getEnv("VITE_THUNDER_URL") || "http://localhost:8097",

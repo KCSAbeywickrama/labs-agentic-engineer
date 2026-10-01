@@ -23,6 +23,9 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 // Same target and variable as the console's dev server, so one dev-env serves
 // both: the new app runs beside it on :8091 until switch-over.
 const apiTarget = process.env.API_PROXY_TARGET || "http://localhost:9090";
+// The collab room's WebSocket, which the app opens same-origin at /collab as
+// the in-cluster console does (its nginx forwards /collab to the collab server).
+const collabTarget = process.env.COLLAB_PROXY_TARGET || "ws://localhost:3400";
 
 export default defineConfig({
   plugins: [
@@ -55,6 +58,11 @@ export default defineConfig({
         target: apiTarget,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/aep-api-service/, ""),
+      },
+      "/collab": {
+        target: collabTarget,
+        ws: true,
+        changeOrigin: true,
       },
     },
   },

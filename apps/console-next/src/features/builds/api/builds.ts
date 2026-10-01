@@ -21,6 +21,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tansta
 import { client } from "../../../api/client";
 import { apiErrorMessage } from "../../../api/errors";
 import type { components } from "../../../generated/aep-api";
+import { useSpecFlush } from "../../spec/collab/specDoc";
 import { buildBody, fixBody, type BuildSelection } from "../buildSelection";
 import { runKeys, useVersionLedger } from "./runs";
 
@@ -161,11 +162,17 @@ export function refreshBuilds(queryClient: QueryClient, projectName: string): vo
   void queryClient.invalidateQueries({ queryKey: runKeys.all(projectName) });
 }
 
-/** Start a build of the selection; resolves with the version it cut ("v1"). */
+/**
+ * Start a build of the selection; resolves with the version it cut ("v1").
+ * The room's pending edits are committed first: the build tags HEAD, and an
+ * edit still in the room would not be in the version.
+ */
 export function useStartBuild(projectName: string) {
   const queryClient = useQueryClient();
+  const flush = useSpecFlush(projectName);
   return useMutation({
     mutationFn: async (selection: BuildSelection): Promise<string> => {
+      await flush();
       const { data, error } = await client.POST("/projects/{projectName}/build", {
         params: { path: { projectName } },
         body: buildBody(selection),

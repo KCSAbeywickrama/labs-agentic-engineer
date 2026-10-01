@@ -18,7 +18,7 @@
 
 import { useNavigate } from "@tanstack/react-router";
 import { Box, Button } from "@wso2/oxygen-ui";
-import { useSpecModel } from "../../spec/api/specModel";
+import { useSpecModel } from "../../spec/useSpecWorkspace";
 import type { NoteAction } from "../chatLog";
 import { useStartInterview } from "../useStartInterview";
 

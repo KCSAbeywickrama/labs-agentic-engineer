@@ -18,8 +18,7 @@
 
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { acmeExpensesSpec, triageAgentSpec } from "../../../mocks/fixtures/spec";
-import type { SpecModel } from "../api/specModel";
+import { acmeExpensesSpec, triageAgentSpec, type MockSpecModel } from "../../../mocks/fixtures/spec";
 import { seedSpecDoc } from "../collab/specDoc";
 import { readSpecLines } from "../collab/useSpecLines";
 import { resolveId } from "./ids";
@@ -29,7 +28,7 @@ import { deriveWorkspace } from "./workspace";
 // (as the spec card seeds it) to what the workspace shows. Guards the fixture
 // against drifting from what the screens are approved on.
 
-function workspaceOf(model: SpecModel) {
+function workspaceOf(model: MockSpecModel) {
   const doc = new Y.Doc();
   seedSpecDoc(doc, model);
   return { doc, workspace: deriveWorkspace(model, readSpecLines(doc)) };

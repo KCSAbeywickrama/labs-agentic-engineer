@@ -52,7 +52,11 @@ import { turnBody, type TurnBody, type TurnScope } from "./turnScope";
 // (useAgentChat.ts, runTurn.ts); the store itself is new, built for one
 // shell-level chat per project rather than the console's panel per page.
 
-export type TurnPhase = { phase: "idle" } | { phase: "starting" } | { phase: "running"; turnId: string };
+/** The turn's phase; a turn being started or running carries its instruction when known ("/interview F2"). */
+export type TurnPhase =
+  | { phase: "idle" }
+  | { phase: "starting"; instruction?: string }
+  | { phase: "running"; turnId: string; instruction?: string };
 
 export interface ProjectChat {
   /** `loading` while the thread and its history are read; `error` when they could not be. */
@@ -190,7 +194,10 @@ export function createChatStore(options: ChatStoreOptions) {
           },
         ];
       }
-      return { items, turn: { phase: "running", turnId } };
+      return {
+        items,
+        turn: { phase: "running", turnId, ...(turn.instruction ? { instruction: turn.instruction } : {}) },
+      };
     });
     let outcome: TurnOutcome | null = null;
     try {
@@ -311,7 +318,7 @@ export function createChatStore(options: ChatStoreOptions) {
     if (!instruction || e.state.status !== "ready" || e.state.turn.phase !== "idle" || !e.conversationId) return false;
     const rowId = localId("u");
     update(projectName, (s) => ({
-      turn: { phase: "starting" },
+      turn: { phase: "starting", instruction },
       items: [...s.items, { kind: "user", id: rowId, text: instruction, state: "sending" }],
     }));
     let turnId: string;
@@ -336,7 +343,7 @@ export function createChatStore(options: ChatStoreOptions) {
     setItems(projectName, (items) =>
       items.map((i) => (i.id === rowId && i.kind === "user" ? { ...i, state: "sent" as const, turnId } : i)),
     );
-    void attach(projectName, { turnId });
+    void attach(projectName, { turnId, instruction });
     return true;
   }
 

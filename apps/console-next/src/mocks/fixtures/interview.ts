@@ -25,7 +25,8 @@ import {
 } from "@aep/agent-stream";
 import { parseInterviewCommand, START_COMMAND } from "@aep/contracts/commands";
 import type { WireScope } from "../../features/agent-chat/turnScope";
-import type { SpecFeature, SpecModel } from "../../features/spec/api/specModel";
+import type { SpecFeature } from "../../features/spec/api/specModel";
+import type { MockSpecModel } from "./spec";
 import type { LineBlock } from "../../features/spec/model/ids";
 import { blockingQuestions } from "../../features/spec/model/questions";
 import type { components } from "../../generated/aep-api";
@@ -282,7 +283,7 @@ function writeUp(feature: SpecFeature, current: string, added: { stories: string
 export interface TurnRequest {
   instruction: string;
   scope: WireScope;
-  model: SpecModel;
+  model: MockSpecModel;
   /** Every spec file's lines as the user has them now (the local doc stands in for the room). */
   lines: ReadonlyMap<string, LineBlock[]>;
   progress: InterviewProgress | undefined;

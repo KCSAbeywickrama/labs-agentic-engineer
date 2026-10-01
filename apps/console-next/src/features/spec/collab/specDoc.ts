@@ -20,26 +20,25 @@ import { useMemo } from "react";
 import * as Y from "yjs";
 import { applyToolCall, FileBundle, isFileMutationTool, type StreamPart } from "@aep/agent-stream";
 import { deleteDocFile, isMarkdownPath, readDocFile, setDocFile, setDocFileAsAgent } from "@aep/collab-doc";
-import { useSpecModel, type SpecModel } from "../api/specModel";
+import { useSession } from "../../../auth/SessionContext";
+import { env } from "../../../config/env";
+import { useMockSpecExtras, type MockSpecExtras } from "../api/specModel";
+import { useSpecRoom } from "./specRoom";
 
-// The project's spec document: ONE Y.Doc per project, every markdown file a
-// Y.XmlFragment keyed by its room path (@aep/collab-doc's model). Everything
-// in the app that reads or edits the spec gets the doc from here, and nothing
-// else creates or seeds one.
+// The project's spec document: ONE Y.Doc per project, every file a share keyed
+// by its repo path (@aep/collab-doc's model). Everything in the app that reads
+// or edits the spec gets the doc from here, and nothing else creates one.
 //
-// TODAY — local, no server. The doc is seeded once from the provisional spec
-// model's markdown. The agent's file writes in a chat turn are applied to it
-// from the turn's stream (`applyAgentWrite`), marked as the agent's the way the
-// agents service writes into the room, so they land with a fading wash. It is
-// kept for the browser session, so an edit survives moving between files and
-// closing the card. No one else sees it, and a reload starts over.
+// ON THE PLATFORM it is the collab room's doc (specRoom.ts): seeded server-side
+// from git, edited by everyone in the project and by the agent, committed back
+// by the collab server. Null until the room has synced.
 //
-// LATER — the collab room. Connecting the Hocuspocus provider replaces this
-// module's body and nothing outside it: `useSpecDoc` then joins the room
-// `spec-<org>-<project>` and returns its doc once synced (null until then,
-// exactly as it returns null while the model loads now). The room is seeded
-// server-side from git and the agent writes into it, so `SpecModel.files`, the
-// seeding below and the chat's write stand-in go away.
+// IN MOCK MODE it is a local doc, seeded once from the mock's files and kept
+// for the browser session, so an edit survives moving between files. The
+// agent's file writes in a chat turn are applied to it from the turn's stream
+// (`applyAgentWrite`), marked as the agent's the way the agents service writes
+// into the room, so they land with a fading wash. No one else sees it, and a
+// reload starts over.
 
 /** Marks the seed's writes, so they are never mistaken for the user's edits. */
 const SEED_ORIGIN = "console-next:local-seed";
@@ -51,8 +50,8 @@ const AGENT_ORIGIN = "console-next:agent-write";
 const AGENT_NAME = "Spec Agent";
 
 /** Seed a doc as the room would hold it: the files. */
-export function seedSpecDoc(doc: Y.Doc, model: Pick<SpecModel, "files">): void {
-  for (const [path, markdown] of Object.entries(model.files)) setDocFile(doc, path, markdown, SEED_ORIGIN);
+export function seedSpecDoc(doc: Y.Doc, seed: Pick<MockSpecExtras, "files">): void {
+  for (const [path, markdown] of Object.entries(seed.files)) setDocFile(doc, path, markdown, SEED_ORIGIN);
 }
 
 const sessionDocs = new Map<string, Y.Doc>();
@@ -62,19 +61,29 @@ const sessionDocs = new Map<string, Y.Doc>();
  * The app reads it through `useSpecDoc`; MSW's design agent reads it too, as
  * the real agent reads the room, to see the spec as the user has edited it.
  */
-export function projectSpecDoc(projectName: string, model: SpecModel): Y.Doc {
+export function projectSpecDoc(projectName: string, seed: Pick<MockSpecExtras, "files">): Y.Doc {
   const existing = sessionDocs.get(projectName);
   if (existing) return existing;
   const doc = new Y.Doc();
-  seedSpecDoc(doc, model);
+  seedSpecDoc(doc, seed);
   sessionDocs.set(projectName, doc);
   return doc;
 }
 
 /** The project's spec doc, or null until it is ready. */
 export function useSpecDoc(projectName: string): Y.Doc | null {
-  const model = useSpecModel(projectName).data;
-  return useMemo(() => (model ? projectSpecDoc(projectName, model) : null), [projectName, model]);
+  const mock = env.apiMode === "mock";
+  const { orgHandle } = useSession();
+  const room = useSpecRoom(orgHandle, projectName, !mock);
+  const seed = useMockSpecExtras(projectName).data;
+  const local = useMemo(() => (mock && seed ? projectSpecDoc(projectName, seed) : null), [mock, projectName, seed]);
+  return mock ? local : room.doc;
+}
+
+/** Commit the room's pending edits to git before a build tags HEAD; nothing to commit in mock mode. */
+export function useSpecFlush(projectName: string): () => Promise<void> {
+  const { orgHandle } = useSession();
+  return useSpecRoom(orgHandle, projectName, env.apiMode !== "mock").flush;
 }
 
 /**
@@ -117,7 +126,8 @@ export function applyAgentToolCall(doc: Y.Doc, part: StreamPart): boolean {
 /**
  * The agent wrote a file in a project's spec: apply it to that project's doc.
  * A project whose doc was never opened has nothing to update; its doc is
- * seeded from the spec model, which already holds the write, when it opens.
+ * seeded from the mock, which already holds the write, when it opens. On the
+ * platform no local doc exists: the agent writes into the room.
  */
 export function applyAgentWrite(projectName: string, part: StreamPart): void {
   const doc = sessionDocs.get(projectName);
