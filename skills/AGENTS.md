@@ -39,7 +39,7 @@ piping. An instruction about *which command to run* does.
 An absent kind means `org`, which is a real decision, not a default to lean on:
 
 - **`platform`** — AE-owned, read-only in the console. The design-flow skills
-  (`start`, `amend`, `settle`, `grilling`, `prd-contract`, `design`,
+  (`start`, `interview`, `refine`, `grilling`, `prd-contract`, `design`,
   `cell-design`, `architecture`, `security-design`, `openapi-conventions`,
   `wireframes`, `acceptance-criteria`, `task-planning`), the `console`
   narration policy, the runner's own workflow skills (`aep`,
@@ -221,8 +221,9 @@ build reads.
   caught at CI, not in a local run.
 - **A mechanics library is not an entry point.** `grilling` owns the question
   tools and `prd-contract` owns the PRD's shape; neither writes a document, so
-  neither is a flow a user can usefully fire — a flow skill (`start`, `amend`,
-  `settle`, `design`) owns the artifact and loads them for the mechanics. Nothing enforces
+  neither is a flow a user can usefully fire — a flow skill (`start`,
+  `interview`, `refine`, `design`) owns the artifact and loads them for the
+  mechanics. Nothing enforces
   that: the catalog offers every name, so a skill with no artifact contract says
   so in its own body and names the flow to fire instead.
 - **Instructions are as short as they can be and stay unambiguous.** State the

@@ -23,7 +23,7 @@ import {
   type AskQuestionInput,
   type StreamPart,
 } from "@aep/agent-stream";
-import { START_COMMAND } from "@aep/contracts/commands";
+import { parseInterviewCommand, START_COMMAND } from "@aep/contracts/commands";
 import type { WireScope } from "../../features/agent-chat/turnScope";
 import type { SpecFeature, SpecModel } from "../../features/spec/api/specModel";
 import { bundlePath } from "../../features/spec/model/files";
@@ -38,7 +38,7 @@ type ConversationMessage = components["schemas"]["ConversationMessage"];
 // as a timed stream in the wire's own frames (@aep/agent-stream) and as the
 // messages the history keeps afterwards.
 //
-// The per-feature interview: "Interview <feature>." scoped to that feature
+// The per-feature interview: `/interview F<n>` scoped to that feature
 // asks two spine questions, one card at a time; the second answer writes the
 // feature's file (stub → interviewed, one `*assumed*` line) with an editFile
 // the client applies to its local doc. Spending reports and Mileage claims
@@ -303,7 +303,6 @@ export interface ScriptedTurn {
   progress: InterviewProgress | undefined;
 }
 
-const INTERVIEW = /^interview (.+?)\.?$/i;
 
 function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -326,8 +325,8 @@ export function scriptTurn(req: TurnRequest): ScriptedTurn {
   }
 
   // Starting an interview: the feature it names, scoped to that feature.
-  const asked = INTERVIEW.exec(text)?.[1];
-  const named = asked ? model.features.find((f) => f.name.toLowerCase() === asked.toLowerCase()) : undefined;
+  const asked = parseInterviewCommand(text)?.featureId;
+  const named = asked ? model.features.find((f) => f.id === asked) : undefined;
   const feature = named && inScope && named.id === inScope.id ? named : undefined;
   if (feature) {
     const script = interviewFor(feature);

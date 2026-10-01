@@ -44,12 +44,12 @@ test("flow points at the skill, with the user's trailing text after a blank line
   assert.ok(
     composeInstruction({ kind: "flow", skill: "design" }).startsWith("Load the design skill and follow it."),
   );
-  const withText = composeInstruction({ kind: "flow", skill: "amend", text: "add an actor" });
-  assert.ok(withText.startsWith("Load the amend skill and follow it.\n\nadd an actor"));
+  const withText = composeInstruction({ kind: "flow", skill: "interview", text: "F2" });
+  assert.ok(withText.startsWith("Load the interview skill and follow it.\n\nF2"));
   // Whitespace-only trailing text is not text.
   assert.ok(
-    composeInstruction({ kind: "flow", skill: "amend", text: "   " }).startsWith(
-      "Load the amend skill and follow it.\n\nSpec sources",
+    composeInstruction({ kind: "flow", skill: "interview", text: "   " }).startsWith(
+      "Load the interview skill and follow it.\n\nSpec sources",
     ),
   );
 });
@@ -75,40 +75,39 @@ test("the resolve command carries the user's answer after the dependency's name,
 
 /**
  * A command names the user's intent (`/feature`), a skill names an
- * engineer-facing playbook (`amend`). The three scoped edits are branches of
- * one playbook, so the command resolves to that skill AND says which branch —
+ * engineer-facing playbook (`refine`). The console's older commands are doors
+ * into that one loop, so each resolves to the skill AND says which branch —
  * carrying whatever the user clicked as the branch's subject, which is what
  * makes a lens on the PRD a complete instruction rather than a menu item the
  * user has to finish from memory (#579).
  */
 test("a command that names a branch resolves to the skill and says which branch", () => {
   const feature = composeInstruction({ kind: "flow", skill: "feature", text: "receipt scanning" });
-  assert.ok(feature.startsWith("Load the amend skill and follow it.\n\nAdd a feature: receipt scanning"));
+  assert.ok(feature.startsWith("Load the refine skill and follow it.\n\nAdd a feature: receipt scanning"));
 
   const actor = composeInstruction({ kind: "flow", skill: "actor", text: "Finance reviewer" });
-  assert.ok(actor.startsWith("Load the amend skill and follow it.\n\nAdd an actor: Finance reviewer"));
+  assert.ok(actor.startsWith("Load the refine skill and follow it.\n\nAdd an actor: Finance reviewer"));
 
   // Fired bare (the header's "+ Feature", where there is no line to carry) the
   // branch still arrives; the skill interviews for the subject.
   const bare = composeInstruction({ kind: "flow", skill: "feature" });
-  assert.ok(bare.startsWith("Load the amend skill and follow it.\n\nAdd a feature."));
+  assert.ok(bare.startsWith("Load the refine skill and follow it.\n\nAdd a feature."));
+
+  // `/settle` on a clicked line carries the line; bare, it walks the Open Questions.
+  const settle = composeInstruction({ kind: "flow", skill: "settle", text: "A rejected claim goes back." });
+  assert.ok(settle.startsWith("Load the refine skill and follow it.\n\nSettle this point: A rejected claim goes back."));
+  assert.ok(
+    composeInstruction({ kind: "flow", skill: "settle" }).startsWith(
+      "Load the refine skill and follow it.\n\nSettle the Open Questions, one at a time.",
+    ),
+  );
 });
 
 test("a branch command inlines the skill it resolves to, not its own token", () => {
-  for (const token of ["feature", "actor"]) {
-    assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: token }), [
-      "amend",
-      "grilling",
-      "prd-contract",
-    ]);
+  for (const token of ["feature", "actor", "amend", "settle", "refine"]) {
+    assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: token }), ["refine", "grilling", "prd-contract"]);
   }
-  // `/settle` is its own skill, so nothing is remapped — but it revises the
-  // same document and carries the same two supporting skills.
-  assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: "settle" }), [
-    "settle",
-    "grilling",
-    "prd-contract",
-  ]);
+  assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: "interview" }), ["interview", "grilling", "prd-contract"]);
 });
 
 /**
@@ -273,9 +272,16 @@ test("plan context is sorted by path, so the same inputs give the same prompt", 
 
 test("eager skills are derived from the flow, not supplied by the caller", () => {
   assert.deepEqual(eagerSkillsFor({ kind: "start" }), ["start", "grilling", "prd-contract"]);
-  assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: "amend" }), ["amend", "grilling", "prd-contract"]);
-  // Only a chat turn names no skill — its instruction is the user's own words.
+  assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: "interview" }), ["interview", "grilling", "prd-contract"]);
+  // A chat turn names no skill — its instruction is the user's own words —
+  // unless it was sent with a feature open: then it is the refine loop (S4).
   assert.deepEqual(eagerSkillsFor({ kind: "chat", text: "x" }), []);
+  assert.deepEqual(eagerSkillsFor({ kind: "chat", text: "x" }, { kind: "design-review" }), []);
+  assert.deepEqual(eagerSkillsFor({ kind: "chat", text: "x" }, { kind: "feature", feature: "F2" }), [
+    "refine",
+    "grilling",
+    "prd-contract",
+  ]);
 });
 
 /**
@@ -295,11 +301,16 @@ test("the instructed skill is always inlined, whatever the flow", () => {
 /**
  * The PRD contract is a SIBLING skill, not a `start` reference: the model read the
  * `start` playbook, saw it cited, and spent a `loadSkillReference` step before the
- * first question on a document it would not write until the next turn. `amend`
- * writes against the same contract without wanting the cold-start playbook.
+ * first question on a document it would not write until the next turn.
+ * `interview` and `refine` write against the same contract without wanting the
+ * cold-start playbook.
  */
 test("both PRD-writing flows carry the contract as a skill, not a reference", () => {
-  for (const turn of [{ kind: "start" } as const, { kind: "flow", skill: "amend" } as const]) {
+  for (const turn of [
+    { kind: "start" } as const,
+    { kind: "flow", skill: "interview" } as const,
+    { kind: "flow", skill: "refine" } as const,
+  ]) {
     assert.ok(eagerSkillsFor(turn).includes("prd-contract"));
   }
   assert.ok(!fs.existsSync(path.join(SKILLS_DIR, "start", "references", "prd-contract.md")));
@@ -314,7 +325,7 @@ test("the design flow inlines its whole lineup, in lineup order", () => {
   assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: "design" }), [
     "design",
     // The design flow interviews at design altitude (#578), so the question
-    // mechanics are inlined here exactly as they are on start and amend.
+    // mechanics are inlined here exactly as they are on start and interview.
     "grilling",
     "cell-design",
     "architecture",
@@ -339,7 +350,8 @@ test("every eager skill name exists in the platform skill library", () => {
   const turns = [
     { kind: "start" } as const,
     { kind: "plan" } as const,
-    { kind: "flow", skill: "amend" } as const,
+    { kind: "flow", skill: "interview" } as const,
+    { kind: "flow", skill: "refine" } as const,
     { kind: "flow", skill: "settle" } as const,
     { kind: "flow", skill: "design" } as const,
     // The branch commands resolve to a platform skill, so they are checked too.
@@ -359,7 +371,7 @@ test("every eager skill name exists in the platform skill library", () => {
 test("`organization` is never eager — it rides the system prompt on every turn", () => {
   for (const turn of [
     { kind: "start" } as const,
-    { kind: "flow", skill: "amend" } as const,
+    { kind: "flow", skill: "refine" } as const,
     { kind: "flow", skill: "design" } as const,
   ]) {
     assert.ok(!eagerSkillsFor(turn).includes("organization"), `${JSON.stringify(turn)} must not inline it twice`);

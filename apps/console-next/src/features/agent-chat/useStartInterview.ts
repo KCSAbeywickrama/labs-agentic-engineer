@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import { interviewCommand } from "@aep/contracts/commands";
 import { useChatPanel } from "../shell/chatPanel";
 import type { SpecFeature } from "../spec/api/specModel";
 import { useOpenSpecTarget } from "../spec/useSpecWorkspace";
@@ -46,7 +47,7 @@ export function useStartInterview(projectName: string): {
     start: (feature) => {
       openTarget({ file: feature.id });
       panel.open();
-      void chatStore.send(projectName, `Interview ${feature.name}.`, featureScope(feature));
+      void chatStore.send(projectName, interviewCommand(feature.id), featureScope(feature));
     },
   };
 }

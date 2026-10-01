@@ -145,9 +145,11 @@ func designOrCollabTurn(job turnJob) bool {
 }
 
 // catalogTurn is the MCP discovery gate: every turn designOrCollabTurn admits,
-// plus the requirements flows wherever they run. A requirements interview
-// records a Registered External resource as a given instead of asking the
-// user which service to use, so it needs `list_external_resources` even from
+// plus the requirements flows wherever they run (the kickoff, a feature's
+// interview, and the refine loop with the older commands that open it). A
+// requirements interview records a Registered External resource as a given
+// instead of asking the user which service to use, so it needs
+// `list_external_resources` even from
 // the playground or the CLI, where no collab room scopes the turn. Web search
 // stays a design-turn affair.
 func catalogTurn(job turnJob) bool {
@@ -155,7 +157,7 @@ func catalogTurn(job turnJob) bool {
 		return true
 	}
 	switch job.flow {
-	case "start", "amend", "settle":
+	case "start", "interview", "refine", "feature", "actor", "amend", "settle":
 		return true
 	}
 	return false

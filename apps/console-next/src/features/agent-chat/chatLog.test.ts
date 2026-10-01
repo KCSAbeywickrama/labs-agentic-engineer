@@ -206,6 +206,10 @@ describe("interviewWriteUp", () => {
 });
 
 describe("userLineText", () => {
+  it("reads a feature's interview command as asking for it", () => {
+    expect(userLineText("/interview F4")).toBe("Interview F4.");
+  });
+
   it("reads an answer as the answer", () => {
     expect(userLineText('Answer to "Who reads the reports?": Finance only')).toBe("Finance only");
   });

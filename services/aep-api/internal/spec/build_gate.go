@@ -52,13 +52,13 @@ import (
 // Build-gate error codes (join the designspec/save vocabulary the console
 // renders).
 const (
-	codeMissingDesignCell        = "MISSING_DESIGN_CELL"
-	codeInvalidDesignCell        = "INVALID_DESIGN_CELL"
-	codeMissingUserStories       = "MISSING_USER_STORIES"
-	codeUncoveredStory           = "UNCOVERED_STORY"
+	codeMissingDesignCell  = "MISSING_DESIGN_CELL"
+	codeInvalidDesignCell  = "INVALID_DESIGN_CELL"
+	codeMissingUserStories = "MISSING_USER_STORIES"
+	codeUncoveredStory     = "UNCOVERED_STORY"
 	// codeStaleStoryCitation — a design.json cites a story the requirements
 	// do not have: retired (the message names its replacement) or unknown.
-	codeStaleStoryCitation = "STALE_STORY_CITATION"
+	codeStaleStoryCitation       = "STALE_STORY_CITATION"
 	codeUnenrichedComponent      = "UNENRICHED_COMPONENT"
 	codeMissingComponentArtifact = "MISSING_COMPONENT_ARTIFACT"
 	// codeMissingRolesDocument — the design has sign-in but declares no roles.

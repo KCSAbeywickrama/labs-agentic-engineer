@@ -151,17 +151,20 @@ const PLAN_CONTEXT_HEADER = "\n\n## Existing open Tasks in this version (referen
  * lives here with the rest of it, not in the parsers, which only ever yield
  * facts (`@aep/contracts/commands`, `internal/spec/start_command.go`).
  *
- * `/settle` and `/design` are absent because their token already IS their
+ * `/interview` and `/design` are absent because their token already IS their
  * skill; an unlisted token stays a plain skill load, which is what keeps
- * `/<org-skill>` working.
+ * `/<org-skill>` working. `/feature`, `/actor`, `/amend` and `/settle` are the
+ * console's older doors into what is now one loop, the `refine` skill.
  *
  * Read through `commandFlow`, never indexed directly: the key is a token the
  * user typed, and `/constructor` reaching `Object.prototype` would turn a
  * skill-not-found — which the agent reports cleanly — into a thrown turn.
  */
 const COMMAND_FLOWS: Record<string, { skill: string; scope: (subject: string) => string }> = {
-  feature: { skill: "amend", scope: (s) => (s ? `Add a feature: ${s}` : "Add a feature.") },
-  actor: { skill: "amend", scope: (s) => (s ? `Add an actor: ${s}` : "Add an actor.") },
+  feature: { skill: "refine", scope: (s) => (s ? `Add a feature: ${s}` : "Add a feature.") },
+  actor: { skill: "refine", scope: (s) => (s ? `Add an actor: ${s}` : "Add an actor.") },
+  amend: { skill: "refine", scope: (s) => s },
+  settle: { skill: "refine", scope: (s) => (s ? `Settle this point: ${s}` : "Settle the Open Questions, one at a time.") },
   // The plural walks every open dependency; the singular's token IS its skill.
   "resolve-dependencies": {
     skill: "resolve-dependency",
@@ -191,10 +194,10 @@ const FLOW_SUPPORTING_SKILLS: Record<string, string[]> = {
   // inlining the cold-start interview playbook, whose frame ("the idea comes to
   // you", the coverage walk over an empty document) is wrong for a scoped edit.
   start: ["grilling", "prd-contract"],
-  amend: ["grilling", "prd-contract"],
-  // `/settle` revises a document that already exists — it asks, then writes the
-  // answer where it belongs — so it needs the same two as its siblings.
-  settle: ["grilling", "prd-contract"],
+  // One feature's interview, and the change loop after the kickoff: both ask
+  // (grilling) and write the requirements (prd-contract).
+  interview: ["grilling", "prd-contract"],
+  refine: ["grilling", "prd-contract"],
   // `/resolve-dependency` asks (grilling) and writes a dependency file whose
   // shape and research playbook the architecture skill owns.
   "resolve-dependency": ["grilling", "architecture"],
@@ -409,7 +412,7 @@ function planContext(files: PlanContextFile[] | undefined): string {
  * `task-planning`, or whichever skill a `/<skill>` command names. A plain chat
  * turn names none: the user's words are the instruction.
  */
-function instructedSkill(turn: TurnSpec): string | undefined {
+function instructedSkill(turn: TurnSpec, scope?: TurnScope): string | undefined {
   switch (turn.kind) {
     case "start":
       return "start";
@@ -418,7 +421,10 @@ function instructedSkill(turn: TurnSpec): string | undefined {
     case "flow":
       return commandFlow(turn.skill)?.skill ?? turn.skill;
     case "chat":
-      return undefined;
+      // A message sent with a feature open is a change to the requirements
+      // (S4): the loop's playbook rides it. Other chat loads nothing up front;
+      // the agent loads a skill when the message needs one.
+      return scope?.kind === "feature" ? "refine" : undefined;
   }
 }
 
@@ -499,8 +505,8 @@ export function imageLeftOutOfHistory(filename: string | undefined): string {
   return `[${filename ? `The image ${filename}` : "An image"} was left out here: the model on this connection does not read images.]`;
 }
 
-export function eagerSkillsFor(turn: TurnSpec): string[] {
-  const instructed = instructedSkill(turn);
+export function eagerSkillsFor(turn: TurnSpec, scope?: TurnScope): string[] {
+  const instructed = instructedSkill(turn, scope);
   if (instructed === undefined) return [];
   return [instructed, ...supportingSkills(instructed)];
 }

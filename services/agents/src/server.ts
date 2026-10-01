@@ -514,7 +514,7 @@ export function createApp(deps: CreateAppDeps): Express {
     // up front, skipping the loadSkill round-trip. DERIVED from the turn —
     // which guidance a flow needs is a property of the flow, not of the call,
     // so a console CTA, a typed command and a playground run cannot diverge.
-    const derivedEager = eagerSkillsFor(turn);
+    const derivedEager = eagerSkillsFor(turn, scope);
     const eagerSkills = derivedEager.length > 0 ? derivedEager : undefined;
 
     // Build the per-turn model from the connection (fail as a pre-stream 500).

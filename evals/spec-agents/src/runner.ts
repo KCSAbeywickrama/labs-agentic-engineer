@@ -204,12 +204,47 @@ function finishRun(
   };
 }
 
+/** A feature file's ID: `F2` for specs/requirements/features/F2-approvals.md. */
+const FEATURE_FILE_ID = /^specs\/requirements\/features\/(F\d+)-[^/]+\.md$/;
+
+/**
+ * The requirements section as the console runs it: the product pass (`/start`)
+ * writes the product page and a stub per feature, then each feature is
+ * interviewed on its own (`/interview F<n>`), in ID order, in the same
+ * conversation. One section result: the turns, questions and answers of all
+ * of them, finished only when every one finished.
+ */
+async function runRequirementsSection(
+  session: Awaited<ReturnType<typeof openSession>>,
+  projectDir: string,
+  brief: RequirementsScenario["brief"],
+): Promise<SectionRunResult> {
+  const runs = [await runConversationalSection(session, "requirements", startSpec(brief.idea), brief)];
+  if (!runs[0]!.error) {
+    const features = listRequirementFiles(projectDir).flatMap((f) => FEATURE_FILE_ID.exec(f)?.[1] ?? []);
+    for (const id of features) {
+      const run = await runConversationalSection(session, "requirements", flowSpec("interview", id), brief);
+      runs.push(run);
+      if (run.error) break;
+    }
+  }
+  const error = runs.find((r) => r.error)?.error;
+  return {
+    section: "requirements",
+    records: runs.flatMap((r) => r.records),
+    questionsAsked: runs.reduce((n, r) => n + r.questionsAsked, 0),
+    finishedInterview: runs.every((r) => r.finishedInterview),
+    answers: runs.flatMap((r) => r.answers),
+    ...(error ? { error } : {}),
+  };
+}
+
 export async function runRequirementsScenario(sc: RequirementsScenario, runName: string): Promise<EvalRunOutput> {
   const projectDir = prepareProject(runName);
   const session = await openSession(projectDir, {});
   let run: SectionRunResult;
   try {
-    run = await runConversationalSection(session, "requirements", startSpec(sc.brief.idea), sc.brief);
+    run = await runRequirementsSection(session, projectDir, sc.brief);
   } finally {
     await session.close();
   }
@@ -254,7 +289,7 @@ export async function runChainScenario(sc: ChainScenario, runName: string): Prom
   let designSkipped = false;
   let requirementsAnswers: SimAnswer[] = [];
   try {
-    const req = await runConversationalSection(session, "requirements", startSpec(sc.brief.idea), sc.brief);
+    const req = await runRequirementsSection(session, projectDir, sc.brief);
     records.push(...req.records);
     requirementsAnswers = req.answers;
     const reqOutcome = await scoreConversational(projectDir, req, sc.rubrics.requirements, []);

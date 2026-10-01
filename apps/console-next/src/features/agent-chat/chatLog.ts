@@ -26,7 +26,7 @@ import {
   type Op,
   type QuestionAnswer,
 } from "@aep/agent-stream";
-import { START_COMMAND } from "@aep/contracts/commands";
+import { parseInterviewCommand, START_COMMAND } from "@aep/contracts/commands";
 import { roomPathOf } from "../spec/model/files";
 import type { ConversationMessage } from "./api/conversation";
 import { parseQuestionsInput } from "./questionCards";
@@ -200,7 +200,7 @@ export function interviewWriteUp(
  * How a user row reads. Its text is what went over the wire, and two kinds of
  * line carry machinery: an answer (`Answer to "…": Finance only`) reads as the
  * answer, with its question on the card above it; the kickoff (`/start <idea>`)
- * reads as the user's own idea.
+ * reads as the user's own idea, and a feature's interview as asking for it.
  */
 export function userLineText(text: string): string {
   if (text.startsWith(ANSWER_PREFIX)) {
@@ -210,6 +210,8 @@ export function userLineText(text: string): string {
   const trimmed = text.trim();
   if (trimmed === START_COMMAND) return "Start the project from the brief.";
   if (trimmed.startsWith(`${START_COMMAND} `)) return trimmed.slice(START_COMMAND.length + 1).trim();
+  const interview = parseInterviewCommand(trimmed);
+  if (interview) return `Interview ${interview.featureId}.`;
   return text;
 }
 

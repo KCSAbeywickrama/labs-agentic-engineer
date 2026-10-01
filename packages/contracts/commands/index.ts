@@ -110,3 +110,21 @@ export function parseFlowCommand(line: string): { skill: string; text: string } 
   if (!m) return null;
   return { skill: m[1]!, text: m[2]?.trim() ?? "" };
 }
+
+/**
+ * `/interview F<n>` — interview one feature (the `interview` skill). The
+ * console sends it when the user starts a feature's interview; the feature is
+ * named by its ID, which a rename never changes.
+ */
+export const INTERVIEW_COMMAND = "/interview";
+
+/** The line that starts a feature's interview. */
+export function interviewCommand(featureId: string): string {
+  return `${INTERVIEW_COMMAND} ${featureId}`;
+}
+
+/** The feature an `/interview` line names, or null for any other line. */
+export function parseInterviewCommand(line: string): { featureId: string } | null {
+  const m = /^\/interview\s+(F[0-9]+)\s*$/.exec(line.trim());
+  return m ? { featureId: m[1]! } : null;
+}

@@ -57,6 +57,8 @@ func TestCatalogTurn(t *testing.T) {
 		{"start flow, no room", turnJob{flow: "start"}, true},
 		{"amend flow, no room", turnJob{flow: "amend"}, true},
 		{"settle flow, no room", turnJob{flow: "settle"}, true},
+		{"interview flow, no room", turnJob{flow: "interview"}, true},
+		{"refine flow, no room", turnJob{flow: "refine"}, true},
 		{"chat, no room", turnJob{flow: "chat"}, false},
 		{"no flow, no room", turnJob{}, false},
 	}

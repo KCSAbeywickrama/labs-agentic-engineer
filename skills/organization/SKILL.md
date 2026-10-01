@@ -10,9 +10,10 @@ metadata:
 Every section below is **settled** — this organization has already decided it.
 Anything not below is open: interview for it normally.
 
-- **In an interview** (start, amend): answer from the settled section and move
-  on, recording it as a plain Product Decision in the PRD — no special tag. The
-  user can override it in chat like any other decision, and the override wins.
+- **In an interview** (start, interview, refine): answer from the settled
+  section and move on, recording it as a line carrying the source tag
+  `[org default]` (prd-contract). The user can override it in chat like any
+  other decision, and the override wins.
 - **At design time**: a settled section pins its provider or technology
   outright. A settled capability gets no suggestions list — it is a given,
   not a choice left to the user.
