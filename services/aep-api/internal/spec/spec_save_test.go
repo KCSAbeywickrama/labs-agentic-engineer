@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -516,7 +517,7 @@ func TestSaveSpec_DesignOutOfDatePerFeature(t *testing.T) {
 	if !errors.As(err, &ve) {
 		t.Fatalf("want the stale feature refused, got %v", err)
 	}
-	if len(ve.Files) != 1 || ve.Files[0].Code != codeDesignOutdated || ve.Files[0].Path != "specs/requirements/features/F2-notify.md" {
+	if len(ve.Files) != 1 || ve.Files[0].Code != codeFeatureNotBuildable || ve.Files[0].Path != "specs/requirements/features/F2-notify.md" {
 		t.Fatalf("want only F2 out of date, got %+v", ve.Files)
 	}
 
@@ -544,5 +545,70 @@ func TestDesignedFeatures(t *testing.T) {
 		if got := DesignedFeatures(line); !reflect.DeepEqual(got, want) {
 			t.Errorf("DesignedFeatures(%q) = %v, want %v", line, got, want)
 		}
+	}
+}
+
+// A version is a selection (B1): a pick builds what it carries, records it in
+// the tag, and the version's scope is exactly those stories. A stale feature
+// the pick does not touch stands aside; a new pick on the same tree is a new
+// version.
+func TestSaveSpec_ABuildIsASelection(t *testing.T) {
+	t.Parallel()
+	seed := validSpecSeed()
+	seed["specs/requirements/features/F2-notify.md"] = "# Notify\n\n## Purpose\n\nTells people.\n\nNeeds: F1.\n\n## User Stories\n\n- F2.1 As a user, I want S, so that s.\n"
+	seed["specs/design/components/svc/design.json"] = `{"name":"svc","type":"service","version":"1.0.0","language":"go",` +
+		`"buildpack":"go","appPath":".","entrypoint":"main.go","exposure":"internet",` +
+		`"stories":["F1.1","F2.1"],"dependencies":[],"description":"a service"}`
+	r := newRig(t, seed)
+	ctx := context.Background()
+
+	v1, err := r.svc.SaveSpec(ctx, r.org, r.proj, SaveRequest{Pick: &reqspec.Pick{Features: []string{"F1"}}})
+	if err != nil {
+		t.Fatalf("pick F1: %v", err)
+	}
+	scope, err := r.svc.BuildScopeAtTag(ctx, r.org, r.proj, v1.Tag)
+	if err != nil || fmt.Sprint(scope.InScope) != "[F1.1]" {
+		t.Fatalf("v1 scope = %v (%v), want F1's story only", scope.InScope, err)
+	}
+
+	// Same tree, a new pick: F2 needs F1, which v1 built, so F2 alone.
+	v2, err := r.svc.SaveSpec(ctx, r.org, r.proj, SaveRequest{Pick: &reqspec.Pick{Features: []string{"F2"}}})
+	if err != nil {
+		t.Fatalf("pick F2: %v", err)
+	}
+	if v2.Tag == v1.Tag || v2.Status != SpecSaveApproved {
+		t.Fatalf("a new pick on the same tree reused %s: %+v", v1.Tag, v2)
+	}
+	scope, _ = r.svc.BuildScopeAtTag(ctx, r.org, r.proj, v2.Tag)
+	if fmt.Sprint(scope.InScope) != "[F2.1]" {
+		t.Fatalf("v2 scope = %v, want F2's story only", scope.InScope)
+	}
+
+	// The same pick again on the same tree is the same version.
+	again, err := r.svc.SaveSpec(ctx, r.org, r.proj, SaveRequest{Pick: &reqspec.Pick{Features: []string{"F2"}}})
+	if err != nil || again.Status != SpecSaveUnchanged || again.Tag != v2.Tag {
+		t.Fatalf("the same pick again = %+v (%v), want %s unchanged", again, err, v2.Tag)
+	}
+
+	// An open dependency keeps its feature out; the pick that needs it is refused.
+	_, err = r.svc.SaveSpec(ctx, r.org, r.proj, SaveRequest{
+		Pick:    &reqspec.Pick{Features: []string{"F2"}},
+		Blocked: map[string]string{"F2": "it waits on xero — no provider chosen yet"},
+	})
+	var ve *SpecValidationError
+	if !errors.As(err, &ve) || len(ve.Files) != 1 || ve.Files[0].Code != codeFeatureNotBuildable ||
+		ve.Files[0].Message != "F2 Notify: it waits on xero — no provider chosen yet" {
+		t.Fatalf("blocked pick = %v", err)
+	}
+}
+
+func TestScopeBodyRoundTrips(t *testing.T) {
+	plan := reqspec.BuildPlan{Features: []string{"F1", "F2"}, ProductWide: []string{"P1"}, HeldBack: []string{"F2.4"}}
+	got, ok := parseScope("Build\n\n" + scopeBody(plan))
+	if !ok || !samePlan(got, plan) {
+		t.Fatalf("parseScope = %+v, %v", got, ok)
+	}
+	if _, ok := parseScope("Build"); ok {
+		t.Fatal("a body with no scope parsed as one")
 	}
 }

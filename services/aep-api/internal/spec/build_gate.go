@@ -107,7 +107,9 @@ const scaffoldPlaceholderMarker = "Scaffolded from design.cell"
 // relative to specs/requirements/) and the design bundle (keys relative to
 // specs/design/). It returns FileValidationError rows (repo-relative paths are
 // stamped by the caller) — empty means the gate passes.
-func validateBuildGate(reqFiles, designFiles map[string]string) []FileValidationError {
+//
+// inScope is the story IDs the version carries: only they must be claimed.
+func validateBuildGate(reqFiles, designFiles map[string]string, inScope map[string]bool) []FileValidationError {
 	cellSource, ok := designFiles[DesignRootFile]
 	if !ok || strings.TrimSpace(cellSource) == "" {
 		return []FileValidationError{{
@@ -150,7 +152,7 @@ func validateBuildGate(reqFiles, designFiles map[string]string) []FileValidation
 		}
 	}
 	for _, st := range stories {
-		if !claimed[st.ID] {
+		if inScope[st.ID] && !claimed[st.ID] {
 			errs = append(errs, FileValidationError{
 				Path: DesignRootFile, Code: codeUncoveredStory,
 				Message: fmt.Sprintf("story %s is in the requirements but no component's design.json lists it in `stories` — extend the design or drop the story", st.ID),

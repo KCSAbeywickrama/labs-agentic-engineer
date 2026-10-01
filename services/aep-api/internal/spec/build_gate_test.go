@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
 	"github.com/wso2/aep/aep-api/internal/platform/securityspec"
 )
 
@@ -81,7 +82,7 @@ func completeDesignFiles() map[string]string {
 
 func gateErrors(t *testing.T, designFiles map[string]string) []FileValidationError {
 	t.Helper()
-	return validateBuildGate(gateRequirements, designFiles)
+	return validateBuildGate(gateRequirements, designFiles, everyStory(gateRequirements))
 }
 
 func codesOf(errs []FileValidationError) []string {
@@ -100,7 +101,7 @@ func TestBuildGate_CompleteDesignPasses(t *testing.T) {
 }
 
 func TestBuildGate_MissingCell(t *testing.T) {
-	errs := validateBuildGate(gateRequirements, map[string]string{})
+	errs := validateBuildGate(gateRequirements, map[string]string{}, everyStory(gateRequirements))
 	if len(errs) != 1 || errs[0].Code != "MISSING_DESIGN_CELL" {
 		t.Fatalf("want MISSING_DESIGN_CELL, got %+v", errs)
 	}
@@ -198,7 +199,7 @@ func TestBuildGate_UnparseableStoriesRefused(t *testing.T) {
 	files := completeDesignFiles()
 	errs := validateBuildGate(map[string]string{
 		"prd.md": "# PRD\n\n## User Stories\n\n1. As a user, I want A, so that a.\n",
-	}, files)
+	}, files, nil)
 	found := false
 	for _, e := range errs {
 		if e.Code == "MISSING_USER_STORIES" {
@@ -467,7 +468,7 @@ func TestBuildGate_StaleStoryCitations(t *testing.T) {
 	files := completeDesignFiles()
 	files["components/lunch-web/design.json"] = enriched("lunch-web", "web-application", "F1.1", "F1.2", "F1.3", "F2", "F9.9")
 	var got []string
-	for _, e := range validateBuildGate(reqs, files) {
+	for _, e := range validateBuildGate(reqs, files, everyStory(reqs)) {
 		if e.Code == codeStaleStoryCitation {
 			got = append(got, e.Message)
 		}
@@ -489,7 +490,7 @@ func TestValidateSpecBundles_RequirementIDProblems(t *testing.T) {
 		reqs[k] = v
 	}
 	reqs["features/F2-notifications.md"] += "- F2.1 As a member, I get the same message twice.\n"
-	err := validateSpecBundles(reqs, completeDesignFiles(), nil)
+	err := validateSpecBundles(reqs, completeDesignFiles(), nil, nil, nil)
 	var ve *SpecValidationError
 	if !errors.As(err, &ve) {
 		t.Fatalf("want a SpecValidationError, got %v", err)
@@ -503,4 +504,14 @@ func TestValidateSpecBundles_RequirementIDProblems(t *testing.T) {
 	if !found {
 		t.Fatalf("want DUPLICATE_ID on the feature file, got %+v", ve.Files)
 	}
+}
+
+// everyStory is every story the requirements define: a build of the whole
+// product, which is what these gate tests check.
+func everyStory(reqFiles map[string]string) map[string]bool {
+	out := map[string]bool{}
+	for _, st := range reqspec.Parse(reqFiles).Stories() {
+		out[st.ID] = true
+	}
+	return out
 }

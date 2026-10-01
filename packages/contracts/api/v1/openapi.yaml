@@ -4044,11 +4044,39 @@ components:
             $ref: '#/components/schemas/BuildInputItem'
           type: array
           nullable: true
+        selection:
+          $ref: '#/components/schemas/BuildSelection'
         version:
           description: The tag name to cut for this version. Empty takes the suggested one. Must be
             a valid tag name; a name already in use is a 409. Ignored when the spec tree is
             unchanged, because that build reuses the existing version.
           type: string
+      type: object
+    BuildSelection:
+      additionalProperties: false
+      description: >
+        What this version builds (B1): the features the user picked, and any
+        product-wide requirement added since the last build that they picked on
+        its own. The server plans the rest — every unbuilt feature a picked one
+        needs, every unbuilt product-wide requirement that reaches one — and
+        holds back a story that needs a feature neither built nor in this build.
+        A feature whose design is out of date, that waits on an open dependency,
+        or that has not been interviewed cannot be built; picking one (or one a
+        pick needs) refuses the build with a FEATURE_NOT_BUILDABLE row naming
+        why. Absent, the build carries every feature that can be designed.
+      properties:
+        features:
+          items:
+            pattern: ^F[0-9]+$
+            type: string
+          type: array
+        productWide:
+          items:
+            pattern: ^P[0-9]+$
+            type: string
+          type: array
+      required:
+      - features
       type: object
     BuildResponse:
       additionalProperties: false

@@ -20,7 +20,7 @@ import { describe, expect, it } from "vitest";
 import { buildBody, fixBody, repairOfBody, selectionOfBody } from "./buildSelection";
 
 describe("the build selection on the wire", () => {
-  it("rides a provisional field beside the contract's own, with no inputs and no version", () => {
+  it("rides the contract's selection, with no inputs and no version", () => {
     const body = buildBody({ features: ["F1", "F2"], productWide: ["P5"] });
     expect(body).toEqual({ inputs: [], selection: { features: ["F1", "F2"], productWide: ["P5"] } });
     expect(body).not.toHaveProperty("version");

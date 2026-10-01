@@ -21,6 +21,7 @@ import (
 	"errors"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
@@ -65,7 +66,10 @@ type RepoLookup interface {
 // unwraps *spec.SpecValidationError into the 422 detail, and
 // spec.ErrVersionNameTaken into the 409.
 type SpecTagger interface {
-	TagSpec(ctx context.Context, orgID, projectID, version string) (*spec.SpecSaveResult, error)
+	//
+	// pick is what the user picked (nil: every feature that can be designed);
+	// blocked names features an open dependency keeps out of this build.
+	TagSpec(ctx context.Context, orgID, projectID, version string, pick *reqspec.Pick, blocked map[string]string) (*spec.SpecSaveResult, error)
 	// BuildScopeAtTag reads the tag's story scope (#369): the milestone the
 	// claim mints is the version's.
 	BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (spec.BuildScope, error)

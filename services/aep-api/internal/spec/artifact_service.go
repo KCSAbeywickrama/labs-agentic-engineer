@@ -32,6 +32,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
@@ -95,6 +96,14 @@ type SaveRequest struct {
 	// and a stale read here fails the gate or tags the wrong tree. Empty →
 	// resolve HEAD (standalone save with no prior apply).
 	CommitSHA string `json:"commitSha,omitempty"`
+	// Pick is what the user picked for this version (B1): features, and
+	// product-wide items added since the last build. Nil builds every feature
+	// that can be designed.
+	Pick *reqspec.Pick `json:"-"`
+	// Blocked names features a build cannot carry for a reason outside the
+	// requirements (E2: an external dependency still open), with the reason in
+	// words. A picked feature among them is refused; the rest build.
+	Blocked map[string]string `json:"-"`
 }
 
 // commitSHAPattern is the accepted shape of a caller-provided CommitSHA

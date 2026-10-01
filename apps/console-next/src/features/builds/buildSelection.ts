@@ -20,15 +20,13 @@ import type { components } from "../../generated/aep-api";
 
 // A build is a selection of features: the ones the user picked in the build
 // picker, and any new product-wide item that pulls in every feature it
-// applies to. The contract's build request cannot say that yet (backend B1).
-// Until it does, this module is the one place a selection meets the wire: it
-// rides a PROVISIONAL `selection` field beside the contract's own fields.
-// aep-api ignores unknown JSON fields, so only MSW reads it. When B1 lands,
-// `buildBody` and `selectionOfBody` change and nothing else does.
+// applies to. It rides the contract's `selection`; the server plans the rest
+// (what the picked features need) and refuses a feature that cannot be built.
 //
-// A repair build (Fix on a failing scenario: v1.1 fixes v1) rides the same
-// way, as a PROVISIONAL `repair` field naming the version and the stories
-// that failed in it: the contract has no way to ask for one yet.
+// A repair build (Fix on a failing scenario: v1.1 fixes v1) rides a
+// PROVISIONAL `repair` field naming the version and the stories that failed
+// in it: the contract has no way to ask for one yet (backend B4). aep-api
+// ignores unknown JSON fields, so only MSW reads it.
 
 type BuildRequest = components["schemas"]["BuildRequest"];
 
@@ -44,14 +42,13 @@ export interface BuildRepair {
   stories: string[];
 }
 
-/** PROVISIONAL (B1): the selection, or the repair, which the contract cannot carry yet. Read only by MSW. */
-interface ProvisionalSelectionField {
-  selection?: BuildSelection;
+/** PROVISIONAL (B4): the repair, which the contract cannot carry yet. Read only by MSW. */
+interface ProvisionalRepairField {
   repair?: BuildRepair;
 }
 
-/** A build's request body: the contract's, plus the provisional selection. */
-export type BuildBody = BuildRequest & ProvisionalSelectionField;
+/** A build's request body: the contract's, plus the provisional repair. */
+export type BuildBody = BuildRequest & ProvisionalRepairField;
 
 /**
  * The request body that starts a build of this selection. No inputs and no
@@ -67,9 +64,11 @@ export function buildBody(selection: BuildSelection): BuildBody {
 
 /** A body's selection, read back as the server would; null when it carries none or a malformed one. */
 export function selectionOfBody(body: BuildBody): BuildSelection | null {
+  // The body comes off the wire (MSW reads it as JSON), so its shape is checked.
   const s = body.selection as Partial<BuildSelection> | undefined;
   const ids = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
   if (!s || !ids(s.features) || !ids(s.productWide ?? [])) return null;
+  if (s.features.length + (s.productWide?.length ?? 0) === 0) return null;
   return { features: s.features, productWide: s.productWide ?? [] };
 }
 

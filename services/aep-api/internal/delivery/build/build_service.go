@@ -33,6 +33,7 @@ import (
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/gen"
+	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
 
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/spec"
@@ -92,7 +93,7 @@ type Deps struct {
 	// Nil-safe: a build with no coordinator (and no inputs) behaves exactly as
 	// before this feature.
 	Coord *InputsCoordinator
-	// Design backs the build-time dependency hard gate (dependencyGateFailures):
+	// Design backs the build-time dependency hard gate (dependencyGate):
 	// the SAME PreflightDesignReader port (and, in production, the same
 	// designComponents{store: artifactStore} adapter) PreflightSvc reads for the
 	// GET-time drawer items — so the hard gate re-runs spec.ComputeDependencyStatus's
@@ -205,7 +206,7 @@ type BuildList struct {
 // propagates so the caller logs it and the reconcile sweep heals later.
 func (s *Service) StartProjectBuild(ctx context.Context, orgID, projectID string) error {
 	// No name: a build the platform starts for itself takes the suggestion.
-	_, failures, err := s.Run(ctx, orgID, projectID, nil, "")
+	_, failures, err := s.Run(ctx, orgID, projectID, nil, "", nil)
 	if err != nil {
 		if errors.Is(err, ErrBuildAlreadyRunning) {
 			return nil
@@ -228,10 +229,13 @@ func (s *Service) StartProjectBuild(ctx context.Context, orgID, projectID string
 // ErrBuildAlreadyRunning sentinel, which each caller interprets for its own
 // context (409 vs. idempotent success).
 //
-// The dependency hard gate (dependencyGateFailures) runs after the pre-tag
+// The dependency hard gate (dependencyGate) runs after the pre-tag
 // inputs are applied but before the tag is cut — see the inline comment at
 // its call site for why that ordering matters.
-func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []BuildInputItem, version string) (string, []InputFailure, error) {
+//
+// pick is what the user picked for this version (B1); nil builds every
+// feature that can be designed.
+func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []BuildInputItem, version string, pick *reqspec.Pick) (string, []InputFailure, error) {
 	// One live DEV RUN per project — the milestone model's mutex (§5). The
 	// partial unique index behind TryAdmit is the authority; this read is what
 	// turns the race into a conflict that names itself, and it runs BEFORE the
@@ -281,7 +285,7 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 	// THIS build request (e.g. a drawer-pasted external-spec, which ApplyPreTag
 	// just committed to HEAD above) is reflected in the fresh read below, but
 	// BEFORE the tag-cut so an unresolved external dependency never reaches it.
-	gateFailures, gerr := s.dependencyGateFailures(ctx, orgID, projectID)
+	gateFailures, blocked, gerr := s.dependencyGate(ctx, orgID, projectID)
 	if gerr != nil {
 		return "", nil, &EdgeError{Status: 500, Message: "check dependency gate: " + gerr.Error()}
 	}
@@ -292,7 +296,7 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 	// The whole-spec hard gate runs INSIDE TagSpec, before the tag is cut —
 	// the returned tag always names a validated requirements+design pair. An
 	// unchanged spec returns the existing tag; the workflow still (re)runs.
-	res, err := s.tagger.TagSpec(ctx, orgID, projectID, version)
+	res, err := s.tagger.TagSpec(ctx, orgID, projectID, version, pick, blocked)
 	if err != nil {
 		return "", nil, mapTagError(err)
 	}

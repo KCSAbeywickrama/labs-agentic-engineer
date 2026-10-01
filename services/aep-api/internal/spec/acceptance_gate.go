@@ -64,7 +64,9 @@ func acceptanceBundleFilter(rel string) bool {
 // acceptance directory) against the requirements. Paths come back
 // repo-relative. No acceptance files at all is not this check's business:
 // whether a project has an oracle is validation's.
-func acceptanceFindings(spec reqspec.Spec, files map[string]string) []FileValidationError {
+//
+// features is what the version carries: only their stories must be on a rule.
+func acceptanceFindings(spec reqspec.Spec, files map[string]string, features []string) []FileValidationError {
 	var out []FileValidationError
 	tagged := map[string][]string{}
 	for _, rel := range slices.Sorted(maps.Keys(files)) {
@@ -92,7 +94,7 @@ func acceptanceFindings(spec reqspec.Spec, files map[string]string) []FileValida
 	}
 	for _, f := range spec.Features {
 		rel := acceptanceFileFor(files, f.ID)
-		if rel == "" || !f.Designable() {
+		if rel == "" || !slices.Contains(features, f.ID) {
 			continue
 		}
 		for _, st := range f.Stories {

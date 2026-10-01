@@ -30,6 +30,7 @@ import (
 	"slices"
 
 	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
 // BuildScope is one tag's story scope. An empty InScope means the snapshot
@@ -38,8 +39,10 @@ import (
 type BuildScope struct {
 	// Tag is the spec version this scope was computed at (e.g. "v3").
 	Tag string
-	// InScope is every story the requirements define, by ID ("F2.3"), in ID
-	// order.
+	// InScope is every story the version builds, by ID ("F2.3"), in ID order:
+	// the stories of the features its annotation names, but the held-back
+	// ones (B1). A version cut before builds were selections carried every
+	// story the requirements define.
 	InScope []string
 	// StoryTitles maps a story ID to its words (reqspec.Story.Text).
 	StoryTitles map[string]string
@@ -80,12 +83,24 @@ func (s *artifactService) BuildScopeAtTag(ctx context.Context, orgID, projectID,
 	if err != nil {
 		return scope, nil
 	}
-	stories := reqspec.Parse(reqFiles).Stories()
+	spec := reqspec.Parse(reqFiles)
+	stories := spec.Stories()
 	if len(stories) == 0 {
 		return scope, nil
 	}
+	carried := map[string]bool{}
+	if plan, ok := s.versionScope(ctx, ref, tag); ok {
+		carried = storySet(spec, plan)
+	} else {
+		for _, st := range stories {
+			carried[st.ID] = true
+		}
+	}
 	scope.StoryTitles = map[string]string{}
 	for _, st := range stories {
+		if !carried[st.ID] {
+			continue
+		}
 		scope.InScope = append(scope.InScope, st.ID)
 		scope.StoryTitles[st.ID] = st.Text
 	}
@@ -103,4 +118,20 @@ func (s *artifactService) BuildScopeAtTag(ctx context.Context, orgID, projectID,
 		}
 	}
 	return scope, nil
+}
+
+// versionScope is a version's plan, read from its tag's annotation, or false
+// when the tag carries none (a version cut before builds were selections) or
+// cannot be listed.
+func (s *artifactService) versionScope(ctx context.Context, ref sourcecontrol.RepoRef, tag string) (reqspec.BuildPlan, bool) {
+	tags, err := s.listVersionTags(ctx, ref)
+	if err != nil {
+		return reqspec.BuildPlan{}, false
+	}
+	for _, t := range tags {
+		if t.Name == tag {
+			return parseScope(t.Body)
+		}
+	}
+	return reqspec.BuildPlan{}, false
 }

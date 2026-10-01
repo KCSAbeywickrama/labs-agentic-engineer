@@ -40,7 +40,7 @@ func TestAcceptanceFindings(t *testing.T) {
 		"lunch.feature": "Feature: Lunch\n\n  @story-4\n  Rule: f\n",
 	}
 	var got []string
-	for _, f := range acceptanceFindings(spec, files) {
+	for _, f := range acceptanceFindings(spec, files, []string{"F1", "F2"}) {
 		got = append(got, f.Path+" "+f.Code+" "+f.Message)
 	}
 	want := []string{
@@ -52,7 +52,7 @@ func TestAcceptanceFindings(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("findings =\n%v\nwant\n%v", got, want)
 	}
-	if got := acceptanceFindings(spec, nil); len(got) != 0 {
+	if got := acceptanceFindings(spec, nil, []string{"F1", "F2"}); len(got) != 0 {
 		t.Errorf("no acceptance files is validation's business, got %+v", got)
 	}
 }

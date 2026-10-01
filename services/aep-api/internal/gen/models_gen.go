@@ -1570,6 +1570,9 @@ type BuildProgressRunKind string
 type BuildRequest struct {
 	Inputs []BuildInputItem `json:"inputs,omitempty"`
 
+	// Selection What this version builds (B1): the features the user picked, and any product-wide requirement added since the last build that they picked on its own. The server plans the rest — every unbuilt feature a picked one needs, every unbuilt product-wide requirement that reaches one — and holds back a story that needs a feature neither built nor in this build. A feature whose design is out of date, that waits on an open dependency, or that has not been interviewed cannot be built; picking one (or one a pick needs) refuses the build with a FEATURE_NOT_BUILDABLE row naming why. Absent, the build carries every feature that can be designed.
+	Selection BuildSelection `json:"selection,omitempty"`
+
 	// Version The tag name to cut for this version. Empty takes the suggested one. Must be a valid tag name; a name already in use is a 409. Ignored when the spec tree is unchanged, because that build reuses the existing version.
 	Version string `json:"version,omitempty"`
 }
@@ -1587,6 +1590,12 @@ type BuildRunList struct {
 	// Runs Newest run first. A milestone sees SEQUENTIAL runs across its life — the spec build that created the version, then any later incident adoption into it.
 	Runs []MilestoneRunView `json:"runs"`
 	Tag  string             `json:"tag"`
+}
+
+// BuildSelection What this version builds (B1): the features the user picked, and any product-wide requirement added since the last build that they picked on its own. The server plans the rest — every unbuilt feature a picked one needs, every unbuilt product-wide requirement that reaches one — and holds back a story that needs a feature neither built nor in this build. A feature whose design is out of date, that waits on an open dependency, or that has not been interviewed cannot be built; picking one (or one a pick needs) refuses the build with a FEATURE_NOT_BUILDABLE row naming why. Absent, the build carries every feature that can be designed.
+type BuildSelection struct {
+	Features    []string `json:"features"`
+	ProductWide []string `json:"productWide,omitempty"`
 }
 
 // BuildStage Build-stage aggregate on ProjectStatus (#184) — the version the newest milestone run is working, and how that run is doing. Deliberately count-free - the only honest source of a per-version task tally is the version's milestone on GitHub, and this endpoint is polled at 5s. The console renders counts from the list-tasks response it already holds, on the surface that already pays for it.

@@ -29,12 +29,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
+	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/delivery/build"
@@ -64,15 +66,19 @@ type fakeTagger struct {
 	// version records the name the build asked to cut — empty when it took the
 	// platform's suggestion.
 	version string
+	// pick and blocked record what the build asked the version to carry.
+	pick    *reqspec.Pick
+	blocked map[string]string
 }
 
 func (f *fakeTagger) BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (spec.BuildScope, error) {
 	return spec.BuildScope{Tag: tag}, nil
 }
 
-func (f *fakeTagger) TagSpec(_ context.Context, _, _, version string) (*spec.SpecSaveResult, error) {
+func (f *fakeTagger) TagSpec(_ context.Context, _, _, version string, pick *reqspec.Pick, blocked map[string]string) (*spec.SpecSaveResult, error) {
 	f.called++
 	f.version = version
+	f.pick, f.blocked = pick, blocked
 	if f.seq != nil {
 		*f.seq = append(*f.seq, "tag")
 	}
@@ -972,6 +978,36 @@ func TestBuild_DependencyGate_UnchosenExternal_BlocksNoTagNoWorkflow(t *testing.
 	}
 	if len(spy.milestones()) != 0 {
 		t.Errorf("a version was claimed despite the dependency gate blocking: %v", spy.milestones())
+	}
+}
+
+// An open dependency of a component that serves stories blocks only the
+// features those stories belong to (E2): the build goes on to the save, which
+// refuses those features if they are picked and builds the rest.
+func TestBuild_DependencyGate_BlocksOnlyTheFeaturesItServes(t *testing.T) {
+	design := &gateDesign{comps: []spec.DesignComponent{
+		{Name: "xero-sync", ComponentType: spec.ComponentTypeService, Stories: []string{"F3.1", "F3.2"},
+			Dependencies: []spec.Dependency{
+				{Kind: spec.DependencyKindExternal, Name: "xero", Status: spec.DependencyStatusUnresolved, Reason: spec.DependencyReasonNeedsInput},
+			}},
+		{Name: "api", ComponentType: spec.ComponentTypeService, Stories: []string{"F1.1", "F2.1"}},
+	}}
+	spy := newPlanSpy()
+	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1", Status: spec.SpecSaveApproved}}
+	svc := withPlanPath(build.NewService(build.Deps{
+		Repos: fakeRepos{}, Tagger: tagger, Design: design,
+	}), spy)
+
+	code, body := postBuild(t, svc, "shop")
+	if code != 200 {
+		t.Fatalf("build: got %d body=%s", code, body)
+	}
+	if out := decodeBody[gen.BuildResponse](t, body); len(out.Failures) != 0 || out.Tag != "v1" {
+		t.Fatalf("response = %+v, want the build to go on", out)
+	}
+	want := map[string]string{"F3": "it waits on xero — No provider chosen yet — choose which one to use."}
+	if !reflect.DeepEqual(tagger.blocked, want) {
+		t.Errorf("blocked = %v, want %v", tagger.blocked, want)
 	}
 }
 
