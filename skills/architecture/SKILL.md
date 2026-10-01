@@ -105,21 +105,23 @@ Do NOT split by:
 system whose requirements describe a browser app lands at one service + one
 web-application; a system whose only surface is an agent lands at one service +
 one ai-agent and NO web-application. An agent is a complete surface on its own —
-the console's Test tab talks to a deployed agent directly — so "there must be
+the platform's Try it app talks to a deployed agent directly — so "there must be
 something for the user to open" is not a reason to add a SPA. Adding an
 unrequested web-application is the same failure as splitting by domain concept:
 a shape imposed on the requirements instead of read from them. Name components
 in kebab-case after their responsibility (`expense-api`, `expense-webapp`,
 `report-worker`, `packing-agent`).
 
-**An AI agent is `"ai-agent"`.** Reach for it when the requirements call for a
+**An AI agent is `"ai-agent"`, and every model call is one.** It is the only
+component type with model access. Reach for it when the requirements call for a
 conversational or autonomous surface — a user talking to the system in their own
-words rather than filling in a form. Its behaviour is authored as
+words rather than filling in a form — and for every agent the PRD's Product
+Decisions name. Its behaviour is authored as
 `agent.afm.md` (the `agent-building` skill), it is implemented in TypeScript, and
 it pins `["agent-building"]`. It is a normal deployable that calls other
 components over HTTP: give it a `component` dependency for every API it uses.
 **An agent a signed-in user reaches is a protected backend** — whether the
-caller is a sibling web-application or the console's Test tab, set
+caller is a sibling web-application or the platform's Try it app, set
 `"exposure": "internet"` (a browser cannot reach an intranet address, so an
 intranet agent has nothing that can talk to it) AND give it the project's
 shared `thunder-app`
@@ -132,6 +134,11 @@ key, so an unauthenticated agent endpoint is a billing hole rather than a
 tolerable one.
 **Declare no dependency for model access** — every `ai-agent` gets it from its
 component type, on the organisation's own key, so there is nothing to choose.
+**An agent whose work needs files declares them.** Give it `x-aep.attachments`
+with the types and counts the feature needs (`agent-building` has the ceilings
+and the contract). One whose work runs with nobody signed in — a ticket from an
+arriving email, a nightly job — does not fit yet: ask the user at design
+altitude whether a person does that step for now or the feature waits.
 **An `ai-agent` with server memory needs a Postgres for its conversation
 store.** Give it a `platform-resource` dependency with `resourceType:
 "postgres-cnpg"` — the PVC-backed type, so a conversation survives a pod
@@ -317,7 +324,7 @@ operations its contract actually exposes:
   its scope list are all derived by the platform (the scopes from the permission
   catalog `security-design` writes on `security.json`). A project with no web
   application still declares the dependency on its API — the client is what the
-  console's Test tab and the validation agent sign in through.
+  platform's Try it app and the validation agent sign in through.
   `thunder-authentication` owns the coding-time rule, and `security-design`
   owns which roles sign in through it and what they may do.
 

@@ -120,3 +120,35 @@ test("rejects an unknown memory type", () => {
   const problem = checkAgentAfm(content, "lunch-agent");
   assert.ok(problem, "expected a problem for memory.type shared");
 });
+
+const ATTACH = "x-aep:\n  attachments:\n    types: [image/jpeg, image/png]\n    maxFiles: 1\n    maxFileSizeMB: 5\n";
+
+test("accepts x-aep.attachments within the ceilings", () => {
+  assert.equal(checkAgentAfm(VALID.replace("x-aep:\n", ATTACH), "lunch-agent"), null);
+});
+
+test("rejects an attachment type outside the ceiling list", () => {
+  const content = VALID.replace("x-aep:\n", ATTACH.replace("image/png", "image/heic"));
+  const problem = checkAgentAfm(content, "lunch-agent");
+  assert.ok(problem && problem.message.startsWith("x-aep.attachments.types"), problem?.message);
+});
+
+test("rejects maxFiles above 10", () => {
+  const problem = checkAgentAfm(VALID.replace("x-aep:\n", ATTACH.replace("maxFiles: 1", "maxFiles: 11")), "lunch-agent");
+  assert.ok(problem && problem.message.startsWith("x-aep.attachments.maxFiles"), problem?.message);
+});
+
+test("rejects maxFileSizeMB above 5", () => {
+  const problem = checkAgentAfm(VALID.replace("x-aep:\n", ATTACH.replace("maxFileSizeMB: 5", "maxFileSizeMB: 6")), "lunch-agent");
+  assert.ok(problem && problem.message.startsWith("x-aep.attachments.maxFileSizeMB"), problem?.message);
+});
+
+test("rejects attachments missing a limit", () => {
+  const problem = checkAgentAfm(VALID.replace("x-aep:\n", ATTACH.replace("    maxFiles: 1\n", "")), "lunch-agent");
+  assert.ok(problem && problem.message.startsWith("x-aep.attachments.maxFiles"), problem?.message);
+});
+
+test("rejects a repeated attachment type", () => {
+  const problem = checkAgentAfm(VALID.replace("x-aep:\n", ATTACH.replace("image/png", "image/jpeg")), "lunch-agent");
+  assert.ok(problem && problem.message.startsWith("x-aep.attachments.types"), problem?.message);
+});

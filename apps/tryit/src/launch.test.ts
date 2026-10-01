@@ -25,6 +25,16 @@ const hash =
   "&endpoint=http%3A%2F%2Fgw%2Fc-http";
 
 describe("parseLaunch", () => {
+  it("reads the attachments spec", () => {
+    const launch = parseLaunch(`${hash}&attach_types=image%2Fjpeg%2Capplication%2Fpdf&attach_max_files=2&attach_max_mb=5`);
+    expect(launch?.attachments).toEqual({ types: ["image/jpeg", "application/pdf"], maxFiles: 2, maxFileSizeMB: 5 });
+  });
+
+  it("has no attachments when the params are absent or malformed", () => {
+    expect(parseLaunch(hash)?.attachments).toBeUndefined();
+    expect(parseLaunch(`${hash}&attach_types=image%2Fjpeg&attach_max_files=zero&attach_max_mb=5`)?.attachments).toBeUndefined();
+  });
+
   it("reads every coordinate off the agent route", () => {
     expect(parseLaunch(hash)).toEqual({
       project: "p",

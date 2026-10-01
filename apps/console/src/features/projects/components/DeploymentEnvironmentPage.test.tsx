@@ -146,6 +146,8 @@ const mockDependencies: ComponentDependencies[] = [
   },
 ];
 let mockDependenciesPending = false;
+// The agents' documents, by path: the page reads x-aep.attachments from them.
+let mockAfmFiles: Record<string, string> = {};
 vi.mock("../../spec/api/queries", () => ({
   useDesignDependencies: () => ({
     data: mockDependenciesPending ? undefined : mockDependencies,
@@ -153,6 +155,8 @@ vi.mock("../../spec/api/queries", () => ({
     isError: false,
     refetch: vi.fn(),
   }),
+  useSpecFiles: () => ({ data: Object.keys(mockAfmFiles).map((path) => ({ path, sha: "s" })) }),
+  useSpecFileContents: () => mockAfmFiles,
 }));
 vi.mock("../../settings/api/queries", () => ({
   useExternalResources: () => ({ data: [], isPending: false, isError: false, refetch: vi.fn() }),
@@ -691,6 +695,55 @@ describe("DeploymentEnvironmentPage — try it out (ADR-0032)", () => {
       mockTestUsers = [
         { username: "test-engineer", roles: ["Engineer"], scopes: ["triage:use"], exists: true, owned: true, supplied: false },
       ];
+    });
+
+    it("carries the agent's attachments spec from its agent.afm.md", () => {
+      mockSignIn = { issuer: "http://default-idp.amp.localhost:8080", clientId: "aep-dp-x-r-y" };
+      mockAfmFiles = {
+        "specs/design/components/triage/agent.afm.md": [
+          "---",
+          'spec_version: "0.4.0"',
+          'name: "triage"',
+          'description: "Reads receipts."',
+          "interfaces:",
+          "  - type: webchat",
+          "x-aep:",
+          "  attachments:",
+          "    types: [image/jpeg]",
+          "    maxFiles: 1",
+          "    maxFileSizeMB: 5",
+          "---",
+          "",
+          "# Role",
+          "",
+          "Reads receipts.",
+        ].join("\n"),
+      };
+      render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
+
+      const href = new URL(screen.getByRole("link", { name: "Try triage" }).getAttribute("href") ?? "");
+      const query = new URLSearchParams(href.hash.slice("#/agent?".length));
+      expect(query.get("attach_types")).toBe("image/jpeg");
+      expect(query.get("attach_max_files")).toBe("1");
+      expect(query.get("attach_max_mb")).toBe("5");
+      mockAfmFiles = {};
+    });
+
+    it("links a governed agent to its page in Agent Manager", () => {
+      const amp = "http://console.amp.localhost:8080/org/acme/project/expense/agents/triage-5703854a";
+      mockDeployments = [...devDeployments(), { ...agent(), agentManagerUrl: amp }];
+      render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
+
+      const link = screen.getByRole("link", { name: "Manage triage in Agent Manager" });
+      expect(link).toHaveAttribute("href", amp);
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveTextContent("Manage in Agent Manager");
+    });
+
+    it("offers no Agent Manager link when the environment does not govern the agent", () => {
+      render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
+
+      expect(screen.queryByRole("link", { name: "Manage triage in Agent Manager" })).toBeNull();
     });
 
     it("carries the sign-in coordinates, the test users' scopes and the gateway URL", () => {

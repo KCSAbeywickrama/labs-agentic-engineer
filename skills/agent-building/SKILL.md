@@ -78,5 +78,6 @@ A design that declares something the implementation ignores is not a design.
 | the agent owns history | `x-aep.memory.type: "server"` | the conversation store, scoped by user |
 | only these operations | `allow: [...]` | generates a tool per entry, and no others |
 | the caller is whoever signed in | `x-aep.identity.mode: "on-behalf-of"` | gates on `x-user-id`, forwards the caller's token |
+| the agent takes files | `x-aep.attachments: { types, maxFiles, maxFileSizeMB }` | `/chat` accepts base64 `attachments` within them; 413 past 24 MiB; files ride one turn; 422 when the model can't read them |
 | behaviour is graded before the PR | `specs/validation/agent-scenarios.json`, from the requirements alone | runs the scenarios, may revise only the prompt body, reports the score — **unless evaluation is disabled** (`AEP_AGENT_EVAL` unset or not `on`), in which case it is skipped and the PR says so. See `references/building.md`, "Evaluate before you open the PR" |
 | no secrets in git | `${env:NAME}` | reads them from config, never hardcodes |

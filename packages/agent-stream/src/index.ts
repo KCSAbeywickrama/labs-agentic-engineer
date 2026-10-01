@@ -164,7 +164,14 @@ export { checkComponentDependencies } from "./component-dependencies.js";
 export type { ComponentDependencyProblem } from "./component-dependencies.js";
 
 // --- The agent.afm.md structural write-gate (the ai-agent component kind) ---
-export { checkAgentAfm, splitAfm, type AfmProblem, type AgentAfmFrontMatter } from "./agent-afm-schema.js";
+export {
+  ATTACHMENT_CEILINGS,
+  ATTACHMENT_TYPES,
+  checkAgentAfm,
+  splitAfm,
+  type AfmProblem,
+  type AgentAfmFrontMatter,
+} from "./agent-afm-schema.js";
 
 // --- The dependency.json write-gate (one dependency, one definition) --------
 export {

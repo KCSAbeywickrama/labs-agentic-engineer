@@ -30,6 +30,8 @@ export interface TryItLaunch {
   resource: string;
   scopes: readonly string[];
   endpoint: string;
+  /** The agent's `x-aep.attachments`, when it accepts files. Only shapes the app's UI — the agent enforces its own limits. */
+  attachments?: { types: readonly string[]; maxFiles: number; maxFileSizeMB: number } | undefined;
 }
 
 /**
@@ -47,5 +49,10 @@ export function tryItAppUrl(base: string, launch: TryItLaunch): string {
     scopes: launch.scopes.join(" "),
     endpoint: launch.endpoint,
   });
+  if (launch.attachments) {
+    query.set("attach_types", launch.attachments.types.join(","));
+    query.set("attach_max_files", String(launch.attachments.maxFiles));
+    query.set("attach_max_mb", String(launch.attachments.maxFileSizeMB));
+  }
   return `${base.replace(/\/+$/, "")}/#/agent?${query.toString()}`;
 }

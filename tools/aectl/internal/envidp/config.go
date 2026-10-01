@@ -69,6 +69,12 @@ const (
 	// Secret informer and RBAC are restricted to (see its own binding.go),
 	// so the binding Secret must be mirrored there by name.
 	operatorNamespace = "thunder-app-operator-system"
+
+	// The domains an install gets when it configures nothing: the k3d
+	// convention deployments/scripts/setup-env-for-aectl.sh builds. Both are
+	// suffixes, not whole hostnames — see Config.IDPBaseDomain.
+	defaultIDPBaseDomain     = "openchoreo.localhost"
+	defaultGatewayBaseDomain = "gateway.localhost"
 )
 
 // Config parameterizes Install. Org and Env are explicit fields, not
@@ -107,6 +113,36 @@ type Config struct {
 	// CA trust, DNS) is an environment prerequisite this package does not
 	// configure — see the package-level Install doc comment.
 	PlatformThunderPublicURL string
+
+	// IDPBaseDomain is the suffix this environment's IdP is published under:
+	// the hostname is "<Env>-idp.<IDPBaseDomain>". Empty takes
+	// defaultIDPBaseDomain.
+	//
+	// It is browser-facing, and not only to operators. thunder-app-operator
+	// republishes the PublicURL built from it as every generated app's OIDC
+	// issuer (binding.go's record → its own binding.go → the app's `issuer`
+	// and `jwks_url` outputs), so an end user signing in to an app AEP
+	// generated is redirected here. On any cluster reachable by more than
+	// its own host, a value that resolves only to loopback breaks that
+	// sign-in — which is why this is configuration and not a constant.
+	//
+	// Agent Manager reaches the same instance by COMPOSING this same suffix
+	// with the environment's IdP handle rather than being told an address
+	// (its ENV_IDP_BASE_DOMAIN, deployments/scripts/setup-agent-manager.sh).
+	// The two must carry the same string or the products stop agreeing on
+	// agent identity; keeping this a bare suffix rather than a URL is what
+	// makes them copy-paste identical.
+	IDPBaseDomain string
+
+	// GatewayBaseDomain is the suffix this environment's API Platform gateway
+	// answers on: the vhost is "<Env>-<Org>.<GatewayBaseDomain>". Empty takes
+	// defaultGatewayBaseDomain. Separate from IDPBaseDomain because the two
+	// share only their trailing labels — "gateway." and "openchoreo." are
+	// different parents, and a single key could only express both by baking
+	// those labels in as structure.
+	//
+	// Also browser-facing: it fronts the APIs a generated app calls.
+	GatewayBaseDomain string
 
 	// Kubeconfig is forwarded to every kubectl/helm invocation; empty uses
 	// the default (~/.kube/config or in-cluster).
@@ -151,14 +187,37 @@ func releaseName(org, env string) string {
 	return head + suffix
 }
 
-// publicURL is the hostname this package exposes T2 on: an httproute on the
-// same shared data-plane gateway and domain the platform IdP (T1) already
-// uses (see deployments/scripts/setup-env-for-aectl.sh's
+// idpBaseDomain and gatewayBaseDomain resolve the two suffixes, so the
+// fallback to the k3d convention lives in one place rather than at each call
+// site — a helper reached directly by a test gets the same answer Install
+// would give it.
+func (c Config) idpBaseDomain() string {
+	if c.IDPBaseDomain != "" {
+		return c.IDPBaseDomain
+	}
+	return defaultIDPBaseDomain
+}
+
+func (c Config) gatewayBaseDomain() string {
+	if c.GatewayBaseDomain != "" {
+		return c.GatewayBaseDomain
+	}
+	return defaultGatewayBaseDomain
+}
+
+// publicURL is the URL this package exposes T2 on: an httproute on the same
+// shared data-plane gateway and domain the platform IdP (T1) already uses
+// (see deployments/scripts/setup-env-for-aectl.sh's
 // "thunder.openchoreo.localhost" convention for T1), rather than Agent
 // Manager's own "<env>-idp.amp.localhost" — this package has no Agent
 // Manager routing to depend on.
-func publicURL(env string) string {
-	return fmt.Sprintf("http://%s-idp.openchoreo.localhost:8080", env)
+//
+// The port is not configurable. 8080 is the k3d control-plane gateway the
+// whole install is built around, the same one T1, the consoles and every
+// HTTPRoute on that tier answer on; moving it is the TLS conversation
+// (scheme, port, and CA trust for T2's JWKS fetch of T1), not this one.
+func publicURL(env, baseDomain string) string {
+	return fmt.Sprintf("http://%s-idp.%s:8080", env, baseDomain)
 }
 
 // validReleaseName rejects a releaseName result that is not a legal Helm

@@ -206,7 +206,8 @@ platform agent speaks:
 
 ```ts
 // POST /api/chat  (or /api/<agent-component-name>/chat for an extra sibling)
-// in:  { conversationId?: string, message: string }
+// in:  { conversationId?: string, message: string,
+//        attachments?: [{ name: string, mediaType: string, data: string /* base64 */ }] }
 // out: { conversationId: string, text: string, toolCalls: unknown[] }
 ```
 
@@ -220,6 +221,16 @@ The agent keeps the conversation. Your state is exactly two things:
   when the agent replies. That list is for RENDERING and is yours alone; the
   agent never sees it and never returns one. No `messages` array crosses the
   wire in either direction.
+
+**Files, only when the agent takes them.** If the agent's
+`specs/design/components/<agent>/agent.afm.md` declares `x-aep.attachments`,
+give the chat an attach control and compile its `types`, `maxFiles` and
+`maxFileSizeMB` in as constants: the picker's `accept` is the types; count,
+per-file size and the 15 MB total are checked before sending, naming the file
+that fails. Send each file base64 in `attachments`; `message` may be empty when
+files are present. Without the block, render no attach control. The agent keeps
+no files, so on a 400, 413 or 422 keep the files and their text in the composer
+for a retry and show the agent's `error`.
 
 A `404` from `/chat` means the conversation is gone or was never yours — drop
 the stored id, start fresh, and tell the user the previous conversation

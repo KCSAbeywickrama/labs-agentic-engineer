@@ -1878,13 +1878,15 @@ type DeployStage struct {
 
 // Deployment defines model for Deployment.
 type Deployment struct {
-	ComponentName string `json:"componentName,omitempty"`
-	CreatedAt     string `json:"createdAt,omitempty"`
-	EndpointURL   string `json:"endpointUrl,omitempty"`
-	Environment   string `json:"environment,omitempty"`
-	Name          string `json:"name,omitempty"`
-	ReleaseName   string `json:"releaseName,omitempty"`
-	Status        string `json:"status,omitempty"`
+	// AgentManagerURL The agent's page in the Agent Manager console that governs this environment. Present only for an ai-agent whose environment is governed by Agent Manager and whose registration exists there; absent otherwise, including when the environment names no console.
+	AgentManagerURL string `json:"agentManagerUrl,omitempty"`
+	ComponentName   string `json:"componentName,omitempty"`
+	CreatedAt       string `json:"createdAt,omitempty"`
+	EndpointURL     string `json:"endpointUrl,omitempty"`
+	Environment     string `json:"environment,omitempty"`
+	Name            string `json:"name,omitempty"`
+	ReleaseName     string `json:"releaseName,omitempty"`
+	Status          string `json:"status,omitempty"`
 }
 
 // DeploymentList defines model for DeploymentList.

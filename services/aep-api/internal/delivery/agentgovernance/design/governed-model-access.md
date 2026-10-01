@@ -222,3 +222,17 @@ branch revert with no code change. Then delete `modelAPIKeyHeaderEnvVar` and
 `ampModelAPIKeyHeader` in `projects/component_service.go`, the entry that emits
 them in `ai_agent_model_access.go`, and the override section in
 `skills/agent-building/references/building.md`.
+
+## The console's link to the agent
+
+The Deployments page links a governed agent to its page in Agent Manager:
+`{console}/org/{org}/project/{project}/agents/{AgentRecordName(project, component)}`.
+The console URL is per ENVIRONMENT, like the admin URL: an optional binding
+annotation, `aep.wso2.com/amp-console-url`, written by
+`setup-environment-aigateway.sh` (`AMP_CONSOLE_URL`, default
+`http://console.amp.localhost:8080`). The name is `AgentRecordName`, injected
+into `projects` rather than recomputed, so the link and the registration cannot
+disagree — a second copy of the hash would drift into links that open nothing.
+An environment without the annotation governs exactly as before; its agents
+just have no link.
+

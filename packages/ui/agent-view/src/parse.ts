@@ -75,6 +75,13 @@ export interface AgentModel {
   authKey?: string | undefined;
 }
 
+/** `x-aep.attachments` — what the agent may be sent with a message. */
+export interface AgentAttachments {
+  types: string[];
+  maxFiles: number;
+  maxFileSizeMB: number;
+}
+
 export interface AgentSpec {
   name: string;
   description?: string | undefined;
@@ -88,6 +95,8 @@ export interface AgentSpec {
   memory?: string | undefined;
   /** `x-aep.identity.mode` — "on-behalf-of" | "agent". */
   identity?: string | undefined;
+  /** `x-aep.attachments`; undefined for a text-only agent or an unreadable block. */
+  attachments?: AgentAttachments | undefined;
   prompt: PromptSection[];
   /**
    * The prompt body VERBATIM, exactly as it sits after the front matter.
@@ -197,6 +206,16 @@ function readPrompt(body: string): PromptSection[] {
   return sections;
 }
 
+function readAttachments(value: unknown): AgentAttachments | undefined {
+  const block = record(value);
+  if (!block) return undefined;
+  const types = list(block.types).filter((t): t is string => typeof t === "string" && t !== "");
+  const maxFiles = num(block.maxFiles);
+  const maxFileSizeMB = num(block.maxFileSizeMB);
+  if (types.length === 0 || maxFiles === undefined || maxFileSizeMB === undefined) return undefined;
+  return { types, maxFiles, maxFileSizeMB };
+}
+
 function readTools(value: unknown): AgentToolGroup[] {
   const out: AgentToolGroup[] = [];
   for (const entry of list(record(value)?.openapi)) {
@@ -238,6 +257,7 @@ export function parseAgentAfm(raw: string): ParseResult {
     tools: readTools(aep?.tools),
     memory: str(record(aep?.memory)?.type),
     identity: str(record(aep?.identity)?.mode),
+    attachments: readAttachments(aep?.attachments),
     prompt: readPrompt(split.body),
     body: split.body,
   };

@@ -48,12 +48,29 @@ const (
 
 func gatewayNamespace(org, env string) string { return fmt.Sprintf("%s-%s", org, env) }
 func gatewayRelease(org, env string) string   { return fmt.Sprintf("api-platform-%s-%s", org, env) }
-func gatewayHostname(org, env string) string  { return fmt.Sprintf("%s-%s.gateway.localhost", env, org) }
-func gatewayVhost(org, env string) string {
-	return fmt.Sprintf("http://%s:19080", gatewayHostname(org, env))
+func gatewayHostname(org, env, baseDomain string) string {
+	return fmt.Sprintf("%s-%s.%s", env, org, baseDomain)
+}
+
+// gatewayVhost's port, like publicURL's, is fixed: 19080 is the k3d
+// data-plane gateway every component endpoint on this cluster is published
+// behind, including the ClusterDataPlane ingress aectl patches.
+func gatewayVhost(org, env, baseDomain string) string {
+	return fmt.Sprintf("http://%s:19080", gatewayHostname(org, env, baseDomain))
 }
 func gatewayBackendJWTSecretName(release string) string { return release + "-backend-jwt" }
 func gatewayTokenSecretName(release string) string      { return release + "-token" }
+func gatewayRuntimeService(release string) string       { return release + "-gw-gateway-gateway-runtime" }
+
+// gatewayOTelEndpoint is the OTLP base AMP's trace ingest answers on: the
+// chart's own otel RestApi, served by THIS gateway's runtime — not the AI
+// gateway beside it, where the same path 404s. The /otel route is part of the
+// value so aep-api composes AMP_OTEL_ENDPOINT from it verbatim and never has
+// to know how AMP spells it; an exporter appends only /v1/traces.
+func gatewayOTelEndpoint(org, env string) string {
+	return fmt.Sprintf("http://%s.%s:22893/otel",
+		gatewayRuntimeService(gatewayRelease(org, env)), gatewayNamespace(org, env))
+}
 
 // assertion is the backend-JWT signing keypair's public half plus the
 // metadata a downstream service verifies against — what gets published onto
@@ -66,7 +83,10 @@ type assertion struct {
 
 // installGateway installs (or binds to) this environment's API Platform
 // gateway, wired to the given Thunder binding as its only ThunderKeyManager,
-// and publishes its backend-JWT assertion certificate onto the Environment.
+// and publishes its backend-JWT assertion certificate and OTLP endpoint onto
+// the Environment. Without the endpoint annotation aep-api composes no
+// tracing variables, and every agent in the environment runs untraced with
+// nothing but an aep-api log line to say so.
 //
 // bootstrap.enabled is always false here: this package never registers with
 // Agent Manager (no amp-api call), matching
@@ -100,7 +120,7 @@ func installGateway(ctx context.Context, c clients, cfg Config, inst *ThunderIns
 	}
 
 	if !deployed {
-		values, err := renderGatewayValues(cfg.Org, cfg.Env, namespace, inst, assert, signingKeyPEM)
+		values, err := renderGatewayValues(cfg, namespace, inst, assert, signingKeyPEM)
 		if err != nil {
 			return fmt.Errorf("render gateway values: %w", err)
 		}
@@ -124,8 +144,9 @@ func installGateway(ctx context.Context, c clients, cfg Config, inst *ThunderIns
 		"aep.wso2.com/gateway-assertion-issuer="+assert.issuer,
 		"aep.wso2.com/gateway-assertion-header="+assert.header,
 		"aep.wso2.com/gateway-assertion-certificate="+assert.certificate,
+		"aep.wso2.com/otel-endpoint="+gatewayOTelEndpoint(cfg.Org, cfg.Env),
 	); err != nil {
-		return fmt.Errorf("annotate Environment with gateway assertion: %w", err)
+		return fmt.Errorf("annotate Environment with gateway assertion and OTLP endpoint: %w", err)
 	}
 	return nil
 }
@@ -291,7 +312,7 @@ type gatewayValuesData struct {
 // renderGatewayValues builds the values file setup-environment-gateway.sh
 // itself builds — same shape, always the no-Agent-Manager branch
 // (bootstrap.enabled: false, no identityProviders block).
-func renderGatewayValues(org, env, namespace string, inst *ThunderInstance, assert assertion, signingKeyPEM string) (string, error) {
+func renderGatewayValues(cfg Config, namespace string, inst *ThunderInstance, assert assertion, signingKeyPEM string) (string, error) {
 	tmpl, err := template.New("gateway-values").Parse(gatewayValuesTemplate)
 	if err != nil {
 		return "", err
@@ -299,10 +320,10 @@ func renderGatewayValues(org, env, namespace string, inst *ThunderInstance, asse
 	indented := indentBlock(signingKeyPEM, "            ")
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, gatewayValuesData{
-		Org:                org,
-		Env:                env,
+		Org:                cfg.Org,
+		Env:                cfg.Env,
 		Namespace:          namespace,
-		Vhost:              gatewayVhost(org, env),
+		Vhost:              gatewayVhost(cfg.Org, cfg.Env, cfg.gatewayBaseDomain()),
 		ThunderIssuer:      inst.PublicURL,
 		ThunderJWKSURL:     strings.TrimRight(inst.AdminURL, "/") + "/oauth2/jwks",
 		AssertionIssuer:    assert.issuer,
@@ -326,7 +347,7 @@ func waitForGateway(ctx context.Context, c clients, namespace, release string) e
 		"apigateway/"+release, "-n", namespace, "--timeout=300s"); err != nil {
 		return fmt.Errorf("apigateway not programmed: %w", err)
 	}
-	runtimeSvc := release + "-gw-gateway-gateway-runtime"
+	runtimeSvc := gatewayRuntimeService(release)
 	if _, err := c.applyKubectl(ctx, "wait", "--for=condition=Available",
 		"deployment/"+runtimeSvc, "-n", namespace, "--timeout=300s"); err != nil {
 		return fmt.Errorf("gateway runtime not available: %w", err)

@@ -34,7 +34,7 @@ import {
   useAppShell,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft, Hammer, Sparkles } from "@wso2/oxygen-ui-icons-react";
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { StatusChip } from "../../../components/StatusChip";
 import type { components } from "../../../generated/aep-api";
 import {
@@ -106,6 +106,8 @@ import { AcceptanceView } from "@aep/ui-acceptance-view";
 import { useAcceptanceEntry } from "../hooks/useAcceptanceEntry";
 import { AgentView } from "@aep/ui-agent-view";
 import { MarkdownView } from "../../../components/MarkdownView";
+import { useConfig } from "../../settings/api/queries";
+import { agentModelConnection } from "../lib/agentModelConnection";
 import type { AgentToolStatusInfo } from "@aep/ui-agent-view";
 import {
   type SpecSelection,
@@ -480,6 +482,10 @@ export function SpecView({ projectName }: { projectName: string }) {
       ),
     [componentDependencies],
   );
+  // The Agent spec's Model panel shows the org's model connection, the one
+  // every agent runs on; the same /config read the chat panel makes.
+  const modelConnection = agentModelConnection(useConfig());
+  const settingsLink = <Link to="/settings/credentials">Change in Settings</Link>;
   // #252 Task 15: cross-component "Used by" for the selected component's own
   // cards — computed across EVERY component's dependencies (dependencies.data
   // spans the whole project; componentDependencies above is only the
@@ -1532,6 +1538,8 @@ export function SpecView({ projectName }: { projectName: string }) {
                       <AgentView
                         spec={structuredLive}
                         toolStatus={agentToolStatus}
+                        modelConnection={modelConnection}
+                        settingsLink={settingsLink}
                         renderMarkdown={(md) => <MarkdownView>{md}</MarkdownView>}
                         {...(afmText ? { onSaveBehaviour: handleSaveBehaviour } : {})}
                       />
@@ -1573,6 +1581,8 @@ export function SpecView({ projectName }: { projectName: string }) {
                         key={content.data.sha}
                         spec={content.data.content}
                         toolStatus={agentToolStatus}
+                        modelConnection={modelConnection}
+                        settingsLink={settingsLink}
                         renderMarkdown={(md) => <MarkdownView>{md}</MarkdownView>}
                         {...(afmText ? { onSaveBehaviour: handleSaveBehaviour } : {})}
                       />

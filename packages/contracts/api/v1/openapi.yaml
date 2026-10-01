@@ -5145,6 +5145,13 @@ components:
     Deployment:
       additionalProperties: false
       properties:
+        agentManagerUrl:
+          description: >-
+            The agent's page in the Agent Manager console that governs this
+            environment. Present only for an ai-agent whose environment is
+            governed by Agent Manager and whose registration exists there;
+            absent otherwise, including when the environment names no console.
+          type: string
         componentName:
           type: string
         createdAt:
