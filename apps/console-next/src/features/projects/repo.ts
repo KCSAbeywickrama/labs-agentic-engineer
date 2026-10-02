@@ -16,12 +16,12 @@
  * under the License.
  */
 
-// A project's repository as people read it: the clone URL without its scheme
-// and `.git`. The grid shows the short `owner/repo`; the overview adds the host.
+// A project's repository as people read it: `owner/repo`, from the clone URL
+// without its host and `.git`. The overview links it to the repository's page.
 
 export interface RepoLabel {
-  /** `github.com/acme/acme-expenses` */
-  full: string;
+  /** `https://github.com/acme/acme-expenses` */
+  href: string;
   /** `acme/acme-expenses` */
   short: string;
 }
@@ -37,5 +37,5 @@ export function repoLabel(repoUrl: string | undefined): RepoLabel | null {
   }
   const path = url.pathname.replace(/^\/+|\/+$/g, "").replace(/\.git$/, "");
   if (!path) return null;
-  return { full: `${url.host}/${path}`, short: path };
+  return { href: `${url.origin}/${path}`, short: path };
 }

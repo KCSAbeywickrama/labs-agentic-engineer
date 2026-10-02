@@ -20,9 +20,9 @@ import { describe, expect, it } from "vitest";
 import { repoLabel } from "./repo";
 
 describe("repoLabel", () => {
-  it("drops the scheme and .git, keeping host and owner/repo apart", () => {
+  it("names owner/repo and links the repository's page, without .git", () => {
     expect(repoLabel("https://github.com/acme/acme-expenses.git")).toEqual({
-      full: "github.com/acme/acme-expenses",
+      href: "https://github.com/acme/acme-expenses",
       short: "acme/acme-expenses",
     });
   });

@@ -17,7 +17,8 @@
  */
 
 import { createLink } from "@tanstack/react-router";
-import { Box, Button, Skeleton, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Link, Skeleton, Typography } from "@wso2/oxygen-ui";
+import { GitHub } from "@wso2/oxygen-ui-icons-react";
 import { EmptyState } from "../../../components/EmptyState";
 import { BuildButton } from "../../builds/components/BuildButton";
 import { ProjectFeatures } from "../../spec/components/ProjectFeatures";
@@ -66,9 +67,18 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
             <Skeleton width={260} />
           ) : (
             repo && (
-              <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
-                {repo.full}
-              </Typography>
+              <Link
+                href={repo.href}
+                target="_blank"
+                rel="noreferrer"
+                variant="caption"
+                color="text.secondary"
+                underline="hover"
+                sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, fontFamily: "monospace" }}
+              >
+                <GitHub size={14} aria-hidden />
+                {repo.short}
+              </Link>
             )
           )}
         </Box>
