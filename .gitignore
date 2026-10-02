@@ -8,6 +8,7 @@ build/
 # would silently swallow them from every commit). The build package moved from
 # a feature to the delivery domain's buildpipe sub-package in P6.
 !services/aep-api/internal/delivery/build/
+!packages/prototype-kit/src/build/
 *.tsbuildinfo
 
 # Turborepo

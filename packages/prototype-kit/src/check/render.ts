@@ -46,10 +46,12 @@ export const RENDER_TIMEOUT_MS = 15_000;
 const RENDER_HEAP_MB = 384;
 
 /** The child: read the input from stdin, run the runtime and the module in a fresh context, print the findings. */
+// The sandbox object has a null prototype: an ordinary one would hand the context the HOST realm's Object.prototype,
+// and globalThis.constructor.constructor would be the host's Function, with code generation on.
 const CHILD = `
 const vm = require("node:vm");
 const input = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
-const ctx = vm.createContext({}, { codeGeneration: { strings: false, wasm: false }, microtaskMode: "afterEvaluate" });
+const ctx = vm.createContext(Object.create(null), { codeGeneration: { strings: false, wasm: false }, microtaskMode: "afterEvaluate" });
 vm.runInContext(input.runtime, ctx, { filename: "check-runtime.js", timeout: ${RENDER_TIMEOUT_MS} });
 ctx.__protoModuleFactory = vm.runInContext(input.factory, ctx, { filename: "prototype.tsx", timeout: ${RENDER_TIMEOUT_MS} });
 ctx.__protoInput = JSON.stringify({ manifest: input.manifest });
