@@ -24,7 +24,11 @@
 
 import type { PrototypeTheme } from "@wso2/prototype-kit";
 import { Alert, Badge, Button, EmptyState, Heading, Link, Stat, Text } from "./components/content.js";
+import { Table, Timeline } from "./components/data.js";
+import { Field, Filters, Form, ValidationSummary } from "./components/forms.js";
 import { Detail, Grid, Screen, Split, Stack } from "./components/layout.js";
+import { Breadcrumbs, Navigation, Stepper, Tabs } from "./components/navigation.js";
+import { Dialog, Drawer } from "./components/overlays.js";
 import { ThemeProvider } from "./provider.js";
 
 const theme: PrototypeTheme = {
@@ -44,6 +48,18 @@ const theme: PrototypeTheme = {
     Link,
     Stat,
     Text,
+    Breadcrumbs,
+    Navigation,
+    Stepper,
+    Tabs,
+    Field,
+    Filters,
+    Form,
+    ValidationSummary,
+    Table,
+    Timeline,
+    Dialog,
+    Drawer,
   },
 };
 

@@ -25,6 +25,10 @@
 
 import type { ComponentType, ReactNode } from "react";
 import type { ThemeAlertProps, ThemeBadgeProps, ThemeButtonProps, ThemeEmptyStateProps, ThemeHeadingProps, ThemeLinkProps, ThemeStatProps, ThemeTextProps } from "../components/content.js";
+import type { ThemeBreadcrumbsProps, ThemeNavigationProps, ThemeStepperProps, ThemeTabsProps } from "../components/navigation.js";
+import type { ThemeFieldProps, ThemeFiltersProps, ThemeFormProps, ThemeValidationSummaryProps } from "../components/forms.js";
+import type { ThemeTableProps, ThemeTimelineProps } from "../components/data.js";
+import type { ThemeDialogProps, ThemeDrawerProps } from "../components/overlays.js";
 import type { ThemeDetailProps, ThemeGridProps, ThemeScreenProps, ThemeSplitProps, ThemeStackProps } from "../components/layout.js";
 
 /** The props each kit component's theme implementation receives. */
@@ -42,6 +46,18 @@ export interface KitComponentProps {
   Link: ThemeLinkProps;
   Stat: ThemeStatProps;
   Text: ThemeTextProps;
+  Breadcrumbs: ThemeBreadcrumbsProps;
+  Navigation: ThemeNavigationProps;
+  Stepper: ThemeStepperProps;
+  Tabs: ThemeTabsProps;
+  Field: ThemeFieldProps;
+  Filters: ThemeFiltersProps;
+  Form: ThemeFormProps;
+  ValidationSummary: ThemeValidationSummaryProps;
+  Table: ThemeTableProps;
+  Timeline: ThemeTimelineProps;
+  Dialog: ThemeDialogProps;
+  Drawer: ThemeDrawerProps;
 }
 
 export type KitComponentName = keyof KitComponentProps;

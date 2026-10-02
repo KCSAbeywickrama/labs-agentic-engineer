@@ -36,7 +36,7 @@ interface Row {
   message?: RegExp;
 }
 
-const valid = ["baseline", "local-names"];
+const valid = ["baseline", "local-names", "contacts", "expense-approval", "integration-monitor"];
 
 const invalid: Row[] = [
   { fixture: "missing-source", findings: [["MISSING_FILE", "prototype.tsx", "(file)"]] },
@@ -84,6 +84,7 @@ const invalid: Row[] = [
   },
   { fixture: "render-unknown-collection", findings: [["RENDER_FAILED", "prototype.tsx", "screen.home as user in state.default"]], message: /no collection named "contacts"/ },
   { fixture: "render-data-not-json", findings: [["RENDER_FAILED", "prototype.tsx", "module"]], message: /data\.lookup is not JSON/ },
+  { fixture: "form-invalid-pattern", findings: [["RENDER_FAILED", "prototype.tsx", "screen.home as user in state.default"]], message: /not a valid regular expression/ },
   // Sandbox-escape attempts: refused by the isolated render, not just the static rules.
   { fixture: "escape-computed-constructor", findings: [["RENDER_FAILED", "prototype.tsx", "module"]], message: /Code generation from strings disallowed/ },
   { fixture: "escape-prototype-pollution", findings: [["RENDER_FAILED", "prototype.tsx", "module"]], message: /not extensible/ },
