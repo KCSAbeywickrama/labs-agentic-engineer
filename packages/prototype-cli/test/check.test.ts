@@ -39,6 +39,16 @@ const valid = ["baseline"];
 
 const invalid: Row[] = [
   { fixture: "missing-source", findings: [["MISSING_FILE", "prototype.tsx", "(file)"]] },
+  // Manifest: shape, then references.
+  { fixture: "manifest-not-json", findings: [["SCHEMA_VIOLATION", "prototype.json", "(root)"]], message: /not valid JSON/ },
+  { fixture: "manifest-missing-roles", findings: [["SCHEMA_VIOLATION", "prototype.json", "roles"]] },
+  { fixture: "manifest-legacy-component", findings: [["SCHEMA_VIOLATION", "prototype.json", "(root)"]], message: /component/ },
+  { fixture: "manifest-version-2", findings: [["UNSUPPORTED_VERSION", "prototype.json", "schemaVersion"]] },
+  { fixture: "manifest-duplicate-id", findings: [["DUPLICATE_ID", "prototype.json", "screens[1].id"]] },
+  { fixture: "manifest-unknown-role", findings: [["UNKNOWN_REFERENCE", "prototype.json", "screens[1].roleIds[1]"]] },
+  { fixture: "manifest-unknown-entry", findings: [["UNKNOWN_REFERENCE", "prototype.json", "entryScreen"]] },
+  { fixture: "manifest-flow-unknown-screen", findings: [["UNKNOWN_REFERENCE", "prototype.json", "flows[0].screenIds[1]"]] },
+  { fixture: "manifest-flow-unreachable", findings: [["UNKNOWN_REFERENCE", "prototype.json", "flows[0].screenIds[1]"]], message: /role "user" reaches/ },
 ];
 
 describe("prototype check --json", () => {

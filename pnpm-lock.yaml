@@ -401,13 +401,23 @@ importers:
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/browser-playwright@4.1.10)(jsdom@29.1.1)(msw@2.14.6(@types/node@22.20.1)(typescript@5.9.3))(vite@7.3.6(@types/node@22.20.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.0))
 
   packages/prototype-kit:
+    dependencies:
+      zod:
+        specifier: ^4.3.6
+        version: 4.6.2
     devDependencies:
       '@types/node':
         specifier: ^22
         version: 22.20.1
+      tsx:
+        specifier: ^4.21.0
+        version: 4.23.15
       typescript:
         specifier: 5.9.3
         version: 5.9.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/browser-playwright@4.1.10)(jsdom@29.1.1)(msw@2.14.6(@types/node@22.20.1)(typescript@5.9.3))(vite@7.3.6(@types/node@22.20.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.0))
 
   packages/sse-cassette:
     dependencies:

@@ -22,6 +22,7 @@
  */
 
 import type { Finding } from "../findings.js";
+import { parseManifestJson } from "../manifest/parse.js";
 import { missingFileFindings, readPrototypeFiles, type PrototypeFiles } from "./files.js";
 
 export { FINDING_CODES, MANIFEST_FILE, SOURCE_FILE, type Finding, type FindingCode, type FindingFile } from "../findings.js";
@@ -29,6 +30,8 @@ export { readPrototypeFiles, type PrototypeFiles } from "./files.js";
 
 export function checkPrototypeFiles(files: PrototypeFiles): Finding[] {
   if (files.manifest === null || files.source === null) return missingFileFindings(files);
+  const manifest = parseManifestJson(files.manifest);
+  if (!manifest.ok) return manifest.findings;
   return [];
 }
 
