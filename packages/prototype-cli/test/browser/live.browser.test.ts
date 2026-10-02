@@ -65,9 +65,19 @@ describe("prototype preview — the live loop", () => {
     await driver.writeFile(preview.id, "prototype.tsx", source.replace("export default defineApp(", "const broken = <div />;\nexport default defineApp("));
     await driver.waitFor(page, host.region("Check findings"));
     expect(await driver.read(page, host.region("Check findings"), "text")).toContain("FORBIDDEN_ELEMENT");
+    expect(await driver.read(page, host.region("Check findings"), "text")).toContain("showing the last good version");
     expect(await driver.count(page, app.heading("Acme contacts"))).toBe(1);
     await driver.writeFile(preview.id, "prototype.tsx", source);
     await driver.waitFor(page, host.region("Check findings"), "hidden");
+  });
+
+  it("shows findings without the last-good phrase when no good revision exists yet", async () => {
+    preview = await driver.startPreview("invalid/source-date-now");
+    page = await driver.openPage(preview.url);
+    await driver.waitFor(page, host.region("Check findings"));
+    const text = await driver.read(page, host.region("Check findings"), "text");
+    expect(text).toContain("finding");
+    expect(text).not.toContain("last good version");
   });
 
   // Review Focus: an agent writes the files in steps — an empty source, a deleted manifest.

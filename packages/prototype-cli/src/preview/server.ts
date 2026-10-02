@@ -39,6 +39,9 @@ import { PrototypeWatcher, type PrototypeStatus } from "./watcher.js";
 /** The largest feedback body accepted. */
 const MAX_BODY = 1024 * 1024;
 
+/** How much of a refused body is read and thrown away before the connection is cut. */
+const DISCARD_CAP = 8 * MAX_BODY;
+
 /** The host page holds the Save control: no other site may frame it (clickjacking). */
 const NOT_FRAMEABLE = { "content-security-policy": "frame-ancestors 'none'", "x-frame-options": "DENY" };
 
@@ -75,26 +78,22 @@ function send(res: ServerResponse, status: number, type: string, body: string | 
   res.end(body);
 }
 
-/** The request body as text, or null when it is over the limit. On null the rest of the body is discarded, not read. */
+/**
+ * The request body as text, or null when it is over the limit. An oversized
+ * body is read and discarded, not buffered, so the client finishes its upload
+ * and receives the 413; only a body past the hard cap is cut off.
+ */
 function readBody(req: IncomingMessage): Promise<string | null> {
   return new Promise((resolve, reject) => {
-    const declared = Number(req.headers["content-length"]);
-    if (declared > MAX_BODY) return resolve(null);
     const chunks: Buffer[] = [];
     let size = 0;
-    let over = false;
     req.on("data", (chunk: Buffer) => {
-      if (over) return;
       size += chunk.length;
-      if (size > MAX_BODY) {
-        over = true;
-        chunks.length = 0;
-        resolve(null);
-        return;
-      }
-      chunks.push(chunk);
+      if (size > DISCARD_CAP) return req.destroy();
+      if (size > MAX_BODY) chunks.length = 0;
+      else chunks.push(chunk);
     });
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("end", () => resolve(size > MAX_BODY ? null : Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
 }
@@ -113,8 +112,6 @@ export async function startPreviewServer(options: PreviewServerOptions): Promise
     if (origin !== undefined && !hosts().has(origin.replace(/^http:\/\//, ""))) return send(res, 403, "text/plain", "cross-origin feedback is refused");
     const body = await readBody(req);
     if (body === null) {
-      // Answer first, then drop the connection: destroying the socket before the response is written loses the 413.
-      res.once("finish", () => req.destroy());
       return send(res, 413, "text/plain", "feedback is too large", { connection: "close" });
     }
     let value: unknown;
@@ -123,8 +120,9 @@ export async function startPreviewServer(options: PreviewServerOptions): Promise
     } catch {
       return send(res, 400, "text/plain", "feedback is not JSON");
     }
-    const submission = parseFeedbackSubmission(value);
-    if (!submission) return send(res, 400, "text/plain", "feedback does not have the documented shape");
+    const parsed = parseFeedbackSubmission(value);
+    if ("reason" in parsed) return send(res, 400, "text/plain", `feedback is refused: ${parsed.reason}`);
+    const { submission } = parsed;
     const file: FeedbackFile = { schemaVersion: FEEDBACK_SCHEMA_VERSION, savedAt: new Date().toISOString(), ...submission };
     const path = join(options.dir, FEEDBACK_PATH);
     mkdirSync(dirname(path), { recursive: true });

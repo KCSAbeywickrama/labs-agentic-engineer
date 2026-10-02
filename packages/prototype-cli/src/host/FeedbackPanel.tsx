@@ -19,7 +19,7 @@
 /** Annotate's side panel: the selection, a request to attach to it, the queue, and Save feedback. */
 
 import { useState } from "react";
-import type { FeedbackRequest } from "../feedback.js";
+import { MAX_FEEDBACK_REQUESTS, MAX_FEEDBACK_TEXT, type FeedbackRequest } from "../feedback.js";
 
 export interface FeedbackPanelProps {
   /** The selected elements' labels, in selection order. */
@@ -35,8 +35,9 @@ export interface FeedbackPanelProps {
 export function FeedbackPanel({ selection, queue, stale, onAdd, onRemove, onSave }: FeedbackPanelProps) {
   const [text, setText] = useState("");
   const [status, setStatus] = useState<string | null>(null);
+  const full = queue.length >= MAX_FEEDBACK_REQUESTS;
   const add = () => {
-    if (text.trim() === "") return;
+    if (full || text.trim() === "") return;
     onAdd(text.trim());
     setText("");
   };
@@ -50,11 +51,12 @@ export function FeedbackPanel({ selection, queue, stale, onAdd, onRemove, onSave
       <p className="ph-selection">{selection.length === 0 ? "Click elements to select them, or write about the whole screen." : `Selected: ${selection.join(", ")}`}</p>
       <label>
         Request
-        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} />
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} maxLength={MAX_FEEDBACK_TEXT} />
       </label>
-      <button type="button" onClick={add} disabled={text.trim() === ""}>
+      <button type="button" onClick={add} disabled={full || text.trim() === ""}>
         Add request
       </button>
+      {full && <p role="note">{`The queue is full (${MAX_FEEDBACK_REQUESTS} requests): save or remove one to add another.`}</p>}
       {stale && queue.length > 0 && <p role="note">Queued against an earlier version of the prototype.</p>}
       <ol className="ph-queue" aria-label="Queued requests">
         {queue.map((r, i) => (

@@ -35,6 +35,7 @@ export type FieldType = "text" | "number" | "select" | "date" | "textarea" | "sw
 
 interface FieldRules {
   label: string;
+  type: FieldType;
   required: boolean;
   pattern: RegExp | undefined;
   patternMessage: string | undefined;
@@ -66,7 +67,8 @@ const FormContext = createContext<FormApi | null>(null);
 const CompactFields = createContext(false);
 
 function fieldIssue(rules: FieldRules, value: string): string | undefined {
-  if (rules.required && value.trim() === "") return `${rules.label} is required`;
+  // A switch always holds "on" or "off": required means it must be on.
+  if (rules.required && (rules.type === "switch" ? value !== "on" : value.trim() === "")) return `${rules.label} is required`;
   if (rules.pattern && value !== "" && !rules.pattern.test(value)) return rules.patternMessage ?? `${rules.label} is not in the expected format`;
   return undefined;
 }
@@ -132,9 +134,9 @@ export function Field({ id, label, name, type = "text", value, defaultValue, opt
   const shown = value ?? (form ? (form.valueOf(key) ?? defaultValue ?? "") : local);
   const readOnly = view.mode === "annotate" || (value !== undefined && onChange === undefined);
 
-  const entry = useRef<FieldEntry>({ rules: { label, required, pattern: compiled, patternMessage }, value: shown });
+  const entry = useRef<FieldEntry>({ rules: { label, type, required, pattern: compiled, patternMessage }, value: shown });
   useLayoutEffect(() => {
-    entry.current = { rules: { label, required, pattern: compiled, patternMessage }, value: shown };
+    entry.current = { rules: { label, type, required, pattern: compiled, patternMessage }, value: shown };
   });
   const register = form?.register;
   useLayoutEffect(() => register?.(key, entry), [register, key]);

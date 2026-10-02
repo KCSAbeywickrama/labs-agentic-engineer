@@ -100,6 +100,25 @@ describe("prototype preview (HTTP)", () => {
     expect(existsSync(feedbackFile())).toBe(false);
   });
 
+  it("answers every one of 50 concurrent oversized uploads with 413, none reset", async () => {
+    const body = JSON.stringify({ prototypeHash: "a".repeat(64), requests: [{ screenId: "s", roleId: "r", stateId: "t", elementIds: [], text: "x".repeat(2 * 1024 * 1024) }] });
+    const statuses = await Promise.all(Array.from({ length: 50 }, () => send("/feedback", { method: "POST", headers: { "content-type": "application/json" }, body }).then((r) => r.status)));
+    expect(statuses.filter((s) => s !== 413)).toEqual([]);
+    expect(existsSync(feedbackFile())).toBe(false);
+  });
+
+  it("says which rule a refused submission broke", async () => {
+    const post = (requests: unknown[]) => send("/feedback", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prototypeHash: "a".repeat(64), requests }) });
+    const one = { screenId: "s", roleId: "r", stateId: "t", elementIds: [] as string[], text: "Hello" };
+    const many = await post(Array.from({ length: 51 }, () => one));
+    expect(many.status).toBe(400);
+    expect(many.body).toContain("too many requests (max 50)");
+    const long = await post([one, one, { ...one, text: "x".repeat(4001) }]);
+    expect(long.status).toBe(400);
+    expect(long.body).toContain("request 3 text exceeds 4000 characters");
+    expect(existsSync(feedbackFile())).toBe(false);
+  });
+
   it("writes valid feedback from its own origin to .prototype/feedback.json", async () => {
     const origin = preview.url.replace(/\/$/, "");
     const res = await send("/feedback", { method: "POST", headers: { "content-type": "application/json", origin }, body: valid });

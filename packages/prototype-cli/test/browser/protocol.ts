@@ -36,7 +36,7 @@ export interface Target {
 
 export type Action = { type: "click" } | { type: "fill"; value: string } | { type: "select"; label: string } | { type: "press"; key: string };
 
-export type Reading = "text" | "count" | "value" | "pressed";
+export type Reading = "text" | "count" | "value" | "pressed" | "disabled" | "maxlength";
 
 export interface Preview {
   id: string;

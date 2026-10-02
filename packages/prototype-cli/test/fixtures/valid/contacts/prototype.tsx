@@ -205,6 +205,7 @@ function Settings() {
         actions={role === "editor" ? <Button id="btn.save-settings" label="Save settings" emphasis="primary" submit /> : undefined}
       >
         <Field id="field.company" name="company" label="Company" defaultValue={company} required />
+        <Field id="field.confirm" name="confirm" label="Confirm company change" type="switch" defaultValue="off" required />
       </Form>
     </Screen>
   );

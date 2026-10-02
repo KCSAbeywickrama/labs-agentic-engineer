@@ -19,6 +19,7 @@
 /** Annotate: a click selects and never acts; queued requests are saved to .prototype/feedback.json for the agent. */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { MAX_FEEDBACK_REQUESTS, MAX_FEEDBACK_TEXT } from "../../src/feedback.js";
 import { app, driver, host } from "./driver.js";
 import type { Preview } from "./protocol.js";
 
@@ -111,6 +112,31 @@ describe("prototype preview — Annotate across a revision", () => {
       const saved = JSON.parse((await driver.readFile(p.id, ".prototype/feedback.json"))!) as { prototypeHash: string };
       expect(saved.prototypeHash).toBe(originalHash);
       expect(await driver.revisionHash(p.id)).not.toBe(originalHash);
+    } finally {
+      await driver.closePage(pg);
+      await driver.stopPreview(p.id);
+    }
+  });
+});
+
+describe("prototype preview — Annotate limits", () => {
+  it("limits the request text to what the server accepts and stops adding at the queue cap, saying why", async () => {
+    const p = await driver.startPreview("contacts");
+    const pg = await driver.openPage(p.url);
+    try {
+      await driver.waitFor(pg, app.heading("Acme contacts"));
+      await driver.click(pg, host.button("Annotate"));
+      
+      expect(await driver.read(pg, host.field("Request"), "maxlength")).toBe(String(MAX_FEEDBACK_TEXT));
+      await driver.fill(pg, host.field("Request"), "Fine");
+      for (let i = 0; i < MAX_FEEDBACK_REQUESTS; i++) {
+        await driver.click(pg, host.button("Add request"));
+        await driver.fill(pg, host.field("Request"), "Fine");
+      }
+      await driver.waitFor(pg, host.text(`The queue is full (${MAX_FEEDBACK_REQUESTS} requests)`, true));
+      expect(await driver.read(pg, host.button("Add request"), "disabled")).toBe("true");
+      await driver.click(pg, host.button("Save feedback"));
+      await driver.waitFor(pg, host.text(`Saved ${MAX_FEEDBACK_REQUESTS} requests to .prototype/feedback.json`));
     } finally {
       await driver.closePage(pg);
       await driver.stopPreview(p.id);

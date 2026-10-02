@@ -32,7 +32,9 @@ export const FEEDBACK_PATH = ".prototype/feedback.json";
 /** The most requests one save takes. */
 export const MAX_FEEDBACK_REQUESTS = 50;
 
-const MAX_TEXT = 4000;
+/** The longest request text. */
+export const MAX_FEEDBACK_TEXT = 4000;
+
 const MAX_ID = 200;
 
 export interface FeedbackRequest {
@@ -61,22 +63,31 @@ export interface FeedbackFile extends FeedbackSubmission {
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isId = (v: unknown): v is string => typeof v === "string" && v.trim() !== "" && v.length <= MAX_ID;
 
-function parseRequest(v: unknown): FeedbackRequest | null {
-  if (!isObject(v)) return null;
+/** A request of the documented shape, or the rule it breaks. */
+function parseRequest(v: unknown): { request: FeedbackRequest } | { reason: string } {
+  if (!isObject(v)) return { reason: "is not an object" };
   const { screenId, flowId, roleId, stateId, elementIds, text } = v;
-  if (!isId(screenId) || !isId(roleId) || !isId(stateId)) return null;
-  if (flowId !== undefined && !isId(flowId)) return null;
-  if (!Array.isArray(elementIds) || !elementIds.every(isId)) return null;
-  if (typeof text !== "string" || text.trim() === "" || text.length > MAX_TEXT) return null;
-  return { screenId, ...(flowId !== undefined ? { flowId } : {}), roleId, stateId, elementIds: [...elementIds], text };
+  for (const [name, id] of [["screenId", screenId], ["roleId", roleId], ["stateId", stateId]] as const) {
+    if (!isId(id)) return { reason: `${name} must be a non-empty string of at most ${MAX_ID} characters` };
+  }
+  if (flowId !== undefined && !isId(flowId)) return { reason: `flowId must be a non-empty string of at most ${MAX_ID} characters` };
+  if (!Array.isArray(elementIds) || !elementIds.every(isId)) return { reason: `elementIds must be a list of non-empty strings of at most ${MAX_ID} characters` };
+  if (typeof text !== "string" || text.trim() === "") return { reason: "text is empty" };
+  if (text.length > MAX_FEEDBACK_TEXT) return { reason: `text exceeds ${MAX_FEEDBACK_TEXT} characters` };
+  return { request: { screenId: screenId as string, ...(flowId !== undefined ? { flowId } : {}), roleId: roleId as string, stateId: stateId as string, elementIds: [...elementIds], text } };
 }
 
-/** A submission of the documented shape, or null for anything else. */
-export function parseFeedbackSubmission(value: unknown): FeedbackSubmission | null {
-  if (!isObject(value) || typeof value["prototypeHash"] !== "string" || !/^[0-9a-f]{64}$/.test(value["prototypeHash"])) return null;
+/** A submission of the documented shape, or the first rule it breaks. */
+export function parseFeedbackSubmission(value: unknown): { submission: FeedbackSubmission } | { reason: string } {
+  if (!isObject(value) || typeof value["prototypeHash"] !== "string" || !/^[0-9a-f]{64}$/.test(value["prototypeHash"])) return { reason: "prototypeHash must be the 64-character revision hash" };
   const requests = value["requests"];
-  if (!Array.isArray(requests) || requests.length === 0 || requests.length > MAX_FEEDBACK_REQUESTS) return null;
-  const parsed = requests.map(parseRequest);
-  if (parsed.some((r) => r === null)) return null;
-  return { prototypeHash: value["prototypeHash"], requests: parsed as FeedbackRequest[] };
+  if (!Array.isArray(requests) || requests.length === 0) return { reason: "requests must be a non-empty list" };
+  if (requests.length > MAX_FEEDBACK_REQUESTS) return { reason: `too many requests (max ${MAX_FEEDBACK_REQUESTS})` };
+  const parsed: FeedbackRequest[] = [];
+  for (const [i, r] of requests.entries()) {
+    const result = parseRequest(r);
+    if ("reason" in result) return { reason: `request ${i + 1} ${result.reason}` };
+    parsed.push(result.request);
+  }
+  return { submission: { prototypeHash: value["prototypeHash"], requests: parsed } };
 }

@@ -16,15 +16,16 @@
  * under the License.
  */
 
-/** The check's findings over the preview: the last good render stays underneath until the files are clean again. */
+/** The check's findings over the preview: a last good render, when there is one, stays underneath until the files are clean again. */
 
 import type { Finding } from "@wso2/prototype-kit/check";
 
-export function FindingsOverlay({ findings }: { findings: readonly Finding[] }) {
+export function FindingsOverlay({ findings, showingLastGood }: { findings: readonly Finding[]; showingLastGood: boolean }) {
   return (
     <section className="ph-findings" role="region" aria-label="Check findings">
       <h2>
-        {findings.length} check finding{findings.length === 1 ? "" : "s"} — showing the last good version
+        {findings.length} check finding{findings.length === 1 ? "" : "s"}
+        {showingLastGood ? " — showing the last good version" : ""}
       </h2>
       <ul>
         {findings.map((f, i) => (

@@ -38,7 +38,7 @@ export function App({ config }: { config: HostConfig }) {
     <div className="ph-app">
       <style>{HOST_CSS}</style>
       {live.revision && live.runtime ? <Review config={config} runtime={live.runtime} revision={live.revision} /> : <p className="ph-waiting">{waiting}</p>}
-      {live.findings.length > 0 && <FindingsOverlay findings={live.findings} />}
+      {live.findings.length > 0 && <FindingsOverlay findings={live.findings} showingLastGood={live.revision !== null} />}
     </div>
   );
 }

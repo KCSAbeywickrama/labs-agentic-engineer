@@ -113,6 +113,11 @@ describe("prototype preview — playing a prototype", () => {
     await driver.click(page, app.element("nav.settings"));
     await driver.fill(page, app.field("Company"), "Globex");
     await driver.click(page, app.button("Save settings"));
+    // A required switch must be on: off is a problem, on passes.
+    await driver.waitFor(page, app.text("Confirm company change is required"));
+    expect(await driver.count(page, app.heading("Globex contacts"))).toBe(0);
+    await driver.click(page, app.field("Confirm company change"));
+    await driver.click(page, app.button("Save settings"));
     await driver.waitFor(page, app.heading("Globex contacts"));
   });
 

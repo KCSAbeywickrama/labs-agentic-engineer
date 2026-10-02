@@ -62,7 +62,7 @@ function locate(pageId: string, t: Target): Locator {
 }
 
 const startPreview: BrowserCommand<[fixture: string, flags?: string[]]> = async (_ctx, fixture, flags = []) => {
-  const p = await spawnPreview(copyFixture(`valid/${fixture}`), flags);
+  const p = await spawnPreview(copyFixture(fixture.includes("/") ? fixture : `valid/${fixture}`), flags);
   const id = String(next++);
   previews.set(id, p);
   return { id, url: p.url } satisfies Preview;
@@ -106,6 +106,8 @@ const read: BrowserCommand<[pageId: string, target: Target, reading: Reading]> =
   if (reading === "count") return l.count();
   if (reading === "text") return l.innerText();
   if (reading === "value") return l.inputValue();
+  if (reading === "maxlength") return l.getAttribute("maxlength");
+  if (reading === "disabled") return String(await l.isDisabled());
   return l.getAttribute("aria-pressed");
 };
 
@@ -162,7 +164,7 @@ const revisionHash: BrowserCommand<[previewId: string]> = (_ctx, previewId) => {
 /** Exports a fixture with the CLI and returns the file's URL. */
 const exportFixture: BrowserCommand<[fixture: string]> = (_ctx, fixture) => {
   const out = join(tempDir(), `${fixture}.html`);
-  const run = runCli(["export", copyFixture(`valid/${fixture}`), "-o", out]);
+  const run = runCli(["export", copyFixture(fixture.includes("/") ? fixture : `valid/${fixture}`), "-o", out]);
   if (run.status !== 0) throw new Error(`export failed: ${run.stderr}`);
   return pathToFileURL(out).href;
 };
