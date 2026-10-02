@@ -18,6 +18,7 @@ package config
 
 import (
 	"encoding/base64"
+	"strings"
 	"testing"
 )
 
@@ -113,143 +114,48 @@ func setRequiredLoadEnv(t *testing.T) {
 	t.Setenv("BFF_TASK_SIGNING_KEY", "-----BEGIN KEY-----\nx\n-----END KEY-----")
 }
 
-// TestLoad_SREAgentConfig pins the push-target wiring (Task 7): Enabled()
-// is true only when all four SRE_AGENT_* vars are set, matching the
-// TemporalConfig.Enabled() toggle pattern.
-func TestLoad_SREAgentConfig(t *testing.T) {
-	t.Run("all four set is enabled", func(t *testing.T) {
-		setRequiredLoadEnv(t)
-		t.Setenv("SRE_AGENT_ORG", "default")
-		t.Setenv("SRE_AGENT_NAMESPACE", "openchoreo-observability-plane")
-		t.Setenv("SRE_AGENT_DEPLOYMENT", "sre-agent")
-		t.Setenv("SRE_AGENT_SECRET", "sre-agent-aep")
+// TestLoad_SREHandoff pins the handoff's env wiring: both set is enabled,
+// neither is disabled, and one without the other or a short key is refused.
+func TestLoad_SREHandoff(t *testing.T) {
+	key := strings.Repeat("a", 64)
 
+	t.Run("org and key set is enabled", func(t *testing.T) {
+		setRequiredLoadEnv(t)
+		t.Setenv("SRE_HANDOFF_ORG", "default")
+		t.Setenv("SRE_HANDOFF_TOKEN", key)
 		cfg, err := Load()
 		if err != nil {
 			t.Fatalf("Load() error = %v, want nil", err)
 		}
-		if !cfg.SREAgent.Enabled() {
-			t.Fatal("SREAgent.Enabled() = false, want true")
-		}
-		if cfg.SREAgent.Org != "default" {
-			t.Errorf("Org = %q, want %q", cfg.SREAgent.Org, "default")
-		}
-		if cfg.SREAgent.Namespace != "openchoreo-observability-plane" {
-			t.Errorf("Namespace = %q, want %q", cfg.SREAgent.Namespace, "openchoreo-observability-plane")
-		}
-		if cfg.SREAgent.Deployment != "sre-agent" {
-			t.Errorf("Deployment = %q, want %q", cfg.SREAgent.Deployment, "sre-agent")
-		}
-		if cfg.SREAgent.Secret != "sre-agent-aep" {
-			t.Errorf("Secret = %q, want %q", cfg.SREAgent.Secret, "sre-agent-aep")
+		if !cfg.SREHandoff.Enabled() || cfg.SREHandoff.Org != "default" || cfg.SREHandoff.Token != key {
+			t.Fatalf("SREHandoff = %+v, want enabled for default", cfg.SREHandoff)
 		}
 	})
 
-	for _, missing := range []string{
-		"SRE_AGENT_ORG", "SRE_AGENT_NAMESPACE", "SRE_AGENT_DEPLOYMENT", "SRE_AGENT_SECRET",
+	t.Run("neither set is disabled", func(t *testing.T) {
+		setRequiredLoadEnv(t)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() error = %v, want nil", err)
+		}
+		if cfg.SREHandoff.Enabled() {
+			t.Fatal("SREHandoff.Enabled() = true with nothing set")
+		}
+	})
+
+	for name, env := range map[string]map[string]string{
+		"org without key": {"SRE_HANDOFF_ORG": "default"},
+		"key without org": {"SRE_HANDOFF_TOKEN": key},
+		"short key":       {"SRE_HANDOFF_ORG": "default", "SRE_HANDOFF_TOKEN": "too-short"},
 	} {
-		t.Run("missing "+missing+" disables", func(t *testing.T) {
+		t.Run(name+" is refused", func(t *testing.T) {
 			setRequiredLoadEnv(t)
-			vals := map[string]string{
-				"SRE_AGENT_ORG":        "default",
-				"SRE_AGENT_NAMESPACE":  "openchoreo-observability-plane",
-				"SRE_AGENT_DEPLOYMENT": "sre-agent",
-				"SRE_AGENT_SECRET":     "sre-agent-aep",
-			}
-			for k, v := range vals {
-				if k == missing {
-					continue
-				}
+			for k, v := range env {
 				t.Setenv(k, v)
 			}
-
-			cfg, err := Load()
-			if err != nil {
-				t.Fatalf("Load() error = %v, want nil", err)
-			}
-			if cfg.SREAgent.Enabled() {
-				t.Fatalf("SREAgent.Enabled() = true with %s unset, want false", missing)
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), "SRE_HANDOFF") {
+				t.Fatalf("Load() error = %v, want an SRE_HANDOFF error", err)
 			}
 		})
 	}
-}
-
-// TestLoad_SREAgentSeed pins the install-time seed's env wiring (Task A1):
-// Present() is true only with both a key and a model, and the base URL
-// defaults to the OpenAI endpoint only then — never as a bare default that
-// would make an absent seed look present.
-func TestLoad_SREAgentSeed(t *testing.T) {
-	t.Run("key and model populate Seed with the default base URL", func(t *testing.T) {
-		setRequiredLoadEnv(t)
-		t.Setenv("SRE_AGENT_SEED_API_KEY", "sk-seed-0123456789")
-		t.Setenv("SRE_AGENT_SEED_MODEL", "gpt-4o-mini")
-
-		cfg, err := Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v, want nil", err)
-		}
-		if !cfg.SREAgent.Seed.Present() {
-			t.Fatal("Seed.Present() = false, want true")
-		}
-		if cfg.SREAgent.Seed.APIKey != "sk-seed-0123456789" {
-			t.Errorf("APIKey = %q", cfg.SREAgent.Seed.APIKey)
-		}
-		if cfg.SREAgent.Seed.Model != "gpt-4o-mini" {
-			t.Errorf("Model = %q", cfg.SREAgent.Seed.Model)
-		}
-		if cfg.SREAgent.Seed.BaseURL != "https://api.openai.com/v1" {
-			t.Errorf("BaseURL = %q, want the default", cfg.SREAgent.Seed.BaseURL)
-		}
-	})
-
-	t.Run("an explicit base URL overrides the default", func(t *testing.T) {
-		setRequiredLoadEnv(t)
-		t.Setenv("SRE_AGENT_SEED_API_KEY", "sk-seed-0123456789")
-		t.Setenv("SRE_AGENT_SEED_MODEL", "gpt-4o-mini")
-		t.Setenv("SRE_AGENT_SEED_BASE_URL", "https://llm.internal/v1")
-
-		cfg, err := Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v, want nil", err)
-		}
-		if cfg.SREAgent.Seed.BaseURL != "https://llm.internal/v1" {
-			t.Errorf("BaseURL = %q, want the explicit value", cfg.SREAgent.Seed.BaseURL)
-		}
-	})
-
-	for _, missing := range []string{"SRE_AGENT_SEED_API_KEY", "SRE_AGENT_SEED_MODEL"} {
-		t.Run("missing "+missing+" is not Present", func(t *testing.T) {
-			setRequiredLoadEnv(t)
-			vals := map[string]string{"SRE_AGENT_SEED_API_KEY": "sk-seed-0123456789", "SRE_AGENT_SEED_MODEL": "gpt-4o-mini"}
-			for k, v := range vals {
-				if k == missing {
-					continue
-				}
-				t.Setenv(k, v)
-			}
-
-			cfg, err := Load()
-			if err != nil {
-				t.Fatalf("Load() error = %v, want nil", err)
-			}
-			if cfg.SREAgent.Seed.Present() {
-				t.Fatalf("Seed.Present() = true with %s unset, want false", missing)
-			}
-		})
-	}
-
-	t.Run("neither set is not Present and no default base URL leaks in", func(t *testing.T) {
-		setRequiredLoadEnv(t)
-
-		cfg, err := Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v, want nil", err)
-		}
-		if cfg.SREAgent.Seed.Present() {
-			t.Fatal("Seed.Present() = true with neither env var set, want false")
-		}
-		if cfg.SREAgent.Seed.BaseURL != "" {
-			t.Errorf("BaseURL = %q, want empty when the seed is not present", cfg.SREAgent.Seed.BaseURL)
-		}
-	})
 }

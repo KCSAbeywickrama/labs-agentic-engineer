@@ -52,21 +52,6 @@ func TestSreAgentValues_ExtraEnvsFromAEOwnedSecret(t *testing.T) {
 	}
 }
 
-func TestSreAgentAEOwnedSecretAndRole(t *testing.T) {
-	sec := renderSreTemplate(t, sreAgentAEOwnedSecretTmpl, sreParams{ObsNamespace: "obs"})
-	for _, k := range []string{"RCA_LLM_API_KEY: \"\"", "RCA_MODEL_NAME: \"\"", "RCA_LLM_BASE_URL: \"\"", "AEP_MCP_TOKEN: \"\""} {
-		if !strings.Contains(sec, k) {
-			t.Errorf("secret missing %s", k)
-		}
-	}
-	role := renderSreTemplate(t, sreAgentPushRoleTmpl, sreParams{ObsNamespace: "obs", AEPNamespace: "wso2-aep", RcaName: "sre-agent"})
-	for _, want := range []string{"resourceNames: [\"sre-agent-aep\"]", "deployments/scale", "resourceNames: [\"sre-agent\"]", "name: aep-api", "namespace: wso2-aep"} {
-		if !strings.Contains(role, want) {
-			t.Errorf("role missing %q", want)
-		}
-	}
-}
-
 // TestSreTemplates_CarryForceSync verifies every ExternalSecret aectl renders
 // carries ESO's force-sync annotation with the per-run value, so a re-run
 // with an unchanged spec still triggers a fresh sync instead of waiting out

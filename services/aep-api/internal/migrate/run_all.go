@@ -252,10 +252,13 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// govern stage can tell when a connection switch moved its base path.
 		// A new table with no backfill; depends on nothing above it.
 		ctxStep("phase21_ai_agent_model_endpoints", RunPhase21AIAgentModelEndpoints),
-		// The org's SRE model connection: the OpenAI-compatible endpoint the
-		// OpenChoreo SRE agent calls when set. A new table with no backfill;
-		// depends on nothing above it.
+		// The org's SRE model connection, since replaced by install-time values
+		// (phase23 drops it). Kept: databases have already run it.
 		ctxStep("phase22_org_sre_model_connections", RunPhase22OrgSreModelConnections),
+		// The SRE agent's model and handoff key moved to install time: drops
+		// phase22's table and the SRE rows in org_secrets. Runs after phase22
+		// so a fresh database creates and drops the table in one boot.
+		ctxStep("phase23_drop_sre_model_connections", RunPhase23DropSreModelConnections),
 	}
 }
 
