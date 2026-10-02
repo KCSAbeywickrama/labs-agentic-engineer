@@ -92,6 +92,13 @@ user sees a single question. For each section:
   one. A yes is a Product Decision naming what the agent does; a no is an Out
   of Scope line. An agent runs on the organization's own model connection, so
   it needs no `list_external_resources` call and no provider question.
+- **Guardrails: propose one where an agent needs it.** Once an agent is
+  agreed, call `list_guardrail_policies` for the guardrails this platform can
+  apply, and match them against what the agent's stories put in front of it —
+  personal data it should not see, content or requests the brief rules out.
+  Propose each that fits once, in plain words, unless the brief already
+  decides it. A yes is a Product Decision; a no is an Out of Scope line. Where
+  nothing fits, ask nothing.
 - **Note the questions whose answers would change the document**, and only
   those. Skip what the brief already answers.
 

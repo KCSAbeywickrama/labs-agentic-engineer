@@ -108,6 +108,8 @@ import { AgentView } from "@aep/ui-agent-view";
 import { MarkdownView } from "../../../components/MarkdownView";
 import { useConfig } from "../../settings/api/queries";
 import { agentModelConnection } from "../lib/agentModelConnection";
+import { agentGuardrailStatus } from "../lib/agentGuardrailStatus";
+import { useComponentsDeployments } from "../../projects/api/queries";
 import type { AgentToolStatusInfo } from "@aep/ui-agent-view";
 import {
   type SpecSelection,
@@ -575,6 +577,14 @@ export function SpecView({ projectName }: { projectName: string }) {
   const isAgentAfmFile = /^specs\/design\/components\/[^/]+\/agent\.afm\.md$/.test(
     selectedFile?.path ?? "",
   );
+  // The Agent spec's Guardrails panel: what the last deploy did with each
+  // declared guardrail, read from the agent's own deployment rows — only while
+  // an agent's spec is open.
+  const agentDeployments = useComponentsDeployments(
+    projectName,
+    isAgentAfmFile && selectedComponentName ? [selectedComponentName] : [],
+  );
+  const guardrailStatus = isAgentAfmFile ? agentGuardrailStatus(agentDeployments) : undefined;
 
   // The Gherkin acceptance criteria render as a read-only structured view.
   // Without this they are neither .md nor structured, so they fall through to
@@ -1540,6 +1550,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                         toolStatus={agentToolStatus}
                         modelConnection={modelConnection}
                         settingsLink={settingsLink}
+                        guardrailStatus={guardrailStatus}
                         renderMarkdown={(md) => <MarkdownView>{md}</MarkdownView>}
                         {...(afmText ? { onSaveBehaviour: handleSaveBehaviour } : {})}
                       />
@@ -1583,6 +1594,7 @@ export function SpecView({ projectName }: { projectName: string }) {
                         toolStatus={agentToolStatus}
                         modelConnection={modelConnection}
                         settingsLink={settingsLink}
+                        guardrailStatus={guardrailStatus}
                         renderMarkdown={(md) => <MarkdownView>{md}</MarkdownView>}
                         {...(afmText ? { onSaveBehaviour: handleSaveBehaviour } : {})}
                       />

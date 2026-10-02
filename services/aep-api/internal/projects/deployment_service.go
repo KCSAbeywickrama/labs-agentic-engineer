@@ -234,7 +234,7 @@ func (s *DeploymentService) Deploy(ctx context.Context, orgID, projectID string,
 	// an environment that carries an AI gateway binding has promised its agents
 	// are governed, and half a governed wave is the state nobody can reason
 	// about afterwards.
-	if err := s.govern(ctx, orgID, projectID, targets); err != nil {
+	if err := s.govern(ctx, orgID, projectID, design, targets); err != nil {
 		return nil, err
 	}
 
@@ -262,17 +262,19 @@ func (s *DeploymentService) Deploy(ctx context.Context, orgID, projectID string,
 // The governor decides what is and is not an agent — this service does not
 // filter, because "which components are governed" is a governance question and
 // splitting it across two packages is how the two drift.
-func (s *DeploymentService) govern(ctx context.Context, orgID, projectID string, targets []delivery.DeployTarget) error {
+func (s *DeploymentService) govern(ctx context.Context, orgID, projectID string, design *spec.DesignFile, targets []delivery.DeployTarget) error {
 	if s.governor == nil || len(targets) == 0 {
 		return nil
 	}
 	for _, t := range targets {
-		outcome, err := s.governor.GovernAgent(ctx, delivery.GovernAgentInput{
+		in := delivery.GovernAgentInput{
 			OrgID:       orgID,
 			ProjectID:   projectID,
 			Component:   t.Component,
 			Environment: openchoreo.DevEnvironmentName,
-		})
+		}
+		declareGuardrails(&in, design, t.Component)
+		outcome, err := s.governor.GovernAgent(ctx, in)
 		if err != nil {
 			slog.ErrorContext(ctx, "deployment: agent governance failed; the deploy is refused",
 				"org", orgID, "project", projectID, "component", t.Component, "error", err)
@@ -284,6 +286,31 @@ func (s *DeploymentService) govern(ctx context.Context, orgID, projectID string,
 		}
 	}
 	return nil
+}
+
+// declareGuardrails fills in what the named ai-agent's spec declares about
+// guardrails: the guardrails, its instructions, and whether the spec could be
+// read at all. Any other component, or no design, declares nothing.
+func declareGuardrails(in *delivery.GovernAgentInput, design *spec.DesignFile, component string) {
+	if design == nil {
+		return
+	}
+	for _, c := range design.Components {
+		if c.Name != component || c.ComponentType != spec.ComponentTypeAIAgent {
+			continue
+		}
+		decl := spec.AgentGuardrails(c.AgentAFM)
+		if !decl.Readable {
+			in.GuardrailsUnreadable = true
+			return
+		}
+		in.AgentInstructions = decl.Instructions
+		in.AgentUsesTools, in.AgentTakesFiles = decl.UsesTools, decl.TakesFiles
+		for _, g := range decl.Guardrails {
+			in.Guardrails = append(in.Guardrails, delivery.GuardrailDeclaration{Policy: g.Policy, Params: g.Params, Why: g.Why})
+		}
+		return
+	}
 }
 
 // PlanDeploymentWaves plans one reconcile pass over the version's state: what

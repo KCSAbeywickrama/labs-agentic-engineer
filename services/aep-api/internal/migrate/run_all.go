@@ -252,6 +252,10 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// govern stage can tell when a connection switch moved its base path.
 		// A new table with no backfill; depends on nothing above it.
 		ctxStep("phase21_ai_agent_model_endpoints", RunPhase21AIAgentModelEndpoints),
+		// Which guardrails AEP wrote to each governed ai-agent's binding, and
+		// what became of each declared one. A new table with no backfill;
+		// depends on nothing above it.
+		ctxStep("phase22_agent_guardrail_applications", RunPhase22AgentGuardrailApplications),
 	}
 }
 

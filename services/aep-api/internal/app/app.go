@@ -1422,6 +1422,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// deployment takes, so the workflow's promote, Converge's drift repair and a
 	// config change's redeploy are all covered by construction.
 	agentComponentKinds := ampComponentKinds{store: artifactStore}
+	guardrailApplications := organization.NewAgentGuardrailApplicationRepository(db)
 	agentGovernor := agentgovernance.New(agentgovernance.Deps{
 		AMP: ampClientFactory{cfg: agentmanager.Config{
 			TokenURL:     cfg.AgentManager.TokenURL,
@@ -1441,8 +1442,14 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// Only ai-agent components are governed; a wave's services and web apps
 		// are left alone.
 		Kinds: agentComponentKinds,
+		// Which guardrails AEP wrote to each agent's binding, so it manages
+		// only its own entries there.
+		Guardrails: ampGuardrailStore{repo: guardrailApplications},
 	})
 	deploymentService.SetGovernor(agentGovernor)
+	// The design agent's list_guardrail_policies tool reads the same live
+	// catalog the deploy resolves a spec's guardrails against.
+	params.MCPGuardrailCatalog = guardrailCatalog{gov: agentGovernor}
 	// The BUILD-TIME half of the same governor: the version's `provision` gate
 	// registers this version's agents before the coding agent is dispatched, so
 	// an Agent Manager that cannot serve the build fails it at PLANNING rather
@@ -1469,6 +1476,13 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		SetAgentRecordNamer(func(project, component string) string)
 	}); ok {
 		cs.SetAgentRecordNamer(agentgovernance.AgentRecordName)
+	}
+	// ...and says what the last deploy did with each guardrail the agent's
+	// spec declares, from the record the govern stage keeps.
+	if cs, ok := componentService.(interface {
+		SetGuardrailOutcomes(projects.GuardrailOutcomeReader)
+	}); ok {
+		cs.SetGuardrailOutcomes(guardrailOutcomeReader{repo: guardrailApplications})
 	}
 	// Endpoint deploy-wait: after OC Ready, a component that advertises an
 	// external URL stays pending until that URL answers. OC reports Ready when

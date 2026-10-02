@@ -81,6 +81,7 @@ type mcpHandler struct {
 	normalizeSpec SpecNormalizer
 	fetchSpec     SpecFetcher
 	sliceSpec     SpecSlicer
+	guardrails    GuardrailCatalogLister
 }
 
 // NewMCPHandler returns the JSON-RPC MCP handler over the external-resource
@@ -90,17 +91,18 @@ type mcpHandler struct {
 // The acting org is resolved from the request context (bound by the auth
 // middleware), never from the request itself. A nil external-resource reader
 // makes the surface unavailable (503 — it is the surface's core catalog). A
-// nil orgEndpoints/resourceTypes/groupCatalog degrades that one tool to an empty result; a
+// nil orgEndpoints/resourceTypes/groupCatalog/guardrails degrades that one tool to an empty result; a
 // nil remoteGit makes the two remote-git tools return a tool error; a nil
 // validateSpec/normalizeSpec/fetchSpec makes the two spec tools return a tool
 // error.
 func NewMCPHandler(
 	er ExternalResourceReader, ep OrgEndpointLister, rt ResourceTypeLister, gc GroupCatalogLister,
 	rg RemoteGitReader, vs SpecValidator, ns SpecNormalizer, fs SpecFetcher, ss SpecSlicer,
+	gl GuardrailCatalogLister,
 ) http.Handler {
 	h := &mcpHandler{
 		resources: er, orgEndpoints: ep, resourceTypes: rt, groupCatalog: gc, remoteGit: rg,
-		validateSpec: vs, normalizeSpec: ns, fetchSpec: fs, sliceSpec: ss,
+		validateSpec: vs, normalizeSpec: ns, fetchSpec: fs, sliceSpec: ss, guardrails: gl,
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if h.resources == nil {
