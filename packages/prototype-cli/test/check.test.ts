@@ -22,6 +22,7 @@
  * code and the exact codes, files and locations an agent would act on.
  */
 
+import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { checkJson, fixturePath, tempDir } from "./harness.js";
@@ -49,6 +50,23 @@ const invalid: Row[] = [
   { fixture: "manifest-unknown-entry", findings: [["UNKNOWN_REFERENCE", "prototype.json", "entryScreen"]] },
   { fixture: "manifest-flow-unknown-screen", findings: [["UNKNOWN_REFERENCE", "prototype.json", "flows[0].screenIds[1]"]] },
   { fixture: "manifest-flow-unreachable", findings: [["UNKNOWN_REFERENCE", "prototype.json", "flows[0].screenIds[1]"]], message: /role "user" reaches/ },
+  // Source: the static rules.
+  { fixture: "source-syntax-error", findings: [["SYNTAX_ERROR", "prototype.tsx", "line 27"]] },
+  { fixture: "source-import-other-package", findings: [["FORBIDDEN_IMPORT", "prototype.tsx", "line 22"]], message: /lodash/ },
+  { fixture: "source-dynamic-import", findings: [["FORBIDDEN_IMPORT", "prototype.tsx", "line 23"]], message: /dynamic import/ },
+  { fixture: "source-require", findings: [["FORBIDDEN_IMPORT", "prototype.tsx", "line 23"]], message: /^require/ },
+  { fixture: "source-fetch", findings: [["FORBIDDEN_API", "prototype.tsx", "line 27"]], message: /^fetch/ },
+  { fixture: "source-local-storage", findings: [["FORBIDDEN_API", "prototype.tsx", "line 27"]], message: /^localStorage/ },
+  { fixture: "source-eval", findings: [["FORBIDDEN_API", "prototype.tsx", "line 27"]], message: /^eval/ },
+  { fixture: "source-window", findings: [["FORBIDDEN_API", "prototype.tsx", "line 27"]], message: /^window/ },
+  { fixture: "source-raw-element", findings: [["FORBIDDEN_ELEMENT", "prototype.tsx", "line 27"]], message: /<div>/ },
+  { fixture: "source-inner-html", findings: [["FORBIDDEN_API", "prototype.tsx", "line 27"]], message: /dangerouslySetInnerHTML/ },
+  { fixture: "source-math-random", findings: [["FORBIDDEN_API", "prototype.tsx", "line 27"]], message: /Math\.random/ },
+  { fixture: "source-date-now", findings: [["FORBIDDEN_API", "prototype.tsx", "line 27"]], message: /Date\.now/ },
+  { fixture: "source-new-date", findings: [["FORBIDDEN_API", "prototype.tsx", "line 27"]], message: /new Date\(\)/ },
+  // Source: literal navigation targets against the manifest.
+  { fixture: "source-unknown-to", findings: [["UNKNOWN_NAV_TARGET", "prototype.tsx", "line 27"]], message: /screen\.reports/ },
+  { fixture: "source-unknown-go", findings: [["UNKNOWN_NAV_TARGET", "prototype.tsx", "line 28"]], message: /screen\.audit/ },
 ];
 
 describe("prototype check --json", () => {
@@ -73,6 +91,16 @@ describe("prototype check --json", () => {
       ["MISSING_FILE", "prototype.json", "(file)"],
       ["MISSING_FILE", "prototype.tsx", "(file)"],
     ]);
+    expect(status).toBe(1);
+  });
+
+  it("reports a source over the size cap without parsing it", () => {
+    const dir = tempDir();
+    mkdirSync(dir, { recursive: true });
+    copyFileSync(fixturePath("valid/baseline/prototype.json"), join(dir, "prototype.json"));
+    writeFileSync(join(dir, "prototype.tsx"), `// ${"x".repeat(256 * 1024)}\n`);
+    const { status, findings } = checkJson(dir);
+    expect(findings.map((f): Expected => [f.code, f.file, f.location])).toEqual([["SOURCE_TOO_LARGE", "prototype.tsx", "(file)"]]);
     expect(status).toBe(1);
   });
 });
