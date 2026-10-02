@@ -20,6 +20,7 @@
 
 import { packageVersion } from "./assets.js";
 import { runCheck } from "./commands/check.js";
+import { runInit } from "./commands/init.js";
 import { EXIT, type CliIO } from "./io.js";
 import { USAGE, UsageError } from "./usage.js";
 
@@ -36,6 +37,8 @@ export async function main(argv: readonly string[], io: CliIO): Promise<number> 
       case "--version":
         io.stdout(`${packageVersion()}\n`);
         return EXIT.ok;
+      case "init":
+        return runInit(rest, io);
       case "check":
         return runCheck(rest, io);
       default:

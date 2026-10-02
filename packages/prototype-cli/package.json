@@ -11,7 +11,8 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "templates"
   ],
   "engines": {
     "node": ">=22"

@@ -16,18 +16,12 @@
  * under the License.
  */
 
-/** The CLI's usage text and its usage error (exit 2). */
+/** How the CLI names a path in its output: relative to the cwd when inside it, absolute otherwise. */
 
-export class UsageError extends Error {}
+import { isAbsolute, relative } from "node:path";
 
-export const USAGE = `Usage: prototype <command> [options]
-
-Commands:
-  init [dir]                      Scaffold a minimal valid prototype (prototype.json + prototype.tsx)
-  check [dir] [--json] [--theme <package>]
-                                  Check the prototype; exit 0 when clean, 1 on findings, 2 on a usage error
-
-Options:
-  -h, --help                      Show this help
-  --version                       Show the version
-`;
+export function displayPath(cwd: string, path: string): string {
+  const rel = relative(cwd, path);
+  if (rel === "") return ".";
+  return rel.startsWith("..") || isAbsolute(rel) ? path : rel;
+}

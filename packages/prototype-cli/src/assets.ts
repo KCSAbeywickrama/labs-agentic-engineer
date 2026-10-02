@@ -25,6 +25,9 @@ import { fileURLToPath } from "node:url";
 /** The package root (one level above dist/). */
 export const PACKAGE_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
+/** The `init` scaffold. */
+export const INIT_TEMPLATE_DIR = join(PACKAGE_ROOT, "templates", "init");
+
 export function packageVersion(): string {
   return (JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8")) as { version: string }).version;
 }
