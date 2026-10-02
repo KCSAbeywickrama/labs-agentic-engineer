@@ -31,14 +31,14 @@
 // entries are drawn as the Fog. A line a design comment changed is marked as
 // such, with the comment's number, until the comment is resolved.
 //
-// Decorations are rebuilt from the document on every change rather than
-// mapped forward: the user types into these lines, and a spec file is a few
-// dozen blocks.
+// Decorations are rebuilt from the document on every change, and when the
+// options change (setSpecLinesOptions), rather than mapped forward: the user
+// types into these lines, and a spec file is a few dozen blocks.
 
 import { Extension } from "@tiptap/core";
 import type { Node as PmNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { parseLine, type LineParts, type Span } from "../model/ids";
 import { blockingEntries } from "../model/questions";
 import { docLines, type DocLine } from "./docLines";
@@ -231,7 +231,30 @@ function build(doc: PmNode, opts: SpecLinesOptions): DecorationSet {
   return DecorationSet.create(doc, decorations);
 }
 
-const specLinesKey = new PluginKey<DecorationSet>("specLines");
+interface SpecLinesState {
+  opts: SpecLinesOptions;
+  decorations: DecorationSet;
+}
+
+const specLinesKey = new PluginKey<SpecLinesState>("specLines");
+
+/**
+ * Draw the open document with new options. They change the drawing only, so
+ * they go in as a transaction rather than a new editor: an editor rebuilt for
+ * them would lose its undo history and the cursor.
+ */
+export function setSpecLinesOptions(view: EditorView, opts: SpecLinesOptions): void {
+  const current = specLinesKey.getState(view.state)?.opts;
+  if (
+    current &&
+    current.featureRows === opts.featureRows &&
+    current.hideFog === opts.hideFog &&
+    current.designChanged === opts.designChanged
+  ) {
+    return;
+  }
+  view.dispatch(view.state.tr.setMeta(specLinesKey, opts));
+}
 
 export const SpecLines = Extension.create<SpecLinesOptions>({
   name: "specLines",
@@ -239,16 +262,20 @@ export const SpecLines = Extension.create<SpecLinesOptions>({
     return { featureRows: false, hideFog: false, designChanged: null };
   },
   addProseMirrorPlugins() {
-    const opts = this.options;
+    const initial = this.options;
     return [
-      new Plugin<DecorationSet>({
+      new Plugin<SpecLinesState>({
         key: specLinesKey,
         state: {
-          init: (_, state) => build(state.doc, opts),
-          apply: (tr, old) => (tr.docChanged ? build(tr.doc, opts) : old),
+          init: (_, state) => ({ opts: initial, decorations: build(state.doc, initial) }),
+          apply: (tr, old) => {
+            const opts = (tr.getMeta(specLinesKey) as SpecLinesOptions | undefined) ?? old.opts;
+            if (opts === old.opts && !tr.docChanged) return old;
+            return { opts, decorations: build(tr.doc, opts) };
+          },
         },
         props: {
-          decorations: (state) => specLinesKey.getState(state),
+          decorations: (state) => specLinesKey.getState(state)?.decorations,
         },
       }),
     ];

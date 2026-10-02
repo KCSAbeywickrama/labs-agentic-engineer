@@ -31,7 +31,7 @@ import { IdPreview } from "../components/IdPreview";
 import { quietLinkSx } from "../components/QuietId";
 import { soft } from "../components/Tag";
 import { actOnAssumed, AssumedLines, leaveAssumedEdit } from "./assumedLines";
-import { ROWS_SLOT, SpecLines, type AssumedAction } from "./specLinesPlugin";
+import { ROWS_SLOT, SpecLines, setSpecLinesOptions, type AssumedAction } from "./specLinesPlugin";
 
 /** A pill button inside the document, in one palette colour. */
 function pillSx(tone: "warning") {
@@ -117,7 +117,8 @@ const documentSx = {
  * One markdown file of the spec, editable, bound to its fragment in the spec
  * doc: every keystroke is a Yjs update, so the edit is in the doc the rest of
  * the workspace reads (and, once the room is wired, what the committer
- * writes). Yjs owns history, so StarterKit's undo is off.
+ * writes). Yjs owns history, so StarterKit's undo is off; the editor lasts
+ * as long as the file is open, so that history does too.
  *
  * IDs in the text are quiet links: hover shows the line, click opens it. A
  * link to another spec file opens that file.
@@ -156,8 +157,14 @@ export function SpecEditor({
       ],
       onBlur: ({ editor: blurred }) => leaveAssumedEdit(blurred.view),
     },
-    [fragment, withRows, hideFog, designChanged],
+    // Only another file makes another editor. The options below change how
+    // the document is drawn and go to the open editor, which keeps its undo
+    // history and the cursor through them.
+    [fragment],
   );
+  useEffect(() => {
+    if (editor) setSpecLinesOptions(editor.view, { featureRows: withRows, hideFog, designChanged });
+  }, [editor, withRows, hideFog, designChanged]);
 
   // The rows draw into the slot the decorations leave in the document. The
   // slot is ProseMirror's DOM, so it is looked up after every transaction,

@@ -19,12 +19,23 @@
 import { useCallback, useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { interviewingIn, useProjectChat } from "../agent-chat/useProjectChat";
-import { sourceDocuments, useMockSpecExtras, useSpecState, type SpecFeature, type SpecModel } from "./api/specModel";
+import {
+  sourceDocuments,
+  useMockSpecExtras,
+  useSpecState,
+  type DesignSpecChange,
+  type SpecFeature,
+  type SpecModel,
+} from "./api/specModel";
 import { useSpecDoc } from "./collab/specDoc";
 import { useSpecLines } from "./collab/useSpecLines";
 import { withCoverage } from "./model/coverage";
 import { deriveFeatures } from "./model/features";
 import { deriveWorkspace } from "./model/workspace";
+
+// One empty list, not a new one per document change: what is read from it
+// (the editor's design marks) then stays the same while it is empty.
+const NO_SPEC_CHANGES: DesignSpecChange[] = [];
 
 /**
  * The spec model: the features worked out from the live documents, with the
@@ -46,7 +57,7 @@ export function useSpecModel(projectName: string) {
       design: {
         designedFrom,
         openComments: extras.data?.openComments ?? 0,
-        specChanges: extras.data?.specChanges ?? [],
+        specChanges: extras.data?.specChanges ?? NO_SPEC_CHANGES,
       },
     };
   }, [state.data, lines, interviewing, extras.data]);
