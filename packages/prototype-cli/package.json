@@ -1,0 +1,34 @@
+{
+  "name": "@wso2/prototype-cli",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "The prototype CLI: init, check, preview and export a sandboxed React prototype written against @wso2/prototype-kit.",
+  "bin": {
+    "prototype": "./dist/bin.js"
+  },
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "pnpm run build && vitest run",
+    "dev": "echo \"@wso2/prototype-cli: no dev server\""
+  },
+  "dependencies": {
+    "@wso2/prototype-kit": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

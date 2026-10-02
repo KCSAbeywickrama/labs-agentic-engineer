@@ -1,0 +1,30 @@
+{
+  "name": "@wso2/prototype-kit",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "The kit a generated prototype is written against (defineApp, hooks, a mock data store, neutral components), plus the manifest schema, the source and render checks, the sandboxed frame host and the theme build helper.",
+  "exports": {
+    "./check": {
+      "types": "./dist/check/index.d.ts",
+      "default": "./dist/check/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "dev": "echo \"@wso2/prototype-kit: no dev server\""
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "5.9.3"
+  }
+}
