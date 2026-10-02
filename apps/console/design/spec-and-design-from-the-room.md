@@ -1,6 +1,6 @@
 # Spec and design from the room
 
-console-next shows the requirements and the design as their documents say,
+The console shows the requirements and the design as their documents say,
 worked out in the browser from the collab room, so an edit — the user's or the
 agent's — shows at once and nothing says the same thing twice. The platform
 serves only what the documents cannot say.

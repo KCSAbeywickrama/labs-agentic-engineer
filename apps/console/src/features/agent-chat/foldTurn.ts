@@ -33,9 +33,9 @@ import { turnFailureText, type TurnFailure } from "./lib/turnFailure";
 import { extractStreamingQuestions, parseQuestionsInput } from "./questionCards";
 
 // Attach to a turn's SSE stream and fold it into the chat, to its terminal.
-// Adapted from the console's agent-chat/runTurn.ts (attachAndFoldTurn): the
+// Adapted from the old console's agent-chat/runTurn.ts (attachAndFoldTurn): the
 // same frames, the same pre-stream 404 retry and the same severed-stream
-// fallback poll. It writes into a `TurnSink` instead of the console's global
+// fallback poll. It writes into a `TurnSink` instead of the old console's global
 // store, and it leaves out what this app does not show yet (the plan
 // checklist, the register draft, the provider-wait label).
 

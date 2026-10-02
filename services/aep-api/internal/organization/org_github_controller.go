@@ -91,7 +91,7 @@ func NewOrgGitHubController(
 }
 
 // consoleCredentialsPath is the console's Settings → Credentials page
-// (apps/console/src/routes/settings.credentials.tsx), where the callback lands
+// (apps/console-old/src/routes/settings.credentials.tsx), where the callback lands
 // the user with its outcome in the query (`error`, `connected`, `candidates`).
 // The console's routes carry no org: it reads the org from the user's token.
 const consoleCredentialsPath = "/settings/credentials"

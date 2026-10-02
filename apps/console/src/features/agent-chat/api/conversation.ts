@@ -16,7 +16,7 @@
  * under the License.
  */
 
-// The project conversation's two reads, copied from the console's agent-chat
+// The project conversation's two reads, copied from the old console's agent-chat
 // (api/conversations.ts, api/turns.ts): resolve the project's current thread,
 // then read its messages.
 

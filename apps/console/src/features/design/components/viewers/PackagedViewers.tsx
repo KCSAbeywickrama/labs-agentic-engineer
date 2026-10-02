@@ -29,7 +29,7 @@ import { PHONE } from "../../../shell/layout";
 import type { ArtifactSource } from "../../api/designModel";
 
 // The design's artifacts drawn by the shared viewers (packages/ui), used as
-// they are. What is here is the glue, after the console's (WireframePanel,
+// they are. What is here is the glue, after the old console's (WireframePanel,
 // CellDiagramPanel, SpecView): a box of the height a canvas needs, the
 // source compiled for the viewer, and an error boundary around the canvases,
 // where render throws have been seen.

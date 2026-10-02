@@ -21,7 +21,7 @@ import { client } from "../../../api/client";
 import { apiErrorMessage } from "../../../api/errors";
 import type { components } from "../../../generated/aep-api";
 
-// Today's build reads, copied from the console (features/builds/api/queries.ts
+// Today's build reads, copied from the old console (features/builds/api/queries.ts
 // and features/validation/api/queries.ts) and trimmed to what the Builds card
 // shows: the version ledger, one version's runs, and one validation attempt's
 // report. Same calls, same polling; the card's live run itself arrives over

@@ -423,7 +423,7 @@ host).
 The agents of ONE cycle, arranged as the tree the runtime declared, each carrying
 how long it has been going and how long it has been quiet. Built by
 `buildCrew(events, now)` in `@aep/progress-view` and rendered by the console's
-crew view (`apps/console/design/crew-view.md`); the playground reads the same
+crew view (`apps/console-old/design/crew-view.md`); the playground reads the same
 model, so a run looks the same wherever it is watched.
 
 A crew is not a log. The feed answers *what happened*; the crew answers *who is
@@ -481,7 +481,7 @@ person removing the label.
 Every `specs/validation/acceptance/<slug>.feature` in its JUDGING role — the
 source of truth a validation run grades the deployed system against. *Oracle* names what the set
 DOES, not what it is: the console calls the documents themselves the **Acceptance
-criteria** (`apps/console/design/lexicon.md` holds that mapping), and one
+criteria** (`apps/console-old/design/lexicon.md` holds that mapping), and one
 `Scenario:` inside them is an **acceptance criterion**. Different axes, so both
 words are correct and neither is a leftover. Authored from the requirement prose
 alone by the `acceptance-criteria` skill, deliberately blind to the design and the

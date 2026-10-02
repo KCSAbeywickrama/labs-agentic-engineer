@@ -84,7 +84,7 @@ func TestBasisMovesOnlyWhenTheWordsTheDesignReadsMove(t *testing.T) {
 }
 
 // A feature's lines as a build keeps them, held to the shared fixture the
-// console's reader is held to as well (console-next builds/model/changes.ts).
+// console's reader is held to as well (console builds/model/changes.ts).
 func TestFeatureLines_SharedFixture(t *testing.T) {
 	files := readFixture(t, acmeFixture)
 	got := map[string][]Line{}
@@ -105,7 +105,7 @@ func TestFeatureLines_SharedFixture(t *testing.T) {
 }
 
 // A feature's basis, held to the shared fixture the console's reader is held
-// to (console-next spec/model/designWork.ts designBasis): the platform records
+// to (console spec/model/designWork.ts designBasis): the platform records
 // what a design read, and the console compares its live basis with it to say
 // a design is out of date, so the two must read the files identically.
 func TestBasis_SharedFixture(t *testing.T) {

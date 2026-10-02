@@ -21,7 +21,7 @@
 // write the output limit cut off) is phrased from its fields, so a provider
 // limit says whose plan is spent and when to try again, in the reader's own
 // time zone; anything else shows the message the platform recorded. Copied
-// from the console's agent-chat/lib/turnFailure.ts, with its lib/resetStamp.ts
+// from the old console's agent-chat/lib/turnFailure.ts, with its lib/resetStamp.ts
 // folded in (nothing else here says when a provider limit lifts yet).
 
 import type { components } from "../../../generated/aep-api";

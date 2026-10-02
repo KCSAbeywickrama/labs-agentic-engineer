@@ -26,7 +26,7 @@ import type { components } from "../../generated/aep-api";
 // validation report are all worked out from the clock, and a reload lands in
 // the middle of it and reattaches.
 //
-// The shape follows the console's fixtures (apps/console/src/mocks/fixtures/
+// The shape follows the old console's fixtures (apps/console-old/src/mocks/fixtures/
 // run-progress.ts and validation.ts): a coding cycle whose lead agent reads
 // the spec, writes its plan (`work_item`, source plan) and works it entry by
 // entry; then a validation cycle that judges each criterion and commits

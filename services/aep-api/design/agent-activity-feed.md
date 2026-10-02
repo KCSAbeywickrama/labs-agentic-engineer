@@ -102,7 +102,7 @@ flowchart LR
 | The feed itself (append-only event log) | `activity_events` table, AutoMigrated via `migrate.BaseModels()` | `internal/projects` (entity + gorm repository at the domain root) |
 | Live-tail wakeups | `ActivityHub`, in-memory per `(org, project)` — no persistence needed; a reconnect replays from the table | `internal/projects` |
 | Event vocabulary (`spec_published`, `task_failed`, …) | `internal/contracts/activityvocab` — a pure leaf both producers (delivery) and the owner (projects) import | shared contract |
-| Console's copy | TanStack Query cache (first page) + `useActivityFeed` in-memory live list, deduped by event `id` | `apps/console/src/features/activity` |
+| Console's copy | TanStack Query cache (first page) + `useActivityFeed` in-memory live list, deduped by event `id` | `apps/console-old/src/features/activity` |
 
 ### Why the indirections
 

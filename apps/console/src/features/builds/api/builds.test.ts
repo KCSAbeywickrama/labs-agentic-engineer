@@ -19,7 +19,7 @@
 import { describe, expect, it } from "vitest";
 import { buildRefusal, BuildRefusedError, projectBuilds } from "./builds";
 
-// How a failed build start reads, as the console's useBuildProject reads it:
+// How a failed build start reads, as the old console's useBuildProject reads it:
 // the envelope's message, and the gate's 422 detail rows kept as a checklist.
 
 describe("buildRefusal", () => {

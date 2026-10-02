@@ -19,7 +19,7 @@
 // Mermaid, loaded on the first diagram so a design without one pays nothing
 // for the (large) library, and rendered one diagram at a time: mermaid keeps
 // global state across a render, so concurrent renders deadlock. Copied from
-// the console's spec editor (apps/console mermaidRenderer.ts).
+// the old console's spec editor (apps/console-old mermaidRenderer.ts).
 
 type RenderFn = (id: string, source: string) => Promise<{ svg: string }>;
 

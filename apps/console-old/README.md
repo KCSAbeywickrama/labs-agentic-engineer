@@ -1,4 +1,10 @@
-# Console
+# Console (old)
+
+> **Reference only.** This is the console `apps/console` replaced. It is kept as
+> source to port from: it is outside the pnpm workspace, so nothing builds,
+> tests or ships it, and the commands below no longer run. What it has that the
+> console does not yet is listed in `apps/console/design/console-old-gaps.md`.
+> Delete this folder once the last of it is ported.
 
 The web frontend of the Agentic Engineer Platform: a React + TypeScript
 single-page app (Vite + Oxygen UI) talking to the `aep-api` BFF through a

@@ -22,7 +22,7 @@
 // `features/projects/lib/referenceFiles.ts` (the screening), folded into one
 // module because this app has no chat attachments yet to share the vocabulary
 // with. When the chat grows attachments (N6), the type vocabulary moves out
-// to be shared, as it is in the console.
+// to be shared, as it is in the old console.
 //
 // The bytes go up as multipart to POST /projects/{name}/references and are
 // never committed (ADR-0017): the server stores them off-git and overlays them

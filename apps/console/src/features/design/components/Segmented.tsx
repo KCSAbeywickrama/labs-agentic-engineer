@@ -21,7 +21,7 @@ import { ToggleButton, ToggleButtonGroup } from "@wso2/oxygen-ui";
 /**
  * A small pill switch between a few values: the artifact filter, and an
  * artifact's Use it · Comment mode. Oxygen's ToggleButtonGroup, restyled as
- * the console's wireframe view switch is (WireframePanel.tsx).
+ * the old console's wireframe view switch is (WireframePanel.tsx).
  */
 export function Segmented<T extends string>({
   value,

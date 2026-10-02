@@ -37,7 +37,7 @@ import { ValidationByFeature, ValidationToCome } from "./ValidationByFeature";
 
 // One version's build, live: its steps in order, each opening to its log;
 // then its validation, grouped by feature; then, once it has finished, what it
-// offers next. Copied in spirit from the console's Builds page (BuildsPage,
+// offers next. Copied in spirit from the old console's Builds page (BuildsPage,
 // BuildDetailPage, RunNowPanel), keeping their transport: the run rows poll
 // (useBuildRuns), the run itself streams (useRunProgress), and the validation
 // attempt's report is read at its commit (useValidationSnapshot).

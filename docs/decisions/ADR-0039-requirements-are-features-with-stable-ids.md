@@ -32,7 +32,7 @@ interview, design or build was the whole product. Users think in features
    `*assumed*` is the agent's decision awaiting the user; there are no
    proposals — edits land directly and the tag is the review.
 4. **Two readers, one fixture.** Go (`internal/platform/reqspec`) and the
-   console (`console-next model/requirements.ts`) read the files and are held to
+   console (`apps/console` model/requirements.ts) read the files and are held to
    `packages/contracts/requirements/acme-expenses` (`expected.json`,
    `feature-lines.json`, `basis.json`). The save gate refuses an ID in two
    places, a reused retired ID, a story outside its feature's file, and a

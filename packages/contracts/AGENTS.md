@@ -23,6 +23,6 @@
   package's `gen` script.
 - `requirements/` holds the requirements fixture both readers of
   `specs/requirements/` are held to: aep-api's `internal/platform/reqspec` (Go)
-  and console-next's `features/spec/model/requirements.ts`. Each fixture folder
+  and the console's `features/spec/model/requirements.ts`. Each fixture folder
   is written to `skills/prd-contract`, and its `expected.json` is the parse both
   must yield. Change the contract, the fixture and both readers together.

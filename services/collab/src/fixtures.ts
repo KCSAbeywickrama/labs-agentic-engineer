@@ -19,7 +19,7 @@
 import { type SpecFile } from "./bff.js";
 
 // Dev-mode seed content. Mirrors the console mock layer's demo-shop project
-// (apps/console/src/mocks/fixtures/project.ts) so `make dev` shows the same
+// (apps/console-old/src/mocks/fixtures/project.ts) so `make dev` shows the same
 // spec in both the mocked REST reads and the live collab doc.
 
 /** A spec file as the Files API serves it: repo-relative path under specs/. */

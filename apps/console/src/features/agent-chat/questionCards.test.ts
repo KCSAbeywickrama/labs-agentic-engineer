@@ -30,7 +30,7 @@ import {
 } from "./questionCards";
 import type { QuestionAnswer } from "@aep/agent-stream";
 
-// Copied from the console's agent-chat/questionCards.test.ts, less the typed
+// Copied from the old console's agent-chat/questionCards.test.ts, less the typed
 // option actions (not parsed here) and the log-level answerability tests,
 // which moved with that logic to chatLog.test.ts.
 

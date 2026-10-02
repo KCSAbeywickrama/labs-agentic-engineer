@@ -56,7 +56,7 @@ export function featureScope(feature: Pick<SpecFeature, "id" | "name" | "path">)
 
 /**
  * The request body of a turn: the user's words, scoped. `collab` makes it a
- * room turn, as the console's spec chat is: the agent edits the shared spec.
+ * room turn, as the old console's spec chat is: the agent edits the shared spec.
  */
 export function turnBody(instruction: string, scope: TurnScope): TurnBody {
   const body: TurnBody = { instruction, collab: true };

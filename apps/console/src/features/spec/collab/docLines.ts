@@ -21,7 +21,7 @@ import { AGENT_INSERTION } from "@aep/collab-doc";
 import type { AgentWriter } from "../api/specModel";
 import type { LineBlock } from "../model/ids";
 
-// The walk from a live ProseMirror document to its lines (after the console's
+// The walk from a live ProseMirror document to its lines (after the old console's
 // docBlocks). A list entry is the paragraph INSIDE its `listItem`: that is the
 // textblock that carries the words, so its item-ness comes from the parent.
 // Text the agent wrote carries the agentInsertion mark (@aep/collab-doc) with

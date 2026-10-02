@@ -78,5 +78,5 @@ unknown value is therefore a pre-stream 400, never a silent fallback — the wro
 answer narrates repo paths at someone who cannot see a file tree.
 
 Ordering, precedence and the four rules are settled under **How the agent talks**
-in `apps/console/design/lexicon.md`, which stays the source for the artifact
+in `apps/console-old/design/lexicon.md`, which stays the source for the artifact
 names the skill pins.

@@ -31,7 +31,7 @@ import { RAIL_WIDTH } from "../layout";
 import { RailUserMenu } from "./RailUserMenu";
 
 // MUI's polymorphic `component={Link}` does not typecheck against the router's
-// typed `to`/`params`; createLink is the adapter (as in the console).
+// typed `to`/`params`; createLink is the adapter (as in the old console).
 const RailLink = createLink(IconButton);
 
 function railButtonSx(active: boolean): SxProps<Theme> {

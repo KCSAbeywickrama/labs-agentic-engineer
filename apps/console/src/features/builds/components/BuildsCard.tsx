@@ -30,7 +30,7 @@ import { RunView } from "./RunView";
 import { VersionPicker, VersionRail } from "./VersionRail";
 
 // The Builds card's body: the versions down its side, and the one picked (the
-// newest by default) as its run. As the console's Builds page, it leads with
+// newest by default) as its run. As the old console's Builds page, it leads with
 // one version's story; an unknown version in the URL falls back to the newest,
 // so a stale link degrades to "latest" rather than to nothing.
 

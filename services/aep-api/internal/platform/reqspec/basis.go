@@ -24,7 +24,7 @@ import (
 // A feature's design is made from its file and from the product-wide items
 // that reach it; when either reads differently, that feature's design is out
 // of date (and only that feature's). The console works out the same thing in
-// the browser (console-next model/designWork.ts) for the chip it shows.
+// the browser (console model/designWork.ts) for the chip it shows.
 
 // Designable reports whether design can take the feature: it has been
 // interviewed (it has stories) and no blocking question stops it.
@@ -81,7 +81,7 @@ type Line struct {
 // FeatureLines is every line of a feature's file under its sections, in file
 // order, by its words — headings left out, and a line left with no words (a
 // bare `Needs:` clause) dropped. The console reads its live lines the same
-// way (console-next builds/model/changes.ts builtLines); both are held to
+// way (console builds/model/changes.ts builtLines); both are held to
 // the shared fixture's feature-lines.json. nil when the feature has no file.
 func FeatureLines(files map[string]string, featureID string) []Line {
 	for rel, content := range files {

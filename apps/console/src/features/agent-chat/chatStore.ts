@@ -48,9 +48,9 @@ import { turnBody, type TurnBody, type TurnScope } from "./turnScope";
 // Module-level rather than in a component: the chat panel closes and opens
 // again while a turn runs, and a page (a stub's Start interview) sends
 // without the panel mounted. The turn's stream is folded here regardless.
-// The transport and the reattach logic follow the console's agent-chat
+// The transport and the reattach logic follow the old console's agent-chat
 // (useAgentChat.ts, runTurn.ts); the store itself is new, built for one
-// shell-level chat per project rather than the console's panel per page.
+// shell-level chat per project rather than the old console's panel per page.
 
 /** The turn's phase; a turn being started or running carries its instruction when known ("/interview F2"). */
 export type TurnPhase =
@@ -102,7 +102,7 @@ interface TurnToAttach {
  * How long until the next look for a running turn. An empty chat is exactly
  * where a platform-started turn (the kickoff) is about to appear, and where a
  * slow poll is indistinguishable from a broken product, so it looks often for
- * a while; otherwise, now and then. As in the console's useAgentChat.
+ * a while; otherwise, now and then. As in the old console's useAgentChat.
  */
 export function foreignTurnPollDelay(chat: ProjectChat, pollsSoFar: number): number {
   return chat.items.length === 0 && pollsSoFar < 8 ? 2_000 : 12_000;

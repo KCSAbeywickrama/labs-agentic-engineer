@@ -22,7 +22,7 @@ Terms: `CONTEXT.md` § Requirements model.
 ## Where each part lives
 
 - aep-api: `services/aep-api/design/requirements-model.md`.
-- console-next: `apps/console-next/design/spec-and-design-from-the-room.md`.
+- console: `apps/console/design/spec-and-design-from-the-room.md`.
 - The shared fixture both readers are held to:
   `packages/contracts/requirements/acme-expenses`.
 - Evals: `evals/spec-agents` (requirements, design, tasks; a scenario with an

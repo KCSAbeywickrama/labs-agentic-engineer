@@ -122,7 +122,7 @@ export function useBuilds(projectName: string) {
   };
 }
 
-/** One unmet condition of the build gate's 422 refusal (the console's #372). */
+/** One unmet condition of the build gate's 422 refusal (the old console's #372). */
 export interface GateProblem {
   field?: string;
   message: string;
@@ -140,7 +140,7 @@ export class BuildRefusedError extends Error {
 }
 
 /**
- * A failed build start, as the console reads it (useBuildProject): the
+ * A failed build start, as the old console reads it (useBuildProject): the
  * envelope's message, and the gate's 422 detail rows ({field, message}) so
  * the refusal renders as a checklist instead of one flattened string.
  */

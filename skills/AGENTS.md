@@ -286,7 +286,7 @@ which is exactly what your own Claude Code reads.
   same flow skills run in the console and in a terminal, where a repo path is
   the right word: the trunk stays byte-identical everywhere and the difference
   rides this one skill. Its artifact-name table pins
-  `apps/console/design/lexicon.md`, which remains the source — a disagreement is
+  `apps/console-old/design/lexicon.md`, which remains the source — a disagreement is
   settled there, not here.
 - A skill is prose for a model, so the usual writing rules apply harder: state
   the rule and the reason it exists, never both halves of a choice.

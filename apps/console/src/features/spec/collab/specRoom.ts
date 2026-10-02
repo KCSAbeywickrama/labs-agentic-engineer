@@ -31,7 +31,7 @@ import { getAccessToken, renewAccessToken, subscribeAccessTokenRefresh } from ".
 // level room, counted by who is using it, and closed a little after the last
 // one lets go, so moving between cards does not reconnect.
 //
-// Its lifecycle is the console's (apps/console useCollabSpec), copied rather
+// Its lifecycle is the old console's (apps/console-old useCollabSpec), copied rather
 // than shared (one consumer each): a doc never outlives the connection that
 // filled it — the server reseeds from git on every load, and a reconnect that
 // carried a seeded doc back would double every file — so a drop after sync

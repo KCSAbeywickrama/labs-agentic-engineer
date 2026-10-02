@@ -17,8 +17,8 @@
  */
 
 // A project turn's transport: start one, find the running one, read one's
-// status, and open its SSE stream. Copied from the console's agent-chat
-// (api/turns.ts) down to what the chat store uses; the console's multipart
+// status, and open its SSE stream. Copied from the old console's agent-chat
+// (api/turns.ts) down to what the chat store uses; the old console's multipart
 // attachments and anchors are not in this app yet.
 
 import type { components } from "../../../generated/aep-api";

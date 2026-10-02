@@ -30,7 +30,7 @@ import {
 } from "../questionCards";
 
 // The agent's question, as a card in the chat: its options, and a free answer
-// in the user's own words. Widgets after the console's SpecQuestionForm
+// in the user's own words. Widgets after the old console's SpecQuestionForm
 // (QuestionBlock, OptionCard), cut down to the chat's width.
 
 function OptionButton({

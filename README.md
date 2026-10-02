@@ -159,6 +159,7 @@ Tear down with `k3d cluster delete openchoreo`, which drops all OpenChoreo state
 | Path | What it is |
 |---|---|
 | [`apps/console`](apps/console/README.md) | the human surface: React SPA over the BFF, its only backend |
+| [`apps/console-old`](apps/console-old/README.md) | the console it replaced, kept as source to port from; not built or shipped ([what it still has](apps/console/design/console-old-gaps.md)) |
 | [`apps/tryit`](apps/tryit/AGENTS.md) | the test app: a static SPA the console opens to sign in as a project's test user and talk to a deployed agent; no backend of its own |
 | [`services/aep-api`](services/aep-api/README.md) | the Go BFF — seven domains behind one tenant-gated edge; owns spec git, the milestone run supervisor (Temporal), provisioning, and the GitHub webhook plane |
 | [`services/agents`](services/agents/AGENTS.md) | design-time agent runtime (Vercel AI SDK). One turn = one POST, streamed as SSE; writes no files itself |

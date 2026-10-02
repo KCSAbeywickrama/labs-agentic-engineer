@@ -42,7 +42,7 @@ export type BuildBody = BuildRequest;
 /**
  * The request body that starts a build of this selection. No inputs and no
  * version: the platform names the version, as an untouched name field does
- * in the console's Start build dialog.
+ * in the old console's Start build dialog.
  */
 export function buildBody(selection: BuildSelection): BuildBody {
   return {

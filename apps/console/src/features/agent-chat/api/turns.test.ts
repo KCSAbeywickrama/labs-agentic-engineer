@@ -19,7 +19,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // What startTurn puts on the wire and how it reads the server's refusals,
-// after the console's api/turns.transport.test.ts.
+// after the old console's api/turns.transport.test.ts.
 
 const post = vi.fn<(path: string, init: Record<string, unknown>) => Promise<unknown>>();
 vi.mock("../../../api/client", () => ({

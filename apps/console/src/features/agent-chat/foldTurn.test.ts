@@ -21,7 +21,7 @@ import type { StreamPart } from "@aep/agent-stream";
 import { TurnStreamAttachError } from "./api/turns";
 import { foldTurn, type TurnSink, type TurnStreamApi } from "./foldTurn";
 
-// After the console's runTurn.test.ts: the frames the fold turns into chat
+// After the old console's runTurn.test.ts: the frames the fold turns into chat
 // rows, and how a turn's end is observed (its terminal frame, or the status
 // read that settles a stream cut short). Streams are real SSE bytes.
 

@@ -57,11 +57,10 @@ export const env = {
   // for locally when it is set.
   apiMode: import.meta.env.DEV && import.meta.env.VITE_API_MODE === "mock" ? ("mock" as const) : ("platform" as const),
   // Thunder OIDC issuer: the REST/OIDC root, not the admin SPA. The dev
-  // default is the dev-thunder-setup container, as for the console.
+  // default is the dev-thunder-setup container, as for the old console.
   thunderUrl: getEnv("VITE_THUNDER_URL") || "http://localhost:8097",
-  // The console's own client: this app replaces the console at switch-over,
-  // so it signs in as the same application. Its dev origin (:8091) is added
-  // to the client's redirect URIs by hand; see README.
+  // The console's client. The dev server's origin (http://localhost:8090) is
+  // added to its redirect URIs by hand; see README.
   thunderClientId: getEnv("VITE_THUNDER_CLIENT_ID") || "aep-console-client",
   thunderScopes: getEnv("VITE_THUNDER_SCOPES") || "openid profile email",
 } as const;
