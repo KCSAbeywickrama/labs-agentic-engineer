@@ -56,7 +56,13 @@ export class PrototypeWatcher {
 
   /** Read and check the files now; reports a change when the files or their findings differ. */
   refresh(): void {
-    const files = readPrototypeFiles(this.dir);
+    let files: ReturnType<typeof readPrototypeFiles>;
+    try {
+      files = readPrototypeFiles(this.dir);
+    } catch (e) {
+      this.reportUnreadable(e);
+      return;
+    }
     const signature = `${files.manifest ?? "\u0000missing"}\u0001${files.source ?? "\u0000missing"}`;
     if (signature === this.signature) return;
     this.signature = signature;
@@ -70,6 +76,18 @@ export class PrototypeWatcher {
     this.onChange(this.current);
   }
 
+  /** A file that exists but cannot be read (a directory, no permission, busy): findings over the last good render, and a retry on the next change. */
+  private reportUnreadable(e: unknown): void {
+    const error = e as NodeJS.ErrnoException;
+    const file = error.path?.endsWith(MANIFEST_FILE) ? MANIFEST_FILE : SOURCE_FILE;
+    const signature = `\u0000unreadable ${file} ${error.code ?? error.message}`;
+    if (signature === this.signature) return;
+    this.signature = signature;
+    const finding: Finding = { code: "MISSING_FILE", file, location: "(file)", message: `${file} cannot be read (${error.code ?? error.message}): it must be a regular file` };
+    this.current = { lastGood: this.current.lastGood, findings: [finding] };
+    this.onChange(this.current);
+  }
+
   /** Watch the folder; a change to either file is checked once the files settle. */
   start(): void {
     this.watcher = watch(this.dir, (_event, name) => {
@@ -80,6 +98,8 @@ export class PrototypeWatcher {
         this.refresh();
       }, SETTLE_MS);
     });
+    // A watch that fails (the folder removed or renamed) must not take the server down; the last status stays.
+    this.watcher.on("error", () => {});
   }
 
   stop(): void {

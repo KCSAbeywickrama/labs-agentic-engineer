@@ -44,6 +44,7 @@ export const driver = {
   readFile: (preview: string, path: string) => call("readFile")(preview, path) as Promise<string | null>,
   writeFile: (preview: string, path: string, content: string) => call("writeFile")(preview, path, content) as Promise<void>,
   removeFile: (preview: string, path: string) => call("removeFile")(preview, path) as Promise<void>,
+  replaceWithDirectory: (preview: string, path: string) => call("replaceWithDirectory")(preview, path) as Promise<void>,
   revisionHash: (preview: string) => call("revisionHash")(preview) as Promise<string>,
 };
 

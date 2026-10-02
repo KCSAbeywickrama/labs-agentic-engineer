@@ -25,7 +25,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { FrameLocator, Locator, Page } from "playwright";
 import type { BrowserCommand } from "vitest/node";
@@ -143,7 +143,13 @@ const writeFile: BrowserCommand<[previewId: string, path: string, content: strin
 };
 
 const removeFile: BrowserCommand<[previewId: string, path: string]> = (_ctx, previewId, path) => {
-  rmSync(join(preview(previewId).dir, path), { force: true });
+  rmSync(join(preview(previewId).dir, path), { force: true, recursive: true });
+};
+
+const replaceWithDirectory: BrowserCommand<[previewId: string, path: string]> = (_ctx, previewId, path) => {
+  const target = join(preview(previewId).dir, path);
+  rmSync(target, { force: true, recursive: true });
+  mkdirSync(target);
 };
 
 /** The revision hash the preview keys persisted data and feedback by: SHA-256 of prototype.json, NUL, prototype.tsx. */
@@ -167,5 +173,6 @@ export const commands = {
   readFile,
   writeFile,
   removeFile,
+  replaceWithDirectory,
   revisionHash,
 };

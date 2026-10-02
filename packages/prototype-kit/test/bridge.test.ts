@@ -46,4 +46,26 @@ describe("parseFromFrameMessage — proto:data", () => {
     cyclic["self"] = cyclic;
     expect(data(cyclic)).toBeNull();
   });
+
+  it("ignores a branching cycle quickly", () => {
+    const a: Record<string, unknown> = {};
+    a["x"] = a;
+    a["y"] = a;
+    const started = Date.now();
+    expect(data(a)).toBeNull();
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it("ignores a deep shared-reference DAG quickly (2^40 paths)", () => {
+    let node: Record<string, unknown> = { leaf: 1 };
+    for (let i = 0; i < 40; i++) node = { l: node, r: node };
+    const started = Date.now();
+    expect(data({ dag: node })).toBeNull();
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it("accepts a value that is shared but not cyclic and small", () => {
+    const shared = { id: "s" };
+    expect(data({ a: [shared], b: [shared] })).not.toBeNull();
+  });
 });

@@ -36,18 +36,25 @@ export function isCollection(value: unknown): value is DataRecord[] {
   );
 }
 
-/** Deep enough for any mock data; a cyclic value (structured clone allows one) is cut off here and so rejected. */
+/** Deep enough for any mock data. */
 const MAX_JSON_DEPTH = 64;
+/** Structured clone keeps shared references, so a small hostile value can be a huge tree; the walk stops at this many values. */
+const MAX_JSON_NODES = 100_000;
 
-function isJsonValue(value: unknown, depth: number): boolean {
+/** Walks `value` once, counting into `budget`; an object met again while still being walked (a cycle) is not JSON. */
+function isJsonValue(value: unknown, depth: number, ancestors: Set<object>, budget: { left: number }): boolean {
+  if (--budget.left < 0) return false;
   if (value === null || typeof value === "string" || typeof value === "boolean") return true;
   if (typeof value === "number") return Number.isFinite(value);
-  if (depth >= MAX_JSON_DEPTH) return false;
-  if (Array.isArray(value)) return value.every((v) => isJsonValue(v, depth + 1));
-  if (typeof value !== "object") return false;
-  const proto: unknown = Object.getPrototypeOf(value);
-  if (proto !== Object.prototype && proto !== null) return false;
-  return Object.values(value).every((v) => isJsonValue(v, depth + 1));
+  if (depth >= MAX_JSON_DEPTH || typeof value !== "object" || ancestors.has(value)) return false;
+  if (!Array.isArray(value)) {
+    const proto: unknown = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return false;
+  }
+  ancestors.add(value);
+  const ok = Object.values(value).every((v) => isJsonValue(v, depth + 1, ancestors, budget));
+  ancestors.delete(value);
+  return ok;
 }
 
 /**
@@ -58,5 +65,5 @@ function isJsonValue(value: unknown, depth: number): boolean {
  */
 export function isDataSnapshot(value: unknown): value is DataSnapshot {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  return isJsonValue(value, 0);
+  return isJsonValue(value, 0, new Set(), { left: MAX_JSON_NODES });
 }

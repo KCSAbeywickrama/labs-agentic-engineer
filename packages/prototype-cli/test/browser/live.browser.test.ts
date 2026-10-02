@@ -162,4 +162,17 @@ describe("prototype preview — the live loop", () => {
     expect(await driver.count(page, host.alert())).toBe(0);
     expect(await driver.read(page, host.picker("Screen"), "value")).toBe("screen.contacts");
   });
+
+  // Fix round: a file that cannot be read (here a directory) must not crash the preview; it shows findings, keeps the last good render and recovers.
+  it("survives prototype.tsx becoming a directory, then recovers", async () => {
+    const { preview, page, source } = await open();
+    await driver.replaceWithDirectory(preview.id, "prototype.tsx");
+    await driver.waitFor(page, host.region("Check findings"));
+    expect(await driver.read(page, host.region("Check findings"), "text")).toContain("cannot be read");
+    expect(await driver.count(page, app.heading("Acme contacts"))).toBe(1);
+    await driver.removeFile(preview.id, "prototype.tsx");
+    await driver.writeFile(preview.id, "prototype.tsx", source.replace("`${company} contacts`", "`${company} people`"));
+    await driver.waitFor(page, host.region("Check findings"), "hidden");
+    await driver.waitFor(page, app.heading("Acme people"));
+  });
 });
