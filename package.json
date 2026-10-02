@@ -15,8 +15,8 @@
     "typecheck": "turbo run typecheck",
     "gen": "turbo run gen",
     "play": "pnpm --filter @aep/playground play",
-    "deadcode-ts": "knip --production --no-exit-code",
-    "deadcode-ts:check": "knip --production"
+    "deadcode-ts": "knip --production --no-gitignore --no-exit-code",
+    "deadcode-ts:check": "knip --production --no-gitignore"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
