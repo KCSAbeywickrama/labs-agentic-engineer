@@ -42,11 +42,13 @@
       "types": "./dist/build/check-prelude.d.ts",
       "default": "./dist/build/check-prelude.js"
     },
+    "./reference.md": "./reference.md",
     "./package.json": "./package.json"
   },
   "files": [
     "dist",
-    "schema"
+    "schema",
+    "reference.md"
   ],
   "engines": {
     "node": ">=22"

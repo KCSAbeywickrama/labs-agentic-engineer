@@ -25,6 +25,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { manifestJsonSchema } from "../src/manifest/json-schema.js";
+import { KIT_REFERENCE_PATH, kitReference } from "./kit-reference.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -35,4 +36,5 @@ export interface GeneratedArtifact {
 
 export const ARTIFACTS: GeneratedArtifact[] = [
   { path: join(root, "schema", "prototype-manifest.schema.json"), render: () => `${JSON.stringify(manifestJsonSchema(), null, 2)}\n` },
+  { path: KIT_REFERENCE_PATH, render: kitReference },
 ];
