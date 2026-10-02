@@ -1,6 +1,6 @@
 # AGENTS.md — tests/e2e
 
-End-to-end walks of the new console (`apps/console-next`) against the real
+End-to-end walks of the console (`apps/console`) against the real
 local stack, driven by `agent-browser` from bash. How to run: `README.md`.
 
 **Status:** `acme-expenses-walk.sh`, the live walk of the running example;

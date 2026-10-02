@@ -33,7 +33,7 @@ import { specSchema } from "./specSchema";
 // the room is wired every peer sees it and the committer writes it.
 
 /** Marks the user's edits made outside an editor. */
-const USER_ORIGIN = "console-next:user";
+const USER_ORIGIN = "console:user";
 
 /** Whitespace before the `*assumed*` tag goes with it. */
 function tagRange(line: DocLine): { from: number; to: number } | null {

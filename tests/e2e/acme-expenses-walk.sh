@@ -25,7 +25,7 @@
 
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-http://localhost:8091}"
+BASE_URL="${BASE_URL:-http://localhost:8090}"
 # The ThunderID admin account deployments/scripts/setup-env-for-aectl.sh
 # creates on every dev-env (the root README documents it): a dev default, not
 # a secret.
@@ -165,7 +165,7 @@ ab find role textbox fill "$E2E_USERNAME" --name Username --exact >/dev/null 2>&
 ab find role textbox fill "$E2E_PASSWORD" --name Password --exact >/dev/null 2>&1 || fail 1 "no Password field"
 ab find role button click --name "Sign In" --exact >/dev/null 2>&1 || fail 1 "no Sign In button"
 ab wait --url "$BASE_URL/**" --timeout 30000 >/dev/null 2>&1 ||
-  fail 1 "sign-in did not return to the app (wrong credentials, or :8091 missing from the client's redirect URIs?): $(ab get url)"
+  fail 1 "sign-in did not return to the app (wrong credentials, or :8090 missing from the client's redirect URIs?): $(ab get url)"
 # The dev-env org is already set up, so onboarding passes straight through.
 if ! retry 30 has_role heading Projects; then
   if ab wait --text "Welcome to Agentic Engineer" --timeout 1000 >/dev/null 2>&1; then

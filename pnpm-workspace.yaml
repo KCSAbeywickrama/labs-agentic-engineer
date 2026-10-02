@@ -2,6 +2,9 @@
 # Go modules (no package.json) are skipped by pnpm and live in go.work instead.
 packages:
   - "apps/*"
+  # The previous console, kept as source to port from: not built, tested or
+  # shipped. apps/console/design/console-old-gaps.md lists what it still has.
+  - "!apps/console-old"
   - "evals/*"
   - "playground"
   - "packages/*"

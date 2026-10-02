@@ -1,6 +1,6 @@
 # tests/e2e — the live walk
 
-`acme-expenses-walk.sh` drives the new console (`apps/console-next`) with
+`acme-expenses-walk.sh` drives the console (`apps/console`) with
 [agent-browser](https://github.com/vercel-labs/agent-browser) through the
 running example, Mark at Acme Corp building Acme Expenses, against your
 dev-env and its real agents. It is run on demand, and before merging
@@ -21,13 +21,12 @@ Later steps (spec, design, build) are added as their screens are wired.
 ## Prerequisites
 
 - A dev-env cluster (`make dev-env`).
-- `http://localhost:8091` and `http://localhost:8091/callback` added by hand to
-  the `aep-console-client` redirect URIs in the cluster's Thunder (see
-  `apps/console-next/README.md`).
-- The new console running in real mode on :8091:
+- `http://localhost:8090/callback` added by hand to the `aep-console-client`
+  redirect URIs in the cluster's Thunder (see `apps/console/README.md`).
+- The console's dev server running in real mode on :8090:
 
   ```sh
-  cd apps/console-next
+  cd apps/console
   API_PROXY_TARGET=http://console.ae.localhost:8080/aep-api-service \
   VITE_THUNDER_URL=http://thunder.openchoreo.localhost:8080 \
   pnpm dev
@@ -48,7 +47,7 @@ exit, pass or fail.
 
 | Variable | Default | |
 |---|---|---|
-| `BASE_URL` | `http://localhost:8091` | where the app runs |
+| `BASE_URL` | `http://localhost:8090` | where the app runs |
 | `E2E_USERNAME` / `E2E_PASSWORD` | `admin` / `Admin@123` | the ThunderID admin that `setup-env-for-aectl.sh` creates |
 | `E2E_CREATE` | `0` | `1` goes past the details form and creates the project |
 | `E2E_SESSION` | `acme-expenses-walk` | the agent-browser session name |

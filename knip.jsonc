@@ -6,14 +6,14 @@
   //
   // Scope: only these two workspaces, plus @aep/web-search (web search for the
   // agents service and the runner's `aep-web` MCP server) and
-  // @aep/console-next (the new console, gated from its first commit); every
+  // @aep/console (gated since its first commit, as console-next); every
   // other pnpm workspace is ignored. knip AUTO-DETECTS entries (agents via its package.json `exports`
   // map, the playground via its `play: tsx src/cli.ts` script) — do NOT add a
   // per-workspace `entry`/`project` override for those two, it silently breaks
   // detection.
   "ignoreWorkspaces": [
     "apps/*",
-    "!apps/console-next",
+    "!apps/console",
     "evals/*",
     "packages/*",
     "!packages/web-search",
@@ -40,13 +40,13 @@
     "services/agents/src/shared/mock-model.ts",
     "skills/**"
   ],
-  // @aep/console-next: TanStack file routes are consumed only by the generated
+  // @aep/console: TanStack file routes are consumed only by the generated
   // route tree, which is gitignored and so invisible to knip; each route file is
   // an entry instead. The test setup and the verbatim-served public/ files are
   // not production source. The `!` suffix marks entries and project files as
   // production ones, which is all `--production` reads.
   "workspaces": {
-    "apps/console-next": {
+    "apps/console": {
       "entry": ["src/main.tsx!", "src/routes/**/*.tsx!"],
       "project": ["src/**/*.{ts,tsx}!"],
       "ignore": ["public/**", "src/test-setup.ts"]

@@ -41,10 +41,10 @@ import { useSpecRoom } from "./specRoom";
 // reload starts over.
 
 /** Marks the seed's writes, so they are never mistaken for the user's edits. */
-const SEED_ORIGIN = "console-next:local-seed";
+const SEED_ORIGIN = "console:local-seed";
 
 /** Marks the agent's file writes, applied here while the room is not wired. */
-const AGENT_ORIGIN = "console-next:agent-write";
+const AGENT_ORIGIN = "console:agent-write";
 
 /** The writer the agents service names on its marks (services/agents room-peer.ts). */
 const AGENT_NAME = "Spec Agent";
