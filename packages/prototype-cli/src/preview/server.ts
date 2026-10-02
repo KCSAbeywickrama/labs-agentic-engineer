@@ -75,16 +75,21 @@ function send(res: ServerResponse, status: number, type: string, body: string | 
   res.end(body);
 }
 
-/** The request body as text, or null when it is over the limit. */
+/** The request body as text, or null when it is over the limit. On null the rest of the body is discarded, not read. */
 function readBody(req: IncomingMessage): Promise<string | null> {
   return new Promise((resolve, reject) => {
+    const declared = Number(req.headers["content-length"]);
+    if (declared > MAX_BODY) return resolve(null);
     const chunks: Buffer[] = [];
     let size = 0;
+    let over = false;
     req.on("data", (chunk: Buffer) => {
+      if (over) return;
       size += chunk.length;
       if (size > MAX_BODY) {
+        over = true;
+        chunks.length = 0;
         resolve(null);
-        req.destroy();
         return;
       }
       chunks.push(chunk);
@@ -107,7 +112,11 @@ export async function startPreviewServer(options: PreviewServerOptions): Promise
     const origin = req.headers.origin;
     if (origin !== undefined && !hosts().has(origin.replace(/^http:\/\//, ""))) return send(res, 403, "text/plain", "cross-origin feedback is refused");
     const body = await readBody(req);
-    if (body === null) return send(res, 413, "text/plain", "feedback is too large");
+    if (body === null) {
+      // Answer first, then drop the connection: destroying the socket before the response is written loses the 413.
+      res.once("finish", () => req.destroy());
+      return send(res, 413, "text/plain", "feedback is too large", { connection: "close" });
+    }
     let value: unknown;
     try {
       value = JSON.parse(body);

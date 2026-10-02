@@ -25,12 +25,14 @@ export interface FeedbackPanelProps {
   /** The selected elements' labels, in selection order. */
   selection: string[];
   queue: readonly FeedbackRequest[];
+  /** The queue was started against a revision that has since been replaced. */
+  stale: boolean;
   onAdd: (text: string) => void;
   onRemove: (index: number) => void;
   onSave: () => Promise<string>;
 }
 
-export function FeedbackPanel({ selection, queue, onAdd, onRemove, onSave }: FeedbackPanelProps) {
+export function FeedbackPanel({ selection, queue, stale, onAdd, onRemove, onSave }: FeedbackPanelProps) {
   const [text, setText] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const add = () => {
@@ -53,6 +55,7 @@ export function FeedbackPanel({ selection, queue, onAdd, onRemove, onSave }: Fee
       <button type="button" onClick={add} disabled={text.trim() === ""}>
         Add request
       </button>
+      {stale && queue.length > 0 && <p role="note">Queued against an earlier version of the prototype.</p>}
       <ol className="ph-queue" aria-label="Queued requests">
         {queue.map((r, i) => (
           <li key={i}>

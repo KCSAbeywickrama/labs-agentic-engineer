@@ -90,3 +90,30 @@ describe("prototype preview — Annotate", () => {
     await driver.waitFor(page, app.heading("New contact"));
   });
 });
+
+describe("prototype preview — Annotate across a revision", () => {
+  it("keeps the queue, says it was made against an earlier version, and saves the original hash", async () => {
+    const p = await driver.startPreview("contacts");
+    const pg = await driver.openPage(p.url);
+    try {
+      await driver.waitFor(pg, app.heading("Acme contacts"));
+      const originalHash = await driver.revisionHash(p.id);
+      await driver.click(pg, host.button("Annotate"));
+      await driver.click(pg, app.element("btn.new"));
+      await driver.fill(pg, host.field("Request"), "Make this button green");
+      await driver.click(pg, host.button("Add request"));
+      const source = (await driver.readFile(p.id, "prototype.tsx"))!;
+      await driver.writeFile(p.id, "prototype.tsx", source.replace("`${company} contacts`", "`${company} people`"));
+      await driver.waitFor(pg, app.heading("Acme people"));
+      await driver.waitFor(pg, host.text("Queued against an earlier version of the prototype."));
+      await driver.click(pg, host.button("Save feedback"));
+      await driver.waitFor(pg, host.text("Saved 1 request to .prototype/feedback.json"));
+      const saved = JSON.parse((await driver.readFile(p.id, ".prototype/feedback.json"))!) as { prototypeHash: string };
+      expect(saved.prototypeHash).toBe(originalHash);
+      expect(await driver.revisionHash(p.id)).not.toBe(originalHash);
+    } finally {
+      await driver.closePage(pg);
+      await driver.stopPreview(p.id);
+    }
+  });
+});

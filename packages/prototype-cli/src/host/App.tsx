@@ -112,6 +112,7 @@ function Review({ config, runtime, revision }: { config: HostConfig; runtime: st
           <FeedbackPanel
             selection={view.selectedKeys.map((k) => labels[k] ?? k)}
             queue={queue}
+            stale={queueHash !== revision.hash}
             onAdd={add}
             onRemove={(index) => setQueue((q) => q.filter((_, i) => i !== index))}
             onSave={save}

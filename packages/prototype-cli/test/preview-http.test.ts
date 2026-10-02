@@ -85,6 +85,21 @@ describe("prototype preview (HTTP)", () => {
     expect(existsSync(feedbackFile())).toBe(false);
   });
 
+  it("answers 413 to feedback over 1 MiB, declared or streamed, and writes nothing", async () => {
+    const big = JSON.stringify({ prototypeHash: "a".repeat(64), requests: [{ screenId: "s", roleId: "r", stateId: "t", elementIds: [], text: "x".repeat(1024 * 1024 + 1) }] });
+    const post = { method: "POST", headers: { "content-type": "application/json" } };
+    expect((await send("/feedback", { ...post, body: big })).status).toBe(413);
+    const url = new URL("/feedback", preview.url);
+    const streamed = await new Promise<number>((resolve, reject) => {
+      const req = request({ host: url.hostname, port: url.port, path: url.pathname, method: "POST", headers: { "content-type": "application/json", "transfer-encoding": "chunked" } }, (res) => (res.resume(), resolve(res.statusCode ?? 0)));
+      req.on("error", reject);
+      req.write(big.slice(0, 1024 * 1024 + 100));
+      req.end(big.slice(1024 * 1024 + 100));
+    });
+    expect(streamed).toBe(413);
+    expect(existsSync(feedbackFile())).toBe(false);
+  });
+
   it("writes valid feedback from its own origin to .prototype/feedback.json", async () => {
     const origin = preview.url.replace(/\/$/, "");
     const res = await send("/feedback", { method: "POST", headers: { "content-type": "application/json", origin }, body: valid });
