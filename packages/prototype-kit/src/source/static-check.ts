@@ -28,7 +28,7 @@ import type { Node } from "acorn";
 import { ancestor } from "acorn-walk";
 import { SOURCE_FILE, type Finding } from "../findings.js";
 import { syntaxFinding } from "./transpile.js";
-import { byLine, isIdentifier, parseSourceTree, sourceFinding, stringLiteral, type IdentifierNode } from "./tree.js";
+import { byLine, collectBoundNames, isIdentifier, parseSourceTree, sourceFinding, stringLiteral, type IdentifierNode } from "./tree.js";
 
 /** The modules a prototype may import. */
 export const PROTOTYPE_IMPORTS = ["react", "@wso2/prototype-kit"] as const;
@@ -76,6 +76,7 @@ export function checkSource(source: string): Finding[] {
     return [syntaxFinding(e)];
   }
 
+  const bound = collectBoundNames(tree);
   const findings: Finding[] = [];
   const report = (code: Finding["code"], node: Node, message: string) => findings.push(sourceFinding(code, node, message));
 
@@ -115,9 +116,9 @@ export function checkSource(source: string): Finding[] {
     Identifier(node, _state, ancestors) {
       const name = (node as unknown as IdentifierNode).name;
       if (!isReference(node, ancestors)) return;
-      if (name === "require") {
+      if (name === "require" && !bound.has(name)) {
         report("FORBIDDEN_IMPORT", node, `require: ${IMPORT_RULE}`);
-      } else if (FORBIDDEN_GLOBALS.has(name)) {
+      } else if (FORBIDDEN_GLOBALS.has(name) && !bound.has(name)) {
         report("FORBIDDEN_API", node, `${name} is not available to a prototype: it renders kit components over its own mock data`);
       }
     },

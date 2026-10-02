@@ -19,6 +19,7 @@
 /** Shared syntax-tree helpers for the static checks (acorn over the analysis transpile). */
 
 import { parse, type Node } from "acorn";
+import { simple } from "acorn-walk";
 import { SOURCE_FILE, type Finding, type FindingCode } from "../findings.js";
 import { transpileForAnalysis } from "./transpile.js";
 
@@ -59,4 +60,49 @@ export function stringLiteral(node: Node | null | undefined): string | undefined
   if (node?.type !== "Literal") return undefined;
   const value = (node as LiteralNode).value;
   return typeof value === "string" ? value : undefined;
+}
+
+/** Every name the module binds anywhere (declarations, parameters, catch and import bindings): a module-wide set, not scope analysis. */
+export function collectBoundNames(tree: SourceTree): Set<string> {
+  const names = new Set<string>();
+  const bind = (pattern: Node | null | undefined): void => {
+    const p = pattern as unknown as Record<string, unknown> | null | undefined;
+    if (!p) return;
+    switch (p["type"]) {
+      case "Identifier":
+        names.add(p["name"] as string);
+        break;
+      case "ObjectPattern":
+        for (const prop of p["properties"] as Node[]) bind((prop as unknown as { value?: Node; argument?: Node }).value ?? (prop as unknown as { argument?: Node }).argument);
+        break;
+      case "ArrayPattern":
+        for (const element of p["elements"] as (Node | null)[]) bind(element);
+        break;
+      case "RestElement":
+        bind(p["argument"] as Node);
+        break;
+      case "AssignmentPattern":
+        bind(p["left"] as Node);
+        break;
+    }
+  };
+  const bindFunction = (node: Node): void => {
+    const fn = node as unknown as { id?: Node | null; params: Node[] };
+    bind(fn.id);
+    fn.params.forEach(bind);
+  };
+  const bindClass = (node: Node): void => bind((node as unknown as { id?: Node | null }).id);
+  simple(tree, {
+    VariableDeclarator: (node) => bind((node as unknown as { id: Node }).id),
+    FunctionDeclaration: bindFunction,
+    FunctionExpression: bindFunction,
+    ArrowFunctionExpression: bindFunction,
+    ClassDeclaration: bindClass,
+    ClassExpression: bindClass,
+    CatchClause: (node) => bind((node as unknown as { param?: Node | null }).param),
+    ImportSpecifier: (node) => bind((node as unknown as { local: Node }).local),
+    ImportDefaultSpecifier: (node) => bind((node as unknown as { local: Node }).local),
+    ImportNamespaceSpecifier: (node) => bind((node as unknown as { local: Node }).local),
+  });
+  return names;
 }

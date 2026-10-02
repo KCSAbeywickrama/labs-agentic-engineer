@@ -36,7 +36,7 @@ interface Row {
   message?: RegExp;
 }
 
-const valid = ["baseline"];
+const valid = ["baseline", "local-names"];
 
 const invalid: Row[] = [
   { fixture: "missing-source", findings: [["MISSING_FILE", "prototype.tsx", "(file)"]] },
