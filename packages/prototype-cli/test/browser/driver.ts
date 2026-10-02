@@ -40,6 +40,11 @@ export const driver = {
   waitFor: (page: string, target: Target, state: "visible" | "hidden" = "visible") => call("waitFor")(page, target, state) as Promise<void>,
   evalInApp: (page: string, expression: string) => call("evalInApp")(page, expression) as Promise<string>,
   requests: (page: string) => call("requests")(page) as Promise<string[]>,
+  setStorage: (page: string, key: string, value: string) => call("setStorage")(page, key, value) as Promise<void>,
+  readFile: (preview: string, path: string) => call("readFile")(preview, path) as Promise<string | null>,
+  writeFile: (preview: string, path: string, content: string) => call("writeFile")(preview, path, content) as Promise<void>,
+  removeFile: (preview: string, path: string) => call("removeFile")(preview, path) as Promise<void>,
+  revisionHash: (preview: string) => call("revisionHash")(preview) as Promise<string>,
 };
 
 export const app = {
@@ -57,6 +62,7 @@ export const host = {
   picker: (label: string): Target => ({ where: "host", role: "combobox", name: label }),
   button: (name: string): Target => ({ where: "host", role: "button", name }),
   region: (name: string): Target => ({ where: "host", role: "region", name }),
+  alert: (): Target => ({ where: "host", role: "alert" }),
   field: (label: string): Target => ({ where: "host", label }),
   text: (text: string, partial = false): Target => ({ where: "host", text, partial }),
 };

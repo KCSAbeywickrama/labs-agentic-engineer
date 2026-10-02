@@ -24,7 +24,9 @@
  * clicks it.
  */
 
-import { rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { FrameLocator, Locator, Page } from "playwright";
 import type { BrowserCommand } from "vitest/node";
 import { copyFixture, startPreview as spawnPreview, type PreviewProcess } from "../harness.js";
@@ -124,6 +126,32 @@ const requests: BrowserCommand<[pageId: string]> = (_ctx, pageId) => {
   return [...p.requests];
 };
 
+const setStorage: BrowserCommand<[pageId: string, key: string, value: string]> = async (_ctx, pageId, key, value) => {
+  await page(pageId).evaluate(([k, v]) => localStorage.setItem(k, v), [key, value] as const);
+};
+
+const readFile: BrowserCommand<[previewId: string, path: string]> = (_ctx, previewId, path) => {
+  try {
+    return readFileSync(join(preview(previewId).dir, path), "utf8");
+  } catch {
+    return null;
+  }
+};
+
+const writeFile: BrowserCommand<[previewId: string, path: string, content: string]> = (_ctx, previewId, path, content) => {
+  writeFileSync(join(preview(previewId).dir, path), content, "utf8");
+};
+
+const removeFile: BrowserCommand<[previewId: string, path: string]> = (_ctx, previewId, path) => {
+  rmSync(join(preview(previewId).dir, path), { force: true });
+};
+
+/** The revision hash the preview keys persisted data and feedback by: SHA-256 of prototype.json, NUL, prototype.tsx. */
+const revisionHash: BrowserCommand<[previewId: string]> = (_ctx, previewId) => {
+  const dir = preview(previewId).dir;
+  return createHash("sha256").update(readFileSync(join(dir, "prototype.json"))).update("\u0000").update(readFileSync(join(dir, "prototype.tsx"))).digest("hex");
+};
+
 export const commands = {
   startPreview,
   stopPreview,
@@ -135,4 +163,9 @@ export const commands = {
   waitFor,
   evalInApp,
   requests,
+  setStorage,
+  readFile,
+  writeFile,
+  removeFile,
+  revisionHash,
 };

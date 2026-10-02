@@ -35,3 +35,28 @@ export function isCollection(value: unknown): value is DataRecord[] {
     value.every((r) => typeof r === "object" && r !== null && !Array.isArray(r) && typeof (r as { id?: unknown }).id === "string")
   );
 }
+
+/** Deep enough for any mock data; a cyclic value (structured clone allows one) is cut off here and so rejected. */
+const MAX_JSON_DEPTH = 64;
+
+function isJsonValue(value: unknown, depth: number): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (depth >= MAX_JSON_DEPTH) return false;
+  if (Array.isArray(value)) return value.every((v) => isJsonValue(v, depth + 1));
+  if (typeof value !== "object") return false;
+  const proto: unknown = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return false;
+  return Object.values(value).every((v) => isJsonValue(v, depth + 1));
+}
+
+/**
+ * Whether `value` is a snapshot a host may keep and hand back to the frame: an
+ * object whose every key holds a collection (an array of records with a
+ * string `id`) or any other JSON value. A frame is untrusted, so its snapshot
+ * is checked before it is stored.
+ */
+export function isDataSnapshot(value: unknown): value is DataSnapshot {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  return isJsonValue(value, 0);
+}

@@ -28,7 +28,7 @@
  * React-free.
  */
 
-import type { DataSnapshot } from "../data.js";
+import { isDataSnapshot, type DataSnapshot } from "../data.js";
 import type { PrototypeManifest } from "../manifest/types.js";
 
 export type FrameMode = "preview" | "annotate";
@@ -138,7 +138,7 @@ export function parseFromFrameMessage(data: unknown): FromFrameMessage | null {
     case "proto:error":
       return isString(data["message"]) ? { type: "proto:error", message: data["message"] } : null;
     case "proto:data":
-      return isObject(data["data"]) ? { type: "proto:data", data: data["data"] } : null;
+      return isDataSnapshot(data["data"]) ? { type: "proto:data", data: data["data"] } : null;
     default:
       return null;
   }

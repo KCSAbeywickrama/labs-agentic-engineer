@@ -16,7 +16,7 @@
  * under the License.
  */
 
-/** The review's controls: screen, flow, role and display-state pickers. */
+/** The review's controls: screen, flow, role and display-state pickers, and Reset data. */
 
 import { screensForRole, type PrototypeManifest, type PrototypeViewEvent, type PrototypeViewState } from "@wso2/prototype-kit/host";
 
@@ -24,11 +24,12 @@ export interface ToolbarProps {
   manifest: PrototypeManifest;
   view: PrototypeViewState;
   dispatch: (event: PrototypeViewEvent) => void;
+  onReset: () => void;
 }
 
 const NO_FLOW = "";
 
-export function Toolbar({ manifest, view, dispatch }: ToolbarProps) {
+export function Toolbar({ manifest, view, dispatch, onReset }: ToolbarProps) {
   return (
     <header className="ph-toolbar">
       <strong className="ph-name">{manifest.name}</strong>
@@ -73,6 +74,9 @@ export function Toolbar({ manifest, view, dispatch }: ToolbarProps) {
           ))}
         </select>
       </label>
+      <button type="button" onClick={onReset}>
+        Reset data
+      </button>
     </header>
   );
 }

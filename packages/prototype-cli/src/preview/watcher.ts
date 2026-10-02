@@ -17,15 +17,19 @@
  */
 
 /**
- * The prototype the preview serves: its two files, checked. The last
- * revision that passed the check is kept, so a revision with findings shows
- * them without taking the good render away.
+ * The prototype the preview serves: its two files, checked on every change.
+ * The last revision that passed the check is kept, so a half-written
+ * revision shows its findings without taking the good render away.
  */
 
+import { watch, type FSWatcher } from "node:fs";
 import { parseManifestJson } from "@wso2/prototype-kit/manifest";
-import { checkPrototypeFiles, readPrototypeFiles, type Finding, type ThemeRuntimes } from "@wso2/prototype-kit/check";
+import { MANIFEST_FILE, SOURCE_FILE, checkPrototypeFiles, readPrototypeFiles, type Finding, type ThemeRuntimes } from "@wso2/prototype-kit/check";
 import { prototypeHash } from "../hash.js";
 import type { PrototypeRevision } from "../host-config.js";
+
+/** How long the files must be quiet before a change is checked (an editor may write in several steps). */
+const SETTLE_MS = 120;
 
 export interface PrototypeStatus {
   /** The latest revision that passed the check; null until one does. */
@@ -37,6 +41,8 @@ export interface PrototypeStatus {
 export class PrototypeWatcher {
   private current: PrototypeStatus = { lastGood: null, findings: [] };
   private signature = "";
+  private watcher: FSWatcher | null = null;
+  private timer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly dir: string,
@@ -62,5 +68,22 @@ export class PrototypeWatcher {
     }
     this.current = { lastGood, findings };
     this.onChange(this.current);
+  }
+
+  /** Watch the folder; a change to either file is checked once the files settle. */
+  start(): void {
+    this.watcher = watch(this.dir, (_event, name) => {
+      if (name !== null && name !== MANIFEST_FILE && name !== SOURCE_FILE) return;
+      if (this.timer) clearTimeout(this.timer);
+      this.timer = setTimeout(() => {
+        this.timer = null;
+        this.refresh();
+      }, SETTLE_MS);
+    });
+  }
+
+  stop(): void {
+    if (this.timer) clearTimeout(this.timer);
+    this.watcher?.close();
   }
 }

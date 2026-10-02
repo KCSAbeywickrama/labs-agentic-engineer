@@ -55,7 +55,9 @@ export interface PrototypeFrameProps {
 export function PrototypeFrame(props: PrototypeFrameProps) {
   const { title, runtime, version, view, resetToken } = props;
   const frame = useRef<HTMLIFrameElement>(null);
-  const [ready, setReady] = useState(false);
+  // Counts the frame's `proto:ready` messages: a reloaded frame document is ready again and needs its app re-sent.
+  const [readies, setReadies] = useState(0);
+  const ready = readies > 0;
   const [error, setError] = useState<string | null>(null);
   const doc = useMemo(() => prototypeFrameDocument(runtime), [runtime]);
 
@@ -71,7 +73,7 @@ export function PrototypeFrame(props: PrototypeFrameProps) {
       const p = latest.current;
       switch (message.type) {
         case "proto:ready":
-          setReady(true);
+          setReadies((n) => n + 1);
           break;
         case "proto:navigate":
           p.onNavigate(message.screenId);
@@ -102,7 +104,7 @@ export function PrototypeFrame(props: PrototypeFrameProps) {
     frame.current?.contentWindow?.postMessage(message, "*");
   };
 
-  // (Re)load the app when the frame is ready and whenever the prototype changes.
+  // (Re)load the app whenever the frame becomes ready (again) and whenever the prototype changes.
   const loadedVersion = useRef<string | null>(null);
   useEffect(() => {
     if (!ready) return;
@@ -110,14 +112,14 @@ export function PrototypeFrame(props: PrototypeFrameProps) {
     setError(null);
     loadedVersion.current = version;
     post({ type: "proto:load", source: p.source, manifest: p.manifest, view: p.view, data: p.initialData });
-  }, [ready, version]);
+  }, [readies, version]);
 
   // Draw every later view of the loaded app.
   useEffect(() => {
     if (!ready || loadedVersion.current !== version) return;
     post({ type: "proto:view", view });
     // `version` is read, not a trigger: a new version's first view goes with its load.
-  }, [ready, view]);
+  }, [readies, view]);
 
   // Start the data over when the token changes (not on the first render).
   const lastReset = useRef(resetToken);
@@ -125,7 +127,7 @@ export function PrototypeFrame(props: PrototypeFrameProps) {
     if (!ready || lastReset.current === resetToken) return;
     lastReset.current = resetToken;
     post({ type: "proto:reset" });
-  }, [ready, resetToken]);
+  }, [readies, resetToken]);
 
   return (
     <div className="proto-frame" style={{ position: "relative", flex: 1, display: "flex", minHeight: 0 }}>

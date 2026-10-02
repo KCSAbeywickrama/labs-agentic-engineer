@@ -29,6 +29,6 @@ export interface PrototypeRevision {
 }
 
 /** Live: the revision and findings arrive over `events`; the frame runtime from `frame-runtime.js`. */
-export type HostConfig = { mode: "preview" };
+export type HostConfig = { mode: "preview"; persist: boolean };
 
 export const HOST_CONFIG_ID = "proto-config";

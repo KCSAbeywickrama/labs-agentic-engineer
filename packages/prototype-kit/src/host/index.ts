@@ -42,6 +42,6 @@ export {
   type PrototypeViewRequest,
   type PrototypeViewState,
 } from "./view-state.js";
-export type { DataSnapshot } from "../data.js";
+export { isDataSnapshot, type DataSnapshot } from "../data.js";
 export type { PrototypeManifest } from "../manifest/types.js";
 export { screensForRole } from "../manifest/screens.js";

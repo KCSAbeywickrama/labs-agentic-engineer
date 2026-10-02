@@ -36,6 +36,7 @@ export interface PreviewServerOptions {
   dir: string;
   /** 0 picks a free port. */
   port: number;
+  persist: boolean;
   theme: ThemeRuntimes;
 }
 
@@ -46,6 +47,17 @@ export interface RunningPreview {
 
 function statusEvents(status: PrototypeStatus): ServerEvent[] {
   return [...(status.lastGood ? [{ event: "update", data: status.lastGood }] : []), { event: "findings", data: { findings: status.findings } }];
+}
+
+/** Serve a file read per request; one that cannot be read answers 500 and never takes the server down. */
+function sendFile(res: ServerResponse, path: string): void {
+  let body: Buffer;
+  try {
+    body = readFileSync(path);
+  } catch {
+    return send(res, 500, "text/plain", "the preview could not read one of its own files");
+  }
+  send(res, 200, "text/javascript; charset=utf-8", body);
 }
 
 function send(res: ServerResponse, status: number, type: string, body: string | Buffer): void {
@@ -66,10 +78,10 @@ export async function startPreviewServer(options: PreviewServerOptions): Promise
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
     if (req.method === "GET" && path === "/") {
       const title = watcher.status().lastGood?.manifest.name ?? "Prototype";
-      return send(res, 200, "text/html; charset=utf-8", renderHostPage(`${title} — prototype preview`, { mode: "preview" }));
+      return send(res, 200, "text/html; charset=utf-8", renderHostPage(`${title} — prototype preview`, { mode: "preview", persist: options.persist }));
     }
-    if (req.method === "GET" && path === "/host.js") return send(res, 200, "text/javascript; charset=utf-8", readFileSync(HOST_SCRIPT_PATH));
-    if (req.method === "GET" && path === "/frame-runtime.js") return send(res, 200, "text/javascript; charset=utf-8", readFileSync(options.theme.frameRuntimePath));
+    if (req.method === "GET" && path === "/host.js") return sendFile(res, HOST_SCRIPT_PATH);
+    if (req.method === "GET" && path === "/frame-runtime.js") return sendFile(res, options.theme.frameRuntimePath);
     if (req.method === "GET" && path === "/events") return events.attach(req, res, statusEvents(watcher.status()));
     send(res, 404, "text/plain", "not found");
   });
@@ -84,11 +96,19 @@ export async function startPreviewServer(options: PreviewServerOptions): Promise
     throw e;
   }
   port = (server.address() as AddressInfo).port;
+  try {
+    watcher.start();
+  } catch (e) {
+    events.close();
+    server.close();
+    throw e;
+  }
 
   return {
     url: `http://127.0.0.1:${port}/`,
     close: () =>
       new Promise<void>((resolve) => {
+        watcher.stop();
         events.close();
         server.close(() => resolve());
         server.closeAllConnections();

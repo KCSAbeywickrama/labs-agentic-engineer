@@ -16,13 +16,15 @@
  * under the License.
  */
 
-/** The preview host: the live prototype in a browser window, under the review's pickers. */
+/** The preview host: the live prototype in a browser window, the review controls and the findings overlay. */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { PrototypeFrame, frameViewOf, initialPrototypeView, reducePrototypeView, type PrototypeViewEvent } from "@wso2/prototype-kit/host";
+import { useCallback, useMemo, useState } from "react";
+import { PrototypeFrame, frameViewOf, initialPrototypeView, reducePrototypeView, type DataSnapshot, type PrototypeViewEvent } from "@wso2/prototype-kit/host";
 import type { HostConfig, PrototypeRevision } from "../host-config.js";
 import { BrowserWindow } from "./BrowserWindow.js";
+import { FindingsOverlay } from "./FindingsOverlay.js";
 import { useLivePrototype } from "./live.js";
+import { clearSnapshot, loadSnapshot, saveSnapshot } from "./persistence.js";
 import { HOST_CSS } from "./styles.js";
 import { Toolbar } from "./Toolbar.js";
 
@@ -32,25 +34,38 @@ export function App({ config }: { config: HostConfig }) {
   return (
     <div className="ph-app">
       <style>{HOST_CSS}</style>
-      {live.revision && live.runtime ? <Review runtime={live.runtime} revision={live.revision} /> : <p className="ph-waiting">{waiting}</p>}
+      {live.revision && live.runtime ? <Review config={config} runtime={live.runtime} revision={live.revision} /> : <p className="ph-waiting">{waiting}</p>}
+      {live.findings.length > 0 && <FindingsOverlay findings={live.findings} />}
     </div>
   );
 }
 
-function Review({ runtime, revision }: { runtime: string; revision: PrototypeRevision }) {
+function Review({ config, runtime, revision }: { config: HostConfig; runtime: string; revision: PrototypeRevision }) {
   const { manifest } = revision;
-  const [view, setView] = useState(() => initialPrototypeView(manifest));
-  const dispatch = useCallback((event: PrototypeViewEvent) => setView((v) => reducePrototypeView(manifest, v, event)), [manifest]);
-  const shown = useRef(manifest);
-  useEffect(() => {
-    if (shown.current === manifest) return;
-    shown.current = manifest;
-    dispatch({ type: "MANIFEST_REPLACED", manifest });
-  }, [manifest, dispatch]);
+  const [state, setState] = useState(() => ({ manifest, view: initialPrototypeView(manifest) }));
+  // A replaced manifest repairs the view in the same render, so the frame is never sent a view naming a screen the new manifest lacks.
+  let current = state;
+  if (state.manifest !== manifest) {
+    current = { manifest, view: reducePrototypeView(manifest, state.view, { type: "MANIFEST_REPLACED", manifest }) };
+    setState(current);
+  }
+  const { view } = current;
+  const dispatch = useCallback((event: PrototypeViewEvent) => setState((s) => ({ ...s, view: reducePrototypeView(s.manifest, s.view, event) })), []);
+  const frameView = useMemo(() => frameViewOf(view), [view]);
+
+  // Mock data: persisted per revision when --persist is on; Reset starts from the seed.
+  const persist = config.persist;
+  const initialData = useMemo(() => (persist ? loadSnapshot(revision.hash) : undefined), [persist, revision.hash]);
+  const [resetToken, setResetToken] = useState(0);
+  const onData = useCallback((data: DataSnapshot) => persist && saveSnapshot(revision.hash, data), [persist, revision.hash]);
+  const reset = () => {
+    clearSnapshot(revision.hash);
+    setResetToken((t) => t + 1);
+  };
 
   return (
     <>
-      <Toolbar manifest={manifest} view={view} dispatch={dispatch} />
+      <Toolbar manifest={manifest} view={view} dispatch={dispatch} onReset={reset} />
       <div className="ph-body">
         <BrowserWindow title={manifest.name} address={`prototype://${view.screenId}`}>
           <PrototypeFrame
@@ -59,7 +74,9 @@ function Review({ runtime, revision }: { runtime: string; revision: PrototypeRev
             manifest={manifest}
             source={revision.source}
             version={revision.hash}
-            view={frameViewOf(view)}
+            view={frameView}
+            initialData={initialData}
+            resetToken={resetToken}
             onNavigate={(screenId) => {
               // The frame is untrusted: only Preview navigates (the reducer checks the target against the role).
               if (view.mode === "preview") dispatch({ type: "NAVIGATE", screenId });
@@ -67,6 +84,7 @@ function Review({ runtime, revision }: { runtime: string; revision: PrototypeRev
             onToggle={(elementKey) => dispatch({ type: "TOGGLE_SELECTION", elementKey })}
             onEscape={() => dispatch({ type: "CLEAR_SELECTION" })}
             onElements={() => {}}
+            onData={onData}
           />
         </BrowserWindow>
       </div>

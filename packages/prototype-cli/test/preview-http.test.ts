@@ -22,9 +22,12 @@
  * name (DNS rebinding), and a busy port.
  */
 
+import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
+import { join } from "node:path";
+import { createRequire } from "node:module";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { copyFixture, runCli, startPreview, type PreviewProcess } from "./harness.js";
+import { PACKAGE_ROOT, copyFixture, runCli, startPreview, type PreviewProcess } from "./harness.js";
 
 let preview: PreviewProcess;
 
@@ -72,5 +75,31 @@ describe("prototype preview (ports)", () => {
     const run = runCli(["preview", preview.dir, "--port", port], { timeoutMs: 20_000 });
     expect(run.status).toBe(2);
     expect(run.stderr).toContain(`port ${port} is in use`);
+  });
+});
+
+// Review Focus: a preview must not crash on its own files. A theme's runtime that vanishes while it runs (a rebuild) is a 500, not a dead server.
+describe("prototype preview (a runtime file that disappears)", () => {
+  it("answers 500 for the frame runtime and keeps serving", async () => {
+    const dir = copyFixture("valid/contacts");
+    const themeDir = join(dir, "node_modules", "fake-theme");
+    mkdirSync(themeDir, { recursive: true });
+    writeFileSync(join(themeDir, "package.json"), JSON.stringify({ name: "fake-theme", version: "0.0.0", exports: { "./frame-runtime.js": "./frame-runtime.js", "./check-runtime.js": "./check-runtime.js" } }));
+    writeFileSync(join(themeDir, "frame-runtime.js"), "");
+    copyFileSync(createRequire(join(PACKAGE_ROOT, "x.js")).resolve("@wso2/prototype-theme-default/check-runtime.js"), join(themeDir, "check-runtime.js"));
+    const running = await startPreview(dir, ["--theme", "fake-theme"]);
+    try {
+      const get = (path: string) => {
+        const url = new URL(path, running.url);
+        return new Promise<number>((resolve, reject) => request({ host: url.hostname, port: url.port, path, headers: {} }, (res) => (res.resume(), resolve(res.statusCode ?? 0))).on("error", reject).end());
+      };
+      expect(await get("/frame-runtime.js")).toBe(200);
+      rmSync(join(themeDir, "frame-runtime.js"));
+      expect(await get("/frame-runtime.js")).toBe(500);
+      expect(await get("/")).toBe(200);
+    } finally {
+      await running.stop();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

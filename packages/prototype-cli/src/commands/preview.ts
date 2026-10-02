@@ -16,7 +16,7 @@
  * under the License.
  */
 
-/** `prototype preview [dir] [--port <n>] [--theme <package>] [--open]`: serve until interrupted. */
+/** `prototype preview [dir] [--port <n>] [--persist] [--theme <package>] [--open]`: serve until interrupted. */
 
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
@@ -52,7 +52,7 @@ function untilInterrupted(): Promise<void> {
 export async function runPreview(args: readonly string[], io: CliIO): Promise<number> {
   const { values, positionals } = parseCommandArgs(
     args,
-    { port: { type: "string" }, theme: { type: "string" }, open: { type: "boolean", default: false } },
+    { port: { type: "string" }, persist: { type: "boolean", default: false }, theme: { type: "string" }, open: { type: "boolean", default: false } },
     1,
   );
   const dir = resolve(io.cwd, positionals[0] ?? ".");
@@ -61,11 +61,11 @@ export async function runPreview(args: readonly string[], io: CliIO): Promise<nu
   const port = values.port !== undefined ? parsePort(values.port) : DEFAULT_PORT;
   let preview: RunningPreview;
   try {
-    preview = await startPreviewServer({ dir, port, theme });
+    preview = await startPreviewServer({ dir, port, persist: values.persist, theme });
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "EADDRINUSE") throw e;
     if (explicit) throw new UsageError(`port ${port} is in use; pick another with --port, or leave --port out to use any free port`);
-    preview = await startPreviewServer({ dir, port: 0, theme });
+    preview = await startPreviewServer({ dir, port: 0, persist: values.persist, theme });
   }
   io.stdout(`Preview ready at ${preview.url}\n`);
   if (values.open) openBrowser(preview.url, io);
