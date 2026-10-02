@@ -15,8 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 
-"""Helm post-renderer: prefix Agent Manager's forked ClusterWorkflowTemplates.
+"""Helm post-renderer for Agent Manager's platform-resources chart.
 
+It reconciles two objects that chart renders with what is already AEP's on a
+converged cluster:
+
+1. It prefixes Agent Manager's forked ClusterWorkflowTemplates, so OpenChoreo
+   keeps its own (below).
+2. It drops Agent Manager's ProjectType/default, which AEP's platform chart
+   owns (see PROJECT TYPE, further down).
+
+FORKED BUILD TEMPLATES
+----------------------
 Agent Manager's platform-resources chart carries its own forks of five of
 OpenChoreo's build templates and names them after OpenChoreo's own:
 
@@ -73,9 +83,24 @@ addresses build workflows by ClusterWorkflow name (amp-docker,
 amp-ballerina-buildpack, amp-google-cloud-buildpacks) — none of which this
 touches.
 
+PROJECT TYPE
+------------
+Both products reference a namespaced ProjectType/default in the org namespace:
+Agent Manager's service compiles the name in, and aep-api sends it on every
+project create because that is what the wso2cloud org bootstrap seeds.
+AEP's platform chart renders it (localOrgProvisioning, the local stand-in for
+that bootstrap), and it is installed before this release, so Agent Manager's
+copy would stop the install with "invalid ownership metadata". The two are the
+same object, so this one is dropped, and the release consumes AEP's.
+
+It is dropped only while its spec is the one AEP's chart renders. If Agent
+Manager's ever differs, the install stops here rather than silently running
+Agent Manager's projects on a type it did not ship.
+
 Helm passes the rendered manifests on stdin and reads the result from stdout.
 """
 
+import os
 import sys
 
 import yaml
@@ -98,6 +123,30 @@ PREFIX = "amp-"
 # changed shape, and the rename is then no longer the one this file describes.
 EXPECTED_RENAMES = 5
 EXPECTED_REFS = 9
+
+
+# AEP's copy, relative to this file's real path. Helm 4 installs this
+# directory as a symlink to the checkout, so the path resolves there too.
+AEP_PROJECT_TYPE = os.path.join(
+    os.path.dirname(os.path.realpath(__file__)),
+    "..", "..", "helm-charts", "platform", "templates",
+    "openchoreo-org-types", "projecttype-default.yaml",
+)
+
+
+def aep_project_type_spec():
+    """The spec AEP's chart renders for ProjectType/default.
+
+    The template's only Helm directives are its gate and the namespace, each on
+    a line of its own, so dropping those lines leaves plain YAML.
+    """
+    with open(AEP_PROJECT_TYPE) as f:
+        lines = [line for line in f if "{{" not in line]
+    return yaml.safe_load("".join(lines))["spec"]
+
+
+def is_project_type_default(doc):
+    return doc.get("kind") == "ProjectType" and (doc.get("metadata") or {}).get("name") == "default"
 
 
 def renamed(name):
@@ -128,6 +177,25 @@ def rewrite_template_refs(node):
 def main():
     docs = [doc for doc in yaml.safe_load_all(sys.stdin) if doc]
 
+    project_types = [doc for doc in docs if is_project_type_default(doc)]
+    if len(project_types) != 1:
+        print(
+            "post-renderer: expected Agent Manager's chart to render one "
+            "ProjectType/default, got {}. Re-check the PROJECT TYPE section of "
+            "{}.".format(len(project_types), __file__),
+            file=sys.stderr,
+        )
+        return 1
+    if project_types[0].get("spec") != aep_project_type_spec():
+        print(
+            "post-renderer: Agent Manager's ProjectType/default no longer matches "
+            "AEP's ({}). Dropping it would run Agent Manager's projects on a type "
+            "it did not ship; reconcile the two first.".format(AEP_PROJECT_TYPE),
+            file=sys.stderr,
+        )
+        return 1
+    docs = [doc for doc in docs if not is_project_type_default(doc)]
+
     renames = 0
     refs = 0
     for doc in docs:
@@ -154,7 +222,7 @@ def main():
 
     print(
         "   post-renderer: {} forked template(s) prefixed, {} templateRef(s) "
-        "rewritten".format(renames, refs),
+        "rewritten, ProjectType/default left to AEP's chart".format(renames, refs),
         file=sys.stderr,
     )
 

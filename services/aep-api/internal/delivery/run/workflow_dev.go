@@ -214,6 +214,12 @@ func (l *loop) fillMilestone(ctx workflow.Context) (settled bool, res RunResult,
 // case that survives being unreachable that this exists for.
 func (l *loop) deliverVersion(ctx workflow.Context) (RunResult, error) {
 	version, err := l.readVersionState(ctx)
+	if isNoWriteTarget(err) {
+		// The project's pipeline stopped naming a write target after the last
+		// cycle: a configuration fault the read has recorded, settled as the
+		// deploy stage settles it.
+		return l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonNoWriteTarget)
+	}
 	if err != nil {
 		return l.result(), err
 	}

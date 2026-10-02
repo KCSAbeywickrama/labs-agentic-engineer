@@ -67,6 +67,7 @@ var ConfigMapKeys = []string{
 	"gateway.hostname",
 	"environment.idp_base_domain",
 	"environment.gateway_base_domain",
+	"tls.enabled",
 }
 
 // keyKind describes the expected type of a config value for validation.
@@ -110,13 +111,15 @@ var keyRegistry = map[string]configKeyMeta{
 	"oc.system_namespace":      {required: true, kind: kindString},
 	// The k8s namespace of the one org AEP ships with — AEP is single-org
 	// today, so this is that default org's home namespace: where its Project,
-	// Environment(s), DeploymentPipeline, and per-org ComponentTypes
-	// (localOrgProvisioning) all live. Empty falls back to "default" (see
-	// ocOrgNamespace in cmd/platform_gateway.go).
+	// Environment(s), DeploymentPipeline, and per-org ComponentTypes and
+	// ProjectType (localOrgProvisioning) all live. Empty falls back to
+	// "default" (see ocOrgNamespace in cmd/platform_gateway.go).
 	"oc.default_org_namespace": {required: false, kind: kindString},
-	// The single OpenChoreo Environment AEP provisions into and patches gateway
-	// ingress onto. Empty falls back to "default" (see ocPipelineSourceEnvironment in
-	// cmd/platform_gateway.go).
+	// The OpenChoreo Environment aectl configures gateway ingress and the
+	// environment Thunder on at install time: the root of the default org's
+	// DeploymentPipeline/default, which is the write target aep-api resolves for
+	// projects on that pipeline. aep-api does not read this. Empty falls back to
+	// "default" (see ocPipelineSourceEnvironment in cmd/platform_gateway.go).
 	"oc.pipeline_source_environment":    {required: false, kind: kindString},
 	"oc.local_org_provisioning.enabled": {required: false, kind: kindBool},
 	// Whether the data-plane gateway aectl is pointing at terminates TLS.
@@ -152,6 +155,21 @@ var keyRegistry = map[string]configKeyMeta{
 	// nothing failing at install time.
 	"environment.idp_base_domain":     {required: false, kind: kindString},
 	"environment.gateway_base_domain": {required: false, kind: kindString},
+	// Whether this cluster's public endpoints are served over HTTPS. One
+	// toggle, because the scheme and both gateway ports move together — a
+	// cluster does not serve https on 8080.
+	//
+	// It decides whether an end user can sign in to a GENERATED APP at all:
+	// browsers expose crypto.subtle only in a secure context, the OIDC login
+	// needs it for PKCE, and the environment identity provider's URL is built
+	// from this. Off is correct only on localhost, which browsers already
+	// treat as secure.
+	//
+	// Must agree with WITH_TLS in deployments/scripts/setup-env-for-aectl.sh:
+	// that script stamps the platform IdP's issuer and provisions the
+	// certificate, and a disagreement is the same class of mismatch as a
+	// wrong domain — it installs clean and fails at the first sign-in.
+	"tls.enabled": {required: false, kind: kindBool},
 }
 
 // Init sets env-var bindings. All config values must come from the cluster

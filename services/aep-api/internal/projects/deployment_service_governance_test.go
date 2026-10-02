@@ -63,7 +63,7 @@ func TestGovern_FailureRefusesTheDeploy(t *testing.T) {
 	svc := NewDeploymentService(nil, nil)
 	svc.SetGovernor(&stubGovernor{err: errors.New("amp unreachable")})
 
-	err := svc.govern(context.Background(), "acme", "shop", nil, []delivery.DeployTarget{
+	err := svc.govern(context.Background(), "acme", "shop", testWriteTarget, nil, []delivery.DeployTarget{
 		{Component: "checkout-agent"},
 	})
 	if err == nil {
@@ -79,7 +79,7 @@ func TestGovern_OffersEveryTargetAndCarriesTheEnvironment(t *testing.T) {
 	svc := NewDeploymentService(nil, nil)
 	svc.SetGovernor(g)
 
-	if err := svc.govern(context.Background(), "acme", "shop", nil, []delivery.DeployTarget{
+	if err := svc.govern(context.Background(), "acme", "shop", testWriteTarget, nil, []delivery.DeployTarget{
 		{Component: "checkout-agent"}, {Component: "catalog-api"},
 	}); err != nil {
 		t.Fatalf("govern: %v", err)
@@ -105,7 +105,7 @@ func TestGovern_OffersEveryTargetAndCarriesTheEnvironment(t *testing.T) {
 func TestGovern_UnwiredIsANoOp(t *testing.T) {
 	t.Parallel()
 	svc := NewDeploymentService(nil, nil)
-	if err := svc.govern(context.Background(), "acme", "shop", nil, []delivery.DeployTarget{
+	if err := svc.govern(context.Background(), "acme", "shop", testWriteTarget, nil, []delivery.DeployTarget{
 		{Component: "checkout-agent"},
 	}); err != nil {
 		t.Fatalf("unwired governor must be a no-op: %v", err)
@@ -126,7 +126,7 @@ func TestGovern_CarriesAnAgentsDeclaredGuardrails(t *testing.T) {
 		{Name: "expense-api", ComponentType: "service"},
 	}}
 
-	if err := svc.govern(context.Background(), "acme", "shop", design, []delivery.DeployTarget{
+	if err := svc.govern(context.Background(), "acme", "shop", testWriteTarget, design, []delivery.DeployTarget{
 		{Component: "receipt-agent"}, {Component: "expense-api"},
 	}); err != nil {
 		t.Fatalf("govern: %v", err)
@@ -158,7 +158,7 @@ func TestGovern_FlagsAnUnreadableAgentSpec(t *testing.T) {
 		{Name: "receipt-agent", ComponentType: spec.ComponentTypeAIAgent, AgentAFM: "# Role\nno front matter\n"},
 	}}
 
-	if err := svc.govern(context.Background(), "acme", "shop", design, []delivery.DeployTarget{{Component: "receipt-agent"}}); err != nil {
+	if err := svc.govern(context.Background(), "acme", "shop", testWriteTarget, design, []delivery.DeployTarget{{Component: "receipt-agent"}}); err != nil {
 		t.Fatalf("govern: %v", err)
 	}
 	if len(g.seen) != 1 || !g.seen[0].GuardrailsUnreadable || g.seen[0].Guardrails != nil {

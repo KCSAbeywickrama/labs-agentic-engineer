@@ -117,7 +117,7 @@ func newEndpointWaitHarness(t *testing.T, opts endpointWaitOpts) *endpointWaitHa
 			return opts.summary, nil
 		},
 	}
-	svc := NewDeploymentService(oc, nil)
+	svc := newTestDeploymentService(oc, nil)
 	if opts.probe != nil {
 		svc.SetEndpointGate(NewEndpointGate(opts.probe))
 	}
@@ -281,7 +281,7 @@ func TestHTTPEndpointProbeRejectsATransportFailure(t *testing.T) {
 func reachableBinding(name, ready, url string) openchoreo.ReleaseBindingSummary {
 	return openchoreo.ReleaseBindingSummary{
 		ComponentName: name,
-		Environment:   openchoreo.DevEnvironmentName,
+		Environment:   testWriteTarget,
 		ReadyStatus:   ready,
 		ReleaseName:   endpointWaitRelease,
 		ExternalURL:   url,
@@ -368,7 +368,7 @@ func TestEndpointGateIsSharedBetweenTheTwoReaders(t *testing.T) {
 			}, nil
 		},
 	}
-	deploySvc := NewDeploymentService(oc, nil)
+	deploySvc := newTestDeploymentService(oc, nil)
 	deploySvc.SetEndpointGate(gate)
 	statusSvc := &Service{}
 	statusSvc.SetEndpointGate(gate)
@@ -438,7 +438,7 @@ func TestHoldUnreachableClearsTheWithdrawnReadyReason(t *testing.T) {
 
 	dev := []openchoreo.ReleaseBindingSummary{{
 		ComponentName: "web",
-		Environment:   openchoreo.DevEnvironmentName,
+		Environment:   testWriteTarget,
 		ReadyStatus:   "True",
 		ReadyReason:   "ReleaseReady",
 		ReleaseName:   endpointWaitRelease,
@@ -525,7 +525,7 @@ func TestEndpointWaitClearsTheWithdrawnReasonOnTheDeployPath(t *testing.T) {
 			}, nil
 		},
 	}
-	svc := NewDeploymentService(oc, nil)
+	svc := newTestDeploymentService(oc, nil)
 	svc.SetEndpointGate(NewEndpointGate(&fakeEndpointProbe{answers: false}))
 
 	got, err := svc.DeploymentState(context.Background(), endpointWaitOrg, endpointWaitProject,

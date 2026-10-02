@@ -34,9 +34,9 @@ import (
 
 // ResourceClient authors the OpenChoreo Resource model (openchoreo.dev/v1alpha1,
 // shipped v1.1) used to wire external resources (and platform-resources) into
-// consuming Workloads. The generated `gen` client is pinned to a spec version
-// that predates v1.1 and has no Resource types, so this client is hand-rolled
-// over the same authenticated transport (buildRetryConfig + authRequestEditor
+// consuming Workloads. It was written while the generated `gen` client's spec
+// pin predated v1.1 and had no Resource types, so it is hand-rolled over the
+// same authenticated transport (buildRetryConfig + authRequestEditor
 // in transport.go) rather than over gen.ClientWithResponses.
 //
 // Authoring chain (the BFF owns every step — Resources have NO AutoDeploy):
@@ -395,6 +395,8 @@ type resourceClient struct {
 	baseURL string
 	http    resourceHTTPDoer
 	editor  func(ctx context.Context, req *http.Request) error
+	// labels are stamped on every write (Config.ResourceLabels).
+	labels resourceLabels
 }
 
 // NewResourceClient builds a Resource-model client over the same
@@ -411,6 +413,7 @@ func NewResourceClient(cfg Config) ResourceClient {
 		baseURL: cfg.BaseURL,
 		http:    requests.NewRetryableHTTPClient(inner, buildRetryConfig(cfg)),
 		editor:  authRequestEditor(cfg),
+		labels:  newResourceLabels(cfg.ResourceLabels),
 	}
 }
 
@@ -464,6 +467,7 @@ func nsBase(ns string) string {
 func (c *resourceClient) EnsureResourceType(ctx context.Context, namespace string, rt *ResourceType) (*ResourceType, error) {
 	rt.APIVersion, rt.Kind = ocResourceAPIVersion, kindResourceType
 	rt.Metadata.Namespace = namespace
+	c.labels.stampOC(&rt.Metadata)
 	out := &ResourceType{}
 	code, err := c.do(ctx, http.MethodPost, nsBase(namespace)+"/resourcetypes", rt, out)
 	switch {
@@ -484,6 +488,7 @@ func (c *resourceClient) EnsureResourceType(ctx context.Context, namespace strin
 func (c *resourceClient) ApplyResource(ctx context.Context, namespace string, r *Resource) (*Resource, error) {
 	r.APIVersion, r.Kind = ocResourceAPIVersion, kindResource
 	r.Metadata.Namespace = namespace
+	c.labels.stampOC(&r.Metadata)
 	out := &Resource{}
 	code, err := c.do(ctx, http.MethodPost, nsBase(namespace)+"/resources", r, out)
 	switch {
@@ -597,6 +602,7 @@ func (c *resourceClient) GetResource(ctx context.Context, namespace, name string
 func (c *resourceClient) EnsureBinding(ctx context.Context, namespace string, b *ResourceReleaseBinding) (*ResourceReleaseBinding, error) {
 	b.APIVersion, b.Kind = ocResourceAPIVersion, kindResourceReleaseBind
 	b.Metadata.Namespace = namespace
+	c.labels.stampOC(&b.Metadata)
 	out := &ResourceReleaseBinding{}
 	code, err := c.do(ctx, http.MethodPost, nsBase(namespace)+"/resourcereleasebindings", b, out)
 	switch {
@@ -729,6 +735,7 @@ func (c *resourceClient) DeleteResourceType(ctx context.Context, namespace, name
 func (c *resourceClient) UpdateResourceType(ctx context.Context, namespace string, rt *ResourceType) (*ResourceType, error) {
 	rt.APIVersion, rt.Kind = ocResourceAPIVersion, kindResourceType
 	rt.Metadata.Namespace = namespace
+	c.labels.stampOC(&rt.Metadata)
 	out := &ResourceType{}
 	if _, err := c.do(ctx, http.MethodPut, nsBase(namespace)+"/resourcetypes/"+rt.Metadata.Name, rt, out); err != nil {
 		return nil, fmt.Errorf("update resourcetype %q: %w", rt.Metadata.Name, err)

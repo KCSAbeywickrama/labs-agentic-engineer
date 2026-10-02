@@ -242,6 +242,19 @@ func TestClassifyCycleDeploys_SeparatesFailedFromPending(t *testing.T) {
 	}
 }
 
+// The poll's environment rides the state, so the fix work it causes can name
+// where the binding failed. Every outcome of one read shares it.
+func TestClassifyCycleDeploys_CarriesTheEnvironment(t *testing.T) {
+	t.Parallel()
+	got := classifyCycleDeploys(2, []delivery.ComponentDeploy{
+		{Component: "ready", Environment: "dev-b", Ready: true},
+		{Component: "broken", Environment: "dev-b", Failed: true},
+	})
+	if got.Environment != "dev-b" {
+		t.Errorf("Environment = %q, want dev-b", got.Environment)
+	}
+}
+
 // A PENDING component carries its hold reason too, and that is not symmetry for
 // its own sake: the deadline reports the still-pending set AS the failure, so
 // this is the only channel by which "why was it waiting" can reach the issue

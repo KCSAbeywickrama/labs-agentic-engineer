@@ -32,6 +32,22 @@ type WebhookDelivery struct {
 	ReceivedAt   time.Time  `gorm:"index;not null" json:"receivedAt"`
 	ProcessedAt  *time.Time `json:"processedAt,omitempty"`
 	ProcessError string     `gorm:"type:text" json:"processError,omitempty"`
+
+	// Attempts counts the handler runs this delivery has been claimed for: the
+	// receiver's own run is 1, and every replay or duplicate that takes the
+	// lease over adds one. It is what the replay's attempt cap reads.
+	Attempts int `gorm:"not null;default:0" json:"attempts"`
+	// LeaseUntil is when the current claim lapses. While it is in the future
+	// the delivery belongs to whichever attempt claimed it and nobody else may
+	// run it; after a failure it is the earliest moment of the next attempt, so
+	// the one column is both the in-flight lease and the retry backoff. Nil on
+	// a processed row, and on rows written before the column existed.
+	LeaseUntil *time.Time `gorm:"index" json:"leaseUntil,omitempty"`
+	// AbandonedAt is when the replay gave the delivery up: its last attempt
+	// failed, or it aged out of the replay window unprocessed. Nothing replays an
+	// abandoned delivery; a manual redelivery may still take it over, which
+	// clears this.
+	AbandonedAt *time.Time `json:"abandonedAt,omitempty"`
 }
 
 // WebhookPayload holds the raw event body. Split from WebhookDelivery so

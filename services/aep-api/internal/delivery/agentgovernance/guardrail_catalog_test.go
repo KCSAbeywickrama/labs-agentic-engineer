@@ -47,7 +47,7 @@ func catalogNames(c []CatalogGuardrail) []string {
 func TestGuardrailCatalog_OffersOnlyGuardrailsTheDeployCanApply(t *testing.T) {
 	g := catalogGovernor(t, newFakeAMP(), &fakeConnections{})
 
-	got, err := g.GuardrailCatalog(context.Background(), "acme")
+	got, err := g.GuardrailCatalog(context.Background(), "acme", "development")
 	if err != nil {
 		t.Fatalf("GuardrailCatalog: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestGuardrailCatalog_OffersOnlyGuardrailsTheDeployCanApply(t *testing.T) {
 func TestGuardrailCatalog_HidesThePlatformOwnedSettings(t *testing.T) {
 	g := catalogGovernor(t, newFakeAMP(), &fakeConnections{})
 
-	got, err := g.GuardrailCatalog(context.Background(), "acme")
+	got, err := g.GuardrailCatalog(context.Background(), "acme", "development")
 	if err != nil {
 		t.Fatalf("GuardrailCatalog: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestGuardrailCatalog_AnUncheckableGuardrailIsNotOffered(t *testing.T) {
 	amp.catalog = append(amp.catalog, agentmanager.PolicyDefinition{Name: "odd-guardrail", Version: "v1",
 		Parameters: json.RawMessage(`{"type":"object","oneOf":[{"required":["a"]}]}`)})
 
-	got, err := g.GuardrailCatalog(context.Background(), "acme")
+	got, err := g.GuardrailCatalog(context.Background(), "acme", "development")
 	if err != nil {
 		t.Fatalf("GuardrailCatalog: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestGuardrailCatalog_NothingToGovernIsAnEmptyList(t *testing.T) {
 	}
 	for name, g := range cases {
 		t.Run(name, func(t *testing.T) {
-			got, err := g.GuardrailCatalog(context.Background(), "acme")
+			got, err := g.GuardrailCatalog(context.Background(), "acme", "development")
 			if err != nil || len(got) != 0 {
 				t.Fatalf("got %v, %v; want an empty list", catalogNames(got), err)
 			}
@@ -132,7 +132,7 @@ func TestGuardrailCatalog_NothingToGovernIsAnEmptyList(t *testing.T) {
 func TestGuardrailCatalog_SaysWhereEachGuardrailApplies(t *testing.T) {
 	g := catalogGovernor(t, newFakeAMP(), &fakeConnections{})
 
-	got, err := g.GuardrailCatalog(context.Background(), "acme")
+	got, err := g.GuardrailCatalog(context.Background(), "acme", "development")
 	if err != nil {
 		t.Fatalf("GuardrailCatalog: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestGuardrailCatalog_LeavesOutGuardrailsNeedingGatewayConfiguration(t *test
 		Parameters:       json.RawMessage(`{"type":"object","properties":{"request":{"type":"object"},"response":{"type":"object"}}}`),
 		SystemParameters: json.RawMessage(`{"type":"object","properties":{"endpoint":{"type":"string"}}}`)})
 
-	got, err := g.GuardrailCatalog(context.Background(), "acme")
+	got, err := g.GuardrailCatalog(context.Background(), "acme", "development")
 	if err != nil {
 		t.Fatalf("GuardrailCatalog: %v", err)
 	}

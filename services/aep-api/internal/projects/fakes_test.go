@@ -110,7 +110,7 @@ var _ ComponentService = (*stubComponentSvc)(nil)
 // No key configured is the honest default for a fake: (nil, nil) is what a
 // real org without a connected key yields, and it keeps MODEL_* out of every
 // test that is not about model access.
-func (s *stubComponentSvc) ModelAccessEnvVars(context.Context, string, string) ([]openchoreo.WorkflowEnvVarRef, error) {
+func (s *stubComponentSvc) ModelAccessEnvVars(context.Context, string, string, string) ([]openchoreo.WorkflowEnvVarRef, error) {
 	return nil, nil
 }
 

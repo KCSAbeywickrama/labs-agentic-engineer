@@ -32,7 +32,7 @@ import (
 // The provisioner is environment-generic: it fans a Resource out over whatever
 // environment list it is handed. These tests therefore use two arbitrary env
 // slugs ("development", "production") rather than the one environment AEP
-// provisions into (openchoreo.DevEnvironmentName) — a single-env fixture could
+// provisions into (the project's write target) — a single-env fixture could
 // not tell a fan-out apart from a short-circuit.
 
 // newFakeRC returns a ResourceClientMock whose GetResource already reports a

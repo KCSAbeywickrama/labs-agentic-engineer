@@ -30,7 +30,7 @@ import (
 // guardrail ([{policy, status, reason}]), for the Deployments page.
 //
 // Keyed on the project too: a component name repeats across projects, and each
-// is its own agent. Created by migrate's phase22_agent_guardrail_applications.
+// is its own agent. Created by migrate's phase23_agent_guardrail_applications.
 type AgentGuardrailApplication struct {
 	OcOrgID      string          `gorm:"column:oc_org_id;primaryKey;type:text"`
 	Project      string          `gorm:"column:project;primaryKey;type:text"`

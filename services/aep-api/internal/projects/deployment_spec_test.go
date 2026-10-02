@@ -88,7 +88,7 @@ func TestDesiredDeploymentFor(t *testing.T) {
 			got := DesiredDeploymentFor(DeploymentInputs{
 				Component:     designComponent(t, tc.body),
 				ComponentName: "api",
-				Environment:   openchoreo.DevEnvironmentName,
+				Environment:   testWriteTarget,
 				ReleaseName:   "rel-1",
 			})
 
@@ -127,7 +127,7 @@ func TestDesiredDeploymentFor_AlwaysPinsAndActivates(t *testing.T) {
 	got := DesiredDeploymentFor(DeploymentInputs{
 		Component:     designComponent(t, svcJSON("api", "", "")),
 		ComponentName: "api",
-		Environment:   openchoreo.DevEnvironmentName,
+		Environment:   testWriteTarget,
 		ReleaseName:   "rel-7",
 	})
 	if got.Binding.ReleaseName != "rel-7" {
@@ -136,7 +136,7 @@ func TestDesiredDeploymentFor_AlwaysPinsAndActivates(t *testing.T) {
 	if got.Binding.State != openchoreo.ReleaseBindingStateActive {
 		t.Errorf("state = %q, want Active", got.Binding.State)
 	}
-	if got.Binding.ComponentName != "api" || got.Binding.Environment != openchoreo.DevEnvironmentName {
+	if got.Binding.ComponentName != "api" || got.Binding.Environment != testWriteTarget {
 		t.Errorf("binding identity wrong: %+v", got.Binding)
 	}
 }
@@ -150,7 +150,7 @@ func TestDesiredDeploymentFor_EmptyTraitConfigsAreAuthoritativeNotUnmanaged(t *t
 	got := DesiredDeploymentFor(DeploymentInputs{
 		Component:     designComponent(t, svcJSON("api", "", "")),
 		ComponentName: "api",
-		Environment:   openchoreo.DevEnvironmentName,
+		Environment:   testWriteTarget,
 		ReleaseName:   "rel-1",
 	})
 	if got.Binding.TraitEnvironmentConfigs == nil {
@@ -168,7 +168,7 @@ func TestDesiredDeploymentFor_CarriesWorkloadOverrides(t *testing.T) {
 	in := DeploymentInputs{
 		Component:     designComponent(t, svcJSON("api", "", "")),
 		ComponentName: "api",
-		Environment:   openchoreo.DevEnvironmentName,
+		Environment:   testWriteTarget,
 		ReleaseName:   "rel-1",
 		EnvVars:       []openchoreo.WorkflowEnvVarRef{{Key: "K", Value: "V"}},
 		Files:         []openchoreo.WorkflowFileVar{{Key: "env-config.js", MountPath: "/x", Value: "y"}},
@@ -185,5 +185,52 @@ func TestDesiredDeploymentFor_CarriesWorkloadOverrides(t *testing.T) {
 	got = DesiredDeploymentFor(in)
 	if got.Binding.Env != nil || got.Binding.Files != nil {
 		t.Errorf("nil inputs must stay nil (unmanaged), got env=%+v files=%+v", got.Binding.Env, got.Binding.Files)
+	}
+}
+
+// The auto-RCA alert rule rides every service component unless the design opts
+// the component out or the DEPLOYMENT has auto-RCA off. The second is the
+// wso2cloud case: its org ComponentTypes accept only the org's own alert-rule
+// Trait, whose contract is not the one this trait speaks, and SRE self-healing
+// is not offered there (ticket 15).
+func TestDesiredDeploymentFor_AutoRCAAlertRule(t *testing.T) {
+	t.Parallel()
+	const service = `{"name":"api","componentType":"service"}`
+	cases := []struct {
+		name     string
+		body     string
+		disabled bool
+		want     bool
+	}{
+		{name: "a service gets the alert rule by default", body: service, want: true},
+		{name: "a deployment with auto-RCA off attaches none", body: service, disabled: true, want: false},
+		{name: "a component the design opts out attaches none",
+			body: `{"name":"api","componentType":"service","disableAutoRca":true}`, want: false},
+		{name: "a web application never gets one",
+			body: `{"name":"api","componentType":"web-application"}`, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := DesiredDeploymentFor(DeploymentInputs{
+				Component:       designComponent(t, tc.body),
+				ComponentName:   "api",
+				Environment:     testWriteTarget,
+				ReleaseName:     "rel-1",
+				AutoRCADisabled: tc.disabled,
+			})
+			has := false
+			for _, tr := range got.Traits {
+				if tr.Name == "observability-alert-rule" {
+					has = true
+				}
+			}
+			if has != tc.want {
+				t.Fatalf("observability-alert-rule attached = %v, want %v (traits %+v)", has, tc.want, got.Traits)
+			}
+			if _, cfg := got.Binding.TraitEnvironmentConfigs["api-auto-rca-error"]; cfg != tc.want {
+				t.Fatalf("alert-rule env config present = %v, want %v", cfg, tc.want)
+			}
+		})
 	}
 }

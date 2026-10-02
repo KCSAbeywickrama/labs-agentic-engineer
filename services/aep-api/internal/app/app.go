@@ -78,6 +78,7 @@ import (
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol/webhook"
 	"github.com/wso2/aep/aep-api/internal/spec"
 	spechttpapi "github.com/wso2/aep/aep-api/internal/spec/httpapi"
+	"github.com/wso2/aep/aep-api/internal/sreagent"
 	"github.com/wso2/aep/aep-api/ocauth"
 )
 
@@ -118,6 +119,10 @@ type Seam struct {
 	// SecretsProvider is the write-only secrets delivery channel.
 	// Nil = delivery off (no secret writes, no external-secret cleanup).
 	SecretsProvider secretmanagersvc.Provider
+
+	// ResourceLabels are stamped on every OpenChoreo resource AEP writes
+	// (openchoreo.Config.ResourceLabels). Nil = none.
+	ResourceLabels map[string]string
 }
 
 // Assemble wires the entire service graph from config + a resolved Infra and
@@ -131,10 +136,9 @@ type Seam struct {
 // one produced; the comments call out the couplings.
 func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	var err error
-	if in.WriteTarget == "" {
-		return nil, fmt.Errorf("assemble: write-target is required (ResolveWriteTarget before Assemble; Fake sets default)")
+	if err := openchoreo.ValidateResourceLabels(seam.ResourceLabels); err != nil {
+		return nil, fmt.Errorf("openchoreo resource labels: %w", err)
 	}
-	openchoreo.SetDevEnvironmentName(in.WriteTarget)
 	db := in.DB
 	credStore := in.CredentialStore
 	minter := in.Minter
@@ -164,6 +168,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// The AI agents card's unit of work: one transaction over the Anthropic
 	// credential rows, the agent-settings row and the secret bytes.
 	agentsCardRepo := organization.NewAgentsCardRepository(db, credStore)
+	orgSreModelConnRepo := organization.NewOrgSreModelConnectionRepository(db)
 	idpRepo := organization.NewIDPRepository(db, in.ColumnCipher)
 	codingAgentLogRepo := delivery.NewCodingAgentLogRepository(db)
 	activityRepo := projects.NewActivityEventRepository(db)
@@ -196,6 +201,10 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	namespaceClient := openchoreo.NewNamespaceClient(ocConfig)
 	environmentClient := openchoreo.NewEnvironmentClient(ocConfig)
 	componentClient := openchoreo.NewComponentClient(ocConfig)
+	// ONE write-target resolver for every consumer: each project writes into
+	// the root of its own deployment pipeline, resolved at use (never cached),
+	// so every package that writes or reads a project's bindings shares it.
+	writeTargets := openchoreo.NewWriteTargets(ocConfig)
 	// GitSecret client lands the per-org build git credential on the workflow
 	// plane (via OC → OpenBao → SecretReference). Used by BuildCredentialsService
 	// for both cloud (CP/WP split) and local k3d — one unified path.
@@ -322,6 +331,23 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	agentSettings := organization.NewAgentSettingsService(orgAgentSettingsRepo, orgRepo, anthropicCredService, modelConnections, agentsCardRepo,
 		runnableAgentRuntimes(cfg))
 
+	// The org's SRE model connection: the OpenAI-compatible endpoint the
+	// OpenChoreo SRE agent calls instead of the org's model connection. It
+	// saves under the card's lock, and falls back to modelConnections.
+	sreModelConnections := organization.NewSreModelConnectionService(orgSreModelConnRepo, credStore, agentsCardRepo, modelConnections)
+	// The org's SRE-handoff token (org_secrets key "sre/handoff-token"):
+	// minted and held by the reconciler below, and looked up fresh on every
+	// request by auth.SREHandoffVerifier — ONE instance shared by both so
+	// there is exactly one place that mints and one that reads.
+	sreTokens := sreagent.NewTokens(credStore)
+	// Pushes that connection to the stock SRE agent on the observability plane
+	// (its Secret, restart hash and replicas) after every save that can change
+	// it and on a periodic pass. nil without a push target.
+	sreAgent, err := newSREAgentReconciler(cfg, sreTokens, sreModelConnections, modelConnections)
+	if err != nil {
+		return nil, err
+	}
+
 	// Task JWT manager — RS256. The public key is published on
 	// /auth/external/jwks.json. Used to mint BFF MCP tokens
 	// (IssueServiceToken) for the design agent and playground. Runner
@@ -359,6 +385,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 			HostHeader:   cfg.AgentManager.HostHeader,
 		}},
 		bindings: environmentClient,
+		targets:  writeTargets,
 	})
 	validatorProbes := organization.NewValidatorProbes(credService, gitHost, credResolver, minter)
 	credValidator := secrets.NewValidator(db, validatorProbes, nil, cfg.CredentialValidatorInterval)
@@ -456,6 +483,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// promotion ordering, so it is built once here instead of twice.
 	projectCellClient := openchoreo.NewProjectCellClient(ocConfig)
 	projectService.SetProjectCellProvisioner(projectCellClient)
+	projectService.SetWriteTargets(writeTargets)
 	// Build/deploy stage sources for the status poll (#184): the milestone-run
 	// index (one row read) + the org-scoped release-binding list —
 	// consumer-side ports wired here so projects imports neither.
@@ -563,7 +591,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	runRecorder := codingagent.NewCycleRecorder(codingLogSource, runRecordings).
 		WithArchive(codingArchive)
 	agentProgressReader := codingagent.NewAgentProgressReader(
-		codingLogSource, codingAgentLogRepo).
+		codingLogSource, writeTargets, codingAgentLogRepo).
 		WithArchive(codingArchive).
 		WithRecordings(runRecordings)
 	execProgressSvc.WithCodingProgress(agentProgressReader)
@@ -587,6 +615,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// writes it once. Driven by the run supervisor's deploy stage, because
 	// components carry AutoDeploy=false and nothing else promotes a release.
 	deploymentService := projects.NewDeploymentService(componentClient, artifactStore)
+	deploymentService.SetWriteTargets(writeTargets)
 
 	// Thunder admin client + IDP service. Reads
 	// aep-system-client credentials from env (THUNDER_*) and exposes
@@ -658,15 +687,15 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		slog.Warn("roles ensure disabled — OPENBAO_ADDR is not set, so no environment's Thunder admin credential can be read; " +
 			"builds will not provision roles or test users")
 	} else {
-		// ONE place decides which environment's identity provider a build's roles
-		// belong to: the environment aep-api deploys and validates in.
+		// A build's roles belong to the identity provider of the environment its
+		// project writes into, resolved per project from its write target.
 		resolver := newIdentityTargetResolver(environmentClient, bindingKV,
-			openchoreo.DevEnvironmentName, cfg.ThunderEnvAdminRoute)
+			writeTargets, cfg.ThunderEnvAdminRoute)
 		identityTargets = resolver
 		rolesEnsure = identity.NewEnsureService(resolver, identityStore, artifactSvcGit)
 		groupCatalogSvc = identity.NewCatalogService(resolver, identityStore)
 		slog.Info("roles ensure wired — a build provisions specs/design/security.json's roles and test users on the environment's own Thunder",
-			"environment", openchoreo.DevEnvironmentName, "adminRoute", cfg.ThunderEnvAdminRoute)
+			"adminRoute", cfg.ThunderEnvAdminRoute)
 	}
 	identityPanel := identity.NewPanelService(identityTargets, identityStore)
 	// Late-bound: provisioning, which owns the sign-in binding, is built below.
@@ -774,7 +803,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		if retentionLimit <= 0 {
 			retentionLimit = codingagent.DefaultCodingAgentComponentRetention
 		}
-		ocDispatcher := codingagent.NewOCDispatcher(componentClient).
+		ocDispatcher := codingagent.NewOCDispatcher(componentClient, writeTargets).
 			WithImage(cfg.AgentRunnerImage).
 			WithOpenCodeImage(cfg.AgentRunnerImageOpenCode).
 			WithRetention(codingagent.NewComponentRetention(
@@ -862,7 +891,13 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// terminals for `kind=build` execution rows, and the run loop records its
 	// cycles in run_cycles instead — so for anything the run loop builds, this
 	// sweep is the only thing that observes a build finishing.
-	buildSweep := eventcore.NewBuildSweep(eventPlane, eventcoreRepoLister{repos: repoRepo}, 0)
+	//
+	// It is also the merge fan-out's reconcile: a merged cycle whose builds were
+	// never triggered gets them. Its grace outlasts every run the merge's own
+	// delivery can still get (webhook.ReplayHorizon), plus a margin, so the two
+	// never fan out one merge at once.
+	buildSweep := eventcore.NewBuildSweep(eventPlane, eventcoreRepoLister{repos: repoRepo}, 0).
+		WithReconcileGrace(webhook.ReplayHorizon + 3*time.Minute)
 	execWatcher := codingagent.NewExecWatcher(componentClient, executionRepo, asServiceIdentity, 0).
 		WithTaskNotifier(taskStreamHub).
 		// Build terminals reach the milestone-run loop through the root observer
@@ -915,6 +950,17 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		validationEndpointResolver{store: artifactStore, comp: componentService},
 	)
 
+	// The SRE-handoff shortcut (internal/edge/sre_handoff_gate.go) is only
+	// meaningful when an SRE agent push target is configured — its org is
+	// cfg.SREAgent.Org, and sreTokens (shared with the reconciler above) is
+	// where the minted token for that org lives. Unconfigured leaves it nil,
+	// same secure default as an unset org/tokens inside NewSREHandoffVerifier
+	// itself. It is also the signal that the SRE loop is wired (auto-RCA below).
+	var sreHandoffAuth *authn.SREHandoffVerifier
+	if cfg.SREAgent.Enabled() {
+		sreHandoffAuth = authn.NewSREHandoffVerifier(cfg.SREAgent.Org, sreTokens)
+	}
+
 	// Controllers
 	params := edge.AppParams{
 		Config: cfg,
@@ -931,7 +977,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		ConfigRepo:          configRepo,
 		ThunderJWKS:         thunderJWKS,
 		OrganizationService: organizationService,
-		SREHandoffAuth:      authn.NewSREHandoffVerifier(cfg.SREHandoffToken, cfg.SREHandoffOrg),
+		SREHandoffAuth:      sreHandoffAuth,
 
 		DB:                   db,
 		CredService:          credService,
@@ -1205,6 +1251,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		Providers:         orgEndpointCatalog,
 		Environments:      environmentLister{client: environmentClient},
 		Pipeline:          pipelineLister{client: projectCellClient},
+		WriteTargets:      writeTargets,
 		CatalogValuePlane: catalogValuePlane,
 		OrgSecrets:        secretRefWriter,
 		OrgResourceDocs:   orgResourceDocs,
@@ -1382,6 +1429,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// The platform tester's callback rides the same patch as the SPAs' own
 	// callbacks, and is what lets an agent-only project be signed in to at all.
 	runtimeConfigSvc.SetTryItCallbackURL(cfg.TryItCallbackURL)
+	// The bindings whose outputs drive window._env_ live in the project's write
+	// target, resolved per emission pass.
+	runtimeConfigSvc.SetWriteTargets(writeTargets)
 	// The pre-build ensure is now the Component CR alone. env-config.js used to be
 	// emitted here too and could not land — the binding it writes to does not
 	// exist before the first build — so it is a deploy-stage input instead, pulled
@@ -1449,7 +1499,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	deploymentService.SetGovernor(agentGovernor)
 	// The design agent's list_guardrail_policies tool reads the same live
 	// catalog the deploy resolves a spec's guardrails against.
-	params.MCPGuardrailCatalog = guardrailCatalog{gov: agentGovernor}
+	params.MCPGuardrailCatalog = guardrailCatalog{gov: agentGovernor, targets: writeTargets}
 	// The BUILD-TIME half of the same governor: the version's `provision` gate
 	// registers this version's agents before the coding agent is dispatched, so
 	// an Agent Manager that cannot serve the build fails it at PLANNING rather
@@ -1459,6 +1509,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	provisioningSvc.SetAgentRegistrar(ampAgentRegistrar{
 		governor: agentGovernor,
 		kinds:    agentComponentKinds,
+		targets:  writeTargets,
 	})
 	// Model access is composed from the AI gateway binding when the environment
 	// has one: an Agent-Manager-governed agent gets the gateway's endpoint and
@@ -1499,6 +1550,21 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// address is derived per deploy beside the context-path builder it has to
 	// agree with (projects.APIGatewayHost). Empty is the normal case.
 	deploymentService.SetAPIGatewayHostOverride(cfg.APIGatewayHost)
+	// The default auto-RCA alert rule exists to start the SRE loop (an error
+	// log → an alert → the OpenChoreo SRE agent's RCA → handed back to this
+	// platform), so it is attached only where that loop is wired: this server
+	// pushes the SRE agent's configuration (sreHandoffAuth above). It is two
+	// writes, the trait on the Component and its per-environment config on the
+	// binding, so both writers take the one value. The deploy re-asserts the Component before it cuts a release: a
+	// release freezes the Component's traits, and the build wrote them earlier.
+	autoRCAEnabled := sreHandoffAuth != nil
+	deploymentService.SetAutoRCAEnabled(autoRCAEnabled)
+	deploymentService.SetComponentEnsurer(componentService)
+	autoRCA, ok := componentService.(projects.AutoRCASwitch)
+	if !ok {
+		return nil, fmt.Errorf("component service does not take the auto-RCA switch (projects.AutoRCASwitch)")
+	}
+	autoRCA.SetAutoRCAEnabled(autoRCAEnabled)
 	// How a protected service verifies that a request reached it through the
 	// gateway. Read off the Environment's annotations — the same projection the
 	// Thunder binding arrives on, and the only one this process can see from
@@ -1545,6 +1611,11 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// execution-row terminals; the trait-sync + credential-validator watchers
 	// are unchanged.
 	watchers := []Watcher{
+		// Re-runs webhook deliveries that were persisted but never processed (a
+		// failed handler, a run lost with its pod), within webhook.ReplayHorizon
+		// of their receipt. The receiver acks before its handlers run, so this —
+		// not GitHub, which never redelivers on its own — is what retries them.
+		webhook.NewReplayer(deliveryStore, webhookRouter, 0),
 		// The event plane's reconcile backstop: a milestone with open work and no
 		// live run gets one. It heals a webhook GitHub never delivered and the
 		// adoption-versus-settle race, and walks only milestones the platform has
@@ -1584,6 +1655,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		// once none of the org's cycles is open.
 		organization.NewModelKeyRename(organization.NewModelKeyRenameRepository(db, credStore), orgRepo, secretRefWriter, runCycleRepo),
 	}
+	if sreAgent != nil {
+		watchers = append(watchers, sreAgent)
+	}
 	// Disk-lifecycle reaper: global passes self-elect via non-blocking flock.
 	// Omitted when Fake() leaves Workspace nil (no disk at assemble time).
 	if workspaceReaper != nil {
@@ -1595,7 +1669,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// provider's limit stopped it), and banks the run's token spend. It writes no
 	// logs and deletes no components — history is the observability plane's and
 	// deletion is retention's. Always on (no longer gated on cluster-gateway-proxy).
-	watchers = append(watchers, codingagent.NewJobWatcher(runtimeClient, runCycleRepo, asServiceIdentity).
+	watchers = append(watchers, codingagent.NewJobWatcher(runtimeClient, runCycleRepo, writeTargets, asServiceIdentity).
 		WithRecorder(runRecorder).
 		WithAgentDeathNotifier(agentDeathNotifier{runs: milestoneRunRepo, supervisor: runSupervisor}).
 		WithRunFailures(milestoneRunRepo))
@@ -1794,4 +1868,17 @@ func runnableAgentRuntimes(cfg config.Config) []orgconfig.AgentRuntime {
 		runtimes = append(runtimes, orgconfig.AgentRuntimeOpenCode)
 	}
 	return runtimes
+}
+
+// ocClientConfig maps aep-api config and the auth seam onto the OpenChoreo client config.
+func ocClientConfig(cfg config.Config, seam Seam) openchoreo.Config {
+	return openchoreo.Config{
+		BaseURL:                  cfg.PlatformAPI.BaseURL,
+		HostHeader:               cfg.PlatformAPI.HostHeader,
+		AuthProvider:             seam.AuthProvider,
+		RequestAuthStrategy:      seam.RequestAuthStrategy,
+		ImpersonateOrgResolver:   seam.ImpersonateOrgResolver,
+		PreferPlainHTTPEndpoints: !cfg.PlatformAPI.DataPlaneGatewayTLS,
+		ResourceLabels:           seam.ResourceLabels,
+	}
 }

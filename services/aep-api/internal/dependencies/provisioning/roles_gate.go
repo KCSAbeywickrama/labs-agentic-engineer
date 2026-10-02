@@ -60,7 +60,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
@@ -496,6 +495,9 @@ type SignInClient struct {
 // the platform itself keys the sign-in overlay on (see deriveEndUserAuth). One
 // project has one such resource — every protected component shares it by
 // declaring the same dependency name — so the first match is the answer.
+//
+// The binding lives in the project's write target; an unresolvable one is one
+// more reason to have no client (readTarget logs it).
 func (s *Service) SignInCoordinates(ctx context.Context, orgID, projectID string) SignInClient {
 	if s == nil || s.design == nil || s.bindings == nil || s.markers == nil {
 		return SignInClient{}
@@ -517,7 +519,13 @@ func (s *Service) SignInCoordinates(ctx context.Context, orgID, projectID string
 			if dep.Kind != spec.DependencyKindPlatformResource || !byName[dep.ResourceType].EndUserAuth {
 				continue
 			}
-			name := ocname.ExternalResourceBindingName(projectID, dep.Name, openchoreo.DevEnvironmentName)
+			// Resolved only now, so a project that signs nobody in costs no
+			// pipeline read.
+			env := s.readTarget(ctx, orgID, projectID, "")
+			if env == "" {
+				return SignInClient{}
+			}
+			name := ocname.ExternalResourceBindingName(projectID, dep.Name, env)
 			binding, berr := s.bindings.GetBinding(ctx, orgID, name)
 			if berr != nil || binding == nil || binding.Status == nil {
 				slog.DebugContext(ctx, "roles gate: the sign-in resource's binding is not readable yet",

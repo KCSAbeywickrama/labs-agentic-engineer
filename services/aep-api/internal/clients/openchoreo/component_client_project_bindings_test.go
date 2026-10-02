@@ -35,14 +35,14 @@ func bindingListPayload(items ...map[string]any) map[string]any {
 // folds to "deployed", and the state an agent Job's binding sits in
 // unconditionally.
 func readyBinding(project, component string, labels map[string]any) map[string]any {
-	meta := map[string]any{"name": ReleaseBindingName(project, component, DevEnvironmentName)}
+	meta := map[string]any{"name": ReleaseBindingName(project, component, "development")}
 	if labels != nil {
 		meta["labels"] = labels
 	}
 	return map[string]any{
 		"metadata": meta,
 		"spec": map[string]any{
-			"environment": DevEnvironmentName,
+			"environment": "development",
 			"owner": map[string]any{
 				"projectName":   project,
 				"componentName": ScopedComponentName(project, component),

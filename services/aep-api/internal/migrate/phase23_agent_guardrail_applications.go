@@ -23,7 +23,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// RunPhase22AgentGuardrailApplications creates agent_guardrail_applications:
+// RunPhase23AgentGuardrailApplications creates agent_guardrail_applications:
 // per (org, project, component, environment), the guardrails the Agent Manager
 // govern stage last wrote to a governed ai-agent's binding, and what became of
 // each declared one (organization.AgentGuardrailApplication).
@@ -34,7 +34,7 @@ import (
 //
 // No backfill: nothing applied guardrails before this. Idempotent: CREATE ...
 // IF NOT EXISTS.
-func RunPhase22AgentGuardrailApplications(ctx context.Context, db *gorm.DB) error {
+func RunPhase23AgentGuardrailApplications(ctx context.Context, db *gorm.DB) error {
 	if err := db.WithContext(ctx).Exec(`
 		CREATE TABLE IF NOT EXISTS agent_guardrail_applications (
 		  oc_org_id     TEXT NOT NULL,
@@ -46,7 +46,7 @@ func RunPhase22AgentGuardrailApplications(ctx context.Context, db *gorm.DB) erro
 		  updated_at    TIMESTAMPTZ NOT NULL,
 		  PRIMARY KEY (oc_org_id, project, component, environment)
 		)`).Error; err != nil {
-		return fmt.Errorf("phase22 create agent_guardrail_applications: %w", err)
+		return fmt.Errorf("phase23 create agent_guardrail_applications: %w", err)
 	}
 	return nil
 }

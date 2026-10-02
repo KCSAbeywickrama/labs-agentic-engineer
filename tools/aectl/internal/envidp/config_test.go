@@ -50,12 +50,53 @@ func TestBaseDomainsIndependent(t *testing.T) {
 		GatewayBaseDomain: "gateway.10.0.0.5.sslip.io",
 	}
 
-	if got, want := publicURL(cfg.Env, cfg.idpBaseDomain()),
+	if got, want := publicURL(cfg.Env, cfg.idpBaseDomain(), cfg.scheme(), cfg.idpPort()),
 		"http://development-idp.openchoreo.10.0.0.5.sslip.io:8080"; got != want {
 		t.Errorf("publicURL = %q, want %q", got, want)
 	}
-	if got, want := gatewayVhost(cfg.Org, cfg.Env, cfg.gatewayBaseDomain()),
+	if got, want := gatewayVhost(cfg.Org, cfg.Env, cfg.gatewayBaseDomain(), cfg.scheme(), cfg.gatewayPort()),
 		"http://development-default.gateway.10.0.0.5.sslip.io:19080"; got != want {
+		t.Errorf("gatewayVhost = %q, want %q", got, want)
+	}
+}
+
+// TestTLSMovesSchemeAndBothPorts is the case that decides whether an end user
+// can sign in to a generated app: the issuer must be https, because a browser
+// withholds crypto.subtle — and with it PKCE — outside a secure context.
+// Scheme and port move together; https on 8080 would be as broken as http.
+func TestTLSMovesSchemeAndBothPorts(t *testing.T) {
+	cfg := Config{
+		Org:               "default",
+		Env:               "development",
+		IDPBaseDomain:     "openchoreo.10.0.0.5.sslip.io",
+		GatewayBaseDomain: "gateway.10.0.0.5.sslip.io",
+		TLS:               true,
+	}
+
+	if got, want := publicURL(cfg.Env, cfg.idpBaseDomain(), cfg.scheme(), cfg.idpPort()),
+		"https://development-idp.openchoreo.10.0.0.5.sslip.io:8443"; got != want {
+		t.Errorf("publicURL = %q, want %q", got, want)
+	}
+	if got, want := gatewayVhost(cfg.Org, cfg.Env, cfg.gatewayBaseDomain(), cfg.scheme(), cfg.gatewayPort()),
+		"https://development-default.gateway.10.0.0.5.sslip.io:19443"; got != want {
+		t.Errorf("gatewayVhost = %q, want %q", got, want)
+	}
+}
+
+// TestTLSDefaultsOff guards the localhost flow: an install that sets nothing
+// must still compose exactly the plain-HTTP URLs it always did.
+func TestTLSDefaultsOff(t *testing.T) {
+	cfg := Config{Org: "default", Env: "development"}
+
+	if cfg.TLS {
+		t.Error("TLS must default to false")
+	}
+	if got, want := publicURL(cfg.Env, cfg.idpBaseDomain(), cfg.scheme(), cfg.idpPort()),
+		"http://development-idp.openchoreo.localhost:8080"; got != want {
+		t.Errorf("publicURL = %q, want %q", got, want)
+	}
+	if got, want := gatewayVhost(cfg.Org, cfg.Env, cfg.gatewayBaseDomain(), cfg.scheme(), cfg.gatewayPort()),
+		"http://development-default.gateway.localhost:19080"; got != want {
 		t.Errorf("gatewayVhost = %q, want %q", got, want)
 	}
 }

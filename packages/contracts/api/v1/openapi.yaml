@@ -5986,6 +5986,12 @@ components:
         nativePdf:
           description: PDFs go to the model natively; otherwise they are sent as extracted text.
           type: boolean
+        sreAgent:
+          description: >-
+            The OpenChoreo SRE agent can call this connection. True for the
+            openai-compatible format authenticated with a Bearer token, which
+            is what the stock agent's langchain-openai client sends.
+          type: boolean
         webSearch:
           description: >-
             How agents search the web on this connection: Anthropic's server
@@ -6001,6 +6007,7 @@ components:
       - imageInput
       - nativePdf
       - generatedAgents
+      - sreAgent
       type: object
     LLMCheck:
       x-go-type: orgconfig.LLMCheck
@@ -6271,6 +6278,10 @@ components:
           description: Why a non-succeeded run stopped. Each value names exactly one failure class;
             empty while the run is non-terminal and on a succeeded run. agent-quota-blocked,
             publisher-credentials-missing and model-provider-limit explain state=blocked.
+            no-write-target is a failed run whose project's deployment pipeline names no
+            environment to deploy into, met at coding-agent dispatch or at any deploy step
+            (the gate, the version read, a promote or a readiness poll); it files no fix
+            work and dispatches no agent.
           type: string
         waitingReason:
           description: Why a `waiting` run is waiting. Empty for the ordinary between-cycles park,
@@ -8066,13 +8077,21 @@ components:
             repository, issue or credential is gone; `model-provider-limit` the
             model provider's usage limit stopped the coding agent — the run is
             `blocked`, not failed, and `host` and `resetAt` say whose limit and
-            until when.
+            until when; `no-write-target` the project's deployment pipeline
+            names no environment to deploy into (none referenced, or one that is
+            missing, empty, cyclic or rooted at a name over 11 characters), met
+            at coding-agent dispatch (`phase` coding) or at a deploy step: the
+            gate, the version read, a promote or a readiness poll (`phase`
+            deploying); the run fails with `terminalReason` no-write-target, no
+            fix work and no agent dispatched, and `detail` names the pipeline
+            fault.
           enum:
           - dependency-unprovisionable
           - dependency-provision-failed
           - plan-turn-failed
           - repository-unavailable
           - model-provider-limit
+          - no-write-target
           type: string
           x-go-type: string
         phase:

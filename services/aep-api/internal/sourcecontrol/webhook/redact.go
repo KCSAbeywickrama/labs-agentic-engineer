@@ -39,8 +39,10 @@ import (
 // re-encoded at all. When the marker IS present, the two fields a body can
 // arrive in are replaced with a notice; if the payload cannot be re-encoded, or
 // the marker survives somewhere this does not model, the whole body is dropped
-// rather than stored. Nothing reads these rows back, so losing one audit body
-// costs less than keeping a credential.
+// rather than stored. The one reader is the Replayer, which re-runs a stored
+// body when a delivery's handlers failed. No registered handler reads a comment
+// or issue body, so a redacted body replays the same, and a dropped one routes
+// to no handler — losing it costs less than keeping a credential.
 func redactPublishedCredentials(payload []byte) []byte {
 	if !bytes.Contains(payload, []byte(credentialNeedle)) {
 		return payload

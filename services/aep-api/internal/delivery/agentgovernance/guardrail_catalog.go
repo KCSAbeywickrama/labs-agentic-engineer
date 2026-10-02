@@ -44,7 +44,7 @@ type CatalogGuardrail struct {
 // GuardrailCatalog lists the guardrails an agent of this org may declare.
 //
 // It reads the same live catalog the deploy resolves against (Agent Manager's,
-// as the environment's gateways report it) and applies the same filter, so a
+// as that environment's gateways report it) and applies the same filter, so a
 // guardrail the design is offered is never one the deploy then reports
 // unavailable or uncheckable. The settings the platform owns — every JSONPath
 // — are removed, so the design is never invited to write one.
@@ -52,8 +52,8 @@ type CatalogGuardrail struct {
 // Nothing to govern — no AI gateway binding, no model connection, no provider
 // yet, or a format guardrails do not support — is an empty list, not an
 // error: a design turn reads it as "no guardrails available here".
-func (g *Governor) GuardrailCatalog(ctx context.Context, org string) ([]CatalogGuardrail, error) {
-	binding, err := g.deps.Bindings.GetAIGatewayBinding(ctx, org, openchoreo.DevEnvironmentName)
+func (g *Governor) GuardrailCatalog(ctx context.Context, org, environment string) ([]CatalogGuardrail, error) {
+	binding, err := g.deps.Bindings.GetAIGatewayBinding(ctx, org, environment)
 	if errors.Is(err, openchoreo.ErrNoAIGatewayBinding) {
 		return nil, nil
 	}

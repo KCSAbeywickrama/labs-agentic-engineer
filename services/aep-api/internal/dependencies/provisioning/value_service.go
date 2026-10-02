@@ -84,8 +84,15 @@ func (s *Service) SaveValues(ctx context.Context, orgID, ocOrgID, projectID, dep
 	if err != nil {
 		return err
 	}
-	var execID string
+	var execID, env string
 	if issueNumber > 0 {
+		// The write target names only the run's binding, so it is resolved only
+		// when there is a run to pin, and before the row is admitted or anything
+		// is written: a project with no write target fails with nothing half done.
+		var terr error
+		if env, terr = s.writeTarget(ctx, orgID, projectID); terr != nil {
+			return terr
+		}
 		repo, rerr := s.repos.RepoFullName(ctx, orgID, projectID)
 		if rerr != nil {
 			return fmt.Errorf("provisioning: resolve repo: %w", rerr)
@@ -108,7 +115,7 @@ func (s *Service) SaveValues(ctx context.Context, orgID, ocOrgID, projectID, dep
 	}
 
 	if execID != "" {
-		ref := result.BindingByEnv[defaultEnv()]
+		ref := result.BindingByEnv[env]
 		if ref == "" {
 			ref = result.ResourceName
 		}

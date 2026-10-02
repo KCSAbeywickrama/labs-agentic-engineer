@@ -591,3 +591,50 @@ func TestRepoNotReady_ZeroValueStages(t *testing.T) {
 		t.Errorf("deploy = %+v, want none zero-valued", st.Deploy)
 	}
 }
+
+// The deploy stage counts only the bindings of the project's resolved write
+// target; a binding in any other environment is someone else's rollout.
+func TestStageDerivation_DeployCountsOnlyTheWriteTarget(t *testing.T) {
+	t.Parallel()
+	fx := statusFixture{
+		snap: spec.StatusSnapshot{HasSpec: true, HasDesign: true, SpecVersion: "v1"},
+		runs: []delivery.MilestoneRun{devRun("v1", delivery.RunStateSucceeded)},
+		bindings: []openchoreo.ReleaseBindingSummary{
+			{ComponentName: "api", Environment: "development", ReadyStatus: "True", ReadyReason: "Ready"},
+			{ComponentName: "web", Environment: "development", ReadyStatus: "True", ReadyReason: "Ready"},
+			{ComponentName: "api", Environment: "default", ReadyStatus: "True", ReadyReason: "Ready"},
+		},
+		counts:      map[string]int{"v1": 2},
+		writeTarget: staticWriteTarget{env: "development"},
+	}
+	st := mustStatus(t, fx)
+	if st.Deploy.Status != "deployed" || st.Deploy.Components.Ready != 2 {
+		t.Errorf("deploy = %s ready %d, want deployed / 2 (only development bindings)",
+			st.Deploy.Status, st.Deploy.Components.Ready)
+	}
+}
+
+// A status poll is a READ and must not fail on a broken pipeline: the endpoint
+// still answers, with the deploy stage at none, so the overview keeps its other
+// stages instead of losing the whole poll to a configuration fault.
+func TestStageDerivation_UnresolvableWriteTargetReadsAsNone(t *testing.T) {
+	t.Parallel()
+	fx := statusFixture{
+		snap: spec.StatusSnapshot{HasSpec: true, HasDesign: true, SpecVersion: "v1"},
+		runs: []delivery.MilestoneRun{devRun("v1", delivery.RunStateSucceeded)},
+		bindings: []openchoreo.ReleaseBindingSummary{
+			devBinding("api", "True", "Ready"),
+		},
+		counts: map[string]int{"v1": 1},
+		writeTarget: staticWriteTarget{err: &openchoreo.ErrNoWriteTarget{
+			Org: "acme", Project: "web", Pipeline: "default", Cause: openchoreo.ErrPipelineCyclic,
+		}},
+	}
+	st := mustStatus(t, fx)
+	if st.Deploy.Status != "none" || st.Deploy.Components.Ready != 0 {
+		t.Errorf("deploy = %s ready %d, want none / 0", st.Deploy.Status, st.Deploy.Components.Ready)
+	}
+	if st.Build.Status != "succeeded" {
+		t.Errorf("build = %q, want the other stages unaffected", st.Build.Status)
+	}
+}

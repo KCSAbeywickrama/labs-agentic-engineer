@@ -21,7 +21,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/gen"
 )
 
@@ -35,8 +34,11 @@ func (f fakeGuardrailOutcomes) GuardrailOutcomes(context.Context, string, string
 	return f.byEnv, f.err
 }
 
+// guardrailTestEnv is the environment these tests deploy to.
+const guardrailTestEnv = "development"
+
 func guardrailService(outcomes GuardrailOutcomeReader) *componentService {
-	svc := NewComponentService(deploymentsOf(openchoreo.DevEnvironmentName), nil, modelAccessStore(nil), nil, nil, fakeKeyResolver{}, fakeSecretRefClient{}).(*componentService)
+	svc := NewComponentService(deploymentsOf(guardrailTestEnv), nil, modelAccessStore(nil), nil, nil, fakeKeyResolver{}, fakeSecretRefClient{}).(*componentService)
 	svc.SetGuardrailOutcomes(outcomes)
 	return svc
 }
@@ -45,7 +47,7 @@ func guardrailService(outcomes GuardrailOutcomeReader) *componentService {
 // guardrail that did not land is visible where the agent is tried.
 func TestListDeployments_CarriesTheAgentsGuardrailOutcomes(t *testing.T) {
 	svc := guardrailService(fakeGuardrailOutcomes{byEnv: map[string][]GuardrailOutcome{
-		openchoreo.DevEnvironmentName: {
+		guardrailTestEnv: {
 			{Policy: "pii-masking-regex", Status: "applied"},
 			{Policy: "word-count-guardrail", Status: "partial", Reason: "the reply-side check is not applied"},
 		},

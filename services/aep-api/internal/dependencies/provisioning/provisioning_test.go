@@ -254,6 +254,10 @@ type fakeExtProv struct {
 	result        *dependencies.ProvisionResult
 	err           error
 	deprovisioned []string
+	// deprovisionedEnvs is the env list each Deprovision call received.
+	deprovisionedEnvs [][]string
+	// runnerEnv is the env the last ResolveRunnerSecrets call received.
+	runnerEnv string
 	// lastER is the *dependencies.ExternalResource the last Provision call received —
 	// lets a test assert the RT-authoring definition was built from the design
 	// (name/description/config schema) rather than fetched from the catalog.
@@ -293,11 +297,13 @@ func (f *fakeExtProv) AuthorPreparedValues(_ context.Context, _, _ string, er *d
 	}
 	return &dependencies.ProvisionResult{ResourceName: "o-ext", BindingByEnv: map[string]string{"default": "o-ext-default"}}, nil
 }
-func (f *fakeExtProv) Deprovision(_ context.Context, _, _, name string, _ []string) error {
+func (f *fakeExtProv) Deprovision(_ context.Context, _, _, name string, envs []string) error {
 	f.deprovisioned = append(f.deprovisioned, name)
+	f.deprovisionedEnvs = append(f.deprovisionedEnvs, envs)
 	return nil
 }
-func (f *fakeExtProv) ResolveRunnerSecrets(_ context.Context, _, _, _ string, names []string) ([]dependencies.ExternalResourceRunnerSecret, error) {
+func (f *fakeExtProv) ResolveRunnerSecrets(_ context.Context, _, _, env string, names []string) ([]dependencies.ExternalResourceRunnerSecret, error) {
+	f.runnerEnv = env
 	out := make([]dependencies.ExternalResourceRunnerSecret, 0, len(names))
 	for _, n := range names {
 		out = append(out, dependencies.ExternalResourceRunnerSecret{KVPath: "vault/" + n, Keys: []string{"API_KEY"}})
@@ -311,11 +317,16 @@ type fakePlatProv struct {
 	result        *dependencies.PlatformProvisionResult
 	err           error
 	deprovisioned []string
+	// envs is the env list the last Provision call received.
+	envs []string
+	// deprovisionedEnvs is the env list each Deprovision call received.
+	deprovisionedEnvs [][]string
 }
 
-func (f *fakePlatProv) Provision(_ context.Context, _, _, depName, _ string, params map[string]any, _ []string) (*dependencies.PlatformProvisionResult, error) {
+func (f *fakePlatProv) Provision(_ context.Context, _, _, depName, _ string, params map[string]any, envs []string) (*dependencies.PlatformProvisionResult, error) {
 	f.calls++
 	f.params = params
+	f.envs = envs
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -324,8 +335,9 @@ func (f *fakePlatProv) Provision(_ context.Context, _, _, depName, _ string, par
 	}
 	return &dependencies.PlatformProvisionResult{ResourceName: "o-" + depName, BindingByEnv: map[string]string{"default": "o-" + depName + "-default"}}, nil
 }
-func (f *fakePlatProv) Deprovision(_ context.Context, _, _, depName string, _ []string) error {
+func (f *fakePlatProv) Deprovision(_ context.Context, _, _, depName string, envs []string) error {
 	f.deprovisioned = append(f.deprovisioned, depName)
+	f.deprovisionedEnvs = append(f.deprovisionedEnvs, envs)
 	return nil
 }
 
@@ -478,15 +490,37 @@ func designWithDeps() []spec.DesignComponent {
 	}}
 }
 
+// testWriteTarget is the write target the pre-existing tests resolve. Their
+// binding-name fixtures were computed against it.
+const testWriteTarget = "default"
+
+// staticWriteTarget answers every project (and the org) with one write target,
+// or with err.
+type staticWriteTarget struct {
+	env     string
+	err     error
+	orgRoot string
+	orgErr  error
+}
+
+func (s staticWriteTarget) Resolve(context.Context, string, string) (string, error) {
+	return s.env, s.err
+}
+
+func (s staticWriteTarget) OrgDefaultRoot(context.Context, string) (string, error) {
+	return s.orgRoot, s.orgErr
+}
+
 func newTestService(issues *fakeIssues, execs *fakeExecStore, design DesignReader, ext *fakeExtProv, plat *fakePlatProv, bindings *fakeBindings) *Service {
 	return NewService(Deps{
-		Issues:   issues,
-		Execs:    execs,
-		Design:   design,
-		Repos:    fakeRepos{},
-		ExtProv:  ext,
-		PlatProv: plat,
-		Bindings: bindings,
+		Issues:       issues,
+		Execs:        execs,
+		Design:       design,
+		Repos:        fakeRepos{},
+		ExtProv:      ext,
+		PlatProv:     plat,
+		Bindings:     bindings,
+		WriteTargets: staticWriteTarget{env: testWriteTarget},
 	})
 }
 
@@ -869,11 +903,12 @@ func TestGrant_OnProviderDeploy(t *testing.T) {
 func TestResolveComponentRunnerSecrets(t *testing.T) {
 	ext := &fakeExtProv{}
 	svc := NewService(Deps{
-		Issues:  newFakeIssues(nil),
-		Execs:   &fakeExecStore{},
-		Design:  fakeDesign{comps: designWithDeps()}, // orders has external "stripe"
-		Repos:   fakeRepos{},
-		ExtProv: ext,
+		Issues:       newFakeIssues(nil),
+		Execs:        &fakeExecStore{},
+		Design:       fakeDesign{comps: designWithDeps()}, // orders has external "stripe"
+		Repos:        fakeRepos{},
+		ExtProv:      ext,
+		WriteTargets: staticWriteTarget{env: testWriteTarget},
 	})
 	srs, err := svc.ResolveComponentRunnerSecrets(context.Background(), "org", "proj", "orders", "")
 	if err != nil {
@@ -895,12 +930,13 @@ func TestDeprovisionProject_TearsDownResources(t *testing.T) {
 	ext := &fakeExtProv{}
 	plat := &fakePlatProv{}
 	svc := NewService(Deps{
-		Issues:   newFakeIssues(nil),
-		Execs:    &fakeExecStore{},
-		Design:   fakeDesign{comps: designWithDeps()},
-		Repos:    fakeRepos{},
-		ExtProv:  ext,
-		PlatProv: plat,
+		Issues:       newFakeIssues(nil),
+		Execs:        &fakeExecStore{},
+		Design:       fakeDesign{comps: designWithDeps()},
+		Repos:        fakeRepos{},
+		ExtProv:      ext,
+		PlatProv:     plat,
+		WriteTargets: staticWriteTarget{env: testWriteTarget},
 	})
 	if err := svc.DeprovisionProject(context.Background(), "org", "proj"); err != nil {
 		t.Fatalf("DeprovisionProject: %v", err)

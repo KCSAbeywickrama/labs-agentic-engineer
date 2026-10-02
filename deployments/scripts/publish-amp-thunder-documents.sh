@@ -88,12 +88,38 @@ done
 # fails at someone's first `amctl` login, nowhere near this line.
 : "${AE_DOMAIN:?set AE_DOMAIN — publish-amp-thunder-documents.sh is normally called by setup-env-for-aectl.sh, which exports it}"
 
+# Dots escaped so the suffix cannot match more than itself.
+AE_DOMAIN_RE="${AE_DOMAIN//./\\.}"
+
 added=0
 for doc in "${DOCS_DIR}"/*.yaml; do
     [ -e "$doc" ] || fail "No documents found in ${DOCS_DIR}."
     sed -e "s|amp\\.localhost|amp.${AE_DOMAIN}|g" \
         -e "s|openchoreo\\.localhost|openchoreo.${AE_DOMAIN}|g" \
         "$doc" > "${BOOTSTRAP_DIR}/$(basename "$doc")"
+    # On a TLS cluster these documents have to move scheme and port as well.
+    # 99-composed-system-resource-server.yaml is why: it SUPERSEDES the
+    # identifier setup-env-for-aectl.sh writes, and that identifier must equal
+    # what every client sends as the OAuth `resource` indicator. Rewriting only
+    # the domain leaves it on http://...:8080 while the platform computes
+    # https://...:8443, and every token request carrying the indicator is
+    # refused with invalid_target — including the one aectl needs to install.
+    #
+    # Scoped to this cluster's own suffix, so the loopback redirect URIs these
+    # documents also carry (localhost:3000, 127.0.0.1:33418) are untouched.
+    #
+    # Rewritten through a temporary file rather than with `sed -i`, which is
+    # not portable: GNU takes a bare -i, BSD/macOS reads the next argument as
+    # the backup suffix and then misparses the script. This runs on whatever
+    # machine the operator installs from.
+    if [ "${WITH_TLS:-0}" = "1" ]; then
+        published="${BOOTSTRAP_DIR}/$(basename "$doc")"
+        sed "s|http://\\([A-Za-z0-9.-]*\\)\\.${AE_DOMAIN_RE}:8080|https://\\1.${AE_DOMAIN}:8443|g" \
+            "$published" > "${published}.tls" \
+            || fail "Could not apply the TLS rewrite to $(basename "$doc")."
+        mv "${published}.tls" "$published" \
+            || fail "Could not replace $(basename "$doc") with its TLS rewrite."
+    fi
     added=$((added + 1))
 done
 

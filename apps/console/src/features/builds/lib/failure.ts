@@ -78,6 +78,8 @@ const SHORT_LABELS: Record<string, string> = {
   "plan-turn-failed": "Planning failed",
   "repository-unavailable": "Repository unavailable",
   "model-provider-limit": "Model provider limit reached",
+  // Also the terminal reason it explains, like model-provider-limit.
+  "no-write-target": "No environment to deploy into",
   // Terminal reasons, for a run with no record.
   "plan-failed": "Planning failed",
   "redispatch-budget": "Coding agent stopped",
@@ -144,6 +146,28 @@ function attemptsPhrase(f: RunFailure): string {
 
 const NOTHING_HAPPENED = "Nothing was coded or deployed.";
 
+/**
+ * A project whose pipeline names no write target. The cause is the same for the
+ * record and for the reason alone; what already happened is not. The coding
+ * agent's dispatch meets it before anything is coded, the deploy stage after the
+ * code merged and built, and the reason alone does not say which.
+ */
+function noWriteTargetCopy(phase?: string): Omit<FailureCopy, "tone" | "details"> {
+  const happened =
+    phase === "coding"
+      ? "Nothing was coded, built or deployed"
+      : phase === "deploying"
+        ? "The code merged and built; nothing was deployed"
+        : "Nothing was deployed";
+  return {
+    title: "The project has no environment to deploy into",
+    body:
+      "Its deployment pipeline is missing, empty or circular, so the platform cannot tell which environment the project writes into. " +
+      `${happened} and no fix task was filed, because code cannot repair a pipeline. ` +
+      "Retrying cannot fix this. Fix the project's deployment pipeline, then build again; the details below name the fault.",
+  };
+}
+
 function codeCopy(f: RunFailure, retrying: boolean): Omit<FailureCopy, "tone" | "details"> {
   switch (f.code) {
     case "dependency-unprovisionable":
@@ -177,6 +201,8 @@ function codeCopy(f: RunFailure, retrying: boolean): Omit<FailureCopy, "tone" | 
             title: "The platform could not plan the version's tasks",
             body: `The planning turn failed. ${NOTHING_HAPPENED} Build again; if it repeats, the details below name the error.`,
           };
+    case "no-write-target":
+      return noWriteTargetCopy(f.phase);
     case "repository-unavailable":
       return {
         title: "The project's repository could not be reached",
@@ -261,6 +287,8 @@ function reasonCopy(run: MilestoneRunView): Omit<FailureCopy, "tone" | "details"
         body: "Its components were built, and a deployment never reached Ready. The Deployments board names the component.",
         next: { label: "Go to Deployments", to: "/projects/$projectName/deployments" },
       };
+    case "no-write-target":
+      return noWriteTargetCopy();
     case "validation-failed":
     case "validation-unreported":
       return {

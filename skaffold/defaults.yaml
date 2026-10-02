@@ -49,28 +49,26 @@ oc:
   # observability plane lives under a different namespace or release name.
   observability_api_url: "http://observer.openchoreo-observability-plane.svc.cluster.local:8080"
 
-  # The OpenChoreo Environment AEP provisions into and patches gateway ingress
-  # onto. Not every OpenChoreo setup names it "default": aep-api itself never
-  # hardcodes this — it computes it live from DeploymentPipeline/default's
-  # promotion graph (whichever environment is a source but never a target).
-  # On a cluster built from the official k3d quickstart's sample
-  # (development -> staging -> production), that computed answer is
-  # "development", not "default" — leave this empty only if your pipeline's
-  # true source really is named "default" (e.g. deployments/scripts/setup-aep.sh's
-  # own convention: one environment, self-referential pipeline).
+  # The OpenChoreo Environment aectl configures gateway ingress and the
+  # environment Thunder on, at install time and before aep-api runs. Set it to
+  # the root of the default org's DeploymentPipeline/default: on the k3d
+  # quickstart (development -> staging -> production) that is "development",
+  # which is the write target aep-api resolves for every project on that
+  # pipeline. aep-api does not read this setting.
   pipeline_source_environment: "development"
 
   # The k8s namespace of the one org AEP ships with — AEP is single-org
   # today, so this is that default org's home namespace: where its Project,
   # Environment(s), DeploymentPipeline, and (when local_org_provisioning.enabled,
-  # see below) per-org ComponentTypes all live.
+  # see below) per-org ComponentTypes and ProjectType all live.
   default_org_namespace: "default"
 
   local_org_provisioning:
-    # Creates per-org OC ComponentTypes (service, web-application) directly
-    # from the Helm chart. Required for local k3d installs where OC's
-    # ProvisionOrgUnit is not running. Must be false in production — OC
-    # handles this per-org automatically there.
+    # Creates the per-org OC ComponentTypes (service, web-application,
+    # ai-agent) and ProjectType/default directly from the Helm chart.
+    # Required for local k3d installs where the platform's org provisioning
+    # is not running. Must be false in production — the platform handles
+    # this per-org automatically there.
     enabled: true
 
   # Whether the data-plane gateway this cluster's components deploy behind
@@ -112,8 +110,8 @@ gateway:
 # per-environment identity provider and API gateway aectl installs alongside
 # the platform. These are the DNS SUFFIXES they are published under, not whole
 # hostnames — aectl composes "<env>-idp.<idp_base_domain>" and
-# "<env>-<org>.<gateway_base_domain>". Scheme and port are fixed to this
-# cluster's gateways (8080 and 19080).
+# "<env>-<org>.<gateway_base_domain>". Scheme and port come from tls.enabled
+# below (8080/19080 plain, 8443/19443 TLS).
 #
 # Both are browser-facing wherever the cluster is reachable by more than its
 # own host. A generated app sends its END USERS to the IdP to sign in
@@ -129,6 +127,22 @@ environment:
   # agent identity — with nothing failing at install time.
   idp_base_domain: "openchoreo.localhost"
   gateway_base_domain: "gateway.localhost"
+
+# Whether this cluster's public endpoints are served over HTTPS. One toggle,
+# because the scheme and both gateway ports move together — 8080/19080 plain,
+# 8443/19443 TLS. A cluster does not serve https on 8080.
+#
+# This decides whether an end user can sign in to a GENERATED APP at all.
+# Browsers expose crypto.subtle only in a secure context, the OIDC login needs
+# it for PKCE, and the environment identity provider's URL is built from this.
+# false is correct only on localhost, which browsers already treat as secure;
+# on any other domain the login cannot complete over plain HTTP.
+#
+# Must agree with WITH_TLS in deployments/scripts/setup-env-for-aectl.sh —
+# that script stamps the platform IdP's issuer and provisions the certificate,
+# and a disagreement installs clean, then fails at the first sign-in.
+tls:
+  enabled: false
 
 webhook:
   # Public URL registered on each GitHub repo's webhook.

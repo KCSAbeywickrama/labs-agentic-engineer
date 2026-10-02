@@ -229,6 +229,12 @@ func (f *cValuePlane) PutInstances(orgID, name string, instances []provisioning.
 	f.instances[orgID][name] = append([]provisioning.ResourceInstance(nil), instances...)
 }
 
+// cWriteTarget fakes provisioning.WriteTargetResolver with one write target.
+type cWriteTarget struct{ env string }
+
+func (c cWriteTarget) Resolve(context.Context, string, string) (string, error) { return c.env, nil }
+func (c cWriteTarget) OrgDefaultRoot(context.Context, string) (string, error)  { return c.env, nil }
+
 // cEnvs fakes provisioning.EnvironmentLister — List returns the injected
 // infos when set; otherwise it synthesizes bare-name infos from the injected
 // names (nil names is an empty list, not an error), so the older, name-only
@@ -573,6 +579,7 @@ func TestProvisioningComponent_DependencyStatus(t *testing.T) {
 		Bindings: &cBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
 			"proj-orders-db-default": readyBindingWith("host", "port"),
 		}},
+		WriteTargets: cWriteTarget{env: "default"},
 	})
 	h := newProvHarness(t, svc)
 

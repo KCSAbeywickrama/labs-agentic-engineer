@@ -795,6 +795,9 @@ type statusFixture struct {
 	cycle       *delivery.RunCycle
 	bindings    []openchoreo.ReleaseBindingSummary
 	bindingsErr error
+	// writeTarget resolves the project's write target. Nil resolves the
+	// "default" environment devBinding writes into.
+	writeTarget writeTargetResolver
 }
 
 func (fx statusFixture) service() *Service {
@@ -826,6 +829,11 @@ func (fx statusFixture) service() *Service {
 	svc.SetStageSources(
 		fakeRunReader{rows: fx.runs, err: fx.runsErr, cycle: fx.cycle},
 		fakeBindingsReader{items: fx.bindings, err: fx.bindingsErr})
+	writeTarget := fx.writeTarget
+	if writeTarget == nil {
+		writeTarget = staticWriteTarget{env: "default"}
+	}
+	svc.SetWriteTargets(writeTarget)
 	return svc
 }
 

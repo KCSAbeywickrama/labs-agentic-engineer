@@ -19,6 +19,7 @@ package runtimeconfig
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -30,11 +31,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
-
-// bindingEnv is the single environment runtime-config targets (mirrors
-// provisioning.defaultEnv). A web-app's platform-resource binding whose
-// outputs drive the SPA lives in this env.
-func bindingEnv() string { return openchoreo.DevEnvironmentName }
 
 // RuntimeConfigService emits the per-web-app `env-config.js` file onto
 // each ReleaseBinding's `workloadOverrides.container.files`. The SPA's
@@ -74,6 +70,17 @@ type RuntimeConfigService struct {
 	// component can complete a sign-in there. Empty = not configured = the
 	// registration is exactly what it was before this field existed.
 	tryItCallbackURL string
+	// writeTargets names the environment a project's resources are provisioned
+	// into: its write target. The platform-resource bindings whose outputs
+	// drive the SPA live there. Nil is a wiring fault; FilesForComponent
+	// refuses for any component that reads one.
+	writeTargets writeTargetResolver
+}
+
+// writeTargetResolver resolves a project's write target.
+// openchoreo.WriteTargets satisfies it.
+type writeTargetResolver interface {
+	Resolve(ctx context.Context, org, project string) (string, error)
 }
 
 // resourceMarkerCatalog is runtimeconfig's narrow consumer port over the
@@ -105,6 +112,12 @@ func (s *RuntimeConfigService) SetResourceCatalog(c resourceMarkerCatalog) {
 // Empty leaves callback registration untouched.
 func (s *RuntimeConfigService) SetTryItCallbackURL(u string) {
 	s.tryItCallbackURL = strings.TrimSpace(u)
+}
+
+// SetWriteTargets wires the resolver for the environment platform-resource
+// bindings live in.
+func (s *RuntimeConfigService) SetWriteTargets(w writeTargetResolver) {
+	s.writeTargets = w
 }
 
 // FilesForComponent computes the literal files the named component's
@@ -150,16 +163,30 @@ func (s *RuntimeConfigService) FilesForComponent(ctx context.Context, orgID, pro
 	if match == nil {
 		return nil, true, nil
 	}
+	// Resolved once, and only for a component that reads a platform-resource
+	// binding: an auth-free, resource-free component never costs a pipeline read.
+	var env string
+	if len(platformResourceDepsOf(match)) > 0 {
+		if env, err = s.writeTarget(ctx, orgID, projectID); err != nil {
+			if match.ComponentType != spec.ComponentTypeWebApplication {
+				// The callback registration is best-effort (see below).
+				slog.WarnContext(ctx, "runtime_config: write target unresolvable; sign-in callback not registered this pass",
+					"projectID", projectID, "component", match.Name, "error", err)
+				return nil, true, nil
+			}
+			return nil, false, fmt.Errorf("runtime_config: %w", err)
+		}
+	}
 	if match.ComponentType != spec.ComponentTypeWebApplication {
 		// No file to compute for a backend or an agent — but its sign-in
 		// dependency still needs the platform tester's callback registered, and
 		// this deploy-time compute is the one trigger every component passes
 		// through. A web app registers it below, as part of its own patch.
-		s.registerSignInCallbacks(ctx, orgID, projectID, design, match)
+		s.registerSignInCallbacks(ctx, orgID, projectID, env, design, match)
 		return nil, true, nil
 	}
 
-	envValues, ready := s.buildEnvValues(ctx, orgID, projectID, design, match)
+	envValues, ready := s.buildEnvValues(ctx, orgID, projectID, env, design, match)
 	if !ready {
 		slog.InfoContext(ctx, "runtime_config: required keys not yet ready; deferring env-config.js",
 			"orgID", orgID, "projectID", projectID, "component", componentName, "keys", sortedKeys(envValues))
@@ -191,7 +218,7 @@ func (s *RuntimeConfigService) FilesForComponent(ctx context.Context, orgID, pro
 // SPA URL not yet resolved for an OIDC consumer-URL patch, etc.). The
 // caller must NOT write a partial env-config.js on `!ready` — see
 // FilesForComponent.
-func (s *RuntimeConfigService) buildEnvValues(ctx context.Context, orgID, projectID string, design *spec.DesignFile, webapp *spec.DesignComponent) (out map[string]interface{}, ready bool) {
+func (s *RuntimeConfigService) buildEnvValues(ctx context.Context, orgID, projectID, env string, design *spec.DesignFile, webapp *spec.DesignComponent) (out map[string]interface{}, ready bool) {
 	out = map[string]interface{}{}
 	ready = true
 
@@ -199,7 +226,7 @@ func (s *RuntimeConfigService) buildEnvValues(ctx context.Context, orgID, projec
 	// No resource-type name is hardcoded — an OIDC dependency and a database
 	// dependency flow through the identical path (see layerPlatformResources).
 	if deps := platformResourceDeps(webapp); len(deps) > 0 {
-		if ok := s.layerPlatformResources(ctx, orgID, projectID, design, webapp, deps, out); !ok {
+		if ok := s.layerPlatformResources(ctx, orgID, projectID, env, design, webapp, deps, out); !ok {
 			ready = false
 		}
 	}
@@ -240,7 +267,8 @@ func platformResourceDepsOf(c *spec.DesignComponent) []spec.Dependency {
 // binding outputs as generic <DEP>_<OUTPUT> keys, and — for any dependency
 // whose CRT carries the consumer-URL-env-config annotation — patches the SPA's
 // own <origin><consumer-url-path> into that env-config key on the dependency's
-// dev binding (declarative: the operator registers the callback URL).
+// binding in env, the project's write target (declarative: the operator
+// registers the callback URL).
 //
 // The two halves are graded differently, and that is the point of the split.
 //
@@ -269,7 +297,7 @@ func platformResourceDepsOf(c *spec.DesignComponent) []spec.Dependency {
 // and the caller then skips the whole write — a deferring dependency contributes
 // NO keys of its own, and keys already in `out` are never shipped because the
 // write is gated. The SPA is thus never handed a partial window._env_.
-func (s *RuntimeConfigService) layerPlatformResources(ctx context.Context, orgID, projectID string, design *spec.DesignFile, webapp *spec.DesignComponent, deps []spec.Dependency, out map[string]interface{}) bool {
+func (s *RuntimeConfigService) layerPlatformResources(ctx context.Context, orgID, projectID, env string, design *spec.DesignFile, webapp *spec.DesignComponent, deps []spec.Dependency, out map[string]interface{}) bool {
 	if s.resourceClient == nil {
 		slog.WarnContext(ctx, "runtime_config: resourceClient not wired; deferring platform-resource outputs",
 			"projectID", projectID, "component", webapp.Name)
@@ -303,7 +331,7 @@ func (s *RuntimeConfigService) layerPlatformResources(ctx context.Context, orgID
 	ready := true
 	for i := range deps {
 		dep := deps[i]
-		bindingName := ocname.ExternalResourceBindingName(projectID, dep.Name, bindingEnv())
+		bindingName := ocname.ExternalResourceBindingName(projectID, dep.Name, env)
 		m := markers[dep.ResourceType]
 
 		// Annotation-driven consumer-URL patch — the SOFT half. Gate on
@@ -497,6 +525,14 @@ func renderEnvConfigJS(values map[string]interface{}) string {
 	return b.String()
 }
 
+// writeTarget resolves the project's write target for one emission pass.
+func (s *RuntimeConfigService) writeTarget(ctx context.Context, orgID, projectID string) (string, error) {
+	if s.writeTargets == nil {
+		return "", errors.New("write targets not configured")
+	}
+	return s.writeTargets.Resolve(ctx, orgID, projectID)
+}
+
 func sortedKeys(m map[string]interface{}) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
@@ -517,7 +553,7 @@ func sortedKeys(m map[string]interface{}) []string {
 // The web apps' own origins are included too, exactly as layerPlatformResources
 // does: the field on the binding is ONE comma-joined set, so a patch that named
 // only the fixed callback would drop every SPA's.
-func (s *RuntimeConfigService) registerSignInCallbacks(ctx context.Context, orgID, projectID string, design *spec.DesignFile, comp *spec.DesignComponent) {
+func (s *RuntimeConfigService) registerSignInCallbacks(ctx context.Context, orgID, projectID, env string, design *spec.DesignFile, comp *spec.DesignComponent) {
 	if s.tryItCallbackURL == "" || s.resourceClient == nil || comp == nil {
 		return
 	}
@@ -549,7 +585,7 @@ func (s *RuntimeConfigService) registerSignInCallbacks(ctx context.Context, orgI
 		if len(callbacks) == 0 {
 			continue
 		}
-		bindingName := ocname.ExternalResourceBindingName(projectID, dep.Name, bindingEnv())
+		bindingName := ocname.ExternalResourceBindingName(projectID, dep.Name, env)
 		if perr := s.resourceClient.PatchBindingEnvironmentConfigs(ctx, orgID, bindingName,
 			map[string]string{m.ConsumerURLEnvConfig: strings.Join(callbacks, ",")}); perr != nil {
 			slog.WarnContext(ctx, "runtime_config: sign-in callback patch failed; will retry on the next deploy",

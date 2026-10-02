@@ -51,7 +51,7 @@ type ComponentService interface {
 	// shape left it reachable only by type assertion, app.go never wired it,
 	// and every ai-agent deployed with no model key and 500'd on its first
 	// turn. Nothing failed at deploy time, which is what made it expensive.
-	ModelAccessEnvVars(ctx context.Context, ocOrgID, component string) ([]openchoreo.WorkflowEnvVarRef, error)
+	ModelAccessEnvVars(ctx context.Context, ocOrgID, component, environment string) ([]openchoreo.WorkflowEnvVarRef, error)
 
 	ListComponents(ctx context.Context, orgName, projectName string, limit int, cursor string) (*gen.ComponentList, error)
 	GetComponent(ctx context.Context, orgName, projectName, componentName string) (*gen.Component, error)
@@ -215,6 +215,26 @@ type componentService struct {
 	// yet).
 	modelKeyResolver ModelKeyResolver
 	secretRefClient  secretmanagersvc.OpenChoreoSecretReferenceClient
+	// autoRCADisabled turns the default auto-RCA alert rule off for this
+	// deployment (no SRE handoff configured). Zero value = on.
+	autoRCADisabled bool
+}
+
+// AutoRCASwitch is how the composition root hands the component service the
+// deployment's auto-RCA switch (on when the SRE handoff is configured). It is a port of its
+// own rather than a ComponentService method: that interface is what the HTTP
+// handlers hold, and a wiring switch is not theirs to flip.
+type AutoRCASwitch interface {
+	SetAutoRCAEnabled(enabled bool)
+}
+
+var _ AutoRCASwitch = (*componentService)(nil)
+
+// SetAutoRCAEnabled sets whether EnsureComponent attaches the default auto-RCA
+// alert rule. DeploymentService takes the same value for the trait's
+// per-environment config.
+func (s *componentService) SetAutoRCAEnabled(enabled bool) {
+	s.autoRCADisabled = !enabled
 }
 
 // NewComponentService builds the component service. repoSvc, buildCredSvc,
@@ -326,9 +346,10 @@ func (s *componentService) EnsureComponent(ctx context.Context, orgName, project
 	// for every environment), so it is written HERE, before the build cuts the
 	// release that freezes the Component's trait list.
 	desired := DesiredDeploymentFor(DeploymentInputs{
-		Component:     *comp,
-		ComponentName: k8sName,
-		Audience:      ProjectAudience(orgName, projectName),
+		Component:       *comp,
+		ComponentName:   k8sName,
+		Audience:        ProjectAudience(orgName, projectName),
+		AutoRCADisabled: s.autoRCADisabled,
 	})
 	if desired.APIOperationsProblem != "" {
 		slog.WarnContext(ctx, "ensure component: OpenAPI contract not projected onto gateway operations; "+

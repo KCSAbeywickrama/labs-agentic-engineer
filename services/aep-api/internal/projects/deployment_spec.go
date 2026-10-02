@@ -115,6 +115,10 @@ type DeploymentInputs struct {
 	// behind the gateway. Each becomes a `<DEP>_GATEWAY_URL` env var so the
 	// consumer can choose the authenticated lane (see gateway_address.go).
 	ProtectedSiblings []ProtectedSibling
+	// AutoRCADisabled turns the default "error → RCA" alert rule off for the
+	// whole deployment (no SRE handoff configured), on top of a component's
+	// own design opt-out. Negative so the zero value keeps the default on.
+	AutoRCADisabled bool
 }
 
 // DesiredDeploymentFor projects one component's design facts onto the two
@@ -167,7 +171,7 @@ func DesiredDeploymentFor(in DeploymentInputs) DesiredDeployment {
 	// Appended to the SAME slice/map: `spec.traits` is replaced wholesale on
 	// write, so emitting the alert rule separately would clobber the
 	// api-configuration trait rather than join it.
-	if spec.ResolveAutoRCAEnabled(in.Component) {
+	if !in.AutoRCADisabled && spec.ResolveAutoRCAEnabled(in.Component) {
 		rcaTraits, rcaConfigs := DesiredObservabilityAlertRuleTraits(in.ComponentName)
 		traits = append(traits, rcaTraits...)
 		if configs == nil {

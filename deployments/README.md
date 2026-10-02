@@ -52,11 +52,16 @@ make dev-update
 make dev-runner
 ```
 
-`make dev-env` also enables the OpenChoreo SRE agent on the observability
-plane and wires its alert → RCA → AE issue handoff (`scripts/setup-sre.sh`),
-using the org's model connection key saved in the Console (an Anthropic key). `WITH_OBSERVABILITY=0`
-skips the plane and the SRE agent; `WITH_SRE=0` skips only the agent;
-`WITH_AGENT_MANAGER=0` is the lean profile for SRE work. See
+`make dev-env` also enables the stock OpenChoreo SRE agent (`v1.3.0`, no AE
+patch) on the observability plane and wires its alert → RCA → AE issue
+handoff (`scripts/setup-sre.sh`, `aectl sre install`). The agent speaks
+OpenAI-compatible chat completions only, so aep-api resolves and pushes it a
+model: the org's own **SRE model connection** if one was seeded at install
+(`aectl sre install --llm-api-key-file/--llm-model`; there is no console or
+API save for it), else the org's model connection if it is itself
+OpenAI-compatible, else the agent runs scaled to zero.
+`WITH_OBSERVABILITY=0` skips the plane and the SRE agent; `WITH_SRE=0` skips
+only the agent; `WITH_AGENT_MANAGER=0` is the lean profile for SRE work. See
 `docs/developer-guide/sre-handoff-runbook.md`.
 
 `make dev-env` builds `tools/aectl` as `aectl-skaffold` (git-ignored — this
@@ -128,6 +133,13 @@ names unprefixed, so installing it takes OpenChoreo's build path over for
 everything on the cluster. That is a naming defect in that chart (it already
 prefixes a fifth as `amp-generate-workload`), to be fixed there rather than
 worked around here.
+
+The same chart renders the org's `ProjectType/default`, which the platform
+chart owns (`localOrgProvisioning`; every project AEP creates references it).
+`setup-agent-manager.sh` drops Agent Manager's identical copy in its
+post-renderer. On a cluster where Agent Manager's release already owns that
+object, `aectl platform install` stops on it: see
+[`agent-manager/README.md`](agent-manager/README.md) for the reinstall.
 
 - **One AI gateway per environment, alongside the API gateway.** Agent Manager
   has two: the **API gateway** fronts an agent's own inbound API, the **AI

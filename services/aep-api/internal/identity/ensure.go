@@ -316,11 +316,16 @@ func (s *EnsureService) EnsureForTag(ctx context.Context, orgID, projectID, tag 
 	if err != nil {
 		return Result{}, true, fmt.Errorf("%s at %s: %w", securityspec.Path, tag, err)
 	}
-	// WHICH directory, before anything is written. The resolver picks the
-	// environment (see TargetResolver) and hands back a Directory already bound
-	// to that environment's identity provider; an unbound environment is an
-	// error here rather than a write onto the wrong tier.
-	target, err := s.targets.Resolve(ctx, orgID)
+	// WHICH directory, before anything is written. The project's write target
+	// picks the environment (see TargetResolver) and the resolver hands back a
+	// Directory already bound to that environment's identity provider; an
+	// unreadable write target or an unbound environment is an error here rather
+	// than a write onto the wrong tier.
+	scope, err := s.targets.Scope(ctx, orgID, projectID)
+	if err != nil {
+		return Result{}, true, err
+	}
+	target, err := s.targets.Resolve(ctx, scope)
 	if err != nil {
 		return Result{}, true, err
 	}

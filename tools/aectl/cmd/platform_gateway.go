@@ -29,14 +29,13 @@ import (
 	"github.com/wso2/aep/aectl/internal/ui"
 )
 
-// ocPipelineSourceEnvironment returns the single OpenChoreo Environment the platform
-// provisions into and patches gateway ingress onto: oc.pipeline_source_environment from
-// config, defaulting to "default" — matching aep-api's
-// openchoreo.DevEnvironmentName and the Environment AEP's own setup-aep.sh /
-// the platform-resources chart create. Must match the environment that is a
-// source but never a target in DeploymentPipeline/default's promotion graph
-// (see PipelineSourceEnvironment), which is what aep-api itself resolves to
-// at runtime.
+// ocPipelineSourceEnvironment returns the OpenChoreo Environment aectl configures
+// gateway ingress and the environment Thunder on, at install time and before
+// aep-api runs: oc.pipeline_source_environment from config, defaulting to
+// "default". Set it to the root of the default org's DeploymentPipeline/default
+// (on the k3d quickstart, "development"), which is the write target aep-api
+// resolves for every project on that pipeline. aep-api does not read this
+// setting.
 func ocPipelineSourceEnvironment() string {
 	if v := viper.GetString("oc.pipeline_source_environment"); v != "" {
 		return v

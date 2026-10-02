@@ -34,7 +34,7 @@ is [`two-tier-thunder.md`](two-tier-thunder.md) and **ADR-0029**.
   │                                                               │
   │  AEP                          │  Agent Manager (flag)         │
   │   aep-* OAuth clients          │   amp-* OAuth clients         │
-  │   ClusterProjectType/default   │   ProjectType/default         │
+  │   ProjectType/default ─── ONE type, AEP's chart, used by both  │
   │   Environment/default ─── ONE environment, shared by both      │
   │   aep-* build templates        │   amp-* build workflows       │
   └──────────────────────────────────────────────────────────────┘
@@ -62,7 +62,7 @@ the RAM.
 | The platform IdP, `platform-idp` (ThunderID via `wso2-amp-thunder-extension`) | A different IdP release means a different PVC and issuer. Flipping the flag would invalidate every login. Its name is deliberately neither product's — `scripts/env.sh` holds it, every address derives from there, and the chart it comes from does not leak into it (ADR-0028). |
 | Entitlement claim → `client_id` | Follows the IdP move — it is a ThunderID behaviour change, not an OpenChoreo one. Two claim configs is exactly the dual-config trap. |
 | gateway-operator → 0.11.0 / chart 1.2.2 | Upgrade in place is supported; **downgrade is not**. Flag-flipping would be one-way. |
-| `ClusterProjectType/default` | AEP's own `CreateProject` needs it whether or not Agent Manager is installed. |
+| `ProjectType/default`, owned by AEP's platform chart | AEP's own `CreateProject` references it whether or not Agent Manager is installed: it is the namespaced type the wso2cloud org bootstrap seeds, and `localOrgProvisioning` stands in for that locally. Agent Manager's chart renders the same object; step 5's post-renderer drops that copy (`deployments/agent-manager/README.md`). |
 | `aep-`prefixed build templates | Harmless when Agent Manager is absent, required when present. |
 
 ### Two things the 1.2.0 charts started requiring
@@ -71,9 +71,10 @@ Neither is a collision — they are just gates the older charts did not have, an
 both fail at `helm template` time with a clear message.
 
 * **`Project.spec.type`.** Required on the CRD. The OpenChoreo *API* defaults it
-  to `ClusterProjectType/default`, so AEP only has to make that object exist —
-  which `setup-aep.sh` now does. A direct `kubectl apply` of a Project (the
-  API Platform POC manifests) has to state it.
+  to `ClusterProjectType/default`, which wso2cloud does not have, so aep-api
+  always sends the org's namespaced `ProjectType/default` and the platform
+  chart renders that object locally. A direct `kubectl apply` of a Project
+  (the API Platform POC manifests) states the same type.
 
 * **`observer.extraEnvs`.** The observability-plane chart now fails its own
   render if any of `controlPlaneApiUrl`, `observer.extraEnvs` or
@@ -153,9 +154,9 @@ apply owns fields, not objects.
 Verified as safe to coexist:
 ComponentTypes (`service`/`web-application` vs `agent-api`/`external-agent-api`),
 ClusterWorkflows (`dockerfile-builder` vs `amp-*`), ClusterTraits, AEP's
-`postgres-cnpg` and `thunder-app` ClusterResourceTypes, and
-`ClusterProjectType/default` vs the namespaced `ProjectType/default` — different
-kinds, different objects.
+`postgres-cnpg` and `thunder-app` ClusterResourceTypes — different names,
+different objects. `ProjectType/default` is the one object both products need
+under the same name, so it has one owner (AEP's platform chart) rather than two.
 
 ### The CORS allow-list is composed by the installer, not owned by a product
 

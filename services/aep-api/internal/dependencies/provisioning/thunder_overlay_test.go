@@ -121,6 +121,7 @@ func thunderOverlayService(design []spec.DesignComponent, plat *fakePlatProv, se
 
 func thunderOverlayServiceNamed(design []spec.DesignComponent, plat *fakePlatProv, security *fakeSecurityJSON, names ProjectNamer) *Service {
 	return NewService(Deps{
+		WriteTargets: staticWriteTarget{env: testWriteTarget},
 		Issues:       newFakeIssues(nil),
 		Execs:        &fakeExecStore{},
 		Design:       fakeDesign{comps: design},

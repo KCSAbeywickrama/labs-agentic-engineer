@@ -60,7 +60,8 @@ const (
 	pinType       = "thunder-app"
 	pinEnvConfig  = "redirectUris"
 	pinPath       = "/callback"
-	pinBinding    = "proj-user-auth-default"
+	pinEnv        = "default"
+	pinBinding    = "proj-user-auth-" + pinEnv
 	pinGuest      = "guest-webapp"
 	pinAdmin      = "hotel-admin-webapp"
 	pinGuestOrig  = "https://guest.example/"
@@ -145,6 +146,12 @@ func (pinThunderReader) FindByResource(context.Context, string, string) (*projec
 	}, nil
 }
 
+// pinWriteTarget resolves every project to pinEnv, the environment
+// pinBinding is named for.
+type pinWriteTarget struct{}
+
+func (pinWriteTarget) Resolve(context.Context, string, string) (string, error) { return pinEnv, nil }
+
 // writtenByDeployRead drives the deploy-verdict writer.
 func writtenByDeployRead(t *testing.T) (binding, value string) {
 	t.Helper()
@@ -153,6 +160,7 @@ func writtenByDeployRead(t *testing.T) (binding, value string) {
 	svc.SetResourceCatalog(pinProjectsCatalog{})
 	svc.SetResourceClient(rc)
 	svc.SetThunderApplicationReader(pinThunderReader{})
+	svc.SetWriteTargets(pinWriteTarget{})
 
 	if _, err := svc.DeploymentState(context.Background(), pinOrg, pinProject, []string{pinGuest, pinAdmin}); err != nil {
 		t.Fatalf("DeploymentState: %v", err)
@@ -171,6 +179,7 @@ func writtenByComposition(t *testing.T) (binding, value string) {
 	rc := pinResourceClient()
 	svc := runtimeconfig.NewRuntimeConfigService(pinOriginsClient(), rc, pinStore())
 	svc.SetResourceCatalog(pinRuntimeCatalog{})
+	svc.SetWriteTargets(pinWriteTarget{})
 
 	// Composition of EITHER web app registers the project's whole set; the
 	// deferred `ready` (no resolved outputs in this fixture) does not affect the

@@ -21,6 +21,16 @@
 # Runs from TypeScript source via tsx, like @aep/agents.
 FROM node:22-bookworm-slim
 
+# Corepack fetches the pnpm release named by the root package.json's
+# packageManager field into COREPACK_HOME, which defaults to the invoking
+# user's home. The build runs as root and the container runs as UID 1000, so
+# the copy fetched below lands in /root/.cache, where the runtime user is
+# denied — and corepack then re-downloads pnpm from registry.npmjs.org on every
+# container start. That makes booting depend on the public registry being
+# reachable and fast, and leaves the package manager unpinned by the image
+# digest even though packageManager names a version. Pointing COREPACK_HOME at
+# a shared path makes the build's download the one the runtime uses.
+ENV COREPACK_HOME=/opt/corepack
 RUN corepack enable
 WORKDIR /repo
 
@@ -33,6 +43,11 @@ RUN pnpm install --frozen-lockfile --filter @aep/collab...
 
 # @aep/collab-doc resolves through its dist exports — build it before boot.
 RUN pnpm --filter @aep/collab-doc build
+
+# Readable by the unprivileged runtime user, so corepack resolves pnpm from
+# this cache instead of the network. Without it the ENV above changes only
+# where the build writes, not what UID 1000 can read.
+RUN chmod -R a+rX "$COREPACK_HOME"
 
 WORKDIR /repo/services/collab
 

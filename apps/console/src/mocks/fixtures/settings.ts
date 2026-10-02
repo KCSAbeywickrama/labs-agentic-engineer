@@ -175,6 +175,7 @@ export const llmConnectedFixture: LLMProjection = {
     imageInput: "yes",
     nativePdf: true,
     generatedAgents: true,
+    sreAgent: false,
   },
 };
 
@@ -193,6 +194,29 @@ export const llmOllamaFixture: LLMProjection = {
     imageInput: "no",
     nativePdf: false,
     generatedAgents: true,
+    sreAgent: false,
+  },
+};
+
+// An OpenAI-compatible, Bearer-authenticated org connection — the one shape
+// `LLMCapabilities.sreAgent` is true for (the OpenChoreo SRE agent can run on
+// it when it has no override of its own).
+export const openaiOrgFixture: LLMProjection = {
+  kind: "openai-compatible",
+  baseURL: "https://api.openai.com/v1",
+  model: "gpt-5.4",
+  keyPreview: "sk-o…f00d",
+  connectedAt: "2026-09-20T08:00:00Z",
+  updatedAt: "2026-09-20T08:00:00Z",
+  updatedBy: "dev@acme.example",
+  priced: false,
+  capabilities: {
+    claudeSubscription: false,
+    webSearch: "none",
+    imageInput: "unknown",
+    nativePdf: false,
+    generatedAgents: true,
+    sreAgent: true,
   },
 };
 

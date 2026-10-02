@@ -583,6 +583,29 @@ input, generated agents) is its **capabilities**, computed only by
 `modelconn.CapabilitiesOf` in aep-api from format and host
 ([ADR-0038](decisions/ADR-0038-an-organization-has-one-model-connection.md)).
 
+### Incident issue
+A GitHub issue AE files from the SRE handoff's `ae_create_issue` call. Always
+carries the label `incident`, stamped server-side — never something the SRE
+agent's request controls — alongside its `kind` and
+any `componentName`/`actionStatuses` the RCA report carried. Deduplication,
+suppression and recurrence (see [SRE attention reason](#sre-attention-reason))
+all key on this label plus the server-owned incident identity, not on
+anything the agent asserts.
+
+### SRE model connection
+The organization's optional, second model connection just for the OpenChoreo
+SRE (RCA) agent: OpenAI-compatible and Bearer only, one row per org in
+`org_sre_model_connections` (absent = none), the key in `org_secrets`
+`sre-model/key`. There is no console or `/config` surface for it — it is set,
+and rotated, only by `aectl sre install`'s install-time seed
+(`--llm-api-key-file`/`--llm-model`), which is authoritative: a changed seed
+replaces whatever is stored, a refused seed or no seed leaves it alone. When
+absent, the agent falls back to the org's own model connection if it carries
+the `SREAgent` capability; with neither, the agent has no model and aep-api
+scales it to zero. See
+[ADR-0038's amendment](decisions/ADR-0038-an-organization-has-one-model-connection.md#amendment-2026-10-01--the-sre-model-connection-is-set-at-install-only)
+and `services/aep-api/design/sre-model-connection.md`.
+
 ### Connection fingerprint
 `format@host`, recorded on each spec-agent turn's journal entry. The history
 filter (`historyFor`) replays turns with the current fingerprint byte for byte

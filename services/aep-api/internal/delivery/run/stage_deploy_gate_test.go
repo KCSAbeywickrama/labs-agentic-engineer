@@ -18,6 +18,7 @@ package run
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -245,6 +246,93 @@ func TestDeployGate_AResourceThatNeverProvisionsFailsTheCycle(t *testing.T) {
 		"what this pass would have promoted is what could not be delivered; the resource is nobody's individual fault")
 	require.Contains(t, mints[0].Reasons["order-service"], "orders-db",
 		"the cause names the resource, which is the one fact the reader cannot derive")
+}
+
+// TestDeployGate_NoWriteTargetSettlesTheRunWithNoFixWork. A project with no
+// write target has no environment for the gate to read. Parking on values would
+// be a hang under a reason that is not the cause, and returning the activity
+// error raw would fail the workflow before the row settles. Nor is it a deploy
+// failure: filing fix work would dispatch the agent at a pipeline no code change
+// repairs. The run settles failed on its own reason, with nothing minted and no
+// further dispatch.
+func TestDeployGate_NoWriteTargetSettlesTheRunWithNoFixWork(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
+	h.merges(1)
+	h.set["gate"] = true
+	h.env.OnActivity(h.acts.CheckDeployReadiness, mock.Anything, mock.Anything).
+		Return(DeployGateVerdict{}, deployErr(noWriteTargetCause()))
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonNoWriteTarget)
+	require.Equal(t, 0, h.deployCount(), "the gate never opened, so nothing was promoted")
+	parks, _ := h.parksOnValues()
+	require.Empty(t, parks, "a missing write target is not a credential a human can supply")
+	require.Equal(t, 0, h.deployMintCount(), "no fix work: the agent cannot repair a pipeline")
+	require.Equal(t, 1, h.dispatchCount(), "no cycle is dispatched after the fault")
+}
+
+// noWriteTargetCause is a no-write-target fault as the projects side marks it:
+// a permanent deploy failure that is ALSO the delivery sentinel, so deployErr
+// stamps the no-write-target type rather than the generic permanent one.
+func noWriteTargetCause() error {
+	return fmt.Errorf("%w: %w: no write target for acme/shop",
+		delivery.ErrDeployPermanent, delivery.ErrNoWriteTarget)
+}
+
+// The gate is not the only place a missing write target surfaces. The version
+// read, the promote and the readiness poll each resolve it, and a pipeline
+// edited mid-run (or a pass that only waits, which skips the gate) meets the
+// fault there instead. Each must settle the run exactly as the gate does: a
+// raw error would fail the workflow before the row settles, and a deploy
+// failure would file fix work no code change can do.
+
+func TestNoWriteTargetAtPromote_SettlesTheRunWithNoFixWork(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
+	h.merges(1)
+	h.deployIs(deployErr(noWriteTargetCause()))
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonNoWriteTarget)
+	require.Equal(t, 1, h.deployCount(), "the one promote that met the fault, and no retry of it")
+	require.Equal(t, 0, h.deployMintCount(), "no fix work: the agent cannot repair a pipeline")
+	require.Equal(t, 1, h.dispatchCount(), "no cycle is dispatched after the fault")
+}
+
+func TestNoWriteTargetAtDeploymentPoll_SettlesTheRunWithNoFixWork(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
+	h.merges(1)
+	h.set["deployments"] = true
+	h.env.OnActivity(h.acts.PollDeployments, mock.Anything, mock.Anything).
+		Return(CycleDeployState{}, deployErr(noWriteTargetCause()))
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonNoWriteTarget)
+	require.Equal(t, 0, h.deployMintCount(), "no fix work: the agent cannot repair a pipeline")
+	require.Equal(t, 1, h.dispatchCount(), "no cycle is dispatched after the fault")
+}
+
+func TestNoWriteTargetAtVersionRead_SettlesTheRunWithNoFixWork(t *testing.T) {
+	h := newHarness(t)
+	h.milestoneIs(workable(1, 1), MilestoneSnapshot{})
+	h.merges(1)
+	h.versionErr = deployErr(noWriteTargetCause())
+
+	h.run(delivery.RunKindDev, 0)
+	res := h.result(t)
+
+	h.assertSettled(t, res, delivery.RunStateFailed, delivery.RunReasonNoWriteTarget)
+	require.Equal(t, 0, h.deployCount(), "the version could not be read, so nothing was promoted")
+	require.Equal(t, 0, h.deployMintCount(), "no fix work: the agent cannot repair a pipeline")
+	require.Equal(t, 1, h.dispatchCount(), "no cycle is dispatched after the fault")
 }
 
 // TestDeployGate_TheValuesParkDoesNotSpendTheProvisioningBudget. The two waits

@@ -47,7 +47,7 @@ func TestReleaseBindingName_PicksTheEnvironmentsBinding(t *testing.T) {
 				map[string]interface{}{
 					"metadata": map[string]interface{}{"name": "rb-dev"},
 					"spec": map[string]interface{}{
-						"environment": "default",
+						"environment": "development",
 						"owner":       map[string]interface{}{"projectName": "shop", "componentName": "shop-ca-abc"},
 						"releaseName": "rel-2",
 					},
@@ -59,7 +59,7 @@ func TestReleaseBindingName_PicksTheEnvironmentsBinding(t *testing.T) {
 	defer srv.Close()
 
 	got, err := newTestRuntimeClient(t, srv).
-		ReleaseBindingName(context.Background(), "acme", "shop", "ca-abc", DevEnvironmentName)
+		ReleaseBindingName(context.Background(), "acme", "shop", "ca-abc", "development")
 	if err != nil {
 		t.Fatalf("ReleaseBindingName: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestReleaseBindingName_NoBindingIsNotFound(t *testing.T) {
 	defer srv.Close()
 
 	_, err := newTestRuntimeClient(t, srv).
-		ReleaseBindingName(context.Background(), "acme", "shop", "ca-abc", DevEnvironmentName)
+		ReleaseBindingName(context.Background(), "acme", "shop", "ca-abc", "development")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}

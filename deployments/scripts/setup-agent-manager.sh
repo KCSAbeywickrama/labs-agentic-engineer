@@ -101,20 +101,27 @@ GW_DOMAIN="gateway.${AE_DOMAIN}"              # the environment API gateway vhos
 # has the same guard and would otherwise refuse.
 export AE_DOMAIN
 
+# Must match the WITH_TLS this cluster was built with. Agent Manager stores the
+# URLs below in its own database and hands them to browsers; getting the scheme
+# wrong here installs cleanly and fails later, in someone else's browser.
+# shellcheck source=lib/tls-env.sh
+. "${SCRIPT_DIR}/lib/tls-env.sh"
+
 # The cluster's own coordinates. These must match what `aectl platform install`
 # ran against — skaffold/defaults.yaml is the source for the first three.
 OC_ENV="${OC_ENV:-development}"              # oc.pipeline_source_environment
 ORG_NS="${ORG_NS:-default}"                  # oc.default_org_namespace
-PUBLIC_THUNDER_URL="${PUBLIC_THUNDER_URL:-http://thunder.openchoreo.${AE_DOMAIN}:8080}"
+PUBLIC_THUNDER_URL="${PUBLIC_THUNDER_URL:-${SCHEME}://thunder.openchoreo.${AE_DOMAIN}:${CP_PORT}}"
 THUNDER_NS="${THUNDER_NS:-thunder}"
 THUNDER_RELEASE="${THUNDER_RELEASE:-thunder}"
 BOOTSTRAP_CM="${BOOTSTRAP_CM:-openchoreo-thunderid-bootstrap}"
 
-# Renames Agent Manager's forked build templates during the step 5 install.
-# See the file itself for which five move and why the others may not.
-FORKED_TEMPLATE_RENAMER_DIR="$INPUTS_DIR/forked-template-renamer"
-FORKED_TEMPLATE_RENAMER="$FORKED_TEMPLATE_RENAMER_DIR/prefix-forked-workflow-templates.py"
-FORKED_TEMPLATE_RENAMER_PLUGIN="aep-prefix-forked-workflow-templates"
+# Post-renders the step 5 install: renames Agent Manager's forked build
+# templates and drops its copy of AEP's ProjectType/default. See the file
+# itself for which five templates move and why the others may not.
+POST_RENDERER_DIR="$INPUTS_DIR/platform-resources-post-renderer"
+POST_RENDERER="$POST_RENDERER_DIR/post-render.py"
+POST_RENDERER_PLUGIN="aep-amp-platform-resources"
 
 AMP_NS="wso2-amp"
 OBS_NS="openchoreo-observability-plane"
@@ -145,10 +152,16 @@ WP_NS="openchoreo-workflow-plane"
 ENV_IDP_BASE_DOMAIN="${ENV_IDP_BASE_DOMAIN:-openchoreo.${AE_DOMAIN}}"
 ENV_IDP_HANDLE="${ENV_IDP_HANDLE:-${OC_ENV}-idp}"
 ENV_IDP_RELEASE="thunder-${ORG_NS}-${OC_ENV}"
-AMP_API_URL="${AMP_API_URL:-http://api.${AMP_DOMAIN}:8080/api/v1}"
+AMP_API_URL="${AMP_API_URL:-${SCHEME}://api.${AMP_DOMAIN}:${CP_PORT}/api/v1}"
 
 PUBLIC_THUNDER_HOST="${PUBLIC_THUNDER_URL#*://}"
 PUBLIC_THUNDER_HOST="${PUBLIC_THUNDER_HOST%%:*}"
+# Stays on https:8443 regardless of WITH_TLS, for the reason in the block above:
+# ThunderID refuses a plain-http JWKS URL for a trusted issuer, so there is no
+# non-TLS form of this value to fall back to. On a WITH_TLS=0 cluster nothing
+# serves 8443 and Agent Manager's environment registration cannot succeed —
+# which is a real limit of the plain-HTTP path, not something to paper over by
+# sending a URL ThunderID will reject.
 PLATFORM_THUNDER_JWKS_URL="https://${PUBLIC_THUNDER_HOST}:8443/oauth2/jwks"
 
 kubectl() { command kubectl --context "$CLUSTER_CONTEXT" "$@"; }
@@ -191,9 +204,14 @@ kubectl get cm "$BOOTSTRAP_CM" -n "$THUNDER_NS" -o jsonpath='{.data.50-amp-api-c
 command -v helm >/dev/null || fail "helm not found on PATH."
 command -v python3 >/dev/null || fail "python3 not found on PATH." "Used to compose the bootstrap ConfigMap."
 python3 -c 'import yaml' 2>/dev/null \
-    || fail "python3 cannot import yaml (PyYAML)." "The bootstrap merge (step 3) and the workflow-template post-renderer (step 5) both parse YAML."
-[ -x "$FORKED_TEMPLATE_RENAMER" ] \
-    || fail "Missing or non-executable $FORKED_TEMPLATE_RENAMER." "Step 5 runs it as a Helm post-renderer; chmod +x it."
+    || fail "python3 cannot import yaml (PyYAML)." "The bootstrap merge (step 3) and the platform-resources post-renderer (step 5) both parse YAML."
+[ -x "$POST_RENDERER" ] \
+    || fail "Missing or non-executable $POST_RENDERER." "Step 5 runs it as a Helm post-renderer; chmod +x it."
+# Agent Manager's projects run on AEP's ProjectType/default (step 5 drops the
+# chart's own copy), so AEP's platform chart must have rendered it.
+kubectl get projecttype default -n "$ORG_NS" >/dev/null 2>&1 \
+    || fail "ProjectType/default is missing from namespace ${ORG_NS}." \
+            "aectl platform install renders it with oc.local_org_provisioning.enabled; run that first."
 
 # ── ThunderID's own object names ────────────────────────────────────────────
 # A hostname is a name, not an address: the public URL is what tokens are
@@ -403,6 +421,10 @@ DP_INGRESS_HOST="${DP_INGRESS_HOST:-openchoreoapis.${AE_DOMAIN}}"
 # prefixes Agent Manager's copies instead of adopting OpenChoreo's, because the
 # forks differ: Agent Manager's checkout-source has no ssh-privatekey branch,
 # so adopting it would drop SSH git authentication from every AEP build.
+# It also drops the chart's ProjectType/default: AEP's platform chart already
+# owns an identical one in this namespace (the local stand-in for what the
+# wso2cloud org bootstrap seeds), and the post-renderer refuses if the two
+# ever differ.
 # Two Helm 4 differences meet in this release:
 #   - Helm 3 takes the post-renderer as an executable's path; Helm 4 only as an
 #     installed postrenderer/v1 plugin, and refuses a path as "plugin not
@@ -413,14 +435,14 @@ DP_INGRESS_HOST="${DP_INGRESS_HOST:-openchoreoapis.${AE_DOMAIN}}"
 #     ("kubectl-client-side-apply" for the getting-started samples). Taking
 #     them over is the point of step 4's hand-over, so --force-conflicts. Helm 3
 #     has no such flag and no such check.
-post_renderer="$FORKED_TEMPLATE_RENAMER"
+post_renderer="$POST_RENDERER"
 takeover=()
 if helm version --short 2>/dev/null | grep -q '^v[4-9]'; then
     takeover=(--force-conflicts)
-    helm plugin uninstall "$FORKED_TEMPLATE_RENAMER_PLUGIN" >/dev/null 2>&1 || true
-    helm plugin install "$FORKED_TEMPLATE_RENAMER_DIR" >/dev/null \
-        || fail "Could not install the $FORKED_TEMPLATE_RENAMER_PLUGIN Helm plugin." "Step 5's post-renderer runs as a plugin on Helm 4."
-    post_renderer="$FORKED_TEMPLATE_RENAMER_PLUGIN"
+    helm plugin uninstall "$POST_RENDERER_PLUGIN" >/dev/null 2>&1 || true
+    helm plugin install "$POST_RENDERER_DIR" >/dev/null \
+        || fail "Could not install the $POST_RENDERER_PLUGIN Helm plugin." "Step 5's post-renderer runs as a plugin on Helm 4."
+    post_renderer="$POST_RENDERER_PLUGIN"
 fi
 helm upgrade --install amp-platform-resources \
     "${AMP_REGISTRY}/wso2-amp-platform-resources-extension" \
@@ -458,7 +480,15 @@ case " $pipeline_sources " in
     *) fail "DeploymentPipeline/default no longer promotes from ${OC_ENV} (sources: ${pipeline_sources:-none})." \
             "deploymentPipeline.promotionOrder did not take effect; aep-api will resolve a different write-target on its next restart." ;;
 esac
-echo "   ✅ ProjectType, Environment, ComponentTypes, amp-* workflows, traits"
+# The ProjectType half is silent too: had Agent Manager's release adopted the
+# object, uninstalling it would delete the type every AEP project runs on.
+pt_owner="$(kubectl get projecttype default -n "$ORG_NS" \
+    -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null || true)"
+[ "$pt_owner" = "amp-platform-resources" ] \
+    && fail "ProjectType/default was adopted by amp-platform-resources." \
+            "The post-renderer did not drop the chart's copy; AEP's platform chart must keep owning it."
+echo "   ✅ ProjectType/default left to AEP's platform chart"
+echo "   ✅ Environment, ComponentTypes, amp-* workflows, traits"
 echo "   ✅ pipeline still promotes from ${OC_ENV}"
 
 # ============================================================================
@@ -510,24 +540,34 @@ echo "   ✅ sandbox controller ready"
 # console's instrumentationUrl beside it, which this script has always
 # overridden — the two address the same gateway and disagreeing was a bug.
 #
+# amObserverPublicURL is the one value that does NOT follow SCHEME. The
+# observability plane's Gateway has a single plain-HTTP listener on 11080 and
+# no certificate, so on a WITH_TLS=1 cluster this stays http:// by choice, not
+# by oversight (OBS_SCHEME/OBS_PORT in lib/tls-env.sh). The consequence is
+# real: anything the console fetches from it is mixed content on an HTTPS page
+# and the browser blocks it, so the traces view does not work over TLS.
+# Server-to-server callers are unaffected. Fixing it means giving that plane a
+# certificate and an HTTPS listener, or routing the hostname through the
+# control-plane gateway already on ${CP_PORT}.
+#
 # The chart runs its own DB-migration and JWT-key-generation Jobs.
 echo ""
 echo "7️⃣  Agent Manager (amp-api, amp-console, PostgreSQL)"
 helm upgrade --install amp "${AMP_REGISTRY}/wso2-agent-manager" \
     --version "$AMP_VERSION" \
     --namespace "$AMP_NS" --create-namespace --kube-context "$CLUSTER_CONTEXT" \
-    --set "console.config.instrumentationUrl=http://${OC_ENV}-${ORG_NS}.${GW_DOMAIN}:19080/otel" \
-    --set "agentManagerService.config.otel.exporterEndpoint=http://${OC_ENV}-${ORG_NS}.${GW_DOMAIN}:19080/otel" \
-    --set "agentManagerService.config.amObserverPublicURL=http://traces.${AMP_DOMAIN}:11080" \
+    --set "console.config.instrumentationUrl=${SCHEME}://${OC_ENV}-${ORG_NS}.${GW_DOMAIN}:${DP_PORT}/otel" \
+    --set "agentManagerService.config.otel.exporterEndpoint=${SCHEME}://${OC_ENV}-${ORG_NS}.${GW_DOMAIN}:${DP_PORT}/otel" \
+    --set "agentManagerService.config.amObserverPublicURL=${OBS_SCHEME}://traces.${AMP_DOMAIN}:${OBS_PORT}" \
     --set "agentManagerService.ocIngress.hostname=api.${AMP_DOMAIN}" \
     --set "agentManagerService.ocIngress.gatewayMgmt.hostnames[0]=cp.${AMP_DOMAIN}" \
-    --set "agentManagerService.config.serverPublicURL=http://api.${AMP_DOMAIN}:8080" \
+    --set "agentManagerService.config.serverPublicURL=${SCHEME}://api.${AMP_DOMAIN}:${CP_PORT}" \
     --set-string "agentManagerService.config.agentsBaseDomain=${AGENTS_DOMAIN}" \
     --set-string "agentManagerService.config.gatewayBaseDomain=${GW_DOMAIN}" \
     --set "console.ocIngress.hostname=console.${AMP_DOMAIN}" \
-    --set "console.config.apiBaseUrl=http://api.${AMP_DOMAIN}:8080" \
-    --set "console.config.auth.signInRedirectURL=http://console.${AMP_DOMAIN}:8080/login" \
-    --set "console.config.auth.signOutRedirectURL=http://console.${AMP_DOMAIN}:8080/login" \
+    --set "console.config.apiBaseUrl=${SCHEME}://api.${AMP_DOMAIN}:${CP_PORT}" \
+    --set "console.config.auth.signInRedirectURL=${SCHEME}://console.${AMP_DOMAIN}:${CP_PORT}/login" \
+    --set "console.config.auth.signOutRedirectURL=${SCHEME}://console.${AMP_DOMAIN}:${CP_PORT}/login" \
     --set "agentManagerService.config.keyManager.issuer=${PUBLIC_THUNDER_URL}" \
     --set "agentManagerService.config.thunder.baseURL=${PUBLIC_THUNDER_URL}" \
     --set "console.config.auth.baseUrl=${PUBLIC_THUNDER_URL}" \
@@ -763,8 +803,8 @@ echo "============================================"
 echo "  ✅ Agent Manager installed"
 echo "============================================"
 echo ""
-echo "  Console: http://console.${AMP_DOMAIN}:8080"
-echo "  API:     http://api.${AMP_DOMAIN}:8080"
+echo "  Console: ${SCHEME}://console.${AMP_DOMAIN}:${CP_PORT}"
+echo "  API:     ${SCHEME}://api.${AMP_DOMAIN}:${CP_PORT}"
 echo ""
 echo "  ${OC_ENV} is registered against the identity provider aectl installed"
 echo "  (${ENV_IDP_RELEASE}), not a second one. Agent Manager's own"

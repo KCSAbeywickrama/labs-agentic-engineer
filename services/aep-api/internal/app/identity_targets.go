@@ -17,13 +17,14 @@
 package app
 
 // identity_targets.go — the composition-root adapter that answers "which
-// identity provider serves this org", for the identity domain's TargetResolver
-// port.
+// identity provider serves this project", for the identity domain's
+// TargetResolver port.
 //
 // There is one identity provider per (org, environment) — the environment tier,
 // "T2" — and a login minted on one is rejected by every other. Finding it is
-// three reads this package is the only one able to make together:
+// four reads this package is the only one able to make together:
 //
+//	the project's write target                             (OpenChoreo API)
 //	the Environment's aep.wso2.com/thunder-* annotations   (OpenChoreo API)
 //	the admin credential at the binding's secret path      (the secret store)
 //	a thundersvc client built from the two                 (this file)
@@ -86,16 +87,19 @@ type bindingCredentialReader interface {
 	ReadBindingCredential(ctx context.Context, secretPath string) (map[string]string, error)
 }
 
+// writeTargetReader names the environment a project writes into, narrowed from
+// openchoreo.WriteTargets. The identity provider a project's roles belong to is
+// the one bound to that environment.
+type writeTargetReader interface {
+	Resolve(ctx context.Context, org, project string) (string, error)
+	OrgDefaultRoot(ctx context.Context, org string) (string, error)
+}
+
 // identityTargetResolver resolves and caches one client per (org, environment).
 type identityTargetResolver struct {
 	environments environmentBindingReader
 	credentials  bindingCredentialReader
-	// environment is THE choice, made once. Every build deploys and validates in
-	// openchoreo.DevEnvironmentName, set at boot from the pipeline source, so its roles
-	// and test users belong to that environment's identity provider. When a run
-	// carries its own environment, this field becomes a parameter on Resolve and
-	// nothing else about the design moves.
-	environment string
+	targets      writeTargetReader
 	// adminRoute picks the address admin calls go to — the binding's in-cluster
 	// Service, or the public issuer. See adminBaseURL.
 	adminRoute string
@@ -117,7 +121,8 @@ type resolvedTarget struct {
 func newIdentityTargetResolver(
 	environments environmentBindingReader,
 	credentials bindingCredentialReader,
-	environment, adminRoute string,
+	targets writeTargetReader,
+	adminRoute string,
 ) *identityTargetResolver {
 	if adminRoute != adminRouteBinding {
 		adminRoute = adminRouteIssuer
@@ -125,7 +130,7 @@ func newIdentityTargetResolver(
 	return &identityTargetResolver{
 		environments: environments,
 		credentials:  credentials,
-		environment:  environment,
+		targets:      targets,
 		adminRoute:   adminRoute,
 		cached:       map[identity.Scope]*resolvedTarget{},
 		now:          time.Now,
@@ -134,18 +139,33 @@ func newIdentityTargetResolver(
 
 var _ identity.TargetResolver = (*identityTargetResolver)(nil)
 
-// Scope names the (org, environment) whose identity provider serves this org.
-// Pure, and it cannot fail — which is what lets the Security panel read the
-// platform's own rows for an environment whose identity provider is unreachable.
-func (r *identityTargetResolver) Scope(orgID string) identity.Scope {
-	return identity.Scope{OrgID: orgID, Environment: r.environment}
+// Scope names the (org, environment) whose identity provider serves the
+// project: its write target, or with no project the org default pipeline's
+// root. The write target's error is returned unchanged, so a caller can tell a
+// configuration fact (*openchoreo.ErrNoWriteTarget) from a transient failure.
+func (r *identityTargetResolver) Scope(ctx context.Context, orgID, projectID string) (identity.Scope, error) {
+	var (
+		environment string
+		err         error
+	)
+	if projectID == "" {
+		environment, err = r.targets.OrgDefaultRoot(ctx, orgID)
+	} else {
+		environment, err = r.targets.Resolve(ctx, orgID, projectID)
+	}
+	if err != nil {
+		return identity.Scope{}, err
+	}
+	return identity.Scope{OrgID: orgID, Environment: environment}, nil
 }
 
-// Resolve returns that environment's directory, bound and authenticated.
-func (r *identityTargetResolver) Resolve(ctx context.Context, orgID string) (identity.Target, error) {
-	scope := r.Scope(orgID)
-	if strings.TrimSpace(orgID) == "" {
+// Resolve returns that scope's directory, bound and authenticated.
+func (r *identityTargetResolver) Resolve(ctx context.Context, scope identity.Scope) (identity.Target, error) {
+	if strings.TrimSpace(scope.OrgID) == "" {
 		return identity.Target{}, errors.New("identity target: no org to resolve an identity provider for")
+	}
+	if strings.TrimSpace(scope.Environment) == "" {
+		return identity.Target{}, fmt.Errorf("identity target: no environment to resolve an identity provider for in %q", scope.OrgID)
 	}
 	if hit, ok := r.cachedTarget(scope); ok {
 		return hit, nil

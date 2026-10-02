@@ -205,10 +205,30 @@ func (r guardrailOutcomeReader) GuardrailOutcomes(ctx context.Context, org, proj
 
 // guardrailCatalog serves the design agent's list_guardrail_policies tool from
 // the governor's view of the org's gateway catalog.
-type guardrailCatalog struct{ gov *agentgovernance.Governor }
+//
+// The tool has no project in hand, so the environment is the org's default
+// pipeline root — the read every org-scoped question resolves to.
+type guardrailCatalog struct {
+	gov     *agentgovernance.Governor
+	targets orgDefaultRoot
+}
+
+// orgDefaultRoot is the one method guardrailCatalog uses;
+// openchoreo.WriteTargets satisfies it.
+type orgDefaultRoot interface {
+	OrgDefaultRoot(ctx context.Context, org string) (string, error)
+}
 
 func (c guardrailCatalog) GuardrailCatalog(ctx context.Context, org string) ([]mcpdiscovery.GuardrailPolicy, error) {
-	entries, err := c.gov.GuardrailCatalog(ctx, org)
+	env, err := c.targets.OrgDefaultRoot(ctx, org)
+	var nwt *openchoreo.ErrNoWriteTarget
+	if errors.As(err, &nwt) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("resolve the org's write target: %w", err)
+	}
+	entries, err := c.gov.GuardrailCatalog(ctx, org, env)
 	if err != nil {
 		return nil, err
 	}
@@ -249,29 +269,76 @@ func (k ampComponentKinds) ComponentKinds(ctx context.Context, orgID, projectID 
 	return kinds, nil
 }
 
+// orgWriteTargets lists the write targets of every project in an org.
+type orgWriteTargets interface {
+	OrgWriteTargets(ctx context.Context, org string) ([]string, map[string]error, error)
+}
+
+// projectWriteTarget resolves the environment one project's deploy writes to.
+type projectWriteTarget interface {
+	Resolve(ctx context.Context, org, project string) (string, error)
+}
+
 // ampModelProviderPublisher writes the org's model connection onto its Agent
 // Manager provider when a save changes it, on any format.
 //
-// It resolves the environment's binding itself rather than taking an address:
-// an org with no governed environment has nothing to publish to, and that is a
-// no-op rather than an error.
+// The org has no single environment, so the publish goes to every governed
+// write target of the org's projects. It resolves each environment's binding
+// itself rather than taking an address: an environment with no binding has
+// nothing to publish to, and that is a no-op rather than an error. Two
+// environments bound to the same gateway are written once.
 type ampModelProviderPublisher struct {
 	amp      agentgovernance.ClientFactory
 	bindings agentgovernance.BindingReader
+	targets  orgWriteTargets
+}
+
+// forEachBinding runs fn once per distinct AI gateway binding among the org's
+// write targets and joins the failures, so one broken environment does not stop
+// the others from being written.
+func (p ampModelProviderPublisher) forEachBinding(ctx context.Context, ocOrgID, what string, fn func(binding openchoreo.AIGatewayBinding) error) error {
+	envs, unresolved, err := p.targets.OrgWriteTargets(ctx, ocOrgID)
+	if err != nil {
+		return fmt.Errorf("resolve the org's write targets: %w", err)
+	}
+	// One project with a broken pipeline must not block the rest of the org.
+	for project, cause := range unresolved {
+		slog.WarnContext(ctx, "governance: project skipped for the "+what+" because it has no write target",
+			"org", ocOrgID, "project", project, "error", cause)
+	}
+	var failures []error
+	seen := map[string]bool{}
+	for _, env := range envs {
+		binding, err := p.bindings.GetAIGatewayBinding(ctx, ocOrgID, env)
+		if errors.Is(err, openchoreo.ErrNoAIGatewayBinding) {
+			continue // nothing governed here
+		}
+		if err != nil {
+			failures = append(failures, fmt.Errorf("resolve AI gateway binding for %q: %w", env, err))
+			continue
+		}
+		key := binding.AdminURL + "|" + binding.GatewayID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if err := fn(binding); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }
 
 func (p ampModelProviderPublisher) PublishOrgModelConnection(ctx context.Context, ocOrgID string, conn modelconn.Connection, apiKey string) error {
-	if p.amp == nil || p.bindings == nil || strings.TrimSpace(apiKey) == "" {
+	if p.amp == nil || p.bindings == nil || p.targets == nil || strings.TrimSpace(apiKey) == "" {
 		return nil
 	}
-	binding, err := p.bindings.GetAIGatewayBinding(ctx, ocOrgID, openchoreo.DevEnvironmentName)
-	if errors.Is(err, openchoreo.ErrNoAIGatewayBinding) {
-		return nil // nothing governed here
-	}
-	if err != nil {
-		return fmt.Errorf("resolve AI gateway binding: %w", err)
-	}
+	return p.forEachBinding(ctx, ocOrgID, "model connection publish", func(binding openchoreo.AIGatewayBinding) error {
+		return p.publishTo(ctx, ocOrgID, binding, conn, apiKey)
+	})
+}
 
+func (p ampModelProviderPublisher) publishTo(ctx context.Context, ocOrgID string, binding openchoreo.AIGatewayBinding, conn modelconn.Connection, apiKey string) error {
 	// THIS path always re-asserts, and it is the one place that must.
 	//
 	// The govern stage writes the provider only when its fingerprint changed
@@ -298,31 +365,26 @@ func (p ampModelProviderPublisher) PublishOrgModelConnection(ctx context.Context
 // connection. last is the connection the copy belonged to: the PUT carries a
 // whole provider, so it keeps that connection's template, upstream and header
 // and changes only the value. It never creates a provider: an org no deploy
-// ever governed has no copy to clear.
+// ever governed has no copy to clear. Like the publish, it covers every
+// governed write target of the org's projects.
 func (p ampModelProviderPublisher) ClearOrgModelKey(ctx context.Context, ocOrgID string, last modelconn.Connection) error {
-	if p.amp == nil || p.bindings == nil {
+	if p.amp == nil || p.bindings == nil || p.targets == nil {
 		return nil
 	}
-	binding, err := p.bindings.GetAIGatewayBinding(ctx, ocOrgID, openchoreo.DevEnvironmentName)
-	if errors.Is(err, openchoreo.ErrNoAIGatewayBinding) {
-		return nil // nothing governed here
-	}
-	if err != nil {
-		return fmt.Errorf("resolve AI gateway binding: %w", err)
-	}
-
-	providerIn, err := agentgovernance.ProviderInputFor(ocOrgID, last, clearedProviderCredential, binding.GatewayID)
-	if err != nil {
-		return err
-	}
-	found, err := p.amp.For(binding.AdminURL).UpdateProviderCredential(ctx, providerIn)
-	if err != nil {
-		return fmt.Errorf("clear the org key on the provider: %w", err)
-	}
-	if found {
-		slog.InfoContext(ctx, "governance: org key cleared from the Agent Manager provider", "org", ocOrgID)
-	}
-	return nil
+	return p.forEachBinding(ctx, ocOrgID, "model key clear", func(binding openchoreo.AIGatewayBinding) error {
+		providerIn, err := agentgovernance.ProviderInputFor(ocOrgID, last, clearedProviderCredential, binding.GatewayID)
+		if err != nil {
+			return err
+		}
+		found, err := p.amp.For(binding.AdminURL).UpdateProviderCredential(ctx, providerIn)
+		if err != nil {
+			return fmt.Errorf("clear the org key on the provider: %w", err)
+		}
+		if found {
+			slog.InfoContext(ctx, "governance: org key cleared from the Agent Manager provider", "org", ocOrgID)
+		}
+		return nil
+	})
 }
 
 // clearedProviderCredential is what the provider holds once the org has
@@ -341,6 +403,7 @@ const clearedProviderCredential = "cleared-by-aep:model-connection-disconnected"
 type ampAgentRegistrar struct {
 	governor *agentgovernance.Governor
 	kinds    ampComponentKinds
+	targets  projectWriteTarget
 }
 
 // Enabled reports whether anything is wired. A deployment with no Agent Manager
@@ -383,18 +446,18 @@ func (r ampAgentRegistrar) RegisterAgentsForBuild(ctx context.Context, orgID, pr
 		Provider: agentgovernance.ProviderID(orgID),
 		Agents:   make([]provisioning.RegisteredAgent, 0, len(components)),
 	}
+	// The project's write target: governance registers where the deploy writes.
+	env, err := r.targets.Resolve(ctx, orgID, projectID)
+	if err != nil {
+		return provisioning.AgentRegistrationOutcome{}, fmt.Errorf("resolve the write target for %s/%s: %w", orgID, projectID, err)
+	}
 	governed := false
 	for _, component := range components {
 		res, err := r.governor.EnsureRegistration(ctx, delivery.GovernAgentInput{
-			OrgID:     orgID,
-			ProjectID: projectID,
-			Component: component,
-			// The single environment the deploy targets. Governance follows the
-			// platform here rather than carrying an environment of its own: it
-			// must change where the rest of the deploy path changes, in one
-			// sweep, or it becomes the only environment-aware step in a
-			// pipeline that is not.
-			Environment: openchoreo.DevEnvironmentName,
+			OrgID:       orgID,
+			ProjectID:   projectID,
+			Component:   component,
+			Environment: env,
 		})
 		if err != nil {
 			return provisioning.AgentRegistrationOutcome{}, fmt.Errorf("register %q with Agent Manager: %w", component, err)
