@@ -36,6 +36,9 @@ type AgentGuardrailApplicationRepository interface {
 	// ListForComponent returns the component's application in every
 	// environment it has one for.
 	ListForComponent(ctx context.Context, ocOrgID, project, component string) ([]AgentGuardrailApplication, error)
+	// DeleteByProject removes every record of the project — each agent, each
+	// environment. Deleting nothing is not an error.
+	DeleteByProject(ctx context.Context, ocOrgID, project string) error
 }
 
 type agentGuardrailApplicationRepository struct{ db *gorm.DB }
@@ -80,4 +83,10 @@ func (r *agentGuardrailApplicationRepository) ListForComponent(ctx context.Conte
 		Order("environment").
 		Find(&rows).Error
 	return rows, err
+}
+
+func (r *agentGuardrailApplicationRepository) DeleteByProject(ctx context.Context, ocOrgID, project string) error {
+	return r.db.WithContext(ctx).
+		Where("oc_org_id = ? AND project = ?", ocOrgID, project).
+		Delete(&AgentGuardrailApplication{}).Error
 }

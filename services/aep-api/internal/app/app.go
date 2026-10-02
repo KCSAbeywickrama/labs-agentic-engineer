@@ -1473,6 +1473,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// config change's redeploy are all covered by construction.
 	agentComponentKinds := ampComponentKinds{store: artifactStore}
 	guardrailApplications := organization.NewAgentGuardrailApplicationRepository(db)
+	// A project delete purges them: they are keyed by project and agent name, so
+	// a recreated same-named project must not inherit AEP's claim over a binding.
+	projectService.SetGuardrailRecords(guardrailApplications)
 	agentGovernor := agentgovernance.New(agentgovernance.Deps{
 		AMP: ampClientFactory{cfg: agentmanager.Config{
 			TokenURL:     cfg.AgentManager.TokenURL,

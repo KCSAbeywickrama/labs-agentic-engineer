@@ -74,3 +74,44 @@ func TestAgentGuardrailApplicationRepository_RecordsTheLatestApplication_DB(t *t
 		t.Fatalf("list = %+v, %v; want the one environment", rows, err)
 	}
 }
+
+// A project delete purges that project's records — every agent, every
+// environment — and nothing of a same-org neighbour's or another org's
+// same-named project.
+func TestAgentGuardrailApplicationRepository_DeleteByProject_DB(t *testing.T) {
+	t.Parallel()
+	repo := organization.NewAgentGuardrailApplicationRepository(dbtest.New(t))
+	ctx := context.Background()
+
+	put := func(org, project, component, env string) {
+		t.Helper()
+		if err := repo.Put(ctx, organization.AgentGuardrailApplication{
+			OcOrgID: org, Project: project, Component: component, Environment: env,
+			AppliedNames: []string{"pii-masking-regex"}, Outcomes: json.RawMessage(`[]`),
+		}); err != nil {
+			t.Fatalf("put: %v", err)
+		}
+	}
+	put("acme", "shop", "receipt-agent", "development")
+	put("acme", "shop", "receipt-agent", "staging")
+	put("acme", "shop", "triage-agent", "development")
+	put("acme", "other", "receipt-agent", "development")
+	put("globex", "shop", "receipt-agent", "development")
+
+	if err := repo.DeleteByProject(ctx, "acme", "shop"); err != nil {
+		t.Fatalf("DeleteByProject: %v", err)
+	}
+	for _, c := range []string{"receipt-agent", "triage-agent"} {
+		if rows, err := repo.ListForComponent(ctx, "acme", "shop", c); err != nil || len(rows) != 0 {
+			t.Fatalf("acme/shop/%s after delete: %d rows, %v; want none", c, len(rows), err)
+		}
+	}
+	for _, kept := range [][2]string{{"acme", "other"}, {"globex", "shop"}} {
+		if rows, err := repo.ListForComponent(ctx, kept[0], kept[1], "receipt-agent"); err != nil || len(rows) != 1 {
+			t.Fatalf("%s/%s must be untouched: %d rows, %v", kept[0], kept[1], len(rows), err)
+		}
+	}
+	if err := repo.DeleteByProject(ctx, "acme", "shop"); err != nil {
+		t.Fatalf("a second delete of an already-purged project must succeed: %v", err)
+	}
+}
