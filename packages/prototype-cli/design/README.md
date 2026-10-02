@@ -24,10 +24,9 @@ survives unreadable files: it shows a finding and keeps the last good render.
 Uses the kit's `/host` reducer for all view state. `--persist` keeps snapshots
 in `localStorage` under `proto:data:<revision hash>`; a new revision starts from
 the seed. Annotate queues requests and saves `.prototype/feedback.json`. The
-queue survives revisions; it is saved with the hash it was started against
-(`prototypeHash` is the revision the first queued request was made on), and the
-panel notes "Queued against an earlier version" when the current revision
-differs.
+queue survives revisions and is saved with the hash it was started against
+(`prototypeHash`); the panel notes "Queued against an earlier version" when the
+current revision differs.
 
 ## Export
 
@@ -43,11 +42,3 @@ Seam 1: the built bin (`test/*.test.ts`, node) and the browser lane
 tests run in the browser and drive Playwright pages through node-side commands
 (`test/browser/commands.ts`). Seam 2: `test/consumer.test.ts` installs the packed
 tarballs with npm in a temp directory.
-
-## Known limitations
-
-- Render-check network isolation relies on the Node permission model plus `vm`;
-  pair it with an egress policy in AEP.
-- Frame self-navigation (`location`) is not blocked by the CSP.
-- Closed Dialog/Drawer contents are not rendered by `check` unless a display
-  state opens them.

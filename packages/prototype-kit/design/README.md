@@ -44,9 +44,7 @@ targets, isolated render.
   chain; it hardens `Object.prototype`, `Array.prototype` and
   `Function.prototype` before the module runs, so prototype pollution throws.
   `RENDER_TIMEOUT_MS` is 15 s.
-- Limits: closed Dialog/Drawer contents are not rendered unless a display state
-  opens them. Network isolation relies on the permission model plus `vm`; pair
-  with an egress policy when running it inside AEP.
+- Limits of the render check: see ADR-0040, Consequences.
 
 ## Host reducer and bridge (`/host`)
 
@@ -54,17 +52,14 @@ The reducer owns view state. `NAVIGATE` only moves to a screen reachable for the
 current role. `proto:data` snapshots are shape-validated with a bounded walk
 (cycles rejected, node cap) before a host persists them (`isDataSnapshot`).
 `PrototypeFrame` re-sends `load` on every frame `ready`, so a reloaded frame
-recovers. The host ignores frame navigation outside Preview. Frame
-self-navigation (`location`) is not blocked by the frame's CSP.
+recovers. The host ignores frame navigation outside Preview.
 
 ## Build helper
 
 `buildThemeRuntimes({ theme, resolveDir, outDir })` bundles a theme with the
-kit and React into `frame-runtime.js` (entry `build/frame-entry`) and
-`check-runtime.js` (entries `build/check-prelude`, `build/check-entry`).
+kit and React into `frame-runtime.js` (entry `bundle/frame-entry`) and
+`check-runtime.js` (entries `bundle/check-prelude`, `bundle/check-entry`). The
+source dir is `src/bundle`; the public subpaths stay `/build`, `/build/*`.
 Generated: `schema/prototype-manifest.schema.json` and `reference.md`
 (`pnpm --filter @wso2/prototype-kit gen`; `test/generated.test.ts` fails when
 stale).
-
-The root `.gitignore` ignores `build/` and re-includes `src/build/`; knip does
-not honour that, so the dead-code scripts run with `--no-gitignore`.

@@ -26,12 +26,6 @@
     "services/aep-mcp-server",
     "services/collab"
   ],
-  // The scripts run knip with --no-gitignore: the root .gitignore ignores
-  // every `build/` directory (re-including packages/prototype-kit/src/build/),
-  // and knip does not honour that re-inclusion, so it would drop the kit's
-  // bundler entries and report everything they import as unused. Build output
-  // is ignored explicitly instead (`**/dist/**`).
-  //
   // Each package keeps tests + shared fixtures in its own `test/` dir (never in
   // the shipped `src/` tree), which knip recognises as test-scope and strips
   // under --production — so test-only code is excluded with no carve-out here.
@@ -44,7 +38,6 @@
   // should — reachability from a package entry is the wrong question to ask of
   // them.
   "ignore": [
-    "**/dist/**",
     "deployments/**",
     "scripts/**",
     "services/agents/src/shared/mock-model.ts",

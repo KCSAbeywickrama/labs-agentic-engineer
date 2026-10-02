@@ -53,8 +53,7 @@ AEP: Oxygen, AEP paths, no CLI, unpublished.
   `vm`; a host-realm escape could still reach the network. Running it inside
   AEP needs an egress policy (sub-project 3).
 - `'unsafe-eval'` in the frame is accepted: the frame has an opaque origin and
-  no network. The CSP does not block the frame navigating itself (`location`);
-  the host ignores such navigation outside Preview.
+  no network. The CSP does not block the frame navigating itself (`location`).
 - `check` does not render closed Dialog/Drawer contents unless a display state
   opens them, so those contents are unchecked until a state shows them.
 - Each theme ships its own runtimes with React bundled; their size is watched.
