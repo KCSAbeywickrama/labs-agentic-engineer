@@ -18,7 +18,6 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { chatWidth } from "./chatWidth";
-import { RAIL_WIDTH } from "./layout";
 
 // The dragged width is the user's, not the project's: one width kept in this
 // browser for every project. Storage can be missing or refused (a private
@@ -41,7 +40,7 @@ function subscribeToResize(onChange: () => void): () => void {
   return () => window.removeEventListener("resize", onChange);
 }
 
-const windowWidth = () => window.innerWidth;
+const readWindowWidth = () => window.innerWidth;
 
 export interface ChatWidth {
   width: number;
@@ -53,7 +52,7 @@ export interface ChatWidth {
 
 /** The chat's width beside the page, tracking the window, and the user's hold on it. */
 export function useChatWidth(): ChatWidth {
-  const room = useSyncExternalStore(subscribeToResize, windowWidth) - RAIL_WIDTH;
+  const windowWidth = useSyncExternalStore(subscribeToResize, readWindowWidth);
   const [saved, setSaved] = useState<number | null>(readSaved);
 
   useEffect(() => {
@@ -65,7 +64,7 @@ export function useChatWidth(): ChatWidth {
     }
   }, [saved]);
 
-  const resizeTo = useCallback((px: number) => setSaved(chatWidth(room, px)), [room]);
+  const resizeTo = useCallback((px: number) => setSaved(chatWidth(windowWidth, px)), [windowWidth]);
   const reset = useCallback(() => setSaved(null), []);
-  return { width: chatWidth(room, saved), resizeTo, reset };
+  return { width: chatWidth(windowWidth, saved), resizeTo, reset };
 }

@@ -106,17 +106,13 @@ export function CardOverlay({
         aria-label={card === "builds" ? undefined : cardTitle(card)}
         tabIndex={-1}
         sx={{
+          // Framed on all sides, the overview showing round it under the scrim.
           position: "absolute",
-          top: (t) => t.spacing(1.75),
-          left: (t) => t.spacing(3.5),
-          right: 0,
-          bottom: 0,
+          inset: (t) => t.spacing(1.75),
           bgcolor: "background.paper",
           border: 1,
-          borderRight: 0,
-          borderBottom: 0,
           borderColor: "divider",
-          borderTopLeftRadius: (t) => t.spacing(1.75),
+          borderRadius: (t) => t.spacing(1.75),
           boxShadow: "var(--aep-shell-card-shadow)",
           display: "flex",
           flexDirection: "column",
@@ -124,7 +120,7 @@ export function CardOverlay({
           outline: "none",
           animation: `${slideIn} 0.22s ease`,
           ...reducedMotion,
-          [PHONE]: { left: (t) => t.spacing(1.25) },
+          [PHONE]: { inset: (t) => t.spacing(1.25) },
         }}
       >
         <Box

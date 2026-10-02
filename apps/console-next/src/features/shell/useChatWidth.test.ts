@@ -42,10 +42,10 @@ describe("useChatWidth", () => {
   it("tracks the golden share as the window changes until the user drags", () => {
     resizeWindow(1440);
     const { result } = renderHook(() => useChatWidth());
-    expect(result.current.width).toBe(Math.round((1440 - RAIL_WIDTH) * GOLDEN_SHARE));
+    expect(result.current.width).toBe(Math.round(1440 * GOLDEN_SHARE - RAIL_WIDTH));
 
     resizeWindow(1920);
-    expect(result.current.width).toBe(Math.round((1920 - RAIL_WIDTH) * GOLDEN_SHARE));
+    expect(result.current.width).toBe(Math.round(1920 * GOLDEN_SHARE - RAIL_WIDTH));
     expect(localStorage.getItem(KEY)).toBeNull();
   });
 
@@ -72,7 +72,7 @@ describe("useChatWidth", () => {
     const { result } = renderHook(() => useChatWidth());
     act(() => result.current.resizeTo(420));
     act(() => result.current.reset());
-    expect(result.current.width).toBe(Math.round((1440 - RAIL_WIDTH) * GOLDEN_SHARE));
+    expect(result.current.width).toBe(Math.round(1440 * GOLDEN_SHARE - RAIL_WIDTH));
     expect(localStorage.getItem(KEY)).toBeNull();
   });
 });
