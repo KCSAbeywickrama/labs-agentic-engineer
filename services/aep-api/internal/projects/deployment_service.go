@@ -386,6 +386,7 @@ func declareGuardrails(in *delivery.GovernAgentInput, design *spec.DesignFile, c
 		}
 		in.AgentInstructions = decl.Instructions
 		in.AgentUsesTools, in.AgentTakesFiles = decl.UsesTools, decl.TakesFiles
+		in.AgentToolText = spec.AgentToolText(c.AgentAFM, design.Components)
 		for _, g := range decl.Guardrails {
 			in.Guardrails = append(in.Guardrails, delivery.GuardrailDeclaration{Policy: g.Policy, Params: g.Params, Why: g.Why})
 		}

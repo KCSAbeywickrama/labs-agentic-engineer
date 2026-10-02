@@ -445,6 +445,23 @@ describe("AgentView — Guardrails", () => {
     expect(screen.getAllByText("Not deployed yet")).toHaveLength(2);
   });
 
+  // A live collaboration draft reaches the view before the write gate that
+  // refuses a repeated policy, so a repeat must still render as two rows.
+  it("renders a repeated policy in an unvalidated draft as separate rows", () => {
+    const repeated = GUARDED.replace(
+      "    - policy: regex-guardrail",
+      '    - policy: pii-masking-regex\n      params: { phone: true }\n      why: "Phone numbers too."\n    - policy: regex-guardrail',
+    );
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<AgentView spec={repeated} />);
+    openTab("Configuration");
+
+    expect(screen.getAllByText("pii-masking-regex")).toHaveLength(2);
+    expect(screen.getByText("Phone numbers too.")).toBeInTheDocument();
+    expect(errors.mock.calls.some((c) => String(c[0]).includes("same key"))).toBe(false);
+    errors.mockRestore();
+  });
+
   // The panel is about checks the AI gateway applies; with none, there is
   // nothing to show, and an empty "declared" row only reads as a contradiction
   // of rules the agent itself follows.

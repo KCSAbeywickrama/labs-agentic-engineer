@@ -43,6 +43,10 @@ type GovernAgentInput struct {
 	// the user's text, which decides where a guardrail can read it.
 	AgentUsesTools  bool
 	AgentTakesFiles bool
+	// AgentToolText is the text the agent's tool definitions are built from
+	// (spec.AgentToolText), which a tool-using agent sends with every request:
+	// a whole-request block that matches it would refuse every call.
+	AgentToolText []string
 }
 
 // GuardrailDeclaration is one declared guardrail: a gateway policy by name,

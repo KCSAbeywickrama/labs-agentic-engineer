@@ -138,5 +138,5 @@ func appliesNote(name string, schema *jsonschema.Schema) string {
 	if measuresRequest[name] {
 		return "Request side only, and only for an agent with no tools and no file uploads, where it reads the user's latest message. Reply-side checks are not applied: they are not enforced on streamed replies."
 	}
-	return "Request side only. Reads the user's latest message for an agent with no tools or file uploads, else the whole request — so keep what it blocks out of the agent's instructions. Reply-side checks are not applied: they are not enforced on streamed replies."
+	return "Request side only. Reads the user's latest message for an agent with no tools or file uploads, else the whole request — so keep what it blocks out of the agent's instructions and tool descriptions, and know that a blocked word anywhere in the conversation so far refuses every later turn of it. Reply-side checks are not applied: they are not enforced on streamed replies."
 }

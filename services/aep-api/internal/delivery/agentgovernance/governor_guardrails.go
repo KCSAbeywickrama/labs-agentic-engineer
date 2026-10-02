@@ -94,7 +94,7 @@ func (g *Governor) reconcileGuardrails(ctx context.Context, reg registration, in
 		return
 	}
 	resolved, outcomes := resolveGuardrails(in.Guardrails, guardrailContext{catalog: catalog, format: reg.format, instructions: in.AgentInstructions,
-		agentUsesTools: in.AgentUsesTools, agentTakesFiles: in.AgentTakesFiles})
+		toolText: in.AgentToolText, agentUsesTools: in.AgentUsesTools, agentTakesFiles: in.AgentTakesFiles})
 
 	ref := agentmanager.BindingRef{Org: in.OrgID, Project: in.ProjectID, Agent: reg.agentName,
 		ConfigID: reg.config.ConfigID, Environment: in.Environment}

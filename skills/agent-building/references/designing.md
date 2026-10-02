@@ -210,9 +210,12 @@ x-aep:
 - **Request-side checks only.** Reply-side checks are not enforced on
   streamed replies, so a guardrail with only a reply-side check is not
   applied. PII masking still returns the real values in the reply.
-- **Keep blocked words out of the instructions.** Where a block reads the
-  whole request, it reads these instructions too, and one that matches them
-  is not applied.
+- **Keep blocked words out of everything every request carries.** Where a
+  block reads the whole request, it reads these instructions and the tools'
+  names and descriptions too, and one that matches them is not applied. It
+  also reads the conversation so far: once a blocked word appears in an
+  earlier message or reply, every later turn of that conversation is refused,
+  so the user has to start a new one.
 - **With personal data masked,** say so in the instructions: the model sees
   tokens like `[EMAIL_0000]` in place of the real values, and is to use them
   as written; the user gets the real values back.

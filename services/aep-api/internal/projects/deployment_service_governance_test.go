@@ -19,6 +19,7 @@ package projects
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -144,6 +145,29 @@ func TestGovern_CarriesAnAgentsDeclaredGuardrails(t *testing.T) {
 	}
 	if agent.AgentUsesTools || agent.AgentTakesFiles {
 		t.Errorf("agent input = %+v, want neither tools nor files for this spec", agent)
+	}
+}
+
+// A tool-using agent's whole-request check also reads its tool definitions,
+// so governance is handed the text those are built from: the allowed
+// operations of the provider's contract, as the design holds it.
+func TestGovern_CarriesTheTextAnAgentsToolsAreBuiltFrom(t *testing.T) {
+	t.Parallel()
+	g := &stubGovernor{}
+	svc := NewDeploymentService(nil, nil)
+	svc.SetGovernor(g)
+	design := &spec.DesignFile{Components: []spec.DesignComponent{
+		{Name: "receipt-agent", ComponentType: spec.ComponentTypeAIAgent,
+			AgentAFM: "---\nname: \"receipt-agent\"\nx-aep:\n  tools:\n    openapi:\n      - component: expense-api\n        allow: [logExpense]\n---\n# Role\n"},
+		{Name: "expense-api", ComponentType: "service",
+			OpenAPISpec: "openapi: 3.0.3\ninfo: { title: e, version: \"1\" }\npaths:\n  /expenses:\n    post:\n      operationId: logExpense\n      summary: Log a casino receipt\n      responses: { \"201\": { description: ok } }\n"},
+	}}
+
+	if err := svc.govern(context.Background(), "acme", "shop", testWriteTarget, design, []delivery.DeployTarget{{Component: "receipt-agent"}}); err != nil {
+		t.Fatalf("govern: %v", err)
+	}
+	if len(g.seen) != 1 || !slices.Contains(g.seen[0].AgentToolText, "Log a casino receipt") {
+		t.Fatalf("input = %+v, want the allowed operation's summary in AgentToolText", g.seen)
 	}
 }
 

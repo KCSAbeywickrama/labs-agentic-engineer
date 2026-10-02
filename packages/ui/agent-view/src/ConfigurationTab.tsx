@@ -129,11 +129,13 @@ function GuardrailsPanel({
 }) {
   return (
     <Panel title="Guardrails">
-      {guardrails.map((g) => {
+      {/* Keyed by position too: a live draft reaches this view before the write
+          gate that refuses a repeated policy. */}
+      {guardrails.map((g, i) => {
           const outcomes = status?.[g.policy];
           return (
             <Row
-              key={g.policy}
+              key={`${g.policy}:${i}`}
               label="Policy"
               value={
                 <Stack spacing={0.25}>

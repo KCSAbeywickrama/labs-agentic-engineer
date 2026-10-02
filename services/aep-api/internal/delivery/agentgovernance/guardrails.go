@@ -92,6 +92,10 @@ type guardrailContext struct {
 	format  modelconn.Format
 	// instructions is the agent's prompt body, which every request carries.
 	instructions string
+	// toolText is what the agent's tool definitions are built from — each
+	// allowed operation's name, summary, description and parameters — which a
+	// tool-using agent also sends in every request.
+	toolText []string
 	// agentUsesTools and agentTakesFiles decide where a request-side check can
 	// find the user's message. With either, the last message is not always the
 	// user's text: on a tool turn it is a tool result, and a message may be a
@@ -227,8 +231,10 @@ func resolveOne(d delivery.GuardrailDeclaration, byName map[string]agentmanager.
 	if reason := semanticProblem(params); reason != "" {
 		return out(GuardrailInvalid, reason)
 	}
-	if path == wholeRequest && blocksItsOwnInstructions(d.Policy, params, gc.instructions) {
-		return out(GuardrailInvalid, "the pattern matches the agent's own instructions, which every request carries, so it would block every call")
+	if path == wholeRequest {
+		if part := blocksTheAgentsOwnRequest(d.Policy, params, gc); part != "" {
+			return out(GuardrailInvalid, "the pattern matches "+part+", which every request carries, so it would block every call")
+		}
 	}
 
 	status, reason := GuardrailApplied, ""
@@ -352,20 +358,36 @@ func semanticProblem(params map[string]any) string {
 	return ""
 }
 
-// blocksItsOwnInstructions reports whether a regex block would match the
-// agent's own instructions — which every request carries, so it would refuse
-// every call the agent makes.
-func blocksItsOwnInstructions(policy string, params map[string]any, instructions string) bool {
-	if policy != "regex-guardrail" || instructions == "" {
-		return false
+// blocksTheAgentsOwnRequest names the part of every request an inverted
+// regex block would match — the agent's instructions or its tool definitions —
+// or "" when it matches neither. A whole-request check reads both on every
+// call, so a match there refuses the agent outright.
+//
+// The tool text is the contract each tool is built from; parameter wording the
+// agent adds in code is not known here, so this catches the certain cases, not
+// every one.
+func blocksTheAgentsOwnRequest(policy string, params map[string]any, gc guardrailContext) string {
+	if policy != "regex-guardrail" {
+		return ""
 	}
 	req, ok := params["request"].(map[string]any)
 	if !ok || req["invert"] != true {
-		return false
+		return ""
 	}
 	pattern, _ := req["regex"].(string)
 	re, err := regexp.Compile(pattern)
-	return err == nil && re.MatchString(instructions)
+	if err != nil {
+		return ""
+	}
+	if gc.instructions != "" && re.MatchString(gc.instructions) {
+		return "the agent's own instructions"
+	}
+	for _, text := range gc.toolText {
+		if re.MatchString(text) {
+			return fmt.Sprintf("the agent's tool definitions (%q)", text)
+		}
+	}
+	return ""
 }
 
 // isPhasePolicy reports whether a policy is configured per phase — a request

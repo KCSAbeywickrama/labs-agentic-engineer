@@ -135,6 +135,38 @@ func TestResolveGuardrails_ABlockPatternMatchingTheAgentsInstructionsIsInvalid(t
 	}
 }
 
+// A tool-using agent sends its tool definitions — names and descriptions from
+// the provider's contract — in every request too. A block pattern that matches
+// one would refuse every call just as surely as one matching the instructions.
+func TestResolveGuardrails_ABlockPatternMatchingTheAgentsToolsIsInvalid(t *testing.T) {
+	gc := guardrailContext{catalog: testCatalog(t), format: modelconn.FormatAnthropic, agentUsesTools: true,
+		instructions: "Help the employee file an expense.",
+		toolText:     []string{"logExpense", "Log a casino or restaurant receipt against the trip"}}
+	policies, outcomes := resolveGuardrails([]delivery.GuardrailDeclaration{declare("regex-guardrail", map[string]any{
+		"request": map[string]any{"regex": "(?i)casino", "invert": true}})}, gc)
+
+	o := onlyOutcome(t, outcomes)
+	if o.Status != GuardrailInvalid || !strings.Contains(o.Reason, "tool") {
+		t.Fatalf("outcome = %+v, want invalid naming the agent's tools", o)
+	}
+	if len(policies) != 0 {
+		t.Fatalf("a pattern that blocks every call was written: %+v", policies)
+	}
+}
+
+// A plain agent's check reads only the latest message; its tool text, if any
+// were passed, is never in what the check reads.
+func TestResolveGuardrails_ToolTextDoesNotMatterForALastMessageCheck(t *testing.T) {
+	gc := guardrailContext{catalog: testCatalog(t), format: modelconn.FormatAnthropic,
+		toolText: []string{"Log a casino receipt"}}
+	_, outcomes := resolveGuardrails([]delivery.GuardrailDeclaration{declare("regex-guardrail", map[string]any{
+		"request": map[string]any{"regex": "(?i)casino", "invert": true}})}, gc)
+
+	if o := onlyOutcome(t, outcomes); o.Status != GuardrailApplied {
+		t.Fatalf("outcome = %+v, want applied", o)
+	}
+}
+
 // Verified live: the gateway does not stop a streamed reply, and every
 // generated agent streams. A reply-side check would promise protection it
 // does not give, so it is dropped and said so.
