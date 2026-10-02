@@ -27,7 +27,7 @@ Commands:
   check [dir] [--json] [--theme <package>]
                                   Check the prototype; exit 0 when clean, 1 on findings, 2 on a usage error
   preview [dir] [--port <n>] [--persist] [--theme <package>] [--open]
-                                  Serve a live-reloading, playable preview
+                                  Serve a live-reloading, playable preview with Annotate
 
 Options:
   -h, --help                      Show this help

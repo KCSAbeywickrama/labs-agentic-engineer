@@ -1,0 +1,76 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+/** Annotate's side panel: the selection, a request to attach to it, the queue, and Save feedback. */
+
+import { useState } from "react";
+import type { FeedbackRequest } from "../feedback.js";
+
+export interface FeedbackPanelProps {
+  /** The selected elements' labels, in selection order. */
+  selection: string[];
+  queue: readonly FeedbackRequest[];
+  onAdd: (text: string) => void;
+  onRemove: (index: number) => void;
+  onSave: () => Promise<string>;
+}
+
+export function FeedbackPanel({ selection, queue, onAdd, onRemove, onSave }: FeedbackPanelProps) {
+  const [text, setText] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
+  const add = () => {
+    if (text.trim() === "") return;
+    onAdd(text.trim());
+    setText("");
+  };
+  const save = () => {
+    setStatus("Saving…");
+    onSave().then(setStatus, (e: unknown) => setStatus(`Not saved: ${e instanceof Error ? e.message : String(e)}`));
+  };
+  return (
+    <aside className="ph-feedback" aria-label="Feedback">
+      <h2>Feedback</h2>
+      <p className="ph-selection">{selection.length === 0 ? "Click elements to select them, or write about the whole screen." : `Selected: ${selection.join(", ")}`}</p>
+      <label>
+        Request
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} />
+      </label>
+      <button type="button" onClick={add} disabled={text.trim() === ""}>
+        Add request
+      </button>
+      <ol className="ph-queue" aria-label="Queued requests">
+        {queue.map((r, i) => (
+          <li key={i}>
+            <span>{r.text}</span>
+            <small>
+              {r.screenId}
+              {r.elementIds.length > 0 ? ` · ${r.elementIds.join(", ")}` : ""}
+            </small>
+            <button type="button" aria-label={`Remove request ${i + 1}`} onClick={() => onRemove(i)}>
+              Remove
+            </button>
+          </li>
+        ))}
+      </ol>
+      <button type="button" onClick={save} disabled={queue.length === 0}>
+        Save feedback
+      </button>
+      {status && <p role="status">{status}</p>}
+    </aside>
+  );
+}

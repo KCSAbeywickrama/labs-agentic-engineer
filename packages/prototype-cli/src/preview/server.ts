@@ -17,20 +17,30 @@
  */
 
 /**
- * The preview server: the host page, the theme's frame runtime and an event
- * stream of revisions and findings. Local only — it binds 127.0.0.1 and
- * answers only requests addressed to it by that name or `localhost` (no DNS
- * rebinding).
+ * The preview server: the host page, the theme's frame runtime, an event
+ * stream of revisions and findings, and `POST /feedback`. Local only — it
+ * binds 127.0.0.1, answers only requests addressed to it by that name or
+ * `localhost` (no DNS rebinding), refuses to have its page framed by another
+ * site, and takes feedback only as JSON from its own origin (no cross-site
+ * posts).
  */
 
-import { readFileSync } from "node:fs";
-import { createServer, type ServerResponse } from "node:http";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { dirname, join } from "node:path";
 import type { ThemeRuntimes } from "@wso2/prototype-kit/check";
 import { HOST_SCRIPT_PATH } from "../assets.js";
+import { FEEDBACK_PATH, FEEDBACK_SCHEMA_VERSION, parseFeedbackSubmission, type FeedbackFile } from "../feedback.js";
 import { renderHostPage } from "../host-page.js";
 import { EventStream, type ServerEvent } from "./sse.js";
 import { PrototypeWatcher, type PrototypeStatus } from "./watcher.js";
+
+/** The largest feedback body accepted. */
+const MAX_BODY = 1024 * 1024;
+
+/** The host page holds the Save control: no other site may frame it (clickjacking). */
+const NOT_FRAMEABLE = { "content-security-policy": "frame-ancestors 'none'", "x-frame-options": "DENY" };
 
 export interface PreviewServerOptions {
   dir: string;
@@ -60,9 +70,28 @@ function sendFile(res: ServerResponse, path: string): void {
   send(res, 200, "text/javascript; charset=utf-8", body);
 }
 
-function send(res: ServerResponse, status: number, type: string, body: string | Buffer): void {
-  res.writeHead(status, { "content-type": type, "cache-control": "no-store", "x-content-type-options": "nosniff" });
+function send(res: ServerResponse, status: number, type: string, body: string | Buffer, extra: Record<string, string> = {}): void {
+  res.writeHead(status, { "content-type": type, "cache-control": "no-store", "x-content-type-options": "nosniff", ...extra });
   res.end(body);
+}
+
+/** The request body as text, or null when it is over the limit. */
+function readBody(req: IncomingMessage): Promise<string | null> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY) {
+        resolve(null);
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", reject);
+  });
 }
 
 export async function startPreviewServer(options: PreviewServerOptions): Promise<RunningPreview> {
@@ -73,16 +102,41 @@ export async function startPreviewServer(options: PreviewServerOptions): Promise
   let port = 0;
   const hosts = () => new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
 
+  const saveFeedback = async (req: IncomingMessage, res: ServerResponse) => {
+    if (!(req.headers["content-type"] ?? "").startsWith("application/json")) return send(res, 415, "text/plain", "feedback is JSON");
+    const origin = req.headers.origin;
+    if (origin !== undefined && !hosts().has(origin.replace(/^http:\/\//, ""))) return send(res, 403, "text/plain", "cross-origin feedback is refused");
+    const body = await readBody(req);
+    if (body === null) return send(res, 413, "text/plain", "feedback is too large");
+    let value: unknown;
+    try {
+      value = JSON.parse(body);
+    } catch {
+      return send(res, 400, "text/plain", "feedback is not JSON");
+    }
+    const submission = parseFeedbackSubmission(value);
+    if (!submission) return send(res, 400, "text/plain", "feedback does not have the documented shape");
+    const file: FeedbackFile = { schemaVersion: FEEDBACK_SCHEMA_VERSION, savedAt: new Date().toISOString(), ...submission };
+    const path = join(options.dir, FEEDBACK_PATH);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+    send(res, 200, "application/json", JSON.stringify({ path: FEEDBACK_PATH, requests: file.requests.length }));
+  };
+
   const server = createServer((req, res) => {
     if (!hosts().has(req.headers.host ?? "")) return send(res, 403, "text/plain", "the preview answers only on 127.0.0.1 and localhost");
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
     if (req.method === "GET" && path === "/") {
       const title = watcher.status().lastGood?.manifest.name ?? "Prototype";
-      return send(res, 200, "text/html; charset=utf-8", renderHostPage(`${title} — prototype preview`, { mode: "preview", persist: options.persist }));
+      return send(res, 200, "text/html; charset=utf-8", renderHostPage(`${title} — prototype preview`, { mode: "preview", persist: options.persist }), NOT_FRAMEABLE);
     }
     if (req.method === "GET" && path === "/host.js") return sendFile(res, HOST_SCRIPT_PATH);
     if (req.method === "GET" && path === "/frame-runtime.js") return sendFile(res, options.theme.frameRuntimePath);
     if (req.method === "GET" && path === "/events") return events.attach(req, res, statusEvents(watcher.status()));
+    if (req.method === "POST" && path === "/feedback") {
+      saveFeedback(req, res).catch((e: unknown) => send(res, 500, "text/plain", e instanceof Error ? e.message : String(e)));
+      return;
+    }
     send(res, 404, "text/plain", "not found");
   });
 

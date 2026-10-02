@@ -18,12 +18,13 @@
 
 /**
  * The preview server's HTTP surface, against a spawned `prototype preview`:
- * what it serves, and what it refuses — a request addressed by another host
- * name (DNS rebinding), and a busy port.
+ * what it serves, and what it refuses — feedback that is not JSON, from
+ * another origin, or of the wrong shape, a page that another site would frame,
+ * a request addressed by another host name (DNS rebinding), and a busy port.
  */
 
-import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { request } from "node:http";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { request, type IncomingHttpHeaders } from "node:http";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -40,19 +41,22 @@ afterAll(async () => {
 });
 
 /** A raw request, so the Host header can be anything. */
-function send(path: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<{ status: number; body: string }> {
+function send(path: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<{ status: number; body: string; headers: IncomingHttpHeaders }> {
   const url = new URL(path, preview.url);
   return new Promise((resolve, reject) => {
     const req = request({ host: url.hostname, port: url.port, path: url.pathname, method: init.method ?? "GET", headers: init.headers ?? {} }, (res) => {
       let body = "";
       res.setEncoding("utf8");
       res.on("data", (c: string) => (body += c));
-      res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, body, headers: res.headers }));
     });
     req.on("error", reject);
     req.end(init.body);
   });
 }
+
+const valid = JSON.stringify({ prototypeHash: "a".repeat(64), requests: [{ screenId: "screen.contacts", roleId: "editor", stateId: "state.default", elementIds: [], text: "Hello" }] });
+const feedbackFile = () => join(preview.dir, ".prototype", "feedback.json");
 
 describe("prototype preview (HTTP)", () => {
   it("serves the host page, its script, the frame runtime and the event stream", async () => {
@@ -62,9 +66,32 @@ describe("prototype preview (HTTP)", () => {
     expect((await send("/nope")).status).toBe(404);
   });
 
+  it("refuses to be framed by another site", async () => {
+    const { headers } = await send("/");
+    expect(headers["content-security-policy"]).toContain("frame-ancestors 'none'");
+    expect(headers["x-frame-options"]).toBe("DENY");
+  });
+
   it("refuses a request addressed by another host name", async () => {
     const res = await send("/", { headers: { host: "attacker.example" } });
     expect(res.status).toBe(403);
+  });
+
+  it("refuses feedback that is not JSON, from another origin, or of the wrong shape, and writes nothing", async () => {
+    expect((await send("/feedback", { method: "POST", headers: { "content-type": "text/plain" }, body: valid })).status).toBe(415);
+    expect((await send("/feedback", { method: "POST", headers: { "content-type": "application/json", origin: "http://attacker.example" }, body: valid })).status).toBe(403);
+    expect((await send("/feedback", { method: "POST", headers: { "content-type": "application/json" }, body: "{" })).status).toBe(400);
+    expect((await send("/feedback", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prototypeHash: "x", requests: [] }) })).status).toBe(400);
+    expect(existsSync(feedbackFile())).toBe(false);
+  });
+
+  it("writes valid feedback from its own origin to .prototype/feedback.json", async () => {
+    const origin = preview.url.replace(/\/$/, "");
+    const res = await send("/feedback", { method: "POST", headers: { "content-type": "application/json", origin }, body: valid });
+    expect(res.status).toBe(200);
+    const file = JSON.parse(readFileSync(feedbackFile(), "utf8")) as Record<string, unknown>;
+    expect(file).toMatchObject({ schemaVersion: 1, prototypeHash: "a".repeat(64), requests: [{ screenId: "screen.contacts", text: "Hello" }] });
+    expect(typeof file["savedAt"]).toBe("string");
   });
 });
 

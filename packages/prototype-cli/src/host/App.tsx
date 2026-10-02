@@ -16,12 +16,15 @@
  * under the License.
  */
 
-/** The preview host: the live prototype in a browser window, the review controls and the findings overlay. */
+/** The preview host: the live prototype in a browser window, the review controls, the findings overlay and Annotate. */
 
 import { useCallback, useMemo, useState } from "react";
 import { PrototypeFrame, frameViewOf, initialPrototypeView, reducePrototypeView, type DataSnapshot, type PrototypeViewEvent } from "@wso2/prototype-kit/host";
+import { FEEDBACK_PATH, type FeedbackRequest, type FeedbackSubmission } from "../feedback.js";
 import type { HostConfig, PrototypeRevision } from "../host-config.js";
+import { pinsOnScreen, requestFor } from "./annotations.js";
 import { BrowserWindow } from "./BrowserWindow.js";
+import { FeedbackPanel } from "./FeedbackPanel.js";
 import { FindingsOverlay } from "./FindingsOverlay.js";
 import { useLivePrototype } from "./live.js";
 import { clearSnapshot, loadSnapshot, saveSnapshot } from "./persistence.js";
@@ -51,7 +54,25 @@ function Review({ config, runtime, revision }: { config: HostConfig; runtime: st
   }
   const { view } = current;
   const dispatch = useCallback((event: PrototypeViewEvent) => setState((s) => ({ ...s, view: reducePrototypeView(s.manifest, s.view, event) })), []);
-  const frameView = useMemo(() => frameViewOf(view), [view]);
+
+  // Annotate: the screen's element labels, the queued requests and their pins.
+  const [labels, setLabels] = useState<Record<string, string>>({});
+  const [queue, setQueue] = useState<FeedbackRequest[]>([]);
+  const [queueHash, setQueueHash] = useState(revision.hash);
+  const pins = useMemo(() => pinsOnScreen(queue, view.screenId), [queue, view.screenId]);
+  const frameView = useMemo(() => frameViewOf(view, pins), [view, pins]);
+  const add = (text: string) => {
+    // The feedback is given against the revision showing when its first request was queued.
+    if (queue.length === 0) setQueueHash(revision.hash);
+    setQueue((q) => [...q, requestFor(view, text)]);
+    dispatch({ type: "CLEAR_SELECTION" });
+  };
+  const save = async () => {
+    const body: FeedbackSubmission = { prototypeHash: queueHash, requests: queue };
+    const response = await fetch("feedback", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    if (!response.ok) throw new Error(await response.text());
+    return `Saved ${queue.length} request${queue.length === 1 ? "" : "s"} to ${FEEDBACK_PATH}`;
+  };
 
   // Mock data: persisted per revision when --persist is on; Reset starts from the seed.
   const persist = config.persist;
@@ -83,10 +104,19 @@ function Review({ config, runtime, revision }: { config: HostConfig; runtime: st
             }}
             onToggle={(elementKey) => dispatch({ type: "TOGGLE_SELECTION", elementKey })}
             onEscape={() => dispatch({ type: "CLEAR_SELECTION" })}
-            onElements={() => {}}
+            onElements={(_screenId, elements) => setLabels(Object.fromEntries(elements.map((e) => [e.key, e.label])))}
             onData={onData}
           />
         </BrowserWindow>
+        {view.mode === "annotate" && (
+          <FeedbackPanel
+            selection={view.selectedKeys.map((k) => labels[k] ?? k)}
+            queue={queue}
+            onAdd={add}
+            onRemove={(index) => setQueue((q) => q.filter((_, i) => i !== index))}
+            onSave={save}
+          />
+        )}
       </div>
     </>
   );

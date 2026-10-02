@@ -16,7 +16,7 @@
  * under the License.
  */
 
-/** The review's controls: screen, flow, role and display-state pickers, and Reset data. */
+/** The review's controls: screen, flow, role and display-state pickers, Reset data and the Preview/Annotate toggle. */
 
 import { screensForRole, type PrototypeManifest, type PrototypeViewEvent, type PrototypeViewState } from "@wso2/prototype-kit/host";
 
@@ -77,6 +77,14 @@ export function Toolbar({ manifest, view, dispatch, onReset }: ToolbarProps) {
       <button type="button" onClick={onReset}>
         Reset data
       </button>
+      <span className="ph-modes" role="group" aria-label="Mode">
+        <button type="button" aria-pressed={view.mode === "preview"} onClick={() => dispatch({ type: "EXIT_ANNOTATE" })}>
+          Preview
+        </button>
+        <button type="button" aria-pressed={view.mode === "annotate"} onClick={() => dispatch({ type: "ENTER_ANNOTATE" })}>
+          Annotate
+        </button>
+      </span>
     </header>
   );
 }
