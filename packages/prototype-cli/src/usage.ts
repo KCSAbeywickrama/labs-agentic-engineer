@@ -26,6 +26,8 @@ Commands:
   init [dir]                      Scaffold a minimal valid prototype (prototype.json + prototype.tsx)
   check [dir] [--json] [--theme <package>]
                                   Check the prototype; exit 0 when clean, 1 on findings, 2 on a usage error
+  preview [dir] [--port <n>] [--theme <package>] [--open]
+                                  Serve a live-reloading, playable preview
 
 Options:
   -h, --help                      Show this help

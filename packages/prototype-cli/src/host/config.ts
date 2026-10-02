@@ -16,16 +16,12 @@
  * under the License.
  */
 
-/**
- * Bundle this theme's two runtimes into dist/ with the kit's build helper:
- * `frame-runtime.js` (the sandboxed frame) and `check-runtime.js` (the
- * isolated render check). Runs after `tsc`, from dist/index.js.
- */
+/** The host page's config, from the inert JSON the server or export wrote into the page. */
 
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { buildThemeRuntimes } from "@wso2/prototype-kit/build";
+import { HOST_CONFIG_ID, type HostConfig } from "../host-config.js";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const files = await buildThemeRuntimes({ theme: join(root, "dist", "index.js"), resolveDir: root, outDir: join(root, "dist") });
-process.stdout.write(`built ${files.frameRuntime} and ${files.checkRuntime}\n`);
+export function readHostConfig(): HostConfig {
+  const text = document.getElementById(HOST_CONFIG_ID)?.textContent;
+  if (!text) throw new Error(`the host page has no #${HOST_CONFIG_ID}`);
+  return JSON.parse(text) as HostConfig;
+}

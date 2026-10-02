@@ -17,15 +17,27 @@
  */
 
 /**
- * Bundle this theme's two runtimes into dist/ with the kit's build helper:
- * `frame-runtime.js` (the sandboxed frame) and `check-runtime.js` (the
- * isolated render check). Runs after `tsc`, from dist/index.js.
+ * Bundle the preview/export host app (src/host/main.tsx) into
+ * dist/host/host.js: one IIFE with React and the kit's /host, so neither
+ * `preview` nor `export` runs a bundler at use time.
  */
 
+import { build } from "esbuild";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildThemeRuntimes } from "@wso2/prototype-kit/build";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const files = await buildThemeRuntimes({ theme: join(root, "dist", "index.js"), resolveDir: root, outDir: join(root, "dist") });
-process.stdout.write(`built ${files.frameRuntime} and ${files.checkRuntime}\n`);
+await build({
+  entryPoints: [join(root, "src", "host", "main.tsx")],
+  outfile: join(root, "dist", "host", "host.js"),
+  bundle: true,
+  format: "iife",
+  platform: "browser",
+  target: "es2022",
+  minify: true,
+  legalComments: "none",
+  jsx: "automatic",
+  define: { "process.env.NODE_ENV": '"production"' },
+  logLevel: "warning",
+});
+process.stdout.write("built dist/host/host.js\n");

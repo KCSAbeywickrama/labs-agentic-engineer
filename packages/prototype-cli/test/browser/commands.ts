@@ -1,0 +1,138 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+/**
+ * Node-side commands for the browser lane. They own the processes and pages:
+ * a spawned `prototype preview` over a copy of a fixture, and Playwright pages
+ * (in the test browser's own context) that open it or an exported file. A
+ * target in the app is found through the sandboxed frame, exactly as a person
+ * clicks it.
+ */
+
+import { rmSync } from "node:fs";
+import type { FrameLocator, Locator, Page } from "playwright";
+import type { BrowserCommand } from "vitest/node";
+import { copyFixture, startPreview as spawnPreview, type PreviewProcess } from "../harness.js";
+import type { Action, Preview, Reading, Target } from "./protocol.js";
+
+const previews = new Map<string, PreviewProcess>();
+const pages = new Map<string, { page: Page; requests: string[] }>();
+let next = 1;
+
+const APP_FRAME = 'iframe[title$="prototype app"]';
+
+function preview(id: string): PreviewProcess {
+  const p = previews.get(id);
+  if (!p) throw new Error(`no preview ${id}`);
+  return p;
+}
+
+function page(id: string): Page {
+  const p = pages.get(id);
+  if (!p) throw new Error(`no page ${id}`);
+  return p.page;
+}
+
+function locate(pageId: string, t: Target): Locator {
+  const scope: Page | FrameLocator = t.where === "host" ? page(pageId) : page(pageId).frameLocator(APP_FRAME);
+  const exact = !t.partial;
+  if (t.elementId !== undefined) return scope.locator(`[data-proto-key="${t.elementId}"]`);
+  if (t.role !== undefined) return scope.getByRole(t.role as Parameters<Page["getByRole"]>[0], t.name === undefined ? {} : { name: t.name, exact });
+  if (t.label !== undefined) return scope.getByLabel(t.label, { exact: true });
+  if (t.text !== undefined) return scope.getByText(t.text, { exact });
+  throw new Error(`target has nothing to find it by: ${JSON.stringify(t)}`);
+}
+
+const startPreview: BrowserCommand<[fixture: string, flags?: string[]]> = async (_ctx, fixture, flags = []) => {
+  const p = await spawnPreview(copyFixture(`valid/${fixture}`), flags);
+  const id = String(next++);
+  previews.set(id, p);
+  return { id, url: p.url } satisfies Preview;
+};
+
+const stopPreview: BrowserCommand<[id: string]> = async (_ctx, id) => {
+  await preview(id).stop();
+  rmSync(preview(id).dir, { recursive: true, force: true });
+  previews.delete(id);
+};
+
+const openPage: BrowserCommand<[url: string]> = async (ctx, url) => {
+  const p = await ctx.context.newPage();
+  const requests: string[] = [];
+  p.on("request", (r) => requests.push(r.url()));
+  await p.goto(url);
+  const id = String(next++);
+  pages.set(id, { page: p, requests });
+  return id;
+};
+
+const reloadPage: BrowserCommand<[id: string]> = async (_ctx, id) => {
+  await page(id).reload();
+};
+
+const closePage: BrowserCommand<[id: string]> = async (_ctx, id) => {
+  await page(id).close();
+  pages.delete(id);
+};
+
+const act: BrowserCommand<[pageId: string, target: Target, action: Action]> = async (_ctx, pageId, target, action) => {
+  const l = locate(pageId, target);
+  if (action.type === "click") await l.click();
+  else if (action.type === "fill") await l.fill(action.value);
+  else if (action.type === "press") await l.press(action.key);
+  else await l.selectOption({ label: action.label });
+};
+
+const read: BrowserCommand<[pageId: string, target: Target, reading: Reading]> = async (_ctx, pageId, target, reading) => {
+  const l = locate(pageId, target);
+  if (reading === "count") return l.count();
+  if (reading === "text") return l.innerText();
+  if (reading === "value") return l.inputValue();
+  return l.getAttribute("aria-pressed");
+};
+
+const waitFor: BrowserCommand<[pageId: string, target: Target, state?: "visible" | "hidden"]> = async (_ctx, pageId, target, state = "visible") => {
+  await locate(pageId, target).first().waitFor({ state, timeout: 15_000 });
+};
+
+/** Evaluates an expression inside the sandboxed app frame and returns its result as a string. */
+const evalInApp: BrowserCommand<[pageId: string, expression: string]> = async (_ctx, pageId, expression) => {
+  const handle = await page(pageId).locator(APP_FRAME).elementHandle();
+  const frame = await handle?.contentFrame();
+  if (!frame) throw new Error("the app frame is not there");
+  return String(await frame.evaluate(expression));
+};
+
+const requests: BrowserCommand<[pageId: string]> = (_ctx, pageId) => {
+  const p = pages.get(pageId);
+  if (!p) throw new Error(`no page ${pageId}`);
+  return [...p.requests];
+};
+
+export const commands = {
+  startPreview,
+  stopPreview,
+  openPage,
+  reloadPage,
+  closePage,
+  act,
+  read,
+  waitFor,
+  evalInApp,
+  requests,
+};

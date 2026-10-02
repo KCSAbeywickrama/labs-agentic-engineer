@@ -21,6 +21,7 @@
 import { packageVersion } from "./assets.js";
 import { runCheck } from "./commands/check.js";
 import { runInit } from "./commands/init.js";
+import { runPreview } from "./commands/preview.js";
 import { EXIT, type CliIO } from "./io.js";
 import { USAGE, UsageError } from "./usage.js";
 
@@ -41,6 +42,8 @@ export async function main(argv: readonly string[], io: CliIO): Promise<number> 
         return runInit(rest, io);
       case "check":
         return runCheck(rest, io);
+      case "preview":
+        return await runPreview(rest, io);
       default:
         throw new UsageError(`unknown command ${JSON.stringify(command)}`);
     }

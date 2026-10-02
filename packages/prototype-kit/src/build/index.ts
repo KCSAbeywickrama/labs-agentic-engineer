@@ -18,9 +18,10 @@
 
 /**
  * `@wso2/prototype-kit/build`: bundles a theme with the kit and React into
- * the self-contained runtime the isolated render check runs
- * (`check-runtime.js`), an IIFE: it runs where no module loader exists.
- * Needs `esbuild` (an optional peer dependency).
+ * the two self-contained runtimes a host needs — `frame-runtime.js` (inlined
+ * into the sandboxed frame's `srcdoc`) and `check-runtime.js` (run by the
+ * isolated render check). Both are IIFEs: neither runs where a module loader
+ * exists. Needs `esbuild` (an optional peer dependency).
  */
 
 import { build, type BuildOptions, type StdinOptions } from "esbuild";
@@ -37,6 +38,7 @@ export interface BuildThemeRuntimesOptions {
 }
 
 export interface ThemeRuntimeFiles {
+  frameRuntime: string;
   checkRuntime: string;
 }
 
@@ -57,18 +59,27 @@ function entry(lines: string[], resolveDir: string, sourcefile: string): StdinOp
 
 export async function buildThemeRuntimes(options: BuildThemeRuntimesOptions): Promise<ThemeRuntimeFiles> {
   const theme = JSON.stringify(options.theme);
-  const files: ThemeRuntimeFiles = { checkRuntime: join(options.outDir, "check-runtime.js") };
-  await build({
-    ...COMMON,
-    minify: options.minify ?? true,
-    outfile: files.checkRuntime,
-    // The check context has no DOM: resolve packages for a server render.
-    conditions: ["worker", "browser"],
-    stdin: entry(
-      [`import "@wso2/prototype-kit/build/check-prelude";`, `import theme from ${theme};`, `import { startCheck } from "@wso2/prototype-kit/build/check-entry";`, "startCheck(theme);"],
-      options.resolveDir,
-      "check-runtime-entry.ts",
-    ),
-  });
+  const files: ThemeRuntimeFiles = { frameRuntime: join(options.outDir, "frame-runtime.js"), checkRuntime: join(options.outDir, "check-runtime.js") };
+  const minify = options.minify ?? true;
+  await Promise.all([
+    build({
+      ...COMMON,
+      minify,
+      outfile: files.frameRuntime,
+      stdin: entry([`import theme from ${theme};`, `import { startFrame } from "@wso2/prototype-kit/build/frame-entry";`, "startFrame(theme);"], options.resolveDir, "frame-runtime-entry.ts"),
+    }),
+    build({
+      ...COMMON,
+      minify,
+      outfile: files.checkRuntime,
+      // The check context has no DOM: resolve packages for a server render.
+      conditions: ["worker", "browser"],
+      stdin: entry(
+        [`import "@wso2/prototype-kit/build/check-prelude";`, `import theme from ${theme};`, `import { startCheck } from "@wso2/prototype-kit/build/check-entry";`, "startCheck(theme);"],
+        options.resolveDir,
+        "check-runtime-entry.ts",
+      ),
+    }),
+  ]);
   return files;
 }

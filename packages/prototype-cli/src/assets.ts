@@ -25,6 +25,9 @@ import { fileURLToPath } from "node:url";
 /** The package root (one level above dist/). */
 export const PACKAGE_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
+/** The prebuilt preview host bundle. */
+export const HOST_SCRIPT_PATH = join(PACKAGE_ROOT, "dist", "host", "host.js");
+
 /** The `init` scaffold. */
 export const INIT_TEMPLATE_DIR = join(PACKAGE_ROOT, "templates", "init");
 

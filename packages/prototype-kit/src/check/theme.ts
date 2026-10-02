@@ -16,7 +16,7 @@
  * under the License.
  */
 
-/** Finding a theme's prebuilt check runtime from its package name. */
+/** Finding a theme's prebuilt runtimes from its package name. */
 
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
@@ -24,18 +24,24 @@ import { join, resolve } from "node:path";
 export interface ThemeRuntimes {
   /** The theme's package specifier, as given. */
   name: string;
+  /** Absolute path of the theme's `frame-runtime.js`. */
+  frameRuntimePath: string;
   /** Absolute path of the theme's `check-runtime.js`. */
   checkRuntimePath: string;
 }
 
 export class ThemeNotFoundError extends Error {}
 
-/** Resolves `${specifier}/check-runtime.js` from the first directory that has the package. */
+/** Resolves `${specifier}/frame-runtime.js` and `${specifier}/check-runtime.js` from the first directory that has the package. */
 export function resolveTheme(specifier: string, searchFrom: readonly string[]): ThemeRuntimes {
   for (const from of searchFrom) {
     const require = createRequire(join(resolve(from), "noop.js"));
     try {
-      return { name: specifier, checkRuntimePath: require.resolve(`${specifier}/check-runtime.js`) };
+      return {
+        name: specifier,
+        frameRuntimePath: require.resolve(`${specifier}/frame-runtime.js`),
+        checkRuntimePath: require.resolve(`${specifier}/check-runtime.js`),
+      };
     } catch {
       continue;
     }

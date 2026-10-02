@@ -16,16 +16,19 @@
  * under the License.
  */
 
-/**
- * Bundle this theme's two runtimes into dist/ with the kit's build helper:
- * `frame-runtime.js` (the sandboxed frame) and `check-runtime.js` (the
- * isolated render check). Runs after `tsc`, from dist/index.js.
- */
+/** What the host page is told when it loads, as JSON in `<script id="proto-config">`. Shared by the server and the host app. */
 
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { buildThemeRuntimes } from "@wso2/prototype-kit/build";
+import type { PrototypeManifest } from "@wso2/prototype-kit/manifest";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const files = await buildThemeRuntimes({ theme: join(root, "dist", "index.js"), resolveDir: root, outDir: join(root, "dist") });
-process.stdout.write(`built ${files.frameRuntime} and ${files.checkRuntime}\n`);
+/** One good revision of the prototype. */
+export interface PrototypeRevision {
+  manifest: PrototypeManifest;
+  source: string;
+  /** `prototypeHash` of the two files. */
+  hash: string;
+}
+
+/** Live: the revision and findings arrive over `events`; the frame runtime from `frame-runtime.js`. */
+export type HostConfig = { mode: "preview" };
+
+export const HOST_CONFIG_ID = "proto-config";

@@ -22,9 +22,17 @@
       "types": "./dist/check/index.d.ts",
       "default": "./dist/check/index.js"
     },
+    "./host": {
+      "types": "./dist/host/index.d.ts",
+      "default": "./dist/host/index.js"
+    },
     "./build": {
       "types": "./dist/build/index.d.ts",
       "default": "./dist/build/index.js"
+    },
+    "./build/frame-entry": {
+      "types": "./dist/build/frame-entry.d.ts",
+      "default": "./dist/build/frame-entry.js"
     },
     "./build/check-entry": {
       "types": "./dist/build/check-entry.d.ts",

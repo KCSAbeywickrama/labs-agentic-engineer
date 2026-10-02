@@ -5,19 +5,13 @@
   "license": "Apache-2.0",
   "description": "The default prototype theme: a lightweight plain React + CSS rendering of every @wso2/prototype-kit component, with its prebuilt frame and check runtimes.",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./frame-runtime.js": "./dist/frame-runtime.js",
     "./check-runtime.js": "./dist/check-runtime.js",
     "./package.json": "./package.json"
   },
-  "files": [
-    "dist"
-  ],
-  "engines": {
-    "node": ">=22"
-  },
+  "files": ["dist"],
+  "engines": { "node": ">=22" },
   "scripts": {
     "build": "tsc -p tsconfig.json && tsx scripts/build-runtimes.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -31,9 +25,7 @@
     "react": "^19.0.0"
   },
   "peerDependenciesMeta": {
-    "react": {
-      "optional": true
-    }
+    "react": { "optional": true }
   },
   "devDependencies": {
     "@types/node": "^22",
