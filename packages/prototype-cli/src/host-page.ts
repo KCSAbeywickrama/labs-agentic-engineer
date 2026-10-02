@@ -16,9 +16,17 @@
  * under the License.
  */
 
-/** The preview host page: the config as inert JSON, then the host app's script. */
+/** The preview/export host page: the config as inert JSON, then the host app's script (by URL, or inline for export). */
 
 import { HOST_CONFIG_ID, type HostConfig } from "./host-config.js";
+
+/**
+ * The exported page's CSP: inline script and styles only, nothing fetched.
+ * The sandboxed frame's `srcdoc` document inherits it, so it allows what the
+ * frame's module loader needs (`'unsafe-eval'`) and the frame narrows it
+ * further with its own.
+ */
+export const EXPORT_CSP = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'";
 
 /** JSON that is safe inside a `<script>` element: no `<` survives to close it. */
 function scriptJson(value: unknown): string {
@@ -29,19 +37,21 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-export function renderHostPage(title: string, config: HostConfig): string {
+export function renderHostPage(title: string, config: HostConfig, script: { src: string } | { inline: string }): string {
+  const scriptTag = "src" in script ? `<script type="module" src="${escapeHtml(script.src)}"></script>` : `<script>${script.inline.replace(/<\/script/gi, "<\\/script")}</script>`;
   return [
     "<!doctype html>",
     '<html lang="en">',
     "<head>",
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    ...(config.mode === "export" ? [`<meta http-equiv="Content-Security-Policy" content="${EXPORT_CSP}">`] : []),
     `<title>${escapeHtml(title)}</title>`,
     "</head>",
     "<body>",
     '<div id="root"></div>',
     `<script type="application/json" id="${HOST_CONFIG_ID}">${scriptJson(config)}</script>`,
-    '<script type="module" src="host.js"></script>',
+    scriptTag,
     "</body>",
     "</html>",
   ].join("\n");

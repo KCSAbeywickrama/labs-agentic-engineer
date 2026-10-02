@@ -16,7 +16,7 @@
  * under the License.
  */
 
-/** The preview host: the live prototype in a browser window, the review controls, the findings overlay and Annotate. */
+/** The preview host: the live prototype in a browser window, the review controls, the findings overlay and (in preview) Annotate. */
 
 import { useCallback, useMemo, useState } from "react";
 import { PrototypeFrame, frameViewOf, initialPrototypeView, reducePrototypeView, type DataSnapshot, type PrototypeViewEvent } from "@wso2/prototype-kit/host";
@@ -55,7 +55,8 @@ function Review({ config, runtime, revision }: { config: HostConfig; runtime: st
   const { view } = current;
   const dispatch = useCallback((event: PrototypeViewEvent) => setState((s) => ({ ...s, view: reducePrototypeView(s.manifest, s.view, event) })), []);
 
-  // Annotate: the screen's element labels, the queued requests and their pins.
+  // Annotate (preview only): the screen's element labels, the queued requests and their pins.
+  const annotate = config.mode === "preview";
   const [labels, setLabels] = useState<Record<string, string>>({});
   const [queue, setQueue] = useState<FeedbackRequest[]>([]);
   const [queueHash, setQueueHash] = useState(revision.hash);
@@ -75,7 +76,7 @@ function Review({ config, runtime, revision }: { config: HostConfig; runtime: st
   };
 
   // Mock data: persisted per revision when --persist is on; Reset starts from the seed.
-  const persist = config.persist;
+  const persist = config.mode === "preview" && config.persist;
   const initialData = useMemo(() => (persist ? loadSnapshot(revision.hash) : undefined), [persist, revision.hash]);
   const [resetToken, setResetToken] = useState(0);
   const onData = useCallback((data: DataSnapshot) => persist && saveSnapshot(revision.hash, data), [persist, revision.hash]);
@@ -86,7 +87,7 @@ function Review({ config, runtime, revision }: { config: HostConfig; runtime: st
 
   return (
     <>
-      <Toolbar manifest={manifest} view={view} dispatch={dispatch} onReset={reset} />
+      <Toolbar manifest={manifest} view={view} dispatch={dispatch} onReset={reset} annotate={annotate} />
       <div className="ph-body">
         <BrowserWindow title={manifest.name} address={`prototype://${view.screenId}`}>
           <PrototypeFrame
@@ -108,7 +109,7 @@ function Review({ config, runtime, revision }: { config: HostConfig; runtime: st
             onData={onData}
           />
         </BrowserWindow>
-        {view.mode === "annotate" && (
+        {annotate && view.mode === "annotate" && (
           <FeedbackPanel
             selection={view.selectedKeys.map((k) => labels[k] ?? k)}
             queue={queue}

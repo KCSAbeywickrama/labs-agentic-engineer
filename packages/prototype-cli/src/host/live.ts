@@ -17,9 +17,10 @@
  */
 
 /**
- * The prototype the host shows: the frame runtime is fetched once, and
- * revisions and findings arrive over the event stream (a revision with
- * findings never arrives, so the last good one stays).
+ * The prototype the host shows. Preview: the frame runtime is fetched once
+ * and revisions and findings arrive over the event stream (a revision with
+ * findings never arrives, so the last good one stays). Export: all of it is
+ * in the page.
  */
 
 import { useEffect, useState } from "react";
@@ -35,9 +36,14 @@ export interface LivePrototype {
 }
 
 export function useLivePrototype(config: HostConfig): LivePrototype {
-  const [state, setState] = useState<LivePrototype>({ runtime: null, revision: null, findings: [], error: null });
+  const [state, setState] = useState<LivePrototype>(() =>
+    config.mode === "export"
+      ? { runtime: config.frameRuntime, revision: config.revision, findings: [], error: null }
+      : { runtime: null, revision: null, findings: [], error: null },
+  );
 
   useEffect(() => {
+    if (config.mode !== "preview") return;
     let live = true;
     fetch("frame-runtime.js")
       .then((r) => {

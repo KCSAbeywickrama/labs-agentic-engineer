@@ -28,7 +28,10 @@ export interface PrototypeRevision {
   hash: string;
 }
 
-/** Live: the revision and findings arrive over `events`; the frame runtime from `frame-runtime.js`. */
-export type HostConfig = { mode: "preview"; persist: boolean };
+export type HostConfig =
+  /** Live: the revision and findings arrive over `events`; the frame runtime from `frame-runtime.js`. */
+  | { mode: "preview"; persist: boolean }
+  /** Self-contained: everything is here; no Annotate, no network. */
+  | { mode: "export"; revision: PrototypeRevision; frameRuntime: string };
 
 export const HOST_CONFIG_ID = "proto-config";

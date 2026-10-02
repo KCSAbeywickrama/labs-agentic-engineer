@@ -16,7 +16,7 @@
  * under the License.
  */
 
-/** The review's controls: screen, flow, role and display-state pickers, Reset data and the Preview/Annotate toggle. */
+/** The review's controls: screen, flow, role and display-state pickers, Reset data and (in preview) the Preview/Annotate toggle. */
 
 import { screensForRole, type PrototypeManifest, type PrototypeViewEvent, type PrototypeViewState } from "@wso2/prototype-kit/host";
 
@@ -25,11 +25,13 @@ export interface ToolbarProps {
   view: PrototypeViewState;
   dispatch: (event: PrototypeViewEvent) => void;
   onReset: () => void;
+  /** Whether Annotate is offered (not in an export). */
+  annotate: boolean;
 }
 
 const NO_FLOW = "";
 
-export function Toolbar({ manifest, view, dispatch, onReset }: ToolbarProps) {
+export function Toolbar({ manifest, view, dispatch, onReset, annotate }: ToolbarProps) {
   return (
     <header className="ph-toolbar">
       <strong className="ph-name">{manifest.name}</strong>
@@ -77,14 +79,16 @@ export function Toolbar({ manifest, view, dispatch, onReset }: ToolbarProps) {
       <button type="button" onClick={onReset}>
         Reset data
       </button>
-      <span className="ph-modes" role="group" aria-label="Mode">
-        <button type="button" aria-pressed={view.mode === "preview"} onClick={() => dispatch({ type: "EXIT_ANNOTATE" })}>
-          Preview
-        </button>
-        <button type="button" aria-pressed={view.mode === "annotate"} onClick={() => dispatch({ type: "ENTER_ANNOTATE" })}>
-          Annotate
-        </button>
-      </span>
+      {annotate && (
+        <span className="ph-modes" role="group" aria-label="Mode">
+          <button type="button" aria-pressed={view.mode === "preview"} onClick={() => dispatch({ type: "EXIT_ANNOTATE" })}>
+            Preview
+          </button>
+          <button type="button" aria-pressed={view.mode === "annotate"} onClick={() => dispatch({ type: "ENTER_ANNOTATE" })}>
+            Annotate
+          </button>
+        </span>
+      )}
     </header>
   );
 }

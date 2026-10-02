@@ -46,6 +46,7 @@ export const driver = {
   removeFile: (preview: string, path: string) => call("removeFile")(preview, path) as Promise<void>,
   replaceWithDirectory: (preview: string, path: string) => call("replaceWithDirectory")(preview, path) as Promise<void>,
   revisionHash: (preview: string) => call("revisionHash")(preview) as Promise<string>,
+  exportFixture: (fixture: string) => call("exportFixture")(fixture) as Promise<string>,
 };
 
 export const app = {

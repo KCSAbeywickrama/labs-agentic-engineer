@@ -137,7 +137,7 @@ export async function startPreviewServer(options: PreviewServerOptions): Promise
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
     if (req.method === "GET" && path === "/") {
       const title = watcher.status().lastGood?.manifest.name ?? "Prototype";
-      return send(res, 200, "text/html; charset=utf-8", renderHostPage(`${title} — prototype preview`, { mode: "preview", persist: options.persist }), NOT_FRAMEABLE);
+      return send(res, 200, "text/html; charset=utf-8", renderHostPage(`${title} — prototype preview`, { mode: "preview", persist: options.persist }, { src: "host.js" }), NOT_FRAMEABLE);
     }
     if (req.method === "GET" && path === "/host.js") return sendFile(res, HOST_SCRIPT_PATH);
     if (req.method === "GET" && path === "/frame-runtime.js") return sendFile(res, options.theme.frameRuntimePath);

@@ -27,9 +27,10 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { FrameLocator, Locator, Page } from "playwright";
 import type { BrowserCommand } from "vitest/node";
-import { copyFixture, startPreview as spawnPreview, type PreviewProcess } from "../harness.js";
+import { copyFixture, runCli, startPreview as spawnPreview, tempDir, type PreviewProcess } from "../harness.js";
 import type { Action, Preview, Reading, Target } from "./protocol.js";
 
 const previews = new Map<string, PreviewProcess>();
@@ -158,6 +159,14 @@ const revisionHash: BrowserCommand<[previewId: string]> = (_ctx, previewId) => {
   return createHash("sha256").update(readFileSync(join(dir, "prototype.json"))).update("\u0000").update(readFileSync(join(dir, "prototype.tsx"))).digest("hex");
 };
 
+/** Exports a fixture with the CLI and returns the file's URL. */
+const exportFixture: BrowserCommand<[fixture: string]> = (_ctx, fixture) => {
+  const out = join(tempDir(), `${fixture}.html`);
+  const run = runCli(["export", copyFixture(`valid/${fixture}`), "-o", out]);
+  if (run.status !== 0) throw new Error(`export failed: ${run.stderr}`);
+  return pathToFileURL(out).href;
+};
+
 export const commands = {
   startPreview,
   stopPreview,
@@ -175,4 +184,5 @@ export const commands = {
   removeFile,
   replaceWithDirectory,
   revisionHash,
+  exportFixture,
 };
