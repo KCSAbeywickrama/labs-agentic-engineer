@@ -20,7 +20,12 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 
+// Same target and variable as the console's dev server, so one dev-env serves
+// both: the new app runs beside it on :8091 until switch-over.
 const apiTarget = process.env.API_PROXY_TARGET || "http://localhost:9090";
+// The collab room's WebSocket, which the app opens same-origin at /collab as
+// the in-cluster console does (its nginx forwards /collab to the collab server).
+const collabTarget = process.env.COLLAB_PROXY_TARGET || "ws://localhost:3400";
 
 export default defineConfig({
   plugins: [
@@ -38,17 +43,26 @@ export default defineConfig({
   optimizeDeps: {
     include: ["@wso2/oxygen-ui-icons-react > lucide-react"],
   },
+  // As the console's: the design viewers (Excalidraw's canvas) read these
+  // Node globals.
   define: {
     global: "globalThis",
     "process.env": {},
   },
   server: {
-    port: 8090,
+    port: 8091,
+    // A fixed port: it is registered as a redirect URI on aep-console-client.
+    strictPort: true,
     proxy: {
       "/aep-api-service": {
         target: apiTarget,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/aep-api-service/, ""),
+      },
+      "/collab": {
+        target: collabTarget,
+        ws: true,
+        changeOrigin: true,
       },
     },
   },

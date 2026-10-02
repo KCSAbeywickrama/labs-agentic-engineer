@@ -19,21 +19,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../../generated/aep-api";
 import { client } from "../../../api/client";
-import { configKeys, resourceKeys, skillsKeys } from "./keys";
+import { configKeys, skillsKeys } from "./keys";
 import { ApiRequestError, apiErrorMessage } from "../../../api/errors";
 
 type ConfigProjection = components["schemas"]["ConfigProjection"];
 type ConfigPatch = components["schemas"]["ConfigPatch"];
 type LLMPatch = components["schemas"]["LLMPatch"];
-type CreateSkillInput = components["schemas"]["CreateSkillInput"];
-type UpdateSkillInput = components["schemas"]["UpdateSkillInput"];
 
 function errorMessage(error: unknown, fallback: string): string {
   return apiErrorMessage(error, fallback);
 }
 
-// --- Org config: GitHub + the model connection (+ IDP, read-only here — out of scope
-// for this feature, issue #96) --------------------------------------------
+// --- Org config: GitHub + the model connection --------------------------
 
 export function useConfig() {
   return useQuery({
@@ -106,172 +103,7 @@ export function useConnectGitHubPat() {
   });
 }
 
-// The cascade endpoint, not a plain patch — PATCH {gitProvider: null} is
-// rejected by the BE for exactly this reason.
-export function useDisconnectGitProvider() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (uninstall: boolean) => {
-      const { error } = await client.POST("/config/git-provider/disconnect", {
-        params: { query: { uninstall } },
-      });
-      if (error) {
-        throw new Error(errorMessage(error, "Failed to disconnect GitHub"));
-      }
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: configKeys.all });
-    },
-  });
-}
-
 // --- Skills catalogue (repo-backed — see reconcile.go; no DB table) -------
-
-// Returns the whole envelope: `skills` plus `repoUrl` (the org skills repo
-// backing the catalogue — powers the Import dialog's via-PR guidance link).
-export function useSkills() {
-  return useQuery({
-    queryKey: skillsKeys.lists(),
-    queryFn: async () => {
-      const { data, error } = await client.GET("/skills");
-      if (error) {
-        throw new Error(errorMessage(error, "Failed to load skills"));
-      }
-      return { skills: data.skills ?? [], repoUrl: data.repoUrl };
-    },
-    staleTime: 30_000,
-  });
-}
-
-export function useSkillUpdates() {
-  return useQuery({
-    queryKey: skillsKeys.updates(),
-    queryFn: async () => {
-      const { data, error } = await client.GET("/skills/updates");
-      if (error) {
-        throw new Error(errorMessage(error, "Failed to load skill updates"));
-      }
-      return data.updates ?? [];
-    },
-    staleTime: 30_000,
-  });
-}
-
-export function useSkill(name: string) {
-  return useQuery({
-    queryKey: skillsKeys.detail(name),
-    queryFn: async () => {
-      const { data, error } = await client.GET("/skills/{name}", {
-        params: { path: { name } },
-      });
-      if (error) {
-        throw new Error(errorMessage(error, "Failed to load skill"));
-      }
-      return data;
-    },
-    enabled: name.length > 0,
-  });
-}
-
-export function useCreateSkill() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (body: CreateSkillInput) => {
-      const { data, error } = await client.POST("/skills", { body });
-      if (error) {
-        throw new Error(errorMessage(error, "Failed to create the skill"));
-      }
-      return data;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: skillsKeys.lists() });
-    },
-  });
-}
-
-export function useUpdateSkill(name: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (body: UpdateSkillInput) => {
-      const { data, error } = await client.PUT("/skills/{name}", {
-        params: { path: { name } },
-        body,
-      });
-      if (error) {
-        throw new Error(errorMessage(error, "Failed to update the skill"));
-      }
-      return data;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: skillsKeys.lists() });
-      void queryClient.invalidateQueries({ queryKey: skillsKeys.detail(name) });
-    },
-  });
-}
-
-export function useDeleteSkill() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (name: string) => {
-      const { error } = await client.DELETE("/skills/{name}", {
-        params: { path: { name } },
-      });
-      if (error) {
-        throw new Error(errorMessage(error, "Failed to delete the skill"));
-      }
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: skillsKeys.lists() });
-    },
-  });
-}
-
-// Non-destructive availability toggle (ADR-0014): withholds the skill from
-// the platform's agents without touching its content, so the list and the
-// detail view (opened via View) must both reflect the new state.
-export function useSetSkillEnabled() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ name, enabled }: { name: string; enabled: boolean }) => {
-      const { data, error } = await client.PATCH("/skills/{name}", {
-        params: { path: { name } },
-        body: { enabled },
-      });
-      if (error) {
-        throw new Error(errorMessage(error, "Failed to update the skill"));
-      }
-      return data;
-    },
-    onSuccess: (_data, { name }) => {
-      void queryClient.invalidateQueries({ queryKey: skillsKeys.lists() });
-      void queryClient.invalidateQueries({ queryKey: skillsKeys.detail(name) });
-    },
-  });
-}
-
-export function useImportSkill() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (file: File) => {
-      const formData = new FormData();
-      formData.append("file", file);
-      // openapi-fetch's default bodySerializer passes FormData through
-      // untouched and lets the browser set the multipart boundary — the
-      // declared `{file: string}` request type only describes the JSON
-      // Schema shape, not the wire body, hence the cast.
-      const { data, error } = await client.POST("/skills/import", {
-        body: formData as unknown as { file: string },
-      });
-      if (error) {
-        throw new Error(errorMessage(error, "Failed to import the skill"));
-      }
-      return data;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: skillsKeys.lists() });
-    },
-  });
-}
 
 // All-or-nothing: the BE's sync-skills takes no body and reconciles every
 // embedded skill in one commit (`Reconcile`). There is no per-skill selection.
@@ -288,54 +120,6 @@ export function useSyncSkills() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: skillsKeys.lists() });
       void queryClient.invalidateQueries({ queryKey: skillsKeys.updates() });
-    },
-  });
-}
-
-// --- Resources (org-settings "Resources" tabs: platform-provisioned types +
-// the external-resource catalog) ------------------------------------------
-
-export function usePlatformResourceTypes() {
-  return useQuery({
-    queryKey: resourceKeys.platformTypes,
-    queryFn: async () => {
-      const { data, error } = await client.GET("/dependencies/platform-resource-types");
-      if (error) {
-        throw new Error(errorMessage(error, "Failed to load platform resource types"));
-      }
-      return data;
-    },
-    staleTime: 30_000,
-  });
-}
-
-export function useExternalResources() {
-  return useQuery({
-    queryKey: resourceKeys.external,
-    queryFn: async () => {
-      const { data, error } = await client.GET("/dependencies/external-resources");
-      if (error) {
-        throw new Error(errorMessage(error, "Failed to load external resources"));
-      }
-      return data;
-    },
-    staleTime: 30_000,
-  });
-}
-
-export function useDeleteExternalResource() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (name: string) => {
-      const { error } = await client.DELETE("/dependencies/external-resources/{name}", {
-        params: { path: { name } },
-      });
-      if (error) {
-        throw new Error(errorMessage(error, "Failed to delete the external resource"));
-      }
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: resourceKeys.external });
     },
   });
 }

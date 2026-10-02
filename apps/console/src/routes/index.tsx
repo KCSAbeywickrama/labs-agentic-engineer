@@ -17,8 +17,9 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { ProjectsList } from "../features/projects/components/ProjectsList";
+import { ProjectsGrid } from "../features/projects/components/ProjectsGrid";
 
+// The org's base page: the Projects grid.
 export const Route = createFileRoute("/")({
-  component: ProjectsList,
+  component: ProjectsGrid,
 });

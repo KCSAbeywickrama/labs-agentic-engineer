@@ -20,16 +20,13 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  AcrylicOrangeTheme,
-  CssBaseline,
-  OxygenUIThemeProvider,
-} from "@wso2/oxygen-ui";
+import { CssBaseline, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import { AppAuthProvider } from "./auth/AuthProvider";
+import { aepTheme } from "./theme/aepTheme";
 import { router } from "./router";
 
-// api-guidelines: retry 3 for queries (TanStack default, made explicit),
-// no automatic retry for mutations; per-query staleTime set at the hook.
+// Retry 3 for queries (TanStack default, made explicit), no automatic retry
+// for mutations; per-query staleTime is set at the hook.
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: { retry: 3 },
@@ -37,9 +34,10 @@ const queryClient = new QueryClient({
   },
 });
 
-// Mock layer: dev-only, dynamic-import-guarded. `import.meta.env.DEV` is
-// statically false in production builds, so the whole branch — and the msw
-// chunk — is eliminated from the prod bundle.
+// Mock mode (VITE_API_MODE=mock) runs the whole app on MSW handlers and
+// fixtures: every screen is built and approved on it before it is wired to
+// aep-api. Dev-only and dynamic-import-guarded: `import.meta.env.DEV` is
+// statically false in production builds, so the msw chunk is eliminated.
 async function enableMocking(): Promise<void> {
   if (!import.meta.env.DEV || import.meta.env.VITE_API_MODE !== "mock") {
     return;
@@ -51,9 +49,9 @@ async function enableMocking(): Promise<void> {
 void enableMocking().then(() => {
   createRoot(document.getElementById("app")!).render(
     <StrictMode>
-      {/* Auth outermost (issue #91): the OIDC session exists before any UI. */}
+      {/* Auth outermost: the OIDC session exists before any UI. */}
       <AppAuthProvider>
-        <OxygenUIThemeProvider theme={AcrylicOrangeTheme}>
+        <OxygenUIThemeProvider theme={aepTheme}>
           <CssBaseline />
           <QueryClientProvider client={queryClient}>
             <RouterProvider router={router} />

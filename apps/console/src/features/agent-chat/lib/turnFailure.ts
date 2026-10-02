@@ -20,15 +20,29 @@
 // service could name (TurnStatus.code — the model provider's usage limit, a
 // write the output limit cut off) is phrased from its fields, so a provider
 // limit says whose plan is spent and when to try again, in the reader's own
-// time zone; anything else shows the message the platform recorded.
+// time zone; anything else shows the message the platform recorded. Copied
+// from the console's agent-chat/lib/turnFailure.ts, with its lib/resetStamp.ts
+// folded in (nothing else here says when a provider limit lifts yet).
 
 import type { components } from "../../../generated/aep-api";
-import { resetStamp } from "../../../lib/resetStamp";
 
 type TurnStatus = components["schemas"]["TurnStatus"];
 
 /** What a turn failure says about itself: the status read, or the `turn-failed` event. */
 export type TurnFailure = Pick<TurnStatus, "code" | "host" | "resetAt" | "message">;
+
+/**
+ * A model provider's reset time as a reader plans around it: the time alone
+ * today, the date as well when the plan resets another day. An unparseable
+ * value is shown as given rather than as "Invalid Date".
+ */
+function resetStamp(iso: string, now: Date): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const time: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit" };
+  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString(undefined, time);
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", ...time });
+}
 
 export function turnFailureText(f: TurnFailure, now: Date = new Date()): string {
   if (f.code === "provider_limit") {

@@ -18,23 +18,13 @@
 
 import { createRouter } from "@tanstack/react-router";
 import { routeTree } from "./generated/routeTree.gen";
-import { NotFound } from "./components/NotFound";
 
-// Module-scoped so non-component code (the OIDC signin callback) can
+// Module-scoped so non-component code (the OIDC sign-in callback) can
 // navigate without a hook.
-export const router = createRouter({
-  routeTree,
-  // Any unmatched URL (Task 4) — renders inside the root route's outlet, so
-  // it stays within the signed-in app shell rather than a bare page.
-  defaultNotFoundComponent: NotFound,
-});
+export const router = createRouter({ routeTree });
 
 declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router;
-  }
-  /** Composer → register form. History state, never a search param (reload must not re-seed chat). */
-  interface HistoryState {
-    registerPrompt?: string;
   }
 }
