@@ -28,7 +28,8 @@
  *
  * Screen, flow, state, role, manifest-replaced and mode changes clear the
  * selection, so a request never refers to something no longer on screen.
- * Every event is checked against the manifest, so the state stays reachable.
+ * Every event is checked against the manifest (a navigation also against the
+ * current role's screens), so the state stays reachable.
  */
 
 import { screensForRole } from "../manifest/screens.js";
@@ -81,7 +82,7 @@ export function reducePrototypeView(manifest: PrototypeManifest, s: PrototypeVie
     case "TOGGLE_SELECTION":
       return toggleSelection(s, e.elementKey);
     case "NAVIGATE":
-      if (!manifest.screens.some((x) => x.id === e.screenId) || e.screenId === s.screenId) return s;
+      if (e.screenId === s.screenId || !screensForRole(manifest, s.roleId).some((x) => x.id === e.screenId)) return s;
       return { ...s, screenId: e.screenId, selectedKeys: [] };
     case "SET_ROLE": {
       if (!manifest.roles.some((r) => r.id === e.roleId)) return s;

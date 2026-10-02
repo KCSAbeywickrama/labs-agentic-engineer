@@ -60,7 +60,10 @@ function Review({ runtime, revision }: { runtime: string; revision: PrototypeRev
             source={revision.source}
             version={revision.hash}
             view={frameViewOf(view)}
-            onNavigate={(screenId) => dispatch({ type: "NAVIGATE", screenId })}
+            onNavigate={(screenId) => {
+              // The frame is untrusted: only Preview navigates (the reducer checks the target against the role).
+              if (view.mode === "preview") dispatch({ type: "NAVIGATE", screenId });
+            }}
             onToggle={(elementKey) => dispatch({ type: "TOGGLE_SELECTION", elementKey })}
             onEscape={() => dispatch({ type: "CLEAR_SELECTION" })}
             onElements={() => {}}

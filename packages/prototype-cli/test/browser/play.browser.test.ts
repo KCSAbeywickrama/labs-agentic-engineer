@@ -83,6 +83,20 @@ describe("prototype preview — playing a prototype", () => {
     await driver.waitFor(page, app.text("Fix 1 problem"));
   });
 
+  it("stays put when the frame asks for a screen the role cannot reach", async () => {
+    // The render check rejects a control that targets such a screen, so the request comes straight from the (untrusted) frame.
+    await driver.click(page, app.row("Alan Turing"));
+    await driver.waitFor(page, app.heading("Alan Turing"));
+    await driver.select(page, host.picker("Role"), "Viewer");
+    await driver.waitFor(page, app.button("Edit"), "hidden");
+    await driver.evalInApp(page, `parent.postMessage({ type: "proto:navigate", screenId: "screen.edit" }, "*"); new Promise((r) => setTimeout(r, 500))`);
+    expect(await driver.read(page, host.picker("Screen"), "value")).toBe("screen.contact");
+    expect(await driver.count(page, app.heading("Edit Alan Turing"))).toBe(0);
+    // A screen the role does reach still follows.
+    await driver.evalInApp(page, `parent.postMessage({ type: "proto:navigate", screenId: "screen.settings" }, "*")`);
+    await driver.waitFor(page, app.heading("Settings"));
+  });
+
   it("edits and deletes a record", async () => {
     await driver.click(page, app.row("Ada Lovelace"));
     await driver.click(page, app.button("Edit"));
