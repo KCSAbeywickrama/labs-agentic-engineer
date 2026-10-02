@@ -109,7 +109,7 @@ func probeSreModel(ctx context.Context, client *http.Client, m sreModel) error {
 	if err != nil {
 		return fmt.Errorf("could not reach %s to check the SRE model key: %w", m.BaseURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return nil
