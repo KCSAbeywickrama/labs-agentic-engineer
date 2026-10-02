@@ -16,17 +16,12 @@
  * under the License.
  */
 
-/** The CLI's usage text and its usage error (exit 2). */
+/**
+ * How a `<Button submit>` reaches its `<Form>`. Not the native form submit:
+ * the sandboxed frame has no `allow-forms`, so a browser never fires a
+ * submit event there. The Form provides its submit; the Button calls it.
+ */
 
-export class UsageError extends Error {}
+import { createContext } from "react";
 
-export const USAGE = `Usage: prototype <command> [options]
-
-Commands:
-  check [dir] [--json] [--theme <package>]
-                                  Check the prototype; exit 0 when clean, 1 on findings, 2 on a usage error
-
-Options:
-  -h, --help                      Show this help
-  --version                       Show the version
-`;
+export const FormSubmitContext = createContext<(() => void) | null>(null);

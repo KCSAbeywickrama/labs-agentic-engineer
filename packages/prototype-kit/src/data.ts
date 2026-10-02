@@ -16,17 +16,22 @@
  * under the License.
  */
 
-/** The CLI's usage text and its usage error (exit 2). */
+/**
+ * The mock data a prototype runs on, as it crosses the bridge: `defineApp`'s
+ * `data`, keyed by name. An array of records that each have a string `id` is
+ * a collection; anything else is a single value. JSON only.
+ */
 
-export class UsageError extends Error {}
+export type DataSnapshot = Record<string, unknown>;
 
-export const USAGE = `Usage: prototype <command> [options]
+export interface DataRecord {
+  id: string;
+  [field: string]: unknown;
+}
 
-Commands:
-  check [dir] [--json] [--theme <package>]
-                                  Check the prototype; exit 0 when clean, 1 on findings, 2 on a usage error
-
-Options:
-  -h, --help                      Show this help
-  --version                       Show the version
-`;
+export function isCollection(value: unknown): value is DataRecord[] {
+  return (
+    Array.isArray(value) &&
+    value.every((r) => typeof r === "object" && r !== null && !Array.isArray(r) && typeof (r as { id?: unknown }).id === "string")
+  );
+}

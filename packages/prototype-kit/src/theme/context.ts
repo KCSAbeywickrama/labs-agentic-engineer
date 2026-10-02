@@ -16,17 +16,15 @@
  * under the License.
  */
 
-/** The CLI's usage text and its usage error (exit 2). */
+/** The active theme's registry, read by every kit component stub to draw itself. */
 
-export class UsageError extends Error {}
+import { createContext, useContext, type ComponentType } from "react";
+import type { KitComponentName, KitComponentProps, ThemeRegistry } from "./contract.js";
 
-export const USAGE = `Usage: prototype <command> [options]
+export const ThemeContext = createContext<ThemeRegistry | null>(null);
 
-Commands:
-  check [dir] [--json] [--theme <package>]
-                                  Check the prototype; exit 0 when clean, 1 on findings, 2 on a usage error
-
-Options:
-  -h, --help                      Show this help
-  --version                       Show the version
-`;
+export function useThemed<K extends KitComponentName>(name: K): ComponentType<KitComponentProps[K]> {
+  const registry = useContext(ThemeContext);
+  if (!registry) throw new Error(`<${name}> renders only inside a prototype screen`);
+  return registry[name] as ComponentType<KitComponentProps[K]>;
+}

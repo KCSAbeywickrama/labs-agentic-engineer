@@ -16,17 +16,26 @@
  * under the License.
  */
 
-/** The CLI's usage text and its usage error (exit 2). */
+// Fixture: useCollection of a name data does not have.
 
-export class UsageError extends Error {}
+import { Button, Heading, Screen, Text, defineApp, useDisplayState, useCollection, useNav, useRole } from "@wso2/prototype-kit";
 
-export const USAGE = `Usage: prototype <command> [options]
+function Home() {
+  const contacts = useCollection<{ id: string }>("contacts");
+  return (
+    <Screen>
+      <Heading id="heading.home" text="Home" />
+      <Text id="text.count" text={String(contacts.items.length)} />
+    </Screen>
+  );
+}
 
-Commands:
-  check [dir] [--json] [--theme <package>]
-                                  Check the prototype; exit 0 when clean, 1 on findings, 2 on a usage error
+function Admin() {
+  return (
+    <Screen>
+      <Heading id="heading.admin" text="Administration" />
+    </Screen>
+  );
+}
 
-Options:
-  -h, --help                      Show this help
-  --version                       Show the version
-`;
+export default defineApp({ screens: { "screen.home": Home, "screen.admin": Admin } });

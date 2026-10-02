@@ -38,6 +38,7 @@ describe("prototype (usage)", () => {
     [["frobnicate"], 'unknown command "frobnicate"'],
     [["check", "--nope"], "Unknown option '--nope'"],
     [["check", "a", "b"], 'unexpected argument "b"'],
+    [["check", fixturePath("valid/baseline"), "--theme", "@wso2/no-such-theme"], 'theme "@wso2/no-such-theme" was not found'],
   ])("exits 2 with usage on %j", (args, message) => {
     const run = runCli(args);
     expect(run.status).toBe(2);

@@ -16,17 +16,25 @@
  * under the License.
  */
 
-/** The CLI's usage text and its usage error (exit 2). */
+// Fixture: a repeated id with quotes and an ampersand.
 
-export class UsageError extends Error {}
+import { Button, Heading, Screen, Text, defineApp, useDisplayState, useNav, useRole } from "@wso2/prototype-kit";
 
-export const USAGE = `Usage: prototype <command> [options]
+function Home() {
+  return (
+    <Screen>
+      <Heading id="heading.home" text="Home" />
+    </Screen>
+  );
+}
 
-Commands:
-  check [dir] [--json] [--theme <package>]
-                                  Check the prototype; exit 0 when clean, 1 on findings, 2 on a usage error
+function Admin() {
+  return (
+    <Screen>
+      <Text id={'say "hi" & bye'} text="One" />
+      <Text id={'say "hi" & bye'} text="Two" />
+    </Screen>
+  );
+}
 
-Options:
-  -h, --help                      Show this help
-  --version                       Show the version
-`;
+export default defineApp({ screens: { "screen.home": Home, "screen.admin": Admin } });

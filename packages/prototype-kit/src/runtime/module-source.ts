@@ -16,17 +16,7 @@
  * under the License.
  */
 
-/** The CLI's usage text and its usage error (exit 2). */
-
-export class UsageError extends Error {}
-
-export const USAGE = `Usage: prototype <command> [options]
-
-Commands:
-  check [dir] [--json] [--theme <package>]
-                                  Check the prototype; exit 0 when clean, 1 on findings, 2 on a usage error
-
-Options:
-  -h, --help                      Show this help
-  --version                       Show the version
-`;
+/** The source of the factory a transpiled module body runs in: strict mode, CommonJS `require`/`module`/`exports`. React-free, for the node-side check. */
+export function moduleFactorySource(code: string): string {
+  return `(function (require, module, exports) {"use strict";\n${code}\n})`;
+}

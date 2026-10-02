@@ -67,6 +67,27 @@ const invalid: Row[] = [
   // Source: literal navigation targets against the manifest.
   { fixture: "source-unknown-to", findings: [["UNKNOWN_NAV_TARGET", "prototype.tsx", "line 27"]], message: /screen\.reports/ },
   { fixture: "source-unknown-go", findings: [["UNKNOWN_NAV_TARGET", "prototype.tsx", "line 28"]], message: /screen\.audit/ },
+  // Render: every screen × role × state, isolated.
+  { fixture: "render-throws-in-one-state", findings: [["RENDER_FAILED", "prototype.tsx", "screen.home as user in state.empty"]], message: /reading 'join'/ },
+  { fixture: "render-throws-for-one-role", findings: [["RENDER_FAILED", "prototype.tsx", "screen.home as admin in state.default"]], message: /reading 'name'/ },
+  { fixture: "render-duplicate-element-id", findings: [["DUPLICATE_ELEMENT_ID", "prototype.tsx", "screen.admin as admin in state.default"]], message: /"heading\.admin"/ },
+  { fixture: "render-duplicate-id-special-chars", findings: [["DUPLICATE_ELEMENT_ID", "prototype.tsx", "screen.admin as admin in state.default"]], message: /"say \\"hi\\" & bye"/ },
+  { fixture: "render-unreachable-to", findings: [["UNKNOWN_NAV_TARGET", "prototype.tsx", "screen.home as user in state.default"]], message: /role "user" does not reach/ },
+  { fixture: "render-missing-element-id", findings: [["RENDER_FAILED", "prototype.tsx", "screen.admin as admin in state.default"]], message: /<Text> needs an id/ },
+  { fixture: "render-no-default-export", findings: [["NO_APP", "prototype.tsx", "module"]] },
+  {
+    fixture: "render-screen-mismatch",
+    findings: [
+      ["SCREEN_MISMATCH", "prototype.tsx", "screen.extra"],
+      ["SCREEN_MISMATCH", "prototype.tsx", "screen.admin"],
+    ],
+  },
+  { fixture: "render-unknown-collection", findings: [["RENDER_FAILED", "prototype.tsx", "screen.home as user in state.default"]], message: /no collection named "contacts"/ },
+  { fixture: "render-data-not-json", findings: [["RENDER_FAILED", "prototype.tsx", "module"]], message: /data\.lookup is not JSON/ },
+  // Sandbox-escape attempts: refused by the isolated render, not just the static rules.
+  { fixture: "escape-computed-constructor", findings: [["RENDER_FAILED", "prototype.tsx", "module"]], message: /Code generation from strings disallowed/ },
+  { fixture: "escape-prototype-pollution", findings: [["RENDER_FAILED", "prototype.tsx", "module"]], message: /not extensible/ },
+  { fixture: "escape-kit-function", findings: [["RENDER_FAILED", "prototype.tsx", "module"]], message: /Code generation from strings disallowed/ },
 ];
 
 describe("prototype check --json", () => {
@@ -103,4 +124,14 @@ describe("prototype check --json", () => {
     expect(findings.map((f): Expected => [f.code, f.file, f.location])).toEqual([["SOURCE_TOO_LARGE", "prototype.tsx", "(file)"]]);
     expect(status).toBe(1);
   });
+
+  // Review Focus: a screen that never finishes rendering must not hang the agent's check loop.
+  it("ends a render that never finishes with RENDER_FAILED inside the time cap", () => {
+    const started = Date.now();
+    const { status, findings } = checkJson(fixturePath("invalid/render-hangs"), 40_000);
+    expect(findings.map((f): Expected => [f.code, f.file, f.location])).toEqual([["RENDER_FAILED", "prototype.tsx", "module"]]);
+    expect(findings[0]?.message).toMatch(/took longer than 15s/);
+    expect(status).toBe(1);
+    expect(Date.now() - started).toBeLessThan(30_000);
+  }, 45_000);
 });

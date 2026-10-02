@@ -16,17 +16,16 @@
  * under the License.
  */
 
-/** The CLI's usage text and its usage error (exit 2). */
+/**
+ * Bundle this theme's check runtime into dist/ with the kit's build helper:
+ * `check-runtime.js` (the isolated render check). Runs after `tsc`, from
+ * dist/index.js.
+ */
 
-export class UsageError extends Error {}
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { buildThemeRuntimes } from "@wso2/prototype-kit/build";
 
-export const USAGE = `Usage: prototype <command> [options]
-
-Commands:
-  check [dir] [--json] [--theme <package>]
-                                  Check the prototype; exit 0 when clean, 1 on findings, 2 on a usage error
-
-Options:
-  -h, --help                      Show this help
-  --version                       Show the version
-`;
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const files = await buildThemeRuntimes({ theme: join(root, "dist", "index.js"), resolveDir: root, outDir: join(root, "dist") });
+process.stdout.write(`built ${files.checkRuntime}\n`);

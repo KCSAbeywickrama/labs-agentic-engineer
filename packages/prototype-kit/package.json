@@ -5,6 +5,10 @@
   "license": "Apache-2.0",
   "description": "The kit a generated prototype is written against (defineApp, hooks, a mock data store, neutral components), plus the manifest schema, the source and render checks, the sandboxed frame host and the theme build helper.",
   "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
     "./manifest": {
       "types": "./dist/manifest/index.d.ts",
       "default": "./dist/manifest/index.js"
@@ -17,6 +21,18 @@
     "./check": {
       "types": "./dist/check/index.d.ts",
       "default": "./dist/check/index.js"
+    },
+    "./build": {
+      "types": "./dist/build/index.d.ts",
+      "default": "./dist/build/index.js"
+    },
+    "./build/check-entry": {
+      "types": "./dist/build/check-entry.d.ts",
+      "default": "./dist/build/check-entry.js"
+    },
+    "./build/check-prelude": {
+      "types": "./dist/build/check-prelude.d.ts",
+      "default": "./dist/build/check-prelude.js"
     },
     "./package.json": "./package.json"
   },
@@ -41,8 +57,29 @@
     "sucrase": "^3.35.1",
     "zod": "^4.3.6"
   },
+  "peerDependencies": {
+    "esbuild": ">=0.25.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "esbuild": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/node": "^22",
+    "@types/react": "19.1.6",
+    "@types/react-dom": "19.0.2",
+    "esbuild": "^0.28.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
     "tsx": "^4.21.0",
     "typescript": "5.9.3",
     "vitest": "^4.1.10"
