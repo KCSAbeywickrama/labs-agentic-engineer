@@ -983,6 +983,12 @@ importers:
       '@types/ws':
         specifier: ^8.18.0
         version: 8.18.2
+      '@wso2/prototype-kit':
+        specifier: workspace:*
+        version: link:../../packages/prototype-kit
+      '@wso2/prototype-theme-default':
+        specifier: workspace:*
+        version: link:../../packages/prototype-theme-default
       tsx:
         specifier: ^4.21.0
         version: 4.23.15

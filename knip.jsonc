@@ -49,7 +49,11 @@
     // The packages' scripts/ run from package.json scripts (tsx), not imports.
     "packages/prototype-cli/test/**",
     "packages/prototype-cli/src/host/**",
-    "packages/prototype-*/scripts/**"
+    "packages/prototype-*/scripts/**",
+    // The agents `gen` script (package.json) pastes the kit reference into the
+    // prototype skill; the freshness test imports the same module, which
+    // --production strips.
+    "services/agents/scripts/**"
   ],
   // @aep/console: TanStack file routes are consumed only by the generated
   // route tree, which is gitignored and so invisible to knip; each route file is

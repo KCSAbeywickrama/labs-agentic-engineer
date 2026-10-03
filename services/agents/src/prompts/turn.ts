@@ -222,7 +222,44 @@ const FLOW_SUPPORTING_SKILLS: Record<string, string[]> = {
   // `acceptance-criteria` writes the Gherkin features a validation run drives
   // (ADR-0029), authored from the PRD alone.
   design: ["grilling", "cell-design", "architecture", "security-design", "openapi-conventions", "wireframes", "agent-building", "acceptance-criteria"],
+  // `/prototype` derives from the finished design, so it reads what that design
+  // wrote: the cell, the roles and the API. The design-system skill says how an
+  // Oxygen screen is composed from the kit's components; the kit itself is in
+  // the `prototype` skill.
+  prototype: ["cell-design", "security-design", "openapi-conventions", "oxygen-ui-design-system"],
 };
+
+/**
+ * What a flow READS, said where the turn starts. Most flows discover their
+ * inputs by walking their own playbook; a flow that is purely DERIVED from
+ * artifacts already on disk names them, so the agent opens the right files
+ * first instead of rediscovering the design tree. Keyed by the skill the flow
+ * loads; a flow absent here gets no brief.
+ *
+ * Each brief is one self-contained instruction, appended after the skill
+ * pointer. A flow with more than one brief for different turn shapes picks
+ * between them in `specBody`, so a second brief is added there rather than
+ * folded into this text.
+ */
+const FLOW_BRIEFS: Record<string, string> = {
+  prototype:
+    "Generate the prototype of each web-application the design declares. The design is the input: read " +
+    "specs/design/design.cell for the web-application components, the roles in specs/design/security.json, " +
+    "each web-application's API (the openapi.yaml of every component it depends on), the numbered user " +
+    "stories in specs/requirements/prd.md, and the key flows in specs/design/flows/*.md. Cover them: every " +
+    "design flow a web-application's users walk becomes a flow of its prototype, and every user story gets at " +
+    "least one screen, unless the product gives it no view (a platform sign-in, a backend job, a machine-facing " +
+    "endpoint); name any story you set aside in your closing. Per web-application write " +
+    "specs/design/components/<component>/prototype.json (the manifest) first and then prototype.tsx beside it " +
+    "(the screens), and change no other file. When component names follow this brief, write only those " +
+    "prototypes; otherwise write one for every web-application. Where a prototype already exists, revise it " +
+    "with edits and keep its ids stable.",
+};
+
+/** The brief a flow's skill carries, or undefined. */
+function flowBrief(skill: string): string | undefined {
+  return Object.hasOwn(FLOW_BRIEFS, skill) ? FLOW_BRIEFS[skill] : undefined;
+}
 
 /** The branch a command names, or undefined for a token that IS its skill. */
 function commandFlow(token: string): { skill: string; scope: (subject: string) => string } | undefined {
@@ -339,7 +376,9 @@ function specBody(turn: Exclude<TurnSpec, { kind: "plan" }>): string {
       // and the agent says so, which is a better failure than a client-side
       // allowlist that goes stale against the org's catalog.
       const command = commandFlow(turn.skill);
-      const base = `Load the ${command?.skill ?? turn.skill} skill and follow it.`;
+      const skill = command?.skill ?? turn.skill;
+      const brief = flowBrief(skill);
+      const base = `Load the ${skill} skill and follow it.` + (brief ? `\n\n${brief}` : "");
       // A command that names a BRANCH says which one, and carries whatever the
       // user clicked as the branch's subject; everything else passes the user's
       // trailing text through untouched.
