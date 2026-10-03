@@ -26,6 +26,7 @@ import type { ProjectChat } from "../../agent-chat/chatStore";
 import { SAMPLE_MANIFEST, SAMPLE_SOURCE } from "../../../mocks/fixtures/prototype";
 import { appPrototypes, manifestPath, revisingIn, sourcePath, type AppPrototype } from "../model/prototypes";
 import { prototypeHash } from "../model/feedback";
+import { unreviewed } from "../model/reviewed";
 
 // The Prototype tab and its full-screen review, driven as a reviewer drives
 // them: the prototype runs in the kit's PrototypeFrame, whose messages are
@@ -207,6 +208,11 @@ describe("the full-screen review", () => {
     const { dialog } = await openReview();
     fireEvent.change(within(dialog).getByLabelText("Flow"), { target: { value: "flow.approve" } });
     annotate(dialog);
+    fromFrame({
+      type: "proto:rendered",
+      screenId: "screen.pending",
+      elements: [{ key: "btn.reject", label: "Reject" }, { key: "btn.approve", label: "Approve" }],
+    });
     fromFrame({ type: "proto:toggle", elementKey: "btn.reject" });
     fromFrame({ type: "proto:toggle", elementKey: "btn.approve" });
     addRequest(dialog, "Put Approve on the right");
@@ -226,11 +232,22 @@ describe("the full-screen review", () => {
           { screenId: "screen.pending", flowId: "flow.approve", roleId: "manager", stateId: "state.empty", elementIds: [], text: "Say who to ask when nothing waits" },
         ],
       },
+      summary: [
+        "Feedback on the Acme Expenses prototype (2 requests)",
+        "1. Pending approvals (Manager, Default) — Reject, Approve: Put Approve on the right",
+        "2. Pending approvals (Manager, Nothing to show) — whole screen: Say who to ask when nothing waits",
+      ].join("\n"),
     });
 
     // Sent: opening it again starts a new queue.
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
     expect(within(await screen.findByRole("dialog")).queryByRole("list", { name: "Queued requests" })).toBeNull();
+  });
+
+  it("records the revision it showed as reviewed in this browser", async () => {
+    await openReview();
+    const hash = await prototypeHash(SAMPLE_MANIFEST, SAMPLE_SOURCE);
+    await waitFor(() => expect(unreviewed("acme-expenses", { [C]: hash })).toEqual([]));
   });
 
   it("refuses Send all while a turn is running, says why, and keeps the queue", async () => {

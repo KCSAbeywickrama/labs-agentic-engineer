@@ -40,6 +40,8 @@ export interface ReviewQueue {
   /** The hash of the prototype showing when the first request was queued. */
   hash: string;
   requests: FeedbackRequest[];
+  /** What each request's elements were called on screen, aligned with `requests`: the chat's summary names them. */
+  labels: string[][];
 }
 
 /** A request on the current screen, flow, role and state, for the selection in the order it was made. */
@@ -65,10 +67,22 @@ export function pinsOnScreen(requests: readonly FeedbackRequest[], screenId: str
 }
 
 /** Queue a request: the queue's revision is the one showing when its first request is made. */
-export function enqueue(queue: ReviewQueue | null, hash: string, request: FeedbackRequest): ReviewQueue {
-  if (!queue || queue.requests.length === 0) return { hash, requests: [request] };
+export function enqueue(
+  queue: ReviewQueue | null,
+  hash: string,
+  request: FeedbackRequest,
+  labels: readonly string[] = request.elementIds,
+): ReviewQueue {
+  if (!queue || queue.requests.length === 0) return { hash, requests: [request], labels: [[...labels]] };
   if (queue.requests.length >= MAX_REQUESTS) return queue;
-  return { hash: queue.hash, requests: [...queue.requests, request] };
+  return { hash: queue.hash, requests: [...queue.requests, request], labels: [...queue.labels, [...labels]] };
+}
+
+/** The queue without its `index`th request; null once it is empty. */
+export function dequeue(queue: ReviewQueue, index: number): ReviewQueue | null {
+  const requests = queue.requests.filter((_, i) => i !== index);
+  if (requests.length === 0) return null;
+  return { ...queue, requests, labels: queue.labels.filter((_, i) => i !== index) };
 }
 
 /** What Send all sends: every queued request, on the revision they were made on. */

@@ -43,20 +43,32 @@ interface Session {
   page: Page;
   app: FrameLocator;
   requests: string[];
+  /** Uncaught errors in the host page or its sandboxed frame. */
+  errors: string[];
 }
 
 async function open(fixture: string): Promise<Session> {
   const preview = await startPreview(`valid/${fixture}`);
   const page = await browser.newPage();
   const requests: string[] = [];
+  const errors: string[] = [];
   page.on("request", (r) => requests.push(r.url()));
+  // Playwright reports a frame's uncaught errors here too, the sandboxed one included.
+  page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(preview.url);
-  return { preview, page, app: page.frameLocator('iframe[title$="prototype app"]'), requests };
+  return { preview, page, app: page.frameLocator('iframe[title$="prototype app"]'), requests, errors };
 }
 
+/**
+ * The frame is sandboxed without `allow-same-origin`, so it has no storage: any
+ * code of the theme or of Oxygen that reads `localStorage` unguarded throws
+ * there. None may, whatever the run drew.
+ */
 async function close(s: Session): Promise<void> {
+  const errors = s.errors;
   await s.page.close();
   await s.preview.stop();
+  expect(errors).toEqual([]);
 }
 
 describe("contacts under Oxygen", () => {
@@ -93,6 +105,22 @@ describe("contacts under Oxygen", () => {
 
     // Fonts and styles are inline: everything came from the preview server, which serves the host page and the runtime.
     expect(s.requests.filter((url) => !url.startsWith(s.preview.url))).toEqual([]);
+  });
+
+  it("runs in a frame that has no storage, and raises no uncaught error there", async () => {
+    const noStorage = await s.page
+      .frames()
+      .find((f) => f !== s.page.mainFrame())!
+      .evaluate(() => {
+        try {
+          void window.localStorage;
+          return false;
+        } catch {
+          return true;
+        }
+      });
+    expect(noStorage).toBe(true);
+    expect(s.errors).toEqual([]);
   });
 
   it("fills fields and turns a switch on by their accessible names", async () => {

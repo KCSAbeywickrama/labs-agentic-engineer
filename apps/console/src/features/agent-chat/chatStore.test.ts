@@ -144,7 +144,18 @@ describe("a turn's lifecycle", () => {
     stream.end();
 
     await vi.waitFor(() => expect(chat().turn).toEqual({ phase: "idle" }));
-    expect(ended).toHaveBeenCalledWith(PROJECT, "completed");
+    expect(ended).toHaveBeenCalledWith(PROJECT, "completed", "What is left to do?");
+  });
+
+  it("shows a prototype review's summary on its row while the wire carries the typed batch", async () => {
+    const { store, streams, chat, started } = setup();
+    await store.open(PROJECT);
+    streams.set("t1", controlledStream().body);
+    const feedback = { prototypeHash: "a".repeat(64), component: "expense-web", requests: [{ screenId: "s", roleId: "r", stateId: "d", elementIds: [], text: "Wider" }] };
+    await store.send(PROJECT, "/prototype expense-web", { kind: "prototype", feedback, summary: "Feedback on the Acme prototype (1 request)" });
+    expect(chat().items[0]).toMatchObject({ kind: "user", text: "/prototype expense-web", summary: "Feedback on the Acme prototype (1 request)" });
+    expect(started[0]).toMatchObject({ instruction: "/prototype expense-web", collab: true, prototypeFeedback: feedback });
+    expect(started[0]).not.toHaveProperty("summary");
   });
 
   it("says why a turn failed, and ends it failed", async () => {
@@ -152,7 +163,7 @@ describe("a turn's lifecycle", () => {
     await store.open(PROJECT);
     streams.set("t1", sse([{ type: "turn-failed", message: "The model refused." } as StreamPart]));
     await store.send(PROJECT, "Go", PRODUCT);
-    await vi.waitFor(() => expect(ended).toHaveBeenCalledWith(PROJECT, "failed"));
+    await vi.waitFor(() => expect(ended).toHaveBeenCalledWith(PROJECT, "failed", expect.any(String)));
     expect(chat().items.at(-1)).toMatchObject({ kind: "error", text: "The model refused." });
   });
 });
@@ -237,7 +248,7 @@ describe("reattaching after a reload", () => {
     streams.set("t7", sse([{ type: "text-delta", delta: "Two questions." }, { type: "turn-committed" }]));
     await store.open(PROJECT);
 
-    await vi.waitFor(() => expect(ended).toHaveBeenCalledWith(PROJECT, "completed"));
+    await vi.waitFor(() => expect(ended).toHaveBeenCalledWith(PROJECT, "completed", "Interview Spending reports."));
     expect(chat().items).toMatchObject([
       { kind: "user", text: "Earlier" },
       { kind: "user", text: "Interview Spending reports.", turnId: "t7" },

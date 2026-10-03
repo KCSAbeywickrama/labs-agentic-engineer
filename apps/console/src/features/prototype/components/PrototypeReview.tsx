@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useCallback, useId, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { Alert, Box, Chip, CircularProgress, Dialog, IconButton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import {
@@ -27,7 +27,8 @@ import {
   type PrototypeViewEvent,
 } from "@wso2/prototype-kit/host";
 import type { PrototypeFeedback } from "../../agent-chat/turnScope";
-import { enqueue, feedbackBatch, pinsOnScreen, requestFor, type ReviewQueue } from "../model/feedback";
+import { dequeue, enqueue, feedbackBatch, pinsOnScreen, requestFor, type ReviewQueue } from "../model/feedback";
+import { feedbackSummary } from "../model/summary";
 import type { AppPrototype, PrototypeFiles } from "../model/prototypes";
 import { useFrameRuntime, usePrototypeHash } from "../useReviewAssets";
 import { FeedbackPanel } from "./FeedbackPanel";
@@ -41,7 +42,9 @@ export interface PrototypeReviewProps {
   /** Whether a turn can start now (the chat is loaded and idle). */
   ready: boolean;
   /** Send the batch as one revision turn; resolves false when it was not sent. */
-  onSend: (feedback: PrototypeFeedback) => Promise<boolean>;
+  onSend: (feedback: PrototypeFeedback, summary: string) => Promise<boolean>;
+  /** The revision showing, once its hash is known: the review has looked at it. */
+  onSeen: (hash: string) => void;
   onClose: () => void;
 }
 
@@ -148,10 +151,14 @@ function Session({
   onQueue,
   ready,
   onSend,
+  onSeen,
   onClose,
 }: PrototypeReviewProps & { titleId: string; files: PrototypeFiles; runtime: string; revising: boolean }) {
   const hash = usePrototypeHash(files.manifestText, files.source);
   const { manifest } = files;
+  useEffect(() => {
+    if (hash) onSeen(hash);
+  }, [hash, onSeen]);
   const [state, setState] = useState(() => ({ manifest, view: initialPrototypeView(manifest) }));
   // A revision that lands while the review is open repairs the view in the same render, as the kit CLI's host does.
   let current = state;
@@ -176,14 +183,11 @@ function Session({
 
   const add = (text: string) => {
     if (!hash) return;
-    onQueue(enqueue(queue, hash, requestFor(view, text)));
+    onQueue(enqueue(queue, hash, requestFor(view, text), view.selectedKeys.map((k) => labels[k] ?? k)));
     setRefused(null);
     dispatch({ type: "CLEAR_SELECTION" });
   };
-  const remove = (index: number) => {
-    const rest = requests.filter((_, i) => i !== index);
-    onQueue(queue && rest.length > 0 ? { ...queue, requests: rest } : null);
-  };
+  const remove = (index: number) => queue && onQueue(dequeue(queue, index));
   const send = async () => {
     if (!queue || queue.requests.length === 0) return;
     if (!ready) {
@@ -191,7 +195,8 @@ function Session({
       return;
     }
     setSending(true);
-    const sent = await onSend(feedbackBatch(prototype.component, queue));
+    const feedback = feedbackBatch(prototype.component, queue);
+    const sent = await onSend(feedback, feedbackSummary(feedback, manifest, queue.labels));
     setSending(false);
     if (!sent) {
       setRefused(NOT_SENT);
