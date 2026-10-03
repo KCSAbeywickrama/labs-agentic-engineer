@@ -17,11 +17,12 @@
  */
 
 import { createOxygenTheme } from "@wso2/oxygen-ui";
-import { channel, tone } from "./tones";
+import { channel, tone } from "./tones.js";
 
-// The app's one theme: the guided-shell prototype's colours laid over
-// Oxygen's base. Type stays Oxygen's bundled Inter; only colours follow the
-// prototype. See tones.ts for why each colour is spelled out in full.
+// AEP's one theme, for the console and the prototypes it shows: the
+// guided-shell design's colours laid over Oxygen's base. Type stays Oxygen's
+// bundled Inter; only colours follow the design. See tones.ts for why each
+// colour is spelled out in full.
 
 interface Scheme {
   primary: [main: string, contrastText: string];

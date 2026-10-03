@@ -17,30 +17,27 @@
  */
 
 /**
- * The theme's root: Oxygen's base theme with sentence-case buttons (as the
- * console writes them), pinned to light with no stored colour scheme (the
- * frame has no storage) so a prototype draws the same in every frame and in
- * the render check. Emotion injects every style inline and Oxygen ships its
- * Inter font as data URIs, so the frame loads nothing.
+ * The theme's root: AEP's own Oxygen theme (`@aep/ui-theme`, the console's),
+ * through Oxygen's `OxygenUIThemeProvider` as the console applies it, so a
+ * prototype looks like the console it is reviewed in. Sandbox-safe: one fixed
+ * theme (no theme switching, so nothing is fetched or stored), and MUI's
+ * colour-scheme storage is guarded and finds none in the frame, so the scheme
+ * follows the system as the console's default does. Emotion injects every
+ * style inline and Oxygen ships its Inter font as data URIs, so the frame
+ * loads nothing.
  */
 
-import { Box, createOxygenTheme, CssBaseline, ThemeProvider } from "@wso2/oxygen-ui";
+import { aepTheme } from "@aep/ui-theme";
+import { Box, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import type { ReactNode } from "react";
-
-const oxygenTheme = createOxygenTheme({
-  components: {
-    MuiButton: { styleOverrides: { root: { textTransform: "none" } } },
-  },
-});
 
 export function OxygenProvider({ children }: { children: ReactNode }) {
   return (
-    <ThemeProvider theme={oxygenTheme} defaultMode="light" storageManager={null}>
-      <CssBaseline />
+    <OxygenUIThemeProvider theme={aepTheme}>
       <Box
         sx={{
-          // The kit's Annotate outline and label, in Oxygen's primary.
-          "--proto-select": oxygenTheme.vars.palette.primary.main,
+          // The kit's Annotate outline and label, in the theme's primary.
+          "--proto-select": aepTheme.vars.palette.primary.main,
           display: "flex",
           flexDirection: "column",
           flex: 1,
@@ -52,6 +49,6 @@ export function OxygenProvider({ children }: { children: ReactNode }) {
       >
         {children}
       </Box>
-    </ThemeProvider>
+    </OxygenUIThemeProvider>
   );
 }
