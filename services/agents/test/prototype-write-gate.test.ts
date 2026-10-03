@@ -28,6 +28,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { OpErr, OpResult, StreamPart } from "@aep/agent-stream";
 import { runConversationTurn, TurnGuard } from "../src/conversation/run-conversation-turn.js";
+import { checkPrototypeRender } from "../src/prototype/render-check.js";
 import { InMemoryConversationStore } from "../src/store/memory-store.js";
 import { mockModel, type MockStep } from "../src/shared/mock-model.js";
 
@@ -71,13 +72,14 @@ const GOOD = source('["a", "b"]');
 /** Draws in the default state and throws in the empty one: only a render finds it. */
 const THROWS_WHEN_EMPTY = GOOD.replace('state === "state.empty" ? "Nothing here yet"', 'state === "state.empty" ? (undefined as unknown as string[]).join(",")');
 
-async function writes(...contents: [path: string, content: string][]): Promise<{ results: OpResult[]; files: Record<string, string> }> {
-  const steps: MockStep[] = contents.map(([path, content], i) => ({
-    kind: "toolCall",
-    toolCallId: `c${i}`,
-    toolName: "addFile",
-    input: { path, content },
-  }));
+type Write = [path: string, content: string] | { remove: string };
+
+async function writes(...contents: Write[]): Promise<{ results: OpResult[] }> {
+  const steps: MockStep[] = contents.map((w, i) =>
+    Array.isArray(w)
+      ? { kind: "toolCall", toolCallId: `c${i}`, toolName: "addFile", input: { path: w[0], content: w[1] } }
+      : { kind: "toolCall", toolCallId: `c${i}`, toolName: "removeFile", input: { path: w.remove } },
+  );
   steps.push({ kind: "text", text: "done" });
   const events: StreamPart[] = [];
   await runConversationTurn({
@@ -90,7 +92,7 @@ async function writes(...contents: [path: string, content: string][]): Promise<{
     onEvent: (p) => events.push(p),
   });
   const results = events.filter((e) => e.type === "tool-result").map((e) => (e as unknown as { output: OpResult }).output);
-  return { results, files: Object.fromEntries(contents) };
+  return { results };
 }
 
 test("a prototype that draws in every role and state lands, manifest first", async () => {
@@ -130,4 +132,34 @@ test("the source before its manifest is refused without rendering anything", asy
   const refused = results[0] as OpErr;
   assert.equal(refused.code, "INVALID_PROTOTYPE");
   assert.deepEqual(refused.findings?.map((f) => f.code), ["MISSING_FILE"]);
+});
+
+test("a manifest change that breaks the screens already written is refused by the render check", async () => {
+  // The screen renamed: prototype.tsx still draws "screen.home", which the new manifest no longer has.
+  const renamed = MANIFEST.replaceAll('"screen.home"', '"screen.start"');
+  const { results } = await writes([MANIFEST_PATH, MANIFEST], [SOURCE_PATH, GOOD], { remove: MANIFEST_PATH }, [MANIFEST_PATH, renamed]);
+  const refused = results[3] as OpErr;
+  assert.equal(refused.ok, false, JSON.stringify(results));
+  assert.equal(refused.code, "INVALID_PROTOTYPE");
+  assert.match(refused.message, /prototype\.json would break/);
+  assert.ok(refused.findings?.some((f) => f.code === "SCREEN_MISMATCH"), JSON.stringify(refused.findings));
+});
+
+test("the service's event loop keeps running while a prototype is drawn", async () => {
+  // How long one render takes here, so the gap below is judged against it.
+  const started = performance.now();
+  assert.deepEqual(await checkPrototypeRender({ manifest: MANIFEST, source: GOOD }), []);
+  const renderMs = performance.now() - started;
+
+  const ticks: number[] = [];
+  const timer = setInterval(() => ticks.push(performance.now()), 5);
+  try {
+    const { results } = await writes([MANIFEST_PATH, MANIFEST], [SOURCE_PATH, GOOD]);
+    assert.deepEqual(results.map((r) => r.ok), [true, true]);
+  } finally {
+    clearInterval(timer);
+  }
+  const longestGap = Math.max(...ticks.slice(1).map((t, i) => t - ticks[i]!));
+  // A synchronous check would hold the loop for a whole render: no tick in between.
+  assert.ok(longestGap < renderMs / 2, `longest gap between timer ticks ${longestGap.toFixed(0)} ms, one render ${renderMs.toFixed(0)} ms`);
 });

@@ -20,12 +20,22 @@
  * The prototype write gate: the manifest and the source are judged by the kit's
  * rules, the manifest first, and every refusal is INVALID_PROTOTYPE carrying
  * the kit's findings. The render check is the host's, so it is a stub here; the
- * agents service tests the real one.
+ * agents service tests the real one. A manifest written beside an existing
+ * source is judged against that source too.
  */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { FileBundle, type OpErr, type OpOk, type OpResult, type PrototypeFinding, type PrototypeRenderCheck } from "../src/index.js";
+import {
+  FileBundle,
+  writeWithRenderCheck,
+  type OpErr,
+  type OpOk,
+  type OpResult,
+  type PrototypeFileTexts,
+  type PrototypeFinding,
+  type PrototypeRenderCheck,
+} from "../src/index.js";
 
 const MANIFEST_PATH = "specs/design/components/web/prototype.json";
 const SOURCE_PATH = "specs/design/components/web/prototype.tsx";
@@ -159,50 +169,108 @@ test("a listing over eight findings is summarized in the message but complete in
   assert.match(r.message, /and \d+ more/);
 });
 
-test("the render check runs last, with the manifest and source texts, and its findings refuse the write", () => {
-  const seen: { manifest: string; source: string }[] = [];
-  const finding: PrototypeFinding = {
-    code: "RENDER_FAILED",
-    file: "prototype.tsx",
-    location: "screen.home as user in state.default",
-    message: "boom",
+const RENDER_FINDING: PrototypeFinding = {
+  code: "RENDER_FAILED",
+  file: "prototype.tsx",
+  location: "screen.home as user in state.default",
+  message: "boom",
+};
+
+/** A stub render check: records the pairs it was asked to draw, answers `findings`. */
+function stubRender(findings: PrototypeFinding[] = []): { render: PrototypeRenderCheck; seen: PrototypeFileTexts[] } {
+  const seen: PrototypeFileTexts[] = [];
+  return {
+    seen,
+    render: async (files) => {
+      seen.push(files);
+      return findings;
+    },
   };
-  const render: PrototypeRenderCheck = (files) => {
-    seen.push(files);
-    return [finding];
-  };
-  const b = new FileBundle({ [MANIFEST_PATH]: MANIFEST }, { prototypeRender: render });
-  const r = refused(b.addFile(SOURCE_PATH, SOURCE));
+}
+
+test("the render check runs after the static stages, with the manifest and source texts, and its findings refuse the write", async () => {
+  const { render, seen } = stubRender([RENDER_FINDING]);
+  const b = new FileBundle({ [MANIFEST_PATH]: MANIFEST });
+  const r = refused(await writeWithRenderCheck(b, { op: "add", path: SOURCE_PATH, content: SOURCE }, render));
   assert.equal(r.code, "INVALID_PROTOTYPE");
-  assert.deepEqual(r.findings, [finding]);
+  assert.deepEqual(r.findings, [RENDER_FINDING]);
   assert.match(r.message, /RENDER_FAILED in prototype\.tsx at screen\.home as user in state\.default: boom/);
-  assert.equal(seen.length, 1);
-  assert.equal(seen[0]!.manifest, MANIFEST);
+  assert.deepEqual(seen, [{ manifest: MANIFEST, source: SOURCE }]);
   assert.equal(b.has(SOURCE_PATH), false);
 });
 
-test("the render check is not asked when a static stage already refused, nor for the manifest", () => {
-  let calls = 0;
-  const render: PrototypeRenderCheck = () => {
-    calls++;
-    return [];
-  };
-  const b = new FileBundle({}, { prototypeRender: render });
-  applied(b.addFile(MANIFEST_PATH, MANIFEST));
-  refused(b.addFile(SOURCE_PATH, SOURCE + '\nfetch("/x");'));
-  assert.equal(calls, 0);
-  applied(b.addFile(SOURCE_PATH, SOURCE));
-  assert.equal(calls, 1);
+test("the render check is not asked when a static stage already refused, nor for a manifest with no source beside it", async () => {
+  const { render, seen } = stubRender();
+  const b = new FileBundle({});
+  applied(await writeWithRenderCheck(b, { op: "add", path: MANIFEST_PATH, content: MANIFEST }, render));
+  refused(await writeWithRenderCheck(b, { op: "add", path: SOURCE_PATH, content: SOURCE + '\nfetch("/x");' }, render));
+  assert.equal(seen.length, 0);
+  applied(await writeWithRenderCheck(b, { op: "add", path: SOURCE_PATH, content: SOURCE }, render));
+  assert.equal(seen.length, 1);
 });
 
-test("a render check that finds nothing lets the write land", () => {
-  const b = new FileBundle({ [MANIFEST_PATH]: MANIFEST }, { prototypeRender: () => [] });
-  applied(b.addFile(SOURCE_PATH, SOURCE));
+test("an edit is drawn as the file it would leave", async () => {
+  const { render, seen } = stubRender();
+  const b = new FileBundle({ [MANIFEST_PATH]: MANIFEST, [SOURCE_PATH]: SOURCE });
+  applied(await writeWithRenderCheck(b, { op: "edit", path: SOURCE_PATH, oldString: 'text="Home"', newString: 'text="Start"' }, render));
+  assert.equal(seen[0]!.source, SOURCE.replace('text="Home"', 'text="Start"'));
+  assert.equal(b.read(SOURCE_PATH), seen[0]!.source);
+});
+
+test("a write the bundle answers without storing (a no-op, a failed anchor) is never drawn", async () => {
+  const { render, seen } = stubRender([RENDER_FINDING]);
+  const b = new FileBundle({ [MANIFEST_PATH]: MANIFEST, [SOURCE_PATH]: SOURCE });
+  assert.equal(applied(await writeWithRenderCheck(b, { op: "add", path: SOURCE_PATH, content: SOURCE }, render)).status, "noop");
+  assert.equal(refused(await writeWithRenderCheck(b, { op: "edit", path: SOURCE_PATH, oldString: "absent", newString: "x" }, render)).code, "NOT_FOUND");
+  assert.equal(seen.length, 0);
 });
 
 test("without a render check the source gets its static checks only", () => {
   const b = new FileBundle({ [MANIFEST_PATH]: MANIFEST });
   applied(b.addFile(SOURCE_PATH, SOURCE));
+});
+
+// --- A manifest written beside an existing source -------------------------
+
+const LINKED_MANIFEST = manifestWith({
+  screens: [
+    { id: "screen.home", name: "Home", roleIds: ["user"] },
+    { id: "screen.about", name: "About", roleIds: ["user"] },
+  ],
+});
+const LINKED_SOURCE = SOURCE.replace('<Heading id="heading.home" text="Home" />', '<Heading id="heading.home" text="Home" />\n      <Button id="btn.about" label="About" to="screen.about" />')
+  .replace("import { Heading,", "import { Button, Heading,");
+
+test("a manifest that drops a screen the existing source links to is refused with the source's findings", () => {
+  const b = new FileBundle({ [MANIFEST_PATH]: LINKED_MANIFEST, [SOURCE_PATH]: LINKED_SOURCE });
+  applied(b.removeFile(MANIFEST_PATH));
+  const r = refused(b.addFile(MANIFEST_PATH, MANIFEST));
+  assert.equal(r.code, "INVALID_PROTOTYPE");
+  assert.equal(r.findings?.[0]?.file, "prototype.tsx");
+  assert.match(r.message, /prototype\.json would break specs\/design\/components\/web\/prototype\.tsx/);
+  assert.match(r.message, /screen\.about/);
+});
+
+test("an edit to the manifest is judged against the existing source too", () => {
+  const b = new FileBundle({ [MANIFEST_PATH]: LINKED_MANIFEST, [SOURCE_PATH]: LINKED_SOURCE });
+  refused(b.editFile(MANIFEST_PATH, '{"id":"screen.about","name":"About","roleIds":["user"]}', '{"id":"screen.help","name":"Help","roleIds":["user"]}'));
+  assert.equal(b.read(MANIFEST_PATH), LINKED_MANIFEST);
+});
+
+test("a manifest change that keeps the source's links lands", () => {
+  const b = new FileBundle({ [MANIFEST_PATH]: LINKED_MANIFEST, [SOURCE_PATH]: LINKED_SOURCE });
+  applied(b.editFile(MANIFEST_PATH, '"name":"About"', '"name":"About us"'));
+});
+
+test("a manifest written beside an existing source is drawn with it, and refused when the pair fails to draw", async () => {
+  const { render, seen } = stubRender([{ ...RENDER_FINDING, code: "SCREEN_MISMATCH", location: "module" }]);
+  const b = new FileBundle({ [MANIFEST_PATH]: MANIFEST, [SOURCE_PATH]: SOURCE });
+  const changed = manifestWith({ name: "Renamed" });
+  const r = refused(await writeWithRenderCheck(b, { op: "edit", path: MANIFEST_PATH, oldString: '"name":"Demo"', newString: '"name":"Renamed"' }, render));
+  assert.deepEqual(seen, [{ manifest: changed, source: SOURCE }]);
+  assert.match(r.message, /prototype\.json would break/);
+  assert.equal(r.findings?.[0]?.code, "SCREEN_MISMATCH");
+  assert.equal(b.read(MANIFEST_PATH), MANIFEST);
 });
 
 const NOT_PROTOTYPE_PATHS = [

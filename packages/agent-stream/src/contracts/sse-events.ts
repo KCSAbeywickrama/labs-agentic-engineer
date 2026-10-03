@@ -38,6 +38,8 @@
  * OpenAPI-representable); the package stays free of any AI-SDK dependency.
  */
 
+import { MAX_FEEDBACK_ID, parseFeedbackSubmission, type FeedbackRequest, type FeedbackSubmission } from "@wso2/prototype-kit/feedback";
+
 // --- Result payloads (the `tool-result.output` value) -----------------------
 
 /** The file-mutation operations the main agent performs. */
@@ -521,70 +523,35 @@ export const PROTOTYPE_FLOW_SKILL = "prototype";
 /**
  * One reviewer request on a prototype: where it was made (screen, flow, role,
  * display state), which elements it is about (empty means the whole screen) and
- * the reviewer's words, verbatim.
+ * the reviewer's words, verbatim. The kit's request (`@wso2/prototype-kit/feedback`).
  */
-export interface PrototypeFeedbackRequest {
-  screenId: string;
-  flowId?: string;
-  roleId: string;
-  stateId: string;
-  elementIds: string[];
-  text: string;
-}
+export type PrototypeFeedbackRequest = FeedbackRequest;
 
 /**
  * A batch of review requests on ONE web-application prototype, revised in a
- * single `/prototype` turn. Mirrors `@wso2/prototype-cli`'s feedback
- * submission plus the `component` the batch is about. The caller forwards it as
- * facts; the agents service alone words it.
+ * single `/prototype` turn: the kit's feedback submission plus the `component`
+ * the batch is about. The caller forwards it as facts; the agents service alone
+ * words it.
  */
-export interface PrototypeFeedback {
-  /** The revision the reviewer looked at: the prototype hash, 64 lowercase hex. */
-  prototypeHash: string;
+export interface PrototypeFeedback extends FeedbackSubmission {
   /** The web-application component, as named under `specs/design/components/`. */
   component: string;
-  requests: PrototypeFeedbackRequest[];
 }
-
-/**
- * The batch's ceilings. They equal the kit's (`MAX_FEEDBACK_REQUESTS`,
- * `MAX_FEEDBACK_TEXT` and the id bound in `@wso2/prototype-cli`'s
- * `feedback.ts`, pinned by a parity test) and the public contract's
- * `PrototypeFeedbackInput`.
- */
-export const PROTOTYPE_FEEDBACK_LIMITS = { requests: 50, text: 4000, id: 200 } as const;
 
 /** A component name as one path segment of `specs/design/components/<component>/`. */
 const PROTOTYPE_COMPONENT_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
 /**
- * Runtime guard for an untrusted feedback batch. Refused whole, never trimmed:
- * a batch the agent applied only in part would read as sent and done.
+ * Runtime guard for an untrusted feedback batch: the kit's submission rules
+ * (shape, limits, counted in UTF-16 code units) plus the component. Refused
+ * whole, never trimmed: a batch the agent applied only in part would read as
+ * sent and done.
  */
 export function isPrototypeFeedback(v: unknown): v is PrototypeFeedback {
   if (v === null || typeof v !== "object") return false;
-  const f = v as Record<string, unknown>;
-  const L = PROTOTYPE_FEEDBACK_LIMITS;
-  const id = (x: unknown): boolean => typeof x === "string" && x.trim() !== "" && x.length <= L.id;
-  if (typeof f.prototypeHash !== "string" || !/^[0-9a-f]{64}$/.test(f.prototypeHash)) return false;
-  if (!id(f.component) || !PROTOTYPE_COMPONENT_RE.test(f.component as string)) return false;
-  const { requests } = f;
-  if (!Array.isArray(requests) || requests.length === 0 || requests.length > L.requests) return false;
-  return requests.every((r: unknown) => {
-    if (r === null || typeof r !== "object") return false;
-    const q = r as Record<string, unknown>;
-    return (
-      id(q.screenId) &&
-      (q.flowId === undefined || id(q.flowId)) &&
-      id(q.roleId) &&
-      id(q.stateId) &&
-      Array.isArray(q.elementIds) &&
-      q.elementIds.every(id) &&
-      typeof q.text === "string" &&
-      q.text.trim() !== "" &&
-      q.text.length <= L.text
-    );
-  });
+  const { component } = v as Record<string, unknown>;
+  if (typeof component !== "string" || component.length > MAX_FEEDBACK_ID || !PROTOTYPE_COMPONENT_RE.test(component)) return false;
+  return "submission" in parseFeedbackSubmission(v);
 }
 
 /** The turn kinds a `TurnSpec` may declare (the server's pre-stream 400 check). */
@@ -693,6 +660,12 @@ export interface TurnJournal {
    * so a reloaded thread can say which feature each message was about.
    */
   scope?: TurnScope;
+  /**
+   * The prototype review this message sent (#860). Journaled because the wire
+   * text is only `/prototype <component>`: without the batch a reloaded thread,
+   * and every teammate's, could not say what was asked for.
+   */
+  prototypeFeedback?: PrototypeFeedback;
 }
 
 /**

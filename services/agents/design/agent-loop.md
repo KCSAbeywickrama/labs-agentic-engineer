@@ -51,11 +51,15 @@ canonical `FileBundle` ops to reconstruct file state — no second matcher.
 
 ## Prototype write gate
 
-A turn's `FileBundle` is built with `gates.prototypeRender`, the render check in
-`src/prototype/render-check.ts`: `@wso2/prototype-kit/check`'s `checkPrototypeFiles`
-on the Oxygen theme's `check-runtime.js`, resolved once at import with the kit's
-`resolveTheme`. It runs in an isolated Node child (permission model, 15 s limit),
-synchronously, so a `prototype.tsx` write blocks the event loop for the render's
-duration. The image therefore builds the kit and the theme (`dist` runtimes) and
+A turn's file tools are built with `gates.prototypeRender` (`buildFileToolSet`),
+the render check in `src/prototype/render-check.ts`: `@wso2/prototype-kit/check`'s
+`checkPrototypeFiles` on the Oxygen theme's `check-runtime.js`, resolved once at
+import with the kit's `resolveTheme`. A write that leaves a whole prototype pair
+(`prototype.tsx`, or `prototype.json` beside an existing source) goes through
+`agent-stream`'s `writeWithRenderCheck`, which draws it in an isolated Node child
+(permission model, 15 s limit) asynchronously: the event loop serves other
+conversations meanwhile. The write ledger queues the turn's later writes behind
+a pending verdict, and `tapWrites` holds later frames, so call order and wire
+order are unchanged; the turn drains the tap before its manifest. The image therefore builds the kit and the theme (`dist` runtimes) and
 needs Node 22. The static stages and the `INVALID_PROTOTYPE` code with its
 `findings` are in `@aep/agent-stream` (its README, Write gates).

@@ -99,7 +99,6 @@ export {
   isSurface,
   isTurnSpec,
   isPrototypeFeedback,
-  PROTOTYPE_FEEDBACK_LIMITS,
   PROTOTYPE_FLOW_SKILL,
   isTurnAttachment,
   isTurnAttachmentsOrAbsent,
@@ -157,7 +156,9 @@ export type { Equal } from "./type-equal.js";
 
 // --- The fold surface --------------------------------------------------------
 export { FileBundle, lf, FRONTMATTER_RE } from "./bundle.js";
-export type { PrototypeFileTexts, PrototypeRenderCheck } from "./prototype-gate.js";
+export type { PlannedWrite, WritePlan } from "./bundle.js";
+export { writeWithRenderCheck } from "./prototype-gate.js";
+export type { FileWrite, PrototypeFileTexts, PrototypeRenderCheck } from "./prototype-gate.js";
 export { toChange, applyToolCall, isFileMutationTool, opForTool, readToolInputPath } from "./change.js";
 
 // --- The component design.json write-gate (travels with FileBundle) ----------

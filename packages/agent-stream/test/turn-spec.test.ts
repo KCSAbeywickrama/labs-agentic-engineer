@@ -25,8 +25,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isPrototypeFeedback, isTurnSpec, PROTOTYPE_FEEDBACK_LIMITS } from "../src/contracts/sse-events.js";
-import { MAX_FEEDBACK_ID, MAX_FEEDBACK_REQUESTS, MAX_FEEDBACK_TEXT } from "../../prototype-cli/src/feedback.js";
+import { isPrototypeFeedback, isTurnSpec } from "../src/contracts/sse-events.js";
+// The feedback table the kit and the Go BFF assert too (prototype-kit/test/fixtures/feedback-cases.json).
+import { feedbackBatch, feedbackTable } from "../../prototype-kit/test/feedback-cases.js";
 
 test("accepts each well-formed kind", () => {
   assert.ok(isTurnSpec({ kind: "chat", text: "add a returns policy" }));
@@ -110,12 +111,6 @@ const feedback = (over: Record<string, unknown> = {}) => ({
 });
 const feedbackFlow = (batch: unknown, skill = "prototype") => ({ kind: "flow", skill, prototypeFeedback: batch });
 
-test("the feedback limits are the kit's", () => {
-  assert.equal(PROTOTYPE_FEEDBACK_LIMITS.requests, MAX_FEEDBACK_REQUESTS);
-  assert.equal(PROTOTYPE_FEEDBACK_LIMITS.text, MAX_FEEDBACK_TEXT);
-  assert.equal(PROTOTYPE_FEEDBACK_LIMITS.id, MAX_FEEDBACK_ID);
-});
-
 test("accepts a well-formed feedback batch on the prototype flow", () => {
   assert.ok(isTurnSpec(feedbackFlow(feedback())));
   assert.ok(isPrototypeFeedback(feedback({ requests: [request({ flowId: undefined, elementIds: [] })] })));
@@ -125,31 +120,11 @@ test("refuses a feedback batch on any other skill", () => {
   assert.equal(isTurnSpec(feedbackFlow(feedback(), "design")), false);
 });
 
-test("refuses a malformed feedback batch whole", () => {
-  const L = PROTOTYPE_FEEDBACK_LIMITS;
-  const bad: [string, unknown][] = [
-    ["not an object", "x"],
-    ["short hash", feedback({ prototypeHash: "abc" })],
-    ["uppercase hash", feedback({ prototypeHash: "A".repeat(64) })],
-    ["blank component", feedback({ component: " " })],
-    ["component that is not one path segment", feedback({ component: "../design" })],
-    ["long component", feedback({ component: "c".repeat(L.id + 1) })],
-    ["no requests", feedback({ requests: [] })],
-    ["too many requests", feedback({ requests: Array.from({ length: L.requests + 1 }, () => request()) })],
-    ["request not an object", feedback({ requests: ["x"] })],
-    ["blank screen", feedback({ requests: [request({ screenId: "" })] })],
-    ["blank flow", feedback({ requests: [request({ flowId: " " })] })],
-    ["blank role", feedback({ requests: [request({ roleId: "" })] })],
-    ["long state", feedback({ requests: [request({ stateId: "s".repeat(L.id + 1) })] })],
-    ["element ids not a list", feedback({ requests: [request({ elementIds: "a" })] })],
-    ["blank element id", feedback({ requests: [request({ elementIds: [""] })] })],
-    ["blank text", feedback({ requests: [request({ text: "  " })] })],
-    ["long text", feedback({ requests: [request({ text: "t".repeat(L.text + 1) })] })],
-  ];
-  for (const [name, b] of bad) {
-    assert.equal(isPrototypeFeedback(b), false, name);
-    assert.equal(isTurnSpec(feedbackFlow(b)), false, name);
+test("judges every row of the feedback table the kit and the Go BFF share", () => {
+  for (const row of feedbackTable.cases) {
+    const batch = feedbackBatch(row);
+    assert.equal(isPrototypeFeedback(batch), row.valid, row.name);
+    assert.equal(isTurnSpec(feedbackFlow(batch)), row.valid, row.name);
   }
-  assert.ok(isPrototypeFeedback(feedback({ requests: Array.from({ length: L.requests }, () => request()) })));
-  assert.ok(isPrototypeFeedback(feedback({ requests: [request({ text: "t".repeat(L.text) })] })));
+  assert.equal(isPrototypeFeedback("x"), false);
 });

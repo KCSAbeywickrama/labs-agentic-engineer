@@ -26,6 +26,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { writeWithRenderCheck } from "@aep/agent-stream";
 import type { RoomPeer } from "../src/collab/room-peer.js";
 import { DocFileBundle } from "../src/collab/doc-bundle.js";
 
@@ -79,16 +80,16 @@ test("editFile mirrors the change MARKED (reviewable edit to committed content)"
   assert.equal(peer.sets[0]!.mark, true, "an edit must be a reviewable (marked) write");
 });
 
-test("a prototype the gates refuse never reaches the room", () => {
+test("a prototype the render check refuses never reaches the room", async () => {
   const peer = new SpyPeer();
   const refusing = [{ code: "RENDER_FAILED", file: "prototype.tsx", location: "module", message: "boom" } as const];
-  const bundle = new DocFileBundle(
-    peer,
-    { "specs/design/components/web/prototype.json": VALID_MANIFEST },
-    { prototypeRender: () => [...refusing] },
-  );
+  const bundle = new DocFileBundle(peer, { "specs/design/components/web/prototype.json": VALID_MANIFEST });
 
-  const res = bundle.addFile("specs/design/components/web/prototype.tsx", "export default 1;\n");
+  const res = await writeWithRenderCheck(
+    bundle,
+    { op: "add", path: "specs/design/components/web/prototype.tsx", content: "export default 1;\n" },
+    async () => [...refusing],
+  );
 
   assert.equal(res.ok, false);
   assert.deepEqual(peer.sets, [], "a refused write is not mirrored");

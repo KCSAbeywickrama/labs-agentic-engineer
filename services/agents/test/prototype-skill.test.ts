@@ -50,13 +50,13 @@ test("the skill's kit block is the kit's reference, verbatim", () => {
   );
 });
 
-test("the skill's worked example is a prototype pair the kit's check accepts", () => {
+test("the skill's worked example is a prototype pair the kit's check accepts", async () => {
   const manifest = /```json\n([\s\S]*?)\n```/.exec(SKILL)?.[1];
   const source = /```tsx\n([\s\S]*?)\n```/.exec(SKILL)?.[1];
   assert.ok(manifest && source, "the skill carries a manifest and a screens example");
   assert.equal((JSON.parse(manifest) as { schemaVersion: unknown }).schemaVersion, 3);
   const theme = resolveTheme("@wso2/prototype-theme-default", [import.meta.dirname]);
-  assert.deepEqual(checkPrototypeFiles({ manifest, source }, { theme }), []);
+  assert.deepEqual(await checkPrototypeFiles({ manifest, source }, { theme }), []);
 });
 
 test("the skill describes the Oxygen look but never has the source name a theme", () => {
