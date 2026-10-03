@@ -29,8 +29,10 @@ by those two subpaths.
 ## Render check
 
 Oxygen UI's single-module bundle evaluates Prism's language files, which read
-a bare `Prism` global that Prism publishes on `global`. The kit's check
-prelude defines `global` for that (`check-prelude.ts`).
+a bare `Prism` global that Prism publishes on Node's `global`. The frame has
+`window`, the render check's bare context has neither, so this theme's
+`scripts/build-runtimes.ts` passes `define: { global: "globalThis" }` to the
+kit's `buildThemeRuntimes`.
 
 ## Size
 

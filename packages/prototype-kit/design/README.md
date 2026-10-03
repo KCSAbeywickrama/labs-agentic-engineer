@@ -68,11 +68,13 @@ recovers. The host ignores frame navigation outside Preview.
 
 ## Build helper
 
-`buildThemeRuntimes({ theme, resolveDir, outDir })` bundles a theme with the
+`buildThemeRuntimes({ theme, resolveDir, outDir, define? })` bundles a theme with the
 kit and React into `frame-runtime.js` (entry `bundle/frame-entry`) and
 `check-runtime.js` (entries `bundle/check-prelude`, `bundle/check-entry`; the
-prelude gives the bare `vm` context the timers, `MessageChannel`, `TextEncoder`
-and `global` that React and theme libraries look for at load). The
+prelude gives the bare `vm` context the timers, `MessageChannel` and
+`TextEncoder` that React looks for at load). A theme whose library expects a
+bundler-provided name passes it as `define` (Oxygen: `global`); the kit prelude
+stays library-neutral. The
 source dir is `src/bundle`; the public subpaths stay `/build`, `/build/*`.
 Generated: `schema/prototype-manifest.schema.json` and `reference.md`
 (`pnpm --filter @wso2/prototype-kit gen`; `test/generated.test.ts` fails when
