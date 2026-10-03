@@ -2580,6 +2580,31 @@ type PromoteFromIssueRequest struct {
 	ComponentName string `json:"componentName"`
 }
 
+// PrototypeFeedbackInput A batch of review requests on ONE web-application prototype, sent as a single `/prototype` turn so the agent revises it once rather than once per note. The BFF validates the batch and forwards it unchanged; it never renders it into prose. The shape mirrors the prototype kit's feedback submission (`@wso2/prototype-cli` `feedback.ts`) plus `component`, and so do its limits.
+type PrototypeFeedbackInput struct {
+	// Component The web-application the batch is about, as named under `specs/design/components/`. Its `prototype.json` and `prototype.tsx` are the only files the turn may change.
+	Component string `json:"component"`
+
+	// PrototypeHash The revision of the prototype the reviewer looked at, as the kit's 64-character lowercase hex hash.
+	PrototypeHash string                     `json:"prototypeHash"`
+	Requests      []PrototypeFeedbackRequest `json:"requests"`
+}
+
+// PrototypeFeedbackRequest One reviewer request, made on one screen in one role and display state.
+type PrototypeFeedbackRequest struct {
+	// ElementIds The ids of the elements the request is about, in selection order. Empty means the whole screen.
+	ElementIds []string `json:"elementIds"`
+
+	// FlowID The flow the reviewer was walking; absent for free navigation.
+	FlowID   string `json:"flowId,omitempty"`
+	RoleID   string `json:"roleId"`
+	ScreenID string `json:"screenId"`
+	StateID  string `json:"stateId"`
+
+	// Text The reviewer's words, verbatim.
+	Text string `json:"text"`
+}
+
 // ProvisionBody defines model for ProvisionBody.
 type ProvisionBody struct {
 	// Environments Environments to provision (defaults to ["default"])
@@ -3534,6 +3559,9 @@ type TurnInputBody struct {
 	//
 	// Deliberately a field and NOT a `/command` prefix on `instruction`: a command IS the user's message (the console adds nothing to a line they typed), and an anchored turn carries prose they wrote in their own words, so a prefix would put machinery in their voice. Mirrors the console's own resolve/reconsider intent, whose only job is the same. Absent for a turn with no anchor.
 	Intent TurnInputBodyIntent `json:"intent,omitempty"`
+
+	// PrototypeFeedback A prototype review batch. Valid only when `instruction` is the `/prototype` command and `collab` is true, and never together with `anchor`/`intent`: a batch aims at stable prototype ids, not at a selection in a document. Room turns only, because the room's committer is the one path an agent's revision reaches git by. When set, `instruction` is `/prototype` alone or followed by the batch's own `component`. Absent for every other turn. JSON-only: a review batch carries no attachments, so the multipart form has no such part.
+	PrototypeFeedback *PrototypeFeedbackInput `json:"prototypeFeedback,omitempty"`
 
 	// Scope What the user was looking at when they sent this message, so the agent reads it in that light: a feature's file open in the spec (`feature`, with its ID), or the design review (`design-review`). Absent means the whole product — the product page, any other spec file, or anywhere else in the project — and such a turn reads exactly as it did before scopes existed.
 	//

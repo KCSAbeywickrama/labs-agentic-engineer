@@ -25,7 +25,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isTurnSpec } from "../src/contracts/sse-events.js";
+import { isPrototypeFeedback, isTurnSpec, PROTOTYPE_FEEDBACK_LIMITS } from "../src/contracts/sse-events.js";
+import { MAX_FEEDBACK_ID, MAX_FEEDBACK_REQUESTS, MAX_FEEDBACK_TEXT } from "../../prototype-cli/src/feedback.js";
 
 test("accepts each well-formed kind", () => {
   assert.ok(isTurnSpec({ kind: "chat", text: "add a returns policy" }));
@@ -89,4 +90,66 @@ test("a title is optional on a story row", () => {
 
 test("unknown extra keys are tolerated", () => {
   assert.ok(isTurnSpec({ kind: "start", idea: "x", futureField: true }));
+});
+
+const HASH = "a".repeat(64);
+const request = (over: Record<string, unknown> = {}) => ({
+  screenId: "orders",
+  flowId: "checkout",
+  roleId: "customer",
+  stateId: "default",
+  elementIds: ["orders.submit"],
+  text: "Move this button to the left",
+  ...over,
+});
+const feedback = (over: Record<string, unknown> = {}) => ({
+  prototypeHash: HASH,
+  component: "storefront",
+  requests: [request()],
+  ...over,
+});
+const feedbackFlow = (batch: unknown, skill = "prototype") => ({ kind: "flow", skill, prototypeFeedback: batch });
+
+test("the feedback limits are the kit's", () => {
+  assert.equal(PROTOTYPE_FEEDBACK_LIMITS.requests, MAX_FEEDBACK_REQUESTS);
+  assert.equal(PROTOTYPE_FEEDBACK_LIMITS.text, MAX_FEEDBACK_TEXT);
+  assert.equal(PROTOTYPE_FEEDBACK_LIMITS.id, MAX_FEEDBACK_ID);
+});
+
+test("accepts a well-formed feedback batch on the prototype flow", () => {
+  assert.ok(isTurnSpec(feedbackFlow(feedback())));
+  assert.ok(isPrototypeFeedback(feedback({ requests: [request({ flowId: undefined, elementIds: [] })] })));
+});
+
+test("refuses a feedback batch on any other skill", () => {
+  assert.equal(isTurnSpec(feedbackFlow(feedback(), "design")), false);
+});
+
+test("refuses a malformed feedback batch whole", () => {
+  const L = PROTOTYPE_FEEDBACK_LIMITS;
+  const bad: [string, unknown][] = [
+    ["not an object", "x"],
+    ["short hash", feedback({ prototypeHash: "abc" })],
+    ["uppercase hash", feedback({ prototypeHash: "A".repeat(64) })],
+    ["blank component", feedback({ component: " " })],
+    ["component that is not one path segment", feedback({ component: "../design" })],
+    ["long component", feedback({ component: "c".repeat(L.id + 1) })],
+    ["no requests", feedback({ requests: [] })],
+    ["too many requests", feedback({ requests: Array.from({ length: L.requests + 1 }, () => request()) })],
+    ["request not an object", feedback({ requests: ["x"] })],
+    ["blank screen", feedback({ requests: [request({ screenId: "" })] })],
+    ["blank flow", feedback({ requests: [request({ flowId: " " })] })],
+    ["blank role", feedback({ requests: [request({ roleId: "" })] })],
+    ["long state", feedback({ requests: [request({ stateId: "s".repeat(L.id + 1) })] })],
+    ["element ids not a list", feedback({ requests: [request({ elementIds: "a" })] })],
+    ["blank element id", feedback({ requests: [request({ elementIds: [""] })] })],
+    ["blank text", feedback({ requests: [request({ text: "  " })] })],
+    ["long text", feedback({ requests: [request({ text: "t".repeat(L.text + 1) })] })],
+  ];
+  for (const [name, b] of bad) {
+    assert.equal(isPrototypeFeedback(b), false, name);
+    assert.equal(isTurnSpec(feedbackFlow(b)), false, name);
+  }
+  assert.ok(isPrototypeFeedback(feedback({ requests: Array.from({ length: L.requests }, () => request()) })));
+  assert.ok(isPrototypeFeedback(feedback({ requests: [request({ text: "t".repeat(L.text) })] })));
 });

@@ -34,7 +34,15 @@
  * all send a `TurnSpec` and none of them composes.
  */
 
-import type { PlanContextFile, PlanScope, Toolset, TurnAim, TurnScope, TurnSpec } from "@aep/agent-stream";
+import type {
+  PlanContextFile,
+  PlanScope,
+  PrototypeFeedback,
+  Toolset,
+  TurnAim,
+  TurnScope,
+  TurnSpec,
+} from "@aep/agent-stream";
 
 // --- Wording -----------------------------------------------------------------
 
@@ -261,6 +269,37 @@ function flowBrief(skill: string): string | undefined {
   return Object.hasOwn(FLOW_BRIEFS, skill) ? FLOW_BRIEFS[skill] : undefined;
 }
 
+/**
+ * The revision brief of a `/prototype` turn that carries a reviewer's feedback
+ * batch. It replaces the generation brief: the turn revises ONE prototype, not
+ * every one the design declares. The reviewer's words are quoted verbatim, one
+ * quote line per text line, so a request can never read as instruction text
+ * and nothing the reviewer wrote is paraphrased.
+ */
+function feedbackBrief(feedback: PrototypeFeedback): string {
+  const dir = `specs/design/components/${feedback.component}`;
+  const n = feedback.requests.length;
+  const requests = feedback.requests.map((r, i) => {
+    const where = [`screen "${r.screenId}"`, ...(r.flowId ? [`flow "${r.flowId}"`] : []), `role "${r.roleId}"`, `display state "${r.stateId}"`];
+    const about = r.elementIds.length > 0 ? `Elements (ids): ${r.elementIds.join(", ")}` : "Elements: none selected, so the request is about the whole screen";
+    const quoted = r.text.split(/\r?\n/).map((line) => `> ${line}`).join("\n");
+    return `Request ${i + 1}\nWhere: ${where.join(", ")}\n${about}\nThe reviewer wrote:\n${quoted}`;
+  });
+  return (
+    `Revise the prototype of the web-application "${feedback.component}" from a reviewer's feedback. This is a revision, ` +
+    `not a generation: do not write any other component's prototype. The reviewer looked at the revision with hash ` +
+    `${feedback.prototypeHash} and made ${n === 1 ? "one request" : `${n} requests`} below, each pointing at the ` +
+    `ids shown on the screen, in the role and in the display state named. Read ${dir}/prototype.json and ` +
+    `${dir}/prototype.tsx first and change only those two files, with edits; if they no longer match what the ` +
+    `request describes, apply what still makes sense and say what differs. Apply every request you can. Keep every ` +
+    `manifest key and element id you do not need to change, so the next round of feedback still lines up. Decline a ` +
+    `request only when it conflicts with the design (the cell, the security roles, the API or the stories), and ` +
+    `say which part of the design it conflicts with. A request that names no element is about the whole screen. ` +
+    `Finish by answering each request by its number, as applied (with what you changed) or declined (with why).\n\n` +
+    requests.join("\n\n")
+  );
+}
+
 /** The branch a command names, or undefined for a token that IS its skill. */
 function commandFlow(token: string): { skill: string; scope: (subject: string) => string } | undefined {
   return Object.hasOwn(COMMAND_FLOWS, token) ? COMMAND_FLOWS[token] : undefined;
@@ -377,7 +416,7 @@ function specBody(turn: Exclude<TurnSpec, { kind: "plan" }>): string {
       // allowlist that goes stale against the org's catalog.
       const command = commandFlow(turn.skill);
       const skill = command?.skill ?? turn.skill;
-      const brief = flowBrief(skill);
+      const brief = turn.prototypeFeedback ? feedbackBrief(turn.prototypeFeedback) : flowBrief(skill);
       const base = `Load the ${skill} skill and follow it.` + (brief ? `\n\n${brief}` : "");
       // A command that names a BRANCH says which one, and carries whatever the
       // user clicked as the branch's subject; everything else passes the user's
