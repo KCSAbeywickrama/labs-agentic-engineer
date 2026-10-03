@@ -454,6 +454,33 @@ via an endpoint that exists only when explicitly enabled in a local deployment.
 Scoped to one org; minted fresh per turn. Never part of the production
 authentication story (which remains an open decision).
 
+## Console (`apps/console`)
+
+**Page**:
+A console screen that shows an org entity or a list of them: the Dashboard, the
+Projects list, a project's overview, the Skills and Resources lists, Settings.
+_Avoid_: view, screen.
+
+**Card**:
+One entity opened over its Page to change it with the agent: a project's Spec,
+Design or a Build; a Skill; a Resource. Opening a Card sets the Turn scope.
+_Avoid_: modal, dialog, panel.
+
+**Conversation**:
+The chat thread that belongs to one entity: a project, a Skill, a Resource, or the
+organization. The chat shows the Conversation of the entity in view.
+_Avoid_: session, chat (the chat is the panel that shows a Conversation).
+
+**Turn scope**:
+What one turn of a Conversation is about, set by the Card in view: a feature, the
+whole product, the design review. It focuses the agent and fences nothing.
+_Avoid_: scope on its own (Resource scope is a different thing), anchor.
+
+**Dashboard**:
+The user's home Page, opened from the logo and shown after sign-in when the
+organization has projects. It holds the Alerts.
+_Avoid_: home, overview (the overview is a project's Page).
+
 ## Project overview
 
 **Stage aggregate**:
