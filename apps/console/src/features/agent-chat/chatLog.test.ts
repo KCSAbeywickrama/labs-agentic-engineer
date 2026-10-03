@@ -219,6 +219,11 @@ describe("userLineText", () => {
     expect(userLineText("/start")).toBe("Start the project from the brief.");
   });
 
+  it("reads a prototype command as asking for the prototype", () => {
+    expect(userLineText("/prototype expense-web")).toBe("Prototype expense-web.");
+    expect(userLineText("/prototype")).toBe("Make the prototypes.");
+  });
+
   it("leaves anything else as typed", () => {
     expect(userLineText("/started a draft")).toBe("/started a draft");
     expect(userLineText("Where are we?")).toBe("Where are we?");

@@ -43,7 +43,12 @@ export type TurnScope =
   | { kind: "product" }
   | { kind: "feature"; featureId: string; name: string; path: string }
   | { kind: "design" }
-  | { kind: "prototype"; feedback?: PrototypeFeedback };
+  | {
+      kind: "prototype";
+      feedback?: PrototypeFeedback;
+      /** The batch in words, for the chat row: the wire carries ids, the user reads names. */
+      summary?: string;
+    };
 
 /** A turn's request body. */
 export type TurnBody = TurnInputBody;

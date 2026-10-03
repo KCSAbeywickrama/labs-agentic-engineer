@@ -77,7 +77,7 @@ function UserRow({ item }: { item: Extract<ChatItem, { kind: "user" }> }) {
         }}
       >
         <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
-          {userLineText(item.text)}
+          {item.summary ?? userLineText(item.text)}
         </Typography>
       </Box>
       {item.state === "failed" && (

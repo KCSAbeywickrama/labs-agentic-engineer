@@ -26,7 +26,7 @@ import {
   type Op,
   type QuestionAnswer,
 } from "@aep/agent-stream";
-import { parseDesignCommand, parseInterviewCommand, START_COMMAND } from "@aep/contracts/commands";
+import { parseDesignCommand, parseInterviewCommand, parsePrototypeCommand, START_COMMAND } from "@aep/contracts/commands";
 import type { ConversationMessage } from "./api/conversation";
 import { parseQuestionsInput } from "./questionCards";
 
@@ -35,10 +35,12 @@ import { parseQuestionsInput } from "./questionCards";
 // talks to the server or to React, so the chat store's rules are tested on
 // plain arrays.
 
-/** What a note offers next: open a version on the Builds card, or interview a feature. */
+/** What a note offers next: open a version on the Builds card, interview a feature, or review a prototype. */
 export type NoteAction =
   | { kind: "open-build"; label: string; version: string }
-  | { kind: "interview"; label: string; featureId: string };
+  | { kind: "interview"; label: string; featureId: string }
+  /** Review a prototype: one component's, or the Prototype tab when the turn made several. */
+  | { kind: "open-prototype"; label: string; component: string | null };
 
 /** One row of the chat. */
 export type ChatItem =
@@ -48,6 +50,12 @@ export type ChatItem =
       text: string;
       /** Who sent it, when that is not the signed-in user or not known. */
       author?: string;
+      /**
+       * What the row reads as when the wire text says too little: a prototype
+       * review's requests in words. Lasts until the thread is read again (the
+       * history carries the wire text only).
+       */
+      summary?: string;
       /** `sending` until the server accepts the turn; `failed` when it refused it. */
       state: "sending" | "sent" | "failed";
       turnId?: string;
@@ -213,6 +221,8 @@ export function userLineText(text: string): string {
   if (interview) return `Interview ${interview.featureId}.`;
   const design = parseDesignCommand(trimmed);
   if (design) return design.featureIds.length > 0 ? `Design ${design.featureIds.join(", ")}.` : "Design the features.";
+  const prototype = parsePrototypeCommand(trimmed);
+  if (prototype) return prototype.component ? `Prototype ${prototype.component}.` : "Make the prototypes.";
   return text;
 }
 

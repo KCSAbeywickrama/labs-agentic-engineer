@@ -22,6 +22,7 @@ import { Box } from "@wso2/oxygen-ui";
 import { ErrorBoundary } from "../../../components/ErrorBoundary";
 import { ChatPanel } from "../../agent-chat/components/ChatPanel";
 import { useRefreshOnTurnEnd } from "../../agent-chat/useProjectChat";
+import { usePrototypeNotes } from "../../prototype/usePrototypeNotes";
 import { ChatPanelContext, type ChatPanelControls } from "../chatPanel";
 import { shellScope } from "../scope";
 import { CHAT_OVERLAY_WIDTH, PHONE, PHONE_QUERY, RAIL_WIDTH } from "../layout";
@@ -59,6 +60,7 @@ export function Shell() {
   const chatWidth = useChatWidth();
   const chatControls = useMemo<ChatPanelControls>(() => ({ open: () => setChatOpen(true) }), []);
   useRefreshOnTurnEnd();
+  usePrototypeNotes();
 
   // Arriving from New project (`?chat=open` on the overview): the kickoff is
   // already running, so the chat opens, at phone width too, to show it. The

@@ -31,7 +31,7 @@ export function usePrototypeTurns(projectName: string): {
   /** Make or update one web application's prototype, or every one's (none named). */
   make: (component?: string) => void;
   /** Send a review's requests as one revision; resolves false when it was not sent. */
-  sendFeedback: (feedback: PrototypeFeedback) => Promise<boolean>;
+  sendFeedback: (feedback: PrototypeFeedback, summary: string) => Promise<boolean>;
   /** Whether one can start now: the chat is loaded and no turn is running. */
   ready: boolean;
 } {
@@ -44,9 +44,9 @@ export function usePrototypeTurns(projectName: string): {
       const line = component ? prototypeCommand(component) : PROTOTYPE_COMMAND;
       void chatStore.send(projectName, line, { kind: "prototype" });
     },
-    sendFeedback: async (feedback) => {
+    sendFeedback: async (feedback, summary) => {
       panel.open();
-      return chatStore.send(projectName, prototypeCommand(feedback.component), { kind: "prototype", feedback });
+      return chatStore.send(projectName, prototypeCommand(feedback.component), { kind: "prototype", feedback, summary });
     },
   };
 }

@@ -20,6 +20,7 @@ import { useState } from "react";
 import { Box, Button, Chip, Skeleton, Typography } from "@wso2/oxygen-ui";
 import { PHONE } from "../../shell/layout";
 import type { ReviewQueue } from "../model/feedback";
+import { markReviewed } from "../model/reviewed";
 import type { AppPrototype, PrototypeStatus } from "../model/prototypes";
 import { usePrototypes } from "../usePrototypes";
 import { usePrototypeTurns } from "../usePrototypeTurns";
@@ -157,6 +158,7 @@ export function PrototypeWorkspace({
           onQueue={(queue) => setQueues((q) => ({ ...q, [open.component]: queue }))}
           ready={turns.ready}
           onSend={turns.sendFeedback}
+          onSeen={(hash) => markReviewed(projectName, open.component, hash)}
           onClose={() => onReview(null)}
         />
       )}

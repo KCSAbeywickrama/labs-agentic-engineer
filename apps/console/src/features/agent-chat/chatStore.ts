@@ -128,7 +128,7 @@ export function createChatStore(options: ChatStoreOptions) {
   const { api, onAgentWrite, beforeTurn } = options;
   const pollDelay = options.pollDelay ?? foreignTurnPollDelay;
   const entries = new Map<string, Entry>();
-  const turnEndListeners = new Set<(projectName: string, outcome: TurnOutcome) => void>();
+  const turnEndListeners = new Set<(projectName: string, outcome: TurnOutcome, instruction?: string) => void>();
   let localIds = 0;
   const localId = (prefix: string) => `${prefix}${++localIds}`;
 
@@ -221,7 +221,7 @@ export function createChatStore(options: ChatStoreOptions) {
       ]);
     }
     update(projectName, () => ({ turn: { phase: "idle" } }));
-    if (outcome) for (const fn of turnEndListeners) fn(projectName, outcome);
+    if (outcome) for (const fn of turnEndListeners) fn(projectName, outcome, turn.instruction);
     trySeed(projectName);
   }
 
@@ -325,7 +325,16 @@ export function createChatStore(options: ChatStoreOptions) {
     const rowId = localId("u");
     update(projectName, (s) => ({
       turn: { phase: "starting", instruction },
-      items: [...s.items, { kind: "user", id: rowId, text: instruction, state: "sending" }],
+      items: [
+        ...s.items,
+        {
+          kind: "user",
+          id: rowId,
+          text: instruction,
+          state: "sending",
+          ...(scope.kind === "prototype" && scope.summary ? { summary: scope.summary } : {}),
+        },
+      ],
     }));
     let turnId: string;
     try {
@@ -421,8 +430,8 @@ export function createChatStore(options: ChatStoreOptions) {
       void open(projectName).then(() => trySeed(projectName));
     },
 
-    /** Be told when any project's turn ends; returns the unsubscribe. */
-    onTurnEnd(fn: (projectName: string, outcome: TurnOutcome) => void): () => void {
+    /** Be told when any project's turn ends, with the instruction that started it when known; returns the unsubscribe. */
+    onTurnEnd(fn: (projectName: string, outcome: TurnOutcome, instruction?: string) => void): () => void {
       turnEndListeners.add(fn);
       return () => turnEndListeners.delete(fn);
     },
