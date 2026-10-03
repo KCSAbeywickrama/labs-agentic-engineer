@@ -23,8 +23,16 @@ import { basename } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ARTIFACTS } from "../scripts/artifacts.js";
 
+// Rendering the reference runs the TypeScript checker over the kit, which
+// takes several seconds on a CI runner — well past vitest's 5 s default.
+const RENDER_TIMEOUT_MS = 60_000;
+
 describe("generated artifacts", () => {
-  it.each(ARTIFACTS.map((a) => [basename(a.path), a] as const))("%s is fresh", (_name, artifact) => {
-    expect(readFileSync(artifact.path, "utf8"), "stale — run `pnpm --filter @wso2/prototype-kit gen`").toBe(artifact.render());
-  });
+  it.each(ARTIFACTS.map((a) => [basename(a.path), a] as const))(
+    "%s is fresh",
+    (_name, artifact) => {
+      expect(readFileSync(artifact.path, "utf8"), "stale — run `pnpm --filter @wso2/prototype-kit gen`").toBe(artifact.render());
+    },
+    RENDER_TIMEOUT_MS,
+  );
 });
