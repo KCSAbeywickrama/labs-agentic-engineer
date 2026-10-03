@@ -61,9 +61,12 @@ AEP: Oxygen, AEP paths, no CLI, unpublished.
   parsed one), which keeps the schema validator out of it. The console loads
   the frame runtime lazily, on first review, and `PrototypeFrame` covers the
   frame with a loading state until the app first draws, so an early click is
-  not lost.
+  not lost; a frame that dies or stalls says so instead. The host's resolved
+  colour scheme travels in the view, so a prototype is light or dark with the
+  console.
 - The kit has an app shell (`<AppShell>`: product, signed-in user, user menu
-  with Account, Settings and Sign out, side navigation), the 26th component,
+  with Account, Settings, Sign out and the prototype's own entries, side
+  navigation), the 26th component,
   and the prototype skill makes it every screen's root. A prototype on bare
   `<Screen>`s stays valid. Its user menu's targets are required props, and a
   theme keeps the closed menu's entries in the markup so the render check

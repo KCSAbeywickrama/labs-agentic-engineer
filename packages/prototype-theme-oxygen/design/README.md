@@ -13,9 +13,10 @@ by those two subpaths.
 - **Provider.** The console's own theme (`aepTheme` from `@aep/ui-theme`)
   through Oxygen's `OxygenUIThemeProvider`, as the console's `main.tsx`
   applies it, so a prototype cannot drift from the console. One fixed theme:
-  no theme switching, so nothing is fetched or stored. MUI's colour-scheme
-  storage is guarded and finds none in the frame, so the scheme follows the
-  system, the console's default. The kit's Annotate colour (`--proto-select`)
+  no theme switching, so nothing is fetched or stored. The scheme is the
+  host's resolved one (the kit's `colorScheme`), set with MUI's
+  `useColorScheme().setMode`; without one it follows the system. MUI's scheme
+  storage is guarded and the frame has none, so nothing is stored. The kit's Annotate colour (`--proto-select`)
   is the theme's primary.
 - **Nothing loaded.** Emotion injects styles inline; Oxygen ships Inter as
   `data:` fonts (the frame CSP allows `font-src data:`).

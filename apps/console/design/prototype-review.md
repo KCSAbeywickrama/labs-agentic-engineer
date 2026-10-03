@@ -70,7 +70,10 @@ feedback by number, and refuses a bad batch as Go does.
 (`@aep/ui-theme`, the `aepTheme` `main.tsx` applies), so the prototype and the
 console cannot drift. Until the frame's app first draws, the review passes
 `PrototypeFrame` a loading state ("Starting the prototype…") that covers the
-frame, so a click while the runtime starts is not lost. Its frame has no
+frame, so a click while the runtime starts is not lost; a frame that never
+draws shows the kit's "didn't start" error instead. The review passes the
+console's resolved scheme (`useColorScheme`: the mode, or the system's under
+System), so the prototype is light or dark with the console. Its frame has no
 storage (opaque origin), so a script that touches `localStorage` in every
 frame (for example a Playwright init script) raises there; limit it to the top
 frame.

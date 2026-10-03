@@ -20,7 +20,7 @@ component's theme props; `ThemeRegistry` maps over it.
 signed-in user (role label defaults to the viewing role's name), side
 navigation, and a user menu whose Account, Settings and Sign out entries open
 screens the prototype names (`account`, `settings`, `signOut`; required, a
-missing one throws). Entries the role cannot reach are not drawn, as for
+missing one throws), plus the prototype's own entries (`menu`). Entries the role cannot reach are not drawn, as for
 `<Navigation>`. A theme keeps the closed menu's entries in the markup, so the
 render check sees their `to` and ids. A bare `<Screen>` stays valid.
 
@@ -92,7 +92,14 @@ recovers. The host ignores frame navigation outside Preview. Until the frame
 first draws (`proto:rendered` or `proto:error`) after its latest `ready`,
 `PrototypeFrame` covers it with its `loading` node (a plain "Loading the
 prototype…" by default), so a click while the large runtime starts is not
-silently lost. The frame does not parse the manifest: the host passes a parsed
+silently lost. The frame reports what kills it: an inline prelude posts
+`proto:error` for any uncaught error or rejection (the runtime failing as it
+loads included), and a boundary around the kit root reports a theme Provider
+that throws. A frame that neither draws nor errs within
+`PROTOTYPE_START_TIMEOUT_MS` (30 s) gets a visible "didn't start" error
+instead of the cover. `FrameView.colorScheme` (optional `light | dark`,
+`PrototypeFrame`'s `colorScheme`) reaches the theme's Provider; absent, the
+theme follows the system. The frame does not parse the manifest: the host passes a parsed
 `PrototypeManifest`, which keeps zod (about 450 KB minified) out of every
 frame runtime.
 

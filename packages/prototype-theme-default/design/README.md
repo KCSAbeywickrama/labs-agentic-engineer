@@ -4,7 +4,9 @@ Plain React and CSS custom properties (`--pt-*` tokens on `.pt-root`), no
 component library, so the runtimes stay small. Each component file exports its
 CSS; `provider.tsx` injects all of it inline, because the frame loads nothing.
 Overlays draw in place (fixed position), not in a portal. Buttons are always
-`type="button"`: submitting is the kit's. The app shell is a plain header
+`type="button"`: submitting is the kit's. The host's `colorScheme` becomes
+`data-theme` on `.pt-root` (dark tokens); without one, `prefers-color-scheme`
+decides. The app shell is a plain header
 (product, user button), a side list and the content; its user menu stays in
 the markup while closed (`hidden`), as the kit's contract asks, so the render
 check sees its targets.
