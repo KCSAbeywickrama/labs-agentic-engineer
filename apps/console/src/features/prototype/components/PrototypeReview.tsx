@@ -244,6 +244,16 @@ function Session({
             onToggle={(elementKey) => dispatch({ type: "TOGGLE_SELECTION", elementKey })}
             onEscape={() => (view.selectedKeys.length > 0 ? dispatch({ type: "CLEAR_SELECTION" }) : onClose())}
             onElements={(_screenId, elements) => setLabels(Object.fromEntries(elements.map((e) => [e.key, e.label])))}
+            loading={
+              <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", bgcolor: "background.default" }}>
+                <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1.5 }}>
+                  <CircularProgress size={28} aria-hidden />
+                  <Typography variant="body2" color="text.secondary">
+                    Starting the prototype…
+                  </Typography>
+                </Box>
+              </Box>
+            }
           />
         </Box>
         {(annotating || requests.length > 0) && (

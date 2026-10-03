@@ -188,6 +188,27 @@ describe("the full-screen review", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  it("covers the frame with a loading state until the prototype first draws, so an early click is not lost", async () => {
+    render(<Harness initial={C} />);
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(frame()).toBeInTheDocument());
+    // The runtime has not started yet, then it has but the app has not drawn.
+    expect(within(dialog).getByRole("status")).toHaveTextContent("Starting the prototype…");
+    expect(frame()).toHaveAttribute("aria-busy", "true");
+    fromFrame({ type: "proto:ready" });
+    expect(within(dialog).getByRole("status")).toHaveTextContent("Starting the prototype…");
+    fromFrame({ type: "proto:rendered", screenId: "screen.my-claims", elements: [] });
+    expect(within(dialog).queryByRole("status")).toBeNull();
+    expect(frame()).toHaveAttribute("aria-busy", "false");
+
+    // A frame document that reloads starts again; one that fails to load stops covering and shows why.
+    fromFrame({ type: "proto:ready" });
+    expect(within(dialog).getByRole("status")).toBeInTheDocument();
+    fromFrame({ type: "proto:error", message: "prototype.tsx failed" });
+    expect(within(dialog).queryByRole("status")).toBeNull();
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("prototype.tsx failed");
+  });
+
   it("says why instead of drawing a blank frame when the prototype is invalid", async () => {
     prototypes = appPrototypes([C], { [manifestPath(C)]: SAMPLE_MANIFEST }, null);
     render(<Harness initial={C} />);

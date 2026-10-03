@@ -41,6 +41,7 @@ describe("prototype preview — Annotate", () => {
   it("selects instead of acting, queues two requests, and saves them as feedback", async () => {
     await driver.click(page, host.button("Annotate"));
     expect(await driver.read(page, host.button("Annotate"), "pressed")).toBe("true");
+    await driver.frameMode(page, "annotate");
 
     // A click on the button selects it; it does not navigate.
     await driver.click(page, app.element("btn.new"));
@@ -87,6 +88,7 @@ describe("prototype preview — Annotate", () => {
 
   it("acts again in Preview", async () => {
     await driver.click(page, host.button("Preview"));
+    await driver.frameMode(page, "preview");
     await driver.click(page, app.button("New contact"));
     await driver.waitFor(page, app.heading("New contact"));
   });
@@ -100,6 +102,7 @@ describe("prototype preview — Annotate across a revision", () => {
       await driver.waitFor(pg, app.heading("Acme contacts"));
       const originalHash = await driver.revisionHash(p.id);
       await driver.click(pg, host.button("Annotate"));
+      await driver.frameMode(pg, "annotate");
       await driver.click(pg, app.element("btn.new"));
       await driver.fill(pg, host.field("Request"), "Make this button green");
       await driver.click(pg, host.button("Add request"));
@@ -126,6 +129,7 @@ describe("prototype preview — Annotate limits", () => {
     try {
       await driver.waitFor(pg, app.heading("Acme contacts"));
       await driver.click(pg, host.button("Annotate"));
+      await driver.frameMode(pg, "annotate");
       
       expect(await driver.read(pg, host.field("Request"), "maxlength")).toBe(String(MAX_FEEDBACK_TEXT));
       await driver.fill(pg, host.field("Request"), "Fine");
@@ -151,7 +155,9 @@ describe("prototype preview — Escape", () => {
     try {
       await driver.waitFor(pg, app.heading("Approval queue"));
       await driver.click(pg, host.button("Annotate"));
+      await driver.frameMode(pg, "annotate");
       await driver.click(pg, app.element("heading.queue"));
+      await driver.waitFor(pg, host.text("Selected: Approval queue"));
       expect(await driver.read(pg, app.element("heading.queue"), "pressed")).toBe("true");
 
       // Annotate makes the controls read-only, so enable one: Escape closing its native picker is the prototype's own,

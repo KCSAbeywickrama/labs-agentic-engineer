@@ -39,6 +39,12 @@ export const driver = {
   count: (page: string, target: Target) => call("read")(page, target, "count") as Promise<number>,
   waitFor: (page: string, target: Target, state: "visible" | "hidden" = "visible") => call("waitFor")(page, target, state) as Promise<void>,
   evalInApp: (page: string, expression: string) => call("evalInApp")(page, expression) as Promise<string>,
+  /** Waits until the app frame draws in `mode`: a host's mode switch reaches the frame by message, after the click. */
+  frameMode: (page: string, mode: "preview" | "annotate") =>
+    call("evalInApp")(
+      page,
+      `new Promise((resolve) => { const check = () => (document.querySelector('.proto-scene[data-proto-mode="${mode}"]') ? resolve(true) : setTimeout(check, 20)); check(); })`,
+    ) as Promise<string>,
   requests: (page: string) => call("requests")(page) as Promise<string[]>,
   setStorage: (page: string, key: string, value: string) => call("setStorage")(page, key, value) as Promise<void>,
   readFile: (preview: string, path: string) => call("readFile")(preview, path) as Promise<string | null>,

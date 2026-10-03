@@ -95,7 +95,7 @@ function isView(v: unknown): v is FrameView {
   );
 }
 
-/** A host message, or null for anything else. The frame re-validates the manifest before use. */
+/** A host message, or null for anything else. The manifest is the host's parsed one (`PrototypeFrame` takes a `PrototypeManifest`), so only its being an object is checked here. */
 export function parseToFrameMessage(data: unknown): ToFrameMessage | null {
   if (!isObject(data)) return null;
   switch (data["type"]) {

@@ -28,7 +28,6 @@ import { createRoot } from "react-dom/client";
 import type { PrototypeApp } from "../app.js";
 import type { DataSnapshot } from "../data.js";
 import { parseToFrameMessage, type FrameElement, type FrameView, type FromFrameMessage } from "../host/bridge.js";
-import { parseManifest } from "../manifest/parse.js";
 import type { PrototypeManifest } from "../manifest/types.js";
 import { KitRoot } from "../runtime/KitRoot.js";
 import { moduleFactorySource } from "../runtime/module-source.js";
@@ -58,14 +57,17 @@ interface Loaded {
 
 let generation = 0;
 
-function load(source: string, manifestValue: unknown, data: DataSnapshot | undefined): Loaded {
-  const manifest = parseManifest(manifestValue);
-  if (!manifest.ok) throw new Error(`prototype.json is not valid: ${manifest.findings.map((f) => f.message).join("; ")}`);
+/**
+ * Runs the prototype. The manifest is the host's, already parsed: a host hands
+ * `PrototypeFrame` a `PrototypeManifest`, so the frame does not parse it again
+ * (which keeps the manifest schema's validator out of this runtime).
+ */
+function load(source: string, manifest: PrototypeManifest, data: DataSnapshot | undefined): Loaded {
   const transpiled = transpileSource(source);
   if (!transpiled.ok) throw new Error(transpiled.findings.map((f) => `${f.location}: ${f.message}`).join("; "));
   // The frame is the sandbox: evaluating the module here is what it is for.
   const factory = (0, eval)(moduleFactorySource(transpiled.code)) as ModuleFactory;
-  return { app: runPrototypeModule(factory), manifest: manifest.manifest, initialData: data, generation: ++generation };
+  return { app: runPrototypeModule(factory), manifest, initialData: data, generation: ++generation };
 }
 
 /** The elements the document draws now, in document order, each once. */

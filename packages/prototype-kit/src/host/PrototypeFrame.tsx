@@ -22,10 +22,12 @@
  * frame what to run (`load`), what to draw (`view`) and when to start the
  * mock data over (`reset`); the frame answers with navigations, selection
  * toggles, the elements a screen draws, data snapshots, Escape and errors.
- * Every message's source and shape is checked. Plain React, no theme.
+ * Every message's source and shape is checked. Until the app first draws,
+ * a loading cover sits over the frame, so an early click is not silently
+ * lost. Plain React, no theme.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { DataSnapshot } from "../data.js";
 import type { PrototypeManifest } from "../manifest/types.js";
 import { parseFromFrameMessage, type FrameElement, type FrameView, type ToFrameMessage } from "./bridge.js";
@@ -50,14 +52,24 @@ export interface PrototypeFrameProps {
   onEscape: () => void;
   onElements: (screenId: string, elements: FrameElement[]) => void;
   onData?: ((data: DataSnapshot) => void) | undefined;
+  /**
+   * What covers the frame until the prototype first draws (or fails): the
+   * runtime is large and takes a moment to start, and a click before then
+   * would be lost. A plain "Loading the prototype…" by default.
+   */
+  loading?: ReactNode;
 }
 
 export function PrototypeFrame(props: PrototypeFrameProps) {
-  const { title, runtime, version, view, resetToken } = props;
+  const { title, runtime, version, view, resetToken, loading } = props;
   const frame = useRef<HTMLIFrameElement>(null);
   // Counts the frame's `proto:ready` messages: a reloaded frame document is ready again and needs its app re-sent.
   const [readies, setReadies] = useState(0);
   const ready = readies > 0;
+  const readyCount = useRef(0);
+  // The `readies` count at which the frame last drew (or failed): below the current one, the app is not up yet.
+  const [drawnAt, setDrawnAt] = useState(0);
+  const starting = readies === 0 || drawnAt < readies;
   const [error, setError] = useState<string | null>(null);
   const doc = useMemo(() => prototypeFrameDocument(runtime), [runtime]);
 
@@ -73,7 +85,8 @@ export function PrototypeFrame(props: PrototypeFrameProps) {
       const p = latest.current;
       switch (message.type) {
         case "proto:ready":
-          setReadies((n) => n + 1);
+          readyCount.current += 1;
+          setReadies(readyCount.current);
           break;
         case "proto:navigate":
           p.onNavigate(message.screenId);
@@ -85,12 +98,14 @@ export function PrototypeFrame(props: PrototypeFrameProps) {
           p.onEscape();
           break;
         case "proto:rendered":
+          setDrawnAt(readyCount.current);
           p.onElements(message.screenId, message.elements);
           break;
         case "proto:data":
           p.onData?.(message.data);
           break;
         case "proto:error":
+          setDrawnAt(readyCount.current);
           setError(message.message);
           break;
       }
@@ -139,7 +154,12 @@ export function PrototypeFrame(props: PrototypeFrameProps) {
           </button>
         </div>
       )}
-      <iframe ref={frame} title={`${title} prototype app`} sandbox="allow-scripts" srcDoc={doc} style={{ flex: 1, border: 0, width: "100%", height: "100%", display: "block" }} />
+      {starting && (
+        <div role="status" className="proto-frame-loading" style={{ position: "absolute", inset: 0, zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {loading ?? <span style={{ font: "13px system-ui, sans-serif", color: "#59636e" }}>Loading the prototype…</span>}
+        </div>
+      )}
+      <iframe ref={frame} aria-busy={starting} title={`${title} prototype app`} sandbox="allow-scripts" srcDoc={doc} style={{ flex: 1, border: 0, width: "100%", height: "100%", display: "block" }} />
     </div>
   );
 }
