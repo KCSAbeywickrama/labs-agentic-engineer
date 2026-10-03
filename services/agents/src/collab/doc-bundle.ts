@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { FileBundle, type OpResult } from "@aep/agent-stream";
+import { FileBundle, type OpResult, type PrototypeRenderCheck } from "@aep/agent-stream";
 import type { RoomPeer } from "./room-peer.js";
 
 /**
@@ -32,8 +32,9 @@ export class DocFileBundle extends FileBundle {
   constructor(
     private readonly peer: RoomPeer,
     initial: Record<string, string>,
+    gates: { prototypeRender?: PrototypeRenderCheck } = {},
   ) {
-    super(initial);
+    super(initial, gates);
   }
 
   override addFile(path: string, content: string): OpResult {

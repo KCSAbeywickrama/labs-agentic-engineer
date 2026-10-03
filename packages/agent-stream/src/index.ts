@@ -33,6 +33,7 @@ export type {
   OpOk,
   OpErr,
   OpResult,
+  PrototypeFinding,
   AddFileInput,
   EditFileInput,
   RemoveFileInput,
@@ -151,6 +152,7 @@ export type { Equal } from "./type-equal.js";
 
 // --- The fold surface --------------------------------------------------------
 export { FileBundle, lf, FRONTMATTER_RE } from "./bundle.js";
+export type { PrototypeFileTexts, PrototypeRenderCheck } from "./prototype-gate.js";
 export { toChange, applyToolCall, isFileMutationTool, opForTool, readToolInputPath } from "./change.js";
 
 // --- The component design.json write-gate (travels with FileBundle) ----------

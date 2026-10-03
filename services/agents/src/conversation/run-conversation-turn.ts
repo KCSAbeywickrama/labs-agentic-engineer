@@ -40,6 +40,7 @@ import {
   type Toolset,
 } from "@aep/agent-stream";
 import { DocFileBundle } from "../collab/doc-bundle.js";
+import { checkPrototypeRender } from "../prototype/render-check.js";
 import { StreamingDocWriter } from "../collab/streaming-add.js";
 import type { RoomPeer } from "../collab/room-peer.js";
 import { runTurn, type ProviderOptions } from "../agents/main/run-turn.js";
@@ -299,9 +300,10 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       tools = buildTaskPlanTools(new TaskPlan(input.files), skills);
       instructions = buildTaskPlanInstructions(skills, input.surface);
     } else {
+      const gates = { prototypeRender: checkPrototypeRender };
       bundle = input.collabPeer
-        ? new DocFileBundle(input.collabPeer, input.files)
-        : new FileBundle(input.files);
+        ? new DocFileBundle(input.collabPeer, input.files, gates)
+        : new FileBundle(input.files, gates);
       const fileToolSet = buildFileToolSet(bundle, skills);
       tools = fileToolSet.tools;
       writes = fileToolSet.writes;
