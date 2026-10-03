@@ -46,7 +46,10 @@ export function Dialog({ title, titleId, open, onClose, children, actions }: The
         elevation={8}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
-          if (e.key === "Escape") onClose();
+          if (e.key !== "Escape") return;
+          // Used here, so the frame does not hand it on to the host.
+          e.preventDefault();
+          onClose();
         }}
         sx={{ m: "auto", width: "min(560px, calc(100% - 32px))", display: "flex", flexDirection: "column" }}
       >

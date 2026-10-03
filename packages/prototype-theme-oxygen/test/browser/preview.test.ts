@@ -160,11 +160,21 @@ describe("integration-monitor under Oxygen", () => {
     await s.app.getByRole("tab", { name: "Log" }).click();
     await s.app.getByText("Run started").waitFor();
 
+    // Escape the dialog handles is the prototype's own: it must not reach the host (which would close a console review).
+    await s.page.evaluate(() => {
+      const w = window as unknown as { __escapes: number };
+      w.__escapes = 0;
+      window.addEventListener("message", (e) => {
+        if ((e.data as { type?: string } | null)?.type === "proto:escape") w.__escapes++;
+      });
+    });
     await s.app.getByRole("button", { name: "Replay run" }).click();
     const dialog = s.app.getByRole("dialog", { name: "Replay run #8812?" });
     await dialog.waitFor();
     await s.app.getByRole("button", { name: "Cancel" }).press("Escape");
     await dialog.waitFor({ state: "hidden" });
+    await s.page.waitForTimeout(300);
+    expect(await s.page.evaluate(() => (window as unknown as { __escapes: number }).__escapes)).toBe(0);
 
     await s.app.getByRole("tab", { name: "Summary" }).click();
     await s.app.getByRole("button", { name: "View payload" }).click();
