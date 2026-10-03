@@ -19,6 +19,7 @@
     "!packages/web-search",
     "!packages/prototype-kit",
     "!packages/prototype-theme-default",
+    "!packages/prototype-theme-oxygen",
     "!packages/prototype-cli",
     "packages/ui/*",
     "runners/*",
@@ -42,12 +43,14 @@
     "scripts/**",
     "services/agents/src/shared/mock-model.ts",
     "skills/**",
-    // The prototype CLI's test harness (spawned bin, browser-lane commands) is
-    // reached only from *.test.ts files, which --production strips; its host
+    // The prototype CLI's and the Oxygen theme's test harnesses (spawned bin,
+    // browser-lane commands) are reached only from *.test.ts files, which
+    // --production strips; the CLI's host
     // app (src/host) is reached by no import: scripts/build-host.ts bundles it
     // into dist/host/host.js, which `preview` serves and `export` inlines.
     // The packages' scripts/ run from package.json scripts (tsx), not imports.
     "packages/prototype-cli/test/**",
+    "packages/prototype-theme-oxygen/test/**",
     "packages/prototype-cli/src/host/**",
     "packages/prototype-*/scripts/**",
     // The agents `gen` script (package.json) pastes the kit reference into the

@@ -25,6 +25,9 @@
 
 const g = globalThis as Record<string, unknown>;
 
+// The global object under the name browser bundlers have long provided for it: a library that publishes itself there (Prism, inside Oxygen UI, whose language files then read the bare `Prism`) finds it.
+g["global"] ??= globalThis;
+
 let nextTimer = 1;
 const timer = () => nextTimer++;
 for (const name of ["setTimeout", "setInterval", "setImmediate"]) g[name] ??= timer;
