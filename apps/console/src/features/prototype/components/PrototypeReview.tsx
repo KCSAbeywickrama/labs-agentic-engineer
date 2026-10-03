@@ -27,8 +27,8 @@ import {
   type PrototypeViewEvent,
 } from "@wso2/prototype-kit/host";
 import type { PrototypeFeedback } from "../../agent-chat/turnScope";
-import { dequeue, enqueue, feedbackBatch, pinsOnScreen, requestFor, type ReviewQueue } from "../model/feedback";
-import { feedbackSummary } from "../model/summary";
+import { pinsOnScreen, requestFor } from "@wso2/prototype-kit/feedback";
+import { dequeue, enqueue, feedbackBatch, type ReviewQueue } from "../model/feedback";
 import type { AppPrototype, PrototypeFiles } from "../model/prototypes";
 import { useFrameRuntime, usePrototypeHash } from "../useReviewAssets";
 import { FeedbackPanel } from "./FeedbackPanel";
@@ -42,8 +42,8 @@ export interface PrototypeReviewProps {
   /** Whether a turn can start now (the chat is loaded and idle). */
   ready: boolean;
   /** Send the batch as one revision turn; resolves false when it was not sent. */
-  onSend: (feedback: PrototypeFeedback, summary: string) => Promise<boolean>;
-  /** The revision showing, once its hash is known: the review has looked at it. */
+  onSend: (feedback: PrototypeFeedback) => Promise<boolean>;
+  /** The revision showing: the review has looked at it. */
   onSeen: (hash: string) => void;
   onClose: () => void;
 }
@@ -157,7 +157,7 @@ function Session({
   const hash = usePrototypeHash(files.manifestText, files.source);
   const { manifest } = files;
   useEffect(() => {
-    if (hash) onSeen(hash);
+    onSeen(hash);
   }, [hash, onSeen]);
   const [state, setState] = useState(() => ({ manifest, view: initialPrototypeView(manifest) }));
   // A revision that lands while the review is open repairs the view in the same render, as the kit CLI's host does.
@@ -182,8 +182,7 @@ function Session({
   const annotating = view.mode === "annotate";
 
   const add = (text: string) => {
-    if (!hash) return;
-    onQueue(enqueue(queue, hash, requestFor(view, text), view.selectedKeys.map((k) => labels[k] ?? k)));
+    onQueue(enqueue(queue, hash, requestFor(view, text)));
     setRefused(null);
     dispatch({ type: "CLEAR_SELECTION" });
   };
@@ -196,7 +195,7 @@ function Session({
     }
     setSending(true);
     const feedback = feedbackBatch(prototype.component, queue);
-    const sent = await onSend(feedback, feedbackSummary(feedback, manifest, queue.labels));
+    const sent = await onSend(feedback);
     setSending(false);
     if (!sent) {
       setRefused(NOT_SENT);
@@ -213,35 +212,29 @@ function Session({
       </Header>
       <Box sx={{ flex: 1, minHeight: 0, display: "flex" }}>
         <Box sx={{ flex: 1, minWidth: 0, display: "flex", bgcolor: "background.default" }}>
-          {hash ? (
-            <PrototypeFrame
-              title={manifest.name}
-              runtime={runtime}
-              manifest={manifest}
-              source={files.source}
-              version={hash}
-              view={frameView}
-              resetToken={resetToken}
-              onNavigate={(screenId) => {
-                // The frame is untrusted: only Preview navigates (the reducer checks the target against the role).
-                if (view.mode === "preview") dispatch({ type: "NAVIGATE", screenId });
-              }}
-              onToggle={(elementKey) => dispatch({ type: "TOGGLE_SELECTION", elementKey })}
-              onEscape={() => (view.selectedKeys.length > 0 ? dispatch({ type: "CLEAR_SELECTION" }) : onClose())}
-              onElements={(_screenId, elements) => setLabels(Object.fromEntries(elements.map((e) => [e.key, e.label])))}
-            />
-          ) : (
-            <Waiting>
-              <CircularProgress aria-label="Loading the prototype" />
-            </Waiting>
-          )}
+          <PrototypeFrame
+            title={manifest.name}
+            runtime={runtime}
+            manifest={manifest}
+            source={files.source}
+            version={hash}
+            view={frameView}
+            resetToken={resetToken}
+            onNavigate={(screenId) => {
+              // The frame is untrusted: only Preview navigates (the reducer checks the target against the role).
+              if (view.mode === "preview") dispatch({ type: "NAVIGATE", screenId });
+            }}
+            onToggle={(elementKey) => dispatch({ type: "TOGGLE_SELECTION", elementKey })}
+            onEscape={() => (view.selectedKeys.length > 0 ? dispatch({ type: "CLEAR_SELECTION" }) : onClose())}
+            onElements={(_screenId, elements) => setLabels(Object.fromEntries(elements.map((e) => [e.key, e.label])))}
+          />
         </Box>
         {(annotating || requests.length > 0) && (
           <FeedbackPanel
             selection={view.selectedKeys.map((k) => labels[k] ?? k)}
             annotating={annotating}
             requests={requests}
-            stale={queue !== null && hash !== null && queue.hash !== hash}
+            stale={queue !== null && queue.hash !== hash}
             refused={refused}
             sending={sending}
             onAdd={add}

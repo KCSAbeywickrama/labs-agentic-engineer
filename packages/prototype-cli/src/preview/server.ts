@@ -31,7 +31,8 @@ import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import type { ThemeRuntimes } from "@wso2/prototype-kit/check";
 import { HOST_SCRIPT_PATH } from "../assets.js";
-import { FEEDBACK_PATH, FEEDBACK_SCHEMA_VERSION, parseFeedbackSubmission, type FeedbackFile } from "../feedback.js";
+import { parseFeedbackSubmission } from "@wso2/prototype-kit/feedback";
+import { FEEDBACK_PATH, FEEDBACK_SCHEMA_VERSION, type FeedbackFile } from "../feedback.js";
 import { renderHostPage } from "../host-page.js";
 import { EventStream, type ServerEvent } from "./sse.js";
 import { PrototypeWatcher, type PrototypeStatus } from "./watcher.js";
@@ -101,7 +102,7 @@ function readBody(req: IncomingMessage): Promise<string | null> {
 export async function startPreviewServer(options: PreviewServerOptions): Promise<RunningPreview> {
   const events = new EventStream();
   const watcher = new PrototypeWatcher(options.dir, options.theme, (status) => statusEvents(status).forEach((e) => events.send(e)));
-  watcher.refresh();
+  await watcher.refresh();
 
   let port = 0;
   const hosts = () => new Set([`127.0.0.1:${port}`, `localhost:${port}`]);

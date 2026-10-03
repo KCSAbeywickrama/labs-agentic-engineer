@@ -20,7 +20,9 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { OxygenTheme, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
+import { designKey } from "../../design/api/designModel";
 import type { ProjectChat } from "../../agent-chat/chatStore";
 import { SAMPLE_MANIFEST, SAMPLE_SOURCE } from "../../../mocks/fixtures/prototype";
 import { appPrototypes, manifestPath, revisingIn, sourcePath, type AppPrototype } from "../model/prototypes";
@@ -47,15 +49,20 @@ const { MakePrototypeButton } = await import("./MakePrototypeButton");
 const idle: ProjectChat = { status: "ready", error: null, items: [], turn: { phase: "idle" } };
 const made = { [manifestPath("expense-web")]: SAMPLE_MANIFEST, [sourcePath("expense-web")]: SAMPLE_SOURCE };
 
+let queryClient = new QueryClient();
+
 function renderButton() {
   return render(
-    <OxygenUIThemeProvider theme={OxygenTheme}>
-      <MakePrototypeButton projectName="acme-expenses" />
-    </OxygenUIThemeProvider>,
+    <QueryClientProvider client={queryClient}>
+      <OxygenUIThemeProvider theme={OxygenTheme}>
+        <MakePrototypeButton projectName="acme-expenses" />
+      </OxygenUIThemeProvider>
+    </QueryClientProvider>,
   );
 }
 
 beforeEach(() => {
+  queryClient = new QueryClient();
   chat = idle;
   send.mockClear();
   openChat.mockClear();
@@ -70,12 +77,14 @@ describe("Make prototype", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
-  it("opens the chat and sends /prototype for the web application", () => {
+  it("opens the chat, sends /prototype for the web application and reads the design again once the turn is sent", async () => {
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     prototypes = appPrototypes(["expense-web"], {}, null);
     renderButton();
     fireEvent.click(screen.getByRole("button", { name: "Make prototype" }));
     expect(openChat).toHaveBeenCalled();
     expect(send).toHaveBeenCalledWith("acme-expenses", "/prototype expense-web", { kind: "prototype" });
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: designKey("acme-expenses") }));
   });
 
   it("sends a bare /prototype when the design has several web applications", () => {

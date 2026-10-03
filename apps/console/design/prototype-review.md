@@ -16,15 +16,17 @@ Code: `features/prototype/`.
 - **Design actions:** Make prototype (`MakePrototypeButton`), hidden until the
   design has a web application. One app sends `/prototype <c>`, several send a
   bare `/prototype`. Disabled unless the chat can send.
-- **Chat:** an "Open prototype" note when a `/prototype` turn completes (one
-  component opens its review, a bare turn opens the tab).
+- **Chat:** an "Open prototype" note after a `/prototype` exchange that wrote
+  a prototype which is valid now (one component opens its review, several
+  open the tab). It is derived (`model/note.ts`) from the log, which the
+  history carries, and the room, so a reload and teammates see it too.
 
 ## Files
 
 A prototype is `specs/design/components/<c>/prototype.{json,tsx}` in the room,
 read with `useRoomFiles`. Status comes from the kit's `parseManifestJson`
 (`model/prototypes.ts`). The agent's writes are gated by the kit's rules and the
-render check; Go re-checks on save (see ADR-0040).
+render check; Go re-checks on save (see ADR-0042).
 
 ## Review
 
@@ -37,14 +39,20 @@ Preview/Annotate), the kit `PrototypeFrame`, and in Annotate the
   selected elements are pinned and a request is typed against them (max 4000
   characters, 50 requests per batch, the kit CLI's limits).
 - **Queue** (`model/feedback.ts`): per component, kept across close and reopen.
-  It carries the hash of the revision of its first request
-  (`prototypeHash`, byte-identical to the CLI's).
+  It carries the hash of the revision of its first request. Requests,
+  limits, pins and the hash are the kit's (`@wso2/prototype-kit/feedback`);
+  the hash is plain JavaScript, so it works over plain HTTP.
 - **Send all:** refused with the reason while the chat is not idle (queue
   kept). Otherwise `chatStore.send("/prototype <c>", {kind: "prototype",
-  feedback})`; on success the queue clears and the overlay closes. The chat
-  row shows `feedbackSummary` (`model/summary.ts`), not the wire text.
-- **Reviewed dot:** `model/reviewed.ts` stores `{component: hash}` in
-  localStorage (`aep:prototype-reviewed:<project>`); every access is guarded.
+  feedback})`; on success the queue clears, the overlay closes and the design
+  data is read again. The batch is journaled with the turn and comes back in
+  the history (`ConversationMessage.prototypeFeedback`); the chat row shows
+  `feedbackSummary` of it (`model/summary.ts`: screen, role and state named
+  from the manifest, element ids, text), not the wire text.
+- **Reviewed dot:** shown while a valid prototype's current revision is
+  unreviewed in this browser (not while a turn is revising it).
+  `model/reviewed.ts` stores `{component: hash}` in localStorage
+  (`aep:prototype-reviewed:<project>`); every access is guarded.
 
 ## Wire
 

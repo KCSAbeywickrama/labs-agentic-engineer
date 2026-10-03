@@ -1,7 +1,7 @@
 # ADR-0001 — Prototype review is a full-screen overlay; Annotate sends typed feedback to the chat
 
 **Status:** Accepted · 2026-10-03
-**Related:** [repo ADR-0040](../../../../docs/decisions/ADR-0040-a-prototype-is-react-on-a-fixed-kit-in-a-sandbox.md)
+**Related:** [repo ADR-0042](../../../../docs/decisions/ADR-0042-a-prototype-is-react-on-a-fixed-kit-in-a-sandbox.md)
 (the kit, the frame, the Oxygen theme). Spec: #860.
 
 ## Context
@@ -33,10 +33,11 @@ listens, so feedback has to reach the same conversation as everything else.
    overlay. It records the hash of the revision its first request was made on,
    and the panel says when the prototype has since changed.
 4. **The chat stays the one place for agent work.** A prototype turn is a
-   normal chat turn; the console adds a readable summary for the user's row,
-   an "Open prototype" note when a turn completes, and a dot on the Prototype
-   tab until this browser has seen the current revision (a per-browser record
-   of hashes, never shared).
+   normal chat turn; the console reads the user's row as its requests (the
+   batch is journaled with the turn), offers "Open prototype" after a turn
+   that wrote a valid prototype (derived from the history and the room), and
+   shows a dot on the Prototype tab until this browser has seen the current
+   revision (a per-browser record of hashes, never shared).
 
 ## Consequences
 
@@ -45,7 +46,8 @@ listens, so feedback has to reach the same conversation as everything else.
 - The overlay hides the console, so the chat is opened before a send and the
   overlay closes on success.
 - The frame runtime is the largest lazy chunk in the console image.
-- The chat summary is live-session only: after a reload the history holds the
-  bare instruction, so it reads "Prototype <component>.".
+- The chat summary and the Open prototype note survive a reload and reach
+  teammates, since both come from the persisted turn. The summary names
+  elements by id: the labels the frame shows are not part of the batch.
 - The "reviewed" dot is per browser: a browser that never looked at an
   existing prototype shows the dot.

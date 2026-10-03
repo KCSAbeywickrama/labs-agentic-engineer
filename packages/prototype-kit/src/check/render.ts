@@ -29,10 +29,14 @@
  *
  * `node:vm` alone is not a boundary; the process is. What the permission
  * model cannot take away is the network.
+ *
+ * The child runs asynchronously: a host serving other work (the agents
+ * service, the CLI's preview server) keeps its event loop while a prototype
+ * renders.
  */
 
-import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { SOURCE_FILE, type Finding } from "../findings.js";
 import type { PrototypeManifest } from "../manifest/types.js";
 import { moduleFactorySource } from "../runtime/module-source.js";
@@ -68,19 +72,61 @@ function telling(stderr: string | undefined): string | undefined {
   return lines.find((l) => /^\w*Error\b/.test(l)) ?? lines[lines.length - 1];
 }
 
+/** The most a child may print before it is stopped (a module that prints in a loop). */
+const RENDER_OUTPUT_CAP = 16 * 1024 * 1024;
+
+interface ChildOutcome {
+  status: number | null;
+  signal: NodeJS.Signals | null;
+  stdout: string;
+  stderr: string;
+  error?: Error | undefined;
+}
+
+/** Run the child to completion without blocking the caller's event loop: the render may take seconds. */
+function runChild(input: string): Promise<ChildOutcome> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [permissionFlag(), `--max-old-space-size=${RENDER_HEAP_MB}`, "-e", CHILD], {
+      env: {},
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: RENDER_TIMEOUT_MS + 5_000,
+      killSignal: "SIGTERM",
+    });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let size = 0;
+    let error: Error | undefined;
+    const collect = (into: Buffer[]) => (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > RENDER_OUTPUT_CAP) {
+        error ??= new Error(`the render check printed more than ${RENDER_OUTPUT_CAP} bytes`);
+        child.kill("SIGKILL");
+        return;
+      }
+      into.push(chunk);
+    };
+    child.stdout.on("data", collect(stdout));
+    child.stderr.on("data", collect(stderr));
+    child.on("error", (e) => {
+      error ??= e;
+    });
+    // A child that dies before reading all of stdin closes the pipe under the write; its exit says why.
+    child.stdin.on("error", () => {});
+    child.stdin.end(input);
+    child.on("close", (status, signal) =>
+      resolve({ status, signal, stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8"), error }),
+    );
+  });
+}
+
 /** Draws every screen of a prototype whose manifest and source passed their checks; the render findings. */
-export function checkRenderIsolated(manifest: PrototypeManifest, source: string, theme: ThemeRuntimes): Finding[] {
+export async function checkRenderIsolated(manifest: PrototypeManifest, source: string, theme: ThemeRuntimes): Promise<Finding[]> {
   const transpiled = transpileSource(source);
   if (!transpiled.ok) return transpiled.findings;
-  const child = spawnSync(process.execPath, [permissionFlag(), `--max-old-space-size=${RENDER_HEAP_MB}`, "-e", CHILD], {
-    input: JSON.stringify({ runtime: readFileSync(theme.checkRuntimePath, "utf8"), factory: moduleFactorySource(transpiled.code), manifest }),
-    env: {},
-    timeout: RENDER_TIMEOUT_MS + 5_000,
-    maxBuffer: 16 * 1024 * 1024,
-    encoding: "utf8",
-  });
+  const runtime = await readFile(theme.checkRuntimePath, "utf8");
+  const child = await runChild(JSON.stringify({ runtime, factory: moduleFactorySource(transpiled.code), manifest }));
   if (child.error || child.status !== 0) {
-    const reason = child.error?.message ?? telling(child.stderr) ?? `exit ${String(child.status)}`;
+    const reason = child.error?.message ?? telling(child.stderr) ?? `exit ${String(child.status ?? child.signal)}`;
     const timedOut = child.signal === "SIGTERM" || /timed out|ETIMEDOUT/i.test(reason);
     return [
       {

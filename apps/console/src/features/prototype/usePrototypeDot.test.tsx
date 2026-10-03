@@ -20,7 +20,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SAMPLE_MANIFEST, SAMPLE_SOURCE } from "../../mocks/fixtures/prototype";
-import { prototypeHash } from "./model/feedback";
+import { prototypeHash } from "@wso2/prototype-kit/feedback";
 import { markReviewed } from "./model/reviewed";
 import { appPrototypes, manifestPath, sourcePath, type AppPrototype } from "./model/prototypes";
 
@@ -46,13 +46,13 @@ describe("the Prototype tab's dot", () => {
     act(() => markReviewed("acme", C, "unrelated"));
     expect(result.current).toBe(true);
     act(() => markReviewed("acme", C, "unrelated-yet"));
-    const hash = await prototypeHash(SAMPLE_MANIFEST, SAMPLE_SOURCE);
+    const hash = prototypeHash(SAMPLE_MANIFEST, SAMPLE_SOURCE);
     act(() => markReviewed("acme", C, hash));
     await waitFor(() => expect(result.current).toBe(false));
   });
 
   it("comes back when the agent writes a new revision", async () => {
-    markReviewed("acme", C, await prototypeHash(SAMPLE_MANIFEST, SAMPLE_SOURCE));
+    markReviewed("acme", C, prototypeHash(SAMPLE_MANIFEST, SAMPLE_SOURCE));
     prototypes = written();
     const { result, rerender } = renderHook(() => usePrototypeDot("acme"));
     await act(async () => {});
@@ -67,6 +67,28 @@ describe("the Prototype tab's dot", () => {
     const { result } = renderHook(() => usePrototypeDot("acme"));
     await act(async () => {});
     expect(result.current).toBe(false);
+  });
+
+  it("is off while the prototype is being revised: there is nothing new to review yet", async () => {
+    prototypes = appPrototypes([C], { [manifestPath(C)]: SAMPLE_MANIFEST, [sourcePath(C)]: SAMPLE_SOURCE }, { component: C });
+    const { result } = renderHook(() => usePrototypeDot("acme"));
+    await act(async () => {});
+    expect(result.current).toBe(false);
+  });
+
+  it("works where Web Crypto's crypto.subtle is missing (a console served over plain HTTP)", async () => {
+    // The kit's hash, worked out before Web Crypto goes (it matches node:crypto's: the kit's tests pin that).
+    const expected = prototypeHash(SAMPLE_MANIFEST, SAMPLE_SOURCE);
+    vi.stubGlobal("crypto", {});
+    try {
+      prototypes = written();
+      const { result } = renderHook(() => usePrototypeDot("acme"));
+      expect(result.current).toBe(true);
+      act(() => markReviewed("acme", C, expected));
+      expect(result.current).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("stays on when storage is unavailable", async () => {

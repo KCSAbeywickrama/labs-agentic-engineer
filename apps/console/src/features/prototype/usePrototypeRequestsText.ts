@@ -17,16 +17,16 @@
  */
 
 import { useMemo } from "react";
-import type { ChatItem } from "../agent-chat/chatLog";
-import { prototypeNotes, type PrototypeNote } from "./model/note";
+import type { PrototypeFeedback } from "../agent-chat/turnScope";
+import { feedbackSummary } from "./model/summary";
 import { usePrototypes } from "./usePrototypes";
 
 /**
- * The chat's Open prototype notes, by the item each follows: one after every
- * `/prototype` exchange that produced a prototype valid now (model/note.ts).
+ * A prototype review's requests as the chat row reads them, named from the
+ * prototype's manifest when the room has it (ids otherwise).
  */
-export function usePrototypeNotes(projectName: string, items: readonly ChatItem[], running: boolean): ReadonlyMap<string, PrototypeNote> {
+export function usePrototypeRequestsText(projectName: string, feedback: PrototypeFeedback): string {
   const prototypes = usePrototypes(projectName);
-  const ready = useMemo(() => new Set((prototypes ?? []).flatMap((p) => (p.status === "ready" ? [p.component] : []))), [prototypes]);
-  return useMemo(() => new Map(prototypeNotes(items, ready, running).map((n) => [n.afterId, n])), [items, ready, running]);
+  const manifest = prototypes?.find((p) => p.component === feedback.component)?.files?.manifest ?? null;
+  return useMemo(() => feedbackSummary(feedback, manifest), [feedback, manifest]);
 }

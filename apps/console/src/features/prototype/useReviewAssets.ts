@@ -16,8 +16,8 @@
  * under the License.
  */
 
-import { useEffect, useState } from "react";
-import { prototypeHash } from "./model/feedback";
+import { useEffect, useMemo, useState } from "react";
+import { prototypeHash } from "@wso2/prototype-kit/feedback";
 
 // What the review loads besides the prototype: the Oxygen theme's frame
 // runtime, the script the sandboxed frame runs the prototype with (about
@@ -56,16 +56,11 @@ export function useFrameRuntime(): Loaded<string> {
   return state;
 }
 
-/** The revision hash of these files; null while it is worked out. */
-export function usePrototypeHash(manifestText: string, source: string): string | null {
-  const [hash, setHash] = useState<{ key: string; hash: string } | null>(null);
-  const key = `${manifestText}\u0000${source}`;
-  useEffect(() => {
-    let live = true;
-    void prototypeHash(manifestText, source).then((h) => live && setHash({ key, hash: h }));
-    return () => {
-      live = false;
-    };
-  }, [key, manifestText, source]);
-  return hash?.key === key ? hash.hash : null;
+/**
+ * The revision hash of these files: the kit's, computed in plain JavaScript,
+ * so it is the same over plain HTTP, where Web Crypto's `crypto.subtle` is
+ * missing, as over HTTPS.
+ */
+export function usePrototypeHash(manifestText: string, source: string): string {
+  return useMemo(() => prototypeHash(manifestText, source), [manifestText, source]);
 }

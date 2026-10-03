@@ -4,8 +4,8 @@
 
 The one import a generated prototype has besides React, and the machinery every
 host needs. Subpaths: `.` (generated-code API + theme contract), `/manifest`,
-`/source`, `/check`, `/host`, `/build`. `/check` and `/manifest` are React-free
-so the CLI runs without React installed.
+`/source`, `/check`, `/host`, `/feedback`, `/build`. `/check` and `/manifest`
+are React-free so the CLI runs without React installed.
 
 ## Stubs and themes
 
@@ -43,8 +43,11 @@ targets, isolated render.
   `Object.create(null)`, so the context's global has no host-realm prototype
   chain; it hardens `Object.prototype`, `Array.prototype` and
   `Function.prototype` before the module runs, so prototype pollution throws.
-  `RENDER_TIMEOUT_MS` is 15 s.
-- Limits of the render check: see ADR-0040, Consequences.
+  `RENDER_TIMEOUT_MS` is 15 s. The child is spawned asynchronously, so
+  `checkPrototypeFiles` and `checkPrototype` return promises and a host keeps
+  its event loop while a prototype renders (the agents service serves other
+  conversations; the CLI preview keeps answering).
+- Limits of the render check: see ADR-0042, Consequences.
 
 ## Go mirror
 
@@ -58,6 +61,19 @@ kit asserts here and Go reads from `test/fixtures`: `manifest-cases.json`
 code) and `source-floor-cases.json` (the floor's syntax, import and size rows,
 plus the size cap). Change a rule in one place and a row fails in the other.
 
+## Feedback (`/feedback`)
+
+The one TS definition of a reviewer's requests: `FeedbackRequest`,
+`FeedbackSubmission`, the limits (`MAX_FEEDBACK_REQUESTS` 50, `MAX_FEEDBACK_TEXT`
+4000, `MAX_FEEDBACK_ID` 200, counted in UTF-16 code units),
+`parseFeedbackSubmission`, the Annotate queue's `requestFor`/`pinsOnScreen`, and
+`prototypeHash` (SHA-256 of manifest, NUL, source). The hash is plain
+JavaScript and synchronous: Web Crypto's `crypto.subtle` exists only in secure
+contexts, and a console served over plain HTTP must still name a revision. The
+CLI, `@aep/agent-stream` and the console import it; the Go BFF and the OpenAPI
+contract mirror it, held by `test/fixtures/feedback-cases.json`, which the kit,
+agent-stream and Go all assert.
+
 ## Host reducer and bridge (`/host`)
 
 The reducer owns view state. `NAVIGATE` only moves to a screen reachable for the
@@ -68,11 +84,13 @@ recovers. The host ignores frame navigation outside Preview.
 
 ## Build helper
 
-`buildThemeRuntimes({ theme, resolveDir, outDir })` bundles a theme with the
+`buildThemeRuntimes({ theme, resolveDir, outDir, define? })` bundles a theme with the
 kit and React into `frame-runtime.js` (entry `bundle/frame-entry`) and
 `check-runtime.js` (entries `bundle/check-prelude`, `bundle/check-entry`; the
-prelude gives the bare `vm` context the timers, `MessageChannel`, `TextEncoder`
-and `global` that React and theme libraries look for at load). The
+prelude gives the bare `vm` context the timers, `MessageChannel` and
+`TextEncoder` that React looks for at load). A theme whose library expects a
+bundler-provided name passes it as `define` (Oxygen: `global`); the kit prelude
+stays library-neutral. The
 source dir is `src/bundle`; the public subpaths stay `/build`, `/build/*`.
 Generated: `schema/prototype-manifest.schema.json` and `reference.md`
 (`pnpm --filter @wso2/prototype-kit gen`; `test/generated.test.ts` fails when

@@ -17,8 +17,9 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { MAX_FEEDBACK_REQUESTS, requestFor, type FeedbackRequest } from "@wso2/prototype-kit/feedback";
 import { initialPrototypeView, reducePrototypeView, type PrototypeManifest } from "@wso2/prototype-kit/host";
-import { MAX_REQUESTS, enqueue, feedbackBatch, pinsOnScreen, prototypeHash, requestFor, type FeedbackRequest } from "./feedback";
+import { dequeue, enqueue, feedbackBatch } from "./feedback";
 
 const manifest: PrototypeManifest = {
   schemaVersion: 3,
@@ -41,8 +42,8 @@ const request = (screenId: string, elementIds: string[], text = "Change it"): Fe
   text,
 });
 
-describe("requestFor", () => {
-  it("is made on what the reviewer looks at, for the selection in the order it was made", () => {
+describe("a request on the review", () => {
+  it("is the kit's: made on what the reviewer looks at, for the selection in the order it was made", () => {
     let view = reducePrototypeView(manifest, initialPrototypeView(manifest), { type: "SET_FLOW", flowId: "flow.approve" });
     view = reducePrototypeView(manifest, view, { type: "ENTER_ANNOTATE" });
     view = reducePrototypeView(manifest, view, { type: "TOGGLE_SELECTION", elementKey: "btn.reject" });
@@ -56,17 +57,6 @@ describe("requestFor", () => {
       text: "Swap these",
     });
   });
-
-  it("leaves the flow out when the reviewer walks freely, and names no element for the whole screen", () => {
-    expect(requestFor(initialPrototypeView(manifest), "Too busy")).toEqual(request("screen.claims", [], "Too busy"));
-  });
-});
-
-describe("pinsOnScreen", () => {
-  it("numbers each element by the requests on this screen that name it", () => {
-    const queue = [request("screen.claim", ["btn.approve"]), request("screen.claims", ["row.42"]), request("screen.claim", ["btn.approve", "text.total"])];
-    expect(pinsOnScreen(queue, "screen.claim")).toEqual({ "btn.approve": [1, 3], "text.total": [3] });
-  });
 });
 
 describe("the queue", () => {
@@ -77,22 +67,20 @@ describe("the queue", () => {
     expect(queue.requests).toHaveLength(2);
   });
 
-  it("takes no more than the contract's limit", () => {
+  it("takes no more than the kit's limit", () => {
     let queue = enqueue(null, "a".repeat(64), request("screen.claims", []));
-    for (let i = 1; i < MAX_REQUESTS + 5; i++) queue = enqueue(queue, "a".repeat(64), request("screen.claims", []));
-    expect(queue.requests).toHaveLength(MAX_REQUESTS);
+    for (let i = 1; i < MAX_FEEDBACK_REQUESTS + 5; i++) queue = enqueue(queue, "a".repeat(64), request("screen.claims", []));
+    expect(queue.requests).toHaveLength(MAX_FEEDBACK_REQUESTS);
+  });
+
+  it("drops a request, and is gone with its last one", () => {
+    const queue = enqueue(enqueue(null, "a".repeat(64), request("screen.claims", [], "1")), "a".repeat(64), request("screen.claim", [], "2"));
+    expect(dequeue(queue, 0)?.requests.map((r) => r.text)).toEqual(["2"]);
+    expect(dequeue(dequeue(queue, 0)!, 0)).toBeNull();
   });
 
   it("is sent whole as the component's feedback batch", () => {
     const queue = enqueue(null, "c".repeat(64), request("screen.claim", ["btn.approve"]));
     expect(feedbackBatch("expense-web", queue)).toEqual({ prototypeHash: "c".repeat(64), component: "expense-web", requests: queue.requests });
-  });
-});
-
-describe("prototypeHash", () => {
-  it("is the kit's revision hash: SHA-256 of the manifest, a NUL and the source", async () => {
-    // What prototype-cli's prototypeHash (node:crypto) gives for these two files.
-    const kit = "96974f3d2eb299b476852889a0c56c8d5818797e761f1d6883c377a8678a7305";
-    await expect(prototypeHash('{"name":"Ünïcode"}', "export default 1;\n")).resolves.toBe(kit);
   });
 });

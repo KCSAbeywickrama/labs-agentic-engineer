@@ -42,11 +42,11 @@ export async function main(argv: readonly string[], io: CliIO): Promise<number> 
       case "init":
         return runInit(rest, io);
       case "check":
-        return runCheck(rest, io);
+        return await runCheck(rest, io);
       case "preview":
         return await runPreview(rest, io);
       case "export":
-        return runExport(rest, io);
+        return await runExport(rest, io);
       default:
         throw new UsageError(`unknown command ${JSON.stringify(command)}`);
     }

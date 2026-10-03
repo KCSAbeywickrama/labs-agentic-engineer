@@ -16,38 +16,30 @@
  * under the License.
  */
 
-import { useEffect, useMemo, useReducer, useState } from "react";
-import { prototypeHash } from "./model/feedback";
+import { useEffect, useMemo, useReducer } from "react";
+import { prototypeHash } from "@wso2/prototype-kit/feedback";
 import { subscribeReviewed, unreviewed } from "./model/reviewed";
 import { usePrototypes } from "./usePrototypes";
 
 /**
- * Whether the Prototype tab has news: a prototype is written whose current
- * revision this browser has not opened in a review yet. A revision the agent
- * writes later shows it again.
+ * Whether the Prototype tab has news: a valid prototype whose current
+ * revision this browser has not opened in a review yet, the same condition
+ * the chat's Open prototype note follows. A revision the agent writes later
+ * shows it again; one still being written (a turn running) does not yet.
  */
 export function usePrototypeDot(projectName: string): boolean {
   const prototypes = usePrototypes(projectName);
-  // The revisions on offer, keyed by their files so a hash is worked out once per revision.
-  const revisions = useMemo(
+  // The revisions on offer, hashed once per change of the prototypes.
+  const hashes = useMemo(
     () =>
-      (prototypes ?? []).flatMap((p) =>
-        p.files ? [{ component: p.component, manifestText: p.files.manifestText, source: p.files.source }] : [],
+      Object.fromEntries(
+        (prototypes ?? []).flatMap((p) =>
+          p.status === "ready" && p.files ? [[p.component, prototypeHash(p.files.manifestText, p.files.source)] as const] : [],
+        ),
       ),
     [prototypes],
   );
-  const [hashes, setHashes] = useState<Record<string, string>>({});
   const [, recheck] = useReducer((n: number) => n + 1, 0);
-
-  useEffect(() => {
-    let live = true;
-    void Promise.all(revisions.map(async (r) => [r.component, await prototypeHash(r.manifestText, r.source)] as const)).then(
-      (pairs) => live && setHashes(Object.fromEntries(pairs)),
-    );
-    return () => {
-      live = false;
-    };
-  }, [revisions]);
   useEffect(() => subscribeReviewed(recheck), []);
 
   return unreviewed(projectName, hashes).length > 0;

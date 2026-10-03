@@ -24,7 +24,7 @@ import { checkPrototypeFiles, readPrototypeFiles } from "@wso2/prototype-kit/che
 import { parseManifestJson } from "@wso2/prototype-kit/manifest";
 import { parseCommandArgs } from "../args.js";
 import { HOST_SCRIPT_PATH } from "../assets.js";
-import { prototypeHash } from "../hash.js";
+import { prototypeHash } from "@wso2/prototype-kit/feedback";
 import { renderHostPage } from "../host-page.js";
 import { EXIT, type CliIO } from "../io.js";
 import { displayPath } from "../paths.js";
@@ -33,12 +33,12 @@ import { resolveCliTheme } from "../theme.js";
 
 export const DEFAULT_EXPORT_FILE = "prototype.html";
 
-export function runExport(args: readonly string[], io: CliIO): number {
+export async function runExport(args: readonly string[], io: CliIO): Promise<number> {
   const { values, positionals } = parseCommandArgs(args, { output: { type: "string", short: "o" }, theme: { type: "string" } }, 1);
   const dir = resolve(io.cwd, positionals[0] ?? ".");
   const theme = resolveCliTheme(values.theme, dir, io.cwd);
   const files = readPrototypeFiles(dir);
-  const findings = checkPrototypeFiles(files, { theme });
+  const findings = await checkPrototypeFiles(files, { theme });
   const manifest = files.manifest !== null ? parseManifestJson(files.manifest) : null;
   if (findings.length > 0 || files.manifest === null || files.source === null || !manifest?.ok) {
     io.stderr(`prototype: export needs a clean check\n\n${formatHuman(findings)}`);

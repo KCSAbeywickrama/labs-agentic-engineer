@@ -25,7 +25,7 @@
 import { watch, type FSWatcher } from "node:fs";
 import { parseManifestJson } from "@wso2/prototype-kit/manifest";
 import { MANIFEST_FILE, SOURCE_FILE, checkPrototypeFiles, readPrototypeFiles, type Finding, type ThemeRuntimes } from "@wso2/prototype-kit/check";
-import { prototypeHash } from "../hash.js";
+import { prototypeHash } from "@wso2/prototype-kit/feedback";
 import type { PrototypeRevision } from "../host-config.js";
 
 /** How long the files must be quiet before a change is checked (an editor may write in several steps). */
@@ -43,6 +43,8 @@ export class PrototypeWatcher {
   private signature = "";
   private watcher: FSWatcher | null = null;
   private timer: NodeJS.Timeout | null = null;
+  /** Bumped by every read; a check that finishes after a newer read began is dropped. */
+  private generation = 0;
 
   constructor(
     private readonly dir: string,
@@ -54,8 +56,12 @@ export class PrototypeWatcher {
     return this.current;
   }
 
-  /** Read and check the files now; reports a change when the files or their findings differ. */
-  refresh(): void {
+  /**
+   * Read and check the files now; reports a change when the files or their
+   * findings differ. The render check runs off the event loop, so the server
+   * keeps answering meanwhile; a newer change supersedes a check in flight.
+   */
+  async refresh(): Promise<void> {
     let files: ReturnType<typeof readPrototypeFiles>;
     try {
       files = readPrototypeFiles(this.dir);
@@ -66,7 +72,9 @@ export class PrototypeWatcher {
     const signature = `${files.manifest ?? "\u0000missing"}\u0001${files.source ?? "\u0000missing"}`;
     if (signature === this.signature) return;
     this.signature = signature;
-    const findings = checkPrototypeFiles(files, { theme: this.theme });
+    const generation = ++this.generation;
+    const findings = await checkPrototypeFiles(files, { theme: this.theme });
+    if (generation !== this.generation) return;
     let lastGood = this.current.lastGood;
     if (findings.length === 0 && files.manifest !== null && files.source !== null) {
       const parsed = parseManifestJson(files.manifest);
@@ -83,6 +91,7 @@ export class PrototypeWatcher {
     const signature = `\u0000unreadable ${file} ${error.code ?? error.message}`;
     if (signature === this.signature) return;
     this.signature = signature;
+    this.generation++;
     const finding: Finding = { code: "MISSING_FILE", file, location: "(file)", message: `${file} cannot be read (${error.code ?? error.message}): it must be a regular file` };
     this.current = { lastGood: this.current.lastGood, findings: [finding] };
     this.onChange(this.current);
@@ -95,7 +104,7 @@ export class PrototypeWatcher {
       if (this.timer) clearTimeout(this.timer);
       this.timer = setTimeout(() => {
         this.timer = null;
-        this.refresh();
+        void this.refresh();
       }, SETTLE_MS);
     });
     // A watch that fails (the folder removed or renamed) must not take the server down; the last status stays.

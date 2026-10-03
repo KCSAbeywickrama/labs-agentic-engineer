@@ -35,6 +35,13 @@ export interface BuildThemeRuntimesOptions {
   /** Where to write the runtimes. */
   outDir: string;
   minify?: boolean | undefined;
+  /**
+   * Extra esbuild `define`s for both runtimes, for a theme library that
+   * expects a name its usual bundler provides (Oxygen UI's Prism publishes
+   * itself on Node's `global`: `{ global: "globalThis" }`). The kit's own
+   * `process.env.NODE_ENV` define cannot be overridden.
+   */
+  define?: Record<string, string> | undefined;
 }
 
 export interface ThemeRuntimeFiles {
@@ -61,16 +68,19 @@ export async function buildThemeRuntimes(options: BuildThemeRuntimesOptions): Pr
   const theme = JSON.stringify(options.theme);
   const files: ThemeRuntimeFiles = { frameRuntime: join(options.outDir, "frame-runtime.js"), checkRuntime: join(options.outDir, "check-runtime.js") };
   const minify = options.minify ?? true;
+  const define = { ...options.define, ...COMMON.define };
   await Promise.all([
     build({
       ...COMMON,
       minify,
+      define,
       outfile: files.frameRuntime,
       stdin: entry([`import theme from ${theme};`, `import { startFrame } from "@wso2/prototype-kit/build/frame-entry";`, "startFrame(theme);"], options.resolveDir, "frame-runtime-entry.ts"),
     }),
     build({
       ...COMMON,
       minify,
+      define,
       outfile: files.checkRuntime,
       // The check context has no DOM: resolve packages for a server render.
       conditions: ["worker", "browser"],

@@ -47,12 +47,12 @@ function docWith(files: Record<string, string>): Y.Doc {
 const made = () => docWith({ [manifestPath(SAMPLE_COMPONENT)]: SAMPLE_MANIFEST, [sourcePath(SAMPLE_COMPONENT)]: SAMPLE_SOURCE });
 
 describe("the mock's sample prototype", () => {
-  it("passes the kit's checks on the Oxygen theme, as written and as every request it knows revises it", () => {
-    expect(checkPrototypeFiles({ manifest: SAMPLE_MANIFEST, source: SAMPLE_SOURCE }, { theme: oxygen })).toEqual([]);
+  it("passes the kit's checks on the Oxygen theme, as written and as every request it knows revises it", async () => {
+    expect(await checkPrototypeFiles({ manifest: SAMPLE_MANIFEST, source: SAMPLE_SOURCE }, { theme: oxygen })).toEqual([]);
     const feedback = { prototypeHash: "a".repeat(64), component: SAMPLE_COMPONENT, requests: [request("Approve on the right"), request("A bigger total")] };
     const revised = scriptPrototypeTurn({ instruction: "/prototype", feedback, webApps: [SAMPLE_COMPONENT], doc: made(), turnKey: "t" })!;
     expect(writes(revised.frames)).toHaveLength(2);
-    expect(checkPrototypeFiles({ manifest: SAMPLE_MANIFEST, source: revised.files![sourcePath(SAMPLE_COMPONENT)]! }, { theme: oxygen })).toEqual([]);
+    expect(await checkPrototypeFiles({ manifest: SAMPLE_MANIFEST, source: revised.files![sourcePath(SAMPLE_COMPONENT)]! }, { theme: oxygen })).toEqual([]);
   });
 });
 

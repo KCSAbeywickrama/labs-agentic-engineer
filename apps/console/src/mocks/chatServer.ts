@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import type { PrototypeFeedback } from "../features/agent-chat/turnScope";
 import type { StreamPart } from "@aep/agent-stream";
 import type { components } from "../generated/aep-api";
 import type { FeatureStage } from "../features/spec/api/specModel";
@@ -73,6 +74,8 @@ export interface MockTurn {
   design?: DesignEffect;
   /** The prototype files a `/prototype` turn left, by room path (fixtures/prototype.ts). */
   prototype?: Record<string, string>;
+  /** The review batch a `/prototype` turn carried, journaled with its message as the platform does. */
+  prototypeFeedback?: PrototypeFeedback;
 }
 
 interface State {
