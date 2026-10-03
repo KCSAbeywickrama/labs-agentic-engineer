@@ -25,7 +25,9 @@ import { OxygenTheme, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
 import type { ProjectChat } from "../../agent-chat/chatStore";
 import { SAMPLE_MANIFEST, SAMPLE_SOURCE } from "../../../mocks/fixtures/prototype";
 import { appPrototypes, manifestPath, revisingIn, sourcePath, type AppPrototype } from "../model/prototypes";
-import { prototypeHash } from "../model/feedback";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { prototypeHash } from "@wso2/prototype-kit/feedback";
+import { designKey } from "../../design/api/designModel";
 import { unreviewed } from "../model/reviewed";
 
 // The Prototype tab and its full-screen review, driven as a reviewer drives
@@ -61,12 +63,17 @@ const { PrototypeWorkspace } = await import("./PrototypeWorkspace");
 const idle: ProjectChat = { status: "ready", error: null, items: [], turn: { phase: "idle" } };
 const busy: ProjectChat = { ...idle, turn: { phase: "running", turnId: "t1", instruction: "/design F1" } };
 
+let queryClient = new QueryClient();
+let invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
 function Harness({ initial }: { initial?: string }) {
   const [review, setReview] = useState<string | undefined>(initial);
   return (
-    <OxygenUIThemeProvider theme={OxygenTheme}>
-      <PrototypeWorkspace projectName="acme-expenses" review={review} onReview={(c) => setReview(c ?? undefined)} />
-    </OxygenUIThemeProvider>
+    <QueryClientProvider client={queryClient}>
+      <OxygenUIThemeProvider theme={OxygenTheme}>
+        <PrototypeWorkspace projectName="acme-expenses" review={review} onReview={(c) => setReview(c ?? undefined)} />
+      </OxygenUIThemeProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -107,6 +114,8 @@ function addRequest(dialog: HTMLElement, text: string) {
 }
 
 beforeEach(() => {
+  queryClient = new QueryClient();
+  invalidate = vi.spyOn(queryClient, "invalidateQueries");
   prototypes = appPrototypes([C], files, null);
   chat = idle;
   send.mockClear();
@@ -225,19 +234,16 @@ describe("the full-screen review", () => {
     expect(send).toHaveBeenCalledWith("acme-expenses", "/prototype expense-web", {
       kind: "prototype",
       feedback: {
-        prototypeHash: await prototypeHash(SAMPLE_MANIFEST, SAMPLE_SOURCE),
+        prototypeHash: prototypeHash(SAMPLE_MANIFEST, SAMPLE_SOURCE),
         component: C,
         requests: [
           { screenId: "screen.pending", flowId: "flow.approve", roleId: "manager", stateId: "state.default", elementIds: ["btn.reject", "btn.approve"], text: "Put Approve on the right" },
           { screenId: "screen.pending", flowId: "flow.approve", roleId: "manager", stateId: "state.empty", elementIds: [], text: "Say who to ask when nothing waits" },
         ],
       },
-      summary: [
-        "Feedback on the Acme Expenses prototype (2 requests)",
-        "1. Pending approvals (Manager, Default) — Reject, Approve: Put Approve on the right",
-        "2. Pending approvals (Manager, Nothing to show) — whole screen: Say who to ask when nothing waits",
-      ].join("\n"),
     });
+    // The cards see the turn running as soon as the server has it.
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: designKey("acme-expenses") });
 
     // Sent: opening it again starts a new queue.
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
@@ -246,7 +252,7 @@ describe("the full-screen review", () => {
 
   it("records the revision it showed as reviewed in this browser", async () => {
     await openReview();
-    const hash = await prototypeHash(SAMPLE_MANIFEST, SAMPLE_SOURCE);
+    const hash = prototypeHash(SAMPLE_MANIFEST, SAMPLE_SOURCE);
     await waitFor(() => expect(unreviewed("acme-expenses", { [C]: hash })).toEqual([]));
   });
 

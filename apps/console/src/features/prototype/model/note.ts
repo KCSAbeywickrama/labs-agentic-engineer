@@ -17,28 +17,65 @@
  */
 
 import { parsePrototypeCommand } from "@aep/contracts/commands";
-import type { NoteAction } from "../../agent-chat/chatLog";
+import type { ChatItem, NoteAction } from "../../agent-chat/chatLog";
 
-// The chat's line when a `/prototype` turn ends: where to look at the result.
-// A turn for one web application opens its review; a bare `/prototype` (every
-// one) opens the Prototype tab.
+// The chat's line after a `/prototype` turn: where to look at the result. It
+// is worked out from the conversation (the turn's own writes, which the
+// history carries) and the room (whether the prototype is valid now), never
+// posted, so a reload and a teammate see the same lines.
 
 export interface PrototypeNote {
+  /** The item the note follows: the exchange's last. */
+  afterId: string;
   text: string;
   actions: NoteAction[];
 }
 
-/** The note a finished turn's instruction earns, or null when it was not a prototype turn. */
-export function prototypeNote(instruction: string | undefined): PrototypeNote | null {
-  const turn = instruction ? parsePrototypeCommand(instruction) : null;
-  if (!turn) return null;
-  return turn.component
+const PROTOTYPE_FILE = /^specs\/design\/components\/([^/]+)\/prototype\.(?:json|tsx)$/;
+
+function noteFor(afterId: string, components: readonly string[]): PrototypeNote {
+  const [only] = components;
+  return components.length === 1 && only
     ? {
-        text: `The ${turn.component} prototype is ready to review.`,
-        actions: [{ kind: "open-prototype", label: "Open prototype", component: turn.component }],
+        afterId,
+        text: `The ${only} prototype is ready to review.`,
+        actions: [{ kind: "open-prototype", label: "Open prototype", component: only }],
       }
     : {
+        afterId,
         text: "The prototypes are ready to review.",
         actions: [{ kind: "open-prototype", label: "Open prototypes", component: null }],
       };
+}
+
+/**
+ * An Open prototype note after each `/prototype` exchange that produced a
+ * prototype: it wrote a web application's prototype files, and that
+ * prototype is valid now (`ready`, both files there and the manifest sound).
+ * An exchange that wrote nothing (up to date, refused) or left no valid
+ * prototype earns none; the one still running earns its note when it ends.
+ */
+export function prototypeNotes(items: readonly ChatItem[], ready: ReadonlySet<string>, running: boolean): PrototypeNote[] {
+  const notes: PrototypeNote[] = [];
+  let exchange: { lastId: string; written: Set<string> } | null = null;
+  const close = () => {
+    const components = exchange ? [...exchange.written].filter((c) => ready.has(c)) : [];
+    if (exchange && components.length > 0) notes.push(noteFor(exchange.lastId, components));
+    exchange = null;
+  };
+  for (const item of items) {
+    if (item.kind === "user") {
+      // A message that was not sent reached no agent: it neither ends an exchange nor is part of one.
+      if (item.state === "failed") continue;
+      close();
+      if (parsePrototypeCommand(item.text)) exchange = { lastId: item.id, written: new Set() };
+      continue;
+    }
+    if (!exchange) continue;
+    exchange.lastId = item.id;
+    const component = item.kind === "activity" && item.state === "done" ? PROTOTYPE_FILE.exec(item.path)?.[1] : undefined;
+    if (component) exchange.written.add(component);
+  }
+  if (!running) close();
+  return notes;
 }

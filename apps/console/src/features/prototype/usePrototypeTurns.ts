@@ -16,37 +16,42 @@
  * under the License.
  */
 
+import { useQueryClient } from "@tanstack/react-query";
 import { PROTOTYPE_COMMAND, prototypeCommand } from "@aep/contracts/commands";
 import { canSend, chatStore, useProjectChat } from "../agent-chat/useProjectChat";
-import type { PrototypeFeedback } from "../agent-chat/turnScope";
+import type { PrototypeFeedback, TurnScope } from "../agent-chat/turnScope";
+import { designKey } from "../design/api/designModel";
 import { useChatPanel } from "../shell/chatPanel";
 
 /**
  * The prototype's two agent turns: Make (or Update) prototype, and a review's
- * Send all. Each is a `/prototype` turn in the project's chat: the chat opens
- * (that is where the agent says what it does) and the message goes. While a
- * turn runs they wait, as the composer does.
+ * Send all. Each is a `/prototype` turn in the project's chat, as the design
+ * turns are: the chat opens (that is where the agent says what it does), the
+ * message goes, and the design data is read again once the server has the
+ * turn (the Design and Prototype cards show it running) and again when it
+ * ends (the shell's useRefreshOnTurnEnd, for every turn). While a turn runs
+ * they wait, as the composer does.
  */
 export function usePrototypeTurns(projectName: string): {
   /** Make or update one web application's prototype, or every one's (none named). */
   make: (component?: string) => void;
   /** Send a review's requests as one revision; resolves false when it was not sent. */
-  sendFeedback: (feedback: PrototypeFeedback, summary: string) => Promise<boolean>;
+  sendFeedback: (feedback: PrototypeFeedback) => Promise<boolean>;
   /** Whether one can start now: the chat is loaded and no turn is running. */
   ready: boolean;
 } {
   const chat = useProjectChat(projectName);
   const panel = useChatPanel();
+  const queryClient = useQueryClient();
+  const send = async (line: string, scope: TurnScope) => {
+    panel.open();
+    const sent = await chatStore.send(projectName, line, scope);
+    if (sent) void queryClient.invalidateQueries({ queryKey: designKey(projectName) });
+    return sent;
+  };
   return {
     ready: canSend(chat),
-    make: (component) => {
-      panel.open();
-      const line = component ? prototypeCommand(component) : PROTOTYPE_COMMAND;
-      void chatStore.send(projectName, line, { kind: "prototype" });
-    },
-    sendFeedback: async (feedback, summary) => {
-      panel.open();
-      return chatStore.send(projectName, prototypeCommand(feedback.component), { kind: "prototype", feedback, summary });
-    },
+    make: (component) => void send(component ? prototypeCommand(component) : PROTOTYPE_COMMAND, { kind: "prototype" }),
+    sendFeedback: (feedback) => send(prototypeCommand(feedback.component), { kind: "prototype", feedback }),
   };
 }

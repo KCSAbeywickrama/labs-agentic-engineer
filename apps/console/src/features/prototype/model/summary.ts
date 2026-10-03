@@ -22,7 +22,8 @@ import type { PrototypeFeedback } from "../../agent-chat/turnScope";
 // How a review's Send all reads in the chat. The turn carries typed requests
 // (ids), which is what the agent needs; the user should see what they asked
 // for in the words of the prototype: the screen, where in it (role and
-// state), the elements as the reviewer saw them labelled, and their text.
+// state), the elements and their text. Worked out from the batch the turn
+// journaled, so a reload and a teammate read the same lines.
 
 const SHOWN_TEXT = 280;
 
@@ -36,23 +37,17 @@ function clip(text: string): string {
 
 /**
  * The batch as a short message: a heading, then per request its number, the
- * screen with its role and state, the elements (their labels where known,
- * otherwise their ids) and the reviewer's text. Names come from the manifest
- * when it has them.
+ * screen with its role and state, the elements' ids and the reviewer's text.
+ * Names come from the manifest when it has them.
  */
-export function feedbackSummary(
-  feedback: PrototypeFeedback,
-  manifest: PrototypeManifest | null,
-  labels: readonly (readonly string[])[] = [],
-): string {
+export function feedbackSummary(feedback: PrototypeFeedback, manifest: PrototypeManifest | null): string {
   const n = feedback.requests.length;
   const lines = [`Feedback on the ${manifest?.name ?? feedback.component} prototype (${n} ${n === 1 ? "request" : "requests"})`];
   feedback.requests.forEach((r, i) => {
     const screen = manifest ? nameOf(manifest.screens, r.screenId) : r.screenId;
     const role = manifest ? nameOf(manifest.roles, r.roleId) : r.roleId;
     const state = manifest ? nameOf(manifest.states, r.stateId) : r.stateId;
-    const shown = labels[i] && labels[i].length > 0 ? labels[i] : r.elementIds;
-    const about = shown.length > 0 ? shown.join(", ") : "whole screen";
+    const about = r.elementIds.length > 0 ? r.elementIds.join(", ") : "whole screen";
     lines.push(`${i + 1}. ${screen} (${role}, ${state}) — ${about}: ${clip(r.text)}`);
   });
   return lines.join("\n");

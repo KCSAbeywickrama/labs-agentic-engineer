@@ -28,6 +28,7 @@ import {
 } from "@aep/agent-stream";
 import { parseDesignCommand, parseInterviewCommand, parsePrototypeCommand, START_COMMAND } from "@aep/contracts/commands";
 import type { ConversationMessage } from "./api/conversation";
+import type { PrototypeFeedback } from "./turnScope";
 import { parseQuestionsInput } from "./questionCards";
 
 // The project conversation as the chat shows it: a list of items, and the
@@ -51,11 +52,11 @@ export type ChatItem =
       /** Who sent it, when that is not the signed-in user or not known. */
       author?: string;
       /**
-       * What the row reads as when the wire text says too little: a prototype
-       * review's requests in words. Lasts until the thread is read again (the
-       * history carries the wire text only).
+       * The prototype review the message sent: the wire text is only the
+       * command, so the row reads as these requests. The history carries it
+       * (the turn journals it), so a reload and a teammate read the same.
        */
-      summary?: string;
+      prototypeFeedback?: PrototypeFeedback;
       /** `sending` until the server accepts the turn; `failed` when it refused it. */
       state: "sending" | "sent" | "failed";
       turnId?: string;
@@ -292,6 +293,7 @@ export function historyItems(history: ConversationMessage[]): ChatItem[] {
         text,
         state: "sent",
         ...(m.author ? { author: m.author.displayName } : {}),
+        ...(m.prototypeFeedback ? { prototypeFeedback: m.prototypeFeedback } : {}),
       });
       continue;
     }

@@ -19,7 +19,7 @@
 import { useRef, useState } from "react";
 import { Alert, Box, Button, IconButton, TextField, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { Trash2 } from "@wso2/oxygen-ui-icons-react";
-import { MAX_REQUESTS, MAX_REQUEST_TEXT, type FeedbackRequest } from "../model/feedback";
+import { MAX_FEEDBACK_REQUESTS, MAX_FEEDBACK_TEXT, type FeedbackRequest } from "@wso2/prototype-kit/feedback";
 
 export interface FeedbackPanelProps {
   /** The selected elements' labels, in selection order. */
@@ -46,7 +46,7 @@ export interface FeedbackPanelProps {
 export function FeedbackPanel({ selection, annotating, requests, stale, refused, sending, onAdd, onRemove, onSend }: FeedbackPanelProps) {
   const [text, setText] = useState("");
   const field = useRef<HTMLTextAreaElement>(null);
-  const full = requests.length >= MAX_REQUESTS;
+  const full = requests.length >= MAX_FEEDBACK_REQUESTS;
   const add = () => {
     if (full || text.trim() === "") return;
     onAdd(text.trim());
@@ -88,15 +88,15 @@ export function FeedbackPanel({ selection, annotating, requests, stale, refused,
             value={text}
             onChange={(e) => setText(e.target.value)}
             inputRef={field}
-            slotProps={{ htmlInput: { maxLength: MAX_REQUEST_TEXT } }}
-            helperText={text.length > MAX_REQUEST_TEXT - 200 ? `${text.length} / ${MAX_REQUEST_TEXT}` : undefined}
+            slotProps={{ htmlInput: { maxLength: MAX_FEEDBACK_TEXT } }}
+            helperText={text.length > MAX_FEEDBACK_TEXT - 200 ? `${text.length} / ${MAX_FEEDBACK_TEXT}` : undefined}
           />
           <Button variant="outlined" onClick={add} disabled={full || text.trim() === ""} sx={{ alignSelf: "flex-start" }}>
             Add request
           </Button>
           {full && (
             <Alert severity="info" role="note">
-              {`The queue is full (${MAX_REQUESTS} requests): send it or remove one to add another.`}
+              {`The queue is full (${MAX_FEEDBACK_REQUESTS} requests): send it or remove one to add another.`}
             </Alert>
           )}
         </>
