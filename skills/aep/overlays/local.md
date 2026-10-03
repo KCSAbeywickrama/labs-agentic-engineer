@@ -67,6 +67,13 @@ runtime relationship, not a build order — it never holds an issue back.
 <!-- /replace-text -->
 
 <!-- replace-text -->
+   - the `## Component <its name>` block of a "Platform-resolved dependencies"
+     comment, pasted verbatim as the `dependencies:` block it merges into that
+     file;
+<!-- with -->
+<!-- /replace-text -->
+
+<!-- replace-text -->
    git diff --cached --name-only    # what is ACTUALLY staged — read it
 <!-- with -->
 <!-- /replace-text -->

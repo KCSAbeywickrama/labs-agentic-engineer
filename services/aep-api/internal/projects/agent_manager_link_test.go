@@ -60,7 +60,7 @@ func agentLinkService(client openchoreo.ComponentClient, bindings AIGatewayBindi
 // A governed agent's row links to its page in the environment's Agent Manager.
 func TestListDeployments_GovernedAgentLinksToAgentManager(t *testing.T) {
 	refs := &presentSecretRefClient{}
-	svc := agentLinkService(deploymentsOf(openchoreo.DevEnvironmentName), consoleBindings{console: "http://console.amp.localhost:8080"}, refs)
+	svc := agentLinkService(deploymentsOf(testWriteTarget), consoleBindings{console: "http://console.amp.localhost:8080"}, refs)
 
 	list, err := svc.ListDeployments(context.Background(), "acme", "shop", "checkout-agent")
 	if err != nil {
@@ -70,7 +70,7 @@ func TestListDeployments_GovernedAgentLinksToAgentManager(t *testing.T) {
 	if got := list.Items[0].AgentManagerURL; got != want {
 		t.Errorf("AgentManagerURL = %q, want %q", got, want)
 	}
-	wantRef := organization.AMPModelKeySecretRefName("checkout-agent", openchoreo.DevEnvironmentName)
+	wantRef := organization.AMPModelKeySecretRefName("checkout-agent", testWriteTarget)
 	if len(refs.askedFor) == 0 || refs.askedFor[0] != wantRef {
 		t.Errorf("governed check must look up the agent's own AMP key for the row's environment (%q), asked for %v", wantRef, refs.askedFor)
 	}
@@ -79,7 +79,7 @@ func TestListDeployments_GovernedAgentLinksToAgentManager(t *testing.T) {
 // No stored Agent Manager key means the agent is not registered there, or the
 // component is not an agent at all: no link.
 func TestListDeployments_NoStoredKeyNoLink(t *testing.T) {
-	svc := agentLinkService(deploymentsOf(openchoreo.DevEnvironmentName), consoleBindings{console: "http://console.amp.localhost:8080"}, fakeSecretRefClient{})
+	svc := agentLinkService(deploymentsOf(testWriteTarget), consoleBindings{console: "http://console.amp.localhost:8080"}, fakeSecretRefClient{})
 
 	list, err := svc.ListDeployments(context.Background(), "acme", "shop", "orders-api")
 	if err != nil {
@@ -92,7 +92,7 @@ func TestListDeployments_NoStoredKeyNoLink(t *testing.T) {
 
 // A governed environment that names no console gets no link.
 func TestListDeployments_NoConsoleURLNoLink(t *testing.T) {
-	svc := agentLinkService(deploymentsOf(openchoreo.DevEnvironmentName), consoleBindings{}, &presentSecretRefClient{})
+	svc := agentLinkService(deploymentsOf(testWriteTarget), consoleBindings{}, &presentSecretRefClient{})
 
 	list, err := svc.ListDeployments(context.Background(), "acme", "shop", "checkout-agent")
 	if err != nil {
@@ -105,7 +105,7 @@ func TestListDeployments_NoConsoleURLNoLink(t *testing.T) {
 
 // An ungoverned environment gets no link, and the list itself still succeeds.
 func TestListDeployments_UngovernedNoLink(t *testing.T) {
-	svc := agentLinkService(deploymentsOf(openchoreo.DevEnvironmentName), fakeAIGatewayBindings{err: openchoreo.ErrNoAIGatewayBinding}, &presentSecretRefClient{})
+	svc := agentLinkService(deploymentsOf(testWriteTarget), fakeAIGatewayBindings{err: openchoreo.ErrNoAIGatewayBinding}, &presentSecretRefClient{})
 
 	list, err := svc.ListDeployments(context.Background(), "acme", "shop", "checkout-agent")
 	if err != nil {
@@ -118,7 +118,7 @@ func TestListDeployments_UngovernedNoLink(t *testing.T) {
 
 // Without a namer wired (an install with no Agent Manager), rows carry no link.
 func TestListDeployments_NoNamerNoLink(t *testing.T) {
-	svc := NewComponentService(deploymentsOf(openchoreo.DevEnvironmentName), nil, modelAccessStore(nil), nil, nil, fakeKeyResolver{}, &presentSecretRefClient{}).(*componentService)
+	svc := NewComponentService(deploymentsOf(testWriteTarget), nil, modelAccessStore(nil), nil, nil, fakeKeyResolver{}, &presentSecretRefClient{}).(*componentService)
 	svc.SetAIGatewayBindings(consoleBindings{console: "http://console.amp.localhost:8080"})
 
 	list, err := svc.ListDeployments(context.Background(), "acme", "shop", "checkout-agent")

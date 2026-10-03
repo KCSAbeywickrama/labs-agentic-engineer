@@ -151,7 +151,7 @@ func recordedReader(t *testing.T) (*AgentProgressReader, *RecordingStore, string
 	t.Helper()
 	root := t.TempDir()
 	store := NewRecordingStore(root, 0)
-	return NewAgentProgressReader(nil, nil).WithRecordings(store), store, root
+	return NewAgentProgressReader(nil, testWriteTargets(), nil).WithRecordings(store), store, root
 }
 
 // recordEvents lays down one attempt's file through the store's own writer.
@@ -320,7 +320,7 @@ func TestCycleEvents_LostRecordingSaysSo(t *testing.T) {
 func TestCycleEvents_NoStoreReportsNoneRatherThanTailingThePod(t *testing.T) {
 	t.Parallel()
 
-	r := NewAgentProgressReader(&stubLive{tail: LiveTail{Text: "should never be read\n"}}, nil)
+	r := NewAgentProgressReader(&stubLive{tail: LiveTail{Text: "should never be read\n"}}, testWriteTargets(), nil)
 	cyc := liveCycle("c1")
 	got, _, _, err := r.CycleEvents(context.Background(), cyc, "")
 	if err != nil {

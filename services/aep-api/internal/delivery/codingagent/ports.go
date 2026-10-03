@@ -197,8 +197,9 @@ type LiveTail struct {
 // LiveLogSource is the running agent's log, read while its Component still
 // exists. Satisfied by *OCLogSource. A wrapped ErrComponentGone means the
 // Component has been deleted — the archive's turn, or an unavailable state.
+// The environment is the one the cycle's Job was bound into.
 type LiveLogSource interface {
-	Tail(ctx context.Context, orgName, projectName, componentName string, maxBytes int) (LiveTail, error)
+	Tail(ctx context.Context, orgName, projectName, componentName, environment string, maxBytes int) (LiveTail, error)
 }
 
 // RecordingLogSource is the same pod log read for the RECORDER rather than for
@@ -226,23 +227,26 @@ type LiveLogSource interface {
 //
 // Satisfied by *OCLogSource.
 type RecordingLogSource interface {
-	// Binding resolves the cycle Component's release binding in the run
-	// environment. A wrapped ErrComponentGone means the Component (or its
-	// binding) has been deleted, which is a fact about the world.
-	Binding(ctx context.Context, orgName, projectName, componentName string) (string, error)
+	// Binding resolves the cycle Component's release binding in the
+	// environment its Job was bound into. A wrapped ErrComponentGone means the
+	// Component (or its binding) has been deleted, which is a fact about the
+	// world.
+	Binding(ctx context.Context, orgName, projectName, componentName, environment string) (string, error)
 
 	// ReadSince reads everything the pod logged at or after `since` (the zero
 	// time = the whole log the platform still holds), with no byte cut.
 	ReadSince(ctx context.Context, orgName, releaseBindingName string, since time.Time) (LiveTail, error)
 }
 
-// ArchiveScope names one cycle's archived log: its component, and the window
-// the cycle ran in. The window matters — the observer has no cursor, so the
-// only way to bound a read is to ask for the time the work happened.
+// ArchiveScope names one cycle's archived log: its component, the environment
+// its Job was bound into, and the window the cycle ran in. The window matters —
+// the observer has no cursor, so the only way to bound a read is to ask for the
+// time the work happened.
 type ArchiveScope struct {
 	OrgName       string
 	ProjectName   string
 	ComponentName string
+	Environment   string
 	From          time.Time
 	To            time.Time
 }

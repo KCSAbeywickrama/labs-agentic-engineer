@@ -17,7 +17,10 @@
 package eventcore
 
 import (
+	"reflect"
+	"sort"
 	"testing"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
@@ -216,5 +219,132 @@ func TestBuildSweep_ObservesOnlyWhatTheCycleTriggered(t *testing.T) {
 	sigs := h.sup.named(delivery.SigRunBuildTerminal)
 	if len(sigs) != 1 || sigs[0].Component != "order-service" {
 		t.Fatalf("only the components the merge touched may be observed, got %+v", sigs)
+	}
+}
+
+// ---- the reconcile: a merged cycle whose builds were never triggered -------
+//
+// The merge fan-out is a webhook's work, and a delivery can be lost past every
+// replay (ticket 13: GitHub's 10-second timeout cancelled the fan-out, and
+// GitHub never redelivers). The run then waits in its build stage forever,
+// because awaitBuilds has no deadline. The sweep that already watches that
+// cycle's builds is what notices a component with NO build at all.
+
+// mergedCycleHarness is a live run whose latest cycle merged testMergeSHA
+// `endedAgo` ago, touching two components, with no build triggered yet.
+func mergedCycleHarness(t *testing.T, endedAgo time.Duration) *harness {
+	t.Helper()
+	h := buildSweepHarness(t)
+	ended := time.Now().Add(-endedAgo)
+	h.cycles.latest.EndedAt = &ended
+	h.prs.files = []string{"services/order/main.go", "apps/web/src/app.tsx"}
+	return h
+}
+
+func TestBuildSweep_BuildsAMergedCycleThatHasNoBuilds(t *testing.T) {
+	h := mergedCycleHarness(t, time.Hour)
+
+	if err := buildSweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("build sweep: %v", err)
+	}
+	for _, component := range []string{"order-service", "web"} {
+		runs := h.builds.triggeredFor(component)
+		if len(runs) != 1 || runs[0] != delivery.BuildRunName(testProject, component, testMergeSHA, 1) {
+			t.Fatalf("%s: the lost fan-out must be triggered as attempt 1 at the merge SHA, got %v", component, runs)
+		}
+	}
+	sort.Strings(h.comps.ensured)
+	if !reflect.DeepEqual(h.comps.ensured, []string{"order-service", "web"}) {
+		t.Fatalf("each component must be ensured before its build, as the fan-out does, got %v", h.comps.ensured)
+	}
+	if h.builds.staged != 1 {
+		t.Fatalf("the credential is staged once for the whole heal, got %d stages", h.builds.staged)
+	}
+}
+
+func TestBuildSweep_BuildsOnlyTheComponentsWithNoBuild(t *testing.T) {
+	h := mergedCycleHarness(t, time.Hour)
+	seedRun(h, "order-service", 1, false, false)
+
+	if err := buildSweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("build sweep: %v", err)
+	}
+	if runs := h.builds.triggeredFor("order-service"); len(runs) != 0 {
+		t.Fatalf("a component already building must not be built again, got %v", runs)
+	}
+	if runs := h.builds.triggeredFor("web"); len(runs) != 1 {
+		t.Fatalf("the component the fan-out missed must be built, got %v", runs)
+	}
+}
+
+func TestBuildSweep_ReconcileIsANoOpWhenEveryComponentHasABuild(t *testing.T) {
+	h := mergedCycleHarness(t, time.Hour)
+	seedRun(h, "order-service", 1, false, false)
+	seedRun(h, "web", 1, true, true)
+
+	if err := buildSweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("build sweep: %v", err)
+	}
+	if len(h.builds.triggered) != 0 || h.builds.staged != 0 {
+		t.Fatalf("a cycle whose builds all exist must trigger and stage nothing, got triggered=%v staged=%d",
+			h.builds.triggered, h.builds.staged)
+	}
+}
+
+// The grace period keeps the reconcile off work a delivery can still do: the
+// receiver's own run and its replays all finish within webhook.ReplayHorizon of
+// the merge, and two fan-outs of one merge would race on the org's credential.
+func TestBuildSweep_ReconcileWaitsOutTheGracePeriod(t *testing.T) {
+	h := mergedCycleHarness(t, time.Minute)
+
+	if err := buildSweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("build sweep: %v", err)
+	}
+	if len(h.builds.triggered) != 0 {
+		t.Fatalf("a merge inside the grace period is still its delivery's to build, got %v", h.builds.triggered)
+	}
+}
+
+func TestBuildSweep_ReconcileSkipsARunACancelWasRequestedOn(t *testing.T) {
+	h := mergedCycleHarness(t, time.Hour)
+	asked := time.Now().Add(-time.Minute)
+	h.runs.rows[0].CancelRequestedAt = &asked
+
+	if err := buildSweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("build sweep: %v", err)
+	}
+	if len(h.builds.triggered) != 0 {
+		t.Fatalf("a run somebody asked to stop must not be built for, got %v", h.builds.triggered)
+	}
+}
+
+// Cancelled, and halted (a halted run settled `failed`), are terminal: the
+// sweep walks live runs only, so neither is ever built for.
+func TestBuildSweep_ReconcileSkipsTerminalRuns(t *testing.T) {
+	for _, state := range []string{delivery.RunStateCancelled, delivery.RunStateFailed} {
+		t.Run(state, func(t *testing.T) {
+			h := mergedCycleHarness(t, time.Hour)
+			h.runs.rows[0].State = state
+
+			if err := buildSweepOver(h).Once(t.Context()); err != nil {
+				t.Fatalf("build sweep: %v", err)
+			}
+			if len(h.builds.triggered) != 0 {
+				t.Fatalf("a %s run must not be built for, got %v", state, h.builds.triggered)
+			}
+		})
+	}
+}
+
+// A cycle that has not closed has not merged, whatever the record says so far.
+func TestBuildSweep_ReconcileIgnoresAnOpenCycle(t *testing.T) {
+	h := buildSweepHarness(t)
+	h.prs.files = []string{"services/order/main.go", "apps/web/src/app.tsx"}
+
+	if err := buildSweepOver(h).Once(t.Context()); err != nil {
+		t.Fatalf("build sweep: %v", err)
+	}
+	if len(h.builds.triggered) != 0 {
+		t.Fatalf("an open cycle is the fan-out's, not the reconcile's, got %v", h.builds.triggered)
 	}
 }

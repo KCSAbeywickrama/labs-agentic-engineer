@@ -16,8 +16,8 @@ download a toolchain and will not compile C.
 ## Development flow
 
 1. **Scaffold** — `go.mod` (module path = app folder name, `go 1.25`),
-   `main.go`, `Dockerfile`, per Layout. `workload.yaml` follows your prompt — as
-   given when it carries one, else per the component contract.
+   `main.go`, `Dockerfile`, per Layout. `workload.yaml` per the component
+   contract.
 2. **Implement** — handlers, store, models. Every rule under Constraints is a
    build- or runtime-failure if broken, not a style preference. The
    platform-wide rules (port, no required env vars, error shape, dependency
@@ -226,23 +226,11 @@ these.
 └── workload.yaml
 ```
 
-`workload.yaml` HTTP endpoint when a sibling SPA calls this service:
+`workload.yaml`'s HTTP endpoint `visibility`: before writing it, read
+`skills/aep`'s `references/workload-and-wiring.md` ("Provider endpoint
+visibility") and write the list it gives a provider, one YAML item per value.
 
-```yaml
-    visibility:
-      - project
-      - internal
-      - external
-```
-
-**Done when:** all three list items are present. `internal` is the only value
-that admits the API gateway to the component's NetworkPolicy — without it the
-gateway authenticates the caller and then cannot reach this service, so every
-call through the SPA's `/api` proxy answers **503** — and a single-item
-`project` list is wrong even though the SPA uses `/api`. Never put `external` on
-a *dependency* entry. (`skills/aep`'s `references/workload-and-wiring.md` is the
-authority on this list, including the `namespace` an org-published service
-adds.)
+**Done when:** the endpoint's `visibility` is exactly that list.
 
 `Dockerfile` — multi-stage, pinned builder, slim runtime:
 
@@ -286,11 +274,10 @@ pool, err := pgxpool.New(ctx, os.Getenv("<DB_URL_ENV_VAR>"))
 | Build fails `cannot write multiple packages to non-directory /out/app` | `go build -o /out/app ./...` on a multi-package module | Build the main package: `./` or `./cmd/<name>` |
 | `checksum mismatch … SECURITY ERROR` at build | `go.sum` stale or hand-edited | `go mod tidy` locally; commit the result |
 | Build fails `COPY go.mod go.sum ./ … go.sum: no such file or directory` | Dockerfile names `go.sum`, stdlib-only service has none | `COPY go.mod ./` only — but a service with any dependency needs both |
-| Every `/api` call through the SPA 503s | `workload.yaml` endpoint visibility is missing `internal` | List all three: `project`, `internal`, `external` |
+| Every `/api` call through the SPA 503s, or the API is not curl-able on the public gateway | The endpoint `visibility` is not the provider list | Write the list `workload-and-wiring` gives a provider |
 | Pod won't start; `panic: listen tcp :8080` | Wrong port | Listen on 9090 |
 | `POST` to an injected upstream returns `405` (or a `301` then a `GET`) | Address ended in `/`, so `base + "/path"` built `//path`; `ServeMux` 301s to the clean path and the client re-issues it as `GET` | `url.JoinPath(base, "path")` |
 | Create/POST 500s only when an optional list field is omitted (`[]` works) | Nil slice bound as `NULL` into a `NOT NULL` array column; its `DEFAULT` skipped because the INSERT lists it | Normalize nil→empty, or omit the column |
-| API reachable via SPA `/api` but not curl-able on the public gateway | Provider `visibility` is missing `external` (misread "not `external`" as the endpoint list) | List all three — `- project`, `- internal`, `- external` — on the service's own endpoint |
 | Every call 401s right after a deploy | The environment's gateway publishes a different key than the container holds — it was re-provisioned and this component was not redeployed | Redeploy the component; the certificate rides its ReleaseBinding |
 | The service will not start: `…must be set together or not at all` | Some of the three are set, not all | Locally, set all three from a throwaway keypair. In a cell, the environment's gateway needs provisioning |
 | A public operation 401s | A handler for a `security: []` operation called `RequireCaller` | A public handler reads no identity; the gateway sends no assertion with one |

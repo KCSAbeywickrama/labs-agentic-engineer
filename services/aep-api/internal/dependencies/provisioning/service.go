@@ -18,6 +18,7 @@ package provisioning
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -28,11 +29,6 @@ import (
 	"github.com/wso2/aep/aep-api/internal/dependencies"
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
-
-// defaultEnv is the single environment provisioning pins in v1 — the watcher and
-// the declarative-wiring comment both read the `development` binding (upstream
-// parity: the two naming schemes are deliberately identical).
-func defaultEnv() string { return openchoreo.DevEnvironmentName }
 
 // Service coordinates dependency provisioning on the `provision` gate funnel: it
 // mints gate issues, collects external values, provisions platform resources,
@@ -58,7 +54,10 @@ type Service struct {
 	// order and filter by promotion order. Nil is a documented degrade: every
 	// environment is served in OpenChoreo's own list order with no PromotesTo,
 	// never a guessed chain.
-	pipelines       PipelineLister
+	pipelines PipelineLister
+	// writeTargets names the environment a project's resources are provisioned
+	// into: its write target. Nil is a wiring fault; the entry points refuse.
+	writeTargets    WriteTargetResolver
 	orgSecrets      OrgSecretWriter
 	orgResourceDocs OrgResourceDocs
 	promoter        ProjectResourcePromoter
@@ -150,7 +149,9 @@ type Deps struct {
 	// Pipeline resolves the org's own deployment pipeline for
 	// ListOrgEnvironments' promotion ordering. Nil degrades to unordered
 	// list-order service with no PromotesTo (see PipelineLister).
-	Pipeline        PipelineLister
+	Pipeline PipelineLister
+	// WriteTargets resolves a project's write target (see Service.writeTargets).
+	WriteTargets    WriteTargetResolver
 	OrgSecrets      OrgSecretWriter
 	OrgResourceDocs OrgResourceDocs
 	// Promoter reads and rewrites a project's own resource for Promote.
@@ -187,6 +188,7 @@ func NewService(d Deps) *Service {
 		catalogValuePlane: d.CatalogValuePlane,
 		environments:      d.Environments,
 		pipelines:         d.Pipeline,
+		writeTargets:      d.WriteTargets,
 		roles:             d.Roles,
 		orgSecrets:        d.OrgSecrets,
 		orgResourceDocs:   d.OrgResourceDocs,
@@ -427,7 +429,8 @@ func (s *Service) ListOrgEnvironments(ctx context.Context, orgID string) ([]Envi
 // resolved unambiguously — a nil pipelines port, a listing/read failure, or
 // more than one candidate pipeline with none named "default".
 //
-// Resolution order:
+// Resolution order (openchoreo.ChooseOrgDefaultPipeline, shared with
+// WriteTargets.OrgDefaultRoot):
 //  1. The pipeline named "default" — the documented platform convention
 //     (DeploymentPipeline/default per namespace, created by setup and used
 //     whenever a project does not name one).
@@ -444,17 +447,8 @@ func (s *Service) resolvePipelineOrder(ctx context.Context, orgID string) (order
 		slog.WarnContext(ctx, "provisioning: list deployment pipelines failed; serving environments in OC list order with no promotion info", "org", orgID, "error", err)
 		return nil, false
 	}
-	pipelineName := ""
-	for _, n := range names {
-		if n == "default" {
-			pipelineName = n
-			break
-		}
-	}
-	if pipelineName == "" && len(names) == 1 {
-		pipelineName = names[0]
-	}
-	if pipelineName == "" {
+	pipelineName, ok := openchoreo.ChooseOrgDefaultPipeline(names)
+	if !ok {
 		slog.WarnContext(ctx, "provisioning: org has no resolvable deployment pipeline (no \"default\" and not exactly one candidate); serving environments in OC list order with no promotion info", "org", orgID, "candidates", names)
 		return nil, false
 	}
@@ -477,8 +471,9 @@ func environmentNames(infos []EnvironmentInfo) []string {
 	return out
 }
 
-// envList returns the environments to provision, defaulting to [development].
-func envList(reqEnvs []string) []string {
+// envList returns the environments to provision, defaulting to the project's
+// write target when the request names none.
+func envList(reqEnvs []string, env string) []string {
 	out := make([]string, 0, len(reqEnvs))
 	for _, e := range reqEnvs {
 		if e = strings.TrimSpace(e); e != "" {
@@ -486,7 +481,43 @@ func envList(reqEnvs []string) []string {
 		}
 	}
 	if len(out) == 0 {
-		return []string{defaultEnv()}
+		return []string{env}
 	}
 	return out
+}
+
+// writeTarget resolves the project's write target once for a write operation.
+// The error is returned unchanged: a *openchoreo.ErrNoWriteTarget is a
+// configuration fact, anything else a transient OpenChoreo failure the caller
+// may retry.
+func (s *Service) writeTarget(ctx context.Context, orgID, projectID string) (string, error) {
+	if s.writeTargets == nil {
+		return "", errors.New("provisioning: write targets not configured")
+	}
+	return s.writeTargets.Resolve(ctx, orgID, projectID)
+}
+
+// orgDefaultRoot is writeTarget for an org-scoped read with no project in view.
+func (s *Service) orgDefaultRoot(ctx context.Context, orgID string) (string, error) {
+	if s.writeTargets == nil {
+		return "", errors.New("provisioning: write targets not configured")
+	}
+	return s.writeTargets.OrgDefaultRoot(ctx, orgID)
+}
+
+// readTarget is writeTarget for the read paths: an env the caller named wins,
+// and an unresolvable write target answers "" after a WARN. Every read treats
+// "" as nothing provisioned, so a broken pipeline degrades a status panel
+// instead of failing it.
+func (s *Service) readTarget(ctx context.Context, orgID, projectID, env string) string {
+	if env != "" {
+		return env
+	}
+	resolved, err := s.writeTarget(ctx, orgID, projectID)
+	if err != nil {
+		slog.WarnContext(ctx, "provisioning: write target unresolvable; reading as nothing provisioned",
+			"org", orgID, "project", projectID, "error", err)
+		return ""
+	}
+	return resolved
 }

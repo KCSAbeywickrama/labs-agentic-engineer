@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol/webhook"
@@ -1007,5 +1008,83 @@ func TestAdoption_StillAdoptsARealDefect(t *testing.T) {
 	}
 	if len(h.sup.started) != 1 || h.sup.started[0].Kind != delivery.RunKindTask {
 		t.Fatalf("a real defect must still start a task run, got %+v", h.sup.started)
+	}
+}
+
+// ---- late deliveries ------------------------------------------------------
+//
+// A delivery can arrive long after the fact it describes: the receiver replays
+// a failed one for up to 15 minutes, and a human can redeliver any time. By
+// then the supervisor may have closed the cycle it was about and opened the
+// next, and the cycle writers write onto whatever cycle is OPEN. A delivery
+// describing its pull request as it stood before the open cycle began is about
+// an earlier cycle, and must not be recorded onto this one.
+
+// prBodyAt is prBody with the pull request's updated_at, which is the moment
+// the delivery describes.
+func prBodyAt(action, branch, body string, number int, merged bool, mergeSHA string, updatedAt time.Time) []byte {
+	return []byte(fmt.Sprintf(`{
+	  "action": %q,
+	  "pull_request": {"number": %d, "draft": false, "merged": %t, "state": "open",
+	                   "body": %q, "html_url": %q, "merge_commit_sha": %q, "head": {"ref": %q},
+	                   "updated_at": %q},
+	  "repository": {"full_name": %q}
+	}`, action, number, merged, body, prURL(number), mergeSHA, branch, updatedAt.UTC().Format(time.RFC3339), testRepo))
+}
+
+func TestLateMergeDelivery_DoesNotCloseALaterCycle(t *testing.T) {
+	h := newHarness(t, aRun("run-1", 7, delivery.RunStateRunning))
+	cycle2Opened := time.Date(2026, 9, 30, 10, 20, 0, 0, time.UTC)
+	h.cycles.latest = aCycle("cycle-2", "run-1")
+	h.cycles.latest.CreatedAt = cycle2Opened
+	h.prs.files = []string{"services/order/main.go"}
+
+	// Cycle 1's merge, replayed after cycle 2 opened.
+	late := prBodyAt("closed", "aep/m7-c1", "Resolves #12", 41, true, "abc123def456789", cycle2Opened.Add(-10*time.Minute))
+	if err := h.deliver(t, "pull_request", late); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if len(h.cycles.closed) != 0 || len(h.cycles.notedPR) != 0 {
+		t.Fatalf("a merge from before the open cycle began must not close or relabel it, got closed=%v noted=%v",
+			h.cycles.closed, h.cycles.notedPR)
+	}
+	if h.cycles.latest.EndedAt != nil || h.cycles.latest.MergeSHA != "" {
+		t.Fatalf("cycle 2 must stay open with no merge, got %+v", h.cycles.latest)
+	}
+}
+
+func TestLatePullRequestDelivery_DoesNotRecordOntoALaterCycle(t *testing.T) {
+	h := newHarness(t, aRun("run-1", 7, delivery.RunStateRunning))
+	cycle2Opened := time.Date(2026, 9, 30, 10, 20, 0, 0, time.UTC)
+	h.cycles.latest = aCycle("cycle-2", "run-1")
+	h.cycles.latest.CreatedAt = cycle2Opened
+	h.issues.withWork(7, 12)
+
+	late := prBodyAt("opened", "aep/m7-c1", "Resolves #12", 41, false, "", cycle2Opened.Add(-10*time.Minute))
+	if err := h.deliver(t, "pull_request", late); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if len(h.cycles.notedPR) != 0 || len(h.cycles.decisions) != 0 {
+		t.Fatalf("a pull request as it stood before the open cycle began is not this cycle's, got noted=%v decisions=%v",
+			h.cycles.notedPR, h.cycles.decisions)
+	}
+}
+
+// The guard reads WHEN the delivery describes, not when the pull request was
+// opened: a conflict cycle's rebase force-pushes to the SAME pull request, so a
+// pull request older than the cycle is normal, and its synchronize is news.
+func TestPullRequestUpdatedDuringTheCycle_IsRecorded(t *testing.T) {
+	h := newHarness(t, aRun("run-1", 7, delivery.RunStateRunning))
+	cycleOpened := time.Date(2026, 9, 30, 10, 20, 0, 0, time.UTC)
+	h.cycles.latest = aCycle("cycle-2", "run-1")
+	h.cycles.latest.CreatedAt = cycleOpened
+	h.issues.withWork(7, 12)
+
+	rebased := prBodyAt("synchronize", "aep/m7-c1", "Resolves #12", 41, false, "", cycleOpened.Add(time.Minute))
+	if err := h.deliver(t, "pull_request", rebased); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if len(h.cycles.notedPR) != 1 || h.cycles.notedPR[0] != "cycle-2:aep/m7-c1:41:"+prURL(41) {
+		t.Fatalf("a push made during the cycle must be recorded on it, got %v", h.cycles.notedPR)
 	}
 }

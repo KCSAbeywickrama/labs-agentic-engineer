@@ -49,12 +49,14 @@ type RunCycleRepository interface {
 	// per-cycle re-dispatch budget is spent. Guarded on the cycle being open.
 	NoteDispatch(ctx context.Context, id, jobRef string) (*RunCycle, error)
 
-	// NoteModelHost records the host of the model connection the cycle's agent
-	// was launched on. It is COPIED at dispatch, as the runtime and model are
-	// copied into the Job, so a connection changed mid-run neither reprices the
-	// cycle nor makes its usage name a host it never ran on; RecordUsage prices
-	// the capture against it. Guarded on the cycle being open.
-	NoteModelHost(ctx context.Context, id, host string) (*RunCycle, error)
+	// NoteLaunch records what the cycle's agent was launched on: the host of
+	// its model connection and the environment its Job was bound into. Both are
+	// COPIED at dispatch, as the runtime and model are copied into the Job, so a
+	// connection changed mid-run neither reprices the cycle nor makes its usage
+	// name a host it never ran on (RecordUsage prices the capture against the
+	// host), and a write target moved mid-run does not send the cycle's readers
+	// to an environment its Job was never in. Guarded on the cycle being open.
+	NoteLaunch(ctx context.Context, id, host, environment string) (*RunCycle, error)
 
 	// NotePullRequest records the pull request the agent actually opened, learned
 	// from the pull_request webhook — the platform never dictates branch identity
@@ -230,8 +232,8 @@ func (r *runCycleRepository) NoteDispatch(ctx context.Context, id, jobRef string
 	})
 }
 
-func (r *runCycleRepository) NoteModelHost(ctx context.Context, id, host string) (*RunCycle, error) {
-	return r.updateOpen(ctx, id, map[string]any{"model_host": host})
+func (r *runCycleRepository) NoteLaunch(ctx context.Context, id, host, environment string) (*RunCycle, error) {
+	return r.updateOpen(ctx, id, map[string]any{"model_host": host, "environment": environment})
 }
 
 func (r *runCycleRepository) NotePullRequest(ctx context.Context, id string, pr CyclePullRequest) (*RunCycle, error) {

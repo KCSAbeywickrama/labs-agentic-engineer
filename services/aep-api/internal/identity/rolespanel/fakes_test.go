@@ -63,14 +63,16 @@ type fakeTargets struct {
 
 func newFakeTargets(dir identity.Directory) *fakeTargets { return &fakeTargets{dir: dir} }
 
-func (f *fakeTargets) Scope(orgID string) identity.Scope { return scopeOf(orgID) }
+func (f *fakeTargets) Scope(_ context.Context, orgID, _ string) (identity.Scope, error) {
+	return scopeOf(orgID), nil
+}
 
-func (f *fakeTargets) Resolve(_ context.Context, orgID string) (identity.Target, error) {
+func (f *fakeTargets) Resolve(_ context.Context, scope identity.Scope) (identity.Target, error) {
 	if f.err != nil {
 		return identity.Target{}, f.err
 	}
 	return identity.Target{
-		OrgID: orgID, Environment: panelEnv,
+		OrgID: scope.OrgID, Environment: scope.Environment,
 		Issuer:    "http://default-idp.amp.localhost:8080",
 		Directory: f.dir,
 	}, nil

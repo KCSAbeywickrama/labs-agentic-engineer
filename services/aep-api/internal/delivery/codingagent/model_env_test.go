@@ -129,7 +129,7 @@ func TestDispatch_NonAnthropicConnection_MountsTheConnectionKey(t *testing.T) {
 	anthropic.conn = &conn
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	launch, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
 	if err != nil {
@@ -173,7 +173,7 @@ func TestDispatch_OpenAICompatibleConnection_MountsTheEvaluationKey(t *testing.T
 	anthropic.conn = &conn
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
 		t.Fatalf("Dispatch: %v", err)

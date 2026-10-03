@@ -103,9 +103,16 @@ const errTypePermanentDeploy = "PermanentDeployFailure"
 // same reason: an answer must not be retried like a blip. WHICH deploy failures
 // are permanent is the projects domain's to say (delivery.ErrDeployPermanent) —
 // this package only knows how to say it to Temporal.
+//
+// A missing write target is the one permanent failure with its own type: the
+// workflow settles the run on it (no-write-target) instead of filing deploy
+// fix work, because no code change repairs a pipeline.
 func deployErr(err error) error {
 	if err == nil || !errors.Is(err, delivery.ErrDeployPermanent) {
 		return err
+	}
+	if errors.Is(err, delivery.ErrNoWriteTarget) {
+		return temporal.NewNonRetryableApplicationError(err.Error(), delivery.ErrTypeNoWriteTarget, err)
 	}
 	return temporal.NewNonRetryableApplicationError(err.Error(), errTypePermanentDeploy, err)
 }

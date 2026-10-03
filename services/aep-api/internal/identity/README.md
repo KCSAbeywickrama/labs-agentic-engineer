@@ -60,20 +60,23 @@ flowchart LR
 
 | Port | Satisfied by | Mapped at |
 |---|---|---|
-| `TargetResolver` | the Environment's `aep.wso2.com/thunder-*` annotations (`clients/openchoreo`) + the admin credential at the binding's secret path (`platform/secrets`) | `app/identity_targets.go` |
+| `TargetResolver` | the project's write target (`openchoreo.WriteTargets`) + the Environment's `aep.wso2.com/thunder-*` annotations (`clients/openchoreo`) + the admin credential at the binding's secret path (`platform/secrets`) | `app/identity_targets.go` |
 | `Directory` | `clients/thundersvc`, one client per `(org, environment)` — groups and users, plus resource servers, resources, actions, roles and assignments | `app/identity_adapters.go` |
 | `DesignReader` | `spec.ArtifactService.GetDesignAtTag` | `app/identity_adapters.go` |
 | `SignInCoordinates` | `provisioning.Service.SignInCoordinates` — the sign-in resource's binding outputs | `app/sign_in_coords_adapter.go` (late-bound: provisioning is built after the panel) |
 
-`TargetResolver` has two methods split by whether they can fail. `Scope(orgID)`
-is pure — it is the choice of environment alone, and the panel needs it to read
-the platform's own rows for an environment whose directory is unreachable.
-`Resolve(ctx, orgID)` performs the two network reads and returns the bound
-`Directory`. It takes the **org** and not the environment on purpose: every build
-deploys and validates in exactly one environment today, so that choice is made
-once at the composition root rather than at each of the four call sites here.
-When a run carries its own environment, `Resolve` grows a parameter and nothing
-else about this design moves.
+`TargetResolver` has two methods split by what they read.
+`Scope(ctx, orgID, projectID)` names the environment: the project's **write
+target**, read from its own pipeline, or with no project (the org's group
+catalog) the org default pipeline's root. `Resolve(ctx, scope)` reads that
+environment's binding and admin credential and returns the bound `Directory`.
+The panel needs the split to read the platform's own rows for an environment
+whose directory is unreachable. A `Scope` failure degrades the panel's read to
+an empty unavailable view, fails every write (ensure, rotate, delete), and
+makes the project-delete teardown report the failure without touching rows,
+since there is no scope to key them by; the project delete logs it and
+continues. The teardown runs before the OC Project delete, so the project's
+pipeline is still readable.
 
 The adapter caches one client per `(org, environment)` and drops the entry when
 the identity provider **rejects** its credential — a rotated admin secret — with

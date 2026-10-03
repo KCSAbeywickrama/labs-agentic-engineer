@@ -81,7 +81,7 @@ outside that lock is the duplicate-issue race the lock exists to close.
 | `build` (buildpipe) | the whole-spec gate + the version's tag cut (its NAME comes from the request — console ADR-0030), **the milestone plan path** (mint the version's milestone, supersede the previous version into it, admit the run row, then plan its Tasks and mint its gates), the version ledger, dependency preflight — which also answers what the version is called and changes, since the click makes one request | `MilestoneRun`/`StartRunRequest`, and the planner via `SpecPlanner` |
 | `task` (taskflow) | the GitHub-native Task READ surface (list/get, scoped to a version by milestone membership) + the plan turn, which mints one **prose** issue per Task **into the version's milestone**, assigned at creation; plus the SRE/RCA handoff's adoption leg | the read DTOs, the milestone label vocabulary, and the run rows (via `MilestoneResolver`) |
 | `execution` | the executions READ surface: the per-Task progress endpoint, the task-log SSE stream, `OpsExecutionReader`. It writes nothing and dispatches nothing — the only execution rows left are the provisioning gates' | `TaskStreamHub`, the executions kernel |
-| `eventcore` | the event plane of the milestone-run loop: the auto-merge policy seam, the merged-PR path-diff build fan-out + per-`(component, SHA)` re-trigger budget, fix/conflict/red-main issue minting, the halt of a failed run's unfinished work and the close of a cancelled run's in-flight work, milestone-matched predicate re-evaluation, adoption, the reconcile sweep (trigger router; halted-aware, and blind to cancelled increments), and the build sweep that observes those builds reaching terminal | the milestone model (labels, `MilestoneRun`/`RunCycle`, run signals), `DiffComponents`/`BuildRunName` and `BuildTerminalObserver`; **no Temporal** — it reaches the supervisor only through the `RunSignaler`/`RunStarter` ports |
+| `eventcore` | the event plane of the milestone-run loop: the auto-merge policy seam, the merged-PR path-diff build fan-out + per-`(component, SHA)` re-trigger budget, fix/conflict/red-main issue minting, the halt of a failed run's unfinished work and the close of a cancelled run's in-flight work, milestone-matched predicate re-evaluation, adoption, the reconcile sweep (trigger router; halted-aware, and blind to cancelled increments), and the build sweep that observes those builds reaching terminal (and builds a merge whose fan-out was lost) | the milestone model (labels, `MilestoneRun`/`RunCycle`, run signals), `DiffComponents`/`BuildRunName` and `BuildTerminalObserver`; **no Temporal** — it reaches the supervisor only through the `RunSignaler`/`RunStarter` ports |
 | `run` | the milestone run SUPERVISOR — three workflows over one shared loop: the wait state + dispatch predicate, the cycle loop, the four budgets + no-progress + ceiling, the version's judgement, settle, and cancel. Plus the `Supervisor` handle the event plane and the build click signal and start runs through | `Runtime`, the milestone model, `RunStatus`/`MilestoneRunWorkflowID`, `MilestoneDispatch`, `DiffComponents`/`BuildRunNamePrefix`; **no GitHub client, no gorm** |
 | `runread` | the run READ surface: a version's runs + their cycles, TWO SSE streams over the per-cycle agent logs (one per run, one per version), the VALIDATION read model (the ledger, one version's attempts, one attempt's evidence at its commit), and the two writes beside them — cancel, and revalidate. Owns no state and decides nothing: both writes resolve their target through the org-scoped read, then hand off | the run/cycle entities, `IsTerminalRunState` and the validation vocabulary (`ValidationStageFromRun`, `AnsweringRunOnMilestone`, `DeployedRun`); reaches the pod log through `CycleLogReader` (OC API while the Component lives, observer archive while retained), the repo at a commit through `ValidationSnapshotReader`, the supervisor through `RunCanceller` and the event plane through `Revalidator`, so it drags in neither a cluster client, a workflow engine nor GitHub |
 | `codingagent` | the CodingExecutor (ONE dispatch entry point: dispatch a run cycle as an ephemeral OpenChoreo `coding-agent` job Component), the build-auth retry, the pod-truth watcher, retention/LRU and the cancel-time delete. Design: [`codingagent/design/oc-job-dispatch.md`](codingagent/design/oc-job-dispatch.md) | `MilestoneDispatch`/`MilestoneDispatcher`, `TaskStreamHub`, `BuildTerminalObserver` |
@@ -631,7 +631,8 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   writes fires an `issues.*` delivery straight back, so those handlers drop self-sender deliveries. It is
   deliberately NOT applied to `pull_request.*`: in App mode the coding runner opens its PR as the same
   `<slug>[bot]` login, and suppressing that would strand the run waiting for a PR that already exists.
-- **Handlers are idempotent, without a seen-it table.** A redelivered webhook re-runs the handler, so
+- **Handlers are idempotent, without a seen-it table.** A failed delivery is re-run (the receiver's
+  `webhook.Replayer`, or a manual redelivery), so
   merging re-reads the live PR first, minting passes a `DedupeKey`, and triggering a build counts the
   WorkflowRuns OpenChoreo already holds for `(component, commit)` — the same count that enforces the
   one-automatic-re-trigger budget, so idempotency and the budget can never disagree. Per-component build
@@ -644,7 +645,17 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   last rule is what makes re-reporting safe: a terminal run stays terminal and is re-read every pass, so
   reporting an older attempt would spend the re-trigger budget twice and mint a fix issue while the retry
   was still in flight.
-- **The build clone credential is staged once per fan-out, never per component.** It is ONE per-org
+- **The build sweep is also the merge fan-out's reconcile.** A merge whose `pull_request.closed` never
+  completed (lost past every webhook replay) left the run in its build stage forever, because
+  `awaitBuilds` has no deadline. When a live run's latest cycle closed on a merge more than the reconcile
+  grace ago (`webhook.ReplayHorizon` + 3 min, so it never races the delivery's own runs), no cancel was
+  requested, and a touched component has NO WorkflowRun at the merge SHA, the sweep builds it through the
+  fan-out's own count-then-stage path. Cancelled and halted runs are terminal and never walked; only the
+  latest cycle is read and builds are counted per merge SHA, so an earlier or superseded merge is never
+  rebuilt. It runs on every replica like the other sweeps; with more than one, two could heal the same
+  merge on one tick (the second trigger collides on the run name) — accepted while the api runs one.
+- **The build clone credential is staged once per fan-out, never per component — and only when a build is
+  owed.** The fan-out counts first, so a duplicate of an already-built merge stages nothing. It is ONE per-org
   object and OpenChoreo has no update verb, so staging is delete-then-create; staging inside the fan-out's
   per-component goroutines had them racing to delete and recreate the same object, and the loser dispatched
   a build with an empty `secretRef` that cloned anonymously and died at checkout against a private repo.

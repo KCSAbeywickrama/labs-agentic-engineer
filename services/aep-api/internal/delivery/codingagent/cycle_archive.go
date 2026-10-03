@@ -63,11 +63,14 @@ func (a *ObserverArchive) CycleArchive(ctx context.Context, scope ArchiveScope) 
 	if a == nil || a.obs == nil {
 		return "", fmt.Errorf("%w: no observability plane configured", ErrArchiveUnavailable)
 	}
+	if scope.Environment == "" {
+		return "", fmt.Errorf("%w: no environment for %s", ErrArchiveUnavailable, scope.ComponentName)
+	}
 	// The index dies with the component, so check the component first: querying
 	// a deleted one returns an empty page that is indistinguishable from a
 	// silent agent, and those are opposite things to tell a user.
 	if a.runtime != nil {
-		_, err := a.runtime.ReleaseBindingName(ctx, scope.OrgName, scope.ProjectName, scope.ComponentName, openchoreo.DevEnvironmentName)
+		_, err := a.runtime.ReleaseBindingName(ctx, scope.OrgName, scope.ProjectName, scope.ComponentName, scope.Environment)
 		if errors.Is(err, openchoreo.ErrNotFound) {
 			return "", fmt.Errorf("%w: %s", ErrComponentGone, scope.ComponentName)
 		}
@@ -76,7 +79,7 @@ func (a *ObserverArchive) CycleArchive(ctx context.Context, scope ArchiveScope) 
 		Namespace:   scope.OrgName,
 		Project:     scope.ProjectName,
 		Component:   openchoreo.ScopedComponentName(scope.ProjectName, scope.ComponentName),
-		Environment: openchoreo.DevEnvironmentName,
+		Environment: scope.Environment,
 		From:        scope.From,
 		To:          scope.To,
 	})

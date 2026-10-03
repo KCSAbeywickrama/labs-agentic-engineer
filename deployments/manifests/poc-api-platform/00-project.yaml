@@ -2,10 +2,11 @@
 # Both hello-world Components (poc-public, poc-protected) live under it.
 #
 # OpenChoreo 1.2.0 changed what it takes to get a usable project:
-#   * `spec.type` is a REQUIRED field on the Project CRD. Only the OpenChoreo
-#     REST API defaults it (to ClusterProjectType/default); a direct kubectl
-#     apply like this one must state it. The ClusterProjectType itself is
-#     created by scripts/setup-aep.sh.
+#   * `spec.type` is a REQUIRED field on the Project CRD, and a direct kubectl
+#     apply like this one must state it. It names the org's namespaced
+#     ProjectType/default, as aep-api does for real projects: AEP's platform
+#     chart renders it (localOrgProvisioning), standing in for the wso2cloud
+#     org bootstrap.
 #   * Creating the Project no longer materializes its cell namespace. It cuts a
 #     ProjectRelease, and a ProjectReleaseBinding is what pins that release to
 #     an environment and owns the namespace. Without the binding below, the
@@ -20,7 +21,7 @@ metadata:
   namespace: default
 spec:
   type:
-    kind: ClusterProjectType
+    kind: ProjectType
     name: default
   deploymentPipelineRef:
     kind: DeploymentPipeline

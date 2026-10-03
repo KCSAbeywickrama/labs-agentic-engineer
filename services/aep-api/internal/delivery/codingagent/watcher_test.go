@@ -48,10 +48,13 @@ type fakeRuntime struct {
 
 	bindingCalls int
 	logCalls     int
+	// bindingEnvs is the environment each ReleaseBindingName call asked for.
+	bindingEnvs []string
 }
 
-func (f *fakeRuntime) ReleaseBindingName(context.Context, string, string, string, string) (string, error) {
+func (f *fakeRuntime) ReleaseBindingName(_ context.Context, _, _, _, environment string) (string, error) {
 	f.bindingCalls++
+	f.bindingEnvs = append(f.bindingEnvs, environment)
 	if f.delay != nil {
 		f.delay()
 	}
@@ -147,7 +150,11 @@ func dispatchedCycle(id string, dispatchedAgo time.Duration) delivery.RunCycle {
 }
 
 func newTestWatcher(rt openchoreo.RuntimeClient, cycles cycleWatchStore) *JobWatcher {
-	return NewJobWatcher(rt, cycles, nil).WithIntervals(time.Millisecond, 10*time.Minute)
+	return newTestWatcherWith(rt, cycles, testWriteTargets())
+}
+
+func newTestWatcherWith(rt openchoreo.RuntimeClient, cycles cycleWatchStore, targets writeTargetResolver) *JobWatcher {
+	return NewJobWatcher(rt, cycles, targets, nil).WithIntervals(time.Millisecond, 10*time.Minute)
 }
 
 // ---- tests -----------------------------------------------------------------
@@ -305,6 +312,60 @@ func TestTick_PendingInsideTheGraceIsLeftAlone(t *testing.T) {
 
 	if len(cycles.finished) != 0 {
 		t.Fatalf("a pod inside the startup grace must not fail: %+v", cycles.finished)
+	}
+}
+
+// A cycle reads its binding in the environment its Job was bound into, even
+// when the project's write target has moved since: the Job is still there.
+func TestTick_ReadsTheBindingInTheCyclesRecordedEnvironment(t *testing.T) {
+	rt := &fakeRuntime{pod: openchoreo.RuntimePod{Found: true, Name: "p1", Phase: "Running"}}
+	cycle := dispatchedCycle("c1", time.Minute)
+	cycle.Environment = "dev-b"
+	targets := &fakeWriteTargets{env: "moved-on"}
+
+	newTestWatcherWith(rt, newWatchedCycles(cycle), targets).Tick(context.Background())
+
+	if len(rt.bindingEnvs) != 1 || rt.bindingEnvs[0] != "dev-b" {
+		t.Fatalf("binding read in %v, want [dev-b]", rt.bindingEnvs)
+	}
+	if n := targets.resolves(); n != 0 {
+		t.Fatalf("resolved the write target %d times, want never for a cycle that recorded one", n)
+	}
+}
+
+// A cycle dispatched before its environment was recorded (or whose launch write
+// failed) has none. It must not be read in "": it falls back to the project's
+// write target now.
+func TestTick_ACycleWithNoRecordedEnvironmentUsesTheProjectsWriteTarget(t *testing.T) {
+	rt := &fakeRuntime{pod: openchoreo.RuntimePod{Found: true, Name: "p1", Phase: "Running"}}
+	targets := &fakeWriteTargets{env: "dev-b"}
+
+	newTestWatcherWith(rt, newWatchedCycles(dispatchedCycle("c1", time.Minute)), targets).Tick(context.Background())
+
+	if len(rt.bindingEnvs) != 1 || rt.bindingEnvs[0] != "dev-b" {
+		t.Fatalf("binding read in %v, want [dev-b]", rt.bindingEnvs)
+	}
+}
+
+// A fallback that cannot be resolved is no evidence about the cycle: nothing is
+// read, and the cycle is not failed, however many ticks it lasts. Even when the
+// cause wraps a not-found (a pipeline that 404s), which must not be counted as
+// the cycle's Component going missing.
+func TestTick_AnUnresolvableFallbackNeverFailsACycle(t *testing.T) {
+	rt := &fakeRuntime{pod: openchoreo.RuntimePod{Found: true, Name: "p1", Phase: "Running"}}
+	cycles := newWatchedCycles(dispatchedCycle("c1", time.Minute))
+	targets := &fakeWriteTargets{err: &openchoreo.ErrNoWriteTarget{Org: "acme", Project: "shop", Cause: openchoreo.ErrNotFound}}
+	w := newTestWatcherWith(rt, cycles, targets)
+
+	for i := 0; i < missingTicksToFail+1; i++ {
+		w.Tick(context.Background())
+	}
+
+	if len(rt.bindingEnvs) != 0 {
+		t.Fatalf("binding read in %v, want no read without an environment", rt.bindingEnvs)
+	}
+	if len(cycles.finished) != 0 {
+		t.Fatalf("an unresolvable write target must not fail a cycle: %+v", cycles.finished)
 	}
 }
 

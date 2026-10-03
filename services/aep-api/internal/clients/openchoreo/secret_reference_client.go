@@ -31,6 +31,8 @@ var _ secretmanagersvc.OpenChoreoSecretReferenceClient = (*secretReferenceClient
 
 type secretReferenceClient struct {
 	oc *gen.ClientWithResponses
+	// labels are stamped on every write (Config.ResourceLabels).
+	labels resourceLabels
 }
 
 // NewSecretReferenceClient builds an OpenChoreoSecretReferenceClient over the
@@ -41,7 +43,7 @@ func NewSecretReferenceClient(cfg Config) secretmanagersvc.OpenChoreoSecretRefer
 	if err != nil {
 		panic(fmt.Errorf("init openchoreo secret-reference client: %w", err))
 	}
-	return &secretReferenceClient{oc: oc}
+	return &secretReferenceClient{oc: oc, labels: newResourceLabels(cfg.ResourceLabels)}
 }
 
 func (c *secretReferenceClient) GetSecretReference(ctx context.Context, cpNS, name string) (*secretmanagersvc.SecretReference, error) {
@@ -62,6 +64,7 @@ func (c *secretReferenceClient) GetSecretReference(ctx context.Context, cpNS, na
 
 func (c *secretReferenceClient) CreateSecretReference(ctx context.Context, cpNS string, req secretmanagersvc.CreateSecretReferenceRequest) (*secretmanagersvc.SecretReference, error) {
 	body := buildSecretReferenceBody(req)
+	c.labels.stamp(&body.Metadata)
 	resp, err := c.oc.CreateSecretReferenceWithResponse(ctx, cpNS, body)
 	if err != nil {
 		return nil, fmt.Errorf("create secret reference: %w", err)
@@ -80,6 +83,7 @@ func (c *secretReferenceClient) CreateSecretReference(ctx context.Context, cpNS 
 
 func (c *secretReferenceClient) UpdateSecretReference(ctx context.Context, cpNS, name string, req secretmanagersvc.CreateSecretReferenceRequest) (*secretmanagersvc.SecretReference, error) {
 	body := buildSecretReferenceBody(req)
+	c.labels.stamp(&body.Metadata)
 	resp, err := c.oc.UpdateSecretReferenceWithResponse(ctx, cpNS, name, body)
 	if err != nil {
 		return nil, fmt.Errorf("update secret reference: %w", err)
@@ -122,7 +126,7 @@ func (c *secretReferenceClient) DeleteSecretReference(ctx context.Context, cpNS,
 //	spec.template.type=Opaque
 func buildSecretReferenceBody(req secretmanagersvc.CreateSecretReferenceRequest) gen.SecretReference {
 	ns := req.Namespace
-	opaque := gen.Opaque
+	opaque := gen.SecretTemplateTypeOpaque
 	data := make([]gen.SecretDataSource, 0, len(req.SecretKeys))
 	for _, key := range req.SecretKeys {
 		prop := key

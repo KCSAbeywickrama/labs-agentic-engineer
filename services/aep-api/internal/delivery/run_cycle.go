@@ -208,11 +208,16 @@ type RunCycle struct {
 	ModelID             string   `gorm:"type:text;not null;default:''" json:"-"`
 	CostUsd             *float64 `gorm:"column:cost_usd" json:"-"`
 	// ModelHost is the host of the model connection the cycle was dispatched
-	// on, copied onto the row at launch (NoteModelHost) just as the runtime and
+	// on, copied onto the row at launch (NoteLaunch) just as the runtime and
 	// model are copied into the Job, and the host its stamp is priced against:
 	// rates are keyed by (host, model). Empty on a cycle not yet dispatched.
 	// Nullable on purpose (see RunPhase18ModelHost).
 	ModelHost string `gorm:"type:text" json:"-"`
+	// Environment is the write target the cycle's Job was bound into, copied
+	// at launch (NoteLaunch) like ModelHost. The watcher, the log source and
+	// the archive read it rather than re-resolving the project's write target,
+	// which may have moved since. Empty on a cycle not yet dispatched.
+	Environment string `gorm:"type:text" json:"-"`
 
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`

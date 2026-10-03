@@ -19,6 +19,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/delivery"
@@ -146,8 +147,8 @@ func (a runCycles) NoteDispatch(ctx context.Context, cycleID, jobRef string) err
 	return err
 }
 
-func (a runCycles) NoteModelHost(ctx context.Context, cycleID, host string) error {
-	_, err := a.cycles.NoteModelHost(ctx, cycleID, host)
+func (a runCycles) NoteLaunch(ctx context.Context, cycleID, host, environment string) error {
+	_, err := a.cycles.NoteLaunch(ctx, cycleID, host, environment)
 	return err
 }
 
@@ -545,8 +546,16 @@ type deployGate struct {
 	prov *provisioning.Service
 }
 
+// DeploymentReadiness marks a project with no write target
+// delivery.ErrDeployPermanent and delivery.ErrNoWriteTarget: it is a
+// configuration fact, so the run settles failed naming the cause instead of
+// retrying. Any other read failure is returned as is and retried.
 func (g deployGate) DeploymentReadiness(ctx context.Context, orgID, projectID, env string) ([]string, []string, error) {
 	readiness, err := g.prov.DeploymentReadiness(ctx, orgID, projectID, env)
+	var nwt *openchoreo.ErrNoWriteTarget
+	if errors.As(err, &nwt) {
+		return nil, nil, fmt.Errorf("%w: %w: %w", delivery.ErrDeployPermanent, delivery.ErrNoWriteTarget, err)
+	}
 	if err != nil {
 		return nil, nil, err
 	}

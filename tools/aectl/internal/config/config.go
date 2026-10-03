@@ -111,13 +111,15 @@ var keyRegistry = map[string]configKeyMeta{
 	"oc.system_namespace":      {required: true, kind: kindString},
 	// The k8s namespace of the one org AEP ships with — AEP is single-org
 	// today, so this is that default org's home namespace: where its Project,
-	// Environment(s), DeploymentPipeline, and per-org ComponentTypes
-	// (localOrgProvisioning) all live. Empty falls back to "default" (see
-	// ocOrgNamespace in cmd/platform_gateway.go).
+	// Environment(s), DeploymentPipeline, and per-org ComponentTypes and
+	// ProjectType (localOrgProvisioning) all live. Empty falls back to
+	// "default" (see ocOrgNamespace in cmd/platform_gateway.go).
 	"oc.default_org_namespace": {required: false, kind: kindString},
-	// The single OpenChoreo Environment AEP provisions into and patches gateway
-	// ingress onto. Empty falls back to "default" (see ocPipelineSourceEnvironment in
-	// cmd/platform_gateway.go).
+	// The OpenChoreo Environment aectl configures gateway ingress and the
+	// environment Thunder on at install time: the root of the default org's
+	// DeploymentPipeline/default, which is the write target aep-api resolves for
+	// projects on that pipeline. aep-api does not read this. Empty falls back to
+	// "default" (see ocPipelineSourceEnvironment in cmd/platform_gateway.go).
 	"oc.pipeline_source_environment":    {required: false, kind: kindString},
 	"oc.local_org_provisioning.enabled": {required: false, kind: kindBool},
 	// Whether the data-plane gateway aectl is pointing at terminates TLS.

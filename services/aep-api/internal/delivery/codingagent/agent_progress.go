@@ -250,6 +250,11 @@ type AgentProgressReader struct {
 	live    LiveLogSource
 	archive ArchiveLogSource
 
+	// targets is the fallback environment: the project's write target, for a
+	// cycle that recorded none and for a legacy execution, which never records
+	// one.
+	targets writeTargetResolver
+
 	// recordings is the v2 read: the file the CycleRecorder wrote for this
 	// cycle. nil on a boot with no workspace volume, which every reader then
 	// reports as `none` rather than falling back to a per-viewer pod tail —
@@ -264,8 +269,8 @@ type AgentProgressReader struct {
 
 // NewAgentProgressReader wires the reader. live may be nil in a degraded boot
 // (every read then reports unavailable rather than erroring).
-func NewAgentProgressReader(live LiveLogSource, logs delivery.CodingAgentLogRepository) *AgentProgressReader {
-	return &AgentProgressReader{live: live, logs: logs}
+func NewAgentProgressReader(live LiveLogSource, targets writeTargetResolver, logs delivery.CodingAgentLogRepository) *AgentProgressReader {
+	return &AgentProgressReader{live: live, targets: targets, logs: logs}
 }
 
 // WithArchive attaches the post-terminal source for the V1 surfaces. Optional —
@@ -307,11 +312,19 @@ type cycleLog struct {
 // resolveCycleLog picks the source that can still see a cycle's output: the live
 // pod tail while its Component exists, then the observability archive while the
 // Component is retained, then nothing at all.
+//
+// Both sources are read in the environment the cycle's Job was bound into. A
+// cycle whose fallback cannot be resolved is a failed read, like a transport
+// failure: the caller degrades this poll.
 func (r *AgentProgressReader) resolveCycleLog(ctx context.Context, cycle *delivery.RunCycle) (cycleLog, error) {
 	closed := cycle.EndedAt != nil
+	env, err := cycleEnvironment(ctx, r.targets, cycle)
+	if err != nil {
+		return cycleLog{}, fmt.Errorf("cycle environment: %w", err)
+	}
 
 	if r.live != nil {
-		tail, err := r.live.Tail(ctx, cycle.OrgID, cycle.ProjectID, cycle.JobRef, logPageBytes)
+		tail, err := r.live.Tail(ctx, cycle.OrgID, cycle.ProjectID, cycle.JobRef, env, logPageBytes)
 		switch {
 		case err == nil:
 			// Real OCLogSource.Tail returns success + empty text when the
@@ -324,7 +337,7 @@ func (r *AgentProgressReader) resolveCycleLog(ctx context.Context, cycle *delive
 				return cycleLog{text: tail.Text, live: !closed, final: closed, pod: tail.Pod}, nil
 			}
 			if !closed && !terminalPod(tail.Pod) {
-				if text, aerr := r.readArchive(ctx, cycle); aerr == nil && strings.TrimSpace(text) != "" {
+				if text, aerr := r.readArchive(ctx, cycle, env); aerr == nil && strings.TrimSpace(text) != "" {
 					return cycleLog{text: text}, nil
 				}
 				return cycleLog{text: tail.Text, live: true, pod: tail.Pod}, nil
@@ -340,7 +353,7 @@ func (r *AgentProgressReader) resolveCycleLog(ctx context.Context, cycle *delive
 	// live source: the archive is the only remaining reader. It only answers
 	// while the Component is retained — so this is also where "the component
 	// was reclaimed" surfaces.
-	text, err := r.readArchive(ctx, cycle)
+	text, err := r.readArchive(ctx, cycle, env)
 	if err != nil {
 		// A CLOSED cycle will never gain a new source, so its unavailability is
 		// settled. An open one may still be mid-render or mid-observer-hiccup.
@@ -386,7 +399,7 @@ func (r *AgentProgressReader) CycleProgress(ctx context.Context, cycle *delivery
 // is the cycle's own lifetime, padded either side: the dispatch write and the
 // first pod line are seconds apart, and a closed cycle's last lines land after
 // the merge webhook that closed it.
-func (r *AgentProgressReader) readArchive(ctx context.Context, cycle *delivery.RunCycle) (string, error) {
+func (r *AgentProgressReader) readArchive(ctx context.Context, cycle *delivery.RunCycle, env string) (string, error) {
 	if r.archive == nil {
 		return "", fmt.Errorf("%w: no archive configured", ErrArchiveUnavailable)
 	}
@@ -399,6 +412,7 @@ func (r *AgentProgressReader) readArchive(ctx context.Context, cycle *delivery.R
 		OrgName:       cycle.OrgID,
 		ProjectName:   cycle.ProjectID,
 		ComponentName: cycle.JobRef,
+		Environment:   env,
 		From:          from,
 		To:            to,
 	})
@@ -502,18 +516,43 @@ func (r *AgentProgressReader) AgentProgress(ctx context.Context, row *delivery.E
 		return resp, nil
 	}
 	live := !taskmeta.ExecutionStatus(row.Status).IsTerminal()
-	tail, err := r.live.Tail(ctx, row.OrgID, row.ProjectID, row.RunName, logPageBytes)
+	// An execution records no environment, so it is read in the project's write
+	// target. One that cannot be resolved has no logs to offer, and says so the
+	// way a reclaimed Component does rather than failing the handler.
+	env, err := r.executionEnvironment(ctx, row)
+	if err != nil {
+		slog.WarnContext(ctx, "codingagent: no environment to read the execution's log in",
+			"execution", row.ID, "run", row.RunName, "error", err)
+		return logsGone(resp, live, ""), nil
+	}
+	tail, err := r.live.Tail(ctx, row.OrgID, row.ProjectID, row.RunName, env, logPageBytes)
 	if err != nil {
 		if errors.Is(err, ErrComponentGone) {
-			if !live {
-				resp.Lines = []contracts.ProgressEvent{logsUnavailableEvent(unavailableReason(err))}
-				resp.Final = true
-			}
-			return resp, nil
+			return logsGone(resp, live, unavailableReason(err)), nil
 		}
 		return nil, fmt.Errorf("tail pod log: %w", err)
 	}
 	return r.fromText(resp, tail.Text, sinceMillis, live, !live, tail.Pod), nil
+}
+
+// executionEnvironment is the project's write target, which is where a legacy
+// execution's Job was bound.
+func (r *AgentProgressReader) executionEnvironment(ctx context.Context, row *delivery.Execution) (string, error) {
+	if r.targets == nil {
+		return "", errNoWriteTargetResolver
+	}
+	return r.targets.Resolve(ctx, row.OrgID, row.ProjectID)
+}
+
+// logsGone is an execution's answer when no source can read its log: nothing
+// while it is live (the next poll may do better), a settled "unavailable" once
+// it is terminal.
+func logsGone(resp *contracts.ProgressResponse, live bool, reason string) *contracts.ProgressResponse {
+	if !live {
+		resp.Lines = []contracts.ProgressEvent{logsUnavailableEvent(reason)}
+		resp.Final = true
+	}
+	return resp
 }
 
 // pageEvents parses a raw pod-log page into events newer than sinceMillis,

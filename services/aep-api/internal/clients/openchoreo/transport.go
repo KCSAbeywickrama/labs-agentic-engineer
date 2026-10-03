@@ -72,6 +72,12 @@ type Config struct {
 	// k3d, which talks to OpenChoreo directly and reads the namespace from the
 	// URL path).
 	ImpersonateOrgResolver func(ctx context.Context, namespace string) (string, error)
+
+	// ResourceLabels are stamped on every resource these clients write
+	// (resource_labels.go). They exist for the platform AEP runs on, never for
+	// AEP to read back. nil or empty adds nothing (local k3d, which talks to
+	// OpenChoreo directly). Validate with ValidateResourceLabels at boot.
+	ResourceLabels map[string]string
 }
 
 // newGenClient builds a *gen.ClientWithResponses with the three-layer

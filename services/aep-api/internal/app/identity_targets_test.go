@@ -63,6 +63,28 @@ func (f *fakeCredentials) ReadBindingCredential(_ context.Context, secretPath st
 	return f.fields, f.err
 }
 
+// fakeScopeTargets is the write-target half: which environment a project, or
+// the org default pipeline, writes into.
+type fakeScopeTargets struct {
+	project string // answered by Resolve
+	root    string // answered by OrgDefaultRoot
+	err     error
+	calls   []string
+}
+
+func (f *fakeScopeTargets) Resolve(_ context.Context, org, project string) (string, error) {
+	f.calls = append(f.calls, "Resolve "+org+"/"+project)
+	return f.project, f.err
+}
+
+func (f *fakeScopeTargets) OrgDefaultRoot(_ context.Context, org string) (string, error) {
+	f.calls = append(f.calls, "OrgDefaultRoot "+org)
+	return f.root, f.err
+}
+
+// acmeDefault is the scope most tests resolve.
+var acmeDefault = identity.Scope{OrgID: "acme", Environment: "default"}
+
 func newTestResolver(t *testing.T, route string) (*identityTargetResolver, *fakeBindings, *fakeCredentials) {
 	t.Helper()
 	bindings := &fakeBindings{binding: openchoreo.ThunderBinding{
@@ -75,7 +97,7 @@ func newTestResolver(t *testing.T, route string) (*identityTargetResolver, *fake
 	credentials := &fakeCredentials{fields: map[string]string{
 		"clientId": "aep-system-client", "clientSecret": "s3cret",
 	}}
-	return newIdentityTargetResolver(bindings, credentials, "default", route), bindings, credentials
+	return newIdentityTargetResolver(bindings, credentials, &fakeScopeTargets{}, route), bindings, credentials
 }
 
 // The whole resolution, end to end: the binding names the instance, the secret
@@ -84,7 +106,7 @@ func newTestResolver(t *testing.T, route string) (*identityTargetResolver, *fake
 func TestIdentityTargetResolver_ResolvesFromTheBindingAndTheSecretStore(t *testing.T) {
 	resolver, bindings, credentials := newTestResolver(t, adminRouteIssuer)
 
-	target, err := resolver.Resolve(context.Background(), "acme")
+	target, err := resolver.Resolve(context.Background(), acmeDefault)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -141,7 +163,7 @@ func TestIdentityTargetResolver_CachesPerScope(t *testing.T) {
 	ctx := context.Background()
 
 	for range 3 {
-		if _, err := resolver.Resolve(ctx, "acme"); err != nil {
+		if _, err := resolver.Resolve(ctx, acmeDefault); err != nil {
 			t.Fatalf("Resolve: %v", err)
 		}
 	}
@@ -150,7 +172,7 @@ func TestIdentityTargetResolver_CachesPerScope(t *testing.T) {
 			bindings.calls, credentials.calls)
 	}
 
-	if _, err := resolver.Resolve(ctx, "globex"); err != nil {
+	if _, err := resolver.Resolve(ctx, identity.Scope{OrgID: "globex", Environment: "default"}); err != nil {
 		t.Fatalf("Resolve for a second org: %v", err)
 	}
 	if bindings.calls != 2 {
@@ -167,11 +189,11 @@ func TestIdentityTargetResolver_CacheExpires(t *testing.T) {
 	resolver.now = func() time.Time { return now }
 	ctx := context.Background()
 
-	if _, err := resolver.Resolve(ctx, "acme"); err != nil {
+	if _, err := resolver.Resolve(ctx, acmeDefault); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	now = now.Add(identityTargetTTL - time.Second)
-	if _, err := resolver.Resolve(ctx, "acme"); err != nil {
+	if _, err := resolver.Resolve(ctx, acmeDefault); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	if bindings.calls != 1 {
@@ -179,7 +201,7 @@ func TestIdentityTargetResolver_CacheExpires(t *testing.T) {
 	}
 
 	now = now.Add(2 * time.Second)
-	if _, err := resolver.Resolve(ctx, "acme"); err != nil {
+	if _, err := resolver.Resolve(ctx, acmeDefault); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	if bindings.calls != 2 {
@@ -195,7 +217,7 @@ func TestIdentityTargetResolver_InvalidatesOnARejectedCredential(t *testing.T) {
 	resolver, bindings, _ := newTestResolver(t, adminRouteIssuer)
 	ctx := context.Background()
 
-	target, err := resolver.Resolve(ctx, "acme")
+	target, err := resolver.Resolve(ctx, acmeDefault)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -208,7 +230,7 @@ func TestIdentityTargetResolver_InvalidatesOnARejectedCredential(t *testing.T) {
 	if err := dir.check(errors.New("thunder is busy")); err == nil {
 		t.Fatal("check swallowed an error")
 	}
-	if _, err := resolver.Resolve(ctx, "acme"); err != nil {
+	if _, err := resolver.Resolve(ctx, acmeDefault); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	if bindings.calls != 1 {
@@ -217,7 +239,7 @@ func TestIdentityTargetResolver_InvalidatesOnARejectedCredential(t *testing.T) {
 
 	// A rejection drops it.
 	dir.invalidate()
-	if _, err := resolver.Resolve(ctx, "acme"); err != nil {
+	if _, err := resolver.Resolve(ctx, acmeDefault); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	if bindings.calls != 2 {
@@ -232,7 +254,7 @@ func TestIdentityTargetResolver_UnboundEnvironmentNamesTheFix(t *testing.T) {
 	resolver, bindings, _ := newTestResolver(t, adminRouteIssuer)
 	bindings.err = openchoreo.ErrNoThunderBinding
 
-	_, err := resolver.Resolve(context.Background(), "acme")
+	_, err := resolver.Resolve(context.Background(), acmeDefault)
 	if err == nil {
 		t.Fatal("Resolve succeeded for an unbound environment")
 	}
@@ -260,27 +282,100 @@ func TestIdentityTargetResolver_MissingCredentialIsNotAUsableTarget(t *testing.T
 				Issuer: targetIssuer, SystemResourceIdentifier: targetIssuer + "/mcp",
 				SecretPath: "secret/aep/thunder/acme/default",
 			}}
-			resolver := newIdentityTargetResolver(bindings, credentials, "default", adminRouteIssuer)
-			if _, err := resolver.Resolve(context.Background(), "acme"); err == nil {
+			resolver := newIdentityTargetResolver(bindings, credentials, &fakeScopeTargets{}, adminRouteIssuer)
+			if _, err := resolver.Resolve(context.Background(), acmeDefault); err == nil {
 				t.Fatal("Resolve returned a target with no usable admin credential")
 			}
 		})
 	}
 }
 
-// Scope is pure and cannot fail — the panel reads the platform's own rows for an
-// environment whose identity provider is unreachable, and it needs the key to do
-// that without touching the network.
-func TestIdentityTargetResolver_ScopeIsPure(t *testing.T) {
-	resolver, bindings, credentials := newTestResolver(t, adminRouteIssuer)
-	bindings.err = errors.New("openchoreo is down")
+// Scope names the environment the PROJECT writes into, read from its own
+// pipeline, and makes no binding or credential read.
+func TestIdentityTargetResolver_ScopeFollowsTheProjectsWriteTarget(t *testing.T) {
+	bindings := &fakeBindings{}
+	credentials := &fakeCredentials{}
+	targets := &fakeScopeTargets{project: "development", root: "org-root"}
+	resolver := newIdentityTargetResolver(bindings, credentials, targets, adminRouteIssuer)
 
-	if got := resolver.Scope("acme"); got != (identity.Scope{OrgID: "acme", Environment: "default"}) {
+	got, err := resolver.Scope(context.Background(), "acme", "shop")
+	if err != nil {
+		t.Fatalf("Scope: %v", err)
+	}
+	if got != (identity.Scope{OrgID: "acme", Environment: "development"}) {
 		t.Fatalf("Scope = %s", got)
 	}
-	if bindings.calls != 0 || credentials.calls != 0 {
-		t.Fatalf("Scope performed I/O (bindings=%d credentials=%d)", bindings.calls, credentials.calls)
+	if len(targets.calls) != 1 || targets.calls[0] != "Resolve acme/shop" {
+		t.Fatalf("write-target calls = %v", targets.calls)
 	}
+	if bindings.calls != 0 || credentials.calls != 0 {
+		t.Fatalf("Scope read the binding (bindings=%d credentials=%d)", bindings.calls, credentials.calls)
+	}
+}
+
+// With no project in hand (the org's group catalog), the scope is the org
+// default pipeline's root.
+func TestIdentityTargetResolver_ScopeWithoutAProjectIsTheOrgDefault(t *testing.T) {
+	targets := &fakeScopeTargets{project: "development", root: "org-root"}
+	resolver := newIdentityTargetResolver(&fakeBindings{}, &fakeCredentials{}, targets, adminRouteIssuer)
+
+	got, err := resolver.Scope(context.Background(), "acme", "")
+	if err != nil {
+		t.Fatalf("Scope: %v", err)
+	}
+	if got != (identity.Scope{OrgID: "acme", Environment: "org-root"}) {
+		t.Fatalf("Scope = %s", got)
+	}
+	if len(targets.calls) != 1 || targets.calls[0] != "OrgDefaultRoot acme" {
+		t.Fatalf("write-target calls = %v", targets.calls)
+	}
+}
+
+// The write target's error comes back unchanged, so a caller can still tell a
+// configuration fact (ErrNoWriteTarget) from a transient failure.
+func TestIdentityTargetResolver_ScopePropagatesTheWriteTargetError(t *testing.T) {
+	boom := &openchoreo.ErrNoWriteTarget{}
+	targets := &fakeScopeTargets{err: boom}
+	resolver := newIdentityTargetResolver(&fakeBindings{}, &fakeCredentials{}, targets, adminRouteIssuer)
+
+	for _, project := range []string{"shop", ""} {
+		if _, err := resolver.Scope(context.Background(), "acme", project); !errors.Is(err, boom) {
+			t.Fatalf("Scope(%q) error = %v, want the write target's", project, err)
+		}
+	}
+}
+
+// Resolve reads the binding of exactly the scope it was handed, and caches per
+// scope: two environments of one org are two identity providers.
+func TestIdentityTargetResolver_ResolveReadsTheScopesOwnBinding(t *testing.T) {
+	resolver, _, _ := newTestResolver(t, adminRouteIssuer)
+	bindings := &recordingBindings{fakeBindings: resolver.environments.(*fakeBindings)}
+	resolver.environments = bindings
+	ctx := context.Background()
+
+	for _, env := range []string{"development", "staging", "development"} {
+		target, err := resolver.Resolve(ctx, identity.Scope{OrgID: "acme", Environment: env})
+		if err != nil {
+			t.Fatalf("Resolve %s: %v", env, err)
+		}
+		if target.Environment != env {
+			t.Fatalf("target environment = %q, want %q", target.Environment, env)
+		}
+	}
+	if len(bindings.envs) != 2 || bindings.envs[0] != "development" || bindings.envs[1] != "staging" {
+		t.Fatalf("binding reads = %v, want one per environment", bindings.envs)
+	}
+}
+
+// recordingBindings records which environment each binding read addressed.
+type recordingBindings struct {
+	*fakeBindings
+	envs []string
+}
+
+func (r *recordingBindings) GetThunderBinding(ctx context.Context, orgID, environment string) (openchoreo.ThunderBinding, error) {
+	r.envs = append(r.envs, environment)
+	return r.fakeBindings.GetThunderBinding(ctx, orgID, environment)
 }
 
 // The binding records its secret path WITH the KV mount, because that is what an

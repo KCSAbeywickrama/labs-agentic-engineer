@@ -17,7 +17,11 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/wso2/aep/aep-api/internal/clients/agentmanager"
@@ -54,6 +58,34 @@ func (oneBinding) GetAIGatewayBinding(context.Context, string, string) (openchor
 	return openchoreo.AIGatewayBinding{AdminURL: "http://amp.example", GatewayID: "gw-1"}, nil
 }
 
+// fakeOrgTargets returns a fixed set of write targets for the org.
+type fakeOrgTargets struct {
+	envs       []string
+	unresolved map[string]error
+	err        error
+}
+
+func (f fakeOrgTargets) OrgWriteTargets(context.Context, string) ([]string, map[string]error, error) {
+	return f.envs, f.unresolved, f.err
+}
+
+// envBindings answers per environment; an absent environment has no binding.
+type envBindings struct {
+	byEnv map[string]openchoreo.AIGatewayBinding
+	reads []string
+}
+
+func (b *envBindings) GetAIGatewayBinding(_ context.Context, _, env string) (openchoreo.AIGatewayBinding, error) {
+	b.reads = append(b.reads, env)
+	binding, ok := b.byEnv[env]
+	if !ok {
+		return openchoreo.AIGatewayBinding{}, openchoreo.ErrNoAIGatewayBinding
+	}
+	return binding, nil
+}
+
+func oneTarget() fakeOrgTargets { return fakeOrgTargets{envs: []string{"development"}} }
+
 func ollamaConnection() modelconn.Connection {
 	return modelconn.Connection{
 		Format: modelconn.FormatOpenAICompatible, BaseURL: "https://ollama.com/v1",
@@ -66,7 +98,7 @@ func ollamaConnection() modelconn.Connection {
 // upstream, the auth and the key.
 func TestAMPModelProviderPublisher_PublishesTheConnection(t *testing.T) {
 	client := &providerClient{exists: true}
-	pub := ampModelProviderPublisher{amp: providerClients{client}, bindings: oneBinding{}}
+	pub := ampModelProviderPublisher{amp: providerClients{client}, bindings: oneBinding{}, targets: oneTarget()}
 
 	if err := pub.PublishOrgModelConnection(context.Background(), "acme", ollamaConnection(), "fake-ollama-key"); err != nil {
 		t.Fatalf("PublishOrgModelConnection: %v", err)
@@ -90,7 +122,7 @@ func TestAMPModelProviderPublisher_PublishesTheConnection(t *testing.T) {
 // connection the copy belonged to.
 func TestAMPModelProviderPublisher_ClearOverwritesTheKey(t *testing.T) {
 	client := &providerClient{exists: true}
-	pub := ampModelProviderPublisher{amp: providerClients{client}, bindings: oneBinding{}}
+	pub := ampModelProviderPublisher{amp: providerClients{client}, bindings: oneBinding{}, targets: oneTarget()}
 
 	if err := pub.ClearOrgModelKey(context.Background(), "acme", ollamaConnection()); err != nil {
 		t.Fatalf("ClearOrgModelKey: %v", err)
@@ -105,5 +137,199 @@ func TestAMPModelProviderPublisher_ClearOverwritesTheKey(t *testing.T) {
 	if in.APIKey != "Bearer "+clearedProviderCredential || in.ID != "aep-acme-anthropic" || in.GatewayID != "gw-1" ||
 		in.Template != "openai" || in.AuthHeader != "Authorization" {
 		t.Fatalf("write = %+v, want the org's provider holding the cleared value", in)
+	}
+}
+
+var (
+	bindingA = openchoreo.AIGatewayBinding{AdminURL: "http://amp-a.example", GatewayID: "gw-a"}
+	bindingB = openchoreo.AIGatewayBinding{AdminURL: "http://amp-b.example", GatewayID: "gw-b"}
+)
+
+func publishWith(t *testing.T, targets fakeOrgTargets, bindings *envBindings, client *providerClient) error {
+	t.Helper()
+	pub := ampModelProviderPublisher{amp: providerClients{client}, bindings: bindings, targets: targets}
+	return pub.PublishOrgModelConnection(context.Background(), "acme", ollamaConnection(), "fake-key")
+}
+
+func clearWith(t *testing.T, targets fakeOrgTargets, bindings *envBindings, client *providerClient) error {
+	t.Helper()
+	pub := ampModelProviderPublisher{amp: providerClients{client}, bindings: bindings, targets: targets}
+	return pub.ClearOrgModelKey(context.Background(), "acme", ollamaConnection())
+}
+
+func TestAMPModelProviderPublisher_DistinctBindingsEachWrittenOnce(t *testing.T) {
+	targets := fakeOrgTargets{envs: []string{"development", "dev-b"}}
+	bindings := &envBindings{byEnv: map[string]openchoreo.AIGatewayBinding{"development": bindingA, "dev-b": bindingB}}
+	client := &providerClient{exists: true}
+	if err := publishWith(t, targets, bindings, client); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if len(client.ensured) != 2 {
+		t.Fatalf("publish writes = %d, want 2", len(client.ensured))
+	}
+	client = &providerClient{exists: true}
+	if err := clearWith(t, targets, bindings, client); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if len(client.updates) != 2 {
+		t.Fatalf("clear writes = %d, want 2", len(client.updates))
+	}
+}
+
+func TestAMPModelProviderPublisher_SameBindingWrittenOnce(t *testing.T) {
+	targets := fakeOrgTargets{envs: []string{"development", "dev-b"}}
+	bindings := &envBindings{byEnv: map[string]openchoreo.AIGatewayBinding{"development": bindingA, "dev-b": bindingA}}
+	client := &providerClient{exists: true}
+	if err := publishWith(t, targets, bindings, client); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if len(client.ensured) != 1 {
+		t.Fatalf("publish writes = %d, want 1", len(client.ensured))
+	}
+	client = &providerClient{exists: true}
+	if err := clearWith(t, targets, bindings, client); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if len(client.updates) != 1 {
+		t.Fatalf("clear writes = %d, want 1", len(client.updates))
+	}
+}
+
+func TestAMPModelProviderPublisher_UnboundTargetIsSkipped(t *testing.T) {
+	targets := fakeOrgTargets{envs: []string{"development", "dev-b"}}
+	bindings := &envBindings{byEnv: map[string]openchoreo.AIGatewayBinding{"development": bindingA}}
+	client := &providerClient{exists: true}
+	if err := publishWith(t, targets, bindings, client); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if len(client.ensured) != 1 {
+		t.Fatalf("publish writes = %d, want 1", len(client.ensured))
+	}
+	client = &providerClient{exists: true}
+	if err := clearWith(t, targets, bindings, client); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if len(client.updates) != 1 {
+		t.Fatalf("clear writes = %d, want 1", len(client.updates))
+	}
+}
+
+// One project with a broken pipeline must not block the others, and the skip
+// must be visible in the log.
+func TestAMPModelProviderPublisher_UnresolvedProjectIsLoggedNotFatal(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	targets := fakeOrgTargets{
+		envs:       []string{"development"},
+		unresolved: map[string]error{"broken": &openchoreo.ErrNoWriteTarget{}},
+	}
+	bindings := &envBindings{byEnv: map[string]openchoreo.AIGatewayBinding{"development": bindingA}}
+	client := &providerClient{exists: true}
+	if err := publishWith(t, targets, bindings, client); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if len(client.ensured) != 1 {
+		t.Fatalf("publish writes = %d, want 1", len(client.ensured))
+	}
+	if out := logs.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "project=broken") {
+		t.Fatalf("expected a WARN naming the project, got %q", out)
+	}
+	client = &providerClient{exists: true}
+	if err := clearWith(t, targets, bindings, client); err != nil || len(client.updates) != 1 {
+		t.Fatalf("clear: err=%v writes=%d, want nil and 1", err, len(client.updates))
+	}
+}
+
+func TestAMPModelProviderPublisher_ZeroProjectsIsNoOp(t *testing.T) {
+	bindings := &envBindings{}
+	client := &providerClient{exists: true}
+	if err := publishWith(t, fakeOrgTargets{}, bindings, client); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := clearWith(t, fakeOrgTargets{}, bindings, client); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if len(bindings.reads) != 0 || len(client.ensured) != 0 || len(client.updates) != 0 {
+		t.Fatalf("expected no reads or writes, got reads=%v", bindings.reads)
+	}
+}
+
+// failingEnsureClient fails every provider write.
+type failingEnsureClient struct{ providerClient }
+
+func (c *failingEnsureClient) EnsureProvider(context.Context, agentmanager.EnsureProviderInput) (agentmanager.ProviderRef, error) {
+	return agentmanager.ProviderRef{}, errors.New("amp down")
+}
+
+func (c *failingEnsureClient) UpdateProviderCredential(context.Context, agentmanager.EnsureProviderInput) (bool, error) {
+	return false, errors.New("amp down")
+}
+
+func TestAMPModelProviderPublisher_OneFailureDoesNotStopTheOthers(t *testing.T) {
+	ok := &providerClient{exists: true}
+	bad := &failingEnsureClient{}
+	pub := ampModelProviderPublisher{
+		amp: clientsByURL{bindingA.AdminURL: bad, bindingB.AdminURL: ok},
+		bindings: &envBindings{byEnv: map[string]openchoreo.AIGatewayBinding{
+			"development": bindingA, "dev-b": bindingB}},
+		targets: fakeOrgTargets{envs: []string{"development", "dev-b"}},
+	}
+	err := pub.PublishOrgModelConnection(context.Background(), "acme", ollamaConnection(), "fake-key")
+	if err == nil || !strings.Contains(err.Error(), "amp down") {
+		t.Fatalf("publish err = %v, want the joined failure", err)
+	}
+	if len(ok.ensured) != 1 {
+		t.Fatalf("healthy gateway writes = %d, want 1", len(ok.ensured))
+	}
+	ok.updates = nil
+	err = pub.ClearOrgModelKey(context.Background(), "acme", ollamaConnection())
+	if err == nil || !strings.Contains(err.Error(), "amp down") {
+		t.Fatalf("clear err = %v, want the joined failure", err)
+	}
+	if len(ok.updates) != 1 {
+		t.Fatalf("healthy gateway clears = %d, want 1", len(ok.updates))
+	}
+}
+
+type clientsByURL map[string]agentmanager.Client
+
+func (c clientsByURL) For(url string) agentmanager.Client { return c[url] }
+
+type fixedTarget struct {
+	env string
+	err error
+}
+
+func (f fixedTarget) Resolve(context.Context, string, string) (string, error) { return f.env, f.err }
+
+func TestAMPAgentRegistrar_ResolveErrorIsReturned(t *testing.T) {
+	cause := &openchoreo.ErrNoWriteTarget{}
+	r := ampAgentRegistrar{targets: fixedTarget{err: cause}}
+	_, err := r.RegisterAgentsForBuild(context.Background(), "acme", "proj", []string{"agent"})
+	if !errors.Is(err, cause) {
+		t.Fatalf("err = %v, want it to wrap the resolve error", err)
+	}
+}
+
+// The governor reads the binding for GovernAgentInput.Environment, so the
+// environment it asks about is the one the registrar passed.
+func TestAMPAgentRegistrar_RegistersAtTheProjectsWriteTarget(t *testing.T) {
+	bindings := &envBindings{}
+	r := ampAgentRegistrar{
+		governor: agentgovernance.New(agentgovernance.Deps{Bindings: bindings}),
+		targets:  fixedTarget{env: "dev-b"},
+	}
+	out, err := r.RegisterAgentsForBuild(context.Background(), "acme", "proj", []string{"agent"})
+	if err != nil {
+		t.Fatalf("RegisterAgentsForBuild: %v", err)
+	}
+	if len(bindings.reads) != 1 || bindings.reads[0] != "dev-b" {
+		t.Fatalf("binding reads = %v, want [dev-b]", bindings.reads)
+	}
+	if len(out.Agents) != 1 || !out.Agents[0].Skipped {
+		t.Fatalf("outcome = %+v, want one skipped agent (no binding)", out)
 	}
 }

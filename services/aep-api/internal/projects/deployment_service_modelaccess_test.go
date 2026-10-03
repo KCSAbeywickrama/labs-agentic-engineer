@@ -32,7 +32,7 @@ import (
 // 500 on its first turn. This pins the wiring itself, not just the branch.
 type stubModelAccess struct{ called bool }
 
-func (s *stubModelAccess) ModelAccessEnvVars(context.Context, string, string) ([]openchoreo.WorkflowEnvVarRef, error) {
+func (s *stubModelAccess) ModelAccessEnvVars(context.Context, string, string, string) ([]openchoreo.WorkflowEnvVarRef, error) {
 	s.called = true
 	return []openchoreo.WorkflowEnvVarRef{{Key: "MODEL_API_KEY"}}, nil
 }
@@ -50,7 +50,7 @@ func TestSetModelAccess_WiresTheProviderForAnAIAgent(t *testing.T) {
 		t.Fatal("SetModelAccess did not wire the provider")
 	}
 
-	got := svc.envVarsWithModelAccess(context.Background(), "acme", "web", "chat-agent", spec.ComponentTypeAIAgent)
+	got := svc.envVarsWithModelAccess(context.Background(), "acme", "web", "chat-agent", testWriteTarget, spec.ComponentTypeAIAgent)
 	if !stub.called {
 		t.Fatal("an ai-agent deploy did not ask for model access")
 	}
@@ -70,7 +70,7 @@ func TestSetModelAccess_NotConsultedForANonAgent(t *testing.T) {
 	stub := &stubModelAccess{}
 	svc.SetModelAccess(stub)
 
-	svc.envVarsWithModelAccess(context.Background(), "acme", "web", "hotel-api", spec.ComponentTypeService)
+	svc.envVarsWithModelAccess(context.Background(), "acme", "web", "hotel-api", testWriteTarget, spec.ComponentTypeService)
 	if stub.called {
 		t.Fatal("a service asked for model access")
 	}

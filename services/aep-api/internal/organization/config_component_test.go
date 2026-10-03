@@ -172,6 +172,7 @@ type configHarness struct {
 	gh    *cfgFakeGH
 	anth  *anthropicFake // the Claude subscription probe
 	model *modelEndpoint // the model connection's endpoint, for every host
+	conns *organization.ModelConnectionService
 }
 
 // newConfigHarness assembles the real orgconfig.Service over one shared dbtest
@@ -229,6 +230,7 @@ func newConfigHarnessProbing(t *testing.T, thunder thundersvc.Client, appClientI
 	anthropicRepo := organization.NewOrgAnthropicRepository(db)
 	anthropicSvc := organization.NewAnthropicCredentialService(anthropicRepo, store).WithAnthropicAPIBase(anth.URL)
 	conns := organization.NewModelConnectionService(organization.NewOrgModelConnectionRepository(db), anthropicRepo, store, sonnetRates())
+	cardRepo := organization.NewAgentsCardRepository(db, store)
 	if !guarded {
 		conns.WithProbeClient(model.client())
 	}
@@ -242,12 +244,12 @@ func newConfigHarnessProbing(t *testing.T, thunder thundersvc.Client, appClientI
 		organization.PlatformIDPConfig{Issuer: platformIss, JWKSURL: platformJWKS},
 		"http://localhost:8090", appClientID,
 	).WithAgentSettings(organization.NewAgentSettingsService(organization.NewOrgAgentSettingsRepository(db),
-		organization.NewOrganizationRepository(db), anthropicSvc, conns, organization.NewAgentsCardRepository(db, store), runtimes))
+		organization.NewOrganizationRepository(db), anthropicSvc, conns, cardRepo, runtimes))
 
 	// The harness wires the DOMAIN, not a loose service: the edge embeds
 	// organization's handlers, so this assembles the same graph production does.
 	h := componenttest.New(t, componenttest.Options{Deps: edge.Deps{Organization: mustNewOrgHandlers(t, organization.Deps{Config: svc})}})
-	return &configHarness{h: h, db: db, gh: gh, anth: anth, model: model}
+	return &configHarness{h: h, db: db, gh: gh, anth: anth, model: model, conns: conns}
 }
 
 // mustNewOrgHandlers assembles the real organization domain around the given

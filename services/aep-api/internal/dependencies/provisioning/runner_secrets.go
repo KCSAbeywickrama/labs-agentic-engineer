@@ -36,8 +36,14 @@ func (s *Service) ResolveComponentRunnerSecrets(ctx context.Context, orgID, proj
 	if s.extProv == nil {
 		return nil, nil
 	}
+	// A caller that recorded no environment gets the project's write target,
+	// resolved at use.
 	if strings.TrimSpace(env) == "" {
-		env = defaultEnv()
+		resolved, err := s.writeTarget(ctx, orgID, projectID)
+		if err != nil {
+			return nil, err
+		}
+		env = resolved
 	}
 	comps, err := s.design.ReadDesignComponents(ctx, orgID, projectID)
 	if err != nil {
