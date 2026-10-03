@@ -83,6 +83,16 @@ function Header({
   );
 }
 
+/**
+ * Whether the dialog should close for this Escape. Escape with focus in the
+ * prototype is the prototype's: the frame reports it (`onEscape`) only when
+ * the prototype left it unused. A key this document still gets with the frame
+ * element as its target was aimed there, so the dialog leaves it to the frame.
+ */
+function closesOnEscape(event: { target: EventTarget | null }): boolean {
+  return !(event.target instanceof HTMLIFrameElement);
+}
+
 function Waiting({ children }: { children: ReactNode }) {
   return <Box sx={{ flex: 1, display: "grid", placeItems: "center", p: 4 }}>{children}</Box>;
 }
@@ -126,7 +136,14 @@ export function PrototypeReview(props: PrototypeReviewProps) {
   }
 
   return (
-    <Dialog fullScreen open onClose={onClose} aria-labelledby={titleId}>
+    <Dialog
+      fullScreen
+      open
+      onClose={(event: { target: EventTarget | null }, reason) => {
+        if (reason !== "escapeKeyDown" || closesOnEscape(event)) onClose();
+      }}
+      aria-labelledby={titleId}
+    >
       <Box sx={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
         {files && runtime.value ? (
           <Session {...props} titleId={titleId} files={files} runtime={runtime.value} revising={revising} />

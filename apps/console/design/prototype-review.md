@@ -33,7 +33,9 @@ render check; Go re-checks on save (see ADR-0042).
 `PrototypeReview`: toolbar (Screen, Flow, Role, State, Reset data,
 Preview/Annotate), the kit `PrototypeFrame`, and in Annotate the
 `FeedbackPanel`. A live revision replaces the manifest in place
-(`MANIFEST_REPLACED`). Escape clears the selection, then closes.
+(`MANIFEST_REPLACED`). Escape clears the selection, then closes. With focus in
+the prototype, only the frame's `proto:escape` counts (sent when the prototype
+left the key unused); the dialog ignores an Escape whose target is the frame.
 
 - **Preview** acts: navigation, forms, mock data. **Annotate** only selects;
   selected elements are pinned and a request is typed against them (max 4000
