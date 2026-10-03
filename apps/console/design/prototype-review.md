@@ -24,7 +24,7 @@ Code: `features/prototype/`.
 A prototype is `specs/design/components/<c>/prototype.{json,tsx}` in the room,
 read with `useRoomFiles`. Status comes from the kit's `parseManifestJson`
 (`model/prototypes.ts`). The agent's writes are gated by the kit's rules and the
-render check; Go re-checks on save (see ADR-0040).
+render check; Go re-checks on save (see ADR-0042).
 
 ## Review
 

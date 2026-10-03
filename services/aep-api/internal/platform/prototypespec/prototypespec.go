@@ -18,7 +18,7 @@
 // prototype: its manifest `specs/design/components/<component>/prototype.json`
 // (schema version 3, the roles, display states, screens and flows the review
 // bar offers) and its screens `prototype.tsx` beside it, a React module over
-// @wso2/prototype-kit (ADR-0040).
+// @wso2/prototype-kit (ADR-0042).
 //
 // It is the sibling of securityspec, and for the same reason: the manifest's
 // single definition is packages/prototype-kit/schema/prototype-manifest.schema.json,

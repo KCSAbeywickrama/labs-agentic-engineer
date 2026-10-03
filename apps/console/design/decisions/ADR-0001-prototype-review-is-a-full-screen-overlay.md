@@ -1,7 +1,7 @@
 # ADR-0001 — Prototype review is a full-screen overlay; Annotate sends typed feedback to the chat
 
 **Status:** Accepted · 2026-10-03
-**Related:** [repo ADR-0040](../../../../docs/decisions/ADR-0040-a-prototype-is-react-on-a-fixed-kit-in-a-sandbox.md)
+**Related:** [repo ADR-0042](../../../../docs/decisions/ADR-0042-a-prototype-is-react-on-a-fixed-kit-in-a-sandbox.md)
 (the kit, the frame, the Oxygen theme). Spec: #860.
 
 ## Context

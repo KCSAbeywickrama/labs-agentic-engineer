@@ -75,7 +75,7 @@ behind `gen`, and CI runs `gen` + `git diff --exit-code` to catch staleness. See
 ## Prototype kit and CLI
 
 Clickable prototypes are React on a fixed kit, run in a sandbox
-([ADR-0040](decisions/ADR-0040-a-prototype-is-react-on-a-fixed-kit-in-a-sandbox.md)).
+([ADR-0042](decisions/ADR-0042-a-prototype-is-react-on-a-fixed-kit-in-a-sandbox.md)).
 Three public packages, usable with no AEP: `@wso2/prototype-kit` (the API a
 `prototype.tsx` imports, the manifest schema, the static and isolated render
 checks, the sandboxed frame host and the theme build helper),

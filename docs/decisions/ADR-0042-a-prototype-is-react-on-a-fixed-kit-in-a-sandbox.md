@@ -1,4 +1,4 @@
-# ADR-0040 — A prototype is React on a fixed kit, run in a sandbox
+# ADR-0042 — A prototype is React on a fixed kit, run in a sandbox
 
 **Status:** Accepted · 2026-10-02
 **Supersedes:** the json-render prototype decision, "ADR-0035 — The prototype

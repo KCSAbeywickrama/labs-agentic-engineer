@@ -44,7 +44,7 @@ targets, isolated render.
   chain; it hardens `Object.prototype`, `Array.prototype` and
   `Function.prototype` before the module runs, so prototype pollution throws.
   `RENDER_TIMEOUT_MS` is 15 s.
-- Limits of the render check: see ADR-0040, Consequences.
+- Limits of the render check: see ADR-0042, Consequences.
 
 ## Go mirror
 
