@@ -19,7 +19,7 @@
 import { useMemo } from "react";
 import * as Y from "yjs";
 import { applyToolCall, FileBundle, isFileMutationTool, type StreamPart } from "@aep/agent-stream";
-import { deleteDocFile, isMarkdownPath, readDocFile, setDocFile, setDocFileAsAgent } from "@aep/collab-doc";
+import { deleteDocFile, isMarkdownPath, listDocPaths, readDocFile, setDocFile, setDocFileAsAgent } from "@aep/collab-doc";
 import { useSession } from "../../../auth/SessionContext";
 import { env } from "../../../config/env";
 import { useMockSpecExtras, type MockSpecExtras } from "../api/specModel";
@@ -110,7 +110,15 @@ export function applyAgentToolCall(doc: Y.Doc, part: StreamPart): boolean {
   if (typeof input?.path !== "string") return false;
   const path = input.path;
   const before = readDocFile(doc, path);
-  const bundle = new FileBundle(before === undefined ? {} : { [path]: before });
+  // The whole doc, as the agent's bundle holds the whole workspace: a gate
+  // that reads another file (a prototype's source needs its manifest) judges
+  // the write as the agents service did.
+  const files: Record<string, string> = {};
+  for (const p of listDocPaths(doc)) {
+    const text = readDocFile(doc, p);
+    if (text !== undefined) files[p] = text;
+  }
+  const bundle = new FileBundle(files);
   applyToolCall(bundle, { ...part, input: { ...input, path } });
   const after = bundle.read(path);
   if (after === before) return false;

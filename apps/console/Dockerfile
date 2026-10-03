@@ -50,7 +50,9 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 # Workspace deps whose exports resolve to ./dist must be compiled first
 # (@aep/excalidraw-dsl — the wireframe DSL + layout gate, built FIRST because
 # @aep/agent-stream imports it; @wso2/prototype-kit — the prototype manifest
-# and source rules @aep/agent-stream's write gate imports, built before it;
+# and source rules @aep/agent-stream's write gate imports, built before it,
+# and the prototype review's frame host; @wso2/prototype-theme-oxygen — the
+# Oxygen frame runtime the review runs a prototype on;
 # @aep/agent-stream — the chat's turn stream
 # contracts; @aep/collab-doc — the spec room's doc and the AgentInsertion mark;
 # @aep/progress-view — the ONE rendering of the run progress feed, shared with
@@ -68,6 +70,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 # apps/console/package.json means adding a line below.
 RUN pnpm --filter @aep/excalidraw-dsl build
 RUN pnpm --filter @wso2/prototype-kit build
+RUN pnpm --filter @wso2/prototype-theme-oxygen build
 RUN pnpm --filter @aep/agent-stream build
 RUN pnpm --filter @aep/collab-doc build
 RUN pnpm --filter @aep/progress-view build
