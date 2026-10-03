@@ -65,6 +65,34 @@ test("/design names the features this run designs, and bare designs every design
   );
 });
 
+test("/prototype loads its skill and the brief, and trailing component names follow the brief", () => {
+  const bare = composeInstruction({ kind: "flow", skill: "prototype" });
+  assert.ok(bare.startsWith("Load the prototype skill and follow it.\n\nGenerate the prototype of each web-application"));
+  // The brief names what to read and what to write.
+  assert.match(bare, /specs\/design\/design\.cell/);
+  assert.match(bare, /specs\/design\/security\.json/);
+  assert.match(bare, /specs\/design\/components\/<component>\/prototype\.json/);
+  assert.match(bare, /manifest\) first and then prototype\.tsx/);
+  assert.match(bare, /Spec sources live under specs\//);
+
+  const named = composeInstruction({ kind: "flow", skill: "prototype", text: "approvals-portal" });
+  const brief = named.indexOf("Generate the prototype of each web-application");
+  assert.ok(brief > 0 && named.indexOf("\n\napprovals-portal") > brief, "component names come after the brief");
+
+  // A flow with no brief is unchanged.
+  assert.ok(!composeInstruction({ kind: "flow", skill: "design" }).includes("Generate the prototype"));
+});
+
+test("/prototype inlines the skills that read the design and say how an Oxygen screen is composed", () => {
+  assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: "prototype" }), [
+    "prototype",
+    "cell-design",
+    "security-design",
+    "openapi-conventions",
+    "oxygen-ui-design-system",
+  ]);
+});
+
 test("the resolve command carries the user's answer after the dependency's name, verbatim", () => {
   // The definition's Service card sends `/resolve-dependency <name> <answer>`;
   // the token IS its skill, so the trailing text rides through untouched for
@@ -380,6 +408,7 @@ test("every eager skill name exists in the platform skill library", () => {
     { kind: "flow", skill: "refine" } as const,
     { kind: "flow", skill: "settle" } as const,
     { kind: "flow", skill: "design" } as const,
+    { kind: "flow", skill: "prototype" } as const,
     // The branch commands resolve to a platform skill, so they are checked too.
     { kind: "flow", skill: "feature" } as const,
     { kind: "flow", skill: "actor" } as const,
