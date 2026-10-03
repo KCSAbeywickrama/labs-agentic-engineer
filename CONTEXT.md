@@ -458,12 +458,14 @@ authentication story (which remains an open decision).
 
 **Page**:
 A console screen that shows an org entity or a list of them: the Dashboard, the
-Projects list, a project's overview, the Skills and Resources lists, Settings.
+Projects list, the Skills and Resources lists, Settings; in a project, its
+overview, build history, the Validation ledger, Deploy and Issues.
 _Avoid_: view, screen.
 
 **Card**:
-One entity opened over its Page to change it with the agent: a project's Spec,
-Design or a Build; a Skill; a Resource. Opening a Card sets the Turn scope.
+One entity opened to change it with the agent, over the Page that lists it: a
+project's Spec or Design (over the overview), a Build (over build history), a
+version's Validation, a Skill, a Resource. Opening a Card sets the Turn scope.
 _Avoid_: modal, dialog, panel.
 
 **Conversation**:
