@@ -53,3 +53,9 @@ fixtures: every valid one passes, and each render-stage failure reports what
 the default theme reports. `pnpm test:browser` plays three fixtures under
 `prototype preview --theme` in Chromium (navigation, forms, tabs, dialog,
 drawer, stepper, Annotate, no requests beyond the preview server).
+It also fails on any uncaught error in the page or its sandboxed frame. The
+frame has no `allow-same-origin`, so `localStorage` throws there; Oxygen and
+MUI X only touch it inside try/catch (a probe, `storageManager={null}` for the
+colour scheme), so a prototype raises nothing. A harness that runs its own
+script in every frame (a Playwright init script writing `localStorage`) does
+raise it, in its own code: guard such a script or run it in the top frame only.
