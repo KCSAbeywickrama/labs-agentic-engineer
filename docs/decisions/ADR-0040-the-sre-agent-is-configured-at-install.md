@@ -46,7 +46,7 @@ handoff directly.**
 ## Consequences
 
 - Removed: the reconciler, its Kubernetes client, the SRE model connection
-  service and table (dropped by migration `phase23`), the per-org token, the
+  service and table (dropped by migration `phase24`), the per-org token, the
   push Role, the REST handoff gate, the `SREAgent` model-connection capability
   and `aep-mcp-server` with its image and chart templates.
 - An org's own OpenAI-compatible model connection no longer doubles as the

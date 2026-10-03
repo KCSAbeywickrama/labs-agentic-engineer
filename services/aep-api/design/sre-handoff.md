@@ -88,7 +88,7 @@ Before this, aep-api stored an org-scoped SRE model connection
 `org_secrets`, and ran a reconciler that pushed both into the agent's Secret
 and scaled it; a separate service, `aep-mcp-server`, forwarded the agent's
 bearer to two REST operations. All of it served one org, since the agent
-can carry one header. Migration `phase23_drop_sre_model_connections` drops
+can carry one header. Migration `phase24_drop_sre_model_connections` drops
 the table and the `sre-model/key`, `sre-model/seed-applied` and
 `sre/handoff-token` rows; `aectl sre install` removes the push Role and the
 `sre-model-seed` Secret it used to create.

@@ -26,13 +26,13 @@ import (
 // per-org handoff token were stored under before both moved to install time.
 var sreSecretKeys = []string{"sre-model/key", "sre-model/seed-applied", "sre/handoff-token"}
 
-// RunPhase23DropSreModelConnections removes what phase22 and its service left
+// RunPhase24DropSreModelConnections removes what phase22 and its service left
 // behind once the SRE agent's model and handoff key became install-time
 // values that `aectl sre install` writes into the agent's own Secret: the
 // org_sre_model_connections table, and the org_secrets rows holding the
 // stored SRE key, the seed marker and the minted handoff token. Phase22 stays
 // in the list because databases have already run it. Idempotent.
-func RunPhase23DropSreModelConnections(ctx context.Context, db *gorm.DB) error {
+func RunPhase24DropSreModelConnections(ctx context.Context, db *gorm.DB) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(`DROP TABLE IF EXISTS org_sre_model_connections`).Error; err != nil {
 			return err

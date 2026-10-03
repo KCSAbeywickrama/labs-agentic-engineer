@@ -54,6 +54,12 @@ to challenge the judgment. The tag lives exactly as long as the user has not
 answered: the moment they do — even by confirming what was assumed — the tag
 comes off and the line stays as a settled decision.>
 
+A guardrail is a check the AI gateway applies to an agent's model traffic —
+one `list_guardrail_policies` offers — and its line says what is guarded, not
+how ("Guardrail: contact details are masked before the model sees them"). A
+rule the agent or the app itself follows is an ordinary product decision,
+never a "Guardrail:" line.
+
 ## Out of Scope
 <what this project deliberately does not do>
 

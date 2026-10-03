@@ -24,9 +24,9 @@ import (
 	"github.com/wso2/aep/aep-api/internal/platform/dbtest"
 )
 
-// Phase23 drops the table phase22 created and the SRE org_secrets rows, keeps
+// Phase24 drops the table phase22 created and the SRE org_secrets rows, keeps
 // every other secret, and a re-run is a no-op.
-func TestPhase23DropSreModelConnections(t *testing.T) {
+func TestPhase24DropSreModelConnections(t *testing.T) {
 	db := dbtest.New(t)
 	ctx := context.Background()
 	if err := migrate.RunOrgSecretsMigration(ctx, db); err != nil {
@@ -42,7 +42,7 @@ func TestPhase23DropSreModelConnections(t *testing.T) {
 	}
 
 	for run := 0; run < 2; run++ {
-		if err := migrate.RunPhase23DropSreModelConnections(ctx, db); err != nil {
+		if err := migrate.RunPhase24DropSreModelConnections(ctx, db); err != nil {
 			t.Fatalf("run %d: %v", run, err)
 		}
 	}
