@@ -37,6 +37,20 @@ export const PROTOTYPE_FRAME_CSP = [
   "base-uri 'none'",
 ].join("; ");
 
+/**
+ * Runs before the runtime: anything that throws uncaught in the frame (the
+ * runtime failing as it loads, a theme, the prototype's own handlers) is
+ * reported to the host as `proto:error`, so the host never waits on a frame
+ * that has died silently.
+ */
+const REPORT_ERRORS = [
+  "(() => {",
+  "const report = (e) => parent.postMessage({ type: 'proto:error', message: String((e && e.message) || e) }, '*');",
+  "addEventListener('error', (e) => report(e.error || e.message));",
+  "addEventListener('unhandledrejection', (e) => report(e.reason));",
+  "})();",
+].join("\n");
+
 export function prototypeFrameDocument(runtime: string): string {
   // `</script` cannot appear inside the inline script; `<\/script` is the same JavaScript.
   const script = runtime.replace(/<\/script/gi, "<\\/script");
@@ -50,6 +64,7 @@ export function prototypeFrameDocument(runtime: string): string {
     "</head>",
     "<body>",
     '<div id="root"></div>',
+    `<script>${REPORT_ERRORS}</script>`,
     `<script>${script}</script>`,
     "</body>",
     "</html>",

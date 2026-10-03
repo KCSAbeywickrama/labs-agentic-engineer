@@ -33,6 +33,9 @@ import type { PrototypeManifest } from "../manifest/types.js";
 
 export type FrameMode = "preview" | "annotate";
 
+/** The host's resolved colour scheme, which the theme draws the prototype in; absent, the frame follows the system. */
+export type FrameColorScheme = "light" | "dark";
+
 /** The review's view as the frame draws it. */
 export interface FrameView {
   mode: FrameMode;
@@ -41,6 +44,7 @@ export interface FrameView {
   screenId: string;
   selectedKeys: string[];
   pins: Record<string, number[]>;
+  colorScheme?: FrameColorScheme | undefined;
 }
 
 /** What the host sends the frame. */
@@ -84,7 +88,9 @@ const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every
 function isView(v: unknown): v is FrameView {
   if (!isObject(v)) return false;
   const pins = v["pins"];
+  const scheme = v["colorScheme"];
   return (
+    (scheme === undefined || scheme === "light" || scheme === "dark") &&
     (v["mode"] === "preview" || v["mode"] === "annotate") &&
     isString(v["roleId"]) &&
     isString(v["stateId"]) &&

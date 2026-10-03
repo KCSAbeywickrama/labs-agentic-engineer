@@ -23,7 +23,7 @@
  * holds, what the reviewer pressed, the mock data and anything that failed.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { PrototypeApp } from "../app.js";
 import type { DataSnapshot } from "../data.js";
@@ -161,19 +161,42 @@ function Frame({ theme }: { theme: PrototypeTheme }) {
   if (failure) return <p role="alert">{failure}</p>;
   if (!loaded || !view) return null;
   return (
-    <KitRoot
-      key={loaded.generation}
-      app={loaded.app}
-      manifest={loaded.manifest}
-      theme={theme}
-      view={view}
-      initialData={loaded.initialData}
-      onNavigate={(screenId) => post({ type: "proto:navigate", screenId })}
-      onToggle={(elementKey) => post({ type: "proto:toggle", elementKey })}
-      onData={(data) => post({ type: "proto:data", data })}
-      onError={(message) => post({ type: "proto:error", message })}
-    />
+    <FrameBoundary key={loaded.generation}>
+      <KitRoot
+        app={loaded.app}
+        manifest={loaded.manifest}
+        theme={theme}
+        view={view}
+        initialData={loaded.initialData}
+        onNavigate={(screenId) => post({ type: "proto:navigate", screenId })}
+        onToggle={(elementKey) => post({ type: "proto:toggle", elementKey })}
+        onData={(data) => post({ type: "proto:data", data })}
+        onError={(message) => post({ type: "proto:error", message })}
+        colorScheme={view.colorScheme}
+      />
+    </FrameBoundary>
   );
+}
+
+/**
+ * What a screen's own boundary cannot catch (the theme's Provider throwing,
+ * the kit root itself) is reported to the host, which would otherwise wait
+ * on its loading cover, and said in the frame.
+ */
+class FrameBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  override state = { error: null as string | null };
+
+  static getDerivedStateFromError(error: unknown) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+
+  override componentDidCatch(error: unknown) {
+    post({ type: "proto:error", message: `The prototype failed to draw: ${error instanceof Error ? error.message : String(error)}` });
+  }
+
+  override render() {
+    return this.state.error === null ? this.props.children : <p role="alert">{this.state.error}</p>;
+  }
 }
 
 export function startFrame(theme: PrototypeTheme): void {

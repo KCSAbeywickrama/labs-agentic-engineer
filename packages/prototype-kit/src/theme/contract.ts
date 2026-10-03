@@ -70,6 +70,10 @@ export interface PrototypeTheme {
   /** The theme's package name, for messages. */
   name: string;
   registry: ThemeRegistry;
-  /** Wraps every render: the theme's styles and any context its components need. */
-  Provider?: ComponentType<{ children: ReactNode }> | undefined;
+  /**
+   * Wraps every render: the theme's styles and any context its components
+   * need. `colorScheme` is the host's resolved scheme; absent (the render
+   * check, a host that names none), the theme picks, typically the system's.
+   */
+  Provider?: ComponentType<{ children: ReactNode; colorScheme?: "light" | "dark" | undefined }> | undefined;
 }

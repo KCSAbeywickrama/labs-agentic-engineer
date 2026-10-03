@@ -20,20 +20,32 @@
  * The theme's root: AEP's own Oxygen theme (`@aep/ui-theme`, the console's),
  * through Oxygen's `OxygenUIThemeProvider` as the console applies it, so a
  * prototype looks like the console it is reviewed in. Sandbox-safe: one fixed
- * theme (no theme switching, so nothing is fetched or stored), and MUI's
- * colour-scheme storage is guarded and finds none in the frame, so the scheme
- * follows the system as the console's default does. Emotion injects every
+ * theme (no theme switching, so nothing is fetched or stored). The scheme is
+ * the host's (`colorScheme`, the console's resolved light or dark), set
+ * through MUI's `useColorScheme`; without one it follows the system, as the
+ * console's default does. MUI's scheme storage is guarded and the frame has
+ * none, so setting it stores nothing. Emotion injects every
  * style inline and Oxygen ships its Inter font as data URIs, so the frame
  * loads nothing.
  */
 
 import { aepTheme } from "@aep/ui-theme";
-import { Box, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
-import type { ReactNode } from "react";
+import { Box, OxygenUIThemeProvider, useColorScheme } from "@wso2/oxygen-ui";
+import { useEffect, type ReactNode } from "react";
 
-export function OxygenProvider({ children }: { children: ReactNode }) {
+/** Applies the host's scheme (or the system's) inside the provider. */
+function Scheme({ colorScheme }: { colorScheme: "light" | "dark" | undefined }) {
+  const { setMode } = useColorScheme();
+  useEffect(() => {
+    setMode(colorScheme ?? "system");
+  }, [colorScheme, setMode]);
+  return null;
+}
+
+export function OxygenProvider({ children, colorScheme }: { children: ReactNode; colorScheme?: "light" | "dark" | undefined }) {
   return (
     <OxygenUIThemeProvider theme={aepTheme}>
+      <Scheme colorScheme={colorScheme} />
       <Box
         sx={{
           // The kit's Annotate outline and label, in the theme's primary.

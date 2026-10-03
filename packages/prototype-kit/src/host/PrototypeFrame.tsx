@@ -24,13 +24,14 @@
  * toggles, the elements a screen draws, data snapshots, Escape and errors.
  * Every message's source and shape is checked. Until the app first draws,
  * a loading cover sits over the frame, so an early click is not silently
- * lost. Plain React, no theme.
+ * lost; a frame that neither draws nor reports an error within
+ * `PROTOTYPE_START_TIMEOUT_MS` says it did not start. Plain React, no theme.
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { DataSnapshot } from "../data.js";
 import type { PrototypeManifest } from "../manifest/types.js";
-import { parseFromFrameMessage, type FrameElement, type FrameView, type ToFrameMessage } from "./bridge.js";
+import { parseFromFrameMessage, type FrameColorScheme, type FrameElement, type FrameView, type ToFrameMessage } from "./bridge.js";
 import { prototypeFrameDocument } from "./frame-document.js";
 
 export interface PrototypeFrameProps {
@@ -58,19 +59,30 @@ export interface PrototypeFrameProps {
    * would be lost. A plain "Loading the prototype…" by default.
    */
   loading?: ReactNode;
+  /** The host's resolved colour scheme, for the theme to draw the prototype in; the system's when absent. */
+  colorScheme?: FrameColorScheme | undefined;
+}
+
+/** How long the frame may take to draw its app (or report why not) before the host stops waiting. */
+export const PROTOTYPE_START_TIMEOUT_MS = 30_000;
+
+const DID_NOT_START = "The prototype didn't start: its runtime did not draw the app or report an error. Close the review and open it again.";
+
+/** The frame document's progress: how many times it said `ready`, and whether it drew (or failed, or stalled) since the last. */
+interface Progress {
+  readies: number;
+  settled: boolean;
 }
 
 export function PrototypeFrame(props: PrototypeFrameProps) {
-  const { title, runtime, version, view, resetToken, loading } = props;
+  const { title, runtime, version, resetToken, loading, colorScheme } = props;
   const frame = useRef<HTMLIFrameElement>(null);
-  // Counts the frame's `proto:ready` messages: a reloaded frame document is ready again and needs its app re-sent.
-  const [readies, setReadies] = useState(0);
+  // `readies` counts the frame's `proto:ready` messages: a reloaded frame document is ready again and needs its app re-sent.
+  const [{ readies, settled }, setProgress] = useState<Progress>({ readies: 0, settled: false });
   const ready = readies > 0;
-  const readyCount = useRef(0);
-  // The `readies` count at which the frame last drew (or failed): below the current one, the app is not up yet.
-  const [drawnAt, setDrawnAt] = useState(0);
-  const starting = readies === 0 || drawnAt < readies;
+  const starting = !settled;
   const [error, setError] = useState<string | null>(null);
+  const view = useMemo(() => (colorScheme === undefined ? props.view : { ...props.view, colorScheme }), [props.view, colorScheme]);
   const doc = useMemo(() => prototypeFrameDocument(runtime), [runtime]);
 
   // The latest props, for the one message listener and the effects below.
@@ -85,8 +97,7 @@ export function PrototypeFrame(props: PrototypeFrameProps) {
       const p = latest.current;
       switch (message.type) {
         case "proto:ready":
-          readyCount.current += 1;
-          setReadies(readyCount.current);
+          setProgress((p) => ({ readies: p.readies + 1, settled: false }));
           break;
         case "proto:navigate":
           p.onNavigate(message.screenId);
@@ -98,14 +109,14 @@ export function PrototypeFrame(props: PrototypeFrameProps) {
           p.onEscape();
           break;
         case "proto:rendered":
-          setDrawnAt(readyCount.current);
+          setProgress((s) => ({ ...s, settled: true }));
           p.onElements(message.screenId, message.elements);
           break;
         case "proto:data":
           p.onData?.(message.data);
           break;
         case "proto:error":
-          setDrawnAt(readyCount.current);
+          setProgress((s) => ({ ...s, settled: true }));
           setError(message.message);
           break;
       }
@@ -126,8 +137,18 @@ export function PrototypeFrame(props: PrototypeFrameProps) {
     const p = latest.current;
     setError(null);
     loadedVersion.current = version;
-    post({ type: "proto:load", source: p.source, manifest: p.manifest, view: p.view, data: p.initialData });
+    post({ type: "proto:load", source: p.source, manifest: p.manifest, view, data: p.initialData });
   }, [readies, version]);
+
+  // A frame that neither draws nor says why within the bound stops being waited for, visibly.
+  useEffect(() => {
+    if (settled) return;
+    const timer = setTimeout(() => {
+      setProgress((s) => ({ ...s, settled: true }));
+      setError(DID_NOT_START);
+    }, PROTOTYPE_START_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [readies, settled, doc]);
 
   // Draw every later view of the loaded app.
   useEffect(() => {
@@ -155,7 +176,7 @@ export function PrototypeFrame(props: PrototypeFrameProps) {
         </div>
       )}
       {starting && (
-        <div role="status" className="proto-frame-loading" style={{ position: "absolute", inset: 0, zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div role="status" className="proto-frame-loading" style={{ position: "absolute", inset: 0, zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#fff" }}>
           {loading ?? <span style={{ font: "13px system-ui, sans-serif", color: "#59636e" }}>Loading the prototype…</span>}
         </div>
       )}
