@@ -5,8 +5,9 @@
 is a json-render spec over a closed catalog", which exists only on the unmerged
 v2 branch `feat/813-prototype-json-render` (on main, ADR-0035 is the agent
 evaluation ADR; this ADR does not touch it).
-**Related:** [console ADR-0033](../../apps/console/design/decisions/ADR-0033-preview-and-annotate-are-one-prototype-view.md)
-(Preview acts, Annotate only selects). Feature: #813, sub-project 1 (#856).
+**Related:** [console ADR-0001](../../apps/console/design/decisions/ADR-0001-prototype-review-is-a-full-screen-overlay.md)
+(the console's review overlay; Preview acts, Annotate only selects). Feature:
+#813, sub-project 1 (#856); AEP stage: #860.
 
 ## Context
 
@@ -46,12 +47,33 @@ AEP: Oxygen, AEP paths, no CLI, unpublished.
 
 ## Consequences
 
-- AEP's Prototype stage (sub-project 3) reuses the kit, manifest, checks,
-  frame and reducer, and brings an Oxygen theme; nothing in a prototype names
-  AEP.
+- AEP's Prototype stage reuses the kit, manifest, checks, frame and reducer. It
+  is wired in the console (`/prototype`, review and Annotate: [console
+  design note](../../apps/console/design/prototype-review.md)). Nothing in a
+  prototype names AEP.
+- `@wso2/prototype-theme-oxygen` draws the kit on Oxygen UI. Its runtimes
+  cannot be tree-shaken: the frame is about 2.1 MB (722 KB gzip) and the check
+  runtime 1.5 MB, against 0.9 MB and 0.24 MB for the default theme. The console
+  loads the frame runtime lazily, on first review.
+- The stage is gated at three places, one rule set: the agent's write
+  (`agent-stream`, with the isolated render check run by the agents service),
+  the Go save gate (manifest schema, references and the static source floor,
+  vendored and kept in step by shared test tables), and the build gate, which is
+  unchanged. Typed `prototypeFeedback` on a `/prototype` turn is validated by
+  Go before a turn opens.
 - Network isolation of the render check rests on the permission model plus
   `vm`; a host-realm escape could still reach the network. Running it inside
-  AEP needs an egress policy (sub-project 3).
+  AEP needs an egress policy.
+- The agents service runs the render check synchronously (`spawnSync`, 15 s
+  cap), so each `prototype.tsx` write blocks that service's event loop for the
+  render (about 1 to 3 s observed); other conversations on the same process
+  wait. An asynchronous check needs a kit change.
+- The Go save gate has no render stage: a prototype that parses and references
+  correctly but throws when drawn is stopped only by the agent's gate, so a
+  write that bypasses the agent (an edit in the room) is not rendered.
+- Editing `prototype.json` after `prototype.tsx` is not re-judged against the
+  existing source; the agent's ordering (manifest first) is what keeps them
+  consistent.
 - `'unsafe-eval'` in the frame is accepted: the frame has an opaque origin and
   no network. The CSP does not block the frame navigating itself (`location`).
 - `check` does not render closed Dialog/Drawer contents unless a display state
