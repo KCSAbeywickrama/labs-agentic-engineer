@@ -377,7 +377,7 @@ function acmeCatalog(designed: ReadonlySet<string>, tweaks: ReadonlySet<DesignTw
   const out: ArtifactDraft[] = [
     {
       id: "prototype",
-      title: "Prototype: the expense web app",
+      title: "Wireframes: the expense web app",
       depth: "business",
       features: all,
       source: { kind: "prototype", path: "specs/design/components/expense-web/wireframes.dsl", dsl: expenseWebDsl(tweaks) },
