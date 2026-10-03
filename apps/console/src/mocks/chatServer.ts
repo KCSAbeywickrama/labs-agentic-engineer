@@ -71,6 +71,8 @@ export interface MockTurn {
   effect?: InterviewEffect;
   /** What a design-review turn does to the design, once it has finished (designState.ts). */
   design?: DesignEffect;
+  /** The prototype files a `/prototype` turn left, by room path (fixtures/prototype.ts). */
+  prototype?: Record<string, string>;
 }
 
 interface State {
@@ -163,4 +165,17 @@ export function interviewEffects(projectName: string, now = Date.now()): Map<str
     effects.set(turn.effect.featureId, turn.effect);
   }
   return effects;
+}
+
+/**
+ * The prototype files finished `/prototype` turns wrote, the latest of each:
+ * the local doc is seeded with them after a reload, as the room would hold them.
+ */
+export function prototypeFileWrites(projectName: string, now = Date.now()): Map<string, string> {
+  const files = new Map<string, string>();
+  for (const turn of read().turns) {
+    if (turn.projectName !== projectName || !turn.prototype || isRunning(turn, now)) continue;
+    for (const [path, content] of Object.entries(turn.prototype)) files.set(path, content);
+  }
+  return files;
 }

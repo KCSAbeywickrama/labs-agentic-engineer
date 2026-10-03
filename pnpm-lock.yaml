@@ -99,6 +99,12 @@ importers:
       '@wso2/oxygen-ui-icons-react':
         specifier: 0.14.0
         version: 0.14.0(react@19.2.3)
+      '@wso2/prototype-kit':
+        specifier: workspace:*
+        version: link:../../packages/prototype-kit
+      '@wso2/prototype-theme-oxygen':
+        specifier: workspace:*
+        version: link:../../packages/prototype-theme-oxygen
       mermaid:
         specifier: ^11.16.0
         version: 11.16.0

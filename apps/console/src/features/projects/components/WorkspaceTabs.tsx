@@ -45,11 +45,12 @@ function TabLabel({ name, dot }: { name: string; dot: string | null }) {
 }
 
 /**
- * Spec · Design: the two faces of the product's workspace, each a card route
- * of its own. The face not open carries a dot when it has news: the spec, a
- * line a design comment changed; the design, features waiting for it.
+ * Spec · Design · Prototype: the faces of the product's workspace, each a
+ * card route of its own. The face not open carries a dot when it has news:
+ * the spec, a line a design comment changed; the design, features waiting for
+ * it. The prototype is the design's web applications, clickable.
  */
-export function WorkspaceTabs({ active }: { active: "spec" | "design" }) {
+export function WorkspaceTabs({ active }: { active: "spec" | "design" | "prototype" }) {
   const { projectName } = useParams({ from: "/projects/$projectName" });
   const { model, workspace } = useSpecWorkspace(projectName);
   const specDot =
@@ -75,6 +76,12 @@ export function WorkspaceTabs({ active }: { active: "spec" | "design" }) {
         value="design"
         label={<TabLabel name="Design" dot={designDot} />}
         to="/projects/$projectName/design"
+        params={{ projectName }}
+      />
+      <TabLink
+        value="prototype"
+        label={<TabLabel name="Prototype" dot={null} />}
+        to="/projects/$projectName/prototype"
         params={{ projectName }}
       />
     </Tabs>
