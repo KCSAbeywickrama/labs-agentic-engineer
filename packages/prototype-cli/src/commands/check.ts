@@ -25,11 +25,11 @@ import { EXIT, type CliIO } from "../io.js";
 import { formatHuman, formatJson } from "../report.js";
 import { resolveCliTheme } from "../theme.js";
 
-export function runCheck(args: readonly string[], io: CliIO): number {
+export async function runCheck(args: readonly string[], io: CliIO): Promise<number> {
   const { values, positionals } = parseCommandArgs(args, { json: { type: "boolean", default: false }, theme: { type: "string" } }, 1);
   const dir = resolve(io.cwd, positionals[0] ?? ".");
   const theme = resolveCliTheme(values.theme, dir, io.cwd);
-  const findings = checkPrototype(dir, { theme });
+  const findings = await checkPrototype(dir, { theme });
   io.stdout(values.json ? formatJson(findings) : formatHuman(findings));
   return findings.length === 0 ? EXIT.ok : EXIT.failed;
 }

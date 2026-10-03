@@ -42,7 +42,8 @@ export interface CheckOptions {
   theme: ThemeRuntimes;
 }
 
-export function checkPrototypeFiles(files: PrototypeFiles, options: CheckOptions): Finding[] {
+/** Every finding for these two files; empty when they are ready to preview. The render stage runs in a child process, off the caller's event loop. */
+export async function checkPrototypeFiles(files: PrototypeFiles, options: CheckOptions): Promise<Finding[]> {
   if (files.manifest === null || files.source === null) return missingFileFindings(files);
   const manifest = parseManifestJson(files.manifest);
   if (!manifest.ok) return manifest.findings;
@@ -54,6 +55,6 @@ export function checkPrototypeFiles(files: PrototypeFiles, options: CheckOptions
 }
 
 /** Every finding for the prototype folder `dir`; empty when it is ready to preview. */
-export function checkPrototype(dir: string, options: CheckOptions): Finding[] {
+export function checkPrototype(dir: string, options: CheckOptions): Promise<Finding[]> {
   return checkPrototypeFiles(readPrototypeFiles(dir), options);
 }

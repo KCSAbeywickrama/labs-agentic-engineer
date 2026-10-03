@@ -26,6 +26,10 @@
       "types": "./dist/host/index.d.ts",
       "default": "./dist/host/index.js"
     },
+    "./feedback": {
+      "types": "./dist/feedback/index.d.ts",
+      "default": "./dist/feedback/index.js"
+    },
     "./build": {
       "types": "./dist/bundle/index.d.ts",
       "default": "./dist/bundle/index.js"

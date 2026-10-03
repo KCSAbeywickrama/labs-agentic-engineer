@@ -19,7 +19,7 @@
 /** Annotate: a click selects and never acts; queued requests are saved to .prototype/feedback.json for the agent. */
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { MAX_FEEDBACK_REQUESTS, MAX_FEEDBACK_TEXT } from "../../src/feedback.js";
+import { MAX_FEEDBACK_REQUESTS, MAX_FEEDBACK_TEXT } from "@wso2/prototype-kit/feedback";
 import { app, driver, host } from "./driver.js";
 import type { Preview } from "./protocol.js";
 

@@ -20,9 +20,9 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { PrototypeFrame, frameViewOf, initialPrototypeView, reducePrototypeView, type DataSnapshot, type PrototypeViewEvent } from "@wso2/prototype-kit/host";
-import { FEEDBACK_PATH, type FeedbackRequest, type FeedbackSubmission } from "../feedback.js";
+import { pinsOnScreen, requestFor, type FeedbackRequest, type FeedbackSubmission } from "@wso2/prototype-kit/feedback";
+import { FEEDBACK_PATH } from "../feedback.js";
 import type { HostConfig, PrototypeRevision } from "../host-config.js";
-import { pinsOnScreen, requestFor } from "./annotations.js";
 import { BrowserWindow } from "./BrowserWindow.js";
 import { FeedbackPanel } from "./FeedbackPanel.js";
 import { FindingsOverlay } from "./FindingsOverlay.js";

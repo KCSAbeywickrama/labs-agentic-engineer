@@ -19,7 +19,7 @@
 /** Annotate's side panel: the selection, a request to attach to it, the queue, and Save feedback. */
 
 import { useState } from "react";
-import { MAX_FEEDBACK_REQUESTS, MAX_FEEDBACK_TEXT, type FeedbackRequest } from "../feedback.js";
+import { MAX_FEEDBACK_REQUESTS, MAX_FEEDBACK_TEXT, type FeedbackRequest } from "@wso2/prototype-kit/feedback";
 
 export interface FeedbackPanelProps {
   /** The selected elements' labels, in selection order. */

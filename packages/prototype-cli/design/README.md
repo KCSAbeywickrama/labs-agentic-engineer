@@ -18,10 +18,13 @@ rather than crashing.
 The watcher rechecks once the files are quiet for 120 ms and keeps the last good
 revision, so a half-written file shows findings over the previous render. It
 survives unreadable files: it shows a finding and keeps the last good render.
+The kit's check runs off the event loop, so the server answers while a revision
+renders; a newer change supersedes a check still in flight.
 
 ## Host page
 
-Uses the kit's `/host` reducer for all view state. `--persist` keeps snapshots
+Uses the kit's `/host` reducer for all view state, and its `/feedback` for the
+request shape, limits, the Annotate queue helpers and the revision hash. `--persist` keeps snapshots
 in `localStorage` under `proto:data:<revision hash>`; a new revision starts from
 the seed. Annotate queues requests and saves `.prototype/feedback.json`. The
 queue survives revisions and is saved with the hash it was started against
