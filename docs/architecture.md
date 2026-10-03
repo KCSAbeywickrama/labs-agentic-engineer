@@ -81,11 +81,19 @@ Three public packages, usable with no AEP: `@wso2/prototype-kit` (the API a
 checks, the sandboxed frame host and the theme build helper),
 `@wso2/prototype-theme-default` (plain React + CSS) and `@wso2/prototype-cli`
 (`prototype init | check | preview | export`). `@wso2/prototype-theme-oxygen`
-draws the same kit on Oxygen UI, so AEP's prototypes look like WSO2 products. The manifest's JSON Schema is
-committed at `packages/prototype-kit/schema/prototype-manifest.schema.json`; the
+draws the same kit on Oxygen UI, so AEP's prototypes look like WSO2 products.
+The manifest's JSON Schema is committed at `packages/prototype-kit/schema/prototype-manifest.schema.json`; the
 kit reference an agent writes against is generated to
 `packages/prototype-kit/reference.md`. Each package's `design/README.md` has
 the details.
+
+In AEP the Prototype stage follows Design. The console's Design card offers
+Make prototype, which sends `/prototype`; the `prototype` skill has the agent
+write `specs/design/components/<c>/prototype.{json,tsx}` into the collab room,
+gated on write and again on save. The reviewer opens it full screen in the
+console, annotates, and Send all returns the requests as a typed
+`prototypeFeedback` on the next `/prototype` turn
+([console design note](../apps/console/design/prototype-review.md)).
 
 ## Service map
 
