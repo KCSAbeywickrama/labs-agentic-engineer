@@ -55,6 +55,7 @@ export type ErrCode =
   | "INVALID_JSON"
   | "SCHEMA_VIOLATION"
   | "INVALID_DSL"
+  | "INVALID_PROTOTYPE"
   | "INVALID_OPENAPI"
   | "INVALID_DIAGRAM"
   | "UNKNOWN_PARTICIPANT"
@@ -81,7 +82,19 @@ export interface OpOk {
   status: "applied" | "already-applied" | "noop";
 }
 
-/** A failed op. Keeps the self-correction payload (candidates / count). */
+/**
+ * One finding of the prototype check (`@wso2/prototype-kit`): a stable code, the
+ * file it is in, where in that file, and what to change. Declared here, not
+ * imported, so this wire contract stays free of the kit.
+ */
+export interface PrototypeFinding {
+  code: string;
+  file: "prototype.json" | "prototype.tsx";
+  location: string;
+  message: string;
+}
+
+/** A failed op. Keeps the self-correction payload (candidates / count / findings). */
 export interface OpErr {
   ok: false;
   path: string;
@@ -91,6 +104,8 @@ export interface OpErr {
   /** Populated for NOT_UNIQUE / NOT_FOUND to steer one-step re-anchoring. */
   candidates?: MatchCandidate[];
   count?: number;
+  /** Populated for INVALID_PROTOTYPE: every finding the prototype check reported. */
+  findings?: PrototypeFinding[];
 }
 
 export type OpResult = OpOk | OpErr;

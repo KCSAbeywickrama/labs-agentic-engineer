@@ -84,5 +84,8 @@
   // The CLI resolves its default theme by name at run time
   // (createRequire(...).resolve("@wso2/prototype-theme-default/check-runtime.js")),
   // so no import names it; the dependency is what makes it installed.
-  "ignoreDependencies": ["@wso2/prototype-theme-default"]
+  // The agents service resolves the Oxygen theme's check runtime by name too
+  // (resolveTheme("@wso2/prototype-theme-oxygen", ...) in the prototype render
+  // check), and the image builds the package because of this dependency.
+  "ignoreDependencies": ["@wso2/prototype-theme-default", "@wso2/prototype-theme-oxygen"]
 }

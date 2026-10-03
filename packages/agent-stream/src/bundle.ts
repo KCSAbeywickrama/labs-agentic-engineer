@@ -44,6 +44,7 @@ import { checkSecurityDesign } from "./security-design-schema.js";
 import { checkOpenapiSpec } from "./openapi-spec.js";
 import { checkWireframeLayout } from "./wireframe-layout.js";
 import { checkDesignDiagram } from "./design-diagrams.js";
+import { checkPrototype, type PrototypeRenderCheck } from "./prototype-gate.js";
 import { checkComponentDependencies } from "./component-dependencies.js";
 import { checkDependencyDesign, preservePlatformFields } from "./dependency-design-schema.js";
 import type {
@@ -53,6 +54,7 @@ import type {
   OpOk,
   OpErr,
   OpResult,
+  PrototypeFinding,
 } from "./contracts/sse-events.js";
 
 // The op shapes & result types are the WIRE contract — defined once in
@@ -82,7 +84,16 @@ export class FileBundle {
   /** What removeFile took out this turn, by path — the prior an add-after-remove is judged against. */
   private readonly removedThisTurn = new Map<string, string>();
 
-  constructor(initial: Record<string, string> = {}) {
+  /**
+   * `gates.prototypeRender` draws a prototype's every screen when its
+   * `prototype.tsx` is written. It executes the generated module, so only a host
+   * that isolates it passes one (the agents service); without it the source gets
+   * its static checks only (see prototype-gate.ts).
+   */
+  constructor(
+    initial: Record<string, string> = {},
+    private readonly gates: { prototypeRender?: PrototypeRenderCheck } = {},
+  ) {
     for (const [path, content] of Object.entries(initial)) {
       this.files.set(path, lf(content));
     }
@@ -211,7 +222,8 @@ export class FileBundle {
    * Apply `content` to `path` through the write-gate ladder: YAML reparse, then
    * each artifact-specific gate that claims the path (component `design.json`
    * schema, `security.json` schema, `wireframes.dsl` syntax, `openapi.yaml`
-   * structure, the design diagrams' shape and participants). The first
+   * structure, a prototype's manifest and screens, the design diagrams' shape
+   * and participants). The first
    * problem aborts with its own code and NO write, leaving the bundle
    * byte-for-byte unchanged — the safe in-memory contract. Every gate is a pure
    * (path, content) => problem | null function, so a new artifact kind is one
@@ -265,6 +277,15 @@ export class FileBundle {
     if (layoutProblem) {
       return err(path, op, layoutProblem.code, layoutProblem.message);
     }
+    // A web-application's prototype is gated as a pair: prototype.json on the
+    // manifest's shape, version and references; prototype.tsx, against the
+    // manifest this bundle holds, on its static rules and, with the host's
+    // render check, on every screen drawing for every role and display state.
+    // One the platform would refuse on save never reaches the ledger.
+    const prototypeProblem = checkPrototype(path, content, this, this.gates.prototypeRender);
+    if (prototypeProblem) {
+      return err(path, op, prototypeProblem.code, prototypeProblem.message, undefined, undefined, prototypeProblem.findings);
+    }
     // A component's openapi.yaml is structure-gated on the same terms, which is
     // what makes asking a separate tool to validate it unnecessary — that ask
     // cost a round trip plus a full re-emission of the document as tool input.
@@ -309,10 +330,12 @@ function err(
   message: string,
   candidates?: MatchCandidate[],
   count?: number,
+  findings?: PrototypeFinding[],
 ): OpErr {
   const e: OpErr = { ok: false, path, op, code, message };
   if (candidates && candidates.length) e.candidates = candidates;
   if (count !== undefined) e.count = count;
+  if (findings) e.findings = findings;
   return e;
 }
 

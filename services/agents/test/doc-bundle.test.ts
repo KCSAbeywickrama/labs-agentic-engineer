@@ -45,6 +45,15 @@ class SpyPeer implements RoomPeer {
 }
 
 const MD = "specs/requirements/prd.md";
+const VALID_MANIFEST = JSON.stringify({
+  schemaVersion: 3,
+  name: "Demo",
+  entryScreen: "screen.home",
+  roles: [{ id: "user", name: "User" }],
+  states: [{ id: "state.default", name: "Default" }],
+  screens: [{ id: "screen.home", name: "Home", roleIds: ["user"] }],
+  flows: [],
+});
 
 test("addFile mirrors the new file UNMARKED (accept-by-default, no flicker)", () => {
   const peer = new SpyPeer();
@@ -68,4 +77,19 @@ test("editFile mirrors the change MARKED (reviewable edit to committed content)"
   assert.equal(peer.sets.length, 1);
   assert.equal(peer.sets[0]!.path, MD);
   assert.equal(peer.sets[0]!.mark, true, "an edit must be a reviewable (marked) write");
+});
+
+test("a prototype the gates refuse never reaches the room", () => {
+  const peer = new SpyPeer();
+  const refusing = [{ code: "RENDER_FAILED", file: "prototype.tsx", location: "module", message: "boom" } as const];
+  const bundle = new DocFileBundle(
+    peer,
+    { "specs/design/components/web/prototype.json": VALID_MANIFEST },
+    { prototypeRender: () => [...refusing] },
+  );
+
+  const res = bundle.addFile("specs/design/components/web/prototype.tsx", "export default 1;\n");
+
+  assert.equal(res.ok, false);
+  assert.deepEqual(peer.sets, [], "a refused write is not mirrored");
 });
