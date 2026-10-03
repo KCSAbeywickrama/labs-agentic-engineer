@@ -245,6 +245,16 @@ func mcpTools() []mcpTool {
 			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
 		},
 		{
+			Name: "list_guardrail_policies",
+			Description: "List the AI-gateway guardrails an ai-agent of this organization may declare in its " +
+				"agent.afm.md `x-aep.guardrails`. Each entry is a policy this organization's gateway offers " +
+				"and the platform can apply: its exact `name` (the `policy` you write), a `description`, and " +
+				"`parameters` — the JSON Schema of the settings you may set in `params`. Path settings " +
+				"(jsonPath) are the platform's and are not listed. Call this before declaring a guardrail; " +
+				"declare only names it returns. An empty list means none can be applied here. Read-only.",
+			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
+		},
+		{
 			Name: "get_remote_git_file_contents",
 			Description: "Read a file (or list a directory) from a repository in THIS organization over the " +
 				"GitHub API — no clone. Use this AFTER list_org_component_endpoints reports a provider whose " +
@@ -443,6 +453,22 @@ func handleToolCall(w http.ResponseWriter, r *http.Request, h *mcpHandler, orgHa
 			return
 		}
 		writeToolText(w, req.ID, mustJSON(map[string]any{"groups": groups}))
+	case "list_guardrail_policies":
+		if h.guardrails == nil {
+			writeToolText(w, req.ID, mustJSON(map[string]any{"guardrails": []any{}}))
+			return
+		}
+		// orgHandle is the verified ocOrgId claim: the catalog is that org's
+		// gateway's, and no tool argument may choose it.
+		policies, err := h.guardrails.GuardrailCatalog(r.Context(), orgHandle)
+		if err != nil {
+			writeToolError(w, req.ID, fmt.Sprintf("list guardrail policies: %v", err))
+			return
+		}
+		if policies == nil {
+			policies = []GuardrailPolicy{}
+		}
+		writeToolText(w, req.ID, mustJSON(map[string]any{"guardrails": policies}))
 	case "get_remote_git_file_contents":
 		if h.remoteGit == nil {
 			writeToolError(w, req.ID, "remote git reader not configured")

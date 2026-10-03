@@ -256,6 +256,10 @@ func Steps(db *gorm.DB, deploymentTier string, credKey []byte) []database.Step {
 		// OpenChoreo SRE agent calls when set. A new table with no backfill;
 		// depends on nothing above it.
 		ctxStep("phase22_org_sre_model_connections", RunPhase22OrgSreModelConnections),
+		// Which guardrails AEP wrote to each governed ai-agent's binding, and
+		// what became of each declared one. A new table with no backfill;
+		// depends on nothing above it.
+		ctxStep("phase23_agent_guardrail_applications", RunPhase23AgentGuardrailApplications),
 	}
 }
 

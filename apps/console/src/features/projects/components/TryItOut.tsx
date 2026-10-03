@@ -18,6 +18,7 @@
 
 import { useMemo, useState } from "react";
 import {
+  Alert,
   Avatar,
   Box,
   Button,
@@ -412,6 +413,27 @@ function ComponentPanel({
           </MuiLink>
         </Box>
       )}
+      {/* A declared guardrail the last deploy could not apply is a protection
+          this agent does not have; say which, and why, where it is tried. */}
+      {(() => {
+        const unapplied = (d?.guardrails ?? []).filter((g) => g.status !== "applied");
+        if (unapplied.length === 0) return null;
+        return (
+          <Alert
+            severity="warning"
+            role="status"
+            aria-label={`${card.displayName} guardrails`}
+            sx={{ mx: 2, mb: 1.25 }}
+          >
+            {unapplied.map((g) => (
+              <Box key={g.policy}>
+                <Box component="span" sx={{ fontWeight: 600 }}>{`${g.policy}: ${g.status}`}</Box>
+                {g.reason ? ` — ${g.reason}` : null}
+              </Box>
+            ))}
+          </Alert>
+        );
+      })()}
       {isWebApp && talksTo.length > 0 && (
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pb: 1.25 }}>
           Talks to{" "}
