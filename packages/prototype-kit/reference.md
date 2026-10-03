@@ -66,11 +66,31 @@ The fixed date every prototype treats as today (ISO `YYYY-MM-DD`).
 
 ## Layout
 
+### `<AppShell>`
+
+The root of a screen inside the product's chrome: header, user menu and side navigation. Use `<Screen>` for a screen outside it (signed out).
+
+- `id: string` — The shell's id; its user menu's elements are `<id>.user`, `<id>.account`, `<id>.settings` and `<id>.sign-out`.
+- `product?: string` — The product's name in the header; prototype.json's `name` by default.
+- `user: AppShellUser` — The signed-in user the header shows.
+- `nav: NavigationItem[]` — The side navigation's entries.
+- `account: string` — The screen the user menu's Account entry opens.
+- `settings: string` — The screen the user menu's Settings entry opens.
+- `signOut: string` — The screen Sign out leads to: a signed-out screen, drawn on a bare `<Screen>`.
+- `menu?: NavigationItem[]` — More user-menu entries (a profile, billing), drawn after Account and Settings and before Sign out.
+- `children?: ReactNode` — The screen's content.
+
+### `AppShellUser`
+
+- `name: string`
+- `email?: string` — Shown under the name in the user menu.
+- `role?: string` — The role beside the name; the viewing role's name in prototype.json by default, so a role switch shows in the header.
+
 ### `<Screen>`
 
-The root of every screen: its navigation and its content.
+The root of a screen outside the app shell (signed out, a landing page): its content, and navigation if any.
 
-- `nav?: ReactNode` — The app's navigation: one `<Navigation>`, usually shared by every screen.
+- `nav?: ReactNode` — Navigation for an app drawn without `<AppShell>`: one `<Navigation>`, usually shared by every screen.
 - `children?: ReactNode`
 
 ### `<Stack>`
@@ -112,7 +132,7 @@ A read-only record: label/value pairs.
 
 ### `<Navigation>`
 
-The app's own chrome. Pass it to every `<Screen nav>`. Its items are what a reviewer points at.
+Navigation for an app drawn on `<Screen nav>` (`<AppShell nav>` draws its own). Its items are what a reviewer points at.
 
 - `id: string`
 - `layout: "side" | "top"`

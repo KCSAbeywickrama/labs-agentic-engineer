@@ -1,14 +1,15 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
   // Dead-code report for the agents runtime, the playground that consumes it,
-  // the console and the prototype kit, themes and CLI.
+  // the console and the prototype kit, themes and CLI, and the console's theme.
   // The TS counterpart of services/aep-api/scripts/deadcode.sh. Run via
   // `--production` so *.test.ts never count as consumers (the Go "no -test").
   //
   // Scope: @aep/agents and the playground, plus @aep/web-search (web search for
   // the agents service and the runner's `aep-web` MCP server), @aep/console
   // (gated since its first commit, as console-next) and the prototype packages
-  // (@wso2/prototype-kit, -theme-default, -theme-oxygen, -cli); every other pnpm
+  // (@wso2/prototype-kit, -theme-default, -theme-oxygen, -cli) with the theme they
+  // share with the console (@aep/ui-theme); every other pnpm
   // workspace is ignored. knip AUTO-DETECTS entries (agents via its package.json
   // `exports` map, the playground via its `play: tsx src/cli.ts` script) — do
   // NOT add a per-workspace `entry`/`project` override for those two, it
@@ -24,6 +25,7 @@
     "!packages/prototype-theme-oxygen",
     "!packages/prototype-cli",
     "packages/ui/*",
+    "!packages/ui/theme",
     "runners/*",
     "services/aep-api",
     "services/aep-mcp-server",

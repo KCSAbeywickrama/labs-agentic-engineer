@@ -41,7 +41,7 @@ const SECTIONS: [string, string[]][] = [
   ["Module", ["defineApp", "PrototypeAppDefinition"]],
   ["View hooks", ["useNav", "KitNav", "useParams", "useRole", "useDisplayState"]],
   ["Data hooks", ["useCollection", "Collection", "useValue", "useToday", "PROTOTYPE_TODAY"]],
-  ["Layout", ["Screen", "Stack", "Grid", "Split", "Detail", "DetailField"]],
+  ["Layout", ["AppShell", "AppShellUser", "Screen", "Stack", "Grid", "Split", "Detail", "DetailField"]],
   ["Navigation", ["Navigation", "NavigationItem", "Breadcrumbs", "BreadcrumbItem", "Tabs", "Stepper", "Panel"]],
   ["Content", ["Heading", "Text", "Badge", "Stat", "Alert", "EmptyState", "Button", "Link", "Tone", "Pressable"]],
   ["Forms", ["Form", "Field", "FieldType", "Filters", "ValidationSummary"]],

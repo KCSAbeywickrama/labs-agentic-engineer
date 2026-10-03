@@ -18,36 +18,37 @@
 
 /** Data: the table of records and the activity timeline. */
 
-import { Box, Chip, Table as OxygenTable, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@wso2/oxygen-ui";
+import { Box, Chip, ListingTable, Typography } from "@wso2/oxygen-ui";
 import type { ThemeTableProps, ThemeTimelineProps } from "@wso2/prototype-kit";
 import { TitledCard } from "./card.js";
 
 export function Table({ title, columns, rows }: ThemeTableProps) {
   return (
-    <TitledCard title={title} flush>
-      <TableContainer>
-        <OxygenTable size="small" aria-label={title ?? "Records"}>
-          <TableHead>
-            <TableRow>
-              {columns.map((c, i) => (
-                <TableCell key={i} sx={{ fontWeight: 600, color: "text.secondary" }}>
-                  {c}
-                </TableCell>
-              ))}
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.id} hover selected={row.highlighted} aria-selected={row.highlighted} onClick={row.onPress} sx={{ cursor: "pointer", "&:last-child td": { borderBottom: 0 } }} {...row.root}>
-                {row.cells.map((value, i) => (
-                  <TableCell key={i}>{i === row.cells.length - 1 && row.tone ? <Chip size="small" label={value} color={row.tone} /> : value}</TableCell>
-                ))}
-              </TableRow>
+    <ListingTable.Container>
+      {title && (
+        <Typography variant="subtitle1" component="h3" sx={{ fontWeight: 600, px: 2, pt: 2, pb: 1 }}>
+          {title}
+        </Typography>
+      )}
+      <ListingTable aria-label={title ?? "Records"}>
+        <ListingTable.Head>
+          <ListingTable.Row>
+            {columns.map((c, i) => (
+              <ListingTable.Cell key={i}>{c}</ListingTable.Cell>
             ))}
-          </TableBody>
-        </OxygenTable>
-      </TableContainer>
-    </TitledCard>
+          </ListingTable.Row>
+        </ListingTable.Head>
+        <ListingTable.Body>
+          {rows.map((row) => (
+            <ListingTable.Row key={row.id} clickable hover selected={row.highlighted} aria-selected={row.highlighted} onClick={row.onPress} {...row.root}>
+              {row.cells.map((value, i) => (
+                <ListingTable.Cell key={i}>{i === row.cells.length - 1 && row.tone ? <Chip size="small" label={value} color={row.tone} /> : value}</ListingTable.Cell>
+              ))}
+            </ListingTable.Row>
+          ))}
+        </ListingTable.Body>
+      </ListingTable>
+    </ListingTable.Container>
   );
 }
 

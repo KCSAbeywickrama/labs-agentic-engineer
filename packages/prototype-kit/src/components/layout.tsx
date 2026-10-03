@@ -16,14 +16,14 @@
  * under the License.
  */
 
-/** Layout: the screen (the app's own shell), stack, grid, split and the read-only detail record. */
+/** Layout: the bare screen, stack, grid, split and the read-only detail record (the app shell is in shell.tsx). */
 
 import type { ReactNode } from "react";
 import { SelectableBox, requireId } from "../runtime/selectable.js";
 import { useThemed } from "../theme/context.js";
 
 export interface ScreenProps {
-  /** The app's navigation: one `<Navigation>`, usually shared by every screen. */
+  /** Navigation for an app drawn without `<AppShell>`: one `<Navigation>`, usually shared by every screen. */
   nav?: ReactNode;
   children?: ReactNode;
 }
@@ -33,7 +33,7 @@ export interface ThemeScreenProps {
   children?: ReactNode;
 }
 
-/** The root of every screen: its navigation and its content. */
+/** The root of a screen outside the app shell (signed out, a landing page): its content, and navigation if any. */
 export function Screen({ nav, children }: ScreenProps) {
   const Themed = useThemed("Screen");
   return <Themed nav={nav}>{children}</Themed>;

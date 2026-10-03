@@ -25,6 +25,7 @@
 export {
   parseFromFrameMessage,
   parseToFrameMessage,
+  type FrameColorScheme,
   type FrameElement,
   type FrameMode,
   type FrameView,
@@ -32,7 +33,7 @@ export {
   type ToFrameMessage,
 } from "./bridge.js";
 export { PROTOTYPE_FRAME_CSP, prototypeFrameDocument } from "./frame-document.js";
-export { PrototypeFrame, type PrototypeFrameProps } from "./PrototypeFrame.js";
+export { PROTOTYPE_START_TIMEOUT_MS, PrototypeFrame, type PrototypeFrameProps } from "./PrototypeFrame.js";
 export {
   frameViewOf,
   initialPrototypeView,

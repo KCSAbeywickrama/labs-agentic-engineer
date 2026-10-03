@@ -16,20 +16,10 @@
  * under the License.
  */
 
-/** The outlined card most components sit in, with an optional section title, as the console draws its panels. */
+/**
+ * `@aep/ui-theme`: the Oxygen theme the console draws with and the Oxygen
+ * prototype theme draws prototypes with, so a prototype looks like the console.
+ * Bundleable into a sandboxed frame: plain data, no storage, no network.
+ */
 
-import { Card, CardContent, Typography } from "@wso2/oxygen-ui";
-import type { ReactNode } from "react";
-
-export function TitledCard({ title, children }: { title?: string | undefined; children?: ReactNode }) {
-  return (
-    <Card variant="outlined" component="section">
-      {title && (
-        <Typography variant="subtitle1" component="h3" sx={{ fontWeight: 600, px: 2, pt: 2 }}>
-          {title}
-        </Typography>
-      )}
-      <CardContent sx={{ "&:last-child": { pb: 2 } }}>{children}</CardContent>
-    </Card>
-  );
-}
+export { aepTheme } from "./aepTheme.js";

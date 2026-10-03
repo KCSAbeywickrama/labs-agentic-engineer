@@ -30,10 +30,12 @@ import type { ThemeFieldProps, ThemeFiltersProps, ThemeFormProps, ThemeValidatio
 import type { ThemeTableProps, ThemeTimelineProps } from "../components/data.js";
 import type { ThemeDialogProps, ThemeDrawerProps } from "../components/overlays.js";
 import type { ThemeDetailProps, ThemeGridProps, ThemeScreenProps, ThemeSplitProps, ThemeStackProps } from "../components/layout.js";
+import type { ThemeAppShellProps } from "../components/shell.js";
 
 /** The props each kit component's theme implementation receives. */
 export interface KitComponentProps {
   Screen: ThemeScreenProps;
+  AppShell: ThemeAppShellProps;
   Stack: ThemeStackProps;
   Grid: ThemeGridProps;
   Split: ThemeSplitProps;
@@ -68,6 +70,10 @@ export interface PrototypeTheme {
   /** The theme's package name, for messages. */
   name: string;
   registry: ThemeRegistry;
-  /** Wraps every render: the theme's styles and any context its components need. */
-  Provider?: ComponentType<{ children: ReactNode }> | undefined;
+  /**
+   * Wraps every render: the theme's styles and any context its components
+   * need. `colorScheme` is the host's resolved scheme; absent (the render
+   * check, a host that names none), the theme picks, typically the system's.
+   */
+  Provider?: ComponentType<{ children: ReactNode; colorScheme?: "light" | "dark" | undefined }> | undefined;
 }

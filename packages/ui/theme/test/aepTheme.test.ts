@@ -17,8 +17,8 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { aepTheme } from "./aepTheme";
-import { tone } from "./tones";
+import { aepTheme } from "../src/aepTheme.js";
+import { tone } from "../src/tones.js";
 
 // OxygenTheme's type omits the per-scheme palettes the built theme carries.
 type Tone = Record<string, string>;

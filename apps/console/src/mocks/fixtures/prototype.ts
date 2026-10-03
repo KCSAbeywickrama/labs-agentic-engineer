@@ -63,7 +63,10 @@ export const SAMPLE_MANIFEST = `{
     { "id": "screen.my-claims", "name": "My claims", "roleIds": ["employee", "manager", "finance"] },
     { "id": "screen.new-claim", "name": "New claim", "roleIds": ["employee", "manager", "finance"] },
     { "id": "screen.pending", "name": "Pending approvals", "roleIds": ["manager", "finance"] },
-    { "id": "screen.claim", "name": "Claim", "roleIds": ["manager", "finance"] }
+    { "id": "screen.claim", "name": "Claim", "roleIds": ["manager", "finance"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["employee", "manager", "finance"] },
+    { "id": "screen.settings", "name": "Settings", "roleIds": ["employee", "manager", "finance"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["employee", "manager", "finance"] }
   ],
   "flows": [
     { "id": "flow.submit", "name": "Submit a claim", "roleId": "employee", "screenIds": ["screen.new-claim", "screen.my-claims"] },
@@ -76,8 +79,9 @@ export const SAMPLE_SOURCE = `// Acme Expenses: employees submit claims, manager
 // gives a second approval over $1,000. Claims are one collection, so a claim
 // submitted here waits in the manager's queue.
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
+  AppShell,
   Badge,
   Button,
   Detail,
@@ -87,7 +91,6 @@ import {
   Form,
   Grid,
   Heading,
-  Navigation,
   Screen,
   Stack,
   Stat,
@@ -120,23 +123,41 @@ const claims: Claim[] = [
 
 const tone = (status: Status) => (status === "Approved" ? "success" : status === "Rejected" ? "error" : "warning");
 
-const nav = (
-  <Navigation
-    id="nav.main"
-    layout="top"
-    items={[
-      { id: "nav.my-claims", label: "My claims", to: "screen.my-claims" },
-      { id: "nav.pending", label: "Approvals", to: "screen.pending" },
-    ]}
-  />
-);
+/** Who each role signs in as. */
+const users: Record<string, { name: string; email: string }> = {
+  employee: { name: "Priya Shah", email: "priya@acme.example" },
+  manager: { name: "Sam Ortiz", email: "sam@acme.example" },
+  finance: { name: "Lena Park", email: "lena@acme.example" },
+};
+
+function useUser() {
+  return users[useRole()] ?? users.employee!;
+}
+
+function Shell({ children }: { children: ReactNode }) {
+  return (
+    <AppShell
+      id="shell"
+      user={useUser()}
+      nav={[
+        { id: "nav.my-claims", label: "My claims", to: "screen.my-claims" },
+        { id: "nav.pending", label: "Approvals", to: "screen.pending" },
+      ]}
+      account="screen.account"
+      settings="screen.settings"
+      signOut="screen.signed-out"
+    >
+      {children}
+    </AppShell>
+  );
+}
 
 function MyClaims() {
   const state = useDisplayState();
   const all = useCollection<Claim>("claims");
   const mine = state === "state.empty" ? [] : all.items.filter((c) => c.employee === "Priya Shah");
   return (
-    <Screen nav={nav}>
+    <Shell>
       <Heading id="heading.my-claims" text="My claims" actions={<Button id="btn.new-claim" label="New claim" emphasis="primary" to="screen.new-claim" />} />
       <Table
         id="table.my-claims"
@@ -144,7 +165,7 @@ function MyClaims() {
         rows={mine.map((c) => ({ id: \`mine.\${c.id}\`, cells: [c.title, c.total, c.submitted, c.status], tone: tone(c.status) }))}
         empty={<EmptyState id="empty.my-claims" title="No claims yet" text="Claims you submit show here with their status." />}
       />
-    </Screen>
+    </Shell>
   );
 }
 
@@ -158,14 +179,14 @@ function NewClaim() {
     nav_.go("screen.my-claims");
   };
   return (
-    <Screen nav={nav}>
+    <Shell>
       <Heading id="heading.new-claim" text="New claim" />
       <Form id="form.claim" actions={<Button id="btn.submit" label="Submit claim" emphasis="primary" onPress={submit} />}>
         <Field id="field.title" label="What it was for" value={title} onChange={setTitle} required />
         <Field id="field.total" label="Total" type="number" value={total} onChange={setTotal} required />
         <Field id="field.category" label="Category" type="select" defaultValue="Travel" options={["Travel", "Meals", "Equipment"]} />
       </Form>
-    </Screen>
+    </Shell>
   );
 }
 
@@ -174,7 +195,7 @@ function Pending() {
   const all = useCollection<Claim>("claims");
   const waiting = state === "state.empty" ? [] : all.items.filter((c) => c.status.startsWith("Waiting"));
   return (
-    <Screen nav={nav}>
+    <Shell>
       <Heading id="heading.pending" text="Pending approvals" />
       <Grid columns={2}>
         <Stat id="stat.waiting" label="Waiting for you" value={String(waiting.length)} />
@@ -186,7 +207,7 @@ function Pending() {
         rows={waiting.map((c) => ({ id: \`pending.\${c.id}\`, cells: [c.employee, c.title, c.total, c.submitted], to: "screen.claim", params: { claim: c.id } }))}
         empty={<EmptyState id="empty.pending" title="Nothing waiting" text="Claims your team submits land here." />}
       />
-    </Screen>
+    </Shell>
   );
 }
 
@@ -204,7 +225,7 @@ function ClaimDetail() {
     nav_.go("screen.pending");
   };
   return (
-    <Screen nav={nav}>
+    <Shell>
       <Stack direction="row">
         <Heading id="heading.claim" text={\`Claim \${claim.id} · \${claim.employee}\`} />
         <Badge id="badge.status" label={claim.status} tone={tone(claim.status)} />
@@ -247,6 +268,49 @@ function ClaimDetail() {
           <Field id="field.reason" label="Reason" type="textarea" value={reason} onChange={setReason} required />
         </Form>
       </Dialog>
+    </Shell>
+  );
+}
+
+function Account() {
+  const user = useUser();
+  return (
+    <Shell>
+      <Heading id="heading.account" text="Account" />
+      <Detail
+        id="detail.account"
+        fields={[
+          { label: "Name", value: user.name },
+          { label: "Email", value: user.email },
+        ]}
+      />
+    </Shell>
+  );
+}
+
+function Settings() {
+  const nav_ = useNav();
+  return (
+    <Shell>
+      <Heading id="heading.settings" text="Settings" />
+      <Form
+        id="form.settings"
+        onSubmit={() => nav_.go("screen.my-claims")}
+        actions={<Button id="btn.save-settings" label="Save settings" emphasis="primary" submit />}
+      >
+        <Field id="field.currency" label="Currency" type="select" defaultValue="USD" options={["USD", "EUR", "LKR"]} />
+        <Field id="field.notify" label="Email me when a claim is decided" type="switch" defaultValue="on" />
+      </Form>
+    </Shell>
+  );
+}
+
+function SignedOut() {
+  return (
+    <Screen>
+      <Heading id="heading.signed-out" text="You are signed out" />
+      <Text id="text.signed-out" text="Sign in again to see your claims." />
+      <Button id="btn.sign-in" label="Sign in" emphasis="primary" to="screen.my-claims" />
     </Screen>
   );
 }
@@ -257,6 +321,9 @@ export default defineApp({
     "screen.new-claim": NewClaim,
     "screen.pending": Pending,
     "screen.claim": ClaimDetail,
+    "screen.account": Account,
+    "screen.settings": Settings,
+    "screen.signed-out": SignedOut,
   },
   data: { claims },
 });
@@ -332,7 +399,7 @@ export function scriptPrototypeTurn(req: {
     s.say(`The prototype of ${component} is up to date with the design. Review it, and send me what you'd change.`);
     return { display, ...s.end() };
   }
-  s.say(`Making the prototype of ${component} from the design: 4 screens, the Employee, Manager and Finance roles, and the submit and approve flows.`);
+  s.say(`Making the prototype of ${component} from the design: 7 screens in the app shell, the Employee, Manager and Finance roles, and the submit and approve flows.`);
   if (manifest === undefined) s.add(`${req.turnKey}-manifest`, manifestPath(component), SAMPLE_MANIFEST);
   if (source === undefined) s.add(`${req.turnKey}-source`, sourcePath(component), SAMPLE_SOURCE);
   s.pause(400).say("The prototype is ready. Open the Prototype tab and press Review to try it full screen; switch to Annotate to point at anything you'd change.");

@@ -41,6 +41,8 @@ export type { SelectableRootProps } from "./runtime/selectable.js";
 export type { KitComponentName, KitComponentProps, PrototypeTheme, ThemeRegistry } from "./theme/contract.js";
 
 export { Detail, Grid, Screen, Split, Stack } from "./components/layout.js";
+export { AppShell } from "./components/shell.js";
+export type { AppShellProps, AppShellUser, ThemeAppShellProps } from "./components/shell.js";
 export type {
   DetailField,
   DetailProps,

@@ -36,7 +36,7 @@ interface Row {
   message?: RegExp;
 }
 
-const valid = ["baseline", "local-names", "contacts", "expense-approval", "integration-monitor"];
+const valid = ["baseline", "local-names", "contacts", "expense-approval", "integration-monitor", "app-shell"];
 
 const invalid: Row[] = [
   { fixture: "missing-source", findings: [["MISSING_FILE", "prototype.tsx", "(file)"]] },
@@ -73,6 +73,9 @@ const invalid: Row[] = [
   { fixture: "render-duplicate-element-id", findings: [["DUPLICATE_ELEMENT_ID", "prototype.tsx", "screen.admin as admin in state.default"]], message: /"heading\.admin"/ },
   { fixture: "render-duplicate-id-special-chars", findings: [["DUPLICATE_ELEMENT_ID", "prototype.tsx", "screen.admin as admin in state.default"]], message: /"say \\"hi\\" & bye"/ },
   { fixture: "render-unreachable-to", findings: [["UNKNOWN_NAV_TARGET", "prototype.tsx", "screen.home as user in state.default"]], message: /role "user" does not reach/ },
+  // The app shell: its user menu's targets are checked while the menu is closed, and each is required.
+  { fixture: "render-shell-unknown-target", findings: [["UNKNOWN_NAV_TARGET", "prototype.tsx", "screen.home as user in state.default"]], message: /screen\.goodbye/ },
+  { fixture: "render-shell-missing-target", findings: [["RENDER_FAILED", "prototype.tsx", "screen.home as user in state.default"]], message: /<AppShell> needs signOut/ },
   { fixture: "render-missing-element-id", findings: [["RENDER_FAILED", "prototype.tsx", "screen.admin as admin in state.default"]], message: /<Text> needs an id/ },
   { fixture: "render-no-default-export", findings: [["NO_APP", "prototype.tsx", "module"]] },
   {

@@ -17,30 +17,39 @@
  */
 
 /**
- * The theme's root: Oxygen's base theme with sentence-case buttons (as the
- * console writes them), pinned to light with no stored colour scheme (the
- * frame has no storage) so a prototype draws the same in every frame and in
- * the render check. Emotion injects every style inline and Oxygen ships its
- * Inter font as data URIs, so the frame loads nothing.
+ * The theme's root: AEP's own Oxygen theme (`@aep/ui-theme`, the console's),
+ * through Oxygen's `OxygenUIThemeProvider` as the console applies it, so a
+ * prototype looks like the console it is reviewed in. Sandbox-safe: one fixed
+ * theme (no theme switching, so nothing is fetched or stored). The scheme is
+ * the host's (`colorScheme`, the console's resolved light or dark), set
+ * through MUI's `useColorScheme`; without one it follows the system, as the
+ * console's default does. MUI's scheme storage is guarded and the frame has
+ * none, so setting it stores nothing. Emotion injects every
+ * style inline and Oxygen ships its Inter font as data URIs, so the frame
+ * loads nothing.
  */
 
-import { Box, createOxygenTheme, CssBaseline, ThemeProvider } from "@wso2/oxygen-ui";
-import type { ReactNode } from "react";
+import { aepTheme } from "@aep/ui-theme";
+import { Box, OxygenUIThemeProvider, useColorScheme } from "@wso2/oxygen-ui";
+import { useEffect, type ReactNode } from "react";
 
-const oxygenTheme = createOxygenTheme({
-  components: {
-    MuiButton: { styleOverrides: { root: { textTransform: "none" } } },
-  },
-});
+/** Applies the host's scheme (or the system's) inside the provider. */
+function Scheme({ colorScheme }: { colorScheme: "light" | "dark" | undefined }) {
+  const { setMode } = useColorScheme();
+  useEffect(() => {
+    setMode(colorScheme ?? "system");
+  }, [colorScheme, setMode]);
+  return null;
+}
 
-export function OxygenProvider({ children }: { children: ReactNode }) {
+export function OxygenProvider({ children, colorScheme }: { children: ReactNode; colorScheme?: "light" | "dark" | undefined }) {
   return (
-    <ThemeProvider theme={oxygenTheme} defaultMode="light" storageManager={null}>
-      <CssBaseline />
+    <OxygenUIThemeProvider theme={aepTheme}>
+      <Scheme colorScheme={colorScheme} />
       <Box
         sx={{
-          // The kit's Annotate outline and label, in Oxygen's primary.
-          "--proto-select": oxygenTheme.vars.palette.primary.main,
+          // The kit's Annotate outline and label, in the theme's primary.
+          "--proto-select": aepTheme.vars.palette.primary.main,
           display: "flex",
           flexDirection: "column",
           flex: 1,
@@ -52,6 +61,6 @@ export function OxygenProvider({ children }: { children: ReactNode }) {
       >
         {children}
       </Box>
-    </ThemeProvider>
+    </OxygenUIThemeProvider>
   );
 }

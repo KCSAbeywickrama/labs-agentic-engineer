@@ -55,8 +55,10 @@ test("the skill's worked example is a prototype pair the kit's check accepts", a
   const source = /```tsx\n([\s\S]*?)\n```/.exec(SKILL)?.[1];
   assert.ok(manifest && source, "the skill carries a manifest and a screens example");
   assert.equal((JSON.parse(manifest) as { schemaVersion: unknown }).schemaVersion, 3);
-  const theme = resolveTheme("@wso2/prototype-theme-default", [import.meta.dirname]);
-  assert.deepEqual(await checkPrototypeFiles({ manifest, source }, { theme }), []);
+  for (const name of ["@wso2/prototype-theme-default", "@wso2/prototype-theme-oxygen"]) {
+    const theme = resolveTheme(name, [import.meta.dirname]);
+    assert.deepEqual(await checkPrototypeFiles({ manifest, source }, { theme }), [], name);
+  }
 });
 
 test("the skill describes the Oxygen look but never has the source name a theme", () => {
@@ -68,19 +70,30 @@ test("the skill describes the Oxygen look but never has the source name a theme"
 
 // Live bug: asked for an account button and sign-out on a screen, the design
 // agent declined, claiming the platform draws a user menu on every screen. The
-// skill has to say exactly what the renderer draws.
-test("the skill says the review renderer draws only the screen's components and its navigation", () => {
+// skill has to say exactly what the renderer draws: the app shell's chrome and
+// nothing more.
+test("the skill says the review renderer draws only the screen's components and its app shell", () => {
   assert.match(PROSE, /renderer draws only/i);
-  assert.match(PROSE, /`<Screen nav>`/);
-  assert.match(PROSE, /no header, user menu, account menu, sign-out/i);
+  assert.match(PROSE, /user menu with Account, Settings and Sign out/);
+  assert.match(PROSE, /no notification bell/i);
   assert.match(PROSE, /model it in the kit/i);
   assert.match(PROSE, /outside the kit/i);
+});
+
+test("the skill puts every screen in the app shell, with Account, Settings and signed-out screens for every role", () => {
+  assert.match(PROSE, /Every screen sits in the app shell/);
+  assert.match(PROSE, /an account screen with the user's details, a settings screen/);
+  assert.match(PROSE, /Only that signed-out screen, outside the product, has a bare `<Screen>`/);
+  assert.match(PROSE, /go to \*\*every\*\* role/);
+  const source = /```tsx\n([\s\S]*?)\n```/.exec(SKILL)?.[1] ?? "";
+  assert.match(source, /<AppShell/);
+  assert.match(source, /account="screen\.account"/);
 });
 
 test("the skill explains the screens: one per manifest screen, shared navigation, hooks, overlays, data", () => {
   assert.match(PROSE, /One component per manifest screen/);
   assert.match(PROSE, /exactly the manifest's screens/);
-  assert.match(PROSE, /pass it to every `<Screen nav>`/);
+  assert.match(PROSE, /One shell serves every role/);
   assert.match(PROSE, /useDisplayState\(\)/);
   assert.match(PROSE, /useRole\(\)/);
   assert.match(PROSE, /draw \*\*without\*\* params/);

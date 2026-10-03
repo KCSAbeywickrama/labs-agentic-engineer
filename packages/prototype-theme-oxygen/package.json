@@ -21,6 +21,7 @@
     "dev": "echo \"@wso2/prototype-theme-oxygen: no dev server\""
   },
   "dependencies": {
+    "@aep/ui-theme": "workspace:*",
     "@wso2/oxygen-ui": "0.14.0",
     "@wso2/oxygen-ui-icons-react": "0.14.0",
     "@wso2/prototype-kit": "workspace:*"

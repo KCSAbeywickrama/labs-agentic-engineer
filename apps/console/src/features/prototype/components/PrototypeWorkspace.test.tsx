@@ -18,10 +18,11 @@
 
 // @vitest-environment jsdom
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OxygenTheme, OxygenUIThemeProvider } from "@wso2/oxygen-ui";
+import { OxygenTheme, OxygenUIThemeProvider, useColorScheme } from "@wso2/oxygen-ui";
+import { PROTOTYPE_START_TIMEOUT_MS } from "@wso2/prototype-kit/host";
 import type { ProjectChat } from "../../agent-chat/chatStore";
 import { SAMPLE_MANIFEST, SAMPLE_SOURCE } from "../../../mocks/fixtures/prototype";
 import { appPrototypes, manifestPath, revisingIn, sourcePath, type AppPrototype } from "../model/prototypes";
@@ -66,11 +67,19 @@ const busy: ProjectChat = { ...idle, turn: { phase: "running", turnId: "t1", ins
 let queryClient = new QueryClient();
 let invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
-function Harness({ initial }: { initial?: string }) {
+/** The console switched to its dark scheme, as its user menu does. */
+function DarkMode() {
+  const { setMode } = useColorScheme();
+  useEffect(() => setMode("dark"), [setMode]);
+  return null;
+}
+
+function Harness({ initial, dark = false }: { initial?: string; dark?: boolean }) {
   const [review, setReview] = useState<string | undefined>(initial);
   return (
     <QueryClientProvider client={queryClient}>
       <OxygenUIThemeProvider theme={OxygenTheme}>
+        {dark && <DarkMode />}
         <PrototypeWorkspace projectName="acme-expenses" review={review} onReview={(c) => setReview(c ?? undefined)} />
       </OxygenUIThemeProvider>
     </QueryClientProvider>
@@ -186,6 +195,60 @@ describe("the full-screen review", () => {
     expect(within(dialog).queryByText(/^Selected:/)).toBeNull();
     fromFrame({ type: "proto:escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("covers the frame with a loading state until the prototype first draws, so an early click is not lost", async () => {
+    render(<Harness initial={C} />);
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(frame()).toBeInTheDocument());
+    // The runtime has not started yet, then it has but the app has not drawn.
+    expect(within(dialog).getByRole("status")).toHaveTextContent("Starting the prototype…");
+    expect(frame()).toHaveAttribute("aria-busy", "true");
+    fromFrame({ type: "proto:ready" });
+    expect(within(dialog).getByRole("status")).toHaveTextContent("Starting the prototype…");
+    fromFrame({ type: "proto:rendered", screenId: "screen.my-claims", elements: [] });
+    expect(within(dialog).queryByRole("status")).toBeNull();
+    expect(frame()).toHaveAttribute("aria-busy", "false");
+
+    // A frame document that reloads starts again; one that fails to load stops covering and shows why.
+    fromFrame({ type: "proto:ready" });
+    expect(within(dialog).getByRole("status")).toBeInTheDocument();
+    fromFrame({ type: "proto:error", message: "prototype.tsx failed" });
+    expect(within(dialog).queryByRole("status")).toBeNull();
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("prototype.tsx failed");
+  });
+
+  it("stops waiting on a frame that neither draws nor says why, and says it did not start", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<Harness initial={C} />);
+      const dialog = await screen.findByRole("dialog");
+      await waitFor(() => expect(frame()).toBeInTheDocument());
+      fromFrame({ type: "proto:ready" });
+      expect(within(dialog).getByRole("status")).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(PROTOTYPE_START_TIMEOUT_MS);
+      });
+      expect(within(dialog).queryByRole("status")).toBeNull();
+      expect(within(dialog).getByRole("alert")).toHaveTextContent("The prototype didn't start");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("draws the prototype in the console's scheme", async () => {
+    try {
+      render(<Harness initial={C} dark />);
+      await screen.findByRole("dialog");
+      await waitFor(() => expect(frame()).toBeInTheDocument());
+      const post = vi.spyOn(frame().contentWindow!, "postMessage");
+      fromFrame({ type: "proto:ready" });
+      await waitFor(() =>
+        expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: "proto:load", view: expect.objectContaining({ colorScheme: "dark" }) }), "*"),
+      );
+    } finally {
+      localStorage.clear();
+    }
   });
 
   it("says why instead of drawing a blank frame when the prototype is invalid", async () => {

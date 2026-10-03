@@ -16,20 +16,13 @@
  * under the License.
  */
 
-/** The outlined card most components sit in, with an optional section title, as the console draws its panels. */
+import { defineConfig } from "vitest/config";
 
-import { Card, CardContent, Typography } from "@wso2/oxygen-ui";
-import type { ReactNode } from "react";
-
-export function TitledCard({ title, children }: { title?: string | undefined; children?: ReactNode }) {
-  return (
-    <Card variant="outlined" component="section">
-      {title && (
-        <Typography variant="subtitle1" component="h3" sx={{ fontWeight: 600, px: 2, pt: 2 }}>
-          {title}
-        </Typography>
-      )}
-      <CardContent sx={{ "&:last-child": { pb: 2 } }}>{children}</CardContent>
-    </Card>
-  );
-}
+export default defineConfig({
+  test: {
+    environment: "node",
+    // Oxygen UI's ESM imports Prism's language files without extensions, which
+    // Node's loader refuses; inlined, Vite resolves them (as the console's config does).
+    server: { deps: { inline: ["@wso2/oxygen-ui", "prismjs", "@mui/x-data-grid", "@mui/x-date-pickers", "@mui/x-tree-view"] } },
+  },
+});

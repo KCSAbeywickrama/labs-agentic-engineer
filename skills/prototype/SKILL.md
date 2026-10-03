@@ -95,7 +95,10 @@ refused.
   ],
   "screens": [
     { "id": "screen.queue", "name": "Approval queue", "roleIds": ["Approver"] },
-    { "id": "screen.detail", "name": "Expense detail", "roleIds": ["Approver"] }
+    { "id": "screen.detail", "name": "Expense detail", "roleIds": ["Approver"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["Approver"] },
+    { "id": "screen.settings", "name": "Settings", "roleIds": ["Approver"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Approver"] }
   ],
   "flows": [
     { "id": "flow.approve", "name": "Approve an expense", "roleId": "Approver",
@@ -109,6 +112,8 @@ refused.
   screen the prototype opens on. `name` is the application's name.
 - A screen's `roleIds` are the roles that reach it. A flow is one role's walk
   through screens that role reaches, in order, for one story or key flow.
+- The app shell's screens, an account screen, a settings screen and a
+  signed-out screen, go to **every** role: every user has them.
 - `states` always starts with a default state (`state.default`); add one per
   presentation a reviewer must see:
   - `state.empty` wherever a list can be empty.
@@ -127,9 +132,9 @@ refused.
 ## The screens
 
 ```tsx
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
-  Alert, Button, Detail, Dialog, EmptyState, Field, Form, Heading, Navigation, Screen, Table,
+  Alert, AppShell, Button, Detail, Dialog, EmptyState, Field, Form, Heading, Screen, Table,
   defineApp, useCollection, useDisplayState, useNav, useParams,
 } from "@wso2/prototype-kit";
 
@@ -140,16 +145,29 @@ const expenses: Expense[] = [
   { id: "1039", employee: "Ravi Perera", amount: "$62.00", status: "Awaiting approval" },
 ];
 
-const nav = (
-  <Navigation id="nav.main" layout="side" items={[{ id: "nav.queue", label: "Approval queue", to: "screen.queue" }]} />
-);
+const user = { name: "Ravi Perera", email: "ravi@acme.example" };
+
+function Shell({ children }: { children: ReactNode }) {
+  return (
+    <AppShell
+      id="shell"
+      user={user}
+      nav={[{ id: "nav.queue", label: "Approval queue", to: "screen.queue" }]}
+      account="screen.account"
+      settings="screen.settings"
+      signOut="screen.signed-out"
+    >
+      {children}
+    </AppShell>
+  );
+}
 
 function Queue() {
   const state = useDisplayState();
   const all = useCollection<Expense>("expenses");
   const waiting = state === "state.empty" ? [] : all.items.filter((e) => e.status === "Awaiting approval");
   return (
-    <Screen nav={nav}>
+    <Shell>
       <Heading id="heading.queue" text="Approval queue" />
       {state === "state.failed" && (
         <Alert id="alert.feed-failed" tone="error" title="Expense feed unavailable" text="Amounts may be stale. Refresh in a few minutes." />
@@ -167,23 +185,23 @@ function Queue() {
         }))}
         empty={<EmptyState id="empty.queue" title="Nothing to approve" text="New claims appear here." />}
       />
-    </Screen>
+    </Shell>
   );
 }
 
 function ExpenseDetail() {
   const { expense: id } = useParams();
   const state = useDisplayState();
-  const nav_ = useNav();
+  const navigate = useNav();
   const all = useCollection<Expense>("expenses");
   const [rejecting, setRejecting] = useState(false);
   const expense = (id ? all.get(id) : undefined) ?? all.items[0]!;
   const decide = (status: string) => {
     all.update(expense.id, { status });
-    nav_.go("screen.queue");
+    navigate.go("screen.queue");
   };
   return (
-    <Screen nav={nav}>
+    <Shell>
       <Heading id="heading.detail" text={`Expense ${expense.id}`} />
       <Detail
         id="detail.expense"
@@ -209,23 +227,73 @@ function ExpenseDetail() {
           />
         </Form>
       </Dialog>
+    </Shell>
+  );
+}
+
+function Account() {
+  return (
+    <Shell>
+      <Heading id="heading.account" text="Account" />
+      <Detail id="detail.account" fields={[{ label: "Name", value: user.name }, { label: "Email", value: user.email }]} />
+    </Shell>
+  );
+}
+
+function Settings() {
+  const navigate = useNav();
+  return (
+    <Shell>
+      <Heading id="heading.settings" text="Settings" />
+      <Form
+        id="form.settings"
+        onSubmit={() => navigate.go("screen.queue")}
+        actions={<Button id="btn.save-settings" label="Save settings" emphasis="primary" submit />}
+      >
+        <Field id="field.digest" label="Email me a daily digest" type="switch" defaultValue="on" />
+      </Form>
+    </Shell>
+  );
+}
+
+function SignedOut() {
+  return (
+    <Screen>
+      <Heading id="heading.signed-out" text="You are signed out" />
+      <Button id="btn.sign-in" label="Sign in" emphasis="primary" to="screen.queue" />
     </Screen>
   );
 }
 
 export default defineApp({
-  screens: { "screen.queue": Queue, "screen.detail": ExpenseDetail },
+  screens: {
+    "screen.queue": Queue,
+    "screen.detail": ExpenseDetail,
+    "screen.account": Account,
+    "screen.settings": Settings,
+    "screen.signed-out": SignedOut,
+  },
   data: { expenses },
 });
 ```
 
 - **One component per manifest screen**, keyed by the screen's id in
   `defineApp({ screens })`: exactly the manifest's screens, no more, no less.
-  Every screen's root is a `<Screen>`.
-- **Share by value.** Write the application's `<Navigation>` once and pass it
-  to every `<Screen nav>`; leave it out for a screen that stands alone (a
-  sign-in page). A navigation item is drawn only for the roles that reach its
-  screen, so one navigation serves every role.
+- **Every screen sits in the app shell.** Write one `<AppShell>` in a small
+  local component (`Shell` above) and make it every screen's root: it draws
+  the product's header, the signed-in user and the user menu (Account,
+  Settings, Sign out) and the side navigation. Its `account`, `settings` and
+  `signOut` are screens you write: an account screen with the user's details,
+  a settings screen with the preferences the application offers, and a
+  signed-out screen. Only that signed-out screen, outside the product, has a
+  bare `<Screen>` as its root, with a way to sign back in.
+  The shell's `menu` adds the application's own user-menu entries (a profile,
+  billing) between Settings and Sign out. A reviewer points at an entry by
+  opening the menu in Preview, then switching to Annotate.
+- **One shell serves every role.** A navigation entry is drawn only for the
+  roles that reach its screen. Give `user` the person each role signs in as
+  (pick by `useRole()` when roles differ); the header shows the viewing role's
+  name beside them.
 - **Read the review through the hooks.** `useDisplayState()` is the display
   state the reviewer chose and `useRole()` the role they view as: branch on
   them to show an error, an empty list, a role's own controls. Show a control
@@ -261,19 +329,19 @@ component, and a component takes no `className` or `style`.
 ### What the reviewer sees
 
 The review renderer draws only what the screen component renders: kit
-components, inside the `<Navigation>` its `<Screen nav>` holds, a side or top
-navigation of its items. A screen without `nav` is drawn with no navigation at
-all.
+components, inside the chrome its `<AppShell>` draws (the header with the
+product's name and the signed-in user, the user menu with Account, Settings
+and Sign out, the side navigation). A bare `<Screen>` is drawn with no chrome
+at all.
 
-Nothing else is drawn automatically. There is no header, user menu, account
-menu, sign-out, notification bell, theme toggle or footer, whatever the built
-application's shell will carry. If a reviewer asks for such chrome, model it in
-the kit: a navigation item, or a Button or Link in the screen's content (a
-Heading's `actions` for the top right) whose `to` is the screen it leads to (an
-account screen, a signed-out screen) or whose `onPress` opens a Drawer (an
-account menu) or a Dialog (a sign-out confirmation). Only if what they ask for
-is outside the kit, say so in your reply and name the limitation. Never tell a
-reviewer the platform draws something for them.
+Nothing else is drawn automatically: no notification bell, search, theme
+toggle, help menu or footer, whatever the built application's shell will
+carry. If a reviewer asks for such chrome, model it in the kit: a navigation
+entry, or a Button or Link in the screen's content (a Heading's `actions` for
+the top right) whose `to` is the screen it leads to or whose `onPress` opens a
+Drawer (a notification list) or a Dialog (a confirmation). Only if what they
+ask for is outside the kit, say so in your reply and name the limitation.
+Never tell a reviewer the platform draws something the screen does not render.
 
 ### The Oxygen look
 
@@ -282,8 +350,8 @@ so a prototype should read as an Oxygen screen. The host applies the theme: the
 source never imports one, never styles anything, and never names Oxygen. Your
 part is composing screens the way an Oxygen application composes them:
 
-- **Page anatomy.** A screen is `<Screen nav>` holding a `<Heading>` (the page
-  title, with its main action Buttons in `actions`), then the content in the
+- **Page anatomy.** A screen is the `<AppShell>` holding a `<Heading>` (the
+  page title, with its main action Buttons in `actions`), then the content in the
   order a user works through it: summary `<Stat>`s, `<Filters>`, the
   `<Table>`, with `<Detail>`, `<Form>` and `<Timeline>` for a single record.
   A sub-page opens with `<Breadcrumbs>` back to its list.
@@ -293,8 +361,8 @@ part is composing screens the way an Oxygen application composes them:
 - **Status is a chip, not prose.** A record's status is a `tone`d table cell or
   a `<Badge>`: `success`, `warning`, `error`, `info`, `default`. Callouts are
   `<Alert>`s with a tone.
-- **Navigation is the side rail.** Prefer `layout="side"` with one item per
-  top-level screen; reserve `"top"` for an application with few screens.
+- **Navigation is the shell's side rail**, one entry per top-level screen.
+  Account and Settings live in the user menu, not the rail.
 - **Records, not cards.** Show a list of records as a `<Table>` whose rows
   open the record; use `<Grid>` of `<Stat>`s for headline numbers and
   `<Split>` for a record next to its activity.
@@ -378,11 +446,31 @@ The fixed date every prototype treats as today (ISO `YYYY-MM-DD`).
 
 ### Layout
 
+#### `<AppShell>`
+
+The root of a screen inside the product's chrome: header, user menu and side navigation. Use `<Screen>` for a screen outside it (signed out).
+
+- `id: string` — The shell's id; its user menu's elements are `<id>.user`, `<id>.account`, `<id>.settings` and `<id>.sign-out`.
+- `product?: string` — The product's name in the header; prototype.json's `name` by default.
+- `user: AppShellUser` — The signed-in user the header shows.
+- `nav: NavigationItem[]` — The side navigation's entries.
+- `account: string` — The screen the user menu's Account entry opens.
+- `settings: string` — The screen the user menu's Settings entry opens.
+- `signOut: string` — The screen Sign out leads to: a signed-out screen, drawn on a bare `<Screen>`.
+- `menu?: NavigationItem[]` — More user-menu entries (a profile, billing), drawn after Account and Settings and before Sign out.
+- `children?: ReactNode` — The screen's content.
+
+#### `AppShellUser`
+
+- `name: string`
+- `email?: string` — Shown under the name in the user menu.
+- `role?: string` — The role beside the name; the viewing role's name in prototype.json by default, so a role switch shows in the header.
+
 #### `<Screen>`
 
-The root of every screen: its navigation and its content.
+The root of a screen outside the app shell (signed out, a landing page): its content, and navigation if any.
 
-- `nav?: ReactNode` — The app's navigation: one `<Navigation>`, usually shared by every screen.
+- `nav?: ReactNode` — Navigation for an app drawn without `<AppShell>`: one `<Navigation>`, usually shared by every screen.
 - `children?: ReactNode`
 
 #### `<Stack>`
@@ -424,7 +512,7 @@ A read-only record: label/value pairs.
 
 #### `<Navigation>`
 
-The app's own chrome. Pass it to every `<Screen nav>`. Its items are what a reviewer points at.
+Navigation for an app drawn on `<Screen nav>` (`<AppShell nav>` draws its own). Its items are what a reviewer points at.
 
 - `id: string`
 - `layout: "side" | "top"`

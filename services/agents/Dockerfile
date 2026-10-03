@@ -64,12 +64,13 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 # for agent-stream's tsc to resolve them. @aep/agents imports the kit's isolated
 # render check (@wso2/prototype-kit/check) and runs it on the Oxygen theme's
 # prebuilt check runtime, which the theme's build writes to
-# dist/check-runtime.js; the theme builds after the kit it bundles.
+# dist/check-runtime.js; the theme builds after the kit and @aep/ui-theme (the
+# console's Oxygen theme) it bundles.
 # Without this step the container crashes at boot with "Cannot find module
 # .../@aep/agent-stream/dist" (or the collab-doc analog). These depend only on
 # packages/, so an agents-source edit doesn't rerun them.
 RUN pnpm --filter @aep/excalidraw-dsl build && pnpm --filter @wso2/prototype-kit build \
-    && pnpm --filter @wso2/prototype-theme-oxygen build && pnpm --filter @aep/agent-stream build && pnpm --filter @aep/collab-doc build \
+    && pnpm --filter @aep/ui-theme build && pnpm --filter @wso2/prototype-theme-oxygen build && pnpm --filter @aep/agent-stream build && pnpm --filter @aep/collab-doc build \
     && pnpm --filter @aep/web-search build
 
 # Service source LAST: an agents-only change invalidates only this COPY (install

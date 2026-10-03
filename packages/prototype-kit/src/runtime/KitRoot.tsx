@@ -49,6 +49,8 @@ export interface KitRootProps {
   onData?: ((snapshot: DataSnapshot) => void) | undefined;
   /** A screen failed to render, or the app asked for a screen that does not exist. */
   onError?: ((message: string) => void) | undefined;
+  /** The scheme the theme draws in (the host's); the theme's own choice when absent. */
+  colorScheme?: "light" | "dark" | undefined;
 }
 
 const NO_PARAMS: Readonly<Record<string, string>> = Object.freeze({});
@@ -57,7 +59,7 @@ function Passthrough({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-export function KitRoot({ app, manifest, theme, view, initialData, onNavigate, onToggle, onData, onError }: KitRootProps) {
+export function KitRoot({ app, manifest, theme, view, initialData, onNavigate, onToggle, onData, onError, colorScheme }: KitRootProps) {
   const onDataRef = useRef(onData);
   onDataRef.current = onData;
   const [store] = useState(() => createDataStore(app.data, initialData, (snapshot) => onDataRef.current?.(snapshot)));
@@ -91,7 +93,7 @@ export function KitRoot({ app, manifest, theme, view, initialData, onNavigate, o
   return (
     <ThemeContext.Provider value={theme.registry}>
       <KitContext.Provider value={ctx}>
-        <Provider>
+        <Provider colorScheme={colorScheme}>
           <style>{KIT_CSS}</style>
           <div className="proto-scene" data-proto-mode={view.mode}>
             {Screen ? (

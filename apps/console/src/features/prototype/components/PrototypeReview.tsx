@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import { Alert, Box, Chip, CircularProgress, Dialog, IconButton, Tooltip, Typography } from "@wso2/oxygen-ui";
+import { Alert, Box, Chip, CircularProgress, Dialog, IconButton, Tooltip, Typography, useColorScheme } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import {
   PrototypeFrame,
@@ -91,6 +91,13 @@ function Header({
  */
 function closesOnEscape(event: { target: EventTarget | null }): boolean {
   return !(event.target instanceof HTMLIFrameElement);
+}
+
+/** The console's scheme as it draws now (its mode, or the system's under "system"), for the prototype to match. */
+function useResolvedScheme(): "light" | "dark" | undefined {
+  const { mode, systemMode } = useColorScheme();
+  const resolved = mode === "system" ? systemMode : mode;
+  return resolved === "light" || resolved === "dark" ? resolved : undefined;
 }
 
 function Waiting({ children }: { children: ReactNode }) {
@@ -172,6 +179,7 @@ function Session({
   onClose,
 }: PrototypeReviewProps & { titleId: string; files: PrototypeFiles; runtime: string; revising: boolean }) {
   const hash = usePrototypeHash(files.manifestText, files.source);
+  const colorScheme = useResolvedScheme();
   const { manifest } = files;
   useEffect(() => {
     onSeen(hash);
@@ -237,6 +245,7 @@ function Session({
             version={hash}
             view={frameView}
             resetToken={resetToken}
+            colorScheme={colorScheme}
             onNavigate={(screenId) => {
               // The frame is untrusted: only Preview navigates (the reducer checks the target against the role).
               if (view.mode === "preview") dispatch({ type: "NAVIGATE", screenId });
@@ -244,6 +253,16 @@ function Session({
             onToggle={(elementKey) => dispatch({ type: "TOGGLE_SELECTION", elementKey })}
             onEscape={() => (view.selectedKeys.length > 0 ? dispatch({ type: "CLEAR_SELECTION" }) : onClose())}
             onElements={(_screenId, elements) => setLabels(Object.fromEntries(elements.map((e) => [e.key, e.label])))}
+            loading={
+              <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", bgcolor: "background.default" }}>
+                <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1.5 }}>
+                  <CircularProgress size={28} aria-hidden />
+                  <Typography variant="body2" color="text.secondary">
+                    Starting the prototype…
+                  </Typography>
+                </Box>
+              </Box>
+            }
           />
         </Box>
         {(annotating || requests.length > 0) && (

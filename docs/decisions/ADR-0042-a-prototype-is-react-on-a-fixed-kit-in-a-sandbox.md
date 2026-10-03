@@ -24,7 +24,7 @@ AEP: Oxygen, AEP paths, no CLI, unpublished.
    `prototype.tsx`, React that imports only `react` and `@wso2/prototype-kit`.
 2. **A fixed kit owns the runtime.** `defineApp`, navigation/role/state hooks,
    a mock data store (collections with deterministic ids, single values, a
-   fixed today) and 25 neutral components. A component is a stub: the kit owns
+   fixed today) and neutral components (25 at first; the app shell made 26). A component is a stub: the kit owns
    element ids, selection and press semantics; a theme registry draws it. The
    registry is a mapped type, so a theme missing a component does not compile.
 3. **Checked before anyone sees it.** `prototype check` runs, in order: the
@@ -51,10 +51,26 @@ AEP: Oxygen, AEP paths, no CLI, unpublished.
   is wired in the console (`/prototype`, review and Annotate: [console
   design note](../../apps/console/design/prototype-review.md)). Nothing in a
   prototype names AEP.
-- `@wso2/prototype-theme-oxygen` draws the kit on Oxygen UI. Its runtimes
-  cannot be tree-shaken: the frame is about 2.1 MB (722 KB gzip) and the check
-  runtime 1.5 MB, against 0.9 MB and 0.24 MB for the default theme. The console
-  loads the frame runtime lazily, on first review.
+- `@wso2/prototype-theme-oxygen` draws the kit on Oxygen UI's own layout kit
+  (`AppShell`, `Header`, `Sidebar`, `PageTitle`, `PageContent`,
+  `ListingTable`) under the console's theme (`@aep/ui-theme`, through
+  `OxygenUIThemeProvider`), so a prototype looks like the console. Oxygen's
+  runtimes cannot be tree-shaken: the frame is about 1.7 MB (630 KB gzip) and
+  the check runtime 1.5 MB, against 0.44 MB and 0.24 MB for the default theme.
+  The frame no longer parses the manifest (the host hands `PrototypeFrame` a
+  parsed one), which keeps the schema validator out of it. The console loads
+  the frame runtime lazily, on first review, and `PrototypeFrame` covers the
+  frame with a loading state until the app first draws, so an early click is
+  not lost; a frame that dies or stalls says so instead. The host's resolved
+  colour scheme travels in the view, so a prototype is light or dark with the
+  console.
+- The kit has an app shell (`<AppShell>`: product, signed-in user, user menu
+  with Account, Settings, Sign out and the prototype's own entries, side
+  navigation), the 26th component,
+  and the prototype skill makes it every screen's root. A prototype on bare
+  `<Screen>`s stays valid. Its user menu's targets are required props, and a
+  theme keeps the closed menu's entries in the markup so the render check
+  verifies them.
 - The stage is gated at three places, one rule set: the agent's write
   (`agent-stream`, with the isolated render check run by the agents service),
   the Go save gate (manifest schema, references and the static source floor,

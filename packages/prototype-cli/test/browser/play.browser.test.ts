@@ -42,6 +42,11 @@ describe("prototype preview — playing a prototype", () => {
     await driver.waitFor(page, app.heading("Acme contacts"));
   });
 
+  it("covers the app while it starts and uncovers it once it draws", async () => {
+    await driver.waitFor(page, host.text("Loading the prototype…"), "hidden");
+    expect(await driver.read(page, { where: "host", role: "status" }, "count")).toBe(0);
+  });
+
   it("navigates with params: a row opens that contact, and the host follows", async () => {
     await driver.click(page, app.row("Alan Turing"));
     await driver.waitFor(page, app.heading("Alan Turing"));
@@ -236,5 +241,70 @@ describe("prototype preview — stepper", () => {
     await driver.waitFor(page, app.field("Amount"));
     await driver.click(page, { where: "app", role: "button", name: "Review", partial: true });
     await driver.waitFor(page, app.button("Submit for approval"));
+  });
+});
+
+describe("prototype preview — the app shell", () => {
+  let preview: Preview;
+  let page: string;
+  const entry = (name: string) => ({ where: "app" as const, role: "menuitem", name });
+
+  beforeAll(async () => {
+    preview = await driver.startPreview("app-shell");
+    page = await driver.openPage(preview.url);
+  });
+
+  afterAll(async () => {
+    await driver.closePage(page);
+    await driver.stopPreview(preview.id);
+  });
+
+  it("opens Account and Settings from the user menu, shows the viewing role's user, and signs out and back in", async () => {
+    await driver.waitFor(page, app.heading("My requests"));
+    await driver.click(page, app.button("Dana Lee"));
+    await driver.waitFor(page, app.text("Employee"));
+    await driver.click(page, entry("Account"));
+    await driver.waitFor(page, app.heading("Account"));
+    expect(await driver.read(page, host.picker("Screen"), "value")).toBe("screen.account");
+    await driver.waitFor(page, entry("Settings"), "hidden");
+
+    // A navigation entry shows only for the role that reaches its screen, and the header follows the role.
+    expect(await driver.count(page, app.element("nav.team"))).toBe(0);
+    expect(await driver.count(page, app.element("menu.team"))).toBe(0);
+    await driver.select(page, host.picker("Role"), "Manager");
+    await driver.waitFor(page, app.button("Priya Shah"));
+    await driver.waitFor(page, app.element("nav.team"));
+
+    await driver.click(page, app.button("Priya Shah"));
+    await driver.waitFor(page, entry("My team"));
+    await driver.click(page, entry("Sign out"));
+    await driver.waitFor(page, app.heading("You are signed out"));
+    expect(await driver.count(page, app.button("Priya Shah"))).toBe(0);
+    await driver.click(page, app.button("Sign in"));
+    await driver.waitFor(page, app.heading("My requests"));
+  });
+
+  it("selects the user menu in Annotate instead of opening it", async () => {
+    await driver.click(page, host.button("Annotate"));
+    await driver.frameMode(page, "annotate");
+    await driver.click(page, app.element("shell.user"));
+    await driver.waitFor(page, host.text("Selected: Priya Shah"));
+    expect(await driver.count(page, entry("Account"))).toBe(0);
+    await driver.click(page, host.button("Preview"));
+  });
+});
+
+describe("prototype preview — a frame runtime that fails as it loads", () => {
+  it("says why instead of leaving the loading cover up", async () => {
+    const p = await driver.startPreviewOnFrameRuntime("baseline", 'throw new Error("the theme failed to load");');
+    const pg = await driver.openPage(p.url);
+    try {
+      await driver.waitFor(pg, { where: "host", role: "alert" });
+      expect(await driver.read(pg, { where: "host", role: "alert" }, "text")).toContain("the theme failed to load");
+      expect(await driver.count(pg, { where: "host", role: "status" })).toBe(0);
+    } finally {
+      await driver.closePage(pg);
+      await driver.stopPreview(p.id);
+    }
   });
 });
