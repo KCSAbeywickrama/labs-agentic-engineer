@@ -42,7 +42,7 @@ export interface ThemeDialogProps {
   /** The title element's DOM id, for `aria-labelledby`. */
   titleId: string;
   open: boolean;
-  /** Close on Escape, on the backdrop, or on a close control. */
+  /** Close on Escape (a theme calls `preventDefault()` on the Escape it uses, so the frame does not pass it to the host), on the backdrop, or on a close control. */
   onClose: () => void;
   children?: ReactNode;
   actions?: ReactNode;

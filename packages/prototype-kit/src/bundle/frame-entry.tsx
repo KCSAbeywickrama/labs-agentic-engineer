@@ -41,6 +41,13 @@ function post(message: FromFrameMessage) {
   window.parent.postMessage(message, "*");
 }
 
+/** Whether the key is the prototype's own: a control inside it closed a picker or an overlay with it, so the host must not act on it. */
+function prototypeUsedEscape(e: KeyboardEvent): boolean {
+  if (e.defaultPrevented) return true;
+  const t = e.target;
+  return t instanceof HTMLElement && (t.isContentEditable || t.matches("input, select, textarea"));
+}
+
 interface Loaded {
   app: PrototypeApp;
   manifest: PrototypeManifest;
@@ -133,7 +140,7 @@ function Frame({ theme }: { theme: PrototypeTheme }) {
       setView(message.view);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") post({ type: "proto:escape" });
+      if (e.key === "Escape" && !prototypeUsedEscape(e)) post({ type: "proto:escape" });
     };
     window.addEventListener("message", onMessage);
     window.addEventListener("keydown", onKey);

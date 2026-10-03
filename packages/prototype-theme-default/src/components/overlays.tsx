@@ -40,7 +40,10 @@ export function Dialog({ title, titleId, open, onClose, children, actions }: The
         className="pt-dialog"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
-          if (e.key === "Escape") onClose();
+          if (e.key !== "Escape") return;
+          // Used here, so the frame does not hand it on to the host.
+          e.preventDefault();
+          onClose();
         }}
       >
         <h2 id={titleId}>{title}</h2>

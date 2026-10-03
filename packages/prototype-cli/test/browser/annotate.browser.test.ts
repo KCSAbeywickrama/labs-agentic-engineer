@@ -143,3 +143,31 @@ describe("prototype preview — Annotate limits", () => {
     }
   });
 });
+
+describe("prototype preview — Escape", () => {
+  it("clears the selection on Escape in the page, but not on Escape in a focused form control", async () => {
+    const p = await driver.startPreview("expense-approval");
+    const pg = await driver.openPage(p.url);
+    try {
+      await driver.waitFor(pg, app.heading("Approval queue"));
+      await driver.click(pg, host.button("Annotate"));
+      await driver.click(pg, app.element("heading.queue"));
+      expect(await driver.read(pg, app.element("heading.queue"), "pressed")).toBe("true");
+
+      // Annotate makes the controls read-only, so enable one: Escape closing its native picker is the prototype's own,
+      // and the host (whose only reaction to Escape is clearing the selection) must leave the selection alone.
+      await driver.evalInApp(pg, `document.querySelectorAll("select").forEach((s) => (s.disabled = false))`);
+      await driver.press(pg, { where: "app", role: "combobox", name: "Team" }, "Escape");
+      await driver.evalInApp(pg, `new Promise((r) => setTimeout(r, 500))`);
+      expect(await driver.read(pg, app.element("heading.queue"), "pressed")).toBe("true");
+
+      // Escape on the page itself is the host's.
+      await driver.evalInApp(pg, `document.activeElement.blur(); document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+      await driver.waitFor(pg, host.text("Selected: Approval queue"), "hidden");
+      expect(await driver.read(pg, app.element("heading.queue"), "pressed")).toBe("false");
+    } finally {
+      await driver.closePage(pg);
+      await driver.stopPreview(p.id);
+    }
+  });
+});
