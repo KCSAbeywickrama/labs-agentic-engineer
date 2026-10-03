@@ -81,7 +81,9 @@ Three public packages, usable with no AEP: `@wso2/prototype-kit` (the API a
 checks, review feedback, the sandboxed frame host and the theme build helper),
 `@wso2/prototype-theme-default` (plain React + CSS) and `@wso2/prototype-cli`
 (`prototype init | check | preview | export`). `@wso2/prototype-theme-oxygen`
-draws the same kit on Oxygen UI, so AEP's prototypes look like WSO2 products.
+draws the same kit on Oxygen UI's layout kit with the console's own theme
+(`@aep/ui-theme`, `packages/ui/theme`), so AEP's prototypes look like the
+console and other WSO2 products.
 The manifest's JSON Schema is committed at `packages/prototype-kit/schema/prototype-manifest.schema.json`; the
 kit reference an agent writes against is generated to
 `packages/prototype-kit/reference.md`. Each package's `design/README.md` has

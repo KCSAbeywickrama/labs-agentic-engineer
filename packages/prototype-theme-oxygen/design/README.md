@@ -10,19 +10,45 @@ by those two subpaths.
 
 ## Choices
 
-- **Provider.** Oxygen's base theme with sentence-case buttons (as the console
-  sets them), pinned to light with `storageManager={null}`: the frame has no
-  storage, and the frame and the render check must draw the same. The kit's
-  Annotate colour (`--proto-select`) is Oxygen's primary.
+- **Provider.** The console's own theme (`aepTheme` from `@aep/ui-theme`)
+  through Oxygen's `OxygenUIThemeProvider`, as the console's `main.tsx`
+  applies it, so a prototype cannot drift from the console. One fixed theme:
+  no theme switching, so nothing is fetched or stored. MUI's colour-scheme
+  storage is guarded and finds none in the frame, so the scheme follows the
+  system, the console's default. The kit's Annotate colour (`--proto-select`)
+  is the theme's primary.
 - **Nothing loaded.** Emotion injects styles inline; Oxygen ships Inter as
   `data:` fonts (the frame CSP allows `font-src data:`).
+- **Oxygen's templates first.** Where Oxygen has a component for a kit
+  component and it fits the kit's contract, the theme uses it:
+
+  | kit | Oxygen |
+  |---|---|
+  | `AppShell` | `AppShell` + `Header` (brand title) + `Sidebar` + `PageContent`; user menu: `Menu` + `UserMenu.Header` |
+  | `Screen` | `PageContent` (beside a `<Navigation>`) |
+  | `Navigation` side / top | `Sidebar` / hand-built tab row (Oxygen has no top nav) |
+  | `Heading` page / section | `PageTitle` (+ `Actions`) / `Typography` |
+  | `Table` | `ListingTable` (`Container`, `Head`, `Body`, `Row`, `Cell`) |
+  | `EmptyState` | `ListingTable.EmptyState` in a `Card` |
+  | `Stat` | `StatCard` |
+  | `Breadcrumbs` | MUI `Breadcrumbs` with `AppBreadcrumbs`' chevron |
+  | the rest | Oxygen's MUI components (`Button`, `Chip`, `Alert`, `TextField`, `Tabs`, `Stepper`, `Card`, `Paper`) |
+
+  Not used, because they do not fit: `UserMenu` whole (its menu portals out of
+  the scene, and its entries take no element props, so they cannot carry the
+  kit's selectable roots and targets; composed as the console's own user menu
+  is instead) and `AppBreadcrumbs` (its crumbs take no element props either).
+  `Sidebar.Item` takes the kit's root through its `link` slot.
 - **No portals.** Dialog and Drawer are drawn in place on Oxygen `Paper`, not
   MUI's `Modal`: a portal leaves the kit's scene (Annotate would not reach
   inside) and draws nothing in the render check. Selects are native for the
-  same reason.
-- **Selectable roots.** Rows, nav items, tabs, steps and crumbs spread the
-  kit's `SelectableRootProps`; `components/root.ts` drops undefined entries so
-  they type-check against `ButtonBase`.
+  same reason. The user menu is a `Menu` kept in place (`disablePortal`) and
+  mounted while closed (`keepMounted`), so the render check sees its targets;
+  its modal's `container` is the trigger's parent, or it would hide the whole
+  app from assistive technology.
+- **Selectable roots.** Rows, nav items, tabs, steps, crumbs and menu entries
+  spread the kit's `SelectableRootProps`; `components/root.ts` drops undefined
+  entries so they type-check against `ButtonBase`.
 - **Required fields** show Oxygen's asterisk; it is `aria-hidden`, so a
   field's accessible name is its label.
 
@@ -37,12 +63,16 @@ kit's `buildThemeRuntimes`.
 ## Size
 
 Oxygen's bundle cannot be tree-shaken (it pulls in `@mui/x-data-grid`, Prism
-and the inlined fonts with any import). Measured 2026-10-03, minified:
+and the inlined fonts, about 290 KB, with any import). Measured 2026-10-03,
+minified:
 
 | runtime | Oxygen | gzip | default theme | gzip |
 |---|---|---|---|---|
-| `frame-runtime.js` | 2.13 MB | 722 KB | 0.89 MB | 213 KB |
-| `check-runtime.js` | 1.49 MB | 584 KB | 0.24 MB | 73 KB |
+| `frame-runtime.js` | 1.68 MB | 630 KB | 0.44 MB | 121 KB |
+| `check-runtime.js` | 1.50 MB | 587 KB | 0.24 MB | 74 KB |
+
+The frame was 2.13 MB (722 KB gzip) until it stopped parsing the manifest
+(zod, about 450 KB minified, now stays in the host).
 
 `@wso2/oxygen-ui-icons-react` imports a small CSS file (Lucide stroke width),
 so esbuild also writes `frame-runtime.css` and `check-runtime.css`. Nothing
@@ -52,9 +82,11 @@ loads them; icons draw at Lucide's default stroke.
 
 `test/check.test.ts` runs the CLI's `prototype check --theme` over the CLI's
 fixtures: every valid one passes, and each render-stage failure reports what
-the default theme reports. `pnpm test:browser` plays three fixtures under
-`prototype preview --theme` in Chromium (navigation, forms, tabs, dialog,
-drawer, stepper, Annotate, no requests beyond the preview server).
+the default theme reports (the app shell's included). `pnpm test:browser`
+plays four fixtures under `prototype preview --theme` in Chromium (navigation,
+forms, tabs, dialog, drawer, stepper, the app shell's user menu, role and sign
+out, Annotate, the host's loading cover, no requests beyond the preview
+server).
 It also fails on any uncaught error in the page or its sandboxed frame. The
 frame has no `allow-same-origin`, so `localStorage` throws there; Oxygen and
 MUI X only touch it inside try/catch (a probe, `storageManager={null}` for the

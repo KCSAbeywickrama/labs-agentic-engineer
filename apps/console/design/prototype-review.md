@@ -66,6 +66,11 @@ feedback by number, and refuses a bad batch as Go does.
 
 ## Theme
 
-`@wso2/prototype-theme-oxygen`. Its frame has no storage (opaque origin), so a
-script that touches `localStorage` in every frame (for example a Playwright
-init script) raises there; limit it to the top frame.
+`@wso2/prototype-theme-oxygen`, drawn with the console's own theme
+(`@aep/ui-theme`, the `aepTheme` `main.tsx` applies), so the prototype and the
+console cannot drift. Until the frame's app first draws, the review passes
+`PrototypeFrame` a loading state ("Starting the prototype…") that covers the
+frame, so a click while the runtime starts is not lost. Its frame has no
+storage (opaque origin), so a script that touches `localStorage` in every
+frame (for example a Playwright init script) raises there; limit it to the top
+frame.

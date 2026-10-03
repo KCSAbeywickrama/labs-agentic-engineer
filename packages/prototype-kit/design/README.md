@@ -16,6 +16,14 @@ steps, navigation entries and crumbs), applies press semantics (`onPress`, then
 therefore behaves the same under every theme. `KitComponentProps` lists every
 component's theme props; `ThemeRegistry` maps over it.
 
+`<AppShell>` is a screen's root inside the product's chrome: product name,
+signed-in user (role label defaults to the viewing role's name), side
+navigation, and a user menu whose Account, Settings and Sign out entries open
+screens the prototype names (`account`, `settings`, `signOut`; required, a
+missing one throws). Entries the role cannot reach are not drawn, as for
+`<Navigation>`. A theme keeps the closed menu's entries in the markup, so the
+render check sees their `to` and ids. A bare `<Screen>` stays valid.
+
 ## Store
 
 Seeded from `defineApp({ data })`. An array whose records all have a string `id`
@@ -80,7 +88,13 @@ The reducer owns view state. `NAVIGATE` only moves to a screen reachable for the
 current role. `proto:data` snapshots are shape-validated with a bounded walk
 (cycles rejected, node cap) before a host persists them (`isDataSnapshot`).
 `PrototypeFrame` re-sends `load` on every frame `ready`, so a reloaded frame
-recovers. The host ignores frame navigation outside Preview.
+recovers. The host ignores frame navigation outside Preview. Until the frame
+first draws (`proto:rendered` or `proto:error`) after its latest `ready`,
+`PrototypeFrame` covers it with its `loading` node (a plain "Loading the
+prototype…" by default), so a click while the large runtime starts is not
+silently lost. The frame does not parse the manifest: the host passes a parsed
+`PrototypeManifest`, which keeps zod (about 450 KB minified) out of every
+frame runtime.
 
 ## Build helper
 
