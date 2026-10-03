@@ -508,7 +508,7 @@ importers:
     dependencies:
       '@wso2/oxygen-ui':
         specifier: 0.14.0
-        version: 0.14.0(@mui/system@7.3.11)(@types/react@19.1.6)(@wso2/oxygen-ui-icons-react@0.14.0)(react-dom@19.2.3)(react@19.2.3)
+        version: 0.14.0(@mui/system@7.3.11(@emotion/react@11.14.0(@types/react@19.1.6)(react@19.2.3))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.1.6)(react@19.2.3))(@types/react@19.1.6)(react@19.2.3))(@types/react@19.1.6)(react@19.2.3))(@types/react@19.1.6)(@wso2/oxygen-ui-icons-react@0.14.0(react@19.2.3))(dayjs@1.11.21)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@wso2/oxygen-ui-icons-react':
         specifier: 0.14.0
         version: 0.14.0(react@19.2.3)
@@ -518,7 +518,7 @@ importers:
     devDependencies:
       '@types/node':
         specifier: ^22
-        version: 22.20.5
+        version: 22.20.1
       '@types/react':
         specifier: 19.1.6
         version: 19.1.6
@@ -548,7 +548,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.10
-        version: 4.1.11(@types/node@22.20.5)(@vitest/browser-playwright@4.1.10)(vite@7.3.6)
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(@vitest/browser-playwright@4.1.10)(jsdom@29.1.1)(msw@2.14.6(@types/node@22.20.1)(typescript@5.9.3))(vite@7.3.6(@types/node@22.20.1)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.0))
 
   packages/sse-cassette:
     dependencies:
