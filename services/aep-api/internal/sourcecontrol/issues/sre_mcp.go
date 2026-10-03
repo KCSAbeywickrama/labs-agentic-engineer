@@ -17,12 +17,14 @@
 package issues
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 	"github.com/wso2/aep/aep-api/internal/platform/mcprpc"
@@ -33,11 +35,18 @@ import (
 // The OpenChoreo SRE agent's remediation handoff: an MCP surface with exactly
 // two tools, search_related_issues and create_issue (the agent sees them as
 // ae_search_related_issues and ae_create_issue, after its "ae" server name).
-// They call the issue service in process, on behalf of the one org the
-// installation's SRE agent serves. The caller is authenticated before this
-// handler runs (auth.SREHandoffVerifier); the handler binds that org and the
-// handoff's incident context, which CreateIssue requires before it accepts the
-// componentName and actionStatuses only a trusted handoff may send.
+// They call the issue service in process. The caller is authenticated before
+// this handler runs (auth.SREHandoffVerifier).
+//
+// One SRE agent serves every org on its observability plane, so each call
+// names the org: the namespace from the alert it is handling. That argument
+// comes from a model that also reads pod logs, so it is a claim, not an
+// identity: before either tool reads or writes anything, the observer must
+// have recorded an alert for that namespace and project (and, for a create,
+// that component) within sreAlertWindow. Only then does the handler bind the
+// namespace as the org, with the handoff's incident context, which CreateIssue
+// requires before it accepts the componentName and actionStatuses only a
+// trusted handoff may send.
 
 // sreHandoffIncidentID is the incident context bound for every SRE-filed
 // issue. CreateIssue derives the dedupe key from it with the org, project and
@@ -45,6 +54,22 @@ import (
 // signature: there is no per-request signal this transport could bind that
 // would mean anything finer.
 const sreHandoffIncidentID = "sre-handoff"
+
+// sreAlertWindow is how recent an alert must be for a tool call to act on
+// it, counted back from the call. The agent calls the tools minutes after the
+// alert that started its RCA, and a recurring incident brings a fresh alert
+// each time, so an hour (the observer's own alert suppression window, the span
+// it already treats as one incident) leaves ample room for a queued analysis
+// while a long-gone incident authorizes nothing.
+const sreAlertWindow = time.Hour
+
+// AlertVerifier confirms against the observer's record that an alert fired
+// for namespace, project and component (any component in the project when
+// component is empty) since since. clients/observability.AlertQuerier is the
+// production implementation.
+type AlertVerifier interface {
+	RecentAlert(ctx context.Context, namespace, project, component string, since time.Time) (bool, error)
+}
 
 // sreHandoffLabels are added to every SRE-filed issue: the handoff is by
 // definition a defect report about a live incident.
@@ -64,18 +89,18 @@ const (
 // report even when it also carries the development label.
 var kindsOutrankingPlan = []string{"provision", "validation", "conflict", "bug"}
 
-// NewSREMCPHandler serves the SRE handoff's MCP tools for org. issues may be
-// nil, which answers every request 503, as the REST handler does.
-func NewSREMCPHandler(issues sourcecontrol.IssueService, org string) http.Handler {
+// NewSREMCPHandler serves the SRE handoff's MCP tools, verifying every call's
+// namespace with alerts. issues or alerts nil answers every request 503: the
+// tools cannot act, or cannot act safely.
+func NewSREMCPHandler(issues sourcecontrol.IssueService, alerts AlertVerifier) http.Handler {
 	server := mcprpc.Server{
 		Name: "aep-sre-handoff", Version: "1.0.0", Tools: sreTools(),
 		Call: func(w http.ResponseWriter, r *http.Request, req mcprpc.Request) {
-			ctx := sourcecontrol.WithIncidentContext(tenant.WithBoundOrg(r.Context(), org), sreHandoffIncidentID)
-			callSRETool(w, r.WithContext(ctx), issues, org, req)
+			callSRETool(w, r, issues, alerts, req)
 		},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if issues == nil {
+		if issues == nil || alerts == nil {
 			http.Error(w, "issue service not configured", http.StatusServiceUnavailable)
 			return
 		}
@@ -84,6 +109,7 @@ func NewSREMCPHandler(issues sourcecontrol.IssueService, org string) http.Handle
 }
 
 type sreToolArgs struct {
+	Namespace      string    `json:"namespace"`
 	Project        string    `json:"project"`
 	Query          string    `json:"query"`
 	Labels         []string  `json:"labels"`
@@ -93,7 +119,7 @@ type sreToolArgs struct {
 	ActionStatuses []*string `json:"actionStatuses"`
 }
 
-func callSRETool(w http.ResponseWriter, r *http.Request, issues sourcecontrol.IssueService, org string, req mcprpc.Request) {
+func callSRETool(w http.ResponseWriter, r *http.Request, issues sourcecontrol.IssueService, alerts AlertVerifier, req mcprpc.Request) {
 	var call struct {
 		Name      string      `json:"name"`
 		Arguments sreToolArgs `json:"arguments"`
@@ -103,15 +129,31 @@ func callSRETool(w http.ResponseWriter, r *http.Request, issues sourcecontrol.Is
 		return
 	}
 	args := call.Arguments
-	slog.InfoContext(r.Context(), "sre handoff tool call", "org", org, "tool", call.Name, "project", args.Project)
-	if args.Project == "" {
-		mcprpc.WriteToolError(w, req.ID, "missing required argument: project")
+	slog.InfoContext(r.Context(), "sre handoff tool call", "namespace", args.Namespace, "tool", call.Name, "project", args.Project)
+	if args.Namespace == "" || args.Project == "" {
+		mcprpc.WriteToolError(w, req.ID, "missing required argument: namespace and project are both required")
 		return
 	}
+	// search_related_issues needs a recent alert anywhere in the project;
+	// create_issue one on the component it files about.
+	component := ""
+	if call.Name == "create_issue" {
+		if args.ComponentName == "" {
+			mcprpc.WriteToolError(w, req.ID, "missing required argument: componentName")
+			return
+		}
+		component = args.ComponentName
+	}
+	if msg, ok := verifyIncident(r.Context(), alerts, args.Namespace, args.Project, component); !ok {
+		mcprpc.WriteToolError(w, req.ID, msg)
+		return
+	}
+	org := args.Namespace
+	ctx := sourcecontrol.WithIncidentContext(tenant.WithBoundOrg(r.Context(), org), sreHandoffIncidentID)
 
 	switch call.Name {
 	case "search_related_issues":
-		found, err := issues.ListIssues(r.Context(), org, args.Project, args.Labels)
+		found, err := issues.ListIssues(ctx, org, args.Project, args.Labels)
 		if err != nil {
 			mcprpc.WriteToolError(w, req.ID, listIssuesFailure(err))
 			return
@@ -133,7 +175,7 @@ func callSRETool(w http.ResponseWriter, r *http.Request, issues sourcecontrol.Is
 				return
 			}
 		}
-		issue, err := issues.CreateIssue(r.Context(), org, args.Project, sourcecontrol.CreateIssueRequest{
+		issue, err := issues.CreateIssue(ctx, org, args.Project, sourcecontrol.CreateIssueRequest{
 			Title:          args.Title,
 			Body:           args.Body,
 			Labels:         withSREHandoffLabels(args.Labels),
@@ -148,6 +190,40 @@ func callSRETool(w http.ResponseWriter, r *http.Request, issues sourcecontrol.Is
 	default:
 		mcprpc.WriteToolError(w, req.ID, "unknown tool: "+call.Name)
 	}
+}
+
+// verifyIncident checks the call's namespace, project and component against
+// the observer's recent alerts, answering the tool error to return when it
+// does not hold. The agent may name a component as AE's design does
+// ("service1") or as OpenChoreo does ("<project>-service1"); the observer
+// knows the second, so the first is tried with the project prefix too. An
+// observer that cannot answer fails the call closed.
+func verifyIncident(ctx context.Context, alerts AlertVerifier, namespace, project, component string) (string, bool) {
+	since := time.Now().Add(-sreAlertWindow)
+	candidates := []string{component}
+	if component != "" && !strings.HasPrefix(component, project+"-") {
+		candidates = append(candidates, project+"-"+component)
+	}
+	for _, c := range candidates {
+		ok, err := alerts.RecentAlert(ctx, namespace, project, c, since)
+		if err != nil {
+			slog.ErrorContext(ctx, "sre handoff: could not verify the incident", "namespace", namespace, "project", project, "error", err)
+			return "aep-api 503: could not verify the incident with the observer; nothing was done", false
+		}
+		if ok {
+			return "", true
+		}
+	}
+	slog.WarnContext(ctx, "sre handoff: no recent alert backs the call", "namespace", namespace, "project", project, "component", component)
+	return fmt.Sprintf("aep-api 403: no alert in the last %s for namespace %q, project %q%s; nothing was done",
+		strings.TrimSuffix(strings.TrimSuffix(sreAlertWindow.String(), "0s"), "0m"), namespace, project, componentClause(component)), false
+}
+
+func componentClause(component string) string {
+	if component == "" {
+		return ""
+	}
+	return fmt.Sprintf(", component %q", component)
 }
 
 // withSREHandoffLabels appends the handoff labels the caller left out.

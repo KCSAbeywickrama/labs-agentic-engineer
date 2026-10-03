@@ -38,7 +38,7 @@ func renderSreTemplate(t *testing.T, tmpl string, params sreParams) string {
 }
 
 func TestSreAgentValues_ExtraEnvsFromAEOwnedSecret(t *testing.T) {
-	out := renderSreTemplate(t, sreAgentValuesTmpl, sreParams{ObsNamespace: "openchoreo-observability-plane", Org: "default", RcaImageRepo: "ghcr.io/openchoreo/sre-agent", RcaImageTag: "v1.3.0@sha256:abc"})
+	out := renderSreTemplate(t, sreAgentValuesTmpl, sreParams{ObsNamespace: "openchoreo-observability-plane", RcaImageRepo: "ghcr.io/openchoreo/sre-agent", RcaImageTag: "v1.3.0@sha256:abc"})
 	for _, want := range []string{
 		"name: RCA_LLM_API_KEY", "name: RCA_MODEL_NAME", "name: RCA_LLM_BASE_URL", "name: AEP_MCP_TOKEN",
 		"name: sre-agent-aep", "name: EXTENSIONS_DIR", "value: /opt/aep/sre-agent-extensions", "tag: v1.3.0@sha256:abc",

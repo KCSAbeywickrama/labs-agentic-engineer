@@ -275,10 +275,13 @@ postgres:
       memory: "512Mi"
 
 # The OpenChoreo SRE agent's handoff into AE (config.SREHandoffConfig). Off by
-# default; `aectl sre install --org` turns it on and sets org. aep-api then
-# serves the agent's two MCP tools, which search and file the project's issues
-# for org, at /internal/v1/sre-handoff/mcp, and attaches the default
-# "error -> RCA" alert rule to service components.
+# default; `aectl sre install` turns it on. aep-api then serves the agent's two
+# MCP tools, which search and file a project's issues, at
+# /internal/v1/sre-handoff/mcp, and attaches the default "error -> RCA" alert
+# rule to service components. One SRE agent serves every org on its plane, so
+# each call names its org (the alert's namespace), and aep-api acts only after
+# the observer (observer.baseURL, read with aepApi.serviceAuth) confirms that
+# alert really fired.
 #
 # The agent authenticates with one random key that aectl generates and writes
 # into tokenSecret (key `token`) here and into the agent's own Secret on the
@@ -292,7 +295,6 @@ postgres:
 # `aectl sre install --mcp-hostname` must name the same host.
 sreAgent:
   enabled: false
-  org: ""
   tokenSecret: "sre-handoff"
   tokenHash: ""
   mcpHostname: "aep-mcp.openchoreo.localhost"

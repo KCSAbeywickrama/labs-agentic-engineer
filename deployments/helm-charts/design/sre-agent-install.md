@@ -60,7 +60,7 @@ which the AE handoff needs. It runs unchanged on the 1.2.5 plane:
   same names, arguments and response shapes;
 - the one gap is closed by aectl ([`rca-agent` role](#rca-agent-role)).
 
-## `aectl sre install --org <org>`
+## `aectl sre install`
 
 Requires OC ≥ 1.2.5, with no upper bound (`minOCVersion`, skippable with
 `--skip-oc-version-check`) and pinning the platform chart
@@ -110,7 +110,7 @@ absent, then installs/upgrades (idempotent). It then:
      on the agent. aectl cannot read the image's system bundle to bake a
      static copy — a copy would also go stale on cluster-CA rotation — so
      the bundle is built fresh in-pod on every start.
-5. The platform release's `sreAgent.*` (`enabled`, `org`, `tokenSecret`,
+5. The platform release's `sreAgent.*` (`enabled`, `tokenSecret`,
    `tokenHash`, `mcpHostname`), through an in-process `aectl platform
    update`, and removal of what earlier versions installed for aep-api to
    push the model (the `aep-api-sre-push` Role and RoleBinding, the
@@ -254,9 +254,12 @@ Tracked follow-ups:
   Deployment's rollout strategy is `Recreate` (a `ReadWriteOnce` PVC backs
   it), so every restart that picks up a changed Secret tears the running
   agent down before the replacement starts.
-- **One org per installation.** The agent carries one static MCP header, so
-  its handoff files issues for the one org named at install; multi-org would
-  have to come from the agent upstream.
+- **The org is the agent's claim, checked against the observer.** One agent
+  serves every org on its plane; each handoff call names its org and aep-api
+  verifies it against the observer's recent alerts (see
+  [`sre-handoff.md`](../../../services/aep-api/design/sre-handoff.md)). A
+  WSO2 Cloud `wc-…` namespace does not map to an org handle, so the handoff
+  fails closed there.
 - `aectl sre uninstall` deletes the whole observability namespace even
   when `aectl` only adopted an existing plane (`sre_uninstall.go`) — out
   of scope here, flagged for a follow-up.

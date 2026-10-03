@@ -28,7 +28,7 @@
 #
 #   1. the observability-alert-rule ClusterTrait the chart's ComponentTypes
 #      allow but `aectl platform install` does not apply (deployments/README.md).
-#   2. `aectl sre install --org`, which enables the SRE agent on the
+#   2. `aectl sre install`, which enables the SRE agent on the
 #      observability plane setup-env-for-aectl.sh installed (at that plane's
 #      chart version, with the stock ghcr.io/openchoreo/sre-agent image) and
 #      mounts the AE remediation extension. It writes the agent's model and
@@ -96,7 +96,7 @@ kubectl apply -f "$ALERT_RULE_TRAIT"
 # ── 2. SRE agent on the observability plane ─────────────────────────────────
 echo "🤖 Running aectl sre install"
 SRE_INSTALL_ARGS=(--namespace "$AEP_NS" --obs-namespace "$OBS_NS" --assets-root "$REPO_ROOT" \
-    --org "${AEP_ORG:-default}" --platform-chart "$PLATFORM_CHART")
+    --platform-chart "$PLATFORM_CHART")
 # The SRE agent's model: only when both the key file and model are set (aectl
 # itself requires the pair together; leaving either unset here keeps the
 # model the agent already has, same as not passing the flags at all).

@@ -318,18 +318,11 @@ func (r *configReader) kubeAPI() KubeAPIConfig {
 // 32 random bytes, hex-encoded; anything far shorter was not made by it.
 const minSREHandoffTokenLen = 32
 
-// sreHandoff reads SRE_HANDOFF_ORG / SRE_HANDOFF_TOKEN, refusing one without
-// the other and a key too short to be one aectl generated.
+// sreHandoff reads SRE_HANDOFF_TOKEN, refusing a key too short to be one
+// aectl generated.
 func (r *configReader) sreHandoff() SREHandoffConfig {
-	c := SREHandoffConfig{
-		Org:   r.readOptionalString("SRE_HANDOFF_ORG", ""),
-		Token: r.readOptionalString("SRE_HANDOFF_TOKEN", ""),
-	}
-	switch {
-	case c.Org == "" && c.Token == "":
-	case c.Org == "" || c.Token == "":
-		r.errors = append(r.errors, fmt.Errorf("SRE_HANDOFF_ORG and SRE_HANDOFF_TOKEN must be set together"))
-	case len(c.Token) < minSREHandoffTokenLen:
+	c := SREHandoffConfig{Token: r.readOptionalString("SRE_HANDOFF_TOKEN", "")}
+	if c.Token != "" && len(c.Token) < minSREHandoffTokenLen {
 		r.errors = append(r.errors, fmt.Errorf("SRE_HANDOFF_TOKEN must be at least %d characters", minSREHandoffTokenLen))
 	}
 	return c

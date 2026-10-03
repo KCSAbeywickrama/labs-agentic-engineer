@@ -77,20 +77,22 @@ func TestHelmUpgradeArgs_ChartSource(t *testing.T) {
 // updatePlatformSreAgent (via sreAgentPlatformUpdateConfig) must forward the
 // chart source it was given — otherwise `sre install`'s pinned chart could
 // still be dropped on the floor between the caller and the underlying helm
-// upgrade — and it must carry the org, the handoff key's Secret and hash and
+// upgrade — and it must carry the handoff key's Secret and hash and
 // the MCPHostname from sreParams, not a global.
 func TestUpdatePlatformSreAgent_PassesChartSourceThrough(t *testing.T) {
-	p := sreParams{AEPNamespace: "wso2-aep", Org: "default", ObsNamespace: "obs", RcaName: "sre-agent", MCPHostname: "aep-mcp.openchoreo.localhost"}
+	p := sreParams{AEPNamespace: "wso2-aep", ObsNamespace: "obs", RcaName: "sre-agent", MCPHostname: "aep-mcp.openchoreo.localhost"}
 	cfg := sreAgentPlatformUpdateConfig(p, "deployments/helm-charts/platform", "", "abc123")
 	args, err := helmUpgradeArgs(cfg)
 	if err != nil {
 		t.Fatalf("helmUpgradeArgs: %v", err)
 	}
 	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "sreAgent.org") {
+		t.Errorf("args = %q, must not set an org: each handoff call names its own", joined)
+	}
 	for _, want := range []string{
 		"deployments/helm-charts/platform",
 		"sreAgent.enabled=true",
-		"sreAgent.org=default",
 		"sreAgent.tokenSecret=sre-handoff",
 		"sreAgent.tokenHash=abc123",
 		"sreAgent.mcpHostname=aep-mcp.openchoreo.localhost",

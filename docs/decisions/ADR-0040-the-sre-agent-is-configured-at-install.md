@@ -32,13 +32,19 @@ handoff directly.**
    pushes them. A re-run with a new key file rotates the key.
 2. **One handoff key per installation.** aectl generates a random key and
    writes it into the agent's Secret and aep-api's (two copies, because a
-   Secret cannot be read across namespaces). aep-api checks the agent's
-   bearer against it for the one org `--org` names.
-3. **aep-api is the MCP server.** The agent calls
+   Secret cannot be read across namespaces). It authenticates the agent, not
+   an org.
+3. **Each call names its org, and aep-api verifies it.** One agent sees every
+   org's alerts on its plane, so both tools take the alert's OpenChoreo
+   namespace. That value passes through a model that reads pod logs, so
+   aep-api acts on it only after the observer confirms an alert fired
+   recently for that namespace, project and component. OpenChoreo's record
+   is the trust anchor, not the model's argument.
+4. **aep-api is the MCP server.** The agent calls
    `/internal/v1/sre-handoff/mcp` on aep-api, which serves exactly the two
    tools (search and create issues) in process. There is no `aep-mcp-server`,
    and no exception on the public edge for the agent's bearer.
-4. **The MCP plumbing is aep-api's own.** The single-response form of
+5. **The MCP plumbing is aep-api's own.** The single-response form of
    Streamable HTTP is a few JSON-RPC methods, already hand-written for the
    agents' discovery MCP; both surfaces share it (`platform/mcprpc`) rather
    than take on an MCP SDK dependency.
@@ -53,14 +59,23 @@ handoff directly.**
   SRE agent's model; the agent has its own, set at install.
 - Without a model the agent waits at 0 replicas, as before; `aectl` now sets
   that, not aep-api.
-- Real multi-org support has to come from the SRE agent upstream: one header
-  can authenticate one org.
+- One installation serves every org on its observability plane, with no
+  `--org`. The bound: the key reaches only components that alerted recently,
+  so a prompt-injected agent can at most act on another real incident within
+  the window. A derived namespace that is not an org handle (WSO2 Cloud's
+  `wc-…`) resolves to no org and fails closed.
 
 ## Alternatives rejected
 
 - **Keep the per-org machinery for later multi-org.** It cannot deliver
   multi-org while the agent carries one header, and it costs a reconciler, a
   table, a token store and a service now.
+- **One org per installation (`--org`).** Simple, but one agent sees every
+  org's alerts, so an incident in one org could be filed into another org's
+  repo on a project-name clash.
+- **Trust the namespace the agent sends.** Multi-org with no check, but the
+  one key would then reach any org, and a filed issue can dispatch a coding
+  agent.
 - **One key in OpenBao, synced to both namespaces.** One source of truth, but
   an OpenBao write from aectl and a sync delay, for a key aectl already holds
   when it writes the agent's Secret.

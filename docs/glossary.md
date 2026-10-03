@@ -595,8 +595,9 @@ anything the agent asserts.
 ### SRE handoff key
 The one long-lived key the OpenChoreo SRE (RCA) agent authenticates to
 aep-api's SRE handoff with. `aectl sre install` generates it and writes it
-into the agent's Secret (`AEP_MCP_TOKEN`) and aep-api's (`SRE_HANDOFF_TOKEN`);
-it is scoped to the one org `--org` names. The agent's own model is set the
+into the agent's Secret (`AEP_MCP_TOKEN`) and aep-api's (`SRE_HANDOFF_TOKEN`).
+It authenticates the agent, not an org: each tool call names its org, which
+aep-api verifies against the observer's recorded alerts. The agent's own model is set the
 same way, at install, into its Secret. See
 [ADR-0040](decisions/ADR-0040-the-sre-agent-is-configured-at-install.md) and
 `services/aep-api/design/sre-handoff.md`.

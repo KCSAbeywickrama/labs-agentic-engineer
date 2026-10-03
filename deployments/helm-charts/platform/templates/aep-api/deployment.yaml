@@ -257,11 +257,13 @@ spec:
               value: "postgresql://{{ .Values.postgres.user }}:$(POSTGRES_PASSWORD)@postgres.{{ .Release.Namespace }}.svc.cluster.local:5432/{{ .Values.postgres.database }}?sslmode=disable"
             {{- if .Values.sreAgent.enabled }}
             # The OpenChoreo SRE agent's handoff (config.SREHandoffConfig): the
-            # one org its MCP tools act for, and the key it authenticates with,
-            # which `aectl sre install` writes into sreAgent.tokenSecret before
-            # it enables this. Omitted, the handoff surface is not mounted.
-            - name: SRE_HANDOFF_ORG
-              value: {{ required "sreAgent.org is required when sreAgent.enabled" .Values.sreAgent.org | quote }}
+            # key it authenticates with, which `aectl sre install` writes into
+            # sreAgent.tokenSecret before it enables this. aep-api verifies each
+            # call's org against the observer (OBSERVER_URL above), and refuses
+            # to start the handoff without it. Omitted, the surface is not mounted.
+            {{- if not .Values.observer.baseURL }}
+            {{- fail "sreAgent.enabled needs observer.baseURL: the SRE handoff verifies every call against the observer" }}
+            {{- end }}
             - name: SRE_HANDOFF_TOKEN
               valueFrom:
                 secretKeyRef:

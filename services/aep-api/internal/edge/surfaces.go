@@ -42,8 +42,8 @@ import (
 //	               (POST, JSON-RPC)     publisher CC (org from ocOrgId or           auth.AgentsScopedVerifier (no spec — JSON-RPC)
 //	                                    PublisherClaims.OrgHandle, never request)
 //	               /sre-handoff/mcp     the install-time SRE handoff key           sourcecontrol/issues/sre_mcp.go ·
-//	               (POST, JSON-RPC)     (org from config, never request)            auth.SREHandoffVerifier (mounted only
-//	                                                                                when SRE_HANDOFF_* is set)
+//	               (POST, JSON-RPC)     (org from the call, verified against the    auth.SREHandoffVerifier (mounted only
+//	                                    observer's alerts before use)               when SRE_HANDOFF_TOKEN is set)
 //	               /mcp/playground-token  NONE — flag-gated only                   dependencies/playground_token.go
 //	               (POST, local dev)      (PLAYGROUND_TOKEN_ENABLED, off by         (mounted only when the flag is true —
 //	                                      default; docker-compose sets it)          404 by absence otherwise)
@@ -187,7 +187,8 @@ func mountSurfaces(params AppParams) *http.ServeMux {
 
 	// ── SRE handoff MCP (POST /internal/v1/sre-handoff/mcp) ─────────────────
 	// The OpenChoreo SRE agent's remediation handoff: two tools that search and
-	// file the project's issues, for the one org the installation serves.
+	// file a project's issues, for the org each call names, once the observer
+	// confirms an alert really fired there (issues/sre_mcp.go).
 	// Guarded by the install-time handoff key, not a Thunder JWT, because the
 	// agent's static MCP header cannot carry a token that expires (see
 	// auth.SREHandoffVerifier). Mounted only when the handoff is configured.

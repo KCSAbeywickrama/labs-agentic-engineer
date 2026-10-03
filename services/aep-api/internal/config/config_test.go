@@ -114,25 +114,24 @@ func setRequiredLoadEnv(t *testing.T) {
 	t.Setenv("BFF_TASK_SIGNING_KEY", "-----BEGIN KEY-----\nx\n-----END KEY-----")
 }
 
-// TestLoad_SREHandoff pins the handoff's env wiring: both set is enabled,
-// neither is disabled, and one without the other or a short key is refused.
+// TestLoad_SREHandoff pins the handoff's env wiring: a key is enabled, none
+// is disabled, and a short key is refused.
 func TestLoad_SREHandoff(t *testing.T) {
 	key := strings.Repeat("a", 64)
 
-	t.Run("org and key set is enabled", func(t *testing.T) {
+	t.Run("a key is enabled", func(t *testing.T) {
 		setRequiredLoadEnv(t)
-		t.Setenv("SRE_HANDOFF_ORG", "default")
 		t.Setenv("SRE_HANDOFF_TOKEN", key)
 		cfg, err := Load()
 		if err != nil {
 			t.Fatalf("Load() error = %v, want nil", err)
 		}
-		if !cfg.SREHandoff.Enabled() || cfg.SREHandoff.Org != "default" || cfg.SREHandoff.Token != key {
-			t.Fatalf("SREHandoff = %+v, want enabled for default", cfg.SREHandoff)
+		if !cfg.SREHandoff.Enabled() || cfg.SREHandoff.Token != key {
+			t.Fatalf("SREHandoff = %+v, want enabled", cfg.SREHandoff)
 		}
 	})
 
-	t.Run("neither set is disabled", func(t *testing.T) {
+	t.Run("no key is disabled", func(t *testing.T) {
 		setRequiredLoadEnv(t)
 		cfg, err := Load()
 		if err != nil {
@@ -143,19 +142,11 @@ func TestLoad_SREHandoff(t *testing.T) {
 		}
 	})
 
-	for name, env := range map[string]map[string]string{
-		"org without key": {"SRE_HANDOFF_ORG": "default"},
-		"key without org": {"SRE_HANDOFF_TOKEN": key},
-		"short key":       {"SRE_HANDOFF_ORG": "default", "SRE_HANDOFF_TOKEN": "too-short"},
-	} {
-		t.Run(name+" is refused", func(t *testing.T) {
-			setRequiredLoadEnv(t)
-			for k, v := range env {
-				t.Setenv(k, v)
-			}
-			if _, err := Load(); err == nil || !strings.Contains(err.Error(), "SRE_HANDOFF") {
-				t.Fatalf("Load() error = %v, want an SRE_HANDOFF error", err)
-			}
-		})
-	}
+	t.Run("a short key is refused", func(t *testing.T) {
+		setRequiredLoadEnv(t)
+		t.Setenv("SRE_HANDOFF_TOKEN", "too-short")
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "SRE_HANDOFF_TOKEN") {
+			t.Fatalf("Load() error = %v, want an SRE_HANDOFF_TOKEN error", err)
+		}
+	})
 }

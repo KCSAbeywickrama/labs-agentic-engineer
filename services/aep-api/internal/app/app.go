@@ -933,16 +933,22 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	)
 
 	// The OpenChoreo SRE agent's handoff: its two MCP tools search and file
-	// issues for the one org `aectl sre install --org` named, authenticated by
-	// the install-time key. Unconfigured leaves both nil and the surface
-	// unmounted. It is also the signal that the SRE loop is wired (auto-RCA
-	// below).
+	// issues, authenticated by the install-time key. Each call names its org,
+	// which the tools verify against the observer's recorded alerts with
+	// aep-api's own service identity, so the handoff needs both; a key without
+	// them is refused at boot rather than serving tools that cannot check what
+	// they act on. Unconfigured leaves both nil and the surface unmounted. It
+	// is also the signal that the SRE loop is wired (auto-RCA below).
 	var sreHandoffAuth *authn.SREHandoffVerifier
 	var sreHandoffMCP http.Handler
 	if cfg.SREHandoff.Enabled() {
+		if cfg.Observability.BaseURL == "" || seam.AuthProvider == nil {
+			return nil, fmt.Errorf("SRE_HANDOFF_TOKEN is set, but the handoff verifies every call against the observer: it needs OBSERVER_URL and the service credential (SERVICE_AUTH_*)")
+		}
 		sreHandoffAuth = authn.NewSREHandoffVerifier(cfg.SREHandoff.Token)
-		sreHandoffMCP = scissues.NewSREMCPHandler(issueService, cfg.SREHandoff.Org)
-		slog.Info("SRE handoff enabled", "org", cfg.SREHandoff.Org)
+		sreHandoffMCP = scissues.NewSREMCPHandler(issueService,
+			observability.NewAlertQuerier(cfg.Observability.BaseURL, seam.AuthProvider))
+		slog.Info("SRE handoff enabled", "observer", cfg.Observability.BaseURL)
 	}
 
 	// Controllers

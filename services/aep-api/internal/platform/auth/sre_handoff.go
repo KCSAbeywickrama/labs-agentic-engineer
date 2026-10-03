@@ -23,8 +23,9 @@ package auth
 // a short-lived token would expire mid pod-lifetime. The credential is
 // instead one long-lived random key that `aectl sre install` generates and
 // writes into both aep-api's Secret and the agent's. One observability plane
-// runs one SRE agent with one static header, so one key, for the one org the
-// installation serves, is all the agent can carry.
+// runs one SRE agent with one static header, so one key is all it can carry.
+// The key authenticates the agent, not an org: each tool call names its org,
+// and the tools verify that claim against the observer's recorded alerts.
 //
 // It guards exactly one mount, the SRE handoff MCP surface, and is never a
 // substitute for Thunder JWT verification anywhere else.

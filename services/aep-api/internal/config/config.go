@@ -84,9 +84,9 @@ type Config struct {
 	TenantGateMode string
 
 	// SREHandoff configures the OpenChoreo SRE agent's handoff into AE: the
-	// one org the installation's SRE agent files issues for, and the key it
-	// authenticates with. `aectl sre install --org` sets both. Read from
-	// SRE_HANDOFF_ORG / SRE_HANDOFF_TOKEN (the token from a Secret only).
+	// key it authenticates with, which `aectl sre install` sets. Read from
+	// SRE_HANDOFF_TOKEN (from a Secret only). Each tool call names its org,
+	// which aep-api verifies against the observer's recorded alerts.
 	SREHandoff SREHandoffConfig
 
 	// OAuthStateSigningKey is the HS256 key used to sign the connect-state
@@ -489,13 +489,10 @@ type TemporalConfig struct {
 // Enabled reports whether the Temporal integration is configured.
 func (t TemporalConfig) Enabled() bool { return t.HostPort != "" }
 
-// SREHandoffConfig is the SRE handoff's org and key. The key is never logged.
+// SREHandoffConfig is the SRE handoff's key. It is never logged.
 type SREHandoffConfig struct {
-	Org   string
 	Token string
 }
 
-// Enabled reports whether the SRE handoff is configured. The loader refuses
-// an org without a key and a key without an org, so either both are set or
-// neither is.
-func (c SREHandoffConfig) Enabled() bool { return c.Org != "" && c.Token != "" }
+// Enabled reports whether the SRE handoff is configured.
+func (c SREHandoffConfig) Enabled() bool { return c.Token != "" }

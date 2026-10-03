@@ -55,10 +55,10 @@ import (
 //   - none is installed: aectl installs the plane and logs charts itself at
 //     --obs-plane-version / --obs-logs-version.
 //
-// The agent's LLM key/model/base URL and its AEP handoff token are pushed by
-// aep-api into the AE-owned sre-agent-aep Secret (rca.extraEnvs) for the
-// --org this command wires up; this command does not carry any LLM
-// credential itself. Prerequisite: `aectl platform install` (it registers
+// The agent's model (--llm-api-key-file/--llm-model/--llm-base-url) and its
+// handoff key are written by this command into the sre-agent-aep Secret
+// (rca.extraEnvs reads it; see sre_model.go). Prerequisite: `aectl platform
+// install` (it registers
 // the openchoreo-rca-agent Thunder client and seeds the OpenBao secrets this
 // reads).
 
@@ -77,7 +77,6 @@ var (
 	sreMCPHost         string
 	sreMCPPort         int
 	sreAssetsRoot      string
-	sreOrg             string
 	srePlatformStore   string
 	sreSkipOCVerCheck  bool
 	// Passed through to the `aectl platform update` this command runs
@@ -144,7 +143,6 @@ func init() {
 	f.StringVar(&sreMCPHost, "mcp-hostname", "aep-mcp.openchoreo.localhost", "https hostname aep-api's SRE handoff route answers on, on the control-plane gateway (must match the platform chart's sreAgent.mcpHostname)")
 	f.IntVar(&sreMCPPort, "mcp-port", 8443, "https port of the control-plane gateway listener the SRE handoff route is on (k3d publishes 8443)")
 	f.StringVar(&sreAssetsRoot, "assets-root", "", "AE repository checkout holding the SRE extension assets (deployments/sre-agent-extensions); default: search upward from the working directory")
-	f.StringVar(&sreOrg, "org", "", "OpenChoreo org whose issues the SRE agent's handoff files (the one org this installation's SRE agent serves)")
 	f.StringVar(&srePlatformStore, "platform-secret-store", "aep-platform", "ClusterSecretStore the platform chart installs for the aep/* OpenBao paths")
 	f.StringVar(&srePlatformChart, "platform-chart", "", "Local path to the AEP platform chart, for the internal `aectl platform update` that flips sreAgent.* (mirrors `platform update`'s own --platform-chart; one of --platform-chart/--platform-version is required)")
 	f.StringVar(&srePlatformVersion, "platform-version", "", "AEP platform chart version, for the internal `aectl platform update` that flips sreAgent.* (mirrors `platform update`'s own --version; one of --platform-chart/--platform-version is required)")
@@ -155,7 +153,6 @@ func init() {
 	f.String("oc-api-url", "", "In-cluster OpenChoreo platform API URL (overrides config)")
 	_ = viper.BindPFlag("oc.api_url", f.Lookup("oc-api-url"))
 	f.BoolVar(&sreSkipOCVerCheck, "skip-oc-version-check", false, "Skip the OpenChoreo minimum version check (not recommended)")
-	_ = sreInstallCmd.MarkFlagRequired("org")
 }
 
 // sreParams holds everything the value/manifest templates need.
@@ -176,8 +173,6 @@ type sreParams struct {
 	// sreAgent.mcpHostname so the chart and this command can't drift.
 	MCPHostname string
 	AEHandoff   bool
-	// Org is the OpenChoreo org the SRE agent's handoff files issues for.
-	Org string
 	// RcaName is the RCA/SRE agent Deployment name, set from
 	// findSREAgentDeployment's discovery (the chart can rename it, e.g.
 	// ai-rca-agent -> sre-agent in 1.2.0). AEPNamespace is the AEP namespace
@@ -264,7 +259,6 @@ func runSreInstall(cmd *cobra.Command, args []string) error {
 		ObserverHost:        sreObserverHost,
 		RcaHost:             sreRcaHost,
 		AEHandoff:           sreAEHandoff,
-		Org:                 sreOrg,
 		AEPNamespace:        sreNamespace,
 		ForceSync:           strconv.FormatInt(time.Now().Unix(), 10),
 	}
@@ -401,7 +395,7 @@ func runSreInstall(cmd *cobra.Command, args []string) error {
 	p.RcaName = agentDeploy
 
 	// 5. Turn on the platform release's sreAgent.* values, so aep-api serves
-	// the handoff for p.Org with the key above and the route to it renders.
+	// the handoff with the key above and the route to it renders.
 	// The push Role and seed Secret earlier versions installed are removed:
 	// aep-api no longer writes to the observability plane or reads a seed.
 	ui.Step("Wiring the platform's SRE handoff")
@@ -537,7 +531,6 @@ func sreAgentPlatformUpdateConfig(p sreParams, chartPath, chartVersion, tokenHas
 		ChartVersion: chartVersion,
 		HelmSets: []string{
 			"sreAgent.enabled=true",
-			"sreAgent.org=" + p.Org,
 			"sreAgent.tokenSecret=" + sreHandoffSecretName,
 			"sreAgent.tokenHash=" + tokenHash,
 			"sreAgent.mcpHostname=" + p.MCPHostname,

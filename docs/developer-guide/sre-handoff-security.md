@@ -27,11 +27,18 @@ deduplication, recurrence, adoption, dispatch, and human-attention state.
   as `Authorization: Bearer ${AEP_MCP_TOKEN}`.
 - aep-api checks it with `auth.SREHandoffVerifier` (a constant-time compare)
   on exactly one mount, `POST /internal/v1/sre-handoff/mcp`, which serves only
-  `search_related_issues` and `create_issue`, for the one org named by
-  `SRE_HANDOFF_ORG`. It never widens what the Thunder JWT verifier accepts,
-  and the public issue operations refuse the fields only the handoff may
-  send. Without `SRE_HANDOFF_ORG` and `SRE_HANDOFF_TOKEN` the mount does not
-  exist.
+  `search_related_issues` and `create_issue`. It never widens what the Thunder
+  JWT verifier accepts, and the public issue operations refuse the fields only
+  the handoff may send. Without `SRE_HANDOFF_TOKEN` the mount does not exist.
+- The key authenticates the agent, not an org. One agent serves every org on
+  its plane, so each call names its org, the alert's OpenChoreo `namespace`.
+  That value reaches aep-api through a model that reads pod logs, so it is
+  never trusted as given: before either tool reads or writes, aep-api asks the
+  observer, with its own service token, whether an alert fired in the last
+  hour for that namespace, project and component. No alert, or an
+  observer that cannot answer, and nothing is read or filed. The bound this
+  leaves: a prompt-injected agent can at most act on another component that
+  really alerted within the window.
 - The mount is reached from the agent only over **https**, through the
   platform chart's `aep-api-sre-handoff` `HTTPRoute` on the OpenChoreo
   control-plane gateway's `https` listener, matching that one path. The
@@ -40,7 +47,7 @@ deduplication, recurrence, adoption, dispatch, and human-attention state.
   Service is not restricted by a `NetworkPolicy` (a platform-wide gap), so
   the key is the boundary there.
 - Local dev (`make dev-env`, unless `WITH_SRE=0`) runs the same path:
-  `deployments/scripts/setup-sre.sh` runs `aectl sre install --org <org>
+  `deployments/scripts/setup-sre.sh` runs `aectl sre install
   --platform-chart ...`, which writes both Secrets and sets
   `sreAgent.enabled=true` on the platform release.
 

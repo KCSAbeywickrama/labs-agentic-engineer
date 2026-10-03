@@ -27,6 +27,8 @@ func sreTools() []mcprpc.Tool {
 	strs := func(desc string) map[string]any {
 		return map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": desc}
 	}
+	namespaceArg := str("The OpenChoreo namespace of the alert you are handling (its organization), exactly as the alert names it. " +
+		"AE acts on it only if an alert for that namespace, project and component really fired recently.")
 	return []mcprpc.Tool{
 		{
 			Name: "search_related_issues",
@@ -36,12 +38,13 @@ func sreTools() []mcprpc.Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"project": str("OpenChoreo/AE project name"),
+					"namespace": namespaceArg,
+					"project":   str("OpenChoreo/AE project name"),
 					"query": str("Space-separated keywords (e.g. 'service1 service2 timeout'), NOT a natural-language phrase. " +
 						"Tokenised and matched against issue title/body; issues are returned ranked by how many keywords they contain. Omit to list all issues."),
 					"labels": strs("Filter by GitHub labels"),
 				},
-				"required": []string{"project"},
+				"required": []string{"namespace", "project"},
 			},
 		},
 		{
@@ -55,10 +58,11 @@ func sreTools() []mcprpc.Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"project": str("OpenChoreo/AE project name"),
-					"title":   str("Issue title"),
-					"body":    str("Issue body (markdown)"),
-					"labels":  strs("GitHub labels to apply"),
+					"namespace": namespaceArg,
+					"project":   str("OpenChoreo/AE project name"),
+					"title":     str("Issue title"),
+					"body":      str("Issue body (markdown)"),
+					"labels":    strs("GitHub labels to apply"),
 					"componentName": str("The component this issue is about. AE's design names it unprefixed ('service1'), and a name carrying its project prefix ('myproject-service1') is resolved to the design name for you, so pass whichever your world uses. " +
 						"Checked before the issue is filed — a name the design carries under neither form fails this call rather than surfacing later inside a coding cycle."),
 					"actionStatuses": map[string]any{
@@ -68,7 +72,7 @@ func sreTools() []mcprpc.Tool {
 							"Required on every call — this is what AE classifies code-level vs config-level vs none from.",
 					},
 				},
-				"required": []string{"project", "title", "body", "actionStatuses"},
+				"required": []string{"namespace", "project", "title", "body", "componentName", "actionStatuses"},
 			},
 		},
 	}
