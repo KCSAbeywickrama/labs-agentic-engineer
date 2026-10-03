@@ -171,6 +171,23 @@ describe("the full-screen review", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  it("leaves Escape pressed in the prototype to the frame: closes only on the frame's proto:escape", async () => {
+    const { dialog } = await openReview();
+    // A key the console's document gets with the frame element as its target was aimed at the prototype (focus is
+    // in it), so it is the prototype's, not the dialog's: only the frame says when Escape went unused.
+    fireEvent.keyDown(frame(), { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    // Annotate: the frame's Escape clears the selection first, then closes.
+    annotate(dialog);
+    fromFrame({ type: "proto:toggle", elementKey: "btn.new-claim" });
+    fromFrame({ type: "proto:escape" });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/^Selected:/)).toBeNull();
+    fromFrame({ type: "proto:escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
   it("says why instead of drawing a blank frame when the prototype is invalid", async () => {
     prototypes = appPrototypes([C], { [manifestPath(C)]: SAMPLE_MANIFEST }, null);
     render(<Harness initial={C} />);
