@@ -139,6 +139,37 @@ func planFailure(err error, attempt int) *delivery.RunFailure {
 	return f
 }
 
+// noWriteTargetFailure is the record of a project with no write target, met at
+// the phase that needed one: a deploy-phase activity (the gate, which can never
+// open, the version read, a promote or a readiness poll), or the dispatch,
+// which has no environment to bind the agent's Job into. Permanent
+// on its first attempt; the detail is the resolver's own words.
+func noWriteTargetFailure(err error, phase string, attempt int) *delivery.RunFailure {
+	now := time.Now().UTC()
+	return &delivery.RunFailure{
+		Code:      delivery.RunFailureCodeNoWriteTarget,
+		Phase:     phase,
+		Permanent: true,
+		Attempts:  attempt,
+		FirstAt:   now,
+		LastAt:    now,
+		Detail:    delivery.ScrubFailureDetail(err.Error()),
+	}
+}
+
+// recordNoWriteTarget records a deploy-phase activity's failure when, and only
+// when, it is a missing write target. Every deploy activity that resolves the
+// write target calls it before deployErr, so the settled run carries the
+// resolver's words whichever step met the fault. Any other failure, permanent
+// or not, records nothing here.
+func (a *Activities) recordNoWriteTarget(ctx context.Context, runID string, err error) {
+	if !errors.Is(err, delivery.ErrNoWriteTarget) {
+		return
+	}
+	attempt := activityAttempt(ctx)
+	a.recordPlanningFault(ctx, runID, noWriteTargetFailure(err, delivery.RunPhaseDeploying, attempt), attempt)
+}
+
 // recordPlanningFault writes the record (or clears a stale one) on the run
 // row. Best-effort: the fault the activity is about to return is the fact that
 // matters, and a bookkeeping write must not mask or replace it — the same

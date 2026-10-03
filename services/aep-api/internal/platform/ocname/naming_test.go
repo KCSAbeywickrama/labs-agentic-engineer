@@ -98,7 +98,7 @@ func TestExternalResourceName_BoundsForCNPG(t *testing.T) {
 	if len(long) > maxOCResourceName {
 		t.Errorf("bounded resource name len = %d, want <= %d (%q)", len(long), maxOCResourceName, long)
 	}
-	// The env slug is the widest maxEnvNameLen allows, not the one AEP provisions
+	// The env slug is the widest MaxEnvNameLen allows, not the one AEP provisions
 	// into — the bound has to hold at its own worst case.
 	if rn := renderedName(long, "development"); len(rn) > cnpgMaxClusterName {
 		t.Errorf("OC-rendered cluster name %q would be %d chars, want <= %d", rn, len(rn), cnpgMaxClusterName)

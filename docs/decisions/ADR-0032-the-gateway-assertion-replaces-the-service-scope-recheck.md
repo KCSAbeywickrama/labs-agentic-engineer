@@ -68,8 +68,11 @@ from that, and nothing else.**
    to it is "is this row the caller's", and that answer is 404, so the caller
    cannot learn the row exists.
 7. **The in-cell bypass is answered by the boundary, and survivable because of
-   the signature.** `visibility: internal` and the NetworkPolicy behind it keep
-   unrefereed traffic off the service. A pod that breaches that boundary can set
+   the signature.** The component's NetworkPolicy keeps unrefereed traffic off
+   the service: it admits the project's own pods and the platform gateway (which
+   the endpoint's `external` visibility grants; this read `visibility: internal`
+   until 2026-09-30, when OpenChoreo's policy code showed `external` already
+   admits the gateway and WSO2 Cloud refuses `internal` for customer orgs). A pod that breaches that boundary can set
    every header it likes and cannot produce an assertion, because it does not
    hold the environment's signing key. That is the property the header re-check
    never had.

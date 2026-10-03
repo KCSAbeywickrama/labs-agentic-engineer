@@ -234,11 +234,12 @@ func TestProvisionForBuild_OrgServiceApprovedStartsVisibility(t *testing.T) {
 		{Kind: spec.DependencyKindOrgService, Name: "inventory"},
 	}}
 	svc := NewService(Deps{
-		Issues: issues,
-		Execs:  &fakeExecStore{},
-		Design: fakeDesign{comps: []spec.DesignComponent{consumer}},
-		Repos:  fakeRepos{},
-		Access: access,
+		WriteTargets: staticWriteTarget{env: testWriteTarget},
+		Issues:       issues,
+		Execs:        &fakeExecStore{},
+		Design:       fakeDesign{comps: []spec.DesignComponent{consumer}},
+		Repos:        fakeRepos{},
+		Access:       access,
 		Providers: fakeProviders{byName: map[string]openchoreo.WorkloadEndpointInfo{
 			"inventory": {Project: "warehouse", Component: "warehouse-inventory", Name: "http"},
 		}},
@@ -360,7 +361,7 @@ func TestSettleReadyGate_NoOpenGate(t *testing.T) {
 	}}
 	svc := newTestService(issues, execs, fakeDesign{comps: designWithDeps()}, &fakeExtProv{}, &fakePlatProv{}, bindings)
 
-	if err := svc.completeReadyGate(context.Background(), "acme", "proj", "orders-db", "orders"); err != nil {
+	if err := svc.completeReadyGate(context.Background(), "acme", "proj", testWriteTarget, "orders-db", "orders"); err != nil {
 		t.Fatalf("no open gate must be a no-op, got %v", err)
 	}
 	if len(execs.rows) != 0 {
@@ -444,6 +445,7 @@ func TestProvisionForBuild_RegisteredExternal_AuthorsFromOrgCells(t *testing.T) 
 	})
 	ext := &fakeExtProv{}
 	svc := NewService(Deps{
+		WriteTargets:      staticWriteTarget{env: testWriteTarget},
 		Issues:            newFakeIssues(nil),
 		Execs:             &fakeExecStore{},
 		Design:            fakeDesign{comps: designWithDeps()},
@@ -500,7 +502,8 @@ func TestProvisionForBuild_ProjectResourceIgnoresOrgCellsOfTheSameName(t *testin
 	comps[0].Dependencies[0].ResourceRef = ""
 	ext := &fakeExtProv{}
 	svc := NewService(Deps{
-		Issues: newFakeIssues(nil), Execs: &fakeExecStore{}, Design: fakeDesign{comps: comps}, Repos: fakeRepos{},
+		WriteTargets: staticWriteTarget{env: testWriteTarget},
+		Issues:       newFakeIssues(nil), Execs: &fakeExecStore{}, Design: fakeDesign{comps: comps}, Repos: fakeRepos{},
 		ExtProv: ext, PlatProv: &fakePlatProv{}, Bindings: &fakeBindings{}, CatalogValuePlane: plane,
 	})
 	if _, err := svc.ProvisionForBuild(context.Background(), "acme", "acme", "proj", "v1", 0, []BuildProvisionInput{
@@ -560,6 +563,7 @@ func TestProvisionForBuild_RegisteredExternal_AuthorsOrgSecretStorePath(t *testi
 	ext := &fakeExtProv{}
 	writer := &fakeOrgSecrets{key: "from-org-secret-writer"}
 	svc := NewService(Deps{
+		WriteTargets:      staticWriteTarget{env: testWriteTarget},
 		Issues:            newFakeIssues(nil),
 		Execs:             &fakeExecStore{},
 		Design:            fakeDesign{comps: designWithDeps()},
@@ -630,10 +634,11 @@ func TestProvisionForBuild_RegisteredAfterRestart_AuthorsOrgSecretStorePath(t *t
 	ext := &fakeExtProv{}
 	writer := &fakeOrgSecrets{key: "org-catalog-github-default"}
 	svc := NewService(Deps{
-		Issues: newFakeIssues(nil),
-		Execs:  &fakeExecStore{},
-		Design: fakeDesign{comps: designWithDeps()},
-		Repos:  fakeRepos{},
+		WriteTargets: staticWriteTarget{env: testWriteTarget},
+		Issues:       newFakeIssues(nil),
+		Execs:        &fakeExecStore{},
+		Design:       fakeDesign{comps: designWithDeps()},
+		Repos:        fakeRepos{},
 		RTCatalog: &fakeRTCatalog{defs: []openchoreo.ExternalResourceDefinition{{
 			Name: "stripe",
 			Config: []openchoreo.ExternalResourceConfigKey{
@@ -690,6 +695,7 @@ func registeredStripe(keys ...openchoreo.ExternalResourceConfigKey) openchoreo.E
 func TestProvisionForBuild_RegisteredWithNoKeysStillBindsTheOrgType(t *testing.T) {
 	ext := &fakeExtProv{}
 	svc := NewService(Deps{
+		WriteTargets:      staticWriteTarget{env: testWriteTarget},
 		Issues:            newFakeIssues(nil),
 		Execs:             &fakeExecStore{},
 		Design:            fakeDesign{comps: designWithDeps()},
@@ -722,6 +728,7 @@ func TestProvisionForBuild_RegisteredWithNoKeysStillBindsTheOrgType(t *testing.T
 func TestProvisionForBuild_RegisteredTakesTheRecordsKeysNotTheCopys(t *testing.T) {
 	ext := &fakeExtProv{}
 	svc := NewService(Deps{
+		WriteTargets:      staticWriteTarget{env: testWriteTarget},
 		Issues:            newFakeIssues(nil),
 		Execs:             &fakeExecStore{},
 		Design:            fakeDesign{comps: designWithDeps()}, // copy still has api_key + region

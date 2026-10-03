@@ -48,6 +48,11 @@ import (
 // to reach the org's model connection, after making sure the SecretReference
 // the MODEL_API_KEY entry names exists in the org's control-plane namespace.
 //
+// environment is the write target the binding is composed for. The AI gateway
+// binding is read for it and the agent's AMP secret refs are named after it,
+// so the caller passes the value its deploy resolved rather than this function
+// resolving its own.
+//
 // It is called while COMPOSING a deployment, so the values ride the one
 // ReleaseBinding write the deploy stage already makes (DesiredDeploymentFor →
 // ApplyReleaseBinding) instead of a second pass that patches the binding after
@@ -66,7 +71,7 @@ import (
 // conjure a connection. The agent then starts unconfigured and agent-building's
 // contract is a 503 from /healthz until one is connected. That holds for a
 // governed agent too: its provider holds no key once the org has none.
-func (s *componentService) ModelAccessEnvVars(ctx context.Context, ocOrgID, component string) ([]openchoreo.WorkflowEnvVarRef, error) {
+func (s *componentService) ModelAccessEnvVars(ctx context.Context, ocOrgID, component, environment string) ([]openchoreo.WorkflowEnvVarRef, error) {
 	if s.modelKeyResolver == nil || s.secretRefClient == nil {
 		return nil, fmt.Errorf("model access not configured at the composition root")
 	}
@@ -81,8 +86,8 @@ func (s *componentService) ModelAccessEnvVars(ctx context.Context, ocOrgID, comp
 		return nil, fmt.Errorf("resolve org's model connection: %w", err)
 	}
 
-	if amp, ok := s.ampModelAccess(ctx, ocOrgID, component); ok {
-		return append(governedModelEnvVars(conn, amp), s.ampTracingEnvVars(ctx, ocOrgID, component, amp.OTelEndpoint)...), nil
+	if amp, ok := s.ampModelAccess(ctx, ocOrgID, component, environment); ok {
+		return append(governedModelEnvVars(conn, amp), s.ampTracingEnvVars(ctx, ocOrgID, component, environment, amp.OTelEndpoint)...), nil
 	}
 
 	if err := s.upsertModelAccessSecretReference(ctx, ocOrgID, triplet); err != nil {
@@ -170,8 +175,8 @@ func directModelEnvVars(conn modelconn.Connection, triplet organization.SecretRe
 // The endpoint is a literal rather than a stored value: the binding already
 // carries it and it is not secret. It is used VERBATIM — the route is part of
 // the recorded value, so aep-api never has to know that AMP spells it /otel.
-func (s *componentService) ampTracingEnvVars(ctx context.Context, ocOrgID, component, otelEndpoint string) []openchoreo.WorkflowEnvVarRef {
-	refName := organization.AMPTracingTokenSecretRefName(component, openchoreo.DevEnvironmentName)
+func (s *componentService) ampTracingEnvVars(ctx context.Context, ocOrgID, component, environment, otelEndpoint string) []openchoreo.WorkflowEnvVarRef {
+	refName := organization.AMPTracingTokenSecretRefName(component, environment)
 	if _, err := s.secretRefClient.GetSecretReference(ctx, ocOrgID, refName); err != nil {
 		slog.InfoContext(ctx, "model access: no AMP tracing token stored for this agent; it will run without observability",
 			"org", ocOrgID, "component", component, "secretRef", refName)
@@ -319,11 +324,11 @@ type ampModelAccessRef struct {
 // connection key. That is the safe direction: an agent on the direct key works
 // and is merely ungoverned, while an agent pointed at a gateway whose key was
 // never stored cannot reach a model at all.
-func (s *componentService) ampModelAccess(ctx context.Context, ocOrgID, component string) (ampModelAccessRef, bool) {
+func (s *componentService) ampModelAccess(ctx context.Context, ocOrgID, component, environment string) (ampModelAccessRef, bool) {
 	if s.aiGatewayBindings == nil || strings.TrimSpace(component) == "" {
 		return ampModelAccessRef{}, false
 	}
-	binding, err := s.aiGatewayBindings.GetAIGatewayBinding(ctx, ocOrgID, openchoreo.DevEnvironmentName)
+	binding, err := s.aiGatewayBindings.GetAIGatewayBinding(ctx, ocOrgID, environment)
 	if err != nil {
 		if !errors.Is(err, openchoreo.ErrNoAIGatewayBinding) {
 			slog.WarnContext(ctx, "model access: could not read the AI gateway binding; composing direct model access",
@@ -332,7 +337,7 @@ func (s *componentService) ampModelAccess(ctx context.Context, ocOrgID, componen
 		return ampModelAccessRef{}, false
 	}
 
-	refName := organization.AMPModelKeySecretRefName(component, openchoreo.DevEnvironmentName)
+	refName := organization.AMPModelKeySecretRefName(component, environment)
 	if _, err := s.secretRefClient.GetSecretReference(ctx, ocOrgID, refName); err != nil {
 		// The environment is governed but this agent has no stored key. The
 		// govern stage either skipped it or has not run for this component yet.

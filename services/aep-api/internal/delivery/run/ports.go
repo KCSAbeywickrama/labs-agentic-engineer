@@ -118,7 +118,7 @@ type RunStore interface {
 type CycleStore interface {
 	Append(ctx context.Context, cycle *delivery.RunCycle) (cycleID string, err error)
 	NoteDispatch(ctx context.Context, cycleID, jobRef string) error
-	NoteModelHost(ctx context.Context, cycleID, host string) error
+	NoteLaunch(ctx context.Context, cycleID, host, environment string) error
 	Finish(ctx context.Context, cycleID, mergeSHA string) error
 	// SetValidationVerdict records one validation ATTEMPT's outcome on its own cycle
 	// row — the verdict, the issue it was dispatched at, and the DIGEST of the
@@ -412,6 +412,9 @@ type DeployIssueMinter interface {
 	// be at different commits in one pass, and the dedupe key is (component,
 	// commit) — so one commit for the whole list would file the next version's
 	// failure against the previous version's key, or the reverse.
-	MintDeployFixIssues(ctx context.Context, orgID, projectID string, milestoneNumber int,
+	//
+	// The environment is the one the failed bindings live in, named in each
+	// issue's body so the agent reads the deployment where it failed.
+	MintDeployFixIssues(ctx context.Context, orgID, projectID string, milestoneNumber int, environment string,
 		failed []delivery.DeployTarget, reasons map[string]string) ([]int, error)
 }

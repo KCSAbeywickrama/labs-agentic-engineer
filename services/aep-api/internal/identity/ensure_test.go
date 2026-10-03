@@ -2326,3 +2326,34 @@ func TestEnsureLeavesUserAndAppPrincipalsOnARoleAlone(t *testing.T) {
 			strings.Join(writes, "\n  "))
 	}
 }
+
+// The ensure asks for the BUILD's project's write target, so its roles land on
+// the identity provider that project deploys into.
+func TestEnsureScopesToTheBuildsProject(t *testing.T) {
+	h := newHarness(rolesJSON(t, []string{"Viewer"}, userFixture{"test-viewer", "Viewer"}))
+
+	h.run(t)
+
+	if len(h.targets.scoped) != 1 || h.targets.scoped[0] != [2]string{testOrg, testProject} {
+		t.Fatalf("Scope calls = %v, want one for (%q, %q)", h.targets.scoped, testOrg, testProject)
+	}
+}
+
+// A write target that cannot be read FAILS the ensure: it is a write, and
+// there is no directory to write to.
+func TestEnsureFailsWhenTheScopeCannotBeRead(t *testing.T) {
+	h := newHarness(rolesJSON(t, []string{"Viewer"}, userFixture{"test-viewer", "Viewer"}))
+	boom := errors.New("project has no deployment pipeline")
+	h.targets.scopeErr = boom
+
+	_, declared, err := h.svc.EnsureForTag(context.Background(), testOrg, testProject, testTag)
+	if !errors.Is(err, boom) {
+		t.Fatalf("EnsureForTag error = %v, want the scope's", err)
+	}
+	if !declared {
+		t.Fatal("declared = false — the design does carry a roles document")
+	}
+	if h.targets.resolved != 0 || len(h.dir.writes()) != 0 {
+		t.Fatalf("resolved=%d writes=%v with no scope", h.targets.resolved, h.dir.writes())
+	}
+}

@@ -19,9 +19,11 @@ package run
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.temporal.io/sdk/temporal"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
@@ -37,10 +39,11 @@ import (
 // stubCycles captures the row AppendCycle builds. Only Append is exercised; the
 // rest of CycleStore is present to satisfy the port and must never be called
 // here — a test that reached them would be testing the loop, not the projection
-// — except NoteModelHost, which the dispatch activity's own tests read back.
+// — except NoteLaunch, which the dispatch activity's own tests read back.
 type stubCycles struct {
 	appended []delivery.RunCycle
-	hosts    map[string]string // cycle id → model host, from NoteModelHost
+	hosts    map[string]string // cycle id → model host, from NoteLaunch
+	envs     map[string]string // cycle id → environment, from NoteLaunch
 	hostErr  error
 }
 
@@ -51,14 +54,15 @@ func (s *stubCycles) Append(_ context.Context, cycle *delivery.RunCycle) (string
 
 func (s *stubCycles) NoteDispatch(context.Context, string, string) error { return nil }
 
-func (s *stubCycles) NoteModelHost(_ context.Context, cycleID, host string) error {
+func (s *stubCycles) NoteLaunch(_ context.Context, cycleID, host, environment string) error {
 	if s.hostErr != nil {
 		return s.hostErr
 	}
 	if s.hosts == nil {
-		s.hosts = map[string]string{}
+		s.hosts, s.envs = map[string]string{}, map[string]string{}
 	}
 	s.hosts[cycleID] = host
+	s.envs[cycleID] = environment
 	return nil
 }
 
@@ -135,9 +139,10 @@ func TestAppendCycle_UnwiredStoreFails(t *testing.T) {
 }
 
 // launchingDispatcher stands in for the coding agent: it reports a launch on
-// host, or fails with err.
+// host into env, or fails with err.
 type launchingDispatcher struct {
 	host string
+	env  string
 	err  error
 }
 
@@ -145,7 +150,7 @@ func (d launchingDispatcher) Dispatch(context.Context, delivery.MilestoneDispatc
 	if d.err != nil {
 		return delivery.AgentLaunch{}, d.err
 	}
-	return delivery.AgentLaunch{JobRef: "ca-job-1", ModelHost: d.host}, nil
+	return delivery.AgentLaunch{JobRef: "ca-job-1", ModelHost: d.host, Environment: d.env}, nil
 }
 
 // The dispatch activity copies the launch's model host onto the cycle — the
@@ -161,6 +166,46 @@ func TestDispatchAgent_RecordsTheLaunchHostOnTheCycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "ca-job-1", jobRef)
 	require.Equal(t, "api.anthropic.com", cycles.hosts["cycle-1"])
+}
+
+// The environment the Job was bound into is copied onto the cycle beside the
+// host, so its readers never re-resolve a write target that may have moved.
+// The activity's result is still the bare Job reference.
+func TestDispatchAgent_RecordsTheLaunchEnvironmentOnTheCycle(t *testing.T) {
+	cycles := &stubCycles{}
+	acts := NewActivities(Deps{Cycles: cycles, Dispatcher: launchingDispatcher{host: "api.anthropic.com", env: "dev-b"}})
+
+	jobRef, err := acts.DispatchAgent(context.Background(), delivery.MilestoneDispatch{
+		OrgID: "acme", ProjectID: "shop", Kind: delivery.CycleKindCoding, CycleID: "cycle-1",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "ca-job-1", jobRef)
+	require.Equal(t, "dev-b", cycles.envs["cycle-1"])
+}
+
+// A project whose pipeline names no write target cannot be dispatched into.
+// That is a configuration fact, not agent death: the activity stamps its own
+// non-retryable type, so the workflow settles the run instead of spending the
+// re-dispatch budget, and the run's failure record carries the cause.
+func TestDispatchAgent_NoWriteTargetIsTypedAndRecorded(t *testing.T) {
+	cycles := &stubCycles{}
+	runs := &failureRuns{}
+	cause := fmt.Errorf("%w: no write target for acme/shop", delivery.ErrNoWriteTarget)
+	acts := NewActivities(Deps{Cycles: cycles, Runs: runs, Dispatcher: launchingDispatcher{err: cause}})
+
+	_, err := acts.DispatchAgent(context.Background(), delivery.MilestoneDispatch{
+		OrgID: "acme", ProjectID: "shop", RunID: "run-1", CycleID: "cycle-1",
+	})
+
+	var appErr *temporal.ApplicationError
+	require.True(t, errors.As(err, &appErr), "want an ApplicationError, got %v", err)
+	require.True(t, appErr.NonRetryable())
+	require.Equal(t, delivery.ErrTypeNoWriteTarget, appErr.Type())
+	require.Empty(t, cycles.hosts, "nothing launched, so nothing is recorded on the cycle")
+	require.Len(t, runs.recorded, 1)
+	require.Equal(t, delivery.RunFailureCodeNoWriteTarget, runs.recorded[0].Code)
+	require.Equal(t, delivery.RunPhaseCoding, runs.recorded[0].Phase)
+	require.Contains(t, runs.recorded[0].Detail, "no write target for acme/shop")
 }
 
 // A launch that failed records nothing: there is no Job, so no host ran it.

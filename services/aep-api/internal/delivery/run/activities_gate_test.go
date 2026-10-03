@@ -19,6 +19,7 @@ package run
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -70,7 +71,7 @@ func (r *recordingRuns) SetWaiting(_ context.Context, _, reason string, deps []s
 func TestCheckDeployReadiness_UnwiredFailsClosed(t *testing.T) {
 	acts := NewActivities(Deps{})
 
-	_, err := acts.CheckDeployReadiness(context.Background(), ProjectRef{OrgID: "acme", ProjectID: "shop"})
+	_, err := acts.CheckDeployReadiness(context.Background(), DeployGateInput{OrgID: "acme", ProjectID: "shop"})
 
 	require.Error(t, err, "an unwired gate must refuse, never wave the deploy through")
 	var appErr *temporal.ApplicationError
@@ -87,7 +88,7 @@ func TestCheckDeployReadiness_ReportsBothBlockersSeparately(t *testing.T) {
 		provisioning: []string{"postgres"},
 	}})
 
-	verdict, err := acts.CheckDeployReadiness(context.Background(), ProjectRef{OrgID: "acme", ProjectID: "shop"})
+	verdict, err := acts.CheckDeployReadiness(context.Background(), DeployGateInput{OrgID: "acme", ProjectID: "shop"})
 
 	require.NoError(t, err)
 	require.Equal(t, []string{"stripe"}, verdict.Unconfigured)
@@ -101,12 +102,132 @@ func TestCheckDeployReadiness_ReportsBothBlockersSeparately(t *testing.T) {
 func TestCheckDeployReadiness_ReadErrorIsRetryable(t *testing.T) {
 	acts := NewActivities(Deps{DeployGate: stubGate{err: errors.New("openchoreo unreachable")}})
 
-	_, err := acts.CheckDeployReadiness(context.Background(), ProjectRef{OrgID: "acme", ProjectID: "shop"})
+	_, err := acts.CheckDeployReadiness(context.Background(), DeployGateInput{OrgID: "acme", ProjectID: "shop"})
 
 	require.Error(t, err)
 	var appErr *temporal.ApplicationError
 	if errors.As(err, &appErr) {
 		require.False(t, appErr.NonRetryable(), "a read failure is a blip; retrying is the right answer")
+	}
+}
+
+// TestCheckDeployReadiness_ANoWriteTargetGateIsNonRetryable: a gate that can
+// never be read (the composition root marks a project with no write target
+// delivery.ErrNoWriteTarget as well as delivery.ErrDeployPermanent) is an
+// answer, not a blip, so the run fails with its cause instead of retrying or
+// parking on it.
+func TestCheckDeployReadiness_ANoWriteTargetGateIsNonRetryable(t *testing.T) {
+	acts := NewActivities(Deps{DeployGate: stubGate{err: noWriteTargetCause()}})
+
+	_, err := acts.CheckDeployReadiness(context.Background(), DeployGateInput{OrgID: "acme", ProjectID: "shop"})
+
+	var appErr *temporal.ApplicationError
+	require.True(t, errors.As(err, &appErr), "want an ApplicationError, got %v", err)
+	require.True(t, appErr.NonRetryable(), "no retry makes a missing write target appear")
+	require.Equal(t, delivery.ErrTypeNoWriteTarget, appErr.Type(), "the workflow settles the run on this type")
+	require.Contains(t, appErr.Error(), "no write target", "the cause must survive to the run failure")
+}
+
+// TestCheckDeployReadiness_RecordsTheCauseOfAGateThatCanNeverOpen: the run
+// settles failed on no-write-target, and the record is what tells a reader why.
+// A retryable read failure records nothing: the next attempt may heal it.
+func TestCheckDeployReadiness_RecordsTheCauseOfAGateThatCanNeverOpen(t *testing.T) {
+	runs := &failureRuns{}
+	acts := NewActivities(Deps{Runs: runs, DeployGate: stubGate{err: noWriteTargetCause()}})
+
+	_, _ = acts.CheckDeployReadiness(context.Background(), DeployGateInput{OrgID: "acme", ProjectID: "shop", RunID: "run-1"})
+
+	require.Len(t, runs.recorded, 1)
+	got := runs.recorded[0]
+	require.Equal(t, delivery.RunFailureCodeNoWriteTarget, got.Code)
+	require.Equal(t, delivery.RunPhaseDeploying, got.Phase)
+	require.True(t, got.Permanent)
+	require.Contains(t, got.Detail, "no write target for acme/shop")
+
+	runs.recorded = nil
+	acts = NewActivities(Deps{Runs: runs, DeployGate: stubGate{err: errors.New("openchoreo unreachable")}})
+	_, _ = acts.CheckDeployReadiness(context.Background(), DeployGateInput{OrgID: "acme", ProjectID: "shop", RunID: "run-1"})
+	require.Empty(t, runs.recorded, "a blip is not a failure to record")
+}
+
+// TestCheckDeployReadiness_OtherPermanentFailuresAreNotNoWriteTarget: the
+// record keys on the no-write-target sentinel itself, not on "permanent". Any
+// other permanent deploy answer keeps the generic type and records nothing
+// under a code that would name the wrong cause.
+func TestCheckDeployReadiness_OtherPermanentFailuresAreNotNoWriteTarget(t *testing.T) {
+	runs := &failureRuns{}
+	cause := fmt.Errorf("%w: component orders is gone from the design", delivery.ErrDeployPermanent)
+	acts := NewActivities(Deps{Runs: runs, DeployGate: stubGate{err: cause}})
+
+	_, err := acts.CheckDeployReadiness(context.Background(), DeployGateInput{OrgID: "acme", ProjectID: "shop", RunID: "run-1"})
+
+	var appErr *temporal.ApplicationError
+	require.True(t, errors.As(err, &appErr), "want an ApplicationError, got %v", err)
+	require.Equal(t, errTypePermanentDeploy, appErr.Type())
+	require.Empty(t, runs.recorded, "only a missing write target is recorded as one")
+}
+
+// stubDeployer answers every promote with err.
+type stubDeployer struct {
+	Deployer
+	err error
+}
+
+func (d stubDeployer) Deploy(context.Context, string, string, []delivery.DeployTarget) ([]delivery.ComponentDeploy, error) {
+	return nil, d.err
+}
+
+type failingDeployments struct{ err error }
+
+func (d failingDeployments) DeploymentState(context.Context, string, string, []string) ([]delivery.ComponentDeploy, error) {
+	return nil, d.err
+}
+
+// TestDeployActivities_RecordAndTypeANoWriteTarget: the promote, the readiness
+// poll and the version read each resolve the write target, so each meets the
+// fault the gate does and must answer it the same way: typed for the workflow,
+// recorded for the reader.
+func TestDeployActivities_RecordAndTypeANoWriteTarget(t *testing.T) {
+	calls := map[string]func(*Activities) error{
+		"PromoteWave": func(a *Activities) error {
+			_, err := a.PromoteWave(context.Background(), PromoteInput{
+				OrgID: "acme", ProjectID: "shop", RunID: "run-1",
+				Targets: []delivery.DeployTarget{{Component: "orders", CommitSHA: "aaa1"}},
+			})
+			return err
+		},
+		"PollDeployments": func(a *Activities) error {
+			_, err := a.PollDeployments(context.Background(), WaitSetInput{
+				OrgID: "acme", ProjectID: "shop", RunID: "run-1", Components: []string{"orders"},
+			})
+			return err
+		},
+		"ReadVersionState": func(a *Activities) error {
+			_, err := a.ReadVersionState(context.Background(), ProjectRef{OrgID: "acme", ProjectID: "shop", RunID: "run-1"})
+			return err
+		},
+	}
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			runs := &failureRuns{}
+			acts := NewActivities(Deps{
+				Runs:        runs,
+				Deploy:      stubDeployer{err: noWriteTargetCause()},
+				Deployments: failingDeployments{err: noWriteTargetCause()},
+				Design:      stubDesign{paths: map[string]string{"orders": "services/orders"}},
+				Builds:      stubBuilds{},
+			})
+
+			err := call(acts)
+
+			var appErr *temporal.ApplicationError
+			require.True(t, errors.As(err, &appErr), "want an ApplicationError, got %v", err)
+			require.True(t, appErr.NonRetryable())
+			require.Equal(t, delivery.ErrTypeNoWriteTarget, appErr.Type())
+			require.Len(t, runs.recorded, 1)
+			require.Equal(t, delivery.RunFailureCodeNoWriteTarget, runs.recorded[0].Code)
+			require.Equal(t, delivery.RunPhaseDeploying, runs.recorded[0].Phase)
+		})
 	}
 }
 

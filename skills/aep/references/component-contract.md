@@ -21,12 +21,12 @@ what is there, and change only what the issue moves.
   not a stub; its build proves it absent from `dist/`);
 - it is green.
 
-**`workload.yaml` is your prompt's to give.** When it carries one, that file is
-already resolved: write it exactly as given and change nothing — a field you add
-is a field somebody else resolved and you overwrote, and nothing fails until
-deploy. When your prompt says no wiring was resolved, author it from the design
-per `workload-and-wiring.md` beside this file. **One that already exists on disk
-is edited, never regenerated**, either way.
+**You write the whole `workload.yaml`, from `workload-and-wiring.md` beside this
+file** — read it before the file's first line, every time: it holds the format
+and where every entry comes from. A `dependencies:` block your prompt carries is
+one the platform resolved; merge it into the file unchanged — a field you edit is
+a field somebody else resolved and you overwrote, and nothing fails until deploy.
+**One that already exists on disk is edited, never regenerated.**
 
 ## What `design.json` fixes
 

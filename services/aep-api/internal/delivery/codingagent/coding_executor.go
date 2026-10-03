@@ -250,9 +250,10 @@ func (e *CodingExecutor) launchAgent(ctx context.Context, in agentLaunch) (deliv
 // Workload secretEnv (refs only). Publisher client_credentials are the Job's
 // only platform credential (local and cloud).
 //
-// The launch reports the host of the connection whose credential it mounted:
-// the supervisor copies it onto the cycle, so the host a cycle's usage is priced
-// on is the one this Job was launched against.
+// The launch reports the host of the connection whose credential it mounted and
+// the environment its Job was bound into: the supervisor copies both onto the
+// cycle, so the host a cycle's usage is priced on is the one this Job was
+// launched against, and its readers look for the Job where it was bound.
 func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo *sourcecontrol.GitRepository,
 	name, email, login string) (delivery.AgentLaunch, error) {
 	// The organization's agent setting, copied onto THIS run. Copied, not
@@ -336,7 +337,7 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 	}
 	env[envPublisherTokenURL] = tokenURL
 	secretEnv = append(secretEnv, pub...)
-	jobRef, err := e.ocJobs.Dispatch(ctx, OCDispatchInputs{
+	res, err := e.ocJobs.Dispatch(ctx, OCDispatchInputs{
 		OrgID:                 in.orgID,
 		ProjectID:             in.projectID,
 		CycleID:               in.correlationID,
@@ -353,7 +354,7 @@ func (e *CodingExecutor) dispatchViaOC(ctx context.Context, in agentLaunch, repo
 	if err != nil {
 		return delivery.AgentLaunch{}, err
 	}
-	return delivery.AgentLaunch{JobRef: jobRef, ModelHost: creds.model.Conn.Host}, nil
+	return delivery.AgentLaunch{JobRef: res.RunName, ModelHost: creds.model.Conn.Host, Environment: res.Environment}, nil
 }
 
 // stageBuildSecret pre-stages the org's build git credential and returns the

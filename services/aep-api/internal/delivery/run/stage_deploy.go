@@ -156,8 +156,8 @@ func (l *loop) reconcileVersion(ctx workflow.Context, version delivery.VersionSt
 	deadline := workflow.NewTimer(deadlineCtx, deployReadyTimeout)
 
 	for _, wave := range plan.Waves {
-		if err := l.promote(ctx, wave); err != nil {
-			return cycleNone, err
+		if res, err := l.promote(ctx, wave); err != nil || res != cycleGreen {
+			return res, err
 		}
 		res, err := l.awaitDeployments(ctx, delivery.TargetNames(wave), version, deadline)
 		if err != nil || res != cycleGreen {
@@ -183,8 +183,8 @@ func (l *loop) reconcileVersion(ctx workflow.Context, version delivery.VersionSt
 	if len(converge) == 0 {
 		return cycleGreen, nil
 	}
-	if err := l.promote(ctx, delivery.ConvergeTargets(converge)); err != nil {
-		return cycleNone, err
+	if res, err := l.promote(ctx, delivery.ConvergeTargets(converge)); err != nil || res != cycleGreen {
+		return res, err
 	}
 	return l.awaitDeployments(ctx, converge, version, deadline)
 }
@@ -234,6 +234,7 @@ func flattenWaves(waves [][]delivery.DeployTarget) []delivery.DeployTarget {
 // whole list would key at least one of them wrongly.
 func (l *loop) failDeploy(components []string, version delivery.VersionState, cause error) {
 	l.deployFailed = targetsFor(components, version)
+	l.deployEnvironment = ""
 	if cause != nil {
 		l.deployFailures = reasonForAll(components, cause)
 	}
@@ -276,7 +277,8 @@ func (l *loop) failDeploy(components []string, version delivery.VersionState, ca
 // is a few seconds of pod crash-looping after deploy, which is cosmetic.
 //
 // Returns cycleGreen when the gate opens, cycleCancelled if a human gave up,
-// and cycleDeployFailed when the provisioning budget runs out — in which case
+// cycleNoWriteTarget when the gate can never be read (the project has no write
+// target), and cycleDeployFailed when the provisioning budget runs out — in which case
 // promoting names the components the failure is filed against, since a resource
 // that will not provision is a stage-wide failure of the whole pass rather than
 // any one component's fault (see reasonForAll). Components this pass was NOT
@@ -322,8 +324,23 @@ func (l *loop) awaitDeployable(ctx workflow.Context, promoting []string,
 		}
 		var verdict DeployGateVerdict
 		if err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).CheckDeployReadiness,
-			ProjectRef{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID}).Get(ctx, &verdict); err != nil {
-			return cycleNone, err
+			DeployGateInput{OrgID: l.in.OrgID, ProjectID: l.in.ProjectID, RunID: l.in.RunID}).Get(ctx, &verdict); err != nil {
+			// A gate that can never open (the project has no write target) is a
+			// configuration fault, not a component that would not come up, so it
+			// is NOT a deploy failure: filing fix work would dispatch the agent at
+			// a pipeline no code change repairs. The activity has recorded the
+			// cause; the boundary settles the run on it. Returned raw it would
+			// fail the workflow before the row settles; a blip is still
+			// Temporal's to retry.
+			if !isNoWriteTarget(err) {
+				return cycleNone, err
+			}
+			if lerr := leaveValuesPark(); lerr != nil {
+				return cycleNone, lerr
+			}
+			workflow.GetLogger(ctx).Error("deploy gate: project has no write target; the run cannot deploy",
+				"error", err)
+			return cycleNoWriteTarget, nil
 		}
 
 		switch {
@@ -469,6 +486,9 @@ func (l *loop) setWaitingOnValues(ctx workflow.Context, deps []string) error {
 //
 // The deadline is the STAGE's and is passed in, so a run cannot buy itself more
 // time by having more waves to wait through.
+//
+// A poll that finds the project has no write target returns cycleNoWriteTarget,
+// which the boundary settles on without filing fix work.
 func (l *loop) awaitDeployments(ctx workflow.Context, components []string,
 	version delivery.VersionState, deadline workflow.Future) (cycleResult, error) {
 	if len(components) == 0 {
@@ -479,11 +499,11 @@ func (l *loop) awaitDeployments(ctx workflow.Context, components []string,
 	for {
 		state, err := l.pollDeployments(ctx, components)
 		if err != nil {
-			return cycleNone, err
+			return noWriteTargetResult(ctx, "deployment poll", err)
 		}
 		if len(state.Failed) > 0 {
 			l.failDeploy(state.Failed, version, nil)
-			l.deployFailures = state.Reasons
+			l.deployFailures, l.deployEnvironment = state.Reasons, state.Environment
 			return cycleDeployFailed, nil
 		}
 		if state.Green() {
@@ -501,7 +521,7 @@ func (l *loop) awaitDeployments(ctx workflow.Context, components []string,
 			// no cause here because the deadline is not itself an error anyone can
 			// be filed against.
 			l.failDeploy(state.Pending, version, nil)
-			l.deployFailures = state.Reasons
+			l.deployFailures, l.deployEnvironment = state.Reasons, state.Environment
 			return cycleDeployFailed, nil
 		}
 
@@ -522,10 +542,17 @@ func (l *loop) awaitDeployments(ctx workflow.Context, components []string,
 // every deployment takes — this promote, Converge's drift repair, and a config
 // change's redeploy — and governance hung off one caller is governance the
 // others skip.
-func (l *loop) promote(ctx workflow.Context, targets []delivery.DeployTarget) error {
-	return workflow.ExecuteActivity(activityCtx(ctx), (*Activities).PromoteWave, PromoteInput{
-		OrgID: l.in.OrgID, ProjectID: l.in.ProjectID, Targets: targets,
+//
+// Returns cycleGreen once written, or cycleNoWriteTarget when the project's
+// pipeline names no write target (edited since the gate read it).
+func (l *loop) promote(ctx workflow.Context, targets []delivery.DeployTarget) (cycleResult, error) {
+	err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).PromoteWave, PromoteInput{
+		OrgID: l.in.OrgID, ProjectID: l.in.ProjectID, Targets: targets, RunID: l.in.RunID,
 	}).Get(ctx, nil)
+	if err != nil {
+		return noWriteTargetResult(ctx, "promote", err)
+	}
+	return cycleGreen, nil
 }
 
 // planDeployWaves asks what this pass should do. The VERSION STATE rides the
@@ -542,9 +569,25 @@ func (l *loop) planDeployWaves(ctx workflow.Context, version delivery.VersionSta
 func (l *loop) pollDeployments(ctx workflow.Context, components []string) (CycleDeployState, error) {
 	var state CycleDeployState
 	err := workflow.ExecuteActivity(activityCtx(ctx), (*Activities).PollDeployments, WaitSetInput{
-		OrgID: l.in.OrgID, ProjectID: l.in.ProjectID, Components: components,
+		OrgID: l.in.OrgID, ProjectID: l.in.ProjectID, Components: components, RunID: l.in.RunID,
 	}).Get(ctx, &state)
 	return state, err
+}
+
+// noWriteTargetResult turns a deploy activity's failure into the stage's
+// answer. A missing write target is a configuration fault the activity has
+// already recorded, so it becomes cycleNoWriteTarget and the boundary settles
+// the run on it: returned raw it would fail the workflow before the row
+// settles, and as a deploy failure it would file fix work no code change can
+// do. Anything else is returned as is, for Temporal to retry or the workflow
+// to fail on.
+func noWriteTargetResult(ctx workflow.Context, step string, err error) (cycleResult, error) {
+	if !isNoWriteTarget(err) {
+		return cycleNone, err
+	}
+	workflow.GetLogger(ctx).Error("deploy: project has no write target; the run cannot deploy",
+		"step", step, "error", err)
+	return cycleNoWriteTarget, nil
 }
 
 // isPermanentDeploy reports whether a deploy-stage activity failed for a reason

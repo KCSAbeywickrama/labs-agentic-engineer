@@ -234,23 +234,23 @@ func TestDeploymentReadiness_RegisteredExternalIsNotTheProjectsToConfigure(t *te
 }
 
 // TestDeploymentReadiness_DefaultsTheEnvironment: the run passes no environment
-// so the readiness service applies its own default rather than the run package
-// pinning an environment name it does not own.
+// so the readiness service resolves the project's write target rather than the
+// run package pinning an environment name it does not own.
 func TestDeploymentReadiness_DefaultsTheEnvironment(t *testing.T) {
 	design := fakeDesign{comps: []spec.DesignComponent{{Name: "api", Dependencies: []spec.Dependency{
 		{Kind: spec.DependencyKindExternal, Name: "stripe", Config: []spec.ConfigKey{{Key: "BASE_URL"}}},
 	}}}}
 	bindings := &fakeBindings{byName: map[string]*openchoreo.ResourceReleaseBinding{
-		ocname.ExternalResourceBindingName("proj", "stripe", defaultEnv()): bindingConfig(t, map[string]string{"BASE_URL": "https://api"}),
+		ocname.ExternalResourceBindingName("proj", "stripe", testWriteTarget): bindingConfig(t, map[string]string{"BASE_URL": "https://api"}),
 	}}
-	svc := NewService(Deps{Design: design, Bindings: bindings})
+	svc := NewService(Deps{Design: design, Bindings: bindings, WriteTargets: staticWriteTarget{env: testWriteTarget}})
 
 	got, err := svc.DeploymentReadiness(context.Background(), "acme", "proj", "")
 	if err != nil {
 		t.Fatalf("DeploymentReadiness: %v", err)
 	}
 	if len(got.Unconfigured) != 0 {
-		t.Fatalf("Unconfigured = %v, want empty — an empty env must resolve to %q", got.Unconfigured, defaultEnv())
+		t.Fatalf("Unconfigured = %v, want empty — an empty env must resolve to %q", got.Unconfigured, testWriteTarget)
 	}
 }
 

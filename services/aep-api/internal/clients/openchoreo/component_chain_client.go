@@ -51,6 +51,7 @@ func (c *componentClient) EnsureWorkload(ctx context.Context, orgName, projectNa
 		},
 	}
 
+	c.labels.stamp(&body.Metadata)
 	resp, err := c.oc.CreateWorkloadWithResponse(ctx, orgName, ocgen.CreateWorkloadJSONRequestBody(body))
 	if err != nil {
 		return fmt.Errorf("failed to create workload %q: %w", scoped, err)
@@ -241,6 +242,7 @@ func (c *componentClient) GetReleaseBindingStatus(ctx context.Context, orgName, 
 // A 409 means it is already there — not an error, and the signal the caller
 // uses to decide between "done" and "converge it".
 func (c *componentClient) createReleaseBinding(ctx context.Context, orgName, bindingName string, body ocgen.ReleaseBinding) (bool, error) {
+	c.labels.stamp(&body.Metadata)
 	resp, err := c.oc.CreateReleaseBindingWithResponse(ctx, orgName, ocgen.CreateReleaseBindingJSONRequestBody(body))
 	if err != nil {
 		return false, fmt.Errorf("failed to create release binding %q: %w", bindingName, err)
@@ -281,6 +283,7 @@ func (c *componentClient) putReleaseBinding(ctx context.Context, orgName, bindin
 		rb.Spec = &ocgen.ReleaseBindingSpec{}
 	}
 	applyDesiredToBinding(rb.Spec, in)
+	c.labels.stamp(&rb.Metadata)
 
 	updResp, uerr := c.oc.UpdateReleaseBindingWithResponse(ctx, orgName,
 		ocgen.ReleaseBindingNameParam(bindingName), ocgen.UpdateReleaseBindingJSONRequestBody(rb))

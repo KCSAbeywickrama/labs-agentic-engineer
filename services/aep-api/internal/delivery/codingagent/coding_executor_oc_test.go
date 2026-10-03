@@ -199,7 +199,7 @@ func newOCDispatchExecutor(rec *chainRecorder) *CodingExecutor {
 	anthropic, github := fullSecretRefs()
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 	return e
 }
 
@@ -228,6 +228,11 @@ func TestDispatch_OCPathDispatchesThroughOpenChoreo(t *testing.T) {
 	if launch.ModelHost != modelconn.AnthropicHost {
 		t.Errorf("launch model host = %q, want %q (the resolved connection's host)", launch.ModelHost, modelconn.AnthropicHost)
 	}
+	// And the environment the Job was bound into, copied onto the cycle for
+	// its readers.
+	if launch.Environment != "development" {
+		t.Errorf("launch environment = %q, want the project's write target", launch.Environment)
+	}
 }
 
 // anthropicSecretEnv returns the Anthropic entry of a dispatched Workload's
@@ -252,7 +257,7 @@ func TestDispatch_AnthropicAPIKey_MountsAsAnthropicAPIKeyEnvVar(t *testing.T) {
 	anthropic, github := fullSecretRefs()
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
 		t.Fatalf("Dispatch: %v", err)
@@ -274,7 +279,7 @@ func TestDispatch_AnthropicOAuthToken_MountsAsClaudeCodeOAuthTokenEnvVar(t *test
 	anthropic.kind = organization.CodingCredentialClaudeSubscription
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
 		t.Fatalf("Dispatch: %v", err)
@@ -301,7 +306,7 @@ func TestDispatch_UnresolvableAnthropicKey_ErrorsNoFallback(t *testing.T) {
 		"coding-agent Anthropic key for org \"acme\" is configured but secret_ref_kv_path is not populated")}
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
 	if err == nil {
@@ -417,7 +422,7 @@ func TestDispatch_OCPathStillRequiresTheOrgsSecretRefs(t *testing.T) {
 	anthropic, github := fullSecretRefs()
 	github.SecretRefName = nil
 	e := newCodingDispatchExecutor(anthropic, github)
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("runner:1"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("runner:1"))
 
 	_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
 	if err == nil {
@@ -457,7 +462,7 @@ func TestDispatch_MountsPublisherSecretEnvAndTokenURL(t *testing.T) {
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.platformURL = "https://gateway.example/app-factory-api"
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "https://platform-idp.example/oauth2/token")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
 		t.Fatalf("Dispatch: %v", err)
@@ -496,7 +501,7 @@ func TestDispatch_MissingPublisher_ErrorsNoCreate(t *testing.T) {
 	anthropic, github := fullSecretRefs()
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.platformURL = "https://gateway.example/app-factory-api"
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
 	if err == nil {
@@ -516,7 +521,7 @@ func TestDispatch_EmptyTokenURL_ErrorsNoCreate(t *testing.T) {
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.platformURL = "https://gateway.example/app-factory-api"
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
 	if err == nil {
@@ -536,7 +541,7 @@ func TestDispatch_ProfileLoadError_ErrorsNoCreate(t *testing.T) {
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.platformURL = "https://gateway.example/app-factory-api"
 	e.WithPublisherCredentials(fakePublisher{err: errors.New("db down")}, "https://idp.example/oauth2/token")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
 	if err == nil {
@@ -556,7 +561,7 @@ func TestDispatch_EmptySecretRef_ErrorsNoCreate(t *testing.T) {
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.platformURL = "https://gateway.example/app-factory-api"
 	e.WithPublisherCredentials(fakePublisher{name: "  "}, "https://idp.example/oauth2/token")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	_, err := e.Dispatch(context.Background(), codingMilestoneDispatch())
 	if err == nil {
@@ -582,7 +587,7 @@ func TestDispatch_HTTPPlatformURL_MountsPublisher(t *testing.T) {
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.platformURL = "http://host.k3d.internal:9090"
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder-service.thunder.svc.cluster.local:8090/oauth2/token")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
 		t.Fatalf("Dispatch: %v", err)
@@ -662,7 +667,7 @@ func TestDispatch_MountsTheOrgDefaultKeyForEvaluation(t *testing.T) {
 	}
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
 		t.Fatalf("Dispatch: %v", err)
@@ -698,7 +703,7 @@ func TestDispatch_EvaluationKeyRidesItsOwnVariable(t *testing.T) {
 	anthropic.kind = organization.CodingCredentialClaudeSubscription
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
 		t.Fatalf("Dispatch: %v", err)
@@ -721,7 +726,7 @@ func TestDispatch_NoDefaultKeyConnected_StillDispatches(t *testing.T) {
 	anthropic.defaultErr = &organization.NotFoundError{What: "org_anthropic_credentials.acme.default"}
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
 		t.Fatalf("a build must not fail because evaluation cannot run: %v", err)
@@ -739,7 +744,7 @@ func TestDispatch_IncompleteKeyRef_IsNotMounted(t *testing.T) {
 	anthropic.defaultRef = organization.SecretRefTriplet{Name: "acme-anthropic-secrets"}
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 	if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
 		t.Fatalf("a build must not fail because evaluation cannot run: %v", err)
@@ -768,7 +773,7 @@ func TestDispatch_DeclaresThePlatformOwnsTheEvaluationKey(t *testing.T) {
 			anthropic.defaultErr = tc.defaultErr
 			e := newCodingDispatchExecutor(anthropic, github)
 			e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
-			e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+			e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 
 			if _, err := e.Dispatch(context.Background(), codingMilestoneDispatch()); err != nil {
 				t.Fatalf("Dispatch: %v", err)
@@ -883,7 +888,7 @@ func TestDispatch_TheOrgsCodingAgentSettingIsCopiedOntoTheRun(t *testing.T) {
 	anthropic.conn = &conn
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).WithImage("ghcr.io/wso2/aep/remote-worker:latest"))
 	e.WithCodingAgentSettings(fakeCodingAgentSettings{
 		proj: orgconfig.AgentsProjection{Runtime: "claude-code"},
 	})
@@ -906,7 +911,7 @@ const openCodeRunnerImage = "aep-runner-opencode:dev"
 func newOpenCodeDispatchExecutor(rec *chainRecorder, anthropic fakeCodingKey, github *organization.OrgCredential, opencodeImage string) *CodingExecutor {
 	e := newCodingDispatchExecutor(anthropic, github)
 	e.WithPublisherCredentials(fakePublisher{name: "acme-publisher-secrets"}, "http://thunder.example/oauth2/token")
-	e.WithOCDispatch(NewOCDispatcher(rec.client()).
+	e.WithOCDispatch(NewOCDispatcher(rec.client(), testWriteTargets()).
 		WithImage("ghcr.io/wso2/aep/remote-worker:latest").
 		WithOpenCodeImage(opencodeImage))
 	e.WithCodingAgentSettings(fakeCodingAgentSettings{proj: orgconfig.AgentsProjection{

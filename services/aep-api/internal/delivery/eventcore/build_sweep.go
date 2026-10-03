@@ -36,6 +36,14 @@ import (
 // limit to shorten a wait nothing downstream can use.
 const defaultBuildSweepInterval = time.Minute
 
+// defaultReconcileGrace is how long after a cycle's merge the sweep leaves an
+// unbuilt component to the merge's own delivery. It must outlast every run of
+// that delivery — the receiver's and each replay's — because two fan-outs of
+// one merge race on the org's clone credential; the composition root sets it
+// from webhook.ReplayHorizon (see WithReconcileGrace), and this default matches
+// what it sets.
+const defaultReconcileGrace = 20 * time.Minute
+
 // BuildSweep observes builds reaching a terminal state and reports each one to
 // OnBuildTerminal, which owns what happens next (the automatic re-trigger, the
 // fix issue, the signal to the supervisor).
@@ -58,10 +66,39 @@ const defaultBuildSweepInterval = time.Minute
 // attempt 2, which is running, so the pass falls silent until that one settles.
 // Reporting the older attempt again instead would spend the budget twice over
 // and mint a fix issue while the retry was still in flight.
+//
+// It is also the RECONCILE for the merge fan-out, and has one trigger
+// condition:
+//
+//	a live run's latest cycle has closed on a merge more than the reconcile
+//	grace ago, and a component that merge touched has no build at its SHA,
+//	gets that build.
+//
+// The fan-out is a webhook's work, and a delivery can be lost past every retry
+// — the receiver's own run failed, its replays failed or ran out of window, or
+// the delivery never arrived. Nothing else would notice: the supervisor's build
+// stage has no deadline (awaitBuilds), so it waits on a build that was never
+// triggered, forever. The sweep already reads exactly this cycle's component set
+// and its builds, so the heal is the one branch it lacked — a component with no
+// attempt at all — not a second walk.
+//
+// What keeps it from building what nobody wants:
+//
+//   - CANCEL: a run somebody asked to stop (CancelRequestedAt) is skipped, and a
+//     cancelled run is terminal, so it is never walked.
+//   - HALT: a halted run settled `failed`, which is terminal too.
+//   - SUPERSEDE: only a live run's LATEST cycle is read, and builds are counted
+//     per merge SHA, so an earlier cycle's merge or a superseded version's is
+//     never built again.
+//   - THE DELIVERY ITSELF: inside the grace a merge is still its delivery's to
+//     build, and after it the heal goes through the same count-then-stage path
+//     as the fan-out (buildMergedComponents), so a delivery that lands late
+//     anyway finds the builds there and triggers and stages nothing.
 type BuildSweep struct {
 	events   *Events
 	repos    RepoLister
 	interval time.Duration
+	grace    time.Duration
 }
 
 // NewBuildSweep wires the sweep. interval ≤ 0 uses the default.
@@ -69,7 +106,16 @@ func NewBuildSweep(events *Events, repos RepoLister, interval time.Duration) *Bu
 	if interval <= 0 {
 		interval = defaultBuildSweepInterval
 	}
-	return &BuildSweep{events: events, repos: repos, interval: interval}
+	return &BuildSweep{events: events, repos: repos, interval: interval, grace: defaultReconcileGrace}
+}
+
+// WithReconcileGrace sets how long after a merge an unbuilt component is left
+// to the merge's own delivery. ≤ 0 keeps the default.
+func (s *BuildSweep) WithReconcileGrace(grace time.Duration) *BuildSweep {
+	if grace > 0 {
+		s.grace = grace
+	}
+	return s
 }
 
 // Run ticks until ctx is cancelled (the app.Watcher shape).
@@ -156,31 +202,62 @@ func (s *BuildSweep) sweepRun(ctx context.Context, repo RepoRef, run *delivery.M
 	if err != nil {
 		return err
 	}
-	var errs []error
+	var (
+		errs    []error
+		unbuilt []string
+	)
 	for _, component := range delivery.DiffComponents(files, paths).Components {
-		if cerr := s.observeComponent(ctx, repo, component, cycle.MergeSHA); cerr != nil {
+		built, cerr := s.observeComponent(ctx, repo, component, cycle.MergeSHA)
+		if cerr != nil {
 			errs = append(errs, cerr)
+			continue
+		}
+		if !built {
+			unbuilt = append(unbuilt, component)
+		}
+	}
+	if len(unbuilt) > 0 && s.owedBuilds(run, cycle) {
+		slog.WarnContext(ctx, "eventcore: build sweep found a merge whose builds were never triggered — building them",
+			"project", repo.ProjectID, "run", run.ID, "pr", cycle.PRNumber,
+			"merge", delivery.ShortSHA(cycle.MergeSHA), "components", unbuilt)
+		if berr := e.buildMergedComponents(ctx, repo.OrgID, repo.ProjectID, run, cycle.MergeSHA, unbuilt); berr != nil {
+			errs = append(errs, berr)
 		}
 	}
 	return errors.Join(errs...)
 }
 
+// owedBuilds reports whether the reconcile may build for this cycle's merge: it
+// closed on that merge more than the grace ago, and nobody asked the run to
+// stop. The rest of the skip rules are the walk's own (live runs, latest cycle).
+func (s *BuildSweep) owedBuilds(run *delivery.MilestoneRun, cycle *delivery.RunCycle) bool {
+	if run.CancelRequestedAt != nil || cycle.EndedAt == nil {
+		return false
+	}
+	return time.Since(*cycle.EndedAt) >= s.grace
+}
+
 // observeComponent reports the component's newest attempt at the merge SHA, if
-// that attempt has finished. A still-running attempt is not news.
-func (s *BuildSweep) observeComponent(ctx context.Context, repo RepoRef, component, mergeSHA string) error {
+// that attempt has finished. A still-running attempt is not news. built is
+// false when the merge has no attempt for the component at all, which is the
+// reconcile's cue.
+func (s *BuildSweep) observeComponent(ctx context.Context, repo RepoRef, component, mergeSHA string) (built bool, err error) {
 	e := s.events
 	runs, err := e.p.Builds.ListBuildRuns(ctx, repo.OrgID, repo.ProjectID, component)
 	if err != nil {
-		return err
+		return false, err
 	}
 	newest, ok := newestAttempt(runs, delivery.BuildRunNamePrefix(repo.ProjectID, component, mergeSHA))
-	if !ok || !newest.Completed {
-		return nil
+	if !ok {
+		return false, nil
+	}
+	if !newest.Completed {
+		return true, nil
 	}
 	slog.DebugContext(ctx, "eventcore: build sweep observed a terminal build",
 		"project", repo.ProjectID, "component", component,
 		"merge", delivery.ShortSHA(mergeSHA), "run", newest.Name, "succeeded", newest.Succeeded)
-	return e.OnBuildTerminal(ctx, delivery.BuildTerminal{
+	return true, e.OnBuildTerminal(ctx, delivery.BuildTerminal{
 		OrgID:     repo.OrgID,
 		ProjectID: repo.ProjectID,
 		Component: component,

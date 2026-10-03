@@ -45,18 +45,23 @@ func (s *Service) Provision(ctx context.Context, orgID, projectID, depName strin
 	if err != nil {
 		return err
 	}
-	return s.provisionResource(ctx, orgID, projectID, depName, issueNumber, params, envs, "")
+	return s.provisionResource(ctx, orgID, projectID, "", depName, issueNumber, params, envs, "")
 }
 
 // provisionResource is the platform-resource provisioning core: it authors the OC
 // Resource + binding and, when gateNumber > 0, admits a running provision
-// Execution pinned to the development binding (the readiness watcher finishes it
-// out-of-band). It takes the gate number DIRECTLY so the build path can thread the
+// Execution pinned to the binding in env, the project's write target (the
+// readiness watcher finishes it out-of-band). An empty envs provisions into env.
+// An empty env is resolved here, once, after the dependency is validated, so a
+// wrong-kind or unknown dependency is still answered as such: the build path
+// passes the env it already resolved, the HTTP path passes "".
+//
+// It takes the gate number DIRECTLY so the build path can thread the
 // just-minted number past GitHub's eventually-consistent issue list (issue #164);
 // the public Provision resolves it via findProvisionIssue for its HTTP callers. A
 // gateNumber of 0 authors the resource with no run admitted (a safe no-op gate).
 // tag is the spec tag the build is provisioning; empty means HEAD (HTTP drawer).
-func (s *Service) provisionResource(ctx context.Context, orgID, projectID, depName string, gateNumber int, params map[string]any, envs []string, tag string) error {
+func (s *Service) provisionResource(ctx context.Context, orgID, projectID, env, depName string, gateNumber int, params map[string]any, envs []string, tag string) error {
 	dep, err := s.findDepInProject(ctx, orgID, projectID, depName, spec.DependencyKindPlatformResource)
 	if err != nil {
 		return err
@@ -75,7 +80,14 @@ func (s *Service) provisionResource(ctx context.Context, orgID, projectID, depNa
 	if err != nil {
 		return err
 	}
-	envs = envList(envs)
+	// Resolved even when envs is named: the provision run is pinned to the
+	// write target's binding, whichever environments the request authors.
+	if env == "" {
+		if env, err = s.writeTarget(ctx, orgID, projectID); err != nil {
+			return err
+		}
+	}
+	envs = envList(envs, env)
 
 	var execID string
 	if gateNumber > 0 {
@@ -102,11 +114,11 @@ func (s *Service) provisionResource(ctx context.Context, orgID, projectID, depNa
 		return fmt.Errorf("%w: %w", dependencies.ErrProvisionFailed, perr)
 	}
 
-	// Async: mark the run RUNNING pinned to the development binding name; the
+	// Async: mark the run RUNNING pinned to the write target's binding name; the
 	// readiness watcher observes Ready and finishes it. Without a start the
 	// watcher cannot pick it up, so a start failure is a real (logged) problem.
 	if execID != "" {
-		ref := result.BindingByEnv[defaultEnv()]
+		ref := result.BindingByEnv[env]
 		if ref == "" {
 			ref = result.ResourceName
 		}

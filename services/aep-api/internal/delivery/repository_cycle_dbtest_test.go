@@ -43,8 +43,48 @@ func admitRun(t *testing.T, repo delivery.MilestoneRunRepository, org, project s
 // dispatch activity does — the host its capture is then priced against.
 func dispatchedOn(t *testing.T, cycles delivery.RunCycleRepository, c *delivery.RunCycle, host string) {
 	t.Helper()
-	if _, err := cycles.NoteModelHost(context.Background(), c.ID, host); err != nil {
-		t.Fatalf("NoteModelHost(%s): %v", c.ID, err)
+	if _, err := cycles.NoteLaunch(context.Background(), c.ID, host, "development"); err != nil {
+		t.Fatalf("NoteLaunch(%s): %v", c.ID, err)
+	}
+}
+
+// NoteLaunch copies both launch facts onto an open cycle, and a closed cycle
+// keeps the ones it was launched with.
+func TestRunCycleRepository_NoteLaunchRecordsHostAndEnvironment(t *testing.T) {
+	t.Parallel()
+	db := dbtest.New(t)
+	runs := delivery.NewMilestoneRunRepository(db)
+	cycles := delivery.NewRunCycleRepository(db, nil)
+	ctx := context.Background()
+
+	run := admitRun(t, runs, "orgl", "proj", 1, "v1")
+	cycle := &delivery.RunCycle{
+		OrgID: run.OrgID, ProjectID: run.ProjectID, RunID: run.ID, Kind: delivery.CycleKindCoding,
+	}
+	if err := cycles.Append(ctx, cycle); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	row, err := cycles.NoteLaunch(ctx, cycle.ID, modelconn.AnthropicHost, "dev-b")
+	if err != nil || row == nil {
+		t.Fatalf("NoteLaunch(open) = (%+v, %v), want the updated row", row, err)
+	}
+	if row.ModelHost != modelconn.AnthropicHost || row.Environment != "dev-b" {
+		t.Fatalf("launched row = (host %q, environment %q), want (%q, dev-b)",
+			row.ModelHost, row.Environment, modelconn.AnthropicHost)
+	}
+
+	if _, err := cycles.Finish(ctx, cycle.ID, "deadbeef"); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	if row, err := cycles.NoteLaunch(ctx, cycle.ID, modelconn.OllamaHost, "staging"); err != nil || row != nil {
+		t.Fatalf("NoteLaunch(closed) = (%+v, %v), want (nil, nil)", row, err)
+	}
+	var env string
+	if err := db.Raw(`SELECT environment FROM run_cycles WHERE id = ?`, cycle.ID).Scan(&env).Error; err != nil {
+		t.Fatalf("read environment: %v", err)
+	}
+	if env != "dev-b" {
+		t.Fatalf("closed cycle environment = %q, want dev-b kept", env)
 	}
 }
 
@@ -770,7 +810,7 @@ func TestRunCycleRepository_ModelHostPricesTheCapture(t *testing.T) {
 	if _, err := cycles.Finish(ctx, anthropic.ID, "deadbeef"); err != nil {
 		t.Fatalf("Finish: %v", err)
 	}
-	if row, err := cycles.NoteModelHost(ctx, anthropic.ID, modelconn.OllamaHost); err != nil || row != nil {
-		t.Fatalf("NoteModelHost(closed) = (%+v, %v), want (nil, nil)", row, err)
+	if row, err := cycles.NoteLaunch(ctx, anthropic.ID, modelconn.OllamaHost, "development"); err != nil || row != nil {
+		t.Fatalf("NoteLaunch(closed) = (%+v, %v), want (nil, nil)", row, err)
 	}
 }

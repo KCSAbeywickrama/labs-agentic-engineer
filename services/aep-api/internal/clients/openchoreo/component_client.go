@@ -181,6 +181,8 @@ type componentClient struct {
 	// preferPlainHTTP picks the http external URL when a binding advertises both
 	// (Config.PreferPlainHTTPEndpoints explains why).
 	preferPlainHTTP bool
+	// labels are stamped on every write (Config.ResourceLabels).
+	labels resourceLabels
 }
 
 func NewComponentClient(cfg Config) ComponentClient {
@@ -188,7 +190,7 @@ func NewComponentClient(cfg Config) ComponentClient {
 	if err != nil {
 		panic(fmt.Errorf("init openchoreo component client: %w", err))
 	}
-	return &componentClient{oc: oc, preferPlainHTTP: cfg.PreferPlainHTTPEndpoints}
+	return &componentClient{oc: oc, preferPlainHTTP: cfg.PreferPlainHTTPEndpoints, labels: newResourceLabels(cfg.ResourceLabels)}
 }
 
 // -- Conversions -------------------------------------------------------------
@@ -571,15 +573,17 @@ func (c *componentClient) CreateComponent(ctx context.Context, orgName, projectN
 	// zone does not read. Catch it here, where the cause is still known.
 	if req != nil && req.Type == CodingAgentComponentTypeRef {
 		scoped := ScopedComponentName(projectName, req.Name)
-		if len(scoped) > CodingAgentComponentNameBudget() {
+		if len(scoped) > CodingAgentComponentNameBudget {
 			return nil, fmt.Errorf(
 				"create component: coding-agent name %q is %d chars after project scoping, over the %d-char budget "+
-					"(OpenChoreo appends -%s-<hash8> into a pod label, so this Component would be accepted and then never schedule a runner)",
-				scoped, len(scoped), CodingAgentComponentNameBudget(), DevEnvironmentName)
+					"(OpenChoreo appends -<environment>-<hash8> into a pod label, so this Component would be accepted and then never schedule a runner)",
+				scoped, len(scoped), CodingAgentComponentNameBudget)
 		}
 	}
 
-	resp, err := c.oc.CreateComponentWithResponse(ctx, orgName, buildCreateComponentBody(projectName, req))
+	body := buildCreateComponentBody(projectName, req)
+	c.labels.stamp(&body.Metadata)
+	resp, err := c.oc.CreateComponentWithResponse(ctx, orgName, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create component: %w", err)
 	}
@@ -689,6 +693,9 @@ func (c *componentClient) ApplyComponentSpec(ctx context.Context, orgName, proje
 		// binding's pin, with the loser's release silently serving.
 		autoBuild, autoDeploy := desired.AutoBuild, desired.AutoDeploy
 		comp.Spec.AutoBuild, comp.Spec.AutoDeploy = &autoBuild, &autoDeploy
+		// Every write re-asserts the resource labels, which is also what labels a
+		// Component written before they were configured.
+		c.labels.stamp(&comp.Metadata)
 
 		updResp, err := c.oc.UpdateComponentWithResponse(ctx, orgName, ocgen.ComponentNameParam(scopedComp), ocgen.UpdateComponentJSONRequestBody(comp))
 		if err != nil {
@@ -788,6 +795,7 @@ func (c *componentClient) putTraitEnvironmentConfigs(ctx context.Context, orgNam
 		merged[inst] = cloneParameterMap(params)
 	}
 	rb.Spec.TraitEnvironmentConfigs = &merged
+	c.labels.stamp(&rb.Metadata)
 
 	updResp, uerr := c.oc.UpdateReleaseBindingWithResponse(ctx, orgName, ocgen.ReleaseBindingNameParam(bindingName), ocgen.UpdateReleaseBindingJSONRequestBody(rb))
 	if uerr != nil {
@@ -828,7 +836,7 @@ func buildCreateComponentBody(projectName string, req *CreateComponentRequest) o
 	//
 	// Verified local + dev cloud: in cloud, platform-api's ProvisionOrgUnit
 	// creates the per-org namespaced `service`/`web-application` ComponentTypes;
-	// locally, deployments/scripts/setup-aep.sh provisions the same namespaced
+	// locally, aectl and the platform chart provision the same namespaced
 	// types in the org ns (derived from the cluster-scoped definitions). So the
 	// kind=ComponentType reference resolves in both environments — no env branch.
 	// The type NAME (`deployment/service` etc.) is identical for both kinds.
@@ -1036,7 +1044,7 @@ func (c *componentClient) ListDeployments(ctx context.Context, orgName, projectN
 // OC call.
 //
 // Internally marked bindings are skipped, the same exclusion ListComponents
-// makes: every coding-agent cycle creates a real dev-environment binding owned
+// makes: every coding-agent cycle creates a real binding in the write target owned
 // by the user's project, and because that binding wraps a batch/v1 Job (which
 // OpenChoreo registers no health check for) it reports Ready=True regardless of
 // the Job's state. Folded into the deploy stage those bindings reported a
@@ -1296,6 +1304,7 @@ func (c *componentClient) createWorkflowRun(ctx context.Context, orgName string,
 			opName, n, len(n), k8sname.MaxLabelValueLen)
 	}
 
+	c.labels.stamp(&body.Metadata)
 	resp, err := c.oc.CreateWorkflowRunWithResponse(ctx, orgName, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to %s: %w", opName, err)

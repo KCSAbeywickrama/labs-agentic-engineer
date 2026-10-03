@@ -68,7 +68,7 @@ flowchart LR
     VAL -.->|not settled| CYCLE
   end
   TAG --> TASK
-  MERGE --> OC[["OpenChoreo — dev environment"]]
+  MERGE --> OC[["OpenChoreo — write target"]]
 ```
 
 Skills are how the platform is taught rather than changed.

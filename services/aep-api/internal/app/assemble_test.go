@@ -25,10 +25,8 @@ package app
 
 import (
 	"context"
-	"strings"
 	"testing"
 
-	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
 	"github.com/wso2/aep/aep-api/internal/clients/secretmanagersvc"
 	"github.com/wso2/aep/aep-api/internal/config"
 )
@@ -78,29 +76,6 @@ func (stubSecretsClient) GetSecretWithValue(context.Context, secretmanagersvc.Se
 }
 func (stubSecretsClient) Close(context.Context) error { return nil }
 
-func TestAssemble_RequiresWriteTarget(t *testing.T) {
-	in := Fake()
-	in.WriteTarget = ""
-	_, err := Assemble(baseCfg(), in, Seam{})
-	if err == nil || !strings.Contains(err.Error(), "write-target") {
-		t.Fatalf("Assemble err = %v, want write-target required", err)
-	}
-}
-
-func TestAssemble_SetsDevEnvironmentName(t *testing.T) {
-	orig := openchoreo.DevEnvironmentName
-	t.Cleanup(func() { openchoreo.SetDevEnvironmentName(orig) })
-
-	in := Fake()
-	in.WriteTarget = "development"
-	if _, err := Assemble(baseCfg(), in, Seam{}); err != nil {
-		t.Fatalf("Assemble: %v", err)
-	}
-	if openchoreo.DevEnvironmentName != "development" {
-		t.Fatalf("DevEnvironmentName = %q, want development", openchoreo.DevEnvironmentName)
-	}
-}
-
 func TestAssemble_MinimalConfigBuildsTheGraph(t *testing.T) {
 	app, err := Assemble(baseCfg(), Fake(), Seam{})
 	if err != nil {
@@ -109,8 +84,8 @@ func TestAssemble_MinimalConfigBuildsTheGraph(t *testing.T) {
 	if app.Handler == nil {
 		t.Fatal("assembled app has a nil Handler")
 	}
-	if len(app.Watchers) != 9 {
-		t.Fatalf("minimal watcher count = %d, want 9 (the unconditional watchers; reaper omitted with Fake nil Workspace)", len(app.Watchers))
+	if len(app.Watchers) != 10 {
+		t.Fatalf("minimal watcher count = %d, want 10 (the unconditional watchers; reaper omitted with Fake nil Workspace)", len(app.Watchers))
 	}
 	for i, w := range app.Watchers {
 		if w == nil {
@@ -120,20 +95,20 @@ func TestAssemble_MinimalConfigBuildsTheGraph(t *testing.T) {
 }
 
 // TestAssemble_WatcherRegistration pins the one remaining conditional watcher:
-// the run-supervisor worker rides on TEMPORAL_HOSTPORT. The base is 9 — Fake()
-// omits the disk reaper (nil Workspace); the event plane's reconcile AND build
-// sweeps, the OpenChoreo pod-truth watcher and the model key rename are all
-// unconditional.
+// the run-supervisor worker rides on TEMPORAL_HOSTPORT. The base is 10 — Fake()
+// omits the disk reaper (nil Workspace); the webhook replayer, the event plane's
+// reconcile AND build sweeps, the OpenChoreo pod-truth watcher and the model key
+// rename are all unconditional.
 func TestAssemble_WatcherRegistration(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*config.Config)
 		want   int
 	}{
-		{"base", func(*config.Config) {}, 9},
+		{"base", func(*config.Config) {}, 10},
 		{"+temporal adds the run worker", func(c *config.Config) {
 			c.Temporal.HostPort = "temporal:7233"
-		}, 10},
+		}, 11},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -221,4 +196,16 @@ func TestAssemble_Degradations(t *testing.T) {
 			}
 		}
 	})
+}
+
+// ResourceLabels are stamped on every OpenChoreo write, so a label the API
+// server would reject must fail the boot rather than every write after it.
+func TestAssemble_RefusesInvalidResourceLabels(t *testing.T) {
+	_, err := Assemble(baseCfg(), Fake(), Seam{ResourceLabels: map[string]string{"cloud.wso2.com/product-name": "not a label value"}})
+	if err == nil {
+		t.Fatal("Assemble with an invalid resource label = nil error, want a refusal")
+	}
+	if _, err := Assemble(baseCfg(), Fake(), Seam{ResourceLabels: map[string]string{"cloud.wso2.com/product-name": "app-factory"}}); err != nil {
+		t.Fatalf("Assemble with a valid resource label = %v, want nil", err)
+	}
 }

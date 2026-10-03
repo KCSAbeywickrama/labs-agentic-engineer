@@ -86,7 +86,7 @@ func newSharedDepHarness(t *testing.T, designs, origins map[string]string, cr *T
 		},
 	}
 	thunder := &fakeThunderReader{view: cr}
-	svc := NewDeploymentService(oc, traitStoreWith(files))
+	svc := newTestDeploymentService(oc, traitStoreWith(files))
 	svc.SetResourceCatalog(thunderWaitCatalog())
 	svc.SetResourceClient(rc)
 	svc.SetThunderApplicationReader(thunder)

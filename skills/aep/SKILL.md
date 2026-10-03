@@ -382,12 +382,14 @@ nothing else. Name **exactly these**, and nothing else:
    its flow at "open a PR", which this subagent may not do). In the same line,
    that it loads **no other skill and not `aep`**: this prompt is its whole
    procedure;
-6. **the artefacts only you could resolve** — and say which is which: the
-   component's `workload.yaml` when you hold a resolved one, pasted verbatim and
-   not to be changed; **or** that no wiring was resolved, so it authors the file
-   from the design per `references/workload-and-wiring.md`. Plus any
-   `org-service` contract you resolved — pasted, as a path, or named as
-   undocumented, which changes the job to a minimal client;
+6. **the artefacts only you could resolve**. Its `workload.yaml` is the
+   subagent's to write, from the component contract, and a `design.json` entry
+   is a path it reads for itself (item 3); what goes in is what you resolved:
+   - the `## Component <its name>` block of a "Platform-resolved dependencies"
+     comment, pasted verbatim as the `dependencies:` block it merges into that
+     file;
+   - any `org-service` contract you resolved — pasted, as a path, or named as
+     undocumented, which changes the job to a minimal client;
 7. **its write boundary** — `Edit`/`Write`, and only inside its App Paths.
    **It never runs `git`**: the branch, the commits and the pull request are
    yours;

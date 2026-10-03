@@ -22,6 +22,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
@@ -134,7 +135,10 @@ type pullRequestPayload struct {
 		// composing a URL of its own.
 		HTMLURL        string `json:"html_url"`
 		MergeCommitSHA string `json:"merge_commit_sha"`
-		Head           struct {
+		// UpdatedAt is the moment the delivery describes the pull request at.
+		// It is what tells a late delivery from a current one (cycleAsOf).
+		UpdatedAt time.Time `json:"updated_at"`
+		Head      struct {
 			Ref string `json:"ref"`
 		} `json:"head"`
 	} `json:"pull_request"`
@@ -245,7 +249,7 @@ func (e *Events) OnPullRequest(ctx context.Context, _, _ string, payload []byte)
 	// the only way the cycle learns them; a human's pull request landing during
 	// the same cycle is not that cycle's work and must not overwrite it.
 	if owner.agentBranch {
-		e.noteCyclePR(ctx, owner.run, p.cyclePR())
+		e.noteCyclePR(ctx, owner.run, p.cyclePR(), p.PullRequest.UpdatedAt)
 	}
 	if p.PullRequest.Draft || e.p.Issues == nil {
 		return nil
@@ -265,7 +269,7 @@ func (e *Events) OnPullRequest(ctx context.Context, _, _ string, payload []byte)
 	// a declined merge is the loudest silence this loop has — the cycle sits at
 	// its landing deadline with a green agent log and nothing else to say.
 	if owner.agentBranch {
-		e.noteCycleMergeDecision(ctx, owner.run, decision)
+		e.noteCycleMergeDecision(ctx, owner.run, decision, p.PullRequest.UpdatedAt)
 	}
 	if !decision.Merge {
 		slog.DebugContext(ctx, "eventcore: auto-merge declined", "pr", p.PullRequest.Number,
@@ -297,7 +301,7 @@ func (e *Events) OnPullRequestClosed(ctx context.Context, _, _ string, payload [
 	// The unverified-fix cleanup is an issue-side follow-up to the merge, not a
 	// precondition of it: its failure must not hold back the cycle close, the
 	// supervisor signal or the rebuild. It is still reported (joined below) so
-	// the delivery is retried; re-running this handler is safe (see Idempotency
+	// the delivery is replayed; re-running this handler is safe (see Idempotency
 	// in doc.go), and the cleanup skips an issue it already left unverified.
 	var cleanupErr error
 	if unverifiedMerge(p.PullRequest.Body) {
@@ -307,7 +311,7 @@ func (e *Events) OnPullRequestClosed(ctx context.Context, _, _ string, payload [
 	// Only the agent's own pull request closes the cycle. A human's merge moves
 	// main (so it still rebuilds), but it is not the cycle's outcome.
 	if owner.agentBranch {
-		e.closeCycle(ctx, owner.run, p.cyclePR(), mergeSHA)
+		e.closeCycle(ctx, owner.run, p.cyclePR(), mergeSHA, p.PullRequest.UpdatedAt)
 	}
 	e.signal(ctx, owner.run, delivery.SigRunPRMerged, delivery.RunSignal{
 		PRNumber: p.PullRequest.Number,
@@ -419,7 +423,7 @@ func (e *Events) OnIssues(ctx context.Context, _, action string, payload []byte)
 		if aerr := e.AdoptIssue(ctx, orgID, projectID, target); aerr != nil {
 			// Adoption problems are the human's to see, and the console dispatch
 			// path returns them synchronously. Failing the delivery here would only
-			// make GitHub redeliver a label that is already applied.
+			// replay a label that is already applied.
 			slog.WarnContext(ctx, "eventcore: adoption declined", "repo", p.Repository.FullName,
 				"issue", p.Issue.Number, "error", aerr)
 			return nil

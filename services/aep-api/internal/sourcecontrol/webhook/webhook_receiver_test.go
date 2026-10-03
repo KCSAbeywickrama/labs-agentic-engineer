@@ -34,9 +34,17 @@ package webhook
 //   - routing resolves BEFORE HMAC verify (an unroutable event 200-acks
 //     without touching the verifier);
 //   - Persist runs AFTER verify (a forged event never writes a delivery row);
+//   - the ack (202) goes out BEFORE the handlers run, and the handlers run on
+//     a context the request's end does not cancel — GitHub's 10-second
+//     delivery timeout cannot reach them;
 //   - MarkProcessed drives the dedup ack (a replay of finished work 200-acks
-//     with no re-dispatch), while a failed handler leaves processed_at NULL so
-//     a GitHub redelivery re-enters the handler.
+//     with no re-dispatch), while a failed handler leaves processed_at NULL
+//     and the delivery held for its retry backoff, after which a redelivery
+//     (or the Replayer) re-enters the handler.
+//
+// Handlers run asynchronously, so a test that asserts on their effects first
+// waits for the delivery row to settle (settle), which is the same ledger
+// write that ends every handler run.
 
 import (
 	"bytes"
@@ -45,6 +53,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -89,6 +98,7 @@ type receiverHarness struct {
 	db      *gorm.DB
 	ctrl    WebhookController
 	handler *recordingHandler
+	clock   *testClock
 }
 
 // repoRoutedEvents are the events extractRoutingKey resolves through
@@ -108,14 +118,15 @@ func newReceiverHarness(t *testing.T) *receiverHarness {
 		router.Register(event, "", handler)
 	}
 	lookup := &fakeOrgLookup{repos: map[string]string{"acme/web": "org-acme"}}
+	clock := newTestClock()
 	ctrl := NewWebhookController(
 		NewVerifier(newStaticProvider(receiverSecret)),
-		sourcecontrol.NewDeliveryStore(db),
+		sourcecontrol.NewDeliveryStore(db).WithClock(clock.Now),
 		router,
 		lookup,
 		NewRoutingCache(0),
 	)
-	return &receiverHarness{db: db, ctrl: ctrl, handler: handler}
+	return &receiverHarness{db: db, ctrl: ctrl, handler: handler, clock: clock}
 }
 
 // post builds a GitHub-shaped POST and drives it through the real Receive.
@@ -123,7 +134,14 @@ func newReceiverHarness(t *testing.T) *receiverHarness {
 // one to pin the rejection).
 func (h *receiverHarness) post(t *testing.T, deliveryID, event, signature string, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
+	return h.postCtx(t, context.Background(), deliveryID, event, signature, body)
+}
+
+// postCtx is post with the request's own context, so a test can end the
+// request the way GitHub's timeout does.
+func (h *receiverHarness) postCtx(t *testing.T, ctx context.Context, deliveryID, event, signature string, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/webhooks/github", bytes.NewReader(body))
 	if deliveryID != "" {
 		req.Header.Set("X-GitHub-Delivery", deliveryID)
 	}
@@ -147,23 +165,42 @@ func (h *receiverHarness) loadDelivery(t *testing.T, deliveryID string) sourceco
 	return row
 }
 
+// settle waits for the handler run the receiver dispatched to record its
+// outcome on the delivery row (processed, or failed with an error), and
+// returns the row.
+func (h *receiverHarness) settle(t *testing.T, deliveryID string) sourcecontrol.WebhookDelivery {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		row := h.loadDelivery(t, deliveryID)
+		if row.ProcessedAt != nil || row.ProcessError != "" {
+			return row
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("delivery %s never settled: %+v", deliveryID, row)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // pushBody is a routable push event: repository.full_name is the routing key
 // for "push" (routing_key.go), and it maps to org-acme in the fake lookup.
 var pushBody = []byte(`{"repository":{"full_name":"acme/web"},"ref":"refs/heads/main"}`)
 
-func TestReceiver_ValidSignature_DispatchesAndAcks200(t *testing.T) {
+func TestReceiver_ValidSignature_Acks202ThenDispatches(t *testing.T) {
 	t.Parallel()
 	h := newReceiverHarness(t)
 
 	rec := h.post(t, "delivery-ok", "push", sign(receiverSecret, pushBody), pushBody)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("valid signed event must ack 200, got %d (%s)", rec.Code, rec.Body)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("valid signed event must ack 202, got %d (%s)", rec.Code, rec.Body)
 	}
-	if len(h.handler.calls) != 1 {
-		t.Fatalf("dispatch must fire exactly once, got %d", len(h.handler.calls))
+	h.settle(t, "delivery-ok")
+	if h.handler.count() != 1 {
+		t.Fatalf("dispatch must fire exactly once, got %d", h.handler.count())
 	}
-	got := h.handler.calls[0]
+	got := h.handler.call(0)
 	if got.event != "push" || got.action != "" || got.payload != string(pushBody) {
 		t.Fatalf("handler received (event=%q action=%q payload=%q); want the raw push payload", got.event, got.action, got.payload)
 	}
@@ -196,22 +233,24 @@ func TestReceiver_PullRequestAndIssuesRouteToHandlers(t *testing.T) {
 	}
 	for i, event := range []string{"pull_request", "issues"} {
 		body := bodies[event]
-		rec := h.post(t, fmt.Sprintf("delivery-%s", event), event, sign(receiverSecret, body), body)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s must ack 200, got %d (%s)", event, rec.Code, rec.Body)
+		id := fmt.Sprintf("delivery-%s", event)
+		rec := h.post(t, id, event, sign(receiverSecret, body), body)
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("%s must ack 202, got %d (%s)", event, rec.Code, rec.Body)
 		}
-		if len(h.handler.calls) != i+1 {
-			t.Fatalf("%s must dispatch, got %d calls", event, len(h.handler.calls))
+		h.settle(t, id)
+		if h.handler.count() != i+1 {
+			t.Fatalf("%s must dispatch, got %d calls", event, h.handler.count())
 		}
-		got := h.handler.calls[i]
+		got := h.handler.call(i)
 		if got.event != event {
 			t.Fatalf("dispatched event = %q, want %q", got.event, event)
 		}
 	}
-	if action := h.handler.calls[0].action; action != "opened" {
+	if action := h.handler.call(0).action; action != "opened" {
 		t.Fatalf("pull_request action = %q, want opened", action)
 	}
-	if action := h.handler.calls[1].action; action != "milestoned" {
+	if action := h.handler.call(1).action; action != "milestoned" {
 		t.Fatalf("issues action = %q, want milestoned", action)
 	}
 }
@@ -225,8 +264,8 @@ func TestReceiver_BadSignature_401NoDispatchNoPersist(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("forged signature must be 401, got %d (%s)", rec.Code, rec.Body)
 	}
-	if len(h.handler.calls) != 0 {
-		t.Fatalf("a forged event must NOT dispatch, got %d calls", len(h.handler.calls))
+	if h.handler.count() != 0 {
+		t.Fatalf("a forged event must NOT dispatch, got %d calls", h.handler.count())
 	}
 	// Verify runs BEFORE Persist: a forged event never writes a delivery row.
 	var count int64
@@ -246,8 +285,8 @@ func TestReceiver_MissingSignature_401NoDispatch(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("missing signature must be 401, got %d (%s)", rec.Code, rec.Body)
 	}
-	if len(h.handler.calls) != 0 {
-		t.Fatalf("an unsigned event must NOT dispatch, got %d calls", len(h.handler.calls))
+	if h.handler.count() != 0 {
+		t.Fatalf("an unsigned event must NOT dispatch, got %d calls", h.handler.count())
 	}
 }
 
@@ -256,11 +295,12 @@ func TestReceiver_DuplicateDelivery_DedupedSecondAck200NoRedispatch(t *testing.T
 	h := newReceiverHarness(t)
 	sig := sign(receiverSecret, pushBody)
 
-	if rec := h.post(t, "delivery-dup", "push", sig, pushBody); rec.Code != http.StatusOK {
-		t.Fatalf("first delivery must ack 200, got %d", rec.Code)
+	if rec := h.post(t, "delivery-dup", "push", sig, pushBody); rec.Code != http.StatusAccepted {
+		t.Fatalf("first delivery must ack 202, got %d", rec.Code)
 	}
-	if len(h.handler.calls) != 1 {
-		t.Fatalf("first delivery must dispatch once, got %d", len(h.handler.calls))
+	h.settle(t, "delivery-dup")
+	if h.handler.count() != 1 {
+		t.Fatalf("first delivery must dispatch once, got %d", h.handler.count())
 	}
 
 	// GitHub redelivers the SAME X-GitHub-Delivery after we already processed
@@ -270,40 +310,105 @@ func TestReceiver_DuplicateDelivery_DedupedSecondAck200NoRedispatch(t *testing.T
 	if rec.Code != http.StatusOK {
 		t.Fatalf("replay of processed work must ack 200, got %d (%s)", rec.Code, rec.Body)
 	}
-	if len(h.handler.calls) != 1 {
-		t.Fatalf("replay must NOT re-dispatch: want 1 total call, got %d", len(h.handler.calls))
+	if h.handler.count() != 1 {
+		t.Fatalf("replay must NOT re-dispatch: want 1 total call, got %d", h.handler.count())
 	}
 }
 
-func TestReceiver_HandlerFailure_500ThenRedeliveryReruns(t *testing.T) {
+func TestReceiver_HandlerFailure_HeldForBackoffThenRedeliveryReruns(t *testing.T) {
 	t.Parallel()
 	h := newReceiverHarness(t)
 	sig := sign(receiverSecret, pushBody)
 
-	// First attempt: the handler fails → 500 (GitHub will redeliver), the row
-	// stays unprocessed with the error recorded for audit.
-	h.handler.err = fmt.Errorf("downstream boom")
-	rec := h.post(t, "delivery-retry", "push", sig, pushBody)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("handler failure must ack 5xx so GitHub redelivers, got %d", rec.Code)
+	// First attempt: the ack has already gone out, the handler then fails. The
+	// row stays unprocessed with the error recorded for audit.
+	h.handler.setErr(fmt.Errorf("downstream boom"))
+	if rec := h.post(t, "delivery-retry", "push", sig, pushBody); rec.Code != http.StatusAccepted {
+		t.Fatalf("the ack must not wait for the handler, want 202, got %d", rec.Code)
 	}
-	row := h.loadDelivery(t, "delivery-retry")
+	row := h.settle(t, "delivery-retry")
 	if row.ProcessedAt != nil || row.ProcessError == "" {
 		t.Fatalf("failed delivery must stay unprocessed with the error recorded, got %+v", row)
 	}
 
-	// Redelivery (same delivery id, handler healthy again): Persist reports
-	// neither Created nor AlreadyProcessed → the handler RE-RUNS → 200.
-	h.handler.err = nil
-	rec = h.post(t, "delivery-retry", "push", sig, pushBody)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("redelivery after a fixed handler must ack 200, got %d (%s)", rec.Code, rec.Body)
+	// A redelivery inside the retry backoff is acknowledged but not run: the
+	// backoff is the delivery's lease, and nobody runs it while it is held.
+	h.handler.setErr(nil)
+	if rec := h.post(t, "delivery-retry", "push", sig, pushBody); rec.Code != http.StatusAccepted {
+		t.Fatalf("a redelivery inside the backoff must ack 202, got %d", rec.Code)
 	}
-	if len(h.handler.calls) != 2 {
-		t.Fatalf("redelivery of unprocessed work must re-dispatch: want 2 calls, got %d", len(h.handler.calls))
+	if h.handler.count() != 1 {
+		t.Fatalf("a redelivery inside the backoff must not re-dispatch, got %d calls", h.handler.count())
 	}
-	if row := h.loadDelivery(t, "delivery-retry"); row.ProcessedAt == nil || row.ProcessError != "" {
-		t.Fatalf("successful redelivery must mark processed + clear the error, got %+v", row)
+
+	// Past the backoff, the redelivery takes the delivery over and re-runs it.
+	h.clock.Advance(deliveryBackoff(1) + time.Second)
+	if rec := h.post(t, "delivery-retry", "push", sig, pushBody); rec.Code != http.StatusAccepted {
+		t.Fatalf("a redelivery past the backoff must ack 202, got %d (%s)", rec.Code, rec.Body)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for h.loadDelivery(t, "delivery-retry").ProcessedAt == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("the re-run never marked the delivery processed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if h.handler.count() != 2 {
+		t.Fatalf("redelivery of unprocessed work must re-dispatch: want 2 calls, got %d", h.handler.count())
+	}
+	if row := h.loadDelivery(t, "delivery-retry"); row.ProcessError != "" {
+		t.Fatalf("successful re-run must clear the error, got %+v", row)
+	}
+}
+
+// TestReceiver_RequestCancelDoesNotCancelTheHandler is the ticket-13 failure:
+// GitHub closes the connection at 10 seconds, which cancels the request's
+// context. The handlers must not be running on that context.
+func TestReceiver_RequestCancelDoesNotCancelTheHandler(t *testing.T) {
+	t.Parallel()
+	h := newReceiverHarness(t)
+	release := make(chan struct{})
+	h.handler.block = release
+
+	reqCtx, endRequest := context.WithCancel(context.Background())
+	rec := h.postCtx(t, reqCtx, "delivery-slow", "push", sign(receiverSecret, pushBody), pushBody)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("the ack must go out while the handler is still running, want 202, got %d", rec.Code)
+	}
+
+	// GitHub gives up on the connection; only then does the handler finish.
+	endRequest()
+	close(release)
+
+	row := h.settle(t, "delivery-slow")
+	if row.ProcessedAt == nil {
+		t.Fatalf("the handler's work must complete after the request ended, got %+v", row)
+	}
+	h.handler.mu.Lock()
+	defer h.handler.mu.Unlock()
+	if len(h.handler.ctxErrs) != 1 || h.handler.ctxErrs[0] != nil {
+		t.Fatalf("the handler's context must outlive the request, got %v", h.handler.ctxErrs)
+	}
+}
+
+func TestReceiver_DuplicateWhileInFlight_NotRunTwice(t *testing.T) {
+	t.Parallel()
+	h := newReceiverHarness(t)
+	release := make(chan struct{})
+	h.handler.block = release
+	sig := sign(receiverSecret, pushBody)
+
+	if rec := h.post(t, "delivery-twice", "push", sig, pushBody); rec.Code != http.StatusAccepted {
+		t.Fatalf("first delivery must ack 202, got %d", rec.Code)
+	}
+	// A manual redelivery lands while the first run is still going.
+	if rec := h.post(t, "delivery-twice", "push", sig, pushBody); rec.Code != http.StatusAccepted {
+		t.Fatalf("a duplicate of an in-flight delivery must ack 202, got %d", rec.Code)
+	}
+	close(release)
+	h.settle(t, "delivery-twice")
+	if h.handler.count() != 1 {
+		t.Fatalf("an in-flight delivery must run once, got %d runs", h.handler.count())
 	}
 }
 
@@ -320,8 +425,8 @@ func TestReceiver_UnroutableRepo_Acks200Noop(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("an event for an unconnected repo must ack 200 noop, got %d (%s)", rec.Code, rec.Body)
 	}
-	if len(h.handler.calls) != 0 {
-		t.Fatalf("an unroutable event must NOT dispatch, got %d calls", len(h.handler.calls))
+	if h.handler.count() != 0 {
+		t.Fatalf("an unroutable event must NOT dispatch, got %d calls", h.handler.count())
 	}
 	var count int64
 	h.db.Model(&sourcecontrol.WebhookDelivery{}).Where("delivery_id = ?", "delivery-stranger").Count(&count)
@@ -341,7 +446,7 @@ func TestReceiver_MissingGitHubHeaders_400(t *testing.T) {
 	if rec := h.post(t, "delivery-no-event", "", sig, pushBody); rec.Code != http.StatusBadRequest {
 		t.Fatalf("missing X-GitHub-Event must be 400, got %d", rec.Code)
 	}
-	if len(h.handler.calls) != 0 {
-		t.Fatalf("header-rejected requests must NOT dispatch, got %d calls", len(h.handler.calls))
+	if h.handler.count() != 0 {
+		t.Fatalf("header-rejected requests must NOT dispatch, got %d calls", h.handler.count())
 	}
 }

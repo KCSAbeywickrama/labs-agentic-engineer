@@ -74,9 +74,14 @@ datastore · `(["/surface"])` = an inbound HTTP surface.
 - **`clients/`** — outbound adapters to external systems (`openchoreo`, `thundersvc`,
   `thunderapp`, `secretmanagersvc`, `oauth`, `oidc`, `observability`).
   `thunderapp` — Kubernetes GET of ThunderApplication CRs for the web-app deploy wait.
+  `kubeobs` — the observability plane's SRE agent Secret, Deployment and pods (merge patches, no
+  client-go; a Secret call's body never reaches an error or a log).
+  `kubeauth` — the bearer/token-file Authorization and cluster-CA transport both share.
 - **supporting:** `app` (public composition **seam** — `Run(Options)`), `config`,
   `migrate` (ordered schema steps), `gen`/`igen` (generated contract types),
-  `arch` (the executable rules), `seed`.
+  `arch` (the executable rules), `seed`, `sreagent` (the reconciler that converges the stock
+  OpenChoreo SRE agent's Secret, restart hash and replicas on the owning org's effective SRE
+  connection, and mints its handoff token).
 
 ## Composition seam (`app.Run(Options)`)
 
@@ -97,13 +102,15 @@ path or secrets backend:
 | `RequestAuthStrategy` | all-M2M / never pass-through (**direct-OC mode**) |
 | `ImpersonateOrgResolver` (+ optional late-bound builder) | no `X-Impersonate-Org` |
 | `SecretsProvider` | secrets delivery off (no KV writes / SecretReference authoring) |
+| `ResourceLabels` | no extra labels on OpenChoreo writes |
 
 **OSS `cmd/aep-api`** runs in **direct-OC mode**: M2M `AuthProvider` when service
 auth is configured, `DirectOCStrategy` (always M2M), a nil impersonation
 resolver, and an OpenBao-direct `SecretsProvider` when `OPENBAO_ADDR` is set.
 An **overlay module** is a separate process entry that imports the same `app`
 package and injects different `Options` — typically a **PAS strategy** for auth
-and an sm-api-backed `SecretsProvider` for cloud delivery. The sm-api client
+an sm-api-backed `SecretsProvider` for cloud delivery, and the wso2cloud
+`ResourceLabels` (`cloud.wso2.com/product-name`). The sm-api client
 lives in the overlay (outside OSS CI); that is an accepted trade-off — public
 coverage never exercised it either. Detail →
 [`design/composition-seam.md`](design/composition-seam.md).

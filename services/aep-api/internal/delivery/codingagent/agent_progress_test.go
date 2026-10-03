@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/clients/openchoreo"
+	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
 
@@ -409,18 +410,24 @@ func liveCycle(id string) *delivery.RunCycle {
 type stubLive struct {
 	tail LiveTail
 	err  error
+	// envs is the environment each Tail asked for.
+	envs []string
 }
 
-func (s *stubLive) Tail(context.Context, string, string, string, int) (LiveTail, error) {
+func (s *stubLive) Tail(_ context.Context, _, _, _, environment string, _ int) (LiveTail, error) {
+	s.envs = append(s.envs, environment)
 	return s.tail, s.err
 }
 
 type stubArchive struct {
 	text string
 	err  error
+	// scopes is every scope the archive was asked for.
+	scopes []ArchiveScope
 }
 
-func (s *stubArchive) CycleArchive(context.Context, ArchiveScope) (string, error) {
+func (s *stubArchive) CycleArchive(_ context.Context, scope ArchiveScope) (string, error) {
+	s.scopes = append(s.scopes, scope)
 	return s.text, s.err
 }
 
@@ -430,7 +437,7 @@ func TestCycleProgress_LiveTailIsServedWhileTheComponentExists(t *testing.T) {
 		Pod:  openchoreo.RuntimePod{Found: true, Name: "p1", Phase: "Running"},
 	}}
 
-	resp, err := NewAgentProgressReader(live, nil).CycleProgress(context.Background(), liveCycle("c1"), 0)
+	resp, err := NewAgentProgressReader(live, testWriteTargets(), nil).CycleProgress(context.Background(), liveCycle("c1"), 0)
 	if err != nil {
 		t.Fatalf("CycleProgress: %v", err)
 	}
@@ -445,7 +452,7 @@ func TestCycleProgress_LiveTailIsServedWhileTheComponentExists(t *testing.T) {
 func TestCycleProgress_UnscheduledPodNarratesTheDarkZone(t *testing.T) {
 	live := &stubLive{tail: LiveTail{Pod: openchoreo.RuntimePod{}}}
 
-	resp, err := NewAgentProgressReader(live, nil).CycleProgress(context.Background(), liveCycle("c2"), 0)
+	resp, err := NewAgentProgressReader(live, testWriteTargets(), nil).CycleProgress(context.Background(), liveCycle("c2"), 0)
 	if err != nil {
 		t.Fatalf("CycleProgress: %v", err)
 	}
@@ -459,7 +466,7 @@ func TestCycleProgress_PendingPodNarratesItsWaitingReason(t *testing.T) {
 		Found: true, Name: "p1", Phase: "Pending", WaitingReason: "ImagePullBackOff",
 	}}}
 
-	resp, err := NewAgentProgressReader(live, nil).CycleProgress(context.Background(), liveCycle("c3"), 0)
+	resp, err := NewAgentProgressReader(live, testWriteTargets(), nil).CycleProgress(context.Background(), liveCycle("c3"), 0)
 	if err != nil {
 		t.Fatalf("CycleProgress: %v", err)
 	}
@@ -477,7 +484,7 @@ func TestCycleProgress_FallsBackToTheArchiveWhenThePodIsGone(t *testing.T) {
 	ended := time.Now().UTC()
 	cycle.EndedAt = &ended
 
-	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
+	resp, err := NewAgentProgressReader(live, testWriteTargets(), nil).WithArchive(archive).
 		CycleProgress(context.Background(), cycle, 0)
 	if err != nil {
 		t.Fatalf("CycleProgress: %v", err)
@@ -503,7 +510,7 @@ func TestCycleProgress_ClosedArchiveOverCapLeadsWithTruncatedBanner(t *testing.T
 	ended := time.Now().UTC()
 	cycle.EndedAt = &ended
 
-	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
+	resp, err := NewAgentProgressReader(live, testWriteTargets(), nil).WithArchive(archive).
 		CycleProgress(context.Background(), cycle, 0)
 	if err != nil {
 		t.Fatalf("CycleProgress: %v", err)
@@ -531,7 +538,7 @@ func TestCycleProgress_UnavailableWhenComponentAndArchiveAreBothGone(t *testing.
 	ended := time.Now().UTC()
 	cycle.EndedAt = &ended
 
-	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
+	resp, err := NewAgentProgressReader(live, testWriteTargets(), nil).WithArchive(archive).
 		CycleProgress(context.Background(), cycle, 0)
 	if err != nil {
 		t.Fatalf("CycleProgress: %v", err)
@@ -555,7 +562,7 @@ func TestCycleProgress_UnavailableWithNoObserverConfigured(t *testing.T) {
 	ended := time.Now().UTC()
 	cycle.EndedAt = &ended
 
-	resp, err := NewAgentProgressReader(live, nil).CycleProgress(context.Background(), cycle, 0)
+	resp, err := NewAgentProgressReader(live, testWriteTargets(), nil).CycleProgress(context.Background(), cycle, 0)
 	if err != nil {
 		t.Fatalf("CycleProgress: %v", err)
 	}
@@ -570,7 +577,7 @@ func TestCycleProgress_ArchiveErrorOnAnOpenCycleStaysNonFinal(t *testing.T) {
 	live := &stubLive{err: fmt.Errorf("%w: ca-c7", ErrComponentGone)}
 	archive := &stubArchive{err: fmt.Errorf("%w: 503", ErrArchiveUnavailable)}
 
-	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
+	resp, err := NewAgentProgressReader(live, testWriteTargets(), nil).WithArchive(archive).
 		CycleProgress(context.Background(), liveCycle("c7"), 0)
 	if err != nil {
 		t.Fatalf("CycleProgress: %v", err)
@@ -583,10 +590,79 @@ func TestCycleProgress_ArchiveErrorOnAnOpenCycleStaysNonFinal(t *testing.T) {
 	}
 }
 
+// A cycle's log is read in the environment its Job was bound into, live and
+// archived alike, without asking for the project's write target.
+func TestCycleProgress_ReadsTheCyclesRecordedEnvironment(t *testing.T) {
+	live := &stubLive{tail: LiveTail{Pod: openchoreo.RuntimePod{Found: true, Name: "p1", Phase: "Succeeded"}}}
+	archive := &stubArchive{text: "2026-08-06T10:00:01Z archived\n"}
+	targets := &fakeWriteTargets{env: "moved-on"}
+	cycle := liveCycle("c1")
+	cycle.Environment = "dev-b"
+
+	if _, err := NewAgentProgressReader(live, targets, nil).WithArchive(archive).
+		CycleProgress(context.Background(), cycle, 0); err != nil {
+		t.Fatalf("CycleProgress: %v", err)
+	}
+	if len(live.envs) != 1 || live.envs[0] != "dev-b" {
+		t.Fatalf("live tail read in %v, want [dev-b]", live.envs)
+	}
+	if len(archive.scopes) != 1 || archive.scopes[0].Environment != "dev-b" {
+		t.Fatalf("archive scopes = %+v, want one in dev-b", archive.scopes)
+	}
+	if n := targets.resolves(); n != 0 {
+		t.Fatalf("resolved the write target %d times, want never for a cycle that recorded one", n)
+	}
+}
+
+// A cycle with no recorded environment reads in the project's write target
+// now, never in "".
+func TestCycleProgress_ACycleWithNoRecordedEnvironmentUsesTheProjectsWriteTarget(t *testing.T) {
+	live := &stubLive{tail: LiveTail{Pod: openchoreo.RuntimePod{Found: true, Name: "p1", Phase: "Succeeded"}}}
+	archive := &stubArchive{text: "2026-08-06T10:00:01Z archived\n"}
+
+	if _, err := NewAgentProgressReader(live, &fakeWriteTargets{env: "dev-b"}, nil).WithArchive(archive).
+		CycleProgress(context.Background(), liveCycle("c1"), 0); err != nil {
+		t.Fatalf("CycleProgress: %v", err)
+	}
+	if len(live.envs) != 1 || live.envs[0] != "dev-b" {
+		t.Fatalf("live tail read in %v, want [dev-b]", live.envs)
+	}
+	if len(archive.scopes) != 1 || archive.scopes[0].Environment != "dev-b" {
+		t.Fatalf("archive scopes = %+v, want one in dev-b", archive.scopes)
+	}
+}
+
+// A legacy execution tails in the project's write target. One that cannot be
+// resolved degrades to the no-logs answer, never an error for the handler.
+func TestAgentProgress_TailsInTheProjectsWriteTargetAndDegradesWithoutOne(t *testing.T) {
+	row := &delivery.Execution{ID: "11111111-1111-1111-1111-111111111111", OrgID: "acme", ProjectID: "shop",
+		RunName: "ca-exec-1", Status: string(taskmeta.ExecRunning)}
+	live := &stubLive{tail: LiveTail{Text: "2026-08-06T10:00:01Z hello\n",
+		Pod: openchoreo.RuntimePod{Found: true, Name: "p1", Phase: "Running"}}}
+
+	resp, err := NewAgentProgressReader(live, &fakeWriteTargets{env: "dev-b"}, nil).AgentProgress(context.Background(), row, 0)
+	if err != nil || len(resp.Lines) != 1 {
+		t.Fatalf("AgentProgress = (%+v, %v), want the live line", resp, err)
+	}
+	if len(live.envs) != 1 || live.envs[0] != "dev-b" {
+		t.Fatalf("live tail read in %v, want [dev-b]", live.envs)
+	}
+
+	live.envs = nil
+	unresolvable := &fakeWriteTargets{err: &openchoreo.ErrNoWriteTarget{Org: "acme", Project: "shop", Cause: openchoreo.ErrPipelineRefMissing}}
+	resp, err = NewAgentProgressReader(live, unresolvable, nil).AgentProgress(context.Background(), row, 0)
+	if err != nil || resp == nil {
+		t.Fatalf("AgentProgress = (%+v, %v), want a degraded response and no error", resp, err)
+	}
+	if len(resp.Lines) != 0 || len(live.envs) != 0 {
+		t.Fatalf("lines = %+v, tails = %v, want nothing read without an environment", resp.Lines, live.envs)
+	}
+}
+
 func TestCycleProgress_ATransportFailureIsAnError(t *testing.T) {
 	live := &stubLive{err: errors.New("dial tcp: connection refused")}
 
-	if _, err := NewAgentProgressReader(live, nil).CycleProgress(context.Background(), liveCycle("c8"), 0); err == nil {
+	if _, err := NewAgentProgressReader(live, testWriteTargets(), nil).CycleProgress(context.Background(), liveCycle("c8"), 0); err == nil {
 		t.Fatal("a transport failure must surface so the caller can degrade")
 	}
 }
@@ -600,7 +676,7 @@ func TestCycleProgress_ClosedEmptyLiveFallsThroughToArchive(t *testing.T) {
 	ended := time.Now().UTC()
 	cycle.EndedAt = &ended
 
-	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
+	resp, err := NewAgentProgressReader(live, testWriteTargets(), nil).WithArchive(archive).
 		CycleProgress(context.Background(), cycle, 0)
 	if err != nil {
 		t.Fatalf("CycleProgress: %v", err)
@@ -620,7 +696,7 @@ func TestCycleProgress_ClosedEmptyLiveWithNoArchiveIsUnavailable(t *testing.T) {
 	ended := time.Now().UTC()
 	cycle.EndedAt = &ended
 
-	resp, err := NewAgentProgressReader(live, nil).CycleProgress(context.Background(), cycle, 0)
+	resp, err := NewAgentProgressReader(live, testWriteTargets(), nil).CycleProgress(context.Background(), cycle, 0)
 	if err != nil {
 		t.Fatalf("CycleProgress: %v", err)
 	}
@@ -641,7 +717,7 @@ func TestCycleProgress_OpenEmptyLiveStaysOnDarkZone(t *testing.T) {
 	live := &stubLive{tail: LiveTail{Pod: openchoreo.RuntimePod{}}}
 	archive := &stubArchive{text: ""}
 
-	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
+	resp, err := NewAgentProgressReader(live, testWriteTargets(), nil).WithArchive(archive).
 		CycleProgress(context.Background(), liveCycle("c11"), 0)
 	if err != nil {
 		t.Fatalf("CycleProgress: %v", err)
@@ -661,7 +737,7 @@ func TestCycleProgress_OpenEmptyLiveFallsThroughToArchiveWhenArchiveHasLines(t *
 	live := &stubLive{tail: LiveTail{Pod: openchoreo.RuntimePod{}}}
 	archive := &stubArchive{text: "2026-08-06T10:00:01Z archived while cycle still open\n"}
 
-	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
+	resp, err := NewAgentProgressReader(live, testWriteTargets(), nil).WithArchive(archive).
 		CycleProgress(context.Background(), liveCycle("c12"), 0)
 	if err != nil {
 		t.Fatalf("CycleProgress: %v", err)
@@ -678,7 +754,7 @@ func TestCycleProgress_OpenEmptyLiveOnTerminalPodFallsThroughToArchive(t *testin
 	live := &stubLive{tail: LiveTail{Pod: openchoreo.RuntimePod{Found: true, Phase: "Succeeded"}}}
 	archive := &stubArchive{text: "2026-08-06T10:00:01Z archived after succeeded pod\n"}
 
-	resp, err := NewAgentProgressReader(live, nil).WithArchive(archive).
+	resp, err := NewAgentProgressReader(live, testWriteTargets(), nil).WithArchive(archive).
 		CycleProgress(context.Background(), liveCycle("c13"), 0)
 	if err != nil {
 		t.Fatalf("CycleProgress: %v", err)

@@ -792,8 +792,8 @@ func TestPanel_DeleteWarnsWhenOtherProjectsStillReference(t *testing.T) {
 // An environment with NO identity provider bound to it yet degrades exactly like
 // an unreachable one: the platform's own record is still this project's truth,
 // and the console says "unknown" rather than "these accounts do not exist". It is
-// the only reason the resolver's pure Scope is a separate call from its
-// network-touching Resolve — without that split there would be no environment to
+// the only reason the resolver's Scope is a separate call from its
+// binding-reading Resolve — without that split there would be no environment to
 // read the store's rows under.
 func TestPanel_UnboundEnvironmentDegradesTheRead(t *testing.T) {
 	t.Parallel()

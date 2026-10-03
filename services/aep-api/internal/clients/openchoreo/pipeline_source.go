@@ -19,59 +19,56 @@ package openchoreo
 import (
 	"errors"
 	"fmt"
-	"slices"
-)
 
-const (
-	PlatformPipelineNamespace = "default"
-	PlatformPipelineName      = "default"
+	"github.com/wso2/aep/aep-api/internal/platform/ocname"
 )
 
 var (
-	ErrPipelineEmpty           = errors.New("deployment pipeline promotes through no source environment")
-	ErrPipelineSourceAmbiguous = errors.New("deployment pipeline has more than one source environment")
+	ErrPipelineEmpty = errors.New("deployment pipeline promotes through no source environment")
 	// ErrPipelineCyclic is a nonempty promotion graph with no never-a-target
 	// source (every source is also a target). Unlike ErrPipelineEmpty this
 	// will not become valid by waiting for setup.
-	ErrPipelineCyclic = errors.New("deployment pipeline has no unique source environment (every source is also a target)")
+	ErrPipelineCyclic = errors.New("deployment pipeline has no root environment (every source is also a target)")
+	// ErrPipelineRefMissing is a Project that names no deployment pipeline.
+	ErrPipelineRefMissing = errors.New("project names no deployment pipeline")
+	// ErrWriteTargetTooLong is a root environment whose name does not fit the
+	// render-name budgets derived from ocname.MaxEnvNameLen.
+	ErrWriteTargetTooLong = fmt.Errorf("write target is longer than %d characters", ocname.MaxEnvNameLen)
 )
 
-// PipelineSourceEnvironment returns the unique environment that appears as a
-// sourceEnvironmentRef and never as a target. That is the pipeline's lowest
-// environment — the write-target. Lexicographic order is not used.
-func PipelineSourceEnvironment(p *deploymentPipeline) (string, error) {
-	pipeID := PlatformPipelineNamespace + "/" + PlatformPipelineName
-	if p == nil {
-		return "", fmt.Errorf("%s: %w — run deployments/scripts/setup-aep.sh", pipeID, ErrPipelineEmpty)
+// PipelineRoot returns the pipeline's root environment by OpenChoreo's own
+// rule (component controller findRootEnvironment): the first promotion path,
+// in list order, whose source is never a target. It is the environment
+// OpenChoreo auto-deploys a project's components to, so AEP writes there too.
+func PipelineRoot(name string, p *deploymentPipeline) (string, error) {
+	if p == nil || len(p.Spec.PromotionPaths) == 0 {
+		return "", fmt.Errorf("deployment pipeline %q: %w", name, ErrPipelineEmpty)
 	}
-	sources := map[string]struct{}{}
-	targets := map[string]struct{}{}
+	targets := map[string]bool{}
 	for _, path := range p.Spec.PromotionPaths {
-		if n := path.SourceEnvironmentRef.Name; n != "" {
-			sources[n] = struct{}{}
-		}
 		for _, t := range path.TargetEnvironmentRefs {
-			if t.Name != "" {
-				targets[t.Name] = struct{}{}
-			}
+			targets[t.Name] = true
 		}
 	}
-	var lowest []string
-	for s := range sources {
-		if _, isTarget := targets[s]; !isTarget {
-			lowest = append(lowest, s)
+	for _, path := range p.Spec.PromotionPaths {
+		if src := path.SourceEnvironmentRef.Name; src != "" && !targets[src] {
+			return src, nil
 		}
 	}
-	switch len(lowest) {
-	case 1:
-		return lowest[0], nil
-	case 0:
-		if len(sources) > 0 {
-			return "", fmt.Errorf("%s: %w", pipeID, ErrPipelineCyclic)
+	return "", fmt.Errorf("deployment pipeline %q: %w", name, ErrPipelineCyclic)
+}
+
+// ChooseOrgDefaultPipeline picks the org's own pipeline when no project is in
+// scope: the one named "default" (the name OpenChoreo's REST create path
+// defaults a project to), else the sole pipeline. ok is false otherwise.
+func ChooseOrgDefaultPipeline(names []string) (string, bool) {
+	for _, n := range names {
+		if n == "default" {
+			return n, true
 		}
-		return "", fmt.Errorf("%s: %w — run deployments/scripts/setup-aep.sh", pipeID, ErrPipelineEmpty)
-	default:
-		slices.Sort(lowest)
-		return "", fmt.Errorf("%s: %w %v", pipeID, ErrPipelineSourceAmbiguous, lowest)
 	}
+	if len(names) == 1 {
+		return names[0], true
+	}
+	return "", false
 }

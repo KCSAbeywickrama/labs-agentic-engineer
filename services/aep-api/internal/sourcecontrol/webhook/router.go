@@ -35,7 +35,8 @@ type Router struct {
 // EventHandler is the contract every per-event handler implements. The
 // (event, action) tuple drives dispatch; the raw payload is provided for
 // the handler to parse what it needs. Idempotency is the handler's
-// responsibility — a redelivery may invoke the handler again.
+// responsibility — a replay (Replayer) or a redelivery may invoke the handler
+// again, after an earlier attempt got partway through.
 type EventHandler interface {
 	Handle(ctx context.Context, event, action string, payload []byte) error
 }

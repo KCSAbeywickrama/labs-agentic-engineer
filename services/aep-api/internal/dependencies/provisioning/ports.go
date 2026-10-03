@@ -218,6 +218,15 @@ type PipelineLister interface {
 	PipelineEnvironments(ctx context.Context, orgID, pipelineName string) ([]string, error)
 }
 
+// WriteTargetResolver names the environment a project writes into: the root of
+// its own deployment pipeline. OrgDefaultRoot answers the same question for an
+// org-scoped read with no project in view, from the org's own pipeline (the
+// PipelineLister convention). openchoreo.WriteTargets satisfies it.
+type WriteTargetResolver interface {
+	Resolve(ctx context.Context, org, project string) (string, error)
+	OrgDefaultRoot(ctx context.Context, org string) (string, error)
+}
+
 // ProjectRef identifies one project (org + project id) for the cross-project
 // design scan (external-resource consumers, teardown).
 type ProjectRef struct {

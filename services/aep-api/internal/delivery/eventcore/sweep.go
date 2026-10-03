@@ -61,8 +61,8 @@ const defaultSweepInterval = 60 * time.Second
 // only planned work starts nothing at all.
 //
 // The first heals both failure modes the event plane can have. A delivery
-// GitHub never made (or that failed past its retries) leaves a milestone with
-// work and nobody working it. And the adoption-versus-settle race — an issue
+// GitHub never made (or that failed past the receiver's replays) leaves a
+// milestone with work and nobody working it. And the adoption-versus-settle race — an issue
 // joining a milestone in the instant the supervisor decided it was empty —
 // leaves exactly the same footprint. It is also the ONLY thing that starts a
 // validation run without a human asking: a dev run settles having filed the
@@ -98,6 +98,10 @@ const defaultSweepInterval = 60 * time.Second
 //     Without it this rule is a budget defeater: a run settles `failed` with its
 //     working set still open, so the sweep starts a fresh run on the same issues
 //     with fresh budgets, forever.
+//
+// A lost merge fan-out is the other thing a lost delivery leaves behind, and
+// it is BuildSweep's to heal, not this sweep's: it already reads the merged
+// cycle's components and their builds, which this walk never touches.
 //
 // It walks the milestones the PLATFORM knows (from its own run rows), not
 // GitHub's milestone list: a milestone the platform never ran is not a missed

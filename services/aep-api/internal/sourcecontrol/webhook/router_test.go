@@ -23,15 +23,42 @@ package webhook
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 )
 
 // recordingHandler captures the (event, action, payload) a Dispatch delivered
 // and returns the configured error, so a test asserts both invocation and
 // error propagation.
+//
+// The receiver runs handlers off the request goroutine, so the recorder is
+// safe for concurrent use: count/call/setErr read and write under its lock.
+// When block is set, Handle waits on it (or on its own context) before
+// returning, and reports what its context said at that moment in ctxErrs.
 type recordingHandler struct {
-	calls []dispatchCall
-	err   error
+	mu      sync.Mutex
+	calls   []dispatchCall
+	err     error
+	block   chan struct{}
+	ctxErrs []error
+}
+
+func (h *recordingHandler) count() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.calls)
+}
+
+func (h *recordingHandler) call(i int) dispatchCall {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.calls[i]
+}
+
+func (h *recordingHandler) setErr(err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.err = err
 }
 
 type dispatchCall struct {
@@ -39,8 +66,20 @@ type dispatchCall struct {
 	payload       string
 }
 
-func (h *recordingHandler) Handle(_ context.Context, event, action string, payload []byte) error {
+func (h *recordingHandler) Handle(ctx context.Context, event, action string, payload []byte) error {
+	h.mu.Lock()
 	h.calls = append(h.calls, dispatchCall{event, action, string(payload)})
+	block := h.block
+	h.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+		}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.ctxErrs = append(h.ctxErrs, ctx.Err())
 	return h.err
 }
 

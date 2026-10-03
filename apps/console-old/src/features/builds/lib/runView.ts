@@ -374,6 +374,8 @@ const TERMINAL_REASONS: Record<string, string> = {
   // (failure.ts), which reads them off the run's failure record.
   "model-provider-limit":
     "The model provider's usage limit stopped the coding agent. Start the run again once it resets.",
+  "no-write-target":
+    "The project's deployment pipeline names no environment to deploy into. Fix the pipeline, then build again.",
 };
 
 /** A sentence for the run's terminal reason; the raw value when unmapped, so

@@ -68,16 +68,12 @@ const ocJobNameHashLen = 8
 
 // CodingAgentComponentNameBudget is how long a coding-agent Component's
 // metadata.name (the SCOPED form CreateComponent writes) may be. OpenChoreo
-// then appends `-{DevEnvironmentName}-{hash8}` for the Job / pod-selector
-// label; overflowing that composed string is accepted at Component create and
-// then fails ResourceApplyFailed with no runner pod — the console's
-// "Waiting for a runner to be scheduled…" dark zone.
-//
-// Coding-agent cycles always bind into DevEnvironmentName, so the decoration
-// width follows the current write-target rather than a compile-time default.
-func CodingAgentComponentNameBudget() int {
-	return k8sname.MaxLabelValueLen - (1 + len(DevEnvironmentName) + 1 + ocJobNameHashLen)
-}
+// then appends `-{environment}-{hash8}` for the Job / pod-selector label;
+// overflowing that composed string is accepted at Component create and then
+// fails ResourceApplyFailed with no runner pod. Budgeted against the longest
+// write target AEP accepts, so the name does not depend on which project's
+// pipeline the cycle binds into.
+const CodingAgentComponentNameBudget = k8sname.MaxLabelValueLen - (1 + ocname.MaxEnvNameLen + 1 + ocJobNameHashLen)
 
 // minCodingAgentRunNameLen is "ca-" + an 8-char digest — the shortest Bounded
 // output that still carries the ca- watcher discriminator.
@@ -97,7 +93,7 @@ const minCodingAgentRunNameLen = 3 + ocJobNameHashLen // "ca-" + digest
 func NewCodingAgentRunName(projectName, cycleID string) string {
 	// Length must match ScopedComponentName(projectName, runName) byte-for-byte —
 	// CreateComponent scopes with the raw project id, not a re-sanitized form.
-	room := CodingAgentComponentNameBudget() - len(projectName) - 1
+	room := CodingAgentComponentNameBudget - len(projectName) - 1
 	if room < minCodingAgentRunNameLen {
 		// Still emit a ca-… JobRef so watchers recognise it; CreateComponent
 		// refuses before OC can accept a Component whose Job label cannot

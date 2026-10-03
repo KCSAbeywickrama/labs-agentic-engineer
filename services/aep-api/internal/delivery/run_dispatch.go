@@ -65,16 +65,20 @@ type MilestoneDispatch struct {
 }
 
 // AgentLaunch is what a dispatch launched: the Job the cycle record points at,
-// and the host of the model connection that Job runs on — the connection read
-// for THIS launch, so the host recorded on the cycle is the one its usage was
-// billed by, not a second read that a save in between could have moved.
+// the host of the model connection that Job runs on, and the environment the
+// Job was bound into. Both facts are read for THIS launch. The host recorded on
+// the cycle is the one its usage was billed by, not a second read that a save
+// in between could have moved; the environment is where the cycle's readers
+// find the Job, not where the project's write target points now.
 type AgentLaunch struct {
-	JobRef    string
-	ModelHost string
+	JobRef      string
+	ModelHost   string
+	Environment string
 }
 
 // MilestoneDispatcher launches ONE agent run over a milestone and reports what
-// it launched (AgentLaunch: the cycle record's JobRef and model host).
+// it launched (AgentLaunch: the cycle record's JobRef, model host and
+// environment).
 //
 // It is the root port that keeps the supervisor and the coding agent peer
 // sub-packages, exactly as BuildTerminalObserver does for the watcher: the

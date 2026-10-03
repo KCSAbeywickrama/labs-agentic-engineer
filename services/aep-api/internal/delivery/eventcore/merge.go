@@ -51,10 +51,10 @@ func milestoneOpenIssuesFilter(milestoneNumber int) sourcecontrol.MilestoneIssue
 // merge squash-merges the cycle's pull request through the org's credential
 // (in App mode that identity IS <slug>[bot] — there is no second credential).
 //
-// It reads the live pull request FIRST. That read is what makes a redelivered
-// webhook harmless: GitHub redelivers any delivery whose handler failed, and
-// the second pass must find the pull request already merged and do nothing
-// rather than issue a second merge call.
+// It reads the live pull request FIRST. That read is what makes a second run
+// harmless: a delivery whose handler failed is replayed, and the second pass
+// must find the pull request already merged and do nothing rather than issue a
+// second merge call.
 func (e *Events) merge(ctx context.Context, orgID, projectID string, run *delivery.MilestoneRun,
 	prNumber int, branch string, decision mergeDecision) error {
 	if e.p.Merger == nil {
@@ -62,7 +62,7 @@ func (e *Events) merge(ctx context.Context, orgID, projectID string, run *delive
 	}
 	settled, err := e.prSettled(ctx, orgID, projectID, prNumber)
 	if err != nil {
-		return err // transient read failure — let GitHub redeliver
+		return err // transient read failure — the delivery is replayed
 	}
 	if settled {
 		return nil

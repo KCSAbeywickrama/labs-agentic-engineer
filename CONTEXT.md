@@ -491,9 +491,16 @@ A build run's own task tally (total/done/failed/active), frozen when the run
 ends. Describes *that run*; the Tasks page remains the live per-task truth.
 _Avoid_: task list (unbounded detail — the opposite of a tally).
 
+**Write target**:
+The one environment a project is built, deployed, validated and coding-agented
+in: the root of the project's own deployment pipeline — its first promotion-path
+source that is never a target, the same environment OpenChoreo auto-deploys to.
+A property of the project, not of the org or the platform.
+_Avoid_: dev environment, default environment, lowest environment, pipeline source.
+
 **Live version**:
 The spec version whose implementation most recently completed a build run —
-what the platform reports as live in the dev environment.
+what the platform reports as live in the project's write target.
 _Avoid_: deployed tag (no tag is cut at deploy time today).
 
 ## Spec collaboration

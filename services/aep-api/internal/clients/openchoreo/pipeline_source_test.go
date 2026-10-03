@@ -18,141 +18,65 @@ package openchoreo
 
 import (
 	"errors"
-	"strings"
 	"testing"
 )
 
-type promotionPath = struct {
-	SourceEnvironmentRef struct {
-		Name string `json:"name"`
-	} `json:"sourceEnvironmentRef"`
-	TargetEnvironmentRefs []struct {
-		Name string `json:"name"`
-	} `json:"targetEnvironmentRefs"`
-}
-
-func appendPromotionPath(p *deploymentPipeline, src string, targets ...string) {
-	var refs []struct {
-		Name string `json:"name"`
-	}
-	for _, n := range targets {
-		refs = append(refs, struct {
-			Name string `json:"name"`
-		}{Name: n})
-	}
-	path := promotionPath{}
-	path.SourceEnvironmentRef.Name = src
-	path.TargetEnvironmentRefs = refs
-	p.Spec.PromotionPaths = append(p.Spec.PromotionPaths, path)
-}
-
-func pipelineWith(source string) *deploymentPipeline {
+func pipelineOf(paths ...[2]any) *deploymentPipeline {
 	p := &deploymentPipeline{}
-	appendPromotionPath(p, source)
-	return p
-}
-
-func pipelineLinear(envs ...string) *deploymentPipeline {
-	p := &deploymentPipeline{}
-	for i := 0; i < len(envs)-1; i++ {
-		appendPromotionPath(p, envs[i], envs[i+1])
+	for _, path := range paths {
+		src := path[0].(string)
+		var tgts []string
+		if path[1] != nil {
+			tgts = path[1].([]string)
+		}
+		entry := struct {
+			SourceEnvironmentRef struct {
+				Name string `json:"name"`
+			} `json:"sourceEnvironmentRef"`
+			TargetEnvironmentRefs []struct {
+				Name string `json:"name"`
+			} `json:"targetEnvironmentRefs"`
+		}{}
+		entry.SourceEnvironmentRef.Name = src
+		for _, t := range tgts {
+			entry.TargetEnvironmentRefs = append(entry.TargetEnvironmentRefs, struct {
+				Name string `json:"name"`
+			}{Name: t})
+		}
+		p.Spec.PromotionPaths = append(p.Spec.PromotionPaths, entry)
 	}
 	return p
 }
 
-func pipelineFanOut(source string, targets ...string) *deploymentPipeline {
-	p := &deploymentPipeline{}
-	for _, t := range targets {
-		appendPromotionPath(p, source, t)
-	}
-	return p
-}
-
-func twoSources(a, b, target string) *deploymentPipeline {
-	p := &deploymentPipeline{}
-	appendPromotionPath(p, a, target)
-	appendPromotionPath(p, b, target)
-	return p
-}
-
-func pipelineCycle(a, b string) *deploymentPipeline {
-	p := &deploymentPipeline{}
-	appendPromotionPath(p, a, b)
-	appendPromotionPath(p, b, a)
-	return p
-}
-
-func TestPipelineSourceEnvironment(t *testing.T) {
-	t.Parallel()
+func TestPipelineRoot(t *testing.T) {
 	cases := []struct {
 		name    string
 		p       *deploymentPipeline
 		want    string
 		wantErr error
 	}{
-		{
-			name: "k3d single env default",
-			p:    pipelineWith("default"),
-			want: "default",
-		},
-		{
-			name: "getting-started development staging production",
-			p:    pipelineLinear("development", "staging", "production"),
-			want: "development",
-		},
-		{
-			name: "fan-out from development",
-			p:    pipelineFanOut("development", "staging", "qa"),
-			want: "development",
-		},
-		{
-			name:    "empty paths",
-			p:       &deploymentPipeline{},
-			wantErr: ErrPipelineEmpty,
-		},
-		{
-			name:    "nil pipeline",
-			p:       nil,
-			wantErr: ErrPipelineEmpty,
-		},
-		{
-			name:    "two sources",
-			p:       twoSources("dev", "experimental", "staging"),
-			wantErr: ErrPipelineSourceAmbiguous,
-		},
-		{
-			name:    "cycle",
-			p:       pipelineCycle("staging", "production"),
-			wantErr: ErrPipelineCyclic,
-		},
+		{"k3d quickstart chain", pipelineOf([2]any{"development", []string{"staging"}}, [2]any{"staging", []string{"production"}}), "development", nil},
+		{"chain listed out of order", pipelineOf([2]any{"staging", []string{"production"}}, [2]any{"development", []string{"staging"}}), "development", nil},
+		{"single source, no targets", pipelineOf([2]any{"default", nil}), "default", nil},
+		{"two roots: first in list order wins", pipelineOf([2]any{"dev-b", []string{"prod"}}, [2]any{"dev-a", []string{"prod"}}), "dev-b", nil},
+		{"cyclic", pipelineOf([2]any{"a", []string{"b"}}, [2]any{"b", []string{"a"}}), "", ErrPipelineCyclic},
+		{"self edge", pipelineOf([2]any{"default", []string{"default"}}), "", ErrPipelineCyclic},
+		{"no promotion paths", &deploymentPipeline{}, "", ErrPipelineEmpty},
+		{"nil pipeline", nil, "", ErrPipelineEmpty},
+		{"only empty sources", pipelineOf([2]any{"", []string{"staging"}}), "", ErrPipelineCyclic},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got, err := PipelineSourceEnvironment(tc.p)
+			got, err := PipelineRoot("default", tc.p)
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("err = %v, want %v", err, tc.wantErr)
 				}
-				if got != "" {
-					t.Fatalf("got %q, want empty on error", got)
-				}
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected err %v", err)
-			}
-			if got != tc.want {
-				t.Fatalf("got %q, want %q", got, tc.want)
+			if err != nil || got != tc.want {
+				t.Fatalf("PipelineRoot = (%q, %v), want (%q, nil)", got, err, tc.want)
 			}
 		})
-	}
-}
-
-func TestPipelineSourceEnvironment_ErrorNamesThePipeline(t *testing.T) {
-	t.Parallel()
-	_, err := PipelineSourceEnvironment(&deploymentPipeline{})
-	if err == nil || !strings.Contains(err.Error(), "default/default") {
-		t.Fatalf("empty error %v, want it to name default/default", err)
 	}
 }

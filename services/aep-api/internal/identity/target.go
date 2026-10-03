@@ -67,29 +67,24 @@ type Target struct {
 // Scope is the key every row about this target's objects carries.
 func (t Target) Scope() Scope { return Scope{OrgID: t.OrgID, Environment: t.Environment} }
 
-// TargetResolver answers "which identity provider serves this org".
+// TargetResolver answers which identity provider a project's roles belong to:
+// the one bound to the project's write target, or with no project in hand,
+// the org default pipeline's root.
 //
-// It takes the ORG only, and not the environment, on purpose. A build's roles
-// and test users belong to the environment that build is validated in, and
-// today every build deploys and validates in exactly one — so the environment is
-// chosen in ONE place, the resolver's own construction at the composition root
-// (`app.newIdentityTargetResolver`), rather than at each of the four call sites
-// here. When a run carries its own environment, this method grows a parameter
-// and the domain passes it through; nothing else about this design moves.
+// Two methods, split by what they read. Scope reads the project's pipeline to
+// learn its write target; Resolve reads that environment's binding and its
+// admin credential. The panel needs that split: its read degrades to the
+// platform's own record when the identity provider is unreachable, and it
+// cannot ask the store for that record without first knowing which
+// environment's rows to ask for.
 //
-// The environment it chose comes back on every Target, so a log line, an error
-// and a gate comment can always name it.
-//
-// Two methods, split by whether they can FAIL. Scope is the choice alone and is
-// pure; Resolve reads the environment's binding and its admin credential over
-// the network. The panel needs that split: its read degrades to the platform's
-// own record when the identity provider is unreachable, and it cannot ask the
-// store for that record without first knowing which environment's rows to ask
-// for.
+// The environment comes back on every Target, so a log line, an error and a
+// gate comment can always name it.
 type TargetResolver interface {
-	// Scope names the (org, environment) whose identity provider serves this
-	// org. Pure — no I/O, and it cannot fail.
-	Scope(orgID string) Scope
-	// Resolve returns that environment's directory, bound and authenticated.
-	Resolve(ctx context.Context, orgID string) (Target, error)
+	// Scope names the (org, environment) whose identity provider serves the
+	// project ("" = the org's default). It reads the project's pipeline, so it
+	// can fail; the platform's own rows are unreachable without it.
+	Scope(ctx context.Context, orgID, projectID string) (Scope, error)
+	// Resolve returns that scope's directory, bound and authenticated.
+	Resolve(ctx context.Context, scope Scope) (Target, error)
 }

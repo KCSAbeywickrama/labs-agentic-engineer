@@ -92,6 +92,9 @@ type cycleWatchStore interface {
 type JobWatcher struct {
 	runtime openchoreo.RuntimeClient
 	cycles  cycleWatchStore
+	// targets is the fallback for a cycle with no recorded environment: the
+	// project's write target, resolved on the tick that needs it.
+	targets writeTargetResolver
 
 	// recorder owns each dispatched cycle's feed recording. The watcher is its
 	// DISCOVERY, not its clock: it hands over every cycle it sees on its own 30s
@@ -141,15 +144,17 @@ type JobWatcher struct {
 	once sync.Once
 }
 
-// NewJobWatcher wires the watcher. runtime + cycles are required; asService may
-// be nil (tests).
-func NewJobWatcher(runtime openchoreo.RuntimeClient, cycles cycleWatchStore, asService func(ctx context.Context) context.Context) *JobWatcher {
-	if runtime == nil || cycles == nil {
-		panic("codingagent.JobWatcher: runtime + cycles are required")
+// NewJobWatcher wires the watcher. runtime, cycles and targets are required;
+// asService may be nil (tests).
+func NewJobWatcher(runtime openchoreo.RuntimeClient, cycles cycleWatchStore, targets writeTargetResolver,
+	asService func(ctx context.Context) context.Context) *JobWatcher {
+	if runtime == nil || cycles == nil || targets == nil {
+		panic("codingagent.JobWatcher: runtime, cycles and targets are required")
 	}
 	return &JobWatcher{
 		runtime:      runtime,
 		cycles:       cycles,
+		targets:      targets,
 		asService:    asService,
 		pollInterval: defaultPollInterval,
 		startupGrace: defaultStartupGrace,
@@ -225,6 +230,18 @@ func (w *JobWatcher) Tick(ctx context.Context) {
 			continue
 		}
 		live[cycle.ID] = true
+		// Everything below reads the cycle in the environment its Job was bound
+		// into. The row copy carries it for this pass (the recorder's session
+		// keeps its own copy); nothing writes it back. A cycle whose fallback
+		// cannot be resolved is left alone this tick: that is no evidence about
+		// its Job, and its session, if any, is kept.
+		env, err := cycleEnvironment(ctx, w.targets, cycle)
+		if err != nil {
+			slog.WarnContext(ctx, "codingagent.JobWatcher: no environment to read the cycle in (no verdict)",
+				"cycle", cycle.ID, "run", cycle.JobRef, "error", err)
+			continue
+		}
+		cycle.Environment = env
 		// Recording is started BEFORE the classification below, because a cycle
 		// this pass is about to close still has a feed worth keeping — and the
 		// recorder's own terminal handling (a final full read) is what captures
@@ -259,7 +276,7 @@ func (w *JobWatcher) Tick(ctx context.Context) {
 }
 
 func (w *JobWatcher) checkCycle(ctx context.Context, cycle *delivery.RunCycle) {
-	binding, err := w.runtime.ReleaseBindingName(ctx, cycle.OrgID, cycle.ProjectID, cycle.JobRef, openchoreo.DevEnvironmentName)
+	binding, err := w.runtime.ReleaseBindingName(ctx, cycle.OrgID, cycle.ProjectID, cycle.JobRef, cycle.Environment)
 	if err != nil {
 		w.noteReadFailure(ctx, cycle, err, "release binding lookup")
 		return

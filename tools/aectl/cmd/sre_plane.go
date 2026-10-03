@@ -24,53 +24,53 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes"
-
-	k8s "github.com/wso2/aep/aectl/internal/kubernetes"
 )
 
 // What `aectl sre install` needs to know about the cluster it lands on: the
-// observability plane already there (if any), the SRE agent Deployment that
-// plane's chart line renders, and where the org's Console-saved model key
-// lives.
+// observability plane already there (if any), and the SRE agent Deployment
+// that plane's chart line renders.
 
 // obsPlaneChart is the chart name of every observability plane release.
 const obsPlaneChart = "openchoreo-observability-plane"
 
-// obsPlaneRelease is an installed observability plane Helm release.
-type obsPlaneRelease struct {
+// obsLogsChart is the chart name of the OpenSearch logs module, whose adapter
+// compiles log alert rules into OpenSearch monitors.
+const obsLogsChart = "observability-logs-opensearch"
+
+// chartRelease is an installed Helm release of a known chart.
+type chartRelease struct {
 	Name    string // release name, e.g. "openchoreo-observability-plane"
 	Version string // chart version, e.g. "1.2.5"
 }
 
-// findObsPlaneRelease picks the observability plane release out of
-// `helm list -o json` output. found is false when none is installed.
-func findObsPlaneRelease(helmListJSON []byte) (rel obsPlaneRelease, found bool, err error) {
+// findChartRelease picks the release of chart out of `helm list -o json`
+// output. found is false when none is installed.
+func findChartRelease(helmListJSON []byte, chart string) (rel chartRelease, found bool, err error) {
 	var releases []struct {
 		Name  string `json:"name"`
 		Chart string `json:"chart"`
 	}
 	if err := json.Unmarshal(helmListJSON, &releases); err != nil {
-		return obsPlaneRelease{}, false, fmt.Errorf("parse helm list output: %w", err)
+		return chartRelease{}, false, fmt.Errorf("parse helm list output: %w", err)
 	}
 	for _, r := range releases {
 		// helm reports "<chart>-<version>"; versions may carry their own
 		// dashes (1.0.1-hotfix.1), so strip the known chart prefix.
-		if v, ok := strings.CutPrefix(r.Chart, obsPlaneChart+"-"); ok && v != "" {
-			return obsPlaneRelease{Name: r.Name, Version: v}, true, nil
+		if v, ok := strings.CutPrefix(r.Chart, chart+"-"); ok && v != "" {
+			return chartRelease{Name: r.Name, Version: v}, true, nil
 		}
 	}
-	return obsPlaneRelease{}, false, nil
+	return chartRelease{}, false, nil
 }
 
-// installedObsPlane returns the observability plane release in ns, if any.
-func installedObsPlane(ctx context.Context, ns string) (obsPlaneRelease, bool, error) {
+// installedRelease returns the release of chart in ns, if any.
+func installedRelease(ctx context.Context, ns, chart string) (chartRelease, bool, error) {
 	out, err := exec.CommandContext(ctx, "helm", "list", "-n", ns, "-o", "json").Output()
 	if err != nil {
-		return obsPlaneRelease{}, false, fmt.Errorf("helm list -n %s: %w", ns, err)
+		return chartRelease{}, false, fmt.Errorf("helm list -n %s: %w", ns, err)
 	}
-	return findObsPlaneRelease(out)
+	return findChartRelease(out, chart)
 }
 
 // sreAgentComponents are the app.kubernetes.io/component labels the SRE agent
@@ -96,67 +96,4 @@ func findSREAgentDeployment(ctx context.Context, client kubernetes.Interface, ns
 	default:
 		return "", fmt.Errorf("%d SRE agent deployments in %s; expected one", len(list.Items), ns)
 	}
-}
-
-// The org's model connection key, as aep-api publishes it when the key is
-// saved in the Console: a SecretReference named after the credential entity
-// (entity + "-secrets") in the org's OpenChoreo namespace, whose api-key entry
-// points at the key's KV path. Reading the coordinates from that CR, rather
-// than rebuilding the path, keeps aep-api the only place that knows how the
-// path is derived.
-//
-// The entity is "model-connection"; before the model connection it was
-// "anthropic", and aep-api moves each org off that name in the background
-// (organization/model_key_rename.go), so an org it has not reached yet still
-// has only the old reference. The current name wins when both exist.
-const orgAnthropicSecretKey = "api-key"
-
-var orgModelKeySecretRefs = []string{"model-connection-secrets", "anthropic-secrets"}
-
-// kvRef is a secret-store remote reference: a KV path and a property in it.
-type kvRef struct {
-	Key, Property string
-}
-
-// orgAnthropicKVRef extracts the api-key remote reference from the org's
-// model key SecretReference.
-func orgAnthropicKVRef(ref *unstructured.Unstructured) (kvRef, error) {
-	data, _, err := unstructured.NestedSlice(ref.Object, "spec", "data")
-	if err != nil {
-		return kvRef{}, fmt.Errorf("read spec.data of SecretReference %s/%s: %w", ref.GetNamespace(), ref.GetName(), err)
-	}
-	for _, d := range data {
-		entry, ok := d.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if sk, _, _ := unstructured.NestedString(entry, "secretKey"); sk != orgAnthropicSecretKey {
-			continue
-		}
-		key, _, _ := unstructured.NestedString(entry, "remoteRef", "key")
-		prop, _, _ := unstructured.NestedString(entry, "remoteRef", "property")
-		if key == "" {
-			break
-		}
-		return kvRef{Key: key, Property: prop}, nil
-	}
-	return kvRef{}, fmt.Errorf("SecretReference %s/%s has no %s entry with a remoteRef.key",
-		ref.GetNamespace(), ref.GetName(), orgAnthropicSecretKey)
-}
-
-// resolveOrgAnthropicKVRef finds the org's Console-saved model connection key.
-// found is false until someone saves the key in the Console.
-func resolveOrgAnthropicKVRef(ctx context.Context, applier *k8s.Applier, orgNamespace string) (ref kvRef, found bool, err error) {
-	for _, name := range orgModelKeySecretRefs {
-		obj, err := applier.Get(ctx, "openchoreo.dev/v1alpha1", "SecretReference", orgNamespace, name)
-		if err != nil {
-			return kvRef{}, false, err
-		}
-		if obj == nil {
-			continue
-		}
-		ref, err = orgAnthropicKVRef(obj)
-		return ref, err == nil, err
-	}
-	return kvRef{}, false, nil
 }
