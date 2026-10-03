@@ -64,16 +64,22 @@ AEP: Oxygen, AEP paths, no CLI, unpublished.
 - Network isolation of the render check rests on the permission model plus
   `vm`; a host-realm escape could still reach the network. Running it inside
   AEP needs an egress policy.
-- The agents service runs the render check synchronously (`spawnSync`, 15 s
-  cap), so each `prototype.tsx` write blocks that service's event loop for the
-  render (about 1 to 3 s observed); other conversations on the same process
-  wait. An asynchronous check needs a kit change.
+- The render check is asynchronous (a spawned child, 15 s cap): the agents
+  service keeps serving other conversations while a prototype renders, and
+  the turn's later writes and frames wait for its verdict, so the wire order
+  is unchanged.
 - The Go save gate has no render stage: a prototype that parses and references
   correctly but throws when drawn is stopped only by the agent's gate, so a
   write that bypasses the agent (an edit in the room) is not rendered.
-- Editing `prototype.json` after `prototype.tsx` is not re-judged against the
-  existing source; the agent's ordering (manifest first) is what keeps them
-  consistent.
+- The agent's gate judges the pair whichever half is written: a
+  `prototype.json` written beside an existing `prototype.tsx` is checked
+  against it (references, then the render), so a manifest change that breaks
+  the screens is refused.
+- One TS definition of review feedback (`@wso2/prototype-kit/feedback`: shape,
+  limits in UTF-16 code units, validator, Annotate helpers, revision hash) is
+  imported by the CLI, `agent-stream` and the console; the Go BFF and the
+  OpenAPI contract mirror it behind a shared test table. The hash is plain
+  JavaScript, so it works where Web Crypto does not (plain HTTP).
 - `'unsafe-eval'` in the frame is accepted: the frame has an opaque origin and
   no network. The CSP does not block the frame navigating itself (`location`).
 - `check` does not render closed Dialog/Drawer contents unless a display state

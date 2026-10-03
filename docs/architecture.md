@@ -78,7 +78,7 @@ Clickable prototypes are React on a fixed kit, run in a sandbox
 ([ADR-0042](decisions/ADR-0042-a-prototype-is-react-on-a-fixed-kit-in-a-sandbox.md)).
 Three public packages, usable with no AEP: `@wso2/prototype-kit` (the API a
 `prototype.tsx` imports, the manifest schema, the static and isolated render
-checks, the sandboxed frame host and the theme build helper),
+checks, review feedback, the sandboxed frame host and the theme build helper),
 `@wso2/prototype-theme-default` (plain React + CSS) and `@wso2/prototype-cli`
 (`prototype init | check | preview | export`). `@wso2/prototype-theme-oxygen`
 draws the same kit on Oxygen UI, so AEP's prototypes look like WSO2 products.
