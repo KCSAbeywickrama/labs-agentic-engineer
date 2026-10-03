@@ -115,6 +115,17 @@ test("the skill asks for validation-error and failure states where the API has e
   assert.match(PROSE, /state\.delayed/);
 });
 
+test("the skill tells the agent to revise from feedback by ids, keep ids, and answer each request", () => {
+  assert.match(PROSE, /## Feedback revision/);
+  assert.match(PROSE, /revision of one prototype/);
+  assert.match(PROSE, /change only them, with `editFile` edits/);
+  assert.match(PROSE, /Keep ids stable/);
+  assert.match(PROSE, /`Request N: applied`/);
+  assert.match(PROSE, /`Request N: declined`/);
+  // Outside the generated kit block.
+  assert.ok(SKILL.indexOf("## Feedback revision") > SKILL.indexOf("<!-- kit:end -->"));
+});
+
 test("every skill /prototype inlines is design-readable, so the flow can load it", () => {
   const snapshot = fs.mkdtempSync(path.join(os.tmpdir(), "aep-prototype-skills-"));
   try {

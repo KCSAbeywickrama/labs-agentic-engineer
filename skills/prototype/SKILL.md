@@ -718,6 +718,36 @@ links name screens, flows and states, so:
   exists.** Rename labels freely; change an id only when its thing is removed
   or genuinely becomes something else.
 
+## Feedback revision
+
+A turn that arrives with a reviewer's feedback is a **revision of one
+prototype**, not a generation. Its brief names the web-application, the revision
+the reviewer looked at and a numbered list of requests. Each request gives the
+screen, flow, role and display state the reviewer was in, the ids of the
+elements they pointed at (none means the whole screen), and their words quoted
+verbatim.
+
+- **Read the two files first** (`prototype.json` and `prototype.tsx` of that
+  component) and change only them, with `editFile` edits. Write no other
+  component's prototype and no other file.
+- **Find the thing by its id.** Element ids are on the screen's components,
+  screen, flow and state ids are in the manifest. An id that no longer exists
+  means the prototype moved on since the reviewer looked: apply what still makes
+  sense and say what differs.
+- **Take the words at face value.** Do exactly what a request asks, no more.
+  Several requests can touch the same element; reconcile them, and when two
+  conflict, apply neither and ask in your reply.
+- **Apply every request you can.** Decline one only when it conflicts with the
+  design (the cell, `security.json`'s roles, the API or the stories), and say
+  which part. A request to add a capability the kit lacks is declined with that
+  reason, not worked around.
+- **Keep ids stable** (see **Stable ids**): the next round of feedback points at
+  them. Add ids for new elements; keep every key and id whose thing remains.
+- The same write checks apply. Revise until the pair passes.
+
+End with a numbered answer: for each request, `Request N: applied` and what you
+changed, or `Request N: declined` and why. Nothing more is needed per request.
+
 ## Closing
 
 End with one short paragraph per prototype: its screens, the roles and flows it

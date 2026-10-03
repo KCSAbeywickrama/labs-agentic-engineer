@@ -35,7 +35,8 @@ export const MAX_FEEDBACK_REQUESTS = 50;
 /** The longest request text. */
 export const MAX_FEEDBACK_TEXT = 4000;
 
-const MAX_ID = 200;
+/** The longest screen, flow, role, state, element or component id. */
+export const MAX_FEEDBACK_ID = 200;
 
 export interface FeedbackRequest {
   screenId: string;
@@ -61,17 +62,17 @@ export interface FeedbackFile extends FeedbackSubmission {
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-const isId = (v: unknown): v is string => typeof v === "string" && v.trim() !== "" && v.length <= MAX_ID;
+const isId = (v: unknown): v is string => typeof v === "string" && v.trim() !== "" && v.length <= MAX_FEEDBACK_ID;
 
 /** A request of the documented shape, or the rule it breaks. */
 function parseRequest(v: unknown): { request: FeedbackRequest } | { reason: string } {
   if (!isObject(v)) return { reason: "is not an object" };
   const { screenId, flowId, roleId, stateId, elementIds, text } = v;
   for (const [name, id] of [["screenId", screenId], ["roleId", roleId], ["stateId", stateId]] as const) {
-    if (!isId(id)) return { reason: `${name} must be a non-empty string of at most ${MAX_ID} characters` };
+    if (!isId(id)) return { reason: `${name} must be a non-empty string of at most ${MAX_FEEDBACK_ID} characters` };
   }
-  if (flowId !== undefined && !isId(flowId)) return { reason: `flowId must be a non-empty string of at most ${MAX_ID} characters` };
-  if (!Array.isArray(elementIds) || !elementIds.every(isId)) return { reason: `elementIds must be a list of non-empty strings of at most ${MAX_ID} characters` };
+  if (flowId !== undefined && !isId(flowId)) return { reason: `flowId must be a non-empty string of at most ${MAX_FEEDBACK_ID} characters` };
+  if (!Array.isArray(elementIds) || !elementIds.every(isId)) return { reason: `elementIds must be a list of non-empty strings of at most ${MAX_FEEDBACK_ID} characters` };
   if (typeof text !== "string" || text.trim() === "") return { reason: "text is empty" };
   if (text.length > MAX_FEEDBACK_TEXT) return { reason: `text exceeds ${MAX_FEEDBACK_TEXT} characters` };
   return { request: { screenId: screenId as string, ...(flowId !== undefined ? { flowId } : {}), roleId: roleId as string, stateId: stateId as string, elementIds: [...elementIds], text } };

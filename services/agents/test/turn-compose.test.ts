@@ -83,6 +83,55 @@ test("/prototype loads its skill and the brief, and trailing component names fol
   assert.ok(!composeInstruction({ kind: "flow", skill: "design" }).includes("Generate the prototype"));
 });
 
+const FEEDBACK = {
+  prototypeHash: "b".repeat(64),
+  component: "approvals-portal",
+  requests: [
+    {
+      screenId: "screen.queue",
+      flowId: "flow.approve",
+      roleId: "approver",
+      stateId: "state.default",
+      elementIds: ["btn.approve", "tbl.expenses"],
+      text: "Put the Approve button on the left.\nMake it `primary`.",
+    },
+    { screenId: "screen.detail", roleId: "employee", stateId: "state.empty", elementIds: [], text: "Say why it is empty" },
+  ],
+};
+
+test("a /prototype turn with feedback is a revision of that one prototype, not a generation", () => {
+  const out = composeInstruction({ kind: "flow", skill: "prototype", prototypeFeedback: FEEDBACK });
+  assert.ok(out.startsWith('Load the prototype skill and follow it.\n\nRevise the prototype of the web-application "approvals-portal"'));
+  assert.ok(!out.includes("Generate the prototype of each web-application"));
+  // The files it may change, and the revision the reviewer saw.
+  assert.match(out, /specs\/design\/components\/approvals-portal\/prototype\.json/);
+  assert.match(out, /specs\/design\/components\/approvals-portal\/prototype\.tsx/);
+  assert.match(out, /change only those two files/);
+  assert.ok(out.includes("b".repeat(64)));
+  // Stable ids, and an answer per request.
+  assert.match(out, /Keep every manifest key and element id you do not need to change/);
+  assert.match(out, /answering each request by its number, as applied .* or declined/);
+});
+
+test("the revision brief lists each request's place and element ids and quotes its text verbatim", () => {
+  const out = composeInstruction({ kind: "flow", skill: "prototype", prototypeFeedback: FEEDBACK });
+  assert.match(
+    out,
+    /Request 1\nWhere: screen "screen\.queue", flow "flow\.approve", role "approver", display state "state\.default"\nElements \(ids\): btn\.approve, tbl\.expenses\nThe reviewer wrote:\n> Put the Approve button on the left\.\n> Make it `primary`\./,
+  );
+  // No flow, no element: the request is about the whole screen.
+  assert.match(out, /Request 2\nWhere: screen "screen\.detail", role "employee", display state "state\.empty"\nElements: none selected/);
+  assert.match(out, /> Say why it is empty/);
+  assert.match(out, /made 2 requests below/);
+  assert.match(composeInstruction({ kind: "flow", skill: "prototype", prototypeFeedback: { ...FEEDBACK, requests: [FEEDBACK.requests[1]!] } }), /made one request below/);
+});
+
+test("a /prototype turn without feedback is unchanged", () => {
+  const out = composeInstruction({ kind: "flow", skill: "prototype" });
+  assert.match(out, /Generate the prototype of each web-application/);
+  assert.doesNotMatch(out, /Revise the prototype/);
+});
+
 test("/prototype inlines the skills that read the design and say how an Oxygen screen is composed", () => {
   assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: "prototype" }), [
     "prototype",
