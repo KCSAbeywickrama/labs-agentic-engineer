@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/wso2/aep/aep-api/internal/clients/agentsvc"
 	"github.com/wso2/aep/aep-api/internal/gen"
@@ -36,10 +35,12 @@ import (
 // A malformed batch is refused whole, here, before any turn row exists: one the
 // agent applied only in part would read as sent and done.
 
-// Ceilings mirror the prototype kit's exported limits (MAX_FEEDBACK_REQUESTS,
-// MAX_FEEDBACK_TEXT, MAX_FEEDBACK_ID in @wso2/prototype-cli feedback.ts), the
-// agents service's PROTOTYPE_FEEDBACK_LIMITS and the contract's
-// PrototypeFeedbackInput.
+// Ceilings mirror the prototype kit's (MAX_FEEDBACK_REQUESTS, MAX_FEEDBACK_TEXT,
+// MAX_FEEDBACK_ID in @wso2/prototype-kit/feedback, which the agents service and
+// the console share) and the contract's PrototypeFeedbackInput. Lengths are
+// counted as the kit counts them, in UTF-16 code units (see utf16Len). The
+// shared table packages/prototype-kit/test/fixtures/feedback-cases.json holds
+// the rules and limits on both sides (prototype_feedback_test.go).
 const (
 	maxFeedbackRequests = 50
 	maxFeedbackText     = 4000
@@ -132,7 +133,7 @@ func feedbackRequest(n int, r gen.PrototypeFeedbackRequest) (agentsvc.PrototypeF
 	if strings.TrimSpace(r.Text) == "" {
 		return bad("text", "is empty")
 	}
-	if utf8.RuneCountInString(r.Text) > maxFeedbackText {
+	if utf16Len(r.Text) > maxFeedbackText {
 		return bad("text", fmt.Sprintf("exceeds %d characters", maxFeedbackText))
 	}
 	elementIDs := r.ElementIds
@@ -150,5 +151,21 @@ func feedbackRequest(n int, r gen.PrototypeFeedbackRequest) (agentsvc.PrototypeF
 }
 
 func validFeedbackID(id string) bool {
-	return strings.TrimSpace(id) != "" && utf8.RuneCountInString(id) <= maxFeedbackID
+	return strings.TrimSpace(id) != "" && utf16Len(id) <= maxFeedbackID
+}
+
+// utf16Len is a string's length as JavaScript's `string.length` reads it, in
+// UTF-16 code units: a character outside the Basic Multilingual Plane (an
+// emoji) counts two. The kit, the agents service and the console count so, and
+// a batch must be judged the same wherever it is checked.
+func utf16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		if r > 0xFFFF {
+			n += 2 // a surrogate pair
+		} else {
+			n++
+		}
+	}
+	return n
 }

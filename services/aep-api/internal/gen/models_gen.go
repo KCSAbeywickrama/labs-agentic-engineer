@@ -1754,7 +1754,7 @@ type ConsumerDTO struct {
 	ProjectID     string `json:"projectId"`
 }
 
-// ConversationMessage One rehydrated message from a conversation's server-side history, sourced from the turn journal. The console's local chat log is display state; this is the durable record, and it is what makes a chip survive a reload.
+// ConversationMessage One rehydrated message from a conversation's server-side history, sourced from the turn journal. The console's local chat log is display state; this is the durable record, and it is what makes a chip survive a reload. A user message that sent a prototype review carries its `prototypeFeedback`, so a reloaded thread, and every teammate's, reads it as the requests it carried.
 type ConversationMessage struct {
 	// Anchor What the user pointed at when they aimed this turn at part of a spec document (#666; console ADR-0024). It LOCATES — it never carries the selected content.
 	//
@@ -1771,6 +1771,9 @@ type ConversationMessage struct {
 
 	// Content The message body as the journal recorded it. Deliberately untyped — a turn's content is model-shaped and varies by role, and this endpoint's job is to replay it, not to interpret it.
 	Content interface{} `json:"content,omitempty"`
+
+	// PrototypeFeedback A batch of review requests on ONE web-application prototype, sent as a single `/prototype` turn so the agent revises it once rather than once per note. The BFF validates the batch and forwards it unchanged; it never renders it into prose. The shape mirrors the prototype kit's feedback submission (`@wso2/prototype-kit/feedback`) plus `component`, and so do its limits. Lengths are counted in UTF-16 code units, as the kit counts them, so a character outside the Basic Multilingual Plane counts two.
+	PrototypeFeedback PrototypeFeedbackInput `json:"prototypeFeedback,omitempty"`
 
 	// Role Who the message is from, as the journal recorded it.
 	Role string `json:"role"`
@@ -2580,7 +2583,7 @@ type PromoteFromIssueRequest struct {
 	ComponentName string `json:"componentName"`
 }
 
-// PrototypeFeedbackInput A batch of review requests on ONE web-application prototype, sent as a single `/prototype` turn so the agent revises it once rather than once per note. The BFF validates the batch and forwards it unchanged; it never renders it into prose. The shape mirrors the prototype kit's feedback submission (`@wso2/prototype-cli` `feedback.ts`) plus `component`, and so do its limits.
+// PrototypeFeedbackInput A batch of review requests on ONE web-application prototype, sent as a single `/prototype` turn so the agent revises it once rather than once per note. The BFF validates the batch and forwards it unchanged; it never renders it into prose. The shape mirrors the prototype kit's feedback submission (`@wso2/prototype-kit/feedback`) plus `component`, and so do its limits. Lengths are counted in UTF-16 code units, as the kit counts them, so a character outside the Basic Multilingual Plane counts two.
 type PrototypeFeedbackInput struct {
 	// Component The web-application the batch is about, as named under `specs/design/components/`. Its `prototype.json` and `prototype.tsx` are the only files the turn may change.
 	Component string `json:"component"`
