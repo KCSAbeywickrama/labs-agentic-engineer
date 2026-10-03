@@ -46,6 +46,18 @@ targets, isolated render.
   `RENDER_TIMEOUT_MS` is 15 s.
 - Limits of the render check: see ADR-0040, Consequences.
 
+## Go mirror
+
+The aep-api save gate (`services/aep-api/internal/platform/prototypespec`)
+re-judges the files a hand push can bring: the manifest against an embedded
+copy of `schema/prototype-manifest.schema.json` (byte-pinned by a vendoring
+test), a Go port of `references.ts`, and a static floor for the source
+(syntax, imports, size). It never renders. Drift is closed by shared tables the
+kit asserts here and Go reads from `test/fixtures`: `manifest-cases.json`
+(code, location and wording of every reference rule; schema rows share only the
+code) and `source-floor-cases.json` (the floor's syntax, import and size rows,
+plus the size cap). Change a rule in one place and a row fails in the other.
+
 ## Host reducer and bridge (`/host`)
 
 The reducer owns view state. `NAVIGATE` only moves to a screen reachable for the
