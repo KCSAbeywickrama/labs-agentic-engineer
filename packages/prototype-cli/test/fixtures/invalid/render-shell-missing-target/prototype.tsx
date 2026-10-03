@@ -16,20 +16,25 @@
  * under the License.
  */
 
-/** The outlined card most components sit in, with an optional section title, as the console draws its panels. */
+// Fixture: an app shell without the screen its Sign out entry opens.
 
-import { Card, CardContent, Typography } from "@wso2/oxygen-ui";
-import type { ReactNode } from "react";
+import { AppShell, Button, Heading, Screen, defineApp } from "@wso2/prototype-kit";
 
-export function TitledCard({ title, children }: { title?: string | undefined; children?: ReactNode }) {
+function Home() {
   return (
-    <Card variant="outlined" component="section">
-      {title && (
-        <Typography variant="subtitle1" component="h3" sx={{ fontWeight: 600, px: 2, pt: 2 }}>
-          {title}
-        </Typography>
-      )}
-      <CardContent sx={{ "&:last-child": { pb: 2 } }}>{children}</CardContent>
-    </Card>
+    <AppShell id="shell" user={{ name: "Dana Lee" }} nav={[{ id: "nav.home", label: "Home", to: "screen.home" }]} account="screen.home" settings="screen.home">
+      <Heading id="heading.home" text="Home" />
+    </AppShell>
   );
 }
+
+function Admin() {
+  return (
+    <Screen>
+      <Heading id="heading.admin" text="Administration" />
+      <Button id="btn.home" label="Back home" to="screen.home" />
+    </Screen>
+  );
+}
+
+export default defineApp({ screens: { "screen.home": Home, "screen.admin": Admin } });

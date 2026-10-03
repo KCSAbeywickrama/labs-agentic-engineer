@@ -18,10 +18,38 @@
 
 /** Navigation: the app's side or top navigation, breadcrumbs, tabs and the stepper. */
 
-import { Box, Breadcrumbs as OxygenBreadcrumbs, Link, List, ListItemButton, ListItemText, Step, StepButton, Stepper as OxygenStepper, Tab, Tabs as OxygenTabs, Typography } from "@wso2/oxygen-ui";
-import type { ThemeBreadcrumbsProps, ThemeNavigationProps, ThemeStepperProps, ThemeTabsProps } from "@wso2/prototype-kit";
+import { Box, Breadcrumbs as OxygenBreadcrumbs, Link, ListItemButton, Sidebar, Step, StepButton, Stepper as OxygenStepper, Tab, Tabs as OxygenTabs, Typography, type SxProps, type Theme } from "@wso2/oxygen-ui";
+import { ChevronRight } from "@wso2/oxygen-ui-icons-react";
+import type { ThemeBreadcrumbsProps, ThemeNavigationItem, ThemeNavigationProps, ThemeStepperProps, ThemeTabsProps } from "@wso2/prototype-kit";
 import type { ReactNode } from "react";
 import { buttonRoot } from "./root.js";
+
+/**
+ * Side navigation on Oxygen's `Sidebar`, for `<AppShell nav>` and a side
+ * `<Navigation>`. Each entry's selectable root wraps its button through
+ * `Sidebar.Item`'s `link` slot, the one place the item takes an element.
+ */
+export function SideNav({ items, label, sx }: { items: ThemeNavigationItem[]; label?: string | undefined; sx?: SxProps<Theme> }) {
+  return (
+    <Sidebar
+      collapsed={false}
+      activeItem={items.find((i) => i.active)?.id ?? ""}
+      onSelect={(id) => items.find((i) => i.id === id)?.onPress()}
+      {...(sx !== undefined ? { sx } : {})}
+    >
+      <Sidebar.Nav>
+        <Sidebar.Category>
+          {label !== undefined && <Sidebar.CategoryLabel>{label}</Sidebar.CategoryLabel>}
+          {items.map((item) => (
+            <Sidebar.Item key={item.id} id={item.id} link={<Box component="span" aria-current={item.active ? "page" : undefined} sx={{ display: "block" }} {...buttonRoot(item.root)} />}>
+              <Sidebar.ItemLabel>{item.label}</Sidebar.ItemLabel>
+            </Sidebar.Item>
+          ))}
+        </Sidebar.Category>
+      </Sidebar.Nav>
+    </Sidebar>
+  );
+}
 
 export function Navigation({ layout, appName, items }: ThemeNavigationProps) {
   if (layout === "top") {
@@ -60,31 +88,12 @@ export function Navigation({ layout, appName, items }: ThemeNavigationProps) {
       </Box>
     );
   }
-  return (
-    <Box
-      component="nav"
-      aria-label={`${appName} navigation`}
-      sx={{ gridColumn: 1, gridRow: "1 / span 2", width: 240, overflow: "auto", px: 1, py: 2, bgcolor: "background.paper", borderRight: 1, borderColor: "divider" }}
-    >
-      <Typography variant="subtitle1" sx={{ fontWeight: 600, px: 1.5, pb: 1 }}>
-        {appName}
-      </Typography>
-      <List disablePadding sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
-        {items.map((item) => (
-          <li key={item.id}>
-            <ListItemButton component="button" selected={item.active} aria-current={item.active ? "page" : undefined} onClick={item.onPress} disableRipple sx={{ width: "100%", borderRadius: 1 }} {...buttonRoot(item.root)}>
-              <ListItemText primary={item.label} slotProps={{ primary: { variant: "body2", fontWeight: item.active ? 600 : 400 } }} />
-            </ListItemButton>
-          </li>
-        ))}
-      </List>
-    </Box>
-  );
+  return <SideNav items={items} label={appName} sx={{ gridColumn: 1, gridRow: "1 / span 2" }} />;
 }
 
 export function Breadcrumbs({ items }: ThemeBreadcrumbsProps) {
   return (
-    <OxygenBreadcrumbs aria-label="Breadcrumbs">
+    <OxygenBreadcrumbs aria-label="Breadcrumbs" separator={<ChevronRight size={16} aria-hidden="true" />}>
       {items.map((item) =>
         item.link ? (
           <Link key={item.id} component="button" type="button" variant="body2" underline="hover" color="text.secondary" onClick={item.link.onPress} {...item.link.root}>

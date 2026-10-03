@@ -16,18 +16,24 @@
  * under the License.
  */
 
-/** Layout: the screen shell, stack, grid, split and detail record. */
+/** Layout: the bare screen, the page every screen's content sits on, stack, grid, split and detail record. */
 
-import { Box, Typography } from "@wso2/oxygen-ui";
+import { Box, PageContent, Typography } from "@wso2/oxygen-ui";
 import type { ThemeDetailProps, ThemeGridProps, ThemeScreenProps, ThemeSplitProps, ThemeStackProps } from "@wso2/prototype-kit";
+import type { ReactNode } from "react";
 import { TitledCard } from "./card.js";
+
+/** A screen's content on Oxygen's `PageContent`: centred, padded, its parts a column apart. */
+export function Page({ children }: { children?: ReactNode }) {
+  return <PageContent sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>{children}</PageContent>;
+}
 
 export function Screen({ nav, children }: ThemeScreenProps) {
   return (
     <Box sx={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gridTemplateRows: "auto minmax(0, 1fr)", flex: 1, minHeight: 0, height: "100%" }}>
       {nav}
-      <Box component="main" sx={{ gridColumn: 2, gridRow: 2, minWidth: 0, minHeight: 0, overflow: "auto", p: 3 }}>
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5, maxWidth: 1200, mx: "auto" }}>{children}</Box>
+      <Box component="main" sx={{ gridColumn: 2, gridRow: 2, minWidth: 0, minHeight: 0, display: "flex" }}>
+        <Page>{children}</Page>
       </Box>
     </Box>
   );

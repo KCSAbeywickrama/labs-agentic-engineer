@@ -18,7 +18,7 @@
 
 /** Content: text, heading, badge, stat, alert, empty state, button and link. */
 
-import { Alert as OxygenAlert, AlertTitle, Box, Button as OxygenButton, Card, CardContent, Chip, Link as OxygenLink, StatCard, Typography } from "@wso2/oxygen-ui";
+import { Alert as OxygenAlert, AlertTitle, Box, Button as OxygenButton, Card, Chip, Link as OxygenLink, ListingTable, PageTitle, StatCard, Typography } from "@wso2/oxygen-ui";
 import type { ThemeAlertProps, ThemeBadgeProps, ThemeButtonProps, ThemeEmptyStateProps, ThemeHeadingProps, ThemeLinkProps, ThemeStatProps, ThemeTextProps } from "@wso2/prototype-kit";
 
 export function Button({ label, emphasis, disabled, onPress }: ThemeButtonProps) {
@@ -53,17 +53,19 @@ export function Text({ text, tone }: ThemeTextProps) {
 }
 
 export function Heading({ text, level, actions }: ThemeHeadingProps) {
+  if (level === "page") {
+    return (
+      <PageTitle sx={{ mb: 0 }}>
+        <PageTitle.Header>{text}</PageTitle.Header>
+        {actions !== undefined && <PageTitle.Actions>{actions}</PageTitle.Actions>}
+      </PageTitle>
+    );
+  }
   return (
     <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
-      {level === "page" ? (
-        <Typography variant="h4" component="h2">
-          {text}
-        </Typography>
-      ) : (
-        <Typography variant="h6" component="h3">
-          {text}
-        </Typography>
-      )}
+      <Typography variant="h6" component="h3">
+        {text}
+      </Typography>
       {actions !== undefined && <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>{actions}</Box>}
     </Box>
   );
@@ -89,15 +91,13 @@ export function Alert({ tone, title, text }: ThemeAlertProps) {
 export function EmptyState({ title, text, actions }: ThemeEmptyStateProps) {
   return (
     <Card variant="outlined">
-      <CardContent sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1, py: 5, textAlign: "center" }}>
-        <Typography variant="h6" component="h3">
-          {title}
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          {text}
-        </Typography>
-        {actions !== undefined && <Box sx={{ display: "flex", gap: 1, mt: 1 }}>{actions}</Box>}
-      </CardContent>
+      <ListingTable.EmptyState
+        title={title}
+        description={text}
+        minHeight={0}
+        sx={{ py: 5 }}
+        {...(actions !== undefined ? { action: <Box sx={{ display: "flex", gap: 1 }}>{actions}</Box> } : {})}
+      />
     </Card>
   );
 }

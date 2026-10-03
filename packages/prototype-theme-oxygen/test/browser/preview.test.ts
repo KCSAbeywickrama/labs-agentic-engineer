@@ -208,3 +208,63 @@ describe("expense-approval under Oxygen", () => {
     await s.app.getByRole("spinbutton", { name: "Amount", exact: true }).waitFor();
   });
 });
+
+describe("the app shell under Oxygen", () => {
+  let s: Session;
+
+  beforeAll(async () => {
+    s = await open("app-shell");
+  });
+
+  afterAll(async () => {
+    await close(s);
+  });
+
+  it("draws the header, user menu and side navigation, follows the role, and signs out and back in, fetching nothing", async () => {
+    await s.app.getByRole("heading", { name: "My requests" }).waitFor();
+    // The host covered the frame while the runtime started, and uncovers it once the app draws.
+    await s.page.getByText("Loading the prototype…").waitFor({ state: "hidden" });
+    await s.app.getByText("Leave requests", { exact: true }).waitFor();
+
+    await s.page.evaluate(() => {
+      const w = window as unknown as { __escapes: number };
+      w.__escapes = 0;
+      window.addEventListener("message", (e) => {
+        if ((e.data as { type?: string } | null)?.type === "proto:escape") w.__escapes++;
+      });
+    });
+    await s.app.getByRole("button", { name: "Dana Lee, Employee" }).click();
+    const account = s.app.getByRole("menuitem", { name: "Account" });
+    await account.waitFor();
+    // Escape closing the menu is the prototype's own: it must not reach the host.
+    await account.press("Escape");
+    await account.waitFor({ state: "hidden" });
+    await s.page.waitForTimeout(300);
+    expect(await s.page.evaluate(() => (window as unknown as { __escapes: number }).__escapes)).toBe(0);
+
+    await s.app.getByRole("button", { name: "Dana Lee, Employee" }).click();
+    await account.click();
+    await s.app.getByRole("heading", { name: "Account" }).waitFor();
+    await s.app.getByRole("menuitem", { name: "Settings" }).waitFor({ state: "hidden" });
+    expect(await s.app.locator('[data-proto-key="nav.team"]').count()).toBe(0);
+
+    await s.page.getByRole("combobox", { name: "Role" }).selectOption({ label: "Manager" });
+    await s.app.getByRole("button", { name: "Priya Shah, Manager" }).click();
+    await s.app.getByRole("menuitem", { name: "Sign out" }).click();
+    await s.app.getByRole("heading", { name: "You are signed out" }).waitFor();
+    await s.app.getByRole("button", { name: "Sign in" }).click();
+    await s.app.locator('[data-proto-key="nav.team"]').click();
+    await s.app.getByRole("heading", { name: "Team requests" }).waitFor();
+
+    expect(s.requests.filter((url) => !url.startsWith(s.preview.url))).toEqual([]);
+  });
+
+  it("selects the user menu in Annotate instead of opening it", async () => {
+    await s.page.getByRole("button", { name: "Annotate" }).click();
+    const user = s.app.locator('[data-proto-key="shell.user"]');
+    await user.click();
+    expect(await user.getAttribute("aria-pressed")).toBe("true");
+    expect(await s.app.getByRole("menuitem", { name: "Account" }).count()).toBe(0);
+    await s.page.getByRole("button", { name: "Preview" }).click();
+  });
+});

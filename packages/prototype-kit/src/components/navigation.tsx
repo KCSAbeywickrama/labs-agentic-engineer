@@ -23,7 +23,7 @@
  */
 
 import { useState, type ReactNode } from "react";
-import { isScreen, reaches, useKit } from "../runtime/context.js";
+import { isScreen, reaches, useKit, type KitContextValue } from "../runtime/context.js";
 import { pressHandler } from "../runtime/press.js";
 import { SelectableBox, requireId, selectableRootProps, type SelectableRootProps } from "../runtime/selectable.js";
 import { useThemed } from "../theme/context.js";
@@ -56,26 +56,29 @@ export interface ThemeNavigationProps {
   items: ThemeNavigationItem[];
 }
 
-/** The app's own chrome. Pass it to every `<Screen nav>`. Its items are what a reviewer points at. */
+/** Navigation for an app drawn on `<Screen nav>` (`<AppShell nav>` draws its own). Its items are what a reviewer points at. */
 export function Navigation({ id, layout, items }: NavigationProps) {
   const ctx = useKit();
   const Themed = useThemed("Navigation");
   requireId("Navigation", id);
-  // An entry to a screen that does not exist stays drawn, so the render check reports its `to`.
-  const shown = items.filter((i) => !isScreen(ctx, i.to) || reaches(ctx, i.to));
-  return (
-    <Themed
-      layout={layout}
-      appName={ctx.manifest.name}
-      items={shown.map((item) => ({
-        id: requireId("Navigation item", item.id),
-        label: item.label,
-        active: item.to === ctx.view.screenId,
-        onPress: pressHandler(ctx, { to: item.to }),
-        root: selectableRootProps(ctx, item.id, item.label, item.to),
-      }))}
-    />
-  );
+  return <Themed layout={layout} appName={ctx.manifest.name} items={navigationItems(ctx, items, "Navigation item")} />;
+}
+
+/**
+ * The entries the viewing role sees, ready for a theme. An entry to a screen
+ * the role cannot reach is not drawn; one to a screen that does not exist
+ * stays drawn, so the render check reports its `to`.
+ */
+export function navigationItems(ctx: KitContextValue, items: NavigationItem[], what: string): ThemeNavigationItem[] {
+  return items
+    .filter((i) => !isScreen(ctx, i.to) || reaches(ctx, i.to))
+    .map((item) => ({
+      id: requireId(what, item.id),
+      label: item.label,
+      active: item.to === ctx.view.screenId,
+      onPress: pressHandler(ctx, { to: item.to }),
+      root: selectableRootProps(ctx, item.id, item.label, item.to),
+    }));
 }
 
 export interface BreadcrumbItem {

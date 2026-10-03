@@ -29,6 +29,7 @@ import { Field, Filters, Form, ValidationSummary } from "./components/forms.js";
 import { Detail, Grid, Screen, Split, Stack } from "./components/layout.js";
 import { Breadcrumbs, Navigation, Stepper, Tabs } from "./components/navigation.js";
 import { Dialog, Drawer } from "./components/overlays.js";
+import { AppShell } from "./components/shell.js";
 import { OxygenProvider } from "./provider.js";
 
 const theme: PrototypeTheme = {
@@ -36,6 +37,7 @@ const theme: PrototypeTheme = {
   Provider: OxygenProvider,
   registry: {
     Screen,
+    AppShell,
     Stack,
     Grid,
     Split,

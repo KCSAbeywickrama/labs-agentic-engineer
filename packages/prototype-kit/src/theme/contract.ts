@@ -30,10 +30,12 @@ import type { ThemeFieldProps, ThemeFiltersProps, ThemeFormProps, ThemeValidatio
 import type { ThemeTableProps, ThemeTimelineProps } from "../components/data.js";
 import type { ThemeDialogProps, ThemeDrawerProps } from "../components/overlays.js";
 import type { ThemeDetailProps, ThemeGridProps, ThemeScreenProps, ThemeSplitProps, ThemeStackProps } from "../components/layout.js";
+import type { ThemeAppShellProps } from "../components/shell.js";
 
 /** The props each kit component's theme implementation receives. */
 export interface KitComponentProps {
   Screen: ThemeScreenProps;
+  AppShell: ThemeAppShellProps;
   Stack: ThemeStackProps;
   Grid: ThemeGridProps;
   Split: ThemeSplitProps;
