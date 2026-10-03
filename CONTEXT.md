@@ -465,8 +465,14 @@ _Avoid_: view, screen.
 **Card**:
 One entity opened to change it with the agent, over the Page that lists it: a
 project's Spec or Design (over the overview), a Build (over build history), a
-version's Validation, a Skill, a Resource. Opening a Card sets the Turn scope.
-_Avoid_: modal, dialog, panel.
+version's Validation, an environment's Configure (over Deploy), a Skill, a
+Resource. It has its own address, and opening it sets the Turn scope.
+_Avoid_: modal, dialog, Panel (a different thing).
+
+**Panel**:
+A small window over a Page for one short task, used without the agent: the build
+picker, Try it. It has no address and leaves the Turn scope as it was.
+_Avoid_: Card, modal.
 
 **Conversation**:
 The chat thread that belongs to one entity: a project, a Skill, a Resource, or the
