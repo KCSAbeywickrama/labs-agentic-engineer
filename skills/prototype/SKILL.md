@@ -192,13 +192,13 @@ function Queue() {
 function ExpenseDetail() {
   const { expense: id } = useParams();
   const state = useDisplayState();
-  const nav_ = useNav();
+  const navigate = useNav();
   const all = useCollection<Expense>("expenses");
   const [rejecting, setRejecting] = useState(false);
   const expense = (id ? all.get(id) : undefined) ?? all.items[0]!;
   const decide = (status: string) => {
     all.update(expense.id, { status });
-    nav_.go("screen.queue");
+    navigate.go("screen.queue");
   };
   return (
     <Shell>
@@ -241,13 +241,13 @@ function Account() {
 }
 
 function Settings() {
-  const nav_ = useNav();
+  const navigate = useNav();
   return (
     <Shell>
       <Heading id="heading.settings" text="Settings" />
       <Form
         id="form.settings"
-        onSubmit={() => nav_.go("screen.queue")}
+        onSubmit={() => navigate.go("screen.queue")}
         actions={<Button id="btn.save-settings" label="Save settings" emphasis="primary" submit />}
       >
         <Field id="field.digest" label="Email me a daily digest" type="switch" defaultValue="on" />
@@ -287,6 +287,9 @@ export default defineApp({
   a settings screen with the preferences the application offers, and a
   signed-out screen. Only that signed-out screen, outside the product, has a
   bare `<Screen>` as its root, with a way to sign back in.
+  The shell's `menu` adds the application's own user-menu entries (a profile,
+  billing) between Settings and Sign out. A reviewer points at an entry by
+  opening the menu in Preview, then switching to Annotate.
 - **One shell serves every role.** A navigation entry is drawn only for the
   roles that reach its screen. Give `user` the person each role signs in as
   (pick by `useRole()` when roles differ); the header shows the viewing role's
@@ -454,6 +457,7 @@ The root of a screen inside the product's chrome: header, user menu and side nav
 - `account: string` — The screen the user menu's Account entry opens.
 - `settings: string` — The screen the user menu's Settings entry opens.
 - `signOut: string` — The screen Sign out leads to: a signed-out screen, drawn on a bare `<Screen>`.
+- `menu?: NavigationItem[]` — More user-menu entries (a profile, billing), drawn after Account and Settings and before Sign out.
 - `children?: ReactNode` — The screen's content.
 
 #### `AppShellUser`

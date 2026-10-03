@@ -26,6 +26,7 @@ const call = (name: string): Call => (commands as unknown as Record<string, Call
 
 export const driver = {
   startPreview: (fixture: string, flags: string[] = []) => call("startPreview")(fixture, flags) as Promise<Preview>,
+  startPreviewOnFrameRuntime: (fixture: string, frameRuntime: string) => call("startPreviewOnFrameRuntime")(fixture, frameRuntime) as Promise<Preview>,
   stopPreview: (id: string) => call("stopPreview")(id) as Promise<void>,
   openPage: (url: string) => call("openPage")(url) as Promise<string>,
   reloadPage: (id: string) => call("reloadPage")(id) as Promise<void>,

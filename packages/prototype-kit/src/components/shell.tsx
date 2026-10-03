@@ -52,6 +52,8 @@ export interface AppShellProps {
   settings: string;
   /** The screen Sign out leads to: a signed-out screen, drawn on a bare `<Screen>`. */
   signOut: string;
+  /** More user-menu entries (a profile, billing), drawn after Account and Settings and before Sign out. */
+  menu?: NavigationItem[] | undefined;
   /** The screen's content. */
   children?: ReactNode;
 }
@@ -63,8 +65,8 @@ export interface ThemeAppShellProps {
   userRoot: SelectableRootProps;
   nav: ThemeNavigationItem[];
   /**
-   * The user menu's entries the viewing role reaches: Account and Settings,
-   * then Sign out. Keep them in the markup while the menu is closed (hidden),
+   * The user menu's entries the viewing role reaches: Account, Settings and
+   * the prototype's own; Sign out is `signOut`. Keep them in the markup while the menu is closed (hidden),
    * so the render check sees where they lead.
    */
   menu: ThemeNavigationItem[];
@@ -72,10 +74,8 @@ export interface ThemeAppShellProps {
   children?: ReactNode;
 }
 
-function requireTarget(name: "account" | "settings" | "signOut", screenId: unknown): string {
-  if (typeof screenId !== "string" || screenId === "") {
-    throw new Error(`<AppShell> needs ${name}: the screen its user menu's ${name === "signOut" ? "Sign out" : name === "account" ? "Account" : "Settings"} entry opens`);
-  }
+function requireTarget(prop: string, entry: string, screenId: unknown): string {
+  if (typeof screenId !== "string" || screenId === "") throw new Error(`<AppShell> needs ${prop}: the screen its user menu's ${entry} entry opens`);
   return screenId;
 }
 
@@ -84,7 +84,7 @@ function roleName(ctx: KitContextValue): string {
 }
 
 /** The root of a screen inside the product's chrome: header, user menu and side navigation. Use `<Screen>` for a screen outside it (signed out). */
-export function AppShell({ id, product, user, nav, account, settings, signOut, children }: AppShellProps) {
+export function AppShell({ id, product, user, nav, account, settings, signOut, menu: extra = [], children }: AppShellProps) {
   const ctx = useKit();
   const Themed = useThemed("AppShell");
   requireId("AppShell", id);
@@ -92,10 +92,10 @@ export function AppShell({ id, product, user, nav, account, settings, signOut, c
   const entry = (suffix: string, label: string, to: string): NavigationItem => ({ id: `${id}.${suffix}`, label, to });
   const menu = navigationItems(
     ctx,
-    [entry("account", "Account", requireTarget("account", account)), entry("settings", "Settings", requireTarget("settings", settings))],
+    [entry("account", "Account", requireTarget("account", "Account", account)), entry("settings", "Settings", requireTarget("settings", "Settings", settings)), ...extra],
     "AppShell menu entry",
   );
-  const [out] = navigationItems(ctx, [entry("sign-out", "Sign out", requireTarget("signOut", signOut))], "AppShell menu entry");
+  const [out] = navigationItems(ctx, [entry("sign-out", "Sign out", requireTarget("signOut", "Sign out", signOut))], "AppShell menu entry");
   return (
     <Themed
       product={product ?? ctx.manifest.name}

@@ -77,6 +77,7 @@ The root of a screen inside the product's chrome: header, user menu and side nav
 - `account: string` — The screen the user menu's Account entry opens.
 - `settings: string` — The screen the user menu's Settings entry opens.
 - `signOut: string` — The screen Sign out leads to: a signed-out screen, drawn on a bare `<Screen>`.
+- `menu?: NavigationItem[]` — More user-menu entries (a profile, billing), drawn after Account and Settings and before Sign out.
 - `children?: ReactNode` — The screen's content.
 
 ### `AppShellUser`

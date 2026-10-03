@@ -17,8 +17,8 @@
  */
 
 // Fixture: an app drawn in the kit's app shell — header, user menu (Account,
-// Settings, Sign out) and side navigation — with a navigation entry only one
-// role reaches, a user per role, and a signed-out screen outside the shell.
+// Settings, Sign out, and an entry of its own) and side navigation — with entries only
+// one role reaches, a user per role, and a signed-out screen outside the shell.
 
 import type { ReactNode } from "react";
 import {
@@ -58,6 +58,7 @@ function Shell({ children }: { children: ReactNode }) {
       account="screen.account"
       settings="screen.settings"
       signOut="screen.signed-out"
+      menu={[{ id: "menu.team", label: "My team", to: "screen.team" }]}
     >
       {children}
     </AppShell>

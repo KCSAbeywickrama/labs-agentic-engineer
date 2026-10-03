@@ -25,12 +25,13 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { FrameLocator, Locator, Page } from "playwright";
 import type { BrowserCommand } from "vitest/node";
-import { copyFixture, runCli, startPreview as spawnPreview, tempDir, type PreviewProcess } from "../harness.js";
+import { PACKAGE_ROOT, copyFixture, runCli, startPreview as spawnPreview, tempDir, type PreviewProcess } from "../harness.js";
 import type { Action, Preview, Reading, Target } from "./protocol.js";
 
 const previews = new Map<string, PreviewProcess>();
@@ -63,6 +64,25 @@ function locate(pageId: string, t: Target): Locator {
 
 const startPreview: BrowserCommand<[fixture: string, flags?: string[]]> = async (_ctx, fixture, flags = []) => {
   const p = await spawnPreview(copyFixture(fixture.includes("/") ? fixture : `valid/${fixture}`), flags);
+  const id = String(next++);
+  previews.set(id, p);
+  return { id, url: p.url } satisfies Preview;
+};
+
+/**
+ * Previews a fixture on a theme whose frame runtime is `frameRuntime` (and
+ * whose check runtime is the default theme's): a runtime that fails as it
+ * loads, as a broken theme build would.
+ */
+const startPreviewOnFrameRuntime: BrowserCommand<[fixture: string, frameRuntime: string]> = async (_ctx, fixture, frameRuntime) => {
+  const dir = copyFixture(`valid/${fixture}`);
+  const themeDir = join(dir, "node_modules", "broken-theme");
+  mkdirSync(themeDir, { recursive: true });
+  const exports = { "./frame-runtime.js": "./frame-runtime.js", "./check-runtime.js": "./check-runtime.js" };
+  writeFileSync(join(themeDir, "package.json"), JSON.stringify({ name: "broken-theme", version: "0.0.0", exports }));
+  writeFileSync(join(themeDir, "frame-runtime.js"), frameRuntime);
+  copyFileSync(createRequire(join(PACKAGE_ROOT, "x.js")).resolve("@wso2/prototype-theme-default/check-runtime.js"), join(themeDir, "check-runtime.js"));
+  const p = await spawnPreview(dir, ["--theme", "broken-theme"]);
   const id = String(next++);
   previews.set(id, p);
   return { id, url: p.url } satisfies Preview;
@@ -171,6 +191,7 @@ const exportFixture: BrowserCommand<[fixture: string]> = (_ctx, fixture) => {
 
 export const commands = {
   startPreview,
+  startPreviewOnFrameRuntime,
   stopPreview,
   openPage,
   reloadPage,

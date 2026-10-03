@@ -246,10 +246,13 @@ describe("the app shell under Oxygen", () => {
     await account.click();
     await s.app.getByRole("heading", { name: "Account" }).waitFor();
     await s.app.getByRole("menuitem", { name: "Settings" }).waitFor({ state: "hidden" });
+    expect(await s.app.locator('[data-proto-key="menu.team"]').count()).toBe(0);
     expect(await s.app.locator('[data-proto-key="nav.team"]').count()).toBe(0);
 
     await s.page.getByRole("combobox", { name: "Role" }).selectOption({ label: "Manager" });
     await s.app.getByRole("button", { name: "Priya Shah, Manager" }).click();
+    // The prototype's own entry shows for the role that reaches its screen.
+    await s.app.getByRole("menuitem", { name: "My team" }).waitFor();
     await s.app.getByRole("menuitem", { name: "Sign out" }).click();
     await s.app.getByRole("heading", { name: "You are signed out" }).waitFor();
     await s.app.getByRole("button", { name: "Sign in" }).click();
@@ -257,6 +260,25 @@ describe("the app shell under Oxygen", () => {
     await s.app.getByRole("heading", { name: "Team requests" }).waitFor();
 
     expect(s.requests.filter((url) => !url.startsWith(s.preview.url))).toEqual([]);
+  });
+
+  it("draws in the scheme the host names, and in the system's when it names none", async () => {
+    const frame = s.page.frames().find((f) => f !== s.page.mainFrame())!;
+    const scheme = () => frame.evaluate(() => document.documentElement.getAttribute("data-color-scheme"));
+    expect(await scheme()).toBe("light");
+    // As the console does: the view the host sends carries its resolved scheme.
+    const send = (colorScheme?: string) =>
+      s.page.evaluate((colorScheme) => {
+        const frameWindow = document.querySelector<HTMLIFrameElement>('iframe[title$="prototype app"]')!.contentWindow!;
+        const view = { mode: "preview", roleId: "manager", stateId: "state.default", screenId: "screen.team", selectedKeys: [], pins: {}, ...(colorScheme ? { colorScheme } : {}) };
+        frameWindow.postMessage({ type: "proto:view", view }, "*");
+      }, colorScheme);
+    await send("dark");
+    await expect.poll(scheme).toBe("dark");
+    const background = await frame.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    expect(background).toBe("rgb(15, 18, 22)");
+    await send();
+    await expect.poll(scheme).toBe("light");
   });
 
   it("selects the user menu in Annotate instead of opening it", async () => {

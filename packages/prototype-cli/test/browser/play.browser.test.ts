@@ -270,11 +270,13 @@ describe("prototype preview — the app shell", () => {
 
     // A navigation entry shows only for the role that reaches its screen, and the header follows the role.
     expect(await driver.count(page, app.element("nav.team"))).toBe(0);
+    expect(await driver.count(page, app.element("menu.team"))).toBe(0);
     await driver.select(page, host.picker("Role"), "Manager");
     await driver.waitFor(page, app.button("Priya Shah"));
     await driver.waitFor(page, app.element("nav.team"));
 
     await driver.click(page, app.button("Priya Shah"));
+    await driver.waitFor(page, entry("My team"));
     await driver.click(page, entry("Sign out"));
     await driver.waitFor(page, app.heading("You are signed out"));
     expect(await driver.count(page, app.button("Priya Shah"))).toBe(0);
@@ -289,5 +291,20 @@ describe("prototype preview — the app shell", () => {
     await driver.waitFor(page, host.text("Selected: Priya Shah"));
     expect(await driver.count(page, entry("Account"))).toBe(0);
     await driver.click(page, host.button("Preview"));
+  });
+});
+
+describe("prototype preview — a frame runtime that fails as it loads", () => {
+  it("says why instead of leaving the loading cover up", async () => {
+    const p = await driver.startPreviewOnFrameRuntime("baseline", 'throw new Error("the theme failed to load");');
+    const pg = await driver.openPage(p.url);
+    try {
+      await driver.waitFor(pg, { where: "host", role: "alert" });
+      expect(await driver.read(pg, { where: "host", role: "alert" }, "text")).toContain("the theme failed to load");
+      expect(await driver.count(pg, { where: "host", role: "status" })).toBe(0);
+    } finally {
+      await driver.closePage(pg);
+      await driver.stopPreview(p.id);
+    }
   });
 });
