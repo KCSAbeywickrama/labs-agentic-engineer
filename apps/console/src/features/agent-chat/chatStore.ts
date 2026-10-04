@@ -285,6 +285,8 @@ export function createChatStore(options: ChatStoreOptions) {
       void (async () => {
         try {
           if (e.state.status === "ready" && e.state.turn.phase === "idle") {
+            // A thread left behind (a teammate started a new one): follow it.
+            if (!e.conversationId) await readHistory(projectName);
             const active = await runningTurn(projectName);
             if (active) {
               // Someone else's turn (a teammate's, or the platform's kickoff):
@@ -313,6 +315,28 @@ export function createChatStore(options: ChatStoreOptions) {
   }
 
   /**
+   * Start a turn in the project's current thread. A thread this chat lost
+   * track of (a teammate started a new one) is resolved again first. When the
+   * server says the thread was replaced (409 `conversation_rotated`: a
+   * teammate's new thread, or the server's own once the context filled), the
+   * chat follows the new thread, its history with the message being sent
+   * kept after it, and the turn starts there: the message is not lost.
+   */
+  async function startInCurrentThread(projectName: string, rowId: string, body: TurnBody): Promise<string> {
+    const e = entry(projectName);
+    e.conversationId ??= await api.conversationId(projectName);
+    try {
+      return await api.startTurn(projectName, e.conversationId, body);
+    } catch (err) {
+      if (!(err instanceof ConversationRotatedError)) throw err;
+      e.conversationId = await api.conversationId(projectName);
+      const history = historyItems(await api.history(projectName, e.conversationId));
+      update(projectName, (s) => ({ items: [...history, ...s.items.filter((i) => i.id === rowId)] }));
+      return api.startTurn(projectName, e.conversationId, body);
+    }
+  }
+
+  /**
    * Send a message as the next turn, with its scope. Resolves true once the
    * server accepted the turn (its stream folds in the background), false when
    * it was not sent: the chat is not ready, a turn is running, or the server
@@ -321,7 +345,7 @@ export function createChatStore(options: ChatStoreOptions) {
   async function send(projectName: string, text: string, scope: TurnScope): Promise<boolean> {
     const e = entry(projectName);
     const instruction = text.trim();
-    if (!instruction || e.state.status !== "ready" || e.state.turn.phase !== "idle" || !e.conversationId) return false;
+    if (!instruction || e.state.status !== "ready" || e.state.turn.phase !== "idle") return false;
     const rowId = localId("u");
     update(projectName, (s) => ({
       turn: { phase: "starting", instruction },
@@ -339,7 +363,7 @@ export function createChatStore(options: ChatStoreOptions) {
     let turnId: string;
     try {
       await beforeTurn?.(projectName).catch(() => undefined);
-      turnId = await api.startTurn(projectName, e.conversationId, turnBody(instruction, scope));
+      turnId = await startInCurrentThread(projectName, rowId, turnBody(instruction, scope));
     } catch (err) {
       update(projectName, (s) => ({
         turn: { phase: "idle" },
@@ -350,9 +374,6 @@ export function createChatStore(options: ChatStoreOptions) {
       }));
       if (err instanceof TurnInProgressError && err.activeTurnId) {
         void attach(projectName, { turnId: err.activeTurnId });
-      } else if (err instanceof ConversationRotatedError) {
-        e.conversationId = null;
-        void readHistory(projectName).catch(() => undefined);
       }
       return false;
     }
