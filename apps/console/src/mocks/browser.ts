@@ -21,6 +21,7 @@ import { buildsHandlers } from "./handlers/builds";
 import { conversationHandlers } from "./handlers/conversation";
 import { deployHandlers } from "./handlers/deploy";
 import { designHandlers } from "./handlers/design";
+import { issuesHandlers } from "./handlers/issues";
 import { projectsHandlers } from "./handlers/projects";
 import { settingsHandlers } from "./handlers/settings";
 import { specHandlers } from "./handlers/spec";
@@ -34,6 +35,7 @@ export const worker = setupWorker(
   ...designHandlers,
   ...buildsHandlers,
   ...deployHandlers,
+  ...issuesHandlers,
   ...settingsHandlers,
   ...usageHandlers,
 );

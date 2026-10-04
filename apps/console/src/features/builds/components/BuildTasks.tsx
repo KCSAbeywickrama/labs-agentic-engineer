@@ -20,10 +20,8 @@ import { useState } from "react";
 import { Box, ButtonBase, Link, Typography } from "@wso2/oxygen-ui";
 import { ChevronRight } from "@wso2/oxygen-ui-icons-react";
 import type { components } from "../../../generated/aep-api";
-import { useTaskLog } from "../hooks/useTaskLog";
-import { taskLogLines } from "../model/run";
 import { orderedTasks, taskNote, taskState, taskStateLabel, type RunClaims, type TaskState } from "../model/taskRow";
-import { LogLines } from "./CardSection";
+import { TaskLog } from "./TaskLog";
 
 // The Build card's tasks: one row per issue of the version, in the order the
 // milestone planned them, each with its state and its status line (the
@@ -45,18 +43,6 @@ const NOTE_COLOUR: Partial<Record<TaskState, string>> = {
   blocked: "warning.main",
   pr_sent: "warning.main",
 };
-
-function TaskLog({ projectName, issueNumber }: { projectName: string; issueNumber: number }) {
-  const log = useTaskLog(projectName, issueNumber);
-  const lines = taskLogLines(log.lines);
-  const empty =
-    log.phase === "ended"
-      ? "No log of its own: the coding agent's log has this task's work."
-      : log.phase === "reconnecting"
-        ? "Connection lost, reconnecting…"
-        : "Attaching to the task's log…";
-  return <LogLines lines={lines} empty={empty} maxHeight={260} />;
-}
 
 function TaskRow({
   projectName,

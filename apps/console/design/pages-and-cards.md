@@ -20,6 +20,8 @@ routes/projects/$projectName/
     $version.tsx               /projects/$p/validations/v2  Validation card
   deploy/route.tsx           the Deploy Page         /projects/$p/deploy
     $env/configure.tsx         /projects/$p/deploy/staging/configure  Configure card
+  issues/route.tsx           the Issues Page         /projects/$p/issues
+    $number.tsx                /projects/$p/issues/14  Issue card
 ```
 
 - **A Page is a layout route.** It renders `PageWithCards` around its content:
@@ -65,3 +67,10 @@ so `turnScopeFor` and `chatTopic` read it as the whole product. The Settings
 card sets none either: it is the org's, and the org's chat is inert. It is
 opened from the rail (the Settings icon above the user menu), not from the
 Dashboard, and keeps its section in the address (`?section=github|ai|usage`).
+
+The Issues Page lists the project's GitHub issues (incidents the SRE agent
+filed, the platform's own, people's), those that need attention first; an
+Issue card is over it and sets no Turn scope either. The Dashboard's Alerts
+link straight to Issue cards: they are every project's issues that need
+attention (`features/issues/useAlerts.ts` asks each project, as no read
+answers for the org), and the rail's logo counts those that need a person.

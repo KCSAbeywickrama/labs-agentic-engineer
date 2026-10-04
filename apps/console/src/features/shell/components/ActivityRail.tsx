@@ -18,8 +18,9 @@
 
 import type { ReactNode } from "react";
 import { createLink } from "@tanstack/react-router";
-import { Box, IconButton, Link, Tooltip, type SxProps, type Theme } from "@wso2/oxygen-ui";
+import { Badge, Box, IconButton, Link, Tooltip, type SxProps, type Theme } from "@wso2/oxygen-ui";
 import {
+  CircleDot,
   ClipboardCheck,
   FileText,
   Hammer,
@@ -31,6 +32,7 @@ import {
   Rocket,
   Settings,
 } from "@wso2/oxygen-ui-icons-react";
+import { useAlerts } from "../../issues/useAlerts";
 import type { ShellScope } from "../scope";
 import { RAIL_WIDTH } from "../layout";
 import { RailUserMenu } from "./RailUserMenu";
@@ -80,9 +82,10 @@ function RailTip({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /**
- * The dark activity rail: the logo (home: the Dashboard), New project,
- * Projects; inside a project also its Overview, Spec, Design, Builds,
- * Validation and Deploy; then the chat toggle, Settings (the org's card, over
+ * The dark activity rail: the logo (home: the Dashboard, with a count of the
+ * Alerts that need a person), New project, Projects; inside a project also
+ * its Overview, Spec, Design, Builds, Validation, Deploy and Issues; then the
+ * chat toggle, Settings (the org's card, over
  * the Dashboard) and the user menu at the bottom. The rail takes you to Pages; a Card opens from what a Page
  * shows, save the few the rail names.
  */
@@ -102,6 +105,8 @@ export function ActivityRail({
   const onPage = (page: "dashboard" | "projects" | "new") =>
     scope.kind === "org" && scope.page === page && scope.card === null;
   const settingsOpen = scope.kind === "org" && scope.card === "settings";
+  const needsYou = useAlerts().needsPerson;
+  const home = needsYou > 0 ? `Dashboard, ${needsYou} need${needsYou === 1 ? "s" : ""} you` : "Dashboard";
 
   return (
     <Box
@@ -122,29 +127,37 @@ export function ActivityRail({
       }}
     >
       {/* The logo is the way home: it opens the Dashboard. */}
-      <RailTip label="Dashboard">
-        <LogoLink
-          to="/"
-          aria-label="Dashboard"
-          aria-current={onPage("dashboard") ? "page" : undefined}
-          underline="none"
-          sx={{
-            width: 32,
-            height: 32,
-            mb: 1,
-            borderRadius: 2,
-            bgcolor: "primary.main",
-            color: "primary.contrastText",
-            display: "grid",
-            placeItems: "center",
-            fontFamily: "monospace",
-            fontWeight: 600,
-            textDecoration: "none",
-            "&:focus-visible": { outline: "2px solid var(--aep-shell-rail-active)", outlineOffset: 2 },
-          }}
+      <RailTip label={home}>
+        <Badge
+          badgeContent={needsYou}
+          color="warning"
+          max={99}
+          overlap="rectangular"
+          slotProps={{ badge: { "aria-hidden": true } }}
+          sx={{ mb: 1, "& .MuiBadge-badge": { pointerEvents: "none" } }}
         >
-          ae
-        </LogoLink>
+          <LogoLink
+            to="/"
+            aria-label={home}
+            aria-current={onPage("dashboard") ? "page" : undefined}
+            underline="none"
+            sx={{
+              width: 32,
+              height: 32,
+              borderRadius: 2,
+              bgcolor: "primary.main",
+              color: "primary.contrastText",
+              display: "grid",
+              placeItems: "center",
+              fontFamily: "monospace",
+              fontWeight: 600,
+              textDecoration: "none",
+              "&:focus-visible": { outline: "2px solid var(--aep-shell-rail-active)", outlineOffset: 2 },
+            }}
+          >
+            ae
+          </LogoLink>
+        </Badge>
       </RailTip>
       <RailTip label="New project">
         <RailLink to="/projects/new" aria-label="New project" sx={railButtonSx(onPage("new"))}>
@@ -216,6 +229,16 @@ export function ActivityRail({
               sx={railButtonSx(project.page === "deploy")}
             >
               <Rocket size={20} />
+            </RailLink>
+          </RailTip>
+          <RailTip label="Issues">
+            <RailLink
+              to="/projects/$projectName/issues"
+              params={{ projectName: project.projectName }}
+              aria-label="Issues"
+              sx={railButtonSx(project.page === "issues")}
+            >
+              <CircleDot size={20} />
             </RailLink>
           </RailTip>
         </>

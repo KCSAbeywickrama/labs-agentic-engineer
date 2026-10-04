@@ -52,6 +52,7 @@ describe("shellScope", () => {
     expect(inProject("/projects/$projectName/builds")).toMatchObject({ page: "builds", card: null });
     expect(inProject("/projects/$projectName/validations")).toMatchObject({ page: "validations", card: null });
     expect(inProject("/projects/$projectName/deploy")).toMatchObject({ page: "deploy", card: null });
+    expect(inProject("/projects/$projectName/issues")).toMatchObject({ page: "issues", card: null });
   });
 
   it("reads each card route as its card over the Page that lists it", () => {
@@ -61,6 +62,7 @@ describe("shellScope", () => {
       ["/projects/$projectName/builds/$version", "build", "builds"],
       ["/projects/$projectName/validations/$version", "validation", "validations"],
       ["/projects/$projectName/deploy/$env/configure", "configure", "deploy"],
+      ["/projects/$projectName/issues/$number", "issue", "issues"],
     ] as const;
     for (const [routeId, card, page] of routes) {
       expect(inProject(routeId)).toEqual({ kind: "project", projectName: "acme-expenses", page, card, specFile: null });
@@ -96,6 +98,8 @@ describe("cards and the Pages they are over", () => {
     expect(cardOfRoute("/projects/$projectName/builds")).toBeNull();
     expect(cardOfRoute("/projects/$projectName/_overview/")).toBeNull();
     expect(cardOfRoute("/projects/$projectName/deploy")).toBeNull();
+    expect(cardOfRoute("/projects/$projectName/issues/$number")).toBe("issue");
+    expect(cardOfRoute("/projects/$projectName/issues")).toBeNull();
     expect(cardOfRoute("/_dashboard/settings")).toBe("settings");
     expect(cardOfRoute("/_dashboard/")).toBeNull();
   });
@@ -106,6 +110,7 @@ describe("cards and the Pages they are over", () => {
     expect(pageOfCard("build")).toBe("builds");
     expect(pageOfCard("validation")).toBe("validations");
     expect(pageOfCard("configure")).toBe("deploy");
+    expect(pageOfCard("issue")).toBe("issues");
   });
 });
 
@@ -132,5 +137,9 @@ describe("chatTopic", () => {
 
   it("talks about the whole product on an environment's Configure card, which no agent can change yet", () => {
     expect(chatTopic("configure", null)).toEqual(product);
+  });
+
+  it("talks about the whole product on an Issue card, which no agent works on its own yet", () => {
+    expect(chatTopic("issue", null)).toEqual(product);
   });
 });

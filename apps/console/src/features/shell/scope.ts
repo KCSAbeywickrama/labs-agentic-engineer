@@ -33,10 +33,10 @@ export type OrgPage = "dashboard" | "projects" | "new" | "other";
 export type OrgCard = "settings";
 
 /** A project's Pages: each is a layout route that draws itself under its Cards. */
-export type ProjectPage = "overview" | "builds" | "validations" | "deploy";
+export type ProjectPage = "overview" | "builds" | "validations" | "deploy" | "issues";
 
 /** The Cards drawn over a project's Pages, each a route of its own. */
-export type ProjectCard = "spec" | "design" | "build" | "validation" | "configure";
+export type ProjectCard = "spec" | "design" | "build" | "validation" | "configure" | "issue";
 
 export type ShellScope =
   | { kind: "org"; page: OrgPage; card: OrgCard | null }
@@ -69,6 +69,7 @@ const PAGE_ROUTES: Record<string, ProjectPage> = {
   "/projects/$projectName/builds": "builds",
   "/projects/$projectName/validations": "validations",
   "/projects/$projectName/deploy": "deploy",
+  "/projects/$projectName/issues": "issues",
 };
 
 const CARD_ROUTES: Record<string, ProjectCard> = {
@@ -77,6 +78,7 @@ const CARD_ROUTES: Record<string, ProjectCard> = {
   "/projects/$projectName/builds/$version": "build",
   "/projects/$projectName/validations/$version": "validation",
   "/projects/$projectName/deploy/$env/configure": "configure",
+  "/projects/$projectName/issues/$number": "issue",
 };
 
 /** The Page each Card opens over, and closes back to. */
@@ -86,6 +88,7 @@ const CARD_PAGE: Record<ProjectCard, ProjectPage> = {
   build: "builds",
   validation: "validations",
   configure: "deploy",
+  issue: "issues",
 };
 
 /** The Card a route draws, the org's or a project's, or null when it draws none. */
@@ -128,6 +131,7 @@ const PAGE_TITLE: Record<ProjectPage, string> = {
   builds: "Builds",
   validations: "Validation",
   deploy: "Deploy",
+  issues: "Issues",
 };
 
 export function pageTitle(page: ProjectPage): string {
@@ -140,6 +144,7 @@ const CARD_TITLE: Record<ProjectCard, string> = {
   build: "Build",
   validation: "Validation",
   configure: "Configure",
+  issue: "Issue",
 };
 
 export function cardTitle(card: ProjectCard): string {
@@ -151,9 +156,10 @@ export function cardTitle(card: ProjectCard): string {
  * composer: the design card talks about the design review; a feature open in
  * the spec card narrows it to that feature, and a change reaching past it is
  * made there too; everywhere else in a project, the whole product. That
- * includes a Build or Validation card, the Deploy Page and an environment's
- * Configure card: no agent works on one build, one validation or one
- * environment yet, so they set no Turn scope of their own.
+ * includes a Build or Validation card, the Deploy Page, an environment's
+ * Configure card and an Issue card: no agent works on one build, one
+ * validation, one environment or one issue yet, so they set no Turn scope of
+ * their own.
  */
 export function chatTopic(
   card: ProjectCard | null,

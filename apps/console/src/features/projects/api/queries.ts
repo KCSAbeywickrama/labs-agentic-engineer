@@ -33,6 +33,7 @@ const projectKeys = {
   list: () => [...projectKeys.lists(), "first"] as const,
   /** The Projects grid's pages for one search. */
   pages: (search: string, limit: number) => [...projectKeys.lists(), "pages", { search, limit }] as const,
+  all: () => [...projectKeys.lists(), "all"] as const,
   detail: (projectName: string) => ["projects", projectName] as const,
 };
 
@@ -45,6 +46,28 @@ export function useProjects() {
       if (error) throw new ApiRequestError(error, "Couldn't load projects");
       return data.items ?? [];
     },
+  });
+}
+
+/**
+ * Every project's name, every page read: what the Dashboard's Alerts ask each
+ * project about. Re-read now and then, as the Alerts are.
+ */
+export function useAllProjectNames(refetchInterval: number) {
+  return useQuery({
+    queryKey: projectKeys.all(),
+    queryFn: async () => {
+      const names: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const { data, error } = await client.GET("/projects", { params: { query: cursor ? { cursor } : {} } });
+        if (error) throw new ApiRequestError(error, "Couldn't load projects");
+        names.push(...(data.items ?? []).map((p) => p.name));
+        cursor = data.nextCursor || undefined;
+      } while (cursor);
+      return names;
+    },
+    refetchInterval,
   });
 }
 

@@ -32,6 +32,7 @@ const PAGE_PATH = {
   builds: "/projects/$projectName/builds",
   validations: "/projects/$projectName/validations",
   deploy: "/projects/$projectName/deploy",
+  issues: "/projects/$projectName/issues",
 } as const satisfies Record<ProjectPage, string>;
 
 /**
