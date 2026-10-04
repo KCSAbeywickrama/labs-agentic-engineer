@@ -99,7 +99,7 @@ that throws. A frame that neither draws nor errs within
 `PROTOTYPE_START_TIMEOUT_MS` (30 s) gets a visible "didn't start" error
 instead of the cover. `FrameView.colorScheme` (optional `light | dark`,
 `PrototypeFrame`'s `colorScheme`) reaches the theme's Provider; absent, the
-theme follows the system. The frame does not parse the manifest: the host passes a parsed
+theme follows the system. `PrototypeWindow` (`/host`) is the shared browser-window chrome around the frame: title, dots and a read-only address (`prototype://<screenId>`, plus `?flow=&state=` when not default); hosts style it with `--proto-window-*` variables and `proto-window*` classes. The frame does not parse the manifest: the host passes a parsed
 `PrototypeManifest`, which keeps zod (about 450 KB minified) out of every
 frame runtime.
 
