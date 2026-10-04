@@ -23,7 +23,6 @@ type GitProviderProjection = components["schemas"]["GitProviderProjection"];
 type LLMProjection = components["schemas"]["LLMProjection"];
 type LLMFormatOption = components["schemas"]["LLMFormatOption"];
 type AgentRuntime = components["schemas"]["AgentRuntime"];
-type SkillUpdate = components["schemas"]["SkillUpdate"];
 type ApiError = components["schemas"]["Error"];
 
 // Scenario switch for onboarding. Toggle in devtools:
@@ -180,11 +179,3 @@ export const gitProviderDisconnectRejected: ApiError = {
     },
   ],
 };
-
-// Embedded content differs from the org repo copy — what POST /skills/sync
-// installs, so its `updated` count is non-zero on the first sync.
-export const seedSkillUpdates: SkillUpdate[] = [
-  { name: "security-design", state: "update" },
-  { name: "go", state: "update" },
-  { name: "code-review", state: "update" },
-];

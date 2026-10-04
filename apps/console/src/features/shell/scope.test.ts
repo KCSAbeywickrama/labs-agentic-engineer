@@ -33,6 +33,16 @@ describe("shellScope", () => {
     });
   });
 
+  it("puts the Skills Page at org level", () => {
+    expect(shellScope({ routeId: "/skills", params: {} })).toEqual({ kind: "org", page: "skills", card: null });
+  });
+
+  it("reads a Skill card, a saved one or a new one, as the org's card over Skills", () => {
+    const skill = { kind: "org", page: "skills", card: "skill" };
+    expect(shellScope({ routeId: "/skills/$name", params: {} })).toEqual(skill);
+    expect(shellScope({ routeId: "/skills/new", params: {} })).toEqual(skill);
+  });
+
   it("reads the Settings card as the org's card over the Dashboard", () => {
     expect(shellScope({ routeId: "/_dashboard/settings", params: {} })).toEqual({
       kind: "org",
@@ -102,6 +112,9 @@ describe("cards and the Pages they are over", () => {
     expect(cardOfRoute("/projects/$projectName/issues")).toBeNull();
     expect(cardOfRoute("/_dashboard/settings")).toBe("settings");
     expect(cardOfRoute("/_dashboard/")).toBeNull();
+    expect(cardOfRoute("/skills/$name")).toBe("skill");
+    expect(cardOfRoute("/skills/new")).toBe("skill");
+    expect(cardOfRoute("/skills")).toBeNull();
   });
 
   it("closes each card back to the Page it opened over", () => {

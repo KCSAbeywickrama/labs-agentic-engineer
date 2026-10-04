@@ -24,6 +24,7 @@ import { designHandlers } from "./handlers/design";
 import { issuesHandlers } from "./handlers/issues";
 import { projectsHandlers } from "./handlers/projects";
 import { settingsHandlers } from "./handlers/settings";
+import { skillsHandlers } from "./handlers/skills";
 import { specHandlers } from "./handlers/spec";
 import { usageHandlers } from "./handlers/usage";
 
@@ -37,5 +38,6 @@ export const worker = setupWorker(
   ...deployHandlers,
   ...issuesHandlers,
   ...settingsHandlers,
+  ...skillsHandlers,
   ...usageHandlers,
 );

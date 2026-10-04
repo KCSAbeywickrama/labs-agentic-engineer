@@ -19,7 +19,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../../generated/aep-api";
 import { client } from "../../../api/client";
-import { configKeys, skillsKeys } from "./keys";
+import { configKeys } from "./keys";
 import { ApiRequestError, apiErrorMessage } from "../../../api/errors";
 
 type ConfigProjection = components["schemas"]["ConfigProjection"];
@@ -117,27 +117,6 @@ export function useDisconnectGitProvider() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: configKeys.all });
-    },
-  });
-}
-
-// --- Skills catalogue (repo-backed — see reconcile.go; no DB table) -------
-
-// All-or-nothing: the BE's sync-skills takes no body and reconciles every
-// embedded skill in one commit (`Reconcile`). There is no per-skill selection.
-export function useSyncSkills() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async () => {
-      const { data, error } = await client.POST("/skills/sync", {});
-      if (error) {
-        throw new Error(errorMessage(error, "Failed to sync skills"));
-      }
-      return data;
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: skillsKeys.lists() });
-      void queryClient.invalidateQueries({ queryKey: skillsKeys.updates() });
     },
   });
 }

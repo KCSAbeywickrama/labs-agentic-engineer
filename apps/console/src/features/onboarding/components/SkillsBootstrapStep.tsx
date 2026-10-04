@@ -25,13 +25,13 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { Check, Sparkles } from "@wso2/oxygen-ui-icons-react";
-import { useSyncSkills } from "../../settings/api/queries";
+import { useSyncSkills } from "../../skills/api/skills";
 
 // Auto-runs the skills bootstrap the moment credentials complete (#102
 // decision): POST /skills/sync creates the org's skills repo if missing and
 // pushes the platform's built-in skills. Failure is non-blocking — sync is
-// idempotent (Retry) and Settings' Sync control is the standing fallback
-// (Continue anyway).
+// idempotent (Retry) and the Skills page's Take updates is the standing
+// fallback (Continue anyway).
 export function SkillsBootstrapStep({ onComplete }: { onComplete: () => void }) {
   const sync = useSyncSkills();
   // Deferred one-shot, not a bare mutate() in the effect: firing a mutation
@@ -69,7 +69,7 @@ export function SkillsBootstrapStep({ onComplete }: { onComplete: () => void }) 
           </Alert>
           <Typography variant="body2" color="text.secondary">
             The skills catalogue couldn't be set up. You can retry now, or
-            continue and run <strong>Sync</strong> from Settings → Skills
+            continue and use <strong>Take updates</strong> on the Skills page
             later — agents won't have skills until it succeeds.
           </Typography>
           <Box sx={{ display: "flex", gap: 1.5 }}>

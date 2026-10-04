@@ -31,6 +31,7 @@ import {
   Plus,
   Rocket,
   Settings,
+  Sparkles,
 } from "@wso2/oxygen-ui-icons-react";
 import { useAlerts } from "../../issues/useAlerts";
 import type { ShellScope } from "../scope";
@@ -83,7 +84,7 @@ function RailTip({ label, children }: { label: string; children: ReactNode }) {
 
 /**
  * The dark activity rail: the logo (home: the Dashboard, with a count of the
- * Alerts that need a person), New project, Projects; inside a project also
+ * Alerts that need a person), New project, Projects, Skills; inside a project also
  * its Overview, Spec, Design, Builds, Validation, Deploy and Issues; then the
  * chat toggle, Settings (the org's card, over
  * the Dashboard) and the user menu at the bottom. The rail takes you to Pages; a Card opens from what a Page
@@ -105,6 +106,8 @@ export function ActivityRail({
   const onPage = (page: "dashboard" | "projects" | "new") =>
     scope.kind === "org" && scope.page === page && scope.card === null;
   const settingsOpen = scope.kind === "org" && scope.card === "settings";
+  // Skills stays current with one of its cards open over it.
+  const onOrgPage = (page: "skills") => scope.kind === "org" && scope.page === page;
   const needsYou = useAlerts().needsPerson;
   const home = needsYou > 0 ? `Dashboard, ${needsYou} need${needsYou === 1 ? "s" : ""} you` : "Dashboard";
 
@@ -167,6 +170,11 @@ export function ActivityRail({
       <RailTip label="Projects">
         <RailLink to="/projects" aria-label="Projects" sx={railButtonSx(onPage("projects"))}>
           <LayoutGrid size={20} />
+        </RailLink>
+      </RailTip>
+      <RailTip label="Skills">
+        <RailLink to="/skills" aria-label="Skills" sx={railButtonSx(onOrgPage("skills"))}>
+          <Sparkles size={20} />
         </RailLink>
       </RailTip>
       {project && (

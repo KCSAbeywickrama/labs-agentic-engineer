@@ -8,6 +8,10 @@ routes/_dashboard/
   route.tsx                  the Dashboard, the org's base Page (pathless)
     index.tsx                  /                       no card
     settings.tsx               /settings?section=ai    Settings card
+routes/skills/
+  route.tsx                  the Skills Page          /skills
+    $name.tsx                  /skills/go              Skill card
+    new.tsx                    /skills/new             Skill card, new
 routes/projects/$projectName/
   route.tsx                  the project: build picker host, build notes, ?chat=open
   _overview/route.tsx        the overview Page (pathless)
@@ -29,6 +33,9 @@ routes/projects/$projectName/
   The page stays mounted under an open card, covered by its scrim and inert.
 - **A Card is a child route of its Page**. Closing it (X, Escape, the scrim)
   navigates to the Page it is over.
+- **The org's Pages** are the Dashboard (pathless, below), Projects and
+  Skills; Skills is a layout route like a project's Pages, its own address
+  with no leaf.
 - **The overview and the Dashboard are pathless** (`_overview`,
   `_dashboard`), so their cards keep short addresses (`/projects/$p/spec`,
   `/settings`); each Page's own address needs its `index.tsx` leaf. The
@@ -37,7 +44,8 @@ routes/projects/$projectName/
 - **Every card is drawn by `CardFrame`** (`features/shell/components/`): the
   scrim, the frame, the header and close (X, Escape, the scrim), told where
   closing goes. A project's cards go through `CardOverlay`, which reads that
-  from the tables below; the Settings card closes to `/` itself.
+  from the tables below; an org card (Settings, a Skill) closes to its Page
+  itself.
 - **`features/shell/scope.ts` holds the tables**: which route IDs are Pages
   (`PAGE_ROUTES`, and `ORG_PAGE_ROUTES` for the org's), which are Cards
   (`CARD_ROUTES` and `ORG_CARD_ROUTES`, both read by `cardOfRoute`), and the
@@ -45,8 +53,13 @@ routes/projects/$projectName/
   item, the chat's breadcrumb, the Turn scope and `CardOverlay`'s close all
   read them, so a new Card is a route file plus its rows there; a new project
   Page also needs its path in `CardOverlay`'s `PAGE_PATH`.
+- **A card with a draft guards it**: `LeaveGuard` (`features/shell/`) asks
+  before any navigation off the card while the draft is dirty (close,
+  Escape, the scrim, the rail, back) and before a reload. Leaving on purpose,
+  after a Save or a Delete, navigates with `ignoreBlocker`.
 - **A Panel is not a route**: a Dialog owned by its Page or Card (the build
-  picker, Try it, Delete project, Settings' Rotate token and Disconnect). It
+  picker, Try it, Delete project, Settings' Rotate token and Disconnect,
+  Skills' Import, a Skill's Delete). It
   has no address and leaves the chat as it was. Try it has two owners: the
   Deploy Page opens it for an environment, every component serving there; the
   overview's components open it for one component, on the first environment
@@ -74,3 +87,19 @@ Issue card is over it and sets no Turn scope either. The Dashboard's Alerts
 link straight to Issue cards: they are every project's issues that need
 attention (`features/issues/useAlerts.ts` asks each project, as no read
 answers for the org), and the rail's logo counts those that need a person.
+
+The Skills Page lists the org's skills (`features/skills/`): search, a kind
+filter, the Disabled and Update to review tags; Import (a Panel for an
+AgentSkills tarball) and Take updates (N), which refreshes every skill the
+platform moved and the org never edited (the `update` state of
+`/skills/updates`). A Skill card edits one skill as one draft: the name
+(typed once, for a new skill; fixed after), the one-line description and the
+markdown body in a Tiptap editor with the Spec editor's look (`proseSx`) and
+no room. Save writes the whole SKILL.md: the frontmatter is never put through
+the editor, only its `description` line is rewritten, and a body nobody
+edited goes back byte for byte (`model/skillDraft.ts`). New skill is the same
+card empty at `/skills/new`; its first Save creates the skill (so a skill
+cannot be named `new`). A skill in conflict (both the org and the platform
+changed it) is tagged and says so; reviewing the platform's version needs the
+API to return it, which it does not yet. The card sets no Turn scope: there
+is no skill agent yet, so the org's chat stays inert beside it.

@@ -16,6 +16,15 @@
  * under the License.
  */
 
-export const configKeys = {
-  all: ["config"] as const,
-};
+import { createFileRoute } from "@tanstack/react-router";
+import { SkillCard } from "../../features/skills/components/SkillCard";
+
+// New skill: an empty Skill card over the Skills Page. Nothing exists until
+// its first Save creates the skill, which then has its own address.
+export const Route = createFileRoute("/skills/new")({
+  component: NewSkillRoute,
+});
+
+function NewSkillRoute() {
+  return <SkillCard name={null} />;
+}

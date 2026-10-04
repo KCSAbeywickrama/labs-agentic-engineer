@@ -16,6 +16,15 @@
  * under the License.
  */
 
-export const configKeys = {
-  all: ["config"] as const,
-};
+import { createFileRoute } from "@tanstack/react-router";
+import { SkillCard } from "../../features/skills/components/SkillCard";
+
+// A Skill card, drawn over the Skills Page: one skill, by its name.
+export const Route = createFileRoute("/skills/$name")({
+  component: SkillRoute,
+});
+
+function SkillRoute() {
+  const { name } = Route.useParams();
+  return <SkillCard name={name} />;
+}

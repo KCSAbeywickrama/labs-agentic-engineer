@@ -16,6 +16,20 @@
  * under the License.
  */
 
-export const configKeys = {
-  all: ["config"] as const,
-};
+import { createFileRoute } from "@tanstack/react-router";
+import { PageWithCards } from "../../features/shell/components/PageWithCards";
+import { SkillsPage } from "../../features/skills/components/SkillsPage";
+
+// The org's Skills Page, and the Card it lists (a Skill, or a new one) as its
+// child routes; the page stays mounted under an open card.
+export const Route = createFileRoute("/skills")({
+  component: SkillsRoute,
+});
+
+function SkillsRoute() {
+  return (
+    <PageWithCards>
+      <SkillsPage />
+    </PageWithCards>
+  );
+}
