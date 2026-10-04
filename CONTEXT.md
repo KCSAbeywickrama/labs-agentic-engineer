@@ -468,7 +468,8 @@ history, the Validation ledger, Deploy and Issues.
 _Avoid_: view, screen.
 
 **Card**:
-One entity opened to change it with the agent, over the Page that lists it: a
+One entity opened with the agent, over the Page that lists it: to change it, or,
+when it is not the organization's to change, to read and ask about it. Examples: a
 project's Spec or Design (over the overview), a Build (over build history), a
 version's Validation, an environment's Configure (over Deploy), a Skill, a
 Resource, the org's Settings. It has its own address, and opening it sets the
