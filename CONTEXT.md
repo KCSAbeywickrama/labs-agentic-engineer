@@ -111,6 +111,11 @@ platform, it is the organization's **publisher client**, not a per-cycle token
 and not the design agent.
 _Avoid_: builder, implementer agent, runner (the runner is the pod it executes in).
 
+**Skill agent**:
+The agent that changes a skill with the user, on its Skill card: it edits the card's
+draft, and the user saves it. It reads and writes skills; it does not design or build.
+_Avoid_: skill editor (the editor is what the user types in).
+
 **Publisher client**:
 The organization's confidential Thunder OAuth application. The coding agent is
 this client when it calls the platform. One per organization, reused across
