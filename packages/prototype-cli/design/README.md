@@ -23,7 +23,7 @@ renders; a newer change supersedes a check still in flight.
 
 ## Host page
 
-Uses the kit's `/host` reducer for all view state, and its `/feedback` for the
+Frames the app in the kit's `PrototypeWindow`; uses the kit's `/host` reducer for all view state, and its `/feedback` for the
 request shape, limits, the Annotate queue helpers and the revision hash. `--persist` keeps snapshots
 in `localStorage` under `proto:data:<revision hash>`; a new revision starts from
 the seed. Annotate queues requests and saves `.prototype/feedback.json`. The
