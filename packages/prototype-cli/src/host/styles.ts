@@ -29,13 +29,6 @@ body{font:13px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;backgrou
 .ph-modes{display:inline-flex;margin-left:auto}
 .ph-modes button[aria-pressed=true]{background:#2563eb;color:#fff;border-color:#2563eb}
 .ph-body{flex:1;min-height:0;display:flex;gap:16px;padding:16px}
-.ph-window{flex:1;min-width:0;display:flex;flex-direction:column;border:1px solid #c9d0d9;border-radius:10px;overflow:hidden;background:#fff;box-shadow:0 8px 24px rgba(15,23,42,.12)}
-.ph-window-bar{display:flex;gap:12px;align-items:center;padding:6px 12px;background:#f1f3f6;border-bottom:1px solid #d5dae1}
-.ph-window-dots{display:flex;gap:6px}
-.ph-window-dots i{width:10px;height:10px;border-radius:50%;background:#d0d5dc}
-.ph-window-title{font-weight:600}
-.ph-window-address{flex:1;min-width:0;padding:2px 10px;border-radius:6px;background:#fff;color:#59636e;font-family:ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ph-window-body{flex:1;min-height:0;display:flex;flex-direction:column}
 .ph-feedback{width:300px;display:flex;flex-direction:column;gap:10px;background:#fff;border:1px solid #d5dae1;border-radius:10px;padding:12px;overflow:auto}
 .ph-feedback h2{margin:0;font-size:15px}
 .ph-feedback label{display:flex;flex-direction:column;gap:4px}

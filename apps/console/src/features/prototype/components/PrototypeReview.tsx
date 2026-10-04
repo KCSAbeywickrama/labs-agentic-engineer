@@ -21,6 +21,7 @@ import { Alert, Box, Chip, CircularProgress, Dialog, IconButton, Tooltip, Typogr
 import { X } from "@wso2/oxygen-ui-icons-react";
 import {
   PrototypeFrame,
+  PrototypeWindow,
   frameViewOf,
   initialPrototypeView,
   reducePrototypeView,
@@ -99,6 +100,21 @@ function useResolvedScheme(): "light" | "dark" | undefined {
   const resolved = mode === "system" ? systemMode : mode;
   return resolved === "light" || resolved === "dark" ? resolved : undefined;
 }
+
+/** The kit's prototype window drawn in the console's theme (light and dark follow the Oxygen palette). */
+const WINDOW_LOOK = {
+  "--proto-window-border": "var(--oxygen-palette-divider)",
+  "--proto-window-radius": "8px",
+  "--proto-window-bg": "var(--oxygen-palette-background-paper)",
+  "--proto-window-shadow": "var(--oxygen-shadows-2, 0 2px 8px rgba(0,0,0,.15))",
+  "--proto-window-bar-bg": "var(--oxygen-palette-action-hover)",
+  "--proto-window-bar-border": "var(--oxygen-palette-divider)",
+  "--proto-window-fg": "var(--oxygen-palette-text-primary)",
+  "--proto-window-dot": "var(--oxygen-palette-action-disabled)",
+  "--proto-window-address-bg": "var(--oxygen-palette-background-paper)",
+  "--proto-window-address-fg": "var(--oxygen-palette-text-secondary)",
+  fontSize: "0.8125rem",
+} as const;
 
 function Waiting({ children }: { children: ReactNode }) {
   return <Box sx={{ flex: 1, display: "grid", placeItems: "center", p: 4 }}>{children}</Box>;
@@ -235,35 +251,37 @@ function Session({
       <Header titleId={titleId} title={`Prototype · ${manifest.name}`} revising={revising} onClose={onClose}>
         <ReviewToolbar manifest={manifest} view={view} dispatch={dispatch} onReset={() => setResetToken((t) => t + 1)} />
       </Header>
-      <Box sx={{ flex: 1, minHeight: 0, display: "flex" }}>
-        <Box sx={{ flex: 1, minWidth: 0, display: "flex", bgcolor: "background.default" }}>
-          <PrototypeFrame
-            title={manifest.name}
-            runtime={runtime}
-            manifest={manifest}
-            source={files.source}
-            version={hash}
-            view={frameView}
-            resetToken={resetToken}
-            colorScheme={colorScheme}
-            onNavigate={(screenId) => {
-              // The frame is untrusted: only Preview navigates (the reducer checks the target against the role).
-              if (view.mode === "preview") dispatch({ type: "NAVIGATE", screenId });
-            }}
-            onToggle={(elementKey) => dispatch({ type: "TOGGLE_SELECTION", elementKey })}
-            onEscape={() => (view.selectedKeys.length > 0 ? dispatch({ type: "CLEAR_SELECTION" }) : onClose())}
-            onElements={(_screenId, elements) => setLabels(Object.fromEntries(elements.map((e) => [e.key, e.label])))}
-            loading={
-              <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", bgcolor: "background.default" }}>
-                <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1.5 }}>
-                  <CircularProgress size={28} aria-hidden />
-                  <Typography variant="body2" color="text.secondary">
-                    Starting the prototype…
-                  </Typography>
+      <Box sx={{ flex: 1, minHeight: 0, display: "flex", bgcolor: "background.default" }}>
+        <Box sx={{ flex: 1, minWidth: 0, display: "flex", p: 2, ...WINDOW_LOOK }}>
+          <PrototypeWindow title={manifest.name} manifest={manifest} view={view}>
+            <PrototypeFrame
+              title={manifest.name}
+              runtime={runtime}
+              manifest={manifest}
+              source={files.source}
+              version={hash}
+              view={frameView}
+              resetToken={resetToken}
+              colorScheme={colorScheme}
+              onNavigate={(screenId) => {
+                // The frame is untrusted: only Preview navigates (the reducer checks the target against the role).
+                if (view.mode === "preview") dispatch({ type: "NAVIGATE", screenId });
+              }}
+              onToggle={(elementKey) => dispatch({ type: "TOGGLE_SELECTION", elementKey })}
+              onEscape={() => (view.selectedKeys.length > 0 ? dispatch({ type: "CLEAR_SELECTION" }) : onClose())}
+              onElements={(_screenId, elements) => setLabels(Object.fromEntries(elements.map((e) => [e.key, e.label])))}
+              loading={
+                <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", bgcolor: "background.paper" }}>
+                  <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1.5 }}>
+                    <CircularProgress size={28} aria-hidden />
+                    <Typography variant="body2" color="text.secondary">
+                      Starting the prototype…
+                    </Typography>
+                  </Box>
                 </Box>
-              </Box>
-            }
-          />
+              }
+            />
+          </PrototypeWindow>
         </Box>
         {(annotating || requests.length > 0) && (
           <FeedbackPanel

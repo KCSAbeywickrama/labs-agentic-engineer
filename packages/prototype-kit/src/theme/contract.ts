@@ -24,18 +24,19 @@
  */
 
 import type { ComponentType, ReactNode } from "react";
-import type { ThemeAlertProps, ThemeBadgeProps, ThemeButtonProps, ThemeEmptyStateProps, ThemeHeadingProps, ThemeLinkProps, ThemeStatProps, ThemeTextProps } from "../components/content.js";
+import type { ThemeAlertProps, ThemeBadgeProps, ThemeButtonProps, ThemeEmptyStateProps, ThemeHeadingProps, ThemeLinkProps, ThemeStatGroupProps, ThemeStatProps, ThemeTextProps } from "../components/content.js";
 import type { ThemeBreadcrumbsProps, ThemeNavigationProps, ThemeStepperProps, ThemeTabsProps } from "../components/navigation.js";
 import type { ThemeFieldProps, ThemeFiltersProps, ThemeFormProps, ThemeValidationSummaryProps } from "../components/forms.js";
 import type { ThemeTableProps, ThemeTimelineProps } from "../components/data.js";
 import type { ThemeDialogProps, ThemeDrawerProps } from "../components/overlays.js";
-import type { ThemeDetailProps, ThemeGridProps, ThemeScreenProps, ThemeSplitProps, ThemeStackProps } from "../components/layout.js";
+import type { ThemeDetailProps, ThemeGridProps, ThemeScreenProps, ThemeSectionProps, ThemeSplitProps, ThemeStackProps } from "../components/layout.js";
 import type { ThemeAppShellProps } from "../components/shell.js";
 
 /** The props each kit component's theme implementation receives. */
 export interface KitComponentProps {
   Screen: ThemeScreenProps;
   AppShell: ThemeAppShellProps;
+  Section: ThemeSectionProps;
   Stack: ThemeStackProps;
   Grid: ThemeGridProps;
   Split: ThemeSplitProps;
@@ -47,6 +48,7 @@ export interface KitComponentProps {
   Heading: ThemeHeadingProps;
   Link: ThemeLinkProps;
   Stat: ThemeStatProps;
+  StatGroup: ThemeStatGroupProps;
   Text: ThemeTextProps;
   Breadcrumbs: ThemeBreadcrumbsProps;
   Navigation: ThemeNavigationProps;

@@ -18,7 +18,7 @@
 
 /** Data: the table of records and the activity timeline. */
 
-import type { ThemeTableProps, ThemeTimelineProps } from "@wso2/prototype-kit";
+import type { ThemeTableAction, ThemeTableColumn, ThemeTableProps, ThemeTimelineProps } from "@wso2/prototype-kit";
 
 export const DATA_CSS = `
 .pt-table{padding:0;overflow:auto}
@@ -28,13 +28,45 @@ export const DATA_CSS = `
 .pt-table td{padding:10px 16px;border-bottom:1px solid var(--pt-border)}
 .pt-table tbody tr{cursor:pointer}
 .pt-table tbody tr:hover{background:color-mix(in srgb,var(--pt-primary) 5%,transparent)}
+.pt-table .pt-fit{width:1%;white-space:nowrap}
+.pt-table .pt-number{text-align:right;font-variant-numeric:tabular-nums}
+.pt-table .pt-row-actions{display:flex;gap:6px;justify-content:flex-end}
+.pt-table .pt-row-actions .pt-button{padding:3px 10px;font-size:13px}
 .pt-table tbody tr[aria-selected=true]{background:color-mix(in srgb,var(--pt-primary) 10%,transparent)}
 .pt-timeline ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
 .pt-timeline li{display:grid;grid-template-columns:120px 1fr;gap:12px}
 .pt-timeline time{color:var(--pt-muted);font-size:12px}
 `;
 
-export function Table({ title, columns, rows }: ThemeTableProps) {
+/** Status, number and actions columns fit their content; text columns share the rest. */
+function columnClass(kind: ThemeTableColumn["kind"]): string | undefined {
+  if (kind === "number") return "pt-fit pt-number";
+  return kind === "status" ? "pt-fit" : undefined;
+}
+
+/** Draws every action inline (no overflow menu). */
+function RowActions({ actions }: { actions: ThemeTableAction[] }) {
+  return (
+    <div className="pt-row-actions">
+      {actions.map((a) => (
+        <button
+          key={a.id}
+          type="button"
+          className={a.emphasis === "danger" ? "pt-button pt-button-danger" : "pt-button"}
+          onClick={(e) => {
+            e.stopPropagation();
+            a.onPress();
+          }}
+          {...a.root}
+        >
+          {a.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function Table({ title, columns, rows, hasActions }: ThemeTableProps) {
   return (
     <section className="pt-card pt-table">
       {title && <h3 className="pt-card-title">{title}</h3>}
@@ -42,16 +74,26 @@ export function Table({ title, columns, rows }: ThemeTableProps) {
         <thead>
           <tr>
             {columns.map((c, i) => (
-              <th key={i}>{c}</th>
+              <th key={i} className={columnClass(c.kind)}>
+                {c.label}
+              </th>
             ))}
+            {hasActions && <th className="pt-fit pt-number">Actions</th>}
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
             <tr key={row.id} aria-selected={row.highlighted} onClick={row.onPress} {...row.root}>
-              {row.cells.map((value, i) => (
-                <td key={i}>{i === row.cells.length - 1 && row.tone ? <span className={`pt-badge pt-tone-${row.tone}`}>{value}</span> : value}</td>
+              {row.cells.map((cell, i) => (
+                <td key={i} className={columnClass(columns[i]?.kind ?? "text")}>
+                  {cell.tone ? <span className={`pt-badge pt-tone-${cell.tone}`}>{cell.text}</span> : cell.text}
+                </td>
               ))}
+              {hasActions && (
+                <td className="pt-fit">
+                  <RowActions actions={row.actions} />
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

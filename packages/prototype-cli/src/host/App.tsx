@@ -19,11 +19,10 @@
 /** The preview host: the live prototype in a browser window, the review controls, the findings overlay and (in preview) Annotate. */
 
 import { useCallback, useMemo, useState } from "react";
-import { PrototypeFrame, frameViewOf, initialPrototypeView, reducePrototypeView, type DataSnapshot, type PrototypeViewEvent } from "@wso2/prototype-kit/host";
+import { PrototypeFrame, PrototypeWindow, frameViewOf, initialPrototypeView, reducePrototypeView, type DataSnapshot, type PrototypeViewEvent } from "@wso2/prototype-kit/host";
 import { pinsOnScreen, requestFor, type FeedbackRequest, type FeedbackSubmission } from "@wso2/prototype-kit/feedback";
 import { FEEDBACK_PATH } from "../feedback.js";
 import type { HostConfig, PrototypeRevision } from "../host-config.js";
-import { BrowserWindow } from "./BrowserWindow.js";
 import { FeedbackPanel } from "./FeedbackPanel.js";
 import { FindingsOverlay } from "./FindingsOverlay.js";
 import { useLivePrototype } from "./live.js";
@@ -89,7 +88,7 @@ function Review({ config, runtime, revision }: { config: HostConfig; runtime: st
     <>
       <Toolbar manifest={manifest} view={view} dispatch={dispatch} onReset={reset} annotate={annotate} />
       <div className="ph-body">
-        <BrowserWindow title={manifest.name} address={`prototype://${view.screenId}`}>
+        <PrototypeWindow title={manifest.name} manifest={manifest} view={view}>
           <PrototypeFrame
             title={manifest.name}
             runtime={runtime}
@@ -108,7 +107,7 @@ function Review({ config, runtime, revision }: { config: HostConfig; runtime: st
             onElements={(_screenId, elements) => setLabels(Object.fromEntries(elements.map((e) => [e.key, e.label])))}
             onData={onData}
           />
-        </BrowserWindow>
+        </PrototypeWindow>
         {annotate && view.mode === "annotate" && (
           <FeedbackPanel
             selection={view.selectedKeys.map((k) => labels[k] ?? k)}

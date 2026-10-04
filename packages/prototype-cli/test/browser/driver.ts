@@ -46,6 +46,8 @@ export const driver = {
       page,
       `new Promise((resolve) => { const check = () => (document.querySelector('.proto-scene[data-proto-mode="${mode}"]') ? resolve(true) : setTimeout(check, 20)); check(); })`,
     ) as Promise<string>,
+  /** The message types a fresh frame posts when it is sent a view before any app. */
+  viewBeforeLoad: (page: string) => call("viewBeforeLoad")(page) as Promise<string>,
   requests: (page: string) => call("requests")(page) as Promise<string[]>,
   setStorage: (page: string, key: string, value: string) => call("setStorage")(page, key, value) as Promise<void>,
   readFile: (preview: string, path: string) => call("readFile")(preview, path) as Promise<string | null>,

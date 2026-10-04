@@ -25,16 +25,16 @@
  * `UserMenu.Header`. `UserMenu` whole does not fit a prototype: its menu
  * portals out of the kit's scene (Annotate would not reach inside, the render
  * check would not see it) and its entries take no element props, so they
- * could not carry the kit's selectable roots and targets. This menu stays in
- * place (`disablePortal`) and mounted while closed (`keepMounted`), so the
- * render check sees where every entry leads.
+ * could not carry the kit's selectable roots and targets. It is an
+ * `InPlaceMenu` instead (menu.tsx).
  */
 
 import { useId, useState } from "react";
-import { AppShell as OxygenAppShell, Avatar, Box, Divider, Header, IconButton, ListItemIcon, ListItemText, Menu, MenuItem, UserMenu } from "@wso2/oxygen-ui";
+import { AppShell as OxygenAppShell, Avatar, Box, Divider, Header, IconButton, ListItemIcon, ListItemText, MenuItem, UserMenu } from "@wso2/oxygen-ui";
 import { ChevronRight, LogOut } from "@wso2/oxygen-ui-icons-react";
 import type { ThemeAppShellProps, ThemeNavigationItem } from "@wso2/prototype-kit";
 import { Page } from "./layout.js";
+import { InPlaceMenu } from "./menu.js";
 import { SideNav } from "./navigation.js";
 import { buttonRoot } from "./root.js";
 
@@ -63,21 +63,7 @@ function AccountMenu({ user, userRoot, menu, signOut }: Pick<ThemeAppShellProps,
           {user.name}
         </Box>
       </IconButton>
-      <Menu
-        id={menuId}
-        anchorEl={anchor}
-        open={open}
-        onClose={() => setAnchor(null)}
-        disablePortal
-        keepMounted
-        // Kept in place, the modal would hide its own ancestors from assistive technology (its default container is
-        // the body): it hides only the trigger beside it, and leaves the frame's scrolling alone.
-        container={() => anchor?.parentElement ?? null}
-        disableScrollLock
-        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-        transformOrigin={{ vertical: "top", horizontal: "right" }}
-        slotProps={{ paper: { sx: { minWidth: 240, mt: 1 } } }}
-      >
+      <InPlaceMenu id={menuId} anchor={anchor} onClose={() => setAnchor(null)} minWidth={240}>
         <UserMenu.Header name={user.name} email={user.email ?? ""} role={user.role} />
         {menu.map((item) => (
           <MenuItem key={item.id} onClick={press(item)} sx={{ py: 1.5 }} {...buttonRoot(item.root)}>
@@ -94,7 +80,7 @@ function AccountMenu({ user, userRoot, menu, signOut }: Pick<ThemeAppShellProps,
             <ListItemText primary={signOut.label} />
           </MenuItem>
         )}
-      </Menu>
+      </InPlaceMenu>
     </>
   );
 }

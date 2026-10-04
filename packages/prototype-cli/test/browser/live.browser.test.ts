@@ -95,6 +95,11 @@ describe("prototype preview — the live loop", () => {
     await driver.waitFor(page, app.heading("Acme contacts"));
   });
 
+  it("a view sent before any app is loaded does not report a draw", async () => {
+    const { page } = await open();
+    expect(await driver.viewBeforeLoad(page)).toBe("proto:ready");
+  });
+
   it("Reset data returns to the seed", async () => {
     const { page } = await open();
     await addGrace(page);

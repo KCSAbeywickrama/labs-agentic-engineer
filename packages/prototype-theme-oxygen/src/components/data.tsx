@@ -18,11 +18,71 @@
 
 /** Data: the table of records and the activity timeline. */
 
-import { Box, Chip, ListingTable, Typography } from "@wso2/oxygen-ui";
-import type { ThemeTableProps, ThemeTimelineProps } from "@wso2/prototype-kit";
+import { useId, useState } from "react";
+import { Box, Button, Chip, IconButton, ListingTable, MenuItem, Typography } from "@wso2/oxygen-ui";
+import { Ellipsis } from "@wso2/oxygen-ui-icons-react";
+import type { ThemeTableAction, ThemeTableColumn, ThemeTableProps, ThemeTimelineProps } from "@wso2/prototype-kit";
 import { TitledCard } from "./card.js";
+import { InPlaceMenu } from "./menu.js";
+import { buttonRoot } from "./root.js";
 
-export function Table({ title, columns, rows }: ThemeTableProps) {
+/** Status, number and actions columns fit their content, so the text columns share the width that is left. */
+const FIT = { width: "1%", whiteSpace: "nowrap" } as const;
+
+function columnProps(kind: ThemeTableColumn["kind"]) {
+  if (kind === "number") return { align: "right" as const, sx: { ...FIT, fontVariantNumeric: "tabular-nums" } };
+  return kind === "status" ? { sx: FIT } : {};
+}
+
+/** More than two actions go behind one overflow button, an `InPlaceMenu`. */
+function OverflowActions({ actions }: { actions: ThemeTableAction[] }) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const menuId = useId();
+  return (
+    <>
+      <IconButton
+        size="small"
+        aria-label="More actions"
+        aria-haspopup="menu"
+        aria-expanded={anchor !== null || undefined}
+        aria-controls={anchor !== null ? menuId : undefined}
+        onClick={(e) => setAnchor(e.currentTarget)}
+      >
+        <Ellipsis size={18} />
+      </IconButton>
+      <InPlaceMenu id={menuId} anchor={anchor} onClose={() => setAnchor(null)} minWidth={160}>
+        {actions.map((a) => (
+          <MenuItem
+            key={a.id}
+            onClick={() => {
+              setAnchor(null);
+              a.onPress();
+            }}
+            sx={a.emphasis === "danger" ? { color: "error.main" } : {}}
+            {...buttonRoot(a.root)}
+          >
+            {a.label}
+          </MenuItem>
+        ))}
+      </InPlaceMenu>
+    </>
+  );
+}
+
+function RowActions({ actions }: { actions: ThemeTableAction[] }) {
+  if (actions.length > 2) return <OverflowActions actions={actions} />;
+  return (
+    <>
+      {actions.map((a) => (
+        <Button key={a.id} size="small" variant="text" color={a.emphasis === "danger" ? "error" : "primary"} disableRipple onClick={a.onPress} {...buttonRoot(a.root)}>
+          {a.label}
+        </Button>
+      ))}
+    </>
+  );
+}
+
+export function Table({ title, columns, rows, hasActions }: ThemeTableProps) {
   return (
     <ListingTable.Container>
       {title && (
@@ -34,16 +94,33 @@ export function Table({ title, columns, rows }: ThemeTableProps) {
         <ListingTable.Head>
           <ListingTable.Row>
             {columns.map((c, i) => (
-              <ListingTable.Cell key={i}>{c}</ListingTable.Cell>
+              <ListingTable.Cell key={i} {...columnProps(c.kind)}>
+                {c.label}
+              </ListingTable.Cell>
             ))}
+            {hasActions && (
+              <ListingTable.Cell align="right" sx={FIT}>
+                Actions
+              </ListingTable.Cell>
+            )}
           </ListingTable.Row>
         </ListingTable.Head>
         <ListingTable.Body>
           {rows.map((row) => (
             <ListingTable.Row key={row.id} clickable hover selected={row.highlighted} aria-selected={row.highlighted} onClick={row.onPress} {...row.root}>
-              {row.cells.map((value, i) => (
-                <ListingTable.Cell key={i}>{i === row.cells.length - 1 && row.tone ? <Chip size="small" label={value} color={row.tone} /> : value}</ListingTable.Cell>
+              {row.cells.map((cell, i) => (
+                <ListingTable.Cell key={i} {...columnProps(columns[i]?.kind ?? "text")}>
+                  {cell.tone ? <Chip size="small" label={cell.text} color={cell.tone} variant={cell.tone === "default" ? "outlined" : "filled"} /> : cell.text}
+                </ListingTable.Cell>
               ))}
+              {hasActions && (
+                // A press on an action is the action's, not the row's.
+                <ListingTable.Cell align="right" sx={FIT} onClick={(e) => e.stopPropagation()}>
+                  <ListingTable.RowActions>
+                    <RowActions actions={row.actions} />
+                  </ListingTable.RowActions>
+                </ListingTable.Cell>
+              )}
             </ListingTable.Row>
           ))}
         </ListingTable.Body>

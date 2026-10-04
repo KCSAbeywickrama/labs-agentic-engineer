@@ -54,6 +54,14 @@ describe("prototype preview — playing a prototype", () => {
     expect(await driver.read(page, host.picker("Screen"), "value")).toBe("screen.contact");
   });
 
+  it("shows the current screen, and a non-default state, in the browser window's address bar", async () => {
+    await driver.waitFor(page, host.text("prototype://screen.contacts"));
+    await driver.click(page, app.row("Alan Turing"));
+    await driver.waitFor(page, host.text("prototype://screen.contact"));
+    await driver.select(page, host.picker("State"), "Empty");
+    await driver.waitFor(page, host.text("prototype://screen.contact?state=state.empty"));
+  });
+
   it("renders differently per role", async () => {
     expect(await driver.count(page, app.button("New contact"))).toBe(1);
     await driver.select(page, host.picker("Role"), "Viewer");
