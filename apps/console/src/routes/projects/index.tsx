@@ -16,18 +16,10 @@
  * under the License.
  */
 
-import { createRouter } from "@tanstack/react-router";
-import { routeTree } from "./generated/routeTree.gen";
+import { createFileRoute } from "@tanstack/react-router";
+import { ProjectsGrid } from "../../features/projects/components/ProjectsGrid";
 
-// Module-scoped so non-component code (the OIDC sign-in callback) can
-// navigate without a hook.
-// An unknown address is the root's to answer (its not-found Page, in the
-// shell's main area), never a project's: `/projects/acme-expenses/tasks/14`
-// would otherwise land on that project's overview with nothing said.
-export const router = createRouter({ routeTree, notFoundMode: "root" });
-
-declare module "@tanstack/react-router" {
-  interface Register {
-    router: typeof router;
-  }
-}
+// The org's Projects Page: every project, as a grid.
+export const Route = createFileRoute("/projects/")({
+  component: ProjectsGrid,
+});

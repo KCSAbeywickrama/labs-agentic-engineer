@@ -1,0 +1,56 @@
+/**
+ * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
+ *
+ * WSO2 LLC. licenses this file to you under the Apache License,
+ * Version 2.0 (the "License"); you may not use this file except
+ * in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+import { Navigate } from "@tanstack/react-router";
+import { Box, Skeleton, Typography } from "@wso2/oxygen-ui";
+import { useProjects } from "../../projects/api/queries";
+import { BasePage } from "../../shell/components/BasePage";
+
+/**
+ * The user's home Page (`/`), opened from the rail's logo. It holds the
+ * Alerts: the issues, across all projects, that need a person.
+ *
+ * It is also where sign-in lands, with one exception: an organization with no
+ * projects yet lands on New project instead, since there is nothing here for
+ * it until something is built.
+ */
+export function Dashboard() {
+  const projects = useProjects();
+  if (projects.data && projects.data.length === 0) return <Navigate to="/projects/new" replace />;
+  return (
+    <BasePage>
+      <Box sx={{ maxWidth: 880, display: "flex", flexDirection: "column", gap: 2.5 }}>
+        <Typography component="h1" variant="h4" sx={{ fontWeight: 600 }}>
+          Dashboard
+        </Typography>
+        <Box component="section" aria-labelledby="alerts-heading" sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          <Typography id="alerts-heading" component="h2" sx={{ fontSize: "0.8125rem", fontWeight: 600 }}>
+            Alerts
+          </Typography>
+          {projects.isPending ? (
+            <Skeleton height={64} />
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              Issues that need you, across all projects, show here.
+            </Typography>
+          )}
+        </Box>
+      </Box>
+    </BasePage>
+  );
+}

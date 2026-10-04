@@ -18,9 +18,10 @@
 
 import type { ReactNode } from "react";
 import { createLink } from "@tanstack/react-router";
-import { Box, IconButton, Tooltip, type SxProps, type Theme } from "@wso2/oxygen-ui";
+import { Box, IconButton, Link, Tooltip, type SxProps, type Theme } from "@wso2/oxygen-ui";
 import {
   FileText,
+  House,
   Layers,
   LayoutGrid,
   MessageSquare,
@@ -33,6 +34,7 @@ import { RailUserMenu } from "./RailUserMenu";
 // MUI's polymorphic `component={Link}` does not typecheck against the router's
 // typed `to`/`params`; createLink is the adapter (as in the old console).
 const RailLink = createLink(IconButton);
+const LogoLink = createLink(Link);
 
 function railButtonSx(active: boolean): SxProps<Theme> {
   return {
@@ -74,8 +76,10 @@ function RailTip({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /**
- * The dark activity rail: brand, New project, Projects; inside a project also
- * Spec and Design; then the chat toggle and the user menu at the bottom.
+ * The dark activity rail: the logo (home: the Dashboard), New project,
+ * Projects; inside a project also its Overview, Spec and Design; then the chat
+ * toggle and the user menu at the bottom. The rail takes you to Pages; a Card
+ * opens from what a Page shows.
  */
 export function ActivityRail({
   scope,
@@ -83,12 +87,12 @@ export function ActivityRail({
   onToggleChat,
 }: {
   scope: ShellScope;
-  /** Null where there is no chat to toggle (org level). */
+  /** Null where there is no chat to toggle (New project, which is itself a prompt). */
   chatOpen: boolean | null;
   onToggleChat: () => void;
 }) {
   const project = scope.kind === "project" ? scope : null;
-  const onPage = (page: "projects" | "new") => scope.kind === "org" && scope.page === page;
+  const onPage = (page: "dashboard" | "projects" | "new") => scope.kind === "org" && scope.page === page;
 
   return (
     <Box
@@ -108,36 +112,53 @@ export function ActivityRail({
         zIndex: (t) => t.zIndex.appBar,
       }}
     >
-      <Box
-        aria-label="Agentic Engineer"
-        role="img"
-        sx={{
-          width: 32,
-          height: 32,
-          mb: 1,
-          borderRadius: 2,
-          bgcolor: "primary.main",
-          color: "primary.contrastText",
-          display: "grid",
-          placeItems: "center",
-          fontFamily: "monospace",
-          fontWeight: 600,
-        }}
-      >
-        ae
-      </Box>
+      {/* The logo is the way home: it opens the Dashboard. */}
+      <RailTip label="Dashboard">
+        <LogoLink
+          to="/"
+          aria-label="Dashboard"
+          aria-current={onPage("dashboard") ? "page" : undefined}
+          underline="none"
+          sx={{
+            width: 32,
+            height: 32,
+            mb: 1,
+            borderRadius: 2,
+            bgcolor: "primary.main",
+            color: "primary.contrastText",
+            display: "grid",
+            placeItems: "center",
+            fontFamily: "monospace",
+            fontWeight: 600,
+            textDecoration: "none",
+            "&:focus-visible": { outline: "2px solid var(--aep-shell-rail-active)", outlineOffset: 2 },
+          }}
+        >
+          ae
+        </LogoLink>
+      </RailTip>
       <RailTip label="New project">
         <RailLink to="/projects/new" aria-label="New project" sx={railButtonSx(onPage("new"))}>
           <Plus size={20} />
         </RailLink>
       </RailTip>
       <RailTip label="Projects">
-        <RailLink to="/" aria-label="Projects" sx={railButtonSx(onPage("projects"))}>
+        <RailLink to="/projects" aria-label="Projects" sx={railButtonSx(onPage("projects"))}>
           <LayoutGrid size={20} />
         </RailLink>
       </RailTip>
       {project && (
         <>
+          <RailTip label="Overview">
+            <RailLink
+              to="/projects/$projectName"
+              params={{ projectName: project.projectName }}
+              aria-label="Overview"
+              sx={railButtonSx(project.card === null)}
+            >
+              <House size={20} />
+            </RailLink>
+          </RailTip>
           <RailTip label="Spec">
             <RailLink
               to="/projects/$projectName/spec"

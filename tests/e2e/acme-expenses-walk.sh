@@ -166,14 +166,16 @@ ab find role textbox fill "$E2E_PASSWORD" --name Password --exact >/dev/null 2>&
 ab find role button click --name "Sign In" --exact >/dev/null 2>&1 || fail 1 "no Sign In button"
 ab wait --url "$BASE_URL/**" --timeout 30000 >/dev/null 2>&1 ||
   fail 1 "sign-in did not return to the app (wrong credentials, or :8090 missing from the client's redirect URIs?): $(ab get url)"
-# The dev-env org is already set up, so onboarding passes straight through.
-if ! retry 30 has_role heading Projects; then
+# The dev-env org is already set up, so onboarding passes straight through,
+# to the Dashboard (or to New project, for an org with no projects yet).
+landed() { has_role heading Dashboard || has_role heading "What do you want to build?"; }
+if ! retry 30 landed; then
   if ab wait --text "Welcome to Agentic Engineer" --timeout 1000 >/dev/null 2>&1; then
-    fail 1 "signed in, but the onboarding wizard showed instead of Projects: the dev-env org is not set up"
+    fail 1 "signed in, but the onboarding wizard showed instead of the Dashboard: the dev-env org is not set up"
   fi
-  fail 1 "signed in, but did not land on Projects: $(ab get url)"
+  fail 1 "signed in, but did not land on the Dashboard: $(ab get url)"
 fi
-pass 1 "signed in as $E2E_USERNAME and landed on Projects"
+pass 1 "signed in as $E2E_USERNAME and landed on the Dashboard"
 
 # ---------------------------------------------------------------------------
 # Step 2: New project, up to the details form.

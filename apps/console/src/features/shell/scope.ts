@@ -16,9 +16,9 @@
  * under the License.
  */
 
-// Where the reader is, in the shell's terms: at org level (the Projects grid,
-// New project), or in a project with at most one card open over its overview
-// (and, on the spec card, the file open in it).
+// Where the reader is, in the shell's terms: at org level (the Dashboard, the
+// Projects grid, New project), or in a project with at most one card open over
+// its overview (and, on the spec card, the file open in it).
 // The rail's active item, whether the chat panel exists, its breadcrumb and
 // its scope line all follow from this, so it is worked out once, from the
 // router's leaf match, here.
@@ -27,7 +27,7 @@
 export type ProjectCard = "spec" | "design" | "builds";
 
 export type ShellScope =
-  | { kind: "org"; page: "projects" | "new" | "other" }
+  | { kind: "org"; page: "dashboard" | "projects" | "new" | "other" }
   | {
       kind: "project";
       projectName: string;
@@ -50,7 +50,8 @@ export function shellScope(leaf: {
   search?: { file?: unknown };
 }): ShellScope {
   const { routeId, params, search } = leaf;
-  if (routeId === "/") return { kind: "org", page: "projects" };
+  if (routeId === "/") return { kind: "org", page: "dashboard" };
+  if (routeId === "/projects/") return { kind: "org", page: "projects" };
   if (routeId === "/projects/new") return { kind: "org", page: "new" };
   if (params.projectName && routeId.startsWith("/projects/$projectName")) {
     const card = CARD_ROUTES[routeId] ?? null;

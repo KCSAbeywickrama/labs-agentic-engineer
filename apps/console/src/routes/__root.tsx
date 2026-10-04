@@ -19,6 +19,7 @@
 import { createRootRoute } from "@tanstack/react-router";
 import { AuthGuard } from "../auth/AuthGuard";
 import { ErrorBoundary } from "../components/ErrorBoundary";
+import { NotFoundPage } from "../components/NotFoundPage";
 import { OnboardingGate } from "../features/onboarding/components/OnboardingGate";
 import { Shell } from "../features/shell/components/Shell";
 
@@ -32,6 +33,8 @@ import { Shell } from "../features/shell/components/Shell";
 // spent it says so and offers a reload, the one thing that fixes a stale
 // bundle after a deploy.
 export const Route = createRootRoute({
+  // An address the console does not have draws in the shell's main area.
+  notFoundComponent: NotFoundPage,
   component: () => (
     <ErrorBoundary
       label="The console"

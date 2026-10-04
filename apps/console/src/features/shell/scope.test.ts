@@ -20,8 +20,9 @@ import { describe, expect, it } from "vitest";
 import { chatTopic, shellScope } from "./scope";
 
 describe("shellScope", () => {
-  it("puts the Projects grid and New project at org level", () => {
-    expect(shellScope({ routeId: "/", params: {} })).toEqual({ kind: "org", page: "projects" });
+  it("puts the Dashboard, the Projects grid and New project at org level", () => {
+    expect(shellScope({ routeId: "/", params: {} })).toEqual({ kind: "org", page: "dashboard" });
+    expect(shellScope({ routeId: "/projects/", params: {} })).toEqual({ kind: "org", page: "projects" });
     expect(shellScope({ routeId: "/projects/new", params: {} })).toEqual({
       kind: "org",
       page: "new",

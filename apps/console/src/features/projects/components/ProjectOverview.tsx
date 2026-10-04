@@ -46,7 +46,7 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
             <Button variant="outlined" onClick={() => void project.refetch()}>
               Try again
             </Button>
-            <ButtonLink to="/" variant="text">
+            <ButtonLink to="/projects" variant="text">
               All projects
             </ButtonLink>
           </Box>
