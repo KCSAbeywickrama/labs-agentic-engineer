@@ -17,31 +17,61 @@
  */
 
 // Where the reader is, in the shell's terms: at org level (the Dashboard, the
-// Projects grid, New project), or in a project with at most one card open over
-// its overview (and, on the spec card, the file open in it).
+// Projects grid, New project), or on one of a project's Pages with at most one
+// of its Cards open over it (and, on the spec card, the file open in it).
 // The rail's active item, whether the chat panel exists, its breadcrumb and
 // its scope line all follow from this, so it is worked out once, from the
-// router's leaf match, here.
+// router's leaf match, here. Which routes are Pages and which are Cards, and
+// the Page each Card is over, are this module's tables
+// (design/pages-and-cards.md).
 
-/** The cards drawn over a project's overview, each a route of its own. */
-export type ProjectCard = "spec" | "design" | "builds";
+/** A project's Pages: each is a layout route that draws itself under its Cards. */
+export type ProjectPage = "overview" | "deploy";
+
+/** The Cards drawn over a project's Pages, each a route of its own. */
+export type ProjectCard = "spec" | "design" | "builds" | "configure";
 
 export type ShellScope =
   | { kind: "org"; page: "dashboard" | "projects" | "new" | "other" }
   | {
       kind: "project";
       projectName: string;
+      page: ProjectPage;
       card: ProjectCard | null;
       /** The spec card's open file (`?file=`), by its key; null on the product page and off the card. */
       specFile: string | null;
     };
 
-const CARD_ROUTES: Record<string, ProjectCard> = {
-  "/projects/$projectName/spec": "spec",
-  "/projects/$projectName/design": "design",
-  "/projects/$projectName/builds/": "builds",
-  "/projects/$projectName/builds/$version": "builds",
+const PAGE_ROUTES: Record<string, ProjectPage> = {
+  "/projects/$projectName/_overview/": "overview",
+  "/projects/$projectName/deploy": "deploy",
 };
+
+const CARD_ROUTES: Record<string, ProjectCard> = {
+  "/projects/$projectName/_overview/spec": "spec",
+  "/projects/$projectName/_overview/design": "design",
+  "/projects/$projectName/_overview/builds/": "builds",
+  "/projects/$projectName/_overview/builds/$version": "builds",
+  "/projects/$projectName/deploy/$env/configure": "configure",
+};
+
+/** The Page each Card opens over, and closes back to. */
+const CARD_PAGE: Record<ProjectCard, ProjectPage> = {
+  spec: "overview",
+  design: "overview",
+  builds: "overview",
+  configure: "deploy",
+};
+
+/** The Card a route draws, or null when it draws none. */
+export function cardOfRoute(routeId: string): ProjectCard | null {
+  return CARD_ROUTES[routeId] ?? null;
+}
+
+/** The Page a Card is drawn over. */
+export function pageOfCard(card: ProjectCard): ProjectPage {
+  return CARD_PAGE[card];
+}
 
 /** The scope of the deepest matched route. */
 export function shellScope(leaf: {
@@ -54,11 +84,14 @@ export function shellScope(leaf: {
   if (routeId === "/projects/") return { kind: "org", page: "projects" };
   if (routeId === "/projects/new") return { kind: "org", page: "new" };
   if (params.projectName && routeId.startsWith("/projects/$projectName")) {
-    const card = CARD_ROUTES[routeId] ?? null;
+    const card = cardOfRoute(routeId);
     const file = search?.file;
     return {
       kind: "project",
       projectName: params.projectName,
+      // An address in a project that is neither a Page nor a Card (one it
+      // does not have) reads as the overview's.
+      page: card ? pageOfCard(card) : (PAGE_ROUTES[routeId] ?? "overview"),
       card,
       specFile: card === "spec" && typeof file === "string" && file ? file : null,
     };
@@ -66,10 +99,20 @@ export function shellScope(leaf: {
   return { kind: "org", page: "other" };
 }
 
+const PAGE_TITLE: Record<ProjectPage, string> = {
+  overview: "Overview",
+  deploy: "Deploy",
+};
+
+export function pageTitle(page: ProjectPage): string {
+  return PAGE_TITLE[page];
+}
+
 const CARD_TITLE: Record<ProjectCard, string> = {
   spec: "Spec",
   design: "Design",
   builds: "Builds",
+  configure: "Configure",
 };
 
 export function cardTitle(card: ProjectCard): string {
@@ -80,7 +123,9 @@ export function cardTitle(card: ProjectCard): string {
  * What a message sent from here would be about, for the line above the
  * composer: the design card talks about the design review; a feature open in
  * the spec card narrows it to that feature, and a change reaching past it is
- * made there too; everywhere else in a project, the whole product.
+ * made there too; everywhere else in a project, the whole product. That
+ * includes the Deploy Page and an environment's Configure card: no agent can
+ * change an environment yet, so they set no Turn scope of their own.
  */
 export function chatTopic(
   card: ProjectCard | null,

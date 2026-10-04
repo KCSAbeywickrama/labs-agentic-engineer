@@ -147,13 +147,6 @@ const hoverSx = { ...legSx, "&:hover": { bgcolor: "action.hover" } } as const;
 function Leg({ leg, projectName, onOpen }: { leg: TrackLegView; projectName: string; onOpen: (() => void) | null }) {
   // The lamp's colour is never the only signal: the state is in the name.
   const label = leg.accessibleName;
-  if (!leg.card) {
-    return (
-      <Box aria-label={label} role="group" sx={legSx}>
-        <LegBody leg={leg} />
-      </Box>
-    );
-  }
   if (onOpen) {
     return (
       <ButtonBase aria-label={label} onClick={onOpen} sx={hoverSx}>
@@ -165,9 +158,10 @@ function Leg({ leg, projectName, onOpen }: { leg: TrackLegView; projectName: str
     spec: "/projects/$projectName/spec",
     design: "/projects/$projectName/design",
     builds: "/projects/$projectName/builds",
+    deploy: "/projects/$projectName/deploy",
   } as const;
   return (
-    <LegLink to={to[leg.card]} params={{ projectName }} aria-label={label} sx={hoverSx}>
+    <LegLink to={to[leg.opens]} params={{ projectName }} aria-label={label} sx={hoverSx}>
       <LegBody leg={leg} />
     </LegLink>
   );
@@ -221,7 +215,7 @@ function Frame({ children }: { children: ReactNode }) {
 
 /**
  * Spec · Design · Build · Deploy: where the project is, each leg opening its
- * card. While a build is offered (something designed, none running) the
+ * card (Deploy, its Page). While a build is offered (something designed, none running) the
  * Build leg opens the build picker instead.
  */
 export function Track({ projectName }: { projectName: string }) {

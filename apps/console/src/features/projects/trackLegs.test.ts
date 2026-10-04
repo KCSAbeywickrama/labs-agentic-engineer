@@ -24,15 +24,16 @@ const acme: ProjectTrack = {
   spec: { state: "done", summary: "5 features" },
   design: { state: "waiting", summary: "2 features to design" },
   build: { state: "notyet", summary: "Not yet" },
+  deploy: { state: "notyet", summary: "Not yet" },
 };
 
 describe("trackLegs", () => {
-  it("draws Spec, Design, Build, Deploy in order, each opening its own card", () => {
-    expect(trackLegs(acme).map((l) => [l.step, l.title, l.card])).toEqual([
+  it("draws Spec, Design, Build, Deploy in order, the first three opening their cards and Deploy its Page", () => {
+    expect(trackLegs(acme).map((l) => [l.step, l.title, l.opens])).toEqual([
       [1, "Spec", "spec"],
       [2, "Design", "design"],
       [3, "Build", "builds"],
-      [4, "Deploy", null],
+      [4, "Deploy", "deploy"],
     ]);
   });
 
@@ -46,13 +47,14 @@ describe("trackLegs", () => {
     });
   });
 
-  it("keeps Deploy at not yet whatever the other legs say", () => {
+  it("carries Deploy's state from the track", () => {
     const shipped: ProjectTrack = {
       spec: { state: "done", summary: "" },
       design: { state: "done", summary: "" },
       build: { state: "done", summary: "v1 built" },
+      deploy: { state: "done", summary: "v1 deployed" },
     };
-    expect(trackLegs(shipped)[3]).toMatchObject({ state: "notyet", summary: "Not yet" });
+    expect(trackLegs(shipped)[3]).toMatchObject({ state: "done", summary: "v1 deployed" });
   });
 });
 

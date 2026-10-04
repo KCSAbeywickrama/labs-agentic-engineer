@@ -17,8 +17,8 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { DesignActions, DesignWorkspace } from "../../../features/design/components/DesignWorkspace";
-import { CardOverlay } from "../../../features/projects/components/CardOverlay";
+import { DesignActions, DesignWorkspace } from "../../../../features/design/components/DesignWorkspace";
+import { CardOverlay } from "../../../../features/projects/components/CardOverlay";
 
 /** The open artifact, or a dependency (`dep-F3`); none opens the first artifact. */
 interface DesignSearch {
@@ -26,7 +26,7 @@ interface DesignSearch {
 }
 
 // The design card, drawn over the project overview: the design review.
-export const Route = createFileRoute("/projects/$projectName/design")({
+export const Route = createFileRoute("/projects/$projectName/_overview/design")({
   validateSearch: (search: Record<string, unknown>): DesignSearch =>
     typeof search.art === "string" && search.art ? { art: search.art } : {},
   component: DesignRoute,

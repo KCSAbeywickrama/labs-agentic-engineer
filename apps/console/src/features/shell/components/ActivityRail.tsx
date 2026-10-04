@@ -26,6 +26,7 @@ import {
   LayoutGrid,
   MessageSquare,
   Plus,
+  Rocket,
 } from "@wso2/oxygen-ui-icons-react";
 import type { ShellScope } from "../scope";
 import { RAIL_WIDTH } from "../layout";
@@ -77,7 +78,7 @@ function RailTip({ label, children }: { label: string; children: ReactNode }) {
 
 /**
  * The dark activity rail: the logo (home: the Dashboard), New project,
- * Projects; inside a project also its Overview, Spec and Design; then the chat
+ * Projects; inside a project also its Overview, Spec, Design and Deploy; then the chat
  * toggle and the user menu at the bottom. The rail takes you to Pages; a Card
  * opens from what a Page shows.
  */
@@ -154,7 +155,7 @@ export function ActivityRail({
               to="/projects/$projectName"
               params={{ projectName: project.projectName }}
               aria-label="Overview"
-              sx={railButtonSx(project.card === null)}
+              sx={railButtonSx(project.page === "overview" && project.card === null)}
             >
               <House size={20} />
             </RailLink>
@@ -177,6 +178,16 @@ export function ActivityRail({
               sx={railButtonSx(project.card === "design")}
             >
               <Layers size={20} />
+            </RailLink>
+          </RailTip>
+          <RailTip label="Deploy">
+            <RailLink
+              to="/projects/$projectName/deploy"
+              params={{ projectName: project.projectName }}
+              aria-label="Deploy"
+              sx={railButtonSx(project.page === "deploy")}
+            >
+              <Rocket size={20} />
             </RailLink>
           </RailTip>
         </>

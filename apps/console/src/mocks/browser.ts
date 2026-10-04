@@ -19,6 +19,7 @@
 import { setupWorker } from "msw/browser";
 import { buildsHandlers } from "./handlers/builds";
 import { conversationHandlers } from "./handlers/conversation";
+import { deployHandlers } from "./handlers/deploy";
 import { designHandlers } from "./handlers/design";
 import { projectsHandlers } from "./handlers/projects";
 import { settingsHandlers } from "./handlers/settings";
@@ -31,5 +32,6 @@ export const worker = setupWorker(
   ...specHandlers,
   ...designHandlers,
   ...buildsHandlers,
+  ...deployHandlers,
   ...settingsHandlers,
 );

@@ -17,10 +17,10 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { BuildsCardRoute } from "../../../../features/builds/components/BuildsCard";
+import { BuildsCardRoute } from "../../../../../features/builds/components/BuildsCard";
 
 // The Builds card, drawn over the project overview, on the newest version.
-export const Route = createFileRoute("/projects/$projectName/builds/")({
+export const Route = createFileRoute("/projects/$projectName/_overview/builds/")({
   component: LatestBuild,
 });
 

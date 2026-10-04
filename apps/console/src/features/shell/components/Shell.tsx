@@ -72,7 +72,8 @@ export function Shell() {
   // honouring it under a card would move the user.
   const navigate = useNavigate();
   const chatParam = useSearch({ from: "/projects/$projectName", shouldThrow: false })?.chat;
-  const arrivingProject = project && project.card === null && chatParam === "open" ? project.projectName : null;
+  const arrivingProject =
+    project && project.page === "overview" && project.card === null && chatParam === "open" ? project.projectName : null;
   useEffect(() => {
     if (!arrivingProject) return;
     setChatOpen(true);
@@ -127,6 +128,7 @@ export function Shell() {
               {project ? (
                 <ChatPanel
                   projectName={project.projectName}
+                  page={project.page}
                   card={project.card}
                   specFile={project.specFile}
                   onClose={() => setChatOpen(false)}

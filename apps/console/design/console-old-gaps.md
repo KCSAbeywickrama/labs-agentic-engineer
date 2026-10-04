@@ -25,7 +25,7 @@ their absence is a dead end somewhere else.
 
 | Area | In console-old | Here today |
 |---|---|---|
-| **Deploy**: environment pipeline, promote, environment page with Try it (web app with test users, service OpenAPI, agent chat, Agent Manager link), connection values, past deployments | `routes/projects.$projectName.deployments.*`, `features/projects/components/Deployments*`, `EnvironmentFlow`, `TryItOut`, `PromoteDialog`, `ConnectionValuesDialog`, `TestUsersDialog` | the track's Deploy leg is always "Not yet" (this app's `features/projects/trackLegs.ts`) |
+| **Deploy**: promote (no platform operation; the Deploy Page shows it disabled), each environment's validation step and the deploy-hold state, the version block (milestone, merge commit), the test-user table with scopes and the Thunder Console link | `features/projects/components/EnvironmentFlow`, `PromoteDialog`, `DeploymentEnvironmentPage.tsx`, `TestUsersDialog`, `lib/deploymentFlow.ts` | the Deploy Page (`features/deploy/`): the board, Try it, the Configure card, history from the version ledger |
 | **Settings, GitHub**: rotate the PAT, disconnect (with uninstall) | `features/settings/components/GitHubCredentialCard.tsx` | connect only, in onboarding |
 | **Settings, AI agents**: edit and test the model connection | `features/settings/components/AiAgentsCard.tsx`, `ModelConnectionRow.tsx` | onboarding, and again when the key is disconnected |
 | **Settings, skills library**: search, view, create, edit, delete, enable, import, platform-update sync and review | `routes/settings.skills.tsx`, `features/settings/components/SkillsSection.tsx` and its dialogs | one sync during onboarding |

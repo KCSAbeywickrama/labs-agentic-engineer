@@ -34,6 +34,7 @@ describe("turnScopeFor (where the user is)", () => {
     expect(turnScopeFor("spec", null)).toEqual({ kind: "product" });
     expect(turnScopeFor(null, null)).toEqual({ kind: "product" });
     expect(turnScopeFor("builds", approvals)).toEqual({ kind: "product" });
+    expect(turnScopeFor("configure", null)).toEqual({ kind: "product" });
   });
 });
 

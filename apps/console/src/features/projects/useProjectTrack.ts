@@ -20,6 +20,7 @@ import { useMemo } from "react";
 import { useBuilds } from "../builds/api/builds";
 import { useBuildOffer } from "../builds/buildPicker";
 import { useBuildOutcome } from "../builds/hooks/useBuildOutcome";
+import { useProjectStatus } from "../deploy/api/deploy";
 import { useDesignModel } from "../design/useDesignModel";
 import { useSpecWorkspace } from "../spec/useSpecWorkspace";
 import { projectTrack, type ProjectTrack } from "./model/track";
@@ -35,21 +36,23 @@ export interface ProjectTrackState {
 
 /**
  * The overview's track, from the queries the page already reads: the spec
- * workspace, the design review, and the builds (with the build offer they
- * make). A finished turn or a started build refreshes those, and so the
+ * workspace, the design review, the builds (with the build offer they
+ * make), and the project's status for its deploy aggregate. A finished turn or a started build refreshes those, and so the
  * track, with nothing of its own to invalidate.
  */
 export function useProjectTrack(projectName: string): ProjectTrackState {
   const { model, workspace } = useSpecWorkspace(projectName);
   const design = useDesignModel(projectName);
   const builds = useBuilds(projectName);
+  const status = useProjectStatus(projectName);
+  const deploy = status.data?.deploy;
   const offer = useBuildOffer(projectName);
   const latest = builds.data?.at(-1);
   const latestOutcome = useBuildOutcome(projectName, latest?.status === "built" ? latest.version : undefined).outcome;
 
   const track = useMemo(
     () =>
-      model.data && workspace && design.data && builds.data && offer
+      model.data && workspace && design.data && builds.data && offer && deploy
         ? projectTrack({
             features: workspace.features,
             design: workspace.design,
@@ -58,12 +61,13 @@ export function useProjectTrack(projectName: string): ProjectTrackState {
             builds: builds.data,
             latestOutcome,
             offer,
+            deploy,
           })
         : null,
-    [model.data, workspace, design.data, builds.data, latestOutcome, offer],
+    [model.data, workspace, design.data, builds.data, latestOutcome, offer, deploy],
   );
 
-  const failed = [model, design, builds].filter((q) => q.isError);
+  const failed = [model, design, builds, status].filter((q) => q.isError);
   return {
     track: failed.length > 0 ? null : track,
     error: failed[0]?.error?.message ?? null,

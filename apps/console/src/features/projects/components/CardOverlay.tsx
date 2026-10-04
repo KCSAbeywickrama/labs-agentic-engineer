@@ -21,10 +21,17 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { Box, IconButton, Tooltip, Typography, keyframes } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { PHONE } from "../../shell/layout";
-import { cardTitle, type ProjectCard } from "../../shell/scope";
+import { cardTitle, pageOfCard, pageTitle, type ProjectCard, type ProjectPage } from "../../shell/scope";
 import { WorkspaceTabs } from "./WorkspaceTabs";
 
-const STEP: Record<ProjectCard, number> = { spec: 1, design: 2, builds: 3 };
+/** A card's place on the track, where it has one (Spec and Design show theirs as tabs). */
+const STEP: Partial<Record<ProjectCard, number>> = { builds: 3 };
+
+/** Where each Page is: a card closes back to the one it is over. */
+const PAGE_PATH = {
+  overview: "/projects/$projectName",
+  deploy: "/projects/$projectName/deploy",
+} as const satisfies Record<ProjectPage, string>;
 
 const slideIn = keyframes`
   from { opacity: 0; transform: translateX(12px); }
@@ -39,12 +46,14 @@ const fadeIn = keyframes`
 const reducedMotion = { "@media (prefers-reduced-motion: reduce)": { animation: "none" } };
 
 /**
- * A card drawn over the project overview: the overview stays rendered under
- * a scrim, and closing (X, Escape, or a click on the scrim) goes back to it.
- * Each card is a route of its own, so this is what the card routes render.
+ * A card drawn over the project Page that lists it (scope.ts `pageOfCard`):
+ * the page stays rendered under a scrim, and closing (X, Escape, or a click
+ * on the scrim) goes back to it. Each card is a route of its own, so this is
+ * what the card routes render.
  *
  * Spec and Design are one workspace, so their header is the Spec · Design
- * tabs rather than a title. A card's own actions (the design card's Address
+ * tabs rather than a title; any other card shows its title, or the `title`
+ * it is given when its own name says more ("Configure Staging"). A card's own actions (the design card's Address
  * comments) sit in the header beside the close button, and wrap under the
  * tabs at phone width. A `fill` body is laid out by its children (the spec
  * card's rail and document scroll on their own); otherwise the body is one
@@ -52,11 +61,13 @@ const reducedMotion = { "@media (prefers-reduced-motion: reduce)": { animation: 
  */
 export function CardOverlay({
   card,
+  title = cardTitle(card),
   fill = false,
   actions,
   children,
 }: {
   card: ProjectCard;
+  title?: string;
   fill?: boolean;
   actions?: ReactNode;
   children: ReactNode;
@@ -66,10 +77,13 @@ export function CardOverlay({
   const titleId = useId();
   const cardRef = useRef<HTMLDivElement>(null);
 
+  const page = pageOfCard(card);
   const close = useCallback(
-    () => void navigate({ to: "/projects/$projectName", params: { projectName } }),
-    [navigate, projectName],
+    () => void navigate({ to: PAGE_PATH[page], params: { projectName } }),
+    [navigate, page, projectName],
   );
+  const tabbed = card === "spec" || card === "design";
+  const step = STEP[card];
 
   useEffect(() => {
     // Menus and dialogs above the card stop their own Escape from reaching here.
@@ -102,11 +116,11 @@ export function CardOverlay({
       <Box
         ref={cardRef}
         role="dialog"
-        aria-labelledby={card === "builds" ? titleId : undefined}
-        aria-label={card === "builds" ? undefined : cardTitle(card)}
+        aria-labelledby={tabbed ? undefined : titleId}
+        aria-label={tabbed ? cardTitle(card) : undefined}
         tabIndex={-1}
         sx={{
-          // Framed on all sides, the overview showing round it under the scrim.
+          // Framed on all sides, the page showing round it under the scrim.
           position: "absolute",
           inset: (t) => t.spacing(1.75),
           bgcolor: "background.paper",
@@ -136,24 +150,26 @@ export function CardOverlay({
             [PHONE]: { flexWrap: "wrap", rowGap: 1 },
           }}
         >
-          {card === "builds" ? (
+          {tabbed ? (
+            <WorkspaceTabs active={card} />
+          ) : (
             <>
-              <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
-                {STEP[card]} / 4
-              </Typography>
+              {step !== undefined && (
+                <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+                  {step} / 4
+                </Typography>
+              )}
               <Typography id={titleId} component="h2" sx={{ fontSize: "1rem", fontWeight: 600, flex: 1 }}>
-                {cardTitle(card)}
+                {title}
               </Typography>
             </>
-          ) : (
-            <WorkspaceTabs active={card} />
           )}
           {actions && (
             <Box sx={{ display: "flex", alignItems: "center", gap: 1, [PHONE]: { order: 3, flexBasis: "100%" } }}>
               {actions}
             </Box>
           )}
-          <Tooltip title="Back to project overview">
+          <Tooltip title={page === "overview" ? "Back to project overview" : `Back to ${pageTitle(page)}`}>
             <IconButton size="small" aria-label="Close" onClick={close}>
               <X size={18} />
             </IconButton>

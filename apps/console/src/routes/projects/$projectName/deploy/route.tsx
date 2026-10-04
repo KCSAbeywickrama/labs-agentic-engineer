@@ -17,15 +17,20 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { BuildsCardRoute } from "../../../../features/builds/components/BuildsCard";
+import { DeployPage } from "../../../../features/deploy/components/DeployPage";
+import { PageWithCards } from "../../../../features/shell/components/PageWithCards";
 
-// The Builds card on one version: a build's own address, which the chat's
-// "Watch it here" and the ledger link to. An unknown version shows the newest.
-export const Route = createFileRoute("/projects/$projectName/builds/$version")({
-  component: OneBuild,
+// The Deploy Page, and the Card it lists (an environment's Configure) as its
+// child route.
+export const Route = createFileRoute("/projects/$projectName/deploy")({
+  component: DeployRoute,
 });
 
-function OneBuild() {
-  const { projectName, version } = Route.useParams();
-  return <BuildsCardRoute projectName={projectName} version={version} />;
+function DeployRoute() {
+  const { projectName } = Route.useParams();
+  return (
+    <PageWithCards>
+      <DeployPage projectName={projectName} />
+    </PageWithCards>
+  );
 }

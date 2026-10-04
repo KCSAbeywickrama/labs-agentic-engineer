@@ -17,8 +17,8 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { CardOverlay } from "../../../features/projects/components/CardOverlay";
-import { SpecWorkspace } from "../../../features/spec/components/SpecWorkspace";
+import { CardOverlay } from "../../../../features/projects/components/CardOverlay";
+import { SpecWorkspace } from "../../../../features/spec/components/SpecWorkspace";
 
 /** The open file (`F2`, `product-wide`, a document's ID; none is the product page) and a line or place in it. */
 interface SpecSearch {
@@ -27,7 +27,7 @@ interface SpecSearch {
 }
 
 // The spec card, drawn over the project overview.
-export const Route = createFileRoute("/projects/$projectName/spec")({
+export const Route = createFileRoute("/projects/$projectName/_overview/spec")({
   validateSearch: (search: Record<string, unknown>): SpecSearch => ({
     ...(typeof search.file === "string" && search.file ? { file: search.file } : {}),
     ...(typeof search.at === "string" && search.at ? { at: search.at } : {}),

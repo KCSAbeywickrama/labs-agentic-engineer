@@ -17,12 +17,14 @@
  */
 
 import type { LegState, ProjectTrack } from "./model/track";
-import type { ProjectCard } from "../shell/scope";
 
 // The overview's track, Spec · Design · Build · Deploy, as the four legs it
-// draws: each with its number, its status lamp, the short state line, and the
-// card it opens. Deploy has no card and no state yet, so it is always "not
-// yet"; the other three are worked out from the page's state (model/track.ts).
+// draws: each with its number, its status lamp, the short state line, and
+// what it opens: the Spec, Design or Builds card, or the Deploy Page. Their
+// states are worked out from the page's state (model/track.ts).
+
+/** What a leg opens: a card over the overview, or the Deploy Page. */
+export type LegTarget = "spec" | "design" | "builds" | "deploy";
 
 export interface TrackLegView {
   key: "spec" | "design" | "build" | "deploy";
@@ -34,8 +36,7 @@ export interface TrackLegView {
   summary: string;
   /** The leg read out whole: title, state in words, and the state line when it adds to them. */
   accessibleName: string;
-  /** The card this leg opens, or null when there is none to open. */
-  card: ProjectCard | null;
+  opens: LegTarget;
 }
 
 const STATE_LABEL: Record<LegState, string> = {
@@ -53,14 +54,14 @@ function leg(
   key: TrackLegView["key"],
   step: number,
   title: string,
-  card: ProjectCard | null,
+  opens: LegTarget,
   state: LegState,
   summary: string,
 ): TrackLegView {
   const stateLabel = legStateLabel(state);
   const accessibleName =
     summary && summary !== stateLabel ? `${title}: ${stateLabel}. ${summary}` : `${title}: ${stateLabel}`;
-  return { key, step, title, card, state, summary, stateLabel, accessibleName };
+  return { key, step, title, opens, state, summary, stateLabel, accessibleName };
 }
 
 export function trackLegs(track: ProjectTrack): TrackLegView[] {
@@ -68,6 +69,6 @@ export function trackLegs(track: ProjectTrack): TrackLegView[] {
     leg("spec", 1, "Spec", "spec", track.spec.state, track.spec.summary),
     leg("design", 2, "Design", "design", track.design.state, track.design.summary),
     leg("build", 3, "Build", "builds", track.build.state, track.build.summary),
-    leg("deploy", 4, "Deploy", null, "notyet", "Not yet"),
+    leg("deploy", 4, "Deploy", "deploy", track.deploy.state, track.deploy.summary),
   ];
 }

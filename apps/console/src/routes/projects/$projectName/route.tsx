@@ -16,16 +16,15 @@
  * under the License.
  */
 
-import { createFileRoute, Outlet, useChildMatches } from "@tanstack/react-router";
+import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { BuildPickerHost } from "../../../features/builds/components/BuildPicker";
 import { useBuildNotes } from "../../../features/builds/hooks/useBuildNotes";
-import { ProjectOverview } from "../../../features/projects/components/ProjectOverview";
-import { BasePage } from "../../../features/shell/components/BasePage";
 
-// A project: its overview is the base page, and a card route (spec, design,
-// builds) draws over it through the outlet. The overview stays mounted while
-// a card is open, covered by the card's scrim. The build picker opens over
-// either, from wherever a build is offered.
+// A project: what every one of its Pages shares. Each Page (the overview,
+// Deploy) is a child layout route that draws itself as the base page and its
+// Cards over it (design/pages-and-cards.md). The build picker opens over any
+// of them, from wherever a build is offered, and the chat's line when a build
+// ends is said wherever in the project the user is.
 //
 // `?chat=open` (#562) is the arrival from New project: the platform has
 // already fired `/start`, so the shell opens the chat to show the journey
@@ -45,13 +44,9 @@ function BuildNotes({ projectName }: { projectName: string }) {
 
 function ProjectRoute() {
   const { projectName } = Route.useParams();
-  const cardOpen = useChildMatches().length > 0;
   return (
     <BuildPickerHost projectName={projectName}>
       <BuildNotes projectName={projectName} />
-      <BasePage covered={cardOpen}>
-        <ProjectOverview projectName={projectName} />
-      </BasePage>
       <Outlet />
     </BuildPickerHost>
   );
