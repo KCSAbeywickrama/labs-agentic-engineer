@@ -68,6 +68,20 @@ test("the skill describes the Oxygen look but never has the source name a theme"
   assert.doesNotMatch(source, /oxygen|prototype-theme/i);
 });
 
+// Review of a generated My Leave screen: stats hugged their content in a row,
+// the section title read as body text with its button floating apart, and a
+// "Cancel" action was written into a cell. The skill names the grouped
+// vocabulary and the example uses it.
+test("the skill groups stats, gives sections their actions, and puts status and row actions in their columns", () => {
+  assert.match(PROSE, /\*\*Stats in a group\.\*\* Put a screen's `<Stat>`s in one `<StatGroup>`/);
+  assert.match(PROSE, /\*\*Sections own their actions\.\*\*/);
+  assert.match(PROSE, /\{ label: "Status", kind: "status" \}/);
+  assert.match(PROSE, /\*\*Row actions are buttons, not cells\.\*\*/);
+  assert.match(PROSE, /Never write an\s+action's label into a cell/);
+  const source = /```tsx\n([\s\S]*?)\n```/.exec(SKILL)?.[1] ?? "";
+  for (const used of [/<StatGroup>/, /<Section\b/, /kind: "status"/, /status: \{ text:/, /actions: \[\{ id:/]) assert.match(source, used);
+});
+
 // Live bug: asked for an account button and sign-out on a screen, the design
 // agent declined, claiming the platform draws a user menu on every screen. The
 // skill has to say exactly what the renderer draws: the app shell's chrome and
