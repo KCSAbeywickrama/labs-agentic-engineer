@@ -16,16 +16,16 @@
  * under the License.
  */
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { client } from "../../../api/client";
 import { apiErrorMessage } from "../../../api/errors";
 import type { components } from "../../../generated/aep-api";
 
 // Today's build reads, copied from the old console (features/builds/api/queries.ts
-// and features/validation/api/queries.ts) and trimmed to what the Builds card
-// shows: the version ledger, one version's runs, and one validation attempt's
-// report. Same calls, same polling; the card's live run itself arrives over
-// the run's progress stream (hooks/useRunProgress.ts).
+// and features/validation/api/queries.ts): the version ledger, one version's
+// runs, the component builds a merge fanned out to, one validation attempt's
+// report, and cancelling a run. Same calls, same polling; a run's live events
+// arrive over its progress stream (hooks/useRunProgress.ts).
 
 type MilestoneRunView = components["schemas"]["MilestoneRunView"];
 
@@ -39,6 +39,9 @@ export const runKeys = {
   ledger: (projectName: string) => [...runKeys.all(projectName), "ledger"] as const,
   /** One version's whole run story: its milestone runs and their cycles. */
   runs: (projectName: string, tag: string) => [...runKeys.all(projectName), "runs", tag] as const,
+  /** The component builds one cycle's merge fanned out to: a cluster read, priced apart. */
+  cycleBuilds: (projectName: string, tag: string, cycleId: string) =>
+    [...runKeys.runs(projectName, tag), "cycles", cycleId, "builds"] as const,
   /** One validation attempt's report and criteria, read at one commit. */
   snapshot: (projectName: string, tag: string, cycleId: string, settled: boolean) =>
     [...runKeys.all(projectName), "snapshot", tag, cycleId, settled] as const,
@@ -57,11 +60,17 @@ function versionIsLive(runs: MilestoneRunView[]): boolean {
 }
 
 /**
- * The run that delivered the version: the newest that built something. A run
- * that only re-judged a version has no build to show.
+ * The runs that delivered the version, newest first: every run that built
+ * something. A run that only re-judged it has no build to show; a validation
+ * run that went on to repair what it found has, and is kept.
  */
+export function deliveryRuns(runs: MilestoneRunView[]): MilestoneRunView[] {
+  return runs.filter((r) => r.kind !== "validation" || r.cycles.some((c) => c.kind !== "validation"));
+}
+
+/** The newest run that delivered the version: the one its build speaks for. */
 export function deliveryRun(runs: MilestoneRunView[]): MilestoneRunView | undefined {
-  return runs.find((r) => r.kind !== "validation" || r.cycles.some((c) => c.kind !== "validation"));
+  return deliveryRuns(runs)[0];
 }
 
 /** The version ledger, newest first. Polls while a version is moving. */
@@ -103,6 +112,55 @@ export function useBuildRuns(projectName: string, tag: string | undefined) {
       const list = query.state.data;
       if (!list) return RUNS_POLL_MS;
       return versionIsLive(list.runs) ? RUNS_POLL_MS : false;
+    },
+  });
+}
+
+/**
+ * Cancel a run, abandoning the increment. 202 only means the signal was sent;
+ * the run row turns `cancelled` when the platform acts on it, so success reads
+ * the version's runs and the ledger again rather than writing either.
+ */
+export function useCancelRun(projectName: string, tag: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (runId: string) => {
+      const { error } = await client.POST("/projects/{projectName}/runs/{runId}/cancel", {
+        params: { path: { projectName, runId } },
+      });
+      if (error) throw new Error(apiErrorMessage(error, "Failed to cancel the run"));
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: runKeys.runs(projectName, tag) });
+      void queryClient.invalidateQueries({ queryKey: runKeys.ledger(projectName) });
+    },
+  });
+}
+
+// A cycle's component builds are read from the cluster, not the database, so
+// they poll slower, and only while one is still moving.
+const CYCLE_BUILDS_POLL_MS = 10_000;
+
+/**
+ * The component builds one cycle's merge fanned out to. Read only for a cycle
+ * that merged: before the merge there is nothing to have built. An empty list
+ * on a merged cycle means the fan-out has not reached the cluster yet.
+ */
+export function useCycleBuilds(projectName: string, tag: string, cycleId: string | undefined) {
+  return useQuery({
+    queryKey: runKeys.cycleBuilds(projectName, tag, cycleId ?? ""),
+    enabled: Boolean(tag) && Boolean(cycleId),
+    queryFn: async () => {
+      const { data, error } = await client.GET("/projects/{projectName}/builds/{tag}/cycles/{cycleId}/builds", {
+        params: { path: { projectName, tag, cycleId: cycleId ?? "" } },
+      });
+      if (error || data === undefined) throw new Error(apiErrorMessage(error, "Failed to load the component builds"));
+      return data.items ?? [];
+    },
+    refetchInterval: (query) => {
+      const builds = query.state.data;
+      if (!builds || builds.length === 0) return CYCLE_BUILDS_POLL_MS;
+      return builds.every((b) => b.completed) ? false : CYCLE_BUILDS_POLL_MS;
     },
   });
 }

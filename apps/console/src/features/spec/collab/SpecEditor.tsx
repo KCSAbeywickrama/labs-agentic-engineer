@@ -24,6 +24,7 @@ import StarterKit from "@tiptap/starter-kit";
 import Collaboration from "@tiptap/extension-collaboration";
 import type * as Y from "yjs";
 import { AgentInsertion } from "@aep/collab-doc";
+import { proseSx } from "../../../components/proseSx";
 import { fileKeyForHref, type MarkdownFile } from "../model/files";
 import { idTarget, resolveId, type IdIndex } from "../model/ids";
 import type { SpecTarget } from "../useSpecWorkspace";
@@ -55,17 +56,11 @@ function pillSx(tone: "warning") {
 
 const ptagSx = { fontSize: "0.6875rem", fontWeight: 600, color: "info.main", whiteSpace: "nowrap", ml: 1 } as const;
 
-// How a spec document reads. The decorations (specLinesPlugin.ts) only name
+// How a spec document reads: the app's prose (proseSx), and the spec's own
+// line decorations on top. The decorations (specLinesPlugin.ts) only name
 // things; the look is here, from the theme.
 const documentSx = {
-  "& .ProseMirror": { outline: "none", maxWidth: "72ch", fontSize: "0.875rem", lineHeight: 1.55 },
-  "& .ProseMirror h1": { fontSize: "1.5rem", fontWeight: 600, letterSpacing: "-0.01em", mt: 0.25, mb: 1.25 },
-  "& .ProseMirror h2": { fontSize: "0.9375rem", fontWeight: 600, mt: 2.75, mb: 0.75 },
-  "& .ProseMirror p": { my: 0.5 },
-  "& .ProseMirror ul, & .ProseMirror ol": { pl: 2.5, my: 0.5 },
-  "& .ProseMirror li > p": { my: 0 },
-  "& .ProseMirror li + li": { mt: 0.25 },
-  "& .ProseMirror a": { color: "primary.main", textUnderlineOffset: "2px", cursor: "pointer" },
+  ...proseSx,
   "& .aep-line": { borderRadius: 1.5 },
   "& .aep-line--assumed": { bgcolor: soft("warning", 0.14) },
   // A blocking question and its options: the warning's wash, a rule down the left.

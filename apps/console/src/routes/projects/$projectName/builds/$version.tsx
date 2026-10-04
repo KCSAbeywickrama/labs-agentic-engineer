@@ -17,15 +17,15 @@
  */
 
 import { createFileRoute } from "@tanstack/react-router";
-import { BuildsCardRoute } from "../../../../features/builds/components/BuildsCard";
+import { BuildCard } from "../../../../features/builds/components/BuildCard";
 
-// The Builds card on one version: a build's own address, which the chat's
-// "Watch it here" and the ledger link to. An unknown version shows the newest.
+// A version's Build card, drawn over build history: a build's own address,
+// which the chat's "Watch it here", the track and the ledger link to.
 export const Route = createFileRoute("/projects/$projectName/builds/$version")({
-  component: OneBuild,
+  component: BuildRoute,
 });
 
-function OneBuild() {
+function BuildRoute() {
   const { projectName, version } = Route.useParams();
-  return <BuildsCardRoute projectName={projectName} version={version} />;
+  return <BuildCard projectName={projectName} version={version} />;
 }

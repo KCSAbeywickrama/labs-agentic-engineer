@@ -17,11 +17,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { fixedBy, selectedRow, versionRows, versionState } from "./ledger";
+import { fixedBy, versionRows, versionState } from "./ledger";
 
 const summaries = [
-  { tag: "v1.1", status: "in_progress" as const },
-  { tag: "v1", status: "completed" as const },
+  { tag: "v1.1", status: "in_progress" as const, startedAt: "2026-10-02T09:00:00Z" },
+  { tag: "v1", status: "completed" as const, startedAt: "2026-10-01T09:00:00Z", completedAt: "2026-10-01T09:40:00Z" },
 ];
 const builds = [
   { version: "v1", features: [{ id: "F1", name: "Submit expenses", lines: [] }, { id: "F2", name: "Approvals", lines: [] }] },
@@ -31,20 +31,31 @@ const builds = [
 describe("the version ledger", () => {
   const rows = versionRows(summaries, builds);
 
-  it("lists the versions newest first, with what each built and what a repair fixes", () => {
+  it("lists the versions newest first, with what each built, what a repair fixes, and when it ran", () => {
     expect(rows).toEqual([
-      { version: "v1.1", status: "in_progress", fixes: "v1", features: ["Submit expenses", "Approvals"], featureIds: ["F1", "F2"], regressions: 0 },
-      { version: "v1", status: "completed", fixes: null, features: ["Submit expenses", "Approvals"], featureIds: ["F1", "F2"], regressions: 0 },
+      {
+        version: "v1.1",
+        status: "in_progress",
+        fixes: "v1",
+        features: ["Submit expenses", "Approvals"],
+        featureIds: ["F1", "F2"],
+        regressions: 0,
+        startedAt: "2026-10-02T09:00:00Z",
+        completedAt: null,
+      },
+      {
+        version: "v1",
+        status: "completed",
+        fixes: null,
+        features: ["Submit expenses", "Approvals"],
+        featureIds: ["F1", "F2"],
+        regressions: 0,
+        startedAt: "2026-10-01T09:00:00Z",
+        completedAt: "2026-10-01T09:40:00Z",
+      },
     ]);
     expect(fixedBy(rows, "v1")?.version).toBe("v1.1");
     expect(fixedBy(rows, "v1.1")).toBeNull();
-  });
-
-  it("opens the version asked for, and the newest for one it does not have", () => {
-    expect(selectedRow(rows, "v1")?.version).toBe("v1");
-    expect(selectedRow(rows, "v7")?.version).toBe("v1.1");
-    expect(selectedRow(rows, undefined)?.version).toBe("v1.1");
-    expect(selectedRow([], "v1")).toBeUndefined();
   });
 
   it("says each version's state in words: building, passing, how many fail, or failed", () => {

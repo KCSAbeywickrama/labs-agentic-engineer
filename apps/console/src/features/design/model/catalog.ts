@@ -27,7 +27,8 @@ import type { DesignArtifact } from "../api/designModel";
 //              who can do what (security.json's roles), the data model, and
 //              each feature's acceptance criteria;
 //   Technical  the architecture (design.cell), each component and its
-//              contract, and the permissions it guards (security.json).
+//              contract (with the organization's resources it reuses), and
+//              the permissions it guards (security.json).
 //
 // An API-only product has no web app, so no prototype. The files are the
 // design skill's (skills/design): flows and the domain model are markdown
@@ -67,6 +68,22 @@ function parseJson<T>(text: string | undefined): T | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The Registered External resources a component reuses: each `external`
+ * dependency is defined once, in its own dependency.json, and one whose
+ * resource carries a `ref` is a copy of the organization's record of that
+ * name (CONTEXT.md, "Registered External resource").
+ */
+export function registeredResourcesOf(files: Readonly<Record<string, string>>, design: string | undefined): string[] {
+  const deps = parseJson<{ dependencies?: { kind?: string; name?: string }[] }>(design)?.dependencies ?? [];
+  const refs = deps.flatMap((d) => {
+    if (d.kind !== "external" || !d.name) return [];
+    const definition = parseJson<{ resource?: { ref?: string } }>(files[`specs/design/dependencies/${d.name}/dependency.json`]);
+    return definition?.resource?.ref ? [definition.resource.ref] : [];
+  });
+  return [...new Set(refs)].sort();
 }
 
 function componentsOf(files: Readonly<Record<string, string>>): ComponentFacts[] {
@@ -155,6 +172,7 @@ export function designCatalog(files: Readonly<Record<string, string>>): DesignAr
         design: files[`specs/design/components/${c.name}/design.json`]!,
         openapi: files[`specs/design/components/${c.name}/openapi.yaml`] ?? null,
         ...(scopeRoles ? { roles: scopeRoles } : {}),
+        resources: registeredResourcesOf(files, files[`specs/design/components/${c.name}/design.json`]),
       },
     });
   }

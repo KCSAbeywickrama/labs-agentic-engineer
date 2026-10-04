@@ -33,7 +33,6 @@ import {
   ollamaVisionModels,
   pricedModels,
   sectionError,
-  seedSkillUpdates,
   subscriptionValidationError,
   type SettingsScenario,
 } from "../fixtures/settings";
@@ -47,7 +46,6 @@ type LLMProjection = components["schemas"]["LLMProjection"];
 type LLMPatch = components["schemas"]["LLMPatch"];
 type LLMCheck = components["schemas"]["LLMCheck"];
 type LLMCapabilities = components["schemas"]["LLMCapabilities"];
-type SkillUpdate = components["schemas"]["SkillUpdate"];
 
 function scenario(): SettingsScenario {
   return (
@@ -78,8 +76,6 @@ let llmDisconnectedAt: string | null = null;
 // `subscription` is the Claude subscription coding runs bill (null = they
 // bill the connection's key).
 let agents: AgentsProjection = { ...agentsDefaultsFixture };
-// The platform's skills the org repo lacks until the next sync.
-let skillUpdates: SkillUpdate[] = [];
 let initialized = false;
 
 // Persist the org's connection state (GitHub, the model connection, the
@@ -125,7 +121,6 @@ function ensureInitialized() {
   } catch {
     /* ignore malformed persisted state */
   }
-  skillUpdates = seedSkillUpdates.map((u) => ({ ...u }));
 }
 
 function configProjection(): ConfigProjection {
@@ -451,13 +446,12 @@ export const settingsHandlers = [
     return HttpResponse.json(probed.check);
   }),
 
-  // All-or-nothing, mirroring the BE: no request body, reconcile everything.
-  // Per #102 the BE creates the org's skills repo first when it's missing;
-  // the mock treats that as part of the same opaque call.
-  http.post("*/api/v1/skills/sync", () => {
+  // Disconnect drops the connection (the App's uninstall is the real
+  // server's business); with no GitHub, onboarding takes over again.
+  http.post("*/api/v1/config/git-provider/disconnect", () => {
     ensureInitialized();
-    const updated = skillUpdates.length;
-    skillUpdates = [];
-    return HttpResponse.json({ status: "synced", updated });
+    gitProvider = null;
+    persistConnection();
+    return HttpResponse.json({ status: "disconnected" });
   }),
 ];

@@ -23,6 +23,8 @@ interface RuntimeEnv {
   VITE_THUNDER_URL?: string;
   VITE_THUNDER_CLIENT_ID?: string;
   VITE_THUNDER_SCOPES?: string;
+  VITE_TRY_IT_URL?: string;
+  BILLING_API_BASE_URL?: string;
 }
 
 declare global {
@@ -63,4 +65,10 @@ export const env = {
   // added to its redirect URIs by hand; see README.
   thunderClientId: getEnv("VITE_THUNDER_CLIENT_ID") || "aep-console-client",
   thunderScopes: getEnv("VITE_THUNDER_SCOPES") || "openid profile email",
+  // The platform's test app (apps/tryit), which Try it opens an agent in; same
+  // origin as aep-api's TRY_IT_CALLBACK_URL. The default is the dev cluster's.
+  tryItUrl: getEnv("VITE_TRY_IT_URL") || "http://tryit.aep.localhost:8095",
+  // WSO2 Cloud's billing-user-api, which sign-in activates the org's
+  // subscription with (api/billing.ts). Unset outside WSO2 Cloud: no call.
+  billingApiBaseUrl: getEnv("BILLING_API_BASE_URL") || "",
 } as const;

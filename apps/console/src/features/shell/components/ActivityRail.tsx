@@ -18,14 +18,23 @@
 
 import type { ReactNode } from "react";
 import { createLink } from "@tanstack/react-router";
-import { Box, IconButton, Tooltip, type SxProps, type Theme } from "@wso2/oxygen-ui";
+import { Badge, Box, IconButton, Link, Tooltip, type SxProps, type Theme } from "@wso2/oxygen-ui";
 import {
+  Boxes,
+  CircleDot,
+  ClipboardCheck,
   FileText,
+  Hammer,
+  House,
   Layers,
   LayoutGrid,
   MessageSquare,
   Plus,
+  Rocket,
+  Settings,
+  Sparkles,
 } from "@wso2/oxygen-ui-icons-react";
+import { useAlerts } from "../../issues/useAlerts";
 import type { ShellScope } from "../scope";
 import { RAIL_WIDTH } from "../layout";
 import { RailUserMenu } from "./RailUserMenu";
@@ -33,6 +42,7 @@ import { RailUserMenu } from "./RailUserMenu";
 // MUI's polymorphic `component={Link}` does not typecheck against the router's
 // typed `to`/`params`; createLink is the adapter (as in the old console).
 const RailLink = createLink(IconButton);
+const LogoLink = createLink(Link);
 
 function railButtonSx(active: boolean): SxProps<Theme> {
   return {
@@ -74,8 +84,12 @@ function RailTip({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /**
- * The dark activity rail: brand, New project, Projects; inside a project also
- * Spec and Design; then the chat toggle and the user menu at the bottom.
+ * The dark activity rail: the logo (home: the Dashboard, with a count of the
+ * Alerts that need a person), New project, Projects, Skills, Resources; inside a project also
+ * its Overview, Spec, Design, Builds, Validation, Deploy and Issues; then the
+ * chat toggle, Settings (the org's card, over
+ * the Dashboard) and the user menu at the bottom. The rail takes you to Pages; a Card opens from what a Page
+ * shows, save the few the rail names.
  */
 export function ActivityRail({
   scope,
@@ -83,12 +97,20 @@ export function ActivityRail({
   onToggleChat,
 }: {
   scope: ShellScope;
-  /** Null where there is no chat to toggle (org level). */
+  /** Null where there is no chat to toggle (New project, which is itself a prompt). */
   chatOpen: boolean | null;
   onToggleChat: () => void;
 }) {
   const project = scope.kind === "project" ? scope : null;
-  const onPage = (page: "projects" | "new") => scope.kind === "org" && scope.page === page;
+  // An org Page is current only with no card over it: Settings open over the
+  // Dashboard makes Settings the active item, not the logo.
+  const onPage = (page: "dashboard" | "projects" | "new") =>
+    scope.kind === "org" && scope.page === page && scope.card === null;
+  const settingsOpen = scope.kind === "org" && scope.card === "settings";
+  // Skills and Resources stay current with one of their cards open over them.
+  const onOrgPage = (page: "skills" | "resources") => scope.kind === "org" && scope.page === page;
+  const needsYou = useAlerts().needsPerson;
+  const home = needsYou > 0 ? `Dashboard, ${needsYou} need${needsYou === 1 ? "s" : ""} you` : "Dashboard";
 
   return (
     <Box
@@ -108,36 +130,71 @@ export function ActivityRail({
         zIndex: (t) => t.zIndex.appBar,
       }}
     >
-      <Box
-        aria-label="Agentic Engineer"
-        role="img"
-        sx={{
-          width: 32,
-          height: 32,
-          mb: 1,
-          borderRadius: 2,
-          bgcolor: "primary.main",
-          color: "primary.contrastText",
-          display: "grid",
-          placeItems: "center",
-          fontFamily: "monospace",
-          fontWeight: 600,
-        }}
-      >
-        ae
-      </Box>
+      {/* The logo is the way home: it opens the Dashboard. */}
+      <RailTip label={home}>
+        <Badge
+          badgeContent={needsYou}
+          color="warning"
+          max={99}
+          overlap="rectangular"
+          slotProps={{ badge: { "aria-hidden": true } }}
+          sx={{ mb: 1, "& .MuiBadge-badge": { pointerEvents: "none" } }}
+        >
+          <LogoLink
+            to="/"
+            aria-label={home}
+            aria-current={onPage("dashboard") ? "page" : undefined}
+            underline="none"
+            sx={{
+              width: 32,
+              height: 32,
+              borderRadius: 2,
+              bgcolor: "primary.main",
+              color: "primary.contrastText",
+              display: "grid",
+              placeItems: "center",
+              fontFamily: "monospace",
+              fontWeight: 600,
+              textDecoration: "none",
+              "&:focus-visible": { outline: "2px solid var(--aep-shell-rail-active)", outlineOffset: 2 },
+            }}
+          >
+            ae
+          </LogoLink>
+        </Badge>
+      </RailTip>
       <RailTip label="New project">
         <RailLink to="/projects/new" aria-label="New project" sx={railButtonSx(onPage("new"))}>
           <Plus size={20} />
         </RailLink>
       </RailTip>
       <RailTip label="Projects">
-        <RailLink to="/" aria-label="Projects" sx={railButtonSx(onPage("projects"))}>
+        <RailLink to="/projects" aria-label="Projects" sx={railButtonSx(onPage("projects"))}>
           <LayoutGrid size={20} />
+        </RailLink>
+      </RailTip>
+      <RailTip label="Skills">
+        <RailLink to="/skills" aria-label="Skills" sx={railButtonSx(onOrgPage("skills"))}>
+          <Sparkles size={20} />
+        </RailLink>
+      </RailTip>
+      <RailTip label="Resources">
+        <RailLink to="/resources" aria-label="Resources" sx={railButtonSx(onOrgPage("resources"))}>
+          <Boxes size={20} />
         </RailLink>
       </RailTip>
       {project && (
         <>
+          <RailTip label="Overview">
+            <RailLink
+              to="/projects/$projectName"
+              params={{ projectName: project.projectName }}
+              aria-label="Overview"
+              sx={railButtonSx(project.page === "overview" && project.card === null)}
+            >
+              <House size={20} />
+            </RailLink>
+          </RailTip>
           <RailTip label="Spec">
             <RailLink
               to="/projects/$projectName/spec"
@@ -158,6 +215,46 @@ export function ActivityRail({
               <Layers size={20} />
             </RailLink>
           </RailTip>
+          <RailTip label="Builds">
+            <RailLink
+              to="/projects/$projectName/builds"
+              params={{ projectName: project.projectName }}
+              aria-label="Builds"
+              sx={railButtonSx(project.page === "builds")}
+            >
+              <Hammer size={20} />
+            </RailLink>
+          </RailTip>
+          <RailTip label="Validation">
+            <RailLink
+              to="/projects/$projectName/validations"
+              params={{ projectName: project.projectName }}
+              aria-label="Validation"
+              sx={railButtonSx(project.page === "validations")}
+            >
+              <ClipboardCheck size={20} />
+            </RailLink>
+          </RailTip>
+          <RailTip label="Deploy">
+            <RailLink
+              to="/projects/$projectName/deploy"
+              params={{ projectName: project.projectName }}
+              aria-label="Deploy"
+              sx={railButtonSx(project.page === "deploy")}
+            >
+              <Rocket size={20} />
+            </RailLink>
+          </RailTip>
+          <RailTip label="Issues">
+            <RailLink
+              to="/projects/$projectName/issues"
+              params={{ projectName: project.projectName }}
+              aria-label="Issues"
+              sx={railButtonSx(project.page === "issues")}
+            >
+              <CircleDot size={20} />
+            </RailLink>
+          </RailTip>
         </>
       )}
       <Box sx={{ flex: 1 }} />
@@ -173,6 +270,16 @@ export function ActivityRail({
           </IconButton>
         </RailTip>
       )}
+      <RailTip label="Settings">
+        <RailLink
+          to="/settings"
+          aria-label="Settings"
+          aria-current={settingsOpen ? "page" : undefined}
+          sx={railButtonSx(settingsOpen)}
+        >
+          <Settings size={20} />
+        </RailLink>
+      </RailTip>
       <RailUserMenu />
     </Box>
   );

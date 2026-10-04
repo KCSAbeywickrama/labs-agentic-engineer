@@ -43,7 +43,8 @@ an area before changing it.
   the frame (rail, chat slot, main outlet) and the route→scope mapping the
   rail and chat read.
 - `src/components/`: app-wide primitives copied from the old console
-  (`ErrorBoundary`, `EmptyState`).
+  (`ErrorBoundary`, `EmptyState`). `src/lib/`: small app-wide helpers with no
+  UI (`stamp.ts`, how a time is shown).
 - `src/routes/`: TanStack file routes; `src/generated/` is codegen, gitignored.
 - `src/mocks/`: MSW handlers and fixtures for mock mode. Dev-only; never in a
   production build.

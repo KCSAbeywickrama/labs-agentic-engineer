@@ -21,7 +21,10 @@ import { routeTree } from "./generated/routeTree.gen";
 
 // Module-scoped so non-component code (the OIDC sign-in callback) can
 // navigate without a hook.
-export const router = createRouter({ routeTree });
+// An unknown address is the root's to answer (its not-found Page, in the
+// shell's main area), never a project's: `/projects/acme-expenses/tasks/14`
+// would otherwise land on that project's overview with nothing said.
+export const router = createRouter({ routeTree, notFoundMode: "root" });
 
 declare module "@tanstack/react-router" {
   interface Register {

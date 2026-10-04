@@ -19,10 +19,15 @@
 import { setupWorker } from "msw/browser";
 import { buildsHandlers } from "./handlers/builds";
 import { conversationHandlers } from "./handlers/conversation";
+import { deployHandlers } from "./handlers/deploy";
 import { designHandlers } from "./handlers/design";
+import { issuesHandlers } from "./handlers/issues";
 import { projectsHandlers } from "./handlers/projects";
+import { resourcesHandlers } from "./handlers/resources";
 import { settingsHandlers } from "./handlers/settings";
+import { skillsHandlers } from "./handlers/skills";
 import { specHandlers } from "./handlers/spec";
+import { usageHandlers } from "./handlers/usage";
 
 // Mock mode's worker. Each screen adds its handlers here as it is built.
 export const worker = setupWorker(
@@ -31,5 +36,10 @@ export const worker = setupWorker(
   ...specHandlers,
   ...designHandlers,
   ...buildsHandlers,
+  ...deployHandlers,
+  ...issuesHandlers,
   ...settingsHandlers,
+  ...skillsHandlers,
+  ...resourcesHandlers,
+  ...usageHandlers,
 );

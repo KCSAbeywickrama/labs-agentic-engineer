@@ -111,6 +111,11 @@ platform, it is the organization's **publisher client**, not a per-cycle token
 and not the design agent.
 _Avoid_: builder, implementer agent, runner (the runner is the pod it executes in).
 
+**Skill agent**:
+The agent that changes a skill with the user, on its Skill card: it edits the card's
+draft, and the user saves it. It reads and writes skills; it does not design or build.
+_Avoid_: skill editor (the editor is what the user types in).
+
 **Publisher client**:
 The organization's confidential Thunder OAuth application. The coding agent is
 this client when it calls the platform. One per organization, reused across
@@ -453,6 +458,45 @@ A short-lived MCP token minted for a human driving the playground locally,
 via an endpoint that exists only when explicitly enabled in a local deployment.
 Scoped to one org; minted fresh per turn. Never part of the production
 authentication story (which remains an open decision).
+
+## Console (`apps/console`)
+
+**Page**:
+A console screen that shows an org entity or a list of them: the Dashboard, the
+Projects list, the Skills and Resources lists; in a project, its overview, build
+history, the Validation ledger, Deploy and Issues.
+_Avoid_: view, screen.
+
+**Card**:
+One entity opened with the agent, over the Page that lists it: to change it, or,
+when it is not the organization's to change, to read and ask about it. Examples: a
+project's Spec or Design (over the overview), a Build (over build history), a
+version's Validation, an Issue, an environment's Configure (over Deploy), a
+Skill, a Resource, the org's Settings. It has its own address, and opening it
+sets the Turn scope where the Card has one; a Build, a Validation or an Issue
+has none yet.
+_Avoid_: modal, dialog, Panel (a different thing).
+
+**Panel**:
+A small window over a Page for one short task, used without the agent: the build
+picker, Try it. It has no address and leaves the Turn scope as it was.
+_Avoid_: Card, modal.
+
+**Conversation**:
+The chat thread that belongs to one entity: a project, a Skill, a Resource, or the
+organization. The chat shows the Conversation of the entity in view.
+_Avoid_: session, chat (the chat is the panel that shows a Conversation).
+
+**Turn scope**:
+What one turn of a Conversation is about, set by the Card in view: a feature, the
+whole product, the design review. It focuses the agent and fences nothing.
+_Avoid_: scope on its own (Resource scope is a different thing), anchor.
+
+**Dashboard**:
+The user's home Page, opened from the logo and shown after sign-in when the
+organization has projects. It holds the Alerts: the issues, across all projects,
+that need a person.
+_Avoid_: home, overview (the overview is a project's Page).
 
 ## Project overview
 

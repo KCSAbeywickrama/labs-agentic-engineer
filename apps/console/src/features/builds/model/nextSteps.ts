@@ -19,17 +19,19 @@
 import type { NoteAction } from "../../agent-chat/chatLog";
 import type { FeatureResults, ValidationOutcome } from "./validation";
 
-// What a finished build offers next, on the Builds card and in the chat, so
-// no finished state is a dead end: a failing scenario offers its fix (or the
-// build already fixing it); a version that passes offers trying it in
-// development and the next feature to interview, or the newer version when
-// there is one. The chat keeps out of the way: one line when a build starts,
-// one when it ends, each linking to the card.
+// What a finished build offers next, on the Validation and Build cards and in
+// the chat, so no finished state is a dead end: a failing scenario offers its
+// fix (or the build already fixing it); a version that passes offers the next
+// feature to interview, or the newer version when there is one. Fix lives on
+// the version's Validation card, beside the scenarios it fixes, so the Build
+// card points there instead. The chat keeps out of the way: one line when a
+// build starts, one when it ends, each linking to the build.
 
 export type NextStep =
   | { kind: "fix"; label: string; version: string; stories: string[] }
   | { kind: "story"; label: string; story: string }
   | { kind: "open"; label: string; version: string }
+  | { kind: "validation"; label: string; version: string }
   | { kind: "interview"; label: string; featureId: string };
 
 export interface NextInput {
@@ -88,6 +90,15 @@ export function nextSteps(input: NextInput): NextSteps {
         : []),
     ],
   };
+}
+
+/**
+ * The next steps as the Build card offers them: a fix, and the failing story,
+ * are the Validation card's, so a failing version points to its validation.
+ */
+export function buildCardSteps(next: NextSteps, version: string): NextSteps {
+  if (!next.steps.some((s) => s.kind === "fix")) return next;
+  return { note: next.note, steps: [{ kind: "validation", label: `See what failed in ${version}`, version }] };
 }
 
 /** The chat's line once a build has started, linking to it on the card. */

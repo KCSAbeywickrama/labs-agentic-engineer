@@ -86,7 +86,14 @@ export type ArtifactSource =
   /** The cell architecture (@aep/ui-cell-diagram-view). */
   | { kind: "architecture"; cell: string }
   /** A component's design.json and its API contract (@aep/ui-design-view, @aep/ui-openapi-view). */
-  | { kind: "contract"; design: string; openapi: string | null; roles?: ScopeRoles }
+  | {
+      kind: "contract";
+      design: string;
+      openapi: string | null;
+      roles?: ScopeRoles;
+      /** The organization's Registered External resources the component's dependencies reuse, by name. */
+      resources?: string[];
+    }
   | { kind: "security"; rows: { subject: string; rule: string }[] }
   /** A feature's acceptance file, Gherkin with rules tagged `@story-F2.3` (@aep/ui-acceptance-view). */
   | { kind: "acceptance"; path: string; content: string }

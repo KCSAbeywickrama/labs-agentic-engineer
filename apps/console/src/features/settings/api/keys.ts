@@ -19,9 +19,3 @@
 export const configKeys = {
   all: ["config"] as const,
 };
-
-export const skillsKeys = {
-  all: ["skills"] as const,
-  lists: () => [...skillsKeys.all, "list"] as const,
-  updates: () => [...skillsKeys.all, "updates"] as const,
-};

@@ -20,10 +20,11 @@ import type { components } from "../../../generated/aep-api";
 import type { ProjectBuild } from "../api/builds";
 import type { ValidationOutcome } from "./validation";
 
-// The Builds card's version ledger, down its side: every version built, newest
+// Build history, the project's version ledger: every version built, newest
 // first, as today's ledger read lists them (list-project-builds), each with
-// what the provisional builds list adds (the features it built, the version a
-// repair build fixes), and the line under it: building, passing, N failing.
+// what the builds list adds (the features it built, the version a repair
+// build fixes), when it ran, and its state in a few words: building,
+// passing, N failing.
 
 type BuildSummary = components["schemas"]["BuildSummary"];
 
@@ -38,11 +39,14 @@ export interface VersionRow {
   featureIds: string[];
   /** Failing scenarios its latest validation found that passed in the version before (B4). */
   regressions: number;
+  startedAt: string;
+  /** Null while it builds. */
+  completedAt: string | null;
 }
 
 /** The ledger's rows, newest first, as the ledger read orders them. */
 export function versionRows(
-  summaries: Pick<BuildSummary, "tag" | "status" | "regressions">[],
+  summaries: Pick<BuildSummary, "tag" | "status" | "regressions" | "startedAt" | "completedAt">[],
   builds: Pick<ProjectBuild, "version" | "fixes" | "features">[],
 ): VersionRow[] {
   return summaries.map((s) => {
@@ -54,13 +58,10 @@ export function versionRows(
       features: build?.features.map((f) => f.name) ?? [],
       featureIds: build?.features.map((f) => f.id) ?? [],
       regressions: s.regressions ?? 0,
+      startedAt: s.startedAt,
+      completedAt: s.completedAt ?? null,
     };
   });
-}
-
-/** The version the card shows: the one asked for when the ledger has it, else the newest. */
-export function selectedRow(rows: VersionRow[], requested: string | undefined): VersionRow | undefined {
-  return rows.find((r) => r.version === requested) ?? rows[0];
 }
 
 export function isBuilding(status: BuildSummary["status"]): boolean {

@@ -21,6 +21,7 @@ import { Outlet, useMatches, useNavigate, useRouterState, useSearch } from "@tan
 import { Box } from "@wso2/oxygen-ui";
 import { ErrorBoundary } from "../../../components/ErrorBoundary";
 import { ChatPanel } from "../../agent-chat/components/ChatPanel";
+import { OrgChatPanel } from "../../agent-chat/components/OrgChatPanel";
 import { useRefreshOnTurnEnd } from "../../agent-chat/useProjectChat";
 import { ChatPanelContext, type ChatPanelControls } from "../chatPanel";
 import { shellScope } from "../scope";
@@ -34,11 +35,12 @@ function atPhoneWidth(): boolean {
 }
 
 /**
- * The app's frame: the activity rail, the project's chat panel, and the main
+ * The app's frame: the activity rail, the chat panel, and the main
  * area where the routes draw (a base page, and a card over it).
  *
- * The chat exists only inside a project: the Projects grid and New project
- * have no org-level chat. It starts open on a wide screen, beside the page in
+ * The chat follows the entity in view: inside a project it is the project's
+ * conversation; on an org Page it is the organization's, which is not available
+ * yet and shows as such. It starts open on a wide screen, beside the page in
  * the golden ratio and resizable (`useChatWidth`), and closed at phone width,
  * where it opens as an overlay beside the rail.
  */
@@ -54,7 +56,10 @@ export function Shell() {
 
   const [chatOpen, setChatOpen] = useState(() => !atPhoneWidth());
   const project = scope.kind === "project" ? scope : null;
-  const chatShown = project !== null && chatOpen;
+  // New project is itself a prompt (its words become the project's first
+  // message), so no second, inert composer sits beside it.
+  const onNewProject = scope.kind === "org" && scope.page === "new";
+  const chatShown = chatOpen && !onNewProject;
 
   const chatWidth = useChatWidth();
   const chatControls = useMemo<ChatPanelControls>(() => ({ open: () => setChatOpen(true) }), []);
@@ -67,7 +72,8 @@ export function Shell() {
   // honouring it under a card would move the user.
   const navigate = useNavigate();
   const chatParam = useSearch({ from: "/projects/$projectName", shouldThrow: false })?.chat;
-  const arrivingProject = project && project.card === null && chatParam === "open" ? project.projectName : null;
+  const arrivingProject =
+    project && project.page === "overview" && project.card === null && chatParam === "open" ? project.projectName : null;
   useEffect(() => {
     if (!arrivingProject) return;
     setChatOpen(true);
@@ -87,7 +93,7 @@ export function Shell() {
       <Box sx={{ display: "flex", height: "100vh", overflow: "hidden", position: "relative", bgcolor: "background.default" }}>
         <ActivityRail
           scope={scope}
-          chatOpen={project ? chatOpen : null}
+          chatOpen={onNewProject ? null : chatOpen}
           onToggleChat={() => setChatOpen((v) => !v)}
         />
         {chatShown && (
@@ -115,16 +121,21 @@ export function Shell() {
                 a throw here leaves the page usable. A new project resets it. */}
             <ErrorBoundary
               label="The chat panel"
-              resetKey={project.projectName}
+              resetKey={project?.projectName ?? "org"}
               fill
               fallbackSx={{ height: "100%" }}
             >
-              <ChatPanel
-                projectName={project.projectName}
-                card={project.card}
-                specFile={project.specFile}
-                onClose={() => setChatOpen(false)}
-              />
+              {project ? (
+                <ChatPanel
+                  projectName={project.projectName}
+                  page={project.page}
+                  card={project.card}
+                  specFile={project.specFile}
+                  onClose={() => setChatOpen(false)}
+                />
+              ) : (
+                <OrgChatPanel onClose={() => setChatOpen(false)} />
+              )}
             </ErrorBoundary>
             <ChatResizeHandle width={chatWidth.width} onResize={chatWidth.resizeTo} onReset={chatWidth.reset} />
           </Box>

@@ -21,7 +21,7 @@ import { Box, Breadcrumbs, IconButton, InputBase, Tooltip, Typography } from "@w
 import { ArrowRight, PanelLeftClose } from "@wso2/oxygen-ui-icons-react";
 import { useSession } from "../../../auth/SessionContext";
 import { projectLabel, useProject } from "../../projects/api/queries";
-import { cardTitle, chatTopic, type ProjectCard } from "../../shell/scope";
+import { cardTitle, chatTopic, pageTitle, type ProjectCard, type ProjectPage } from "../../shell/scope";
 import { useSpecFeature } from "../../spec/useSpecWorkspace";
 import { turnScopeFor, type TurnScope } from "../turnScope";
 import { canSend, chatStore, useProjectChat } from "../useProjectChat";
@@ -31,12 +31,22 @@ import { Thread } from "./Thread";
 // (the breadcrumb), the thread, and the composer. What a message is about
 // follows from where the user is, and goes with every turn sent from here.
 
-function ScopeCrumb({ projectName, card }: { projectName: string; card: ProjectCard | null }) {
+function ScopeCrumb({
+  projectName,
+  page,
+  card,
+}: {
+  projectName: string;
+  page: ProjectPage;
+  card: ProjectCard | null;
+}) {
   const { orgHandle } = useSession();
   const project = useProject(projectName);
   const segments = [
     orgHandle ?? "Organization",
     project.data ? projectLabel(project.data) : projectName,
+    // The overview is the project itself; any other Page is named.
+    ...(page !== "overview" ? [pageTitle(page)] : []),
     ...(card ? [cardTitle(card)] : []),
   ];
   return (
@@ -172,11 +182,14 @@ function Composer({
 /** The chat panel: scope breadcrumb, the project's thread, and the composer. */
 export function ChatPanel({
   projectName,
+  page,
   card,
   specFile,
   onClose,
 }: {
   projectName: string;
+  /** The project Page in view, under any card. */
+  page: ProjectPage;
   card: ProjectCard | null;
   /** The spec card's open file; a feature narrows what the chat is about. */
   specFile: string | null;
@@ -203,7 +216,7 @@ export function ChatPanel({
           borderColor: "divider",
         }}
       >
-        <ScopeCrumb projectName={projectName} card={card} />
+        <ScopeCrumb projectName={projectName} page={page} card={card} />
         <Tooltip title="Hide agent chat">
           <IconButton size="small" aria-label="Hide agent chat" onClick={onClose}>
             <PanelLeftClose size={16} />

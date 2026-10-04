@@ -19,7 +19,7 @@
 import { describe, expect, it } from "vitest";
 import type { PickRow } from "../../builds/model/picker";
 import type { DesignComment } from "../../design/api/designModel";
-import { projectTrack, type TrackInput } from "./track";
+import { deployLeg, projectTrack, type TrackInput } from "./track";
 
 // The track follows the Acme Expenses walk: each leg's lamp and line read the
 // same state as the feature rows, the design card and the build picker.
@@ -63,6 +63,7 @@ const beforeDesign: TrackInput = {
   builds: [],
   latestOutcome: null,
   offer: { version: "v1", rows: [row("F1", "disabled"), row("F2", "disabled")] },
+  deploy: { status: "none", version: "" },
 };
 
 const designed: TrackInput = {
@@ -187,5 +188,20 @@ describe("the build leg", () => {
   it("waits on a failed build", () => {
     const failed = { ...designed, builds: [{ version: "v1", status: "failed" as const }] };
     expect(projectTrack(failed).build).toEqual({ state: "waiting", summary: "v1 failed" });
+  });
+});
+
+describe("the deploy leg", () => {
+  it("is not yet until a build has deployed", () => {
+    expect(projectTrack(beforeDesign).deploy).toEqual({ state: "notyet", summary: "Not yet" });
+  });
+
+  it("follows the newest build's rollout to the first environment", () => {
+    expect(deployLeg({ status: "deploying", version: "v2" })).toEqual({ state: "live", summary: "Deploying v2" });
+    expect(deployLeg({ status: "deployed", version: "v2" })).toEqual({ state: "done", summary: "v2 deployed" });
+  });
+
+  it("waits on the user when the rollout failed", () => {
+    expect(deployLeg({ status: "failed", version: "v2" })).toEqual({ state: "waiting", summary: "v2 failed to deploy" });
   });
 });

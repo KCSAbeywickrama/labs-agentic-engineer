@@ -17,7 +17,8 @@
  */
 
 import { useEffect, useMemo } from "react";
-import { Alert, Box } from "@wso2/oxygen-ui";
+import { createLink } from "@tanstack/react-router";
+import { Alert, Box, Link, Typography } from "@wso2/oxygen-ui";
 import { AcceptanceView } from "@aep/ui-acceptance-view";
 import { CellDiagramView } from "@aep/ui-cell-diagram-view";
 import { DesignView } from "@aep/ui-design-view";
@@ -35,6 +36,8 @@ import type { ArtifactSource } from "../../api/designModel";
 // where render throws have been seen.
 
 type Source<K extends ArtifactSource["kind"]> = Extract<ArtifactSource, { kind: K }>;
+
+const ResourceLink = createLink(Link);
 
 /** A canvas viewer fills a flex column; this gives it one of a fixed height. */
 const canvasSx = {
@@ -82,10 +85,26 @@ export function ArchitectureArtifact({ source, layoutKey }: { source: Source<"ar
   );
 }
 
-/** A component: its design (DesignView), then its API contract with who may call what (OpenApiView). */
+/**
+ * A component: the organization's resources it reuses, each opening its
+ * Resource card; its design (DesignView); then its API contract with who may
+ * call what (OpenApiView).
+ */
 export function ContractArtifact({ source }: { source: Source<"contract"> }) {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {(source.resources ?? []).length > 0 && (
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+          <Typography variant="body2" color="text.secondary">
+            Reuses the organization&apos;s
+          </Typography>
+          {(source.resources ?? []).map((name) => (
+            <ResourceLink key={name} to="/resources/$name" params={{ name }} variant="body2">
+              {name}
+            </ResourceLink>
+          ))}
+        </Box>
+      )}
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 2.5, overflow: "hidden" }}>
         <DesignView design={source.design} />
       </Box>

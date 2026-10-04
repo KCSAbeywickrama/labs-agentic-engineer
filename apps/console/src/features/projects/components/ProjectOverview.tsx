@@ -16,22 +16,62 @@
  * under the License.
  */
 
+import { useState } from "react";
 import { createLink } from "@tanstack/react-router";
-import { Box, Button, Link, Skeleton, Typography } from "@wso2/oxygen-ui";
-import { GitHub } from "@wso2/oxygen-ui-icons-react";
+import { Box, Button, IconButton, Link, ListItemIcon, ListItemText, Menu, MenuItem, Skeleton, Typography } from "@wso2/oxygen-ui";
+import { EllipsisVertical, GitHub, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { EmptyState } from "../../../components/EmptyState";
 import { BuildButton } from "../../builds/components/BuildButton";
 import { ProjectFeatures } from "../../spec/components/ProjectFeatures";
-import { projectLabel, useProject } from "../api/queries";
+import { projectLabel, useProject, type Project } from "../api/queries";
 import { repoLabel } from "../repo";
+import { DeleteProjectPanel } from "./DeleteProjectPanel";
+import { OverviewArchitecture } from "./OverviewArchitecture";
+import { OverviewComponents } from "./OverviewComponents";
 import { Track } from "./Track";
 
 const ButtonLink = createLink(Button);
 
+/** The overview's menu: what is done to the project as a whole (today, delete it). */
+function ProjectMenu({ project }: { project: Project }) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  return (
+    <>
+      <IconButton aria-label="Project actions" size="small" onClick={(e) => setAnchor(e.currentTarget)}>
+        <EllipsisVertical size={18} />
+      </IconButton>
+      <Menu anchorEl={anchor} open={anchor !== null} onClose={() => setAnchor(null)}>
+        <MenuItem
+          onClick={() => {
+            setAnchor(null);
+            setDeleting(true);
+          }}
+        >
+          <ListItemIcon>
+            <Trash2 size={16} />
+          </ListItemIcon>
+          <ListItemText>Delete project</ListItemText>
+        </MenuItem>
+      </Menu>
+      {deleting && <DeleteProjectPanel project={project} onClose={() => setDeleting(false)} />}
+    </>
+  );
+}
+
+function SectionHeading({ id, children }: { id: string; children: string }) {
+  return (
+    <Typography id={id} component="h2" sx={{ fontSize: "0.8125rem", fontWeight: 600, mb: 1 }}>
+      {children}
+    </Typography>
+  );
+}
+
 /**
  * A project's base page: its name and repository (with Build v1 once
- * something is designed), the track, and the features (the spec workspace's
- * rows). Cards open over it.
+ * something is designed, and the project's menu), the track, the features
+ * (the spec workspace's rows), the architecture and the components, each of
+ * which can be tried. Cards open over it.
  */
 export function ProjectOverview({ projectName }: { projectName: string }) {
   const project = useProject(projectName);
@@ -46,7 +86,7 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
             <Button variant="outlined" onClick={() => void project.refetch()}>
               Try again
             </Button>
-            <ButtonLink to="/" variant="text">
+            <ButtonLink to="/projects" variant="text">
               All projects
             </ButtonLink>
           </Box>
@@ -83,13 +123,19 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
           )}
         </Box>
         <BuildButton projectName={projectName} />
+        {project.data && <ProjectMenu project={project.data} />}
       </Box>
       <Track projectName={projectName} />
-      <Box component="section" aria-labelledby="features-heading">
-        <Typography id="features-heading" component="h2" sx={{ fontSize: "0.8125rem", fontWeight: 600, mb: 1 }}>
-          Features
-        </Typography>
-        <ProjectFeatures projectName={projectName} />
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 3.5 }}>
+        <Box component="section" aria-labelledby="features-heading">
+          <SectionHeading id="features-heading">Features</SectionHeading>
+          <ProjectFeatures projectName={projectName} />
+        </Box>
+        <OverviewArchitecture projectName={projectName} />
+        <Box component="section" aria-labelledby="components-heading">
+          <SectionHeading id="components-heading">Components</SectionHeading>
+          <OverviewComponents projectName={projectName} />
+        </Box>
       </Box>
     </>
   );

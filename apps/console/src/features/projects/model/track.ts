@@ -21,13 +21,14 @@ import type { ValidationOutcome } from "../../builds/model/validation";
 import type { BuildOffer } from "../../builds/model/picker";
 import type { DesignComment, DesignModel } from "../../design/api/designModel";
 import type { DesignQueue, FeatureView } from "../../spec/model/workspace";
+import type { DeployStage } from "../../deploy/api/deploy";
 
 // Where the project is, leg by leg, worked out from what the rest of the page
 // already reads: the spec workspace (the model and the live documents), the
-// design review, and the builds with the offer made from them. Pure, and read
-// from the same state as the feature rows, the design card and the build
-// picker, so the track can never say something they do not. Deploy has no
-// state yet, so it is not here: it is always "not yet" (trackLegs.ts).
+// design review, the builds with the offer made from them, and the project's
+// deploy aggregate. Pure, and read from the same state as the feature rows,
+// the design card, the build picker and the Deploy Page, so the track can
+// never say something they do not.
 
 /** A leg's status lamp: finished, running now, waiting on the user, or not started. */
 export type LegState = "done" | "live" | "waiting" | "notyet";
@@ -42,6 +43,7 @@ export interface ProjectTrack {
   spec: TrackLeg;
   design: TrackLeg;
   build: TrackLeg;
+  deploy: TrackLeg;
 }
 
 export interface TrackInput {
@@ -56,6 +58,8 @@ export interface TrackInput {
   /** The newest build's validation, once it has finished; null before then or while it loads. */
   latestOutcome: Pick<ValidationOutcome, "passed" | "total" | "failing"> | null;
   offer: Pick<BuildOffer, "rows" | "version">;
+  /** The deploy aggregate: the rollout of the newest build to the pipeline's first environment. */
+  deploy: Pick<DeployStage, "status" | "version">;
 }
 
 const NOT_YET: TrackLeg = { state: "notyet", summary: "Not yet" };
@@ -132,6 +136,30 @@ export function buildLeg(input: Pick<TrackInput, "builds" | "offer" | "latestOut
   };
 }
 
+/**
+ * Deploy: the rollout of the newest build to the first environment, where
+ * every build lands by itself. A failed rollout waits on the user; nothing
+ * deployed yet is not yet.
+ */
+export function deployLeg(deploy: TrackInput["deploy"]): TrackLeg {
+  const version = deploy.version;
+  switch (deploy.status) {
+    case "deploying":
+      return { state: "live", summary: version ? `Deploying ${version}` : "Deploying" };
+    case "failed":
+      return { state: "waiting", summary: version ? `${version} failed to deploy` : "Deploy failed" };
+    case "deployed":
+      return { state: "done", summary: version ? `${version} deployed` : "Deployed" };
+    default:
+      return NOT_YET;
+  }
+}
+
 export function projectTrack(input: TrackInput): ProjectTrack {
-  return { spec: specLeg(input.features), design: designLeg(input), build: buildLeg(input) };
+  return {
+    spec: specLeg(input.features),
+    design: designLeg(input),
+    build: buildLeg(input),
+    deploy: deployLeg(input.deploy),
+  };
 }

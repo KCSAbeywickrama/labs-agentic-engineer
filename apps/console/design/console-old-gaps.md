@@ -16,28 +16,27 @@ their absence is a dead end somewhere else.
 |---|---|---|
 | `aep://spec/<path>` links in agent text open the spec file. Here agent text is plain text, so they show as raw links. | `components/MarkdownView.tsx` (`SPEC_LINK_PREFIX`), `features/agent-chat/components/AgentChatPanel.tsx` | `skills/console`, `skills/architecture` and `skills/design` tell the design turn to emit them |
 | A question option's `action` (`upload-interface`) does something. Here such options are plain answers. | `features/agent-chat/questionCards.ts`, `features/spec/components/SpecQuestionForm.tsx` | `skills/resolve-dependency` ("an option without it is a dead button") |
-| `/settings/credentials` exists. aep-api's GitHub connect flow redirects there (`?connected=app`, `?error=`, `?candidates=`). | `routes/settings.credentials.tsx` | `services/aep-api/internal/organization/org_github_controller.go` (`consoleCredentialsPath`) |
-| WSO2 Cloud billing activation on first sign-in when `BILLING_API_BASE_URL` is set. The entrypoint still writes the key; nothing reads it. | `auth/BillingActivation.tsx`, `api/billing.ts` | the WSO2 Cloud deployment |
-| A version's tasks show the newest issue comment's first line as their status. | `features/builds/lib/taskRow.ts` | `runners/remote-worker` ADR-0010 ("the issue is the status line") |
-| Old deep links redirect: `/builds/<number>` → task, `/builds?tag=vN`, `/tasks/` → builds, `/marketplace` → `/resources`, `/settings` → `/settings/credentials`, spec `?generate=design` / `?view=architecture` / `?file=specs/…`, prototype `?screen=` / `?flow=`. | `routes/projects.$projectName.builds.$tag.tsx` and the other route files | links already in GitHub threads, comments and bookmarks |
+| `/settings/credentials` exists. aep-api's GitHub connect flow redirects there (`?connected=app`, `?error=`, `?candidates=`); here it falls to the not-found Page, and the Settings card (`/settings`) rotates a PAT but has no App connect. | `routes/settings.credentials.tsx` | `services/aep-api/internal/organization/org_github_controller.go` (`consoleCredentialsPath`) |
+| Old deep links redirect: `/builds/<number>` → task, `/builds?tag=vN`, `/tasks/` → builds, `/marketplace` → `/resources`, spec `?generate=design` / `?view=architecture` / `?file=specs/…`, prototype `?screen=` / `?flow=`. | `routes/projects.$projectName.builds.$tag.tsx` and the other route files | links already in GitHub threads, comments and bookmarks |
 
 ## Pages and capabilities
 
 | Area | In console-old | Here today |
 |---|---|---|
-| **Deploy**: environment pipeline, promote, environment page with Try it (web app with test users, service OpenAPI, agent chat, Agent Manager link), connection values, past deployments | `routes/projects.$projectName.deployments.*`, `features/projects/components/Deployments*`, `EnvironmentFlow`, `TryItOut`, `PromoteDialog`, `ConnectionValuesDialog`, `TestUsersDialog` | the track's Deploy leg is always "Not yet" (this app's `features/projects/trackLegs.ts`) |
-| **Settings, GitHub**: rotate the PAT, disconnect (with uninstall) | `features/settings/components/GitHubCredentialCard.tsx` | connect only, in onboarding |
-| **Settings, AI agents**: edit and test the model connection | `features/settings/components/AiAgentsCard.tsx`, `ModelConnectionRow.tsx` | onboarding, and again when the key is disconnected |
-| **Settings, skills library**: search, view, create, edit, delete, enable, import, platform-update sync and review | `routes/settings.skills.tsx`, `features/settings/components/SkillsSection.tsx` and its dialogs | one sync during onboarding |
-| **Usage**: agent spend per project | `routes/settings.usage.tsx`, `features/usage/` | none |
-| **Resources**: the org's platform resource types and external resources; register, edit, promote a project's resource to the org | `routes/resources*.tsx`, `features/marketplace/` | none |
-| **Endpoints**: what other projects offer | `routes/endpoints.tsx`, `features/marketplace/components/EndpointsPage.tsx` | none |
-| **Alerts**: SRE agent incident analyses, with a notification bell | `routes/alerts*.tsx`, `features/alerts/`, `layouts/NotificationBell.tsx` | none |
-| **Issues**: a project's GitHub issues (incidents, coding-agent handoffs) with an unread badge | `routes/projects.$projectName.issues.tsx`, `features/issues/` | none |
-| **Task logs**: one issue's live log | `routes/projects.$projectName.tasks.*`, `features/tasks/` | the Builds card shows steps and their logs, not tasks |
-| **Build detail**: task list, crew timeline, provisioning gates, cancel a run | `features/builds/` | the Builds card's run view, without those |
-| **Validation**: the ledger of versions, every attempt's report and log, revalidate | `routes/projects.$projectName.validations.*`, `features/validation/` | the newest attempt, by feature, in the Builds card |
-| **Overview panels**: architecture diagram, components with their OpenAPI, dependencies and readiness | `features/projects/components/OverviewArchitecture.tsx`, `DependenciesTable.tsx`, `OverviewDependencies.tsx` | dependencies in the Design card, from the build preflight |
-| **Security matrix editing** (grant patching) | `features/spec/components/SecurityPanel.tsx`, `features/spec/lib/patchGrants.ts` | read-only in the Design card |
-| **Projects grid**: search, paging, delete a project | `routes/index.tsx`, `features/projects/components/DeleteProjectDialog.tsx` | the grid without them |
-| **Header**: org and project switchers, project status badge, footer links | `layouts/AppLayout.tsx`, `layouts/HeaderSwitchers.tsx` | the rail; the org's name in the user menu |
+| **Deploy**: promote (no platform operation; the Deploy Page shows it disabled), each environment's validation step and the deploy-hold state, the version block (milestone, merge commit), the test-user table with scopes and the Thunder Console link | `features/projects/components/EnvironmentFlow`, `PromoteDialog`, `DeploymentEnvironmentPage.tsx`, `TestUsersDialog`, `lib/deploymentFlow.ts` | the Deploy Page (`features/deploy/`): the board, Try it, the Configure card, history from the version ledger |
+| **Skills**: importing a single `SKILL.md` file (here: a tarball, or New skill); the platform-update review console-old only flagged | `features/settings/components/ImportSkillDialog.tsx`, `SkillsSection.tsx` | the Skills Page and Skill card: list, search, kind filter, create, edit, enable, delete, tarball import, Take updates; a skill in conflict is tagged, and its review waits on the API returning the platform's version |
+| **Resources**: editing a record's further-reading docs (kept as they are on Save); registering from a prompt, the agent drafting the record (no resource agent yet) | `features/marketplace/components/ResourceDocsFields.tsx`, `RegisterComposerPage.tsx` | the Resources Page and Resource card: every kind in one list, register, edit, delete, Promote to organization, endpoints read-only |
+| **Alerts**: an RCA report's own page (its full diagnosis and the fix's stages). Nothing writes reports on today's install. | `routes/alerts_.$alertId.tsx`, `features/alerts/components/AlertDetail.tsx` | the Dashboard's Alerts list a report by its summary, opening its issue's card when it has one |
+| **Build detail**: the crew view (each agent's tree and timeline lanes), the External resources section (each dependency's values, edited in place), a build log per session, Copy build ID | `features/builds/components/RunCrew.tsx`, `CrewTimeline.tsx`, `ExternalResources.tsx` | the Build card: tasks with their status lines and logs, the coding agent's log as plain lines per session, component build logs, cancel and retry; a park or a blocked task links to the write target's Configure card |
+| **Validation**: the ledger's state filter, the verdict summary tile with the validation issue's status line, cancel a validation run, View validation issue on GitHub | `features/validation/components/ValidationLedger.tsx`, `ValidationSummaryCard.tsx`, `ValidationMilestonePage.tsx` | the Validation ledger and card: every attempt, by feature, with its report and log; Fix and Revalidate |
+| **Header**: project status badge, footer links | `layouts/AppLayout.tsx`, `layouts/ProjectStatusBadge.tsx` | the rail; the org's name in the user menu |
+
+## Left out by decision
+
+Not gaps: console-old has them and this console will not, so they do not keep
+the folder alive.
+
+| Area | In console-old | Why not here |
+|---|---|---|
+| **Security matrix editing** (grant patching) | `features/spec/components/SecurityPanel.tsx`, `features/spec/lib/patchGrants.ts` | the Design card shows the matrix read-only; a change goes through the design agent |
+| **Org and project switchers** | `layouts/HeaderSwitchers.tsx` | the rail's Projects and the grid's search do the job |

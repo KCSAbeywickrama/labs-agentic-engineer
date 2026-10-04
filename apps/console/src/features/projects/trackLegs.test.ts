@@ -24,20 +24,25 @@ const acme: ProjectTrack = {
   spec: { state: "done", summary: "5 features" },
   design: { state: "waiting", summary: "2 features to design" },
   build: { state: "notyet", summary: "Not yet" },
+  deploy: { state: "notyet", summary: "Not yet" },
 };
 
 describe("trackLegs", () => {
-  it("draws Spec, Design, Build, Deploy in order, each opening its own card", () => {
-    expect(trackLegs(acme).map((l) => [l.step, l.title, l.card])).toEqual([
-      [1, "Spec", "spec"],
-      [2, "Design", "design"],
-      [3, "Build", "builds"],
-      [4, "Deploy", null],
+  it("draws Spec, Design, Build, Deploy in order, each opening its card or Page", () => {
+    expect(trackLegs(acme, null).map((l) => [l.step, l.title, l.opens])).toEqual([
+      [1, "Spec", { kind: "spec" }],
+      [2, "Design", { kind: "design" }],
+      [3, "Build", { kind: "builds" }],
+      [4, "Deploy", { kind: "deploy" }],
     ]);
   });
 
+  it("opens the latest build's card from the Build leg once there is one", () => {
+    expect(trackLegs(acme, "v2")[2]?.opens).toEqual({ kind: "build", version: "v2" });
+  });
+
   it("carries each leg's state and state line from the track", () => {
-    const [spec, design] = trackLegs(acme);
+    const [spec, design] = trackLegs(acme, null);
     expect(spec).toMatchObject({ state: "done", stateLabel: "Done", summary: "5 features" });
     expect(design).toMatchObject({
       state: "waiting",
@@ -46,23 +51,24 @@ describe("trackLegs", () => {
     });
   });
 
-  it("keeps Deploy at not yet whatever the other legs say", () => {
+  it("carries Deploy's state from the track", () => {
     const shipped: ProjectTrack = {
       spec: { state: "done", summary: "" },
       design: { state: "done", summary: "" },
       build: { state: "done", summary: "v1 built" },
+      deploy: { state: "done", summary: "v1 deployed" },
     };
-    expect(trackLegs(shipped)[3]).toMatchObject({ state: "notyet", summary: "Not yet" });
+    expect(trackLegs(shipped, "v1")[3]).toMatchObject({ state: "done", summary: "v1 deployed" });
   });
 });
 
 describe("a leg's accessible name", () => {
   it("says the state in words, then the state line", () => {
-    expect(trackLegs(acme)[1]?.accessibleName).toBe("Design: Waiting on you. 2 features to design");
+    expect(trackLegs(acme, null)[1]?.accessibleName).toBe("Design: Waiting on you. 2 features to design");
   });
 
   it("does not repeat a state line that only restates the state", () => {
-    expect(trackLegs(acme)[2]?.accessibleName).toBe("Build: Not yet");
+    expect(trackLegs(acme, null)[2]?.accessibleName).toBe("Build: Not yet");
   });
 });
 

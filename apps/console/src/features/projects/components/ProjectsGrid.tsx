@@ -16,6 +16,7 @@
  * under the License.
  */
 
+import { useState } from "react";
 import { createLink } from "@tanstack/react-router";
 import {
   Box,
@@ -23,13 +24,16 @@ import {
   Card,
   CardActionArea,
   CircularProgress,
+  SearchBar,
   Typography,
 } from "@wso2/oxygen-ui";
 import { FolderOpen, Plus } from "@wso2/oxygen-ui-icons-react";
 import { useSession } from "../../../auth/SessionContext";
 import { EmptyState } from "../../../components/EmptyState";
+import { useDebouncedValue } from "../../../lib/useDebouncedValue";
 import { BasePage } from "../../shell/components/BasePage";
-import { projectLabel, useProjects, type Project } from "../api/queries";
+import { projectLabel, useProjectPages, type Project } from "../api/queries";
+import { GRID_PAGE_SIZE, gridView, type GridView } from "../model/grid";
 import { repoLabel } from "../repo";
 
 const CardLink = createLink(CardActionArea);
@@ -77,30 +81,64 @@ function ProjectCard({ project }: { project: Project }) {
   );
 }
 
-function Grid() {
-  const projects = useProjects();
-  if (projects.isPending) {
-    return (
-      <Box sx={{ display: "grid", placeItems: "center", py: 8 }}>
-        <CircularProgress size={24} aria-label="Loading projects" />
+function Grid({ view, loadingMore, onMore }: { view: Extract<GridView, { kind: "list" }>; loadingMore: boolean; onMore: () => void }) {
+  return (
+    <>
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+          gap: 1.75,
+        }}
+      >
+        {view.projects.map((p) => (
+          <ProjectCard key={p.name} project={p} />
+        ))}
       </Box>
-    );
-  }
-  if (projects.isError) {
-    return (
+      {view.more && (
+        <Box sx={{ display: "flex", justifyContent: "center", mt: 3 }}>
+          <Button variant="outlined" onClick={onMore} disabled={loadingMore}>
+            {loadingMore ? "Loading…" : "View more"}
+          </Button>
+        </Box>
+      )}
+    </>
+  );
+}
+
+/**
+ * The org's Projects Page: every project as a card, a page at a time (View
+ * more), narrowed by a search on the name; a card opens its overview.
+ */
+export function ProjectsGrid() {
+  const { orgHandle } = useSession();
+  const [typed, setTyped] = useState("");
+  const search = useDebouncedValue(typed.trim());
+  const pages = useProjectPages(search, GRID_PAGE_SIZE);
+  const view = pages.data ? gridView(pages.data.pages, search, pages.hasNextPage) : null;
+  const count = view?.kind === "list" ? view.count : view?.kind === "empty" ? 0 : null;
+
+  let body;
+  if (pages.isError && !pages.data) {
+    body = (
       <EmptyState
         title="Couldn't load projects"
-        description={projects.error.message}
+        description={pages.error.message}
         action={
-          <Button variant="outlined" onClick={() => void projects.refetch()}>
+          <Button variant="outlined" onClick={() => void pages.refetch()}>
             Try again
           </Button>
         }
       />
     );
-  }
-  if (projects.data.length === 0) {
-    return (
+  } else if (!view) {
+    body = (
+      <Box sx={{ display: "grid", placeItems: "center", py: 8 }}>
+        <CircularProgress size={24} aria-label="Loading projects" />
+      </Box>
+    );
+  } else if (view.kind === "empty") {
+    body = (
       <EmptyState
         icon={<FolderOpen size={48} />}
         title="No projects yet"
@@ -108,27 +146,16 @@ function Grid() {
         action={<NewProjectButton />}
       />
     );
+  } else if (view.kind === "no-match") {
+    body = (
+      <Typography variant="body2" color="text.secondary" sx={{ py: 4 }}>
+        No projects match &ldquo;{view.search}&rdquo;.
+      </Typography>
+    );
+  } else {
+    body = <Grid view={view} loadingMore={pages.isFetchingNextPage} onMore={() => void pages.fetchNextPage()} />;
   }
-  return (
-    <Box
-      sx={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-        gap: 1.75,
-      }}
-    >
-      {projects.data.map((p) => (
-        <ProjectCard key={p.name} project={p} />
-      ))}
-    </Box>
-  );
-}
 
-/** The org's base page: every project as a card; a card opens its overview. */
-export function ProjectsGrid() {
-  const { orgHandle } = useSession();
-  const projects = useProjects();
-  const count = projects.data?.length;
   return (
     <BasePage>
       <Box sx={{ display: "flex", alignItems: "flex-start", gap: 2, mb: 2.75 }}>
@@ -138,12 +165,24 @@ export function ProjectsGrid() {
           </Typography>
           <Typography variant="body2" color="text.secondary">
             {orgHandle ?? "Your organization"}
-            {count !== undefined && ` · ${count === 1 ? "1 project" : `${count} projects`}`}
+            {count !== null && ` · ${count === 1 ? "1 project" : `${count} projects`}`}
           </Typography>
         </Box>
-        {count !== 0 && <NewProjectButton />}
+        {view?.kind !== "empty" && <NewProjectButton />}
       </Box>
-      <Grid />
+      {view?.kind !== "empty" && (
+        <Box sx={{ maxWidth: 420, mb: 2.5 }}>
+          <SearchBar
+            size="small"
+            fullWidth
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            placeholder="Search projects"
+            slotProps={{ htmlInput: { "aria-label": "Search projects" } }}
+          />
+        </Box>
+      )}
+      {body}
     </BasePage>
   );
 }

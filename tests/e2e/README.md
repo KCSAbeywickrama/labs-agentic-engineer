@@ -9,7 +9,7 @@ shell-level changes; it is not part of `make test` and does not run in CI.
 It covers the screens wired to aep-api so far:
 
 1. **Sign in**: the app sends the browser to Thunder, signs in, and lands on
-   Projects (the dev-env org is set up, so onboarding passes straight through).
+   the Dashboard (the dev-env org is set up, so onboarding passes straight through).
 2. **New project**: types "An expense tracker for our staff", attaches
    `fixtures/expense-policy.pdf`, presses Continue, and checks the details form
    suggests `expense-tracker-staff` and lists the document. With `E2E_CREATE=1`
