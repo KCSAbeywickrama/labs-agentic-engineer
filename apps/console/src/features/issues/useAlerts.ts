@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useAllProjectNames } from "../projects/api/queries";
+import { useRepoProjectNames } from "../projects/api/queries";
 import { useIssuesByProject, useRcaReports } from "./api/issues";
 import { alertItems, needsPersonCount, type AlertItem } from "./model/issues";
 
@@ -39,7 +39,7 @@ export interface Alerts {
 }
 
 export function useAlerts(): Alerts {
-  const projects = useAllProjectNames(ALERTS_POLL_MS);
+  const projects = useRepoProjectNames(ALERTS_POLL_MS);
   const issues = useIssuesByProject(projects.data ?? [], ALERTS_POLL_MS);
   // The reports are an extra: normally there are none, and a failed read hides nothing that needs a person.
   const reports = useRcaReports(ALERTS_POLL_MS);

@@ -50,10 +50,13 @@ export function useProjects() {
 }
 
 /**
- * Every project's name, every page read: what the Dashboard's Alerts ask each
- * project about. Re-read now and then, as the Alerts are.
+ * The name of every project that has a repository, every page read: what the
+ * Dashboard's Alerts ask about, since issues live in a project's repository
+ * (a platform project such as Agent Manager's default has none, so nothing to
+ * read and nothing that could need a person). Re-read now and then, as the
+ * Alerts are.
  */
-export function useAllProjectNames(refetchInterval: number) {
+export function useRepoProjectNames(refetchInterval: number) {
   return useQuery({
     queryKey: projectKeys.all(),
     queryFn: async () => {
@@ -62,7 +65,7 @@ export function useAllProjectNames(refetchInterval: number) {
       do {
         const { data, error } = await client.GET("/projects", { params: { query: cursor ? { cursor } : {} } });
         if (error) throw new ApiRequestError(error, "Couldn't load projects");
-        names.push(...(data.items ?? []).map((p) => p.name));
+        names.push(...(data.items ?? []).filter((p) => p.repoUrl).map((p) => p.name));
         cursor = data.nextCursor || undefined;
       } while (cursor);
       return names;
