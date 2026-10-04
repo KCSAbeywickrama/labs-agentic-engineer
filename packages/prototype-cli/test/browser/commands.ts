@@ -143,6 +143,41 @@ const evalInApp: BrowserCommand<[pageId: string, expression: string]> = async (_
   return String(await frame.evaluate(expression));
 };
 
+/**
+ * Mounts a second frame from the host's own document and sends it a view before any app: returns the
+ * message types it posted back, so a test can tell a frame that stayed quiet from one that reported a draw.
+ */
+const viewBeforeLoad: BrowserCommand<[pageId: string]> = async (_ctx, pageId) => {
+  const types = await page(pageId).evaluate(async (selector) => {
+    const original = document.querySelector<HTMLIFrameElement>(selector);
+    if (!original) throw new Error("the app frame is not there");
+    const probe = document.createElement("iframe");
+    probe.setAttribute("sandbox", "allow-scripts");
+    probe.srcdoc = original.srcdoc;
+    // Off-screen, not display:none: a hidden frame never runs animation frames, which is when a draw is reported.
+    probe.style.cssText = "position:fixed;left:-9999px;width:320px;height:240px;border:0";
+    const seen: string[] = [];
+    const ready = new Promise<void>((resolve) => {
+      window.addEventListener("message", (e) => {
+        if (e.source !== probe.contentWindow) return;
+        const type = (e.data as { type?: string } | null)?.type ?? "";
+        seen.push(type);
+        if (type === "proto:ready") {
+          const view = { mode: "preview", roleId: "role.none", stateId: "state.none", screenId: "screen.none", selectedKeys: [], pins: {} };
+          probe.contentWindow?.postMessage({ type: "proto:view", view }, "*");
+          resolve();
+        }
+      });
+    });
+    document.body.append(probe);
+    await ready;
+    await new Promise((r) => setTimeout(r, 500));
+    probe.remove();
+    return seen;
+  }, APP_FRAME);
+  return types.join(",");
+};
+
 const requests: BrowserCommand<[pageId: string]> = (_ctx, pageId) => {
   const p = pages.get(pageId);
   if (!p) throw new Error(`no page ${pageId}`);
@@ -200,6 +235,7 @@ export const commands = {
   read,
   waitFor,
   evalInApp,
+  viewBeforeLoad,
   requests,
   setStorage,
   readFile,

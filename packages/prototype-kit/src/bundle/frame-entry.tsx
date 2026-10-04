@@ -111,7 +111,8 @@ function Frame({ theme }: { theme: PrototypeTheme }) {
   const [view, setView] = useState<FrameView | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const screen = useRef<string | undefined>(undefined);
-  screen.current = view?.screenId;
+  // Nothing has drawn until an app is loaded: a view sent before it must not report a draw (that clears the host's loading cover).
+  screen.current = loaded ? view?.screenId : undefined;
   const watcher = useRef<ReturnType<typeof watchElements> | null>(null);
 
   useEffect(() => {
