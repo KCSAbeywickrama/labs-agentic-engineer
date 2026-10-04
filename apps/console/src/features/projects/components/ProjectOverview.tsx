@@ -22,6 +22,7 @@ import { Box, Button, IconButton, Link, ListItemIcon, ListItemText, Menu, MenuIt
 import { EllipsisVertical, GitHub, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { EmptyState } from "../../../components/EmptyState";
 import { BuildButton } from "../../builds/components/BuildButton";
+import { useProjectStatus } from "../../deploy/api/deploy";
 import { ProjectFeatures } from "../../spec/components/ProjectFeatures";
 import { projectLabel, useProject, type Project } from "../api/queries";
 import { repoLabel } from "../repo";
@@ -33,7 +34,7 @@ import { Track } from "./Track";
 const ButtonLink = createLink(Button);
 
 /** The overview's menu: what is done to the project as a whole (today, delete it). */
-function ProjectMenu({ project }: { project: Project }) {
+function ProjectMenu({ project, repoUrl }: { project: Project; repoUrl: string | undefined }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [deleting, setDeleting] = useState(false);
   return (
@@ -54,7 +55,7 @@ function ProjectMenu({ project }: { project: Project }) {
           <ListItemText>Delete project</ListItemText>
         </MenuItem>
       </Menu>
-      {deleting && <DeleteProjectPanel project={project} onClose={() => setDeleting(false)} />}
+      {deleting && <DeleteProjectPanel project={project} repoUrl={repoUrl} onClose={() => setDeleting(false)} />}
     </>
   );
 }
@@ -75,6 +76,10 @@ function SectionHeading({ id, children }: { id: string; children: string }) {
  */
 export function ProjectOverview({ projectName }: { projectName: string }) {
   const project = useProject(projectName);
+  // The repository comes with the project's status (the track reads it too),
+  // as it did in console-old: the project itself does not carry it.
+  const status = useProjectStatus(projectName);
+  const repoUrl = status.data?.repoUrl;
 
   if (project.isError) {
     return (
@@ -95,7 +100,7 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
     );
   }
 
-  const repo = project.data ? repoLabel(project.data.repoUrl) : null;
+  const repo = repoLabel(repoUrl);
   return (
     <>
       <Box sx={{ mb: 2.75, display: "flex", alignItems: "flex-start", gap: 2 }}>
@@ -103,7 +108,7 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
           <Typography component="h1" variant="h4" sx={{ fontWeight: 600 }}>
             {project.data ? projectLabel(project.data) : <Skeleton width={220} />}
           </Typography>
-          {project.isPending ? (
+          {status.isPending ? (
             <Skeleton width={260} />
           ) : (
             repo && (
@@ -123,7 +128,7 @@ export function ProjectOverview({ projectName }: { projectName: string }) {
           )}
         </Box>
         <BuildButton projectName={projectName} />
-        {project.data && <ProjectMenu project={project.data} />}
+        {project.data && <ProjectMenu project={project.data} repoUrl={repoUrl} />}
       </Box>
       <Track projectName={projectName} />
       <Box sx={{ display: "flex", flexDirection: "column", gap: 3.5 }}>

@@ -28,10 +28,18 @@ import { repoLabel } from "../repo";
 // the remote standing). It names that repository, because it keeps its name
 // taken: a new project cannot be created under it while it exists.
 
-export function DeleteProjectPanel({ project, onClose }: { project: Project; onClose: () => void }) {
+export function DeleteProjectPanel({
+  project,
+  repoUrl,
+  onClose,
+}: {
+  project: Project;
+  repoUrl: string | undefined;
+  onClose: () => void;
+}) {
   const remove = useDeleteProject();
   const navigate = useNavigate();
-  const repo = repoLabel(project.repoUrl);
+  const repo = repoLabel(repoUrl);
   const name = projectLabel(project);
   const busy = remove.isPending;
 
