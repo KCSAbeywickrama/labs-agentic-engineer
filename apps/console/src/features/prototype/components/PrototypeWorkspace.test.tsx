@@ -150,10 +150,17 @@ describe("the Prototype tab", () => {
     expect(within(rows[2]!).getByRole("button", { name: "Make prototype" })).toBeInTheDocument();
   });
 
-  it("explains that a prototype needs a designed web application", () => {
+  it("says the prototype is being made while its first turn runs", () => {
+    prototypes = appPrototypes([C], {}, revisingIn("/prototype expense-web"));
+    render(<Harness />);
+    expect(screen.getByText("Making prototype…")).toBeInTheDocument();
+    expect(screen.getByLabelText("Working on the prototype")).toBeInTheDocument();
+  });
+
+  it("says there is no prototype yet and the spec and design come first", () => {
     prototypes = [];
     render(<Harness />);
-    expect(screen.getByText(/needs a designed web application/)).toBeInTheDocument();
+    expect(screen.getByText(/Finish the spec and design a web application first/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Make prototype/ })).toBeNull();
   });
 

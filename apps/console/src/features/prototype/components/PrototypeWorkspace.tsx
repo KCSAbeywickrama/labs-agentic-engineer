@@ -17,7 +17,7 @@
  */
 
 import { useState } from "react";
-import { Box, Button, Chip, Skeleton, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Chip, CircularProgress, Skeleton, Typography } from "@wso2/oxygen-ui";
 import { AppWindow } from "@wso2/oxygen-ui-icons-react";
 import { PHONE } from "../../shell/layout";
 import type { ReviewQueue } from "../model/feedback";
@@ -36,7 +36,9 @@ const STATUS: Record<PrototypeStatus, { label: string; color: "default" | "succe
 };
 
 function Row({ prototype, ready, onReview, onMake }: { prototype: AppPrototype; ready: boolean; onReview: () => void; onMake: () => void }) {
-  const status = STATUS[prototype.status];
+  const status =
+    prototype.status === "revising" && !prototype.exists ? { ...STATUS.revising, label: "Making prototype…" } : STATUS[prototype.status];
+  const busy = prototype.status === "revising";
   return (
     <Box component="li" sx={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 1 }}>
       <Box
@@ -52,7 +54,7 @@ function Row({ prototype, ready, onReview, onMake }: { prototype: AppPrototype; 
           color: "primary.main",
         }}
       >
-        <AppWindow size={26} aria-hidden />
+        {busy ? <CircularProgress size={26} aria-label="Working on the prototype" /> : <AppWindow size={26} aria-hidden />}
       </Box>
       <Typography component="h3" sx={{ fontWeight: 600, fontSize: "1.375rem" }}>
         {prototype.files?.manifest.name ?? prototype.component}
@@ -126,31 +128,34 @@ export function PrototypeWorkspace({
       }}
     >
       {prototypes.length === 0 || none ? (
-        <Box
-          sx={{
-            border: 1,
-            borderStyle: "dashed",
-            borderColor: "divider",
-            borderRadius: 2.5,
-            px: 2,
-            py: 1.75,
-            maxWidth: "64ch",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "flex-start",
-            gap: 1.25,
-          }}
-        >
-          <Typography variant="body2">
-            A prototype is a clickable version of a web application the design has: its screens, roles and mock data, to try
-            before anything is built.
+        <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 1, maxWidth: "52ch" }}>
+          <Box
+            sx={{
+              width: 56,
+              height: 56,
+              mb: 0.75,
+              borderRadius: 3,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              bgcolor: "action.hover",
+              color: "text.secondary",
+            }}
+          >
+            <AppWindow size={26} aria-hidden />
+          </Box>
+          <Typography component="h3" sx={{ fontWeight: 600, fontSize: "1.375rem" }}>
+            No prototype yet
           </Typography>
-          {prototypes.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              It needs a designed web application. Once the design has one, you can make its prototype here.
-            </Typography>
-          ) : (
-            <MakePrototypeButton projectName={projectName} variant="contained" />
+          <Typography variant="body2" color="text.secondary">
+            {prototypes.length === 0
+              ? "Finish the spec and design a web application first. Its clickable prototype is made here."
+              : "Make a clickable prototype of the designed web application to try it before anything is built."}
+          </Typography>
+          {prototypes.length > 0 && (
+            <Box sx={{ mt: 2 }}>
+              <MakePrototypeButton projectName={projectName} variant="contained" />
+            </Box>
           )}
         </Box>
       ) : (
