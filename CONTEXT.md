@@ -472,7 +472,7 @@ One entity opened to change it with the agent, over the Page that lists it: a
 project's Spec or Design (over the overview), a Build (over build history), a
 version's Validation, an environment's Configure (over Deploy), a Skill, a
 Resource, the org's Settings. It has its own address, and opening it sets the
-Turn scope.
+Turn scope where the Card has one; a Build or a Validation has none yet.
 _Avoid_: modal, dialog, Panel (a different thing).
 
 **Panel**:
