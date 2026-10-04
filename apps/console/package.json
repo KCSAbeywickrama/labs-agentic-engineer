@@ -32,6 +32,7 @@
     "@tanstack/react-router": "1.170.17",
     "@tiptap/core": "^3.31.3",
     "@tiptap/extension-collaboration": "^3.31.3",
+    "@tiptap/extension-list": "^3.31.3",
     "@tiptap/extension-table": "^3.31.3",
     "@tiptap/markdown": "^3.31.3",
     "@tiptap/pm": "^3.31.3",

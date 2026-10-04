@@ -19,10 +19,8 @@
 import { useEffect, useRef } from "react";
 import { Box } from "@wso2/oxygen-ui";
 import { EditorContent, useEditor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import { TableKit } from "@tiptap/extension-table";
-import { Markdown } from "@tiptap/markdown";
 import { proseSx } from "../../../components/proseSx";
+import { skillEditorExtensions } from "./skillEditorExtensions";
 
 // What a skill body holds beyond the spec's prose: deeper headings, code,
 // quotes and tables (most of the platform's skills carry one).
@@ -66,10 +64,18 @@ export function SkillBodyEditor({
 
   const editor = useEditor(
     {
-      extensions: [StarterKit.configure({ link: { openOnClick: false } }), TableKit, Markdown],
+      extensions: skillEditorExtensions,
       content: markdown,
       contentType: "markdown",
       editable,
+      editorProps: {
+        handleDOMEvents: {
+          // ProseMirror marks every Escape handled, which the card reads as a
+          // menu above it having taken the key. Nothing here binds Escape, so
+          // it goes on to close the card; an IME composition still keeps it.
+          keydown: (_view, event) => event.key === "Escape" && !event.isComposing,
+        },
+      },
       onUpdate: ({ editor: changed }) => {
         // The document as opened, written the way the editor writes it: the
         // editor reports its own loading as an update, before it is created.
