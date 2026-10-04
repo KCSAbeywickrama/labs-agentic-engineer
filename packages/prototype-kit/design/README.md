@@ -24,6 +24,23 @@ missing one throws), plus the prototype's own entries (`menu`). Entries the role
 `<Navigation>`. A theme keeps the closed menu's entries in the markup, so the
 render check sees their `to` and ids. A bare `<Screen>` stays valid.
 
+Grouping is the kit's, not the theme's guess. `<StatGroup>` lays its
+`<Stat>`s at one width (a theme grid, wrapping); `<Section>` is a selectable
+container with a title, optional `count` and `subtitle`, and its own `actions`.
+A `<Stat>`'s `icon` is one of the kit's `StatIcon` names (Oxygen's, so Lucide's);
+the stub throws on any other, so the check fails the same under every theme,
+and a theme maps each name or draws none.
+
+`<Table>` columns are strings or `{ label, kind }` (`text`, `number`,
+`status`). The stub hands the theme one cell per column: `cells` fill the text
+and number columns in order, the single status column takes the row's
+`status`, and a legacy row `tone` (no status column) still badges the last
+cell. A row's `actions` reach the theme with their own selectable roots and
+press handlers; a selectable root claims clicks inside it except those on a
+root nested in it, so Annotate selects the action, not its row. Keeping a
+Preview press on an action from also pressing the row is the theme's (stop the
+click in the actions cell).
+
 ## Store
 
 Seeded from `defineApp({ data })`. An array whose records all have a string `id`

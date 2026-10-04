@@ -40,7 +40,7 @@ export type { Pressable } from "./runtime/press.js";
 export type { SelectableRootProps } from "./runtime/selectable.js";
 export type { KitComponentName, KitComponentProps, PrototypeTheme, ThemeRegistry } from "./theme/contract.js";
 
-export { Detail, Grid, Screen, Split, Stack } from "./components/layout.js";
+export { Detail, Grid, Screen, Section, Split, Stack } from "./components/layout.js";
 export { AppShell } from "./components/shell.js";
 export type { AppShellProps, AppShellUser, ThemeAppShellProps } from "./components/shell.js";
 export type {
@@ -48,15 +48,17 @@ export type {
   DetailProps,
   GridProps,
   ScreenProps,
+  SectionProps,
   SplitProps,
   StackProps,
   ThemeDetailProps,
   ThemeGridProps,
   ThemeScreenProps,
+  ThemeSectionProps,
   ThemeSplitProps,
   ThemeStackProps,
 } from "./components/layout.js";
-export { Alert, Badge, Button, EmptyState, Heading, Link, Stat, Text } from "./components/content.js";
+export { Alert, Badge, Button, EmptyState, Heading, Link, Stat, StatGroup, Text } from "./components/content.js";
 export type {
   AlertProps,
   BadgeProps,
@@ -64,6 +66,8 @@ export type {
   EmptyStateProps,
   HeadingProps,
   LinkProps,
+  StatGroupProps,
+  StatIcon,
   StatProps,
   TextProps,
   ThemeAlertProps,
@@ -72,6 +76,7 @@ export type {
   ThemeEmptyStateProps,
   ThemeHeadingProps,
   ThemeLinkProps,
+  ThemeStatGroupProps,
   ThemeStatProps,
   ThemeTextProps,
   Tone,
@@ -106,6 +111,20 @@ export type {
   ValidationSummaryProps,
 } from "./components/forms.js";
 export { Table, Timeline } from "./components/data.js";
-export type { TableProps, TableRow, ThemeTableProps, ThemeTableRow, ThemeTimelineProps, TimelineEntry, TimelineProps } from "./components/data.js";
+export type {
+  TableAction,
+  TableColumn,
+  TableProps,
+  TableRow,
+  TableStatus,
+  ThemeTableAction,
+  ThemeTableCell,
+  ThemeTableColumn,
+  ThemeTableProps,
+  ThemeTableRow,
+  ThemeTimelineProps,
+  TimelineEntry,
+  TimelineProps,
+} from "./components/data.js";
 export { Dialog, Drawer } from "./components/overlays.js";
 export type { DialogProps, DrawerProps, ThemeDialogProps, ThemeDrawerProps } from "./components/overlays.js";

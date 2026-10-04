@@ -75,14 +75,19 @@ export interface SelectableRootProps {
   onKeyDown?: ((e: KeyboardEvent) => void) | undefined;
 }
 
+function insideNestedRoot(e: MouseEvent): boolean {
+  const nearest = e.target instanceof Element ? e.target.closest("[data-proto-annotating]") : null;
+  return nearest !== null && nearest !== e.currentTarget;
+}
+
 function pinsOf(ctx: KitContextValue, key: string): readonly number[] {
   return ctx.view.mode === "annotate" ? (ctx.view.pins[key] ?? []) : [];
 }
 
 /**
  * The selection handlers for `key`. A box claims only a click that lands on
- * itself (one inside it landed on a nested selectable); a root holds no other
- * selectable and claims every click inside it.
+ * itself (one inside it landed on a nested selectable); a root claims every
+ * click inside it but one on a root nested in it (a table row's actions).
  */
 function selectHandlers(ctx: KitContextValue, key: string, claims: "own-target" | "any-inside") {
   return {
@@ -91,6 +96,7 @@ function selectHandlers(ctx: KitContextValue, key: string, claims: "own-target" 
     "aria-pressed": ctx.view.selectedKeys.includes(key),
     onClickCapture: (e: MouseEvent) => {
       if (claims === "own-target" && e.target !== e.currentTarget) return;
+      if (claims === "any-inside" && insideNestedRoot(e)) return;
       e.stopPropagation();
       e.preventDefault();
       ctx.toggle(key);

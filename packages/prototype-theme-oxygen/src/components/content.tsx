@@ -16,10 +16,64 @@
  * under the License.
  */
 
-/** Content: text, heading, badge, stat, alert, empty state, button and link. */
+/** Content: text, heading, badge, stat and stat group, alert, empty state, button and link. */
 
-import { Alert as OxygenAlert, AlertTitle, Box, Button as OxygenButton, Card, Chip, Link as OxygenLink, ListingTable, PageTitle, StatCard, Typography } from "@wso2/oxygen-ui";
-import type { ThemeAlertProps, ThemeBadgeProps, ThemeButtonProps, ThemeEmptyStateProps, ThemeHeadingProps, ThemeLinkProps, ThemeStatProps, ThemeTextProps } from "@wso2/prototype-kit";
+import { Alert as OxygenAlert, AlertTitle, Box, Button as OxygenButton, Card, CardContent, Chip, Link as OxygenLink, ListingTable, PageTitle, Typography } from "@wso2/oxygen-ui";
+import {
+  Activity,
+  Bell,
+  Briefcase,
+  Bug,
+  Building2,
+  Calendar,
+  CalendarCheck,
+  CalendarClock,
+  CalendarDays,
+  ChartColumn,
+  CircleCheck,
+  CircleX,
+  ClipboardList,
+  Clock,
+  Cloud,
+  Cpu,
+  CreditCard,
+  Database,
+  DollarSign,
+  FileText,
+  Gauge,
+  Globe,
+  HeartPulse,
+  Hourglass,
+  Inbox,
+  Layers,
+  ListChecks,
+  Lock,
+  Mail,
+  MessageSquare,
+  Package,
+  Plane,
+  Receipt,
+  Rocket,
+  Server,
+  Shield,
+  ShoppingCart,
+  Star,
+  Tag,
+  Ticket,
+  Timer,
+  TrendingDown,
+  TrendingUp,
+  TriangleAlert,
+  Truck,
+  User,
+  UserCheck,
+  Users,
+  Wallet,
+  Zap,
+  type LucideIcon,
+} from "@wso2/oxygen-ui-icons-react";
+import type { ThemeAlertProps, ThemeBadgeProps, ThemeButtonProps, ThemeEmptyStateProps, ThemeHeadingProps, ThemeLinkProps, ThemeStatGroupProps, ThemeStatProps, ThemeTextProps, StatIcon, Tone } from "@wso2/prototype-kit";
+import { SectionHeader } from "./layout.js";
 
 export function Button({ label, emphasis, disabled, onPress }: ThemeButtonProps) {
   return (
@@ -61,22 +115,108 @@ export function Heading({ text, level, actions }: ThemeHeadingProps) {
       </PageTitle>
     );
   }
-  return (
-    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
-      <Typography variant="h6" component="h3">
-        {text}
-      </Typography>
-      {actions !== undefined && <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>{actions}</Box>}
-    </Box>
-  );
+  return <SectionHeader title={text} actions={actions} />;
 }
 
 export function Badge({ label, tone }: ThemeBadgeProps) {
   return <Chip size="small" label={label} color={tone} variant={tone === "default" ? "outlined" : "filled"} />;
 }
 
-export function Stat({ label, value }: ThemeStatProps) {
-  return <StatCard label={label} value={value} />;
+/** Every kit icon, from Oxygen's set: the record's type makes leaving one out a compile error. */
+const STAT_ICONS: Record<StatIcon, LucideIcon> = {
+  Activity,
+  Bell,
+  Briefcase,
+  Bug,
+  Building2,
+  Calendar,
+  CalendarCheck,
+  CalendarClock,
+  CalendarDays,
+  ChartColumn,
+  CircleCheck,
+  CircleX,
+  ClipboardList,
+  Clock,
+  Cloud,
+  Cpu,
+  CreditCard,
+  Database,
+  DollarSign,
+  FileText,
+  Gauge,
+  Globe,
+  HeartPulse,
+  Hourglass,
+  Inbox,
+  Layers,
+  ListChecks,
+  Lock,
+  Mail,
+  MessageSquare,
+  Package,
+  Plane,
+  Receipt,
+  Rocket,
+  Server,
+  Shield,
+  ShoppingCart,
+  Star,
+  Tag,
+  Ticket,
+  Timer,
+  TrendingDown,
+  TrendingUp,
+  TriangleAlert,
+  Truck,
+  User,
+  UserCheck,
+  Users,
+  Wallet,
+  Zap,
+};
+
+/** A tone as an Oxygen palette colour: `default` is the primary. */
+function paletteOf(tone: Tone): "primary" | "info" | "success" | "warning" | "error" {
+  return tone === "default" ? "primary" : tone;
+}
+
+/**
+ * The KPI tile with a caption, as Oxygen's design guidance composes it:
+ * `Card` > `CardContent` > overline label, value, caption. `StatCard` holds
+ * only a label and a value (its children are discarded), so it cannot carry
+ * the hint; the same tile draws every stat, so a group reads as one.
+ */
+export function Stat({ label, value, hint, icon, tone }: ThemeStatProps) {
+  const Icon = icon && STAT_ICONS[icon];
+  return (
+    <Card variant="outlined" sx={{ height: "100%" }}>
+      <CardContent>
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+          <Typography variant="overline" component="p" color="text.secondary" sx={{ lineHeight: 1.6 }}>
+            {label}
+          </Typography>
+          {Icon && (
+            <Box aria-hidden="true" sx={{ display: "flex", color: `${paletteOf(tone)}.main` }}>
+              <Icon size={20} />
+            </Box>
+          )}
+        </Box>
+        <Typography variant="h4" component="p" sx={{ fontWeight: 600, mt: 0.5 }}>
+          {value}
+        </Typography>
+        {hint && (
+          <Typography variant="caption" component="p" color="text.secondary">
+            {hint}
+          </Typography>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function StatGroup({ children }: ThemeStatGroupProps) {
+  return <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>{children}</Box>;
 }
 
 export function Alert({ tone, title, text }: ThemeAlertProps) {

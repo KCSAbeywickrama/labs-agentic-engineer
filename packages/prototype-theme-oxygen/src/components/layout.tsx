@@ -16,16 +16,56 @@
  * under the License.
  */
 
-/** Layout: the bare screen, the page every screen's content sits on, stack, grid, split and detail record. */
+/** Layout: the bare screen, the page every screen's content sits on, section, stack, grid, split and detail record. */
 
-import { Box, PageContent, Typography } from "@wso2/oxygen-ui";
-import type { ThemeDetailProps, ThemeGridProps, ThemeScreenProps, ThemeSplitProps, ThemeStackProps } from "@wso2/prototype-kit";
+import { Box, Chip, PageContent, Typography } from "@wso2/oxygen-ui";
+import type { ThemeDetailProps, ThemeGridProps, ThemeScreenProps, ThemeSectionProps, ThemeSplitProps, ThemeStackProps } from "@wso2/prototype-kit";
 import type { ReactNode } from "react";
 import { TitledCard } from "./card.js";
 
-/** A screen's content on Oxygen's `PageContent`: centred, padded, its parts a column apart. */
+/**
+ * A screen's content on Oxygen's `PageContent`: centred, padded, its parts a
+ * column apart, and no wider than a table's columns read well (Oxygen's
+ * default, 1400px, leaves tables stretched thin on a wide window).
+ */
 export function Page({ children }: { children?: ReactNode }) {
-  return <PageContent sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>{children}</PageContent>;
+  return (
+    <PageContent maxWidth={1200} sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
+      {children}
+    </PageContent>
+  );
+}
+
+/** A part of a page's title row: a heading a step below the page title, an optional count, a subtitle and the part's own actions. */
+export function SectionHeader({ title, count, subtitle, actions }: Omit<ThemeSectionProps, "children">) {
+  return (
+    <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
+      <div>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <Typography variant="h4" component="h2" sx={{ fontWeight: 500 }}>
+            {title}
+          </Typography>
+          {count !== undefined && <Chip size="small" label={count} />}
+        </Box>
+        {subtitle && (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+            {subtitle}
+          </Typography>
+        )}
+      </div>
+      {actions !== undefined && <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>{actions}</Box>}
+    </Box>
+  );
+}
+
+/** Its header close to its content, and a little more room above it than between a page's other parts. */
+export function Section({ title, subtitle, count, actions, children }: ThemeSectionProps) {
+  return (
+    <Box component="section" sx={{ display: "flex", flexDirection: "column", gap: 1.5, mt: 1 }}>
+      <SectionHeader title={title} subtitle={subtitle} count={count} actions={actions} />
+      {children}
+    </Box>
+  );
 }
 
 export function Screen({ nav, children }: ThemeScreenProps) {
