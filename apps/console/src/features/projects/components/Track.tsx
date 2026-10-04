@@ -154,6 +154,19 @@ function Leg({ leg, projectName, onOpen }: { leg: TrackLegView; projectName: str
       </ButtonBase>
     );
   }
+  const target = leg.opens;
+  if (target.kind === "build") {
+    return (
+      <LegLink
+        to="/projects/$projectName/builds/$version"
+        params={{ projectName, version: target.version }}
+        aria-label={label}
+        sx={hoverSx}
+      >
+        <LegBody leg={leg} />
+      </LegLink>
+    );
+  }
   const to = {
     spec: "/projects/$projectName/spec",
     design: "/projects/$projectName/design",
@@ -161,7 +174,7 @@ function Leg({ leg, projectName, onOpen }: { leg: TrackLegView; projectName: str
     deploy: "/projects/$projectName/deploy",
   } as const;
   return (
-    <LegLink to={to[leg.opens]} params={{ projectName }} aria-label={label} sx={hoverSx}>
+    <LegLink to={to[target.kind]} params={{ projectName }} aria-label={label} sx={hoverSx}>
       <LegBody leg={leg} />
     </LegLink>
   );
@@ -215,11 +228,11 @@ function Frame({ children }: { children: ReactNode }) {
 
 /**
  * Spec · Design · Build · Deploy: where the project is, each leg opening its
- * card (Deploy, its Page). While a build is offered (something designed, none running) the
- * Build leg opens the build picker instead.
+ * card (Build, the latest build's; Deploy, its Page). While a build is offered
+ * (something designed, none running) the Build leg opens the build picker instead.
  */
 export function Track({ projectName }: { projectName: string }) {
-  const { track, error, retry } = useProjectTrack(projectName);
+  const { track, latestBuild, error, retry } = useProjectTrack(projectName);
   const build = useBuildAction(projectName);
   if (error) {
     return (
@@ -254,7 +267,7 @@ export function Track({ projectName }: { projectName: string }) {
   }
   return (
     <Frame>
-      {trackLegs(track).map((leg) => (
+      {trackLegs(track, latestBuild).map((leg) => (
         <Leg key={leg.key} leg={leg} projectName={projectName} onOpen={leg.key === "build" && build.label ? build.open : null} />
       ))}
     </Frame>

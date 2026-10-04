@@ -20,11 +20,20 @@ import type { LegState, ProjectTrack } from "./model/track";
 
 // The overview's track, Spec · Design · Build · Deploy, as the four legs it
 // draws: each with its number, its status lamp, the short state line, and
-// what it opens: the Spec, Design or Builds card, or the Deploy Page. Their
-// states are worked out from the page's state (model/track.ts).
+// what it opens: the Spec or Design card, the latest build's card, or the
+// Deploy Page. Their states are worked out from the page's state (model/track.ts).
 
-/** What a leg opens: a card over the overview, or the Deploy Page. */
-export type LegTarget = "spec" | "design" | "builds" | "deploy";
+/**
+ * What a leg opens: a card over the overview, the Build card of the version
+ * whose state the leg shows (over build history, or build history itself
+ * before the first build), or the Deploy Page.
+ */
+export type LegTarget =
+  | { kind: "spec" }
+  | { kind: "design" }
+  | { kind: "build"; version: string }
+  | { kind: "builds" }
+  | { kind: "deploy" };
 
 export interface TrackLegView {
   key: "spec" | "design" | "build" | "deploy";
@@ -64,11 +73,13 @@ function leg(
   return { key, step, title, opens, state, summary, stateLabel, accessibleName };
 }
 
-export function trackLegs(track: ProjectTrack): TrackLegView[] {
+/** The legs, given the track and the newest version built (the one the Build leg speaks for); null before any. */
+export function trackLegs(track: ProjectTrack, latestBuild: string | null): TrackLegView[] {
+  const build: LegTarget = latestBuild ? { kind: "build", version: latestBuild } : { kind: "builds" };
   return [
-    leg("spec", 1, "Spec", "spec", track.spec.state, track.spec.summary),
-    leg("design", 2, "Design", "design", track.design.state, track.design.summary),
-    leg("build", 3, "Build", "builds", track.build.state, track.build.summary),
-    leg("deploy", 4, "Deploy", "deploy", track.deploy.state, track.deploy.summary),
+    leg("spec", 1, "Spec", { kind: "spec" }, track.spec.state, track.spec.summary),
+    leg("design", 2, "Design", { kind: "design" }, track.design.state, track.design.summary),
+    leg("build", 3, "Build", build, track.build.state, track.build.summary),
+    leg("deploy", 4, "Deploy", { kind: "deploy" }, track.deploy.state, track.deploy.summary),
   ];
 }

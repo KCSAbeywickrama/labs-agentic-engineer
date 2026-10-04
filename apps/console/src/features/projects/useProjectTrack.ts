@@ -28,6 +28,8 @@ import { projectTrack, type ProjectTrack } from "./model/track";
 export interface ProjectTrackState {
   /** Null while any source is loading, or when one failed. */
   track: ProjectTrack | null;
+  /** The newest version built, whose state the Build leg shows; null before the first build. */
+  latestBuild: string | null;
   /** Why a source could not be read. */
   error: string | null;
   /** Read the failed sources again. */
@@ -70,6 +72,7 @@ export function useProjectTrack(projectName: string): ProjectTrackState {
   const failed = [model, design, builds, status].filter((q) => q.isError);
   return {
     track: failed.length > 0 ? null : track,
+    latestBuild: latest?.version ?? null,
     error: failed[0]?.error?.message ?? null,
     retry: () => {
       for (const q of failed) void q.refetch();

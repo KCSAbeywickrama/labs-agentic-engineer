@@ -21,6 +21,7 @@ import { createLink } from "@tanstack/react-router";
 import { Box, IconButton, Link, Tooltip, type SxProps, type Theme } from "@wso2/oxygen-ui";
 import {
   FileText,
+  Hammer,
   House,
   Layers,
   LayoutGrid,
@@ -79,7 +80,7 @@ function RailTip({ label, children }: { label: string; children: ReactNode }) {
 
 /**
  * The dark activity rail: the logo (home: the Dashboard), New project,
- * Projects; inside a project also its Overview, Spec, Design and Deploy; then the chat
+ * Projects; inside a project also its Overview, Spec, Design, Builds and Deploy; then the chat
  * toggle, Settings (the org's card, over the Dashboard) and the user menu at
  * the bottom. The rail takes you to Pages; a Card opens from what a Page
  * shows, save the few the rail names.
@@ -184,6 +185,16 @@ export function ActivityRail({
               sx={railButtonSx(project.card === "design")}
             >
               <Layers size={20} />
+            </RailLink>
+          </RailTip>
+          <RailTip label="Builds">
+            <RailLink
+              to="/projects/$projectName/builds"
+              params={{ projectName: project.projectName }}
+              aria-label="Builds"
+              sx={railButtonSx(project.page === "builds")}
+            >
+              <Hammer size={20} />
             </RailLink>
           </RailTip>
           <RailTip label="Deploy">

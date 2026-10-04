@@ -20,7 +20,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ProjectOverview } from "../../../../features/projects/components/ProjectOverview";
 import { PageWithCards } from "../../../../features/shell/components/PageWithCards";
 
-// The overview Page, and the Cards it lists (Spec, Design, Builds) as its
+// The overview Page, and the Cards it lists (Spec, Design) as its
 // child routes. Pathless, so the cards keep their addresses under the project
 // (`/projects/$p/spec`); the overview stays mounted under an open card.
 export const Route = createFileRoute("/projects/$projectName/_overview")({

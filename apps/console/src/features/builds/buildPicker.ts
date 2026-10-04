@@ -61,7 +61,7 @@ export function useBuildOffer(projectName: string): BuildOffer | null {
 /**
  * The build action as an entry point shows it: its words ("Build v1") while
  * something is designed and no build runs, else null; and what it does,
- * which opens the picker, or the Builds card while a build runs.
+ * which opens the picker, or the running build's card while a build runs.
  */
 export function useBuildAction(projectName: string): { offer: BuildOffer | null; label: string | null; open: () => void } {
   const controls = useContext(BuildPickerContext);
@@ -70,7 +70,7 @@ export function useBuildAction(projectName: string): { offer: BuildOffer | null;
   const navigate = useNavigate();
   const running = offer?.running ?? null;
   const open = useCallback(() => {
-    if (running) void navigate({ to: "/projects/$projectName/builds", params: { projectName } });
+    if (running) void navigate({ to: "/projects/$projectName/builds/$version", params: { projectName, version: running.version } });
     else controls.open();
   }, [controls, navigate, projectName, running]);
   const label = offer && !running && offeredRows(offer).length > 0 ? `Build ${offer.version}` : null;

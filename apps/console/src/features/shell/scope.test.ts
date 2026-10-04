@@ -49,6 +49,7 @@ describe("shellScope", () => {
       card: null,
       specFile: null,
     });
+    expect(inProject("/projects/$projectName/builds")).toMatchObject({ page: "builds", card: null });
     expect(inProject("/projects/$projectName/deploy")).toMatchObject({ page: "deploy", card: null });
   });
 
@@ -56,8 +57,7 @@ describe("shellScope", () => {
     const routes = [
       ["/projects/$projectName/_overview/spec", "spec", "overview"],
       ["/projects/$projectName/_overview/design", "design", "overview"],
-      ["/projects/$projectName/_overview/builds/", "builds", "overview"],
-      ["/projects/$projectName/_overview/builds/$version", "builds", "overview"],
+      ["/projects/$projectName/builds/$version", "build", "builds"],
       ["/projects/$projectName/deploy/$env/configure", "configure", "deploy"],
     ] as const;
     for (const [routeId, card, page] of routes) {
@@ -90,7 +90,8 @@ describe("shellScope", () => {
 describe("cards and the Pages they are over", () => {
   it("knows which routes draw a card", () => {
     expect(cardOfRoute("/projects/$projectName/deploy/$env/configure")).toBe("configure");
-    expect(cardOfRoute("/projects/$projectName/_overview/builds/$version")).toBe("builds");
+    expect(cardOfRoute("/projects/$projectName/builds/$version")).toBe("build");
+    expect(cardOfRoute("/projects/$projectName/builds")).toBeNull();
     expect(cardOfRoute("/projects/$projectName/_overview/")).toBeNull();
     expect(cardOfRoute("/projects/$projectName/deploy")).toBeNull();
     expect(cardOfRoute("/_dashboard/settings")).toBe("settings");
@@ -100,7 +101,7 @@ describe("cards and the Pages they are over", () => {
   it("closes each card back to the Page it opened over", () => {
     expect(pageOfCard("spec")).toBe("overview");
     expect(pageOfCard("design")).toBe("overview");
-    expect(pageOfCard("builds")).toBe("overview");
+    expect(pageOfCard("build")).toBe("builds");
     expect(pageOfCard("configure")).toBe("deploy");
   });
 });
@@ -119,10 +120,10 @@ describe("chatTopic", () => {
     });
   });
 
-  it("talks about the whole product on the product page, product-wide, the overview and builds", () => {
+  it("talks about the whole product on the product page, product-wide, the overview and a build", () => {
     expect(chatTopic("spec", null)).toEqual(product);
     expect(chatTopic(null, null)).toEqual(product);
-    expect(chatTopic("builds", null)).toEqual(product);
+    expect(chatTopic("build", null)).toEqual(product);
   });
 
   it("talks about the whole product on an environment's Configure card, which no agent can change yet", () => {

@@ -14,8 +14,8 @@ routes/projects/$projectName/
     index.tsx                  /projects/$p            no card
     spec.tsx                   /projects/$p/spec       Spec card
     design.tsx                 /projects/$p/design     Design card
-    builds/index.tsx           /projects/$p/builds     Builds card
-    builds/$version.tsx        /projects/$p/builds/v2  Builds card
+  builds/route.tsx           build history           /projects/$p/builds
+    $version.tsx               /projects/$p/builds/v2  Build card
   deploy/route.tsx           the Deploy Page         /projects/$p/deploy
     $env/configure.tsx         /projects/$p/deploy/staging/configure  Configure card
 ```
@@ -44,6 +44,12 @@ routes/projects/$projectName/
 - **A Panel is not a route**: a Dialog owned by its Page or Card (the build
   picker, Try it, Settings' Rotate token and Disconnect). It has no address
   and leaves the chat as it was.
+
+A Build card is a version's, over build history (the ledger of versions);
+closing it goes back there. The overview's track opens the newest version's
+Build card from its Build leg, and the build picker opens the version it
+started. It sets no Turn scope: no agent works on one build yet, so the chat
+stays on the whole product.
 
 The Configure card sets no Turn scope: no agent can change an environment yet,
 so `turnScopeFor` and `chatTopic` read it as the whole product. The Settings

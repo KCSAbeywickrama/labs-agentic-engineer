@@ -16,11 +16,11 @@
  * under the License.
  */
 
-import { formatEvent } from "@aep/progress-view";
+import { formatDuration, formatEvent } from "@aep/progress-view";
 import type { components } from "../../../generated/aep-api";
 import type { RunProgressCycle, StampedRunEvent } from "../hooks/useRunProgress";
 
-// A run's steps as the Builds card lists them, read from what today's run
+// A run's steps as the Build card's phase strip shows them, read from what today's run
 // progress stream already carries: Plan, then each entry of the coding
 // agent's own plan ("Foundation · API", "F1 Submit expenses · Web app"), then
 // Validate. Pure, so the card and its tests read the same answer.
@@ -197,4 +197,20 @@ export function runStatus(
     return { text: `Validating · ${phase.count.done} of ${phase.count.total}`, tone: "primary" };
   }
   return { text: `Running · ${steps.current + 1} of ${steps.phases.length}`, tone: "primary" };
+}
+
+/** A phase as the Build card's strip says it, for its tooltip and a screen reader: where it is, in words. */
+export function phaseStripLabel(phase: RunPhase): string {
+  switch (phase.state) {
+    case "done":
+      return `${phase.label}: done${phase.durationMs !== null ? ` in ${formatDuration(phase.durationMs)}` : ""}`;
+    case "live":
+      return phase.count && phase.count.total > 0
+        ? `${phase.label}: ${phase.count.done} of ${phase.count.total}`
+        : `${phase.label}: running`;
+    case "failed":
+      return `${phase.label}: failed`;
+    default:
+      return `${phase.label}: queued`;
+  }
 }

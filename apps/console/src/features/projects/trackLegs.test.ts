@@ -28,17 +28,21 @@ const acme: ProjectTrack = {
 };
 
 describe("trackLegs", () => {
-  it("draws Spec, Design, Build, Deploy in order, the first three opening their cards and Deploy its Page", () => {
-    expect(trackLegs(acme).map((l) => [l.step, l.title, l.opens])).toEqual([
-      [1, "Spec", "spec"],
-      [2, "Design", "design"],
-      [3, "Build", "builds"],
-      [4, "Deploy", "deploy"],
+  it("draws Spec, Design, Build, Deploy in order, each opening its card or Page", () => {
+    expect(trackLegs(acme, null).map((l) => [l.step, l.title, l.opens])).toEqual([
+      [1, "Spec", { kind: "spec" }],
+      [2, "Design", { kind: "design" }],
+      [3, "Build", { kind: "builds" }],
+      [4, "Deploy", { kind: "deploy" }],
     ]);
   });
 
+  it("opens the latest build's card from the Build leg once there is one", () => {
+    expect(trackLegs(acme, "v2")[2]?.opens).toEqual({ kind: "build", version: "v2" });
+  });
+
   it("carries each leg's state and state line from the track", () => {
-    const [spec, design] = trackLegs(acme);
+    const [spec, design] = trackLegs(acme, null);
     expect(spec).toMatchObject({ state: "done", stateLabel: "Done", summary: "5 features" });
     expect(design).toMatchObject({
       state: "waiting",
@@ -54,17 +58,17 @@ describe("trackLegs", () => {
       build: { state: "done", summary: "v1 built" },
       deploy: { state: "done", summary: "v1 deployed" },
     };
-    expect(trackLegs(shipped)[3]).toMatchObject({ state: "done", summary: "v1 deployed" });
+    expect(trackLegs(shipped, "v1")[3]).toMatchObject({ state: "done", summary: "v1 deployed" });
   });
 });
 
 describe("a leg's accessible name", () => {
   it("says the state in words, then the state line", () => {
-    expect(trackLegs(acme)[1]?.accessibleName).toBe("Design: Waiting on you. 2 features to design");
+    expect(trackLegs(acme, null)[1]?.accessibleName).toBe("Design: Waiting on you. 2 features to design");
   });
 
   it("does not repeat a state line that only restates the state", () => {
-    expect(trackLegs(acme)[2]?.accessibleName).toBe("Build: Not yet");
+    expect(trackLegs(acme, null)[2]?.accessibleName).toBe("Build: Not yet");
   });
 });
 

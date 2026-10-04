@@ -18,7 +18,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { RunProgressCycle, StampedRunEvent } from "../hooks/useRunProgress";
-import { runStatus, runSteps } from "./phases";
+import { phaseStripLabel, runStatus, runSteps, type RunPhase } from "./phases";
 
 let seq = 0;
 const at = (cycleId: string, second: number, rest: Partial<StampedRunEvent>): StampedRunEvent =>
@@ -125,5 +125,18 @@ describe("the run's result in one line", () => {
       tone: "success",
     });
     expect(runStatus("succeeded", done, null)).toEqual({ text: "Built", tone: null });
+  });
+});
+
+describe("the phase strip", () => {
+  const phase = (rest: Partial<RunPhase>): RunPhase => ({ key: "p", label: "Plan", state: "queued", count: null, log: [], durationMs: null, ...rest });
+
+  it("says where each phase is in words, never by its colour alone", () => {
+    expect(phaseStripLabel(phase({ state: "done", durationMs: 125_000 }))).toBe("Plan: done in 2m5s");
+    expect(phaseStripLabel(phase({ state: "done" }))).toBe("Plan: done");
+    expect(phaseStripLabel(phase({ label: "Approvals · Web app", state: "live" }))).toBe("Approvals · Web app: running");
+    expect(phaseStripLabel(phase({ label: "Validate", state: "live", count: { done: 3, total: 9 } }))).toBe("Validate: 3 of 9");
+    expect(phaseStripLabel(phase({ state: "failed" }))).toBe("Plan: failed");
+    expect(phaseStripLabel(phase({}))).toBe("Plan: queued");
   });
 });

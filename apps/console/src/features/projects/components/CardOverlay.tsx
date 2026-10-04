@@ -24,11 +24,12 @@ import { cardTitle, pageOfCard, pageTitle, type ProjectCard, type ProjectPage } 
 import { WorkspaceTabs } from "./WorkspaceTabs";
 
 /** A card's place on the track, where it has one (Spec and Design show theirs as tabs). */
-const STEP: Partial<Record<ProjectCard, number>> = { builds: 3 };
+const STEP: Partial<Record<ProjectCard, number>> = { build: 3 };
 
 /** Where each Page is: a card closes back to the one it is over. */
 const PAGE_PATH = {
   overview: "/projects/$projectName",
+  builds: "/projects/$projectName/builds",
   deploy: "/projects/$projectName/deploy",
 } as const satisfies Record<ProjectPage, string>;
 
