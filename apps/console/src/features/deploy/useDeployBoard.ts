@@ -39,8 +39,19 @@ export interface DeployBoard {
   retry: () => void;
 }
 
-/** The Deploy Page's board and history, from its reads. */
-export function useDeployBoard(projectName: string): DeployBoard {
+interface Columns {
+  columns: EnvironmentColumn[] | null;
+  error: string | null;
+  unreadComponents: number;
+  retry: () => void;
+}
+
+/**
+ * The board's columns, from the environments, the components and every
+ * component's deployments; with each environment's dependency readiness when
+ * `withReadiness` (the Deploy Page shows it, the overview does not).
+ */
+function useColumns(projectName: string, withReadiness: boolean): Columns {
   const environments = useEnvironments();
   const components = useProjectComponents(projectName);
   const names = (components.data ?? []).map((c) => c.name);
@@ -48,9 +59,8 @@ export function useDeployBoard(projectName: string): DeployBoard {
   const status = useProjectStatus(projectName);
   const readiness = useReadinessByEnvironment(
     projectName,
-    (environments.data ?? []).map((e) => e.name),
+    withReadiness ? (environments.data ?? []).map((e) => e.name) : [],
   );
-  const ledger = useVersionLedger(projectName);
 
   const ready = environments.data && components.data && !(names.length > 0 && deployments.isPending);
   const columns = ready
@@ -65,11 +75,25 @@ export function useDeployBoard(projectName: string): DeployBoard {
   const failed = [environments, components].filter((q) => q.isError);
   return {
     columns,
-    history: columns && ledger.data ? deployHistory(columns, ledger.data) : null,
     error: failed[0]?.error?.message ?? null,
     unreadComponents: deployments.failedCount,
     retry: () => {
       for (const q of failed) void q.refetch();
     },
   };
+}
+
+/** The Deploy Page's board and history, from its reads. */
+export function useDeployBoard(projectName: string): DeployBoard {
+  const board = useColumns(projectName, true);
+  const ledger = useVersionLedger(projectName);
+  return {
+    ...board,
+    history: board.columns && ledger.data ? deployHistory(board.columns, ledger.data) : null,
+  };
+}
+
+/** What runs where, for the overview's components: the board's columns without the dependencies' values. */
+export function useEnvironmentColumns(projectName: string): Columns {
+  return useColumns(projectName, false);
 }

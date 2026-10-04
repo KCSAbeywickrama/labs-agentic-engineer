@@ -34,12 +34,15 @@ import { OpenApiView } from "@aep/ui-openapi-view";
 import { env } from "../../../config/env";
 import { useComponentOpenApi, useProjectRoles, useRevealTestUserPassword, type ProjectRolesView } from "../api/deploy";
 import { componentKindLabel, type ColumnComponent, type EnvironmentColumn } from "../model/pipeline";
-import { agentLaunch, testLogins, tryItAppUrl, tryItKind, type TestLogin } from "../model/tryIt";
+import { Segmented } from "../../design/components/Segmented";
+import { agentLaunch, testLogins, tryItAppUrl, tryItKind, type EnvironmentRef, type TestLogin } from "../model/tryIt";
 
-// Try it, a Panel over the Deploy Page: no address, and the chat stays as it
-// was. Each component serving in the environment, as a person tries it: a web
-// app opened and signed in to as one of the project's test users, an agent
-// opened in the platform's test app the same way, a service's API.
+// Try it, a Panel over the Deploy Page and the project overview: no address,
+// and the chat stays as it was. Each component serving in the environment, as
+// a person tries it: a web app opened and signed in to as one of the
+// project's test users, an agent opened in the platform's test app the same
+// way, a service's API. From the overview it is one component's, with a
+// switch between the environments it serves in.
 //
 // The console cannot sign anyone in on the project's identity provider: the
 // sign-in happens on its page. So "Open as" opens the app and copies that
@@ -188,23 +191,33 @@ function ServiceApi({ projectName, component }: { projectName: string; component
   );
 }
 
-/** Try it: what each component serving in one environment offers a person. */
+/** One component, opened from the overview, and the environments it can be tried in. */
+export interface TryItFocus {
+  componentName: string;
+  environments: EnvironmentRef[];
+  onEnvironment: (name: string) => void;
+}
+
+/** Try it: what each component serving in one environment offers a person, or one component's. */
 export function TryItPanel({
   projectName,
   column,
   entryLabel,
+  focus,
   onClose,
 }: {
   projectName: string;
   column: EnvironmentColumn;
   /** The pipeline's first environment, the one the project's test users are set up in. */
   entryLabel: string;
+  focus?: TryItFocus;
   onClose: () => void;
 }) {
   const serving = column.components.flatMap((c) => {
     const kind = tryItKind(c);
-    return kind ? [{ component: c, kind }] : [];
+    return kind && (!focus || c.name === focus.componentName) ? [{ component: c, kind }] : [];
   });
+  const focused = focus ? column.components.find((c) => c.name === focus.componentName) : undefined;
   const signsIn = column.entry && serving.some((s) => s.kind !== "service");
   const roles = useProjectRoles(projectName, signsIn);
   const reveal = useRevealTestUserPassword(projectName);
@@ -223,15 +236,27 @@ export function TryItPanel({
   return (
     <Dialog open onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle sx={{ pr: 6 }}>
-        Try {column.version ?? "it"} in {column.label}
+        Try {focused?.displayName ?? column.version ?? "it"} in {column.label}
         <IconButton aria-label="Close" size="small" onClick={onClose} sx={{ position: "absolute", right: 12, top: 12 }}>
           <X size={18} />
         </IconButton>
       </DialogTitle>
       <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        {focus && focus.environments.length > 1 && (
+          <Box sx={{ alignSelf: "flex-start" }}>
+            <Segmented
+              label="Environment"
+              value={column.name}
+              options={focus.environments.map((e) => ({ value: e.name, label: e.label }))}
+              onChange={focus.onEnvironment}
+            />
+          </Box>
+        )}
         {serving.length === 0 && (
           <Typography variant="body2" color="text.secondary">
-            Nothing is serving in {column.label} yet.
+            {focus
+              ? `${focused?.displayName ?? focus.componentName} is not serving in ${column.label} right now.`
+              : `Nothing is serving in ${column.label} yet.`}
           </Typography>
         )}
         {serving.map(({ component, kind }) => (

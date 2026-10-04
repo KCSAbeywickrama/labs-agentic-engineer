@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../../generated/aep-api";
 import { client } from "../../../api/client";
 import { ApiRequestError, apiErrorMessage } from "../../../api/errors";
@@ -25,12 +25,18 @@ import { useConfig } from "../../settings/api/queries";
 export type Project = components["schemas"]["Project"];
 type CreateProjectRequest = components["schemas"]["CreateProjectRequest"];
 
+// Every read of the org's project list is under `lists`, apart from each
+// project's own reads (under "projects"), so a create or a delete refreshes
+// the lists without re-reading every project.
 const projectKeys = {
-  list: () => ["projects"] as const,
+  lists: () => ["project-lists"] as const,
+  list: () => [...projectKeys.lists(), "first"] as const,
+  /** The Projects grid's pages for one search. */
+  pages: (search: string, limit: number) => [...projectKeys.lists(), "pages", { search, limit }] as const,
   detail: (projectName: string) => ["projects", projectName] as const,
 };
 
-/** The org's projects, first page: the Projects grid. */
+/** The org's projects, first page: where the Dashboard sends an org with none to New project. */
 export function useProjects() {
   return useQuery({
     queryKey: projectKeys.list(),
@@ -39,6 +45,46 @@ export function useProjects() {
       if (error) throw new ApiRequestError(error, "Couldn't load projects");
       return data.items ?? [];
     },
+  });
+}
+
+/**
+ * The Projects grid: the projects whose name matches `search`, a page at a
+ * time, the next page on asking (View more). The previous answer stays on
+ * screen while a new search is read, so typing does not flicker the grid.
+ */
+export function useProjectPages(search: string, limit: number) {
+  return useInfiniteQuery({
+    queryKey: projectKeys.pages(search, limit),
+    queryFn: async ({ pageParam }) => {
+      const { data, error } = await client.GET("/projects", {
+        params: { query: { limit, ...(search ? { search } : {}), ...(pageParam ? { cursor: pageParam } : {}) } },
+      });
+      if (error) throw new ApiRequestError(error, "Couldn't load projects");
+      return data;
+    },
+    initialPageParam: "",
+    getNextPageParam: (last) => last.nextCursor || undefined,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * Delete a project. The platform drops the project, its deployments and its
+ * build history; the GitHub repository is kept, with its code and issues.
+ */
+export function useDeleteProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (projectName: string) => {
+      const { error } = await client.DELETE("/projects/{projectName}", {
+        params: { path: { projectName } },
+      });
+      if (error) throw new Error(apiErrorMessage(error, "Couldn't delete the project"));
+    },
+    // The caller leaves the project's pages; its own reads are left to expire
+    // rather than re-read into a not-found while they are still on screen.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: projectKeys.lists() }),
   });
 }
 
@@ -81,7 +127,7 @@ export function useCreateProject() {
       return data;
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: projectKeys.list(), exact: true });
+      void queryClient.invalidateQueries({ queryKey: projectKeys.lists() });
     },
   });
 }

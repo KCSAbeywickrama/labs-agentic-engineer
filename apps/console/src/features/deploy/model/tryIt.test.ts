@@ -18,8 +18,8 @@
 
 import { describe, expect, it } from "vitest";
 import type { components } from "../../../generated/aep-api";
-import type { ColumnComponent } from "./pipeline";
-import { agentLaunch, testLogins, tryItAppUrl, tryItKind } from "./tryIt";
+import type { ColumnComponent, EnvironmentColumn } from "./pipeline";
+import { agentLaunch, componentTry, testLogins, tryItAppUrl, tryItKind } from "./tryIt";
 
 type ProjectRolesView = components["schemas"]["ProjectRolesView"];
 
@@ -83,5 +83,61 @@ describe("agentLaunch", () => {
     const withoutSignIn: ProjectRolesView = { directoryAvailable: true, testUsers: view.testUsers ?? null };
     expect(agentLaunch("acme-expenses", component({}), withoutSignIn)).toBeNull();
     expect(agentLaunch("acme-expenses", component({}), { ...view, testUsers: [] })).toBeNull();
+  });
+});
+
+describe("componentTry", () => {
+  const column = (name: string, components: ColumnComponent[]): EnvironmentColumn => ({
+    name,
+    label: name[0]!.toUpperCase() + name.slice(1),
+    entry: name === "development",
+    version: null,
+    running: components.length > 0,
+    state: { label: "Running", tone: "success" },
+    components,
+    dependencies: null,
+    next: null,
+  });
+  const app = (over: Partial<ColumnComponent> = {}) =>
+    component({ name: "expense-app", displayName: "Expense app", type: "web-application", ...over });
+
+  it("opens on the first environment it serves in, where its newest version runs, and offers the others", () => {
+    const columns = [column("development", [app()]), column("staging", [app()]), column("production", [app()])];
+    expect(componentTry(columns, "expense-app")).toEqual({
+      kind: "serving",
+      environments: [
+        { name: "development", label: "Development" },
+        { name: "staging", label: "Staging" },
+        { name: "production", label: "Production" },
+      ],
+    });
+  });
+
+  it("skips an environment where it is not serving", () => {
+    const columns = [column("development", [app({ kind: "converging" })]), column("staging", [app()])];
+    expect(componentTry(columns, "expense-app")).toEqual({ kind: "serving", environments: [{ name: "staging", label: "Staging" }] });
+  });
+
+  it("says where it is deploying or failed when it serves nowhere, a failure first", () => {
+    expect(componentTry([column("development", [app({ kind: "converging" })])], "expense-app")).toEqual({
+      kind: "deploying",
+      environment: { name: "development", label: "Development" },
+    });
+    const columns = [column("development", [app({ kind: "converging" })]), column("staging", [app({ kind: "failed" })])];
+    expect(componentTry(columns, "expense-app")).toEqual({ kind: "failed", environment: { name: "staging", label: "Staging" } });
+  });
+
+  it("says it runs where it is ready but nothing answers to try", () => {
+    expect(componentTry([column("development", [app({ url: null })])], "expense-app")).toEqual({
+      kind: "running",
+      environment: { name: "development", label: "Development" },
+    });
+  });
+
+  it("says a component deployed nowhere is not deployed yet", () => {
+    const notDeployed = app({ deployment: undefined, kind: "not-deployed", url: null });
+    expect(componentTry([column("development", [notDeployed]), column("staging", [])], "expense-app")).toEqual({
+      kind: "not-deployed",
+    });
   });
 });

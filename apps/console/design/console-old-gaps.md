@@ -31,7 +31,14 @@ their absence is a dead end somewhere else.
 | **Issues**: a project's GitHub issues (incidents, coding-agent handoffs) with an unread badge | `routes/projects.$projectName.issues.tsx`, `features/issues/` | none |
 | **Build detail**: the crew view (each agent's tree and timeline lanes), the External resources section (each dependency's values, edited in place), a build log per session, Copy build ID | `features/builds/components/RunCrew.tsx`, `CrewTimeline.tsx`, `ExternalResources.tsx` | the Build card: tasks with their status lines and logs, the coding agent's log as plain lines per session, component build logs, cancel and retry; a park or a blocked task links to the write target's Configure card |
 | **Validation**: the ledger's state filter, the verdict summary tile with the validation issue's status line, cancel a validation run, View validation issue on GitHub | `features/validation/components/ValidationLedger.tsx`, `ValidationSummaryCard.tsx`, `ValidationMilestonePage.tsx` | the Validation ledger and card: every attempt, by feature, with its report and log; Fix and Revalidate |
-| **Overview panels**: architecture diagram, components with their OpenAPI, dependencies and readiness | `features/projects/components/OverviewArchitecture.tsx`, `DependenciesTable.tsx`, `OverviewDependencies.tsx` | dependencies in the Design card, from the build preflight |
-| **Security matrix editing** (grant patching) | `features/spec/components/SecurityPanel.tsx`, `features/spec/lib/patchGrants.ts` | read-only in the Design card |
-| **Projects grid**: search, paging, delete a project | `routes/index.tsx`, `features/projects/components/DeleteProjectDialog.tsx` | the grid without them |
-| **Header**: org and project switchers, project status badge, footer links | `layouts/AppLayout.tsx`, `layouts/HeaderSwitchers.tsx` | the rail; the org's name in the user menu |
+| **Header**: project status badge, footer links | `layouts/AppLayout.tsx`, `layouts/ProjectStatusBadge.tsx` | the rail; the org's name in the user menu |
+
+## Left out by decision
+
+Not gaps: console-old has them and this console will not, so they do not keep
+the folder alive.
+
+| Area | In console-old | Why not here |
+|---|---|---|
+| **Security matrix editing** (grant patching) | `features/spec/components/SecurityPanel.tsx`, `features/spec/lib/patchGrants.ts` | the Design card shows the matrix read-only; a change goes through the design agent |
+| **Org and project switchers** | `layouts/HeaderSwitchers.tsx` | the rail's Projects and the grid's search do the job |

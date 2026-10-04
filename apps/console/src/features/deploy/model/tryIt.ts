@@ -17,7 +17,7 @@
  */
 
 import type { components } from "../../../generated/aep-api";
-import type { ColumnComponent } from "./pipeline";
+import type { ColumnComponent, EnvironmentColumn } from "./pipeline";
 
 // Try it, the Panel: what each component running in an environment offers a
 // person, after the old console's Try it out (TryItOut.tsx, tryItAppUrl.ts,
@@ -52,6 +52,40 @@ export function tryItKind(component: ColumnComponent): TryItKind | null {
   if (component.type === "ai-agent") return "agent";
   if (component.type === "service") return "service";
   return null;
+}
+
+/** An environment, by its name and as people read it. */
+export interface EnvironmentRef {
+  name: string;
+  label: string;
+}
+
+/**
+ * Where one component can be tried, for the overview's Try it: every
+ * environment it serves in, in promotion order. The first is the one Try it
+ * opens on, since every build lands in the pipeline's first environment and
+ * moves on from there, so the earliest environment a component serves in runs
+ * its newest version. A component serving nowhere says why: deploying or
+ * failed where it was deployed, running where nothing answers to try, or
+ * deployed nowhere at all.
+ */
+export type ComponentTry =
+  | { kind: "serving"; environments: EnvironmentRef[] }
+  | { kind: "deploying" | "failed" | "running"; environment: EnvironmentRef }
+  | { kind: "not-deployed" };
+
+export function componentTry(columns: readonly EnvironmentColumn[], componentName: string): ComponentTry {
+  const placed = columns.flatMap((column) => {
+    const row = column.components.find((c) => c.name === componentName);
+    return row?.deployment ? [{ environment: { name: column.name, label: column.label }, row }] : [];
+  });
+  const serving = placed.filter((p) => tryItKind(p.row) !== null).map((p) => p.environment);
+  if (serving.length > 0) return { kind: "serving", environments: serving };
+  for (const kind of ["failed", "converging", "ready"] as const) {
+    const first = placed.find((p) => p.row.kind === kind);
+    if (first) return { kind: kind === "converging" ? "deploying" : kind === "ready" ? "running" : kind, environment: first.environment };
+  }
+  return { kind: "not-deployed" };
 }
 
 /** Everything the test app needs to sign in to a project and reach one of its components; all of it public. */

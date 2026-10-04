@@ -44,8 +44,12 @@ routes/projects/$projectName/
   read them, so a new Card is a route file plus its rows there; a new project
   Page also needs its path in `CardOverlay`'s `PAGE_PATH`.
 - **A Panel is not a route**: a Dialog owned by its Page or Card (the build
-  picker, Try it, Settings' Rotate token and Disconnect). It has no address
-  and leaves the chat as it was.
+  picker, Try it, Delete project, Settings' Rotate token and Disconnect). It
+  has no address and leaves the chat as it was. Try it has two owners: the
+  Deploy Page opens it for an environment, every component serving there; the
+  overview's components open it for one component, on the first environment
+  it serves in (where its newest version runs, `componentTry`), with a switch
+  to the others. Delete project is opened from the overview's menu.
 
 A Build card is a version's, over build history (the ledger of versions);
 closing it goes back there. The overview's track opens the newest version's
