@@ -23,10 +23,10 @@
  */
 
 import type { PrototypeTheme } from "@wso2/prototype-kit";
-import { Alert, Badge, Button, EmptyState, Heading, Link, Stat, Text } from "./components/content.js";
+import { Alert, Badge, Button, EmptyState, Heading, Link, Stat, StatGroup, Text } from "./components/content.js";
 import { Table, Timeline } from "./components/data.js";
 import { Field, Filters, Form, ValidationSummary } from "./components/forms.js";
-import { Detail, Grid, Screen, Split, Stack } from "./components/layout.js";
+import { Detail, Grid, Screen, Section, Split, Stack } from "./components/layout.js";
 import { Breadcrumbs, Navigation, Stepper, Tabs } from "./components/navigation.js";
 import { Dialog, Drawer } from "./components/overlays.js";
 import { AppShell } from "./components/shell.js";
@@ -38,6 +38,7 @@ const theme: PrototypeTheme = {
   registry: {
     Screen,
     AppShell,
+    Section,
     Stack,
     Grid,
     Split,
@@ -49,6 +50,7 @@ const theme: PrototypeTheme = {
     Heading,
     Link,
     Stat,
+    StatGroup,
     Text,
     Breadcrumbs,
     Navigation,

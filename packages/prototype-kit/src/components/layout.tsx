@@ -16,7 +16,7 @@
  * under the License.
  */
 
-/** Layout: the bare screen, stack, grid, split and the read-only detail record (the app shell is in shell.tsx). */
+/** Layout: the bare screen, section, stack, grid, split and the read-only detail record (the app shell is in shell.tsx). */
 
 import type { ReactNode } from "react";
 import { SelectableBox, requireId } from "../runtime/selectable.js";
@@ -37,6 +37,38 @@ export interface ThemeScreenProps {
 export function Screen({ nav, children }: ScreenProps) {
   const Themed = useThemed("Screen");
   return <Themed nav={nav}>{children}</Themed>;
+}
+
+export interface SectionProps {
+  id: string;
+  title: string;
+  /** One line under the title: what the section holds or why. */
+  subtitle?: string | undefined;
+  /** How many records the section lists, shown beside the title. */
+  count?: number | undefined;
+  /** The section's own Buttons ("New request" above the requests it adds to). */
+  actions?: ReactNode;
+  children?: ReactNode;
+}
+
+export interface ThemeSectionProps {
+  title: string;
+  subtitle?: string | undefined;
+  count?: number | undefined;
+  actions?: ReactNode;
+  children?: ReactNode;
+}
+
+/** A titled part of a screen — a table, a form, a group of stats — with the actions that belong to it. */
+export function Section({ id, title, subtitle, count, actions, children }: SectionProps) {
+  const Themed = useThemed("Section");
+  return (
+    <SelectableBox id={requireId("Section", id)} label={title} container>
+      <Themed title={title} subtitle={subtitle} count={count} actions={actions}>
+        {children}
+      </Themed>
+    </SelectableBox>
+  );
 }
 
 export interface StackProps {

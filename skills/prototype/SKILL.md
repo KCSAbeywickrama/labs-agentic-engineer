@@ -134,8 +134,8 @@ refused.
 ```tsx
 import { useState, type ReactNode } from "react";
 import {
-  Alert, AppShell, Button, Detail, Dialog, EmptyState, Field, Form, Heading, Screen, Table,
-  defineApp, useCollection, useDisplayState, useNav, useParams,
+  Alert, AppShell, Button, Detail, Dialog, EmptyState, Field, Form, Heading, Screen, Section, Stat,
+  StatGroup, Table, defineApp, useCollection, useDisplayState, useNav, useParams,
 } from "@wso2/prototype-kit";
 
 interface Expense { id: string; employee: string; amount: string; status: string }
@@ -143,6 +143,7 @@ interface Expense { id: string; employee: string; amount: string; status: string
 const expenses: Expense[] = [
   { id: "1042", employee: "Maya Fernando", amount: "$148.20", status: "Awaiting approval" },
   { id: "1039", employee: "Ravi Perera", amount: "$62.00", status: "Awaiting approval" },
+  { id: "1031", employee: "Ana Silva", amount: "$310.00", status: "Approved" },
 ];
 
 const user = { name: "Ravi Perera", email: "ravi@acme.example" };
@@ -166,25 +167,32 @@ function Queue() {
   const state = useDisplayState();
   const all = useCollection<Expense>("expenses");
   const waiting = state === "state.empty" ? [] : all.items.filter((e) => e.status === "Awaiting approval");
+  const approved = all.items.filter((e) => e.status === "Approved").length;
   return (
     <Shell>
       <Heading id="heading.queue" text="Approval queue" />
       {state === "state.failed" && (
         <Alert id="alert.feed-failed" tone="error" title="Expense feed unavailable" text="Amounts may be stale. Refresh in a few minutes." />
       )}
-      <Table
-        id="table.expenses"
-        title="Expenses"
-        columns={["Employee", "Amount", "Status"]}
-        rows={waiting.map((e) => ({
-          id: `expense.${e.id}`,
-          cells: [e.employee, e.amount, e.status],
-          tone: "warning",
-          to: "screen.detail",
-          params: { expense: e.id },
-        }))}
-        empty={<EmptyState id="empty.queue" title="Nothing to approve" text="New claims appear here." />}
-      />
+      <StatGroup>
+        <Stat id="stat.waiting" label="Awaiting you" value={String(waiting.length)} hint="claims to decide" icon="Inbox" tone="warning" />
+        <Stat id="stat.approved" label="Approved" value={String(approved)} hint="this month" icon="CircleCheck" tone="success" />
+      </StatGroup>
+      <Section id="section.expenses" title="Expenses" count={waiting.length} subtitle="Oldest first. Open a claim to reject it with a reason.">
+        <Table
+          id="table.expenses"
+          columns={["Employee", { label: "Amount", kind: "number" }, { label: "Status", kind: "status" }]}
+          rows={waiting.map((e) => ({
+            id: `expense.${e.id}`,
+            cells: [e.employee, e.amount],
+            status: { text: e.status, tone: "warning" },
+            to: "screen.detail",
+            params: { expense: e.id },
+            actions: [{ id: `expense.${e.id}.approve`, label: "Approve", onPress: () => all.update(e.id, { status: "Approved" }) }],
+          }))}
+          empty={<EmptyState id="empty.queue" title="Nothing to approve" text="New claims appear here." />}
+        />
+      </Section>
     </Shell>
   );
 }
@@ -299,7 +307,7 @@ export default defineApp({
   them to show an error, an empty list, a role's own controls. Show a control
   only to the roles that reach where it leads: a `to` a role cannot follow is
   refused.
-- **Navigate with `to`** on a Button, Link, table row or breadcrumb (with
+- **Navigate with `to`** on a Button, Link, table row, row action or breadcrumb (with
   `params` the target reads through `useParams()`); `useNav().go(...)` inside
   an `onPress` for a navigation that follows an action. Every screen must
   also draw **without** params (the reviewer can open any screen from the
@@ -351,21 +359,40 @@ source never imports one, never styles anything, and never names Oxygen. Your
 part is composing screens the way an Oxygen application composes them:
 
 - **Page anatomy.** A screen is the `<AppShell>` holding a `<Heading>` (the
-  page title, with its main action Buttons in `actions`), then the content in the
-  order a user works through it: summary `<Stat>`s, `<Filters>`, the
-  `<Table>`, with `<Detail>`, `<Form>` and `<Timeline>` for a single record.
-  A sub-page opens with `<Breadcrumbs>` back to its list.
+  page title, with page-wide action Buttons in `actions`), then the content in
+  the order a user works through it: headline numbers as one `<StatGroup>` of
+  `<Stat>`s, then a `<Section>` per part of the page (a list, a form, a
+  record), with `<Filters>` and the `<Table>` inside it, and `<Detail>`,
+  `<Form>` and `<Timeline>` for a single record. A sub-page opens with
+  `<Breadcrumbs>` back to its list.
+- **Stats in a group.** Put a screen's `<Stat>`s in one `<StatGroup>`, never a
+  `<Stack direction="row">` or `<Grid>`: the group gives them one width. Give
+  each a `hint` that gives the number its scale ("of 20 left this year",
+  "claims to decide") and an `icon` from the kit's list that names what it
+  counts; `tone` colours the icon when the number needs attention.
+- **Sections own their actions.** A `<Section>` titles a part of the page,
+  with `count` for the records it lists and `subtitle` for one line on what it
+  holds. An action that adds to or acts on that part sits in the Section's
+  `actions` (New request above the requests), not under the table and not in
+  the page Heading.
 - **One primary action per screen.** `emphasis="primary"` marks the screen's
-  main action and nothing else; destructive actions are `"danger"`. A listing
-  page's create action sits in the Heading's `actions`, not under the table.
-- **Status is a chip, not prose.** A record's status is a `tone`d table cell or
-  a `<Badge>`: `success`, `warning`, `error`, `info`, `default`. Callouts are
-  `<Alert>`s with a tone.
+  main action and nothing else; destructive actions are `"danger"`.
+- **Status is a chip, not prose.** A record's status is the table's status
+  column (`{ label: "Status", kind: "status" }` in `columns`, and each row's
+  `status: { text, tone }`) or a `<Badge>`: `success`, `warning`, `error`,
+  `info`, `default`. Put the column where it reads best; the row's `cells` fill
+  the other columns in order. Callouts are `<Alert>`s with a tone.
+- **Row actions are buttons, not cells.** What a user does to one record
+  without opening it (Cancel, Approve) is the row's `actions`, each with an id
+  built from the row's (`` `${rowId}.cancel` ``), a `label`, and `to` or
+  `onPress` like a Button (`emphasis: "danger"` for a destructive one). They
+  draw in a trailing column (behind one menu past two) and pressing one never
+  presses the row, so the row can still open the record. Never write an
+  action's label into a cell. Figures are `{ label, kind: "number" }` columns.
 - **Navigation is the shell's side rail**, one entry per top-level screen.
   Account and Settings live in the user menu, not the rail.
 - **Records, not cards.** Show a list of records as a `<Table>` whose rows
-  open the record; use `<Grid>` of `<Stat>`s for headline numbers and
-  `<Split>` for a record next to its activity.
+  open the record; use `<Split>` for a record next to its activity.
 - **Forms are short and labelled.** One `<Form>` per task, a `<Field>` per
   input with a plain label, `required` where the API requires it, errors in
   the Field's `error` and a `<ValidationSummary>` for the whole form.
@@ -473,6 +500,17 @@ The root of a screen outside the app shell (signed out, a landing page): its con
 - `nav?: ReactNode` — Navigation for an app drawn without `<AppShell>`: one `<Navigation>`, usually shared by every screen.
 - `children?: ReactNode`
 
+#### `<Section>`
+
+A titled part of a screen — a table, a form, a group of stats — with the actions that belong to it.
+
+- `id: string`
+- `title: string`
+- `subtitle?: string` — One line under the title: what the section holds or why.
+- `count?: number` — How many records the section lists, shown beside the title.
+- `actions?: ReactNode` — The section's own Buttons ("New request" above the requests it adds to).
+- `children?: ReactNode`
+
 #### `<Stack>`
 
 Children in a column (default) or a wrapping row.
@@ -570,7 +608,7 @@ A page or section title, with the actions beside it.
 
 - `id: string`
 - `text: string`
-- `level?: "page" | "section"` — `page` (default) for a screen's title, `section` for a part of it.
+- `level?: "page" | "section"` — `page` (default) for a screen's title; `section` titles a part of it. Prefer `<Section>` for a part with its own actions or records.
 - `actions?: ReactNode` — Buttons and Links beside the heading.
 
 #### `<Text>`
@@ -591,11 +629,24 @@ A status chip.
 
 #### `<Stat>`
 
-A headline number with its label.
+A headline number with its label. Put a screen's stats side by side in a `<StatGroup>`.
 
 - `id: string`
 - `label: string`
 - `value: string`
+- `hint?: string` — A short line under the value that gives it scale or context: "of 20 days", "3 due this week".
+- `icon?: StatIcon` — An icon beside the label.
+- `tone?: Tone` — Colours the icon (`default` is the theme's primary).
+
+#### `StatIcon` = `"Activity" | "Bell" | "Briefcase" | "Bug" | "Building2" | "Calendar" | "CalendarCheck" | "CalendarClock" | "CalendarDays" | "ChartColumn" | "CircleCheck" | "CircleX" | "ClipboardList" | "Clock" | "Cloud" | "Cpu" | "CreditCard" | "Database" | "DollarSign" | "FileText" | "Gauge" | "Globe" | "HeartPulse" | "Hourglass" | "Inbox" | "Layers" | "ListChecks" | "Lock" | "Mail" | "MessageSquare" | "Package" | "Plane" | "Receipt" | "Rocket" | "Server" | "Shield" | "ShoppingCart" | "Star" | "Tag" | "Ticket" | "Timer" | "TrendingDown" | "TrendingUp" | "TriangleAlert" | "Truck" | "User" | "UserCheck" | "Users" | "Wallet" | "Zap"`
+
+The icons a `<Stat>` may show, named as in WSO2's Oxygen icon set (Lucide's names). A theme draws each or none; an unknown name fails the check.
+
+#### `<StatGroup>`
+
+A row of `<Stat>`s at equal widths, wrapping on a narrow window.
+
+- `children?: ReactNode` — The `<Stat>`s, in reading order.
 
 #### `<Alert>`
 
@@ -700,18 +751,39 @@ A table of records.
 
 - `id: string`
 - `title?: string`
-- `columns: string[]`
+- `columns: (string | TableColumn)[]`
 - `rows: TableRow[]`
 - `onRowPress?: ((rowId: string) => void)` — Run when a row is pressed, with its id; a row with neither this nor `to` is only highlighted.
 - `empty?: ReactNode` — What an empty table shows instead (an `<EmptyState>`).
 
+#### `TableColumn`
+
+- `label: string`
+- `kind?: "number" | "text" | "status"` — `text` (default); `number` aligns figures to the right; `status` shows each row's `status` as a badge (one per table). A plain string is a `text` column.
+
 #### `TableRow`
 
 - `id: string` — The row's element id: unique on the screen (prefix it with the table's).
-- `cells: string[]` — Cells in column order.
-- `tone?: Tone` — Colours the last cell as a status.
+- `cells: string[]` — One per `text` or `number` column, in column order; the status column takes `status`.
+- `status?: TableStatus` — The badge in the table's status column.
+- `actions?: TableAction[]` — What can be done to this record, drawn as buttons in a trailing column; pressing one does not press the row.
+- `tone?: Tone` — Colours the last cell as a status, in a table without a status column. Prefer `status`.
 - `to?: string` — Open this screen when the row is pressed.
 - `params?: Record<string, string>`
+
+#### `TableStatus`
+
+- `text: string`
+- `tone: Tone`
+
+#### `TableAction`
+
+- `id: string` — The action's element id: unique on the screen (prefix it with the row's).
+- `label: string`
+- `emphasis?: "danger"` — `danger` for a destructive action.
+- `to?: string` — Navigate to this screen when pressed. Prefer it to `onPress` for plain navigation: the checks verify it.
+- `params?: Record<string, string>` — The params `to` carries, read on the target with `useParams`.
+- `onPress?: (() => void)` — Run when pressed: change mock data, open a dialog, navigate conditionally.
 
 #### `<Timeline>`
 

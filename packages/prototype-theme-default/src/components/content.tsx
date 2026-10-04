@@ -16,9 +16,9 @@
  * under the License.
  */
 
-/** Content: text, heading, badge, stat, alert, empty state, button and link. */
+/** Content: text, heading, badge, stat and stat group, alert, empty state, button and link. */
 
-import type { ThemeAlertProps, ThemeBadgeProps, ThemeButtonProps, ThemeEmptyStateProps, ThemeHeadingProps, ThemeLinkProps, ThemeStatProps, ThemeTextProps } from "@wso2/prototype-kit";
+import type { ThemeAlertProps, ThemeBadgeProps, ThemeButtonProps, ThemeEmptyStateProps, ThemeHeadingProps, ThemeLinkProps, ThemeStatGroupProps, ThemeStatProps, ThemeTextProps } from "@wso2/prototype-kit";
 
 export const CONTENT_CSS = `
 .pt-button{font:inherit;font-weight:500;padding:6px 14px;border-radius:6px;border:1px solid var(--pt-primary);background:var(--pt-surface);color:var(--pt-primary);cursor:pointer}
@@ -33,8 +33,12 @@ export const CONTENT_CSS = `
 .pt-heading h3{margin:0;font-size:16px;font-weight:600}
 .pt-actions{display:flex;gap:8px;flex-wrap:wrap}
 .pt-badge{display:inline-block;padding:1px 10px;border-radius:999px;font-size:12px;font-weight:600;color:var(--pt-tone);background:color-mix(in srgb,var(--pt-tone) 12%,transparent)}
-.pt-stat-value{font-size:26px;font-weight:600}
+.pt-stat-group{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.pt-stat-group .pt-stat{height:100%}
+.pt-stat{display:flex;flex-direction:column;gap:4px}
 .pt-stat-label{color:var(--pt-muted);font-size:13px}
+.pt-stat-value{font-size:28px;font-weight:600;line-height:1.2;font-variant-numeric:tabular-nums}
+.pt-stat-hint{color:var(--pt-muted);font-size:12px}
 .pt-alert{border-left:4px solid var(--pt-tone);background:color-mix(in srgb,var(--pt-tone) 8%,var(--pt-surface));padding:10px 14px;border-radius:6px}
 .pt-alert strong{display:block;margin-bottom:2px}
 .pt-empty{text-align:center;padding:32px 16px;display:flex;flex-direction:column;align-items:center;gap:8px}
@@ -75,13 +79,19 @@ export function Badge({ label, tone }: ThemeBadgeProps) {
   return <span className={`pt-badge pt-tone-${tone}`}>{label}</span>;
 }
 
-export function Stat({ label, value }: ThemeStatProps) {
+/** The plain theme draws no icon. */
+export function Stat({ label, value, hint }: ThemeStatProps) {
   return (
-    <div className="pt-card">
-      <div className="pt-stat-value">{value}</div>
+    <div className="pt-card pt-stat">
       <div className="pt-stat-label">{label}</div>
+      <div className="pt-stat-value">{value}</div>
+      {hint && <div className="pt-stat-hint">{hint}</div>}
     </div>
   );
+}
+
+export function StatGroup({ children }: ThemeStatGroupProps) {
+  return <div className="pt-stat-group">{children}</div>;
 }
 
 export function Alert({ tone, title, text }: ThemeAlertProps) {

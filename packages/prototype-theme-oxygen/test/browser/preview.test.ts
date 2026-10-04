@@ -290,3 +290,71 @@ describe("the app shell under Oxygen", () => {
     await s.page.getByRole("button", { name: "Preview" }).click();
   });
 });
+
+describe("stats, sections and row actions under Oxygen", () => {
+  let s: Session;
+
+  beforeAll(async () => {
+    s = await open("team-leave");
+  });
+
+  afterAll(async () => {
+    await close(s);
+  });
+
+  beforeEach(async () => {
+    await s.page.reload();
+    await s.app.getByRole("heading", { name: "My Leave" }).waitFor();
+  });
+
+  it("draws the stats at one width, and the section's heading with its own action", async () => {
+    const widths = await s.app.locator('[data-proto-key^="stat.balance."]').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
+    expect(widths).toHaveLength(3);
+    expect(new Set(widths).size).toBe(1);
+    await s.app.getByText("of 20 left this year").waitFor();
+    await s.app.getByRole("heading", { name: "My Requests", level: 2 }).waitFor();
+    await s.app.getByRole("button", { name: "New request" }).first().click();
+    await s.app.getByRole("heading", { name: "New Leave Request" }).waitFor();
+  });
+
+  it("acts on a row's action in Preview without pressing the row, and selects it in Annotate without acting", async () => {
+    await s.page.getByRole("combobox", { name: "Role" }).selectOption({ label: "Manager" });
+    await s.app.getByRole("heading", { name: "Pending Requests" }).waitFor();
+    await s.app.locator('[data-proto-key="row.team-queue.req-2001.approve"]').click();
+    await s.app.getByText("Alex Doe").waitFor({ state: "hidden" });
+    await s.app.getByRole("heading", { name: "Pending Requests" }).waitFor();
+
+    await s.page.getByRole("button", { name: "Annotate" }).click();
+    const reject = s.app.locator('[data-proto-key="row.team-queue.req-2002.reject"]');
+    await expect.poll(() => reject.getAttribute("data-proto-annotating")).toBe("");
+    await reject.click();
+    expect(await reject.getAttribute("aria-pressed")).toBe("true");
+    expect(await s.app.locator('[data-proto-key="row.team-queue.req-2002"]').getAttribute("aria-pressed")).toBe("false");
+    await s.page.getByText("Selected: Reject").waitFor();
+    expect(await s.app.getByRole("heading", { name: "Request from Sam Lee" }).count()).toBe(0);
+    await s.page.getByRole("button", { name: "Preview" }).click();
+  });
+});
+
+describe("a row's overflow actions under Oxygen", () => {
+  let s: Session;
+
+  beforeAll(async () => {
+    s = await open("row-actions");
+  });
+
+  afterAll(async () => {
+    await close(s);
+  });
+
+  it("puts more than two actions behind one menu, whose entries act without pressing the row", async () => {
+    await s.app.getByRole("heading", { name: "Documents", exact: true }).waitFor();
+    // One action stays a button; three go behind the menu.
+    await s.app.locator('[data-proto-key="row.doc-1.open"]').and(s.app.getByRole("button", { name: "Open" })).waitFor();
+    expect(await s.app.getByRole("button", { name: "More actions" }).count()).toBe(1);
+    await s.app.getByRole("button", { name: "More actions" }).click();
+    await s.app.getByRole("menuitem", { name: "Delete" }).click();
+    await s.app.getByText("Travel guide").waitFor({ state: "hidden" });
+    await s.app.getByRole("heading", { name: "Documents", exact: true }).waitFor();
+  });
+});

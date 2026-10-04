@@ -93,6 +93,17 @@ The root of a screen outside the app shell (signed out, a landing page): its con
 - `nav?: ReactNode` — Navigation for an app drawn without `<AppShell>`: one `<Navigation>`, usually shared by every screen.
 - `children?: ReactNode`
 
+### `<Section>`
+
+A titled part of a screen — a table, a form, a group of stats — with the actions that belong to it.
+
+- `id: string`
+- `title: string`
+- `subtitle?: string` — One line under the title: what the section holds or why.
+- `count?: number` — How many records the section lists, shown beside the title.
+- `actions?: ReactNode` — The section's own Buttons ("New request" above the requests it adds to).
+- `children?: ReactNode`
+
 ### `<Stack>`
 
 Children in a column (default) or a wrapping row.
@@ -190,7 +201,7 @@ A page or section title, with the actions beside it.
 
 - `id: string`
 - `text: string`
-- `level?: "page" | "section"` — `page` (default) for a screen's title, `section` for a part of it.
+- `level?: "page" | "section"` — `page` (default) for a screen's title; `section` titles a part of it. Prefer `<Section>` for a part with its own actions or records.
 - `actions?: ReactNode` — Buttons and Links beside the heading.
 
 ### `<Text>`
@@ -211,11 +222,24 @@ A status chip.
 
 ### `<Stat>`
 
-A headline number with its label.
+A headline number with its label. Put a screen's stats side by side in a `<StatGroup>`.
 
 - `id: string`
 - `label: string`
 - `value: string`
+- `hint?: string` — A short line under the value that gives it scale or context: "of 20 days", "3 due this week".
+- `icon?: StatIcon` — An icon beside the label.
+- `tone?: Tone` — Colours the icon (`default` is the theme's primary).
+
+### `StatIcon` = `"Activity" | "Bell" | "Briefcase" | "Bug" | "Building2" | "Calendar" | "CalendarCheck" | "CalendarClock" | "CalendarDays" | "ChartColumn" | "CircleCheck" | "CircleX" | "ClipboardList" | "Clock" | "Cloud" | "Cpu" | "CreditCard" | "Database" | "DollarSign" | "FileText" | "Gauge" | "Globe" | "HeartPulse" | "Hourglass" | "Inbox" | "Layers" | "ListChecks" | "Lock" | "Mail" | "MessageSquare" | "Package" | "Plane" | "Receipt" | "Rocket" | "Server" | "Shield" | "ShoppingCart" | "Star" | "Tag" | "Ticket" | "Timer" | "TrendingDown" | "TrendingUp" | "TriangleAlert" | "Truck" | "User" | "UserCheck" | "Users" | "Wallet" | "Zap"`
+
+The icons a `<Stat>` may show, named as in WSO2's Oxygen icon set (Lucide's names). A theme draws each or none; an unknown name fails the check.
+
+### `<StatGroup>`
+
+A row of `<Stat>`s at equal widths, wrapping on a narrow window.
+
+- `children?: ReactNode` — The `<Stat>`s, in reading order.
 
 ### `<Alert>`
 
@@ -320,18 +344,39 @@ A table of records.
 
 - `id: string`
 - `title?: string`
-- `columns: string[]`
+- `columns: (string | TableColumn)[]`
 - `rows: TableRow[]`
 - `onRowPress?: ((rowId: string) => void)` — Run when a row is pressed, with its id; a row with neither this nor `to` is only highlighted.
 - `empty?: ReactNode` — What an empty table shows instead (an `<EmptyState>`).
 
+### `TableColumn`
+
+- `label: string`
+- `kind?: "number" | "text" | "status"` — `text` (default); `number` aligns figures to the right; `status` shows each row's `status` as a badge (one per table). A plain string is a `text` column.
+
 ### `TableRow`
 
 - `id: string` — The row's element id: unique on the screen (prefix it with the table's).
-- `cells: string[]` — Cells in column order.
-- `tone?: Tone` — Colours the last cell as a status.
+- `cells: string[]` — One per `text` or `number` column, in column order; the status column takes `status`.
+- `status?: TableStatus` — The badge in the table's status column.
+- `actions?: TableAction[]` — What can be done to this record, drawn as buttons in a trailing column; pressing one does not press the row.
+- `tone?: Tone` — Colours the last cell as a status, in a table without a status column. Prefer `status`.
 - `to?: string` — Open this screen when the row is pressed.
 - `params?: Record<string, string>`
+
+### `TableStatus`
+
+- `text: string`
+- `tone: Tone`
+
+### `TableAction`
+
+- `id: string` — The action's element id: unique on the screen (prefix it with the row's).
+- `label: string`
+- `emphasis?: "danger"` — `danger` for a destructive action.
+- `to?: string` — Navigate to this screen when pressed. Prefer it to `onPress` for plain navigation: the checks verify it.
+- `params?: Record<string, string>` — The params `to` carries, read on the target with `useParams`.
+- `onPress?: (() => void)` — Run when pressed: change mock data, open a dialog, navigate conditionally.
 
 ### `<Timeline>`
 

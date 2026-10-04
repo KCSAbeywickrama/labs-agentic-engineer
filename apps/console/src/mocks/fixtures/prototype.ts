@@ -89,11 +89,12 @@ import {
   EmptyState,
   Field,
   Form,
-  Grid,
   Heading,
   Screen,
+  Section,
   Stack,
   Stat,
+  StatGroup,
   Table,
   Text,
   defineApp,
@@ -158,13 +159,20 @@ function MyClaims() {
   const mine = state === "state.empty" ? [] : all.items.filter((c) => c.employee === "Priya Shah");
   return (
     <Shell>
-      <Heading id="heading.my-claims" text="My claims" actions={<Button id="btn.new-claim" label="New claim" emphasis="primary" to="screen.new-claim" />} />
-      <Table
-        id="table.my-claims"
-        columns={["Claim", "Total", "Submitted", "Status"]}
-        rows={mine.map((c) => ({ id: \`mine.\${c.id}\`, cells: [c.title, c.total, c.submitted, c.status], tone: tone(c.status) }))}
-        empty={<EmptyState id="empty.my-claims" title="No claims yet" text="Claims you submit show here with their status." />}
-      />
+      <Heading id="heading.my-claims" text="My claims" />
+      <Section
+        id="section.my-claims"
+        title="Claims"
+        count={mine.length}
+        actions={<Button id="btn.new-claim" label="New claim" emphasis="primary" to="screen.new-claim" />}
+      >
+        <Table
+          id="table.my-claims"
+          columns={["Claim", { label: "Total", kind: "number" }, "Submitted", { label: "Status", kind: "status" }]}
+          rows={mine.map((c) => ({ id: \`mine.\${c.id}\`, cells: [c.title, c.total, c.submitted], status: { text: c.status, tone: tone(c.status) } }))}
+          empty={<EmptyState id="empty.my-claims" title="No claims yet" text="Claims you submit show here with their status." />}
+        />
+      </Section>
     </Shell>
   );
 }
@@ -197,16 +205,18 @@ function Pending() {
   return (
     <Shell>
       <Heading id="heading.pending" text="Pending approvals" />
-      <Grid columns={2}>
-        <Stat id="stat.waiting" label="Waiting for you" value={String(waiting.length)} />
-        <Stat id="stat.oldest" label="Oldest" value={waiting[0]?.submitted ?? "None"} />
-      </Grid>
-      <Table
-        id="table.pending"
-        columns={["Employee", "Claim", "Total", "Submitted"]}
-        rows={waiting.map((c) => ({ id: \`pending.\${c.id}\`, cells: [c.employee, c.title, c.total, c.submitted], to: "screen.claim", params: { claim: c.id } }))}
-        empty={<EmptyState id="empty.pending" title="Nothing waiting" text="Claims your team submits land here." />}
-      />
+      <StatGroup>
+        <Stat id="stat.waiting" label="Waiting for you" value={String(waiting.length)} hint="claims to decide" icon="Inbox" tone="warning" />
+        <Stat id="stat.oldest" label="Oldest" value={waiting[0]?.submitted ?? "None"} hint="submitted, still waiting" icon="Clock" />
+      </StatGroup>
+      <Section id="section.pending" title="To decide" count={waiting.length}>
+        <Table
+          id="table.pending"
+          columns={["Employee", "Claim", { label: "Total", kind: "number" }, "Submitted"]}
+          rows={waiting.map((c) => ({ id: \`pending.\${c.id}\`, cells: [c.employee, c.title, c.total, c.submitted], to: "screen.claim", params: { claim: c.id } }))}
+          empty={<EmptyState id="empty.pending" title="Nothing waiting" text="Claims your team submits land here." />}
+        />
+      </Section>
     </Shell>
   );
 }

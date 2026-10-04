@@ -36,7 +36,7 @@ interface Row {
   message?: RegExp;
 }
 
-const valid = ["baseline", "local-names", "contacts", "expense-approval", "integration-monitor", "app-shell"];
+const valid = ["baseline", "local-names", "contacts", "expense-approval", "integration-monitor", "app-shell", "team-leave", "row-actions"];
 
 const invalid: Row[] = [
   { fixture: "missing-source", findings: [["MISSING_FILE", "prototype.tsx", "(file)"]] },
@@ -76,6 +76,10 @@ const invalid: Row[] = [
   // The app shell: its user menu's targets are checked while the menu is closed, and each is required.
   { fixture: "render-shell-unknown-target", findings: [["UNKNOWN_NAV_TARGET", "prototype.tsx", "screen.home as user in state.default"]], message: /screen\.goodbye/ },
   { fixture: "render-shell-missing-target", findings: [["RENDER_FAILED", "prototype.tsx", "screen.home as user in state.default"]], message: /<AppShell> needs signOut/ },
+  // Stats and tables: an icon outside the kit's set, a status with no column for it, and a row action's target per role.
+  { fixture: "render-stat-unknown-icon", findings: [["RENDER_FAILED", "prototype.tsx", "screen.home as user in state.default"]], message: /<Stat> icon "Calender" is not one of the kit's icons/ },
+  { fixture: "render-table-status-without-column", findings: [["RENDER_FAILED", "prototype.tsx", "screen.home as user in state.default"]], message: /no column is \{ kind: "status" \}/ },
+  { fixture: "render-table-action-unreachable-to", findings: [["UNKNOWN_NAV_TARGET", "prototype.tsx", "screen.home as user in state.default"]], message: /role "user" does not reach/ },
   { fixture: "render-missing-element-id", findings: [["RENDER_FAILED", "prototype.tsx", "screen.admin as admin in state.default"]], message: /<Text> needs an id/ },
   { fixture: "render-no-default-export", findings: [["NO_APP", "prototype.tsx", "module"]] },
   {

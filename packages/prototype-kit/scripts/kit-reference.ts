@@ -41,11 +41,11 @@ const SECTIONS: [string, string[]][] = [
   ["Module", ["defineApp", "PrototypeAppDefinition"]],
   ["View hooks", ["useNav", "KitNav", "useParams", "useRole", "useDisplayState"]],
   ["Data hooks", ["useCollection", "Collection", "useValue", "useToday", "PROTOTYPE_TODAY"]],
-  ["Layout", ["AppShell", "AppShellUser", "Screen", "Stack", "Grid", "Split", "Detail", "DetailField"]],
+  ["Layout", ["AppShell", "AppShellUser", "Screen", "Section", "Stack", "Grid", "Split", "Detail", "DetailField"]],
   ["Navigation", ["Navigation", "NavigationItem", "Breadcrumbs", "BreadcrumbItem", "Tabs", "Stepper", "Panel"]],
-  ["Content", ["Heading", "Text", "Badge", "Stat", "Alert", "EmptyState", "Button", "Link", "Tone", "Pressable"]],
+  ["Content", ["Heading", "Text", "Badge", "Stat", "StatIcon", "StatGroup", "Alert", "EmptyState", "Button", "Link", "Tone", "Pressable"]],
   ["Forms", ["Form", "Field", "FieldType", "Filters", "ValidationSummary"]],
-  ["Data", ["Table", "TableRow", "Timeline", "TimelineEntry"]],
+  ["Data", ["Table", "TableColumn", "TableRow", "TableStatus", "TableAction", "Timeline", "TimelineEntry"]],
   ["Overlays", ["Dialog", "Drawer"]],
 ];
 
