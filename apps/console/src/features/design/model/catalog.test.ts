@@ -17,7 +17,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { designCatalog } from "./catalog";
+import { designCatalog, registeredResourcesOf } from "./catalog";
 
 // A real design: the per-feature expense-tracker design the design eval wrote
 // (evals/spec-agents/scenarios/fixtures/expense-tracker-design), read as the
@@ -61,5 +61,29 @@ describe("the design catalog, from a design's files", () => {
   it("has no prototype for a product with no web app", () => {
     const apiOnly = Object.fromEntries(Object.entries(files).filter(([p]) => !p.includes("expense-webapp")));
     expect(designCatalog(apiOnly).some((a) => a.source.kind === "prototype")).toBe(false);
+  });
+});
+
+describe("the organization's resources a component reuses", () => {
+  const design = JSON.stringify({
+    dependencies: [
+      { kind: "external", name: "currency-service" },
+      { kind: "external", name: "payroll-service" },
+      { kind: "platform-resource", name: "orders-db" },
+    ],
+  });
+  const files = {
+    "specs/design/dependencies/currency-service/dependency.json": JSON.stringify({
+      name: "currency-service",
+      resource: { ref: "currency-service", name: "currency-service" },
+    }),
+    "specs/design/dependencies/payroll-service/dependency.json": JSON.stringify({
+      name: "payroll-service",
+      resource: { name: "payroll-service", provider: "Xero" },
+    }),
+  };
+
+  it("are the external dependencies whose resource is a copy of a registered one", () => {
+    expect(registeredResourcesOf(files, design)).toEqual(["currency-service"]);
   });
 });

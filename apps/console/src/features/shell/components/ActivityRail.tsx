@@ -20,6 +20,7 @@ import type { ReactNode } from "react";
 import { createLink } from "@tanstack/react-router";
 import { Badge, Box, IconButton, Link, Tooltip, type SxProps, type Theme } from "@wso2/oxygen-ui";
 import {
+  Boxes,
   CircleDot,
   ClipboardCheck,
   FileText,
@@ -84,7 +85,7 @@ function RailTip({ label, children }: { label: string; children: ReactNode }) {
 
 /**
  * The dark activity rail: the logo (home: the Dashboard, with a count of the
- * Alerts that need a person), New project, Projects, Skills; inside a project also
+ * Alerts that need a person), New project, Projects, Skills, Resources; inside a project also
  * its Overview, Spec, Design, Builds, Validation, Deploy and Issues; then the
  * chat toggle, Settings (the org's card, over
  * the Dashboard) and the user menu at the bottom. The rail takes you to Pages; a Card opens from what a Page
@@ -106,8 +107,8 @@ export function ActivityRail({
   const onPage = (page: "dashboard" | "projects" | "new") =>
     scope.kind === "org" && scope.page === page && scope.card === null;
   const settingsOpen = scope.kind === "org" && scope.card === "settings";
-  // Skills stays current with one of its cards open over it.
-  const onOrgPage = (page: "skills") => scope.kind === "org" && scope.page === page;
+  // Skills and Resources stay current with one of their cards open over them.
+  const onOrgPage = (page: "skills" | "resources") => scope.kind === "org" && scope.page === page;
   const needsYou = useAlerts().needsPerson;
   const home = needsYou > 0 ? `Dashboard, ${needsYou} need${needsYou === 1 ? "s" : ""} you` : "Dashboard";
 
@@ -175,6 +176,11 @@ export function ActivityRail({
       <RailTip label="Skills">
         <RailLink to="/skills" aria-label="Skills" sx={railButtonSx(onOrgPage("skills"))}>
           <Sparkles size={20} />
+        </RailLink>
+      </RailTip>
+      <RailTip label="Resources">
+        <RailLink to="/resources" aria-label="Resources" sx={railButtonSx(onOrgPage("resources"))}>
+          <Boxes size={20} />
         </RailLink>
       </RailTip>
       {project && (

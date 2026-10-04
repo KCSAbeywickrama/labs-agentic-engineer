@@ -447,7 +447,14 @@ function acmeCatalog(designed: ReadonlySet<string>, tweaks: ReadonlySet<DesignTw
       title: "Component and contract: expense-api",
       depth: "technical",
       features: all,
-      source: { kind: "contract", design: EXPENSE_API_DESIGN, openapi: expenseApiOpenApi(tweaks), roles: OPENAPI_ROLES },
+      source: {
+        kind: "contract",
+        design: EXPENSE_API_DESIGN,
+        openapi: expenseApiOpenApi(tweaks),
+        roles: OPENAPI_ROLES,
+        // The Resources mock's registered currency-service, reused here.
+        resources: ["currency-service"],
+      },
     },
     {
       id: "security",

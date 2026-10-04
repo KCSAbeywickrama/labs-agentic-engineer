@@ -17,9 +17,9 @@
  */
 
 // Where the reader is, in the shell's terms: at org level (the Dashboard, the
-// Projects grid, New project, Skills), possibly with one of the org's cards
-// open over its Page (Settings over the Dashboard, a Skill over Skills), or
-// on one of a project's Pages with at most one of its Cards
+// Projects grid, New project, Skills, Resources), possibly with one of the
+// org's cards open over its Page (Settings over the Dashboard, a Skill over
+// Skills, a Resource over Resources), or on one of a project's Pages with at most one of its Cards
 // open over it (and, on the spec card, the file open in it).
 // The rail's active item, whether the chat panel exists, its breadcrumb and
 // its scope line all follow from this, so it is worked out once, from the
@@ -28,10 +28,10 @@
 // (design/pages-and-cards.md).
 
 /** The org's Pages; "other" is an org-level address that is none of them. */
-export type OrgPage = "dashboard" | "projects" | "new" | "skills" | "other";
+export type OrgPage = "dashboard" | "projects" | "new" | "skills" | "resources" | "other";
 
-/** The Cards drawn over the org's Pages: Settings over the Dashboard, a Skill over Skills. */
-export type OrgCard = "settings" | "skill";
+/** The Cards drawn over the org's Pages: Settings over the Dashboard, a Skill over Skills, a Resource over Resources. */
+export type OrgCard = "settings" | "skill" | "resource";
 
 /** A project's Pages: each is a layout route that draws itself under its Cards. */
 export type ProjectPage = "overview" | "builds" | "validations" | "deploy" | "issues";
@@ -55,18 +55,22 @@ const ORG_PAGE_ROUTES: Record<string, OrgPage> = {
   "/projects/": "projects",
   "/projects/new": "new",
   "/skills": "skills",
+  "/resources": "resources",
 };
 
 const ORG_CARD_ROUTES: Record<string, OrgCard> = {
   "/_dashboard/settings": "settings",
   "/skills/$name": "skill",
   "/skills/new": "skill",
+  "/resources/$name": "resource",
+  "/resources/new": "resource",
 };
 
 /** The org Page each org Card opens over, and closes back to. */
 const ORG_CARD_PAGE: Record<OrgCard, OrgPage> = {
   settings: "dashboard",
   skill: "skills",
+  resource: "resources",
 };
 
 const PAGE_ROUTES: Record<string, ProjectPage> = {

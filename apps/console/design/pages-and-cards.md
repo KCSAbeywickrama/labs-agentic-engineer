@@ -12,6 +12,10 @@ routes/skills/
   route.tsx                  the Skills Page          /skills
     $name.tsx                  /skills/go              Skill card
     new.tsx                    /skills/new             Skill card, new
+routes/resources/
+  route.tsx                  the Resources Page       /resources
+    $name.tsx                  /resources/maps?project=p  Resource card
+    new.tsx                    /resources/new          Resource card, new
 routes/projects/$projectName/
   route.tsx                  the project: build picker host, build notes, ?chat=open
   _overview/route.tsx        the overview Page (pathless)
@@ -33,9 +37,9 @@ routes/projects/$projectName/
   The page stays mounted under an open card, covered by its scrim and inert.
 - **A Card is a child route of its Page**. Closing it (X, Escape, the scrim)
   navigates to the Page it is over.
-- **The org's Pages** are the Dashboard (pathless, below), Projects and
-  Skills; Skills is a layout route like a project's Pages, its own address
-  with no leaf.
+- **The org's Pages** are the Dashboard (pathless, below), Projects, Skills
+  and Resources; Skills and Resources are layout routes like a project's
+  Pages, each its own address with no leaf.
 - **The overview and the Dashboard are pathless** (`_overview`,
   `_dashboard`), so their cards keep short addresses (`/projects/$p/spec`,
   `/settings`); each Page's own address needs its `index.tsx` leaf. The
@@ -44,8 +48,8 @@ routes/projects/$projectName/
 - **Every card is drawn by `CardFrame`** (`features/shell/components/`): the
   scrim, the frame, the header and close (X, Escape, the scrim), told where
   closing goes. A project's cards go through `CardOverlay`, which reads that
-  from the tables below; an org card (Settings, a Skill) closes to its Page
-  itself.
+  from the tables below; an org card (Settings, a Skill, a Resource) closes
+  to its Page itself.
 - **`features/shell/scope.ts` holds the tables**: which route IDs are Pages
   (`PAGE_ROUTES`, and `ORG_PAGE_ROUTES` for the org's), which are Cards
   (`CARD_ROUTES` and `ORG_CARD_ROUTES`, both read by `cardOfRoute`), and the
@@ -59,7 +63,8 @@ routes/projects/$projectName/
   after a Save or a Delete, navigates with `ignoreBlocker`.
 - **A Panel is not a route**: a Dialog owned by its Page or Card (the build
   picker, Try it, Delete project, Settings' Rotate token and Disconnect,
-  Skills' Import, a Skill's Delete). It
+  Skills' Import, a Skill's Delete, a Resource's Delete and Promote to
+  organization). It
   has no address and leaves the chat as it was. Try it has two owners: the
   Deploy Page opens it for an environment, every component serving there; the
   overview's components open it for one component, on the first environment
@@ -103,3 +108,23 @@ cannot be named `new`). A skill in conflict (both the org and the platform
 changed it) is tagged and says so; reviewing the platform's version needs the
 API to return it, which it does not yet. The card sets no Turn scope: there
 is no skill agent yet, so the org's chat stays inert beside it.
+
+The Resources Page is one list of everything a project can depend on
+(`features/resources/`), filtered by kind: Platform (the platform's resource
+types), External (the organization's Registered External resources, and the
+Project External resources each project holds, tagged "In <project>") and
+From projects (other projects' endpoints, which have no Page of their own).
+Names collide across kinds and projects, so a Resource card's address keeps
+the kind and project in its search where the name alone is not enough
+(`model/resources.ts`, `resourceAddress`): none for a registered resource,
+`?project=` for a project's own, `?kind=platform`, `?kind=endpoint&project=`.
+A registered resource's card is the one the organization edits, one draft and
+one Save (register at `/resources/new`, update after; its resource docs go
+back untouched, since an update without them drops them); a platform type and
+an endpoint are read-only; a project's own resource is read-only with Promote
+to organization, a Panel for the consumption instructions and any values not
+carried over from the project, after which the card opens on the registered,
+editable record. No Resource card sets a Turn scope (there is no resource
+agent). The Design card's component view links each dependency that reuses a
+registered resource to its card (`registeredResourcesOf`, from the
+dependency's `resource.ref`).
