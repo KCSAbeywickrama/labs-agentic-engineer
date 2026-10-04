@@ -279,6 +279,16 @@ describe("the full-screen review", () => {
     expect(within(dialog).getByText("Selected: Submit claim")).toBeInTheDocument();
   });
 
+  it("frames the prototype in a browser window whose address follows the screen", async () => {
+    const { dialog } = await openReview();
+    const window = within(dialog).getByRole("region", { name: "Acme Expenses prototype" });
+    expect(within(window).getByLabelText("Address")).toHaveTextContent("prototype://screen.my-claims");
+    expect(within(window).getByTitle("Acme Expenses prototype app")).toBeInTheDocument();
+
+    fromFrame({ type: "proto:navigate", screenId: "screen.new-claim" });
+    expect(within(window).getByLabelText("Address")).toHaveTextContent("prototype://screen.new-claim");
+  });
+
   it("queues requests with numbered pins, and removes one", async () => {
     const { dialog, post } = await openReview();
     annotate(dialog);

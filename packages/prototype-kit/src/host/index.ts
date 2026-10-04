@@ -34,6 +34,7 @@ export {
 } from "./bridge.js";
 export { PROTOTYPE_FRAME_CSP, prototypeFrameDocument } from "./frame-document.js";
 export { PROTOTYPE_START_TIMEOUT_MS, PrototypeFrame, type PrototypeFrameProps } from "./PrototypeFrame.js";
+export { PrototypeWindow, prototypeAddress, type PrototypeWindowProps } from "./PrototypeWindow.js";
 export {
   frameViewOf,
   initialPrototypeView,
