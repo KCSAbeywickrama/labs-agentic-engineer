@@ -87,12 +87,11 @@ type AppParams struct {
 	// deny-by-default tenant gate chain are untouched.
 	InboundAuth func(http.Handler) http.Handler
 
-	// SREHandoffAuth verifies aep-mcp-server's forwarded SRE-handoff bearer
-	// for exactly CreateIssue/ListIssues (sre_handoff_gate.go), binding the
-	// one org it is configured for. nil (the default) leaves the shortcut
-	// absent — those two operations then require a normal Thunder JWT like
-	// every other /api/ operation. See auth.SREHandoffVerifier.
+	// SREHandoffAuth guards SREHandoffMCP, the OpenChoreo SRE agent's handoff
+	// tools, with the install-time handoff key. Both nil (the default) leaves
+	// the surface unmounted. See auth.SREHandoffVerifier.
 	SREHandoffAuth *auth.SREHandoffVerifier
+	SREHandoffMCP  http.Handler
 
 	// Runner-facing and agents-facing surfaces. Callers use the gitrepo +
 	// artifacts packages in-process. CredService + AnthropicCredService +
@@ -113,6 +112,7 @@ type AppParams struct {
 	MCPOrgEndpoints      mcpdiscovery.OrgEndpointLister
 	MCPResourceTypes     mcpdiscovery.ResourceTypeLister
 	MCPGroupCatalog      mcpdiscovery.GroupCatalogLister
+	MCPGuardrailCatalog  mcpdiscovery.GuardrailCatalogLister
 	// MCPRemoteGit backs the read-only remote-git MCP tools (endpoint spec
 	// discovery). Nil makes get_remote_git_file_contents/search_remote_git_code
 	// return a tool error; it never affects the other tools.

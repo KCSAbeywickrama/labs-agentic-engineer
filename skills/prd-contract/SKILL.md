@@ -278,6 +278,12 @@ An agent is a decision whose line says what the agent does ("Ticket category:
 suggested by an agent"); it runs on the organization's own model connection, so
 the line names no provider or model.
 
+A guardrail is a check the AI gateway applies to an agent's model traffic —
+one `list_guardrail_policies` offers — and its line says what is guarded, not
+how ("Guardrail: contact details are masked before the model sees them"). A
+rule the agent or the app itself follows is an ordinary decision,
+never a "Guardrail:" line.
+
 ## Open questions
 
 An open question is a fact only the user holds — marked, never guessed. The

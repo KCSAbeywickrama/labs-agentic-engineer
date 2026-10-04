@@ -168,6 +168,8 @@ export type { ComponentDependencyProblem } from "./component-dependencies.js";
 // --- The agent.afm.md structural write-gate (the ai-agent component kind) ---
 export {
   ATTACHMENT_CEILINGS,
+  GUARDRAIL_LIMITS,
+  PLATFORM_OWNED_GUARDRAIL_KEYS,
   ATTACHMENT_TYPES,
   checkAgentAfm,
   splitAfm,

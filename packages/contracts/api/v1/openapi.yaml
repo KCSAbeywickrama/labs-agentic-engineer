@@ -5272,6 +5272,35 @@ components:
       - components
       - validation
       type: object
+    DeploymentGuardrail:
+      additionalProperties: false
+      description: >-
+        One declared guardrail and what the deploy did with it. `applied` is on
+        the agent's traffic; `partial` is applied without its reply-side check,
+        which the gateway does not enforce on streamed replies; `unavailable`
+        names a policy this environment's gateway does not offer; `invalid`
+        params failed the policy's schema; `conflict` means a guardrail of the
+        same policy was added in Agent Manager by hand and was left alone;
+        `failed` could not be written; `unsupported` needs an Anthropic-format
+        model connection.
+      properties:
+        policy:
+          type: string
+        reason:
+          type: string
+        status:
+          enum: [applied, partial, unavailable, invalid, conflict, failed, unsupported]
+          type: string
+          x-enum-varnames:
+          - GuardrailApplied
+          - GuardrailPartial
+          - GuardrailUnavailable
+          - GuardrailInvalid
+          - GuardrailConflict
+          - GuardrailFailed
+          - GuardrailUnsupported
+      required: [policy, status]
+      type: object
     Deployment:
       additionalProperties: false
       properties:
@@ -5282,6 +5311,15 @@ components:
             governed by Agent Manager and whose registration exists there;
             absent otherwise, including when the environment names no console.
           type: string
+        guardrails:
+          description: >-
+            What became of each guardrail the agent's spec declares
+            (x-aep.guardrails), as the last deploy to this environment left it.
+            Present only for an ai-agent governed by Agent Manager that
+            declares guardrails or once did; absent otherwise.
+          items:
+            $ref: '#/components/schemas/DeploymentGuardrail'
+          type: array
         componentName:
           type: string
         createdAt:
@@ -6009,8 +6047,8 @@ components:
     IssueInfo:
       additionalProperties: false
       description: 'One issue from list/search. Field names are CAPITALIZED on
-        the wire (historical shape the deployed aep-mcp-server parses — do not
-        "fix" without a coordinated MCP-server release).'
+        the wire (a historical shape the SRE handoff''s search tool answers too,
+        and the SRE agent''s skill reads — do not "fix" without changing both).'
       properties:
         Number:
           format: int64
@@ -6078,12 +6116,6 @@ components:
         nativePdf:
           description: PDFs go to the model natively; otherwise they are sent as extracted text.
           type: boolean
-        sreAgent:
-          description: >-
-            The OpenChoreo SRE agent can call this connection. True for the
-            openai-compatible format authenticated with a Bearer token, which
-            is what the stock agent's langchain-openai client sends.
-          type: boolean
         webSearch:
           description: >-
             How agents search the web on this connection: Anthropic's server
@@ -6099,7 +6131,6 @@ components:
       - imageInput
       - nativePdf
       - generatedAgents
-      - sreAgent
       type: object
     LLMCheck:
       x-go-type: orgconfig.LLMCheck

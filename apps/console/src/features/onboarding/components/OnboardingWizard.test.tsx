@@ -195,7 +195,6 @@ describe("OnboardingWizard's Connect a model step", () => {
             imageInput: "yes",
             nativePdf: true,
             generatedAgents: true,
-            sreAgent: false,
           },
         },
       }),
