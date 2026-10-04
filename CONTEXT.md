@@ -471,9 +471,10 @@ _Avoid_: view, screen.
 One entity opened with the agent, over the Page that lists it: to change it, or,
 when it is not the organization's to change, to read and ask about it. Examples: a
 project's Spec or Design (over the overview), a Build (over build history), a
-version's Validation, an environment's Configure (over Deploy), a Skill, a
-Resource, the org's Settings. It has its own address, and opening it sets the
-Turn scope where the Card has one; a Build or a Validation has none yet.
+version's Validation, an Issue, an environment's Configure (over Deploy), a
+Skill, a Resource, the org's Settings. It has its own address, and opening it
+sets the Turn scope where the Card has one; a Build, a Validation or an Issue
+has none yet.
 _Avoid_: modal, dialog, Panel (a different thing).
 
 **Panel**:
@@ -493,7 +494,8 @@ _Avoid_: scope on its own (Resource scope is a different thing), anchor.
 
 **Dashboard**:
 The user's home Page, opened from the logo and shown after sign-in when the
-organization has projects. It holds the Alerts.
+organization has projects. It holds the Alerts: the issues, across all projects,
+that need a person.
 _Avoid_: home, overview (the overview is a project's Page).
 
 ## Project overview
