@@ -18,6 +18,7 @@
 
 import { useState } from "react";
 import { Box, Button, Chip, Skeleton, Typography } from "@wso2/oxygen-ui";
+import { AppWindow } from "@wso2/oxygen-ui-icons-react";
 import { PHONE } from "../../shell/layout";
 import type { ReviewQueue } from "../model/feedback";
 import { markReviewed } from "../model/reviewed";
@@ -37,40 +38,42 @@ const STATUS: Record<PrototypeStatus, { label: string; color: "default" | "succe
 function Row({ prototype, ready, onReview, onMake }: { prototype: AppPrototype; ready: boolean; onReview: () => void; onMake: () => void }) {
   const status = STATUS[prototype.status];
   return (
-    <Box
-      component="li"
-      sx={{
-        display: "flex",
-        alignItems: "center",
-        gap: 1.5,
-        border: 1,
-        borderColor: "divider",
-        borderRadius: 2,
-        px: 2,
-        py: 1.5,
-        [PHONE]: { flexWrap: "wrap" },
-      }}
-    >
-      <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Typography sx={{ fontWeight: 600, fontSize: "0.9375rem" }}>{prototype.files?.manifest.name ?? prototype.component}</Typography>
-          <Chip size="small" label={status.label} color={status.color} variant={prototype.status === "none" ? "outlined" : "filled"} />
-        </Box>
-        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
-          {prototype.component}
-        </Typography>
-        {prototype.problem && (
-          <Typography variant="body2" color="error.main" sx={{ mt: 0.5 }}>
-            {prototype.problem}
-          </Typography>
-        )}
+    <Box component="li" sx={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 1 }}>
+      <Box
+        sx={{
+          width: 56,
+          height: 56,
+          mb: 0.75,
+          borderRadius: 3,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          bgcolor: "action.hover",
+          color: "primary.main",
+        }}
+      >
+        <AppWindow size={26} aria-hidden />
       </Box>
-      <Button size="small" variant="contained" disabled={!prototype.files} onClick={onReview}>
-        Review
-      </Button>
-      <Button size="small" variant="outlined" disabled={!ready} onClick={onMake}>
-        {prototype.exists ? "Update" : "Make prototype"}
-      </Button>
+      <Typography component="h3" sx={{ fontWeight: 600, fontSize: "1.375rem" }}>
+        {prototype.files?.manifest.name ?? prototype.component}
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+        {prototype.component}
+      </Typography>
+      <Chip size="small" label={status.label} color={status.color} variant={prototype.status === "none" ? "outlined" : "filled"} />
+      {prototype.problem && (
+        <Typography variant="body2" color="error.main" sx={{ maxWidth: "56ch" }}>
+          {prototype.problem}
+        </Typography>
+      )}
+      <Box sx={{ display: "flex", gap: 1.25, mt: 2, flexWrap: "wrap", justifyContent: "center" }}>
+        <Button variant="outlined" disabled={!ready} onClick={onMake}>
+          {prototype.exists ? "Update" : "Make prototype"}
+        </Button>
+        <Button variant="contained" disabled={!prototype.files} onClick={onReview}>
+          Review
+        </Button>
+      </Box>
     </Box>
   );
 }
@@ -98,7 +101,7 @@ export function PrototypeWorkspace({
 
   if (!prototypes) {
     return (
-      <Box aria-busy>
+      <Box aria-busy sx={{ px: 3.5, pt: 3 }}>
         <Skeleton width={180} />
         <Skeleton variant="rounded" height={72} sx={{ mt: 2 }} />
       </Box>
@@ -109,7 +112,19 @@ export function PrototypeWorkspace({
   const none = prototypes.every((p) => p.status === "none");
 
   return (
-    <>
+    <Box
+      sx={{
+        height: "100%",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        px: 3.5,
+        py: 4,
+        [PHONE]: { px: 2 },
+      }}
+    >
       {prototypes.length === 0 || none ? (
         <Box
           sx={{
@@ -139,7 +154,7 @@ export function PrototypeWorkspace({
           )}
         </Box>
       ) : (
-        <Box component="ul" aria-label="Prototypes" sx={{ m: 0, p: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 1.25, maxWidth: 820 }}>
+        <Box component="ul" aria-label="Prototypes" sx={{ m: "auto", p: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
           {prototypes.map((p) => (
             <Row
               key={p.component}
@@ -162,6 +177,6 @@ export function PrototypeWorkspace({
           onClose={() => onReview(null)}
         />
       )}
-    </>
+    </Box>
   );
 }

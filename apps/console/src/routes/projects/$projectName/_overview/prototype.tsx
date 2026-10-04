@@ -38,7 +38,7 @@ function PrototypeRoute() {
   const { review } = Route.useSearch();
   const navigate = Route.useNavigate();
   return (
-    <CardOverlay card="prototype">
+    <CardOverlay card="prototype" fill>
       <PrototypeWorkspace
         projectName={projectName}
         review={review}
