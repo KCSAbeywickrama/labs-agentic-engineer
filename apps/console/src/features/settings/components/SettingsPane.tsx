@@ -19,6 +19,9 @@
 import type { ReactNode } from "react";
 import { Box, Typography } from "@wso2/oxygen-ui";
 
+/** How wide a Settings section reads, whatever it holds. */
+export const PANE_MAX_WIDTH = 820;
+
 /** One section of the Settings card: its title and what it is for, an action beside them, then its body. */
 export function SettingsPane({
   title,
@@ -32,7 +35,7 @@ export function SettingsPane({
   children: ReactNode;
 }) {
   return (
-    <Box component="section" aria-label={title} sx={{ display: "flex", flexDirection: "column", gap: 2.5, maxWidth: 820 }}>
+    <Box component="section" aria-label={title} sx={{ display: "flex", flexDirection: "column", gap: 2.5, maxWidth: PANE_MAX_WIDTH }}>
       <Box sx={{ display: "flex", alignItems: "flex-start", flexWrap: "wrap", gap: 2 }}>
         <Box sx={{ flex: 1, minWidth: 240 }}>
           <Typography component="h3" sx={{ fontSize: "1.5rem", fontWeight: 600 }}>

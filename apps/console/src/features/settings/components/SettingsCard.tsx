@@ -27,7 +27,7 @@ import { useConfig } from "../api/queries";
 import { SETTINGS_SECTIONS, type SettingsSection } from "../settingsSection";
 import { AiAgentsCard } from "./AiAgentsCard";
 import { GitHubSection } from "./GitHubSection";
-import { SettingsPane } from "./SettingsPane";
+import { SettingsPane, PANE_MAX_WIDTH } from "./SettingsPane";
 
 const MenuLink = createLink(ButtonBase);
 
@@ -77,11 +77,13 @@ function SectionBody({ section }: { section: SettingsSection }) {
   // The onboarding gate has loaded the config before any route draws, so
   // this waits only on a refetch that dropped it.
   if (!config.data) return <Skeleton variant="rounded" height={240} />;
+  // The AI agents card carries its own title and readiness, so it is the
+  // section by itself rather than under a second "AI agents" heading.
   if (section === "ai") {
     return (
-      <SettingsPane title="AI agents" intro="The model every agent uses, and the coding agent.">
+      <Box sx={{ maxWidth: PANE_MAX_WIDTH }}>
         <AiAgentsCard config={config.data} />
-      </SettingsPane>
+      </Box>
     );
   }
   return <GitHubSection gitProvider={config.data.gitProvider} />;
