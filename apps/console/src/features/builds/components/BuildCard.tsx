@@ -18,7 +18,7 @@
 
 import type { ReactNode } from "react";
 import { createLink, useNavigate } from "@tanstack/react-router";
-import { Alert, Box, Button, Skeleton, Typography } from "@wso2/oxygen-ui";
+import { Alert, Box, Button, Link, Skeleton, Typography } from "@wso2/oxygen-ui";
 import { GitHub } from "@wso2/oxygen-ui-icons-react";
 import { EmptyState } from "../../../components/EmptyState";
 import { stamp } from "../../../lib/stamp";
@@ -31,10 +31,10 @@ import { useBuildCard, type BuildCardData } from "../hooks/useBuildCard";
 import { useBuildOutcome, type BuildOutcome } from "../hooks/useBuildOutcome";
 import { useNextInterview } from "../hooks/useNextInterview";
 import { fixedBy, isBuilding } from "../model/ledger";
-import { nextSteps, startedNote } from "../model/nextSteps";
+import { buildCardSteps, nextSteps, startedNote } from "../model/nextSteps";
 import { runStatus } from "../model/phases";
 import { isAgentStreaming, mergedCycle, settledLabel } from "../model/run";
-import { rolloutLine } from "../model/summary";
+import { rolloutLine, validationLine } from "../model/summary";
 import { taskTally } from "../model/taskRow";
 import { AgentLog } from "./AgentLog";
 import { BuildLogs } from "./BuildLogs";
@@ -43,15 +43,16 @@ import { CardSection } from "./CardSection";
 import { ExplanationNotice } from "./ExplanationNotice";
 import { NextStepsBar } from "./NextStepsBar";
 import { PhaseStrip } from "./PhaseStrip";
-import { ValidationByFeature, ValidationToCome } from "./ValidationByFeature";
 
 // A version's Build card, over build history: the old console's build page
 // (features/builds/components/BuildDetailPage.tsx). Its summary, the strip of
 // where the run is, why it is stuck or failed when it is, then its tasks with
 // their status lines and logs, the coding agent's log and the component build
-// logs; then its validation, and what a finished build offers next.
+// logs; then a line to its validation (a card of its own), and what a
+// finished build offers next.
 
 const LinkButton = createLink(Button);
+const RouterLink = createLink(Link);
 
 const TONE_COLOUR = { primary: "primary.main", success: "success.main", warning: "warning.main", error: "error.main" } as const;
 
@@ -158,8 +159,8 @@ function TasksSection({ projectName, data }: { projectName: string; data: BuildC
   );
 }
 
-/** Today's validation, by feature, under the build; and what a finished build offers next. */
-function ValidationSection({
+/** The line to the version's validation, and what a finished build offers next. */
+function ValidationAndNext({
   projectName,
   data,
   version,
@@ -175,41 +176,29 @@ function ValidationSection({
   const fix = fixedBy(data.rows, version);
   const next =
     settled && result.outcome
-      ? nextSteps({
+      ? buildCardSteps(
+          nextSteps({
+            version,
+            outcome: result.outcome,
+            fixedBy: fix ? { version: fix.version, building: isBuilding(fix.status) } : null,
+            latest: data.rows[0]?.version ?? version,
+            nextInterview,
+          }),
           version,
-          outcome: result.outcome,
-          fixedBy: fix ? { version: fix.version, building: isBuilding(fix.status) } : null,
-          latest: data.rows[0]?.version ?? version,
-          nextInterview,
-        })
+        )
       : null;
-  const builtHere = data.build && !data.build.fixes ? data.build.features.map((f) => f.id) : [];
   return (
-    <>
-      <Box component="section" aria-label="Validation" sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
-        <Typography component="h3" sx={{ fontSize: "0.9375rem", fontWeight: 600 }}>
-          Validation
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, borderTop: 1, borderColor: "divider", pt: 1.75 }}>
+      <Box sx={{ display: "flex", alignItems: "baseline", gap: 1, flexWrap: "wrap" }}>
+        <Typography variant="body2" color="text.secondary">
+          {validationLine(version, result.outcome, Boolean(result.validation) && !result.outcome)}
         </Typography>
-        {result.groups ? (
-          <ValidationByFeature
-            projectName={projectName}
-            groups={result.groups}
-            version={version}
-            builtHere={builtHere}
-            baseline={result.baseline}
-            settled={Boolean(result.outcome)}
-            failingActions={next && <NextStepsBar projectName={projectName} next={next} />}
-          />
-        ) : (
-          <ValidationToCome features={data.build?.features.map((f) => f.name) ?? []} />
-        )}
+        <RouterLink to="/projects/$projectName/validations/$version" params={{ projectName, version }} variant="body2">
+          Open {version}&apos;s validation
+        </RouterLink>
       </Box>
-      {next && (
-        <Box sx={{ borderTop: 1, borderColor: "divider", pt: 1.75 }}>
-          <NextStepsBar projectName={projectName} next={next} />
-        </Box>
-      )}
-    </>
+      {next && next.steps.length > 0 && <NextStepsBar projectName={projectName} next={next} />}
+    </Box>
   );
 }
 
@@ -252,7 +241,7 @@ function BuildBody({ projectName, version, data }: { projectName: string; versio
       <CardSection title="Build logs">
         <BuildLogs projectName={projectName} version={version} cycleId={mergedCycle(data.runs)?.id} />
       </CardSection>
-      <ValidationSection projectName={projectName} data={data} version={version} result={result} />
+      <ValidationAndNext projectName={projectName} data={data} version={version} result={result} />
     </Box>
   );
 }

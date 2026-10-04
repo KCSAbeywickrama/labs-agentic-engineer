@@ -16,6 +16,8 @@ routes/projects/$projectName/
     design.tsx                 /projects/$p/design     Design card
   builds/route.tsx           build history           /projects/$p/builds
     $version.tsx               /projects/$p/builds/v2  Build card
+  validations/route.tsx      the Validation ledger   /projects/$p/validations
+    $version.tsx               /projects/$p/validations/v2  Validation card
   deploy/route.tsx           the Deploy Page         /projects/$p/deploy
     $env/configure.tsx         /projects/$p/deploy/staging/configure  Configure card
 ```
@@ -48,8 +50,11 @@ routes/projects/$projectName/
 A Build card is a version's, over build history (the ledger of versions);
 closing it goes back there. The overview's track opens the newest version's
 Build card from its Build leg, and the build picker opens the version it
-started. It sets no Turn scope: no agent works on one build yet, so the chat
-stays on the whole product.
+started. A Validation card is a version's too, over the Validation ledger:
+its attempts, the chosen one by feature, Fix and Revalidate. The Build card
+links to it, and a failing build's next step is "See what failed", there.
+Neither sets a Turn scope: no agent works on one build or one validation yet,
+so the chat stays on the whole product.
 
 The Configure card sets no Turn scope: no agent can change an environment yet,
 so `turnScopeFor` and `chatTopic` read it as the whole product. The Settings

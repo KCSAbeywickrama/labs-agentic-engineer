@@ -20,7 +20,7 @@ import { useState, type ReactNode } from "react";
 import { Box, ButtonBase, Typography } from "@wso2/oxygen-ui";
 import { StoryRef } from "../../design/components/viewers/StoryRef";
 import { Tag } from "../../spec/components/Tag";
-import type { FeatureResults, ScenarioResult } from "../model/validation";
+import type { FeatureResults, ScenarioResult } from "../../builds/model/validation";
 import { LogTail, StepIcon } from "./RunParts";
 
 // Validation, grouped by feature: a box per feature with its tally, a row per
@@ -250,18 +250,6 @@ function FeatureBox({
       {group.scenarios.map((s, i) => (
         <ScenarioRow key={`${s.name}-${i}`} projectName={projectName} scenario={s} baseline={baseline} actions={failingActions} />
       ))}
-    </Box>
-  );
-}
-
-/** Before validation runs: what it will run. */
-export function ValidationToCome({ features }: { features: string[] }) {
-  return (
-    <Box sx={{ border: 1, borderStyle: "dashed", borderColor: "divider", borderRadius: 2.5, px: 2, py: 1.5 }}>
-      <Typography variant="body2" color="text.secondary">
-        Runs when the code is done: every scenario of {features.join(" and ") || "the features built"}, each tagged
-        with the story it proves.
-      </Typography>
     </Box>
   );
 }

@@ -18,7 +18,7 @@
 
 import { Box, keyframes } from "@wso2/oxygen-ui";
 import { Check, X } from "@wso2/oxygen-ui-icons-react";
-import type { PhaseState } from "../model/phases";
+import type { PhaseState } from "../../builds/model/phases";
 
 const pulse = keyframes`
   0%, 100% { opacity: 1; }

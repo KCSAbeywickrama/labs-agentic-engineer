@@ -30,6 +30,7 @@ const STEP: Partial<Record<ProjectCard, number>> = { build: 3 };
 const PAGE_PATH = {
   overview: "/projects/$projectName",
   builds: "/projects/$projectName/builds",
+  validations: "/projects/$projectName/validations",
   deploy: "/projects/$projectName/deploy",
 } as const satisfies Record<ProjectPage, string>;
 

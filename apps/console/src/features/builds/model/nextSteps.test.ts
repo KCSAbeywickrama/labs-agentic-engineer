@@ -17,7 +17,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { finishedNote, nextSteps, startedNote } from "./nextSteps";
+import { buildCardSteps, finishedNote, nextSteps, startedNote } from "./nextSteps";
 import type { FeatureResults } from "./validation";
 
 const deputy = { featureId: "F2", featureName: "Approvals", story: "F2.4", name: "A deputy approves while the manager is on leave", standing: null };
@@ -101,5 +101,22 @@ describe("the chat's two lines about a build", () => {
         { kind: "interview", label: "Interview Spending reports", featureId: "F4" },
       ],
     });
+  });
+});
+
+describe("the Build card's next steps", () => {
+  it("sends a failing version to its validation, where Fix is", () => {
+    const next = nextSteps({ version: "v1", outcome: failing, fixedBy: null, latest: "v1", nextInterview: null });
+    expect(buildCardSteps(next, "v1")).toEqual({
+      note: null,
+      steps: [{ kind: "validation", label: "See what failed in v1", version: "v1" }],
+    });
+  });
+
+  it("keeps every other next step as it is", () => {
+    const passed = nextSteps({ version: "v1", outcome: passing, fixedBy: null, latest: "v1", nextInterview: spending });
+    expect(buildCardSteps(passed, "v1")).toBe(passed);
+    const fixing = nextSteps({ version: "v1", outcome: failing, fixedBy: { version: "v1.1", building: true }, latest: "v1.1", nextInterview: null });
+    expect(buildCardSteps(fixing, "v1")).toBe(fixing);
   });
 });

@@ -20,6 +20,7 @@ import type { ReactNode } from "react";
 import { createLink } from "@tanstack/react-router";
 import { Box, IconButton, Link, Tooltip, type SxProps, type Theme } from "@wso2/oxygen-ui";
 import {
+  ClipboardCheck,
   FileText,
   Hammer,
   House,
@@ -80,9 +81,9 @@ function RailTip({ label, children }: { label: string; children: ReactNode }) {
 
 /**
  * The dark activity rail: the logo (home: the Dashboard), New project,
- * Projects; inside a project also its Overview, Spec, Design, Builds and Deploy; then the chat
- * toggle, Settings (the org's card, over the Dashboard) and the user menu at
- * the bottom. The rail takes you to Pages; a Card opens from what a Page
+ * Projects; inside a project also its Overview, Spec, Design, Builds,
+ * Validation and Deploy; then the chat toggle, Settings (the org's card, over
+ * the Dashboard) and the user menu at the bottom. The rail takes you to Pages; a Card opens from what a Page
  * shows, save the few the rail names.
  */
 export function ActivityRail({
@@ -195,6 +196,16 @@ export function ActivityRail({
               sx={railButtonSx(project.page === "builds")}
             >
               <Hammer size={20} />
+            </RailLink>
+          </RailTip>
+          <RailTip label="Validation">
+            <RailLink
+              to="/projects/$projectName/validations"
+              params={{ projectName: project.projectName }}
+              aria-label="Validation"
+              sx={railButtonSx(project.page === "validations")}
+            >
+              <ClipboardCheck size={20} />
             </RailLink>
           </RailTip>
           <RailTip label="Deploy">

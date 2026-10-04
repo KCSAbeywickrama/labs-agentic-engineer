@@ -17,9 +17,11 @@
  */
 
 import type { DeployStage } from "../../deploy/api/deploy";
+import type { ValidationOutcome } from "./validation";
 
-// The Build card's summary line about its version's rollout, copied from the
-// old console's build page (deploymentNote). The deploy aggregate names the
+// The Build card's lines about where its version stands beyond the build: its
+// rollout, and its validation (which has a card of its own). The rollout line
+// is copied from the old console's build page (deploymentNote). The deploy aggregate names the
 // version that reached the write target; every state it can be in gets its
 // own sentence, so the card never says "deploys as its tasks merge" while the
 // version is already rolling out.
@@ -41,4 +43,23 @@ export function rolloutLine(
     default:
       return `${version} deploys as its tasks merge.`;
   }
+}
+
+/**
+ * The line pointing to the version's validation: its result once settled,
+ * that it is under way, or when it will run.
+ */
+export function validationLine(
+  version: string,
+  outcome: Pick<ValidationOutcome, "passed" | "total" | "failing"> | null,
+  validating: boolean,
+): string {
+  if (outcome) {
+    if (outcome.failing.length > 0) {
+      return `${version}'s validation: ${outcome.passed} of ${outcome.total} scenarios pass, ${outcome.failing.length} failing.`;
+    }
+    return `${version} passed validation: all ${outcome.total} scenarios.`;
+  }
+  if (validating) return `${version} is being validated.`;
+  return `${version} is validated once every task has merged and it deploys.`;
 }

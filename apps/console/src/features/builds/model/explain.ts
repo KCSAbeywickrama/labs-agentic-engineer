@@ -36,7 +36,7 @@ type TaskView = components["schemas"]["TaskView"];
 
 /** Where the reader goes next: a project route, and an environment for its Configure card. */
 export type ExplanationNext =
-  | { label: string; to: "/projects/$projectName/design" | "/projects/$projectName/deploy" }
+  | { label: string; to: "/projects/$projectName/design" | "/projects/$projectName/deploy" | "/projects/$projectName/validations" }
   | { label: string; to: "/projects/$projectName/deploy/$env/configure"; env: string };
 
 /** The platform's own facts, for a bug report. */
@@ -219,6 +219,7 @@ function reasonCopy(run: MilestoneRunView): Copy {
       return {
         title: reason === "validation-failed" ? "Validation failed" : "Validation reported nothing",
         body: "The version deployed and its acceptance scenarios were not met. Its validation carries the report.",
+        next: { label: "Go to Validation", to: "/projects/$projectName/validations" },
       };
     default:
       return {

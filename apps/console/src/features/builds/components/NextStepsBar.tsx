@@ -56,6 +56,9 @@ export function NextStepsBar({ projectName, next }: { projectName: string; next:
       case "open":
         void navigate({ to: "/projects/$projectName/builds/$version", params: { projectName, version: step.version } });
         return;
+      case "validation":
+        void navigate({ to: "/projects/$projectName/validations/$version", params: { projectName, version: step.version } });
+        return;
       case "interview":
         if (nextFeature?.id === step.featureId) interview.start(nextFeature);
         return;

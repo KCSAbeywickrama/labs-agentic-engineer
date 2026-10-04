@@ -17,7 +17,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { rolloutLine } from "./summary";
+import { rolloutLine, validationLine } from "./summary";
 
 describe("the Build card's rollout line", () => {
   it("says where the version is in its rollout", () => {
@@ -35,5 +35,21 @@ describe("the Build card's rollout line", () => {
     expect(rolloutLine("v2", { status: "deployed", version: "v1" }, true)).toBe(
       "v2 is built and waits for its dependencies' values before it deploys.",
     );
+  });
+});
+
+describe("the Build card's line to its validation", () => {
+  const deputy = { featureId: "F2", featureName: "Approvals", story: "F2.4", name: "A deputy approves", standing: null };
+
+  it("gives the settled result", () => {
+    expect(validationLine("v1", { passed: 10, total: 11, failing: [deputy] }, false)).toBe(
+      "v1's validation: 10 of 11 scenarios pass, 1 failing.",
+    );
+    expect(validationLine("v1", { passed: 11, total: 11, failing: [] }, false)).toBe("v1 passed validation: all 11 scenarios.");
+  });
+
+  it("says when it is under way, or still to come", () => {
+    expect(validationLine("v2", null, true)).toBe("v2 is being validated.");
+    expect(validationLine("v2", null, false)).toBe("v2 is validated once every task has merged and it deploys.");
   });
 });

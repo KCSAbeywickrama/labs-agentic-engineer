@@ -17,7 +17,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { FeatureResults } from "../model/validation";
+import type { FeatureResults } from "../../builds/model/validation";
 import { validationSections } from "./ValidationByFeature";
 
 const group = (id: string, notBuilt = false): FeatureResults => ({

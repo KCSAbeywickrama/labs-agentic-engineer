@@ -33,10 +33,10 @@ export type OrgPage = "dashboard" | "projects" | "new" | "other";
 export type OrgCard = "settings";
 
 /** A project's Pages: each is a layout route that draws itself under its Cards. */
-export type ProjectPage = "overview" | "builds" | "deploy";
+export type ProjectPage = "overview" | "builds" | "validations" | "deploy";
 
 /** The Cards drawn over a project's Pages, each a route of its own. */
-export type ProjectCard = "spec" | "design" | "build" | "configure";
+export type ProjectCard = "spec" | "design" | "build" | "validation" | "configure";
 
 export type ShellScope =
   | { kind: "org"; page: OrgPage; card: OrgCard | null }
@@ -67,6 +67,7 @@ const ORG_CARD_PAGE: Record<OrgCard, OrgPage> = {
 const PAGE_ROUTES: Record<string, ProjectPage> = {
   "/projects/$projectName/_overview/": "overview",
   "/projects/$projectName/builds": "builds",
+  "/projects/$projectName/validations": "validations",
   "/projects/$projectName/deploy": "deploy",
 };
 
@@ -74,6 +75,7 @@ const CARD_ROUTES: Record<string, ProjectCard> = {
   "/projects/$projectName/_overview/spec": "spec",
   "/projects/$projectName/_overview/design": "design",
   "/projects/$projectName/builds/$version": "build",
+  "/projects/$projectName/validations/$version": "validation",
   "/projects/$projectName/deploy/$env/configure": "configure",
 };
 
@@ -82,6 +84,7 @@ const CARD_PAGE: Record<ProjectCard, ProjectPage> = {
   spec: "overview",
   design: "overview",
   build: "builds",
+  validation: "validations",
   configure: "deploy",
 };
 
@@ -123,6 +126,7 @@ export function shellScope(leaf: {
 const PAGE_TITLE: Record<ProjectPage, string> = {
   overview: "Overview",
   builds: "Builds",
+  validations: "Validation",
   deploy: "Deploy",
 };
 
@@ -134,6 +138,7 @@ const CARD_TITLE: Record<ProjectCard, string> = {
   spec: "Spec",
   design: "Design",
   build: "Build",
+  validation: "Validation",
   configure: "Configure",
 };
 
@@ -146,9 +151,9 @@ export function cardTitle(card: ProjectCard): string {
  * composer: the design card talks about the design review; a feature open in
  * the spec card narrows it to that feature, and a change reaching past it is
  * made there too; everywhere else in a project, the whole product. That
- * includes a Build card, the Deploy Page and an environment's Configure card:
- * no agent works on one build or one environment yet, so they set no Turn
- * scope of their own.
+ * includes a Build or Validation card, the Deploy Page and an environment's
+ * Configure card: no agent works on one build, one validation or one
+ * environment yet, so they set no Turn scope of their own.
  */
 export function chatTopic(
   card: ProjectCard | null,
