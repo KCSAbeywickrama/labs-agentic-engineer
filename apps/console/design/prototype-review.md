@@ -9,10 +9,13 @@ Code: `features/prototype/`.
 ## Where it shows
 
 - **Prototype tab** (`PrototypeWorkspace`, route `projects/$p/prototype`): one
-  row per web application (a contract artifact whose `design.json` type is
-  `web-application`) with status None, Ready, Invalid (with the reason) or
-  Revising, Review, and Make or Update. The tab shows a dot while a prototype
-  is unreviewed.
+  centered entry per web application (a contract artifact whose `design.json`
+  type is `web-application`) with status None, Ready, Invalid (the reason in a
+  tooltip) or Revising, and one action: Review once a prototype renders, else
+  Make prototype (Try again when invalid). No action while the first one is
+  being made. Revising an existing prototype goes through Annotate in review;
+  remaking it from a changed design is the Design tab's Make prototype. The tab
+  shows a dot while a prototype is unreviewed.
 - **Design actions:** Make prototype (`MakePrototypeButton`), hidden until the
   design has a web application. One app sends `/prototype <c>`, several send a
   bare `/prototype`. Disabled unless the chat can send.

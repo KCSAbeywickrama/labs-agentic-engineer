@@ -17,7 +17,7 @@
  */
 
 import { useState } from "react";
-import { Box, Button, Chip, CircularProgress, Skeleton, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Chip, CircularProgress, Skeleton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { AppWindow } from "@wso2/oxygen-ui-icons-react";
 import { PHONE } from "../../shell/layout";
 import type { ReviewQueue } from "../model/feedback";
@@ -36,9 +36,11 @@ const STATUS: Record<PrototypeStatus, { label: string; color: "default" | "succe
 };
 
 function Row({ prototype, ready, onReview, onMake }: { prototype: AppPrototype; ready: boolean; onReview: () => void; onMake: () => void }) {
-  const status =
-    prototype.status === "revising" && !prototype.exists ? { ...STATUS.revising, label: "Making prototype…" } : STATUS[prototype.status];
   const busy = prototype.status === "revising";
+  // The first make: nothing to name, review or update yet.
+  const making = busy && !prototype.exists;
+  const status = making ? { ...STATUS.revising, label: "Making prototype…" } : STATUS[prototype.status];
+  const name = prototype.files?.manifest.name;
   return (
     <Box component="li" sx={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 1 }}>
       <Box
@@ -57,25 +59,38 @@ function Row({ prototype, ready, onReview, onMake }: { prototype: AppPrototype; 
         {busy ? <CircularProgress size={26} aria-label="Working on the prototype" /> : <AppWindow size={26} aria-hidden />}
       </Box>
       <Typography component="h3" sx={{ fontWeight: 600, fontSize: "1.375rem" }}>
-        {prototype.files?.manifest.name ?? prototype.component}
+        {name ?? prototype.component}
       </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace" }}>
-        {prototype.component}
-      </Typography>
-      <Chip size="small" label={status.label} color={status.color} variant={prototype.status === "none" ? "outlined" : "filled"} />
-      {prototype.problem && (
-        <Typography variant="body2" color="error.main" sx={{ maxWidth: "56ch" }}>
-          {prototype.problem}
+      {name && (
+        <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+          {prototype.component}
         </Typography>
       )}
-      <Box sx={{ display: "flex", gap: 1.25, mt: 2, flexWrap: "wrap", justifyContent: "center" }}>
-        <Button variant="outlined" disabled={!ready} onClick={onMake}>
-          {prototype.exists ? "Update" : "Make prototype"}
-        </Button>
-        <Button variant="contained" disabled={!prototype.files} onClick={onReview}>
-          Review
-        </Button>
-      </Box>
+      <Chip size="small" label={status.label} color={status.color} variant={prototype.status === "none" ? "outlined" : "filled"} />
+      {prototype.problem && (
+        <Tooltip title={prototype.problem}>
+          <Typography variant="body2" color="error.main">
+            The last prototype couldn't be rendered.
+          </Typography>
+        </Tooltip>
+      )}
+      {making ? (
+        <Typography variant="body2" color="text.secondary">
+          This usually takes a few minutes.
+        </Typography>
+      ) : (
+        <Box sx={{ mt: 2 }}>
+          {prototype.files ? (
+            <Button variant="contained" onClick={onReview}>
+              Review
+            </Button>
+          ) : (
+            <Button variant="contained" disabled={!ready} onClick={onMake}>
+              {prototype.status === "invalid" ? "Try again" : "Make prototype"}
+            </Button>
+          )}
+        </Box>
+      )}
     </Box>
   );
 }

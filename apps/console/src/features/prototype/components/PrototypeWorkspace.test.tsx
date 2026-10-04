@@ -144,9 +144,11 @@ describe("the Prototype tab", () => {
     render(<Harness />);
     const rows = within(screen.getByRole("list", { name: "Prototypes" })).getAllByRole("listitem");
     expect(rows.map((r) => within(r).getByText(/^(Invalid|Revising…|No prototype|Ready)$/).textContent)).toEqual(["Invalid", "Revising…", "No prototype"]);
-    expect(within(rows[0]!).getByText(/prototype\.json is invalid/)).toBeInTheDocument();
-    expect(within(rows[0]!).getByRole("button", { name: "Review" })).toBeDisabled();
+    expect(within(rows[0]!).getByLabelText(/prototype\.json is invalid/)).toHaveTextContent("The last prototype couldn't be rendered.");
+    expect(within(rows[0]!).queryByRole("button", { name: "Review" })).toBeNull();
+    expect(within(rows[0]!).getByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(within(rows[1]!).getByRole("button", { name: "Review" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Update" })).toBeNull();
     expect(within(rows[2]!).getByRole("button", { name: "Make prototype" })).toBeInTheDocument();
   });
 
