@@ -27,6 +27,7 @@ import {
   MessageSquare,
   Plus,
   Rocket,
+  Settings,
 } from "@wso2/oxygen-ui-icons-react";
 import type { ShellScope } from "../scope";
 import { RAIL_WIDTH } from "../layout";
@@ -79,8 +80,9 @@ function RailTip({ label, children }: { label: string; children: ReactNode }) {
 /**
  * The dark activity rail: the logo (home: the Dashboard), New project,
  * Projects; inside a project also its Overview, Spec, Design and Deploy; then the chat
- * toggle and the user menu at the bottom. The rail takes you to Pages; a Card
- * opens from what a Page shows.
+ * toggle, Settings (the org's card, over the Dashboard) and the user menu at
+ * the bottom. The rail takes you to Pages; a Card opens from what a Page
+ * shows, save the few the rail names.
  */
 export function ActivityRail({
   scope,
@@ -93,7 +95,11 @@ export function ActivityRail({
   onToggleChat: () => void;
 }) {
   const project = scope.kind === "project" ? scope : null;
-  const onPage = (page: "dashboard" | "projects" | "new") => scope.kind === "org" && scope.page === page;
+  // An org Page is current only with no card over it: Settings open over the
+  // Dashboard makes Settings the active item, not the logo.
+  const onPage = (page: "dashboard" | "projects" | "new") =>
+    scope.kind === "org" && scope.page === page && scope.card === null;
+  const settingsOpen = scope.kind === "org" && scope.card === "settings";
 
   return (
     <Box
@@ -205,6 +211,16 @@ export function ActivityRail({
           </IconButton>
         </RailTip>
       )}
+      <RailTip label="Settings">
+        <RailLink
+          to="/settings"
+          aria-label="Settings"
+          aria-current={settingsOpen ? "page" : undefined}
+          sx={railButtonSx(settingsOpen)}
+        >
+          <Settings size={20} />
+        </RailLink>
+      </RailTip>
       <RailUserMenu />
     </Box>
   );

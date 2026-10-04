@@ -17,13 +17,20 @@
  */
 
 // Where the reader is, in the shell's terms: at org level (the Dashboard, the
-// Projects grid, New project), or on one of a project's Pages with at most one
-// of its Cards open over it (and, on the spec card, the file open in it).
+// Projects grid, New project), possibly with the org's Settings card open over
+// the Dashboard, or on one of a project's Pages with at most one of its Cards
+// open over it (and, on the spec card, the file open in it).
 // The rail's active item, whether the chat panel exists, its breadcrumb and
 // its scope line all follow from this, so it is worked out once, from the
 // router's leaf match, here. Which routes are Pages and which are Cards, and
 // the Page each Card is over, are this module's tables
 // (design/pages-and-cards.md).
+
+/** The org's Pages; "other" is an org-level address that is none of them. */
+export type OrgPage = "dashboard" | "projects" | "new" | "other";
+
+/** The Cards drawn over the org's Pages: Settings, over the Dashboard. */
+export type OrgCard = "settings";
 
 /** A project's Pages: each is a layout route that draws itself under its Cards. */
 export type ProjectPage = "overview" | "deploy";
@@ -32,7 +39,7 @@ export type ProjectPage = "overview" | "deploy";
 export type ProjectCard = "spec" | "design" | "builds" | "configure";
 
 export type ShellScope =
-  | { kind: "org"; page: "dashboard" | "projects" | "new" | "other" }
+  | { kind: "org"; page: OrgPage; card: OrgCard | null }
   | {
       kind: "project";
       projectName: string;
@@ -41,6 +48,21 @@ export type ShellScope =
       /** The spec card's open file (`?file=`), by its key; null on the product page and off the card. */
       specFile: string | null;
     };
+
+const ORG_PAGE_ROUTES: Record<string, OrgPage> = {
+  "/_dashboard/": "dashboard",
+  "/projects/": "projects",
+  "/projects/new": "new",
+};
+
+const ORG_CARD_ROUTES: Record<string, OrgCard> = {
+  "/_dashboard/settings": "settings",
+};
+
+/** The org Page each org Card opens over, and closes back to. */
+const ORG_CARD_PAGE: Record<OrgCard, OrgPage> = {
+  settings: "dashboard",
+};
 
 const PAGE_ROUTES: Record<string, ProjectPage> = {
   "/projects/$projectName/_overview/": "overview",
@@ -63,12 +85,12 @@ const CARD_PAGE: Record<ProjectCard, ProjectPage> = {
   configure: "deploy",
 };
 
-/** The Card a route draws, or null when it draws none. */
-export function cardOfRoute(routeId: string): ProjectCard | null {
-  return CARD_ROUTES[routeId] ?? null;
+/** The Card a route draws, the org's or a project's, or null when it draws none. */
+export function cardOfRoute(routeId: string): ProjectCard | OrgCard | null {
+  return CARD_ROUTES[routeId] ?? ORG_CARD_ROUTES[routeId] ?? null;
 }
 
-/** The Page a Card is drawn over. */
+/** The Page a project Card is drawn over. */
 export function pageOfCard(card: ProjectCard): ProjectPage {
   return CARD_PAGE[card];
 }
@@ -80,11 +102,8 @@ export function shellScope(leaf: {
   search?: { file?: unknown };
 }): ShellScope {
   const { routeId, params, search } = leaf;
-  if (routeId === "/") return { kind: "org", page: "dashboard" };
-  if (routeId === "/projects/") return { kind: "org", page: "projects" };
-  if (routeId === "/projects/new") return { kind: "org", page: "new" };
   if (params.projectName && routeId.startsWith("/projects/$projectName")) {
-    const card = cardOfRoute(routeId);
+    const card = CARD_ROUTES[routeId] ?? null;
     const file = search?.file;
     return {
       kind: "project",
@@ -96,7 +115,9 @@ export function shellScope(leaf: {
       specFile: card === "spec" && typeof file === "string" && file ? file : null,
     };
   }
-  return { kind: "org", page: "other" };
+  const orgCard = ORG_CARD_ROUTES[routeId];
+  if (orgCard) return { kind: "org", page: ORG_CARD_PAGE[orgCard], card: orgCard };
+  return { kind: "org", page: ORG_PAGE_ROUTES[routeId] ?? "other", card: null };
 }
 
 const PAGE_TITLE: Record<ProjectPage, string> = {

@@ -451,6 +451,15 @@ export const settingsHandlers = [
     return HttpResponse.json(probed.check);
   }),
 
+  // Disconnect drops the connection (the App's uninstall is the real
+  // server's business); with no GitHub, onboarding takes over again.
+  http.post("*/api/v1/config/git-provider/disconnect", () => {
+    ensureInitialized();
+    gitProvider = null;
+    persistConnection();
+    return HttpResponse.json({ status: "disconnected" });
+  }),
+
   // All-or-nothing, mirroring the BE: no request body, reconcile everything.
   // Per #102 the BE creates the org's skills repo first when it's missing;
   // the mock treats that as part of the same opaque call.

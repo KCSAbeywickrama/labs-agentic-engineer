@@ -16,11 +16,6 @@
  * under the License.
  */
 
-import { createFileRoute } from "@tanstack/react-router";
-import { Dashboard } from "../features/dashboard/components/Dashboard";
-
-// The org's home Page: the Dashboard. Sign-in lands here (or on New project
-// when the organization has no projects yet).
-export const Route = createFileRoute("/")({
-  component: Dashboard,
-});
+export const usageKeys = {
+  projects: () => ["usage", "projects"] as const,
+};

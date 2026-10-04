@@ -16,11 +16,10 @@
  * under the License.
  */
 
-import { useCallback, useEffect, useId, useRef, type ReactNode } from "react";
+import { useCallback, type ReactNode } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { Box, IconButton, Tooltip, Typography, keyframes } from "@wso2/oxygen-ui";
-import { X } from "@wso2/oxygen-ui-icons-react";
-import { PHONE } from "../../shell/layout";
+import { Typography } from "@wso2/oxygen-ui";
+import { CardFrame } from "../../shell/components/CardFrame";
 import { cardTitle, pageOfCard, pageTitle, type ProjectCard, type ProjectPage } from "../../shell/scope";
 import { WorkspaceTabs } from "./WorkspaceTabs";
 
@@ -33,23 +32,11 @@ const PAGE_PATH = {
   deploy: "/projects/$projectName/deploy",
 } as const satisfies Record<ProjectPage, string>;
 
-const slideIn = keyframes`
-  from { opacity: 0; transform: translateX(12px); }
-  to { opacity: 1; transform: none; }
-`;
-
-const fadeIn = keyframes`
-  from { opacity: 0; }
-  to { opacity: 1; }
-`;
-
-const reducedMotion = { "@media (prefers-reduced-motion: reduce)": { animation: "none" } };
-
 /**
  * A card drawn over the project Page that lists it (scope.ts `pageOfCard`):
  * the page stays rendered under a scrim, and closing (X, Escape, or a click
  * on the scrim) goes back to it. Each card is a route of its own, so this is
- * what the card routes render.
+ * what the card routes render; the frame itself is the shell's `CardFrame`.
  *
  * Spec and Design are one workspace, so their header is the Spec · Design
  * tabs rather than a title; any other card shows its title, or the `title`
@@ -74,8 +61,6 @@ export function CardOverlay({
 }) {
   const { projectName } = useParams({ from: "/projects/$projectName" });
   const navigate = useNavigate();
-  const titleId = useId();
-  const cardRef = useRef<HTMLDivElement>(null);
 
   const page = pageOfCard(card);
   const close = useCallback(
@@ -85,104 +70,32 @@ export function CardOverlay({
   const tabbed = card === "spec" || card === "design";
   const step = STEP[card];
 
-  useEffect(() => {
-    // Menus and dialogs above the card stop their own Escape from reaching here.
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.defaultPrevented) close();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [close]);
-
-  // Focus moves into the card as it opens, so keyboard and screen reader land
-  // on what is now in front.
-  useEffect(() => {
-    cardRef.current?.focus();
-  }, [card]);
-
   return (
-    <>
-      <Box
-        aria-hidden
-        onClick={close}
-        sx={{
-          position: "absolute",
-          inset: 0,
-          bgcolor: "var(--aep-shell-scrim)",
-          animation: `${fadeIn} 0.2s ease`,
-          ...reducedMotion,
-        }}
-      />
-      <Box
-        ref={cardRef}
-        role="dialog"
-        aria-labelledby={tabbed ? undefined : titleId}
-        aria-label={tabbed ? cardTitle(card) : undefined}
-        tabIndex={-1}
-        sx={{
-          // Framed on all sides, the page showing round it under the scrim.
-          position: "absolute",
-          inset: (t) => t.spacing(1.75),
-          bgcolor: "background.paper",
-          border: 1,
-          borderColor: "divider",
-          borderRadius: (t) => t.spacing(1.75),
-          boxShadow: "var(--aep-shell-card-shadow)",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          outline: "none",
-          animation: `${slideIn} 0.22s ease`,
-          ...reducedMotion,
-          [PHONE]: { inset: (t) => t.spacing(1.25) },
-        }}
-      >
-        <Box
-          sx={{
-            display: "flex",
-            alignItems: "center",
-            gap: 1.25,
-            pl: 2.5,
-            pr: 2,
-            py: 1.5,
-            borderBottom: 1,
-            borderColor: "divider",
-            [PHONE]: { flexWrap: "wrap", rowGap: 1 },
-          }}
-        >
-          {tabbed ? (
-            <WorkspaceTabs active={card} />
-          ) : (
-            <>
-              {step !== undefined && (
-                <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
-                  {step} / 4
-                </Typography>
-              )}
-              <Typography id={titleId} component="h2" sx={{ fontSize: "1rem", fontWeight: 600, flex: 1 }}>
-                {title}
-              </Typography>
-            </>
-          )}
-          {actions && (
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1, [PHONE]: { order: 3, flexBasis: "100%" } }}>
-              {actions}
-            </Box>
-          )}
-          <Tooltip title={page === "overview" ? "Back to project overview" : `Back to ${pageTitle(page)}`}>
-            <IconButton size="small" aria-label="Close" onClick={close}>
-              <X size={18} />
-            </IconButton>
-          </Tooltip>
-        </Box>
-        {fill ? (
-          <Box sx={{ flex: 1, minHeight: 0 }}>{children}</Box>
+    <CardFrame
+      name={tabbed ? cardTitle(card) : title}
+      heading={
+        tabbed ? (
+          <WorkspaceTabs active={card} />
         ) : (
-          <Box sx={{ flex: 1, minHeight: 0, overflowY: "auto", px: 3.5, pt: 3, pb: 11, [PHONE]: { px: 2, pb: 17.5 } }}>
-            {children}
-          </Box>
-        )}
-      </Box>
-    </>
+          <>
+            {step !== undefined && (
+              <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
+                {step} / 4
+              </Typography>
+            )}
+            <Typography component="h2" sx={{ fontSize: "1rem", fontWeight: 600, flex: 1 }}>
+              {title}
+            </Typography>
+          </>
+        )
+      }
+      closeHint={page === "overview" ? "Back to project overview" : `Back to ${pageTitle(page)}`}
+      onClose={close}
+      actions={actions}
+      fill={fill}
+      openKey={card}
+    >
+      {children}
+    </CardFrame>
   );
 }

@@ -23,10 +23,12 @@ import { getUserManager } from "./userManager";
 import { decodeJwtClaims, identityFromClaims, type TokenClaims } from "./claims";
 import { MOCK_ORG, MOCK_USER, isMockSignedOut, setMockSignedOut } from "./mockSession";
 import { AuthScreen } from "./AuthScreen";
+import { BillingActivation } from "./BillingActivation";
 import { SessionContext, type Session } from "./SessionContext";
 
 // Gates the whole app (rendered at __root): children only ever see a
-// signed-in state, with the session in context.
+// signed-in state, with the session in context. Signing in ends with WSO2
+// Cloud's billing activation where the install has one (BillingActivation).
 export function AuthGuard({ children }: PropsWithChildren) {
   if (env.authMode === "mock") {
     return <MockGuard>{children}</MockGuard>;
@@ -62,7 +64,10 @@ function MockGuard({ children }: PropsWithChildren) {
     );
   }
   return (
-    <SessionContext.Provider value={session}>{children}</SessionContext.Provider>
+    <SessionContext.Provider value={session}>
+      <BillingActivation />
+      {children}
+    </SessionContext.Provider>
   );
 }
 
@@ -142,6 +147,9 @@ function OidcGuard({ children }: PropsWithChildren) {
     );
   }
   return (
-    <SessionContext.Provider value={session}>{children}</SessionContext.Provider>
+    <SessionContext.Provider value={session}>
+      <BillingActivation />
+      {children}
+    </SessionContext.Provider>
   );
 }

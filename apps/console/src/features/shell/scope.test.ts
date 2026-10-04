@@ -24,11 +24,20 @@ describe("shellScope", () => {
     shellScope({ routeId, params: { projectName: "acme-expenses" }, ...(search ? { search } : {}) });
 
   it("puts the Dashboard, the Projects grid and New project at org level", () => {
-    expect(shellScope({ routeId: "/", params: {} })).toEqual({ kind: "org", page: "dashboard" });
-    expect(shellScope({ routeId: "/projects/", params: {} })).toEqual({ kind: "org", page: "projects" });
+    expect(shellScope({ routeId: "/_dashboard/", params: {} })).toEqual({ kind: "org", page: "dashboard", card: null });
+    expect(shellScope({ routeId: "/projects/", params: {} })).toEqual({ kind: "org", page: "projects", card: null });
     expect(shellScope({ routeId: "/projects/new", params: {} })).toEqual({
       kind: "org",
       page: "new",
+      card: null,
+    });
+  });
+
+  it("reads the Settings card as the org's card over the Dashboard", () => {
+    expect(shellScope({ routeId: "/_dashboard/settings", params: {} })).toEqual({
+      kind: "org",
+      page: "dashboard",
+      card: "settings",
     });
   });
 
@@ -73,6 +82,7 @@ describe("shellScope", () => {
     expect(shellScope({ routeId: "/callback", params: {} })).toEqual({
       kind: "org",
       page: "other",
+      card: null,
     });
   });
 });
@@ -83,6 +93,8 @@ describe("cards and the Pages they are over", () => {
     expect(cardOfRoute("/projects/$projectName/_overview/builds/$version")).toBe("builds");
     expect(cardOfRoute("/projects/$projectName/_overview/")).toBeNull();
     expect(cardOfRoute("/projects/$projectName/deploy")).toBeNull();
+    expect(cardOfRoute("/_dashboard/settings")).toBe("settings");
+    expect(cardOfRoute("/_dashboard/")).toBeNull();
   });
 
   it("closes each card back to the Page it opened over", () => {

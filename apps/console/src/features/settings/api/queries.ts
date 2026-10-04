@@ -103,6 +103,24 @@ export function useConnectGitHubPat() {
   });
 }
 
+// Disconnect: drops the org's GitHub connection, and with `uninstall` also
+// uninstalls the GitHub App (left installed, a later connect re-adopts it).
+// The config refetch then finds no connection, and onboarding takes over.
+export function useDisconnectGitProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (uninstall: boolean) => {
+      const { error } = await client.POST("/config/git-provider/disconnect", {
+        params: { query: { uninstall } },
+      });
+      if (error) throw new Error(errorMessage(error, "Failed to disconnect GitHub"));
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: configKeys.all });
+    },
+  });
+}
+
 // --- Skills catalogue (repo-backed — see reconcile.go; no DB table) -------
 
 // All-or-nothing: the BE's sync-skills takes no body and reconciles every

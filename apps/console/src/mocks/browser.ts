@@ -24,6 +24,7 @@ import { designHandlers } from "./handlers/design";
 import { projectsHandlers } from "./handlers/projects";
 import { settingsHandlers } from "./handlers/settings";
 import { specHandlers } from "./handlers/spec";
+import { usageHandlers } from "./handlers/usage";
 
 // Mock mode's worker. Each screen adds its handlers here as it is built.
 export const worker = setupWorker(
@@ -34,4 +35,5 @@ export const worker = setupWorker(
   ...buildsHandlers,
   ...deployHandlers,
   ...settingsHandlers,
+  ...usageHandlers,
 );

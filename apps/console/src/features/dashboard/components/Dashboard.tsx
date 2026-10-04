@@ -16,41 +16,33 @@
  * under the License.
  */
 
-import { Navigate } from "@tanstack/react-router";
 import { Box, Skeleton, Typography } from "@wso2/oxygen-ui";
 import { useProjects } from "../../projects/api/queries";
-import { BasePage } from "../../shell/components/BasePage";
 
 /**
  * The user's home Page (`/`), opened from the rail's logo. It holds the
- * Alerts: the issues, across all projects, that need a person.
- *
- * It is also where sign-in lands, with one exception: an organization with no
- * projects yet lands on New project instead, since there is nothing here for
- * it until something is built.
+ * Alerts: the issues, across all projects, that need a person. It is also the
+ * base the org's Settings card is drawn over (`routes/_dashboard/`).
  */
 export function Dashboard() {
   const projects = useProjects();
-  if (projects.data && projects.data.length === 0) return <Navigate to="/projects/new" replace />;
   return (
-    <BasePage>
-      <Box sx={{ maxWidth: 880, display: "flex", flexDirection: "column", gap: 2.5 }}>
-        <Typography component="h1" variant="h4" sx={{ fontWeight: 600 }}>
-          Dashboard
+    <Box sx={{ maxWidth: 880, display: "flex", flexDirection: "column", gap: 2.5 }}>
+      <Typography component="h1" variant="h4" sx={{ fontWeight: 600 }}>
+        Dashboard
+      </Typography>
+      <Box component="section" aria-labelledby="alerts-heading" sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+        <Typography id="alerts-heading" component="h2" sx={{ fontSize: "0.8125rem", fontWeight: 600 }}>
+          Alerts
         </Typography>
-        <Box component="section" aria-labelledby="alerts-heading" sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-          <Typography id="alerts-heading" component="h2" sx={{ fontSize: "0.8125rem", fontWeight: 600 }}>
-            Alerts
+        {projects.isPending ? (
+          <Skeleton height={64} />
+        ) : (
+          <Typography variant="body2" color="text.secondary">
+            Issues that need you, across all projects, show here.
           </Typography>
-          {projects.isPending ? (
-            <Skeleton height={64} />
-          ) : (
-            <Typography variant="body2" color="text.secondary">
-              Issues that need you, across all projects, show here.
-            </Typography>
-          )}
-        </Box>
+        )}
       </Box>
-    </BasePage>
+    </Box>
   );
 }
