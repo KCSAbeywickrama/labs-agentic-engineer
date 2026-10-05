@@ -153,8 +153,7 @@ export function groupByFeature(
       const name = titled?.[2] ?? feature.name;
       const notBuilt = scope ? !scope.features.includes(id) : false;
       const group = groups.get(id) ?? { id, name, scenarios: [], passed: 0, judged: 0, runs: 0, notBuilt };
-      const stories = [scenario.tags, rule.tags, feature.tags].flat().flatMap((t) => STORY_TAG.exec(t)?.[1] ?? []);
-      const heldBack = scope !== undefined && stories.length > 0 && stories.every((st) => scope.heldBack.includes(st));
+      const heldBack = scope !== undefined && scenario.stories.length > 0 && scenario.stories.every((st) => scope.heldBack.includes(st));
       const key = scenarioKey(id, rule.text, scenario.name);
       let result: ScenarioResult;
       if (notBuilt || heldBack) {
