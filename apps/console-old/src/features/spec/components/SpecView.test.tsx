@@ -238,6 +238,8 @@ let mockSpecAgent = "";
 let mockSpecFlow = "";
 vi.mock("../../projects/api/queries", () => ({
   useProject: () => ({ data: { displayName: "Test Project" } }),
+  // The Agent spec's Guardrails panel reads the agent's deployments.
+  useComponentsDeployments: () => ({ isPending: false, deployments: [], failedCount: 0 }),
   // `spec.agent` (#562) is what tells the workspace whether an agent is working
   // right now. Mutable so the kickoff block below can drive it; the global
   // beforeEach resets it to idle, which is what every other test wants.

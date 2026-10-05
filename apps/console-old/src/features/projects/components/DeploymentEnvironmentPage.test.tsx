@@ -746,6 +746,28 @@ describe("DeploymentEnvironmentPage — try it out (ADR-0032)", () => {
       expect(screen.queryByRole("link", { name: "Manage triage in Agent Manager" })).toBeNull();
     });
 
+    // A guardrail that did not land is a protection the agent does not have:
+    // the panel where the agent is tried says so, with the reason.
+    it("warns about a guardrail the deploy could not apply", () => {
+      mockDeployments = [...devDeployments(), { ...agent(), guardrails: [
+        { policy: "pii-masking-regex", status: "applied" },
+        { policy: "regex-guardrail", status: "invalid", reason: "the regex does not compile" },
+      ] }];
+      render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
+
+      const warning = screen.getByRole("status", { name: "triage guardrails" });
+      expect(warning).toHaveTextContent("regex-guardrail: invalid");
+      expect(warning).toHaveTextContent("the regex does not compile");
+      expect(warning).not.toHaveTextContent("pii-masking-regex");
+    });
+
+    it("says nothing when every guardrail applied", () => {
+      mockDeployments = [...devDeployments(), { ...agent(), guardrails: [{ policy: "pii-masking-regex", status: "applied" }] }];
+      render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);
+
+      expect(screen.queryByRole("status", { name: "triage guardrails" })).toBeNull();
+    });
+
     it("carries the sign-in coordinates, the test users' scopes and the gateway URL", () => {
       mockSignIn = { issuer: "http://default-idp.amp.localhost:8080", clientId: "aep-dp-x-r-y" };
       render(<DeploymentEnvironmentPage projectName="expense" environment="development" />);

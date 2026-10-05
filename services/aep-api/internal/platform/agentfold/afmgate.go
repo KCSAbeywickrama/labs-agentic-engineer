@@ -98,6 +98,21 @@ const (
 	afmAttachmentsMaxFileSizeMB = 5
 )
 
+// The guardrail limits and platform-owned keys mirror the zod gate's
+// guardrailSchema. Shape only: params are checked against the gateway's
+// catalog at deploy (agentgovernance/guardrails.go), which this gate cannot
+// reach. The platform owns every JSONPath and the policy version, so a spec
+// that sets one is refused rather than silently overridden.
+var (
+	afmGuardrailPolicyRe  = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)
+	afmGuardrailOwnedKeys = []string{"jsonPath", "streamingJsonPath", "version", "paths"}
+)
+
+const (
+	afmGuardrailsMax   = 10
+	afmGuardrailWhyMax = 300
+)
+
 // Known-key sets, one per strictObject in frontMatterSchema
 // (agent-afm-schema.ts). Keep these — not a struct's field list — as the
 // single source of truth for "what shape does this object have"; the zod
@@ -113,12 +128,13 @@ var (
 	afmInterfaceKnownKeys   = map[string]bool{"type": true, "exposure": true}
 	afmExposureKnownKeys    = map[string]bool{"http": true}
 	afmExposureHTTPKeys     = map[string]bool{"path": true}
-	afmXAepKnownKeys        = map[string]bool{"tools": true, "memory": true, "identity": true, "attachments": true}
+	afmXAepKnownKeys        = map[string]bool{"tools": true, "memory": true, "identity": true, "attachments": true, "guardrails": true}
 	afmToolsKnownKeys       = map[string]bool{"openapi": true}
 	afmOpenAPIToolKnownKeys = map[string]bool{"component": true, "baseUrl": true, "allow": true}
 	afmMemoryKnownKeys      = map[string]bool{"type": true}
 	afmIdentityKnownKeys    = map[string]bool{"mode": true}
 	afmAttachmentsKnownKeys = map[string]bool{"types": true, "maxFiles": true, "maxFileSizeMB": true}
+	afmGuardrailKnownKeys   = map[string]bool{"policy": true, "params": true, "why": true}
 )
 
 // validateAgentAfm mirrors checkAgentAfm: parse the `---` front matter fence,
@@ -391,7 +407,76 @@ func validateAfmXAep(raw any) *designProblem {
 			return problem
 		}
 	}
+	if guardrails, present := xaep["guardrails"]; present {
+		if problem := validateAfmGuardrails(guardrails); problem != nil {
+			return problem
+		}
+	}
 	return nil
+}
+
+// validateAfmGuardrails mirrors the zod guardrails array: 1..10 entries, each
+// {policy, params, why} and nothing else, no policy twice, and no
+// platform-owned key anywhere in params.
+func validateAfmGuardrails(raw any) *designProblem {
+	list, ok := raw.([]any)
+	if !ok || len(list) == 0 {
+		return &designProblem{code: ErrSchemaViolation, message: "x-aep.guardrails: must contain at least 1 element(s)"}
+	}
+	if len(list) > afmGuardrailsMax {
+		return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("x-aep.guardrails: must contain at most %d element(s)", afmGuardrailsMax)}
+	}
+	seen := map[string]bool{}
+	for i, r := range list {
+		entry, ok := r.(map[string]any)
+		if !ok {
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("x-aep.guardrails[%d]: must be an object", i)}
+		}
+		for k := range entry {
+			if !afmGuardrailKnownKeys[k] {
+				return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("x-aep.guardrails[%d]: unknown property %s", i, k)}
+			}
+		}
+		policy, _ := entry["policy"].(string)
+		if !afmGuardrailPolicyRe.MatchString(policy) {
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("x-aep.guardrails[%d].policy: must be a lowercase policy name", i)}
+		}
+		params, ok := entry["params"].(map[string]any)
+		if !ok {
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("x-aep.guardrails[%d].params: must be an object", i)}
+		}
+		if owned := ownedGuardrailKey(params); owned != "" {
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("x-aep.guardrails[%d].params: must not set %s — the platform sets it", i, owned)}
+		}
+		why, _ := entry["why"].(string)
+		if why == "" || len([]rune(why)) > afmGuardrailWhyMax {
+			return &designProblem{code: ErrSchemaViolation, message: fmt.Sprintf("x-aep.guardrails[%d].why: must be 1 to %d characters", i, afmGuardrailWhyMax)}
+		}
+		if seen[policy] {
+			return &designProblem{code: ErrSchemaViolation, message: "x-aep.guardrails: must not repeat a policy"}
+		}
+		seen[policy] = true
+	}
+	return nil
+}
+
+// ownedGuardrailKey names the first platform-owned key in params, at the top
+// level or inside its request/response blocks; "" when there is none.
+func ownedGuardrailKey(params map[string]any) string {
+	scopes := []map[string]any{params}
+	for _, phase := range []string{"request", "response"} {
+		if block, ok := params[phase].(map[string]any); ok {
+			scopes = append(scopes, block)
+		}
+	}
+	for _, scope := range scopes {
+		for _, key := range afmGuardrailOwnedKeys {
+			if _, has := scope[key]; has {
+				return key
+			}
+		}
+	}
+	return ""
 }
 
 // validateAfmAttachments mirrors the zod attachmentsSchema: types (non-empty,

@@ -223,6 +223,39 @@ func (e BuildSummaryWaitingReason) Valid() bool {
 	}
 }
 
+// Defines values for DeploymentGuardrailStatus.
+const (
+	GuardrailApplied     DeploymentGuardrailStatus = "applied"
+	GuardrailConflict    DeploymentGuardrailStatus = "conflict"
+	GuardrailFailed      DeploymentGuardrailStatus = "failed"
+	GuardrailInvalid     DeploymentGuardrailStatus = "invalid"
+	GuardrailPartial     DeploymentGuardrailStatus = "partial"
+	GuardrailUnavailable DeploymentGuardrailStatus = "unavailable"
+	GuardrailUnsupported DeploymentGuardrailStatus = "unsupported"
+)
+
+// Valid indicates whether the value is a known member of the DeploymentGuardrailStatus enum.
+func (e DeploymentGuardrailStatus) Valid() bool {
+	switch e {
+	case GuardrailApplied:
+		return true
+	case GuardrailConflict:
+		return true
+	case GuardrailFailed:
+		return true
+	case GuardrailInvalid:
+		return true
+	case GuardrailPartial:
+		return true
+	case GuardrailUnavailable:
+		return true
+	case GuardrailUnsupported:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for EnvValueCellDTOStatus.
 const (
 	EnvValueCellDTOStatusConfigured EnvValueCellDTOStatus = "configured"
@@ -1929,10 +1962,23 @@ type Deployment struct {
 	CreatedAt       string `json:"createdAt,omitempty"`
 	EndpointURL     string `json:"endpointUrl,omitempty"`
 	Environment     string `json:"environment,omitempty"`
-	Name            string `json:"name,omitempty"`
-	ReleaseName     string `json:"releaseName,omitempty"`
-	Status          string `json:"status,omitempty"`
+
+	// Guardrails What became of each guardrail the agent's spec declares (x-aep.guardrails), as the last deploy to this environment left it. Present only for an ai-agent governed by Agent Manager that declares guardrails or once did; absent otherwise.
+	Guardrails  []DeploymentGuardrail `json:"guardrails,omitempty"`
+	Name        string                `json:"name,omitempty"`
+	ReleaseName string                `json:"releaseName,omitempty"`
+	Status      string                `json:"status,omitempty"`
 }
+
+// DeploymentGuardrail One declared guardrail and what the deploy did with it. `applied` is on the agent's traffic; `partial` is applied without its reply-side check, which the gateway does not enforce on streamed replies; `unavailable` names a policy this environment's gateway does not offer; `invalid` params failed the policy's schema; `conflict` means a guardrail of the same policy was added in Agent Manager by hand and was left alone; `failed` could not be written; `unsupported` needs an Anthropic-format model connection.
+type DeploymentGuardrail struct {
+	Policy string                    `json:"policy"`
+	Reason string                    `json:"reason,omitempty"`
+	Status DeploymentGuardrailStatus `json:"status"`
+}
+
+// DeploymentGuardrailStatus defines model for DeploymentGuardrail.Status.
+type DeploymentGuardrailStatus string
 
 // DeploymentList defines model for DeploymentList.
 type DeploymentList struct {
@@ -2130,7 +2176,7 @@ type IssueComment struct {
 	URL      string `json:"url"`
 }
 
-// IssueInfo One issue from list/search. Field names are CAPITALIZED on the wire (historical shape the deployed aep-mcp-server parses — do not "fix" without a coordinated MCP-server release).
+// IssueInfo One issue from list/search. Field names are CAPITALIZED on the wire (a historical shape the SRE handoff's search tool answers too, and the SRE agent's skill reads — do not "fix" without changing both).
 type IssueInfo struct {
 	Body   string   `json:"Body"`
 	Labels []string `json:"Labels"`

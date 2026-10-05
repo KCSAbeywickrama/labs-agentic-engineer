@@ -237,6 +237,13 @@ A `404` from `/chat` means the conversation is gone or was never yours — drop
 the stored id, start fresh, and tell the user the previous conversation
 expired. Do not retry the same id.
 
+A `422` whose body carries `guardrail` (`{ error, guardrail }`) means the
+platform's AI gateway refused that message on policy — the agent is up. Say so
+in the user's terms with the agent's `error` as the reason ("This message was
+blocked by a safety check: <error>"), keep their text in the composer to edit,
+and keep the conversation as it was: the blocked turn left nothing behind.
+Reserve "couldn't reach the assistant" for a network failure or a 5xx.
+
 ## Layout
 
 ```
