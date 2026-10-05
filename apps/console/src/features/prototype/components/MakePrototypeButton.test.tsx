@@ -110,6 +110,13 @@ describe("Make prototype", () => {
     expect(screen.getByRole("button", { name: "Make prototype" })).toBeDisabled();
   });
 
+  it("says why it waits while another turn runs", () => {
+    chat = { ...idle, turn: { phase: "running", turnId: "t1", instruction: "/design F1" } };
+    prototypes = appPrototypes(["expense-web"], {}, null);
+    renderButton();
+    expect(screen.getByLabelText(/The agent is busy with a turn/)).toContainElement(screen.getByRole("button", { name: "Make prototype" }));
+  });
+
   it("says what runs while its own turn runs", () => {
     chat = { ...idle, turn: { phase: "running", turnId: "t1", instruction: "/prototype expense-web" } };
     prototypes = appPrototypes(["expense-web"], made, revisingIn("/prototype expense-web"));

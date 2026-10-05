@@ -159,6 +159,28 @@ describe("the Prototype tab", () => {
     expect(screen.getByLabelText("Working on the prototype")).toBeInTheDocument();
   });
 
+  it("shows a prototype the running turn is still writing as in progress, not broken", () => {
+    prototypes = [
+      ...appPrototypes([C], { [manifestPath(C)]: SAMPLE_MANIFEST }, revisingIn("/prototype")),
+      ...appPrototypes(["admin-web"], {}, revisingIn("/prototype")),
+    ];
+    chat = { ...idle, turn: { phase: "running", turnId: "t1", instruction: "/prototype" } };
+    render(<Harness />);
+    const rows = within(screen.getByRole("list", { name: "Prototypes" })).getAllByRole("listitem");
+    expect(within(rows[0]!).queryByText("The last prototype couldn't be rendered.")).toBeNull();
+    expect(within(rows[0]!).getByText("The agent is working on it.")).toBeInTheDocument();
+    expect(within(rows[1]!).getByText("Making prototype…")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("says why Make prototype waits while another turn runs", () => {
+    prototypes = appPrototypes([C], {}, null);
+    chat = busy;
+    render(<Harness />);
+    expect(screen.getByRole("button", { name: "Make prototype" })).toBeDisabled();
+    expect(screen.getByText(/The agent is busy with a turn/)).toBeInTheDocument();
+  });
+
   it("says there is no prototype yet and the spec and design come first", () => {
     prototypes = [];
     render(<Harness />);

@@ -18,10 +18,19 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { PROTOTYPE_COMMAND, prototypeCommand } from "@aep/contracts/commands";
+import type { ProjectChat } from "../agent-chat/chatStore";
 import { canSend, chatStore, useProjectChat } from "../agent-chat/useProjectChat";
 import type { PrototypeFeedback, TurnScope } from "../agent-chat/turnScope";
 import { designKey } from "../design/api/designModel";
 import { useChatPanel } from "../shell/chatPanel";
+
+/** Why a turn cannot start now, in the words a disabled button shows; null when one can. */
+function waitingFor(chat: ProjectChat): string | null {
+  if (canSend(chat)) return null;
+  if (chat.status === "error") return "The chat couldn't load. Reopen it to try again.";
+  if (chat.status !== "ready") return "Loading the chat…";
+  return "The agent is busy with a turn. This is available once it finishes.";
+}
 
 /**
  * The prototype's two agent turns: Make (or Update) prototype, and a review's
@@ -39,6 +48,8 @@ export function usePrototypeTurns(projectName: string): {
   sendFeedback: (feedback: PrototypeFeedback) => Promise<boolean>;
   /** Whether one can start now: the chat is loaded and no turn is running. */
   ready: boolean;
+  /** Why one cannot start now; null when it can. */
+  waiting: string | null;
 } {
   const chat = useProjectChat(projectName);
   const panel = useChatPanel();
@@ -51,6 +62,7 @@ export function usePrototypeTurns(projectName: string): {
   };
   return {
     ready: canSend(chat),
+    waiting: waitingFor(chat),
     make: (component) => void send(component ? prototypeCommand(component) : PROTOTYPE_COMMAND, { kind: "prototype" }),
     sendFeedback: (feedback) => send(prototypeCommand(feedback.component), { kind: "prototype", feedback }),
   };
