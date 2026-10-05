@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { Button } from "@wso2/oxygen-ui";
+import { Box, Button, Tooltip } from "@wso2/oxygen-ui";
 import type { AppPrototype } from "../model/prototypes";
 import { usePrototypes } from "../usePrototypes";
 import { usePrototypeTurns } from "../usePrototypeTurns";
@@ -32,7 +32,8 @@ export function makeLabel(prototypes: readonly AppPrototype[]): string {
 /**
  * Make prototype, once the design has a web application: a `/prototype` turn
  * for it (every web application, when there are several), run in the chat.
- * Update prototype once one exists. It waits while a turn runs.
+ * Update prototype once one exists. It waits while a turn runs, and says why
+ * unless the turn is its own (the label says that).
  */
 export function MakePrototypeButton({
   projectName,
@@ -45,9 +46,19 @@ export function MakePrototypeButton({
   const turns = usePrototypeTurns(projectName);
   if (!prototypes || prototypes.length === 0) return null;
   const only = prototypes.length === 1 ? prototypes[0]!.component : undefined;
-  return (
+  const own = prototypes.some((p) => p.status === "revising");
+  const button = (
     <Button size="small" variant={variant} disabled={!turns.ready} onClick={() => turns.make(only)}>
       {makeLabel(prototypes)}
     </Button>
+  );
+  if (!turns.waiting || own) return button;
+  // A disabled button gets no pointer events, so the tooltip sits on a wrapper.
+  return (
+    <Tooltip title={turns.waiting}>
+      <Box component="span" sx={{ display: "inline-flex" }}>
+        {button}
+      </Box>
+    </Tooltip>
   );
 }
