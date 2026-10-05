@@ -73,10 +73,16 @@ func storeWith(files map[string]string) *spec.ArtifactStore {
 // mapped external URL for a component (keyed by the k8s component name), or an
 // empty deployment list (no URL resolved yet) for any unmapped component.
 func ocResolving(urlsByComponent map[string]string) *ocmocks.ComponentClientMock {
+	return ocResolvingIn(testWriteTarget, urlsByComponent)
+}
+
+// ocResolvingIn is the same, with the deployments placed in a named environment —
+// so a test can put a sibling somewhere the project does not write to.
+func ocResolvingIn(env string, urlsByComponent map[string]string) *ocmocks.ComponentClientMock {
 	return &ocmocks.ComponentClientMock{
 		ListDeploymentsFunc: func(_ context.Context, _, _, componentName string) (*gen.DeploymentList, error) {
 			if u, ok := urlsByComponent[componentName]; ok && u != "" {
-				return &gen.DeploymentList{Items: []gen.Deployment{{EndpointURL: u}}}, nil
+				return &gen.DeploymentList{Items: []gen.Deployment{{EndpointURL: u, Environment: env}}}, nil
 			}
 			return &gen.DeploymentList{}, nil
 		},
@@ -817,7 +823,7 @@ func Test_componentExternalURL(t *testing.T) {
 	t.Run("nil componentClient → empty", func(t *testing.T) {
 		t.Parallel()
 		svc := NewRuntimeConfigService(nil, nil, nil)
-		if got := svc.componentExternalURL(ctx, "acme", "proj", "web"); got != "" {
+		if got := svc.componentExternalURL(ctx, "acme", "proj", testWriteTarget, "web"); got != "" {
 			t.Errorf("want empty when componentClient is nil; got %q", got)
 		}
 	})
@@ -827,20 +833,21 @@ func Test_componentExternalURL(t *testing.T) {
 		oc := &ocmocks.ComponentClientMock{ListDeploymentsFunc: func(context.Context, string, string, string) (*gen.DeploymentList, error) {
 			return nil, errors.New("boom")
 		}}
-		if got := NewRuntimeConfigService(oc, nil, nil).componentExternalURL(ctx, "acme", "proj", "web"); got != "" {
+		if got := NewRuntimeConfigService(oc, nil, nil).componentExternalURL(ctx, "acme", "proj", testWriteTarget, "web"); got != "" {
 			t.Errorf("want empty on error; got %q", got)
 		}
 	})
 
-	t.Run("returns first non-empty EndpointURL verbatim", func(t *testing.T) {
+	t.Run("returns this environment's EndpointURL verbatim", func(t *testing.T) {
 		t.Parallel()
 		oc := &ocmocks.ComponentClientMock{ListDeploymentsFunc: func(context.Context, string, string, string) (*gen.DeploymentList, error) {
 			return &gen.DeploymentList{Items: []gen.Deployment{
-				{EndpointURL: ""},                  // skipped
-				{EndpointURL: "http://web.local/"}, // returned untrimmed
+				{EndpointURL: "", Environment: testWriteTarget},                  // skipped: no URL
+				{EndpointURL: "http://prod.local/", Environment: "prod"},         // skipped: another environment
+				{EndpointURL: "http://web.local/", Environment: testWriteTarget}, // returned untrimmed
 			}}, nil
 		}}
-		if got := NewRuntimeConfigService(oc, nil, nil).componentExternalURL(ctx, "acme", "proj", "web"); got != "http://web.local/" {
+		if got := NewRuntimeConfigService(oc, nil, nil).componentExternalURL(ctx, "acme", "proj", testWriteTarget, "web"); got != "http://web.local/" {
 			t.Errorf("componentExternalURL = %q; want the first non-empty URL verbatim", got)
 		}
 	})
@@ -1141,6 +1148,25 @@ func Test_buildEnvValues_bindsSiblingEndpoints(t *testing.T) {
 		}
 		if _, present := out["ROOMS_API_URL"]; present {
 			t.Errorf("an unresolved address must not be emitted; got %v", out["ROOMS_API_URL"])
+		}
+	})
+
+	// ListDeployments filters by COMPONENT, not by environment, so a project
+	// deployed to development, staging and production answers with all three.
+	// Taking whichever OpenChoreo listed first would hand a development browser
+	// production's API — a wrong URL the SPA cannot tell from a right one, where
+	// no URL at all is a state this path already defers on.
+	t.Run("a sibling deployed only elsewhere is not this environment's URL", func(t *testing.T) {
+		t.Parallel()
+		design, web := designWith(t, webappCallingSibling("web", "rooms-api", "ROOMS_API_URL"))
+		oc := ocResolvingIn("prod", map[string]string{"rooms-api": "http://rooms.prod/"})
+
+		out, ready := NewRuntimeConfigService(oc, nil, nil).buildEnvValues(ctx, "acme", "proj", testWriteTarget, design, web)
+		if ready {
+			t.Errorf("want ready=false when the sibling is deployed elsewhere; got true (out=%v)", out)
+		}
+		if got, present := out["ROOMS_API_URL"]; present {
+			t.Errorf("emitted %v from another environment", got)
 		}
 	})
 
