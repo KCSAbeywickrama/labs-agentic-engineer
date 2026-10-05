@@ -19,7 +19,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StreamPart } from "@aep/agent-stream";
 import type { ConversationMessage } from "./api/conversation";
-import { TurnInProgressError, type TurnStatus } from "./api/turns";
+import { ConversationRotatedError, TurnInProgressError, type TurnStatus } from "./api/turns";
 import { createChatStore, type ChatApi } from "./chatStore";
 import type { TurnBody, TurnScope } from "./turnScope";
 
@@ -147,6 +147,16 @@ describe("a turn's lifecycle", () => {
     expect(ended).toHaveBeenCalledWith(PROJECT, "completed");
   });
 
+  it("keeps a prototype review's batch on its row, and sends it typed", async () => {
+    const { store, streams, chat, started } = setup();
+    await store.open(PROJECT);
+    streams.set("t1", controlledStream().body);
+    const feedback = { prototypeHash: "a".repeat(64), component: "expense-web", requests: [{ screenId: "s", roleId: "r", stateId: "d", elementIds: [], text: "Wider" }] };
+    await store.send(PROJECT, "/prototype expense-web", { kind: "prototype", feedback });
+    expect(chat().items[0]).toMatchObject({ kind: "user", text: "/prototype expense-web", prototypeFeedback: feedback });
+    expect(started[0]).toMatchObject({ instruction: "/prototype expense-web", collab: true, prototypeFeedback: feedback });
+  });
+
   it("says why a turn failed, and ends it failed", async () => {
     const { store, streams, chat, ended } = setup();
     await store.open(PROJECT);
@@ -205,6 +215,54 @@ describe("one turn at a time", () => {
     expect(chat().items[0]).toMatchObject({ kind: "user", state: "failed" });
     expect(chat().items[1]).toMatchObject({ kind: "error" });
     await vi.waitFor(() => expect(api.openStream).toHaveBeenCalledWith(PROJECT, "t9", 0, expect.anything()));
+  });
+});
+
+describe("a thread that was replaced", () => {
+  it("when the server says the thread was replaced, follows the new one and sends the message there", async () => {
+    let current = "conv-1";
+    const { store, api, chat } = setup({
+      api: {
+        conversationId: vi.fn(async () => current),
+        startTurn: vi.fn(async (_p: string, conversationId: string) => {
+          if (conversationId !== current) throw new ConversationRotatedError();
+          return "t1";
+        }),
+      },
+    });
+    await store.open(PROJECT);
+    current = "conv-2";
+
+    expect(await store.send(PROJECT, "/prototype expense-web", PRODUCT)).toBe(true);
+    expect(api.startTurn).toHaveBeenLastCalledWith(PROJECT, "conv-2", expect.anything());
+    expect(api.history).toHaveBeenLastCalledWith(PROJECT, "conv-2");
+    expect(chat().items[0]).toMatchObject({ kind: "user", text: "/prototype expense-web", state: "sent", turnId: "t1" });
+  });
+
+  it("follows a thread a teammate started, and a send meanwhile goes to it instead of being dropped", async () => {
+    vi.useFakeTimers();
+    try {
+      // A teammate started a new thread, and a turn is running in it.
+      let active: TurnStatus | null = null;
+      let current = "conv-1";
+      const { store, api, chat } = setup({
+        api: { activeTurn: vi.fn(async () => active), conversationId: vi.fn(async () => current) },
+      });
+      const stop = store.watch(PROJECT);
+      await vi.waitFor(() => expect(chat().status).toBe("ready"));
+      current = "conv-2";
+      active = { ...running("t5"), conversationId: "conv-2" };
+      await vi.advanceTimersByTimeAsync(60_000);
+      active = null;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(api.history).toHaveBeenLastCalledWith(PROJECT, "conv-2");
+
+      expect(await store.send(PROJECT, "Hello", PRODUCT)).toBe(true);
+      expect(api.startTurn).toHaveBeenCalledWith(PROJECT, "conv-2", expect.anything());
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
