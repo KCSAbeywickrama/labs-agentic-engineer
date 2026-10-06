@@ -10,7 +10,7 @@ the design agent cannot run it.
 ## What it produces
 
 ```
-specs/requirements/prd.md, product-wide.md, features/F<n>-<slug>.md   per skills/prd-contract
+specs/requirements/prd.md, product-wide.md, features/F<n>-<slug>.md   per the bundled prd-contract
 specs/requirements/sources/<module>.md                                 one coverage file per module and document
 specs/design/domain-model.md                                           one erDiagram from the code's types
 .inventory/*.md                                                        working notes, not part of the spec
@@ -25,26 +25,35 @@ authorization tables — is recorded in the coverage files as context.
 Behaviour that must survive the rewrite is a requirements line; a rule left
 only in a coverage file does not reach the build.
 
-## Running it
+## Installing and running it
 
-Open Claude Code with this repository as the working directory, so the skill
-and the contracts it reads are on disk, and point it at the product:
+The skill directory is self-contained: it carries the two platform contracts
+it follows under `references/`, so it needs no checkout of this repository.
+Copy it to where Claude Code looks for personal skills and run it from any
+directory:
+
+```bash
+cp -R .agents/skills/specs-from-code ~/.claude/skills/specs-from-code
+```
 
 ```
 /specs-from-code /path/to/digiops-finance/apps/allocation
-/specs-from-code /path/to/single-app-repo playground/.projects/my-app
+/specs-from-code /path/to/single-app-repo ~/work/my-app-specs
 ```
 
 The product root is the directory that *is* the product: a repository, or
-one app inside a monorepo. Output defaults to
-`playground/.projects/<name>/`, which git ignores. The skill never writes into
-the product's own repository.
+one app inside a monorepo. Output defaults to `<name>-specs/` under the
+current directory, and the skill refuses to write inside the product's own
+repository. Someone working in this repository can point the output at
+`playground/.projects/<name>` instead, which git ignores here, and run
+`pnpm play playground/.projects/<name> design` to see what `/design` makes of
+it before it enters a real project.
 
 Expect a long run: six inventories over the whole codebase first, then the
-feature cut, then the files. Review the result against `skills/prd-contract`
-before handing it over, with particular attention to the `*assumed*` lines
-and the Open Questions — those are the skill's inferences and the facts only
-the owning team holds.
+feature cut, then the files. Review the result against the bundled
+`references/prd-contract.md` before handing it over, with particular
+attention to the `*assumed*` lines and the Open Questions — those are the
+skill's inferences and the facts only the owning team holds.
 
 **Confidential codebases.** Derived specs describe internal business
 processes. Keep them in gitignored or private locations and never commit them
@@ -53,47 +62,31 @@ key names only, never values; check its output all the same.
 
 ## Getting the tree into an AEP project
 
-Creating a project fires `/start` on the server, and while a spec tab is open
-the room's live document wins over git for the files it holds. The order
-below avoids both:
+The handoff travels with the skill: `.agents/skills/specs-from-code/references/handoff.md`
+has the ordered steps. In short, create the project, let the kickoff `/start`
+flush, close every spec tab so the room unloads, push the requirements and the
+domain model to the project repository, reopen, then run `/design`. The room
+writes the files back once in its own markdown escaping; that one-for-one diff
+is normal.
 
-1. **Create the project** in the console with the product's name and a
-   one-line idea. Let the kickoff interview run; answer or dismiss it.
-2. **Wait for the flush.** The room commits about a minute after the last
-   edit; the spec view shows the kickoff's `prd.md` committed.
-3. **Close every spec tab** for the project, in every browser, so the room
-   unloads.
-4. **Push the generated files** to the project repository's default branch:
-   replace `specs/requirements/` and add `specs/design/domain-model.md`.
-   Leave `specs/.agentic-engineer.toml` and `.claude/` as the platform wrote
-   them.
-5. **Reopen the spec view.** The room reseeds from git and shows the
-   generated requirements. A tab left open at step 3 would have reverted the
-   push on its next flush.
-   Expect one more commit from the room a couple of minutes later: it writes
-   the files back in its own markdown escaping, so `[tag]` becomes `\[tag\]`
-   and the diff is one line out for one line in. Nothing is lost; the
-   platform's reader unescapes it. A diff that deletes feature files is the
-   revert to watch for.
-6. **Settle the assumed lines and answer the open questions** in the console,
-   or leave them — they hold nothing up.
-7. **Run `/design`.** It converges the domain model, derives the cell and
-   components, and mints the acceptance criteria. From here the project is an
-   ordinary AEP project.
+## Keeping the bundled contracts current
 
-## Trying `/design` locally first
-
-The playground runs the real design flow against a local project directory
-with the working-tree skills, which is the quickest way to see what `/design`
-makes of the output before it enters a real project:
+`references/prd-contract.md` and `references/domain-model-shape.md` are
+generated copies of `skills/prd-contract/SKILL.md` and step 3 of
+`skills/design/SKILL.md`. When either platform skill changes, re-run
 
 ```bash
-pnpm play playground/.projects/<name> design
+node .agents/skills/specs-from-code/scripts/sync-references.mjs
 ```
+
+and commit the result. `make test` runs `scripts/sync-references.test.mjs`,
+which fails while the copies are stale, and also fails if `SKILL.md` ever
+names a path into this repository again, so the skill cannot quietly stop
+being standalone.
 
 ## What this is not
 
 - Not an import run on the platform. A source-repository input on project
   create and a run that clones it are later work, if the skill proves out.
-- Not a change to `prd-contract`, `start` or `design`. The skill reads them;
-  the platform's contracts stay the single source of the file shapes.
+- Not a change to `prd-contract`, `start` or `design`. The skill carries
+  copies; the platform's skills stay the single source of the file shapes.

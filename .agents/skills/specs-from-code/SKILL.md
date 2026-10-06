@@ -1,6 +1,6 @@
 ---
 name: specs-from-code
-description: Use when writing the AEP specs of a product that already exists as code — the pass that reads a codebase and writes specs/requirements/ (with a coverage file per module) and specs/design/domain-model.md, so /design can take it from there. Runs from a developer's Claude Code in this repository checkout, never in a platform turn.
+description: Use when writing the AEP specs of a product that already exists as code — the pass that reads a codebase and writes specs/requirements/ (with a coverage file per module) and specs/design/domain-model.md, so /design can take it from there. Runs from any developer's Claude Code, never in a platform turn.
 argument-hint: <product root> [output dir]
 ---
 
@@ -12,20 +12,24 @@ does — `start` and `interview` — because the code already answers them. It
 writes the requirements and the domain model; **`/design` writes everything
 else**, exactly as it does for a product that started from an idea.
 
-It runs in a developer's Claude Code with this repository as the working
-directory, so the platform contracts are on disk to read. If you were loaded
+It runs in a developer's Claude Code, from any directory: the platform
+contracts it follows travel with it under `references/`. If you were loaded
 inside a platform turn — no shell, no file reads — stop and say this skill
 is run from a developer's terminal.
 
 ## Read the contracts first
 
-Two files govern every line you write. Read both now; this skill restates
-neither, and a rule remembered instead of read drifts.
+Two files beside this one govern every line you write. Read both now; this
+skill restates neither, and a rule remembered instead of read drifts.
 
-- `skills/prd-contract/SKILL.md` — every requirements file, the line grammar,
+- `references/prd-contract.md` — every requirements file, the line grammar,
   the IDs, the `sources/` coverage file, what the requirements exclude.
-- `skills/design/SKILL.md`, step 3 of the lineup — the shape of
+- `references/domain-model-shape.md` — the shape of
   `specs/design/domain-model.md`.
+
+Both are the platform's own skills copied verbatim and pinned by a test in
+the platform repository, so what you read is the contract the platform
+enforces. Never edit them here.
 
 ## What this writes, and what it never writes
 
@@ -51,9 +55,12 @@ where it informs without becoming the design.
   app inside a monorepo (`…/digiops-finance/apps/allocation`). Everything
   below it is the product; nothing above it is, with one exception under
   **Read scope**.
-- **Output dir** — defaults to `playground/.projects/<basename of the product
-  root>/` in this checkout, which git ignores. Never write into the product's
-  own repository. The product's name for `prd.md` comes from its documents,
+- **Output dir** — defaults to `<basename of the product root>-specs/` under
+  the current working directory. Refuse an output directory inside the
+  product root, and never write into the product's own repository. Someone
+  working in the platform repository may point it at the playground's
+  projects directory, which git ignores there, to run the local design phase
+  on the result. The product's name for `prd.md` comes from its documents,
   else from the root's basename.
 
 ## Read scope
@@ -198,7 +205,10 @@ place that says what was set aside. One per module and one per document.
 - **A module** is a directory under the product root at the granularity that
   gives a file of roughly twenty to eighty lines — `backend/`, `webapp/`, or
   a backend's `modules/email/` when the top level is too coarse. The title is
-  the module's path relative to the root. No `Pages:` line.
+  the module's path relative to the root. No `Pages:` line. Its second line
+  records where the code was read, so the line references can be resolved
+  later: `Read from <the product root's git remote, or "a local checkout"> at
+  <short commit>`.
 - **A document** keeps the contract's shape exactly: its file name as the
   title, `Pages:` when it has pages, its sections as places.
 - One line per point, in file order, each ending in an arrow:
@@ -221,12 +231,12 @@ and resist prose.
 
 ## `specs/design/domain-model.md`
 
-From the `data` inventory, in the shape step 3 of the design skill fixes: an
-H1, one or two sentences, exactly one mermaid `erDiagram`, a few lines of
-entity notes. Include every entity a user would name, including lookup tables
-that are product concepts (allocation types, categories); exclude
-infrastructure (sessions, migrations, audit tables, job queues). Key fields
-only; relations with their cardinality; an entity that lives in another
+From the `data` inventory, in the shape `references/domain-model-shape.md`
+fixes: an H1, one or two sentences, exactly one mermaid `erDiagram`, a few
+lines of entity notes. Include every entity a user would name, including
+lookup tables that are product concepts (allocation types, categories);
+exclude infrastructure (sessions, migrations, audit tables, job queues). Key
+fields only; relations with their cardinality; an entity that lives in another
 service is still an entity here if the product's stories act on it. Status
 values are Decisions, not notes.
 
@@ -249,6 +259,6 @@ Run these over `<out>/specs/`, and fix what they find:
 
 Report, in a few lines: the features by name, counts of stories, decisions,
 P items, assumed lines and open questions, the files written, and that the
-output is in `<out>`. Then point at `docs/developer-guide/specs-from-code.md`
-for how the tree enters an AEP project — the order matters there, and this
-skill does not perform it.
+output is in `<out>`. Then point at `references/handoff.md` for how the tree
+enters an AEP project — the order matters there, and this skill does not
+perform it.
