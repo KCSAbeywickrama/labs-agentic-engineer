@@ -39,6 +39,7 @@ enforces. Never edit them here.
 <out>/specs/requirements/features/F<n>-<slug>.md
 <out>/specs/requirements/sources/<module>.md      one per module, one per document
 <out>/specs/design/domain-model.md
+<out>/registrations/<name>.md                     one per upstream the recreate keeps calling, its derived contract beside it
 <out>/.inventory/*.md                             working notes; never pushed
 ```
 
@@ -91,7 +92,7 @@ paths, so a `/design` run never inlines the working notes.
 | `surfaces` | every route, page, screen, navigation entry, scheduled job, CLI verb | routers, resource functions, page components, nav menus, cron |
 | `access` | roles or groups, privileges or permissions, which surface each gates, how roles map to privileges | auth middleware, interceptors, route guards, privilege constants |
 | `data` | record types, tables, entities fetched from other services, their fields and relations, status enums | type modules, migrations, ORM models, GraphQL queries |
-| `integrations` | every outbound client: what it reaches, its auth style, what the product uses it for | client constructors, SDK imports, HTTP clients, mail senders |
+| `integrations` | every outbound client: what it reaches and what that fronts, its auth style, its config key names, every operation the product calls with its request and response shapes | client constructors, config records, SDK imports, HTTP clients, mail senders |
 | `documents` | every README, ADR, doc page, inline design note, with its claims | `README*`, `docs/`, `design/`, long header comments |
 | `rules` | constants, validation patterns, limits, user-facing message strings that state a rule | constants modules, validators, i18n or message files |
 
@@ -166,8 +167,7 @@ the legacy construct:
 | The code has | The requirements say |
 |---|---|
 | a call to an LLM API for some task | a Decision naming what the agent does: "Skill recommendations: suggested by an agent." No provider, no model |
-| a client to a third-party SaaS | a Decision naming the capability and the provider as a given the business already holds: "Consultant skills lookup: ServiceNow — the current system of record" |
-| a client to another in-house service | the same, naming the service: "Employee and org data: the HR entity service" |
+| a client to a third-party SaaS or to another in-house service | a Decision naming the capability and the resource by its proposed registered name, with what it fronts: "Customers, opportunities and products: `sales-entity-service`, the organization's sales entity service, which fronts Salesforce." The name is the brief's (**Registration briefs**). A service that fronts another system also gets an Open Question on the product page: keep calling the service, or go to the system behind it |
 | sign-in via directory groups or an IdP | a P item: "Every user signs in through the organization's SSO." Roles as actors |
 | a runtime screen that edits role → privilege mappings | stories for what the screen does, and an Open Question whether editing privileges at runtime is a requirement or an artifact of the old directory, since the platform fixes scopes at design |
 | synthetic identities (pseudo-emails, service accounts standing in for people) | a Decision stating the need they serve, and an Open Question on how the recreate identifies those people |
@@ -229,6 +229,53 @@ The design agent reads every `.md` under `specs/` as context, so a coverage
 file is where `/design` learns the as-is shape — keep each line to one point
 and resist prose.
 
+## Registration briefs — `registrations/<name>.md`
+
+The recreate keeps calling the systems the product calls today, and `/design`
+settles such a system only when the organization has registered it as an
+external resource, or when a Decision names a product. An in-house service
+named in words is neither: the design writes it as an open need with
+suggestions, and the build blocks on it. So for every outbound client to a
+system the recreate must keep talking to — in-house services and third-party
+SaaS alike — write one brief: everything the platform's registration form
+asks for, except the values. Not the product's own databases (the design
+introduces its own), not the LLM call (an agent decision), not the IdP (a P
+item).
+
+The briefs live outside `specs/` because they are the registering admin's
+input, not part of the project tree, and are never pushed. Registering is
+that admin's act, through the platform's form, with the credentials they
+hold; this skill sends nothing anywhere and holds no value.
+
+- **Name** — kebab-case (`^[a-z0-9]+(?:-[a-z0-9]+)*$`), naming the thing by
+  its own identity — the code's display label or client name,
+  `sales-entity-service` — not this product's use of it. The registered name
+  becomes the dependency directory and the cell node in every consumer, so
+  only a name a project can reference is worth proposing.
+- **Shape** — exactly `references/registration-brief.md`, field for field
+  the form. The description says what the resource is and what it fronts, in
+  the words the requirements use, since the design agent matches a registered
+  row by what it does, not by its name.
+- **Keys** — one set per record even when the legacy shares one credential
+  set across services; upper snake case, prefixed with the resource name
+  (`SALES_ENTITY_SERVICE_CLIENT_SECRET`), because each key lands in the
+  consumer as an environment variable as-is. Every key gets a one-line "what
+  it is" and a secret flag. Key names come from the client's config record;
+  the value column is the admin's and stays empty.
+- **Consumption instructions** — from the client code, distinct from the
+  description: the auth style, the operations the product calls, envelopes
+  and quirks, what the service fronts.
+- **Contract** — derive one when the code supports it, beside the brief. A
+  GraphQL client yields `<name>.graphql`: an SDL holding only the operations
+  and fields the product uses, type names as the queries spell them, a
+  sibling service's record types read for field types only. A REST client
+  yields `<name>.openapi.yaml`: only the called paths and their record
+  shapes. The first line of either says it was derived from the product's
+  client code at the read commit and is not the service's published schema.
+  No `servers` entry, no URL, no example value from config or test data. When
+  nothing can be derived, the brief says `documentation` and "attach the
+  real document".
+
 ## `specs/design/domain-model.md`
 
 From the `data` inventory, in the shape `references/domain-model-shape.md`
@@ -252,13 +299,14 @@ Run these over `<out>/specs/`, and fix what they find:
   `*assumed*`; every P item carries `Applies to:`.
 - **Arrows**: every coverage line ends in `→ <ID>` or `→ not used: <reason>`.
 - **Vocabulary**: `grep -rniwE 'http|https|sql|mysql|jwt|graphql|endpoint|token|json|regex' <out>/specs/requirements` — each hit is rewritten in product language or moved to a coverage file.
-- **Secrets**: `grep -rniE 'secret|password|api[-_ ]?key|bearer' <out>/specs <out>/.inventory` — a hit may be a word in a sentence, never a value.
+- **Secrets**: `grep -rniE 'secret|password|api[-_ ]?key|bearer' <out>/specs <out>/registrations <out>/.inventory` — a hit may be a word in a sentence or a key name, never a value.
+- **Registrations**: one brief per client the recreate keeps calling; every field filled but the values; every name matches the kebab-case rule; every Decision that names a resource matches a brief's name exactly; `grep -rnE 'servers:|https?://' <out>/registrations` is empty.
 - **Design files**: nothing under `<out>/specs/design/` but `domain-model.md`.
 
 ## Close
 
 Report, in a few lines: the features by name, counts of stories, decisions,
-P items, assumed lines and open questions, the files written, and that the
-output is in `<out>`. Then point at `references/handoff.md` for how the tree
+P items, assumed lines, open questions and registration briefs, the files
+written, and that the output is in `<out>`. Then point at `references/handoff.md` for how the tree
 enters an AEP project — the order matters there, and this skill does not
 perform it.
