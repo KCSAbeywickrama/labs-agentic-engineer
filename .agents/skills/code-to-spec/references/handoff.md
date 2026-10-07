@@ -31,9 +31,18 @@ Creating a project also fires `/start` on the server. The order below respects b
    platform's reader unescapes it. A diff that deletes feature files is the revert to watch for.
 6. **Settle the assumed lines and answer the open questions** in the console, or leave them; they
    hold nothing up. A feature with a `*blocking*` question stays undesigned until it is answered.
-7. **Run `/design`.** It converges the domain model, derives the cell and components, and mints
-   the acceptance criteria. External systems the requirements name as givens come up as "needs
-   your input" unless the organization has registered them as external resources. From here the
+7. **Register the upstreams.** An org admin opens Resources → New resource in the console and
+   enters each `registrations/<name>.md` field for field: the name, provider, description, the
+   keys with their secret flags, the consumption instructions; uploads the derived contract file
+   as the contract document; types the values per environment; saves. The Marketplace chat flow
+   takes a contract by URL only, so a derived file goes in through the form. Do this before the
+   first `/design`: the design agent reads the registry only when it first writes a dependency,
+   and a need already written as a suggestion cannot be switched to a registered name later. If
+   `/design` already ran, regenerate: remove `specs/design/` except `domain-model.md` by the same
+   git path as step 4, reopen, then `/design` again; safe while nothing is built.
+8. **Run `/design`.** It converges the domain model, derives the cell and components, and mints
+   the acceptance criteria. The registered upstreams come up as reused copies of the
+   organization's records; anything unregistered comes up as a need to settle. From here the
    project is an ordinary AEP project.
 
 With a checkout of the platform repository, the same `/design` can be tried locally first by
