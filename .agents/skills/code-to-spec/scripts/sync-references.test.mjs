@@ -1,4 +1,4 @@
-// Pins the specs-from-code skill's standalone property: its bundled copies
+// Pins the code-to-spec skill's standalone property: its bundled copies
 // of the platform contracts match the platform's skills, and its own text
 // names no path into this repository. Run by `make test` with node --test.
 
@@ -8,7 +8,7 @@ import { join, relative } from "node:path";
 import test from "node:test";
 import { render, REPO_ROOT, SKILL_DIR } from "./sync-references.mjs";
 
-const SYNC = "node .agents/skills/specs-from-code/scripts/sync-references.mjs";
+const SYNC = "node .agents/skills/code-to-spec/scripts/sync-references.mjs";
 
 test("the bundled references are the platform contracts, verbatim", () => {
   const rendered = render();

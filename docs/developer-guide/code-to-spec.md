@@ -1,6 +1,6 @@
 # Developer guide — specs from an existing codebase
 
-`specs-from-code` is a developer skill (`.agents/skills/specs-from-code/`) for
+`code-to-spec` is a developer skill (`.agents/skills/code-to-spec/`) for
 recreating an application that already exists as code on AEP. It reads the
 codebase and writes the part of the `specs/` tree that `/start` and
 `/interview` would otherwise elicit from a human; `/design` then runs
@@ -33,12 +33,12 @@ Copy it to where Claude Code looks for personal skills and run it from any
 directory:
 
 ```bash
-cp -R .agents/skills/specs-from-code ~/.claude/skills/specs-from-code
+cp -R .agents/skills/code-to-spec ~/.claude/skills/code-to-spec
 ```
 
 ```
-/specs-from-code /path/to/digiops-finance/apps/allocation
-/specs-from-code /path/to/single-app-repo ~/work/my-app-specs
+/code-to-spec /path/to/digiops-finance/apps/allocation
+/code-to-spec /path/to/single-app-repo ~/work/my-app-specs
 ```
 
 The product root is the directory that *is* the product: a repository, or
@@ -62,7 +62,7 @@ key names only, never values; check its output all the same.
 
 ## Getting the tree into an AEP project
 
-The handoff travels with the skill: `.agents/skills/specs-from-code/references/handoff.md`
+The handoff travels with the skill: `.agents/skills/code-to-spec/references/handoff.md`
 has the ordered steps. In short, create the project, let the kickoff `/start`
 flush, close every spec tab so the room unloads, push the requirements and the
 domain model to the project repository, reopen, then run `/design`. The room
@@ -76,7 +76,7 @@ generated copies of `skills/prd-contract/SKILL.md` and step 3 of
 `skills/design/SKILL.md`. When either platform skill changes, re-run
 
 ```bash
-node .agents/skills/specs-from-code/scripts/sync-references.mjs
+node .agents/skills/code-to-spec/scripts/sync-references.mjs
 ```
 
 and commit the result. `make test` runs `scripts/sync-references.test.mjs`,
