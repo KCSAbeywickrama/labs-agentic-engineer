@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Bundles the two platform contracts the specs-from-code skill follows into
+// Bundles the two platform contracts the code-to-spec skill follows into
 // its own references/, so a copy of the skill directory works outside this
 // repository. The copies are verbatim and pinned by sync-references.test.mjs,
 // which fails when either platform file changes without a re-run of this
 // script. Run from anywhere inside the repository:
 //
-//   node .agents/skills/specs-from-code/scripts/sync-references.mjs
+//   node .agents/skills/code-to-spec/scripts/sync-references.mjs
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";

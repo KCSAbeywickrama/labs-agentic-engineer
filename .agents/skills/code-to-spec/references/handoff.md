@@ -1,6 +1,6 @@
 # Getting the specs into an AEP project
 
-The tree `specs-from-code` writes is the state an AEP project reaches after `/start` and every
+The tree `code-to-spec` writes is the state an AEP project reaches after `/start` and every
 `/interview`, plus the domain model. The platform has no import path, so it enters a project
 through git, which is the project's durable truth: the spec room reseeds from git on every load,
 and while a spec tab is open the room's live document wins over git for the files it holds.

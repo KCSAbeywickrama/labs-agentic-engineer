@@ -1,10 +1,10 @@
 ---
-name: specs-from-code
+name: code-to-spec
 description: Use when writing the AEP specs of a product that already exists as code — the pass that reads a codebase and writes specs/requirements/ (with a coverage file per module) and specs/design/domain-model.md, so /design can take it from there. Runs from any developer's Claude Code, never in a platform turn.
 argument-hint: <product root> [output dir]
 ---
 
-# Specs from code
+# Code to spec
 
 A product exists as code and is going to be recreated on AEP. This skill
 replaces the two flows that would otherwise ask a human what the product
