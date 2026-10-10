@@ -8,6 +8,8 @@
   "specs/design/components/api/openapi.yaml": true,
   "specs/design/components/api/dependencies/stripe.openapi.yaml": true,
   "specs/design/security.json": true,
+  "specs/design/review.json": true,
+  "specs/design/components/web/review.json": false,
   "specs/requirements/references/brief.txt": true,
   "specs/requirements/references/rows.csv": true,
   "specs/design/components/api/security.json": false,

@@ -62,7 +62,7 @@ import { parse as parseYaml } from "yaml";
 // Reuse the bundle's single frontmatter grammar + LF canonicalizer so SKILL.md
 // fence parsing cannot drift from the spec-file fence parsing (same approach as
 // the caller-side skill resolver the playground uses to materialize the mount).
-import { FRONTMATTER_RE, lf } from "@aep/agent-stream";
+import { DESIGN_REVIEW_PATH, FRONTMATTER_RE, lf } from "@aep/agent-stream";
 import type { SkillAudience, SkillLoadResult } from "../agents/main/skill-source.js";
 import { ALL_AUDIENCES, SERVICE_AUDIENCE } from "../agents/main/skill-source.js";
 import {
@@ -159,8 +159,9 @@ const SECURITY_DESIGN_PATH = "specs/design/security.json";
 /**
  * The turn-snapshot filter: keep agent-authored sources (`*.md`, `*.dsl`,
  * `*.cell`, `*.feature`, component `design.json`, the project security design
- * `specs/design/security.json`, the two OpenAPI contract shapes above, a
- * component's `prototype.json` and `prototype.tsx`) and drop
+ * `specs/design/security.json`, the design review `specs/design/review.json`,
+ * the two OpenAPI contract shapes above, a component's `prototype.json` and
+ * `prototype.tsx`) and drop
  * everything else (derived `.excalidraw`/`*.gen.json` projections, code,
  * arbitrary `*.yaml` such as `workload.yaml`, …). `*.cell` is the
  * project-level cell-diagram DSL (design.cell) that drives the live
@@ -179,6 +180,9 @@ export function keepInTurnSnapshot(path: string): boolean {
     return true;
   if (isAdmittedSpecPath(path)) return true;
   if (path === SECURITY_DESIGN_PATH) return true;
+  // The review's comments are what an Address comments turn acts on, and it
+  // writes its replies back into the file; by its exact path, like security.json.
+  if (path === DESIGN_REVIEW_PATH) return true;
   if (isTextReferencePath(path)) return true;
   return basename(path) === "design.json";
 }
