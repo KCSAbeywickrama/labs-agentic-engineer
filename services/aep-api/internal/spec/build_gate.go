@@ -28,7 +28,8 @@ package spec
 //     between requirements and design);
 //   - every deployable component is ENRICHED (its design.json moved off the
 //     scaffold placeholder, a language decided) and carries its type-mandated
-//     artifact (service → openapi.yaml, web-application → wireframes.dsl);
+//     artifact (service → openapi.yaml, web-application → its prototype,
+//     prototype.json + prototype.tsx);
 //   - a design with END-USER SIGN-IN carries specs/design/security.json, it parses,
 //     and every story its roles cite is a real story. The platform creates
 //     the roles and test users that file declares when the tag is built, so a
@@ -45,6 +46,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/platform/prototypespec"
 	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
 	"github.com/wso2/aep/aep-api/internal/platform/securityspec"
 )
@@ -194,24 +196,54 @@ func validateBuildGate(reqFiles, designFiles map[string]string, inScope map[stri
 				Message: fmt.Sprintf("component %q has no language decided — set it from the organization Tech stack default, the requirements, or the platform default", c.ID),
 			})
 		}
-		var artifact string
 		switch componentType {
 		case "service":
-			artifact = "openapi.yaml"
-		case "web-application":
-			artifact = "wireframes.dsl"
-		}
-		if artifact != "" {
-			artifactPath := "components/" + c.ID + "/" + artifact
+			artifactPath := "components/" + c.ID + "/openapi.yaml"
 			if strings.TrimSpace(designFiles[artifactPath]) == "" {
 				errs = append(errs, FileValidationError{
 					Path: artifactPath, Code: codeMissingComponentArtifact,
-					Message: fmt.Sprintf("component %q (%s) needs %s", c.ID, componentType, artifact),
+					Message: fmt.Sprintf("component %q (%s) needs openapi.yaml", c.ID, componentType),
 				})
 			}
+		case "web-application":
+			errs = append(errs, missingPrototype(c.ID, designFiles)...)
 		}
 	}
 	return errs
+}
+
+// missingPrototype refuses a web-application whose prototype is not whole: the
+// manifest (prototype.json) and the screens (prototype.tsx) are one artifact,
+// and the coding agent builds the app from both. Whether a present file is
+// sound is the save gate's job (prototypeFileErrors); this asks only that both
+// are there.
+//
+// A design made before the prototype carries wireframes.dsl instead. It is not
+// read and it does not count (decision L6): such a project is refused here like
+// one with no design for the app, and running Design writes the prototype.
+func missingPrototype(component string, designFiles map[string]string) []FileValidationError {
+	manifest, source := prototypespec.ManifestPath(component), prototypespec.SourcePath(component)
+	hasManifest := strings.TrimSpace(designFiles[manifest]) != ""
+	hasSource := strings.TrimSpace(designFiles[source]) != ""
+	switch {
+	case hasManifest && hasSource:
+		return nil
+	case !hasManifest && !hasSource:
+		return []FileValidationError{{
+			Path: manifest, Code: codeMissingComponentArtifact,
+			Message: fmt.Sprintf("%s has no prototype yet: run Design", component),
+		}}
+	case !hasSource:
+		return []FileValidationError{{
+			Path: source, Code: codeMissingComponentArtifact,
+			Message: fmt.Sprintf("%s's prototype has no screens (prototype.tsx): run Design again", component),
+		}}
+	default:
+		return []FileValidationError{{
+			Path: manifest, Code: codeMissingComponentArtifact,
+			Message: fmt.Sprintf("%s's prototype has no manifest (prototype.json): run Design again", component),
+		}}
+	}
 }
 
 // validateRolesDocument checks the security design: the permission catalog, the

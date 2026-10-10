@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/platform/designspec"
 	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
 )
 
@@ -73,7 +74,8 @@ func completeDesignFiles() map[string]string {
 		"components/lunch-api/design.json":       enriched("lunch-api", "service", "F1.1", "F1.2", "F1.4"),
 		"components/lunch-api/openapi.yaml":      "openapi: 3.0.3\n",
 		"components/lunch-web/design.json":       enriched("lunch-web", "web-application", "F1.1", "F1.2"),
-		"components/lunch-web/wireframes.dsl":    "screen home\n",
+		"components/lunch-web/prototype.json":    validPrototypeManifest,
+		"components/lunch-web/prototype.tsx":     validPrototypeSource,
 		"components/slack-notifier/design.json":  enriched("slack-notifier", "service", "F2.1"),
 		"components/slack-notifier/openapi.yaml": "openapi: 3.0.3\n",
 	}
@@ -139,6 +141,80 @@ func TestBuildGate_DeployableComponentDemandsArtifactsAndEnrichment(t *testing.T
 	}
 	if !strings.Contains(codes, "UNENRICHED_COMPONENT") {
 		t.Errorf("want UNENRICHED_COMPONENT for scaffold-placeholder lunch-web, got %+v", errs)
+	}
+}
+
+// A web-application's type-mandated artifact is its prototype, both halves. A
+// design made before the prototype carries wireframes.dsl instead, which no
+// longer counts (L6): it is refused as having no prototype, never crashes the
+// gate, and a design carrying both passes on the prototype.
+func TestBuildGate_WebAppNeedsItsPrototype(t *testing.T) {
+	const (
+		manifest   = "components/lunch-web/prototype.json"
+		source     = "components/lunch-web/prototype.tsx"
+		wireframes = "components/lunch-web/wireframes.dsl"
+	)
+	for _, tc := range []struct {
+		name     string
+		drop     []string
+		add      map[string]string
+		wantPath string
+		wantMsg  string
+	}{
+		{name: "only wireframes.dsl", drop: []string{manifest, source}, add: map[string]string{wireframes: "screen home\n"},
+			wantPath: manifest, wantMsg: "lunch-web has no prototype yet: run Design"},
+		{name: "no design for the app at all", drop: []string{manifest, source},
+			wantPath: manifest, wantMsg: "lunch-web has no prototype yet: run Design"},
+		{name: "no prototype.tsx", drop: []string{source},
+			wantPath: source, wantMsg: "lunch-web's prototype has no screens (prototype.tsx): run Design again"},
+		{name: "no prototype.json", drop: []string{manifest},
+			wantPath: manifest, wantMsg: "lunch-web's prototype has no manifest (prototype.json): run Design again"},
+		{name: "blank prototype.tsx", add: map[string]string{source: "  \n"},
+			wantPath: source, wantMsg: "lunch-web's prototype has no screens (prototype.tsx): run Design again"},
+		{name: "prototype and wireframes.dsl", add: map[string]string{wireframes: "screen home\n"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := completeDesignFiles()
+			for _, k := range tc.drop {
+				delete(files, k)
+			}
+			for k, v := range tc.add {
+				files[k] = v
+			}
+			got := gateErrors(t, files)
+			var want []FileValidationError
+			if tc.wantMsg != "" {
+				want = []FileValidationError{{Path: tc.wantPath, Code: codeMissingComponentArtifact, Message: tc.wantMsg}}
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("gate =\n%+v\nwant\n%+v", got, want)
+			}
+		})
+	}
+}
+
+// review.json (the Design step's comments and checks) never refuses a build:
+// unsent drafts and open comments are the console's to show, and a malformed
+// file is the save gate's to refuse when it is written.
+func TestBuildGate_ReviewNeverRefuses(t *testing.T) {
+	for name, review := range map[string]string{
+		"an unsent draft and a sent comment": `{"version":1,"artifacts":[{"path":"specs/design/components/lunch-web/prototype.json","comments":[` +
+			`{"id":"c1","author":{"id":"u-1","name":"Mark"},"text":"Move the total up.","createdAt":"2026-10-10T09:00:00Z","status":"draft"},` +
+			`{"id":"c2","author":{"id":"u-1","name":"Mark"},"text":"Name it Expense.","createdAt":"2026-10-10T09:00:00Z","status":"sent","sentAt":"2026-10-10T09:05:00Z"}]}]}`,
+		"malformed": "{nope",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if name != "malformed" {
+				if err := designspec.ValidateDesignReview([]byte(review)); err != nil {
+					t.Fatalf("fixture must be a sound review.json: %v", err)
+				}
+			}
+			files := completeDesignFiles()
+			files["review.json"] = review
+			if errs := gateErrors(t, files); len(errs) != 0 {
+				t.Errorf("review.json must never refuse the build gate, got %+v", errs)
+			}
+		})
 	}
 }
 
