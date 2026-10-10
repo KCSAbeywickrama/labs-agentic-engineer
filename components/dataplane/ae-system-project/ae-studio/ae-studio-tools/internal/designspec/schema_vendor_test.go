@@ -22,6 +22,8 @@ package designspec
 import (
 	"os"
 	"testing"
+
+	"github.com/wso2/aep/ae-studio-tools/internal/jsonschema"
 )
 
 // TestVendoredSchemaMatchesContracts is the anti-drift guard for the vendored
@@ -38,7 +40,7 @@ import (
 // re-sync by regenerating the contract (`pnpm --filter @aep/agent-stream gen`)
 // and copying it over this file.
 func TestVendoredSchemaMatchesContracts(t *testing.T) {
-	for _, name := range []string{"component-design.schema.json", "dependency-design.schema.json"} {
+	for _, name := range []string{"component-design.schema.json", "dependency-design.schema.json", "design-review.schema.json"} {
 		t.Run(name, func(t *testing.T) {
 			// designspec → internal → ae-studio-tools → ae-studio → ae-system-project → dataplane → components → repo root.
 			source := "../../../../../../../packages/contracts/schemas/" + name
@@ -55,5 +57,17 @@ func TestVendoredSchemaMatchesContracts(t *testing.T) {
 					"regenerate the contract (pnpm --filter @aep/agent-stream gen) and copy it into this package", name)
 			}
 		})
+	}
+}
+
+// TestReviewSchemaUsesOnlySupportedKeywords is the other half of the guard for
+// the review schema: the interpreter ignores a keyword it does not implement,
+// so a Zod change that emits one would leave this gate validating less than
+// the agent's. (The component schema's maps rely on that leniency; the review
+// schema was shaped to need none.)
+func TestReviewSchemaUsesOnlySupportedKeywords(t *testing.T) {
+	if unsupported := jsonschema.UnsupportedKeywords(reviewSchemaJSON); len(unsupported) > 0 {
+		t.Fatalf("design-review.schema.json uses keywords the Go interpreter ignores: %v — "+
+			"implement them in internal/jsonschema, or this gate validates less than the agent's", unsupported)
 	}
 }

@@ -58,6 +58,10 @@ func (e *DesignValidationError) Error() string {
 	return "design validation failed: " + strings.Join(parts, "; ")
 }
 
+// reviewBundleKey is the review file's key inside the design bundle (paths
+// there are relative to specs/design/).
+var reviewBundleKey = strings.TrimPrefix(designspec.ReviewPath, designPrefix)
+
 // Save-gate error codes not owned by designspec.
 const (
 	// codeInvalidOpenAPI — a component openapi.yaml does not parse as YAML.
@@ -80,6 +84,9 @@ const (
 //   - security.json, when present: the security design validates against the
 //     same published schema and referential rules the agent's write gate
 //     applies;
+//   - review.json, when present: the Design step's comments and checks
+//     validate against the same published schema and cross-entry rules the
+//     agent's write gate applies (designspec.ValidateDesignReview);
 //   - prototype.json / prototype.tsx, when present: the manifest against the
 //     kit's published schema and reference rules, the source against a static
 //     floor (syntax, allowed imports, size). The render check stays in the
@@ -171,6 +178,17 @@ func validateDesignBundle(files map[string]string) error {
 				code, msg = ve.Code, ve.Message
 			}
 			verrs = append(verrs, FileValidationError{Path: securityspec.BundleKey, Code: code, Message: msg})
+		}
+	}
+
+	if raw, ok := files[reviewBundleKey]; ok {
+		if err := designspec.ValidateDesignReview([]byte(raw)); err != nil {
+			var ve *designspec.ValidationError
+			if errors.As(err, &ve) {
+				verrs = append(verrs, FileValidationError{Path: reviewBundleKey, Code: ve.Code, Message: ve.Message})
+			} else {
+				verrs = append(verrs, FileValidationError{Path: reviewBundleKey, Code: designspec.CodeSchemaViolation, Message: err.Error()})
+			}
 		}
 	}
 

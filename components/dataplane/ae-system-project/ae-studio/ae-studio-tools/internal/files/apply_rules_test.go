@@ -243,6 +243,24 @@ func TestApply_InvalidSecurityDesignWarns(t *testing.T) {
 	}
 }
 
+func TestApply_InvalidDesignReviewWarns(t *testing.T) {
+	a, origin := newApplier(t, nil)
+	const malformed = `{"version":1,"artifacts":[{"path":"specs/design/domain-model.md","comments":[` +
+		`{"id":"c1","author":{"id":"u","name":"M"},"text":"t","createdAt":"x","status":"resolved"}]}]}`
+	res, _, err := a.Apply(ctx, "greeter", files.ApplyRequest{Writes: []files.WriteOp{
+		{Path: "specs/design/review.json", Content: malformed},
+	}})
+	if err != nil {
+		t.Fatalf("a malformed review.json must NOT block apply: %v", err)
+	}
+	if len(res.Warnings) != 1 || res.Warnings[0].Path != "specs/design/review.json" || res.Warnings[0].Code != "SCHEMA_VIOLATION" {
+		t.Fatalf("warnings = %+v, want one SCHEMA_VIOLATION on review.json", res.Warnings)
+	}
+	if got := origin.FileAt(t, repotest.Branch, "specs/design/review.json"); got != malformed {
+		t.Errorf("file not committed despite warning: %q", got)
+	}
+}
+
 // The security design's coverage notices ride the soft-warning channel; the
 // apply path assembles the bundle the batch lands and judges that.
 func TestApply_SecurityDesignCoverageWarnings(t *testing.T) {

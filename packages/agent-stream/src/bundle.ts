@@ -47,6 +47,7 @@ import { checkDesignDiagram } from "./design-diagrams.js";
 import { checkPrototype } from "./prototype-gate.js";
 import { checkComponentDependencies } from "./component-dependencies.js";
 import { checkDependencyDesign, preservePlatformFields } from "./dependency-design-schema.js";
+import { checkDesignReview } from "./design-review-schema.js";
 import type {
   Op,
   ErrCode,
@@ -295,6 +296,13 @@ export class FileBundle {
     const securityProblem = checkSecurityDesign(path, content, this);
     if (securityProblem) {
       return err(path, op, securityProblem.code, securityProblem.message);
+    }
+    // The review file holds the user's comments and checks, which the agent
+    // edits when it addresses comments; a malformed write would lose them for
+    // the console, so it is refused here like any design document.
+    const reviewProblem = checkDesignReview(path, content);
+    if (reviewProblem) {
+      return err(path, op, reviewProblem.code, reviewProblem.message);
     }
     // Wireframes .dsl is layout-gated the same way: out-of-frame or
     // partially-overlapping elements abort the write with the coordinates the

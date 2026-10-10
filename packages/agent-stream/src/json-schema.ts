@@ -29,6 +29,10 @@
  *    referential rules (every `testUsers[].role` names a declared role,
  *    `coldStartRole` likewise, thunder scopes tokens) are equally inexpressible
  *    standalone, and are likewise applied separately on both sides.
+ *  - `designReviewJsonSchema` — the review.json write/save gate. Its rules
+ *    across entries (unique paths and comment ids, an addressed comment's
+ *    reply, an anchor only on a prototype) are applied separately on both
+ *    sides too.
  *  - `planTaskJsonSchema` / `updateTaskJsonSchema` — the plan-turn tool inputs
  *    the BFF plan tap acts on; vendored by phase 2.
  *
@@ -40,6 +44,7 @@ import { z } from "zod";
 import { componentDesignSchema } from "./component-design-schema.js";
 import { securityDesignSchema } from "./security-design-schema.js";
 import { dependencyDesignSchema } from "./dependency-design-schema.js";
+import { designReviewSchema } from "./design-review-schema.js";
 import { planTaskInputSchema, updateTaskInputSchema } from "./task-tools-schema.js";
 import { agentAfmFrontMatterSchema } from "./agent-afm-schema.js";
 
@@ -60,6 +65,11 @@ export function dependencyDesignJsonSchema(): Record<string, unknown> {
 
 export function securityDesignJsonSchema(): Record<string, unknown> {
   return z.toJSONSchema(securityDesignSchema, { target: "draft-2020-12" }) as Record<string, unknown>
+}
+
+/** The `DesignReview` structural schema (`specs/design/review.json`) as JSON Schema (draft 2020-12). */
+export function designReviewJsonSchema(): Record<string, unknown> {
+  return z.toJSONSchema(designReviewSchema, { target: "draft-2020-12" }) as Record<string, unknown>;
 }
 
 /** The `planTask` tool input as JSON Schema (draft 2020-12). */
