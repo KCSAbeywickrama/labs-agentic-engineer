@@ -415,8 +415,11 @@ export interface Change {
  *              generates artifacts (wireframes above all) that must be
  *              grounded in an attached sketch or spec.
  *              `prototypeFeedback` rides only the `prototype` flow: a reviewer's
- *              batch of requests on one prototype, which turns the flow from
- *              "generate every prototype" into "revise this one".
+ *              batch of requests on one prototype, from the review's retired
+ *              Send to agent. The design agent journals it and no longer words
+ *              it: review comments live in `specs/design/review.json` and go to
+ *              the agent with `/address-comments`. It leaves the wire once no
+ *              client sends it.
  *  - `start` — the project kickoff. `idea` is what the user asked for, read by
  *              the BFF from `specs/.agentic-engineer.toml` — a dot-led path
  *              stripped from every turn snapshot, so the agent cannot read it

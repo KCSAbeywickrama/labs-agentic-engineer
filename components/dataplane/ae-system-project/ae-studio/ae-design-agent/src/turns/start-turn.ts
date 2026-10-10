@@ -531,6 +531,7 @@ export class TurnStarter {
       previousTurnFailed: last?.status === "failed",
       ...(l.input.aim ? { aim: l.input.aim } : {}),
       ...(this.deps.headless ? { headless: true } : {}),
+      now: new Date().toISOString(),
     });
     const filesChangedExternally = last !== null && last.baseRef !== l.material.baseRef;
     // The start awaited the lookup and the snapshot read since `admissible`:

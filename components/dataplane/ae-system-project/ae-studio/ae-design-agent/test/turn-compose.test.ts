@@ -68,6 +68,51 @@ test("/design names the features this run designs, and bare designs every design
   );
 });
 
+/**
+ * Address comments is a branch of the design playbook, not a skill of its own:
+ * the comments ride the review file, so the line is bare, and the brief says
+ * where they are and which of them the turn acts on.
+ */
+test("/address-comments loads the design skill with the review brief", () => {
+  const now = "2026-10-10T10:00:00.000Z";
+  const out = composeInstruction({ kind: "flow", skill: "address-comments" }, { scope: { kind: "design-review" }, now });
+  assert.ok(out.startsWith("The user is in the design review"), "the review's scope leads");
+  assert.match(out, /Load the design skill and follow it\.\n\nAddress the review comments in specs\/design\/review\.json/);
+  assert.match(out, /status is sent or reopened/);
+  assert.match(out, /leave each draft comment exactly as it is/);
+  assert.ok(out.includes(`The time now is ${now}`), "the agent has no clock: the turn gives it the addressedAt stamp");
+  // No time, no stamp sentence (and never an invented one).
+  assert.doesNotMatch(composeInstruction({ kind: "flow", skill: "address-comments" }), /The time now is/);
+});
+
+test("the turn's time changes only the turn that stamps it", () => {
+  const now = "2026-10-10T10:00:00.000Z";
+  for (const turn of [{ kind: "flow", skill: "design" } as const, { kind: "chat", text: "x" } as const, { kind: "start" } as const]) {
+    assert.equal(composeInstruction(turn, { now }), composeInstruction(turn), JSON.stringify(turn));
+  }
+});
+
+/**
+ * Address comments regenerates in the design's own order, so it inlines the
+ * design lineup unchanged: the same bytes as a `/design` turn, which keeps the
+ * cached prefix shared between the two.
+ */
+test("/address-comments inlines the design lineup, the org's design system in its place", () => {
+  const lineup = eagerSkillsFor({ kind: "flow", skill: "address-comments" }, { kind: "design-review" }, "oxygen-ui-design-system");
+  assert.deepEqual(lineup, [
+    "design",
+    "cell-design",
+    "architecture",
+    "security-design",
+    "prototype",
+    "oxygen-ui-design-system",
+    "openapi-conventions",
+    "agent-building",
+    "acceptance-criteria",
+  ]);
+  assert.deepEqual(lineup, eagerSkillsFor({ kind: "flow", skill: "design" }, undefined, "oxygen-ui-design-system"));
+});
+
 test("/prototype loads its skill and the brief, and trailing component names follow the brief", () => {
   const bare = composeInstruction({ kind: "flow", skill: "prototype" });
   assert.ok(bare.startsWith("Load the prototype skill and follow it.\n\nGenerate the prototype of each web-application"));
@@ -84,55 +129,6 @@ test("/prototype loads its skill and the brief, and trailing component names fol
 
   // A flow with no brief is unchanged.
   assert.ok(!composeInstruction({ kind: "flow", skill: "design" }).includes("Generate the prototype"));
-});
-
-const FEEDBACK = {
-  prototypeHash: "b".repeat(64),
-  component: "approvals-portal",
-  requests: [
-    {
-      screenId: "screen.queue",
-      flowId: "flow.approve",
-      roleId: "approver",
-      stateId: "state.default",
-      elementIds: ["btn.approve", "tbl.expenses"],
-      text: "Put the Approve button on the left.\nMake it `primary`.",
-    },
-    { screenId: "screen.detail", roleId: "employee", stateId: "state.empty", elementIds: [], text: "Say why it is empty" },
-  ],
-};
-
-test("a /prototype turn with feedback is a revision of that one prototype, not a generation", () => {
-  const out = composeInstruction({ kind: "flow", skill: "prototype", prototypeFeedback: FEEDBACK });
-  assert.ok(out.startsWith('Load the prototype skill and follow it.\n\nRevise the prototype of the web-application "approvals-portal"'));
-  assert.ok(!out.includes("Generate the prototype of each web-application"));
-  // The files it may change, and the revision the reviewer saw.
-  assert.match(out, /specs\/design\/components\/approvals-portal\/prototype\.json/);
-  assert.match(out, /specs\/design\/components\/approvals-portal\/prototype\.tsx/);
-  assert.match(out, /change only those two files/);
-  assert.ok(out.includes("b".repeat(64)));
-  // Stable ids, and an answer per request.
-  assert.match(out, /Keep every manifest key and element id you do not need to change/);
-  assert.match(out, /answering each request by its number, as applied .* or declined/);
-});
-
-test("the revision brief lists each request's place and element ids and quotes its text verbatim", () => {
-  const out = composeInstruction({ kind: "flow", skill: "prototype", prototypeFeedback: FEEDBACK });
-  assert.match(
-    out,
-    /Request 1\nWhere: screen "screen\.queue", flow "flow\.approve", role "approver", display state "state\.default"\nElements \(ids\): btn\.approve, tbl\.expenses\nThe reviewer wrote:\n> Put the Approve button on the left\.\n> Make it `primary`\./,
-  );
-  // No flow, no element: the request is about the whole screen.
-  assert.match(out, /Request 2\nWhere: screen "screen\.detail", role "employee", display state "state\.empty"\nElements: none selected/);
-  assert.match(out, /> Say why it is empty/);
-  assert.match(out, /made 2 requests below/);
-  assert.match(composeInstruction({ kind: "flow", skill: "prototype", prototypeFeedback: { ...FEEDBACK, requests: [FEEDBACK.requests[1]!] } }), /made one request below/);
-});
-
-test("a /prototype turn without feedback is unchanged", () => {
-  const out = composeInstruction({ kind: "flow", skill: "prototype" });
-  assert.match(out, /Generate the prototype of each web-application/);
-  assert.doesNotMatch(out, /Revise the prototype/);
 });
 
 test("/prototype inlines the skills that read the design and the org's design system", () => {
@@ -474,6 +470,7 @@ test("every eager skill name exists in the platform skill library", () => {
     { kind: "flow", skill: "refine" } as const,
     { kind: "flow", skill: "settle" } as const,
     { kind: "flow", skill: "design" } as const,
+    { kind: "flow", skill: "address-comments" } as const,
     { kind: "flow", skill: "prototype" } as const,
     // The branch commands resolve to a platform skill, so they are checked too.
     { kind: "flow", skill: "feature" } as const,

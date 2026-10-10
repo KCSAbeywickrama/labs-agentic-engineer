@@ -295,7 +295,7 @@ test("a feature scope is composed after the snapshot read (it names the feature'
   }
 });
 
-test("a /prototype Room turn carries the review batch into the brief and the journal", async () => {
+test("a /prototype Room turn journals the review batch", async () => {
   const model = mockModel([{ kind: "text", text: "ok" }]);
   const edge = await startEdge({ models: [model], room: fakeRoom });
   try {
@@ -309,8 +309,6 @@ test("a /prototype Room turn carries the review batch into the brief and the jou
     const stored = await edge.store.get(edge.threads.current(PROJECT).conversationId);
     assert.equal(stored!.turns[0]?.text, "/prototype expense-web");
     assert.deepEqual(stored!.turns[0]?.prototypeFeedback, BATCH);
-    const firstUser = stored!.messages.find((m) => m.role === "user");
-    assert.match(JSON.stringify(firstUser?.content), /Make it primary/);
   } finally {
     await edge.close();
   }

@@ -55,7 +55,13 @@ at), an aim (`anchor` + `intent`) and, JSON only, `prototypeFeedback`. A
 review batch rides only a `/prototype` turn (bare or naming the batch's
 component) that runs in the Room, never with an aim. The retired `target` is
 `400` in both body forms. The pod composes the scope into the instruction
-after the snapshot read and journals scope and batch on the message.
+after the snapshot read and journals scope and batch on the message. A batch
+no longer reaches the model: review comments live in
+`specs/design/review.json` and go to the agent with `/address-comments`, a
+branch of the `design` skill, so the field is validated and journaled only
+until the console stops sending it and the wire drops it. The composer gives
+each turn its start time (`now`); only the Address comments brief uses it, as
+the comments' `addressedAt`.
 
 ## Start and watch are separate
 
