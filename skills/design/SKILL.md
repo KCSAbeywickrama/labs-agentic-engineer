@@ -1,6 +1,6 @@
 ---
 name: design
-description: Use when generating a project's design from its PRD — the /design flow that turns the requirements under specs/requirements/ into the design under specs/design/, a prototype for each web app included, then writes the acceptance tests. Also the flow for converging an existing design onto an amended PRD.
+description: Use when generating a project's design from its PRD — the /design flow that turns the requirements under specs/requirements/ into the design under specs/design/, a prototype for each web app included, then writes the acceptance tests. Also the flow for converging an existing design onto an amended PRD, and for addressing the design review's comments (/address-comments).
 metadata:
   aep:
     kind: platform
@@ -316,6 +316,67 @@ the new stories require and touch shipped components only where those stories
 force it — calling out every such change. When built reality contradicts the
 design, surface the conflict to the user; never silently redraw shipped
 architecture.
+
+## Addressing comments
+
+`/address-comments` sends you the design review's comments. They are in
+`specs/design/review.json`: one entry per artifact `path`, each with its
+`comments`. Act on each comment whose `status` is `sent` or `reopened`. A
+`reopened` comment keeps your earlier `reply`: its author did not accept that
+answer. Do not act on a `draft` comment, and do not change it. When no comment
+is `sent` or `reopened`, say so and stop.
+
+1. **Find what each comment changes.** The artifact that a comment is on
+   shows where its author saw the problem. The change can start in an earlier
+   artifact. Example: "show the receipt on Team approvals" is on the
+   prototype, and it also needs the contract. A comment on a prototype has an
+   `anchor`: the `screenId`, the `elementIds` (empty for the whole screen),
+   the `roleId`, the `stateId` and, if there is one, the `flowId`. Find them
+   in the prototype as it is now.
+2. **Do not guess an ambiguous comment.** A comment is ambiguous when two
+   reasonable readings give different designs, or when it needs a fact that
+   only the user knows. Do not act on it, and do not change it: it stays
+   `sent`. Ask its question in your closing. When the answer is a product
+   decision, also write the question as an open question in its feature's
+   file, as the gap check does.
+3. **Start at the earliest artifact.** Of the comments that you act on, find
+   the change that comes first in this order: the requirements, the
+   architecture, the data model, the roles and permissions, the components'
+   artifacts (the prototypes, then the contracts, then the agents), the
+   dependencies, the flows, `decisions.md`, the acceptance tests.
+4. **Regenerate from there down, in that order.** Read each later artifact
+   again. Change it only where a comment asks, or where an earlier change
+   makes it wrong. Write a file only when it changes: edit it, and keep its
+   ids, keys and names. Apply a prototype comment with the `prototype` skill
+   in this run, together with the contract change that it needs. Write the
+   acceptance tests last: rewrite each feature file whose scenarios the
+   changes make wrong.
+   - A comment that changes a product rule (who can do what, a limit, a
+     state) is a requirement. Write it in the Decisions of its feature, in
+     the comment's words, without `*assumed*`: its author decided it.
+   - A decision that you make to apply a comment goes where **Technical
+     decisions** puts it.
+   - Decline a comment only when it conflicts with a requirement.
+5. **Change every place.** A comment that renames a field or a term changes
+   each line that has the old name. Before you edit a file, find each of
+   those lines in it, and change all of them. A new field goes in each
+   artifact that the change needs.
+6. **Answer each comment in `review.json`.** It is the last file that you
+   write in the turn: write it only when every artifact write (the prototype
+   included) has succeeded, because each reply tells what the artifacts now
+   say. Set `status` to `"addressed"`, `addressedAt` to the time that
+   the turn gives, `revision` to the revision of this run, and `reply` to one
+   line that tells what you did, in the words of the reader: `Renamed
+   totalAmountCents to totalCents in the data model, the contract and the
+   prototype.` A declined comment is also addressed: its reply tells which
+   requirement it conflicts with. The revision of this run is the highest
+   `revision` in the file plus one, or 2 when no comment has one (the first
+   Design run is revision 1). All the comments of one run get the same
+   revision. Change no other field and no other comment.
+
+Close with one line for each comment that you addressed (its author and your
+reply), then a **"Questions for you"** block with the question of each comment
+that stays `sent`. Leave out a block that has nothing in it.
 
 ## Where this stops
 
