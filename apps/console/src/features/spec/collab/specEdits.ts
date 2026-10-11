@@ -19,11 +19,11 @@
 import type { Node as PmNode } from "@tiptap/pm/model";
 import { Transform } from "@tiptap/pm/transform";
 import type * as Y from "yjs";
-import { updateYFragment, yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
+import { updateYFragment } from "y-prosemirror";
 import { parseLine } from "../model/ids";
 import { openEntries } from "../model/questions";
 import { docLines, type DocLine } from "./docLines";
-import { specSchema } from "./specSchema";
+import { readFragment } from "./readFragment";
 
 // The edits the user makes to the spec by acting on what the agent left in it
 // (a line to confirm, a question answered), as steps on a
@@ -123,6 +123,10 @@ export function fileFragment(doc: Y.Doc, path: string): Y.XmlFragment | null {
  * collaborator's concurrent typing survives. False when the file is not in the
  * doc or the edit changed nothing. The transaction carries `origin`: the
  * user's, unless the edit is someone else's.
+ *
+ * A file holding a block the schema rejects is not edited (false, with a
+ * warning): its read leaves that block out or reads it without its marks, and
+ * writing that read back would delete from the file what the read dropped.
  */
 export function editFile(
   doc: Y.Doc,
@@ -132,7 +136,12 @@ export function editFile(
 ): boolean {
   const fragment = fileFragment(doc, path);
   if (!fragment) return false;
-  const tr = new Transform(yXmlFragmentToProseMirrorRootNode(fragment, specSchema));
+  const read = readFragment(fragment);
+  if (!read.lossless) {
+    console.warn(`[spec] ${path} holds content the spec schema rejects; the edit is not applied`);
+    return false;
+  }
+  const tr = new Transform(read.doc);
   edit(tr);
   if (!tr.docChanged) return false;
   doc.transact(() => {
