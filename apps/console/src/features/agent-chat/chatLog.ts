@@ -36,12 +36,14 @@ import { parseQuestionsInput } from "./questionCards";
 // talks to the server or to React, so the chat store's rules are tested on
 // plain arrays.
 
-/** What a note offers next: open a version on the Builds card, interview a feature, or review a prototype. */
+/** What a note offers next: open a version on the Builds card, interview a feature, review a prototype, or answer the design's questions. */
 export type NoteAction =
   | { kind: "open-build"; label: string; version: string }
   | { kind: "interview"; label: string; featureId: string }
   /** Review a prototype: one component's item on the Design card, or the card when the turn made several. */
-  | { kind: "open-prototype"; label: string; component: string | null };
+  | { kind: "open-prototype"; label: string; component: string | null }
+  /** The Design card, where its questions are answered. */
+  | { kind: "open-design"; label: string };
 
 /** One row of the chat. */
 export type ChatItem =

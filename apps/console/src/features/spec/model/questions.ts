@@ -33,7 +33,9 @@ import { parseLine, type LineBlock } from "./ids";
 // (collab/specEdits.ts), so no blocking state lives outside the file. A tag
 // with no options is still a question, answered in the user's own words;
 // options under an entry with no tag are an ordinary open question, which
-// gates nothing.
+// gates nothing. Every entry but one the user deferred ("deferred — the user
+// will decide later", prd-contract) is open: it waits on the user, and the
+// Design card asks the ones in designed features (the gap check's).
 
 export const OPEN_QUESTIONS = "Open Questions";
 
@@ -45,20 +47,32 @@ export interface BlockingQuestion {
   options: string[];
 }
 
-/** A blocking question with the line it is written on: what the editor decorates and an answer removes. */
-export interface BlockingEntry<L extends LineBlock> extends BlockingQuestion {
+/** An entry of Open Questions the user has not deferred. */
+export interface OpenQuestion extends BlockingQuestion {
+  /** Tagged `*blocking*`: its feature's interview waits on it. */
+  blocking: boolean;
+}
+
+/** An open question with the line it is written on: what the editor decorates and an answer removes. */
+export interface OpenEntry<L extends LineBlock> extends OpenQuestion {
   line: L;
 }
+
+/** A blocking question with the line it is written on. */
+export type BlockingEntry<L extends LineBlock> = OpenEntry<L>;
+
+/** An entry the user declined for now: "deferred — the user will decide later". */
+const DEFERRED = /\bdeferred\b/i;
 
 function isSectionHeading(line: LineBlock): boolean {
   return line.kind === "heading" && (line.level ?? 1) <= 2;
 }
 
-/** Every blocking question in a file's lines, in order, with its line. */
-export function blockingEntries<L extends LineBlock>(lines: readonly L[]): BlockingEntry<L>[] {
-  const out: BlockingEntry<L>[] = [];
+/** Every open question in a file's lines, in order, with its line. */
+export function openEntries<L extends LineBlock>(lines: readonly L[]): OpenEntry<L>[] {
+  const out: OpenEntry<L>[] = [];
   let inside = false;
-  let open: { entry: BlockingEntry<L>; depth: number } | null = null;
+  let open: { entry: OpenEntry<L>; depth: number } | null = null;
   for (const line of lines) {
     if (isSectionHeading(line)) {
       inside = line.text.trim().toLowerCase() === OPEN_QUESTIONS.toLowerCase();
@@ -74,12 +88,22 @@ export function blockingEntries<L extends LineBlock>(lines: readonly L[]): Block
     if (open && depth > open.depth) continue;
     open = null;
     const parts = parseLine(line.text, line.emphasis);
-    if (!parts.blocking) continue;
-    const entry: BlockingEntry<L> = { question: parts.body, options: [], line };
-    out.push(entry);
+    const entry: OpenEntry<L> = { question: parts.body, options: [], blocking: parts.blocking !== null, line };
+    // A deferred entry's options are still read past, but the entry is not open.
+    if (!DEFERRED.test(line.text)) out.push(entry);
     open = { entry, depth };
   }
   return out;
+}
+
+/** Every blocking question in a file's lines, in order, with its line. */
+export function blockingEntries<L extends LineBlock>(lines: readonly L[]): BlockingEntry<L>[] {
+  return openEntries(lines).filter((e) => e.blocking);
+}
+
+/** A file's open questions, without their lines. */
+export function openQuestions(lines: readonly LineBlock[]): OpenQuestion[] {
+  return openEntries(lines).map(({ question, options, blocking }) => ({ question, options, blocking }));
 }
 
 /** A file's blocking questions, without their lines. */

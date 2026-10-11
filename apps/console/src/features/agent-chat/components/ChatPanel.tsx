@@ -223,7 +223,7 @@ export function ChatPanel({
           </IconButton>
         </Tooltip>
       </Box>
-      <Thread projectName={projectName} />
+      <Thread projectName={projectName} card={card} />
       <Composer projectName={projectName} topic={topic} note={note} scope={scope} />
     </Box>
   );

@@ -187,7 +187,7 @@ export function DesignWorkspace({ projectName, art, review }: { projectName: str
                       ? `You changed ${names(outOfDate, featureName)} in Spec since it was designed.`
                       : `${names(workspace.design.toDesign, featureName)} ${workspace.design.toDesign.length === 1 ? "isn't" : "aren't"} designed yet.`}
                   </Typography>
-                  <Button size="small" variant="outlined" disabled={!turns.ready} onClick={() => turns.design()}>
+                  <Button size="small" variant={card.primary?.kind === "design" ? "contained" : "outlined"} disabled={!turns.ready} onClick={() => turns.design()}>
                     {label}
                   </Button>
                 </Note>

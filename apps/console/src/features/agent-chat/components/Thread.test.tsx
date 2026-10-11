@@ -24,9 +24,9 @@ import { SAMPLE_COMPONENT, SAMPLE_MANIFEST, SAMPLE_SOURCE } from "../../../mocks
 import { appPrototypes, manifestPath, sourcePath, type AppPrototype } from "../../prototype/model/prototypes";
 import type { ProjectChat } from "../chatStore";
 
-// The conversation's rows that the prototype adds to: a review's requests in
-// place of the wire text, and the Open prototype note after a prototype turn,
-// both worked out from the log (which the history carries) and the room.
+// The conversation's rows the design adds to: the Open prototype note after
+// a prototype turn, and the pointer to the design's questions after a design
+// run, both worked out from the log (which the history carries) and the room.
 
 let prototypes: AppPrototype[] | undefined;
 vi.mock("../../prototype/usePrototypes", () => ({ usePrototypes: () => prototypes }));
@@ -43,6 +43,8 @@ vi.mock("../useProjectChat", () => ({
   chatStore: {},
   canSend: () => true,
 }));
+let questions: unknown[] = [];
+vi.mock("../../design/useDesignQuestions", () => ({ useDesignQuestions: () => questions }));
 vi.mock("../../spec/useSpecWorkspace", () => ({ useSpecModel: () => ({ data: { features: [] } }) }));
 vi.mock("../useStartInterview", () => ({ useStartInterview: () => ({ start: vi.fn(), ready: true, waiting: false }) }));
 const navigate = vi.fn();
@@ -72,6 +74,34 @@ function renderThread() {
 afterEach(() => {
   cleanup();
   navigate.mockReset();
+  questions = [];
+});
+
+describe("the design's questions in the conversation", () => {
+  it("points at the Design card after a design run that left a question, which opens it", () => {
+    questions = [{ kind: "comment", key: "c1" }];
+    chat = ready([
+      { kind: "user", id: "h0", text: "/address-comments", state: "sent" },
+      { kind: "agent", id: "h1", turnId: "history", text: "1 question for you on the Design card." },
+    ]);
+    renderThread();
+    fireEvent.click(screen.getByRole("button", { name: "Answer 1 question" }));
+    expect(navigate).toHaveBeenCalledWith({ to: "/projects/$projectName/design", params: { projectName: "acme" } });
+  });
+
+  it("offers no button while the Design card is open: the card holds the primary", () => {
+    questions = [{ kind: "comment", key: "c1" }];
+    chat = ready([
+      { kind: "user", id: "h0", text: "/address-comments", state: "sent" },
+      { kind: "agent", id: "h1", turnId: "history", text: "1 question for you on the Design card." },
+    ]);
+    render(
+      <OxygenUIThemeProvider theme={OxygenTheme}>
+        <Thread projectName="acme" card="design" />
+      </OxygenUIThemeProvider>,
+    );
+    expect(screen.queryByRole("button", { name: "Answer 1 question" })).toBeNull();
+  });
 });
 
 const wrote = (id: string, component: string, state: "done" | "failed" = "done"): ProjectChat["items"][number] => ({

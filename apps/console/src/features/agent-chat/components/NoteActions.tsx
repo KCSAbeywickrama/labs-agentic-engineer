@@ -24,7 +24,8 @@ import { useStartInterview } from "../useStartInterview";
 
 /**
  * A note's next steps, under it: open a version on the Builds card, review a
- * prototype, or start the next feature's interview. The same steps the card offers, so the chat
+ * prototype, answer the design's questions on the Design card, or start the
+ * next feature's interview. The same steps the card offers, so the chat
  * and the card never disagree about what comes next.
  */
 export function NoteActions({ projectName, actions }: { projectName: string; actions: NoteAction[] }) {
@@ -35,6 +36,10 @@ export function NoteActions({ projectName, actions }: { projectName: string; act
   const act = (action: NoteAction) => {
     if (action.kind === "open-build") {
       void navigate({ to: "/projects/$projectName/builds/$version", params: { projectName, version: action.version } });
+      return;
+    }
+    if (action.kind === "open-design") {
+      void navigate({ to: "/projects/$projectName/design", params: { projectName } });
       return;
     }
     if (action.kind === "open-prototype") {

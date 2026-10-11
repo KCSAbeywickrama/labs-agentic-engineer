@@ -24,6 +24,7 @@ import { soft } from "../../spec/components/Tag";
 import { dependencyKey } from "../model/artifacts";
 import { commentsOn, isWaiting } from "../model/review";
 import type { DesignCard, ReviewRow } from "../useDesignCard";
+import { AnswerQuestions } from "./QuestionsPanel";
 
 // The Design card's Overview (L22, D12, D13): what to review, for whom, and
 // the card's one step forward. Four parts: the business review list
@@ -31,9 +32,12 @@ import type { DesignCard, ReviewRow } from "../useDesignCard";
 // (architecture, data model, contracts, flows, technical decisions), the
 // Dependencies (what blocks a build first), and the acceptance tests, one row
 // per feature, for reference. At the bottom, Address comments (N) and Build,
-// the only place comments are sent from. Exactly one button is the primary
-// (model/review.ts primaryAction): Address comments while a comment waits,
-// Build once everything is checked, otherwise Open on the first unchecked row.
+// the only place comments are sent from. Above them all, while the agent
+// waits on the user, its questions (Answer N questions, model/questions.ts).
+// Exactly one button is the primary (model/review.ts primaryAction): Answer
+// while a question waits, Address comments while a comment waits, Design
+// while the spec is ahead of the design, Build once everything is checked,
+// otherwise Open on the first unchecked row.
 
 const OpenLink = createLink(Link);
 const OpenButton = createLink(Button);
@@ -171,6 +175,19 @@ export function DesignOverview({
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
+      {card.questions.length > 0 && (
+        <Box
+          component="section"
+          aria-label="Questions for you"
+          sx={{ border: 1, borderColor: "warning.main", bgcolor: soft("warning"), borderRadius: 2.5, px: 1.75, py: 1.25, display: "flex", alignItems: "center", gap: 1.25, flexWrap: "wrap" }}
+        >
+          <Typography variant="body2" sx={{ flex: "1 1 260px" }}>
+            {card.questions.length === 1 ? "The agent has a question for you" : `The agent has ${card.questions.length} questions for you`}: a call only you can make. Your
+            answers go back with the next run.
+          </Typography>
+          <AnswerQuestions card={card} primary={primary?.kind === "answer"} ready={review.ready && !running} />
+        </Box>
+      )}
       <Typography variant="body2" color="text.secondary">
         Open each file and tick Checked. Comment on anything that is wrong from its 💬, then address your comments below.
       </Typography>
@@ -237,9 +254,11 @@ export function DesignOverview({
         <Typography variant="caption" color="text.secondary">
           {waiting > 0
             ? "Comments go to the agent only from here, all together."
-            : primary?.kind === "build"
-              ? "Everything is checked."
-              : "Build once everything is checked; until then it builds with what is unchecked."}
+            : primary?.kind === "design"
+              ? "Update the design first: the spec has changed since."
+              : primary?.kind === "build"
+                ? "Everything is checked."
+                : "Build once everything is checked; until then it builds with what is unchecked."}
         </Typography>
       </Box>
       {review.problem && (

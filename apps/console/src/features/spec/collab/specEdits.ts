@@ -21,7 +21,7 @@ import { Transform } from "@tiptap/pm/transform";
 import type * as Y from "yjs";
 import { updateYFragment, yXmlFragmentToProseMirrorRootNode } from "y-prosemirror";
 import { parseLine } from "../model/ids";
-import { blockingEntries } from "../model/questions";
+import { openEntries } from "../model/questions";
 import { docLines, type DocLine } from "./docLines";
 import { specSchema } from "./specSchema";
 
@@ -160,17 +160,18 @@ export function settleAssumedLine(doc: Y.Doc, path: string, text: string, action
 }
 
 /**
- * Answer a feature's blocking question, in one Yjs transaction: its entry
- * (with the options nested under it) leaves Open Questions, and the answer is
- * a settled line in the feature's Decisions. The entry is found by its words;
- * false when no blocking question in the file has them any more (it was
- * answered or edited meanwhile), and then nothing is written.
+ * Answer an open question of a file (a feature's blocking question, or one
+ * the design's gap check left), in one Yjs transaction: its entry (with the
+ * options nested under it) leaves Open Questions, and the answer is a settled
+ * line in the file's Decisions. The entry is found by its words; false when
+ * no open question in the file has them any more (it was answered or edited
+ * meanwhile), and then nothing is written.
  */
-export function answerBlockingQuestion(doc: Y.Doc, path: string, question: string, answer: string): boolean {
+export function answerOpenQuestion(doc: Y.Doc, path: string, question: string, answer: string): boolean {
   const words = answer.trim();
   if (!words) return false;
   return editFile(doc, path, (tr) => {
-    const entry = blockingEntries(docLines(tr.doc)).find((e) => e.question === question);
+    const entry = openEntries(docLines(tr.doc)).find((e) => e.question === question);
     if (!entry) return;
     deleteLine(tr, entry.line);
     appendToSection(tr, "Decisions", words);

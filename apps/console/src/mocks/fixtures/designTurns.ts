@@ -48,7 +48,10 @@ type ConversationMessage = components["schemas"]["ConversationMessage"];
 //  - "/address-comments": answers every comment the console sent in
 //    specs/design/review.json, marking each addressed with a one-line reply,
 //    and revises the prototype where a comment on it asks for a change the
-//    sample knows (fixtures/prototype.ts).
+//    sample knows (fixtures/prototype.ts). A comment that offers two readings
+//    ("… or …") and has no answer yet is not guessed: the mock writes its
+//    question on it and leaves it sent; once answered, it is addressed with
+//    the answer. Each run closes with what is next on the Design card.
 // What each does lands when the turn has finished (designState.ts).
 
 const DESIGN_NOTE: Record<string, string> = {
@@ -116,7 +119,7 @@ function scriptDesign(projectName: string, text: string, model: MockSpecModel, t
   const files = writeFiles(s, doc, turnKey, designRoomFiles(projectName, drafts, [...design.dependencies, ...found]));
   const blocker = found[0];
   s.pause(600).say(
-    "The design is ready. Each file is in the Design card's rail: open each one, tick Checked, and comment from its 💬." +
+    `The design is ready: ${plural(Object.keys(files).length, "file")} written. Next on the Design card: check each file, and comment from its 💬.` +
       (blocker ? ` ${names(model, [blocker.featureId])} waits on ${blocker.needs}; it blocks nothing else.` : ""),
   );
   return {
@@ -129,6 +132,17 @@ function scriptDesign(projectName: string, text: string, model: MockSpecModel, t
 /** The revision an Address comments turn makes: one past the latest any comment names. */
 function nextRevision(comments: readonly ReviewComment[]): number {
   return Math.max(1, ...comments.map((c) => c.revision ?? 1)) + 1;
+}
+
+/** A comment the mock treats as ambiguous: it offers two readings. */
+const TWO_READINGS = /\bor\b/i;
+
+function questionFor(comment: ReviewComment): string {
+  return `“${comment.text}” can be read two ways. Which one should the design follow?`;
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
 function scriptAddressComments(projectName: string, text: string, model: MockSpecModel, turnKey: string): DesignTurn {
@@ -148,7 +162,16 @@ function scriptAddressComments(projectName: string, text: string, model: MockSpe
   // A comment on the prototype the sample knows how to take changes its source.
   let source = readDocFile(doc, sourcePath(SAMPLE_COMPONENT));
   const replies = new Map<string, string>();
+  const questions = new Map<string, string>();
   for (const { path, comment } of sent) {
+    if (comment.answer === undefined && TWO_READINGS.test(comment.text)) {
+      questions.set(comment.id, questionFor(comment));
+      continue;
+    }
+    if (comment.answer !== undefined) {
+      replies.set(comment.id, `Went with your answer: ${comment.answer}`);
+      continue;
+    }
     const tweak = path === manifestPath(SAMPLE_COMPONENT) && source !== undefined ? tweakSource(source, comment.text) : null;
     if (tweak && source !== undefined) {
       s.pause(400).edit(`${turnKey}-${comment.id}`, sourcePath(SAMPLE_COMPONENT), tweak.from, tweak.to);
@@ -164,6 +187,8 @@ function scriptAddressComments(projectName: string, text: string, model: MockSpe
       ...(a.comments
         ? {
             comments: a.comments.map((c) => {
+              const question = questions.get(c.id);
+              if (question) return { ...c, question };
               const reply = replies.get(c.id);
               return reply ? { ...c, status: "addressed" as const, reply, revision, addressedAt: at } : c;
             }),
@@ -174,7 +199,12 @@ function scriptAddressComments(projectName: string, text: string, model: MockSpe
   const after = reviewText(answered);
   s.pause(400).edit(`${turnKey}-review`, DESIGN_REVIEW_PATH, before, after);
   files[DESIGN_REVIEW_PATH] = after;
-  s.pause(400).say("Done. Each comment now shows what I did: check the changed files again, or reopen a comment if it isn't right yet.");
+  const asked = questions.size;
+  s.pause(400).say(
+    (replies.size > 0 ? `Addressed ${plural(replies.size, "comment")}; each one now says what I did.` : "I addressed nothing yet.") +
+      (asked > 0 ? ` ${plural(asked, "question")} for you on the Design card.` : "") +
+      ` Next on the Design card: ${asked > 0 ? `answer ${asked === 1 ? "it" : "them"}, then ` : ""}check the changed files, or reopen a comment that isn't right yet.`,
+  );
   return { display: text, ...s.end(), design: { kind: "address", files } };
 }
 

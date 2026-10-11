@@ -38,6 +38,7 @@ import { sha256Text } from "../../../lib/sha256";
 import type { ProjectChat } from "../../agent-chat/chatStore";
 import type { DesignModel } from "../api/designModel";
 import { readReview } from "../model/review";
+import { readSpecLines } from "../../spec/collab/useSpecLines";
 
 // The Design card as a reviewer uses it, on a room (a Y.Doc here) holding a
 // design's files: the rail of files, each file's Checked and 💬, the
@@ -75,9 +76,18 @@ const model: DesignModel = { revision: null, running: null, artifacts: [], depen
 vi.mock("../useDesignModel", () => ({ useDesignModel: () => ({ data: model, isError: false, error: null, refetch: vi.fn() }) }));
 
 let label: string | null = null;
+const F1_PATH = "specs/requirements/features/F1-submit-expenses.md";
+/** Whether F1 has been designed: only a designed feature's open questions are the Design card's. */
+let designedFrom: Record<string, string> = {};
 vi.mock("../../spec/useSpecWorkspace", () => ({
   useSpecWorkspace: () => ({
-    model: { data: { features: [{ id: "F1", name: "Submit expenses" }] }, isError: false, error: null, refetch: vi.fn() },
+    model: {
+      data: { features: [{ id: "F1", name: "Submit expenses", path: F1_PATH }], design: { designedFrom } },
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    },
+    lines: readSpecLines(doc),
     workspace: { design: { label, toDesign: label ? ["F1"] : [], outOfDate: [] } },
   }),
 }));
@@ -152,6 +162,7 @@ beforeAll(() => {
 beforeEach(() => {
   seed(FILES);
   label = null;
+  designedFrom = {};
   send.mockReset();
   send.mockResolvedValue(true);
 });
@@ -268,6 +279,65 @@ describe("the Overview's one primary", () => {
     await waitFor(() => expect(send).toHaveBeenCalled());
     await waitFor(() => expect(review().artifacts[0]?.comments?.[0]).toMatchObject({ status: "draft" }));
     expect(review().artifacts[0]?.comments?.[0]).not.toHaveProperty("sentAt");
+  });
+});
+
+describe("questions waiting on the user", () => {
+  const asked = (status: "sent" | "addressed" = "sent") =>
+    JSON.stringify({
+      version: 1,
+      artifacts: [
+        {
+          path: DECISIONS,
+          comments: [
+            { id: "c1", author: { id: "u-sam", name: "Sam" }, text: "Cents?", createdAt: "x", status, sentAt: "y", question: "Cents for every currency, or the currency's own minor unit?" },
+          ],
+        },
+      ],
+    });
+
+  it("makes Answer 1 question the primary; the answer reopens the comment, and Address comments is next", async () => {
+    setDocFile(doc, DESIGN_REVIEW_PATH, asked(), "test");
+    renderCard();
+    const answer = await screen.findByRole("button", { name: "Answer 1 question" });
+    expect(primaries()).toEqual(["Answer 1 question"]);
+    fireEvent.click(answer);
+    const panel = await screen.findByRole("dialog", { name: "Questions for you" });
+    expect(panel).toHaveTextContent("On Technical decisions · Sam's comment: “Cents?”");
+    fireEvent.change(within(panel).getByLabelText(/^Your answer: Cents for every currency/), { target: { value: "The currency's own minor unit." } });
+    fireEvent.click(within(panel).getByRole("button", { name: "Answer" }));
+    await waitFor(() =>
+      expect(review().artifacts[0]?.comments?.[0]).toMatchObject({ status: "reopened", answer: "The currency's own minor unit." }),
+    );
+    await waitFor(() => expect(primaries()).toEqual(["Address comments (1)"]));
+    expect(screen.queryByRole("button", { name: /^Answer \d/ })).toBeNull();
+  });
+
+  it("asks a designed feature's open question, and the answer goes into the feature's Decisions", async () => {
+    setDocFile(doc, F1_PATH, "# Submit expenses\n\n## Open Questions\n\n1. Can a claim mix currencies?\n   - No, one currency per claim.\n", "test");
+    designedFrom = { F1: "basis" };
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: "Answer 1 question" }));
+    const panel = await screen.findByRole("dialog", { name: "Questions for you" });
+    expect(panel).toHaveTextContent("Submit expenses (F1)");
+    fireEvent.click(within(panel).getByRole("button", { name: "No, one currency per claim." }));
+    await waitFor(() => expect(readDocFile(doc, F1_PATH)).toContain("## Decisions\n\n- No, one currency per claim."));
+    expect(readDocFile(doc, F1_PATH)).not.toContain("Can a claim mix currencies?");
+  });
+
+  it("does not ask an undesigned feature's open questions, or a question already answered", async () => {
+    setDocFile(doc, F1_PATH, "# Submit expenses\n\n## Open Questions\n\n1. Can a claim mix currencies?\n", "test");
+    setDocFile(doc, DESIGN_REVIEW_PATH, asked("addressed").replace('"status":"addressed"', '"status":"addressed","reply":"Done.","answer":"Minor unit."'), "test");
+    renderCard();
+    await screen.findByRole("region", { name: "For technical review" });
+    expect(screen.queryByRole("button", { name: /^Answer \d/ })).toBeNull();
+  });
+
+  it("makes Design the primary while the spec is ahead of the design", async () => {
+    label = "Update design · 1 feature";
+    renderCard();
+    expect(await screen.findByRole("button", { name: "Update design · 1 feature" })).toHaveClass("MuiButton-contained");
+    expect(primaries()).toEqual(["Update design · 1 feature"]);
   });
 });
 

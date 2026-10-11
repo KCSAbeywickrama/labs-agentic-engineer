@@ -25,7 +25,9 @@ import { soft } from "../../spec/components/Tag";
 // One artifact's comment threads, as GitHub's pull request review keeps them
 // (D13): a draft is Pending, with Edit and Delete, until Address comments
 // sends it; a sent one is with the agent; an addressed one carries the
-// agent's one-line reply, with Reopen, which puts it in the next batch. Used
+// agent's one-line reply, with Reopen, which puts it in the next batch. A
+// comment the agent found ambiguous shows its question (answered from the
+// Overview's Answer N questions) and, once answered, the answer. Used
 // in an artifact's 💬 panel and on the Comments item. No spot comments: a
 // prototype comment names the screen it was made on (`place`).
 
@@ -77,8 +79,8 @@ function Thread({ comment: c, place, actions }: { comment: ReviewComment; place:
           {c.status === "draft" && <Badge tone="warning">Pending</Badge>}
           {c.status === "reopened" && <Badge tone="warning">Reopened</Badge>}
           {c.status === "sent" && (
-            <Typography variant="caption" color="text.secondary">
-              sent{c.sentAt ? ` ${stamp(c.sentAt)}` : ""}, with the agent
+            <Typography variant="caption" color={c.question && !c.answer ? "warning.main" : "text.secondary"}>
+              sent{c.sentAt ? ` ${stamp(c.sentAt)}` : ""}, {c.question && !c.answer ? "the agent has a question" : "with the agent"}
             </Typography>
           )}
           {place && (
@@ -114,6 +116,28 @@ function Thread({ comment: c, place, actions }: { comment: ReviewComment; place:
           </Typography>
         )}
       </Box>
+      {c.question && (
+        <Box sx={{ px: 1.5, py: 1, borderTop: 1, borderColor: "divider", bgcolor: soft("warning"), display: "flex", flexDirection: "column", gap: 0.25 }}>
+          <Typography variant="body2">
+            <Box component="span" sx={{ fontWeight: 600 }}>
+              Agent asks:
+            </Box>{" "}
+            {c.question}
+          </Typography>
+          <Typography variant="body2" color={c.answer ? "text.primary" : "text.secondary"}>
+            {c.answer ? (
+              <>
+                <Box component="span" sx={{ fontWeight: 600 }}>
+                  Answer:
+                </Box>{" "}
+                {c.answer}
+              </>
+            ) : (
+              "Answer it from the Overview's Answer button."
+            )}
+          </Typography>
+        </Box>
+      )}
       {c.reply && (
         <Box sx={{ px: 1.5, py: 1, borderTop: 1, borderColor: "divider", bgcolor: soft("success"), display: "flex", gap: 1, alignItems: "baseline", flexWrap: "wrap" }}>
           <Typography variant="body2" sx={{ fontWeight: 600 }}>

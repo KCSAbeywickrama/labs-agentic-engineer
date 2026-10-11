@@ -20,11 +20,14 @@ import { describe, expect, it } from "vitest";
 import { checkDesignReview, DESIGN_REVIEW_PATH } from "@aep/agent-stream";
 import {
   addDraft,
+  answerComment,
   changedSinceChecked,
+  commentQuestions,
   commentsOn,
   deleteDraft,
   editDraft,
   EMPTY_REVIEW,
+  isAsking,
   isChecked,
   primaryAction,
   readReview,
@@ -152,26 +155,64 @@ describe("comments", () => {
   });
 });
 
+describe("the agent's questions on comments", () => {
+  const sent = () => sendWaiting(addDraft(EMPTY_REVIEW, DATA, draft("c1", "the total")), "2026-10-10T10:00:00Z").review;
+  const ask = (review: ReturnType<typeof sent>) =>
+    ({ version: 1, artifacts: review.artifacts.map((a) => ({ ...a, comments: a.comments?.map((c) => ({ ...c, question: "Before or after tax?" })) })) }) as typeof review;
+
+  it("lists a sent comment the agent asked about, until it is answered", () => {
+    const asked = valid(ask(sent()));
+    expect(commentQuestions(asked)).toEqual([{ path: DATA, comment: expect.objectContaining({ id: "c1", question: "Before or after tax?" }) }]);
+    expect(commentQuestions(sent())).toEqual([]);
+    expect(isAsking({ status: "sent", question: "Which?" })).toBe(true);
+    expect(isAsking({ status: "addressed", question: "Which?", answer: "This." })).toBe(false);
+  });
+
+  it("reopens the comment with the answer, so the next Address comments sends it", () => {
+    const answered = valid(answerComment(ask(sent()), "c1", "  After tax.  "));
+    expect(commentsOn(answered, DATA)[0]).toMatchObject({ status: "reopened", question: "Before or after tax?", answer: "After tax." });
+    expect(commentQuestions(answered)).toEqual([]);
+    expect(waitingComments(answered).map((c) => c.id)).toEqual(["c1"]);
+    expect(commentsOn(sendWaiting(answered, "2026-10-10T11:00:00Z").review, DATA)[0]).toMatchObject({ status: "sent", answer: "After tax." });
+  });
+
+  it("changes an answer not yet sent, and takes no blank answer or one to a comment never asked about", () => {
+    const answered = answerComment(ask(sent()), "c1", "After tax.");
+    expect(commentsOn(answerComment(answered, "c1", "Before tax."), DATA)[0]?.answer).toBe("Before tax.");
+    expect(answerComment(ask(sent()), "c1", "   ")).toEqual(ask(sent()));
+    expect(commentsOn(answerComment(sent(), "c1", "After tax."), DATA)[0]).not.toHaveProperty("answer");
+  });
+});
+
 describe("the one primary", () => {
   const rows = [
     { key: "prototype-expense-web", checked: true },
     { key: "roles", checked: false },
     { key: "architecture", checked: false },
   ];
+  const idle = { questions: 0, waiting: 0, toDesign: false };
+
+  it("is Answer while the agent waits on the user, before anything else", () => {
+    expect(primaryAction({ ...idle, questions: 1, waiting: 2, toDesign: true, rows })).toEqual({ kind: "answer", count: 1 });
+  });
 
   it("is Address comments while any comment waits, even with files unchecked", () => {
-    expect(primaryAction({ waiting: 2, rows })).toEqual({ kind: "address", count: 2 });
+    expect(primaryAction({ ...idle, waiting: 2, toDesign: true, rows })).toEqual({ kind: "address", count: 2 });
+  });
+
+  it("is Design while the spec is ahead of the design (an answered feature question)", () => {
+    expect(primaryAction({ ...idle, toDesign: true, rows })).toEqual({ kind: "design" });
   });
 
   it("is Open on the first unchecked row otherwise", () => {
-    expect(primaryAction({ waiting: 0, rows })).toEqual({ kind: "open", key: "roles" });
+    expect(primaryAction({ ...idle, rows })).toEqual({ kind: "open", key: "roles" });
   });
 
   it("is Build once every checkable file is checked and nothing waits", () => {
-    expect(primaryAction({ waiting: 0, rows: rows.map((r) => ({ ...r, checked: true })) })).toEqual({ kind: "build" });
+    expect(primaryAction({ ...idle, rows: rows.map((r) => ({ ...r, checked: true })) })).toEqual({ kind: "build" });
   });
 
   it("is nothing while nothing is listed", () => {
-    expect(primaryAction({ waiting: 0, rows: [] })).toBeNull();
+    expect(primaryAction({ ...idle, rows: [] })).toBeNull();
   });
 });

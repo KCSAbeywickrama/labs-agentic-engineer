@@ -35,6 +35,11 @@ import {
 // A comment WAITS while it is a draft or reopened: Address comments sends
 // every waiting one (`sent`), and the agent marks each `addressed` with a
 // reply. Only drafts are edited or deleted; only an addressed one reopens.
+//
+// A sent comment the agent found ambiguous carries its `question` and stays
+// `sent`: it waits on the user, not on the agent. The user's `answer` reopens
+// it, so it goes with the next Address comments and the agent acts on it with
+// the answer (a `reopened` comment is the one state the batch already takes).
 
 export const EMPTY_REVIEW: DesignReview = Object.freeze({ version: 1, artifacts: [] }) as DesignReview;
 
@@ -162,6 +167,39 @@ export interface Sent {
   sent: { id: string; was: ReviewComment["status"] }[];
 }
 
+/** Whether the agent asked about a comment and waits for the user's answer. */
+export function isAsking(comment: Pick<ReviewComment, "status" | "question" | "answer">): boolean {
+  return comment.status === "sent" && comment.question !== undefined && comment.answer === undefined;
+}
+
+/** A comment the agent asked about, with the artifact it is on. */
+export interface CommentQuestion {
+  path: string;
+  comment: ReviewComment & { question: string };
+}
+
+/** Every comment the agent asked about and the user has not answered, in the file's order. */
+export function commentQuestions(review: DesignReview): CommentQuestion[] {
+  return review.artifacts.flatMap((a) =>
+    (a.comments ?? []).flatMap((c) => (isAsking(c) && c.question !== undefined ? [{ path: a.path, comment: { ...c, question: c.question } }] : [])),
+  );
+}
+
+/**
+ * The user's answer to the agent's question on comment `id`: the comment is
+ * reopened, so it goes with the next Address comments. An answer not yet sent
+ * can be changed the same way; anything else is left as it is.
+ */
+export function answerComment(review: DesignReview, id: string, answer: string): DesignReview {
+  const words = answer.trim();
+  if (!words) return review;
+  return onComments(review, (c) => {
+    if (c.id !== id || c.question === undefined) return c;
+    const open = isAsking(c) || (c.status === "reopened" && c.answer !== undefined);
+    return open ? { ...c, answer: words, status: "reopened" } : c;
+  });
+}
+
 /** Every waiting comment marked sent at `at` (ISO 8601). */
 export function sendWaiting(review: DesignReview, at: string): Sent {
   const sent: Sent["sent"] = [];
@@ -186,19 +224,31 @@ export function unsend(review: DesignReview, sent: Sent["sent"]): DesignReview {
 
 /** The one primary action on the Design card, first match wins. */
 export type Primary =
+  | { kind: "answer"; count: number }
   | { kind: "address"; count: number }
+  | { kind: "design" }
   | { kind: "build" }
   | { kind: "open"; key: string }
   | null;
 
 /**
- * The card's one primary: Address comments while any comment waits, then
- * Build once every checkable file is checked, otherwise Open on the first
- * unchecked row (`rows`, in the Overview's order). Null while nothing is
- * listed.
+ * The card's one primary: Answer the agent's questions while any waits on
+ * the user, then Address comments while any comment waits, then Design while
+ * the spec has features the design has not caught up with (an answered
+ * feature question puts its feature there), then Build once every checkable
+ * file is checked, otherwise Open on the first unchecked row (`rows`, in the
+ * Overview's order). Null while nothing is listed.
  */
-export function primaryAction(input: { waiting: number; rows: readonly { key: string; checked: boolean }[] }): Primary {
+export function primaryAction(input: {
+  questions: number;
+  waiting: number;
+  /** The spec has features to design or update. */
+  toDesign: boolean;
+  rows: readonly { key: string; checked: boolean }[];
+}): Primary {
+  if (input.questions > 0) return { kind: "answer", count: input.questions };
   if (input.waiting > 0) return { kind: "address", count: input.waiting };
+  if (input.toDesign) return { kind: "design" };
   if (input.rows.length === 0) return null;
   const first = input.rows.find((r) => !r.checked);
   return first ? { kind: "open", key: first.key } : { kind: "build" };

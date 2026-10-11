@@ -16,24 +16,29 @@
  * under the License.
  */
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import type { ReviewComment } from "@aep/agent-stream";
 import { useProjectChat } from "../agent-chat/useProjectChat";
 import { appPrototypes, revisingIn, type AppPrototype } from "../prototype/model/prototypes";
 import { usePrototypeReviews, type PrototypeReviews } from "../prototype/usePrototypeReviews";
 import { useSpecDoc } from "../spec/collab/specDoc";
+import { answerOpenQuestion } from "../spec/collab/specEdits";
 import { useRoomFiles } from "../spec/collab/useRoomFiles";
+import { useSpecWorkspace } from "../spec/useSpecWorkspace";
 import type { DesignDependency } from "./api/designModel";
 import { blockingDependencies } from "./model/artifacts";
 import { artifactHashes, designItems, DESIGN_FILE_PREFIXES, reviewLists, type DesignItem, type ReviewList } from "./model/designFiles";
-import { changedSinceChecked, commentsOn, isChecked, isWaiting, primaryAction, waitingComments, type Primary } from "./model/review";
+import type { DesignQuestion } from "./model/questions";
+import { answerComment, changedSinceChecked, commentsOn, isChecked, isWaiting, primaryAction, waitingComments, type Primary } from "./model/review";
 import { useDesignModel } from "./useDesignModel";
+import { useDesignQuestions } from "./useDesignQuestions";
 import { useDesignReview, type DesignReviewActions } from "./useDesignReview";
 
 // Everything the Design card shows, worked out once for the header and the
 // body: the rail's items from the room's files (model/designFiles.ts), each
-// one's hash, the review (review.json), the web applications' prototypes, the
-// dependencies that block a build, and the one primary action.
+// one's hash, the review (review.json), the questions waiting on the user
+// (model/questions.ts), the web applications' prototypes, the dependencies
+// that block a build, and the one primary action.
 
 /** One row of an Overview review list. */
 export interface ReviewRow {
@@ -50,6 +55,10 @@ export interface DesignCard {
   review: DesignReviewActions;
   lists: Record<ReviewList, ReviewRow[]>;
   waiting: ReviewComment[];
+  /** The questions the design waits on the user for. */
+  questions: DesignQuestion[];
+  /** Answer one: a feature's goes into its file's Decisions, a comment's reopens the comment. False when it could not be written. */
+  answer: (question: DesignQuestion, text: string) => boolean;
   primary: Primary;
   /** Each web application's prototype, by component. */
   prototypes: ReadonlyMap<string, AppPrototype>;
@@ -61,7 +70,9 @@ export interface DesignCard {
 const NO_PROTOTYPES: AppPrototype[] = [];
 
 export function useDesignCard(projectName: string): DesignCard {
-  const files = useRoomFiles(useSpecDoc(projectName), DESIGN_FILE_PREFIXES);
+  const doc = useSpecDoc(projectName);
+  const files = useRoomFiles(doc, DESIGN_FILE_PREFIXES);
+  const spec = useSpecWorkspace(projectName);
   const review = useDesignReview(projectName);
   const model = useDesignModel(projectName).data;
   const chat = useProjectChat(projectName);
@@ -77,6 +88,18 @@ export function useDesignCard(projectName: string): DesignCard {
     [webApps, files, designRunning, instruction],
   );
   const reviews = usePrototypeReviews(projectName, list);
+
+  const questions = useDesignQuestions(projectName);
+  const toDesign = spec.workspace?.design.label != null;
+  const answer = useCallback(
+    (question: DesignQuestion, text: string): boolean => {
+      if (!text.trim()) return false;
+      if (question.kind === "feature") return doc !== null && answerOpenQuestion(doc, question.path, question.question, text);
+      review.change((r) => answerComment(r, question.key, text));
+      return review.ready;
+    },
+    [doc, review],
+  );
 
   const card = useMemo(() => {
     const row = (item: DesignItem): ReviewRow => ({
@@ -95,10 +118,12 @@ export function useDesignCard(projectName: string): DesignCard {
       review,
       lists,
       waiting,
-      primary: primaryAction({ waiting: waiting.length, rows }),
+      questions,
+      answer,
+      primary: primaryAction({ questions: questions.length, waiting: waiting.length, toDesign, rows }),
       prototypes: new Map(list.map((p) => [p.component, p])),
       blocking: blockingDependencies(model?.dependencies ?? []),
     };
-  }, [items, hashes, review, list, model?.dependencies]);
+  }, [items, hashes, review, list, model?.dependencies, questions, answer, toDesign]);
   return { ...card, reviews };
 }
