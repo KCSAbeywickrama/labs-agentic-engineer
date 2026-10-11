@@ -29,7 +29,7 @@ import { SpecEditor } from "./SpecEditor";
 // drawn reaches the open editor, so the user's undo history and cursor survive
 // it. A new editor per change was why Ctrl+Z did nothing on the platform.
 
-const PATH = "specs/requirements/features/F1.md";
+const PATH = "specs/requirements/prd.md";
 const props = {
   path: PATH,
   files: [],
@@ -37,9 +37,9 @@ const props = {
   onOpen: () => {},
 };
 
-function featureFragment(): Y.XmlFragment {
+function productFragment(): Y.XmlFragment {
   const doc = new Y.Doc();
-  setDocFile(doc, PATH, "# Onboarding\n\n## User Stories\n\n- F1.1 As HR, I add a new hire.\n");
+  setDocFile(doc, PATH, "# Onboarding\n\n## Fog\n\n- Whether contractors count as new hires.\n");
   return doc.getXmlFragment(PATH);
 }
 
@@ -53,16 +53,16 @@ async function openEditor(container: HTMLElement): Promise<{ dom: Element; edito
 }
 
 describe("SpecEditor", () => {
-  it("draws new design marks in the open editor, and Ctrl+Z still undoes what was typed", async () => {
-    const fragment = featureFragment();
-    const { container, rerender } = render(<SpecEditor fragment={fragment} {...props} designChanged={null} />);
+  it("draws new options in the open editor, and Ctrl+Z still undoes what was typed", async () => {
+    const fragment = productFragment();
+    const { container, rerender } = render(<SpecEditor fragment={fragment} {...props} />);
     const { dom, editor } = await openEditor(container);
 
     act(() => void editor.chain().focus("end").insertContent(" typed").run());
-    rerender(<SpecEditor fragment={fragment} {...props} designChanged={new Map([["F1.1", "comment 1"]])} />);
+    rerender(<SpecEditor fragment={fragment} {...props} hideFog />);
 
     expect(container.querySelector(".ProseMirror")).toBe(dom);
-    expect(container.querySelector(".aep-line--design")).not.toBeNull();
+    expect(container.querySelector(".aep-hidden")).not.toBeNull();
     act(() => void editor.commands.undo());
     expect(dom.textContent).not.toContain("typed");
   });

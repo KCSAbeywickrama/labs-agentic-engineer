@@ -19,33 +19,20 @@
 import { useCallback, useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { interviewingIn, useProjectChat } from "../agent-chat/useProjectChat";
-import {
-  sourceDocuments,
-  useMockSpecExtras,
-  useSpecState,
-  type DesignSpecChange,
-  type SpecFeature,
-  type SpecModel,
-} from "./api/specModel";
+import { useWaitingComments } from "../design/useWaitingComments";
+import { sourceDocuments, useSpecState, type SpecFeature, type SpecModel } from "./api/specModel";
 import { useSpecDoc } from "./collab/specDoc";
 import { useSpecLines } from "./collab/useSpecLines";
 import { withCoverage } from "./model/coverage";
 import { deriveFeatures } from "./model/features";
 import { deriveWorkspace } from "./model/workspace";
 
-// One empty list, not a new one per document change: what is read from it
-// (the editor's design marks) then stays the same while it is empty.
-const NO_SPEC_CHANGES: DesignSpecChange[] = [];
-
 /**
  * The spec model: the features worked out from the live documents, with the
- * platform's word on what a design has read, and the attached documents. The
- * design comments' marks on the spec are the mock's alone until commenting
- * ships (E5); on the platform there are none.
+ * platform's word on what a design has read, and the attached documents.
  */
 export function useSpecModel(projectName: string) {
   const state = useSpecState(projectName);
-  const extras = useMockSpecExtras(projectName);
   const lines = useSpecLines(useSpecDoc(projectName));
   const interviewing = interviewingIn(useProjectChat(projectName));
   const data = useMemo((): SpecModel | undefined => {
@@ -54,13 +41,9 @@ export function useSpecModel(projectName: string) {
     return {
       features: deriveFeatures(lines, designedFrom, interviewing),
       documents: withCoverage(sourceDocuments(state.data), lines),
-      design: {
-        designedFrom,
-        openComments: extras.data?.openComments ?? 0,
-        specChanges: extras.data?.specChanges ?? NO_SPEC_CHANGES,
-      },
+      design: { designedFrom },
     };
-  }, [state.data, lines, interviewing, extras.data]);
+  }, [state.data, lines, interviewing]);
   return { data, isError: state.isError, error: state.error, refetch: state.refetch };
 }
 
@@ -74,9 +57,10 @@ export function useSpecWorkspace(projectName: string) {
   const model = useSpecModel(projectName);
   const doc = useSpecDoc(projectName);
   const lines = useSpecLines(doc);
+  const waiting = useWaitingComments(projectName);
   const workspace = useMemo(
-    () => (model.data && lines ? deriveWorkspace(model.data, lines) : null),
-    [model.data, lines],
+    () => (model.data && lines ? deriveWorkspace(model.data, lines, waiting) : null),
+    [model.data, lines, waiting],
   );
   return { model, doc, lines, workspace };
 }

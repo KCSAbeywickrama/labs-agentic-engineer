@@ -16,34 +16,25 @@
  * under the License.
  */
 
-import { createFileRoute } from "@tanstack/react-router";
-import { CardOverlay } from "../../../../features/projects/components/CardOverlay";
-import { PrototypeWorkspace } from "../../../../features/prototype/components/PrototypeWorkspace";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 /** The web application whose prototype is open full screen. */
 interface PrototypeSearch {
   review?: string;
 }
 
-// The prototype card, beside Spec and Design: each web application's
-// prototype, and the full-screen review of one (`?review=expense-web`).
+// Where the Prototype card was: each prototype is now an item of the Design
+// card's rail (`?art=prototype-<component>`), and its full-screen review opens
+// over it. An old link, or a chat note's Open prototype, lands there.
 export const Route = createFileRoute("/projects/$projectName/_overview/prototype")({
   validateSearch: (search: Record<string, unknown>): PrototypeSearch =>
     typeof search.review === "string" && search.review ? { review: search.review } : {},
-  component: PrototypeRoute,
+  beforeLoad: ({ params, search }) => {
+    throw redirect({
+      to: "/projects/$projectName/design",
+      params: { projectName: params.projectName },
+      search: search.review ? { art: `prototype-${search.review}`, review: search.review } : {},
+      replace: true,
+    });
+  },
 });
-
-function PrototypeRoute() {
-  const { projectName } = Route.useParams();
-  const { review } = Route.useSearch();
-  const navigate = Route.useNavigate();
-  return (
-    <CardOverlay card="prototype" fill>
-      <PrototypeWorkspace
-        projectName={projectName}
-        review={review}
-        onReview={(component) => void navigate({ search: component ? { review: component } : {} })}
-      />
-    </CardOverlay>
-  );
-}

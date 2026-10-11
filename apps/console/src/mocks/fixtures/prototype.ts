@@ -376,6 +376,12 @@ const TWEAKS: Tweak[] = [
   },
 ];
 
+/** The edit a request on the sample asks for, if the sample knows one, as the source holds it now; null otherwise. */
+export function tweakSource(source: string, text: string): { from: string; to: string; applied: string } | null {
+  const tweak = TWEAKS.find((t) => t.match.test(text) && source.includes(t.from));
+  return tweak ? { from: tweak.from, to: tweak.to, applied: tweak.applied } : null;
+}
+
 /** A request that makes the revision's turn fail, so a review can be seen getting its comments back. */
 const FAIL = /\bfail\b/i;
 

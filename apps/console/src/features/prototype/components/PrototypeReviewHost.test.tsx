@@ -21,43 +21,34 @@
 import { useEffect, useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as Y from "yjs";
 import { OxygenTheme, OxygenUIThemeProvider, useColorScheme } from "@wso2/oxygen-ui";
+import { DESIGN_REVIEW_PATH } from "@aep/agent-stream";
+import { readDocFile } from "@aep/collab-doc";
 import { PROTOTYPE_START_TIMEOUT_MS } from "@wso2/prototype-kit/host";
-import type { ProjectChat, TurnOutcome } from "../../agent-chat/chatStore";
-import { SAMPLE_MANIFEST, SAMPLE_SOURCE } from "../../../mocks/fixtures/prototype";
-import { appPrototypes, manifestPath, revisingIn, sourcePath, type AppPrototype } from "../model/prototypes";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MAX_FEEDBACK_REQUESTS, MAX_FEEDBACK_TEXT, prototypeHash } from "@wso2/prototype-kit/feedback";
-import { designKey } from "../../design/api/designModel";
-import { unreviewed } from "../model/reviewed";
+import { SAMPLE_MANIFEST, SAMPLE_SOURCE } from "../../../mocks/fixtures/prototype";
+import { commentsOn, readReview } from "../../design/model/review";
+import { useDesignReview } from "../../design/useDesignReview";
+import { appPrototypes, manifestPath, revisingIn, sourcePath, type AppPrototype } from "../model/prototypes";
+import { usePrototypeReviews } from "../usePrototypeReviews";
 
-// The Prototype tab and its full-screen review, driven as a reviewer drives
-// them: the prototype runs in the kit's PrototypeFrame, whose messages are
-// played here as the sandboxed frame would send them, and the turns go to the
-// project's chat, which is stubbed at its store.
+// The full-screen prototype review, opened from its item on the Design card,
+// driven as a reviewer drives it: the prototype runs in the kit's
+// PrototypeFrame, whose messages are played here as the sandboxed frame would
+// send them, and the comment queue is the reviewer's drafts on the prototype
+// in the room's review.json (a Y.Doc here, as the room's).
 
 const C = "expense-web";
 const files = { [manifestPath(C)]: SAMPLE_MANIFEST, [sourcePath(C)]: SAMPLE_SOURCE };
+const ME = { id: "u-priya", name: "Priya", email: "priya@acme.example" };
 
-let prototypes: AppPrototype[] | undefined;
-vi.mock("../usePrototypes", () => ({ usePrototypes: () => prototypes }));
+let prototypes: AppPrototype[];
+let doc: Y.Doc;
+vi.mock("../../spec/collab/specDoc", () => ({ useSpecDoc: () => doc }));
+vi.mock("../../../auth/SessionContext", () => ({ useSession: () => ({ user: ME, orgHandle: "acme", signOut: () => {} }) }));
 
-let chat: ProjectChat;
-const send = vi.fn<(...args: unknown[]) => Promise<boolean>>(async () => true);
-const turnEnds = new Set<(projectName: string, outcome: TurnOutcome) => void>();
-vi.mock("../../agent-chat/useProjectChat", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../agent-chat/useProjectChat")>()),
-  useProjectChat: () => chat,
-  chatStore: {
-    send: (...args: unknown[]) => send(...args),
-    onTurnEnd: (fn: (projectName: string, outcome: TurnOutcome) => void) => {
-      turnEnds.add(fn);
-      return () => turnEnds.delete(fn);
-    },
-  },
-}));
-
-// The review store outlives the tab for the page's life; each test starts on a fresh one, on the stubbed chat.
+// The review store outlives the review for the page's life; each test starts on a fresh one.
 type ReviewStore = ReturnType<typeof import("../model/reviewStore").createReviewStore>;
 const reviews = vi.hoisted(() => ({ current: null as null | ReviewStore }));
 vi.mock("../model/reviewStore", async (importOriginal) => ({
@@ -68,9 +59,6 @@ vi.mock("../model/reviewStore", async (importOriginal) => ({
     }),
 }));
 const { createReviewStore } = await vi.importActual<typeof import("../model/reviewStore")>("../model/reviewStore");
-
-const openChat = vi.fn();
-vi.mock("../../shell/chatPanel", () => ({ useChatPanel: () => ({ open: openChat }) }));
 
 // The theme's 2 MB runtime is the kit's browser lane's to run; the frame here only needs one.
 vi.mock("../useReviewAssets", async (importOriginal) => ({
@@ -87,13 +75,9 @@ vi.stubGlobal(
   },
 );
 
-const { PrototypeWorkspace } = await import("./PrototypeWorkspace");
+const { PrototypeReviewHost } = await import("./PrototypeReviewHost");
 
-const idle: ProjectChat = { status: "ready", error: null, items: [], turn: { phase: "idle" } };
-const busy: ProjectChat = { ...idle, turn: { phase: "running", turnId: "t1", instruction: "/design F1" } };
-
-let queryClient = new QueryClient();
-let invalidate = vi.spyOn(queryClient, "invalidateQueries");
+const whatChanged = vi.fn();
 
 /** The console switched to its dark scheme, as its user menu does. */
 function DarkMode() {
@@ -102,16 +86,40 @@ function DarkMode() {
   return null;
 }
 
-function Harness({ initial, dark = false }: { initial?: string; dark?: boolean }) {
-  const [review, setReview] = useState<string | undefined>(initial);
-  return (
-    <QueryClientProvider client={queryClient}>
-      <OxygenUIThemeProvider theme={OxygenTheme}>
-        {dark && <DarkMode />}
-        <PrototypeWorkspace projectName="acme-expenses" review={review} onReview={(c) => setReview(c ?? undefined)} />
-      </OxygenUIThemeProvider>
-    </QueryClientProvider>
+/** The Design card's part in it: the review, and the prototype's entry that opens it again (Review). */
+function Host({ initial }: { initial: boolean }) {
+  const [open, setOpen] = useState(initial);
+  const review = useDesignReview("acme-expenses");
+  const sessions = usePrototypeReviews("acme-expenses", prototypes);
+  const prototype = prototypes[0]!;
+  return open ? (
+    <PrototypeReviewHost
+      prototype={prototype}
+      review={review}
+      reviews={sessions}
+      onWhatChanged={() => {
+        whatChanged();
+        setOpen(false);
+      }}
+      onClose={() => setOpen(false)}
+    />
+  ) : (
+    <button onClick={() => setOpen(true)}>Review</button>
   );
+}
+
+function Harness({ initial = false, dark = false }: { initial?: boolean; dark?: boolean }) {
+  return (
+    <OxygenUIThemeProvider theme={OxygenTheme}>
+      {dark && <DarkMode />}
+      <Host initial={initial} />
+    </OxygenUIThemeProvider>
+  );
+}
+
+/** The prototype's comments in review.json, as the room holds it. */
+function written() {
+  return commentsOn(readReview(readDocFile(doc, DESIGN_REVIEW_PATH)).review, manifestPath(C));
 }
 
 function frame(): HTMLIFrameElement {
@@ -131,12 +139,12 @@ function lastView(post: { mock: { calls: unknown[][] } }) {
   return messages.filter((m) => m.view).at(-1)!.view!;
 }
 
-/** Render again after the room's files or the chat changed (`prototypes`, `chat`), as their stores would. */
+/** Render again after the room's files changed (`prototypes`), as the room would. */
 let rerender: () => void = () => {};
 
 async function openReview() {
-  const rendered = render(<Harness initial={C} />);
-  rerender = () => rendered.rerender(<Harness initial={C} />);
+  const rendered = render(<Harness initial />);
+  rerender = () => rendered.rerender(<Harness initial />);
   const dialog = await screen.findByRole("dialog");
   await waitFor(() => expect(frame()).toBeInTheDocument());
   const post = vi.spyOn(frame().contentWindow!, "postMessage");
@@ -167,7 +175,7 @@ function dock() {
   return screen.getByRole("region", { name: "Review controls" });
 }
 
-/** The dock's comments: the count and its list (with Comment on this screen), Send to agent, and what the send says. */
+/** The dock's comments: the count and its list (with Comment on this screen), where they go, and what the queue says. */
 function bar() {
   return within(dock()).getByRole("group", { name: "Comments" });
 }
@@ -214,87 +222,15 @@ function addComment(text: string) {
   fireEvent.click(within(bubble()).getByRole("button", { name: "Add" }));
 }
 
+
 beforeEach(() => {
-  queryClient = new QueryClient();
-  invalidate = vi.spyOn(queryClient, "invalidateQueries");
+  doc = new Y.Doc();
   prototypes = appPrototypes([C], files, null);
-  chat = idle;
-  send.mockClear();
-  send.mockResolvedValue(true);
-  openChat.mockClear();
-  turnEnds.clear();
-  reviews.current = createReviewStore({
-    onTurnEnd: (fn) => {
-      turnEnds.add(fn);
-      return () => turnEnds.delete(fn);
-    },
-  });
+  whatChanged.mockClear();
+  reviews.current = createReviewStore();
 });
 
 afterEach(cleanup);
-
-describe("the Prototype tab", () => {
-  it("lists each web application with its prototype's status", () => {
-    prototypes = [
-      ...appPrototypes(["admin-web"], { [manifestPath("admin-web")]: "{" , [sourcePath("admin-web")]: "x" }, null),
-      ...appPrototypes([C], files, revisingIn("/prototype expense-web")),
-      ...appPrototypes(["kiosk-web"], {}, null),
-    ];
-    render(<Harness />);
-    const rows = within(screen.getByRole("list", { name: "Prototypes" })).getAllByRole("listitem");
-    expect(rows.map((r) => within(r).getByText(/^(Invalid|Revising…|No prototype|Ready)$/).textContent)).toEqual(["Invalid", "Revising…", "No prototype"]);
-    expect(within(rows[0]!).getByLabelText(/prototype\.json is invalid/)).toHaveTextContent("The last prototype couldn't be rendered.");
-    expect(within(rows[0]!).queryByRole("button", { name: "Review" })).toBeNull();
-    expect(within(rows[0]!).getByRole("button", { name: "Try again" })).toBeInTheDocument();
-    expect(within(rows[1]!).getByRole("button", { name: "Review" })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: "Update" })).toBeNull();
-    expect(within(rows[2]!).getByRole("button", { name: "Make prototype" })).toBeInTheDocument();
-  });
-
-  it("says the prototype is being made while its first turn runs", () => {
-    prototypes = appPrototypes([C], {}, revisingIn("/prototype expense-web"));
-    render(<Harness />);
-    expect(screen.getByText("Making prototype…")).toBeInTheDocument();
-    expect(screen.getByLabelText("Working on the prototype")).toBeInTheDocument();
-  });
-
-  it("shows a prototype the running turn is still writing as in progress, not broken", () => {
-    prototypes = [
-      ...appPrototypes([C], { [manifestPath(C)]: SAMPLE_MANIFEST }, revisingIn("/prototype")),
-      ...appPrototypes(["admin-web"], {}, revisingIn("/prototype")),
-    ];
-    chat = { ...idle, turn: { phase: "running", turnId: "t1", instruction: "/prototype" } };
-    render(<Harness />);
-    const rows = within(screen.getByRole("list", { name: "Prototypes" })).getAllByRole("listitem");
-    expect(within(rows[0]!).queryByText("The last prototype couldn't be rendered.")).toBeNull();
-    expect(within(rows[0]!).getByText("The agent is working on it.")).toBeInTheDocument();
-    expect(within(rows[1]!).getByText("Making prototype…")).toBeInTheDocument();
-    expect(screen.queryByRole("button")).toBeNull();
-  });
-
-  it("says why Make prototype waits while another turn runs", () => {
-    prototypes = appPrototypes([C], {}, null);
-    chat = busy;
-    render(<Harness />);
-    expect(screen.getByRole("button", { name: "Make prototype" })).toBeDisabled();
-    expect(screen.getByText(/The agent is busy with a turn/)).toBeInTheDocument();
-  });
-
-  it("says there is no prototype yet and the spec and design come first", () => {
-    prototypes = [];
-    render(<Harness />);
-    expect(screen.getByText(/Finish the spec and design a web application first/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Make prototype/ })).toBeNull();
-  });
-
-  it("offers Make prototype in the empty state once the design has a web application", () => {
-    prototypes = appPrototypes([C], {}, null);
-    render(<Harness />);
-    fireEvent.click(screen.getByRole("button", { name: "Make prototype" }));
-    expect(openChat).toHaveBeenCalled();
-    expect(send).toHaveBeenCalledWith("acme-expenses", "/prototype expense-web", { kind: "prototype" });
-  });
-});
 
 describe("the full-screen review", () => {
   it("opens from Review over the whole console, and closes with Close and with Escape", async () => {
@@ -332,7 +268,7 @@ describe("the full-screen review", () => {
   });
 
   it("covers the frame with a loading state until the prototype first draws, so an early click is not lost", async () => {
-    render(<Harness initial={C} />);
+    render(<Harness initial />);
     const dialog = await screen.findByRole("dialog");
     await waitFor(() => expect(frame()).toBeInTheDocument());
     // The runtime has not started yet, then it has but the app has not drawn.
@@ -355,7 +291,7 @@ describe("the full-screen review", () => {
   it("stops waiting on a frame that neither draws nor says why, and says it did not start", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      render(<Harness initial={C} />);
+      render(<Harness initial />);
       const dialog = await screen.findByRole("dialog");
       await waitFor(() => expect(frame()).toBeInTheDocument());
       fromFrame({ type: "proto:ready" });
@@ -372,7 +308,7 @@ describe("the full-screen review", () => {
 
   it("draws the prototype in the console's scheme", async () => {
     try {
-      render(<Harness initial={C} dark />);
+      render(<Harness initial dark />);
       await screen.findByRole("dialog");
       await waitFor(() => expect(frame()).toBeInTheDocument());
       const post = vi.spyOn(frame().contentWindow!, "postMessage");
@@ -387,7 +323,7 @@ describe("the full-screen review", () => {
 
   it("says why instead of drawing a blank frame when the prototype is invalid", async () => {
     prototypes = appPrototypes([C], { [manifestPath(C)]: SAMPLE_MANIFEST }, null);
-    render(<Harness initial={C} />);
+    render(<Harness initial />);
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText(/prototype\.tsx is missing/)).toBeInTheDocument();
     expect(screen.queryByTitle("Acme Expenses prototype app")).toBeNull();
@@ -433,7 +369,7 @@ describe("the full-screen review", () => {
     const controls = (group: HTMLElement) => [...group.querySelectorAll("button, select")].map((c) => c.getAttribute("aria-label") ?? c.textContent);
     expect(controls(groups[0]!)).toEqual(["Role", "State", "Reset data"]);
     expect(controls(groups[1]!)).toEqual(["Preview", "Comment"]);
-    expect(controls(groups[2]!)).toEqual(["0 comments", "Send to agent"]);
+    expect(controls(groups[2]!)).toEqual(["0 comments"]);
     fireEvent.mouseOver(within(dock()).getByRole("button", { name: "Reset data" }));
     expect(await screen.findByRole("tooltip")).toHaveTextContent("Reset data");
   });
@@ -460,10 +396,11 @@ describe("the full-screen review", () => {
     fireEvent.click(within(queue).getByRole("button", { name: "Remove comment 1" }));
     expect(within(queue).getAllByRole("listitem")).toHaveLength(1);
     expect(bar()).toHaveTextContent("1 comment");
-    expect(within(bar()).getByRole("button", { name: "Send to agent" })).toBeEnabled();
+    expect(bar()).toHaveTextContent("1 pending · sent with Address comments on the Overview");
+    expect(written().map((c) => c.text)).toEqual(["Too much white space"]);
   });
 
-  it("sends every request as one typed /prototype turn, keeps the review open, and opens the chat", async () => {
+  it("writes each queued comment as the reviewer's Pending draft on the prototype in review.json, with where it was made", async () => {
     const { dialog } = await openReview();
     toPendingAsManager(dialog);
     annotate(dialog);
@@ -479,60 +416,35 @@ describe("the full-screen review", () => {
     clickElement("empty.pending");
     addComment("Say who to ask when nothing waits");
     expect(bar()).toHaveTextContent("2 comments");
-    fireEvent.click(within(bar()).getByRole("button", { name: "Send to agent" }));
+    expect(within(bar()).queryByRole("button", { name: /Send/ })).toBeNull();
 
-    await waitFor(() => expect(openChat).toHaveBeenCalled());
-    expect(screen.getByRole("dialog", { name: "Prototype · Acme Expenses" })).toBeInTheDocument();
-    expect(send).toHaveBeenCalledWith("acme-expenses", "/prototype expense-web", {
-      kind: "prototype",
-      feedback: {
-        prototypeHash: prototypeHash(SAMPLE_MANIFEST, SAMPLE_SOURCE),
-        component: C,
-        requests: [
-          { screenId: "screen.pending", roleId: "manager", stateId: "state.default", elementIds: ["btn.reject", "btn.approve"], text: "Put Approve on the right" },
-          { screenId: "screen.pending", roleId: "manager", stateId: "state.empty", elementIds: ["empty.pending"], text: "Say who to ask when nothing waits" },
-        ],
+    expect(written().map((c) => ({ text: c.text, status: c.status, author: c.author, anchor: c.anchor }))).toEqual([
+      {
+        text: "Put Approve on the right",
+        status: "draft",
+        author: { id: ME.id, name: ME.name },
+        anchor: { screenId: "screen.pending", roleId: "manager", stateId: "state.default", elementIds: ["btn.reject", "btn.approve"] },
       },
-    });
-    // The cards see the turn running as soon as the server has it.
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: designKey("acme-expenses") });
-
-    // Sent: the queue starts again.
-    expect(bar()).toHaveTextContent("0 comments");
+      {
+        text: "Say who to ask when nothing waits",
+        status: "draft",
+        author: { id: ME.id, name: ME.name },
+        anchor: { screenId: "screen.pending", roleId: "manager", stateId: "state.empty", elementIds: ["empty.pending"] },
+      },
+    ]);
   });
 
-  it("records the revision it showed as reviewed in this browser", async () => {
-    await openReview();
-    const hash = prototypeHash(SAMPLE_MANIFEST, SAMPLE_SOURCE);
-    await waitFor(() => expect(unreviewed("acme-expenses", { [C]: hash })).toEqual([]));
-  });
-
-  it("refuses Send while a turn is running, says why, and keeps the queue", async () => {
-    chat = busy;
+  it("keeps the queue across closing and opening again, and shows a draft written elsewhere", async () => {
     const { dialog } = await openReview();
     annotate(dialog);
     clickElement("btn.new-claim");
     addComment("Too much white space");
-    fireEvent.click(within(bar()).getByRole("button", { name: "Send to agent" }));
-    expect(within(bar()).getByRole("alert")).toHaveTextContent(/working on another turn.*kept/);
-    expect(send).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(within(commentList()).getAllByRole("listitem")).toHaveLength(1);
-  });
-
-  it("keeps the queue when the chat does not take the turn, and across closing and opening again", async () => {
-    send.mockResolvedValue(false);
-    const { dialog } = await openReview();
-    annotate(dialog);
-    clickElement("btn.new-claim");
-    addComment("Too much white space");
-    fireEvent.click(within(bar()).getByRole("button", { name: "Send to agent" }));
-    expect(await within(bar()).findByRole("alert")).toHaveTextContent(/weren't sent/);
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
     await screen.findByRole("dialog");
     expect(bar()).toHaveTextContent("1 comment");
+    expect(written()).toHaveLength(1);
   });
 });
 
@@ -659,6 +571,7 @@ describe("commenting in place", () => {
     expect(within(bubble()).getByText(`${MAX_FEEDBACK_TEXT - 10} / ${MAX_FEEDBACK_TEXT}`)).toBeInTheDocument();
   });
 
+  // Fifty comments, each selected and added through the frame and written to the review: seconds on a loaded runner.
   it("refuses another comment once the queue is full, and says why", async () => {
     await annotating();
     for (let i = 0; i < MAX_FEEDBACK_REQUESTS; i++) {
@@ -671,20 +584,20 @@ describe("commenting in place", () => {
     expect(within(bar()).getByRole("note")).toHaveTextContent(`The queue is full (${MAX_FEEDBACK_REQUESTS} comments)`);
     commentList();
     expect(within(bar()).getByRole("button", { name: "Comment on this screen" })).toBeDisabled();
-  });
+  }, 60_000);
 });
 
-describe("the send bar", () => {
-  it("replaces the side panel: the prototype takes the full width, and the bar counts and sends", async () => {
+describe("the comments bar", () => {
+  it("replaces the side panel: the prototype takes the full width, and the bar counts and says where comments go", async () => {
     const { dialog } = await openReview();
     annotate(dialog);
     expect(within(dialog).queryByRole("complementary")).toBeNull();
     expect(bar()).toHaveTextContent("0 comments");
-    expect(within(bar()).getByRole("button", { name: "Send to agent" })).toBeDisabled();
+    expect(bar()).not.toHaveTextContent("pending");
     clickElement("btn.new-claim");
     addComment("Call it Submit a claim");
     expect(bar()).toHaveTextContent("1 comment");
-    expect(within(bar()).getByRole("button", { name: "Send to agent" })).toBeEnabled();
+    expect(bar()).toHaveTextContent("1 pending · sent with Address comments on the Overview");
   });
 
   it("comments on the whole screen from the list for the keyboard, even from Preview, and leaves no pin", async () => {
@@ -698,12 +611,9 @@ describe("the send bar", () => {
     expect(lastView(post).pins).toEqual({});
     expect(lastView(post)).not.toHaveProperty("screenPins");
     expect(within(commentList()).getByRole("listitem")).toHaveTextContent(/Too busy overall.*Whole screen/);
-
-    fireEvent.click(within(bar()).getByRole("button", { name: "Send to agent" }));
-    await waitFor(() => expect(send).toHaveBeenCalled());
-    expect(send.mock.calls[0]![2]).toMatchObject({
-      feedback: { requests: [{ screenId: "screen.my-claims", roleId: "employee", stateId: "state.default", elementIds: [], text: "Too busy overall" }] },
-    });
+    expect(written().map((c) => [c.text, c.anchor])).toEqual([
+      ["Too busy overall", { screenId: "screen.my-claims", roleId: "employee", stateId: "state.default", elementIds: [] }],
+    ]);
   });
 
   it("opens nothing on a toggle that names no element", async () => {
@@ -1004,7 +914,7 @@ describe("pins and drafts", () => {
     expect(lastView(post).pins).toEqual({ "btn.reject": [1] });
   });
 
-  it("never counts or sends a draft, and keeps it once the rest is sent", async () => {
+  it("never counts a draft, nor writes it to the review", async () => {
     const { dialog, post } = await annotating();
     clickElement("btn.approve");
     addComment("Make it green");
@@ -1012,15 +922,8 @@ describe("pins and drafts", () => {
     type("Half a thought");
     await clickAway(dialog);
     expect(within(bar()).getByRole("button", { name: "1 comment" })).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: /^Send/ }));
-
-    await waitFor(() => expect(send).toHaveBeenCalled());
-    const [, , turn] = send.mock.calls[0] as [string, string, { feedback: { requests: { text: string }[] } }];
-    expect(turn.feedback.requests.map((r) => r.text)).toEqual(["Make it green"]);
-
-    await waitFor(() => expect(lastView(post).pins).toEqual({}));
+    expect(written().map((c) => c.text)).toEqual(["Make it green"]);
     expect(lastView(post).drafts).toEqual(["btn.reject"]);
-    expect(screen.getByRole("dialog", { name: "Prototype · Acme Expenses" })).toBeInTheDocument();
   });
 
   it("keeps drafts, and the text left open, across closing and opening the review again", async () => {
@@ -1039,7 +942,6 @@ describe("pins and drafts", () => {
 });
 
 describe("the revision landing in the open review", () => {
-  const PROJECT = "acme-expenses";
   const REVISED_SOURCE = SAMPLE_SOURCE.replace("Revising", "Revised") + "\n// revised\n";
   /** The sample without the New claim screen (and the submit flow through it). */
   const WITHOUT_NEW_CLAIM = (() => {
@@ -1049,19 +951,14 @@ describe("the revision landing in the open review", () => {
     return JSON.stringify(m, null, 2);
   })();
 
-  /** The agent took the turn: the chat runs `/prototype expense-web` and the room's files are what it has written so far. */
+  /** A design run is working on the prototype: the room's files are what it has written so far. */
   function revising(room: Record<string, string> = files) {
-    chat = { ...idle, turn: { phase: "running", turnId: "t2", instruction: "/prototype expense-web" } };
     prototypes = appPrototypes([C], room, revisingIn("/prototype expense-web"));
     rerender();
   }
 
-  /** The turn ended (`outcome`, as the chat store reports it), leaving the room's files as given. */
-  function ended(room: Record<string, string>, outcome: TurnOutcome = "completed") {
-    act(() => {
-      for (const fn of turnEnds) fn(PROJECT, outcome);
-    });
-    chat = idle;
+  /** The run ended, leaving the room's files as given. */
+  function ended(room: Record<string, string>) {
     prototypes = appPrototypes([C], room, null);
     rerender();
   }
@@ -1073,8 +970,8 @@ describe("the revision landing in the open review", () => {
     return post.mock.calls.map((c) => c[0] as { type: string; source?: string; version?: string; data?: unknown; view?: { screenId: string } }).filter((m) => m.type === "proto:load").at(-1)!;
   }
 
-  /** Comments `texts` on the pending approvals' Reject, sent; the agent takes the turn. */
-  async function sent(texts: string[] = ["Ask for a reason"]) {
+  /** Comments `texts` on the pending approvals' Reject, queued; then a run starts revising the prototype. */
+  async function queued(texts: string[] = ["Ask for a reason"]) {
     const opened = await openReview();
     toPendingAsManager(opened.dialog);
     annotate(opened.dialog);
@@ -1082,30 +979,24 @@ describe("the revision landing in the open review", () => {
       clickElement("btn.reject");
       addComment(text);
     }
-    fireEvent.click(within(bar()).getByRole("button", { name: "Send to agent" }));
-    await waitFor(() => expect(send).toHaveBeenCalled());
     revising();
     return opened;
   }
 
-  it("says the agent is revising on the Send button itself, waits to send, and holds comments written meanwhile", async () => {
-    await sent(["Ask for a reason", "Make it red"]);
-    // The button carries the state: no second label beside it.
-    const busy = within(bar()).getByRole("button", { name: /Revising…/ });
-    expect(busy).toBeDisabled();
-    expect(within(bar()).queryByRole("button", { name: "Send to agent" })).toBeNull();
-    // Read out in full to a screen reader.
-    expect(bar()).toHaveTextContent("Agent is revising… (2 comments)");
-
+  it("says the agent is revising in the bar, and takes comments written meanwhile as drafts", async () => {
+    await queued(["Ask for a reason"]);
+    expect(bar()).toHaveTextContent("The agent is revising the prototype…");
     clickElement("btn.approve");
     addComment("Make it green");
-    expect(bar()).toHaveTextContent("1 comment");
-    expect(within(bar()).getByRole("button", { name: /Revising…/ })).toBeDisabled();
-    expect(send).toHaveBeenCalledTimes(1);
+    expect(bar()).toHaveTextContent("2 comments");
+    expect(written().map((c) => [c.text, c.status])).toEqual([
+      ["Ask for a reason", "draft"],
+      ["Make it green", "draft"],
+    ]);
   });
 
   it("keeps showing the revision it had while the agent writes the next one", async () => {
-    const { post } = await sent();
+    const { post } = await queued();
     const loads = post.mock.calls.filter((c) => (c[0] as { type: string }).type === "proto:load").length;
     revising({ [manifestPath(C)]: SAMPLE_MANIFEST, [sourcePath(C)]: "// half written" });
     revising({ [manifestPath(C)]: SAMPLE_MANIFEST });
@@ -1114,18 +1005,17 @@ describe("the revision landing in the open review", () => {
   });
 
   it("swaps the landed revision in on the same screen, its data from the seed, and says so with What changed", async () => {
-    const { post } = await sent(["Ask for a reason", "Make it red"]);
+    const { post } = await queued(["Ask for a reason", "Make it red"]);
     ended(revised());
 
     await waitFor(() => expect(lastLoad(post).source).toBe(REVISED_SOURCE));
     expect(lastLoad(post)).toMatchObject({ data: undefined, view: { screenId: "screen.pending" } });
-    expect(bar()).not.toHaveTextContent("Agent is revising");
-    expect(within(bar()).getByRole("button", { name: "Send to agent" })).toBeDisabled();
+    expect(bar()).not.toHaveTextContent("revising");
     const toast = screen.getByRole("alert");
-    expect(toast).toHaveTextContent("Updated · 2 comments addressed");
+    expect(toast).toHaveTextContent("Updated");
 
     fireEvent.click(within(toast).getByRole("button", { name: "What changed" }));
-    expect(openChat).toHaveBeenCalled();
+    expect(whatChanged).toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
@@ -1134,8 +1024,6 @@ describe("the revision landing in the open review", () => {
     fromFrame({ type: "proto:navigate", screenId: "screen.new-claim" });
     commentOnScreen();
     addComment("Too long a form");
-    fireEvent.click(within(bar()).getByRole("button", { name: "Send to agent" }));
-    await waitFor(() => expect(send).toHaveBeenCalled());
     revising();
     ended(revised(REVISED_SOURCE, WITHOUT_NEW_CLAIM));
 
@@ -1144,10 +1032,8 @@ describe("the revision landing in the open review", () => {
     expect(address(dialog)).toHaveTextContent("prototype://screen.my-claims");
   });
 
-  it("flags held comments whose element the revision took away, to remove or keep on the screen", async () => {
-    await sent();
-    clickElement("btn.reject");
-    addComment("Reason is required");
+  it("flags comments whose element the revision took away, to remove or keep on the screen", async () => {
+    await queued();
     clickElement("btn.approve");
     addComment("Make it green");
     clickElement("btn.approve");
@@ -1162,8 +1048,9 @@ describe("the revision landing in the open review", () => {
 
     fireEvent.click(within(entries[0]!).getByRole("button", { name: "Keep as screen comment" }));
     entries = within(commentList()).getAllByRole("listitem");
-    expect(entries[0]).toHaveTextContent(/Reason is required.*Whole screen/);
+    expect(entries[0]).toHaveTextContent(/Ask for a reason.*Whole screen/);
     expect(entries[0]).not.toHaveTextContent("Element no longer on this screen");
+    expect(written()[0]?.anchor?.elementIds).toEqual([]);
 
     // Another goes the same way and is removed.
     ended(revised(REVISED_SOURCE + "\n// again\n"));
@@ -1172,28 +1059,13 @@ describe("the revision landing in the open review", () => {
     expect(entries.filter((e) => e.textContent?.includes("Element no longer on this screen"))).toHaveLength(2);
     fireEvent.click(within(entries[1]!).getByRole("button", { name: "Remove comment 2" }));
     expect(bar()).toHaveTextContent("2 comments");
-  });
-
-  it("sends comments held during the revision on the revision that landed", async () => {
-    await sent();
-    clickElement("btn.approve");
-    addComment("Make it green");
-    ended(revised());
-    fromFrame({ type: "proto:rendered", screenId: "screen.pending", elements: [{ key: "btn.approve", label: "Approve" }] });
-
-    fireEvent.click(within(bar()).getByRole("button", { name: "Send to agent" }));
-    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
-    expect(send.mock.calls[1]![2]).toMatchObject({
-      feedback: { prototypeHash: prototypeHash(SAMPLE_MANIFEST, REVISED_SOURCE), requests: [{ elementIds: ["btn.approve"], text: "Make it green" }] },
-    });
+    expect(written().map((c) => c.text)).toEqual(["Ask for a reason", "And bigger"]);
   });
 
   it("marks only the comments written on an earlier version", async () => {
-    await sent();
-    clickElement("btn.approve");
-    addComment("Make it green");
+    await queued();
     ended(revised());
-    fromFrame({ type: "proto:rendered", screenId: "screen.pending", elements: [{ key: "btn.approve", label: "Approve" }] });
+    fromFrame({ type: "proto:rendered", screenId: "screen.pending", elements: [{ key: "btn.approve", label: "Approve" }, { key: "btn.reject", label: "Reject" }] });
     clickElement("btn.approve");
     addComment("And bigger");
 
@@ -1204,7 +1076,7 @@ describe("the revision landing in the open review", () => {
   });
 
   it("flags no orphan until the frame reports what the landed revision draws", async () => {
-    await sent();
+    await queued();
     clickElement("btn.approve");
     addComment("Make it green");
     // The last the frame said of the old revision: no Approve.
@@ -1217,7 +1089,7 @@ describe("the revision landing in the open review", () => {
   });
 
   it("flags no orphan from a report of the revision before, arriving after the swap", async () => {
-    const { post } = await sent();
+    const { post } = await queued();
     clickElement("btn.approve");
     addComment("Make it green");
     ended(revised());
@@ -1231,135 +1103,25 @@ describe("the revision landing in the open review", () => {
     expect(bar()).toHaveTextContent("1 comment points at an element no longer on this screen.");
   });
 
-  it("puts the sent comments back with the reason and Retry when the turn fails, and keeps the revision showing", async () => {
-    const { post } = await sent(["Ask for a reason"]);
-    clickElement("btn.approve");
-    addComment("Make it green");
-    const loads = post.mock.calls.filter((c) => (c[0] as { type: string }).type === "proto:load").length;
-    ended(files, "failed");
-
-    expect(within(bar()).getByRole("alert")).toHaveTextContent(/wasn't updated.*Your comments are back/);
-    expect(within(commentList()).getAllByRole("listitem").map((e) => e.textContent)).toEqual([
-      expect.stringContaining("Ask for a reason"),
-      expect.stringContaining("Make it green"),
-    ]);
-    expect(post.mock.calls.filter((c) => (c[0] as { type: string }).type === "proto:load")).toHaveLength(loads);
-    expect(screen.queryByText(/^Updated/)).toBeNull();
-
-    fireEvent.click(within(bar()).getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
-    expect((send.mock.calls[1]![2] as { feedback: { requests: { text: string }[] } }).feedback.requests.map((r) => r.text)).toEqual([
-      "Ask for a reason",
-      "Make it green",
-    ]);
-  });
-
-  it("shows what a failed turn wrote before it stopped, and gives the comments back on it", async () => {
-    const { post } = await sent(["Ask for a reason"]);
-    clickElement("btn.approve");
-    addComment("Make it green");
-    ended(revised(), "failed");
-
-    await waitFor(() => expect(lastLoad(post).source).toBe(REVISED_SOURCE));
-    expect(within(bar()).getByRole("alert")).toHaveTextContent(/stopped partway, so you're seeing the changes it made before it stopped\. Your comments are back/);
-    expect(bar()).toHaveTextContent("2 comments were written on an earlier version of the prototype.");
-
-    fireEvent.click(within(bar()).getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
-    expect(send.mock.calls[1]![2]).toMatchObject({ feedback: { prototypeHash: prototypeHash(SAMPLE_MANIFEST, REVISED_SOURCE) } });
-  });
-
-  it("keeps the places of the comments out with the agent: none can be added past the limit while it revises", async () => {
-    await sent(Array.from({ length: MAX_FEEDBACK_REQUESTS }, (_, i) => `Comment ${i + 1}`));
-    clickElement("btn.approve");
-    fireEvent.change(within(bubble()).getByLabelText("Comment"), { target: { value: "One more" } });
-    expect(within(bubble()).getByRole("button", { name: "Add" })).toBeDisabled();
-    expect(within(bar()).getByRole("note")).toHaveTextContent(`The queue is full (${MAX_FEEDBACK_REQUESTS} comments`);
-    commentList();
-    expect(within(bar()).getByRole("button", { name: "Comment on this screen" })).toBeDisabled();
-  });
-
-  it("gives a failed batch back with the comments held meanwhile as one batch Retry can send", async () => {
-    await sent(["Ask for a reason"]);
-    for (let i = 0; i < MAX_FEEDBACK_REQUESTS - 1; i++) {
-      clickElement("btn.approve");
-      addComment(`Held ${i + 1}`);
-    }
-    clickElement("btn.approve");
-    fireEvent.change(within(bubble()).getByLabelText("Comment"), { target: { value: "One more" } });
-    expect(within(bubble()).getByRole("button", { name: "Add" })).toBeDisabled();
-    ended(files, "failed");
-
-    expect(bar()).toHaveTextContent(`${MAX_FEEDBACK_REQUESTS} comments`);
-    fireEvent.click(within(bar()).getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
-    expect((send.mock.calls[1]![2] as { feedback: { requests: unknown[] } }).feedback.requests).toHaveLength(MAX_FEEDBACK_REQUESTS);
-  });
-
-  it("keeps the last good revision showing when the new one is invalid, and gives the comments back", async () => {
-    await sent(["Ask for a reason"]);
-    ended({ [manifestPath(C)]: "{" , [sourcePath(C)]: REVISED_SOURCE });
+  it("keeps the last good revision showing when the new one is invalid, and says why", async () => {
+    await queued(["Ask for a reason"]);
+    ended({ [manifestPath(C)]: "{", [sourcePath(C)]: REVISED_SOURCE });
 
     expect(screen.getByTitle("Acme Expenses prototype app")).toBeInTheDocument();
     expect(within(bar()).getByRole("alert")).toHaveTextContent(/prototype\.json is invalid/);
     expect(bar()).toHaveTextContent("1 comment");
-    expect(within(bar()).getByRole("button", { name: "Retry" })).toBeEnabled();
   });
 
   it("shows the revising state when opened again mid-revision, then the landed revision", async () => {
-    const { dialog } = await sent(["Ask for a reason"]);
+    const { dialog } = await queued(["Ask for a reason"]);
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
     await screen.findByRole("dialog");
-    expect(bar()).toHaveTextContent("Agent is revising… (1 comment)");
+    expect(bar()).toHaveTextContent("The agent is revising the prototype…");
     ended(revised());
-    expect(screen.getByRole("alert")).toHaveTextContent("Updated · 1 comment addressed");
-  });
-});
-
-describe("leaving the Prototype tab mid-revision", () => {
-  /** The tab goes away (another tab of the project, or another page), and comes back later, with the review open. */
-  function leave() {
-    cleanup();
-  }
-  async function comeBack() {
-    render(<Harness initial={C} />);
-    return screen.findByRole("dialog");
-  }
-
-  async function sentAndLeft() {
-    const { dialog } = await openReview();
-    annotate(dialog);
-    clickElement("btn.reject");
-    addComment("Ask for a reason");
-    fireEvent.click(within(bar()).getByRole("button", { name: "Send to agent" }));
-    await waitFor(() => expect(send).toHaveBeenCalled());
-    chat = { ...idle, turn: { phase: "running", turnId: "t2", instruction: "/prototype expense-web" } };
-    prototypes = appPrototypes([C], files, revisingIn("/prototype expense-web"));
-    rerender();
-    leave();
-  }
-
-  it("shows the batch still out with the agent when the tab comes back mid-turn", async () => {
-    await sentAndLeft();
-    await comeBack();
-    expect(bar()).toHaveTextContent("Agent is revising… (1 comment)");
-  });
-
-  it("gives a batch whose turn failed while the tab was away back, with the reason, when it comes back", async () => {
-    await sentAndLeft();
-    act(() => {
-      for (const fn of turnEnds) fn("acme-expenses", "failed");
-    });
-    chat = idle;
-    prototypes = appPrototypes([C], files, null);
-    await comeBack();
-
-    expect(within(bar()).getByRole("alert")).toHaveTextContent(/Your comments are back/);
-    expect(within(commentList()).getAllByRole("listitem").map((e) => e.textContent)).toEqual([expect.stringContaining("Ask for a reason")]);
-    expect(within(bar()).getByRole("button", { name: "Retry" })).toBeEnabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Updated");
   });
 });
 
@@ -1409,7 +1171,7 @@ describe("a whole-screen comment at a spot of the screen", () => {
     expect(lastView(post)).not.toHaveProperty("screenPins");
   });
 
-  it("leaves a numbered pin at the spot once added, and sends the comment without the spot", async () => {
+  it("leaves a numbered pin at the spot once added, and writes the comment without the spot", async () => {
     const { dialog, post } = await openReview();
     annotate(dialog);
     clickScreen();
@@ -1418,12 +1180,7 @@ describe("a whole-screen comment at a spot of the screen", () => {
     expect(lastView(post).screenPins).toEqual([{ at: SPOT, number: 1 }]);
     expect(lastView(post).pins).toEqual({});
     expect(within(commentList()).getByRole("listitem")).toHaveTextContent(/Too busy overall.*Whole screen/);
-
-    fireEvent.click(within(bar()).getByRole("button", { name: "Send to agent" }));
-    await waitFor(() => expect(send).toHaveBeenCalled());
-    expect((send.mock.calls[0]![2] as { feedback: { requests: unknown[] } }).feedback.requests).toEqual([
-      { screenId: "screen.my-claims", roleId: "employee", stateId: "state.default", elementIds: [], text: "Too busy overall" },
-    ]);
+    expect(written().map((c) => c.anchor)).toEqual([{ screenId: "screen.my-claims", roleId: "employee", stateId: "state.default", elementIds: [] }]);
   });
 
   it("opens its pin to read, edit and remove it, putting focus back on the pin on Escape", async () => {
@@ -1465,7 +1222,7 @@ describe("a whole-screen comment at a spot of the screen", () => {
     expect(lastView(post).screenPins).toEqual([{ at: SPOT, number: 1 }]);
   });
 
-  it("lists and sends comments made on several screens and as another role as one batch, and draws each screen's pins again there", async () => {
+  it("lists and writes comments made on several screens and as another role, and draws each screen's pins again there", async () => {
     const { dialog, post } = await openReview();
     // My claims: an element, and a spot.
     annotate(dialog);
@@ -1492,10 +1249,8 @@ describe("a whole-screen comment at a spot of the screen", () => {
     addComment("Ask for a reason");
 
     expect(within(commentList()).getAllByRole("listitem")).toHaveLength(5);
-    fireEvent.click(within(bar()).getByRole("button", { name: "Send to agent" }));
-    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
     const on = (screenId: string, roleId: string, elementIds: string[], text: string) => ({ screenId, roleId, stateId: "state.default", elementIds, text });
-    expect((send.mock.calls[0]![2] as { feedback: { requests: unknown[] } }).feedback.requests).toEqual([
+    expect(written().map((c) => ({ ...c.anchor, text: c.text }))).toEqual([
       on("screen.my-claims", "employee", ["btn.new-claim"], "Call it Submit a claim"),
       on("screen.my-claims", "employee", [], "Too busy overall"),
       on("screen.new-claim", "employee", ["btn.submit"], "Say what happens next"),

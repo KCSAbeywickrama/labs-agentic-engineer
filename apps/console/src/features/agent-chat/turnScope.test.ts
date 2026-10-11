@@ -26,9 +26,8 @@ describe("turnScopeFor (where the user is)", () => {
     expect(turnScopeFor("spec", approvals)).toEqual({ kind: "feature", featureId: "F2" });
   });
 
-  it("is the design review on the design card, and on the prototypes beside it", () => {
+  it("is the design review on the design card", () => {
     expect(turnScopeFor("design", null)).toEqual({ kind: "design" });
-    expect(turnScopeFor("prototype", null)).toEqual({ kind: "design" });
   });
 
   it("is the whole product anywhere else in the project", () => {
@@ -54,21 +53,7 @@ describe("the scope on the wire", () => {
 });
 
 describe("a prototype turn on the wire", () => {
-  const feedback = {
-    prototypeHash: "a".repeat(64),
-    component: "expense-web",
-    requests: [{ screenId: "screen.claim", roleId: "manager", stateId: "state.default", elementIds: ["btn.approve"], text: "Move it right" }],
-  };
-
-  it("sends no scope: the command says what it is about", () => {
-    expect(turnBody("/prototype expense-web", { kind: "prototype" })).toEqual({
-      instruction: "/prototype expense-web",
-    });
-  });
-
-  it("carries a review's requests as prototypeFeedback, unchanged", () => {
-    const body = turnBody("/prototype expense-web", { kind: "prototype", feedback });
-    expect(body).toEqual({ instruction: "/prototype expense-web", prototypeFeedback: feedback });
-    expect(scopeOfBody(body)).toEqual({ kind: "product" });
+  it("sends no scope from the product: the command says what it is about", () => {
+    expect(turnBody("/prototype expense-web", { kind: "product" })).toEqual({ instruction: "/prototype expense-web" });
   });
 });

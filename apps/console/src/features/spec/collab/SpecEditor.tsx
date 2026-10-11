@@ -54,8 +54,6 @@ function pillSx(tone: "warning") {
   } as const;
 }
 
-const ptagSx = { fontSize: "0.6875rem", fontWeight: 600, color: "info.main", whiteSpace: "nowrap", ml: 1 } as const;
-
 // How a spec document reads: the app's prose (proseSx), and the spec's own
 // line decorations on top. The decorations (specLinesPlugin.ts) only name
 // things; the look is here, from the theme.
@@ -69,8 +67,6 @@ const documentSx = {
   "@keyframes aep-fresh": { from: { backgroundColor: soft("success", 0.28) }, to: { backgroundColor: "transparent" } },
   "& .aep-fresh": { borderRadius: 0.5, animation: "aep-fresh 5s ease-out forwards" },
   // Changed by a design comment: the accent's wash, a rule down the left.
-  "& .aep-line--design": { bgcolor: soft("primary"), boxShadow: "inset 2px 0 0 var(--oxygen-palette-primary-main)" },
-  "& .aep-dtag": { ...ptagSx, color: "primary.main", display: "inline-block" },
   "& .aep-asm": { display: "inline-flex", flexWrap: "wrap", gap: 0.5, ml: 0.75, verticalAlign: "baseline", "& button": pillSx("warning") },
   "& .aep-line--by-you": { textDecoration: "underline dotted var(--oxygen-palette-success-main)", textUnderlineOffset: "4px" },
   "& .aep-you": { fontSize: "0.6875rem", color: "success.main", whiteSpace: "nowrap", ml: 1, textDecoration: "none", display: "inline-block" },
@@ -126,7 +122,6 @@ export function SpecEditor({
   onOpen,
   featureRows,
   hideFog = false,
-  designChanged = null,
 }: {
   fragment: Y.XmlFragment;
   /** The file's room path, which its relative links resolve against. */
@@ -137,7 +132,6 @@ export function SpecEditor({
   /** Drawn in place of the Features list (the product page). */
   featureRows?: ReactNode;
   hideFog?: boolean;
-  designChanged?: ReadonlyMap<string, string> | null;
 }) {
   const withRows = featureRows !== undefined;
 
@@ -147,7 +141,7 @@ export function SpecEditor({
         StarterKit.configure({ undoRedo: false, link: { openOnClick: false } }),
         AgentInsertion,
         Collaboration.configure({ fragment }),
-        SpecLines.configure({ featureRows: withRows, hideFog, designChanged }),
+        SpecLines.configure({ featureRows: withRows, hideFog }),
         AssumedLines,
       ],
       onBlur: ({ editor: blurred }) => leaveAssumedEdit(blurred.view),
@@ -158,8 +152,8 @@ export function SpecEditor({
     [fragment],
   );
   useEffect(() => {
-    if (editor) setSpecLinesOptions(editor.view, { featureRows: withRows, hideFog, designChanged });
-  }, [editor, withRows, hideFog, designChanged]);
+    if (editor) setSpecLinesOptions(editor.view, { featureRows: withRows, hideFog });
+  }, [editor, withRows, hideFog]);
 
   // The rows draw into the slot the decorations leave in the document. The
   // slot is ProseMirror's DOM, so it is looked up after every transaction,

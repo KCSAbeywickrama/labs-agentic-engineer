@@ -177,8 +177,7 @@ describe("Acme Expenses, acted on", () => {
         productWide: view(doc).productWide,
         lines: readSpecLines(doc),
         dependencies: [],
-        comments: [],
-        artifacts: [],
+        waitingComments: 0,
         builds: [],
       }).rows.find((r) => r.id === "F3");
     const doc = seeded();

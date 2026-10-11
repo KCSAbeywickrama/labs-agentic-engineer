@@ -17,12 +17,8 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { prototypeHash, type FeedbackRequest } from "@wso2/prototype-kit/feedback";
 import type { PrototypeManifest } from "@wso2/prototype-kit/host";
-import type { TurnOutcome } from "../../agent-chat/chatStore";
-import type { PrototypeFeedback } from "../../agent-chat/turnScope";
 import type { AppPrototype, PrototypeFiles } from "./prototypes";
-import { sendStarted } from "./revision";
 import { createReviewStore } from "./reviewStore";
 
 const manifest: PrototypeManifest = {
@@ -36,25 +32,12 @@ const manifest: PrototypeManifest = {
 };
 const V1: PrototypeFiles = { manifestText: JSON.stringify(manifest), manifest, source: "// one" };
 const C = "expense-web";
-const app = (status: AppPrototype["status"]): AppPrototype => ({ component: C, status, problem: null, files: V1, exists: true });
-const request: FeedbackRequest = { screenId: "screen.claims", roleId: "manager", stateId: "state.default", elementIds: ["btn.reject"], text: "Ask for a reason" };
-const batch: PrototypeFeedback = { prototypeHash: prototypeHash(V1.manifestText, V1.source), component: C, requests: [request] };
-
-/** A store on a stub chat whose turns end when the test says. */
-function store() {
-  const ends = new Set<(projectName: string, outcome: TurnOutcome) => void>();
-  const reviews = createReviewStore({
-    onTurnEnd: (fn) => {
-      ends.add(fn);
-      return () => ends.delete(fn);
-    },
-  });
-  return { reviews, end: (projectName: string, outcome: TurnOutcome) => ends.forEach((fn) => fn(projectName, outcome)) };
-}
+const V2: PrototypeFiles = { ...V1, source: "// two" };
+const app = (status: AppPrototype["status"], files: PrototypeFiles = V1): AppPrototype => ({ component: C, status, problem: null, files, exists: true });
 
 describe("the review store", () => {
   it("keeps each project's sessions apart, and tells only that project's subscribers", () => {
-    const { reviews } = store();
+    const reviews = createReviewStore();
     const told = vi.fn();
     reviews.subscribe("acme", told);
     reviews.change("other", C, (s) => ({ ...s, revising: true }));
@@ -66,34 +49,18 @@ describe("the review store", () => {
   });
 
   it("hands out the same sessions while nothing changed", () => {
-    const { reviews } = store();
+    const reviews = createReviewStore();
     reviews.follow("acme", [app("ready")]);
     const before = reviews.get("acme");
     reviews.follow("acme", [app("ready")]);
     expect(reviews.get("acme")).toBe(before);
   });
 
-  it("records how a turn ended with no review open, and gives a failed batch back once the prototype is followed again", () => {
-    const { reviews, end } = store();
+  it("announces a revision that landed with no review open, the next time the prototype is followed", () => {
+    const reviews = createReviewStore();
     reviews.follow("acme", [app("ready")]);
-    reviews.change("acme", C, (s) => sendStarted(s, batch));
     reviews.follow("acme", [app("revising")]);
-    // The Prototype tab is left: nothing follows the prototype while the turn ends.
-    end("acme", "failed");
-    end("other", "completed");
-    reviews.follow("acme", [app("ready")]);
-    const s = reviews.get("acme")[C]!;
-    expect(s.sent).toBeNull();
-    expect(s.queue.requests.map((r) => r.text)).toEqual(["Ask for a reason"]);
-    expect(s.notice).toMatchObject({ kind: "failed" });
-  });
-
-  it("settles a turn whose revising it never saw, once it knows how the turn ended", () => {
-    const { reviews, end } = store();
-    reviews.follow("acme", [app("ready")]);
-    reviews.change("acme", C, (s) => sendStarted(s, batch));
-    end("acme", "failed");
-    reviews.follow("acme", [app("ready")]);
-    expect(reviews.get("acme")[C]).toMatchObject({ sent: null, notice: { kind: "failed" } });
+    reviews.follow("acme", [app("ready", V2)]);
+    expect(reviews.get("acme")[C]?.notice).toEqual({ kind: "updated" });
   });
 });

@@ -237,8 +237,7 @@ export const buildsHandlers = [
       productWide: workspace.productWide,
       lines,
       dependencies: design.dependencies,
-      comments: design.comments,
-      artifacts: design.artifacts,
+      waitingComments: 0,
       builds,
     });
     const held = [...selection.features, ...selection.productWide].flatMap((id) => gateProblem(offer.rows, id) ?? []);

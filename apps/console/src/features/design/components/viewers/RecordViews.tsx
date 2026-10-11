@@ -20,9 +20,8 @@ import { Box, Typography } from "@wso2/oxygen-ui";
 import { Check, Minus } from "@wso2/oxygen-ui-icons-react";
 import type { ArtifactSource } from "../../api/designModel";
 
-// The design's plain artifacts, drawn by this app: roles, the data model and
-// security. Each part is marked with `data-anchor`, so a comment pinned on it
-// is named after it ("Manager · Approve their team's claims").
+// The design's plain artifacts, drawn by this app from security.json: who can
+// do what (roles), and how each permission is enforced (security).
 
 type Source<K extends ArtifactSource["kind"]> = Extract<ArtifactSource, { kind: K }>;
 
@@ -76,46 +75,6 @@ export function RolesView({ source }: { source: Source<"roles"> }) {
       </Box>
       <Typography variant="body2" color="text.secondary" sx={{ mt: 1.25 }}>
         {source.note}
-      </Typography>
-    </Box>
-  );
-}
-
-/** The records the product keeps, each with example values from one story's walk. */
-export function DataModelView({ source }: { source: Source<"data"> }) {
-  return (
-    <Box>
-      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 1.5 }}>
-        {source.records.map((rec) => (
-          <Box
-            component="section"
-            key={rec.name}
-            data-anchor={rec.name}
-            sx={{ border: 1, borderColor: "divider", borderRadius: 2.5, px: 1.75, py: 1.5, display: "flex", flexDirection: "column", gap: 0.75 }}
-          >
-            <Typography component="h3" sx={{ fontSize: "0.9375rem", fontWeight: 600 }}>
-              {rec.name}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {rec.about}
-            </Typography>
-            <Box component="dl" sx={{ m: 0, display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 1.5, rowGap: 0.5, fontSize: "0.8125rem" }}>
-              {rec.fields.map((f) => (
-                <Box key={f.name} data-anchor={`${rec.name} · ${f.name}`} sx={{ display: "contents" }}>
-                  <Box component="dt" sx={{ color: "text.secondary" }}>
-                    {f.name}
-                  </Box>
-                  <Box component="dd" sx={{ m: 0 }}>
-                    {f.example}
-                  </Box>
-                </Box>
-              ))}
-            </Box>
-          </Box>
-        ))}
-      </Box>
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
-        {source.relation}
       </Typography>
     </Box>
   );

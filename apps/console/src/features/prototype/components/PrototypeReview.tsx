@@ -16,7 +16,7 @@
  * under the License.
  */
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Alert, Box, Button, CircularProgress, Dialog, IconButton, Snackbar, Tooltip, Typography, useColorScheme } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import {
@@ -33,7 +33,6 @@ import {
   type QueueUpdate,
   type ReviewEvent,
 } from "@wso2/prototype-kit/host";
-import type { PrototypeFeedback } from "../../agent-chat/turnScope";
 import {
   dequeue,
   draftAt,
@@ -47,8 +46,9 @@ import {
   pinsOnScreen,
   screenPinsOnScreen,
   targetLabel,
+  type FeedbackQueue,
 } from "@wso2/prototype-kit/feedback";
-import { commentCount, feedbackBatch, queueFull } from "../model/feedback";
+import { queueFull } from "../model/feedback";
 import type { AppPrototype, PrototypeFiles } from "../model/prototypes";
 import type { ReviewSession, RevisionNotice } from "../model/revision";
 import { useFrameRuntime, usePrototypeHash } from "../useReviewAssets";
@@ -64,27 +64,23 @@ import { ViewControls } from "./ViewControls";
 export interface PrototypeReviewProps {
   prototype: AppPrototype;
   /**
-   * What outlives the overlay: the comments queued and drafted so far, the
-   * batch out with the agent, the revision to show (kept while the agent
+   * What outlives the overlay: the revision to show (kept while the agent
    * revises it) and what the last revision's end left to say.
    */
-  session: ReviewSession;
+  session: Pick<ReviewSession, "shown" | "revising" | "notice">;
+  /**
+   * The comment queue: the prototype's drafts in review.json, sent only with
+   * Address comments on the Design card's Overview, and the comments started
+   * and not added.
+   */
+  queue: FeedbackQueue;
   onQueue: (update: QueueUpdate) => void;
-  /** Whether a turn can start now (the chat is loaded and idle). */
-  ready: boolean;
-  /** Send the batch as one revision turn; resolves false when it was not sent. */
-  onSend: (feedback: PrototypeFeedback) => Promise<boolean>;
-  /** The revision showing: the review has looked at it. */
-  onSeen: (hash: string) => void;
   /** The notice was seen: the "Updated" toast closed. */
   onNoticeSeen: () => void;
   /** Read what the agent did: the chat, with the review closed. */
   onWhatChanged: () => void;
   onClose: () => void;
 }
-
-const BUSY = "The agent is working on another turn, so nothing was sent. Your comments are kept: send them once it finishes.";
-const NOT_SENT = "Your comments weren't sent; the chat says why. They are kept: try again.";
 
 /** The review's header: only its title and Close; every control is in the dock. */
 function Header({ titleId, title, onClose }: { titleId: string; title: string; onClose: () => void }) {
@@ -235,26 +231,20 @@ export function PrototypeReview(props: PrototypeReviewProps) {
 
 function Session({
   titleId,
-  prototype,
   files,
   runtime,
   revising,
   session,
+  queue,
   onQueue,
-  ready,
-  onSend,
-  onSeen,
   onNoticeSeen,
   onWhatChanged,
   onClose,
 }: PrototypeReviewProps & { titleId: string; files: PrototypeFiles; runtime: string; revising: boolean }) {
-  const { queue, notice } = session;
+  const { notice } = session;
   const hash = usePrototypeHash(files.manifestText, files.source);
   const colorScheme = useResolvedScheme();
   const { manifest } = files;
-  useEffect(() => {
-    onSeen(hash);
-  }, [hash, onSeen]);
   const [state, setState] = useState(() => ({ manifest, review: initialReview(manifest) }));
   // A revision that lands while the review is open repairs the view in the same render, as the kit CLI's host does.
   let current = state;
@@ -274,8 +264,6 @@ function Session({
   // The elements the frame last said it draws, and for what (revision, screen, role, state): what comments are checked against.
   const [rendered, setRendered] = useState<Rendered | null>(null);
   const [resetToken, setResetToken] = useState(0);
-  const [refused, setRefused] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
   const pins = useMemo(() => pinsOnScreen(requests, view.screenId), [requests, view.screenId]);
   const drafts = useMemo(() => draftPinsOnScreen(queue, view.screenId), [queue, view.screenId]);
   const writing = bubble?.on === "screen" ? bubble : null;
@@ -288,9 +276,7 @@ function Session({
   const [dock, setDock] = useState<HTMLElement | null>(null);
   // The stage: the prototype window's area, above the dock, which bubbles keep within.
   const [stage, setStage] = useState<HTMLDivElement | null>(null);
-  // The comments out with the agent keep their places in the queue until their turn ends.
-  const held = session.sent?.feedback.requests.length ?? 0;
-  const full = queueFull(requests.length, held);
+  const full = queueFull(requests.length);
   // Comments written on an earlier revision may point at elements it took away.
   const earlier = useMemo(() => earlierComments(queue, hash), [queue, hash]);
   // Checked only against what the frame drew for this very revision and view, never a report from before a swap or a switch.
@@ -337,7 +323,6 @@ function Session({
     onQueue((q) => enqueue(q, hash, comment));
     // Added, the comment is no longer a draft to keep.
     draft.setText("");
-    setRefused(null);
     focusBack(view.selectedKeys[0]);
     dispatch({ type: "CLEAR_SELECTION" });
   };
@@ -374,18 +359,6 @@ function Session({
     if (request) dispatch({ type: "OPEN_COMMENT", index, request });
   };
   const labelsOf = (keys: readonly string[]) => keys.map((k) => labels[view.screenId]?.[k] ?? k);
-  const send = async () => {
-    const feedback = feedbackBatch(prototype.component, queue);
-    if (!feedback) return;
-    if (!ready) {
-      setRefused(BUSY);
-      return;
-    }
-    setSending(true);
-    const delivered = await onSend(feedback);
-    setSending(false);
-    setRefused(delivered ? null : NOT_SENT);
-  };
 
   return (
     <>
@@ -476,13 +449,9 @@ function Session({
             requests={requests}
             labels={labels}
             earlier={earlier}
-            held={held}
-            refused={refused}
-            sending={sending}
-            revising={revising ? (session.sent?.feedback.requests.length ?? 0) : null}
+            revising={revising}
             failed={notice?.kind === "failed" ? notice.reason : null}
             orphans={orphans}
-            onSend={() => void send()}
             onKeepOnScreen={(index) => onQueue((q) => keepOnScreen(q, index))}
             onCommentOnScreen={() => dispatch({ type: "COMMENT_ON_SCREEN" })}
             onOpen={open}
@@ -514,7 +483,7 @@ function UpdatedToast({ notice, onWhatChanged, onClose }: { notice: RevisionNoti
           </Button>
         }
       >
-        {updated && (updated.addressed > 0 ? `Updated · ${commentCount(updated.addressed)} addressed` : "Updated")}
+        {updated && "Updated"}
       </Alert>
     </Snackbar>
   );

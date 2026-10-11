@@ -18,7 +18,6 @@
 
 import { describe, expect, it } from "vitest";
 import type { PickRow } from "../../builds/model/picker";
-import type { DesignComment } from "../../design/api/designModel";
 import { deployLeg, projectTrack, type TrackInput } from "./track";
 
 // The track follows the Acme Expenses walk: each leg's lamp and line read the
@@ -53,13 +52,12 @@ const row = (id: string, state: PickRow["state"]): PickRow => ({
   warn: false,
 });
 
-const comment = (status: DesignComment["status"]) => ({ status });
 
 const beforeDesign: TrackInput = {
   features: acme,
   design: { toDesign: ["F1", "F2"], outOfDate: [] },
   designedFrom: {},
-  review: { running: null, comments: [] },
+  review: { running: null, waitingComments: 0 },
   builds: [],
   latestOutcome: null,
   offer: { version: "v1", rows: [row("F1", "disabled"), row("F2", "disabled")] },
@@ -112,7 +110,7 @@ describe("the design leg", () => {
   });
 
   it("is live while the design turn runs", () => {
-    const running = { ...beforeDesign, review: { running: { kind: "design" as const, features: ["F1", "F2"] }, comments: [] } };
+    const running = { ...beforeDesign, review: { running: { kind: "design" as const, features: ["F1", "F2"] }, waitingComments: 0 } };
     expect(projectTrack(running).design).toEqual({ state: "live", summary: "Designing 2 features" });
   });
 
@@ -123,7 +121,7 @@ describe("the design leg", () => {
   it("says a design is out of date once its spec changed, and live again while Update design runs", () => {
     const edited = { ...designed, design: { toDesign: ["F2"], outOfDate: ["F2"] } };
     expect(projectTrack(edited).design).toEqual({ state: "waiting", summary: "1 feature out of date" });
-    const updating = { ...edited, review: { running: { kind: "design" as const, features: ["F2"] }, comments: [] } };
+    const updating = { ...edited, review: { running: { kind: "design" as const, features: ["F2"] }, waitingComments: 0 } };
     expect(projectTrack(updating).design).toEqual({ state: "live", summary: "Designing 1 feature" });
   });
 
@@ -132,13 +130,11 @@ describe("the design leg", () => {
     expect(projectTrack(both).design).toEqual({ state: "waiting", summary: "2 features to design" });
   });
 
-  it("waits on open comments, then on addressed ones to check", () => {
-    const pinned = { ...designed, review: { running: null, comments: [comment("open"), comment("resolved")] } };
-    expect(projectTrack(pinned).design).toEqual({ state: "waiting", summary: "1 comment to address" });
-    const addressing = { ...pinned, review: { running: { kind: "address" as const, features: [] }, comments: pinned.review.comments } };
+  it("waits on comments to address, and runs while they are addressed", () => {
+    const waiting = { ...designed, review: { running: null, waitingComments: 1 } };
+    expect(projectTrack(waiting).design).toEqual({ state: "waiting", summary: "1 comment to address" });
+    const addressing = { ...waiting, review: { running: { kind: "address" as const, features: [] }, waitingComments: 0 } };
     expect(projectTrack(addressing).design).toEqual({ state: "live", summary: "Addressing comments" });
-    const addressed = { ...designed, review: { running: null, comments: [comment("addressed"), comment("addressed")] } };
-    expect(projectTrack(addressed).design).toEqual({ state: "waiting", summary: "2 comments to check" });
   });
 });
 

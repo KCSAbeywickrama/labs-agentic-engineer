@@ -20,24 +20,27 @@ import { createFileRoute } from "@tanstack/react-router";
 import { DesignActions, DesignWorkspace } from "../../../../features/design/components/DesignWorkspace";
 import { CardOverlay } from "../../../../features/projects/components/CardOverlay";
 
-/** The open artifact, or a dependency (`dep-F3`); none opens the first artifact. */
+/** The open file, Comments, or a dependency (`dep-F3`); none opens the Overview. A prototype's full-screen review over it (`review=expense-web`). */
 interface DesignSearch {
   art?: string;
+  review?: string;
 }
 
-// The design card, drawn over the project overview: the design review.
+// The design card, drawn over the project overview: the design and its review.
 export const Route = createFileRoute("/projects/$projectName/_overview/design")({
-  validateSearch: (search: Record<string, unknown>): DesignSearch =>
-    typeof search.art === "string" && search.art ? { art: search.art } : {},
+  validateSearch: (search: Record<string, unknown>): DesignSearch => ({
+    ...(typeof search.art === "string" && search.art ? { art: search.art } : {}),
+    ...(typeof search.review === "string" && search.review ? { review: search.review } : {}),
+  }),
   component: DesignRoute,
 });
 
 function DesignRoute() {
   const { projectName } = Route.useParams();
-  const { art } = Route.useSearch();
+  const { art, review } = Route.useSearch();
   return (
     <CardOverlay card="design" fill actions={<DesignActions projectName={projectName} />}>
-      <DesignWorkspace projectName={projectName} art={art} />
+      <DesignWorkspace projectName={projectName} art={art} review={review} />
     </CardOverlay>
   );
 }

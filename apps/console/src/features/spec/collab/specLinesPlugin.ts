@@ -66,8 +66,6 @@ export interface SpecLinesOptions {
   featureRows: boolean;
   /** Leave the Fog out: a small product shows its feature list alone. */
   hideFog: boolean;
-  /** Lines a design comment changed, by line ID, and what their mark says. Feature pages only. */
-  designChanged: ReadonlyMap<string, string> | null;
 }
 
 /** A decoration to draw, as data: what `build` turns into ProseMirror's. */
@@ -132,14 +130,6 @@ function actionsDom(body: string): HTMLElement {
     button.setAttribute("aria-label", `${label}: ${body}`);
     el.append(button);
   }
-  return el;
-}
-
-function tagDom(className: string, text: string): HTMLElement {
-  const el = document.createElement("span");
-  el.className = className;
-  el.contentEditable = "false";
-  el.textContent = text;
   return el;
 }
 
@@ -216,17 +206,6 @@ function build(doc: PmNode, opts: SpecLinesOptions): DecorationSet {
   for (const line of lines) {
     const parts = parseLine(line.text, line.emphasis);
     for (const mark of lineMarks(line, parts, blocking.has(line))) decorations.push(toDecoration(mark));
-    const changed = parts.lead ? opts.designChanged?.get(parts.lead.id) : undefined;
-    if (changed) {
-      decorations.push(Decoration.node(line.lineFrom, line.lineTo, { class: "aep-line--design" }));
-      decorations.push(
-        Decoration.widget(line.to - 1, () => tagDom("aep-dtag", changed), {
-          key: `design:${changed}`,
-          side: 1,
-          ignoreSelection: true,
-        }),
-      );
-    }
   }
   return DecorationSet.create(doc, decorations);
 }
@@ -245,21 +224,14 @@ const specLinesKey = new PluginKey<SpecLinesState>("specLines");
  */
 export function setSpecLinesOptions(view: EditorView, opts: SpecLinesOptions): void {
   const current = specLinesKey.getState(view.state)?.opts;
-  if (
-    current &&
-    current.featureRows === opts.featureRows &&
-    current.hideFog === opts.hideFog &&
-    current.designChanged === opts.designChanged
-  ) {
-    return;
-  }
+  if (current && current.featureRows === opts.featureRows && current.hideFog === opts.hideFog) return;
   view.dispatch(view.state.tr.setMeta(specLinesKey, opts));
 }
 
 export const SpecLines = Extension.create<SpecLinesOptions>({
   name: "specLines",
   addOptions() {
-    return { featureRows: false, hideFog: false, designChanged: null };
+    return { featureRows: false, hideFog: false };
   },
   addProseMirrorPlugins() {
     const initial = this.options;

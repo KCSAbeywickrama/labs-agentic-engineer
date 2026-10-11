@@ -23,7 +23,7 @@ import { CardFrame } from "../../shell/components/CardFrame";
 import { cardTitle, pageOfCard, pageTitle, type ProjectCard, type ProjectPage } from "../../shell/scope";
 import { WorkspaceTabs } from "./WorkspaceTabs";
 
-/** A card's place on the track, where it has one (Spec, Design and Prototype show theirs as tabs). */
+/** A card's place on the track, where it has one (Spec and Design show theirs as tabs). */
 const STEP: Partial<Record<ProjectCard, number>> = { build: 3 };
 
 /** Where each Page is: a card closes back to the one it is over. */
@@ -41,10 +41,10 @@ const PAGE_PATH = {
  * on the scrim) goes back to it. Each card is a route of its own, so this is
  * what the card routes render; the frame itself is the shell's `CardFrame`.
  *
- * Spec, Design and Prototype are one workspace, so their header is the
- * Spec · Design · Prototype tabs rather than a title; any other card shows its title, or the `title`
- * it is given when its own name says more ("Configure Staging"). A card's own actions (the design card's Address
- * comments) sit in the header beside the close button, and wrap under the
+ * Spec and Design are one workspace, so their header is the
+ * Spec · Design tabs rather than a title; any other card shows its title, or the `title`
+ * it is given when its own name says more ("Configure Staging"). A card's own actions (the design card's
+ * Build) sit in the header beside the close button, and wrap under the
  * tabs at phone width. A `fill` body is laid out by its children (the spec
  * card's rail and document scroll on their own); otherwise the body is one
  * padded scroll.
@@ -70,7 +70,7 @@ export function CardOverlay({
     () => void navigate({ to: PAGE_PATH[page], params: { projectName } }),
     [navigate, page, projectName],
   );
-  const tabbed = card === "spec" || card === "design" || card === "prototype";
+  const tabbed = card === "spec" || card === "design";
   const step = STEP[card];
 
   return (

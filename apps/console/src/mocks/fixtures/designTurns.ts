@@ -16,51 +16,45 @@
  * under the License.
  */
 
-import { parseDesignCommand } from "@aep/contracts/commands";
-import * as Y from "yjs";
+import { ADDRESS_COMMENTS_COMMAND, parseDesignCommand } from "@aep/contracts/commands";
+import type * as Y from "yjs";
 import { readDocFile } from "@aep/collab-doc";
+import { DESIGN_REVIEW_PATH, type ReviewComment } from "@aep/agent-stream";
 import type { MockSpecModel } from "./spec";
-import { applyAgentToolCall } from "../../features/spec/collab/agentWrites";
+import { readReview, reviewText } from "../../features/design/model/review";
+import { manifestPath, sourcePath } from "../../features/prototype/model/prototypes";
 import { projectSpecDoc } from "../../features/spec/collab/specDoc";
 import { readSpecLines } from "../../features/spec/collab/useSpecLines";
 import { designBasis, designWork } from "../../features/spec/model/designWork";
 import { productWideItems, readRequirements } from "../../features/spec/model/requirements";
 import type { components } from "../../generated/ae-design-agent";
 import type { ScriptFrame } from "../chatServer";
-import { liveDesign, teachingSent, type DesignEffect } from "../designState";
-import { dependencyOf, designCatalog, feedbackFor, type DesignTweak } from "./design";
+import { liveDesign, type DesignEffect } from "../designState";
+import { dependencyOf, designCatalog, replyTo } from "./design";
+import { designRoomFiles } from "./designFiles";
 import { Script } from "./interview";
+import { SAMPLE_COMPONENT, tweakSource } from "./prototype";
 
 type ConversationMessage = components["schemas"]["ConversationMessage"];
 
-// PROVISIONAL — mock-only until E1/E4/E5; see features/design/api/designModel.ts.
+// PROVISIONAL — mock-only until E1/E4; see features/design/api/designModel.ts.
 //
 // The mock agent's design-review turns, scoped to the design review:
-//  - "Design 2 features" / "Update design · 1 feature": designs every
-//    interviewed, unblocked feature that is new or out of date, worked out
-//    from the spec as the user has it now (the local doc stands in for the
-//    room), finds what a feature needs from outside, and the first time
-//    teaches the user how feedback works;
-//  - "Address comments · 3": works through every open comment in one turn,
-//    changes the design, rewrites a spec line when a comment is really a
-//    requirement (an editFile the client applies to its doc, as an
-//    interview's write), and replies on each comment.
+//  - "/design F1 F2": designs every interviewed, unblocked feature that is new
+//    or out of date, worked out from the spec as the user has it now (the
+//    local doc stands in for the room), finds what a feature needs from
+//    outside, and writes the design's files into the room one by one, as the
+//    design agent does (fixtures/designFiles.ts);
+//  - "/address-comments": answers every comment the console sent in
+//    specs/design/review.json, marking each addressed with a one-line reply,
+//    and revises the prototype where a comment on it asks for a change the
+//    sample knows (fixtures/prototype.ts).
 // What each does lands when the turn has finished (designState.ts).
-
-const ADDRESS = /^address comments\b/i;
 
 const DESIGN_NOTE: Record<string, string> = {
   "Submit expenses": "the claim flow, 1 endpoint, 2 screens",
   Approvals: "the approval flow, 3 endpoints, 3 screens",
 };
-
-export const TEACHING = [
-  "How feedback works here:",
-  "1. Click anything in an artifact to pin a comment. In the prototype and flows, switch to Comment first.",
-  "2. Pin as many as you like, then press Address comments. I'll work through them together.",
-  "3. Check each change I make, then resolve the comment, or reply if it isn't right yet.",
-  "You can also just tell me here.",
-].join("\n");
 
 export interface DesignTurn {
   display: string;
@@ -74,9 +68,26 @@ function names(model: MockSpecModel, ids: string[]): string {
   return list.length <= 1 ? (list[0] ?? "") : `${list.slice(0, -1).join(", ")} and ${list.at(-1)}`;
 }
 
-function scriptDesign(projectName: string, text: string, model: MockSpecModel): DesignTurn {
+/** Files the design never writes over once they exist: the user's review, and a prototype comments may have revised. */
+const KEPT = new Set([DESIGN_REVIEW_PATH, manifestPath(SAMPLE_COMPONENT), sourcePath(SAMPLE_COMPONENT)]);
+
+/** Stream each file into the room: added when new, rewritten whole when it changed; what it leaves, by path. */
+function writeFiles(s: Script, doc: Y.Doc, turnKey: string, files: Record<string, string>): Record<string, string> {
+  const written: Record<string, string> = {};
+  for (const [i, [path, content]] of Object.entries(files).entries()) {
+    const current = readDocFile(doc, path);
+    if (current === content || (current !== undefined && KEPT.has(path))) continue;
+    if (current === undefined) s.pause(150).add(`${turnKey}-f${i}`, path, content);
+    else s.pause(150).edit(`${turnKey}-f${i}`, path, current, content);
+    written[path] = content;
+  }
+  return written;
+}
+
+function scriptDesign(projectName: string, text: string, model: MockSpecModel, turnKey: string): DesignTurn {
   const design = liveDesign(projectName);
-  const lines = readSpecLines(projectSpecDoc(projectName, model));
+  const doc = projectSpecDoc(projectName, model);
+  const lines = readSpecLines(doc);
   const productWide = productWideItems(readRequirements(lines));
   const { toDesign, outOfDate } = designWork(model.features, design.designedFrom, lines, productWide);
   if (toDesign.length === 0) {
@@ -87,13 +98,12 @@ function scriptDesign(projectName: string, text: string, model: MockSpecModel): 
     toDesign.map((id) => [id, designBasis(model.features.find((f) => f.id === id)!, lines, productWide)]),
   );
   const designed = model.features.filter((f) => design.designedFrom[f.id] !== undefined || toDesign.includes(f.id));
-  const drafts = designCatalog(projectName, designed, lines, new Set(design.tweaks));
+  const drafts = designCatalog(projectName, designed, lines);
   const found = model.features
     .filter((f) => f.stage !== "Not interviewed")
     .map((f) => dependencyOf(projectName, f))
     .filter((d) => d !== null)
     .filter((d) => !design.dependencies.some((known) => known.featureId === d.featureId));
-  const teach = !design.taught && !teachingSent(projectName);
   const updating = toDesign.every((id) => outOfDate.includes(id));
 
   const s = new Script()
@@ -103,95 +113,69 @@ function scriptDesign(projectName: string, text: string, model: MockSpecModel): 
     const name = names(model, [id]);
     s.pause(700).say(`Designed ${name}: ${DESIGN_NOTE[name] ?? "flows, contracts and acceptance"}.`);
   }
+  const files = writeFiles(s, doc, turnKey, designRoomFiles(projectName, drafts, [...design.dependencies, ...found]));
   const blocker = found[0];
   s.pause(600).say(
-    `The design is ready: ${drafts.length} artifacts. Use the filter to see the business or the technical ones.` +
-      (blocker
-        ? ` One thing blocks a build: ${names(model, [blocker.featureId])} waits on ${blocker.needs}. It's at the top of the list, and it blocks nothing else.`
-        : ""),
+    "The design is ready. Each file is in the Design card's rail: open each one, tick Checked, and comment from its 💬." +
+      (blocker ? ` ${names(model, [blocker.featureId])} waits on ${blocker.needs}; it blocks nothing else.` : ""),
   );
-  s.pause(300).say(teach ? TEACHING : "Comment on anything, or tell me here. I'd start with the prototype.");
   return {
     display: text,
     ...s.end(),
-    design: { kind: "design", features: toDesign, designedFrom, drafts, dependencies: found, teach },
+    design: { kind: "design", features: toDesign, designedFrom, drafts, dependencies: found, files },
   };
 }
 
-function scriptAddress(projectName: string, text: string, model: MockSpecModel, turnKey: string): DesignTurn {
-  const design = liveDesign(projectName);
-  const open = design.comments.filter((c) => c.status === "open");
-  if (open.length === 0) {
-    return { display: text, ...new Script().pause(500).say("There are no open comments to address.").end() };
-  }
-  // The agent works on a copy of the room: its spec edits, and the spec each
-  // changed feature is then designed from, are read off the copy.
-  const room = projectSpecDoc(projectName, model);
-  const scratch = new Y.Doc();
-  Y.applyUpdate(scratch, Y.encodeStateAsUpdate(room));
-  const productWide = productWideItems(readRequirements(readSpecLines(scratch)));
-  const before = designWork(model.features, design.designedFrom, readSpecLines(scratch), productWide);
+/** The revision an Address comments turn makes: one past the latest any comment names. */
+function nextRevision(comments: readonly ReviewComment[]): number {
+  return Math.max(1, ...comments.map((c) => c.revision ?? 1)) + 1;
+}
 
-  const s = new Script().pause(600).say(`Working through ${open.length} comment${open.length === 1 ? "" : "s"} together.`);
-  const tweaks = new Set<DesignTweak>(design.tweaks);
-  const replies: Extract<DesignEffect, { kind: "address" }>["replies"] = [];
-  const specFeatures = new Set<string>();
-  let file: { path: string; content: string } | undefined;
-  for (const comment of open) {
-    const feedback = feedbackFor(projectName, comment.text);
-    if (feedback.tweak) tweaks.add(feedback.tweak);
-    let specLine: string | null = null;
-    const feature = feedback.spec && model.features.find((f) => f.id === feedback.spec!.featureId);
-    const current = feature ? readDocFile(scratch, feature.path) : undefined;
-    if (feedback.spec && feature && current?.includes(feedback.spec.from)) {
-      const edit = { path: feature.path, oldString: feedback.spec.from, newString: feedback.spec.to };
-      s.edit(`${turnKey}-c${comment.n}`, edit.path, edit.oldString, edit.newString);
-      applyAgentToolCall(scratch, { type: "tool-result", toolCallId: `${turnKey}-c${comment.n}`, toolName: "editFile", input: edit });
-      file = { path: feature.path, content: readDocFile(scratch, feature.path) ?? "" };
-      specLine = feedback.spec.lineId;
-      specFeatures.add(feature.id);
+function scriptAddressComments(projectName: string, text: string, model: MockSpecModel, turnKey: string): DesignTurn {
+  const doc = projectSpecDoc(projectName, model);
+  const before = readDocFile(doc, DESIGN_REVIEW_PATH);
+  const { review, problem } = readReview(before);
+  const all = review.artifacts.flatMap((a) => (a.comments ?? []).map((c) => ({ path: a.path, comment: c })));
+  const sent = all.filter((c) => c.comment.status === "sent");
+  if (problem || before === undefined || sent.length === 0) {
+    const why = problem ? `I can't read specs/design/review.json: ${problem}` : "There are no comments waiting for me in the review.";
+    return { display: text, ...new Script().pause(500).say(why).end() };
+  }
+  const s = new Script().pause(600).say(`Working through ${sent.length} comment${sent.length === 1 ? "" : "s"} together.`);
+  const revision = nextRevision(all.map((c) => c.comment));
+  const at = new Date().toISOString();
+  const files: Record<string, string> = {};
+  // A comment on the prototype the sample knows how to take changes its source.
+  let source = readDocFile(doc, sourcePath(SAMPLE_COMPONENT));
+  const replies = new Map<string, string>();
+  for (const { path, comment } of sent) {
+    const tweak = path === manifestPath(SAMPLE_COMPONENT) && source !== undefined ? tweakSource(source, comment.text) : null;
+    if (tweak && source !== undefined) {
+      s.pause(400).edit(`${turnKey}-${comment.id}`, sourcePath(SAMPLE_COMPONENT), tweak.from, tweak.to);
+      source = source.replace(tweak.from, tweak.to);
+      files[sourcePath(SAMPLE_COMPONENT)] = source;
     }
-    replies.push({ commentId: comment.id, reply: feedback.reply, specLine, artifacts: [comment.artifactId, ...feedback.artifacts] });
+    replies.set(comment.id, tweak?.applied ?? replyTo(projectName, comment.text));
   }
-  const lines = readSpecLines(scratch);
-  // A feature whose spec the turn changed is designed from the new words,
-  // unless the user's own edit had already put it out of date.
-  const designedFrom = Object.fromEntries(
-    [...specFeatures]
-      .filter((id) => !before.outOfDate.includes(id))
-      .map((id) => [id, designBasis(model.features.find((f) => f.id === id)!, lines, productWide)]),
-  );
-  const designed = model.features.filter((f) => design.designedFrom[f.id] !== undefined);
-  const drafts = designCatalog(projectName, designed, lines, tweaks);
-  const changedSpec = replies.filter((r) => r.specLine).length;
-  s.pause(800).say(addressedReply(open.length - changedSpec, changedSpec));
-  return {
-    display: text,
-    ...s.end(),
-    design: { kind: "address", replies, tweaks: [...tweaks], drafts, designedFrom, ...(file ? { file } : {}) },
+  const answered = {
+    version: 1 as const,
+    artifacts: review.artifacts.map((a) => ({
+      ...a,
+      ...(a.comments
+        ? {
+            comments: a.comments.map((c) => {
+              const reply = replies.get(c.id);
+              return reply ? { ...c, status: "addressed" as const, reply, revision, addressedAt: at } : c;
+            }),
+          }
+        : {}),
+    })),
   };
-}
-
-/**
- * The Address comments turn's closing line: how many comments changed the
- * design only and how many the spec too, with no clause for a count of zero,
- * worded for one comment or several.
- */
-export function addressedReply(designOnly: number, specToo: number): string {
-  const total = designOnly + specToo;
-  const all = total === 1 ? "It" : total === 2 ? "Both" : `All ${total}`;
-  const dot = " (you'll see a dot on the Spec tab)";
-  const what =
-    specToo === 0
-      ? `${all} changed the design only.`
-      : designOnly === 0
-        ? `${all} changed the spec as well as the design${dot}.`
-        : `${designOnly} changed the design only, and ${specToo} also changed the spec${dot}.`;
-  const check =
-    total === 1
-      ? "The comment now shows what I did: check it, then resolve it, or reply if it's not right yet."
-      : "Each comment now shows what I did: check it, then resolve it, or reply if it's not right yet.";
-  return `Done. ${what} ${check}`;
+  const after = reviewText(answered);
+  s.pause(400).edit(`${turnKey}-review`, DESIGN_REVIEW_PATH, before, after);
+  files[DESIGN_REVIEW_PATH] = after;
+  s.pause(400).say("Done. Each comment now shows what I did: check the changed files again, or reopen a comment if it isn't right yet.");
+  return { display: text, ...s.end(), design: { kind: "address", files } };
 }
 
 /** A design-review turn, or null when the message is not one (the caller answers it). */
@@ -202,7 +186,7 @@ export function scriptDesignTurn(req: {
   turnKey: string;
 }): DesignTurn | null {
   const text = req.instruction.trim();
-  if (parseDesignCommand(text)) return scriptDesign(req.projectName, text, req.model);
-  if (ADDRESS.test(text)) return scriptAddress(req.projectName, text, req.model, req.turnKey);
+  if (parseDesignCommand(text)) return scriptDesign(req.projectName, text, req.model, req.turnKey);
+  if (text === ADDRESS_COMMENTS_COMMAND) return scriptAddressComments(req.projectName, text, req.model, req.turnKey);
   return null;
 }

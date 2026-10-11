@@ -22,28 +22,27 @@ import type { ProjectCard } from "../shell/scope";
 
 // A project has one conversation; each turn in it carries a scope, taken from
 // where the user was when they sent it. A feature file open in the spec card
-// scopes the turn to that feature; the design card (and the prototypes beside
-// it), to the design review; anywhere else in the project, to the whole
-// product. A prototype turn (Make prototype, a review's Send all) is about one
-// web application, and a review's requests ride it as typed feedback.
+// scopes the turn to that feature; the design card (its prototypes among its
+// files), to the design review; anywhere else in the project, to the whole
+// product.
 //
 // This module is the one place a scope meets the wire, as the contract's
 // `scope` (TurnScope): a feature by its ID, or the design review; the whole
 // product is the absence of a scope. It focuses the agent and fences nothing.
-// A prototype turn sends no scope (its `/prototype` command says what it is
-// about) and carries the review's batch as `prototypeFeedback`.
+// A prototype review's comments no longer ride a turn (they are drafts in
+// review.json, sent with Address comments); a turn in an earlier conversation
+// may still carry a batch as `prototypeFeedback`, which the chat shows.
 
 type TurnInputBody = components["schemas"]["TurnInputBody"];
 
-/** A prototype review's requests, as the turn carries them. */
+/** A prototype review's requests, as an earlier turn carried them. */
 export type PrototypeFeedback = components["schemas"]["PrototypeFeedbackInput"];
 
 /** What one turn is about. */
 export type TurnScope =
   | { kind: "product" }
   | { kind: "feature"; featureId: string }
-  | { kind: "design" }
-  | { kind: "prototype"; feedback?: PrototypeFeedback };
+  | { kind: "design" };
 
 /** A turn's request body. */
 export type TurnBody = TurnInputBody;
@@ -53,7 +52,7 @@ export function turnScopeFor(
   card: ProjectCard | null,
   feature: Pick<SpecFeature, "id"> | null,
 ): TurnScope {
-  if (card === "design" || card === "prototype") return { kind: "design" };
+  if (card === "design") return { kind: "design" };
   if (card === "spec" && feature) return featureScope(feature);
   return { kind: "product" };
 }
@@ -71,7 +70,6 @@ export function turnBody(instruction: string, scope: TurnScope): TurnBody {
   const body: TurnBody = { instruction };
   if (scope.kind === "feature") body.scope = { kind: "feature", feature: scope.featureId };
   if (scope.kind === "design") body.scope = { kind: "design-review" };
-  if (scope.kind === "prototype" && scope.feedback) body.prototypeFeedback = scope.feedback;
   return body;
 }
 

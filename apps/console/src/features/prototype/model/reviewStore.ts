@@ -16,24 +16,16 @@
  * under the License.
  */
 
-import type { TurnOutcome } from "../../agent-chat/chatStore";
 import type { AppPrototype } from "./prototypes";
-import { NEW_SESSION, follow, turnEnded, type ReviewSession } from "./revision";
+import { NEW_SESSION, follow, type ReviewSession } from "./revision";
 
 // Each project's prototype reviews (model/revision.ts), kept outside React so
-// they outlive the review overlay and the Prototype tab itself: a batch out
-// with the agent is still there when the reviewer comes back, the turn's end
-// is recorded even with no review open, and a failed batch is given back the
-// next time the prototype is followed. Kept for the page's life, like the
-// chat store; nothing here is persisted.
+// they outlive the review overlay and the Design card itself: a revision that
+// lands with no review open is still announced the next time it opens. Kept
+// for the page's life, like the chat store; nothing here is persisted.
 
 /** Each component's review session, by component. */
 export type ReviewSessions = Readonly<Record<string, ReviewSession>>;
-
-/** How a turn ended, from the chat (`chatStore.onTurnEnd`). */
-export interface TurnEnds {
-  onTurnEnd(fn: (projectName: string, outcome: TurnOutcome) => void): () => void;
-}
 
 const NONE: ReviewSessions = Object.freeze({});
 
@@ -48,7 +40,7 @@ export function followAll(sessions: ReviewSessions, prototypes: readonly AppProt
   return followed;
 }
 
-export function createReviewStore(chat: TurnEnds) {
+export function createReviewStore() {
   const projects = new Map<string, { sessions: ReviewSessions; listeners: Set<() => void> }>();
 
   const entry = (projectName: string) => {
@@ -65,13 +57,6 @@ export function createReviewStore(chat: TurnEnds) {
     e.sessions = sessions;
     for (const fn of e.listeners) fn();
   };
-
-  // Every project's turns, for the page's life: an ending is recorded whether or not its review is open.
-  chat.onTurnEnd((projectName, outcome) => {
-    const { sessions } = entry(projectName);
-    const ended = Object.entries(sessions).map(([c, s]) => [c, turnEnded(s, outcome)] as const);
-    if (ended.some(([c, s]) => s !== sessions[c])) set(projectName, Object.fromEntries(ended));
-  });
 
   return {
     /** The project's sessions; the same object until one changes. */

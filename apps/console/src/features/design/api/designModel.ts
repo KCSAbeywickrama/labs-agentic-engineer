@@ -19,30 +19,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ScopeRoles } from "@aep/ui-openapi-view";
 import { env } from "../../../config/env";
-import { mockSpecKey } from "../../spec/api/specModel";
 
-// The design review's shape. On the platform it is worked out from the room
-// (../useDesignModel.ts); the mock serves it whole, on the paths below, which
-// are not in the contract. Commenting has no platform backend yet (E5,
-// parked), so its mutations are the mock's alone.
+// The design model's shape: the artifacts a design yields, the dependencies
+// that block a feature's build, and the design turn running now. On the
+// platform it is worked out from the room (../useDesignModel.ts); the mock
+// serves it whole, on the path below, which is not in the contract. The
+// design review itself (comments, Checked) is not here: it is the room's
+// specs/design/review.json (../model/review.ts).
 //
-// What follows is the mock's original note.
-//
-// PROVISIONAL — MOCK-ONLY until E1/E4/E5 land the design review's contract.
-//
-// The design card needs the design review: the artifacts the design turn
-// wrote (each tagged Business or Technical, with the features it covers and
-// the data its viewer draws), the dependencies that block a feature's build,
-// the comments pinned on artifacts, and whether this user has been shown how
-// feedback works. Nothing in aep-api serves that yet (backend items E1, E4,
-// E5). Until it does, the shape lives here, behind this one module, and only
-// MSW answers it (mocks/handlers/design.ts, on a path that is not in the
-// contract). When they ship, this module becomes calls on the generated
-// client with contract types, and the handler and these hand-written types go.
-//
-// An artifact carries its viewer's source inline (`source`). Once the room is
-// wired, the design files live in it beside the spec and the viewers read
-// them there; `source` then becomes a path.
+// PROVISIONAL — MOCK-ONLY until E1/E4 land the design's contract: only MSW
+// answers the path (mocks/handlers/design.ts). When they ship, this module
+// becomes calls on the generated client with contract types, and the handler
+// and these hand-written types go.
 //
 // What is NOT here, on purpose: which features wait for design and which
 // designs are out of date. Those are worked out in the browser from the live
@@ -54,35 +42,9 @@ import { mockSpecKey } from "../../spec/api/specModel";
 /** Who an artifact is for: the business reader, or the engineer. */
 export type ArtifactDepth = "business" | "technical";
 
-/** One lane of a flow: an actor or a system. */
-export interface FlowLane {
-  name: string;
-  /** "employee", "payroll". */
-  role?: string;
-}
-
-/** One step of a flow, from lane to lane (the same lane for an action of its own). */
-export interface FlowStep {
-  from: number;
-  to: number;
-  text: string;
-  /** The story it walks, "F2.2". */
-  story?: string;
-  /** Where the rule comes from, "policy p.7". */
-  source?: string;
-}
-
 /** What an artifact's viewer draws. */
 export type ArtifactSource =
-  /** A wireframes DSL, clicked through as a prototype (@aep/ui-excalidraw-view). */
-  | { kind: "prototype"; path: string; dsl: string }
-  | { kind: "flow"; lanes: FlowLane[]; steps: FlowStep[] }
   | { kind: "roles"; roles: string[]; rows: { action: string; grants: boolean[] }[]; note: string }
-  | {
-      kind: "data";
-      records: { name: string; about: string; fields: { name: string; example: string }[] }[];
-      relation: string;
-    }
   /** The cell architecture (@aep/ui-cell-diagram-view). */
   | { kind: "architecture"; cell: string }
   /** A component's design.json and its API contract (@aep/ui-design-view, @aep/ui-openapi-view). */
@@ -99,8 +61,6 @@ export type ArtifactSource =
   | { kind: "acceptance"; path: string; content: string }
   /** A design document as the design writes it: prose around one mermaid diagram (a flow, the domain model). */
   | { kind: "document"; path: string; markdown: string };
-
-export type ArtifactKind = ArtifactSource["kind"];
 
 export interface DesignArtifact {
   id: string;
@@ -127,52 +87,6 @@ export interface DesignDependency {
   answer: string | null;
 }
 
-/**
- * How a comment finds its element again in what the artifact's viewer draws
- * (commentAnchor.ts): by an id the markup gives it (`attr`), or by its words
- * and tag; `nth` is which of the elements so named it is, in document order.
- */
-export type ElementRef =
-  | { attr: string; value: string; nth: number }
-  | { tag: string; words: string; nth: number };
-
-/**
- * Where a comment is pinned: the element's name in the artifact, the view it
- * was on (the prototype's screen; null elsewhere), the element itself (null:
- * the artifact as a whole), and the point on it, as fractions of its box.
- */
-export interface CommentAnchor {
-  label: string;
-  view: string | null;
-  element: ElementRef | null;
-  x: number;
-  y: number;
-}
-
-/**
- * open: waiting for Address comments. addressed: the agent changed the
- * design and replied; the user checks it. resolved: the user is done with it.
- * A reply takes an addressed comment back to open.
- */
-export type CommentStatus = "open" | "addressed" | "resolved";
-
-export interface DesignComment {
-  id: string;
-  /** The pin's number, in the order comments were made. */
-  n: number;
-  artifactId: string;
-  anchor: CommentAnchor;
-  /** What the user asked, latest first when they replied. */
-  text: string;
-  /** What the user said before, oldest first. */
-  earlier: string[];
-  status: CommentStatus;
-  /** The agent's answer: what it changed. */
-  reply: string | null;
-  /** The spec line it changed, when the comment was really a requirement. */
-  specLine: string | null;
-}
-
 /** The design turn running now, as the server knows it. */
 export interface DesignRun {
   kind: "design" | "address";
@@ -190,21 +104,10 @@ export interface DesignModel {
   running: DesignRun | null;
   artifacts: DesignArtifact[];
   dependencies: DesignDependency[];
-  comments: DesignComment[];
-  /** This user has done the feedback loop once: the teaching box folds away. */
-  taught: boolean;
-  /** Whether comments can be pinned, addressed and resolved here (E5: the mock only, for now). */
-  commenting: boolean;
 }
 
 /** The provisional path MSW serves; `:projectName` is the project's slug. */
 export const PROVISIONAL_DESIGN_PATH = "/api/v1/projects/:projectName/provisional/design";
-
-/** Pin a comment: POST `{ artifactId, anchor, text }`, answered with the model. */
-export const PROVISIONAL_COMMENTS_PATH = `${PROVISIONAL_DESIGN_PATH}/comments`;
-
-/** Resolve an addressed comment, or reply to it (`{ text }`): POST, answered with the model. */
-export const PROVISIONAL_COMMENT_PATH = `${PROVISIONAL_COMMENTS_PATH}/:commentId/:action`;
 
 /** Settle a dependency: POST `{ answer }`, answered with the model. */
 export const PROVISIONAL_DEPENDENCY_PATH = `${PROVISIONAL_DESIGN_PATH}/dependencies/:featureId/answer`;
@@ -240,46 +143,13 @@ export function useMockDesignModel(projectName: string, enabled: boolean) {
   });
 }
 
-/**
- * A change to the design review. The spec model carries the open-comment
- * count and the lines a comment changed, so it is read again too.
- */
+/** A change to the design model: the mock answers with the whole model. */
 function useDesignMutation<T>(projectName: string, send: (input: T) => Promise<DesignModel>) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: send,
-    onSuccess: (model) => {
-      queryClient.setQueryData(designKey(projectName), model);
-      void queryClient.invalidateQueries({ queryKey: mockSpecKey(projectName) });
-    },
+    onSuccess: (model) => queryClient.setQueryData(designKey(projectName), model),
   });
-}
-
-export function usePinComment(projectName: string) {
-  return useDesignMutation(projectName, async (input: { artifactId: string; anchor: CommentAnchor; text: string }) =>
-    readModel(await fetch(url(PROVISIONAL_COMMENTS_PATH, { projectName }), post(input)), "Couldn't pin the comment"),
-  );
-}
-
-export function useResolveComment(projectName: string) {
-  return useDesignMutation(projectName, async (commentId: string) =>
-    readModel(
-      await fetch(url(PROVISIONAL_COMMENT_PATH, { projectName, commentId, action: "resolve" }), post(undefined)),
-      "Couldn't resolve the comment",
-    ),
-  );
-}
-
-export function useReplyToComment(projectName: string) {
-  return useDesignMutation(projectName, async (input: { commentId: string; text: string }) =>
-    readModel(
-      await fetch(
-        url(PROVISIONAL_COMMENT_PATH, { projectName, commentId: input.commentId, action: "reply" }),
-        post({ text: input.text }),
-      ),
-      "Couldn't send your reply",
-    ),
-  );
 }
 
 export function useSettleDependency(projectName: string) {

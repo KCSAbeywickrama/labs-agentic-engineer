@@ -223,8 +223,11 @@ export function withBuild(items: NextUpItem[], build: NextUpItem | null): NextUp
   return [...items.slice(0, at), build, ...items.slice(at)];
 }
 
-/** The workspace from the model and every markdown file's live lines (by room path). */
-export function deriveWorkspace(model: SpecModel, lines: ReadonlyMap<string, LineBlock[]>): Workspace {
+/**
+ * The workspace from the model, every markdown file's live lines (by room
+ * path), and how many design comments wait for Address comments.
+ */
+export function deriveWorkspace(model: SpecModel, lines: ReadonlyMap<string, LineBlock[]>, waitingComments = 0): Workspace {
   const files = markdownFiles(model.features);
   const { designedFrom } = model.design;
   const productWide = productWideItems(readRequirements(lines));
@@ -252,7 +255,7 @@ export function deriveWorkspace(model: SpecModel, lines: ReadonlyMap<string, Lin
     nextUp: nextUp({
       features,
       design,
-      openComments: model.design.openComments,
+      openComments: waitingComments,
       fog,
     }),
     small: isSmallProduct(features.length),

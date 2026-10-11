@@ -22,6 +22,7 @@ import { useBuildOffer } from "../builds/buildPicker";
 import { useBuildOutcome } from "../builds/hooks/useBuildOutcome";
 import { useProjectStatus } from "../deploy/api/deploy";
 import { useDesignModel } from "../design/useDesignModel";
+import { useWaitingComments } from "../design/useWaitingComments";
 import { useSpecWorkspace } from "../spec/useSpecWorkspace";
 import { projectTrack, type ProjectTrack } from "./model/track";
 
@@ -49,6 +50,7 @@ export function useProjectTrack(projectName: string): ProjectTrackState {
   const status = useProjectStatus(projectName);
   const deploy = status.data?.deploy;
   const offer = useBuildOffer(projectName);
+  const waitingComments = useWaitingComments(projectName);
   const latest = builds.data?.at(-1);
   const latestOutcome = useBuildOutcome(projectName, latest?.status === "built" ? latest.version : undefined).outcome;
 
@@ -59,14 +61,14 @@ export function useProjectTrack(projectName: string): ProjectTrackState {
             features: workspace.features,
             design: workspace.design,
             designedFrom: model.data.design.designedFrom,
-            review: design.data,
+            review: { running: design.data.running, waitingComments },
             builds: builds.data,
             latestOutcome,
             offer,
             deploy,
           })
         : null,
-    [model.data, workspace, design.data, builds.data, latestOutcome, offer, deploy],
+    [model.data, workspace, design.data, builds.data, latestOutcome, offer, deploy, waitingComments],
   );
 
   const failed = [model, design, builds, status].filter((q) => q.isError);

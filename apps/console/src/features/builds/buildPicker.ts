@@ -19,6 +19,7 @@
 import { createContext, useCallback, useContext, useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useDesignModel } from "../design/useDesignModel";
+import { useWaitingComments } from "../design/useWaitingComments";
 import { useSpecWorkspace } from "../spec/useSpecWorkspace";
 import { useBuilds } from "./api/builds";
 import { buildOffer, offeredRows, type BuildOffer } from "./model/picker";
@@ -39,6 +40,7 @@ export function useBuildOffer(projectName: string): BuildOffer | null {
   const { model, workspace, lines } = useSpecWorkspace(projectName);
   const design = useDesignModel(projectName).data;
   const builds = useBuilds(projectName).data;
+  const waitingComments = useWaitingComments(projectName);
   const spec = model.data;
   return useMemo(
     () =>
@@ -49,12 +51,11 @@ export function useBuildOffer(projectName: string): BuildOffer | null {
             productWide: workspace.productWide,
             lines,
             dependencies: design.dependencies,
-            comments: design.comments,
-            artifacts: design.artifacts,
+            waitingComments,
             builds,
           })
         : null,
-    [spec, workspace, lines, design, builds],
+    [spec, workspace, lines, design, builds, waitingComments],
   );
 }
 

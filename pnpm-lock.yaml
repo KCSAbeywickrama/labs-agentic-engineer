@@ -52,9 +52,6 @@ importers:
       '@aep/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@aep/excalidraw-dsl':
-        specifier: workspace:*
-        version: link:../../packages/excalidraw-dsl
       '@aep/progress-view':
         specifier: workspace:*
         version: link:../../packages/progress-view
@@ -67,9 +64,6 @@ importers:
       '@aep/ui-design-view':
         specifier: workspace:*
         version: link:../../packages/ui/design-view
-      '@aep/ui-excalidraw-view':
-        specifier: workspace:*
-        version: link:../../packages/ui/excalidraw-view
       '@aep/ui-openapi-view':
         specifier: workspace:*
         version: link:../../packages/ui/openapi-view

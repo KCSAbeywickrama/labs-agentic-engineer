@@ -18,8 +18,6 @@
 
 import { createLink, useParams } from "@tanstack/react-router";
 import { Box, Tab, Tabs } from "@wso2/oxygen-ui";
-import { usePrototypeDot } from "../../prototype/usePrototypeDot";
-import { specTabDot } from "../../spec/model/designChanges";
 import { useSpecWorkspace } from "../../spec/useSpecWorkspace";
 
 const TabLink = createLink(Tab);
@@ -46,18 +44,14 @@ function TabLabel({ name, dot }: { name: string; dot: string | null }) {
 }
 
 /**
- * Spec · Design · Prototype: the faces of the product's workspace, each a
- * card route of its own. The face not open carries a dot when it has news:
- * the spec, a line a design comment changed; the design, features waiting for
- * it, the prototype, a revision not yet reviewed in this browser.
+ * Spec · Design: the faces of the product's workspace, each a card route of
+ * its own (a prototype is an item of the Design card's rail). Design carries
+ * a dot when it has news while Spec is open: features waiting for it.
  */
-export function WorkspaceTabs({ active }: { active: "spec" | "design" | "prototype" }) {
+export function WorkspaceTabs({ active }: { active: "spec" | "design" }) {
   const { projectName } = useParams({ from: "/projects/$projectName" });
-  const { model, workspace } = useSpecWorkspace(projectName);
-  const specDot =
-    active !== "spec" && model.data && specTabDot(model.data.design.specChanges) ? "changed by design feedback" : null;
+  const { workspace } = useSpecWorkspace(projectName);
   const designDot = active !== "design" && workspace?.design.label ? workspace.design.label.toLowerCase() : null;
-  const prototypeDot = usePrototypeDot(projectName);
   return (
     <Tabs
       value={active}
@@ -70,7 +64,7 @@ export function WorkspaceTabs({ active }: { active: "spec" | "design" | "prototy
     >
       <TabLink
         value="spec"
-        label={<TabLabel name="Spec" dot={specDot} />}
+        label={<TabLabel name="Spec" dot={null} />}
         to="/projects/$projectName/spec"
         params={{ projectName }}
       />
@@ -78,12 +72,6 @@ export function WorkspaceTabs({ active }: { active: "spec" | "design" | "prototy
         value="design"
         label={<TabLabel name="Design" dot={designDot} />}
         to="/projects/$projectName/design"
-        params={{ projectName }}
-      />
-      <TabLink
-        value="prototype"
-        label={<TabLabel name="Prototype" dot={active !== "prototype" && prototypeDot ? "a prototype to review" : null} />}
-        to="/projects/$projectName/prototype"
         params={{ projectName }}
       />
     </Tabs>

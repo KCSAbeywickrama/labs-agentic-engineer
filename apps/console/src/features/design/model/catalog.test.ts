@@ -32,13 +32,8 @@ const files = Object.fromEntries(Object.entries(raw).map(([path, content]) => [p
 describe("the design catalog, from a design's files", () => {
   const catalog = designCatalog(files);
 
-  it("titles the wireframe viewer Wireframes, so it is not mistaken for the Prototype tab", () => {
-    expect(catalog.find((a) => a.source.kind === "prototype")?.title).toBe("Wireframes: expense-webapp");
-  });
-
   it("lists what the design yields, business first, then technical, then the acceptance criteria", () => {
     expect(catalog.map((a) => [a.id, a.depth, a.source.kind])).toEqual([
-      ["prototype-expense-webapp", "business", "prototype"],
       ["flow-claim-decision", "business", "document"],
       ["roles", "business", "roles"],
       ["data", "business", "document"],
@@ -62,9 +57,8 @@ describe("the design catalog, from a design's files", () => {
     expect(roles?.kind === "roles" && roles.roles.length > 0 && roles.rows.some((r) => r.grants.some(Boolean))).toBe(true);
   });
 
-  it("has no prototype for a product with no web app", () => {
-    const apiOnly = Object.fromEntries(Object.entries(files).filter(([p]) => !p.includes("expense-webapp")));
-    expect(designCatalog(apiOnly).some((a) => a.source.kind === "prototype")).toBe(false);
+  it("reads no wireframes: a web app's screens are its prototype now", () => {
+    expect(catalog.some((a) => a.title.startsWith("Wireframes"))).toBe(false);
   });
 });
 
