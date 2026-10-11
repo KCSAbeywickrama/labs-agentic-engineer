@@ -384,11 +384,27 @@ function normalize(name: string): string {
 
 const MAX_LISTED = 5;
 
-function reject(path: string, code: DesignDiagramProblem["code"], detail: string): DesignDiagramProblem {
-  return {
-    code,
-    message: `${path} rejected — ${detail} The file is unchanged; fix it and re-emit the WHOLE file in ONE retry.`,
-  };
+/** What is wrong with a diagram document, before the move that fixes it is added. */
+interface DiagramFault {
+  code: DesignDiagramProblem["code"];
+  detail: string;
+}
+
+function fault(code: DiagramFault["code"], detail: string): DiagramFault {
+  return { code, detail };
+}
+
+/**
+ * The move that fixes a refusal. A refused write leaves the bundle unchanged,
+ * so it depends on whether the file existed before the write: a new file is
+ * re-emitted whole; an existing one takes a local editFile, and a whole
+ * rewrite of it carries every part it keeps (seen live: an Address comments
+ * rename rewrote the domain model and lost its diagram).
+ */
+function remedy(existed: boolean): string {
+  return existed
+    ? "The file is unchanged; fix it with an editFile of the part you meant to change, or re-emit the WHOLE file, every part of it, with removeFile then ONE addFile."
+    : "The file is unchanged, so it still does not exist; fix it and re-emit the WHOLE file in ONE addFile.";
 }
 
 function listDiagnostics(diagnostics: Diagnostic[]): string {
@@ -408,17 +424,23 @@ export function checkDesignDiagram(
 ): DesignDiagramProblem | null {
   const kind = diagramKindFor(path);
   if (kind === null) return null;
+  const found = diagramFault(kind, content, bundle);
+  if (found === null) return null;
+  const existed = bundle.read(path) !== undefined;
+  return { code: found.code, message: `${path} rejected — ${found.detail} ${remedy(existed)}` };
+}
+
+function diagramFault(kind: DiagramKind, content: string, bundle: DiagramBundleReader): DiagramFault | null {
 
   const { blocks, unterminated } = mermaidBlocks(content);
   if (unterminated !== null) {
-    return reject(
-      path,
+    return fault(
       "INVALID_DIAGRAM",
       `the \`\`\`mermaid fence opened at line ${unterminated} is never closed — close it with \`\`\` on its own line.`,
     );
   }
   if (blocks.length === 0) {
-    return reject(path, "INVALID_DIAGRAM", `it holds no \`\`\`mermaid block — it must hold exactly one ${kind}.`);
+    return fault("INVALID_DIAGRAM", `it holds no \`\`\`mermaid block — it must hold exactly one ${kind}.`);
   }
   if (blocks.length > 1) {
     const where = blocks.map((b) => b.fenceLine).join(", ");
@@ -426,8 +448,7 @@ export function checkDesignDiagram(
       kind === "sequenceDiagram"
         ? "one flow per file — put the extra diagram in its own specs/design/flows/<slug>.md."
         : "one domain model — merge the entities into a single erDiagram.";
-    return reject(
-      path,
+    return fault(
       "INVALID_DIAGRAM",
       `it holds ${blocks.length} mermaid blocks (lines ${where}) but must hold exactly one ${kind}: ${hint}`,
     );
@@ -436,18 +457,17 @@ export function checkDesignDiagram(
 
   if (kind === "erDiagram") {
     const diagnostics = parseEr(block);
-    return diagnostics.length === 0 ? null : reject(path, "INVALID_DIAGRAM", listDiagnostics(diagnostics));
+    return diagnostics.length === 0 ? null : fault("INVALID_DIAGRAM", listDiagnostics(diagnostics));
   }
 
   const parsed = parseSequence(block);
   if (parsed.diagnostics.length > 0) {
-    return reject(path, "INVALID_DIAGRAM", listDiagnostics(parsed.diagnostics));
+    return fault("INVALID_DIAGRAM", listDiagnostics(parsed.diagnostics));
   }
 
   const cellSource = bundle.read(DESIGN_CELL_PATH);
   if (cellSource === undefined || cellSource.trim() === "") {
-    return reject(
-      path,
+    return fault(
       "UNKNOWN_PARTICIPANT",
       `${DESIGN_CELL_PATH} is not in the bundle yet, so its participants cannot be resolved — write the cell first; a flow's participants must be nodes the cell declares or actors the PRD names.`,
     );
@@ -471,8 +491,7 @@ export function checkDesignDiagram(
   if (unknown.length === 0) return null;
 
   const list = (xs: string[]) => (xs.length ? xs.join(", ") : "none");
-  return reject(
-    path,
+  return fault(
     "UNKNOWN_PARTICIPANT",
     `participant${unknown.length > 1 ? "s" : ""} ${unknown.map((u) => `\`${u}\``).join(", ")} ${unknown.length > 1 ? "are" : "is"} neither a node design.cell declares (components: ${list(nodes.components)}; boundary externals: ${list(nodes.externals)}) nor an actor the PRD names (${list(actors)}). Use one of those ids, name one in the declaration's \`as\` alias (\`actor LM as Line Manager\`), add the node to design.cell first, or have the actor named in the PRD's Actors section.`,
   );

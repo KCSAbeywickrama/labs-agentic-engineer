@@ -258,6 +258,34 @@ test("FileBundle: a rejected flow leaves the bundle byte-for-byte unchanged; the
   assert.equal(b.read(FLOW), GOOD_FLOW);
 });
 
+// Address comments renames a field in the data model. A write that loses the
+// erDiagram on the way (seen live: a rename reply over a domain model whose
+// whole diagram was gone) must be refused while the agent can still fix it:
+// as an edit, and as a whole rewrite after removeFile.
+test("FileBundle: a domain-model write that drops its erDiagram is refused; a rename inside it lands", () => {
+  const b = bundle({ [DOMAIN]: GOOD_DOMAIN });
+  const prose = GOOD_DOMAIN.slice(0, GOOD_DOMAIN.indexOf("```mermaid"));
+  const block = GOOD_DOMAIN.slice(GOOD_DOMAIN.indexOf("```mermaid"), GOOD_DOMAIN.lastIndexOf("```") + 3);
+
+  const edit = b.editFile(DOMAIN, block, "");
+  assert.equal(edit.ok === false && edit.code, "INVALID_DIAGRAM");
+  const editMessage = edit.ok === false ? edit.message : "";
+  assert.match(editMessage, /holds no ```mermaid block — it must hold exactly one erDiagram/);
+  // The file existed: the remedy is a local edit, or a whole rewrite that keeps every part.
+  assert.match(editMessage, /an editFile of the part you meant to change, or re-emit the WHOLE file, every part of it/);
+  assert.equal(b.read(DOMAIN), GOOD_DOMAIN);
+
+  assert.equal(b.removeFile(DOMAIN).ok, true);
+  const rewrite = b.addFile(DOMAIN, prose);
+  assert.equal(rewrite.ok === false && rewrite.code, "INVALID_DIAGRAM");
+  // removeFile took it out: the remedy is the whole file, never an editFile.
+  assert.match(rewrite.ok === false ? rewrite.message : "", /so it still does not exist; fix it and re-emit the WHOLE file in ONE addFile\.$/);
+  assert.equal(b.addFile(DOMAIN, GOOD_DOMAIN).ok, true);
+
+  assert.equal(b.editFile(DOMAIN, "string claimId FK", "string expenseId FK").ok, true);
+  assert.match(b.read(DOMAIN)!, /```mermaid\nerDiagram[\s\S]*string expenseId FK/);
+});
+
 test("a PRD that names no actors leaves `actor` declarations unchecked, nodes still enforced", () => {
   const legacy = new FileBundle({
     "specs/design/design.cell": CELL,
