@@ -88,92 +88,149 @@ type wirePlan struct {
 	HeldBack    []string `json:"heldBack"`
 }
 
+const usage = "usage: build-plan scope|issue --requirements-dir <dir> [--design-dir <dir> [--acceptance-dir <dir>]] --version <tag> [--features ..] [--product-wide ..] [--built-features ..] [--built-product-wide ..]"
+
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	if len(args) == 0 || (args[0] != "scope" && args[0] != "issue") {
-		_, _ = fmt.Fprintln(stderr, "usage: build-plan scope|issue --requirements-dir <dir> [--design-dir <dir> [--acceptance-dir <dir>]] --version <tag> [--features ..] [--product-wide ..] [--built-features ..] [--built-product-wide ..]")
+	if len(args) > 0 {
+		switch args[0] {
+		case "scope":
+			return runScope(args[1:], stdout, stderr)
+		case "issue":
+			return runIssue(args[1:], stdin, stdout, stderr)
+		}
+	}
+	_, _ = fmt.Fprintln(stderr, usage)
+	return 2
+}
+
+// runScope gates the selection as POST /build does and prints what the build
+// carries beside the plan turn's scope.
+func runScope(args []string, stdout, stderr io.Writer) int {
+	flags, sf := selectionFlagSet("scope", stderr)
+	designDir := flags.String("design-dir", "", "the project's specs/design directory (required)")
+	acceptanceDir := flags.String("acceptance-dir", "", "the project's specs/validation/acceptance directory; absent holds no acceptance files")
+	sel, code := parseSelection(flags, sf, args, stderr, designDir)
+	if code != 0 {
+		return code
+	}
+	designFiles, err := readDir(*designDir, true)
+	var acceptanceFiles map[string]string
+	if err == nil {
+		acceptanceFiles, err = readDir(*acceptanceDir, true)
+	}
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "build-plan: %v\n", err)
 		return 2
 	}
-	verb := args[0]
+	plan, scope, err := spec.GatedSelection(sel.version, sel.reqFiles, designFiles, acceptanceFiles, sel.built, sel.pick)
+	if err != nil {
+		return selectionFailed(err, stderr)
+	}
+	return emit(map[string]any{
+		"plan":  wirePlan{Features: nonNil(plan.Features), PulledIn: nonNil(plan.PulledIn), ProductWide: nonNil(plan.ProductWide), HeldBack: nonNil(plan.HeldBack)},
+		"scope": wireScopeOf(scope),
+	}, stdout, stderr)
+}
+
+// runIssue renders the build issue of the selection and the planner's
+// checklist on stdin.
+func runIssue(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	flags, sf := selectionFlagSet("issue", stderr)
+	sel, code := parseSelection(flags, sf, args, stderr)
+	if code != 0 {
+		return code
+	}
+	_, scope, err := spec.PlanSelection(sel.version, sel.reqFiles, sel.built, sel.pick)
+	if err != nil {
+		return selectionFailed(err, stderr)
+	}
+	var in struct {
+		Items []taskplan.BuildPlanItem `json:"items"`
+	}
+	if err := json.NewDecoder(stdin).Decode(&in); err != nil || len(in.Items) == 0 {
+		_, _ = fmt.Fprintln(stderr, `build-plan: stdin must be {"items": [...]} with at least one item`)
+		return 2
+	}
+	issue := scope.Issue(in.Items)
+	return emit(map[string]string{"title": issue.Title(), "body": issue.Body()}, stdout, stderr)
+}
+
+// selectionFlags are the flags both verbs take.
+type selectionFlags struct {
+	reqDir, version, features, productWide, builtFeatures, builtProductWide *string
+}
+
+func selectionFlagSet(verb string, stderr io.Writer) (*flag.FlagSet, selectionFlags) {
 	flags := flag.NewFlagSet("build-plan "+verb, flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	reqDir := flags.String("requirements-dir", "", "the project's specs/requirements directory (required)")
-	version := flags.String("version", "", "the version being built, as its tag would be named (required)")
-	features := flags.String("features", "", "the picked features; empty picks every feature that can be designed")
-	productWide := flags.String("product-wide", "", "the picked product-wide items")
-	builtFeatures := flags.String("built-features", "", "the features earlier versions carried")
-	builtProductWide := flags.String("built-product-wide", "", "the product-wide items earlier versions carried")
-	var designDir, acceptanceDir *string
-	if verb == "scope" {
-		designDir = flags.String("design-dir", "", "the project's specs/design directory (required)")
-		acceptanceDir = flags.String("acceptance-dir", "", "the project's specs/validation/acceptance directory; absent holds no acceptance files")
+	return flags, selectionFlags{
+		reqDir:           flags.String("requirements-dir", "", "the project's specs/requirements directory (required)"),
+		version:          flags.String("version", "", "the version being built, as its tag would be named (required)"),
+		features:         flags.String("features", "", "the picked features; empty picks every feature that can be designed"),
+		productWide:      flags.String("product-wide", "", "the picked product-wide items"),
+		builtFeatures:    flags.String("built-features", "", "the features earlier versions carried"),
+		builtProductWide: flags.String("built-product-wide", "", "the product-wide items earlier versions carried"),
 	}
-	if err := flags.Parse(args[1:]); err != nil {
-		return 2
+}
+
+// selection is a parsed command line: the version, its requirements and the
+// pick over them.
+type selection struct {
+	version  string
+	reqFiles map[string]string
+	built    reqspec.Built
+	pick     *reqspec.Pick
+}
+
+// parseSelection parses args and reads the requirements. required are the
+// verb's own flags that must be set. A non-zero code is the exit status.
+func parseSelection(flags *flag.FlagSet, sf selectionFlags, args []string, stderr io.Writer, required ...*string) (selection, int) {
+	if err := flags.Parse(args); err != nil {
+		return selection{}, 2
 	}
-	if *reqDir == "" || *version == "" || flags.NArg() != 0 || (designDir != nil && *designDir == "") {
+	missing := *sf.reqDir == "" || *sf.version == "" || flags.NArg() != 0
+	for _, r := range required {
+		missing = missing || *r == ""
+	}
+	if missing {
 		flags.Usage()
-		return 2
+		return selection{}, 2
 	}
-	if err := spec.ValidateVersionName(*version); err != nil {
-		_, _ = fmt.Fprintf(stderr, "build-plan: --version %q: %v\n", *version, err)
-		return 2
+	if err := spec.ValidateVersionName(*sf.version); err != nil {
+		_, _ = fmt.Fprintf(stderr, "build-plan: --version %q: %v\n", *sf.version, err)
+		return selection{}, 2
 	}
-	reqFiles, err := readDir(*reqDir, false)
+	reqFiles, err := readDir(*sf.reqDir, false)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "build-plan: %v\n", err)
-		return 2
+		return selection{}, 2
 	}
+	sel := selection{
+		version:  *sf.version,
+		reqFiles: reqFiles,
+		built:    reqspec.Built{Features: set(ids(*sf.builtFeatures)), ProductWide: set(ids(*sf.builtProductWide))},
+	}
+	if *sf.features != "" || *sf.productWide != "" {
+		sel.pick = &reqspec.Pick{Features: ids(*sf.features), ProductWide: ids(*sf.productWide)}
+	}
+	return sel, 0
+}
 
-	var pick *reqspec.Pick
-	if *features != "" || *productWide != "" {
-		pick = &reqspec.Pick{Features: ids(*features), ProductWide: ids(*productWide)}
-	}
-	built := reqspec.Built{Features: set(ids(*builtFeatures)), ProductWide: set(ids(*builtProductWide))}
-	var plan reqspec.BuildPlan
-	var scope spec.BuildScope
-	if verb == "scope" {
-		var designFiles, acceptanceFiles map[string]string
-		if designFiles, err = readDir(*designDir, true); err == nil {
-			acceptanceFiles, err = readDir(*acceptanceDir, true)
+// selectionFailed prints a refused selection or a failed gate, one finding per
+// line, and exits 1; any other error exits 2.
+func selectionFailed(err error, stderr io.Writer) int {
+	var refused *spec.SpecValidationError
+	if errors.As(err, &refused) {
+		for _, row := range refused.Files {
+			_, _ = fmt.Fprintf(stderr, "%s: %s\n", row.Path, row.Message)
 		}
-		if err != nil {
-			_, _ = fmt.Fprintf(stderr, "build-plan: %v\n", err)
-			return 2
-		}
-		plan, scope, err = spec.GatedSelection(*version, reqFiles, designFiles, acceptanceFiles, built, pick)
-	} else {
-		plan, scope, err = spec.PlanSelection(*version, reqFiles, built, pick)
+		return 1
 	}
-	if err != nil {
-		var refused *spec.SpecValidationError
-		if errors.As(err, &refused) {
-			for _, row := range refused.Files {
-				_, _ = fmt.Fprintf(stderr, "%s: %s\n", row.Path, row.Message)
-			}
-			return 1
-		}
-		_, _ = fmt.Fprintf(stderr, "build-plan: %v\n", err)
-		return 2
-	}
+	_, _ = fmt.Fprintf(stderr, "build-plan: %v\n", err)
+	return 2
+}
 
-	var out any
-	switch verb {
-	case "scope":
-		out = map[string]any{
-			"plan":  wirePlan{Features: nonNil(plan.Features), PulledIn: nonNil(plan.PulledIn), ProductWide: nonNil(plan.ProductWide), HeldBack: nonNil(plan.HeldBack)},
-			"scope": wireScopeOf(scope),
-		}
-	case "issue":
-		var in struct {
-			Items []taskplan.BuildPlanItem `json:"items"`
-		}
-		if err := json.NewDecoder(stdin).Decode(&in); err != nil || len(in.Items) == 0 {
-			_, _ = fmt.Fprintln(stderr, `build-plan: stdin must be {"items": [...]} with at least one item`)
-			return 2
-		}
-		issue := scope.Issue(in.Items)
-		out = map[string]string{"title": issue.Title(), "body": issue.Body()}
-	}
+func emit(out any, stdout, stderr io.Writer) int {
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(out); err != nil {

@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol/webhook"
 )
 
@@ -191,7 +192,8 @@ func TestPullRequestOpened_MergesWhenItResolvesMilestoneWork(t *testing.T) {
 func TestPullRequestOpened_RecordsTheAdvancedBuildIssueOnTheCycle(t *testing.T) {
 	h := newHarness(t, aRun("run-1", 7, delivery.RunStateRunning))
 	h.cycles.latest = aCycle("cycle-1", "run-1")
-	h.issues.withWork(7, 10)
+	h.issues.withIssue(7, 10, delivery.LabelAgentWork, delivery.KindDevelopment,
+		sourcecontrol.DedupeLabel(delivery.DedupeKeyBuildIssue(testProject, 7)))
 
 	if err := h.deliver(t, "pull_request", prBody("opened", "aep/m7-c1", "Advances #10", 42, false, false, "")); err != nil {
 		t.Fatalf("dispatch: %v", err)

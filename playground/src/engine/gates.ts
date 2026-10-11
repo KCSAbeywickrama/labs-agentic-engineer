@@ -47,7 +47,7 @@ export function designGate(projectDir: string): GateResult {
   return ok;
 }
 
-/** Component names with a design dir (what justifies a Task). */
+/** Component names with a design dir. */
 export function listComponents(projectDir: string): string[] {
   const dir = join(projectDir, "specs/design/components");
   if (!existsSync(dir)) return [];

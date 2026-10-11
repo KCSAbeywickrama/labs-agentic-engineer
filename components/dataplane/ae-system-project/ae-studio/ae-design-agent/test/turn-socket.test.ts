@@ -163,7 +163,9 @@ test("a Plan turn: each ok planBuild result is a task-op line, a refused one is 
     },
     async (edge) => {
       const turnId = randomUUID();
-      const res = await postTurnSocket(edge.turnSocket, { turnId, project: PROJECT, kind: "plan", credit: NOBODY, scope: PLAN_SCOPE });
+      // No product-wide items, so the first plan may leave Foundation out.
+      const scope = { ...PLAN_SCOPE, productWide: [] };
+      const res = await postTurnSocket(edge.turnSocket, { turnId, project: PROJECT, kind: "plan", credit: NOBODY, scope });
       assert.equal(res.status, 200);
       assert.equal(res.contentType, "application/x-ndjson");
       const frames = withoutKeepAlives(await res.rest());

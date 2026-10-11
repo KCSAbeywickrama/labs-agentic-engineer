@@ -72,8 +72,8 @@ ADR-0041). The unit the issues cut was the component.
 
 - **The merge policy admits three references** (`eventcore/policy.go`): a
   closing keyword on an armed issue, `Validates #N` on the validation task, and
-  `Advances #N` on the milestone's `development`-kind issue. `Advances` is
-  scoped to that kind for the same reason `Validates` is scoped to its kind.
+  `Advances #N` on the milestone's build issue. `Advances` is scoped to that
+  issue for the same reason `Validates` is scoped to its kind.
 - **No-progress compares progress units** (`run/policy.go`): the working set
   plus the open build items. The poll reads the build issue's body only when
   the counts show open `development` work. The new snapshot field decodes to

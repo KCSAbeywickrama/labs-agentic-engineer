@@ -1,6 +1,6 @@
 ---
 name: task-planning
-description: Use when planning a version's build from a design — the plan turn that writes the build's checklist with planBuild, one item per feature the version carries in build order, after an optional Foundation item.
+description: Use when planning a version's build from a design — the plan turn that writes the build's checklist with planBuild, one item per feature the version carries in build order, after a Foundation item when the version needs one.
 metadata:
   aep:
     kind: platform
@@ -25,9 +25,10 @@ Call `planBuild` with all the items:
 
 1. **Foundation** (`"foundation"`), first, when the build has work that no
    single feature owns: the setup of each component that the version builds for
-   the first time, and the product-wide requirements that reach those
-   components. A later version that adds features to components that exist has
-   no Foundation item.
+   the first time, and the product-wide requirements that the version carries.
+   When the scope has product-wide requirements, Foundation is necessary. A
+   version that does not set up a component and has no product-wide
+   requirements has no Foundation item.
 2. **One item for each feature in the scope** (`"F2"`). Put each feature after
    the features that it needs.
 3. With no feature in the scope, one item, `"spec"`, for the whole design.

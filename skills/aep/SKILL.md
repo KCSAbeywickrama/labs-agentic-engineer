@@ -322,10 +322,12 @@ Add these parts to the PR when they apply:
   walk's result. Put each open `[ ]` line of the walk report next to its
   item.
 - For each spec change: the file, the change, and the gap that it closes.
-- For a component that is not green: use `--draft` and the title prefix
-  `[build-failed]`. List `Resolves #N` only for the completed issues. Add an
-  `## Error` section (the last 40 lines of output, fenced) and a
-  `## What was tried` section.
+- For a component that is not green: list `Resolves #N` only for the
+  completed issues. Add an `## Error` section (the last 40 lines of output,
+  fenced) and a `## What was tried` section. When one or more items are
+  committed and ticked, open a usual PR with `Advances #N`: the platform does
+  not merge a draft. Use `--draft` and the title prefix `[build-failed]` only
+  when the cycle completed no item and no issue.
 
 Keep each unfinished issue open. Make its last status line the same
 diagnostic.

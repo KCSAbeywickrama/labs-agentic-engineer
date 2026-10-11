@@ -59,7 +59,7 @@ func (b BuildIssue) Body() string {
 		if len(it.Components) > 0 {
 			sb.WriteString(": `" + strings.Join(it.Components, "`, `") + "`.")
 		}
-		if note := strings.TrimSpace(it.Note); note != "" {
+		if note := oneLine(it.Note); note != "" {
 			sb.WriteString(" " + note)
 		}
 		sb.WriteString("\n")
@@ -75,6 +75,13 @@ func (b BuildIssue) Body() string {
 	}
 	return sb.String()
 }
+
+// oneLine is s with every whitespace run, newlines included, as one space. A
+// note renders inside its item's line, so a newline in it would start a line
+// of its own, a fake `- [ ]` item UncheckedItems would count. The design
+// agent's plan accumulator applies the same rule, so the accepted plan is what
+// the issue shows.
+func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // label is the words after an item's ID.
 func (b BuildIssue) label(item string) string {

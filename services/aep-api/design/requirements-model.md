@@ -80,8 +80,10 @@ The plan turn reads `tags/<version>` and writes the version's checklist with
   no-progress rule compares the working set plus those items
   (`progressUnits`), so a cycle that ticks an item has progressed.
 - The merge policy (`eventcore/policy.go`) admits `Advances #N` on the
-  milestone's `development`-kind issue beside `Resolves` and `Validates`, so a
-  cycle that finished some items lands them and leaves the issue open.
+  milestone's build issue beside `Resolves` and `Validates`, so a cycle that
+  finished some items lands them and leaves the issue open. The poll and the
+  policy name the build issue with one predicate, `delivery.IsBuildIssue`
+  (its dedupe label).
 - `cmd/build-plan` runs the selection (`scope`) and the render (`issue`) for
   the playground, with this code.
 

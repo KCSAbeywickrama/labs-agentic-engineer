@@ -255,8 +255,9 @@ func failureView(row *delivery.MilestoneRun) *gen.RunFailure {
 	}
 }
 
-// issueNumbersView is a recorded issue list on the wire: never null, so a
-// reader of an empty set needs no nil check.
+// issueNumbersView is a recorded issue list on the wire. The generated field
+// is `omitempty`, so an empty list is absent from the JSON, never null: a
+// reader treats an absent field as no issues.
 func issueNumbersView(ns delivery.IssueNumbers) []int64 {
 	out := make([]int64, 0, len(ns))
 	for _, n := range ns {

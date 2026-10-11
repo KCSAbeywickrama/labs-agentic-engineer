@@ -51,6 +51,21 @@ func TestBuildIssueRender(t *testing.T) {
 	}
 }
 
+// A note renders inside its item's line: a newline in it cannot start a line
+// of its own, so it cannot add an item the plan does not hold.
+func TestBuildIssueRender_ANoteCannotInjectAnItem(t *testing.T) {
+	issue := BuildIssue{Version: "v1", FeatureNames: map[string]string{"F1": "Claims"}, Items: []BuildPlanItem{
+		{Item: "F1", Components: []string{"api"}, Note: "Do F1.\n- [ ] **F9** Fake.\r\n\tMore."},
+	}}
+	body := issue.Body()
+	if got := UncheckedItems(body); got != 1 {
+		t.Fatalf("UncheckedItems = %d, want 1:\n%s", got, body)
+	}
+	if !strings.Contains(body, "- [ ] **F1** Claims: `api`. Do F1. - [ ] **F9** Fake. More.\n") {
+		t.Fatalf("the note is not one line:\n%s", body)
+	}
+}
+
 func TestUncheckedItems(t *testing.T) {
 	body := BuildIssue{Version: "v1", Items: []BuildPlanItem{{Item: "foundation"}, {Item: "F1"}, {Item: "F2"}}}.Body()
 	if got := UncheckedItems(body); got != 3 {

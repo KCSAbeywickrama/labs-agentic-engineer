@@ -332,8 +332,9 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   The policy admits a pull request THREE ways, and the lists never merge: a CLOSING keyword on any
   armed issue (the coding cycles' path, where the matched list is also `RunCycle.Resolves`, the durable
   record of what the cycle finished), `Validates #N` on the milestone's `validation`-kind task, or
-  `Advances #N` on its `development`-kind build issue (a cycle that finished some items and not all; the
-  issue stays open with those items ticked). Each non-closing word is scoped to its kind, because
+  `Advances #N` on its build issue (`IsBuildIssue`, the same predicate the run poll counts the checklist
+  of; a cycle that finished some items and not all, and the issue stays open with those items ticked).
+  Each non-closing word is scoped to its issue, because
   otherwise it would become a general-purpose way to merge a pull request while closing nothing and no
   working set would ever empty.
 - **Milestone assignment rides issue creation.** A plan costs two content-generating requests against

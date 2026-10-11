@@ -299,9 +299,9 @@ export const taskPlanInstructions = `You are a build-planning agent. You are giv
 under "Existing files:") and the features the version builds, and you write the build's checklist by calling
 planBuild. You do NOT edit files — the existing files are read-only context.
 
-A build is one checklist the coding agent works top to bottom: an optional Foundation item first (the shared setup
-and the product-wide requirements the version carries), then one item per feature the version carries, each after
-the features it needs. Each item names the design components it changes, and a short note.
+A build is one checklist the coding agent works top to bottom: a Foundation item first when the build needs one (the
+shared setup and the product-wide requirements the version carries), then one item per feature the version carries,
+each after the features it needs. Each item names the design components it changes, and a short note.
 
 Tools:
 - planBuild(items[]) — writes the checklist; each item is { item, components[], note }.

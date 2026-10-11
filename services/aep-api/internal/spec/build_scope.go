@@ -132,12 +132,11 @@ func (s *artifactService) BuildScopeAtTag(ctx context.Context, orgID, projectID,
 // dependency or an out-of-date design, which need the repository's records,
 // refuse nothing here.
 func PlanSelection(tag string, reqFiles map[string]string, built reqspec.Built, pick *reqspec.Pick) (reqspec.BuildPlan, BuildScope, error) {
-	req := reqspec.Parse(requirementsBundle.of(reqFiles))
-	plan, err := planVersion(req, built, pick, nil)
+	sel, err := selectBuild(reqFiles, built, pick)
 	if err != nil {
-		return plan, BuildScope{Tag: tag}, err
+		return sel.plan, BuildScope{Tag: tag}, err
 	}
-	return plan, scopeFor(tag, req, plan), nil
+	return sel.plan, scopeFor(tag, sel.req, sel.plan), nil
 }
 
 // GatedSelection is PlanSelection behind POST /build's hard gate: the
@@ -148,13 +147,31 @@ func PlanSelection(tag string, reqFiles map[string]string, built reqspec.Built, 
 // selection's refusals and the gate's failures come back as ONE
 // *SpecValidationError, as POST /build answers them.
 func GatedSelection(tag string, reqFiles, designFiles, acceptanceFiles map[string]string, built reqspec.Built, pick *reqspec.Pick) (reqspec.BuildPlan, BuildScope, error) {
-	reqFiles = requirementsBundle.of(reqFiles)
-	req := reqspec.Parse(reqFiles)
-	plan, planErr := planVersion(req, built, pick, nil)
-	if err := gateVersion(req, plan, planErr, reqFiles, designBundle.of(designFiles), acceptanceBundle.of(acceptanceFiles)); err != nil {
-		return plan, BuildScope{Tag: tag}, err
+	sel, planErr := selectBuild(reqFiles, built, pick)
+	if err := gateVersion(sel.req, sel.plan, planErr, sel.reqFiles, designBundle.of(designFiles), acceptanceBundle.of(acceptanceFiles)); err != nil {
+		return sel.plan, BuildScope{Tag: tag}, err
 	}
-	return plan, scopeFor(tag, req, plan), nil
+	return sel.plan, scopeFor(tag, sel.req, sel.plan), nil
+}
+
+// selection is a pick over on-disk requirements, as both selections above
+// read it: the files kept to what the tag's requirements bundle holds, their
+// parse, and the plan of what the build carries.
+type selection struct {
+	reqFiles map[string]string
+	req      reqspec.Spec
+	plan     reqspec.BuildPlan
+}
+
+// selectBuild plans pick after the versions that built `built`. The error is
+// the selection's refusal; the selection is filled either way, because the
+// gate reports a refusal beside its own findings.
+func selectBuild(reqFiles map[string]string, built reqspec.Built, pick *reqspec.Pick) (selection, error) {
+	sel := selection{reqFiles: requirementsBundle.of(reqFiles)}
+	sel.req = reqspec.Parse(sel.reqFiles)
+	var err error
+	sel.plan, err = planVersion(sel.req, built, pick, nil)
+	return sel, err
 }
 
 // scopeFor is what plan carries, as the plan turn and the build issue name it.

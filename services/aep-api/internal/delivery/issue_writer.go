@@ -317,3 +317,13 @@ func DedupeKeyValidationIssue(projectID string, milestoneNumber int) string {
 func DedupeKeyBuildIssue(projectID string, milestoneNumber int) string {
 	return "build:" + projectID + ":" + strconv.Itoa(milestoneNumber)
 }
+
+// IsBuildIssue reports whether an issue carrying `labels` is the version's
+// build issue: the one its plan minted under DedupeKeyBuildIssue. That dedupe
+// label is the build issue's identity, so another development issue in the
+// milestone (filed by hand, say) is not it. The run poll counts this issue's
+// checklist and the merge policy admits `Advances #N` only on it, so the two
+// agree on which issue the build is.
+func IsBuildIssue(labels []string, projectID string, milestoneNumber int) bool {
+	return HasLabel(labels, sourcecontrol.DedupeLabel(DedupeKeyBuildIssue(projectID, milestoneNumber)))
+}

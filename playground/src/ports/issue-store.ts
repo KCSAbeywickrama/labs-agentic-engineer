@@ -54,7 +54,7 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?/;
 /** The Go `uncheckedItemRE` (taskplan/build_issue.go) widened to ticked lines: one line, no `*` in the item. */
 const ITEM_RE = /^- \[( |x|X)\] \*\*([^*\n]+)\*\*/gm;
 
-/** Mirrors the Go renderer's scalar quoting: newlines flatten; backslash and quote escaped. */
+/** A YAML double-quoted scalar on one line: newlines flatten to spaces; backslash and quote escaped. */
 function yamlQuote(s: string): string {
   const flat = s.replaceAll("\r\n", " ").replaceAll("\n", " ");
   return `"${flat.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;

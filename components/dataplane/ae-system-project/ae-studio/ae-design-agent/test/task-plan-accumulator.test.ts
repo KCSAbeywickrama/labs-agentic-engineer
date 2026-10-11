@@ -52,12 +52,35 @@ test("an ordered checklist of every carried feature is accepted and normalized",
   assert.equal(plan.plan()?.length, 4);
 });
 
-test("foundation is optional", () => {
-  assert.equal(new BuildPlan(DESIGN, SCOPE).planBuild({ items: [item("F1"), item("F3"), item("F2")] }).ok, true);
+test("a note or component cannot start a checklist line of its own", () => {
+  const plan = new BuildPlan(DESIGN, SCOPE);
+  const res = plan.planBuild({
+    items: [item("foundation", ["claims-api\n"]), item("F1", ["claims-api"], "Do F1.\n- [ ] **F9** Fake.\r\n\tMore."), item("F2"), item("F3")],
+  });
+  assert.equal(res.ok, true);
+  if (res.ok) {
+    assert.deepEqual(res.items[0]!.components, ["claims-api"]);
+    assert.equal(res.items[1]!.note, "Do F1. - [ ] **F9** Fake. More.");
+  }
+});
+
+test("foundation is optional when the version carries no product-wide requirements", () => {
+  const scope: PlanScope = { ...SCOPE, productWide: [] };
+  assert.equal(new BuildPlan(DESIGN, scope).planBuild({ items: [item("F1"), item("F3"), item("F2")] }).ok, true);
+});
+
+test("foundation is required when the version carries product-wide requirements", () => {
+  const res = new BuildPlan(DESIGN, SCOPE).planBuild({ items: [item("F1"), item("F3"), item("F2")] });
+  assert.equal(res.ok, false);
+  if (res.ok) return;
+  assert.equal(res.code, "MISSING_ITEM");
+  assert.match(res.message, /foundation, which the plan leaves out/);
+  assert.match(res.message, /foundation is required/);
+  assert.deepEqual(res.carriedItems, ["foundation", "F1", "F2", "F3"]);
 });
 
 test("a later ok call replaces the checklist; a refused one keeps it", () => {
-  const plan = new BuildPlan(DESIGN, SCOPE);
+  const plan = new BuildPlan(DESIGN, { ...SCOPE, productWide: [] });
   plan.planBuild({ items: [item("F1"), item("F2"), item("F3")] });
   assert.equal(plan.planBuild({ items: [item("F2")] }).ok, false);
   assert.equal(plan.plan()?.length, 3);
@@ -68,12 +91,12 @@ test("a later ok call replaces the checklist; a refused one keeps it", () => {
 test("refusals name the fix and list what the version carries in an order that builds", () => {
   const plan = new BuildPlan(DESIGN, SCOPE);
   const cases: [string, ReturnType<typeof item>[]][] = [
-    ["UNKNOWN_COMPONENT", [item("F1", ["billing"]), item("F2"), item("F3")]],
-    ["DUPLICATE_ITEM", [item("F1"), item("F1"), item("F2"), item("F3")]],
-    ["UNKNOWN_ITEM", [item("F1"), item("F2"), item("F3"), item("F4")]],
-    ["MISSING_ITEM", [item("F1"), item("F2")]],
+    ["UNKNOWN_COMPONENT", [item("foundation"), item("F1", ["billing"]), item("F2"), item("F3")]],
+    ["DUPLICATE_ITEM", [item("foundation"), item("F1"), item("F1"), item("F2"), item("F3")]],
+    ["UNKNOWN_ITEM", [item("foundation"), item("F1"), item("F2"), item("F3"), item("F4")]],
+    ["MISSING_ITEM", [item("foundation"), item("F1"), item("F2")]],
     ["ITEM_ORDER", [item("F1"), item("foundation"), item("F2"), item("F3")]],
-    ["ITEM_ORDER", [item("F2"), item("F1"), item("F3")]],
+    ["ITEM_ORDER", [item("foundation"), item("F2"), item("F1"), item("F3")]],
   ];
   for (const [code, items] of cases) {
     const res = plan.planBuild({ items });

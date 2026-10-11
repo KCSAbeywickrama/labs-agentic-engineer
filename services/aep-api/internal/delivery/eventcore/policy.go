@@ -86,13 +86,15 @@ type mergeDecision struct {
 //     on an ending where no pull request merged at all. A closing keyword would
 //     put two owners on one issue.
 //
-//   - `Advances #N` on the milestone's `development`-kind build issue. This is a
-//     coding cycle that finished some of the build's items and not all: the
-//     merge lands them, and the build issue stays open (its done items ticked)
-//     for the next cycle.
+//   - `Advances #N` on the milestone's build issue (delivery.IsBuildIssue, the
+//     same identity the run poll counts the checklist of). This is a coding
+//     cycle that finished some of the build's items and not all: the merge
+//     lands them, and the build issue stays open (its done items ticked) for
+//     the next cycle.
 //
 // The second admission is SCOPED to a validation-kind issue on purpose, and the
-// third to a development-kind issue for the same reason. Without
+// third to the build issue for the same reason: another development issue in
+// the milestone is not the version's checklist. Without
 // the scope, `Validates #N` would become a general-purpose way for any agent to
 // get a pull request merged while closing nothing — and the working set would
 // never empty, because the issues it claimed would still be open. A coding pull
@@ -123,7 +125,7 @@ type mergeDecision struct {
 // logic (approvals, checks, a human gate) arrives later BEHIND this function —
 // it is one named decision over facts precisely so that swapping it is a local
 // change with a local test, not a rewrite of the handler.
-func decideAutoMerge(resolves, validates, advances []int, milestoneIssues []sourcecontrol.IssueInfo) mergeDecision {
+func decideAutoMerge(resolves, validates, advances []int, milestoneIssues []sourcecontrol.IssueInfo, projectID string, milestoneNumber int) mergeDecision {
 	if len(resolves) == 0 && len(validates) == 0 && len(advances) == 0 {
 		return mergeDecision{Reason: "pull request references no issue"}
 	}
@@ -138,7 +140,7 @@ func decideAutoMerge(resolves, validates, advances []int, milestoneIssues []sour
 		if delivery.IsValidationWork(iss.Labels) {
 			validation[iss.Number] = true
 		}
-		if delivery.HasLabel(iss.Labels, delivery.KindDevelopment) {
+		if delivery.IsBuildIssue(iss.Labels, projectID, milestoneNumber) {
 			build[iss.Number] = true
 		}
 	}

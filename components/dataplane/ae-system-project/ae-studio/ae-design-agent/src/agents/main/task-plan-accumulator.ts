@@ -21,7 +21,9 @@
  * per turn from the read-only snapshot and the version's plan scope: it knows
  * the components (`specs/design/components/<name>/`) and the items the version
  * carries (Foundation, then each carried feature), and validates each
- * `planBuild` against them.
+ * `planBuild` against them. Foundation is the planner's call unless the version
+ * carries product-wide requirements: Foundation builds them, so it is required
+ * then.
  *
  * Like the file tools, validation runs SERVER-SIDE inside the agent loop, so a
  * refusal returns a self-correction payload the model acts on in the same turn.
@@ -49,12 +51,15 @@ export class BuildPlan {
   /** The carried features in an order that builds: each after the carried features it needs. */
   private readonly features: string[];
   private readonly needs: Map<string, string[]>;
+  /** The version carries product-wide requirements, which only Foundation builds. */
+  private readonly foundationRequired: boolean;
   private current: BuildPlanItem[] | undefined;
 
   constructor(files: Record<string, string>, scope?: PlanScope) {
     this.known = new Set(parseKnownComponents(files));
     this.needs = new Map((scope?.features ?? []).map((f) => [f.id, f.needs ?? []]));
     this.features = buildOrder((scope?.features ?? []).map((f) => f.id), this.needs);
+    this.foundationRequired = this.features.length > 0 && (scope?.productWide?.length ?? 0) > 0;
   }
 
   // -- Reads (for the eval fold + tests) ----------------------------------
@@ -63,7 +68,7 @@ export class BuildPlan {
     return [...this.known].sort();
   }
 
-  /** The items a plan may name, in an order that builds; Foundation is optional. */
+  /** The items a plan may name, in an order that builds; Foundation is optional unless the version carries product-wide requirements. */
   carriedItems(): string[] {
     return this.features.length === 0 ? [WHOLE_SPEC_ITEM] : [FOUNDATION_ITEM, ...this.features];
   }
@@ -78,8 +83,8 @@ export class BuildPlan {
   planBuild(input: BuildPlanInput): BuildPlanResult {
     const items = input.items.map((it) => ({
       item: it.item,
-      components: [...new Set(it.components.map((c) => c.trim()))],
-      note: it.note.trim(),
+      components: [...new Set(it.components.map(collapseWhitespace))],
+      note: collapseWhitespace(it.note),
     }));
 
     for (const it of items) {
@@ -99,7 +104,7 @@ export class BuildPlan {
     if (foreign.length > 0) {
       return this.refuse("UNKNOWN_ITEM", `this version does not carry ${foreign.join(", ")}.`);
     }
-    const missing = this.carriedItems().filter((n) => n !== FOUNDATION_ITEM && !names.includes(n));
+    const missing = this.carriedItems().filter((n) => (n !== FOUNDATION_ITEM || this.foundationRequired) && !names.includes(n));
     if (missing.length > 0) {
       return this.refuse("MISSING_ITEM", `the version carries ${missing.join(", ")}, which the plan leaves out.`);
     }
@@ -123,11 +128,28 @@ export class BuildPlan {
       ok: false,
       op: "build",
       code,
-      message: `${message} The version carries, in an order that builds: ${order}${this.features.length > 0 ? " (foundation is optional)" : ""}.`,
+      message: `${message} The version carries, in an order that builds: ${order}${this.foundationNote()}.`,
       carriedItems: this.carriedItems(),
       ...extra,
     };
   }
+
+  private foundationNote(): string {
+    if (this.features.length === 0) return "";
+    return this.foundationRequired
+      ? " (foundation is required: it builds the product-wide requirements the version carries)"
+      : " (foundation is optional)";
+  }
+}
+
+/**
+ * Every whitespace run, newlines included, as one space: a note or component
+ * renders inside one checklist line, so a newline in it would start a line of
+ * its own (a fake `- [ ]` item). The Go renderer (`taskplan.BuildIssue.Body`)
+ * applies the same rule, so the accepted plan is what the issue shows.
+ */
+function collapseWhitespace(s: string): string {
+  return s.trim().replace(/\s+/g, " ");
 }
 
 /** The features in ID order, each moved after the carried features it needs. */

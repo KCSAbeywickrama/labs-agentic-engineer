@@ -25,7 +25,7 @@
  * playground and the Go BFF plan tap all speak this one definition.
  *
  * A build is one GitHub issue: an ordered checklist of the version's work, one
- * item per carried feature, after an optional Foundation item. The platform
+ * item per carried feature, after a Foundation item when the build needs one. The platform
  * names what the version carries (the plan scope); the planner only orders the
  * items and says, per item, which components it touches and what to know. The
  * plan turn's `files` are read-only: the spec and design at the version's tag.

@@ -449,10 +449,9 @@ func (a *Activities) PollMilestone(ctx context.Context, in MilestoneRef) (Milest
 // still holds. It costs a second read only when the counts show open planned
 // work, which is the only population a build issue belongs to.
 //
-// The build issue is the one the plan service minted under the version's
-// build dedupe key, not every development issue: another one in the milestone
-// (filed by hand, say) is not the version's checklist, and counting its task
-// list would let ticking it read as the build progressing.
+// The build issue is delivery.IsBuildIssue, not every development issue:
+// counting another one's task list would let ticking it read as the build
+// progressing.
 func (a *Activities) openBuildItems(ctx context.Context, in MilestoneRef, counts *sourcecontrol.MilestoneIssueCounts) (int, error) {
 	if counts.OpenDevelopment == 0 {
 		return 0, nil
@@ -461,10 +460,9 @@ func (a *Activities) openBuildItems(ctx context.Context, in MilestoneRef, counts
 	if err != nil {
 		return 0, err
 	}
-	build := sourcecontrol.DedupeLabel(delivery.DedupeKeyBuildIssue(in.ProjectID, in.MilestoneNumber))
 	n := 0
 	for _, issue := range issues {
-		if delivery.HasLabel(issue.Labels, build) {
+		if delivery.IsBuildIssue(issue.Labels, in.ProjectID, in.MilestoneNumber) {
 			n += taskplan.UncheckedItems(issue.Body)
 		}
 	}

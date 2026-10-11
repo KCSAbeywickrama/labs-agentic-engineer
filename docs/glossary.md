@@ -490,8 +490,8 @@ skips items whose commit is on the branch.
 
 ### Advances
 `Advances #N` in a pull request body: a coding cycle finished some items of
-the build issue and not all. The merge policy admits it for the milestone's
-`development`-kind issue, and GitHub does not treat it as a closing keyword,
+the build issue and not all. The merge policy admits it only for the
+milestone's build issue, and GitHub does not treat it as a closing keyword,
 so the issue stays open for the next cycle. The coding counterpart of
 `Validates #N`.
 

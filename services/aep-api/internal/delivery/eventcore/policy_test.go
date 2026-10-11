@@ -125,7 +125,7 @@ func TestDecideAutoMerge(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := decideAutoMerge(c.resolves, c.validates, nil, work)
+			got := decideAutoMerge(c.resolves, c.validates, nil, work, "proj", 7)
 			if got.Merge != c.want {
 				t.Fatalf("Merge = %v (%s), want %v", got.Merge, got.Reason, c.want)
 			}
@@ -146,10 +146,16 @@ func TestDecideAutoMerge(t *testing.T) {
 // durable record of what that cycle finished (RunCycle.Resolves), so folding a
 // reference nothing closed into it would claim work that is still open.
 // A coding cycle that finished some of the build's items lands them through
-// the NON-closing `Advances #N`, scoped to the development-kind build issue.
+// the NON-closing `Advances #N`, scoped to the version's build issue.
 func TestDecideAutoMerge_Advances(t *testing.T) {
+	buildLabel := sourcecontrol.DedupeLabel(delivery.DedupeKeyBuildIssue("proj", 7))
 	work := []sourcecontrol.IssueInfo{
-		{Number: 10, State: "open", Labels: []string{delivery.LabelAgentWork, delivery.KindDevelopment}},
+		{Number: 10, State: "open", Labels: []string{delivery.LabelAgentWork, delivery.KindDevelopment, buildLabel}},
+		// A development issue filed by hand: armed, but not the version's checklist.
+		{Number: 11, State: "open", Labels: []string{delivery.LabelAgentWork, delivery.KindDevelopment}},
+		// Another version's build issue, carried into this milestone.
+		{Number: 12, State: "open", Labels: []string{delivery.LabelAgentWork, delivery.KindDevelopment,
+			sourcecontrol.DedupeLabel(delivery.DedupeKeyBuildIssue("proj", 6))}},
 		{Number: 13, State: "open", Labels: []string{delivery.LabelAgentWork, delivery.KindBug, delivery.SrcBuild}},
 		{Number: 15, State: "open", Labels: []string{delivery.LabelAgentWork, delivery.KindValidation}},
 	}
@@ -162,11 +168,13 @@ func TestDecideAutoMerge_Advances(t *testing.T) {
 	}{
 		{"a partial build merges and closes nothing", nil, []int{10}, true, "advances this version's build issue", nil, []int{10}},
 		{"a bug resolved beside a partial build", []int{13}, []int{10}, true, "resolves this run's work in its milestone", []int{13}, []int{10}},
+		{"Advances on a development issue that is not the build issue is declined", nil, []int{11}, false, "no referenced issue is this run's work in this milestone", nil, nil},
+		{"Advances on another version's build issue is declined", nil, []int{12}, false, "no referenced issue is this run's work in this milestone", nil, nil},
 		{"Advances on a bug is declined", nil, []int{13}, false, "no referenced issue is this run's work in this milestone", nil, nil},
 		{"Advances on the validation task is declined", nil, []int{15}, false, "no referenced issue is this run's work in this milestone", nil, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			got := decideAutoMerge(c.resolves, nil, c.advances, work)
+			got := decideAutoMerge(c.resolves, nil, c.advances, work, "proj", 7)
 			if got.Merge != c.want || got.Reason != c.reason {
 				t.Fatalf("decision = %+v, want merge %v (%s)", got, c.want, c.reason)
 			}

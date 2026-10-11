@@ -276,7 +276,7 @@ func (e *Events) OnPullRequest(ctx context.Context, _, _ string, payload []byte)
 	if err != nil {
 		return err
 	}
-	decision := decideAutoMerge(refs, validates, advances, work)
+	decision := decideAutoMerge(refs, validates, advances, work, owner.projectID, owner.run.MilestoneNumber)
 	// The verdict is recorded for the AGENT's pull request whichever way it went:
 	// a declined merge is the loudest silence this loop has — the cycle sits at
 	// its landing deadline with a green agent log and nothing else to say.

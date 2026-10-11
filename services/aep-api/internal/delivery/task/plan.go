@@ -91,7 +91,6 @@ func (s *PlanService) PlanIntoMilestone(ctx context.Context, orgID, projectID st
 	scope := spec.BuildScope{Tag: versions.Latest}
 	if sc, serr := s.versions.BuildScopeAtTag(ctx, orgID, projectID, versions.Latest); serr == nil {
 		scope = sc
-		scope.Tag = versions.Latest
 	} else {
 		slog.WarnContext(ctx, "plan: scope read failed — planning the whole spec",
 			"project", projectID, "tag", versions.Latest, "error", serr)

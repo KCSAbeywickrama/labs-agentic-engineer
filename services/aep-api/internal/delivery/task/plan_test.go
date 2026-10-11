@@ -48,8 +48,11 @@ func (p planVersions) ListSpecVersionTags(context.Context, string, string) (*spe
 	return &spec.TagList{Tags: []string{p.specTag}, Latest: p.specTag}, nil
 }
 
-func (p planVersions) BuildScopeAtTag(context.Context, string, string, string) (spec.BuildScope, error) {
-	return p.scope, nil
+// BuildScopeAtTag answers the scope at the asked tag, as the real one does.
+func (p planVersions) BuildScopeAtTag(_ context.Context, _, _, tag string) (spec.BuildScope, error) {
+	scope := p.scope
+	scope.Tag = tag
+	return scope, nil
 }
 
 // planRig is a plan service over the fake pod, for project proj1 of org1
