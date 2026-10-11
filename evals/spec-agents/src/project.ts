@@ -65,3 +65,9 @@ export function readProjectFile(projectDir: string, rel: string): string {
   const abs = join(projectDir, rel);
   return existsSync(abs) ? readFileSync(abs, "utf8") : "";
 }
+
+/** Every requirements file, keyed by its repo-relative path: what a design run found, or left. */
+export function readRequirementTexts(projectDir: string): Record<string, string> {
+  return Object.fromEntries(listRequirementFiles(projectDir).map((rel) => [rel, readProjectFile(projectDir, rel)]));
+}
+

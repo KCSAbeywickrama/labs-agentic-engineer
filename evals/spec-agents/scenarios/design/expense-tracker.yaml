@@ -2,7 +2,9 @@
 # scopes design (two roles, one API, own vs all rows). This scenario exists to
 # exercise the design lineup's SECURITY step — specs/design/security.json v3 —
 # so its rubric leans on the permission catalog and the grants guidance the
-# `security-design` skill states.
+# `security-design` skill states, and on the grants pass that walks the web
+# app's prototype. The lineup itself (order, prototype kit check, decisions.md,
+# no form question, the closing) is in the structural checks.
 
 brief:
   name: expense-tracker
@@ -37,11 +39,20 @@ rubric:
       weight: 2
     - item: "specs/design/security.json is written at version 3 with a permissions catalog of handles and descriptions and no ownership field — which rows an operation reaches is its path in openapi.yaml"
       weight: 2
-    - item: Exactly two roles, named Employee and Approver, each citing the story IDs it serves (F1.1, F2.3, …), and each assigned to an organisation group (the Approver reusing the directory's existing Finance group rather than inventing one)
+    # Not "reuses the Finance group": the playground has no directory
+    # (list_groups lists nothing), the PRD never says the approvers are
+    # Finance, and Design asks no question, so the brief's fact cannot reach
+    # the run. With no existing group, the org default allows a new one.
+    - item: Exactly two roles, named Employee and Approver, each citing the story IDs it serves (F1.1, F2.3, …), and each assigned to an organisation group
       weight: 2
     - item: "The service's openapi.yaml puts the employee's own claims under /me/claims (guarded by claims:read) and every claim at /claims (guarded by claims:read-all): two operations, two handles, no handle guarding both sides of /me/"
       weight: 3
-    - item: "security.json names no screen (no screens table, no requires), and each role's grants cover the operation every screen in its wireframe flow loads, at the reach the screen shows (the approvals queue lists every claim via GET /claims, so the Approver holds claims:read-all; My Claims loads GET /me/claims, so the Employee holds claims:read)"
+    - item: "security.json names no screen (no screens table, no requires), and each role's grants cover the operation every screen in its prototype flows loads, at the reach the screen shows (the approvals queue lists every claim via GET /claims, so the Approver holds claims:read-all; My Claims loads GET /me/claims, so the Employee holds claims:read)"
+      weight: 2
+    - item: "The web app's prototype (prototype.json + prototype.tsx) has exactly the roles security.json names, copied verbatim, and draws, for the Employee, filing a claim and My Claims with each claim's status and a rejection's reason, and for the Approver, the queue of submitted claims with approve and reject-with-a-reason, and the monthly total of approved claims"
+      weight: 2
+    - "Each role's and each permission's description in security.json says in plain words what it allows and what it does not (an Employee sees only their own claims; an Approver decides but does not file)"
+    - item: "specs/design/decisions.md holds only technical choices a product user would not notice (storage, paging, where a check runs), one line each, tagged with the artifact it shapes (architecture, data-model, security, flows) or a component's name, and naming the features it serves (or all); it restates no requirement line and lists no organization default (the stack, the sign-in provider) as a decision"
       weight: 2
     - item: "The service's openapi.yaml declares an oauth2 security scheme whose scope keys are catalog handles, a document-level default of any signed-in user, and at most one scope on any operation"
       weight: 2
@@ -51,3 +62,5 @@ rubric:
     - "More than one scope on a single operation's security requirement, or a bearerAuth security scheme"
     - An auth, login, registration or token-issuance endpoint specced on the service
     - Receipt image upload or OCR, or any payment/reimbursement integration
+    - A requirements line the run added that widens the PRD's scope (a new feature, a new actor, or an integration the PRD does not have)
+    - A wireframes.dsl file, or screens described anywhere but the prototype

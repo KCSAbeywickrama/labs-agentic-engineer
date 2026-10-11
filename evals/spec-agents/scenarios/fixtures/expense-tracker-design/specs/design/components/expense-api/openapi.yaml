@@ -2,8 +2,10 @@ openapi: 3.0.3
 info:
   title: Expense API
   version: 0.1.0
+  description: Expense claims, from submission to decision, and the monthly total of approved claims.
 servers:
   - url: /
+
 components:
   securitySchemes:
     oauth2:
@@ -15,41 +17,11 @@ components:
           scopes:
             claims:read: The caller's own claims
             claims:read-all: Every claim
-            claims:submit: File a new claim
+            claims:submit: Create a new claim
             claims:approve: Approve a submitted claim
             claims:reject: Reject a submitted claim with a reason
-            reports:read: Monthly total of approved claims
+            reports:read: Read the monthly total of approved claims
   schemas:
-    ExpenseClaim:
-      type: object
-      required: [id, employeeId, description, amount, claimDate, status]
-      properties:
-        id: { type: string }
-        employeeId: { type: string }
-        description: { type: string }
-        amount: { type: number, format: double }
-        claimDate: { type: string, format: date }
-        status: { type: string, enum: [submitted, approved, rejected] }
-        reason: { type: string, nullable: true, description: set only when rejected }
-        decidedAt: { type: string, format: date-time, nullable: true }
-    NewExpenseClaim:
-      type: object
-      required: [description, amount, claimDate]
-      properties:
-        description: { type: string }
-        amount: { type: number, format: double }
-        claimDate: { type: string, format: date }
-    RejectClaim:
-      type: object
-      required: [reason]
-      properties:
-        reason: { type: string }
-    MonthlyReport:
-      type: object
-      required: [month, total]
-      properties:
-        month: { type: string, description: "calendar month, e.g. 2026-09" }
-        total: { type: number, format: double, description: sum of approved claims that month }
     Error:
       type: object
       required: [code, message]
@@ -58,22 +30,64 @@ components:
         message: { type: string, description: short human-readable label }
         description: { type: string, description: detailed explanation }
         moreInfo: { type: string, description: URI to documentation }
+    ClaimStatus:
+      type: string
+      enum: [submitted, approved, rejected]
+    Claim:
+      type: object
+      required: [id, description, amountCents, expenseDate, status, submittedAt]
+      properties:
+        id: { type: string }
+        employeeName: { type: string, description: the submitting employee's display name }
+        description: { type: string }
+        amountCents: { type: integer, description: the claimed amount, in whole cents }
+        expenseDate: { type: string, format: date, description: the date the expense was incurred }
+        status: { $ref: '#/components/schemas/ClaimStatus' }
+        submittedAt: { type: string, format: date-time }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        decisionReason: { type: string, nullable: true, description: set only when status is rejected }
+    ClaimCreate:
+      type: object
+      required: [description, amountCents, expenseDate]
+      properties:
+        description: { type: string }
+        amountCents: { type: integer, description: must be greater than zero }
+        expenseDate: { type: string, format: date, description: cannot be in the future }
+    RejectClaim:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string }
+    MonthlyReport:
+      type: object
+      required: [month, totalApprovedCents, approvedCount]
+      properties:
+        month: { type: string, description: calendar month, YYYY-MM }
+        totalApprovedCents: { type: integer, description: sum of approved claims' amounts, in whole cents }
+        approvedCount: { type: integer }
+  parameters:
+    limit:
+      name: limit
+      in: query
+      schema: { type: integer, default: 20, maximum: 100 }
+    offset:
+      name: offset
+      in: query
+      schema: { type: integer, default: 0 }
+
 security:
   - oauth2: []
+
 paths:
   /me/claims:
     get:
       operationId: listMyClaims
-      summary: The caller's own claims
+      summary: The caller's own claims, newest-submitted-first
       security:
         - oauth2: [claims:read]
       parameters:
-        - name: limit
-          in: query
-          schema: { type: integer, default: 20, maximum: 100 }
-        - name: offset
-          in: query
-          schema: { type: integer, default: 0 }
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
       responses:
         '200':
           description: The caller's claims
@@ -83,37 +97,48 @@ paths:
                 type: object
                 required: [count, data]
                 properties:
-                  count: { type: integer }
-                  next: { type: string, nullable: true }
-                  previous: { type: string, nullable: true }
+                  count: { type: integer, description: total matching claims }
+                  next: { type: string, nullable: true, description: relative URI of the next page }
+                  previous: { type: string, nullable: true, description: relative URI of the previous page }
                   data:
                     type: array
-                    items: { $ref: '#/components/schemas/ExpenseClaim' }
+                    items: { $ref: '#/components/schemas/Claim' }
+        '401':
+          description: Not signed in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
     post:
-      operationId: submitExpenseClaim
-      summary: File a new expense claim
+      operationId: submitClaim
+      summary: Submit a new claim
       security:
         - oauth2: [claims:submit]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/NewExpenseClaim' }
+            schema: { $ref: '#/components/schemas/ClaimCreate' }
       responses:
         '201':
-          description: Claim filed as submitted
+          description: The created claim
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ExpenseClaim' }
+              schema: { $ref: '#/components/schemas/Claim' }
         '400':
-          description: Missing or invalid claim fields
+          description: The amount was not greater than zero, or the date is in the future
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Not signed in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /me/claims/{claimId}:
     get:
       operationId: getMyClaim
-      summary: A claim of the caller's, with its decision and reason
+      summary: The caller's own claim, with its decision and reason
       security:
         - oauth2: [claims:read]
       parameters:
@@ -126,46 +151,82 @@ paths:
           description: The claim
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ExpenseClaim' }
+              schema: { $ref: '#/components/schemas/Claim' }
         '404':
-          description: No such claim of the caller's
+          description: No claim of the caller's has this id
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Not signed in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /claims:
     get:
-      operationId: listAllClaims
-      summary: Every claim, for the approval queue
+      operationId: listClaims
+      summary: Every claim, optionally filtered by status
       security:
         - oauth2: [claims:read-all]
       parameters:
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/offset'
         - name: status
           in: query
-          schema: { type: string, enum: [submitted, approved, rejected] }
-        - name: limit
-          in: query
-          schema: { type: integer, default: 20, maximum: 100 }
-        - name: offset
-          in: query
-          schema: { type: integer, default: 0 }
+          schema: { $ref: '#/components/schemas/ClaimStatus' }
       responses:
         '200':
-          description: Every claim matching the filter
+          description: Every matching claim
           content:
             application/json:
               schema:
                 type: object
                 required: [count, data]
                 properties:
-                  count: { type: integer }
-                  next: { type: string, nullable: true }
-                  previous: { type: string, nullable: true }
+                  count: { type: integer, description: total matching claims }
+                  next: { type: string, nullable: true, description: relative URI of the next page }
+                  previous: { type: string, nullable: true, description: relative URI of the previous page }
                   data:
                     type: array
-                    items: { $ref: '#/components/schemas/ExpenseClaim' }
+                    items: { $ref: '#/components/schemas/Claim' }
+        '401':
+          description: Not signed in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /claims/{claimId}:
+    get:
+      operationId: getClaim
+      summary: Any claim, by id
+      security:
+        - oauth2: [claims:read-all]
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The claim
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Claim' }
+        '404':
+          description: No claim has this id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Not signed in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /claims/{claimId}/approve:
     post:
-      operationId: approveExpenseClaim
+      operationId: approveClaim
       summary: Approve a submitted claim
       security:
         - oauth2: [claims:approve]
@@ -176,23 +237,29 @@ paths:
           schema: { type: string }
       responses:
         '200':
-          description: Claim approved
+          description: The approved claim
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ExpenseClaim' }
+              schema: { $ref: '#/components/schemas/Claim' }
         '400':
-          description: The claim is not submitted, so it cannot be decided again
+          description: The claim has already been decided
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '404':
-          description: No such claim
+          description: No claim has this id
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Not signed in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /claims/{claimId}/reject:
     post:
-      operationId: rejectExpenseClaim
+      operationId: rejectClaim
       summary: Reject a submitted claim with a reason
       security:
         - oauth2: [claims:reject]
@@ -208,34 +275,46 @@ paths:
             schema: { $ref: '#/components/schemas/RejectClaim' }
       responses:
         '200':
-          description: Claim rejected
+          description: The rejected claim
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/ExpenseClaim' }
+              schema: { $ref: '#/components/schemas/Claim' }
         '400':
-          description: The claim is not submitted, so it cannot be decided again
+          description: The claim has already been decided, or no reason was given
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '404':
-          description: No such claim
+          description: No claim has this id
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          description: Not signed in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /reports/monthly:
     get:
       operationId: getMonthlyReport
-      summary: Monthly total of approved claims
+      summary: The total of approved claims for a calendar month
       security:
         - oauth2: [reports:read]
       parameters:
         - name: month
           in: query
-          required: true
-          schema: { type: string, description: "calendar month, e.g. 2026-09" }
+          required: false
+          description: calendar month, YYYY-MM; defaults to the current month
+          schema: { type: string }
       responses:
         '200':
           description: The month's total of approved claims
           content:
             application/json:
               schema: { $ref: '#/components/schemas/MonthlyReport' }
+        '401':
+          description: Not signed in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }

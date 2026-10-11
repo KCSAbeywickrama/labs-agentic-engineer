@@ -22,13 +22,18 @@ import { join } from "node:path";
 import { FIXTURES_DIR } from "../src/config.js";
 import type { SectionRunResult } from "../src/drivers/conversational.js";
 import { designChecks, isAcyclic } from "../src/scoring/structural.js";
+import { newTurnRecord } from "../src/tracing.js";
 
 // The committed design fixture is the reference bundle shape (design.cell root,
-// domain-model.md, flows/); every deterministic design check must pass on it,
-// otherwise the scorer disagrees with the platform's own golden example.
-test("designChecks: the lunch-coordinator design fixture passes every deterministic check", () => {
-  const run: SectionRunResult = { section: "design", records: [], questionsAsked: 0, finishedInterview: true, answers: [] };
-  const report = designChecks(join(FIXTURES_DIR, "lunch-coordinator-design"), run);
+// domain-model.md, the prototype, decisions.md, the acceptance tests); every
+// deterministic design check must pass on it, otherwise the scorer disagrees
+// with the platform's own golden example. The run is one turn that wrote
+// nothing and closed on the card, so only the files are judged.
+test("designChecks: the lunch-coordinator design fixture passes every deterministic check", async () => {
+  const closing = newTurnRecord("design", 1, "/design");
+  closing.agentText = "Next on the Design card: check the design files.";
+  const run: SectionRunResult = { section: "design", records: [closing], questionsAsked: 0, finishedInterview: true, answers: [] };
+  const report = await designChecks(join(FIXTURES_DIR, "lunch-coordinator-design"), run);
   const failed = report.checks.filter((c) => !c.ok).map((c) => `${c.name}: ${c.detail ?? ""}`);
   assert.deepEqual(failed, []);
 });

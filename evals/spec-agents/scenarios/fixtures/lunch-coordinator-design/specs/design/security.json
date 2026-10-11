@@ -1,0 +1,40 @@
+{
+  "version": 3,
+  "permissions": [
+    {
+      "resource": "rounds",
+      "component": "lunch-api",
+      "description": "The daily lunch round: its restaurant, cutoff and open/closed state",
+      "actions": [
+        { "handle": "read", "description": "Every round, open or past" },
+        { "handle": "open", "description": "Open a new round when none is open" },
+        { "handle": "close", "description": "Close your own open round before its cutoff" }
+      ]
+    },
+    {
+      "resource": "items",
+      "component": "lunch-api",
+      "description": "The items teammates add to a round",
+      "actions": [
+        { "handle": "add", "description": "Add an item to the open round" },
+        { "handle": "manage", "description": "Edit or remove an item you added" }
+      ]
+    }
+  ],
+  "groups": [
+    { "name": "Teammates", "description": "Every signed-in member of the one shared team" }
+  ],
+  "roles": [
+    {
+      "name": "Teammate",
+      "description": "Opens a round, adds and manages their own items, and reads rounds and the consolidated order. Never edits another teammate's items, and never closes a round they did not open.",
+      "stories": ["F1.1", "F1.2", "F1.3", "F1.4", "F1.5", "F2.1", "F2.2", "F3.1", "F3.2"],
+      "grants": ["rounds:read", "rounds:open", "rounds:close", "items:add", "items:manage"],
+      "enrolment": "self-service"
+    }
+  ],
+  "testUsers": [
+    { "username": "test-teammate", "roles": ["Teammate"] },
+    { "username": "test-teammate-2", "roles": ["Teammate"] }
+  ]
+}

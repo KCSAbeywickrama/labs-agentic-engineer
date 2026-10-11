@@ -18,15 +18,17 @@
 
 /**
  * The rubric judge (#355): one call per section artifact. Sees the artifact,
- * the rubric, and the sim user's decisions digest (#354) — user-decided scope
- * is never penalized as invention. The weighted score is computed HERE from
+ * the rubric, the sim user's decisions digest (#354) and the organization's
+ * settled defaults — user-decided scope and an org default the agent followed
+ * are never penalized as invention. The weighted score is computed HERE from
  * the judge's per-item booleans, not by the model.
  */
 
+import { existsSync, readFileSync } from "node:fs";
 import { generateObject } from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
-import { ensureAnthropicKey, JUDGE_MODEL } from "../config.js";
+import { ensureAnthropicKey, JUDGE_MODEL, ORG_SKILL_PATH } from "../config.js";
 import type { Rubric } from "../scenario.js";
 
 export interface JudgedItem {
@@ -46,11 +48,29 @@ export interface JudgeReport {
   inventions: string[];
 }
 
+/**
+ * The organization skill's settled sections: its body from the first `## `
+ * heading on (the frontmatter and the how-to-use preamble are for the agent).
+ * Undefined when the skill is absent or settles nothing.
+ */
+export function orgDefaults(path: string = ORG_SKILL_PATH): string | undefined {
+  if (!existsSync(path)) return undefined;
+  const text = readFileSync(path, "utf8");
+  const start = text.search(/^## /m);
+  return start < 0 ? undefined : text.slice(start).trim();
+}
+
 export async function judgeArtifact(input: {
   rubric: Rubric;
   artifactLabel: string;
   artifact: string;
   decisionsDigest?: string;
+  /**
+   * The organization skill's settled sections (`orgDefaults()`). The agent
+   * answers a settled policy from it instead of asking, so a judge that never
+   * saw it scores that decision as missing or invented.
+   */
+  orgDefaults?: string;
 }): Promise<JudgeReport> {
   const anthropic = createAnthropic({ apiKey: ensureAnthropicKey() });
   const mustCover = input.rubric.mustCover;
@@ -70,11 +90,13 @@ export async function judgeArtifact(input: {
 
 For each MUST-COVER item (by index) decide covered=true/false — covered means the artifact states it, correctly and unambiguously. Quote the evidence (or say why it is missing/wrong).
 For each MUST-NOT item (by index) decide violated=true/false — violated means the artifact contains what the item forbids. Quote the evidence when violated.
-Also list INVENTIONS: substantive requirements or scope in the artifact that trace to neither the rubric, nor plausibly to the product idea, nor to the user's interview decisions given below. Do not list phrasing differences or reasonable elaborations.`,
+Also list INVENTIONS: substantive requirements or scope in the artifact that trace to neither the rubric, nor plausibly to the product idea, nor to the user's interview decisions given below, nor to the organization's settled defaults given below. Do not list phrasing differences or reasonable elaborations.
+An organization default is settled before the run: an artifact that follows one complies with it. Where a rubric item names a choice an organization default makes (a sign-in provider, a stack), the default satisfies it unless the item says otherwise.`,
     prompt: [
       `MUST COVER:\n${mustCover.map((m, i) => `${i}. ${m.item}`).join("\n")}`,
       input.rubric.mustNot.length ? `MUST NOT:\n${input.rubric.mustNot.map((m, i) => `${i}. ${m}`).join("\n")}` : "",
       input.decisionsDigest ? `USER INTERVIEW DECISIONS (user-approved scope, NOT inventions):\n${input.decisionsDigest}` : "",
+      input.orgDefaults ? `ORGANIZATION DEFAULTS (settled by the organization, NOT inventions):\n${input.orgDefaults}` : "",
       `ARTIFACT (${input.artifactLabel}):\n${input.artifact}`,
     ]
       .filter(Boolean)

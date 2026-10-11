@@ -1,6 +1,6 @@
 {
   "id": "project",
-  "name": "lunch-coordinator",
+  "name": "design-lunch-coordinator",
   "modelVersion": "0.2.0",
   "components": [
     {
@@ -8,7 +8,7 @@
       "label": "lunch-api",
       "version": "0.1.0",
       "type": "service",
-      "buildPack": "Go",
+      "buildPack": "Ballerina",
       "services": {
         "lunch-api:api": {
           "id": "lunch-api:api",
@@ -18,10 +18,10 @@
           "deploymentMetadata": {
             "gateways": {
               "internet": {
-                "isExposed": false
+                "isExposed": true
               },
               "intranet": {
-                "isExposed": true
+                "isExposed": false
               }
             }
           }
@@ -29,15 +29,15 @@
       },
       "connections": [
         {
-          "id": "default:external-apis:lunch-db",
-          "label": "lunch-db",
+          "id": "default:external-apis:user-auth",
+          "label": "user-auth",
           "type": "datastore",
           "onPlatform": true,
           "tooltip": "datastore"
         },
         {
-          "id": "default:external-apis:team-auth",
-          "label": "team-auth",
+          "id": "default:external-apis:lunch-db",
+          "label": "lunch-db",
           "type": "datastore",
           "onPlatform": true,
           "tooltip": "datastore"
@@ -84,8 +84,8 @@
           "onPlatform": true
         },
         {
-          "id": "default:external-apis:team-auth",
-          "label": "team-auth",
+          "id": "default:external-apis:user-auth",
+          "label": "user-auth",
           "type": "datastore",
           "onPlatform": true,
           "tooltip": "datastore"

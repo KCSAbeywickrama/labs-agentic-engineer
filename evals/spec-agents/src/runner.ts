@@ -40,13 +40,13 @@ function startTurn(idea: string): string {
   return `${START_COMMAND} ${idea.trim()}`;
 }
 import { FIXTURES_DIR, PROJECTS_HOME } from "./config.js";
-import { listRequirementFiles, prepareProject, readProjectFile } from "./project.js";
+import { listRequirementFiles, prepareProject, readProjectFile, readRequirementTexts } from "./project.js";
 import type { ChainScenario, DesignScenario, RequirementsScenario, Rubric, TasksScenario } from "./scenario.js";
 import { decisionsDigest, type SimAnswer } from "./sim-user.js";
 import { runConversationalSection, type SectionRunResult } from "./drivers/conversational.js";
 import { runTaskPlanSection, type TaskPlanRunResult } from "./drivers/task-plan.js";
 import { sectionVerdict, type SectionVerdict } from "./scoring/bands.js";
-import { judgeArtifact, type JudgeReport } from "./scoring/judge.js";
+import { judgeArtifact, orgDefaults, type JudgeReport } from "./scoring/judge.js";
 import { designChecks, requirementsChecks, tasksChecks, type StructuralReport } from "./scoring/structural.js";
 import { emitReviewSheet, type ReviewSection } from "./scoring/review-sheet.js";
 import { sumUsage, writeRunArtifacts, type TurnRecord, type TurnUsage } from "./tracing.js";
@@ -82,31 +82,55 @@ function requirementsArtifact(projectDir: string): string {
     .join("\n\n");
 }
 
-function designArtifact(projectDir: string): string {
+/** The list items a design run added to the requirements (the gap check's lines), per file. */
+function addedRequirementLines(before: Record<string, string>, after: Record<string, string>): string {
+  const lines: string[] = [];
+  for (const [path, text] of Object.entries(after)) {
+    const was = new Set((before[path] ?? "").split("\n").map((l) => l.trim()));
+    const added = text
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => /^(?:-|\d+\.)\s+\S/.test(l) && !was.has(l));
+    if (added.length > 0) lines.push(`${path}:`, ...added.map((l) => `  ${l}`));
+  }
+  return lines.join("\n");
+}
+
+/**
+ * What the design judge reads, in the lineup's order, the prototype's source
+ * last (it is the longest file, and the clip cuts from the end).
+ */
+function designArtifact(projectDir: string, requirementsBefore?: Record<string, string>): string {
   const labeled = (rel: string): string => {
     const content = readProjectFile(projectDir, rel);
     return content ? `--- ${rel} ---\n${content}` : "";
   };
+  const componentsDir = join(projectDir, "specs/design/components");
+  const components = existsSync(componentsDir) ? readdirSync(componentsDir).sort() : [];
+  const dependenciesDir = join(projectDir, "specs/design/dependencies");
+  const dependencies = existsSync(dependenciesDir) ? readdirSync(dependenciesDir).sort() : [];
+  const added = requirementsBefore ? addedRequirementLines(requirementsBefore, readRequirementTexts(projectDir)) : "";
   const parts: string[] = [
+    added ? `--- requirements lines this run added (the gap check) ---\n${added}` : "",
     labeled("specs/design/design.cell"),
     labeled("specs/design/domain-model.md"),
     // The security step's artifact: the judge cannot score a permission
-    // catalog, a grant set or a screen's `requires` handle it never sees.
+    // catalog or a grant set it never sees.
     labeled("specs/design/security.json"),
+    labeled("specs/design/decisions.md"),
   ];
+  for (const c of components) {
+    for (const f of ["design.json", "prototype.json", "openapi.yaml", "agent.afm.md"]) {
+      parts.push(labeled(`specs/design/components/${c}/${f}`));
+    }
+  }
+  for (const d of dependencies) {
+    for (const f of ["dependency.json", "assumptions.md"]) parts.push(labeled(`specs/design/dependencies/${d}/${f}`));
+  }
   for (const f of listFlows(projectDir)) {
     parts.push(labeled(`specs/design/flows/${f}`));
   }
-  const componentsDir = join(projectDir, "specs/design/components");
-  if (existsSync(componentsDir)) {
-    for (const c of readdirSync(componentsDir).sort()) {
-      for (const f of ["design.json", "openapi.yaml"]) {
-        const rel = `specs/design/components/${c}/${f}`;
-        const content = readProjectFile(projectDir, rel);
-        if (content) parts.push(`--- ${rel} ---\n${content}`);
-      }
-    }
-  }
+  for (const c of components) parts.push(labeled(`specs/design/components/${c}/prototype.tsx`));
   return parts.filter(Boolean).join("\n\n");
 }
 
@@ -120,22 +144,31 @@ function tasksArtifact(projectDir: string): string {
     .join("\n\n");
 }
 
+/**
+ * `requirementsBefore` (design only): the requirements as the design run
+ * found them, so the gap check is scored by what the run added.
+ */
 async function scoreConversational(
   projectDir: string,
   run: SectionRunResult,
   rubric: Rubric,
   priorAnswers: SimAnswer[],
+  requirementsBefore?: Record<string, string>,
 ): Promise<SectionOutcome> {
   const isDesign = run.section === "design";
-  const structural = isDesign ? designChecks(projectDir, run) : requirementsChecks(projectDir, run);
-  const artifact = isDesign ? designArtifact(projectDir) : requirementsArtifact(projectDir);
+  const structural = isDesign ? await designChecks(projectDir, run, requirementsBefore) : requirementsChecks(projectDir, run);
+  const artifact = isDesign ? designArtifact(projectDir, requirementsBefore) : requirementsArtifact(projectDir);
   const digest = decisionsDigest([...priorAnswers, ...run.answers]);
+  const org = orgDefaults();
   const judge = artifact.trim()
     ? await judgeArtifact({
         rubric,
-        artifactLabel: isDesign ? "software design (design.cell + domain-model.md + flows/ + per-component design.json/openapi.yaml)" : "requirements document",
+        artifactLabel: isDesign
+          ? "software design (the requirements lines it added, design.cell, domain-model.md, security.json, decisions.md, per component design.json + prototype + openapi.yaml/agent.afm.md, dependencies, flows)"
+          : "requirements document",
         artifact: clip(artifact),
         ...(digest ? { decisionsDigest: digest } : {}),
+        ...(org ? { orgDefaults: org } : {}),
       })
     : null;
   return {
@@ -273,6 +306,7 @@ export async function runRequirementsScenario(sc: RequirementsScenario, runName:
 
 export async function runDesignScenario(sc: DesignScenario, runName: string): Promise<EvalRunOutput> {
   const projectDir = prepareProject(runName, sc.fixture);
+  const requirementsBefore = readRequirementTexts(projectDir);
   const session = await openSession(projectDir, {});
   let run: SectionRunResult;
   try {
@@ -280,9 +314,9 @@ export async function runDesignScenario(sc: DesignScenario, runName: string): Pr
   } finally {
     await session.close();
   }
-  const outcome = await scoreConversational(projectDir, run, sc.rubric, []);
+  const outcome = await scoreConversational(projectDir, run, sc.rubric, [], requirementsBefore);
   return finishRun("design-section", sc.brief.name, runName, run.records, [outcome], {
-    "specs/design/": designArtifact(projectDir),
+    "specs/design/": designArtifact(projectDir, requirementsBefore),
   });
 }
 
@@ -315,9 +349,10 @@ export async function runChainScenario(sc: ChainScenario, runName: string): Prom
     if (reqOutcome.verdict.band === "fail") {
       designSkipped = true;
     } else {
+      const requirementsBefore = readRequirementTexts(projectDir);
       const design = await runConversationalSection(session, "design", designTurn, sc.brief);
       records.push(...design.records);
-      const designOutcome = await scoreConversational(projectDir, design, sc.rubrics.design, requirementsAnswers);
+      const designOutcome = await scoreConversational(projectDir, design, sc.rubrics.design, requirementsAnswers, requirementsBefore);
       outcomes.push(designOutcome);
     }
   } finally {

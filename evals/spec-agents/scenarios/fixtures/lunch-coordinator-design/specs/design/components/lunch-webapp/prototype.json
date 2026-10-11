@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 3,
+  "name": "Team Lunch",
+  "entryScreen": "screen.round",
+  "roles": [{ "id": "Teammate", "name": "Teammate" }],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.validation-error", "name": "Validation errors" }
+  ],
+  "screens": [
+    { "id": "screen.round", "name": "Today's round", "roleIds": ["Teammate"] },
+    { "id": "screen.history", "name": "Past rounds", "roleIds": ["Teammate"] },
+    { "id": "screen.consolidated", "name": "Consolidated order", "roleIds": ["Teammate"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["Teammate"] },
+    { "id": "screen.settings", "name": "Settings", "roleIds": ["Teammate"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Teammate"] }
+  ],
+  "flows": [
+    { "id": "flow.open-round", "name": "Open a round", "roleId": "Teammate", "screenIds": ["screen.round"] },
+    { "id": "flow.add-item", "name": "Add an item", "roleId": "Teammate", "screenIds": ["screen.round"] },
+    { "id": "flow.edit-item", "name": "Edit or remove my item", "roleId": "Teammate", "screenIds": ["screen.round"] },
+    { "id": "flow.close-early", "name": "Close the round early", "roleId": "Teammate", "screenIds": ["screen.round"] },
+    { "id": "flow.view-history", "name": "Look back at past rounds", "roleId": "Teammate", "screenIds": ["screen.history"] },
+    { "id": "flow.view-consolidated", "name": "View the consolidated order", "roleId": "Teammate", "screenIds": ["screen.history", "screen.consolidated"] }
+  ]
+}
