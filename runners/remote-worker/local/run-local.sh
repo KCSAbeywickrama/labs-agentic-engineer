@@ -145,9 +145,29 @@ docker build \
 
 mkdir -p "$SCRIPT_DIR/workspace"
 
+# The image runs as `aep` (uid 999). A Linux bind mount keeps the host's numeric
+# owners, so uid 999 cannot create the run's directory in the workspace you own
+# (EACCES at provisioning). On Linux the container starts as root only to give
+# `aep` your uid and gid (adopt-host-user.sh, which the playground's docker
+# runs share), then runs as `aep` through the image's own entrypoint; you own
+# what it writes. macOS (Docker Desktop, colima) maps a mount's owner already.
+ADOPT_HOST_USER=()
+if [ "$(uname -s)" = "Linux" ]; then
+  ADOPT_HOST_USER=(
+    --user 0:0
+    --entrypoint /usr/local/bin/aep-adopt-host-user
+    -e "AEP_HOST_UID=$(id -u)" -e "AEP_HOST_GID=$(id -g)"
+    -v "$SCRIPT_DIR/adopt-host-user.sh:/usr/local/bin/aep-adopt-host-user:ro"
+  )
+fi
+
 echo ">> dispatching task ${AEP_TASK_ID} on ${AEP_REPO_URL}"
 EXIT_CODE=0
+# The command after the image is the image's CMD, spelled out because
+# --entrypoint clears it. The array guard keeps bash 3.2 (macOS) from calling
+# an empty array unbound under set -u.
 docker run --rm \
+  ${ADOPT_HOST_USER[@]+"${ADOPT_HOST_USER[@]}"} \
   --add-host=host.docker.internal:host-gateway \
   --shm-size=1g \
   -v "$SCRIPT_DIR/workspace:/home/aep/aep-workspace" \
@@ -159,7 +179,7 @@ docker run --rm \
   -e AEP_REPO_URL -e AEP_PROMPT -e AEP_BEARER -e GITHUB_TOKEN \
   -e AEP_IDENTITY_NAME -e AEP_IDENTITY_EMAIL -e AEP_GITHUB_OWNER -e AEP_TASK_KIND -e AEP_PLATFORM_URL \
   -e PUBLISHER_CLIENT_ID -e PUBLISHER_CLIENT_SECRET -e PUBLISHER_TOKEN_URL \
-  "$IMAGE_TAG" || EXIT_CODE=$?
+  "$IMAGE_TAG" npx tsx src/oneshot.ts || EXIT_CODE=$?
 
 WS="$SCRIPT_DIR/workspace/$AEP_ORG_ID/$AEP_PROJECT_ID/$AEP_TASK_ID"
 case "$EXIT_CODE" in

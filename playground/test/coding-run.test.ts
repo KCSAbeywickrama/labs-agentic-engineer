@@ -128,7 +128,7 @@ test("a Linux docker run adopts the host user; a macOS run keeps the image's use
   assert.equal(linux[linux.indexOf("--entrypoint") + 1], "/usr/local/bin/aep-adopt-host-user");
   assert.equal(linux[linux.indexOf("--user") + 1], "0:0");
   assert.ok(linux.includes("AEP_HOST_UID=1000") && linux.includes("AEP_HOST_GID=1001"));
-  assert.ok(linux.includes(`${join(REPO_ROOT, "playground", "docker", "adopt-host-user.sh")}:/usr/local/bin/aep-adopt-host-user:ro`));
+  assert.ok(linux.includes(`${join(REPO_ROOT, "runners", "remote-worker", "local", "adopt-host-user.sh")}:/usr/local/bin/aep-adopt-host-user:ro`));
 
   const mac = dockerInvocation(invocationOpts, "/r", "c1", null).args;
   assert.equal(mac[mac.indexOf("--entrypoint") + 1], "/usr/local/bin/aep-runner-entrypoint");

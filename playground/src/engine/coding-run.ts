@@ -640,8 +640,9 @@ export function applyCodingCredential(env: NodeJS.ProcessEnv, cred: CodingCreden
 // The image's own entrypoint wrapper (`runners/remote-worker/docker-entrypoint.sh`).
 const IMAGE_ENTRYPOINT = "/usr/local/bin/aep-runner-entrypoint";
 // A Linux run's entrypoint: `aep` takes the host user's uid, then the image's own
-// entrypoint runs. Bind-mounted like local.ts, so the image never carries it.
-const ADOPT_HOST_USER = join(REPO_ROOT, "playground", "docker", "adopt-host-user.sh");
+// entrypoint runs. Bind-mounted like local.ts, so the image never carries it. It
+// is the runner's local-run script, shared with `runners/remote-worker/local/run-local.sh`.
+const ADOPT_HOST_USER = join(REPO_ROOT, "runners", "remote-worker", "local", "adopt-host-user.sh");
 const IMAGE_ADOPT_HOST_USER = "/usr/local/bin/aep-adopt-host-user";
 
 /** The host user a docker run's `aep` takes the ids of. */

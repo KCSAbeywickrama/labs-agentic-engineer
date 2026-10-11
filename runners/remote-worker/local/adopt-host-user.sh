@@ -15,12 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# A Linux docker-mode coding run's entrypoint (playground only; bind-mounted
-# over the unmodified runner image, never baked into it).
+# The entrypoint of a runner container started on a Linux host: the
+# playground's docker-mode coding run and run-local.sh both bind-mount it over
+# the unmodified runner image; it is never baked into the image.
 #
 # The image runs as `aep` (uid 999). On a Linux host a bind mount keeps the
-# host's numeric owners, so uid 999 cannot write the project and run dirs the
-# host user owns, and what it does write the host user cannot delete. macOS
+# host's numeric owners, so uid 999 cannot write the directories the host user
+# mounts in, and what it does write the host user cannot delete. macOS
 # (Docker Desktop, colima) maps a mount's owner to the host user, so this is
 # not used there.
 #

@@ -13,7 +13,10 @@ mounts the org's gitpat.
 2. Builds the runner image from `../Dockerfile` (cached after the first time).
 3. Runs the one-shot container: clones `AEP_REPO_URL`'s default branch,
    reads the `aep` skill from the clone's mirror, and lets the agent work `AEP_PROMPT` —
-   branch, commit, push, PR, exactly as a cluster run would.
+   branch, commit, push, PR, exactly as a cluster run would. On a Linux
+   host the container starts as root only to give the image's `aep` user
+   your uid and gid (`adopt-host-user.sh`, shared with the playground), so
+   the run can write `workspace/` and you own what it leaves there.
 
 The run reads every skill from the `.claude/skills/` mirror the BFF wrote
 into the clone — there is no skills fetch and no plugin. The repo-root
