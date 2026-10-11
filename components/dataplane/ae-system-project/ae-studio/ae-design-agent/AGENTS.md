@@ -12,8 +12,10 @@ committer saves them.
 The client-side consumption surface — wire types (SSE events, `OpResult`,
 `*Input`, `Change`, `TurnRequest`), the `FileBundle` fold (`applyToolCall`,
 `toChange`) with its per-artifact write gates (`design.json` schema,
-`wireframes.dsl` syntax, `openapi.yaml` structure — so validating a spec costs no
-round trip), the SSE reader
+`security.json` and `review.json` schemas, `openapi.yaml` structure, a web
+app's prototype — the manifest and source rules, then this service's check,
+which type-checks `prototype.tsx` and draws every screen — so validating a spec
+costs no round trip), the SSE reader
 (`startAndStreamTurn`), and the published JSON Schema — lives in the workspace package
 **`@aep/agent-stream`** (moved there so the console/playground fold one
 definition). This service imports it; the Zod schemas in `src/agents/main/tools/` are drift-guarded

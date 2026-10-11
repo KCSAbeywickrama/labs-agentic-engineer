@@ -16,6 +16,11 @@ Use this procedure for steps 1 and 3 of the `writing-skills` verify loop.
 ### Before the first run
 
 - Docker mode is the default. It needs a running Docker daemon (`colima start`).
+- On a Linux host, a docker-mode run starts the container as root only to
+  give the image's `aep` user your uid and gid (`runners/remote-worker/local/adopt-host-user.sh`),
+  then runs as `aep`. Thus the run can write the project and run directories,
+  and you own each file that it writes. This step adds about 3 s to a Claude
+  Code run and about 35 s to an OpenCode run. macOS runs do not use it.
 - `code` needs `go` on the PATH. Before the agent starts, it derives each
   dependency's `wiring` and `exposesAPI.auth` with aep-api's own derivation, as
   POST /build does (ADR-0003).
