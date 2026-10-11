@@ -73,7 +73,7 @@ export const INTERNAL_TURN_MESSAGE = "the turn stopped on an internal error";
 
 /** One structured, value-free log line of the turn path. */
 export interface TurnLogLine {
-  msg: "turn_internal_error" | "turn_material_unreadable";
+  msg: "turn_internal_error" | "turn_material_unreadable" | "turn_end_unread";
   source: "ae-design-agent";
   /** The error's class (`Error`, `TypeError`, ...), never its message. */
   errorClass: string;
@@ -134,6 +134,10 @@ export interface TurnOutcome {
   baseRef: string;
   /** The Org skills snapshot sha the turn read. */
   skillsRef: string;
+  /** A design run's: the commit its Room work was saved at when it ended (`start-spec.ts` `savesItsEnd`). */
+  endRef?: string;
+  /** The files the turn's own writes changed (`ConversationTurnResult.changedPaths`). */
+  changedPaths?: string[];
 }
 
 /** One turn's body: emit parts, honour the signal (the cap and shutdown abort it). */
@@ -389,6 +393,8 @@ export class TurnDesk {
       cacheCreationTokens: usage?.cacheCreationTokens ?? 0,
       ...(ending.contextTokens !== undefined ? { contextTokens: ending.contextTokens } : {}),
       ...(meta.designFeatures?.length ? { designFeatures: meta.designFeatures } : {}),
+      ...(ending.endRef ? { endRef: ending.endRef } : {}),
+      ...changedPathsFact(ending.changedPaths),
     };
   }
 
@@ -405,6 +411,19 @@ export class TurnDesk {
       else this.finished.set(key, keep);
     }
   }
+}
+
+const MAX_CHANGED_PATHS = 200;
+const MAX_PATH = 512;
+
+/**
+ * The changed paths a usage record carries: those the record's schema takes
+ * (at most 512 characters, the first 200), since one bad item makes the
+ * socket refuse the whole record.
+ */
+function changedPathsFact(paths: readonly string[] | undefined): { changedPaths?: string[] } {
+  const kept = (paths ?? []).filter((p) => p !== "" && p.length <= MAX_PATH).slice(0, MAX_CHANGED_PATHS);
+  return kept.length > 0 ? { changedPaths: kept } : {};
 }
 
 /** The refs of a turn that ended before its run reported any: the starter's, else none. */

@@ -130,6 +130,21 @@ turn's record has no `project`. A `design` turn's record carries
 never the line; `start-spec.ts` `designFeaturesOf`); a bare `/design` sends
 none, which `aep-api` reads as every feature.
 
+- **A design run records where it ended** (L30). A `design` or
+  `address-comments` turn (`savesItsEnd`) asks the Room for a forced save
+  before it leaves (`RoomPeer.flush`: the `{type:"flush", id}` the console's
+  flush-before-build sends, answered `flushed` or `flush-error`), then reads
+  the project's head through the tools socket's lookup and sends it as
+  `endRef`. `aep-api` reads a designed feature's basis there, so the run's own
+  requirement edits (the gap check's assumed lines and questions) never read
+  as out of date. A save that does not land within 60 s, or a lookup that
+  fails (`turn_end_unread`), sends no `endRef`; the turn still completes.
+- **Every record names the files the turn changed** (L18): `changedPaths`,
+  what the turn's own writes left different from the bundle it started with
+  (`runConversationTurn`; a file written and put back is not one), sorted,
+  within the schema (at most 200, each at most 512 characters). `aep-api`
+  numbers each design artifact's revisions from them.
+
 - The record's tokens are the run's whole-turn usage. A turn the desk ends
   itself (shutdown on a roll, the 30-minute cap) or whose run reports none
   carries the sum of its finished model steps instead (`StepUsageTally` in

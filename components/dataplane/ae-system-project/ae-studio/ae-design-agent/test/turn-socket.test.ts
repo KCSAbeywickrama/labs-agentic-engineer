@@ -337,6 +337,7 @@ test("a turn whose Room writes did not all land ends failed room_unavailable, no
         files: () => ({ "specs/requirements/prd.md": "# PRD\n" }),
         set: () => {},
         delete: () => {},
+        flush: async () => false,
         leave: async () => 1,
       }),
     },

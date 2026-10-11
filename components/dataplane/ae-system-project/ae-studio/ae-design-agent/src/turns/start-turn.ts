@@ -72,7 +72,7 @@ import { connectionHost, type ModelConnection } from "../shared/model.js";
 import { projectSnapshotDir, skillsSnapshotDir } from "../shared/snapshot-path.js";
 import type { ConversationStore } from "../store/conversation-store.js";
 import { ToolsSocketError, type ProjectSnapshot, type ToolsSocket } from "../tools-socket/client.js";
-import { designFeaturesOf, startTurnSummary, turnSpecFor } from "./start-spec.js";
+import { designFeaturesOf, savesItsEnd, startTurnSummary, turnSpecFor } from "./start-spec.js";
 import {
   DeskClosedError,
   errorClassOf,
@@ -437,6 +437,20 @@ export class TurnStarter {
     }
   }
 
+  /**
+   * The project's head once a design run's Room work has been saved: the
+   * commit its run ended at. undefined when the tools socket cannot say;
+   * the run then records no end, and aep-api reads its start instead.
+   */
+  private async headAfterSave(project: string): Promise<string | undefined> {
+    try {
+      return (await this.deps.tools.lookup(project))?.headSha;
+    } catch (err) {
+      (this.deps.log ?? stdoutTurnLog)({ msg: "turn_end_unread", source: "ae-design-agent", errorClass: errorClassOf(err) });
+      return undefined;
+    }
+  }
+
   /** A turn runs on the scope: 409, unless it is the turn `turnId` names (the desk reattaches it). */
   private refuseBusy(scope: Scope, turnId?: string): void {
     const active = this.deps.desk.active(scope);
@@ -612,7 +626,14 @@ export class TurnStarter {
             onEvent,
             abortSignal: signal,
           });
-          const usage = { usage: res.usage, ...(contextTokens !== undefined ? { contextTokens } : {}) };
+          const usage = {
+            usage: res.usage,
+            ...(contextTokens !== undefined ? { contextTokens } : {}),
+            changedPaths: res.changedPaths,
+          };
+          // A design run saves its Room work before it leaves, so the commit
+          // it ends at holds its own requirement edits (L30).
+          const saved = peer !== undefined && savesItsEnd(l.flow) ? await peer.flush() : false;
           // A turn whose edits did not all reach the Room has not completed:
           // its Room connection dropped and the rejoin failed or never synced.
           const dropped = await leaveRoom();
@@ -626,7 +647,8 @@ export class TurnStarter {
               ...refs,
             };
           }
-          return { status: "completed", ...usage, ...refs };
+          const endRef = saved && l.roomProject !== undefined ? await this.headAfterSave(l.roomProject) : undefined;
+          return { status: "completed", ...usage, ...refs, ...(endRef ? { endRef } : {}) };
         } catch (err) {
           if (signal.aborted) throw err; // the desk already ended the turn (cap or shutdown)
           const frame = turnErrorFrame(err, host);

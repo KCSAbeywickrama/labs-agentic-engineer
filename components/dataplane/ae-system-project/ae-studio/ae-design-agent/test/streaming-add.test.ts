@@ -39,6 +39,9 @@ class FakePeer implements RoomPeer {
   delete(path: string): void {
     this.deletes.push(path);
   }
+  flush(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
   leave(): Promise<number> {
     return Promise.resolve(0);
   }

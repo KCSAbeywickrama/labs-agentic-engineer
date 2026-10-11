@@ -239,11 +239,17 @@ export interface RunConversationTurnInput {
   abortSignal?: AbortSignal;
 }
 
-/** What a completed turn leaves behind: the saved aggregate and the turn's token usage. */
+/** What a completed turn leaves behind: the saved aggregate, the turn's token usage and the files it changed. */
 export interface ConversationTurnResult {
   conversation: Conversation;
   /** The whole turn's usage on the wire shape (#249); `model` is the connection's id, `""` without one. */
   usage: TurnUsage;
+  /**
+   * The files the turn's own writes left different from what it started
+   * with, sorted (the usage record's `changedPaths`, L18): a file written and
+   * then put back is not among them. Empty for a turn that writes nothing.
+   */
+  changedPaths: string[];
 }
 
 export async function runConversationTurn(input: RunConversationTurnInput): Promise<ConversationTurnResult> {
@@ -268,6 +274,8 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     const toolset: Toolset = input.toolset ?? "files";
     const skills = input.skillSource;
     let bundle: FileBundle | undefined;
+    /** The bundle as the turn found it: what `changedPaths` is measured against. */
+    let started: Record<string, string> = {};
     let tools: ToolSet;
     let instructions: string;
     // The turn's write ledger (files turns only) — see write-ledger.ts: it is
@@ -281,6 +289,7 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
       instructions = buildTaskPlanInstructions(skills, input.surface);
     } else {
       bundle = input.collabPeer ? new DocFileBundle(input.collabPeer, input.files) : new FileBundle(input.files);
+      started = bundle.snapshot();
       // A prototype write is drawn by the isolated render check before it lands
       // (asynchronously: other conversations keep the event loop meanwhile).
       const fileToolSet = buildFileToolSet(bundle, skills, { prototypeRender: checkPrototypeRender });
@@ -465,7 +474,7 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     const cutOff = res.finishReason === "length" ? truncation.cutOffCall() : undefined;
     if (cutOff) throw new OutputTruncatedError(cutOff, maxOutputTokens);
 
-    return { conversation: conv, usage };
+    return { conversation: conv, usage, changedPaths: bundle ? changedPaths(started, bundle) : [] };
   } finally {
     // Drain the live-preview writer and undo any addFile body we streamed but that
     // never finalized (a severed or rejected op). Runs before the turn's run detaches
@@ -482,4 +491,12 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
 function providerOptionsFor(conn: ModelConnection): { providerOptions?: ProviderOptions } {
   const providerOptions = modelProviderOptions(conn);
   return providerOptions ? { providerOptions } : {};
+}
+
+/** The paths the bundle's writes left different from `started`, sorted. */
+function changedPaths(started: Record<string, string>, bundle: FileBundle): string[] {
+  return bundle
+    .touched()
+    .filter((path) => started[path] !== bundle.read(path))
+    .sort();
 }

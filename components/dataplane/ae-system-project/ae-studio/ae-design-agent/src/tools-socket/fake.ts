@@ -127,6 +127,12 @@ export class FakeToolsSocket implements ToolsSocket {
     this.lookupFault = new ToolsSocketError(code, 404, "the studio could not read the project's tree");
   }
 
+  /** Later `lookup`s of a known project answer this head (a commit landed: a Room save). */
+  setHead(project: string, headSha: string): void {
+    const known = this.projects[project];
+    if (known) this.projects[project] = { ...known, headSha };
+  }
+
   /** `lookup` calls wait until `release()` (a cold tools sidecar). */
   holdLookups(): { release(): void } {
     let release!: () => void;

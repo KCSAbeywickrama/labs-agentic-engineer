@@ -38,6 +38,7 @@
 // confirmed are not hidden: `leave()` resolves to their count (logged as
 // `room_writes_dropped`), and the turn ends failed on it.
 
+import { randomUUID } from "node:crypto";
 import {
   HocuspocusProvider,
   HocuspocusProviderWebsocket,
@@ -78,6 +79,12 @@ export interface RejoinPolicy {
   maxAttempts: number;
   /** How long `leave()` waits for a rejoin in flight to sync before it counts the writes as dropped. */
   leaveWaitMs: number;
+  /**
+   * How long `flush()` waits for the Room's answer. The committer gives the
+   * Files socket 45 s per apply and retries a conflict twice; past this the
+   * save is reported as not landed (it may still land later).
+   */
+  flushWaitMs: number;
 }
 
 const REJOIN_POLICY: RejoinPolicy = {
@@ -86,6 +93,7 @@ const REJOIN_POLICY: RejoinPolicy = {
   attemptTimeoutMs: 10_000,
   maxAttempts: 10,
   leaveWaitMs: 3_000,
+  flushWaitMs: 60_000,
 };
 
 /** One structured, value-free log line (no token, no content). */
@@ -118,6 +126,14 @@ export interface RoomPeer {
   set(path: string, content: string, mark: boolean): void;
   /** Remove one file from the live doc. */
   delete(path: string): void;
+  /**
+   * Ask the Room to save its doc to git now: the forced flush the console's
+   * flush-before-build sends (`{type:"flush", id}`), which commits pending
+   * agent marks too. Resolves true once the Room answers `flushed`, false on
+   * `flush-error`, on no answer within `flushWaitMs`, or when the connection
+   * is not synced (a rejoin in flight, or after `leave()`). Never rejects.
+   */
+  flush(): Promise<boolean>;
   /**
    * Clear presence and close the connection. Resolves to the number of files
    * this peer wrote that the Room never confirmed (a rejoin that failed or
@@ -360,6 +376,35 @@ export async function joinRoom(input: JoinRoomInput): Promise<RoomPeer> {
     return conn.synced ? 0 : written.size;
   };
 
+  /** One forced flush on the current connection, answered by its id. */
+  const flush = (): Promise<boolean> => {
+    const c = conn;
+    if (left || !c.synced) return Promise.resolve(false);
+    const id = randomUUID();
+    return new Promise<boolean>((resolve) => {
+      const done = (landed: boolean): void => {
+        clearTimeout(timer);
+        c.provider.off("stateless", onStateless);
+        resolve(landed);
+      };
+      const onStateless = ({ payload }: { payload: string }): void => {
+        let msg: { type?: unknown; id?: unknown } | null;
+        try {
+          msg = JSON.parse(payload) as typeof msg;
+        } catch {
+          return; // not the flush protocol
+        }
+        if (msg === null || typeof msg !== "object" || msg.id !== id) return;
+        if (msg.type === "flushed") done(true);
+        else if (msg.type === "flush-error") done(false);
+      };
+      const timer = setTimeout(() => done(false), policy.flushWaitMs);
+      timer.unref?.();
+      c.provider.on("stateless", onStateless);
+      c.provider.sendStateless(JSON.stringify({ type: "flush", id }));
+    });
+  };
+
   let leaving: Promise<number> | undefined;
   const leave = async (): Promise<number> => {
     const dropped = await unconfirmed();
@@ -383,6 +428,7 @@ export async function joinRoom(input: JoinRoomInput): Promise<RoomPeer> {
       written.set(path, null);
       if (conn.synced) write(conn, path, null);
     },
+    flush,
     leave: () => (leaving ??= leave()),
   };
 }
