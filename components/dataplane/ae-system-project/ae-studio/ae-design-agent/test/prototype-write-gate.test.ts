@@ -19,9 +19,10 @@
 /**
  * The prototype write gate end to end in the design agent: a turn's model
  * writes a prototype through the real tool loop, and the bundle the turn builds
- * judges it with the real isolated render check on the Oxygen theme's runtime.
- * The static stages are pinned in @aep/agent-stream; this pins what only the
- * design agent can: that the render check is wired in and sees what the model wrote.
+ * judges it with the kit's whole check: the type stage, then the real isolated
+ * render on the Oxygen theme's runtime. The static stages are pinned in
+ * @aep/agent-stream; this pins what only the design agent can: that the type
+ * and render checks are wired in and see what the model wrote.
  */
 
 import { test } from "node:test";
@@ -114,6 +115,37 @@ test("a screen that throws in one display state is refused with the kit's RENDER
   assert.equal(render.file, "prototype.tsx");
   assert.match(render.location, /screen\.home as user in state\.empty/);
   assert.match(refused.message, /RENDER_FAILED/);
+  assert.equal(results[2]!.ok, true, "the corrected file is accepted");
+});
+
+// Live: an /address-comments run renamed a record field by separate edits and
+// left one use of the old name; it transpiled and drew, so it landed.
+test("a source that reads a field its record type no longer has is refused with the kit's TYPE_ERROR at that line, then a fix lands", async () => {
+  const typed = (field: string) => `
+import { Heading, Screen, Text, defineApp, useCollection } from "@wso2/prototype-kit";
+
+interface Claim { id: string; totalCents: number }
+
+function Home() {
+  const claims = useCollection<Claim>("claims");
+  return (
+    <Screen>
+      <Heading id="heading.home" text="Home" />
+      <Text id="text.total" text={String(claims.items.reduce((sum, c) => sum + c.${field}, 0))} />
+    </Screen>
+  );
+}
+
+export default defineApp({ screens: { "screen.home": Home }, data: { claims: [{ id: "claim-1", totalCents: 1200 }] } });
+`;
+  const { results } = await writes([MANIFEST_PATH, MANIFEST], [SOURCE_PATH, typed("totalAmountCents")], [SOURCE_PATH, typed("totalCents")]);
+  const refused = results[1] as OpErr;
+  assert.equal(refused.ok, false, JSON.stringify(results));
+  assert.equal(refused.code, "INVALID_PROTOTYPE");
+  assert.deepEqual(refused.findings, [
+    { code: "TYPE_ERROR", file: "prototype.tsx", location: "line 11", message: "Property 'totalAmountCents' does not exist on type 'Claim'." },
+  ]);
+  assert.match(refused.message, /TYPE_ERROR in prototype\.tsx at line 11/);
   assert.equal(results[2]!.ok, true, "the corrected file is accepted");
 });
 

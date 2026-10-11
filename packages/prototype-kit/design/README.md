@@ -69,7 +69,7 @@ themes call `onSubmit` for Enter in a single-line field. Validation (`required`,
 
 `checkPrototypeFiles` stops at the first failing stage: files, manifest
 (JSON, version, shape, references), static source rules, literal `to=`/`go()`
-targets, isolated render.
+targets, types, isolated render.
 
 - Static global check: a name bound anywhere in the module (a local `history`)
   is not a global, so it is not flagged.
@@ -82,6 +82,27 @@ targets, isolated render.
   its event loop while a prototype renders (the design agent serves other
   conversations; the CLI preview keeps answering).
 - Limits of the render check: see ADR-0042, Consequences.
+- Types (`check/types.ts`, `TYPE_ERROR`): transpiling erases types, so a
+  read of a field the record's interface no longer has (a rename finished in
+  the interface and missed at one use) transpiles and draws, as `undefined`.
+  Seen live: `/address-comments` renamed a field by separate edits and left
+  one use in three of four runs (fixture `test/fixtures/stale-field`). The
+  stage type-checks `prototype.tsx` in-process with the TypeScript compiler
+  API: one in-memory program whose only root is the prototype, placed in the
+  kit's folder so `react` resolves to the React types the kit is installed
+  with, and `@wso2/prototype-kit` to the kit's own entry (its declarations
+  built, its sources in the kit's tests). Every other file is parsed once per
+  process and kept, so a warm check costs about 0.1 s and the first about a
+  second (compiler load included), with about 80 MB of heap resident. The
+  compiler is loaded on the first check, not on import of `/check`, and
+  never from `/source`, which a browser host's static gate imports.
+  Non-strict on purpose: it refuses names, props and values that cannot be
+  right, not strict mode's discipline (a possibly undefined lookup, an
+  unannotated parameter); drawing every screen covers what a missing value
+  breaks. Records are typed by the screen: `useCollection<T>` has no default,
+  so a collection read without its record type has only `id`. At most
+  `MAX_TYPE_FINDINGS` (20) findings, by line; the Go save gate does not
+  mirror this stage.
 
 ## Go mirror
 

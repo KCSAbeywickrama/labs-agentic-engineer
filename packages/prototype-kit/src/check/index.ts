@@ -20,8 +20,8 @@
  * `@wso2/prototype-kit/check`: the whole prototype check, in the order an
  * author fixes things — the files, the manifest's shape and references, the
  * source's static rules, the source's literal references into the manifest,
- * then the isolated render of every screen × role × state. Each stage runs
- * only when the earlier ones pass.
+ * the source's types, then the isolated render of every screen × role ×
+ * state. Each stage runs only when the earlier ones pass.
  */
 
 import type { Finding } from "../findings.js";
@@ -42,7 +42,12 @@ export interface CheckOptions {
   theme: ThemeRuntimes;
 }
 
-/** Every finding for these two files; empty when they are ready to preview. The render stage runs in a child process, off the caller's event loop. */
+/**
+ * Every finding for these two files; empty when they are ready to preview.
+ * The type stage runs in the caller's process (a warm check takes about a
+ * tenth of a second, the first in a process about a second); the render
+ * stage runs in a child process, off the caller's event loop.
+ */
 export async function checkPrototypeFiles(files: PrototypeFiles, options: CheckOptions): Promise<Finding[]> {
   if (files.manifest === null || files.source === null) return missingFileFindings(files);
   const manifest = parseManifestJson(files.manifest);
@@ -51,6 +56,10 @@ export async function checkPrototypeFiles(files: PrototypeFiles, options: CheckO
   if (staticFindings.length > 0) return staticFindings;
   const references = sourceReferenceFindings(files.source, manifest.manifest);
   if (references.length > 0) return references;
+  // The compiler loads on the first check, not on import: a host that only reads files never pays for it.
+  const { checkSourceTypes } = await import("./types.js");
+  const types = checkSourceTypes(files.source);
+  if (types.length > 0) return types;
   return checkRenderIsolated(manifest.manifest, files.source, options.theme);
 }
 

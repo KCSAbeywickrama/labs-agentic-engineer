@@ -17,6 +17,7 @@
  */
 
 // Fixture: a kit component without an id.
+// A cast hides the fault from the type stage, as an untyped value would, so only the render finds it.
 
 import { Button, Heading, Screen, Text, defineApp, useDisplayState, useNav, useRole } from "@wso2/prototype-kit";
 
@@ -32,7 +33,7 @@ function Admin() {
   return (
     <Screen>
       <Heading id="heading.admin" text="Administration" />
-      <Text text="No id" />
+      <Text {...({} as { id: string })} text="No id" />
     </Screen>
   );
 }

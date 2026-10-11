@@ -29,11 +29,12 @@ AEP: Oxygen, AEP paths, no CLI, unpublished.
    registry is a mapped type, so a theme missing a component does not compile.
 3. **Checked before anyone sees it.** `prototype check` runs, in order: the
    manifest's shape and references, static source rules (a name bound anywhere
-   in the module is not a global), literal navigation targets, then every
-   screen x role x state rendered in an isolated child (empty environment, Node
-   permission model with no grants, heap and time caps, a `vm` context created
-   from `Object.create(null)` without string code generation or wasm, frozen
-   shared prototypes). Findings are a stable, documented code enum.
+   in the module is not a global), literal navigation targets, the source's
+   types (the TypeScript compiler in-process, non-strict, against the kit's
+   declarations), then every screen x role x state rendered in an isolated
+   child (empty environment, Node permission model with no grants, heap and
+   time caps, a `vm` context created from `Object.create(null)` without
+   string code generation or wasm, frozen shared prototypes). Findings are a stable, documented code enum.
 4. **Played in a sandbox.** The frame is `<iframe sandbox="allow-scripts">`
    from `srcdoc` with a no-network CSP (`'unsafe-eval'` only for the module
    loader); host and frame speak a validated message bridge. The host ignores

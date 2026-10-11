@@ -66,9 +66,11 @@
     "dev": "echo \"@wso2/prototype-kit: no dev server\""
   },
   "dependencies": {
+    "@types/react": "19.1.6",
     "acorn": "^8.17.0",
     "acorn-walk": "^8.3.5",
     "sucrase": "^3.35.1",
+    "typescript": "5.9.3",
     "zod": "^4.3.6"
   },
   "peerDependencies": {
@@ -89,13 +91,11 @@
   },
   "devDependencies": {
     "@types/node": "^22",
-    "@types/react": "19.1.6",
     "@types/react-dom": "19.0.2",
     "esbuild": "^0.28.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "tsx": "^4.21.0",
-    "typescript": "5.9.3",
     "vitest": "^4.1.10"
   }
 }

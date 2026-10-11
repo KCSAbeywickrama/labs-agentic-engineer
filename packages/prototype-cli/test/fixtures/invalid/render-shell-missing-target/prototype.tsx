@@ -17,12 +17,13 @@
  */
 
 // Fixture: an app shell without the screen its Sign out entry opens.
+// A cast hides the fault from the type stage, as an untyped value would, so only the render finds it.
 
 import { AppShell, Button, Heading, Screen, defineApp } from "@wso2/prototype-kit";
 
 function Home() {
   return (
-    <AppShell id="shell" user={{ name: "Dana Lee" }} nav={[{ id: "nav.home", label: "Home", to: "screen.home" }]} account="screen.home" settings="screen.home">
+    <AppShell id="shell" user={{ name: "Dana Lee" }} nav={[{ id: "nav.home", label: "Home", to: "screen.home" }]} account="screen.home" settings="screen.home" {...({} as { signOut: string })}>
       <Heading id="heading.home" text="Home" />
     </AppShell>
   );
