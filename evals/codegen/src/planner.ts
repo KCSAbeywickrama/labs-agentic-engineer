@@ -45,7 +45,7 @@ export function plannerPrompt(roles: string[]): string {
 Write the acceptance checklist a tester will walk against the finished app.
 
 READ (Glob/Grep/Read), in roughly this order:
-- specs/requirements/prd.md — the user stories (numbered) and the assumptions.
+- specs/requirements/prd.md, features/F<n>-*.md and product-wide.md — the product page (actors, out of scope), each feature's user stories (\`F2.3\`), decisions and open questions, and the rules that span features. Lines tagged *assumed* are assumptions.
 - specs/design/components/*/prototype.json — the reviewed prototype's manifest: \`roles\`, \`screens\` (each with its \`name\` and the \`roleIds\` that reach it), and \`flows\` (one role's walk through screens, entry screen first, in \`screenIds\` order).
 - specs/design/components/*/prototype.tsx — what each screen shows, as \`@wso2/prototype-kit\` components keyed by screen id in \`defineApp({ screens })\`. A \`to\` on a \`Button\`, \`Link\`, table row, row action, breadcrumb or \`AppShell\` \`nav\` entry, or a \`useNav().go(...)\` after an action, is where it navigates. Its \`data\` is the reviewer's sample records: the app under test does NOT have them.
 - specs/design/security.json — the roles and their grants.

@@ -25,7 +25,7 @@ playground's production-parity waist.
 3. **Scoring** (`src/scoring/`) — runs inside the task, not in evalite
    scorers, so chains can band a section before deciding to continue:
    - *structural*: deterministic checks binding the LIVE workspace validators
-     (`checkComponentDesign`, the DSL compilers, the prototype kit's check,
+     (`checkComponentDesign`, the design.cell compiler, the prototype kit's check,
      the review file's validator, the issue fold). A validator tightening is
      an explainable score shift, not drift. The design section also checks
      the lineup itself (`src/scoring/design-lineup.ts`): the artifacts' write

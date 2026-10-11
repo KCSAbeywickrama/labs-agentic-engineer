@@ -18,7 +18,7 @@
 
 /**
  * Deterministic per-section checks (#355), binding the LIVE workspace
- * validators — `checkComponentDesign`, the DSL compilers, the issue fold —
+ * validators — `checkComponentDesign`, the design.cell compiler, the issue fold —
  * never vendored copies. A validator tightening is an explainable score-shift
  * event, not drift.
  */

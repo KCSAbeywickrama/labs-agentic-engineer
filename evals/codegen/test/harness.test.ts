@@ -548,6 +548,7 @@ test("prompts: planner and walker both carry the wired-mode auth semantics; the 
   assert.match(planner, /READ-ONLY/);
   assert.match(planner, /the prototype wins for the walk/);
   assert.match(planner, /prototype\.json/);
+  assert.match(planner, /features\/F<n>-\*\.md/);
   assert.doesNotMatch(planner, /wireframe/i);
   const walker = walkerPrompt({ baseUrl: "http://localhost:5173/", roles: ["Employee"], items: [], mustNot: [] });
   assert.ok(walker.includes(WIRED_AUTH_SEMANTICS));
