@@ -78,6 +78,14 @@ test("accepts a sound review, and an empty one", () => {
   assert.equal(problem(JSON.stringify({ version: 1, artifacts: [] })), null);
 });
 
+test("accepts the agent's question on a sent comment, and the user's answer reopening it", () => {
+  const asked = comment({ status: "sent", sentAt: "2026-10-10T09:05:00Z", question: "Which total: before or after tax?" });
+  const answered = { ...asked, status: "reopened", answer: "After tax." };
+  for (const c of [asked, answered, { ...answered, status: "addressed", reply: "Shows the total after tax.", revision: 2 }]) {
+    assert.equal(problem(JSON.stringify({ version: 1, artifacts: [{ path: "specs/design/domain-model.md", comments: [c] }] })), null, c.status);
+  }
+});
+
 test("refuses a file that is not JSON", () => {
   assert.equal(problem("{nope")?.code, "INVALID_JSON");
 });
@@ -90,6 +98,8 @@ for (const [name, artifacts, expected] of [
   ["a hash that is not a SHA-256", [{ path: "specs/design/domain-model.md", checkedHash: "abc" }], /checkedHash/],
   ["a path outside the generated artifacts", [{ path: "specs/requirements/prd.md" }], /path/],
   ["a revision that is not a positive integer", [{ path: PROTOTYPE, comments: [comment({ revision: 0 })] }], /revision/],
+  ["a blank question", [{ path: PROTOTYPE, comments: [comment({ status: "sent", question: " " })] }], /question: must not be blank/],
+  ["a blank answer", [{ path: PROTOTYPE, comments: [comment({ status: "reopened", question: "Which?", answer: "" })] }], /answer: must not be blank/],
 ] as const) {
   test(`refuses ${name}`, () => {
     const p = problem(JSON.stringify({ version: 1, artifacts }));
@@ -119,6 +129,12 @@ test("refuses the rules the schema cannot say", () => {
 
   const anchored = [{ path: "specs/design/domain-model.md", comments: [comment({ anchor: { screenId: "s", roleId: "r", stateId: "d", elementIds: [] } })] }];
   assert.match(problem(JSON.stringify({ version: 1, artifacts: anchored }))!.message, /only a prototype's comments/);
+
+  const draftQuestion = [{ path: "specs/design/domain-model.md", comments: [comment({ question: "Which?" })] }];
+  assert.match(problem(JSON.stringify({ version: 1, artifacts: draftQuestion }))!.message, /a draft has no question/);
+
+  const loneAnswer = [{ path: "specs/design/domain-model.md", comments: [comment({ status: "reopened", answer: "After tax." })] }];
+  assert.match(problem(JSON.stringify({ version: 1, artifacts: loneAnswer }))!.message, /an answer goes with the agent's "question"/);
 });
 
 test("FileBundle refuses a malformed review.json and keeps the file as it was", () => {

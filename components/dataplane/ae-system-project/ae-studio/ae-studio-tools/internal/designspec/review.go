@@ -50,10 +50,12 @@ type reviewEntries struct {
 	Artifacts []struct {
 		Path     string `json:"path"`
 		Comments []struct {
-			ID     string          `json:"id"`
-			Status string          `json:"status"`
-			Reply  *string         `json:"reply"`
-			Anchor json.RawMessage `json:"anchor"`
+			ID       string          `json:"id"`
+			Status   string          `json:"status"`
+			Reply    *string         `json:"reply"`
+			Anchor   json.RawMessage `json:"anchor"`
+			Question *string         `json:"question"`
+			Answer   *string         `json:"answer"`
 		} `json:"comments"`
 	} `json:"artifacts"`
 }
@@ -61,8 +63,9 @@ type reviewEntries struct {
 // ValidateDesignReview checks raw review.json bytes against the embedded
 // schema plus the rules the schema cannot express, the same list as the
 // agent's checkDesignReview: one entry per artifact path, unique comment ids,
-// an addressed comment carries its reply, and only a prototype's comments
-// carry an anchor. Returns nil when valid, or a *ValidationError.
+// an addressed comment carries its reply, only a prototype's comments carry an
+// anchor, a draft has no question, and an answer answers a question. Returns
+// nil when valid, or a *ValidationError.
 func ValidateDesignReview(raw []byte) error {
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
@@ -102,6 +105,12 @@ func reviewRuleBroken(doc reviewEntries) string {
 			}
 			if len(c.Anchor) > 0 && !prototypeArtifact.MatchString(artifact.Path) {
 				return at + ".anchor: only a prototype's comments (specs/design/components/<component>/prototype.json) carry an anchor."
+			}
+			if c.Question != nil && c.Status == "draft" {
+				return at + `.question: a draft has no question — ask only about a comment that was sent, and leave it "sent".`
+			}
+			if c.Answer != nil && c.Question == nil {
+				return at + `.answer: an answer goes with the agent's "question" on the same comment.`
 			}
 		}
 	}

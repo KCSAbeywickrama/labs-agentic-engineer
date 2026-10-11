@@ -28,7 +28,8 @@
  * The schema uses only the keywords the Go interpreter implements. The rules
  * it cannot say are in `checkDesignReview`, and the Go gates apply the same
  * list: artifact paths and comment ids are unique, an addressed comment has a
- * reply, and only a prototype's comments carry an anchor.
+ * reply, only a prototype's comments carry an anchor, a draft has no question,
+ * and an answer answers a question.
  */
 
 import { z } from "zod";
@@ -73,6 +74,8 @@ export const reviewCommentSchema = z.strictObject({
   revision: z.number().int().positive().optional(),
   addressedAt: z.string().min(1).optional(),
   anchor: reviewAnchorSchema.optional(),
+  question: z.string().max(MAX_FEEDBACK_TEXT).regex(/\S/, "must not be blank").optional(),
+  answer: z.string().max(MAX_FEEDBACK_TEXT).regex(/\S/, "must not be blank").optional(),
 });
 
 export const reviewedArtifactSchema = z.strictObject({
@@ -135,6 +138,12 @@ function designReviewRuleBroken(review: z.infer<typeof designReviewSchema>): str
       }
       if (comment.anchor !== undefined && !PROTOTYPE_ARTIFACT_RE.test(artifact.path)) {
         return `${at}.anchor: only a prototype's comments (specs/design/components/<component>/prototype.json) carry an anchor.`;
+      }
+      if (comment.question !== undefined && comment.status === "draft") {
+        return `${at}.question: a draft has no question — ask only about a comment that was sent, and leave it "sent".`;
+      }
+      if (comment.answer !== undefined && comment.question === undefined) {
+        return `${at}.answer: an answer goes with the agent's "question" on the same comment.`;
       }
     }
   }

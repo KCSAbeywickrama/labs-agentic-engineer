@@ -46,8 +46,21 @@ const validReview = `{
   ]
 }`
 
+// A question the agent asked on a sent comment, and the user's answer reopening it.
+const questionReview = `{
+  "version": 1,
+  "artifacts": [
+    { "path": "specs/design/domain-model.md",
+      "comments": [
+        { "id": "c1", "author": { "id": "u-1", "name": "Mark" }, "text": "Show the total.", "createdAt": "2026-10-10T09:00:00Z",
+          "status": "sent", "sentAt": "2026-10-10T09:05:00Z", "question": "Before or after tax?" },
+        { "id": "c2", "author": { "id": "u-1", "name": "Mark" }, "text": "Show the date.", "createdAt": "2026-10-10T09:00:00Z",
+          "status": "reopened", "sentAt": "2026-10-10T09:05:00Z", "question": "Submitted or approved?", "answer": "Submitted." }] }
+  ]
+}`
+
 func TestValidateDesignReview_AcceptsASoundReview(t *testing.T) {
-	for name, raw := range map[string]string{"sound": validReview, "empty": `{"version":1,"artifacts":[]}`} {
+	for name, raw := range map[string]string{"sound": validReview, "empty": `{"version":1,"artifacts":[]}`, "question and answer": questionReview} {
 		if err := ValidateDesignReview([]byte(raw)); err != nil {
 			t.Errorf("%s review refused: %v", name, err)
 		}
@@ -78,6 +91,9 @@ func TestValidateDesignReview_RefusesAMalformedReview(t *testing.T) {
 		{"comment id reused", doc(on(model, comment("")) + "," + on("specs/design/flows/submit.md", comment(""))), CodeSchemaViolation, `"c1" is already used`},
 		{"addressed without a reply", doc(on(model, strings.Replace(comment(""), `"draft"`, `"addressed"`, 1))), CodeSchemaViolation, `carries its one-line "reply"`},
 		{"anchor off a prototype", doc(on(model, comment(`,"anchor":{"screenId":"s","roleId":"r","stateId":"d","elementIds":[]}`))), CodeSchemaViolation, "only a prototype's comments"},
+		{"blank question", doc(on(model, strings.Replace(comment(`,"question":" "`), `"draft"`, `"sent"`, 1))), CodeSchemaViolation, "question"},
+		{"question on a draft", doc(on(model, comment(`,"question":"Which?"`))), CodeSchemaViolation, "a draft has no question"},
+		{"answer without a question", doc(on(model, strings.Replace(comment(`,"answer":"After tax."`), `"draft"`, `"reopened"`, 1))), CodeSchemaViolation, `an answer goes with the agent's "question"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := ValidateDesignReview([]byte(tc.raw))

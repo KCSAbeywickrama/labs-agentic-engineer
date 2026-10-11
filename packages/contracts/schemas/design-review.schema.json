@@ -121,6 +121,16 @@
                     "elementIds"
                   ],
                   "additionalProperties": false
+                },
+                "question": {
+                  "type": "string",
+                  "maxLength": 4000,
+                  "pattern": "\\S"
+                },
+                "answer": {
+                  "type": "string",
+                  "maxLength": 4000,
+                  "pattern": "\\S"
                 }
               },
               "required": [

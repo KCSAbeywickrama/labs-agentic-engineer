@@ -47,6 +47,14 @@
  * from the design runs that changed the artifact (the turn-usage ledger);
  * `revision` on an addressed comment records the one that addressed it.
  *
+ * A QUESTION is how the agent asks about an ambiguous comment instead of
+ * guessing: it writes `question` on the comment and leaves it `sent`, and the
+ * comment waits on the user (the Design card's "Answer 1 question"). The
+ * user's `answer` puts it back in the next batch as `reopened`, like a
+ * reopened reply; Address comments sends it, and the agent acts on it with
+ * the answer, or asks again by writing a new `question` and removing the
+ * `answer`. Question and answer stay on an addressed comment as its history.
+ *
  * The Zod validator (`designReviewSchema` in `../design-review-schema.ts`) is
  * drift-guarded against these types.
  */
@@ -92,6 +100,10 @@ export interface ReviewComment {
   addressedAt?: string;
   /** Prototype comments only: the screen and elements it is about. */
   anchor?: ReviewAnchor;
+  /** The agent's question about an ambiguous comment, which it left `sent`; never on a draft. */
+  question?: string;
+  /** The user's answer to `question`; it reopens the comment for the next batch. */
+  answer?: string;
 }
 
 /** One artifact's review state. */
