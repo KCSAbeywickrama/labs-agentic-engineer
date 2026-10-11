@@ -70,14 +70,14 @@ The fixed date every prototype treats as today (ISO `YYYY-MM-DD`).
 
 The root of a screen inside the product's chrome: header, user menu and side navigation. Use `<Screen>` for a screen outside it (signed out).
 
-- `id: string` — The shell's id; its user menu's elements are `<id>.user`, `<id>.account`, `<id>.settings` and `<id>.sign-out`.
+- `id: string` — The shell's id; its user menu's elements are `<id>.user`, `<id>.account`, `<id>.settings` (with `settings`) and `<id>.sign-out`.
 - `product?: string` — The product's name in the header; prototype.json's `name` by default.
 - `user: AppShellUser` — The signed-in user the header shows.
 - `nav: NavigationItem[]` — The side navigation's entries.
 - `account: string` — The screen the user menu's Account entry opens.
-- `settings: string` — The screen the user menu's Settings entry opens.
+- `settings?: string` — The screen the user menu's Settings entry opens. Leave it out when the application has nothing to set: the menu then has no Settings entry.
 - `signOut: string` — The screen Sign out leads to: a signed-out screen, drawn on a bare `<Screen>`.
-- `menu?: NavigationItem[]` — More user-menu entries (a profile, billing), drawn after Account and Settings and before Sign out.
+- `menu?: NavigationItem[]` — More user-menu entries (a profile, billing), drawn after Account (and Settings) and before Sign out.
 - `children?: ReactNode` — The screen's content.
 
 ### `AppShellUser`

@@ -28,8 +28,10 @@ component's theme props; `ThemeRegistry` maps over it.
 `<AppShell>` is a screen's root inside the product's chrome: product name,
 signed-in user (role label defaults to the viewing role's name), side
 navigation, and a user menu whose Account, Settings and Sign out entries open
-screens the prototype names (`account`, `settings`, `signOut`; required, a
-missing one throws), plus the prototype's own entries (`menu`). Entries the role cannot reach are not drawn, as for
+screens the prototype names (`account` and `signOut` required, a missing one
+throws; `settings` optional: an application with nothing to set has no
+Settings entry, so a prototype never invents preferences to fill one), plus
+the prototype's own entries (`menu`). Entries the role cannot reach are not drawn, as for
 `<Navigation>`. A theme keeps the closed menu's entries in the markup, so the
 render check sees their `to` and ids. A bare `<Screen>` stays valid.
 
