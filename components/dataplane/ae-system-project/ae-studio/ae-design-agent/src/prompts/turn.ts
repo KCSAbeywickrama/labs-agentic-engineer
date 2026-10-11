@@ -159,7 +159,8 @@ interface CommandFlow {
 
 /**
  * The Address comments brief (`/address-comments`): which file holds the
- * comments and which of them this turn acts on. What the agent then does is
+ * comments and which of them this turn acts on (a comment the agent asked
+ * about waits until the user answers). What the agent then does is
  * the `design` skill's "Addressing comments". The turn's time rides along
  * because the agent has no clock and each addressed comment records when.
  */
@@ -167,7 +168,8 @@ function addressCommentsBrief(now: string | undefined): string {
   const stamp = now ? ` The time now is ${now}: write it as the addressedAt of each comment you address.` : "";
   return (
     "Address the review comments in specs/design/review.json (Addressing comments). Act on every comment " +
-    "whose status is sent or reopened, and leave each draft comment exactly as it is." +
+    "whose status is sent or reopened, except a sent one whose question has no answer yet, and leave each " +
+    "draft comment exactly as it is." +
     stamp
   );
 }

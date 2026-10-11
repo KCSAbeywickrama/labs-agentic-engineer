@@ -79,6 +79,7 @@ test("/address-comments loads the design skill with the review brief", () => {
   assert.ok(out.startsWith("The user is in the design review"), "the review's scope leads");
   assert.match(out, /Load the design skill and follow it\.\n\nAddress the review comments in specs\/design\/review\.json/);
   assert.match(out, /status is sent or reopened/);
+  assert.match(out, /except a sent one whose question has no answer yet/);
   assert.match(out, /leave each draft comment exactly as it is/);
   assert.ok(out.includes(`The time now is ${now}`), "the agent has no clock: the turn gives it the addressedAt stamp");
   // No time, no stamp sentence (and never an invented one).
