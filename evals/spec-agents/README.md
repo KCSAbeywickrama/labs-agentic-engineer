@@ -1,10 +1,10 @@
 # @aep/spec-agent-evals
 
 Evaluation framework for the spec-flow agents: each SDLC section —
-**requirements**, **design**, **task generation** — evaluable separately and
-in combination (a **chain**), against the *real* design agent
-(`@aep/ae-design-agent`) booted in-process through the playground's
-production-parity waist.
+**requirements**, **design**, **Address comments**, **task generation** —
+evaluable separately and in combination (a **chain**), against the *real*
+design agent (`@aep/ae-design-agent`) booted in-process through the
+playground's production-parity waist.
 
 ## How a run works
 
@@ -26,7 +26,7 @@ production-parity waist.
    scorers, so chains can band a section before deciding to continue:
    - *structural*: deterministic checks binding the LIVE workspace validators
      (`checkComponentDesign`, the DSL compilers, the prototype kit's check,
-     the issue fold). A validator tightening is
+     the review file's validator, the issue fold). A validator tightening is
      an explainable score shift, not drift. The design section also checks
      the lineup itself (`src/scoring/design-lineup.ts`): the artifacts' write
      order with the acceptance tests last, `decisions.md`'s tagged lines, the
@@ -53,6 +53,7 @@ production-parity waist.
 ```bash
 make eval                                  # everything (real model calls)
 make eval EVAL=evals/requirements.eval.ts  # one section
+make eval EVAL=evals/address-comments.eval.ts
 make eval-ui                               # run once + local results UI
 EVAL_REPEATS=3 make eval EVAL=...          # score-spread mode (#355)
 ```
@@ -69,3 +70,9 @@ by running the upstream section once, reviewing/hand-tuning the produced
 deliberately; it's a conscious event, not silent drift). The models for the
 sim and judge are pinned in `src/config.ts` (sonnet) so score variance
 attributes to the agent under eval.
+
+An `address-comments` scenario names a designed fixture, the `review` file
+the console flushes before it sends `/address-comments`, and the expected
+outcome of each comment: `act` (where its change must start, and what it must
+reach), `ask` (ambiguous: a question on the comment, nothing changed) or
+`wait` (a draft: untouched).

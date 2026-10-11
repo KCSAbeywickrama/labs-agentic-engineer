@@ -48,12 +48,12 @@ export interface StructuralReport {
   checks: CheckResult[];
 }
 
-function report(checks: CheckResult[]): StructuralReport {
+export function report(checks: CheckResult[]): StructuralReport {
   const passed = checks.filter((c) => c.ok).length;
   return { score: checks.length ? passed / checks.length : 0, checks };
 }
 
-const check = (name: string, ok: boolean, detail?: string): CheckResult => ({
+export const check = (name: string, ok: boolean, detail?: string): CheckResult => ({
   name,
   ok,
   ...(detail && !ok ? { detail } : {}),

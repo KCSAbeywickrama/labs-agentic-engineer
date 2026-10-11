@@ -26,7 +26,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import type { PlanScope } from "@aep/agent-stream";
+import { designReviewSchema, type DesignReview, type PlanScope } from "@aep/agent-stream";
 import { z } from "zod";
 import { SCENARIOS_DIR } from "./config.js";
 
@@ -106,6 +106,56 @@ const tasksScenarioSchema = z.object({
 });
 export type TasksScenario = z.infer<typeof tasksScenarioSchema>;
 
+/**
+ * What one review comment should come to after `/address-comments`
+ * (`skills/design`, "Addressing comments"):
+ *  - `act`: addressed, with a reply, at this run's revision; the change starts
+ *    in one of `earliest` (the first artifact in lineup order it touches) and
+ *    reaches each of `changes`.
+ *  - `ask`: ambiguous, so not acted on: it stays `sent`, with the agent's
+ *    `question` on it and nothing else changed.
+ *  - `wait`: not the agent's to act on (a draft, or a question still waiting
+ *    for its answer): byte-identical after the run.
+ */
+const commentExpectSchema = z.discriminatedUnion("outcome", [
+  z.object({
+    outcome: z.literal("act"),
+    earliest: z.array(z.string().min(1)).min(1),
+    changes: z.array(z.string().min(1)).default([]),
+  }),
+  z.object({ outcome: z.literal("ask") }),
+  z.object({ outcome: z.literal("wait") }),
+]);
+export type CommentExpect = z.infer<typeof commentExpectSchema>;
+
+/**
+ * Address comments, standalone: a designed fixture plus the review file the
+ * console flushes before it sends `/address-comments`. The turn should ask
+ * nothing (a question goes on its comment); the brief is there so the sim can
+ * answer one it asks anyway, which the checks then count.
+ */
+const addressCommentsScenarioSchema = z
+  .object({
+    brief: briefSchema,
+    /** A designed project (prototype included) under scenarios/fixtures/. */
+    fixture: z.string().min(1),
+    /** specs/design/review.json as the turn finds it, validated by the platform's own schema. */
+    review: designReviewSchema.transform((r) => r as DesignReview),
+    /** The expected outcome of every comment in `review`, by comment id. */
+    expect: z.record(z.string(), commentExpectSchema),
+    rubric: rubricSchema,
+  })
+  .superRefine((sc, ctx) => {
+    const ids = sc.review.artifacts.flatMap((a) => (a.comments ?? []).map((c) => c.id));
+    for (const id of ids) {
+      if (!(id in sc.expect)) ctx.addIssue({ code: "custom", path: ["expect"], message: `no expected outcome for comment ${id}` });
+    }
+    for (const id of Object.keys(sc.expect)) {
+      if (!ids.includes(id)) ctx.addIssue({ code: "custom", path: ["expect", id], message: `no comment ${id} in review` });
+    }
+  });
+export type AddressCommentsScenario = z.infer<typeof addressCommentsScenarioSchema>;
+
 /** A chain is FIRST-CLASS: one brief, a rubric per section (#357). */
 const chainScenarioSchema = z.object({
   brief: briefSchema,
@@ -122,6 +172,7 @@ const sectionSchemas = {
   design: designScenarioSchema,
   tasks: tasksScenarioSchema,
   chains: chainScenarioSchema,
+  "address-comments": addressCommentsScenarioSchema,
 } as const;
 
 export type ScenarioSection = keyof typeof sectionSchemas;

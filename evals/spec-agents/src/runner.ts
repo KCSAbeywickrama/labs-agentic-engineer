@@ -26,10 +26,10 @@
  * a section before deciding to continue; the .eval.ts scorers only extract.
  */
 
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { openSession } from "@aep/playground/src/engine/session.js";
-import { DESIGN_COMMAND, interviewCommand, START_COMMAND } from "@aep/contracts/commands";
+import { ADDRESS_COMMENTS_COMMAND, DESIGN_COMMAND, interviewCommand, START_COMMAND } from "@aep/contracts/commands";
 
 // The design flow, sent verbatim as the console sends it: the design agent
 // parses the command and composes the wording.
@@ -40,17 +40,19 @@ function startTurn(idea: string): string {
   return `${START_COMMAND} ${idea.trim()}`;
 }
 import { FIXTURES_DIR, PROJECTS_HOME } from "./config.js";
-import { listRequirementFiles, prepareProject, readProjectFile, readRequirementTexts } from "./project.js";
-import type { ChainScenario, DesignScenario, RequirementsScenario, Rubric, TasksScenario } from "./scenario.js";
+import { listRequirementFiles, prepareProject, readProjectFile, readRequirementTexts, readSpecTree } from "./project.js";
+import type { AddressCommentsScenario, ChainScenario, DesignScenario, RequirementsScenario, Rubric, TasksScenario } from "./scenario.js";
 import { decisionsDigest, type SimAnswer } from "./sim-user.js";
 import { runConversationalSection, type SectionRunResult } from "./drivers/conversational.js";
 import { runTaskPlanSection, type TaskPlanRunResult } from "./drivers/task-plan.js";
 import { sectionVerdict, type SectionVerdict } from "./scoring/bands.js";
 import { judgeArtifact, orgDefaults, type JudgeReport } from "./scoring/judge.js";
 import { designChecks, requirementsChecks, tasksChecks, type StructuralReport } from "./scoring/structural.js";
+import { addressCommentsChecks, changedPaths } from "./scoring/address-comments.js";
 import { emitReviewSheet, type ReviewSection } from "./scoring/review-sheet.js";
 import { sumUsage, writeRunArtifacts, type TurnRecord, type TurnUsage } from "./tracing.js";
 import { listFlows } from "@aep/playground/src/engine/gates.js";
+import { DESIGN_REVIEW_PATH } from "@aep/agent-stream";
 
 export interface SectionOutcome {
   section: string;
@@ -318,6 +320,61 @@ export async function runDesignScenario(sc: DesignScenario, runName: string): Pr
   return finishRun("design-section", sc.brief.name, runName, run.records, [outcome], {
     "specs/design/": designArtifact(projectDir, requirementsBefore),
   });
+}
+
+/**
+ * What the Address comments judge reads: the review file as the turn left it,
+ * then each changed file as the lines it lost (-) and gained (+).
+ */
+function addressCommentsArtifact(before: Record<string, string>, after: Record<string, string>): string {
+  const parts = [`--- ${DESIGN_REVIEW_PATH} (after the turn) ---\n${after[DESIGN_REVIEW_PATH] ?? "(missing)"}`];
+  for (const path of changedPaths(before, after)) {
+    if (path === DESIGN_REVIEW_PATH) continue;
+    const was = (before[path] ?? "").split("\n");
+    const now = (after[path] ?? "").split("\n");
+    const wasSet = new Set(was);
+    const nowSet = new Set(now);
+    const diff = [...was.filter((l) => !nowSet.has(l)).map((l) => `- ${l}`), ...now.filter((l) => !wasSet.has(l)).map((l) => `+ ${l}`)];
+    const label = before[path] === undefined ? "added" : after[path] === undefined ? "removed" : "changed";
+    parts.push(`--- ${path} (${label}) ---\n${diff.join("\n")}`);
+  }
+  return parts.join("\n\n");
+}
+
+/**
+ * Address comments as the console runs it: the client has flushed the review
+ * file with the comments marked `sent`, then sends the bare command from the
+ * design review's scope.
+ */
+export async function runAddressCommentsScenario(sc: AddressCommentsScenario, runName: string): Promise<EvalRunOutput> {
+  const projectDir = prepareProject(runName, sc.fixture);
+  writeFileSync(join(projectDir, DESIGN_REVIEW_PATH), `${JSON.stringify(sc.review, null, 2)}\n`);
+  const before = readSpecTree(projectDir);
+  const session = await openSession(projectDir, {});
+  let run: SectionRunResult;
+  try {
+    run = await runConversationalSection(session, "address-comments", ADDRESS_COMMENTS_COMMAND, sc.brief, { kind: "design-review" });
+  } finally {
+    await session.close();
+  }
+  const after = readSpecTree(projectDir);
+  const structural = await addressCommentsChecks(projectDir, run, before, after, sc.expect);
+  const artifact = addressCommentsArtifact(before, after);
+  const judge = await judgeArtifact({
+    rubric: sc.rubric,
+    artifactLabel: "design revision (the review comments with the agent's replies and questions, and the changes it made to the design's files)",
+    artifact: clip(artifact),
+  });
+  const outcome: SectionOutcome = {
+    section: "address-comments",
+    verdict: sectionVerdict("address-comments", structural.score, judge.weightedScore, judge.mustNotViolations.length > 0),
+    structural,
+    judge,
+    turns: run.records.length,
+    questionsAsked: run.questionsAsked,
+    skipped: false,
+  };
+  return finishRun("address-comments", sc.brief.name, runName, run.records, [outcome], { [`${DESIGN_REVIEW_PATH} and the changed files`]: artifact });
 }
 
 export async function runTasksScenario(sc: TasksScenario, runName: string): Promise<EvalRunOutput> {
