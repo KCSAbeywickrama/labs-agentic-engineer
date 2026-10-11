@@ -584,7 +584,13 @@ paths:
             The requested `version` name is already in use, or a build is
             already running for this project, or (`publisher_credentials_missing`)
             the organization has no build credentials: "Reconnect GitHub to set
-            up this organization's build credentials". Nothing was cut.
+            up this organization's build credentials", or
+            (`platform_resources_not_approved`) the design declares a platform
+            resource that is neither provisioned (nor provisioning) nor approved
+            by a `platform-resource` input with `approved: true`; `details` has
+            one row per such resource, its message starting with the dependency
+            name. The build preflight lists each resource to approve. Nothing
+            was cut.
         default:
           content:
             application/json:

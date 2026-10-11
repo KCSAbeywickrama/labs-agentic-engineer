@@ -1294,6 +1294,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// mutex; the run then fills the milestone (gates, then the planning turn) as
 	// its own first phase. Set here rather than in build.Deps because its gate
 	// resolver is provisioningSvc, which is constructed after buildSvc.
+	// The build's approval gate reads platform resources the way the preflight
+	// lists them, so a build is refused for exactly what it was asked to approve.
+	buildSvc.SetProvisionStatus(buildProvisionStatus{svc: provisioningSvc})
 	buildSvc.SetPlanPath(build.PlanPathDeps{
 		Milestones: issueService,
 		Issues:     deliveryIssues,

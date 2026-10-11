@@ -126,14 +126,21 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
 
 ## Owns
 - The **executions** store (now provisioning gates only) and the Temporal `Runtime` + the three workflows on it.
-- The **build click's whole sequence** (`build`): mutex → repo → request pre-tag work → dependency hard
-  gate → whole-spec gate + `v<N>` tag cut → milestone → supersede → run row → plan. The ORDER is the
+- The **build click's whole sequence** (`build`): mutex → repo → approval gate → request pre-tag work →
+  dependency hard gate → whole-spec gate + `v<N>` tag cut → milestone → supersede → run row → plan. The ORDER is the
   domain fact `build` owns; the two halves it does not own (the planning turn, the gate resolvers) are
   root ports. Preflight emits no `external-config` collect for a **Registered External
   resource** the org catalog already holds (ADR-0021). Pre-tag also refuses an unknown
   `resourceType` (`ErrUnknownResourceType` → 409) the same way it refuses an end-user-auth
   conflict: the design is unsatisfiable on this cluster, so the click claims no version and
   starts no workflow.
+- **The approval gate**: the run provisions a platform resource only from the request's
+  `platform-resource` approval for it, while the deploy gate waits on every one the design
+  declares. So a build whose design declares a resource that is neither provisioned (nor
+  provisioning) nor approved is refused before the pre-tag work (`409
+  platform_resources_not_approved`, one detail per resource). It reads readiness the way
+  preflight lists a `platform-resource` item, so a client that approves what preflight lists is
+  never refused, and a rebuild over provisioned resources needs no approval.
 - **What preflight gates**: it reports what a version's dependencies still need, and only
   `needsResolution` — a dependency the design itself cannot name (no service chosen, an unaccepted
   assumption, missing spec, or an org service awaiting access) — blocks the version cut. `needsInput` stays the broad "there is
