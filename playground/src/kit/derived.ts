@@ -23,17 +23,15 @@
  * BFF owns in production, kept as thin functions so the turn loop stays chat
  * mechanics only.
  *
- *   *.dsl                        → sibling .excalidraw           (per-file compile)
  *   design.json (all components) → specs/design/cell-diagram.gen.json (aggregate)
  *
- * Everything written here ends in .excalidraw / .gen.json — the extensions
- * readSnapshot excludes — so derived output can never leak into the agent's
+ * Everything written here ends in .gen.json — an extension readSnapshot
+ * excludes — so derived output can never leak into the agent's
  * bundle or the prompt.
  */
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { compileDslArtifacts } from "./dsl.js";
 import { buildProjectDesign, toCellDiagramProject } from "@aep/design-projection";
 
 /** Thread-relative path of the project-level cell-diagram rollup. */
@@ -42,20 +40,6 @@ export const CELL_DIAGRAM_PATH = "specs/design/cell-diagram.gen.json";
 export interface DerivedNote {
   ok: boolean;
   message: string;
-}
-
-/**
- * Compile ONE changed path's derived view, if it has one: a `*.dsl` source
- * compiles to its sibling `.excalidraw`. Returns a display note, or `null` when
- * `path` is not a compilable source (so the caller can drive it per change).
- * The source must already be on disk — `compileDslArtifacts` reads it back.
- */
-export function compileDslDerived(threadDir: string, path: string): DerivedNote | null {
-  const [r] = compileDslArtifacts(threadDir, [path]);
-  if (!r) return null;
-  return r.ok
-    ? { ok: true, message: `${r.outPath} (compiled)` }
-    : { ok: false, message: `${r.path}: DSL error — ${r.error}` };
 }
 
 /**

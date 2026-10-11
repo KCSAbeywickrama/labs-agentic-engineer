@@ -157,12 +157,12 @@ function isAdmittedSpecPath(path: string): boolean {
 const SECURITY_DESIGN_PATH = "specs/design/security.json";
 
 /**
- * The turn-snapshot filter: keep agent-authored sources (`*.md`, `*.dsl`,
- * `*.cell`, `*.feature`, component `design.json`, the project security design
+ * The turn-snapshot filter: keep agent-authored sources (`*.md`, `*.cell`,
+ * `*.feature`, component `design.json`, the project security design
  * `specs/design/security.json`, the design review `specs/design/review.json`,
  * the two OpenAPI contract shapes above, a component's `prototype.json` and
  * `prototype.tsx`) and drop
- * everything else (derived `.excalidraw`/`*.gen.json` projections, code,
+ * everything else (`.dsl`/`.excalidraw` scenes, derived `*.gen.json` projections, code,
  * arbitrary `*.yaml` such as `workload.yaml`, …). `*.cell` is the
  * project-level cell-diagram DSL (design.cell) that drives the live
  * architecture diagram.
@@ -176,8 +176,7 @@ const SECURITY_DESIGN_PATH = "specs/design/security.json";
  * to the fixed accept/reject table in `test/fixtures/turn-snapshot-paths.json`.
  */
 export function keepInTurnSnapshot(path: string): boolean {
-  if (path.endsWith(".md") || path.endsWith(".dsl") || path.endsWith(".cell") || path.endsWith(".feature"))
-    return true;
+  if (path.endsWith(".md") || path.endsWith(".cell") || path.endsWith(".feature")) return true;
   if (isAdmittedSpecPath(path)) return true;
   if (path === SECURITY_DESIGN_PATH) return true;
   // The review's comments are what an Address comments turn acts on, and it

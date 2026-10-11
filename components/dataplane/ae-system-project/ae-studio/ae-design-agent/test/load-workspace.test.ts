@@ -59,7 +59,6 @@ test("readSnapshot walks recursively with POSIX keys and applies the turn filter
     "specs/requirements/prd.md": "# Req\n",
     "specs/design/domain-model.md": "# Domain model\n",
     "specs/design/design.cell": "title Shop\n",
-    "specs/design/system.dsl": "workspace {}\n",
     "specs/design/components/api/design.json": "{}\n",
     // Produced + consumed OpenAPI contracts: the two admitted *.yaml shapes —
     // a turn must be able to read back the spec it just stored.
@@ -69,6 +68,7 @@ test("readSnapshot walks recursively with POSIX keys and applies the turn filter
     "specs/design/components/api/workload.yaml": "kind: Workload\n", // arbitrary yaml, not one of the two admitted shapes
     "specs/design/components/api/api.gen.json": "{}\n", // derived projection
     "specs/design/wireframe.excalidraw": "{}\n", // derived scene
+    "specs/design/components/web/wireframes.dsl": "screen Home\n", // retired wireframes source
     "src/main.go": "package main\n", // code
     ".hidden.md": "dot\n", // dot-entry
     ".git/config.md": "dot dir\n", // dot dir
@@ -82,7 +82,6 @@ test("readSnapshot walks recursively with POSIX keys and applies the turn filter
       "specs/design/components/api/openapi.yaml",
       "specs/design/design.cell",
       "specs/design/domain-model.md",
-      "specs/design/system.dsl",
       "specs/requirements/prd.md",
     ]);
     assert.equal(snap["specs/requirements/prd.md"], "# Req\n");
@@ -94,7 +93,7 @@ test("readSnapshot walks recursively with POSIX keys and applies the turn filter
 test("filterTurnSnapshot mirrors the walk's rules over an in-memory map", () => {
   const filtered = filterTurnSnapshot({
     "a.md": "x",
-    "b/system.dsl": "y",
+    "b/system.dsl": "drop",
     "b/design.json": "z",
     "specs/validation/acceptance/checkout.feature": "keep",
     "specs/design/components/api/openapi.yaml": "keep",
@@ -109,7 +108,6 @@ test("filterTurnSnapshot mirrors the walk's rules over an in-memory map", () => 
   assert.deepEqual(Object.keys(filtered).sort(), [
     "a.md",
     "b/design.json",
-    "b/system.dsl",
     "specs/design/components/api/dependencies/stripe.openapi.yaml",
     "specs/design/components/api/openapi.yaml",
     "specs/design/security.json",

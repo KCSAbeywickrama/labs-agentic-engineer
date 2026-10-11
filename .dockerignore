@@ -2,7 +2,7 @@
 #
 # agents-service (deployments/docker-compose.yml) is the one image built with
 # the REPO ROOT as context — it needs sibling workspace packages
-# (packages/excalidraw-dsl, packages/design-projection) alongside
+# (packages/agent-stream, packages/prototype-kit, …) alongside
 # components/dataplane/ae-system-project/ae-studio/ae-design-agent, which live
 # outside that package's own directory. See
 # components/dataplane/ae-system-project/ae-studio/ae-design-agent/Dockerfile.

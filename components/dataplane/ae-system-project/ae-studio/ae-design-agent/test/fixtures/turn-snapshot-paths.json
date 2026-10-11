@@ -2,7 +2,7 @@
   "specs/requirements/prd.md": true,
   "specs/design/domain-model.md": true,
   "specs/design/design.cell": true,
-  "specs/design/system.dsl": true,
+  "specs/design/system.dsl": false,
   "specs/design/components/api/design.json": true,
   "specs/validation/acceptance/checkout.feature": true,
   "specs/design/components/api/openapi.yaml": true,

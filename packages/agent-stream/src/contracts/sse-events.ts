@@ -54,7 +54,6 @@ export type ErrCode =
   | "INVALID_YAML"
   | "INVALID_JSON"
   | "SCHEMA_VIOLATION"
-  | "INVALID_DSL"
   | "INVALID_PROTOTYPE"
   | "INVALID_OPENAPI"
   | "INVALID_DIAGRAM"
@@ -410,7 +409,7 @@ export interface Change {
  *              the few that name a branch of one instead resolve in the design
  *              agent, which is where wording lives. `references` names the
  *              attached reference documents exactly as on `start` — a flow
- *              generates artifacts (wireframes above all) that must be
+ *              generates artifacts (the prototype above all) that must be
  *              grounded in an attached sketch or spec. A prototype review's
  *              comments never ride a turn: they live in
  *              `specs/design/review.json` and go to the agent with

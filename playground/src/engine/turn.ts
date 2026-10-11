@@ -43,7 +43,7 @@ import {
 } from "@aep/agent-stream";
 import { filterTurnSnapshot } from "@aep/ae-design-agent/conversation/load-workspace";
 import { reconcileFile, type FileChange } from "../kit/project-fs.js";
-import { compileDslDerived, projectCellDiagram, CELL_DIAGRAM_PATH, type DerivedNote } from "../kit/derived.js";
+import { projectCellDiagram, CELL_DIAGRAM_PATH, type DerivedNote } from "../kit/derived.js";
 import type { FsSpecWorkspace } from "../ports/spec-workspace.js";
 import { adoptCurrentThread, type ThreadSession } from "./thread.js";
 
@@ -148,13 +148,9 @@ export async function runSpecTurn(session: TurnSession, instruction: string, opt
     changes.push(change);
     if (bundle.has(path)) after[path] = bundle.read(path)!;
     else delete after[path];
-    // Refresh this change's derived views immediately: the *.dsl → .excalidraw
-    // compile is per-file; any specs/design/ change re-rolls the aggregate
-    // cell-diagram from the current snapshot (last rebuild wins the final view).
-    if (change.kind !== "remove") {
-      const note = compileDslDerived(projectDir, change.path);
-      if (note) derived.set(change.path, note);
-    }
+    // Refresh the derived view immediately: any specs/design/ change re-rolls
+    // the aggregate cell-diagram from the current snapshot (last rebuild wins
+    // the final view).
     if (change.path.startsWith("specs/design/")) {
       derived.set(CELL_DIAGRAM_PATH, projectCellDiagram(projectDir, state.slug, after));
     }
@@ -179,7 +175,7 @@ export async function runSpecTurn(session: TurnSession, instruction: string, opt
   // stream loop above over the FILTERED view: files the turn filter hid are
   // absent from both sides of every diff and so were never touched, deletions
   // applied only to files the agent could see (via removeFile tool-calls), and
-  // every derived view (.excalidraw / cell-diagram.gen.json) was refreshed as
+  // the derived view (cell-diagram.gen.json) was refreshed as
   // its source landed.
   return { parts, toolCalls, changes, derivedNotes: [...derived.values()], ...(streamError ? { error: streamError } : {}) };
 }

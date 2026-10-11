@@ -69,10 +69,6 @@ Reacting to tool results (each result tells you the next move):
   paths or no operations. Fix what the message names and re-emit the WHOLE corrected document with
   removeFile + addFile. Every write to an openapi.yaml is checked this way as it lands, so a spec that
   applied cleanly is already valid — never spend a tool call asking something else to validate it.
-- INVALID_DSL — a wireframes .dsl write was rejected (bad lines listed with line numbers: an unknown
-  keyword, a misplaced left/right/table-row, or retired x,y coordinates). Fix EVERY listed line and
-  re-emit the WHOLE corrected file with removeFile + addFile — layout comes from structure, never
-  from coordinates.
 - INVALID_PROTOTYPE — a components/<name>/prototype.json or prototype.tsx write was rejected. The message
   and the findings list every problem as CODE, file and location (a JSON path in prototype.json, a source
   line in prototype.tsx, or a screen/role/state for a render failure). The write did NOT land. Fix every
@@ -263,8 +259,8 @@ export function buildInstructions(skills?: SkillSource, surface?: Surface): stri
  *
  * A REFUSAL skips the same way. `load()` has three states (body / `{refused}` /
  * undefined, see `SkillLoadResult`), and an org is free to mark a skill this
- * service's audience may not read — `wireframes` and `openapi-conventions` are
- * pin targets for the coding agent as much as guidance for this one. Narrowing on
+ * service's audience may not read — `openapi-conventions` is a pin target for
+ * the coding agent as much as guidance for this one. Narrowing on
  * `!== undefined` alone let a refusal through to `body.content.trim()` and threw,
  * failing the whole turn over guidance it could simply have gone without.
  *

@@ -19,7 +19,7 @@ compile error, not a runtime surprise.
 | `services/` | long-lived deployables (Go + TS) | yes |
 | `components/` | deployables arranged as they are deployed: `dataplane/ae-system-project/ae-studio/` is the per-org AE Studio; `controlplane/` and `dataplane/user-project/` are placeholders | yes (`ae-studio`: per org, by `aep-api`) |
 | `runners/` | one-shot / job images | as jobs |
-| `packages/` | shared libraries: `contracts`, `clients`, `ui`, `agent-stream`, `collab-doc`, `design-projection`, `excalidraw-dsl`, `progress-view`, `sse-cassette`, `platform-idp-auth`, `web-search`, `agent-eval`, `bal-library-tool`, `prototype-kit`, `prototype-theme-default`, `prototype-theme-oxygen`, `prototype-cli` | no |
+| `packages/` | shared libraries: `contracts`, `clients`, `ui`, `agent-stream`, `collab-doc`, `design-projection`, `progress-view`, `sse-cassette`, `platform-idp-auth`, `web-search`, `agent-eval`, `bal-library-tool`, `prototype-kit`, `prototype-theme-default`, `prototype-theme-oxygen`, `prototype-cli` | no |
 | `skills/` | the authored skill library, seeded and reconciled into each org's own repo | no — delivered as content |
 | `playground/` | local harness that runs the real agents against a plain directory (no cluster, no GitHub, no database) | no |
 | `evals/` | on-demand evaluation suites for the platform's agents (`spec-agents`: per-section + chained evals over the real design agent; see its README) | no — never in CI |

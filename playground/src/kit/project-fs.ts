@@ -45,7 +45,7 @@ function walk(dir: string, rel: string, out: Record<string, string>): void {
       continue;
     }
     if (!e.isFile()) continue;
-    // Derived artifacts (compiled .excalidraw, projected *.gen.json) never
+    // Derived artifacts (.excalidraw scenes, projected *.gen.json) never
     // enter the bundle: the agent must not see or edit them, and inlining
     // generated JSON into every turn's prompt would be pure token waste.
     if (e.name.endsWith(".excalidraw") || e.name.endsWith(".gen.json")) continue;

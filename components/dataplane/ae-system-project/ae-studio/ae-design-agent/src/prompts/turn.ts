@@ -455,7 +455,7 @@ function specBody(turn: Exclude<TurnSpec, { kind: "plan" }>, now: string | undef
       const withText = scoped ? `${base}\n\n${scoped}` : base;
       // Reference documents ride flows the same way they ride start turns:
       // a flow generates artifacts, and an attached sketch IS the brief for
-      // wireframes. No documents → byte-identical to a plain flow turn.
+      // the prototype. No documents → byte-identical to a plain flow turn.
       return withText + references(turn.references);
     }
     case "start":

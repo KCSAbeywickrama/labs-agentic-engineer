@@ -27,7 +27,6 @@
   "dependencies": {
     "yaml": "^2.8.4",
     "zod": "^4.3.6",
-    "@aep/excalidraw-dsl": "workspace:*",
     "@wso2/prototype-kit": "workspace:*"
   },
   "devDependencies": {
