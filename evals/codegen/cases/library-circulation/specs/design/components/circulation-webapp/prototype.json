@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 3,
+  "name": "Library Circulation",
+  "entryScreen": "screen.catalogue",
+  "roles": [
+    { "id": "Member", "name": "Member" },
+    { "id": "Librarian", "name": "Librarian" }
+  ],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.validation-error", "name": "Refused or invalid input" },
+    { "id": "state.failed", "name": "Service unavailable" }
+  ],
+  "screens": [
+    { "id": "screen.catalogue", "name": "Catalogue", "roleIds": ["Member", "Librarian"] },
+    { "id": "screen.title", "name": "Title", "roleIds": ["Member", "Librarian"] },
+    { "id": "screen.my-loans", "name": "My loans", "roleIds": ["Member"] },
+    { "id": "screen.my-holds", "name": "My holds", "roleIds": ["Member"] },
+    { "id": "screen.my-fees", "name": "My fees", "roleIds": ["Member"] },
+    { "id": "screen.loans", "name": "Loans", "roleIds": ["Librarian"] },
+    { "id": "screen.holds-queue", "name": "Holds queue", "roleIds": ["Librarian"] },
+    { "id": "screen.fees", "name": "Fees", "roleIds": ["Librarian"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["Member", "Librarian"] },
+    { "id": "screen.settings", "name": "Settings", "roleIds": ["Member", "Librarian"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Member", "Librarian"] }
+  ],
+  "flows": [
+    { "id": "flow.member-loans-fees", "name": "Member sees loans and fees", "roleId": "Member",
+      "screenIds": ["screen.my-loans", "screen.my-fees"] },
+    { "id": "flow.place-hold", "name": "Place a hold", "roleId": "Member",
+      "screenIds": ["screen.catalogue", "screen.title", "screen.my-holds"] },
+    { "id": "flow.checkout-return", "name": "Check out and return with a late fee", "roleId": "Librarian",
+      "screenIds": ["screen.loans", "screen.fees"] },
+    { "id": "flow.hold-queue", "name": "Work the holds queue and hand over a copy", "roleId": "Librarian",
+      "screenIds": ["screen.holds-queue", "screen.loans"] },
+    { "id": "flow.manage-catalogue", "name": "Manage titles and copies", "roleId": "Librarian",
+      "screenIds": ["screen.catalogue", "screen.title"] }
+  ]
+}

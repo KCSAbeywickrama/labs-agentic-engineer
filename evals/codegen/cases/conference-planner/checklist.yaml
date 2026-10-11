@@ -7,386 +7,577 @@
 # extras.mustNot entries ({id, description}) cap the band at review when violated.
 
 # Planner gaps — what the walk cannot cover, and where the PRD and the prototype disagree:
-#  - Waitlisting and automatic promotion need two attendees competing for one full session; only one Attendee identity is available and capacity cannot be set to zero, so the Join waitlist action, waitlist positions, promotion on cancellation and the organizer's waitlist rows are not walkable. A person with a second attendee could add: attendee B joins the waitlist of a full session, attendee A cancels, B becomes Confirmed.
-#  - Reviewer refusal: Reviewer lacks only proposals:read, registrations:read and registrations:read-all; refusal item written for My proposals only; reach to Organizer screens that need events:manage is not blocked by the spec (events, rooms, sessions list operations need no scope), so no refusal items are written for Manage events, Event form, Event rooms and sessions or Add room for any role.
-#  - Attendee refusal is written only for Session registrations; Speaker only for Review queue; Organizer only for My registrations; other role/screen refusals follow the same grant rule and were not itemised.
-#  - Proposal and registration screens in the prototype are drawn for a fixed speaker (Amara Perera) and fixed attendee, so per-user isolation of proposals and registrations cannot be walked with one identity per role.
-#  - Display states not walkable: Request failed on list screens, Registration in progress (delayed), and 'Decision refused' on an already-decided proposal (the Accept button is disabled after rejection and a decided proposal cannot be re-decided through the UI).
-#  - PRD says an organizer can assign reviewers to proposals and edit sessions; the prototype draws no assign-reviewer control and no session edit, so neither is checked. The prototype lets the Session form save without a Room-required check beyond the draw; its end-time field is not displayed in session lists.
-#  - Speaker submit, Browse events empty state and Event detail empty-sessions state only walk once each: after data exists the empty states for events and sessions on the Attendee side cannot be revisited.
-#  - No-access page and signed-out screen names are not in the manifest; the 'screen' value 'No access' is a label for the no-access state the app shows.
+#  - The manifest entryScreen is Events for everyone, but the Reviewer flow starts at Review queue; reviewer-lands-queue expects the Review queue.
+#  - The reviewer queue only shows proposals for events assigned to the signed-in reviewer by username; items from reviewer-lands-queue onward that need the queue assume the test Reviewer's username is 'test-reviewer' (security.json testUsers) as assigned in organizer-assigns-reviewer. If the session uses another username, assign that one instead.
+#  - With one Attendee identity the waitlist can only be reached on an event whose capacity is 0 (Waitlist Workshop); the spec does not say whether capacity 0 is accepted, so attendee-joins-waitlist and later items assume it is. A second attendee could fill a normal capacity-2 event instead.
+#  - The 'Events service failed' display state needs the backend to fail and cannot be walked.
+#  - The locked 'Decision made' view of Score a proposal (scores cannot change after a decision) is not reachable by navigation, since decided proposals leave the Review queue, so it has no item.
+#  - Refusal items are written for Speaker, Reviewer, Attendee and Organizer, one screen each; the grants in security.json refuse each role more screens than listed, and other screens are left out to avoid repetition.
+#  - Rejecting a proposal for a session speaker assignment: before any proposal is accepted, the assign-speaker dialog shows 'No accepted talks yet'; not covered since an earlier item already accepts one.
+#  - The PRD says organizers edit or delete 'an event I created', while the prototype shows Edit and Delete on every event; the walk uses a single organizer so ownership is not tested.
+#  - Settings: the PRD has no story for the settings switch and the prototype only saves and returns to Events; the switch's effect on times is not tested.
+#  - Session capacity validation, room removal when sessions use it, session deletion when registrations exist, session waitlists and reviewers scoring their own proposal need data or identities the UI cannot create from an empty database (a second user, or a user who is both speaker and reviewer), so they have no items.
 
 items:
-  - id: attendee-lands-home
-    role: Attendee
-    screen: Home
-    flow: Attendee entry
-    steps: Look at the screen the app opens on after sign-in.
-    expect: The Home screen shows a welcome heading and a start section for the Attendee role with options to browse events and open My registrations.
-    weight: 1
-  - id: attendee-events-empty
-    role: Attendee
-    screen: Browse events
-    flow: Browse and register
-    steps: From Home press 'Browse events'.
-    expect: The Browse events screen loads with no crash and an empty state ('No events yet') instead of rows, since nothing has been created.
-    weight: 1
-  - id: attendee-registrations-empty
-    role: Attendee
-    screen: My registrations
-    flow: Browse and register
-    steps: From the navigation open 'My registrations'.
-    expect: The My registrations screen shows the empty state 'No registrations' with a way to browse events.
-    weight: 1
-  - id: speaker-lands-home
-    role: Speaker
-    screen: Home
-    flow: Speaker entry
-    steps: Look at the screen the app opens on after sign-in.
-    expect: "The Home screen shows a welcome heading and start options for the Speaker role: My proposals and Submit a proposal."
-    weight: 1
-  - id: speaker-proposals-empty
-    role: Speaker
-    screen: My proposals
-    flow: Submit a talk
-    steps: From Home press 'My proposals'.
-    expect: The My proposals screen shows the empty state 'No proposals yet' with a way to submit a proposal.
-    weight: 1
-  - id: reviewer-lands-home
-    role: Reviewer
-    screen: Home
-    flow: Reviewer entry
-    steps: Look at the screen the app opens on after sign-in.
-    expect: The Home screen shows a welcome heading and an option to open the review queue.
-    weight: 1
-  - id: reviewer-queue-empty
-    role: Reviewer
-    screen: Review queue
-    flow: Score proposals
-    steps: From Home press 'Open review queue'.
-    expect: The Review queue loads with the empty state 'Nothing to review' and no rows.
-    weight: 1
-  - id: organizer-lands-home
+  - id: organizer-lands-events
     role: Organizer
-    screen: Home
-    flow: Organizer entry
-    steps: Look at the screen the app opens on after sign-in.
-    expect: "The Home screen shows a welcome heading and start options for the Organizer role: Manage events and Review proposals."
+    screen: Events
+    flow: Create an event and schedule sessions
+    steps: Look at the screen the app opens on.
+    expect: The Events screen shows with a 'New event' button, and the list reads as empty with 'No events yet' (the empty state) since nothing exists.
     weight: 1
-  - id: organizer-manage-events-empty
-    role: Organizer
-    screen: Manage events
-    flow: Build the program
-    steps: From Home press 'Manage events'.
-    expect: The Manage events screen shows the empty state 'No events' with a 'New event' action.
-    weight: 1
-  - id: organizer-proposals-empty
-    role: Organizer
-    screen: Proposals
-    flow: Decide proposals
-    steps: From the navigation open 'Proposals'.
-    expect: The Proposals screen shows the empty state 'No proposals' and no rows.
-    weight: 1
-  - id: organizer-event-validation
+  - id: organizer-event-form-validation
     role: Organizer
     screen: Event form
-    flow: Build the program
-    steps: Open Manage events, press 'New event', leave Name, Start date and End date blank and press Save.
-    expect: The event is not created, the form stays open and shows validation errors for the missing required fields (Validation errors state).
+    flow: "Create an event: validation"
+    steps: Press 'New event'. Clear the Name field (leave it empty), leave the other fields as they are, press 'Save event'.
+    expect: The event is not saved; the form stays on screen and indicates that a name is required. Pressing the Events breadcrumb afterwards still shows no events.
     weight: 1
-  - id: organizer-create-event
+  - id: organizer-creates-event
     role: Organizer
-    screen: Manage events
-    flow: Create and edit events
-    steps: On the Event form (press 'New event' from Manage events if needed) enter Name 'DevSummit 2026', Venue 'Colombo', Start date 2026-11-12, End date 2026-11-14 and press Save.
-    expect: You arrive on Manage events and a row 'DevSummit 2026' with venue Colombo and dates 2026-11-12 to 2026-11-14 is listed.
+    screen: Events
+    flow: Create an event and schedule sessions
+    steps: Press 'New event'. Name 'DevSummit 2027', Start date 2027-03-10, End date 2027-03-12, Venue 'Riverside Hall', Time zone 'Europe/Lisbon', Event capacity 2. Press 'Save event'.
+    expect: You arrive on the Events screen and a row 'DevSummit 2027' is listed with dates 2027-03-10 to 2027-03-12, venue Riverside Hall and seats '0 of 2'.
     weight: 2
-  - id: organizer-create-second-event
+  - id: organizer-creates-waitlist-event
     role: Organizer
-    screen: Manage events
-    flow: Create and edit events
-    steps: Press 'New event', enter Name 'CloudDays', Venue 'Kandy', Start date 2026-12-03, End date 2026-12-04 and press Save.
-    expect: Manage events lists both 'DevSummit 2026' and 'CloudDays'.
+    screen: Events
+    flow: Create an event and schedule sessions
+    steps: Press 'New event'. Name 'Waitlist Workshop', Start date 2027-06-04, End date 2027-06-05, Venue 'Harbour Conference Centre', Time zone 'Europe/Berlin', Event capacity 0. Press 'Save event'.
+    expect: Back on Events, a row 'Waitlist Workshop' is listed with seats '0 of 0' next to the DevSummit 2027 row.
     weight: 1
-  - id: organizer-edit-event
+  - id: organizer-creates-throwaway-event
     role: Organizer
-    screen: Manage events
-    flow: Create and edit events
-    steps: Open the 'CloudDays' row, press 'Edit event', change Venue to 'Galle' and press Save.
-    expect: The form was titled 'Edit event' and showed the existing values; after Save you are on Manage events and the CloudDays row shows venue Galle.
+    screen: Events
+    flow: Create an event and schedule sessions
+    steps: Press 'New event'. Name 'Data Forum', Start date 2027-09-21, End date 2027-09-22, Venue 'Lakeside Congress Hall', Time zone 'America/Toronto', Event capacity 150. Press 'Save event'.
+    expect: A row 'Data Forum' appears in the Events list.
+    weight: 1
+  - id: organizer-edits-event
+    role: Organizer
+    screen: Events
+    flow: Create an event and schedule sessions
+    steps: In the DevSummit 2027 row choose the 'Edit' action. Change Venue to 'Riverside Hall West'. Press 'Save event'.
+    expect: You arrive on Events and the DevSummit 2027 row shows venue 'Riverside Hall West'; the other fields are unchanged.
+    weight: 1
+  - id: organizer-deletes-event
+    role: Organizer
+    screen: Events
+    flow: Create an event and schedule sessions
+    steps: In the Data Forum row choose the 'Delete' action.
+    expect: The Data Forum row disappears from the Events list; DevSummit 2027 and Waitlist Workshop remain.
+    weight: 1
+  - id: organizer-event-detail-empty
+    role: Organizer
+    screen: Event sessions and rooms
+    flow: Create an event and schedule sessions
+    steps: Open the DevSummit 2027 row.
+    expect: The Event sessions and rooms screen shows the event name, seats taken 0 of 2, no waitlisted people, an empty sessions table ('No sessions scheduled') and an empty rooms table ('No rooms'), plus 'Edit event', a call-for-proposals button, 'Add session' and 'Add room'.
+    weight: 1
+  - id: organizer-adds-room-a
+    role: Organizer
+    screen: Event sessions and rooms
+    flow: Create an event and schedule sessions
+    steps: On DevSummit 2027 press 'Add room'. Room name 'Hall A', Seating capacity 100. Press 'Add room' in the dialog.
+    expect: The Rooms table lists 'Hall A' with seating capacity 100.
     weight: 2
-  - id: organizer-admin-empty
+  - id: organizer-adds-room-b
     role: Organizer
-    screen: Event rooms and sessions
-    flow: Build the program
-    steps: On Manage events open the 'DevSummit 2026' row.
-    expect: The Event rooms and sessions screen for DevSummit 2026 shows the empty states 'No rooms' and 'No sessions', with Add room, Add session and Edit event actions.
+    screen: Event sessions and rooms
+    flow: Create an event and schedule sessions
+    steps: Press 'Add room'. Room name 'Hall B', Seating capacity 40. Confirm.
+    expect: The Rooms table lists Hall A and Hall B (40).
     weight: 1
-  - id: organizer-room-validation
+  - id: organizer-adds-session-keynote
     role: Organizer
-    screen: Add room
-    flow: Build the program
-    steps: Press 'Add room', leave Room name and Capacity blank and press Save.
-    expect: No room is created, the form stays open and shows validation errors (Validation errors state).
-    weight: 1
-  - id: organizer-add-room
-    role: Organizer
-    screen: Event rooms and sessions
-    flow: Define rooms
-    steps: On the Add room form enter Room name 'Hall A', Capacity 120 and press Save.
-    expect: You return to the DevSummit 2026 admin screen and the Rooms list shows 'Hall A' with capacity 120.
+    screen: Event sessions and rooms
+    flow: Create an event and schedule sessions
+    steps: Press 'Add session'. Title 'Opening Keynote', Room Hall A, Day 2027-03-10, Starts 09:00, Ends 10:00, Capacity 50. Press 'Save session'.
+    expect: The Sessions table lists 'Opening Keynote' on 2027-03-10, 09:00 to 10:00, room Hall A, seats '0 of 50'.
     weight: 2
-  - id: organizer-session-validation
+  - id: organizer-adds-session-scaling
     role: Organizer
-    screen: Session form
-    flow: Build the program
-    steps: Press 'Add session', leave Title, Start time, End time and Capacity blank and press Save.
-    expect: No session is created, the form stays open and shows validation errors (Validation errors state).
+    screen: Event sessions and rooms
+    flow: Create an event and schedule sessions
+    steps: Press 'Add session'. Title 'Scaling Waitlists', Room Hall B, Day 2027-03-10, Starts 10:30, Ends 11:15, Capacity 30. Save.
+    expect: The Sessions table lists 'Scaling Waitlists' in Hall B at 10:30 to 11:15.
     weight: 1
-  - id: organizer-add-session
+  - id: organizer-adds-session-panel
     role: Organizer
-    screen: Event rooms and sessions
-    flow: Create sessions
-    steps: On the Session form enter Title 'Intro to APIs', Room 'Hall A', Start time '2026-11-12 10:00', End time '2026-11-12 11:00', Capacity 1 and press Save.
-    expect: You return to the DevSummit 2026 admin screen and the Sessions list shows 'Intro to APIs' in Hall A at 2026-11-12 10:00 with capacity 1 and waitlist 0.
-    weight: 2
-  - id: organizer-room-conflict
-    role: Organizer
-    screen: Session form
-    flow: Create sessions
-    steps: Press 'Add session' again and enter Title 'Clash Test', Room 'Hall A', Start time '2026-11-12 10:30', End time '2026-11-12 11:30', Capacity 5 and press Save.
-    expect: The session is not created because Hall A is already booked in that slot; the form shows that another session uses this room in that time slot (Request failed state), and no 'Clash Test' row appears in the Sessions list.
+    screen: Event sessions and rooms
+    flow: Create an event and schedule sessions
+    steps: "Press 'Add session'. Title 'Panel: Open Source Funding', Room Hall A, Day 2027-03-11, Starts 14:00, Ends 15:00, Capacity 80. Save."
+    expect: The Sessions table lists the Panel session on 2027-03-11 in Hall A, and the sessions are grouped or ordered by day.
     weight: 1
-  - id: organizer-session-regs-empty
+  - id: organizer-session-overlap-blocked
     role: Organizer
-    screen: Session registrations
-    flow: Build the program
-    steps: Cancel out to the DevSummit 2026 admin screen and open the 'Intro to APIs' row.
-    expect: The Session registrations screen shows Seats left 1 of 1, Waitlist 0 and the empty state 'No registrations'.
-    weight: 1
-  - id: attendee-session-before-event
-    role: Attendee
-    screen: Event and sessions
-    flow: Browse and register
-    steps: Open 'Browse events', open the 'DevSummit 2026' row, and on the 'Intro to APIs' row press 'Register for session' without registering for the event first.
-    expect: "The event page lists the Intro to APIs session with Seats left 1. The session registration is not made: Seats left stays 1 and 'Your registration' still reads 'Not registered'."
-    weight: 1
-  - id: attendee-register-event
-    role: Attendee
-    screen: Event and sessions
-    flow: Register for an event
-    steps: On the DevSummit 2026 page press 'Register for event'.
-    expect: "'Your registration' reads Confirmed and the register button is replaced by a disabled 'Registered'."
+    screen: Event sessions and rooms
+    flow: "Create an event and schedule sessions: overlap"
+    steps: Press 'Add session'. Title 'Clash', Room Hall A, Day 2027-03-10, Starts 09:30, Ends 10:30, Capacity 20. Save.
+    expect: The session is not added; the user is told that the room is already booked at that time, and the Sessions table has no 'Clash' row.
     weight: 2
-  - id: attendee-register-session
-    role: Attendee
-    screen: Event and sessions
-    flow: Register for a session
-    steps: On the DevSummit 2026 page press 'Register for session' on the 'Intro to APIs' row.
-    expect: "The registration is confirmed: Seats left for Intro to APIs drops from 1 to 0."
-    weight: 2
-  - id: attendee-my-registrations
-    role: Attendee
-    screen: My registrations
-    flow: Browse and register
-    steps: Open 'My registrations' from the navigation.
-    expect: "Two rows: 'DevSummit 2026' and 'Intro to APIs', each with status Confirmed and no waitlist position."
-    weight: 1
-  - id: organizer-session-regs-shows-attendee
+  - id: organizer-session-over-room-capacity
     role: Organizer
-    screen: Session registrations
-    flow: See registrations per session
-    steps: Open Manage events, 'DevSummit 2026', then the 'Intro to APIs' row.
-    expect: Seats left 0 of 1, Waitlist 0, and the Attendees list holds one row with status Confirmed.
-    weight: 2
-  - id: attendee-cancel-session
-    role: Attendee
-    screen: My registrations
-    flow: Cancel registration
-    steps: On My registrations press 'Cancel' on the 'Intro to APIs' row.
-    expect: The row's status becomes Cancelled and it no longer offers Cancel. The 'DevSummit 2026' row stays Confirmed. On the DevSummit 2026 event page Intro to APIs shows Seats left 1.
-    weight: 2
-  - id: organizer-seat-freed
+    screen: Event sessions and rooms
+    flow: "Create an event and schedule sessions: capacity"
+    steps: Press 'Add session'. Title 'Too Big', Room Hall B, Day 2027-03-12, Starts 09:00, Ends 10:00, Capacity 60. Save.
+    expect: The session is not added; the user is told that capacity cannot exceed the room's 40 seats, and there is no 'Too Big' row.
+    weight: 1
+  - id: organizer-moves-session
     role: Organizer
-    screen: Session registrations
-    flow: See registrations per session
-    steps: Open Manage events, 'DevSummit 2026', then the 'Intro to APIs' row.
-    expect: Seats left shows 1 of 1 and Waitlist 0 after the attendee's cancellation.
+    screen: Event sessions and rooms
+    flow: Create an event and schedule sessions
+    steps: In the 'Scaling Waitlists' row choose 'Edit or move'. Change Room to Hall A (same day and times 10:30 to 11:15, capacity 30). Press 'Save session'.
+    expect: The Scaling Waitlists row now shows room Hall A, same time.
+    weight: 1
+  - id: organizer-removes-session
+    role: Organizer
+    screen: Event sessions and rooms
+    flow: Create an event and schedule sessions
+    steps: "In the 'Panel: Open Source Funding' row choose 'Remove'."
+    expect: The Panel row disappears from the Sessions table; Opening Keynote and Scaling Waitlists remain.
+    weight: 1
+  - id: organizer-removes-room
+    role: Organizer
+    screen: Event sessions and rooms
+    flow: Create an event and schedule sessions
+    steps: In the Rooms table choose 'Remove' on the Hall B row (no session uses it now).
+    expect: Hall B disappears from the Rooms table; Hall A remains.
+    weight: 1
+  - id: organizer-opens-cfp
+    role: Organizer
+    screen: Event sessions and rooms
+    flow: Open and close a call for proposals
+    steps: On DevSummit 2027 press 'Open call for proposals'.
+    expect: The button changes to 'Close call for proposals'. Going back to the Events list shows DevSummit 2027 with call for proposals 'Open' and Waitlist Workshop 'Closed'.
+    weight: 2
+  - id: organizer-events-open-filter
+    role: Organizer
+    screen: Events
+    flow: Browse events
+    steps: On Events switch on 'Open for proposals only'.
+    expect: Only DevSummit 2027 is listed; Waitlist Workshop is not. Switching it off lists both.
+    weight: 1
+  - id: organizer-reviewers-empty
+    role: Organizer
+    screen: Reviewers
+    flow: Assign reviewers to an event
+    steps: Open 'Reviewers' in the navigation. Choose Event 'DevSummit 2027'.
+    expect: The Reviewers screen shows an assign-reviewer form and an empty assigned-reviewers list ('No reviewers assigned').
+    weight: 1
+  - id: organizer-reviewers-validation
+    role: Organizer
+    screen: Reviewers
+    flow: "Assign reviewers to an event: validation"
+    steps: With DevSummit 2027 selected leave 'Reviewer username' empty and press 'Assign reviewer'.
+    expect: No reviewer is added; the form asks for the reviewer's username and the list stays empty.
+    weight: 1
+  - id: organizer-assigns-reviewer
+    role: Organizer
+    screen: Reviewers
+    flow: Assign reviewers to an event
+    steps: With DevSummit 2027 selected enter Reviewer username 'test-reviewer' and press 'Assign reviewer'.
+    expect: "'test-reviewer' is listed under assigned reviewers for DevSummit 2027, showing that they have not signed in yet."
+    weight: 2
+  - id: organizer-unassigns-reviewer
+    role: Organizer
+    screen: Reviewers
+    flow: Assign reviewers to an event
+    steps: Assign username 'temp-reviewer' to DevSummit 2027, then press 'Unassign' on the 'temp-reviewer' row.
+    expect: "'temp-reviewer' disappears from the list; 'test-reviewer' remains."
+    weight: 1
+  - id: organizer-event-proposals-empty
+    role: Organizer
+    screen: Event proposals
+    flow: Rank and decide proposals
+    steps: Open 'Event proposals' in the navigation. Choose Event 'DevSummit 2027'.
+    expect: The Event proposals screen shows no proposals ('No proposals').
+    weight: 1
+  - id: organizer-registrations-empty
+    role: Organizer
+    screen: Event registrations
+    flow: Raise a capacity and promote the waitlist
+    steps: Open 'Registrations' in the navigation. Choose Event 'DevSummit 2027'.
+    expect: The Registrations screen shows seats taken 0 of 2, 0 on the waitlist and an empty table ('No registrations').
+    weight: 1
+  - id: reviewer-lands-queue
+    role: Reviewer
+    screen: Review queue
+    flow: Score a proposal
+    steps: Look at the screen the app opens on.
+    expect: The Review queue screen shows, with no proposals yet, an empty list ('Nothing to review').
+    weight: 1
+  - id: speaker-lands-events
+    role: Speaker
+    screen: Events
+    flow: Submit a proposal and follow its status
+    steps: Look at the screen the app opens on.
+    expect: The Events screen lists DevSummit 2027 and Waitlist Workshop, with no 'New event' button and no Edit or Delete actions.
+    weight: 1
+  - id: speaker-cfp-filter
+    role: Speaker
+    screen: Events
+    flow: Browse events open for proposals
+    steps: Switch on 'Open for proposals only'.
+    expect: Only DevSummit 2027 (call for proposals Open) is listed.
+    weight: 1
+  - id: speaker-my-proposals-empty
+    role: Speaker
+    screen: My proposals
+    flow: Submit a proposal and follow its status
+    steps: Open 'My proposals' in the navigation.
+    expect: The screen shows an empty list ('No proposals yet') and a 'Submit a proposal' button.
     weight: 1
   - id: speaker-submit-validation
     role: Speaker
     screen: Submit a proposal
-    flow: Submit a talk
-    steps: From My proposals press 'New proposal', leave Talk title and Abstract blank and press Submit.
-    expect: No proposal is created, the form stays open and shows validation errors for title and abstract (Validation errors state).
+    flow: "Submit a proposal: validation"
+    steps: Open Events, open DevSummit 2027, press 'Submit a proposal'. Leave Title and Abstract empty, Duration 30, press 'Submit proposal'.
+    expect: The proposal is not sent; the form indicates that a title and an abstract are required, and the screen stays on 'Submit a proposal'.
     weight: 1
-  - id: speaker-submit-proposal
+  - id: speaker-submits-proposal-a
     role: Speaker
     screen: My proposals
-    flow: Submit a talk
-    steps: On Submit a proposal choose Event 'DevSummit 2026', Talk title 'Resilient Event Pipelines', Abstract 'Retries, idempotency and dead letters for event-driven systems.' and press Submit.
-    expect: You arrive on My proposals and a row 'Resilient Event Pipelines' for DevSummit 2026 is listed with status Submitted.
+    flow: Submit a proposal and follow its status
+    steps: On the Submit a proposal form choose Event DevSummit 2027, Title 'Scaling Waitlists', Abstract 'How a registration service promotes the next person without overbooking.', Format Talk, Duration 45. Press 'Submit proposal'.
+    expect: You arrive on My proposals and a row 'Scaling Waitlists' for DevSummit 2027, Talk, 45 minutes, status Submitted is listed.
     weight: 2
-  - id: speaker-submit-second
+  - id: speaker-submits-proposal-b
     role: Speaker
     screen: My proposals
-    flow: Submit a talk
-    steps: Press 'New proposal', choose Event 'CloudDays', Talk title 'Edge Functions', Abstract 'Running code close to users.' and press Submit.
-    expect: My proposals lists both proposals, each with status Submitted, 'Edge Functions' for CloudDays.
+    flow: Submit a proposal and follow its status
+    steps: Press 'Submit a proposal'. Event DevSummit 2027, Title 'Event Sourcing in Practice', Abstract 'Lessons from three production migrations.', Format Workshop, Duration 90. Submit.
+    expect: My proposals lists 'Event Sourcing in Practice' as Workshop, 90 minutes, status Submitted, alongside the first proposal.
     weight: 1
-  - id: reviewer-queue-lists
+  - id: speaker-submits-proposal-c
+    role: Speaker
+    screen: My proposals
+    flow: Submit a proposal and follow its status
+    steps: Press 'Submit a proposal'. Event DevSummit 2027, Title 'Accessible Dashboards', Abstract 'Designing charts everyone can read.', Format Talk, Duration 30. Submit.
+    expect: "'Accessible Dashboards' appears with status Submitted."
+    weight: 1
+  - id: speaker-submits-proposal-d
+    role: Speaker
+    screen: My proposals
+    flow: Submit a proposal and follow its status
+    steps: Press 'Submit a proposal'. Event DevSummit 2027, Title 'Throwaway Talk', Abstract 'To be withdrawn.', Format Lightning talk, Duration 10. Submit.
+    expect: "'Throwaway Talk' appears with status Submitted."
+    weight: 1
+  - id: speaker-edits-proposal
+    role: Speaker
+    screen: My proposals
+    flow: Submit a proposal and follow its status
+    steps: In the 'Accessible Dashboards' row choose 'Edit'. Change Duration to 45 and press 'Save changes'.
+    expect: The row 'Accessible Dashboards' now shows 45 minutes, still Submitted.
+    weight: 1
+  - id: speaker-withdraws-proposal
+    role: Speaker
+    screen: My proposals
+    flow: Submit a proposal and follow its status
+    steps: In the 'Throwaway Talk' row choose 'Withdraw'.
+    expect: The 'Throwaway Talk' row disappears; the other three proposals remain.
+    weight: 1
+  - id: reviewer-queue-lists-proposals
     role: Reviewer
     screen: Review queue
-    flow: Score proposals
-    steps: From Home press 'Open review queue' (the event filter starts at 'All events').
-    expect: Both proposals are listed with their speaker, an average score showing no score yet, and 0 reviews.
+    flow: Score a proposal
+    steps: Open the Review queue (navigation). Read the list with 'Not yet scored by me' on.
+    expect: The queue lists 'Scaling Waitlists', 'Event Sourcing in Practice' and 'Accessible Dashboards' for DevSummit 2027 with the speaker's name and 'Not scored'; it does not list 'Throwaway Talk'. (Needs the reviewer assignment 'test-reviewer' from organizer-assigns-reviewer.)
+    weight: 2
+  - id: reviewer-score-validation
+    role: Reviewer
+    screen: Score a proposal
+    flow: "Score a proposal: validation"
+    steps: Open the 'Scaling Waitlists' row. Leave Score unselected and press 'Save score'.
+    expect: The score is not saved; the form asks for a score from 1 to 5 and stays on 'Score a proposal', which shows the proposal's speaker, format, abstract and status.
+    weight: 1
+  - id: reviewer-scores-proposal-a
+    role: Reviewer
+    screen: Review queue
+    flow: Score a proposal
+    steps: On 'Scaling Waitlists' choose Score 5, Comment 'Clear and timely', press 'Save score'.
+    expect: You arrive on the Review queue and 'Scaling Waitlists' is no longer listed while 'Not yet scored by me' is on.
+    weight: 2
+  - id: reviewer-scores-proposal-b
+    role: Reviewer
+    screen: Review queue
+    flow: Score a proposal
+    steps: Open 'Event Sourcing in Practice', choose Score 2, Comment 'Needs a sharper outline', press 'Save score'.
+    expect: Back on the Review queue the proposal is no longer listed with the filter on.
     weight: 1
   - id: reviewer-queue-filter
     role: Reviewer
     screen: Review queue
-    flow: Score proposals
-    steps: Set the Event filter to 'DevSummit 2026'.
-    expect: Only 'Resilient Event Pipelines' is listed; 'Edge Functions' is not.
+    flow: Score a proposal
+    steps: With 'Not yet scored by me' on read the list; then switch it off.
+    expect: With the filter on only 'Accessible Dashboards' is listed. With it off the scored proposals are also listed showing '5 of 5' for Scaling Waitlists and '2 of 5' for Event Sourcing in Practice, with status Under review.
     weight: 1
-  - id: reviewer-open-proposal
-    role: Reviewer
-    screen: Score a proposal
-    flow: Score proposals
-    steps: With the filter on 'DevSummit 2026', open the 'Resilient Event Pipelines' row.
-    expect: The Score a proposal screen shows the speaker, the abstract, average score (none yet), 0 reviews and a Score 1 to 5 field.
-    weight: 1
-  - id: reviewer-score-proposal
+  - id: reviewer-changes-score
     role: Reviewer
     screen: Review queue
-    flow: Score proposals
-    steps: On the proposal choose Score 4 and press 'Submit score'.
-    expect: You arrive back on the Review queue and the proposal now shows average score 4 (4.0) with 1 review.
+    flow: Score a proposal
+    steps: With the filter off open 'Event Sourcing in Practice', change Score to 3, Comment 'Better outline now', press 'Save score'.
+    expect: Back on the queue the proposal shows '3 of 5'.
+    weight: 1
+  - id: organizer-ranks-proposals
+    role: Organizer
+    screen: Event proposals
+    flow: Rank and decide proposals
+    steps: Open 'Event proposals' in the navigation. Choose Event 'DevSummit 2027', Status 'All'.
+    expect: "The proposals are listed best average first: 'Scaling Waitlists' (average 5, 1 review, Under review), 'Event Sourcing in Practice' (3, 1 review, Under review), then 'Accessible Dashboards' (no scores, 0 reviews, Submitted)."
     weight: 2
-  - id: reviewer-score-twice
-    role: Reviewer
-    screen: Score a proposal
-    flow: Score proposals
-    steps: Open 'Resilient Event Pipelines' again, choose Score 2 and press 'Submit score'.
-    expect: The second score is refused because each reviewer scores a proposal once; the average stays 4 and reviews stay 1 (Request failed state).
-    weight: 1
-  - id: organizer-proposals-list
+  - id: organizer-proposals-status-filter
     role: Organizer
-    screen: Proposals
-    flow: Decide proposals
-    steps: From Home press 'Review proposals' (filter at 'All events').
-    expect: Both proposals are listed with speaker and status Submitted; 'Resilient Event Pipelines' shows average score 4.
+    screen: Event proposals
+    flow: Rank and decide proposals
+    steps: Set Status to 'Submitted'.
+    expect: Only 'Accessible Dashboards' is listed. Setting Status back to 'All' shows all three again.
     weight: 1
-  - id: organizer-proposals-filter
+  - id: organizer-views-scores
     role: Organizer
-    screen: Proposals
-    flow: Decide proposals
-    steps: Set the Event filter to 'CloudDays'.
-    expect: Only 'Edge Functions' is listed.
+    screen: Event proposals
+    flow: Rank and decide proposals
+    steps: On the 'Scaling Waitlists' row choose 'Scores'.
+    expect: A panel titled for that proposal lists a reviewer row with score 5 and comment 'Clear and timely'.
     weight: 1
-  - id: organizer-open-decision
+  - id: organizer-accepts-proposal
     role: Organizer
-    screen: Decide a proposal
-    flow: Decide proposals
-    steps: With the filter on 'CloudDays', open the 'Edge Functions' row.
-    expect: The Decide a proposal screen shows the speaker, status Submitted, the abstract, and Reject and 'Accept and schedule' buttons.
-    weight: 1
-  - id: organizer-reject-proposal
-    role: Organizer
-    screen: Proposals
-    flow: Decide proposals
-    steps: On the Edge Functions decision screen press 'Reject'.
-    expect: You arrive back on the Proposals list and 'Edge Functions' shows status Rejected.
+    screen: Event proposals
+    flow: Rank and decide proposals
+    steps: On the 'Scaling Waitlists' row choose 'Accept', enter comment 'Great fit for the main track', press 'Accept'.
+    expect: The row's status shows Accepted.
     weight: 2
-  - id: organizer-accept-schedule
+  - id: organizer-rejects-proposal
     role: Organizer
-    screen: Event rooms and sessions
-    flow: Decide proposals
-    steps: On Proposals set the filter to 'DevSummit 2026', open 'Resilient Event Pipelines', press 'Accept and schedule'. On the Session form (title prefilled with the proposal title) choose Room 'Hall A', Start time '2026-11-13 09:00', End time '2026-11-13 10:00', Capacity 50 and press Save.
-    expect: The Session form opens for scheduling the proposal; after Save you arrive on the DevSummit 2026 admin screen where 'Resilient Event Pipelines' is listed as a session in Hall A with capacity 50.
+    screen: Event proposals
+    flow: Rank and decide proposals
+    steps: On the 'Event Sourcing in Practice' row choose 'Reject', enter comment 'Overlaps another talk', press 'Reject'.
+    expect: The row's status shows Rejected.
     weight: 2
-  - id: speaker-sees-outcomes
+  - id: speaker-sees-decisions
     role: Speaker
     screen: My proposals
-    flow: Track proposal outcome
-    steps: From Home open 'My proposals'.
-    expect: "'Resilient Event Pipelines' shows status Accepted and 'Edge Functions' shows status Rejected."
+    flow: Submit a proposal and follow its status
+    steps: Open 'My proposals' in the navigation.
+    expect: "'Scaling Waitlists' shows Accepted with comment 'Great fit for the main track'; 'Event Sourcing in Practice' shows Rejected with comment 'Overlaps another talk'; 'Accessible Dashboards' still shows Submitted."
     weight: 2
-  - id: attendee-sees-new-session
-    role: Attendee
-    screen: Event and sessions
-    flow: Browse sessions
-    steps: Open 'Browse events' and open the 'DevSummit 2026' row.
-    expect: The Sessions list shows both 'Intro to APIs' and 'Resilient Event Pipelines' with room, time, seats left (50 for the new one) and waitlist columns.
+  - id: organizer-reverses-decision
+    role: Organizer
+    screen: Event proposals
+    flow: Rank and decide proposals
+    steps: Open 'Event proposals', choose DevSummit 2027, and on the 'Event Sourcing in Practice' row choose 'Reverse decision'.
+    expect: The row's status returns to Under review.
     weight: 2
-  - id: attendee-account
+  - id: organizer-assigns-speaker
+    role: Organizer
+    screen: Event sessions and rooms
+    flow: Create an event and schedule sessions
+    steps: Open Events, open DevSummit 2027. In the 'Scaling Waitlists' session row choose 'Assign speaker', pick the accepted talk 'Scaling Waitlists' in the list, press 'Assign'.
+    expect: The session row shows the accepted talk's speaker in its Speaker column.
+    weight: 1
+  - id: attendee-lands-events
     role: Attendee
+    screen: Events
+    flow: Register, waitlist and cancel
+    steps: Look at the screen the app opens on.
+    expect: The Events screen lists DevSummit 2027 (seats '0 of 2') and Waitlist Workshop (seats '0 of 0') with no 'New event' button and no Edit or Delete actions.
+    weight: 1
+  - id: attendee-registrations-empty
+    role: Attendee
+    screen: My registrations
+    flow: Register, waitlist and cancel
+    steps: Open 'My registrations' in the navigation.
+    expect: The screen shows no registrations ('No registrations') and a 'Browse events' button.
+    weight: 1
+  - id: attendee-browses-sessions
+    role: Attendee
+    screen: Event sessions and rooms
+    flow: Register, waitlist and cancel
+    steps: Open Events, then the DevSummit 2027 row.
+    expect: "The screen lists the sessions by day with time, room and speaker: 'Opening Keynote' (2027-03-10, 09:00 to 10:00, Hall A) and 'Scaling Waitlists' (2027-03-10, 10:30 to 11:15, Hall A), and the room Hall A."
+    weight: 1
+  - id: attendee-session-before-event
+    role: Attendee
+    screen: Event sessions and rooms
+    flow: Register, waitlist and cancel
+    steps: On DevSummit 2027, in the 'Opening Keynote' row choose 'Register' before registering for the event.
+    expect: No confirmed registration for the session results; the attendee is told to register for the event first, and the row still offers 'Register'.
+    weight: 1
+  - id: attendee-registers-event
+    role: Attendee
+    screen: Event sessions and rooms
+    flow: Register, waitlist and cancel
+    steps: On DevSummit 2027 press 'Register for event'.
+    expect: A confirmation that you are confirmed for DevSummit 2027 shows, seats taken becomes 1 of 2, and the button changes to 'Cancel registration'.
+    weight: 2
+  - id: attendee-registers-session
+    role: Attendee
+    screen: Event sessions and rooms
+    flow: Register, waitlist and cancel
+    steps: In the 'Opening Keynote' row choose 'Register'.
+    expect: A confirmation shows, the row's seats read '1 of 50' and its action becomes 'Cancel'.
+    weight: 2
+  - id: attendee-joins-waitlist
+    role: Attendee
+    screen: Event sessions and rooms
+    flow: Register, waitlist and cancel
+    steps: Open Events, open Waitlist Workshop (capacity 0), press 'Register for event'.
+    expect: A message says the event is full and you are on the waitlist; the waitlisted count shows 1, seats taken stay 0, and the button reads 'Leave waitlist'.
+    weight: 2
+  - id: attendee-views-registrations
+    role: Attendee
+    screen: My registrations
+    flow: Register, waitlist and cancel
+    steps: Open 'My registrations' in the navigation.
+    expect: "Three rows: DevSummit 2027 (Event, Confirmed), Opening Keynote (Session, DevSummit 2027, Confirmed), Waitlist Workshop (Event, Waitlisted, waitlist position 1)."
+    weight: 2
+  - id: attendee-leaves-waitlist
+    role: Attendee
+    screen: My registrations
+    flow: Register, waitlist and cancel
+    steps: On the Waitlist Workshop row choose 'Leave waitlist'.
+    expect: The Waitlist Workshop row disappears; the two DevSummit rows remain.
+    weight: 2
+  - id: attendee-rejoins-waitlist
+    role: Attendee
+    screen: My registrations
+    flow: Register, waitlist and cancel
+    steps: Press 'Browse events', open Waitlist Workshop, press 'Register for event', then open 'My registrations'.
+    expect: Waitlist Workshop is listed again as Waitlisted with waitlist position 1.
+    weight: 1
+  - id: organizer-views-registrations
+    role: Organizer
+    screen: Event registrations
+    flow: Raise a capacity and promote the waitlist
+    steps: Open 'Registrations' in the navigation. Choose Event 'DevSummit 2027'.
+    expect: Seats taken 1 of 2 event seats, 0 on the waitlist; the table lists the attendee's event registration (Confirmed) and Opening Keynote session registration (Confirmed). Choosing 'Waitlist Workshop' shows seats 0 of 0, 1 on the waitlist and the attendee's row as Waitlisted, position 1.
+    weight: 2
+  - id: organizer-delete-event-blocked
+    role: Organizer
+    screen: Events
+    flow: "Create an event and schedule sessions: delete rule"
+    steps: Open Events. In the DevSummit 2027 row choose 'Delete'.
+    expect: The event is not deleted; the user is told it has registrations that must be cancelled first, and the DevSummit 2027 row remains.
+    weight: 1
+  - id: organizer-lower-capacity-blocked
+    role: Organizer
+    screen: Event form
+    flow: "Raise a capacity and promote the waitlist: lowering"
+    steps: In the DevSummit 2027 row choose 'Edit'. Change Event capacity to 0 and press 'Save event'.
+    expect: The change is refused with a message that capacity cannot drop below the 1 confirmed seat; the capacity stays 2 (the Events list still shows '1 of 2').
+    weight: 1
+  - id: organizer-raises-capacity
+    role: Organizer
+    screen: Event registrations
+    flow: Raise a capacity and promote the waitlist
+    steps: On Events, in the Waitlist Workshop row choose 'Edit'. Change Event capacity to 1 and press 'Save event'. Then open 'Registrations' and choose Event 'Waitlist Workshop'.
+    expect: The Events row shows '1 of 1' seats; Registrations shows seats 1 of 1, 0 waitlisted, and the attendee's row as Confirmed.
+    weight: 2
+  - id: attendee-promoted
+    role: Attendee
+    screen: My registrations
+    flow: Register, waitlist and cancel
+    steps: Open 'My registrations'.
+    expect: The Waitlist Workshop row now shows Confirmed (not waiting).
+    weight: 2
+  - id: organizer-removes-registration
+    role: Organizer
+    screen: Event registrations
+    flow: Raise a capacity and promote the waitlist
+    steps: Open 'Registrations', choose Event 'Waitlist Workshop', and on the attendee's row choose 'Remove'.
+    expect: The row disappears and seats taken fall to 0 of 1.
+    weight: 2
+  - id: attendee-cancels-event-cascade
+    role: Attendee
+    screen: My registrations
+    flow: Register, waitlist and cancel
+    steps: Open 'My registrations'. On the DevSummit 2027 event row choose 'Cancel'.
+    expect: Both the DevSummit 2027 event registration and the Opening Keynote session registration are gone and the screen shows no registrations.
+    weight: 2
+  - id: organizer-closes-cfp
+    role: Organizer
+    screen: Event sessions and rooms
+    flow: Open and close a call for proposals
+    steps: Open Events, open DevSummit 2027 and press 'Close call for proposals'.
+    expect: The button changes to 'Open call for proposals', and the Events list shows DevSummit 2027 as Closed.
+    weight: 2
+  - id: speaker-cannot-submit-closed
+    role: Speaker
+    screen: Event sessions and rooms
+    flow: Submit a proposal and follow its status
+    steps: Open Events, open DevSummit 2027.
+    expect: No 'Submit a proposal' button is offered for this event, since its call for proposals is closed.
+    weight: 1
+  - id: speaker-account
+    role: Speaker
     screen: Account
     flow: Account
-    steps: Open the user menu in the top bar and choose the account entry.
-    expect: The Account screen shows Name, Email and Role (Attendee).
+    steps: Open the user menu and choose the account entry.
+    expect: The Account screen shows the signed-in user's name, email and role Speaker.
     weight: 1
-  - id: organizer-settings
-    role: Organizer
-    screen: Home
+  - id: speaker-settings
+    role: Speaker
+    screen: Events
     flow: Settings
-    steps: Open the user menu and choose settings; on the Settings screen switch 'Compact tables' on and press 'Save settings'.
-    expect: The Settings screen shows a 'Compact tables' switch; after saving you arrive on Home with no crash.
+    steps: Open the user menu and choose settings. Read the screen, then press 'Save settings'.
+    expect: The Settings screen shows a switch 'Show times in the event's time zone' that is on; after saving you arrive on the Events screen.
+    weight: 1
+  - id: speaker-refused-event-proposals
+    role: Speaker
+    screen: Event proposals
+    flow: Role reach
+    steps: Open the address the Event proposals screen had in organizer-ranks-proposals.
+    expect: "The Speaker is refused: the proposals of the event are not shown."
+    weight: 1
+  - id: reviewer-refused-event-proposals
+    role: Reviewer
+    screen: Event proposals
+    flow: Role reach
+    steps: Open the address the Event proposals screen had in organizer-ranks-proposals.
+    expect: "The Reviewer is refused: the event's full proposal list and scores are not shown."
+    weight: 1
+  - id: attendee-refused-event-registrations
+    role: Attendee
+    screen: Event registrations
+    flow: Role reach
+    steps: Open the address the Registrations screen had in organizer-views-registrations.
+    expect: "The Attendee is refused: other people's registrations are not shown."
+    weight: 1
+  - id: organizer-refused-my-proposals
+    role: Organizer
+    screen: My proposals
+    flow: Role reach
+    steps: Open the address My proposals had in speaker-sees-decisions.
+    expect: "The Organizer is refused: the speaker's proposals are not shown."
+    weight: 1
+  - id: no-role-no-access
+    role: no role
+    screen: Events
+    flow: Role reach
+    steps: Look at what the app shows.
+    expect: A no-access page is shown instead of the app; no events, proposals or registrations are visible.
+    weight: 1
+  - id: signed-out-guard
+    role: signed out
+    screen: Events
+    flow: Role reach
+    steps: Load the app signed out and wait.
+    expect: The app's guard sends the browser through sign-in and it comes back into a session without a crash or blank page.
+    weight: 1
+  - id: attendee-signs-out
+    role: Attendee
+    screen: Signed out
+    flow: Sign out
+    steps: Open the user menu and choose sign out.
+    expect: The previous role's screens and data are gone and the no-access state shows; no sign-in form appears.
     weight: 1
   - id: organizer-account
     role: Organizer
     screen: Account
     flow: Account
     steps: Open the user menu and choose the account entry.
-    expect: The Account screen shows Name, Email and Role (Organizer).
-    weight: 1
-  - id: attendee-refused-session-registrations
-    role: Attendee
-    screen: Session registrations
-    flow: Role access
-    steps: Open the address the Session registrations screen had in organizer-session-regs-shows-attendee.
-    expect: "The Attendee is refused: the session's attendee list is not shown, and the app does not crash."
-    weight: 1
-  - id: speaker-refused-review-queue
-    role: Speaker
-    screen: Review queue
-    flow: Role access
-    steps: Open the address the Review queue had in reviewer-queue-lists.
-    expect: "The Speaker is refused: the proposals of other speakers are not shown, and the app does not crash."
-    weight: 1
-  - id: reviewer-refused-my-proposals
-    role: Reviewer
-    screen: My proposals
-    flow: Role access
-    steps: Open the address My proposals had in speaker-sees-outcomes.
-    expect: "The Reviewer is refused: the speaker's proposals are not shown, and the app does not crash."
-    weight: 1
-  - id: organizer-refused-my-registrations
-    role: Organizer
-    screen: My registrations
-    flow: Role access
-    steps: Open the address My registrations had in attendee-my-registrations.
-    expect: "The Organizer is refused: the attendee's registrations are not shown, and the app does not crash."
-    weight: 1
-  - id: no-role-no-access
-    role: no role
-    screen: No access
-    flow: Role access
-    steps: Look at the screen the app shows after sign-in.
-    expect: A no-access page is shown instead of the app; no events, proposals or registrations are visible.
-    weight: 1
-  - id: signed-out-guard
-    role: signed out
-    screen: Home
-    flow: Sign-in guard
-    steps: Load the app signed out and wait.
-    expect: The address loses 'auth=out' and the app reloads into a session without a blank page or crash.
-    weight: 1
-  - id: sign-out
-    role: Attendee
-    screen: No access
-    flow: Sign out
-    steps: Open the user menu and choose sign out.
-    expect: The Attendee's screens and data are gone and the no-access state shows; no sign-in form appears.
+    expect: The Account screen shows the signed-in user's name, email and role Organizer.
     weight: 1
 extras:
   mustCover: []

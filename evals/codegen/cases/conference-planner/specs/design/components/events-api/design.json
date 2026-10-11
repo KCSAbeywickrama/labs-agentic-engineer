@@ -7,12 +7,79 @@
   "appPath": "events-api",
   "entrypoint": "deployment/service",
   "exposure": "internet",
-  "dependencies": [
-    { "kind": "component", "name": "registration-service", "description": "Delegates seat reservation, waitlist, cancellation and promotion; forwards the caller's token." },
-    { "kind": "platform-resource", "name": "events-db", "resourceType": "postgres-cnpg", "description": "Stores events, rooms, sessions, proposals and scores." },
-    { "kind": "platform-resource", "name": "user-auth", "resourceType": "thunder-app" }
+  "stories": [
+    "F1.1",
+    "F1.2",
+    "F1.3",
+    "F1.4",
+    "F1.5",
+    "F1.6",
+    "F1.7",
+    "F1.8",
+    "F1.9",
+    "F2.1",
+    "F2.2",
+    "F2.3",
+    "F2.4",
+    "F2.5",
+    "F2.6",
+    "F3.1",
+    "F3.2",
+    "F3.3",
+    "F3.4",
+    "F3.5",
+    "F3.6",
+    "F3.7",
+    "F4.1",
+    "F4.2",
+    "F4.3",
+    "F4.4",
+    "F4.5",
+    "F4.6",
+    "F4.7",
+    "F4.8",
+    "F4.9"
   ],
-  "description": "The public API of the product: events, rooms, sessions, proposals, scores, decisions, and the caller-facing registration operations. Owns role-based authorization and persists its data in its own Postgres. Registration state (capacity, waitlist) is never held here; every seat operation goes through the registration service. Does not send notifications or run background jobs.",
-  "stories": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-  "skillsPinned": ["openapi-conventions", "ballerina", "thunder-authentication", "api-management"]
+  "description": "The single backend the web app calls. Owns events, rooms, sessions, talk proposals, reviews, reviewer assignments and the call for proposals, enforces role-based access from the gateway's signed assertion, stores reviewer assignments against a username (binding them to the person's id on that person's first call, and matching queue and score checks on username or id), and fronts registration: it checks that a session registration needs a confirmed event registration, cascades event cancellations to sessions, and delegates seat counting and waitlists to the registration service. It does not store registrations or waitlists, send notifications, accept file uploads or run background jobs.",
+  "dependencies": [
+    {
+      "kind": "component",
+      "name": "registration-service",
+      "description": "Creates and cancels registrations, sets capacities and reads seat status; the only caller of the registration service (P3).",
+      "wiring": {
+        "endpoint": {
+          "component": "ev-conference-planner-registration-service",
+          "name": "http",
+          "visibility": "project",
+          "envBindings": {
+            "address": "REGISTRATION_SERVICE_URL"
+          }
+        }
+      }
+    },
+    {
+      "kind": "platform-resource",
+      "name": "user-auth",
+      "resourceType": "thunder-app",
+      "wiring": {
+        "ref": "ev-conference-pla-d836ecc3",
+        "envBindings": {
+          "client_id": "USER_AUTH_CLIENT_ID",
+          "issuer": "USER_AUTH_ISSUER",
+          "jwks_url": "USER_AUTH_JWKS_URL",
+          "resource": "USER_AUTH_RESOURCE",
+          "scopes": "USER_AUTH_SCOPES"
+        }
+      }
+    }
+  ],
+  "exposesAPI": {
+    "auth": "end-user-required"
+  },
+  "skillsPinned": [
+    "openapi-conventions",
+    "ballerina",
+    "thunder-authentication",
+    "api-management"
+  ]
 }

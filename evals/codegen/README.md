@@ -13,6 +13,22 @@ failure: the CLI exits nonzero only when it could not do what was asked.
 
 ## Saving a case
 
+A case starts as a playground project, generated headless on the feature flow:
+
+```bash
+pnpm play <dir> requirements --idea "<brief>" --silent   # product pass: stub features
+pnpm play <dir> interview F<n> --silent                  # each feature, in order
+pnpm play <dir> design --silent
+pnpm play <dir> prototype --silent
+pnpm play <dir> tasks --silent                           # the Build v1 issue
+```
+
+Read the spec before `tasks`: a planned version is recorded, so a later `tasks`
+plans v2. A role whose reach rests on data nothing in the product writes (a
+claim no assertion carries, a limit "set outside the product") walks as
+broken, which scores the design, not the code: fix it with
+`pnpm play <dir> chat "…"`, then rerun `design` and `prototype`.
+
 ```bash
 pnpm play <project dir> eval-save <name>      # from a playground project
 pnpm --filter @aep/codegen-evals eval save --from <abs dir> --name <name> [--force]

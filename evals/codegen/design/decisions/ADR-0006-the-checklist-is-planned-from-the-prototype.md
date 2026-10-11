@@ -51,7 +51,13 @@ checklist planned without the contract would be one the build cannot match.
 - A score from before the re-plan is not comparable with one after it: the
   checklists changed (item counts moved, for example, from 15 to 22 and from 42
   to 35). A new baseline sweep is needed before skill changes are scored.
-- The cases still carry `wireframes.dsl`, flat PRDs and per-component issue
-  files. The planner ignores the wireframes. A flat PRD cannot be planned into
-  a build issue (root ADR-0039, ADR-0050), so a case moves to one build issue
-  only when it is made again with feature files.
+- **Amendment (2026-10-11): the seven cases were made again on the feature
+  flow** (`requirements`, `interview` per feature, `design`, `prototype`,
+  `tasks`; README "Saving a case"). Each has feature files, one `Build v1`
+  issue (root ADR-0050) and no `wireframes.dsl`. A flat PRD cannot be planned
+  into a build issue (root ADR-0039), which is why the old cases could not be
+  kept. Five specs were changed by chat before `tasks`, because a role's reach
+  rested on data nothing in the product writes: a department from a `groups`
+  claim, an approval limit set "outside the product", or a person who exists
+  only after their first call. Their checklists grew (expense-claims 22 to 46
+  items, conference-planner 53 to 80), so the baseline is taken again.

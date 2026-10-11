@@ -2,7 +2,6 @@ title Clinic Appointments
 
 component clinic-webapp as "Clinic Web App" web-application
 component clinic-api as "Clinic API" service
-component clinic-db as "Clinic Database" database
 
 east user-auth as "Thunder Auth" identity-server
 
@@ -12,4 +11,3 @@ north -> clinic-api
 clinic-webapp -> clinic-api
 clinic-webapp -> user-auth
 clinic-api -> user-auth
-clinic-api -> clinic-db

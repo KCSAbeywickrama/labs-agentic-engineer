@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
-  "name": "Clinic",
-  "entryScreen": "screen.account",
+  "name": "Clinic Appointments",
+  "entryScreen": "screen.home",
   "roles": [
     { "id": "Patient", "name": "Patient" },
     { "id": "Doctor", "name": "Doctor" },
@@ -11,29 +11,30 @@
     { "id": "state.default", "name": "Default" },
     { "id": "state.empty", "name": "Nothing to show" },
     { "id": "state.validation-error", "name": "Validation errors" },
-    { "id": "state.conflict", "name": "Slot taken or inside 2-hour cutoff" },
+    { "id": "state.conflict", "name": "Slot taken or rule refused" },
     { "id": "state.failed", "name": "Clinic service failed" }
   ],
   "screens": [
+    { "id": "screen.home", "name": "Home", "roleIds": ["Patient", "Doctor", "Receptionist"] },
+    { "id": "screen.slots", "name": "Open slots", "roleIds": ["Patient", "Receptionist"] },
     { "id": "screen.my-appointments", "name": "My appointments", "roleIds": ["Patient"] },
-    { "id": "screen.browse-slots", "name": "Available slots", "roleIds": ["Patient"] },
-    { "id": "screen.reschedule", "name": "Reschedule appointment", "roleIds": ["Patient"] },
-    { "id": "screen.schedule", "name": "My day", "roleIds": ["Doctor"] },
-    { "id": "screen.my-slots", "name": "My slots", "roleIds": ["Doctor"] },
-    { "id": "screen.publish-slots", "name": "Publish slots", "roleIds": ["Doctor"] },
-    { "id": "screen.visit-note", "name": "Visit note", "roleIds": ["Doctor"] },
+    { "id": "screen.my-slots", "name": "My availability", "roleIds": ["Doctor"] },
+    { "id": "screen.my-day", "name": "My day", "roleIds": ["Doctor"] },
+    { "id": "screen.consultation", "name": "Appointment and visit notes", "roleIds": ["Doctor"] },
     { "id": "screen.front-desk", "name": "Front desk", "roleIds": ["Receptionist"] },
-    { "id": "screen.book-for-patient", "name": "Book for patient", "roleIds": ["Receptionist"] },
+    { "id": "screen.patients", "name": "Patients", "roleIds": ["Receptionist"] },
     { "id": "screen.account", "name": "Account", "roleIds": ["Patient", "Doctor", "Receptionist"] },
     { "id": "screen.settings", "name": "Settings", "roleIds": ["Patient", "Doctor", "Receptionist"] },
     { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Patient", "Doctor", "Receptionist"] }
   ],
   "flows": [
-    { "id": "flow.my-appointments", "name": "My appointments", "roleId": "Patient",
-      "screenIds": ["screen.my-appointments", "screen.browse-slots", "screen.reschedule"] },
-    { "id": "flow.my-day", "name": "My day", "roleId": "Doctor",
-      "screenIds": ["screen.schedule", "screen.visit-note", "screen.my-slots", "screen.publish-slots"] },
-    { "id": "flow.front-desk", "name": "Front desk", "roleId": "Receptionist",
-      "screenIds": ["screen.front-desk", "screen.book-for-patient"] }
+    { "id": "flow.patient-books", "name": "Book, reschedule and cancel an appointment", "roleId": "Patient",
+      "screenIds": ["screen.slots", "screen.my-appointments"] },
+    { "id": "flow.doctor-availability", "name": "Publish availability", "roleId": "Doctor",
+      "screenIds": ["screen.my-slots"] },
+    { "id": "flow.doctor-notes", "name": "Doctor's day and visit notes", "roleId": "Doctor",
+      "screenIds": ["screen.my-day", "screen.consultation"] },
+    { "id": "flow.reception", "name": "Reception books and checks in", "roleId": "Receptionist",
+      "screenIds": ["screen.patients", "screen.slots", "screen.front-desk"] }
   ]
 }

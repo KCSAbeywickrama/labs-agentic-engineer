@@ -7,259 +7,298 @@
 # extras.mustNot entries ({id, description}) cap the band at review when violated.
 
 # Planner gaps — what the walk cannot cover, and where the PRD and the prototype disagree:
-#  - SLA breach cannot be created from an empty database through the UI (it needs a ticket to pass its due time), so breached badges, the '(overdue)' marker, a non-zero SLA breached figure and a filter result containing breached tickets are not walkable. A person could add these by hand after a ticket has gone past its due time.
-#  - Agents appear in the assign list only after they have used the app (profiles are recorded on first use); the assign items assume the Support Agent has already landed, which the earlier items do. The prototype's Assignee filter lists fixed agent names; whether it matches the real agents is not walkable.
-#  - Team Lead, Support Agent and Employee scopes: the Team Lead holds the scopes for the Ticket queue, Work a ticket and Assign ticket screens, and the Support Agent holds them for Team queue, Review ticket and Reassign ticket, so no refusal items are written for those; the Employee is refused only the queue screens, with one item.
-#  - The 'Help desk service failed' state needs the backend to fail and is not walkable. The validation-error state on Assign ticket cannot be reached because the agent select always has a selection.
-#  - The PRD says a Team Lead can see SLA breaches highlighted and the prototype draws no comment box for the Team Lead; the prototype wins. The Settings 'Compact tables' switch has no stated visible effect beyond saving.
-#  - Employee-only second-user isolation (employees seeing only their own tickets) is not walked, because only one Employee identity can be selected by role name.
-#  - The SLA due values for each priority (3 days, 1 day, 8 hours, 2 hours) are assumed in the PRD and an open question; items only expect an SLA due time to be shown, not its value.
+#  - Nothing is seeded: tickets are all raised by items here; the prototype's sample data (breached tickets, Priya Nair) cannot be created.
+#  - SLA breach cannot be reached from an empty database because due times are in the future for hours or days; the breached SLA alert, Breached SLA count above zero, the 'Breached' SLA text, and Breached only showing rows are not walkable. Items for the Breached only filter only check it hides non-breached tickets.
+#  - The 'Pick a known agent' option and the Assignee filter by an agent name depend on the help desk having seen agents; the spec gives no UI way to register an agent, so whether the test support agent appears is unknown. A person could add by hand: assigning by picking a known agent, filtering the queue by an agent's name, and combining a breached filter with an assignee.
+#  - The Help desk unavailable state needs the backend to fail and is not walkable.
+#  - Typed-username binding on that person's first sign-in cannot be shown without that user acting; no item covers it.
+#  - The Employee, Support Agent and Team Lead are each refused only the screens whose operations they lack; Team Lead and Support Agent reach Queue and Ticket, so no refusal item exists for those. Employee is refused Queue and Ticket; only Queue is covered.
+#  - The prototype draws Edit ticket only while a ticket is open, and the PRD says edit is possible until triaged, so no item checks that a triaged ticket is read-only for the employee beyond what the prototype states; the employee-locked-after-triage item shows an untriaged ticket still editable. The step 'Edit ticket gone after triage' for a triaged ticket would need an employee ticket triaged by an agent after raising a third ticket.
+#  - Where the item expects a Settings 'Compact tables' effect, the spec describes none; only the save and landing are checked.
+#  - The queue pagination (default page of 20) is not walkable without more than 20 tickets.
+#  - The prototype does not show the Support Agent's Assign to me on a ticket already theirs, and Support Agent can start work only on tickets assigned to them; Team Lead reassigning a ticket after agents work is not covered.
+#  - Names shown in the prototype for users (Erin, Sam, Tara) may differ in the running app; items refer to roles' own names loosely.
 
 items:
-  - id: employee-lands-on-my-tickets
+  - id: employee-lands-my-tickets
     role: Employee
     screen: My tickets
-    flow: Raise and follow a ticket
-    steps: Look at the landing screen before creating anything.
-    expect: "The My tickets screen shows: a Your tickets list with no rows, and the empty state 'No tickets yet' (Nothing to show state). Active and Resolved counters read 0."
+    flow: Raise and track a ticket
+    steps: Look at the screen the app opens on.
+    expect: The My tickets screen shows, with a Raise a ticket button, Active and Resolved counts, and the Your tickets list.
+    weight: 1
+  - id: employee-my-tickets-empty
+    role: Employee
+    screen: My tickets
+    flow: Raise and track a ticket
+    steps: On My tickets, look at the Your tickets list before any ticket is raised.
+    expect: The empty state 'No tickets yet' shows in place of rows, and the list count is 0.
+    weight: 1
+  - id: employee-raise-ticket-blank-title
+    role: Employee
+    screen: Raise a ticket
+    flow: Raise and track a ticket
+    steps: On My tickets press Raise a ticket. Leave Title empty, enter Description 'Nothing' and press Raise ticket.
+    expect: "The validation errors state shows: a message asking for a title appears, and no ticket is created (you stay on Raise a ticket)."
+    weight: 1
+  - id: employee-raise-ticket
+    role: Employee
+    screen: My tickets
+    flow: Raise and track a ticket (F1.1, F1.2, F1.3)
+    steps: On Raise a ticket enter Title 'Laptop will not boot', Description 'Black screen after the vendor logo', Category hardware, Priority high and press Raise ticket.
+    expect: You arrive on My tickets. The list shows 'Laptop will not boot' with priority High, Unassigned, an SLA due time and the status Open. Active count is 1.
+    weight: 2
+  - id: employee-raise-second-ticket
+    role: Employee
+    screen: My tickets
+    flow: Raise and track a ticket
+    steps: On My tickets press Raise a ticket. Enter Title 'Need access to the finance share', Description 'Read access to the shared drive', Category access, Priority low and press Raise ticket.
+    expect: Back on My tickets both tickets are listed, the new one with priority Low, a later SLA due time than the high ticket, and status Open. Active count is 2.
+    weight: 1
+  - id: employee-open-ticket
+    role: Employee
+    screen: My ticket
+    flow: Raise and track a ticket (F1.4)
+    steps: On My tickets open the row 'Need access to the finance share'.
+    expect: The My ticket screen shows the ticket with Status Open, Priority Low, Category Access, Assignee Not assigned yet, SLA due, Raised time and the description. Edit ticket button is available.
+    weight: 2
+  - id: employee-edit-ticket
+    role: Employee
+    screen: My ticket
+    flow: Raise and track a ticket (F1.5)
+    steps: On the open 'Need access to the finance share' ticket press Edit ticket. Change Title to 'Need access to the finance drive', Priority to medium and press Save changes.
+    expect: The ticket shows the new title and Priority Medium, with an updated SLA due time later than a high ticket's and earlier than before for low.
+    weight: 2
+  - id: employee-add-comment
+    role: Employee
+    screen: My ticket
+    flow: Ticket comments (F3.1, F3.4)
+    steps: On the 'Need access to the finance drive' ticket, in Add a comment enter 'Please hurry, onboarding Monday' and press Post comment. Then open My tickets and open the 'Laptop will not boot' ticket and look at its Comments.
+    expect: The first ticket's Comments lists the new comment with Erin's name as author and a time; the laptop ticket shows 'No comments yet'.
+    weight: 2
+  - id: employee-comment-blank
+    role: Employee
+    screen: My ticket
+    flow: Ticket comments
+    steps: On the 'Laptop will not boot' ticket press Post comment with the Comment field empty.
+    expect: The validation errors state shows for the required Comment field and no comment is added.
     weight: 1
   - id: employee-account
     role: Employee
     screen: Account
     flow: Account
-    steps: Open the user menu in the app shell and choose Account.
-    expect: The Account screen shows the signed-in user's name, email and the role Employee.
+    steps: Open the user menu and choose Account.
+    expect: The Account screen shows Name, Email and Role (Employee).
     weight: 1
   - id: employee-settings
     role: Employee
-    screen: Settings
+    screen: My tickets
     flow: Settings
-    steps: Open the user menu and choose Settings. Switch 'Compact tables' on, then press Save settings.
-    expect: The Settings screen shows the Compact tables switch; after Save settings the app arrives on the Account screen without error.
-    weight: 1
-  - id: employee-new-ticket-validation
-    role: Employee
-    screen: New ticket
-    flow: Raise a ticket
-    steps: From the My tickets screen press New ticket. Leave Title and Describe the problem blank and press Submit ticket.
-    expect: The ticket is not created; the New ticket screen stays open and shows validation errors asking for a title and a description (Validation errors state). The Priority field is offered with Medium selected.
-    weight: 1
-  - id: employee-raises-high-ticket
-    role: Employee
-    screen: My ticket
-    flow: Raise a ticket (story 1, 12)
-    steps: On New ticket enter Title 'VPN not connecting', Describe the problem 'Cannot connect to the VPN from home since this morning.', Priority High, then press Submit ticket.
-    expect: The My ticket screen opens for 'VPN not connecting' showing status Open, priority High, the description, an SLA due time, and an Unassigned assignee.
-    weight: 1
-  - id: employee-ticket-empty-comments
-    role: Employee
-    screen: My ticket
-    flow: Comments (story 3)
-    steps: On the My ticket screen for 'VPN not connecting', look at the Comments section.
-    expect: The Comments section shows the empty state 'No comments yet' and a comment box. The Reopen ticket button is not usable because the ticket is not resolved.
-    weight: 1
-  - id: employee-comments-on-ticket
-    role: Employee
-    screen: My ticket
-    flow: Comments (story 3)
-    steps: In 'Write a comment' type 'Still cannot connect after a restart.' and press Add comment.
-    expect: The comment appears in the Comments thread with the employee as its author, and the 'No comments yet' empty state is gone.
-    weight: 1
-  - id: employee-raises-low-ticket
-    role: Employee
-    screen: My ticket
-    flow: Raise a ticket (story 1)
-    steps: Use the My tickets navigation item, press New ticket, enter Title 'Request monitor stand', Describe the problem 'Need an adjustable stand for my second monitor.', Priority Low, press Submit ticket.
-    expect: The My ticket screen opens for 'Request monitor stand' with status Open, priority Low and an SLA due time.
-    weight: 1
-  - id: employee-sees-own-tickets
-    role: Employee
-    screen: My tickets
-    flow: Raise and follow a ticket (story 2, 12)
-    steps: Open My tickets from the navigation (or the breadcrumb). Then press the row 'VPN not connecting'.
-    expect: The list shows both 'VPN not connecting' and 'Request monitor stand', each with status, priority and an SLA due time, and the section count reads 2. Pressing the row opens the My ticket screen for that ticket.
-    weight: 1
-  - id: employee-cancel-new-ticket
-    role: Employee
-    screen: My tickets
-    flow: Raise a ticket
-    steps: On My tickets press New ticket, type Title 'Discarded', then press Cancel.
-    expect: The app returns to My tickets and no ticket titled 'Discarded' is listed.
-    weight: 1
-  - id: agent-lands-on-queue
-    role: Support Agent
-    screen: Ticket queue
-    flow: Work the queue
-    steps: Look at the landing screen.
-    expect: The Ticket queue screen lists 'VPN not connecting' and 'Request monitor stand' with requester, status Open, priority, assignee Unassigned and SLA due; the tickets count shows the rows. Open, In progress and SLA breached figures are shown.
-    weight: 1
-  - id: agent-filters-queue
-    role: Support Agent
-    screen: Ticket queue
-    flow: Filter the queue (story 5)
-    steps: On the Ticket queue set Priority to High. Then reset Priority to All and set Assignee to Unassigned. Then set Status to Resolved.
-    expect: With Priority High only 'VPN not connecting' is listed. With Assignee Unassigned both tickets are listed. With Status Resolved no ticket is listed and the 'No tickets match' empty state shows.
-    weight: 1
-  - id: agent-filters-breached
-    role: Support Agent
-    screen: Ticket queue
-    flow: Filter the queue (story 5)
-    steps: Reset Status to All and Assignee to All. Switch 'SLA breached only' on.
-    expect: The tickets just raised, which are not past their SLA due time, are not listed and the 'No tickets match' empty state shows.
-    weight: 1
-  - id: agent-opens-ticket-work
-    role: Support Agent
-    screen: Work a ticket
-    flow: Work the queue
-    steps: Switch 'SLA breached only' off, then press the row 'VPN not connecting'.
-    expect: The Work a ticket screen opens for 'VPN not connecting' showing status Open, priority High, requester, Unassigned, SLA due, the description, the earlier employee comment in the thread, a Priority field, and Triage, Start work and Resolve buttons. Start work and Resolve are not usable yet.
-    weight: 1
-  - id: agent-triages-ticket
-    role: Support Agent
-    screen: Work a ticket
-    flow: Triage (story 6)
-    steps: On 'VPN not connecting' set Priority to Critical and press Triage.
-    expect: The status badge shows Triaged and the priority badge shows Critical; the SLA due time reflects the new priority.
-    weight: 1
-  - id: agent-assigns-ticket
-    role: Support Agent
-    screen: Work a ticket
-    flow: Assign (story 7)
-    steps: On 'VPN not connecting' press Assign. On the Assign ticket screen leave the Support agent select on its first option (or choose any listed agent) and press Assign.
-    expect: The Assign ticket screen shows a Support agent select with at least the agent who is signed in; after Assign the app returns to Work a ticket and the Assignee detail shows the chosen agent's name instead of Unassigned.
-    weight: 1
-  - id: agent-assign-cancel
-    role: Support Agent
-    screen: Work a ticket
-    flow: Assign (story 7)
-    steps: On 'VPN not connecting' press Assign, then press Cancel.
-    expect: The app returns to Work a ticket for the same ticket with the assignee unchanged.
-    weight: 1
-  - id: agent-starts-and-resolves
-    role: Support Agent
-    screen: Work a ticket
-    flow: Move to in progress, resolve (story 8)
-    steps: On 'VPN not connecting' press Start work, then press Resolve.
-    expect: After Start work the status badge shows In progress; after Resolve it shows Resolved.
-    weight: 1
-  - id: agent-comments-on-ticket
-    role: Support Agent
-    screen: Work a ticket
-    flow: Comments (story 9)
-    steps: On 'VPN not connecting' write 'Please restart the VPN client and try again.' in the comment box and press Add comment.
-    expect: The new comment appears in the Comments thread with the agent as author, alongside the employee's earlier comment.
-    weight: 1
-  - id: agent-triages-second-ticket
-    role: Support Agent
-    screen: Work a ticket
-    flow: Triage (story 6)
-    steps: Use the breadcrumb Queue, open 'Request monitor stand', keep Priority Low and press Triage.
-    expect: The status badge shows Triaged with priority Low.
-    weight: 1
-  - id: agent-queue-reflects-changes
-    role: Support Agent
-    screen: Ticket queue
-    flow: Filter the queue (story 5)
-    steps: Return to the Queue through the navigation. Set Status to Resolved.
-    expect: Only 'VPN not connecting' is listed, with status Resolved and the assignee chosen earlier.
-    weight: 1
-  - id: employee-sees-agent-activity
-    role: Employee
-    screen: My ticket
-    flow: Comments, SLA (story 3, 12)
-    steps: From My tickets open 'VPN not connecting'.
-    expect: The ticket shows status Resolved, priority Critical, the assignee, an SLA due time, and both comments including the support agent's reply.
-    weight: 1
-  - id: employee-reopens-ticket
-    role: Employee
-    screen: My ticket
-    flow: Reopen (story 4)
-    steps: On 'VPN not connecting' press Reopen ticket, then go back to My tickets.
-    expect: The status badge shows Reopened and in My tickets the row shows status Reopened. The Reopen ticket button is no longer usable.
+    steps: Open the user menu and choose Settings. Turn on Compact tables and press Save settings.
+    expect: The Settings screen shows the Compact tables switch; after saving you arrive on My tickets.
     weight: 1
   - id: employee-refused-queue
     role: Employee
-    screen: Ticket queue
+    screen: Queue
     flow: Role reach
-    steps: Open the address the Ticket queue had in agent-lands-on-queue.
-    expect: The Employee does not see the queue or any other person's tickets; the app refuses the screen.
+    steps: Open the address the Queue had in agent-lands-on-queue.
+    expect: "The Employee is refused: the Queue and its tickets are not shown, no crash or blank page."
     weight: 1
-  - id: agent-lands-reopened
+  - id: agent-lands-on-queue
     role: Support Agent
-    screen: Ticket queue
-    flow: Work the queue (story 8)
-    steps: On the Ticket queue open 'VPN not connecting', then press Start work.
-    expect: The ticket was listed with status Reopened and after Start work its status badge shows In progress.
-    weight: 1
+    screen: Queue
+    flow: Triage, work and resolve a ticket (F4.1, F4.8)
+    steps: Look at the screen the app opens on.
+    expect: The Queue screen shows with Breached SLA, Unassigned and Not resolved counts, the four filters and a table listing both tickets raised by the employee with requester, priority, assignee, SLA due, SLA and status. The soonest SLA due time is first.
+    weight: 2
   - id: agent-refused-my-tickets
     role: Support Agent
     screen: My tickets
     flow: Role reach
-    steps: Open the address My tickets had in employee-lands-on-my-tickets.
-    expect: The Support Agent does not see the My tickets screen; the app refuses it.
+    steps: Open the address My tickets had in employee-lands-my-tickets.
+    expect: The Support Agent is refused the My tickets screen; the employee's list is not shown.
     weight: 1
-  - id: lead-lands-on-team-queue
+  - id: agent-filter-status-priority
+    role: Support Agent
+    screen: Queue
+    flow: Queue filters (F4.3, F4.4)
+    steps: "On Queue set Status to open: note the rows. Set Status back to All statuses and set Priority to high."
+    expect: With Status open both open tickets are listed. With Priority high only 'Laptop will not boot' is listed and the count reads 1. Setting Status to resolved shows the empty state 'No tickets match'.
+    weight: 1
+  - id: agent-filter-unassigned
+    role: Support Agent
+    screen: Queue
+    flow: Queue filters (F4.5)
+    steps: Reset the other filters and set Assignee to Unassigned.
+    expect: Both tickets (both are unassigned) are listed.
+    weight: 1
+  - id: agent-open-ticket
+    role: Support Agent
+    screen: Ticket
+    flow: Triage, work and resolve a ticket
+    steps: Reset filters. Open the row 'Laptop will not boot'.
+    expect: The Ticket screen shows status Open, requester, Unassigned, priority High, SLA due and the description, with a Triage button.
+    weight: 1
+  - id: agent-triage
+    role: Support Agent
+    screen: Ticket
+    flow: Triage, work and resolve a ticket (F2.1)
+    steps: On the 'Laptop will not boot' ticket press Triage, set Priority to critical and press Confirm triage.
+    expect: Status becomes Triaged, Priority Critical, and the SLA due time becomes earlier than before.
+    weight: 2
+  - id: agent-assign-to-me
+    role: Support Agent
+    screen: Ticket
+    flow: Triage, work and resolve a ticket (F2.2)
+    steps: On the same ticket press Assign to me.
+    expect: The Assignee shows the Support Agent's name; Start work button appears.
+    weight: 2
+  - id: agent-start-work
+    role: Support Agent
+    screen: Ticket
+    flow: Triage, work and resolve a ticket (F2.4)
+    steps: Press Start work.
+    expect: Status becomes In progress and a Resolve button is available.
+    weight: 2
+  - id: agent-comment
+    role: Support Agent
+    screen: Ticket
+    flow: Ticket comments (F3.2, F3.5)
+    steps: On the ticket add comment 'Please send the asset tag' and press Post comment.
+    expect: The Comments list shows the comment with the agent as author and a time.
+    weight: 2
+  - id: agent-resolve
+    role: Support Agent
+    screen: Ticket
+    flow: Triage, work and resolve a ticket (F2.5)
+    steps: Press Resolve.
+    expect: Status becomes Resolved.
+    weight: 2
+  - id: agent-claim-from-queue
+    role: Support Agent
+    screen: Queue
+    flow: Triage, work and resolve a ticket (F2.2)
+    steps: Go to Queue (breadcrumb Queue). On the row 'Need access to the finance drive' use the row action Assign to me.
+    expect: That row's Assignee shows the Support Agent's name; its status stays Open.
+    weight: 1
+  - id: agent-filter-assignee
+    role: Support Agent
+    screen: Queue
+    flow: Queue filters (F4.5)
+    steps: On Queue set Assignee to Unassigned.
+    expect: The empty state 'No tickets match' shows since both tickets are assigned (or, if the app lists none, no unassigned ticket rows appear).
+    weight: 1
+  - id: employee-sees-assignee-and-comment
+    role: Employee
+    screen: My ticket
+    flow: Raise and track a ticket (F1.4, F3.4)
+    steps: On My tickets open 'Laptop will not boot'.
+    expect: Status Resolved, Priority Critical, the assignee is the support agent, and Comments shows the agent's comment 'Please send the asset tag'. A Reopen ticket button is shown and no Edit ticket button.
+    weight: 1
+  - id: employee-locked-after-triage
+    role: Employee
+    screen: My ticket
+    flow: Raise and track a ticket (F1.5)
+    steps: Go to My tickets. Open 'Need access to the finance drive' (still open and assigned to the agent).
+    expect: The Edit ticket button is still available since it was not triaged; no change is required.
+    weight: 1
+  - id: employee-reopen
+    role: Employee
+    screen: My ticket
+    flow: Reopen a resolved ticket (F2.6)
+    steps: On My tickets open 'Laptop will not boot' and press Reopen ticket.
+    expect: Status becomes Reopened and the Reopen ticket button is gone.
+    weight: 2
+  - id: agent-pick-up-reopened
+    role: Support Agent
+    screen: Ticket
+    flow: Triage, work and resolve a ticket (F2.7)
+    steps: On Queue open 'Laptop will not boot' (Reopened, assigned to this agent) and press Start work.
+    expect: Status becomes In progress.
+    weight: 2
+  - id: lead-lands-on-queue
     role: Team Lead
-    screen: Team queue
-    flow: Watch the queue and SLA breaches (story 10)
-    steps: Look at the landing screen.
-    expect: The Team queue screen lists 'VPN not connecting' and 'Request monitor stand' with requester, status, priority, assignee and SLA due, plus Open, In progress and SLA breached figures.
-    weight: 1
-  - id: lead-filters-queue
-    role: Team Lead
-    screen: Team queue
-    flow: Filter the queue (story 10)
-    steps: On the Team queue set Status to In progress, then reset it to All and set Priority to Low.
-    expect: With In progress only 'VPN not connecting' is listed; with Priority Low only 'Request monitor stand' is listed.
-    weight: 1
-  - id: lead-opens-ticket
-    role: Team Lead
-    screen: Review ticket
-    flow: Watch the queue (story 10)
-    steps: Reset Priority to All and press the row 'VPN not connecting'.
-    expect: The Review ticket screen shows the ticket's status, priority, requester, assignee, SLA due, description, and the comment thread with the employee's and the agent's comments. There is no comment box and no Triage, Start or Resolve control.
-    weight: 1
-  - id: lead-reassigns-ticket
-    role: Team Lead
-    screen: Review ticket
-    flow: Reassign (story 11)
-    steps: On 'VPN not connecting' press Reassign. On Reassign ticket choose any listed agent and press Assign.
-    expect: The Reassign ticket screen shows a Support agent select; after Assign the app returns to Review ticket and the Assignee shows the chosen agent.
-    weight: 1
-  - id: lead-reassign-cancel
-    role: Team Lead
-    screen: Review ticket
-    flow: Reassign (story 11)
-    steps: On Review ticket press Reassign, then Cancel.
-    expect: The app returns to Review ticket with the assignee unchanged.
-    weight: 1
+    screen: Queue
+    flow: Monitor the queue and SLA breaches (F4.2)
+    steps: Look at the screen the app opens on.
+    expect: The Queue screen shows both tickets with their requester, priority, assignee, SLA due, SLA and status, and the counts and filters.
+    weight: 2
   - id: lead-refused-my-tickets
     role: Team Lead
     screen: My tickets
     flow: Role reach
-    steps: Open the address My tickets had in employee-lands-on-my-tickets.
-    expect: The Team Lead does not see the My tickets screen; the app refuses it.
+    steps: Open the address My tickets had in employee-lands-my-tickets.
+    expect: The Team Lead is refused the My tickets screen; the employee's list is not shown.
+    weight: 1
+  - id: lead-filter-breached
+    role: Team Lead
+    screen: Queue
+    flow: Monitor the queue and SLA breaches (F4.6)
+    steps: On Queue set SLA to Breached only.
+    expect: The screen shows the filtered list without error; the newly raised tickets, whose due times are still ahead, are not breached and are not listed.
+    weight: 2
+  - id: lead-combine-filters
+    role: Team Lead
+    screen: Queue
+    flow: Monitor the queue and SLA breaches (F4.7)
+    steps: Set SLA back to All tickets, set Priority to critical and Status to in-progress.
+    expect: Only 'Laptop will not boot' is listed; changing Priority to low then shows the empty state 'No tickets match'.
+    weight: 2
+  - id: lead-open-ticket
+    role: Team Lead
+    screen: Ticket
+    flow: Assign a ticket to an agent
+    steps: Reset filters, and open the row 'Need access to the finance drive'.
+    expect: The Ticket screen shows its details and an Assign to an agent button; no Triage, Start work or Resolve buttons.
+    weight: 1
+  - id: lead-assign-typed-username
+    role: Team Lead
+    screen: Ticket
+    flow: Assign a ticket to an agent (F2.3)
+    steps: Press Assign to an agent, leave the known agent unselected, type username 'priya.nair' and press Assign.
+    expect: The dialog closes and the ticket shows the assignee as priya.nair (the help desk accepts a username it has not seen).
+    weight: 2
+  - id: lead-comment
+    role: Team Lead
+    screen: Ticket
+    flow: Ticket comments (F3.3)
+    steps: On the ticket add comment 'Assigned to Priya' and press Post comment.
+    expect: The comment appears in Comments with the Team Lead as author and a time.
+    weight: 2
+  - id: lead-assign-nothing
+    role: Team Lead
+    screen: Ticket
+    flow: Assign a ticket to an agent
+    steps: Press Assign to an agent and press Assign with nothing chosen and the username empty.
+    expect: The ticket's assignee does not change.
+    weight: 1
+  - id: employee-sees-comment-from-lead
+    role: Employee
+    screen: My ticket
+    flow: Ticket comments (F3.4)
+    steps: On My tickets open 'Need access to the finance drive'.
+    expect: Comments lists, oldest first, 'Please hurry, onboarding Monday' then 'Assigned to Priya', each with author and time, and the assignee shows priya.nair.
     weight: 1
   - id: no-role-no-access
     role: no role
     screen: No access
     flow: Role reach
-    steps: Look at the landing screen.
-    expect: A no-access page is shown instead of the app; no tickets or navigation to ticket screens are available.
+    steps: Look at what the app shows.
+    expect: A no-access page shows instead of the app.
     weight: 1
   - id: signed-out-guard
     role: signed out
     screen: My tickets
-    flow: Sign-in guard
-    steps: Load the app while signed out and wait for it to settle.
-    expect: The address loses auth=out and the app reloads into a session without a blank page or crash.
+    flow: Role reach
+    steps: Load the app signed out.
+    expect: The app goes through sign-in and returns into a session without a crash or blank page.
     weight: 1
-  - id: employee-signs-out
-    role: Employee
-    screen: No access
+  - id: agent-sign-out
+    role: Support Agent
+    screen: Signed out
     flow: Sign out
     steps: Open the user menu and choose sign out.
-    expect: The app goes to the start page and shows the no-access state; the employee's tickets and screens are no longer shown and no sign-in form appears.
+    expect: The previous role's screens and data are gone and the app shows its no-access state.
     weight: 1
 extras:
   mustCover: []
