@@ -1,6 +1,6 @@
 Feature: Event program
 
-  @story-1
+  @story-F1.1
   Rule: Only organizers may create and edit events
 
     Scenario: Olivia creates an event
@@ -19,7 +19,7 @@ Feature: Event program
       When Olivia changes the venue to "Kandy"
       Then the event shows venue "Kandy"
 
-  @story-2
+  @story-F1.2
   Rule: Organizers define rooms for an event
 
     Scenario: Adding a room
@@ -27,7 +27,7 @@ Feature: Event program
       When Olivia adds a room "Hall A" with capacity 120
       Then the event lists room "Hall A" with capacity 120
 
-  @story-3
+  @story-F1.3
   Rule: A session has a room, a time slot and a capacity
 
     Scenario: Creating a session
@@ -35,7 +35,7 @@ Feature: Event program
       When Olivia creates a session "Intro to APIs" in "Hall A" from "10:00" to "11:00" with capacity 3
       Then the event schedule shows "Intro to APIs" in "Hall A" with 3 seats remaining
 
-  @story-9
+  @story-F1.4
   Rule: Any signed-in attendee may browse events and their sessions
 
     Scenario: Browsing sessions

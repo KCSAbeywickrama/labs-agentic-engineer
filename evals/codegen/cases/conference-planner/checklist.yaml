@@ -7,14 +7,14 @@
 # extras.mustNot entries ({id, description}) cap the band at review when violated.
 
 # Planner gaps — what the walk cannot cover, and where the PRD and the prototype disagree:
-#  - Waitlist stories 12 and 13 (join waitlist when full, automatic promotion on cancellation) need two different attendees, and only one Attendee identity can be used and no UI creates another. Not tested. A person could add waitlist and promotion items by hand if two attendee identities exist: fill 'Closing Keynote' with one, join the waitlist with the other, cancel the first and check promotion.
-#  - Story 1 says organizers can edit events, and sessions are editable in the contract, but the prototype has no edit control for events, rooms or sessions. No edit item was written.
+#  - Waitlist stories F3.3, F3.4 (join waitlist when full, automatic promotion on cancellation) need two different attendees, and only one Attendee identity can be used and no UI creates another. Not tested. A person could add waitlist and promotion items by hand if two attendee identities exist: fill 'Closing Keynote' with one, join the waitlist with the other, cancel the first and check promotion.
+#  - Story F1.1 says organizers can edit events, and sessions are editable in the contract, but the prototype has no edit control for events, rooms or sessions. No edit item was written.
 #  - The PRD says organizers may assign reviewers to proposals, but no screen draws an assignment control. The Reviewer sees all submitted proposals in the review queue instead.
 #  - Speaker and Reviewer have no navigation to Events, and the Organizer has no way to view a Speaker's identity. Events, Event detail and Session detail need no scope beyond sign-in, so no role is refused them. No refusal item was written for them.
 #  - Reviewer holds the scope that loads the Proposal decisions screen (proposals:read-all) but not the decide scope. No refusal item was written for Reviewer on that screen. Organizer and Reviewer share the same list, so Reviewer refusal depends on how actions are gated.
 #  - Organizer is not refused My proposals in a dedicated item, and Organizer, Reviewer and Speaker refusals of every other screen are only partly covered. Only a representative set of refusals was written.
 #  - No UI shows the Attendee's identity as a distinct person, so the Organizer's Registrations list cannot be checked for a specific attendee name.
-#  - The relationship between room capacity and session capacity, session time-slot conflicts, and the effect of the Settings notification switch are not specified, so no items were written.
+#  - The relationship between room capacity and session capacity, and session time-slot conflicts are not specified, so no items were written.
 
 items:
   - id: organizer-lands-on-events
@@ -27,7 +27,7 @@ items:
   - id: organizer-creates-event
     role: Organizer
     screen: Events
-    flow: Create an event (story 1)
+    flow: Create an event (F1.1)
     steps: Press 'New event'. Enter Name 'API Summit 2026', Venue 'Colombo', Start date 2026-11-12, End date 2026-11-14. Press 'Create event'.
     expect: The dialog closes and a row 'API Summit 2026' with venue Colombo and dates 2026-11-12 to 2026-11-14 is listed on Events.
     weight: 2
@@ -41,21 +41,21 @@ items:
   - id: organizer-adds-room
     role: Organizer
     screen: Event detail
-    flow: Define rooms (story 2)
+    flow: Define rooms (F1.2)
     steps: On 'API Summit 2026', press 'Add room'. Enter Name 'Hall A', Capacity 120. Press 'Add room' in the dialog.
     expect: The Rooms list shows 'Hall A' with capacity 120.
     weight: 2
   - id: organizer-creates-open-session
     role: Organizer
     screen: Event detail
-    flow: Create sessions (story 3)
+    flow: Create sessions (F1.3)
     steps: Press 'New session'. Choose Room 'Hall A', Title 'Intro to APIs', Speaker 'Sam Fernando', Start time 2026-11-12T10:00, End time 2026-11-12T11:00, Capacity 50. Press 'Create session'.
     expect: The Sessions list shows 'Intro to APIs' in Hall A, time 10:00–11:00, 50 seats remaining and an 'Open' status.
     weight: 2
   - id: organizer-creates-small-session
     role: Organizer
     screen: Event detail
-    flow: Create sessions (story 3)
+    flow: Create sessions (F1.3)
     steps: Press 'New session'. Choose Room 'Hall A', Title 'Closing Keynote', Speaker 'Priya Jayasuriya', Start time 2026-11-14T16:00, End time 2026-11-14T17:00, Capacity 1. Press 'Create session'.
     expect: The Sessions list now also shows 'Closing Keynote' with 1 seat remaining and an 'Open' status.
     weight: 1
@@ -69,14 +69,14 @@ items:
   - id: speaker-submits-proposal
     role: Speaker
     screen: My proposals
-    flow: Submit a proposal (story 4)
+    flow: Submit a proposal (F2.1)
     steps: Press 'Submit proposal'. Choose Event 'API Summit 2026', Title 'Scaling Queues', Abstract 'How we moved a million messages a day without losing one.'. Press 'Submit'.
     expect: The dialog closes and 'Scaling Queues' is listed with a 'Submitted' status and no score yet.
     weight: 2
   - id: speaker-submits-second-proposal
     role: Speaker
     screen: My proposals
-    flow: Submit a proposal (story 4)
+    flow: Submit a proposal (F2.1)
     steps: Press 'Submit proposal'. Choose Event 'API Summit 2026', Title 'Monitoring at Scale', Abstract 'Dashboards that tell you something before the pager does.'. Press 'Submit'.
     expect: Both 'Scaling Queues' and 'Monitoring at Scale' are listed, each with a 'Submitted' status.
     weight: 1
@@ -90,21 +90,21 @@ items:
   - id: reviewer-scores-proposal
     role: Reviewer
     screen: Review queue
-    flow: Score a proposal (story 6)
+    flow: Score a proposal (F2.3)
     steps: On the row 'Scaling Queues' use 'Score'. Enter Score 4. Press 'Submit score'.
     expect: The dialog closes and the 'Scaling Queues' row shows average 4.0 with 1 review.
     weight: 2
   - id: reviewer-scores-second-proposal
     role: Reviewer
     screen: Review queue
-    flow: Score a proposal (story 6)
+    flow: Score a proposal (F2.3)
     steps: On the row 'Monitoring at Scale' use 'Score'. Enter Score 3. Press 'Submit score'.
     expect: The 'Monitoring at Scale' row shows average 3.0 with 1 review.
     weight: 1
   - id: reviewer-score-out-of-range
     role: Reviewer
     screen: Review queue
-    flow: Score a proposal (story 6)
+    flow: Score a proposal (F2.3)
     steps: On the row 'Monitoring at Scale' use 'Score'. Enter Score 7 and try to submit.
     expect: The score is not accepted, the message 'Score must be between 1 and 5' is shown, and the average for 'Monitoring at Scale' stays 3.0 with 1 review.
     weight: 1
@@ -118,35 +118,35 @@ items:
   - id: organizer-opens-decisions
     role: Organizer
     screen: Proposal decisions
-    flow: Decide on scored proposals (story 7)
+    flow: Decide on scored proposals (F2.4)
     steps: Use the navigation entry 'Proposal decisions'.
     expect: Proposal decisions lists 'Scaling Queues' (average 4.0) and 'Monitoring at Scale' (average 3.0), both 'Submitted', each with Accept and Reject actions.
     weight: 1
   - id: organizer-accepts-proposal
     role: Organizer
     screen: Proposal decisions
-    flow: Decide on scored proposals (story 7)
+    flow: Decide on scored proposals (F2.4)
     steps: On the row 'Scaling Queues' use 'Accept'.
     expect: The row 'Scaling Queues' shows status 'Accepted' and offers 'Schedule session' instead of Accept and Reject.
     weight: 2
   - id: organizer-rejects-proposal
     role: Organizer
     screen: Proposal decisions
-    flow: Decide on scored proposals (story 7)
+    flow: Decide on scored proposals (F2.4)
     steps: On the row 'Monitoring at Scale' use 'Reject'.
     expect: The row 'Monitoring at Scale' shows status 'Rejected' and offers no further actions.
     weight: 2
   - id: organizer-schedules-accepted-proposal
     role: Organizer
     screen: Proposal decisions
-    flow: Turn a proposal into a session (story 8)
+    flow: Turn a proposal into a session (F2.5)
     steps: On the row 'Scaling Queues' use 'Schedule session'. Choose Room 'Hall A', Start time 2026-11-12T13:00, End time 2026-11-12T14:00, Capacity 40. Press 'Schedule'. Then use the navigation entry 'Events', open 'API Summit 2026'.
     expect: The 'Schedule session' action is gone from the 'Scaling Queues' row. The event's Sessions list includes 'Scaling Queues' in Hall A, 13:00–14:00, 40 seats remaining, 'Open'.
     weight: 2
   - id: speaker-sees-outcomes
     role: Speaker
     screen: My proposals
-    flow: Track proposals (story 5)
+    flow: Track proposals (F2.2)
     steps: Look at the My proposals list.
     expect: "'Scaling Queues' shows score 4.0 and status 'Accepted'; 'Monitoring at Scale' shows score 3.0 and status 'Rejected'."
     weight: 2
@@ -160,70 +160,70 @@ items:
   - id: attendee-opens-event
     role: Attendee
     screen: Event detail
-    flow: Browse and register (story 9)
+    flow: Browse and register (F1.4)
     steps: Click the 'API Summit 2026' row.
     expect: "Event detail shows venue, dates, 'Your registration: Not registered', a 'Register for event' button, the room 'Hall A' and the sessions 'Intro to APIs', 'Closing Keynote' and 'Scaling Queues' with seats remaining and status. There are no Add room or New session buttons."
     weight: 1
   - id: attendee-registers-for-event
     role: Attendee
     screen: Event detail
-    flow: Register for an event (story 10)
+    flow: Register for an event (F3.1)
     steps: Press 'Register for event'.
     expect: "'Your registration' shows 'Confirmed' and the 'Register for event' button is no longer offered."
     weight: 2
   - id: attendee-registers-for-session
     role: Attendee
     screen: Session detail
-    flow: Register for a session (story 11)
+    flow: Register for a session (F3.2)
     steps: Click the row 'Intro to APIs'. Note Seats remaining 50. Press 'Register'.
     expect: Session detail shows room Hall A, time, speaker 'Sam Fernando', capacity 50. After registering, 'Your registration' shows 'Confirmed', a 'Cancel registration' button appears, and Seats remaining is 49.
     weight: 2
   - id: attendee-fills-small-session
     role: Attendee
     screen: Session detail
-    flow: Register for a session (story 11)
+    flow: Register for a session (F3.2)
     steps: Go back to the event, click the row 'Closing Keynote' (capacity 1) and press 'Register'.
     expect: Your registration shows 'Confirmed' and Seats remaining is 0. On the event's Sessions list, 'Closing Keynote' shows 0 seats and status 'Full'.
     weight: 1
   - id: attendee-views-my-registrations
     role: Attendee
     screen: My registrations
-    flow: Review registrations (story 14)
+    flow: Review registrations (F3.5)
     steps: Use the navigation entry 'My registrations'.
     expect: "The list shows three confirmed rows for 'API Summit 2026': one event-only registration, one for 'Intro to APIs' and one for 'Closing Keynote', each with a Cancel action."
     weight: 1
   - id: organizer-session-oversight
     role: Organizer
     screen: Session detail
-    flow: Watch registrations per session (story 15)
+    flow: Watch registrations per session (F3.6)
     steps: Use the navigation entry 'Events', open 'API Summit 2026' and click the row 'Closing Keynote'.
     expect: Session detail shows capacity 1, Seats remaining 0, Waitlist 0, and a Registrations list with one confirmed attendee entry. There are no Register or Cancel buttons for the Organizer.
     weight: 2
   - id: organizer-empty-session-registrations
     role: Organizer
     screen: Session detail
-    flow: Watch registrations per session (story 15)
+    flow: Watch registrations per session (F3.6)
     steps: Go back to the event and click the row 'Scaling Queues'.
     expect: Session detail shows capacity 40, Seats remaining 40, and the empty state 'No registrations yet' in Registrations.
     weight: 1
   - id: attendee-cancels-from-session
     role: Attendee
     screen: Session detail
-    flow: Cancel a registration (story 14)
+    flow: Cancel a registration (F3.5)
     steps: Open 'API Summit 2026', click 'Closing Keynote' and press 'Cancel registration'.
     expect: The 'Your registration' status is gone, a 'Register' button is offered again, and Seats remaining is back to 1.
     weight: 2
   - id: attendee-cancels-from-my-registrations
     role: Attendee
     screen: My registrations
-    flow: Cancel a registration (story 14)
+    flow: Cancel a registration (F3.5)
     steps: Use the navigation entry 'My registrations'. On the row for 'Intro to APIs' use 'Cancel'.
     expect: The 'Intro to APIs' row disappears from the list. Opening that session shows Seats remaining 50.
     weight: 2
   - id: organizer-sees-cancellation
     role: Organizer
     screen: Session detail
-    flow: Watch registrations per session (story 15)
+    flow: Watch registrations per session (F3.6)
     steps: Open 'API Summit 2026' and click 'Closing Keynote'.
     expect: Seats remaining is 1 and the Registrations list shows the empty state 'No registrations yet'.
     weight: 1
@@ -234,12 +234,12 @@ items:
     steps: Open the user menu and choose the account entry.
     expect: The Account screen shows Name, Email and Role 'Organizer'.
     weight: 1
-  - id: organizer-saves-settings
+  - id: organizer-opens-settings
     role: Organizer
-    screen: Account
+    screen: Settings
     flow: Settings
-    steps: Open the user menu and choose settings. Change the switch 'Notify me of schedule changes' and press 'Save settings'.
-    expect: The Settings screen loads with the switch, and after saving the app arrives on the Account screen.
+    steps: Open the user menu and choose settings.
+    expect: The Settings screen says 'Nothing to set up' and that the app sends no email or notifications; it offers no notification option.
     weight: 1
   - id: speaker-refused-review-queue
     role: Speaker

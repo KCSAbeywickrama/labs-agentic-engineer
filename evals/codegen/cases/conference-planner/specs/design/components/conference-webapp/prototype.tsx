@@ -19,7 +19,7 @@
 import { useState, type ReactNode } from "react";
 import {
   Alert, AppShell, Badge, Button, Detail, Dialog, EmptyState, Field, Form, Heading, Screen, Section, Stat,
-  StatGroup, Table, defineApp, useCollection, useDisplayState, useNav, useParams, useRole,
+  StatGroup, Table, defineApp, useCollection, useDisplayState, useParams, useRole,
 } from "@wso2/prototype-kit";
 
 interface EventRec { id: string; name: string; venue: string; startDate: string; endDate: string }
@@ -782,17 +782,14 @@ function Account() {
 }
 
 function Settings() {
-  const navigate = useNav();
   return (
     <Shell>
       <Heading id="heading.settings" text="Settings" />
-      <Form
-        id="form.settings"
-        onSubmit={() => navigate.go("screen.account")}
-        actions={<Button id="btn.save-settings" label="Save settings" emphasis="primary" submit />}
-      >
-        <Field id="field.notify" label="Notify me of schedule changes" type="switch" defaultValue="on" />
-      </Form>
+      <EmptyState
+        id="empty.settings"
+        title="Nothing to set up"
+        text="Conference Planner sends no email or notifications: open the app to see where your proposals and registrations stand."
+      />
     </Shell>
   );
 }

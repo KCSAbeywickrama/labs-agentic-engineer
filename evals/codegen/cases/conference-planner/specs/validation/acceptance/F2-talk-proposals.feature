@@ -1,6 +1,6 @@
 Feature: Talk proposals
 
-  @story-4
+  @story-F2.1
   Rule: Speakers submit proposals to an event
 
     Scenario: Submitting a proposal
@@ -8,7 +8,7 @@ Feature: Talk proposals
       When Sam the speaker submits a proposal titled "Scaling Queues" to that event
       Then Sam's proposals list shows "Scaling Queues"
 
-  @story-5
+  @story-F2.2
   Rule: A speaker sees only their own proposals, with status
 
     Scenario: A new proposal is submitted
@@ -22,7 +22,7 @@ Feature: Talk proposals
       When Sara the speaker opens her proposals
       Then Sara's proposals list does not contain "Scaling Queues"
 
-  @story-6
+  @story-F2.3
   Rule: A reviewer scores each proposal once from 1 to 5
 
     Scenario: Scoring a proposal
@@ -42,7 +42,7 @@ Feature: Talk proposals
       When Rita tries to score it 6
       Then the proposal has no reviews
 
-  @story-7
+  @story-F2.4
   Rule: Only organizers decide on proposals
 
     Scenario: Accepting a scored proposal
@@ -56,7 +56,7 @@ Feature: Talk proposals
       When Rita looks for a way to accept it
       Then the proposal status is still "submitted"
 
-  @story-8
+  @story-F2.5
   Rule: An accepted proposal becomes a scheduled session
 
     Scenario: Scheduling an accepted proposal

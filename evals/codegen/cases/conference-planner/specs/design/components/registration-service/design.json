@@ -12,6 +12,6 @@
     { "kind": "platform-resource", "name": "user-auth", "resourceType": "thunder-app" }
   ],
   "description": "Own deployable for registration, as the requirements demand: it holds session capacity, confirmed seats and the ordered waitlist in its own Postgres, and promotes the next waitlisted person when a seat frees. Called only by the events API; it never calls other components. Does not know events, proposals or roles beyond ids.",
-  "stories": [10, 11, 12, 13, 14, 15],
+  "stories": ["F3.1", "F3.2", "F3.3", "F3.4", "F3.5", "F3.6"],
   "skillsPinned": ["openapi-conventions", "ballerina", "thunder-authentication", "api-management"]
 }
