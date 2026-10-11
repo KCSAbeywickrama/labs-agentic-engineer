@@ -18,7 +18,7 @@
 
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Box, Paper, Popper } from "@wso2/oxygen-ui";
+import { Alert, Box, Paper, Popper } from "@wso2/oxygen-ui";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Collaboration from "@tiptap/extension-collaboration";
@@ -32,6 +32,7 @@ import { IdPreview } from "../components/IdPreview";
 import { quietLinkSx } from "../components/QuietId";
 import { soft } from "../components/Tag";
 import { actOnAssumed, AssumedLines, leaveAssumedEdit } from "./assumedLines";
+import { readFragment, type FragmentRead } from "./readFragment";
 import { ROWS_SLOT, SpecLines, setSpecLinesOptions, type AssumedAction } from "./specLinesPlugin";
 
 /** A pill button inside the document, in one palette colour. */
@@ -105,6 +106,29 @@ const documentSx = {
 } as const;
 
 /**
+ * The file as the spec schema reads it, re-read as the fragment changes. A
+ * read the schema takes whole is kept while it stays whole, so typing in a
+ * healthy file does not redraw the editor around it.
+ */
+function useFragmentRead(fragment: Y.XmlFragment): FragmentRead {
+  const [read, setRead] = useState(() => readFragment(fragment));
+  useEffect(() => {
+    const update = () => {
+      const next = readFragment(fragment);
+      setRead((prev) => (prev.lossless && next.lossless ? prev : next));
+    };
+    update();
+    fragment.observeDeep(update);
+    return () => fragment.unobserveDeep(update);
+  }, [fragment]);
+  return read;
+}
+
+/** Said over a file opened read-only (lexicon: A spec file opened read-only). */
+const READ_ONLY_NOTICE =
+  "Part of this file can't be edited here safely, so it is read-only for now. Ask the agent to rewrite it to edit it again.";
+
+/**
  * One markdown file of the spec, editable, bound to its fragment in the spec
  * doc: every keystroke is a Yjs update, so the edit is in the doc the rest of
  * the workspace reads (and, once the room is wired, what the committer
@@ -113,6 +137,12 @@ const documentSx = {
  *
  * IDs in the text are quiet links: hover shows the line, click opens it. A
  * link to another spec file opens that file.
+ *
+ * A file holding content the schema rejects is never bound: y-prosemirror's
+ * binding DELETES such a node from the shared doc on sight, as it read a
+ * mark inside a code block on lunch-order-l29 and took a whole diagram with
+ * it. The file opens read-only instead, from a read that writes nothing
+ * (readFragment), and becomes editable once the fragment is whole again.
  */
 export function SpecEditor({
   fragment,
@@ -134,26 +164,43 @@ export function SpecEditor({
   hideFog?: boolean;
 }) {
   const withRows = featureRows !== undefined;
+  const read = useFragmentRead(fragment);
+  const editable = read.lossless;
 
   const editor = useEditor(
-    {
-      extensions: [
-        StarterKit.configure({ undoRedo: false, link: { openOnClick: false } }),
-        AgentInsertion,
-        Collaboration.configure({ fragment }),
-        SpecLines.configure({ featureRows: withRows, hideFog }),
-        AssumedLines,
-      ],
-      onBlur: ({ editor: blurred }) => leaveAssumedEdit(blurred.view),
-    },
-    // Only another file makes another editor. The options below change how
-    // the document is drawn and go to the open editor, which keeps its undo
-    // history and the cursor through them.
-    [fragment],
+    editable
+      ? {
+          extensions: [
+            StarterKit.configure({ undoRedo: false, link: { openOnClick: false } }),
+            AgentInsertion,
+            Collaboration.configure({ fragment }),
+            SpecLines.configure({ featureRows: withRows, hideFog }),
+            AssumedLines,
+          ],
+          onBlur: ({ editor: blurred }) => leaveAssumedEdit(blurred.view),
+        }
+      : {
+          extensions: [
+            StarterKit.configure({ undoRedo: false, link: { openOnClick: false } }),
+            AgentInsertion,
+            SpecLines.configure({ featureRows: withRows, hideFog }),
+          ],
+          editable: false,
+          content: read.doc.toJSON(),
+        },
+    // Only another file, or the file turning safe or unsafe to bind, makes
+    // another editor. The options below change how the document is drawn and
+    // go to the open editor, which keeps its undo history and the cursor
+    // through them.
+    [fragment, editable],
   );
   useEffect(() => {
     if (editor) setSpecLinesOptions(editor.view, { featureRows: withRows, hideFog });
   }, [editor, withRows, hideFog]);
+  // A read-only file follows the fragment by its reads, as nothing binds it.
+  useEffect(() => {
+    if (editor && !editable) editor.commands.setContent(read.doc.toJSON(), { emitUpdate: false });
+  }, [editor, editable, read]);
 
   // The rows draw into the slot the decorations leave in the document. The
   // slot is ProseMirror's DOM, so it is looked up after every transaction,
@@ -182,7 +229,7 @@ export function SpecEditor({
   const onClick = (e: MouseEvent) => {
     const target = e.target as HTMLElement;
     const button = target.closest<HTMLElement>("[data-assumed]");
-    if (button && editor) {
+    if (button && editor && editable) {
       actOnAssumed(editor.view, editor.view.posAtDOM(button, 0), button.dataset.assumed as AssumedAction);
       return;
     }
@@ -204,6 +251,11 @@ export function SpecEditor({
 
   return (
     <Box sx={documentSx} onMouseOver={onMouseOver} onMouseLeave={() => setHover(null)} onClick={onClick}>
+      {!editable && (
+        <Alert severity="warning" sx={{ mb: 2, maxWidth: "72ch" }}>
+          {READ_ONLY_NOTICE}
+        </Alert>
+      )}
       <EditorContent editor={editor} aria-label="Document" />
       {withRows && rowsSlot && createPortal(featureRows, rowsSlot)}
       <Popper

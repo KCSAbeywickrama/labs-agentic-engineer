@@ -117,6 +117,15 @@ Resource or container.
 The title says the save happened, so a warning is not read as lost work. The
 next save's warnings replace these, and a save without any clears them.
 
+## A spec file opened read-only
+
+| Situation | Says |
+|---|---|
+| The file holds content the editor would lose if it bound to it (a mark the schema does not allow, a node it does not know) | above the file, a warning: **Part of this file can't be edited here safely, so it is read-only for now. Ask the agent to rewrite it to edit it again.** |
+
+It names what the user can do, not the schema. The file is shown as far as it
+can be read, and opens for editing by itself once the content is whole again.
+
 ## A build session's log
 
 A session's log is kept for a few days, not forever. When it is not on screen
