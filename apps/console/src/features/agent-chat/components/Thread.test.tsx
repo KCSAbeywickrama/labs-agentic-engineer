@@ -85,21 +85,6 @@ const wrote = (id: string, component: string, state: "done" | "failed" = "done")
 });
 
 describe("a prototype review in the conversation", () => {
-  it("reads as its comments, named from the manifest, not as the /prototype line it went over the wire as", () => {
-    prototypes = written(SAMPLE_COMPONENT);
-    const prototypeFeedback = {
-      prototypeHash: "a".repeat(64),
-      component: SAMPLE_COMPONENT,
-      requests: [{ screenId: "screen.pending", roleId: "manager", stateId: "state.default", elementIds: ["btn.reject"], text: "Wider" }],
-    };
-    chat = ready([{ kind: "user", id: "h0", text: "/prototype expense-web", prototypeFeedback, state: "sent" }]);
-    renderThread();
-    expect(screen.getByText(/Feedback on the Acme Expenses prototype \(1 comment\)/)).toHaveTextContent(
-      /1\. Pending approvals \(Manager, Default\) — btn\.reject: Wider/,
-    );
-    expect(screen.queryByText("/prototype expense-web")).toBeNull();
-  });
-
   it("reads a plain /prototype line (Make prototype) as asking for it", () => {
     prototypes = [];
     chat = ready([{ kind: "user", id: "h0", text: "/prototype expense-web", state: "sent" }]);
@@ -107,7 +92,7 @@ describe("a prototype review in the conversation", () => {
     expect(screen.getByText("Prototype expense-web.")).toBeInTheDocument();
   });
 
-  it("offers Open prototype after a /prototype turn that wrote a valid prototype, and opens its review", () => {
+  it("offers Open prototype after a /prototype turn that wrote a valid prototype, and opens its item on the Design card", () => {
     prototypes = written(SAMPLE_COMPONENT);
     chat = ready([
       { kind: "user", id: "h0", text: "/prototype expense-web", state: "sent" },
@@ -118,9 +103,9 @@ describe("a prototype review in the conversation", () => {
     expect(screen.getByText("The expense-web prototype is ready to review.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open prototype" }));
     expect(navigate).toHaveBeenCalledWith({
-      to: "/projects/$projectName/prototype",
+      to: "/projects/$projectName/design",
       params: { projectName: "acme" },
-      search: { review: "expense-web" },
+      search: { art: "prototype-expense-web" },
     });
   });
 
@@ -136,11 +121,11 @@ describe("a prototype review in the conversation", () => {
     expect(screen.queryByRole("button", { name: "Open prototype" })).toBeNull();
   });
 
-  it("opens the Prototype tab after a turn that made several", () => {
+  it("opens the Design card after a turn that made several", () => {
     prototypes = written(SAMPLE_COMPONENT, "admin-web");
     chat = ready([{ kind: "user", id: "u1", text: "/prototype", state: "sent" }, wrote("w1", SAMPLE_COMPONENT), wrote("w2", "admin-web")]);
     renderThread();
     fireEvent.click(screen.getByRole("button", { name: "Open prototypes" }));
-    expect(navigate).toHaveBeenCalledWith({ to: "/projects/$projectName/prototype", params: { projectName: "acme" }, search: {} });
+    expect(navigate).toHaveBeenCalledWith({ to: "/projects/$projectName/design", params: { projectName: "acme" }, search: {} });
   });
 });

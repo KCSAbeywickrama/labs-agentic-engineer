@@ -21,10 +21,8 @@ import { Box, Button, CircularProgress, Typography } from "@wso2/oxygen-ui";
 import { CircleAlert, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { visuallyHidden } from "../../../components/visuallyHidden";
 import { usePrototypeNotes } from "../../prototype/usePrototypeNotes";
-import { usePrototypeRequestsText } from "../../prototype/usePrototypeRequestsText";
 import { useSpecModel } from "../../spec/useSpecWorkspace";
 import { interviewWriteUp, openQuestionId, userLineText, type ChatItem } from "../chatLog";
-import type { PrototypeFeedback } from "../turnScope";
 import { chatStore, useProjectChat } from "../useProjectChat";
 import { ActivityLine } from "./ActivityLine";
 import { InterviewFollowUp } from "./InterviewFollowUp";
@@ -57,12 +55,7 @@ function AgentMark() {
   );
 }
 
-/** A prototype review's message reads as its requests, not as the `/prototype` line it went over the wire as. */
-function PrototypeRequests({ projectName, feedback }: { projectName: string; feedback: PrototypeFeedback }) {
-  return <>{usePrototypeRequestsText(projectName, feedback)}</>;
-}
-
-function UserRow({ projectName, item }: { projectName: string; item: Extract<ChatItem, { kind: "user" }> }) {
+function UserRow({ item }: { item: Extract<ChatItem, { kind: "user" }> }) {
   return (
     <Box sx={{ alignSelf: "flex-end", maxWidth: "88%", display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
       <Box
@@ -75,11 +68,7 @@ function UserRow({ projectName, item }: { projectName: string; item: Extract<Cha
         }}
       >
         <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
-          {item.prototypeFeedback ? (
-            <PrototypeRequests projectName={projectName} feedback={item.prototypeFeedback} />
-          ) : (
-            userLineText(item.text)
-          )}
+          {userLineText(item.text)}
         </Typography>
       </Box>
       {item.state === "failed" && (
@@ -249,7 +238,7 @@ export function Thread({ projectName }: { projectName: string }) {
     >
       {items.map((item) => (
         <Fragment key={item.id}>
-          {item.kind === "user" && <UserRow projectName={projectName} item={item} />}
+          {item.kind === "user" && <UserRow item={item} />}
           {(item.kind === "agent" || item.kind === "note") && <AgentRow text={item.text} />}
           {item.kind === "note" && item.actions && <NoteActions projectName={projectName} actions={item.actions} />}
           {item.kind === "activity" && <ActivityLine item={item} features={features ?? []} />}

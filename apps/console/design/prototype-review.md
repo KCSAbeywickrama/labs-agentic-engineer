@@ -20,11 +20,11 @@ Code: `features/prototype/`. The spec is wso2/labs-agentic-engineer#885
   its title line (Checked, 💬) over `PrototypeEntry`: the app's name, its
   status (Ready, Invalid with the reason in a tooltip, Revising while a
   design run works on it) and Review, which opens the review over the card
-  (`?review=<component>`). The old `projects/$p/prototype` route redirects
-  there. There is no Prototype tab and no Make prototype.
+  (`?review=<component>`). There is no Prototype tab, no Prototype route
+  and no Make prototype.
 - **Chat:** an "Open prototype" note after a `/prototype` exchange that wrote
-  a prototype which is valid now (one component opens its review, several
-  the Design card). It is derived (`model/note.ts`) from the log, which the
+  a prototype which is valid now (one component opens its item on the Design
+  card, `?art=prototype-<component>`; several, the card). It is derived (`model/note.ts`) from the log, which the
   history carries, and the room, so a reload and teammates see it too.
 
 ## Files
@@ -147,9 +147,8 @@ whole-screen comment there (`proto:screen-click`).
   pin stays there (a draft from elsewhere is on the revision showing, with no
   spot). Comments, limits, pins and the hash are the kit's
   (`@wso2/prototype-kit/feedback`); the hash is plain JavaScript, so it works
-  over plain HTTP. An earlier turn that carried a batch
-  (`ConversationMessage.prototypeFeedback`) still shows it in the chat as
-  `feedbackSummary` (`model/summary.ts`).
+  over plain HTTP. No comment rides a turn: the retired `prototypeFeedback`
+  is gone from the wire.
 - **Revision** (ADR-0002; `model/revision.ts`, kept per project and
   component in the review store, `model/reviewStore.ts`, which
   `usePrototypeReviews` reads): the store lives for the page, like the chat

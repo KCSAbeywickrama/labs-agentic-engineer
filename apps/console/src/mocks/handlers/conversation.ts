@@ -17,7 +17,7 @@
  */
 
 import { http, HttpResponse } from "msw";
-import { SSE_DONE, isPrototypeFeedback } from "@aep/agent-stream";
+import { SSE_DONE } from "@aep/agent-stream";
 import { parsePrototypeCommand } from "@aep/contracts/commands";
 import { scopeOfBody, type TurnBody } from "../../features/agent-chat/turnScope";
 import { webApplications } from "../../features/prototype/model/prototypes";
@@ -62,8 +62,7 @@ type Problem = components["schemas"]["Problem"];
 // second start is the server's 409 `turn_in_progress`. What each turn says
 // and does is scripted in fixtures/interview.ts (the design review's in
 // fixtures/designTurns.ts, `/prototype` in fixtures/prototype.ts); the turns
-// themselves live in chatServer.ts. A turn's `prototypeFeedback` is refused
-// as the design agent refuses it.
+// themselves live in chatServer.ts.
 //
 // Acme Expenses starts with a conversation; a project made through New
 // project starts with the platform's kickoff (handlers/projects.ts); every
@@ -86,7 +85,6 @@ function historyFor(conversationId: string): ConversationMessage[] {
         author: AUTHOR,
         content: t.instruction,
         ...(t.scope ? { scope: t.scope } : {}),
-        ...(t.prototypeFeedback ? { prototypeFeedback: t.prototypeFeedback } : {}),
       },
       ...t.reply,
     ]),
@@ -110,22 +108,6 @@ function statusOf(turn: MockTurn): TurnStatus {
   };
 }
 
-/**
- * Why a turn's `prototypeFeedback` is refused, as the design agent refuses it
- * (400, before any turn): a malformed batch, or one on anything but
- * `/prototype` (bare, or naming the batch's component) without an anchor.
- */
-export function prototypeFeedbackProblem(body: TurnBody): string | null {
-  if (body.prototypeFeedback === undefined) return null;
-  if (!isPrototypeFeedback(body.prototypeFeedback)) return "prototypeFeedback is malformed";
-  const command = parsePrototypeCommand(body.instruction);
-  if (!command || (command.component !== null && command.component !== body.prototypeFeedback.component)) {
-    return "prototypeFeedback goes only with /prototype for its component";
-  }
-  if (body.anchor || body.intent) return "prototypeFeedback goes only on a turn without an anchor";
-  return null;
-}
-
 /** Start a turn: what the mock agent does with the message, scheduled from now. */
 export function startMockTurn(projectName: string, body: TurnBody): MockTurn {
   const scope = scopeOfBody(body);
@@ -133,7 +115,6 @@ export function startMockTurn(projectName: string, body: TurnBody): MockTurn {
   const prototypeTurn = parsePrototypeCommand(body.instruction)
     ? scriptPrototypeTurn({
         instruction: body.instruction,
-        feedback: body.prototypeFeedback,
         webApps: webApplications(liveDesign(projectName).artifacts),
         doc: projectSpecDoc(projectName, specView(projectName)),
         turnKey,
@@ -147,7 +128,6 @@ export function startMockTurn(projectName: string, body: TurnBody): MockTurn {
       frames: prototypeTurn.frames,
       reply: prototypeTurn.reply,
       ...(prototypeTurn.files ? { prototype: prototypeTurn.files } : {}),
-      ...(body.prototypeFeedback ? { prototypeFeedback: body.prototypeFeedback } : {}),
       ...(prototypeTurn.failure ? { failure: prototypeTurn.failure } : {}),
     });
   }
@@ -238,8 +218,6 @@ export const conversationHandlers = [
     const projectName = String(params.projectName);
     const body = (await request.json()) as TurnBody;
     if (!body.instruction?.trim()) return problem(400, "invalid_turn", "instruction is required");
-    const feedbackProblem = prototypeFeedbackProblem(body);
-    if (feedbackProblem) return problem(400, "invalid_turn", feedbackProblem);
     if (String(params.conversationId) !== conversationIdFor(projectName)) {
       return HttpResponse.json<TurnConflict>({ code: "conversation_rotated" }, { status: 409 });
     }

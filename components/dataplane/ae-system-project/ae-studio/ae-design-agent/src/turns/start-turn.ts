@@ -45,7 +45,6 @@ import type { FilePart, LanguageModel } from "ai";
 import type {
   PlanContextFile,
   PlanScope,
-  PrototypeFeedback,
   StreamPart,
   Surface,
   TurnAim,
@@ -139,8 +138,6 @@ export interface TurnInput {
   /** What the user was looking at (S6); absent = the whole product. */
   scope?: TurnScope;
   aim?: TurnAim;
-  /** A review batch on one prototype, valid only on a `/prototype` Room turn (`turn-input.ts` checks the body). */
-  prototypeFeedback?: PrototypeFeedback;
   /** Chat attachments, bytes base64 (`turn-input.ts` caps them). */
   attachments: TurnAttachment[];
 }
@@ -257,11 +254,8 @@ export class TurnStarter {
   /** Start a browser turn in the project's current thread; resolves to its turn id. */
   async startProjectTurn(req: { project: string; conversationId: string; input: TurnInput; credit: Credit }): Promise<string> {
     const conn = this.admissible(req.input);
-    // Only the Room's committer saves a revision: a batch on a roomless turn
-    // would be applied to a throwaway bundle and read as done.
-    if (req.input.prototypeFeedback && !this.deps.room) throw feedbackNeedsRoom();
     const lookup = await this.lookup(req.project);
-    const { spec, flow } = turnSpecFor(req.input.instruction, lookup, req.input.prototypeFeedback);
+    const { spec, flow } = turnSpecFor(req.input.instruction, lookup);
     const material = await this.material(req.input, spec, () => this.projectDirs(req.project, lookup), conn);
     const scope: Scope = { kind: "project", project: req.project };
     this.refuseBusy(scope);
@@ -374,7 +368,6 @@ export class TurnStarter {
   /** Start a turn in a marketplace conversation (no project, no Room); the caller checked ownership. */
   async startMarketplaceTurn(req: { conversationId: string; input: TurnInput; credit: Credit }): Promise<string> {
     const conn = this.admissible(req.input);
-    if (req.input.prototypeFeedback) throw feedbackNeedsRoom();
     const { skillsSha } = await this.toolsCall(() => this.deps.tools.skills());
     const { spec, flow } = turnSpecFor(req.input.instruction, { references: [] });
     // The marketplace reads only the Org skills snapshot: it is both the
@@ -609,11 +602,9 @@ export class TurnStarter {
               // The names that reached the model, not the ones that were sent.
               ...(m.chatAttachments.length ? { attachments: m.chatAttachments.flatMap((p) => (p.filename ? [p.filename] : [])) } : {}),
               ...(l.input.aim ? { anchor: l.input.aim.anchor } : {}),
-              // Likewise the scope the instruction was composed from, and the
-              // review batch the flow carries, so a reloaded thread can say
-              // what each message was about.
+              // Likewise the scope the instruction was composed from, so a
+              // reloaded thread can say what each message was about.
               ...(l.input.scope ? { scope: l.input.scope } : {}),
-              ...(l.spec.kind === "flow" && l.spec.prototypeFeedback ? { prototypeFeedback: l.spec.prototypeFeedback } : {}),
             },
             model,
             connection: l.conn,
@@ -657,10 +648,6 @@ export class TurnStarter {
       }
     };
   }
-}
-
-function feedbackNeedsRoom(): TurnStartError {
-  return new TurnStartError(400, "invalid_turn", "prototypeFeedback must be a Room turn: only the Room's committer saves the revision");
 }
 
 /** A design turn's feature IDs for its usage record; none for a bare `/design` or any other flow. */

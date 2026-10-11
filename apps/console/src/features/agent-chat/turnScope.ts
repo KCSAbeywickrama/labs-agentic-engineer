@@ -29,14 +29,10 @@ import type { ProjectCard } from "../shell/scope";
 // This module is the one place a scope meets the wire, as the contract's
 // `scope` (TurnScope): a feature by its ID, or the design review; the whole
 // product is the absence of a scope. It focuses the agent and fences nothing.
-// A prototype review's comments no longer ride a turn (they are drafts in
-// review.json, sent with Address comments); a turn in an earlier conversation
-// may still carry a batch as `prototypeFeedback`, which the chat shows.
+// A prototype review's comments never ride a turn: they are drafts in
+// review.json, sent with Address comments.
 
 type TurnInputBody = components["schemas"]["TurnInputBody"];
-
-/** A prototype review's requests, as an earlier turn carried them. */
-export type PrototypeFeedback = components["schemas"]["PrototypeFeedbackInput"];
 
 /** What one turn is about. */
 export type TurnScope =

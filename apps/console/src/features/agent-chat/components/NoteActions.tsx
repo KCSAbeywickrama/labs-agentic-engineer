@@ -38,10 +38,11 @@ export function NoteActions({ projectName, actions }: { projectName: string; act
       return;
     }
     if (action.kind === "open-prototype") {
+      // A prototype is an item of the Design card's rail; several open the card.
       void navigate({
-        to: "/projects/$projectName/prototype",
+        to: "/projects/$projectName/design",
         params: { projectName },
-        search: action.component ? { review: action.component } : {},
+        search: action.component ? { art: `prototype-${action.component}` } : {},
       });
       return;
     }

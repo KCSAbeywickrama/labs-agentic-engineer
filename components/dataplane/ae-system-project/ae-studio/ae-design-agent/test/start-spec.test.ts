@@ -94,18 +94,6 @@ test("/interview F<n> (main's interview command shape) is the interview flow wit
   });
 });
 
-test("a review batch rides the /prototype flow it was sent with", () => {
-  const batch = {
-    prototypeHash: "0".repeat(64),
-    component: "web",
-    requests: [{ screenId: "s", roleId: "r", stateId: "st", elementIds: [], text: "t" }],
-  };
-  assert.deepEqual(turnSpecFor("/prototype web", { references: [] }, batch), {
-    spec: { kind: "flow", skill: "prototype", text: "web", prototypeFeedback: batch },
-    flow: "prototype",
-  });
-});
-
 test("designFeaturesOf: the /design line's feature IDs in order, deduplicated; none for a bare /design or another flow", () => {
   const of = (raw: string) => designFeaturesOf(turnSpecFor(raw, { references: [] }).spec);
   assert.deepEqual(of("/design F2 F1, F2 and F10"), ["F2", "F1", "F10"]);

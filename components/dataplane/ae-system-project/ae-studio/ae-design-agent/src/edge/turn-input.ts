@@ -19,17 +19,16 @@
 /**
  * A turn start's body: JSON (`TurnInputBody`) or, when the message
  * carries chat attachments, multipart (`TurnInputMultipart`): `instruction`,
- * `scope?` (JSON), `anchor?` (JSON), `intent?`, `files[]`; the JSON form also
- * takes `prototypeFeedback?`. The caps are aep-api's
+ * `scope?` (JSON), `anchor?` (JSON), `intent?`, `files[]`. The caps are aep-api's
  * (`A/spec/genaiturns/attachments.go`): at most 10 files, 5 MiB each, 15 MiB
  * in total, and the same accepted extensions and the media type the model
  * reads each as.
  *
  * The retired `target` is refused in both forms, so a stale client learns to
- * send `scope` instead of running a turn that ignores what it asked for. A
- * review batch is checked here for what the body alone can say (its shape,
- * its `/prototype` instruction, no aim); that it rides a Room turn is the
- * start path's check (`turns/start-turn.ts`).
+ * send `scope` instead of running a turn that ignores what it asked for.
+ * A prototype review's comments never ride a turn (they are in
+ * `specs/design/review.json`), so the retired `prototypeFeedback` is an
+ * unknown field like any other.
  *
  * Nothing is buffered past a cap: the body is counted as it streams and
  * the read stops at the cap with 413, so a multipart body holds at most
@@ -39,16 +38,7 @@
 
 import type { IncomingMessage } from "node:http";
 import { basename, extname } from "node:path";
-import {
-  isPrototypeFeedback,
-  isTurnAim,
-  isTurnScope,
-  type PrototypeFeedback,
-  type TurnAim,
-  type TurnAttachment,
-  type TurnScope,
-} from "@aep/agent-stream";
-import { parseFeedbackSubmission } from "@wso2/prototype-kit/feedback";
+import { isTurnAim, isTurnScope, type TurnAim, type TurnAttachment, type TurnScope } from "@aep/agent-stream";
 import { MAX_INSTRUCTION_BYTES, type TurnInput } from "../turns/start-turn.js";
 
 export const MAX_ATTACHMENT_COUNT = 10;
@@ -100,10 +90,8 @@ const invalid = (message: string) => new InputError(400, "invalid_turn", message
 const rejected = (message: string) => new InputError(400, "attachment_rejected", message);
 
 /** The JSON body's fields; anything else is refused by name. */
-const JSON_FIELDS = ["instruction", "scope", "anchor", "intent", "prototypeFeedback"];
+const JSON_FIELDS = ["instruction", "scope", "anchor", "intent"];
 const TARGET_RETIRED = "target is no longer accepted — send scope";
-/** The one command a review batch may ride. */
-const PROTOTYPE_COMMAND = "/prototype";
 
 /** Read and validate the turn body by its content type. */
 export async function readTurnInput(req: IncomingMessage): Promise<TurnInput> {
@@ -161,12 +149,10 @@ function jsonInput(raw: Buffer): TurnInput {
   const unknown = Object.keys(b).filter((k) => !JSON_FIELDS.includes(k));
   if (unknown.length > 0) throw invalid(`unknown field: ${unknown[0]}`);
   if (typeof b.instruction !== "string") throw invalid("instruction must be a string");
-  const aim = aimOf(b.anchor, b.intent);
   return {
     instruction: b.instruction,
     ...scopeOf(b.scope),
-    ...aim,
-    ...prototypeFeedbackOf(b.instruction, aim.aim !== undefined, b.prototypeFeedback),
+    ...aimOf(b.anchor, b.intent),
     attachments: [],
   };
 }
@@ -176,30 +162,6 @@ function scopeOf(scope: unknown): { scope?: TurnScope } {
   if (scope === undefined) return {};
   if (!isTurnScope(scope)) throw invalid('scope must be { kind: "feature", feature: "F<n>" } or { kind: "design-review" }');
   return { scope: scope.kind === "feature" ? { kind: "feature", feature: scope.feature } : { kind: "design-review" } };
-}
-
-/**
- * A review batch (#860), checked as aep-api's `prototype_feedback.go` did:
- * the instruction is `/prototype` alone or followed by the batch's own
- * component, no aim rides with it (an aim points at a document selection,
- * the batch at prototype ids), and the batch passes the kit's rules plus the
- * component (`isPrototypeFeedback`). The batch is rebuilt from the parsed
- * fields, so nothing but the contract's fields is kept.
- */
-export function prototypeFeedbackOf(instruction: string, aimed: boolean, raw: unknown): { prototypeFeedback?: PrototypeFeedback } {
-  if (raw === undefined) return {};
-  const words = instruction.trim().split(/\s+/);
-  const component = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>).component : undefined;
-  if (words[0] !== PROTOTYPE_COMMAND || words.length > 2 || (words.length === 2 && words[1] !== component)) {
-    throw invalid("prototypeFeedback is only valid on a /prototype instruction, bare or followed by its component");
-  }
-  if (aimed) throw invalid("prototypeFeedback cannot be combined with anchor and intent");
-  const parsed = parseFeedbackSubmission(raw);
-  if (!isPrototypeFeedback(raw) || !("submission" in parsed)) {
-    const reason = "reason" in parsed ? parsed.reason : "component must name a web-application component";
-    throw invalid(`prototypeFeedback: ${reason}`);
-  }
-  return { prototypeFeedback: { prototypeHash: parsed.submission.prototypeHash, component: raw.component, requests: parsed.submission.requests } };
 }
 
 /**
@@ -232,11 +194,10 @@ async function multipartInput(raw: Buffer, contentType: string): Promise<TurnInp
   };
   const instruction = text("instruction");
   if (instruction === undefined) throw invalid("instruction is required");
-  // Named refusals for the two parts the JSON form knows and this form does
-  // not; other parts are ignored, as aep-api did: a console that ships a
-  // field first must not have every send refused during a roll.
+  // A named refusal for the retired target; other parts are ignored, as
+  // aep-api did: a console that ships a field first must not have every send
+  // refused during a roll.
   if (form.has("target")) throw invalid(TARGET_RETIRED);
-  if (form.has("prototypeFeedback")) throw invalid("prototypeFeedback is JSON only: send the batch without attachments");
   const anchor = jsonPart(text("anchor"), "anchor must be valid JSON");
   const scope = jsonPart(text("scope"), "scope must be valid JSON: {kind, feature?}");
   return {

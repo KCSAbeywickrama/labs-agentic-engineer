@@ -137,15 +137,20 @@ kit reference an agent writes against is generated to
 `packages/prototype-kit/reference.md`. Each package's `design/README.md` has
 the details.
 
-In AEP the Prototype stage follows Design. The console's Design card offers
-Make prototype, which sends `/prototype`; the `prototype` skill has the agent
-write `specs/design/components/<c>/prototype.{json,tsx}` into the Room (ae-collab),
+In AEP the prototype is made inside Design: after the data model and the
+roles, the `design` run calls the `prototype` skill, which has the agent write
+`specs/design/components/<c>/prototype.{json,tsx}` into the Room (ae-collab),
 gated on write by the design agent's file tool (the manifest and source rules
 plus an isolated render check) and again when a build cuts the version
-(aep-api's save gate, `internal/spec/save_gate.go`). The reviewer opens it full screen in the
-console, annotates, and Send all returns the requests as a typed
-`prototypeFeedback` on the next `/prototype` turn
-([console design note](../apps/console/design/prototype-review.md)).
+(aep-api's save gate, `internal/spec/save_gate.go`). The reviewer opens it full
+screen from its item on the console's Design card and annotates it; each
+comment is a Pending draft on the prototype in `specs/design/review.json`, the
+design's review file. Address comments on the Design card's Overview sends
+every waiting comment with `/address-comments`, and the agent revises the
+prototype in that run, with the contract change it needs, and answers each
+comment in the review file
+([console design notes](../apps/console/design/design-card.md),
+[prototype review](../apps/console/design/prototype-review.md)).
 
 ## Service map
 
