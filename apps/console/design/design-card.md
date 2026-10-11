@@ -2,9 +2,9 @@
 
 The design as its files say, reviewed the way a pull request is: each file
 ticked Checked and commented on from its title line, the comments sent to the
-agent together from the Overview. Decided on the design-loop map (D12–D14,
-L2, L3, L21–L25); code: `features/design/`, the prototype's part in
-`features/prototype/`.
+agent together from the Overview, and the agent's questions answered there.
+Decided on the design-loop map (D01, D07, D12–D14, L2, L3, L19, L21–L26);
+code: `features/design/`, the prototype's part in `features/prototype/`.
 
 ## The rail
 
@@ -35,14 +35,16 @@ are checkable; a component's `design.json`, a dependency and the acceptance
 tests are for reference and take comments only. `wireframes.dsl` is not read.
 At phone width the rail is a picker above the pane. The URL names the pane
 (`?art=<key>`, none for the Overview) and a prototype's full-screen review
-over it (`&review=<component>`); the old Prototype card route redirects there.
+over it (`&review=<component>`). There is no Prototype route: the chat's
+Open prototype and the Track link to `?art=prototype-<component>`.
 
 ## The review file
 
 `specs/design/review.json` (`DesignReview` in `@aep/agent-stream`) holds,
 per artifact path, its comments and the hash it had when ticked Checked.
 `model/review.ts` is every change to it, pure: add, edit and delete a draft,
-send, reopen, check, the counts, and the one primary. `useDesignReview` reads
+send, reopen, check, answer the agent's question, the counts, and the one
+primary. `useDesignReview` reads
 it live from the room and writes it whole through the room's Y.Doc
 (`setDocFile`, origin `console:user`): the file is read again at the moment
 of writing, the change runs on it, and the result is checked with
@@ -58,16 +60,43 @@ kit's `prototypeHash(manifest, source)`.
 
 ## A file's title line
 
-`ArtifactFrame`: the file's name and path, then at the right **Checked**
+`ArtifactFrame`: the file's name and path, its revision once a design run
+has changed it ("Revision 2", the spec state's `artifactRevisions`, by the
+review path), then at the right **Checked**
 (GitHub's Viewed: ticking records the current hash; a file that changed since
-shows unticked with "Changed since you checked it"; nothing collapses) and
+shows unticked with "Revision 2 · Changed since you checked it"; nothing
+collapses) and
 **💬 N**, a popover with the file's threads (`CommentThreads`) and a text box.
 A draft shows **Pending**, with Edit and Delete for its author; a sent one is
 with the agent; an addressed one carries the agent's one-line reply ("✓
 Addressed in revision 2: …") with **Reopen**, which puts it in the next batch.
+A comment the agent found ambiguous shows "Agent asks: …" and, once
+answered, the answer.
 A prototype comment names the screen and elements it was made on. Acceptance
 tests have the 💬 but no Checked. There are no comments on spots inside a
 file.
+
+## Questions waiting on the user
+
+What the design waits on the user for is stored where its answer goes, never
+only said in the chat (`model/questions.ts`, `useDesignQuestions`):
+
+- **A designed feature's open questions**: each entry of the feature file's
+  Open Questions that the user has not deferred (the gap check writes one for
+  a call only the user can make). Answering is an edit of the file
+  (`answerOpenQuestion`, which the spec card's blocking box uses too): the
+  entry leaves, the answer lands in Decisions. The feature's design is then
+  out of date, and Update design is the next primary.
+- **The agent's question on an ambiguous comment**: `question` on the
+  review comment, which the agent leaves `sent`. The user's `answer` reopens
+  it (`answerComment`), so Address comments sends it and the agent acts on it
+  with the answer. An answer can be changed until it is sent.
+
+While any waits, the top of the Overview says so, with **Answer N
+questions**, which drops down a panel (`QuestionsPanel`): each question with
+what it is about (the comment and its file, or the feature), the agent's
+options as buttons for a feature's question, and a text box. An answered
+question leaves the panel; the last one closes it.
 
 ## The Overview
 
@@ -76,12 +105,13 @@ Checked box, the name, its pending 💬 count, Open), Dependencies (each
 definition, and what still blocks a build), Acceptance tests (one row per
 feature). At the bottom **Address comments (N)** and **Build**, the only
 place comments are sent from. Exactly one is the primary, first match wins
-(`primaryAction`): Address comments while any comment waits (a draft or a
-reopened one), Build once every checkable file is checked, otherwise Open on
-the first unchecked row. The card's header keeps only Build, in the same
-state. An "Update design" (or "Design N features") note sits at the top of the
-Overview while the spec changed since the design; before anything is designed
-the card's body offers Design.
+(`primaryAction`): Answer N questions while any waits on the user, Address
+comments while any comment waits (a draft or a reopened one), Design while
+the spec is ahead of the design (the "Update design" or "Design N features"
+note at the top of the Overview, which an answered feature question brings
+up), Build once every checkable file is checked, otherwise Open on the first
+unchecked row. The card's header keeps only Build, in the same state. Before
+anything is designed the card's body offers Design.
 
 **Address comments** (`useDesignTurns`) marks every waiting comment `sent`
 with `sentAt` in one write, then sends the bare `/address-comments`
@@ -89,6 +119,16 @@ with `sentAt` in one write, then sends the bare `/address-comments`
 flushed before every turn, so the agent reads them. If the turn doesn't
 start, the comments go back as they were. While it runs the card says so,
 and a prototype it may rewrite shows its last revision until the run ends.
+
+## The chat
+
+The chat reports and the card acts (D07 rule 2, L26). A design run's closing
+ends with the next step on the card ("Next on the Design card: answer 1
+question, then check the 3 changed files"), and a question shows in it only
+as a count ("1 question for you on the Design card"). When a design run left
+questions and the Design card is not open, the chat adds **Answer N
+questions** under the run, which opens the card (`model/chatNote.ts`); on the
+open card the card's primary is enough.
 
 The **Comments** item lists every comment grouped by file, in the rail's
 order, each group linking to its file. The spec's Next up, the build picker's
@@ -122,4 +162,7 @@ files into the room one by one, as the design agent does
 prototype, the Xero dependency, technical decisions and a review holding one
 addressed comment), each through the agent's write gates. Its
 `/address-comments` turn answers every sent comment with a reply, and revises
-the sample prototype where a comment asks for a change it knows.
+the sample prototype where a comment asks for a change it knows. A comment
+that offers two readings ("… or …") and has no answer gets a question
+instead, and is addressed once answered. Each run closes with what is next
+on the card.

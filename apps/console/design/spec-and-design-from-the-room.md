@@ -29,6 +29,14 @@ from `GET /spec/state`; documents' coverage from `sources/*.md`
 index, design work — is derived from that (`model/workspace.ts`,
 `designWork.ts`). Stage "Interviewing" is the chat's running `/interview`.
 
+The spec card's header holds its step forward (`SpecActions`,
+`model/specActions.ts`, D07 rule 6): while a feature is a stub, Interview
+<next stub> is the primary and Design is secondary; once every feature is
+interviewed, Design is the primary while something waits to be designed;
+before any is interviewed, Design is disabled with the reason. A stub's own
+page (Start interview) and a blocking question's page (Answer) keep their own
+primary.
+
 ## The design
 
 `useDesignModel` (`features/design/useDesignModel.ts`): the catalog from the
