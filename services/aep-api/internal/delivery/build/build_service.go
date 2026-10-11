@@ -92,6 +92,9 @@ type Service struct {
 	// SetPlanPath because its gate resolver is built after this service. Nil
 	// means the build stops at the tag cut.
 	plan *planPath
+	// status backs the approval gate (approval_gate.go), wired via
+	// SetProvisionStatus for the same reason. Nil leaves the gate open.
+	status ProvisionStatusReader
 }
 
 // Deps carries the service's ports.
@@ -217,7 +220,10 @@ type BuildList struct {
 // (mutex → repo → pre-tag → dependency gate → tag → claim → plan) and
 // is idempotent: a build already in flight already satisfies the trigger, so
 // ErrBuildAlreadyRunning is treated as success (nil). Any other failure
-// propagates so the caller logs it and the reconcile sweep heals later.
+// propagates so the caller logs it and the reconcile sweep heals later. With no
+// inputs it approves nothing, so a provider whose own platform resources are
+// not provisioned yet is refused (*UnapprovedResourcesError) rather than
+// started into a deploy that cannot succeed: those wait on its own team's build.
 func (s *Service) StartProjectBuild(ctx context.Context, orgID, projectID string) error {
 	// No name: a build the platform starts for itself takes the suggestion.
 	_, failures, err := s.Run(ctx, orgID, projectID, nil, "", nil)
@@ -267,6 +273,13 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 	// GitHub write the plan path makes lands on it.
 	if _, err := s.repos.RepoFullName(ctx, orgID, projectID); err != nil {
 		return "", nil, &EdgeError{Status: 404, Message: "project repository not found"}
+	}
+	// Every platform resource the version will deploy against is provisioned,
+	// in flight, or approved by this request: the run provisions only what is
+	// approved, and its deploy gate waits on all of them. Checked before the
+	// pre-tag work, so a refused build commits nothing and claims no version.
+	if err := s.approvalGate(ctx, orgID, projectID, inputs); err != nil {
+		return "", nil, err
 	}
 
 	// Apply the relevant drawer inputs BEFORE the tag-cut: collect external specs + run the

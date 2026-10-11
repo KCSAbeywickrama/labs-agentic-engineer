@@ -74,6 +74,11 @@ func (h *Handler) WithPublisherGate(p PublisherGate) *Handler {
 // want of the org's publisher credentials.
 const codePublisherCredentialsMissing = "publisher_credentials_missing"
 
+// codePlatformResourcesNotApproved is the error code of a build refused because
+// a platform resource it would deploy against is neither provisioned nor
+// approved (approval_gate.go).
+const codePlatformResourcesNotApproved = "platform_resources_not_approved"
+
 func (h *Handler) BuildProject(ctx context.Context, request gen.BuildProjectRequestObject) (gen.BuildProjectResponseObject, error) {
 	org := tenant.BoundOrgFromContext(ctx)
 	if h.publisher != nil {
@@ -156,6 +161,18 @@ func mapBuildRunError(err error) error {
 	// one is "wait", the other is "cancel the validation".
 	if errors.Is(err, ErrValidationRunLive) {
 		return apierr.Conflict(ErrValidationRunLive.Error())
+	}
+	// One detail row per resource, so the console lists what to approve.
+	var unapproved *UnapprovedResourcesError
+	if errors.As(err, &unapproved) {
+		details := make([]gen.ErrorDetail, 0, len(unapproved.Resources))
+		for _, name := range unapproved.Resources {
+			details = append(details, gen.ErrorDetail{
+				Field:   "body.inputs",
+				Message: name + ": not provisioned, and this build does not approve it",
+			})
+		}
+		return apierr.New(http.StatusConflict, codePlatformResourcesNotApproved, unapproved.Error(), details)
 	}
 	// A server-side answer keeps err as its cause (apierr.WithCause): the edge
 	// speaks for an AE Studio failure behind it.

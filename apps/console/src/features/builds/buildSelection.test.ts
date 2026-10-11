@@ -17,18 +17,36 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { buildBody, fixBody, repairOfBody, selectionOfBody } from "./buildSelection";
+import type { components } from "../../generated/aep-api";
+import { approvalInputsFor, buildBody, fixBody, repairOfBody, selectionOfBody } from "./buildSelection";
+
+type PreflightItem = components["schemas"]["PreflightItem"];
+
+const database: PreflightItem = {
+  component: "lunch-api",
+  dependency: "lunch-db",
+  kind: "platform-resource",
+  description: "Postgres database",
+  resourceType: "postgres-cnpg",
+  parameters: { instances: 1 },
+};
+const billing: PreflightItem = { component: "lunch-api", dependency: "billing", kind: "org-service", description: "Billing endpoint" };
 
 describe("the build selection on the wire", () => {
-  it("rides the contract's selection, with no inputs and no version", () => {
-    const body = buildBody({ features: ["F1", "F2"], productWide: ["P5"] });
+  it("rides the contract's selection, with no version, approving nothing when the preflight lists nothing", () => {
+    const body = buildBody({ features: ["F1", "F2"], productWide: ["P5"] }, []);
     expect(body).toEqual({ inputs: [], selection: { features: ["F1", "F2"], productWide: ["P5"] } });
     expect(body).not.toHaveProperty("version");
   });
 
+  it("approves what the preflight lists", () => {
+    const body = buildBody({ features: ["F1"], productWide: [] }, [database]);
+    expect(body.inputs).toEqual(approvalInputsFor([database]));
+  });
+
   it("reads back as the server would", () => {
     const selection = { features: ["F1"], productWide: [] };
-    expect(selectionOfBody(buildBody(selection))).toEqual(selection);
+    expect(selectionOfBody(buildBody(selection, []))).toEqual(selection);
   });
 
   it("reads a body without a selection, or a malformed one, as none", () => {
@@ -46,7 +64,43 @@ describe("a repair build on the wire", () => {
   });
 
   it("reads a body without a repair, or a malformed one, as none", () => {
-    expect(repairOfBody(buildBody({ features: ["F1"], productWide: [] }))).toBeNull();
+    expect(repairOfBody(buildBody({ features: ["F1"], productWide: [] }, []))).toBeNull();
     expect(repairOfBody({ repair: { of: 4 } } as never)).toBeNull();
+  });
+});
+
+// Clicking Build is the consent to what the build provisions: the platform
+// provisions a resource only from its approval (the classic console's
+// approvalInputsFor).
+describe("the approvals a build carries", () => {
+  it("approves a platform resource that is not provisioned yet, carrying the design's parameters", () => {
+    expect(approvalInputsFor([database])).toEqual([
+      { component: "lunch-api", dependency: "lunch-db", kind: "platform-resource", approved: true, parameters: { instances: 1 } },
+    ]);
+  });
+
+  it("leaves parameters out when the design authored none", () => {
+    const cache: PreflightItem = { component: "lunch-api", dependency: "cache", kind: "platform-resource", description: "Redis", resourceType: "redis" };
+    expect(approvalInputsFor([cache])[0]).not.toHaveProperty("parameters");
+  });
+
+  it("approves an unresolved cross-project endpoint", () => {
+    expect(approvalInputsFor([billing])).toEqual([
+      { component: "lunch-api", dependency: "billing", kind: "org-service", approved: true },
+    ]);
+  });
+
+  it("approves nothing for an external dependency's values or a resolution blocker", () => {
+    const items: PreflightItem[] = [
+      { component: "lunch-api", dependency: "stripe", kind: "external-config", description: "Stripe", config: [{ key: "STRIPE_KEY", secret: true }] },
+      { component: "lunch-api", dependency: "crm", kind: "external-unresolved", description: "No provider chosen yet." },
+      { component: "lunch-api", dependency: "partner", kind: "external-spec", description: "No API spec yet." },
+    ];
+    expect(approvalInputsFor(items)).toEqual([]);
+  });
+
+  it("approves a shared resource once per component that consumes it", () => {
+    const auth = { ...database, dependency: "user-auth", resourceType: "auth" };
+    expect(approvalInputsFor([auth, { ...auth, component: "lunch-web" }]).map((i) => i.component)).toEqual(["lunch-api", "lunch-web"]);
   });
 });
