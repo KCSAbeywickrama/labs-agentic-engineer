@@ -123,9 +123,17 @@ screen). Before anything is designed the card's body offers Design.
 The note beside the two buttons (`overviewNote`) says what the primary asks
 (comments to send, the design to update), then, while Build is held, why
 (`buildHold`, from the build offer): "v2 is building — open it on Builds",
-linking to that build; "Not ready to build yet — " with each held feature and
+linking to that build; "Wait for the agent to finish" while a turn runs in
+the project's chat; "Not ready to build yet — " with each held feature and
 the picker's reasons; or "Nothing new to build". Only a Build that can start
-reads "Everything is checked." A design run does not hold Build.
+reads "Everything is checked."
+
+Any agent turn holds Build: a Design or Address comments turn writes the
+design file by file, and a build started half way would freeze a design the
+turn had not finished. The hold is in `useBuildAction`, which every Build
+reads (the Overview's and the card header's, the Builds page header, Next
+up's build item, the track's Build leg, and the picker's Start build), so
+they hold and release together.
 
 **Address comments** (`useDesignTurns`) marks every waiting comment `sent`
 with `sentAt` in one write, then sends the bare `/address-comments`

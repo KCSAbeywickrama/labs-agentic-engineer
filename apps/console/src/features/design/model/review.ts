@@ -271,6 +271,7 @@ export function overviewNote(input: { waiting: number; primary: Primary; hold: B
   if (waiting > 0) parts.push(text("Comments go to the agent only from here, all together."));
   else if (primary?.kind === "design") parts.push(text("Update the design first: the spec has changed since."));
   if (hold?.kind === "running") return [...parts, { kind: "building", version: hold.version }];
+  if (hold?.kind === "agent-working") return [...parts, text("Wait for the agent to finish.")];
   if (hold?.kind === "held") {
     const why = hold.features.map((f) => `${f.name}: ${f.reasons.join(", ")}`).join("; ");
     return [...parts, text(`Not ready to build yet — ${why}.`)];

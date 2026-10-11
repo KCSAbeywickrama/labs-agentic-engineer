@@ -285,6 +285,20 @@ describe("the Overview's one primary", () => {
     expect(within(bottom).getByRole("link", { name: "open it on Builds" })).toHaveAttribute("href", "/projects/acme-expenses/builds/v2");
   });
 
+  it("holds Build while the agent works, on the Overview and in the header, and asks to wait", async () => {
+    hold = { kind: "agent-working" };
+    renderCard();
+    await screen.findByRole("region", { name: "For technical review" });
+    for (const name of ["Architecture", "Data model", "Technical decisions"]) {
+      fireEvent.click(screen.getByRole("checkbox", { name: `Checked: ${name}` }));
+    }
+    const bottom = screen.getByRole("region", { name: "Send and build" });
+    await waitFor(() => expect(within(bottom).getByRole("button", { name: "Build" })).toBeDisabled());
+    expect(bottom).toHaveTextContent("Wait for the agent to finish.");
+    expect(bottom).not.toHaveTextContent("Everything is checked.");
+    expect(within(screen.getByRole("banner", { name: "Card actions" })).queryByRole("button", { name: /Build/ })).toBeNull();
+  });
+
   it("makes the header's Build the primary on a file once every file is checked", async () => {
     const router = renderCard();
     await screen.findByRole("region", { name: "For technical review" });

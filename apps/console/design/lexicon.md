@@ -67,6 +67,7 @@ for console turns, and a disagreement is settled here.
 | **✓ Addressed in revision N** | the agent's one-line answer on a comment it acted on | Resolved, Done |
 | **Reopen** | put an addressed comment back in the next batch | Reply, Unresolve |
 | **v2 is building — open it on Builds** | the Overview's note while a build runs and Build is held; the link opens that build | Build disabled, Busy |
+| **Wait for the agent to finish** | the note while a turn runs in the project's chat and Build is held, so a build does not freeze a half-written design; the picker's Start build says the same | Agent busy, Build locked |
 | **Not ready to build yet — Payroll export: waiting on Xero** | the note while every designed feature is held: each one with the build picker's reasons | Build refused, Blocked |
 | **Nothing new to build: what is designed is built and unchanged** | the note when every designed feature is built and has not changed since | Up to date, Nothing to do |
 

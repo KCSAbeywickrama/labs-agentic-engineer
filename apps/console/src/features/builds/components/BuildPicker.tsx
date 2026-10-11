@@ -32,7 +32,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { chatStore } from "../../agent-chat/useProjectChat";
 import { BuildRefusedError, useStartBuild } from "../api/builds";
-import { BuildPickerContext, useBuildOffer } from "../buildPicker";
+import { BuildPickerContext, useBuildAction } from "../buildPicker";
 import type { BuildSelection } from "../buildSelection";
 import { startedNote } from "../model/nextSteps";
 import {
@@ -162,7 +162,9 @@ function Refusal({ error }: { error: Error }) {
  * what is building.
  */
 function BuildPicker({ projectName, onClose }: { projectName: string; onClose: () => void }) {
-  const offer = useBuildOffer(projectName);
+  // The offer, and whether the agent is at work: a build started now would freeze its half-written design.
+  const { offer, hold } = useBuildAction(projectName);
+  const agentWorking = hold?.kind === "agent-working";
   const start = useStartBuild(projectName);
   const navigate = useNavigate();
   const [chosen, setChosen] = useState<BuildSelection | null>(null);
@@ -217,13 +219,14 @@ function BuildPicker({ projectName, onClose }: { projectName: string; onClose: (
           </Alert>
         ))}
         <Summary offer={offer} />
+        {agentWorking && <Alert severity="info">Wait for the agent to finish.</Alert>}
         {start.error && <Refusal error={start.error} />}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose} disabled={start.isPending}>
           Cancel
         </Button>
-        <Button variant="contained" loading={start.isPending} disabled={!canStart(selection)} onClick={startBuild}>
+        <Button variant="contained" loading={start.isPending} disabled={!canStart(selection) || agentWorking} onClick={startBuild}>
           Start build
         </Button>
       </DialogActions>

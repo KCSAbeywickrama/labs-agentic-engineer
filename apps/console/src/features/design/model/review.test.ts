@@ -250,6 +250,14 @@ describe("the Overview's note beside Build", () => {
     expect(overviewNote({ waiting: 0, primary: { kind: "design" }, hold: null })).toEqual([text("Update the design first: the spec has changed since.")]);
   });
 
+  it("asks to wait while the agent works, whatever the review says", () => {
+    expect(overviewNote({ waiting: 0, primary: { kind: "build" }, hold: { kind: "agent-working" } })).toEqual([text("Wait for the agent to finish.")]);
+    expect(overviewNote({ waiting: 0, primary: { kind: "design" }, hold: { kind: "agent-working" } })).toEqual([
+      text("Update the design first: the spec has changed since."),
+      text("Wait for the agent to finish."),
+    ]);
+  });
+
   it("says nothing of Build while the build offer loads", () => {
     expect(overviewNote({ waiting: 0, primary: { kind: "build" }, hold: { kind: "loading" } })).toEqual([]);
   });

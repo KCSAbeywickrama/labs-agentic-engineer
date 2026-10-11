@@ -18,6 +18,7 @@
 
 import { createContext, useCallback, useContext, useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { useProjectChat } from "../agent-chat/useProjectChat";
 import { useDesignModel } from "../design/useDesignModel";
 import { useWaitingComments } from "../design/useWaitingComments";
 import { useSpecWorkspace } from "../spec/useSpecWorkspace";
@@ -61,21 +62,23 @@ export function useBuildOffer(projectName: string): BuildOffer | null {
 
 /**
  * The build action as an entry point shows it: its words ("Build v1") while
- * something is designed and no build runs, else null and why (`hold`); and
- * what it does, which opens the picker, or the running build's card while a
- * build runs.
+ * something is designed, no build runs and the agent is not at work in the
+ * project's chat, else null and why (`hold`); and what it does, which opens
+ * the picker, or the running build's card while a build runs. Every Build
+ * reads it, so they hold together.
  */
 export function useBuildAction(projectName: string): { offer: BuildOffer | null; label: string | null; hold: BuildHold | null; open: () => void } {
   const controls = useContext(BuildPickerContext);
   if (!controls) throw new Error("useBuildAction outside the project's build picker");
   const offer = useBuildOffer(projectName);
+  const agentWorking = useProjectChat(projectName).turn.phase !== "idle";
   const navigate = useNavigate();
   const running = offer?.running ?? null;
   const open = useCallback(() => {
     if (running) void navigate({ to: "/projects/$projectName/builds/$version", params: { projectName, version: running.version } });
     else controls.open();
   }, [controls, navigate, projectName, running]);
-  const hold = buildHold(offer);
+  const hold = buildHold(offer, agentWorking);
   const label = offer && !hold ? `Build ${offer.version}` : null;
   return { offer, label, hold, open };
 }

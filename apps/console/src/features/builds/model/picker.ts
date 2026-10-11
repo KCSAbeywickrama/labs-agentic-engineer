@@ -207,19 +207,24 @@ export function offeredRows(offer: BuildOffer): PickRow[] {
 
 /**
  * Why no build can start now, for the entry points that show Build held:
- * the offer still loading, a build running (the picker does not open), each
+ * the offer still loading, a build running (the picker does not open), the
+ * agent at work in the project's chat (a Design or Address comments turn
+ * may be half way through writing the design a build would freeze), each
  * designed feature held with the picker's own reasons, or nothing new since
  * the last build. Null when a build is offered.
  */
 export type BuildHold =
   | { kind: "loading" }
   | { kind: "running"; version: string }
+  | { kind: "agent-working" }
   | { kind: "held"; features: readonly { name: string; reasons: readonly string[] }[] }
   | { kind: "nothing-new" };
 
-export function buildHold(offer: BuildOffer | null): BuildHold | null {
+/** `agentWorking`: a turn is starting or running in the project's chat. */
+export function buildHold(offer: BuildOffer | null, agentWorking: boolean): BuildHold | null {
   if (!offer) return { kind: "loading" };
   if (offer.running) return { kind: "running", version: offer.running.version };
+  if (agentWorking) return { kind: "agent-working" };
   if (offeredRows(offer).length > 0) return null;
   const held = offer.rows.flatMap((r) => (r.kind === "feature" && r.state === "disabled" ? [{ name: r.name, reasons: r.detail }] : []));
   return held.length > 0 ? { kind: "held", features: held } : { kind: "nothing-new" };
