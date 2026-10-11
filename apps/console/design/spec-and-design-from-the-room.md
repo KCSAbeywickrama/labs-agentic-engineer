@@ -33,8 +33,11 @@ index, design work — is derived from that (`model/workspace.ts`,
 
 `useDesignModel` (`features/design/useDesignModel.ts`): the catalog from the
 room's design files (`model/catalog.ts`), dependencies from the build
-preflight, the running design from the chat. Commenting is mock-only
-(`DesignModel.commenting`) until it ships.
+preflight, the running design-review turn from the chat (`/design`, or
+`/address-comments`). The Design card's rail and its review are read from the
+room too: the files (`model/designFiles.ts`) and `specs/design/review.json`
+(`useDesignReview`), which the card writes back through the room's doc; see
+[design-card.md](design-card.md).
 
 ## Builds
 
@@ -45,6 +48,6 @@ standing.
 
 ## Mock mode
 
-`VITE_API_MODE=mock` keeps a local doc seeded from the mock's files and the
-mock's approved design review; the agent's writes are applied to the local doc
-from the turn's stream.
+`VITE_API_MODE=mock` keeps a local doc seeded from the mock's files, and the
+mock's design model; the agent's writes, the design's files among them, are
+applied to the local doc from the turn's stream.

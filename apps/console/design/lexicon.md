@@ -38,23 +38,34 @@ for console turns, and a disagreement is settled here.
 
 | Say | Means | Not |
 |---|---|---|
-| **Prototype** | the clickable mock of one web application, made by the agent | wireframe (the sketch in Design), mockup, demo |
-| **Make prototype** / **Update prototype** | the action; Update once one exists | generate, build |
+| **Prototype** | the clickable mock of one web application, made by Design | wireframe, mockup, demo |
 | **Review** | open a prototype full screen | open, view |
 | **Preview** | the review mode where the prototype acts | run, play |
 | **Comment** (mode) | the review mode where a click starts a comment instead of acting. `annotate` is only the code's and the protocol's name for it, never said to the user | Annotate, mark up |
 | **Comment** | one change asked of the prototype: the selected elements (or the whole screen) and the text. "Request" is only the contract's and the code's name for it, never said to the user | request, note, ticket |
 | **draft** (comment) | a comment started and closed without Add: kept where it was written, shown as a hollow pin, reopened with its text; never counted or sent | unsaved comment |
 | **Whole screen** | what a comment on no element is on, in its bubble and the list | page, full page |
-| **Send to agent** | send the queued comments to the agent in one turn (the dock's last button) | submit, Send all |
 | **Comment on this screen** | the comment list's action that starts a comment on the whole screen, not an element (the keyboard's way; the pointer's is a click on empty space, which puts the comment at that spot) | Comment on screen, page comment |
-| **Revising…** | the Send to agent button while the agent works on the sent comments; read out to a screen reader as `Agent is revising… (N comments)` | a separate status label, a header chip, processing |
-| **Updated · N addressed** | the toast once the revision lands in the open review: `Updated · N comments addressed`, N being the comments sent | Done, Reloaded |
+| **N pending · sent with Address comments on the Overview** | where the queued comments go, in the dock | Send to agent, submit |
+| **The agent is revising the prototype…** | the dock's status while a design run may rewrite it | Revising…, processing |
+| **Updated** | the toast once a changed revision lands in the open review | Done, Reloaded |
 | **What changed** | the toast's action: the chat, at the turn that revised the prototype | Details, View diff |
-| **Retry** | send again the comments a revision that did not land gave back | Resend |
 | **Written on an earlier version** | a queued comment written before the revision now showing landed | stale, outdated |
 | **Reset data** | restore the prototype's mock data | clear |
 | **Dock** | the review's one floating bar below the prototype, with every control | toolbar, send bar |
+
+## The design review
+
+| Say | Means | Not |
+|---|---|---|
+| **Overview** | the Design card's first item: what to review, for whom, and the one step forward | Summary, Dashboard |
+| **For business review** / **For technical review** | the Overview's two lists, by who can judge each file | Product, Technical (as a filter) |
+| **Checked** | the reviewer has gone through the file (GitHub's Viewed); not "it's perfect" | Approved, Reviewed, Done |
+| **Changed since you checked it** | the file changed after it was ticked, so it shows unticked | stale, outdated |
+| **Pending** | a comment added and not yet sent; the Comments item counts them as "N pending" | draft (that is a started, unadded comment in the prototype review), unsent |
+| **Address comments (N)** | send every pending (and reopened) comment to the agent in one turn | Send, Submit review |
+| **✓ Addressed in revision N** | the agent's one-line answer on a comment it acted on | Resolved, Done |
+| **Reopen** | put an addressed comment back in the next batch | Reply, Unresolve |
 
 ## The agent's questions
 
