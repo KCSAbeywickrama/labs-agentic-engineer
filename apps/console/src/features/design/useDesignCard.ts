@@ -24,6 +24,7 @@ import { usePrototypeReviews, type PrototypeReviews } from "../prototype/useProt
 import { useSpecDoc } from "../spec/collab/specDoc";
 import { answerOpenQuestion } from "../spec/collab/specEdits";
 import { useRoomFiles } from "../spec/collab/useRoomFiles";
+import { useSpecState } from "../spec/api/specModel";
 import { useSpecWorkspace } from "../spec/useSpecWorkspace";
 import type { DesignDependency } from "./api/designModel";
 import { blockingDependencies } from "./model/artifacts";
@@ -55,6 +56,8 @@ export interface DesignCard {
   review: DesignReviewActions;
   lists: Record<ReviewList, ReviewRow[]>;
   waiting: ReviewComment[];
+  /** Each artifact's revision (the design runs that changed it, the first design 1), by review path. */
+  revisions: Readonly<Record<string, number>>;
   /** The questions the design waits on the user for. */
   questions: DesignQuestion[];
   /** Answer one: a feature's goes into its file's Decisions, a comment's reopens the comment. False when it could not be written. */
@@ -68,6 +71,7 @@ export interface DesignCard {
 }
 
 const NO_PROTOTYPES: AppPrototype[] = [];
+const NO_REVISIONS: Readonly<Record<string, number>> = {};
 
 export function useDesignCard(projectName: string): DesignCard {
   const doc = useSpecDoc(projectName);
@@ -90,6 +94,7 @@ export function useDesignCard(projectName: string): DesignCard {
   const reviews = usePrototypeReviews(projectName, list);
 
   const questions = useDesignQuestions(projectName);
+  const revisions = useSpecState(projectName).data?.artifactRevisions ?? NO_REVISIONS;
   const toDesign = spec.workspace?.design.label != null;
   const answer = useCallback(
     (question: DesignQuestion, text: string): boolean => {
@@ -118,12 +123,13 @@ export function useDesignCard(projectName: string): DesignCard {
       review,
       lists,
       waiting,
+      revisions,
       questions,
       answer,
       primary: primaryAction({ questions: questions.length, waiting: waiting.length, toDesign, rows }),
       prototypes: new Map(list.map((p) => [p.component, p])),
       blocking: blockingDependencies(model?.dependencies ?? []),
     };
-  }, [items, hashes, review, list, model?.dependencies, questions, answer, toDesign]);
+  }, [items, hashes, review, list, model?.dependencies, revisions, questions, answer, toDesign]);
   return { ...card, reviews };
 }

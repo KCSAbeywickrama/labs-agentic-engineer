@@ -28,7 +28,8 @@ import { CommentComposer, CommentThreads, type ThreadActions } from "./CommentTh
 // artifact shows unticked again, "Changed since you checked it"; it does not
 // collapse anything) and a 💬 with the count of its comments, which drops
 // down its threads and a text box for a new one. Acceptance tests take
-// comments but no Checked.
+// comments but no Checked. The title line names the artifact's revision once
+// a design run has changed it ("Revision 2").
 
 export interface CheckState {
   checked: boolean;
@@ -39,6 +40,7 @@ export interface CheckState {
 export function ArtifactFrame({
   title,
   path,
+  revision,
   check,
   onCheck,
   comments,
@@ -50,6 +52,8 @@ export function ArtifactFrame({
 }: {
   title: string;
   path: string;
+  /** The design runs that changed it (the first design is 1); absent when not known. */
+  revision?: number | undefined;
   /** Null: not checkable (reference only). */
   check: CheckState | null;
   onCheck: (checked: boolean) => void;
@@ -75,9 +79,14 @@ export function ArtifactFrame({
           <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace", overflowWrap: "anywhere" }}>
             {path}
           </Typography>
+          {revision !== undefined && (
+            <Typography variant="caption" color="text.secondary">
+              Revision {revision}
+            </Typography>
+          )}
           {check?.changed && (
             <Typography variant="caption" color="warning.main">
-              Changed since you checked it
+              {revision !== undefined ? "· " : ""}Changed since you checked it
             </Typography>
           )}
         </Box>

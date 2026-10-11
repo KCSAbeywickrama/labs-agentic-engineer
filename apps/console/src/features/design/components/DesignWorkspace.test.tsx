@@ -92,6 +92,12 @@ vi.mock("../../spec/useSpecWorkspace", () => ({
   }),
 }));
 
+let revisions: Record<string, number> = {};
+vi.mock("../../spec/api/specModel", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../spec/api/specModel")>()),
+  useSpecState: () => ({ data: { artifactRevisions: revisions } }),
+}));
+
 const chat: ProjectChat = { status: "ready", error: null, items: [], turn: { phase: "idle" } };
 const send = vi.fn<(projectName: string, text: string, scope: unknown) => Promise<boolean>>(async () => true);
 vi.mock("../../agent-chat/useProjectChat", async (importOriginal) => ({
@@ -163,6 +169,7 @@ beforeEach(() => {
   seed(FILES);
   label = null;
   designedFrom = {};
+  revisions = {};
   send.mockReset();
   send.mockResolvedValue(true);
 });
@@ -207,6 +214,12 @@ describe("Checked and comments on a file's title line", () => {
     act(() => setDocFile(doc, DECISIONS, `${FILES[DECISIONS]}- [contract] Oldest first. (F2)\n`, "agent"));
     await waitFor(() => expect(box).not.toBeChecked());
     expect(screen.getByText("Changed since you checked it")).toBeInTheDocument();
+  });
+
+  it("names the file's revision once a design run has changed it", async () => {
+    revisions = { [DECISIONS]: 2 };
+    renderCard("?art=decisions");
+    expect(await screen.findByText("Revision 2")).toBeInTheDocument();
   });
 
   it("adds a Pending draft from the 💬, edits and deletes it", async () => {

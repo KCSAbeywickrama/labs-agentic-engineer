@@ -131,6 +131,7 @@ export function ItemPane(props: {
     <ArtifactFrame
       title={item.title}
       path={item.path}
+      revision={card.revisions[item.path]}
       check={item.checkable ? { checked: isChecked(review.review, item.path, hash), changed: changedSinceChecked(review.review, item.path, hash) } : null}
       onCheck={(checked) => review.check(item.path, checked && hash !== undefined ? hash : null)}
       comments={commentsOn(review.review, item.path)}
