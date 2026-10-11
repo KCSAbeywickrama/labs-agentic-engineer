@@ -158,10 +158,10 @@ tick the Task's copy: re-planning writes that body again.
 The ticks are **evidence, not a claim**, and they come from the walk. After a
 clean build, `mock-verification` opens the app in a browser, reaches every
 screen, uses every control and follows every `to`. It reports one line for
-each flow and each screen. The lead ticks the PR's lists from that report when
-it opens the PR. You write no checklist. A screen that you could not build as
-the prototype shows it is a gap that you name in your report to the lead, and
-the walk records it.
+each flow, and for each screen in no flow. The lead ticks the PR's lists from
+that report when it opens the PR. You write no checklist. A screen that you
+could not build as the prototype shows it is a gap that you name in your
+report to the lead, and the walk records it.
 
 ```text
 Prototype fidelity (specs/design/components/<name>/prototype.json)
@@ -178,8 +178,8 @@ Flows
 ```
 
 **Screens** come from the Task's `Screens:` line, one line each, with the
-route you built. A screen is ticked when the walk reached it, used every
-control and followed every `to`.
+route you built. A screen is ticked when every flow through it is done or
+fixed, or, for a screen in no flow, when its own line is.
 
 **Flows** come from the Task's `Flows:` checklist, with the same number, name,
 persona and stories, on one line each. A flow is ticked when the walk went
