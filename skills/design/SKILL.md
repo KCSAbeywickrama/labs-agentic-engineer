@@ -49,7 +49,9 @@ what the PRD already says.
 only the user knows, or a choice that the PRD left open on purpose. Do not
 make such a call, and do not stop to ask it. Write it as an open question in
 the file that its answer changes (`prd-contract`), design the parts that do
-not depend on it, and list it in your closing. The PRD's own answers are
+not depend on it, and count it in your closing. The user answers each
+question on the Design card, which reads it from that file: do not ask it in
+the chat too. The PRD's own answers are
 settled: asking one back reads as the document being ignored. An open question
 already in the requirements does not stop the run either, except a
 `*blocking*` one, which leaves its feature out (above). One marked "deferred"
@@ -218,7 +220,7 @@ Close each gap that you find in one of these ways:
 - **Only the user can decide it** (a fact only they know, or a choice
   between two products, such as an actor nobody defined). Write it as an open
   question in that feature's file (`prd-contract`; never `*blocking*`). Design
-  the rest of the feature, and list the question in your closing.
+  the rest of the feature, and count the question in your closing.
 
 Then report the gap check in one chat line, with the count of decisions per
 feature and the count of questions. A gap that a later step finds goes the
@@ -321,10 +323,13 @@ architecture.
 
 `/address-comments` sends you the design review's comments. They are in
 `specs/design/review.json`: one entry per artifact `path`, each with its
-`comments`. Act on each comment whose `status` is `sent` or `reopened`. A
-`reopened` comment keeps your earlier `reply`: its author did not accept that
-answer. Do not act on a `draft` comment, and do not change it. When no comment
-is `sent` or `reopened`, say so and stop.
+`comments`. Act on each comment whose `status` is `sent` or `reopened`, with
+one exception: a `sent` comment that has your `question` and no `answer`
+waits for the user. Do not act on it, and do not change it. A comment that
+has an `answer` is the user's answer to your `question`: act on the comment as
+the answer says. A `reopened` comment keeps your earlier `reply`: its author
+did not accept that answer. Do not act on a `draft` comment, and do not change
+it. When no comment is left to act on, say so and stop.
 
 1. **Find what each comment changes.** The artifact that a comment is on
    shows where its author saw the problem. The change can start in an earlier
@@ -335,10 +340,15 @@ is `sent` or `reopened`, say so and stop.
    in the prototype as it is now.
 2. **Do not guess an ambiguous comment.** A comment is ambiguous when two
    reasonable readings give different designs, or when it needs a fact that
-   only the user knows. Do not act on it, and do not change it: it stays
-   `sent`. Ask its question in your closing. When the answer is a product
-   decision, also write the question as an open question in its feature's
-   file, as the gap check does.
+   only the user knows. Do not act on it. Write your question on the comment,
+   as its `question`: one or two sentences, in the words of the reader, that
+   the user can answer in a line ("Sort the list by the date of the expense,
+   or by the date it was sent?"). The comment stays `sent`. Write
+   the question only there, not also in a feature file: the Design card asks
+   it from the comment. When the user's answer is a product rule, step 4
+   writes it into the requirements. If a comment that has an `answer` is still
+   ambiguous, replace its `question` with the new one and remove its
+   `answer`.
 3. **Start at the earliest artifact.** Of the comments that you act on, find
    the change that comes first in this order: the requirements, the
    architecture, the data model, the roles and permissions, the components'
@@ -360,11 +370,18 @@ is `sent` or `reopened`, say so and stop.
 5. **Change every place.** A comment that renames a field or a term changes
    each line that has the old name. Before you edit a file, find each of
    those lines in it, and change all of them. A new field goes in each
-   artifact that the change needs.
+   artifact that the change needs. The prototype gate type-checks
+   `prototype.tsx` on each write, so one edit of a rename leaves the other
+   uses stale and the gate refuses it (`TYPE_ERROR`, one finding for each
+   stale line). For a rename, or for any change to many lines of
+   `prototype.tsx`, write the whole corrected file in one write: remove it,
+   then add it again. When a write gets a `TYPE_ERROR`, fix every line that
+   the findings name in the next write.
 6. **Answer each comment in `review.json`.** It is the last file that you
-   write in the turn: write it only when every artifact write (the prototype
-   included) has succeeded, because each reply tells what the artifacts now
-   say. Set `status` to `"addressed"`, `addressedAt` to the time that
+   write in the turn, in one write: write it only when every artifact write
+   has succeeded (when you rewrite the prototype, after its `addFile`),
+   because each reply tells what the artifacts now say. The same write sets the `question` of each comment that step 2 asks
+   about. Set `status` to `"addressed"`, `addressedAt` to the time that
    the turn gives, `revision` to the revision of this run, and `reply` to one
    line that tells what you did, in the words of the reader: `Renamed
    totalAmountCents to totalCents in the data model, the contract and the
@@ -372,24 +389,30 @@ is `sent` or `reopened`, say so and stop.
    requirement it conflicts with. The revision of this run is the highest
    `revision` in the file plus one, or 2 when no comment has one (the first
    Design run is revision 1). All the comments of one run get the same
-   revision. Change no other field and no other comment.
+   revision. Keep the `question` and the `answer` of a comment that you
+   address. Change no other field and no other comment.
 
 Close with one line for each comment that you addressed (its author and your
-reply), then a **"Questions for you"** block with the question of each comment
-that stays `sent`. Leave out a block that has nothing in it.
+reply). Write no line for a comment that you asked about. When you asked a
+question, write one line with the count: `1 question for you on the Design
+card.` Do not repeat the question: the card shows it.
+End with one line that names the next step on the Design card, for example
+`Next on the Design card: answer 1 question, then check the 3 changed files.`
 
 ## Where this stops
 
 `/design` ends at the design and its acceptance tests — no task planning,
-no application code. Close with these parts and nothing more: one line per
-component (name, type, one-clause role); a **"Questions for you"** block with
-each open question the gap check wrote, as one line with the feature it holds,
-and each ambiguity the acceptance tests met;
+no application code. An ambiguity that the acceptance tests meet is an open
+question in its feature's file, as the gap check writes one. Close with these
+parts and nothing more: one line per component (name, type, one-clause role);
+when the run left open questions, one line with their count (`2 questions for
+you on the Design card.`), without the questions, which the card shows;
 a **"Needs your input"** block
 listing only the dependencies still unresolved, each as a link to its
 definition (`[<name>](aep://spec/specs/design/dependencies/<name>/dependency.json)`,
 the `architecture` skill's closing form) followed by the one thing you need,
-so the user opens it with a click; and
-a one-line pointer to `specs/design/`. Leave out a block that has nothing in
-it. The artifact lines and the dependency narration during the turn (the
-`architecture` skill owns its format) already carried the play-by-play.
+so the user opens it with a click; and a last line that names the next step on
+the Design card (`Next on the Design card: answer 2 questions, then check the
+9 files.`). Name the step, never a command or a path. Leave out a part that has
+nothing in it. The artifact lines and the dependency narration during the turn
+(the `architecture` skill owns its format) already carried the play-by-play.
