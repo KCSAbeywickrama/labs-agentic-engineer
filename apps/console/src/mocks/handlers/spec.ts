@@ -32,6 +32,7 @@ type SpecState = components["schemas"]["SpecState"];
 function specState(model: MockSpecModel): SpecState {
   return {
     designedFrom: model.design.designedFrom,
+    artifactRevisions: {},
     documents: model.documents.map((d) => ({ id: d.id, title: d.title, pages: d.pages, rows: d.rows })),
   };
 }
