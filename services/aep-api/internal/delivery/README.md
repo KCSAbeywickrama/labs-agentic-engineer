@@ -139,6 +139,12 @@ is the one package allowed to name them, so `httpapi.Deps` + `httpapi.New` is wh
   assumption, missing spec, or an org service awaiting access) — blocks the version cut. `needsInput` stays the broad "there is
   something to show" flag: an external dependency's config VALUES are collected while the build runs
   and enforced at the deploy gate, so they never hold up starting a build.
+- **The click is the consent to the platform resources it provisions.** `BuildProvisionInputs` derives
+  the provision payload from the design, not the request: one approved `platform-resource` input per
+  resource preflight would still report (`pendingPlatformResource`, the one rule both share: not yet
+  provisioned or in flight, with the design-authored parameters), deduped by name. Request
+  `platform-resource` and `external-config` entries are ignored; only `org-service` approvals ride the
+  request.
 - The **event plane** (`eventcore`): the platform's whole reaction to a pull request, a milestone-matched
   issue and a build terminal. It merges, mints and signals — the supervisor decides. Its three GitHub
   effects are a squash-merge, an issue in a milestone, and a build pinned to a merge SHA. It owns the

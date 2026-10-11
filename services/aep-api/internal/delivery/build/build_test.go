@@ -1195,6 +1195,7 @@ func TestBuild_DependencyGate_NeedsContract_ResolvedByThisRequestsDrawerInput_Pr
 	spy := newPlanSpy()
 	tagger := &fakeTagger{res: &spec.SpecSaveResult{Tag: "v1"}}
 	coord := build.NewInputsCoordinator(&resolvingSpec{design: design}, noopAuth{}, design)
+	coord.SetProvisionStatus(pfStatus{})
 	svc := withPlanPath(build.NewService(build.Deps{
 		Repos: fakeRepos{}, Tagger: tagger, Coord: coord, Design: design,
 	}), spy)

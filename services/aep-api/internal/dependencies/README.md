@@ -136,7 +136,7 @@ slices.
   matters: a failure after Ensure leaves a record the project does not reference yet, and the next
   attempt reads "already registered — have the project reuse it instead".
 - **A gate's provisioning run keeps an execution row.** It is the one execution kind the milestone model
-  still writes: admitted when the drawer submits, finished by the readiness watcher, and its terminal state
+  still writes: admitted when a build (or a direct provision request) starts it, finished by the readiness watcher, and its terminal state
   is what closes the gate issue.
 - **Dependency wiring is SAID, never patched** (ADR-0004), and this domain now says only HALF of it
   (ADR-0013). A resource's `ref` + env-var names need no binding to compute, so design save stamps them

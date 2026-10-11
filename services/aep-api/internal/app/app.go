@@ -1137,17 +1137,18 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		Writer:   deliveryIssues,
 		Criteria: acceptanceCriteria{projFiles},
 	})
+	buildInputs := build.NewInputsCoordinator(
+		designService,                          // SpecCollector (CollectSpec)
+		buildDesignDeriver{svc: designService}, // DesignFactDeriver (sentinel translation)
+		designComponents{store: artifactStore},
+	).WithSkillMirror(skillSvc) // refresh .claude/skills onto HEAD before the tag-cut
 	buildSvc := build.NewService(build.Deps{
 		Repos:  repoFullNameLookup{repos: repoRepo},
 		Tagger: buildSpecTagger{art: artifactSvcGit},
 		// A repair build (B4) reads the fixed version's final validation the
 		// way the run read it, and files its failures as the run would have.
 		Repairs: runValidation{projectFiles: projFiles, svc: validationSvc, versions: artifactSvcGit, runs: milestoneRunRepo, cycles: runCycleRepo},
-		Coord: build.NewInputsCoordinator(
-			designService,                          // SpecCollector (CollectSpec)
-			buildDesignDeriver{svc: designService}, // DesignFactDeriver (sentinel translation)
-			designComponents{store: artifactStore},
-		).WithSkillMirror(skillSvc), // refresh .claude/skills onto HEAD before the tag-cut
+		Coord:   buildInputs,
 		// The build-time dependency hard gate's fresh read (dependencyGateFailures) —
 		// the SAME designComponents{store: artifactStore} adapter PreflightSvc.Design
 		// uses below, so both surfaces read the exact same
@@ -1184,6 +1185,9 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		ProjectNames:      projectDisplayNamer{client: projectClient},
 	})
 	testUserCoords.svc = provisioningSvc
+	// The build provisions every platform resource preflight would report, so
+	// it reads "already provisioned or in flight" through the same adapter.
+	buildInputs.SetProvisionStatus(buildProvisionStatus{svc: provisioningSvc})
 	// Assemble the dependencies domain (P8): the provisioning slice (7 ops over
 	// provisioningSvc) + the resource-type-discovery slice (ListPlatformResourceTypes
 	// over the catalog). Both slices are nil-tolerant; the edge 503s when unwired.

@@ -30,15 +30,16 @@ import (
 // effects a build requires: it collects external specs and runs the design
 // derivations (end-user auth + dependency wiring — ADR-0013) BEFORE the tag-cut
 // (ApplyPreTag, which runs on EVERY build, drawer inputs or not, because the
-// derivations depend on the design rather than on the inputs), derives unset
-// external-config authoring from that design, and passes platform resource
-// params + approvals through (BuildProvisionInputs). It is a thin
-// orchestrator — it holds no state and authors no OC resources
-// (that is the workflow's job, Task 3).
+// derivations depend on the design rather than on the inputs), and derives the
+// provision payload from that design: unset external-config authoring and an
+// approved provision of every platform resource not yet handled
+// (BuildProvisionInputs). It is a thin orchestrator — it holds no state and
+// authors no OC resources (that is the workflow's job, Task 3).
 type InputsCoordinator struct {
 	spec   SpecCollector
 	auth   DesignFactDeriver
 	design PreflightDesignReader
+	status ProvisionStatusReader
 	skills SkillMirror
 }
 
@@ -59,6 +60,15 @@ func NewInputsCoordinator(spec SpecCollector, auth DesignFactDeriver, design Pre
 func (c *InputsCoordinator) WithSkillMirror(m SkillMirror) *InputsCoordinator {
 	c.skills = m
 	return c
+}
+
+// SetProvisionStatus wires the reader that says whether a platform resource is
+// already provisioned or in flight — the same reader preflight filters with.
+// Set after construction because its adapter wraps the provisioning service,
+// which the composition root builds after the build service. Required by
+// BuildProvisionInputs.
+func (c *InputsCoordinator) SetProvisionStatus(s ProvisionStatusReader) {
+	c.status = s
 }
 
 // ApplyPreTag runs the side effects that MUST land on HEAD before the tag-cut
@@ -117,42 +127,82 @@ func (c *InputsCoordinator) ApplyPreTag(ctx context.Context, orgID, projectID st
 	return failures, nil
 }
 
-// BuildProvisionInputs derives one unset external-config payload per external
-// dependency from the design's union schema. Request external-config entries are
-// ignored: builds no longer collect or stage user values. Platform-resource and
-// org-service inputs still pass through; external-spec is handled pre-tag.
-func (c *InputsCoordinator) BuildProvisionInputs(ctx context.Context, orgID, projectID string, inputs []BuildInputItem) ([]delivery.ProvisionInput, []InputFailure, error) {
+// BuildProvisionInputs derives the build's provision payload from the design:
+//
+//   - external-config: one unset payload per external dependency, from the
+//     design's union schema. Request external-config entries are ignored:
+//     builds no longer collect or stage user values.
+//   - platform-resource: one APPROVED payload per platform-resource dependency
+//     that is not yet provisioned or in flight, carrying its design-authored
+//     parameters — exactly the set preflight reports (pendingPlatformResource).
+//     Clicking Build is the user's consent to the platform resources it will
+//     provision; there is no per-resource approval. A resource already handled
+//     is left out, so a later version does not re-provision it; ProvisionForBuild
+//     settles its gate instead. A dependency several components declare is
+//     provisioned once. Request platform-resource entries are ignored: the
+//     design is authoritative, as for external-config.
+//   - org-service: request entries pass through unchanged (their approval comes
+//     from the resolution drawer).
+//   - external-spec: handled pre-tag (ApplyPreTag); no provision payload.
+func (c *InputsCoordinator) BuildProvisionInputs(ctx context.Context, orgID, projectID string, inputs []BuildInputItem) ([]delivery.ProvisionInput, error) {
 	if c.design == nil {
-		return nil, nil, fmt.Errorf("build inputs: design reader is not configured")
+		return nil, fmt.Errorf("build inputs: design reader is not configured")
+	}
+	if c.status == nil {
+		return nil, fmt.Errorf("build inputs: provision status reader is not configured")
 	}
 	comps, err := c.design.ReadDesignComponents(ctx, orgID, projectID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	var (
-		out      []delivery.ProvisionInput
-		failures []InputFailure
-	)
+	out := externalConfigInputs(comps)
+	platform, err := c.platformResourceInputs(ctx, orgID, projectID, comps)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, platform...)
+	for _, in := range inputs {
+		switch in.Kind {
+		case "org-service":
+			out = append(out, delivery.ProvisionInput{
+				Component:  in.Component,
+				Dependency: in.Dependency,
+				Kind:       in.Kind,
+				Parameters: in.Parameters,
+				Approved:   in.Approved,
+			})
+		case "external-config", "platform-resource":
+			// Ignored. The design-derived entries above are authoritative.
+		case "external-spec":
+			// Collected in ApplyPreTag; no provision payload.
+		}
+	}
+	return out, nil
+}
+
+// externalConfigInputs derives one unset external-config payload per external
+// dependency name: the union schema's non-secret keys at their defaults.
+func externalConfigInputs(comps []spec.DesignComponent) []delivery.ProvisionInput {
 	union := spec.UnionExternalConfigKeys(comps)
 	unionByName := make(map[string][]spec.ConfigKey, len(union))
 	for name, keys := range union {
 		unionByName[strings.ToLower(name)] = keys
 	}
-	seenExternal := map[string]bool{}
+	var out []delivery.ProvisionInput
+	seen := map[string]bool{}
 	for _, component := range comps {
 		for _, dep := range component.Dependencies {
 			if dep.Kind != spec.DependencyKindExternal {
 				continue
 			}
 			nameKey := strings.ToLower(dep.Name)
-			if seenExternal[nameKey] {
+			if seen[nameKey] {
 				continue
 			}
-			seenExternal[nameKey] = true
+			seen[nameKey] = true
 			config := map[string]string{}
-			keys := unionByName[nameKey]
-			for _, key := range keys {
+			for _, key := range unionByName[nameKey] {
 				if !key.Secret {
 					config[key.Key] = key.DefaultValue
 				}
@@ -165,21 +215,39 @@ func (c *InputsCoordinator) BuildProvisionInputs(ctx context.Context, orgID, pro
 			})
 		}
 	}
-	for _, in := range inputs {
-		switch in.Kind {
-		case "external-config":
-			// Ignored. The design-derived entry above is authoritative.
-		case "platform-resource", "org-service":
+	return out
+}
+
+// platformResourceInputs derives one approved platform-resource payload per
+// dependency name that preflight would report as still pending.
+func (c *InputsCoordinator) platformResourceInputs(ctx context.Context, orgID, projectID string, comps []spec.DesignComponent) ([]delivery.ProvisionInput, error) {
+	var out []delivery.ProvisionInput
+	seen := map[string]bool{}
+	for _, component := range comps {
+		for _, dep := range component.Dependencies {
+			if dep.Kind != spec.DependencyKindPlatformResource {
+				continue
+			}
+			nameKey := strings.ToLower(dep.Name)
+			if seen[nameKey] {
+				continue
+			}
+			seen[nameKey] = true
+			item, err := pendingPlatformResource(ctx, c.status, orgID, projectID, component.Name, dep)
+			if err != nil {
+				return nil, fmt.Errorf("build inputs: read %q provision status: %w", dep.Name, err)
+			}
+			if item == nil {
+				continue
+			}
 			out = append(out, delivery.ProvisionInput{
-				Component:  in.Component,
-				Dependency: in.Dependency,
-				Kind:       in.Kind,
-				Parameters: in.Parameters,
-				Approved:   in.Approved,
+				Component:  item.Component,
+				Dependency: item.Dependency,
+				Kind:       item.Kind,
+				Parameters: item.Parameters,
+				Approved:   true,
 			})
-		case "external-spec":
-			// Collected in ApplyPreTag; no provision payload.
 		}
 	}
-	return out, failures, nil
+	return out, nil
 }
