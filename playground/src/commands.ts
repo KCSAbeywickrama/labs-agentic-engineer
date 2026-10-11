@@ -178,10 +178,14 @@ export interface TasksOptions extends PhaseOptions {
   productWide?: string[];
   /** Override the `cmd/build-plan` runner (tests). */
   buildPlan?: BuildPlanRunner;
+  /** Override the pre-tag design derivation (tests). */
+  deriveDesign?: (projectDir: string) => Promise<DeriveOutcome>;
 }
 
 /**
- * Phase 3 — tasks: the build click's plan half. The selection goes through
+ * Phase 3 — tasks: the build click's plan half. Production's pre-tag
+ * derivation runs first, as POST /build runs it before its gate (the gate reads
+ * the `exposesAPI.auth` it stamps). The selection goes through
  * POST /build's own code (`cmd/build-plan scope`, which refuses as it does:
  * the selection, then the build gate over the requirements, design and
  * acceptance files, so a design production would refuse never plans here),
@@ -203,6 +207,8 @@ export async function tasksCommand(projectDir: string, opts: TasksOptions): Prom
       detail: `${first!.file} (${first!.title}) still has unticked items — finish it with \`code\`, or delete the file to drop that version's work`,
     };
   }
+  const derived = await derivePreTag(projectDir, opts);
+  if (!derived.ok) return derived;
 
   const session = await openSession(projectDir, opts);
   try {
@@ -247,6 +253,23 @@ export async function tasksCommand(projectDir: string, opts: TasksOptions): Prom
   } finally {
     await session.close();
   }
+}
+
+/** Production's pre-tag design derivation (ADR-0003): end-user auth and each dependency's wiring. */
+async function derivePreTag(
+  projectDir: string,
+  opts: PhaseOptions & { deriveDesign?: (projectDir: string) => Promise<DeriveOutcome> },
+): Promise<PhaseOutcome> {
+  const derived = await (opts.deriveDesign ?? deriveDesign)(projectDir);
+  if (!derived.ok) return { ok: false, detail: derived.detail };
+  if (!opts.silent) {
+    output.write(
+      derived.changed.length > 0
+        ? `  ⚙ derived wiring: ${derived.changed.join(", ")}\n`
+        : "  ⚙ derived wiring: no change\n",
+    );
+  }
+  return { ok: true };
 }
 
 export interface CodeOptions extends PhaseOptions {
@@ -306,16 +329,9 @@ export async function codeCommand(
   const snapshot = takeUndoSnapshot(projectDir); // mandatory (§12), once per session
   if (!opts.silent) output.write(`  ⛑ undo snapshot: ${snapshot}\n`);
 
-  // Production's pre-tag derivation (ADR-0003); after the snapshot so `--restore` undoes it.
-  const derived = await (opts.deriveDesign ?? deriveDesign)(projectDir);
-  if (!derived.ok) return { ok: false, detail: derived.detail };
-  if (!opts.silent) {
-    output.write(
-      derived.changed.length > 0
-        ? `  ⚙ derived wiring: ${derived.changed.join(", ")}\n`
-        : "  ⚙ derived wiring: no change\n",
-    );
-  }
+  // After the snapshot so `--restore` undoes it.
+  const derived = await derivePreTag(projectDir, opts);
+  if (!derived.ok) return derived;
 
   const result = await runCodingAgent({
     projectDir,

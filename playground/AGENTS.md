@@ -16,9 +16,9 @@ Use this procedure for steps 1 and 3 of the `writing-skills` verify loop.
 ### Before the first run
 
 - Docker mode is the default. It needs a running Docker daemon (`colima start`).
-- `code` and `tasks` need `go` on the PATH. Before the agent starts, `code`
-  derives each dependency's `wiring` and `exposesAPI.auth` with aep-api's own
-  derivation, as POST /build does (ADR-0003). `tasks` runs
+- `code` and `tasks` need `go` on the PATH. Both first derive each
+  dependency's `wiring` and `exposesAPI.auth` with aep-api's own derivation, as
+  POST /build does before its gate (ADR-0003). `tasks` then runs
   `go run ./cmd/build-plan` to select and render the build issue.
 - If `aep-runner:dev` or `aep-runner-opencode:dev` is missing, the next `code`
   run builds both. The first build takes several minutes. It needs a
@@ -205,7 +205,7 @@ ae-studio-tools does in production), and the design agent puts it on the
 | the prototype review page is served by `@wso2/prototype-cli` preview, not the console | no console locally; the preview uses the same kit and Oxygen theme, has no Room, and saves the comments to `<component>/.prototype/feedback.json` | the console's prototype review |
 | `/v1` admits the session's dev bearer secret (`kit/auth.ts`), on loopback | no Platform IdP locally | the pod's `idpAuthenticate` |
 | `filesChangedExternally` follows the pod's rule (the last turn's snapshot differs), so it is set after any writing turn and resets with each session | the design agent keeps the last turn's facts in memory | the pod's behaviour, per pod lifetime |
-| `code` derives `wiring` and `exposesAPI.auth` from the repo's resource-type manifests, not from the cluster's catalog | there is no cluster; the derivation code is production's (`services/aep-api/cmd/design-derive`, ADR-0003) | a cluster with other resource types derives differently |
+| `code` and `tasks` derive `wiring` and `exposesAPI.auth` from the repo's resource-type manifests, not from the cluster's catalog | there is no cluster; the derivation code is production's (`services/aep-api/cmd/design-derive`, ADR-0003) | a cluster with other resource types derives differently |
 | no CRT-annotation append, no lineage diffs in replans | platform resources and tags do not exist locally | edit by hand; replan stays file-based |
 | no spec or design tags, and an issue file has no dedupe `key` | no builds or tags locally | `tasks` plans the next version in `versions`, so it never plans one twice |
 | design and tasks gates are playground UX | production has no server gate on the spec paths | advisory only |

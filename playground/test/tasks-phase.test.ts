@@ -32,6 +32,7 @@ import { tmpdir } from "node:os";
 import { mockModel, type MockStep } from "@aep/ae-design-agent/shared/mock-model";
 import { tasksCommand } from "../src/commands.js";
 import type { BuildPlanRunner } from "../src/engine/build-plan.js";
+import type { DeriveOutcome } from "../src/engine/design-derive.js";
 import { checklistDone, FsIssueStore, parseIssueFile, renderIssueFile } from "../src/ports/issue-store.js";
 import { loadProjectState } from "../src/state/project.js";
 
@@ -123,6 +124,9 @@ function fakeBuildPlan(calls: { args: string[]; stdin?: string }[], overrides: {
   };
 }
 
+/** The pre-tag derivation stand-in: nothing to derive. */
+const noDerive = async (): Promise<DeriveOutcome> => ({ ok: true, changed: [] });
+
 const planBuild = (id: string, items: string[]): MockStep => ({
   kind: "toolCall",
   toolCallId: id,
@@ -141,7 +145,7 @@ test("tasks: the selection's scope reaches the plan, its last ok planBuild becom
       planBuild("p3", ["foundation", "F1", "F2"]),
       { kind: "text", text: "Planned." },
     ]);
-    const outcome = await tasksCommand(projectDir, { model, skillsDir, silent: true, features: ["F2"], buildPlan: fakeBuildPlan(calls) });
+    const outcome = await tasksCommand(projectDir, { model, skillsDir, silent: true, features: ["F2"], deriveDesign: noDerive, buildPlan: fakeBuildPlan(calls) });
     assert.equal(outcome.ok, true, outcome.detail);
 
     assert.deepEqual(calls[0]!.args.slice(0, 1), ["scope"]);
@@ -171,9 +175,9 @@ test("tasks: a later version waits for the earlier one's checklist, then carries
   const calls: { args: string[]; stdin?: string }[] = [];
   try {
     const first = mockModel([planBuild("p1", ["F1", "F2"]), { kind: "text", text: "ok" }]);
-    assert.equal((await tasksCommand(projectDir, { model: first, skillsDir, silent: true, buildPlan: fakeBuildPlan(calls) })).ok, true);
+    assert.equal((await tasksCommand(projectDir, { model: first, skillsDir, silent: true, deriveDesign: noDerive, buildPlan: fakeBuildPlan(calls) })).ok, true);
 
-    const waiting = await tasksCommand(projectDir, { model: mockModel([]), skillsDir, silent: true, buildPlan: fakeBuildPlan(calls) });
+    const waiting = await tasksCommand(projectDir, { model: mockModel([]), skillsDir, silent: true, deriveDesign: noDerive, buildPlan: fakeBuildPlan(calls) });
     assert.equal(waiting.ok, false);
     assert.match(waiting.detail ?? "", /issues\/1\.md \(Build v1\) still has unticked items/);
 
@@ -181,7 +185,7 @@ test("tasks: a later version waits for the earlier one's checklist, then carries
     writeFileSync(file, readFileSync(file, "utf8").replaceAll("- [ ]", "- [x]"));
     calls.length = 0;
     const second = mockModel([planBuild("p2", ["F1", "F2"]), { kind: "text", text: "ok" }]);
-    assert.equal((await tasksCommand(projectDir, { model: second, skillsDir, silent: true, features: ["F3"], buildPlan: fakeBuildPlan(calls) })).ok, true);
+    assert.equal((await tasksCommand(projectDir, { model: second, skillsDir, silent: true, features: ["F3"], deriveDesign: noDerive, buildPlan: fakeBuildPlan(calls) })).ok, true);
     const args = calls[0]!.args.join(" ");
     assert.ok(args.includes("--version v2") && args.includes("--built-features F1,F2"), args);
     assert.equal(new FsIssueStore(projectDir).list().length, 2);
@@ -203,13 +207,53 @@ test("tasks: a design POST /build's gate refuses never plans; the gate's finding
       model: mockModel([planBuild("p1", ["F1"]), { kind: "text", text: "ok" }]),
       skillsDir,
       silent: true,
-      buildPlan: fakeBuildPlan(calls, { scopeCode: 1, stderr }),
+      deriveDesign: noDerive, buildPlan: fakeBuildPlan(calls, { scopeCode: 1, stderr }),
     });
     assert.equal(refused.ok, false);
     assert.match(refused.detail ?? "", /^the build is refused: specs\/design\/design\.cell: story F1\.1 .*; specs\/design\/components\/claims-web\/prototype\.tsx: /);
     assert.deepEqual(calls.map((c) => c.args[0]), ["scope"], "no plan turn and no issue render after a refusal");
     assert.equal(existsSync(join(projectDir, "issues")), false, "no issue written");
     assert.deepEqual(loadProjectState(projectDir, "p").versions, []);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+    rmSync(skillsDir, { recursive: true, force: true });
+  }
+});
+
+test("tasks: production's pre-tag derivation runs before the gate, and its refusal plans nothing", async () => {
+  const projectDir = seedDesignedProject();
+  const skillsDir = tempSkills();
+  const calls: { args: string[]; stdin?: string }[] = [];
+  try {
+    const order: string[] = [];
+    const buildPlan = fakeBuildPlan(calls);
+    const ok = await tasksCommand(projectDir, {
+      model: mockModel([planBuild("p1", ["F1", "F2"]), { kind: "text", text: "ok" }]),
+      skillsDir,
+      silent: true,
+      deriveDesign: async (dir) => {
+        order.push(`derive ${dir}`);
+        return { ok: true, changed: ["claims-api"] };
+      },
+      buildPlan: async (args, stdin) => {
+        order.push(args[0]!);
+        return buildPlan(args, stdin);
+      },
+    });
+    assert.equal(ok.ok, true, ok.detail);
+    assert.deepEqual(order, [`derive ${projectDir}`, "scope", "issue"]);
+
+    rmSync(join(projectDir, "issues"), { recursive: true, force: true });
+    calls.length = 0;
+    const refused = await tasksCommand(projectDir, {
+      model: mockModel([]),
+      skillsDir,
+      silent: true,
+      deriveDesign: async () => ({ ok: false, detail: "claims-api: dependency user-auth names no resource type" }),
+      buildPlan: fakeBuildPlan(calls),
+    });
+    assert.deepEqual(refused, { ok: false, detail: "claims-api: dependency user-auth names no resource type" });
+    assert.equal(calls.length, 0, "no selection after a refused derivation");
   } finally {
     rmSync(projectDir, { recursive: true, force: true });
     rmSync(skillsDir, { recursive: true, force: true });
@@ -225,7 +269,7 @@ test("tasks: a refused selection, or a plan turn that never plans, writes nothin
       skillsDir,
       silent: true,
       features: ["F9"],
-      buildPlan: fakeBuildPlan([], { scopeCode: 1, stderr: "specs/requirements/prd.md: F9 is not a feature of the requirements\n" }),
+      deriveDesign: noDerive, buildPlan: fakeBuildPlan([], { scopeCode: 1, stderr: "specs/requirements/prd.md: F9 is not a feature of the requirements\n" }),
     });
     assert.equal(refused.ok, false);
     assert.match(refused.detail ?? "", /the build is refused: .*F9 is not a feature/);
@@ -234,7 +278,7 @@ test("tasks: a refused selection, or a plan turn that never plans, writes nothin
       model: mockModel([planBuild("p1", ["F2"]), { kind: "text", text: "I could not plan." }]),
       skillsDir,
       silent: true,
-      buildPlan: fakeBuildPlan([]),
+      deriveDesign: noDerive, buildPlan: fakeBuildPlan([]),
     });
     assert.equal(silent.ok, false);
     assert.match(silent.detail ?? "", /without a build plan/);
