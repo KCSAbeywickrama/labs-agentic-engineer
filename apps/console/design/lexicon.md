@@ -66,6 +66,9 @@ for console turns, and a disagreement is settled here.
 | **Address comments (N)** | send every pending (and reopened) comment to the agent in one turn | Send, Submit review |
 | **✓ Addressed in revision N** | the agent's one-line answer on a comment it acted on | Resolved, Done |
 | **Reopen** | put an addressed comment back in the next batch | Reply, Unresolve |
+| **v2 is building — open it on Builds** | the Overview's note while a build runs and Build is held; the link opens that build | Build disabled, Busy |
+| **Not ready to build yet — Payroll export: waiting on Xero** | the note while every designed feature is held: each one with the build picker's reasons | Build refused, Blocked |
+| **Nothing new to build: what is designed is built and unchanged** | the note when every designed feature is built and has not changed since | Up to date, Nothing to do |
 
 ## The agent's questions
 

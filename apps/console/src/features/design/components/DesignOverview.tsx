@@ -16,13 +16,13 @@
  * under the License.
  */
 
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { createLink } from "@tanstack/react-router";
 import { Box, Button, Checkbox, Link, Typography } from "@wso2/oxygen-ui";
 import { useBuildAction } from "../../builds/buildPicker";
 import { soft } from "../../spec/components/Tag";
 import { dependencyKey } from "../model/artifacts";
-import { commentsOn, isWaiting } from "../model/review";
+import { commentsOn, isWaiting, overviewNote } from "../model/review";
 import type { DesignCard, ReviewRow } from "../useDesignCard";
 import { AnswerQuestions } from "./QuestionsPanel";
 
@@ -37,7 +37,8 @@ import { AnswerQuestions } from "./QuestionsPanel";
 // Exactly one button is the primary (model/review.ts primaryAction): Answer
 // while a question waits, Address comments while a comment waits, Design
 // while the spec is ahead of the design, Build once everything is checked,
-// otherwise Open on the first unchecked row.
+// otherwise Open on the first unchecked row. The note beside them says what
+// the primary asks and, while Build is held, why (model/review.ts overviewNote).
 
 const OpenLink = createLink(Link);
 const OpenButton = createLink(Button);
@@ -252,13 +253,21 @@ export function DesignOverview({
           {build.label ?? "Build"}
         </Button>
         <Typography variant="caption" color="text.secondary">
-          {waiting > 0
-            ? "Comments go to the agent only from here, all together."
-            : primary?.kind === "design"
-              ? "Update the design first: the spec has changed since."
-              : primary?.kind === "build"
-                ? "Everything is checked."
-                : "Build once everything is checked; until then it builds with what is unchecked."}
+          {overviewNote({ waiting, primary, hold: build.hold }).map((part, i) => (
+            <Fragment key={i}>
+              {i > 0 && " "}
+              {part.kind === "text" ? (
+                part.text
+              ) : (
+                <>
+                  {part.version} is building —{" "}
+                  <OpenLink to="/projects/$projectName/builds/$version" params={{ projectName, version: part.version }} variant="caption">
+                    open it on Builds
+                  </OpenLink>
+                </>
+              )}
+            </Fragment>
+          ))}
         </Typography>
       </Box>
       {review.problem && (

@@ -120,6 +120,13 @@ unchecked row. The card's header keeps only Build: the primary when Build
 is, except on the Overview, whose own Build carries it there (one primary per
 screen). Before anything is designed the card's body offers Design.
 
+The note beside the two buttons (`overviewNote`) says what the primary asks
+(comments to send, the design to update), then, while Build is held, why
+(`buildHold`, from the build offer): "v2 is building — open it on Builds",
+linking to that build; "Not ready to build yet — " with each held feature and
+the picker's reasons; or "Nothing new to build". Only a Build that can start
+reads "Everything is checked." A design run does not hold Build.
+
 **Address comments** (`useDesignTurns`) marks every waiting comment `sent`
 with `sentAt` in one write, then sends the bare `/address-comments`
 (`ADDRESS_COMMENTS_COMMAND`) with the design-review scope; the room is

@@ -205,6 +205,26 @@ export function offeredRows(offer: BuildOffer): PickRow[] {
   return offer.rows.filter((r) => r.state === "offered");
 }
 
+/**
+ * Why no build can start now, for the entry points that show Build held:
+ * the offer still loading, a build running (the picker does not open), each
+ * designed feature held with the picker's own reasons, or nothing new since
+ * the last build. Null when a build is offered.
+ */
+export type BuildHold =
+  | { kind: "loading" }
+  | { kind: "running"; version: string }
+  | { kind: "held"; features: readonly { name: string; reasons: readonly string[] }[] }
+  | { kind: "nothing-new" };
+
+export function buildHold(offer: BuildOffer | null): BuildHold | null {
+  if (!offer) return { kind: "loading" };
+  if (offer.running) return { kind: "running", version: offer.running.version };
+  if (offeredRows(offer).length > 0) return null;
+  const held = offer.rows.flatMap((r) => (r.kind === "feature" && r.state === "disabled" ? [{ name: r.name, reasons: r.detail }] : []));
+  return held.length > 0 ? { kind: "held", features: held } : { kind: "nothing-new" };
+}
+
 /** What the picker opens with: every pickable feature. A product-wide row is the user's to tick. */
 export function defaultSelection(offer: BuildOffer): BuildSelection {
   return { features: offeredRows(offer).flatMap((r) => (r.kind === "feature" ? [r.id] : [])), productWide: [] };

@@ -29,6 +29,7 @@ import {
   EMPTY_REVIEW,
   isAsking,
   isChecked,
+  overviewNote,
   primaryAction,
   readReview,
   reopen,
@@ -214,5 +215,42 @@ describe("the one primary", () => {
 
   it("is nothing while nothing is listed", () => {
     expect(primaryAction({ ...idle, rows: [] })).toBeNull();
+  });
+});
+
+describe("the Overview's note beside Build", () => {
+  const text = (t: string) => ({ kind: "text", text: t });
+
+  it("says everything is checked only while Build can start", () => {
+    expect(overviewNote({ waiting: 0, primary: { kind: "build" }, hold: null })).toEqual([text("Everything is checked.")]);
+  });
+
+  it("names the running build, with a link, in place of everything is checked", () => {
+    expect(overviewNote({ waiting: 0, primary: { kind: "build" }, hold: { kind: "running", version: "v2" } })).toEqual([{ kind: "building", version: "v2" }]);
+  });
+
+  it("names each held feature with the picker's reasons", () => {
+    const hold = { kind: "held", features: [{ name: "Payroll export", reasons: ["waiting on Xero", "blocked by a question"] }, { name: "Approvals", reasons: ["design out of date"] }] } as const;
+    expect(overviewNote({ waiting: 0, primary: { kind: "open", key: "roles" }, hold })).toEqual([
+      text("Not ready to build yet — Payroll export: waiting on Xero, blocked by a question; Approvals: design out of date."),
+    ]);
+  });
+
+  it("says when there is nothing new to build", () => {
+    expect(overviewNote({ waiting: 0, primary: { kind: "build" }, hold: { kind: "nothing-new" } })).toEqual([
+      text("Nothing new to build: what is designed is built and unchanged."),
+    ]);
+  });
+
+  it("keeps what the primary asks, then why Build is held", () => {
+    expect(overviewNote({ waiting: 2, primary: { kind: "address", count: 2 }, hold: { kind: "running", version: "v2" } })).toEqual([
+      text("Comments go to the agent only from here, all together."),
+      { kind: "building", version: "v2" },
+    ]);
+    expect(overviewNote({ waiting: 0, primary: { kind: "design" }, hold: null })).toEqual([text("Update the design first: the spec has changed since.")]);
+  });
+
+  it("says nothing of Build while the build offer loads", () => {
+    expect(overviewNote({ waiting: 0, primary: { kind: "build" }, hold: { kind: "loading" } })).toEqual([]);
   });
 });

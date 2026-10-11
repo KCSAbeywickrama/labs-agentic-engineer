@@ -22,7 +22,7 @@ import { useDesignModel } from "../design/useDesignModel";
 import { useWaitingComments } from "../design/useWaitingComments";
 import { useSpecWorkspace } from "../spec/useSpecWorkspace";
 import { useBuilds } from "./api/builds";
-import { buildOffer, offeredRows, type BuildOffer } from "./model/picker";
+import { buildHold, buildOffer, type BuildHold, type BuildOffer } from "./model/picker";
 
 // The build picker is one dialog per project, opened from wherever a build is
 // offered: the overview's Build v1, the track's Build leg, the design card
@@ -61,10 +61,11 @@ export function useBuildOffer(projectName: string): BuildOffer | null {
 
 /**
  * The build action as an entry point shows it: its words ("Build v1") while
- * something is designed and no build runs, else null; and what it does,
- * which opens the picker, or the running build's card while a build runs.
+ * something is designed and no build runs, else null and why (`hold`); and
+ * what it does, which opens the picker, or the running build's card while a
+ * build runs.
  */
-export function useBuildAction(projectName: string): { offer: BuildOffer | null; label: string | null; open: () => void } {
+export function useBuildAction(projectName: string): { offer: BuildOffer | null; label: string | null; hold: BuildHold | null; open: () => void } {
   const controls = useContext(BuildPickerContext);
   if (!controls) throw new Error("useBuildAction outside the project's build picker");
   const offer = useBuildOffer(projectName);
@@ -74,6 +75,7 @@ export function useBuildAction(projectName: string): { offer: BuildOffer | null;
     if (running) void navigate({ to: "/projects/$projectName/builds/$version", params: { projectName, version: running.version } });
     else controls.open();
   }, [controls, navigate, projectName, running]);
-  const label = offer && !running && offeredRows(offer).length > 0 ? `Build ${offer.version}` : null;
-  return { offer, label, open };
+  const hold = buildHold(offer);
+  const label = offer && !hold ? `Build ${offer.version}` : null;
+  return { offer, label, hold, open };
 }

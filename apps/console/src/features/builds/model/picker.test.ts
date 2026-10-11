@@ -22,6 +22,7 @@ import type { LineBlock } from "../../spec/model/ids";
 import type { ProjectBuild } from "../api/builds";
 import { builtLines } from "./changes";
 import {
+  buildHold,
   buildOffer,
   canStart,
   defaultSelection,
@@ -225,6 +226,14 @@ describe("a later build: what changed since, and a new product-wide item", () =>
 
   it("offers nothing while a build runs", () => {
     expect(nextUpBuild(later({ builds: [{ ...v1, status: "building" }] }))).toBeNull();
+  });
+
+  it("says why no build can start: one running, features held, or nothing new", () => {
+    expect(buildHold(later())).toBeNull();
+    expect(buildHold(null)).toEqual({ kind: "loading" });
+    expect(buildHold(later({ builds: [{ ...v1, status: "building" }] }))).toEqual({ kind: "running", version: "v1" });
+    expect(buildHold(later({ lines, productWide }))).toEqual({ kind: "held", features: [{ name: "Payroll export", reasons: ["waiting on Xero", "blocked by a question"] }] });
+    expect(buildHold(later({ lines, productWide, dependencies: [] }))).toEqual({ kind: "nothing-new" });
   });
 });
 

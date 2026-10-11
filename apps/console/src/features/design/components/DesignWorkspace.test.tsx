@@ -36,6 +36,7 @@ import { DESIGN_REVIEW_PATH, type DesignReview } from "@aep/agent-stream";
 import { readDocFile, setDocFile } from "@aep/collab-doc";
 import { sha256Text } from "../../../lib/sha256";
 import type { ProjectChat } from "../../agent-chat/chatStore";
+import type { BuildHold } from "../../builds/model/picker";
 import type { DesignModel } from "../api/designModel";
 import { readReview } from "../model/review";
 import { readSpecLines } from "../../spec/collab/useSpecLines";
@@ -110,7 +111,9 @@ vi.mock("../../agent-chat/useProjectChat", async (importOriginal) => ({
 vi.mock("../../shell/chatPanel", () => ({ useChatPanel: () => ({ open: vi.fn() }) }));
 
 const openBuild = vi.fn();
-vi.mock("../../builds/buildPicker", () => ({ useBuildAction: () => ({ offer: null, label: "Build v1", open: openBuild }) }));
+/** Why no build can start (null: Build v1 is offered). */
+let hold: BuildHold | null = null;
+vi.mock("../../builds/buildPicker", () => ({ useBuildAction: () => ({ offer: null, label: hold ? null : "Build v1", hold, open: openBuild }) }));
 
 const { DesignActions, DesignWorkspace } = await import("./DesignWorkspace");
 
@@ -173,6 +176,7 @@ beforeEach(() => {
   designedFrom = {};
   outOfDate = [];
   revisions = {};
+  hold = null;
   send.mockReset();
   send.mockResolvedValue(true);
 });
@@ -265,6 +269,20 @@ describe("the Overview's one primary", () => {
     await waitFor(() => expect(primaries()).toEqual(["Build v1"]));
     const header = () => within(screen.getByRole("banner", { name: "Card actions" })).getByRole("button", { name: "Build v1" });
     expect(header()).toHaveClass("MuiButton-outlined");
+  });
+
+  it("says why Build is held while a build runs, linking to it, never only that everything is checked", async () => {
+    hold = { kind: "running", version: "v2" };
+    renderCard();
+    await screen.findByRole("region", { name: "For technical review" });
+    for (const name of ["Architecture", "Data model", "Technical decisions"]) {
+      fireEvent.click(screen.getByRole("checkbox", { name: `Checked: ${name}` }));
+    }
+    const bottom = screen.getByRole("region", { name: "Send and build" });
+    await waitFor(() => expect(within(bottom).getByRole("button", { name: "Build" })).toBeDisabled());
+    expect(bottom).toHaveTextContent("v2 is building — open it on Builds");
+    expect(bottom).not.toHaveTextContent("Everything is checked.");
+    expect(within(bottom).getByRole("link", { name: "open it on Builds" })).toHaveAttribute("href", "/projects/acme-expenses/builds/v2");
   });
 
   it("makes the header's Build the primary on a file once every file is checked", async () => {

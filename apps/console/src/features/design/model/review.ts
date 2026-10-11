@@ -25,6 +25,7 @@ import {
   type ReviewComment,
   type ReviewedArtifact,
 } from "@aep/agent-stream";
+import type { BuildHold } from "../../builds/model/picker";
 
 // The design review as `specs/design/review.json` holds it (the contract is
 // @aep/agent-stream's DesignReview): per artifact path, the user's comments
@@ -252,4 +253,29 @@ export function primaryAction(input: {
   if (input.rows.length === 0) return null;
   const first = input.rows.find((r) => !r.checked);
   return first ? { kind: "open", key: first.key } : { kind: "build" };
+}
+
+/** The Overview's note beside Address comments and Build: a sentence, or the running build to link to. */
+export type OverviewNotePart = { kind: "text"; text: string } | { kind: "building"; version: string };
+
+/**
+ * What the note says, in order: what the primary asks (comments to send, the
+ * design to update), then why Build is held, else where Build stands against
+ * the review. A Build held says why, never "Everything is checked." alone; a
+ * Build still loading says nothing of it.
+ */
+export function overviewNote(input: { waiting: number; primary: Primary; hold: BuildHold | null }): OverviewNotePart[] {
+  const { waiting, primary, hold } = input;
+  const text = (t: string): OverviewNotePart => ({ kind: "text", text: t });
+  const parts: OverviewNotePart[] = [];
+  if (waiting > 0) parts.push(text("Comments go to the agent only from here, all together."));
+  else if (primary?.kind === "design") parts.push(text("Update the design first: the spec has changed since."));
+  if (hold?.kind === "running") return [...parts, { kind: "building", version: hold.version }];
+  if (hold?.kind === "held") {
+    const why = hold.features.map((f) => `${f.name}: ${f.reasons.join(", ")}`).join("; ");
+    return [...parts, text(`Not ready to build yet — ${why}.`)];
+  }
+  if (hold?.kind === "nothing-new") return [...parts, text("Nothing new to build: what is designed is built and unchanged.")];
+  if (parts.length > 0 || hold?.kind === "loading") return parts;
+  return [text(primary?.kind === "build" ? "Everything is checked." : "Build once everything is checked; until then it builds with what is unchecked.")];
 }
