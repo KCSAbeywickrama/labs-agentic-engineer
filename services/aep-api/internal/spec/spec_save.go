@@ -153,8 +153,7 @@ func (s *artifactService) SaveSpec(ctx context.Context, orgID, projectID string,
 	// Hard gate: what this version carries must be buildable BEFORE any tag
 	// is cut. It runs even when the pick was refused, so one save reports
 	// every reason at once.
-	gateErr := validateSpecBundles(reqFiles, designFiles, acceptanceFiles, storySet(spec, plan), plan.Features)
-	if verr := joinValidation(planErr, gateErr); verr != nil {
+	if verr := gateVersion(spec, plan, planErr, reqFiles, designFiles, acceptanceFiles); verr != nil {
 		slog.WarnContext(ctx, "spec save: hard gate failed",
 			"project", projectID, "commit", commit, "error", verr)
 		return nil, verr
@@ -220,6 +219,14 @@ func (s *artifactService) SaveSpec(ctx context.Context, orgID, projectID string,
 // authored. The cost of that is what it always was — a `v<N>` tag no longer
 // promises a buildable spec.
 const specGateDisabled = false
+
+// gateVersion is POST /build's hard gate over what plan carries: the spec gate
+// joined with the selection's own refusal planErr, so one answer names every
+// reason. SaveSpec and GatedSelection (the playground's cmd/build-plan) both
+// run it, so a local build is refused exactly where a real one would be.
+func gateVersion(spec reqspec.Spec, plan reqspec.BuildPlan, planErr error, reqFiles, designFiles, acceptanceFiles map[string]string) error {
+	return joinValidation(planErr, validateSpecBundles(reqFiles, designFiles, acceptanceFiles, storySet(spec, plan), plan.Features))
+}
 
 // validateSpecBundles is the shared spec gate: the requirements main doc must
 // exist, its IDs must hold, the design bundle must pass the design hard gate,

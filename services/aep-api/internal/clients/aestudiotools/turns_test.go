@@ -130,7 +130,7 @@ func TestStartTurn_StreamsEventsInOrderKeepAlivesIncluded(t *testing.T) {
 	}
 }
 
-func TestStartTurn_PlanSendsScopeAndTaskContext(t *testing.T) {
+func TestStartTurn_PlanSendsScope(t *testing.T) {
 	var body map[string]any
 	srv := ndjsonServer(t, &body, `{"type":"result","status":"completed"}`)
 	a := newAdapter(t, fixedTarget(srv.URL, "ou-123"), &countingTokens{})
@@ -138,11 +138,10 @@ func TestStartTurn_PlanSendsScopeAndTaskContext(t *testing.T) {
 		TurnID: turnID, Project: "greeter", Kind: "plan", At: "tags/m1",
 		Scope: &PlanScope{
 			Tag:         "m1",
-			Stories:     []PlanStory{{ID: "F1.1", Title: "Greet", Covered: true}, {ID: "F2.1"}},
 			Features:    []PlanFeature{{ID: "F1", Name: "Greeting"}, {ID: "F2", Needs: []string{"F1"}}},
 			ProductWide: []PlanItem{{ID: "P1", Text: "Log in", AppliesTo: []string{"all"}}},
+			HeldBack:    []string{"F2.3"},
 		},
-		TaskContext: []PlanContextFile{{Path: "tasks/1.md", Body: "# one"}},
 	}
 	seq, err := a.StartTurn(context.Background(), acmeGreeter, req)
 	if err != nil {
@@ -154,10 +153,8 @@ func TestStartTurn_PlanSendsScopeAndTaskContext(t *testing.T) {
 	raw, _ := json.Marshal(body)
 	for _, want := range []string{
 		`"at":"tags/m1"`,
-		`"scope":{"features":[{"id":"F1","name":"Greeting"},{"id":"F2","needs":["F1"]}],` +
-			`"productWide":[{"appliesTo":["all"],"id":"P1","text":"Log in"}],` +
-			`"stories":[{"covered":true,"id":"F1.1","title":"Greet"},{"covered":false,"id":"F2.1"}],"tag":"m1"}`,
-		`"taskContext":[{"body":"# one","path":"tasks/1.md"}]`,
+		`"scope":{"features":[{"id":"F1","name":"Greeting"},{"id":"F2","needs":["F1"]}],"heldBack":["F2.3"],` +
+			`"productWide":[{"appliesTo":["all"],"id":"P1","text":"Log in"}],"tag":"m1"}`,
 	} {
 		if !strings.Contains(string(raw), want) {
 			t.Fatalf("body %s lacks %s", raw, want)

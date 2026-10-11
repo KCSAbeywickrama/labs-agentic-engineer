@@ -25,15 +25,15 @@
  * `POST /turns` starts the turn through the same start path as a browser turn
  * (`TurnStarter.startServerTurn`), or reattaches to the turn its `turnId`
  * names, then answers NDJSON: the handler is one more subscriber on the
- * turn's replay buffer. It projects the ok results of `planTask` and
- * `updateTask` to `task-op` lines (`taskOpOf`, aep-api's plan tap filter
- * moved into the pod), sends a `keep-alive` line every 15 s, and ends with
+ * turn's replay buffer. It projects the ok results of `planBuild` to
+ * `task-op` lines (`taskOpOf`, aep-api's plan tap filter moved into the
+ * pod), sends a `keep-alive` line every 15 s, and ends with
  * one `result` line. A caller that goes away only detaches: the turn runs on,
  * and a retry with the same `turnId` replays it from the start.
  */
 
 import express, { type ErrorRequestHandler, type Express, type Response } from "express";
-import { isTurnSpec, PLAN_TASK, UPDATE_TASK } from "@aep/agent-stream";
+import { isTurnSpec, PLAN_BUILD } from "@aep/agent-stream";
 import type { components } from "../generated/turn-socket.js";
 import { ReplayTruncatedError, type ReplayFrame, type ReplayPart, type TurnEndPart } from "../turns/replay-buffer.js";
 import type { TurnDesk, TurnStatus } from "../turns/turn-desk.js";
@@ -57,7 +57,7 @@ const TRUNCATED_RECHECK_MS = 1_000;
 export const SHUTDOWN_MESSAGE = "the studio is shutting down";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const REQUEST_KEYS = new Set(["turnId", "project", "kind", "credit", "at", "scope", "taskContext", "text"]);
+const REQUEST_KEYS = new Set(["turnId", "project", "kind", "credit", "at", "scope", "text"]);
 /** A plan turn's pin: a resolved commit, never a ref (the studio resolves `tags/<version>`). */
 const SHA_RE = /^[0-9a-f]{40}$/;
 const CREDIT_KEYS = ["userId", "name", "email"] as const;
@@ -74,17 +74,16 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * The Task operation one stream part carries, or `null`: a `tool-result` of
- * `planTask` / `updateTask` whose output is ok, with op `plan` / `update`
- * (port of aep-api's `plan_tap.go` `consume` filter). An `ok: false` result
- * is the agent correcting itself and never leaves the pod.
+ * The build plan one stream part carries, or `null`: a `tool-result` of
+ * `planBuild` whose output is ok, with op `build` (port of aep-api's
+ * `plan_tap.go` `consume` filter). An `ok: false` result is the agent
+ * correcting itself and never leaves the pod.
  */
 export function taskOpOf(part: unknown): Pick<TaskOpFrame, "op" | "output"> | null {
   if (!isRecord(part) || part.type !== "tool-result") return null;
-  if (part.toolName !== PLAN_TASK && part.toolName !== UPDATE_TASK) return null;
+  if (part.toolName !== PLAN_BUILD) return null;
   const output = part.output;
-  if (!isRecord(output) || output.ok !== true) return null;
-  if (output.op !== "plan" && output.op !== "update") return null;
+  if (!isRecord(output) || output.ok !== true || output.op !== "build") return null;
   return { op: output.op, output };
 }
 
@@ -135,7 +134,7 @@ export function parseTurnRequest(body: unknown): ServerTurnRequest | string {
   if (!isRecord(body)) return "the body must be a JSON object";
   const unknown = Object.keys(body).find((k) => !REQUEST_KEYS.has(k));
   if (unknown !== undefined) return `unknown field ${unknown}`;
-  const { turnId, project, kind, credit, at, scope, taskContext, text } = body;
+  const { turnId, project, kind, credit, at, scope, text } = body;
   if (typeof turnId !== "string" || !UUID_RE.test(turnId)) return "turnId must be a uuid";
   if (typeof project !== "string" || project === "") return "project is required";
   if (kind !== "start" && kind !== "plan") return "kind must be start or plan";
@@ -148,7 +147,7 @@ export function parseTurnRequest(body: unknown): ServerTurnRequest | string {
     if (typeof at !== "string" || !SHA_RE.test(at)) return "at must be a 40-hex commit sha";
     if (kind !== "plan") return "at is only for a plan turn";
   }
-  if (!isTurnSpec({ kind: "plan", scope, taskContext })) return "scope or taskContext is malformed";
+  if (!isTurnSpec({ kind: "plan", scope })) return "scope is malformed";
   return {
     turnId: turnId.toLowerCase(),
     project,
@@ -156,7 +155,6 @@ export function parseTurnRequest(body: unknown): ServerTurnRequest | string {
     credit: { userId: credit.userId as string, name: credit.name as string, email: credit.email as string },
     ...(at !== undefined ? { at } : {}),
     ...(scope !== undefined ? { scope: scope as NonNullable<ServerTurnRequest["scope"]> } : {}),
-    ...(taskContext !== undefined ? { taskContext: taskContext as NonNullable<ServerTurnRequest["taskContext"]> } : {}),
     ...(text !== undefined ? { text } : {}),
   };
 }

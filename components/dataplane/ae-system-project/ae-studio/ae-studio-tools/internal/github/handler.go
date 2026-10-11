@@ -212,14 +212,6 @@ func (h Handler) SetIssueBody(ctx context.Context, req gen.SetIssueBodyRequestOb
 	return gen.SetIssueBody204Response{}, nil
 }
 
-// SetIssueTitle replaces an issue's title.
-func (h Handler) SetIssueTitle(ctx context.Context, req gen.SetIssueTitleRequestObject) (gen.SetIssueTitleResponseObject, error) {
-	if err := h.gh.EditIssueTitle(ctx, req.Owner, req.Repo, req.Number, req.Body.Title); err != nil {
-		return h.problem(ctx, "set-issue-title", req.Owner, req.Repo, err)
-	}
-	return gen.SetIssueTitle204Response{}, nil
-}
-
 // SetIssueMilestone assigns an issue to a milestone by number.
 func (h Handler) SetIssueMilestone(ctx context.Context, req gen.SetIssueMilestoneRequestObject) (gen.SetIssueMilestoneResponseObject, error) {
 	if err := h.gh.SetIssueMilestone(ctx, req.Owner, req.Repo, req.Number, req.Body.Number); err != nil {
@@ -494,9 +486,6 @@ func (p problemReply) VisitReopenIssueResponse(w http.ResponseWriter) error { re
 
 // VisitSetIssueBodyResponse implements gen.SetIssueBodyResponseObject.
 func (p problemReply) VisitSetIssueBodyResponse(w http.ResponseWriter) error { return p.write(w) }
-
-// VisitSetIssueTitleResponse implements gen.SetIssueTitleResponseObject.
-func (p problemReply) VisitSetIssueTitleResponse(w http.ResponseWriter) error { return p.write(w) }
 
 // VisitSetIssueMilestoneResponse implements gen.SetIssueMilestoneResponseObject.
 func (p problemReply) VisitSetIssueMilestoneResponse(w http.ResponseWriter) error { return p.write(w) }

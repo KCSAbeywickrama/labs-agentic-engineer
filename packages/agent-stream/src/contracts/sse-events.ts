@@ -412,7 +412,7 @@ export interface Change {
  *              the few that name a branch of one instead resolve in the design
  *              agent, which is where wording lives. `references` names the
  *              attached reference documents exactly as on `start` — a flow
- *              generates artifacts (wireframes above all) that must be
+ *              generates artifacts (the prototype above all) that must be
  *              grounded in an attached sketch or spec.
  *              `prototypeFeedback` rides only the `prototype` flow: a reviewer's
  *              batch of requests on one prototype, which turns the flow from
@@ -425,15 +425,15 @@ export interface Change {
  *              (paths under `specs/requirements/references/`, listed by the
  *              BFF). Paths only: they are ordinary spec content the agent
  *              reads from its own snapshot. Absent/empty → nothing is said.
- *  - `plan`  — Task planning. `scope` is the milestone's story coverage and
- *              `taskContext` the existing-Task renders; both are platform
- *              state, not repository files, so they cannot ride the snapshot.
+ *  - `plan`  — the build plan. `scope` is what the version carries; it is
+ *              platform state (the tag's annotation), not a repository file,
+ *              so it cannot ride the snapshot.
  */
 export type TurnSpec =
   | { kind: "chat"; text: string }
   | { kind: "flow"; skill: string; text?: string; references?: string[]; prototypeFeedback?: PrototypeFeedback }
   | { kind: "start"; idea?: string; references?: string[] }
-  | { kind: "plan"; scope?: PlanScope; taskContext?: PlanContextFile[] };
+  | { kind: "plan"; scope?: PlanScope };
 
 /** The flow a `prototypeFeedback` batch may ride: the `/prototype` command's token. */
 export const PROTOTYPE_FLOW_SKILL = "prototype";
@@ -738,26 +738,19 @@ export function isTurnAim(v: unknown): v is TurnAim {
   });
 }
 
-/** The milestone a plan turn is scoped to, and which of its stories already have Tasks. */
+/** What the version a plan turn plans carries, from its tag's annotation. */
 export interface PlanScope {
   /** The spec tag the milestone is pinned to. */
   tag: string;
-  /** Each in-scope story by its ID ("F2.3"). */
-  stories: { id: string; title?: string; covered: boolean }[];
   /**
    * The features the version carries, in ID order, each with the carried
-   * features it waits on: one Task per feature per component (B3).
+   * features it is built after: one checklist item each.
    */
   features?: { id: string; name?: string; needs?: string[] }[];
-  /** The product-wide items the version carries: each component's Foundation Task builds them. */
+  /** The product-wide items the version carries: the Foundation item builds them. */
   productWide?: { id: string; text?: string; appliesTo?: string[] }[];
-}
-
-/** One existing-Task render passed as read-only planning context. */
-export interface PlanContextFile {
-  /** Historical `tasks/<n>.md` name — kept so the model's mental layout is unchanged. */
-  path: string;
-  body: string;
+  /** The stories of carried features the version holds back (they need a feature neither built nor carried). */
+  heldBack?: string[];
 }
 
 /**
@@ -820,7 +813,7 @@ export function isTurnSpec(v: unknown): v is TurnSpec {
     case "start":
       return optStr(t.idea) && optStrArr(t.references);
     case "plan":
-      return isPlanScopeOrAbsent(t.scope) && isPlanContextOrAbsent(t.taskContext);
+      return isPlanScopeOrAbsent(t.scope);
     default:
       return false;
   }
@@ -831,20 +824,10 @@ function isPlanScopeOrAbsent(v: unknown): boolean {
   if (v === null || typeof v !== "object") return false;
   const s = v as Record<string, unknown>;
   if (typeof s.tag !== "string") return false;
-  if (!Array.isArray(s.stories)) return false;
-  const storiesOk = s.stories.every((row) => {
-    if (row === null || typeof row !== "object") return false;
-    const r = row as Record<string, unknown>;
-    return (
-      typeof r.id === "string" &&
-      typeof r.covered === "boolean" &&
-      (r.title === undefined || typeof r.title === "string")
-    );
-  });
   return (
-    storiesOk &&
     isRowsOrAbsent(s.features, (r) => optionalString(r.name) && optionalStrings(r.needs)) &&
-    isRowsOrAbsent(s.productWide, (r) => optionalString(r.text) && optionalStrings(r.appliesTo))
+    isRowsOrAbsent(s.productWide, (r) => optionalString(r.text) && optionalStrings(r.appliesTo)) &&
+    optionalStrings(s.heldBack)
   );
 }
 
@@ -865,16 +848,6 @@ function optionalString(v: unknown): boolean {
 
 function optionalStrings(v: unknown): boolean {
   return v === undefined || (Array.isArray(v) && v.every((x) => typeof x === "string"));
-}
-
-function isPlanContextOrAbsent(v: unknown): boolean {
-  if (v === undefined) return true;
-  if (!Array.isArray(v)) return false;
-  return v.every((row) => {
-    if (row === null || typeof row !== "object") return false;
-    const r = row as Record<string, unknown>;
-    return typeof r.path === "string" && typeof r.body === "string";
-  });
 }
 
 // --- The terminal manifest (D14) --------------------

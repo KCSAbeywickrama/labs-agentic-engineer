@@ -127,6 +127,13 @@ directory on disk, with the resource-type catalog decoded from manifest files
 (`openchoreo.ResourceTypeDir`). The playground runs it before each coding run
 (playground ADR-0003).
 
+**`cmd/build-plan`** is a third offline entry, over a spec folder on disk: `scope`
+runs POST /build's feature selection behind its hard gate (`spec.GatedSelection`:
+the spec gate `SaveSpec` runs before it cuts a tag, build gate included) and prints
+what the build carries with the plan turn's scope; `issue` renders the build
+issue the plan service mints (`BuildScope.Issue`) from the planner's checklist.
+The playground's tasks phase runs both (playground ADR-0003).
+
 ## Conventions
 
 - **Contract-first.** Every HTTP op is generated from

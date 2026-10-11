@@ -117,14 +117,15 @@ type RunCycleRepository interface {
 	NotePullRequest(ctx context.Context, id string, pr CyclePullRequest) (*RunCycle, error)
 
 	// NoteMergeDecision records what the merge policy decided about the cycle's
-	// pull request: the matched issue set, and the verdict (with its reason) when
+	// pull request: the matched issue set (what the merge closes), the advanced
+	// build issue (what it lands part of), and the verdict (with its reason) when
 	// the pull request did not merge.
 	//
 	// It is a SEPARATE mutator from NotePullRequest on purpose. Pull request
 	// identity is backfilled from the merge webhook too, and a backfill has no
 	// decision in hand — folding both into one update would let it clobber a
 	// recorded verdict with zero values. Guarded on the cycle being open.
-	NoteMergeDecision(ctx context.Context, id string, resolves []int, verdict, reason string) (*RunCycle, error)
+	NoteMergeDecision(ctx context.Context, id string, worked CycleWork, verdict, reason string) (*RunCycle, error)
 
 	// Finish closes the cycle: it stamps ended_at and records the merge SHA the
 	// cycle landed. mergeSHA is empty for a cycle that ended without a merge
@@ -384,16 +385,17 @@ func (r *runCycleRepository) NotePullRequest(ctx context.Context, id string, pr 
 	})
 }
 
-func (r *runCycleRepository) NoteMergeDecision(ctx context.Context, id string, resolves []int, verdict, reason string) (*RunCycle, error) {
-	// A STRUCT update, not the map the other mutators use: resolves is a
-	// serializer-backed jsonb column, and only the struct path runs the schema's
-	// serializer. Select names the three columns so blanks are written too — the
-	// row is a snapshot of the LATEST decision, so a pull request that was
+func (r *runCycleRepository) NoteMergeDecision(ctx context.Context, id string, worked CycleWork, verdict, reason string) (*RunCycle, error) {
+	// A STRUCT update, not the map the other mutators use: resolves and advances
+	// are serializer-backed jsonb columns, and only the struct path runs the
+	// schema's serializer. Select names the columns so blanks are written too —
+	// the row is a snapshot of the LATEST decision, so a pull request that was
 	// declined and then re-pushed into a merge must not keep its stale verdict.
 	return r.updateOpenColumns(ctx, id,
-		[]string{"resolves", "merge_verdict", "merge_reason"},
+		[]string{"resolves", "advances", "merge_verdict", "merge_reason"},
 		RunCycle{
-			Resolves:     IssueNumbers(resolves),
+			Resolves:     IssueNumbers(worked.Resolves),
+			Advances:     IssueNumbers(worked.Advances),
 			MergeVerdict: verdict,
 			MergeReason:  reason,
 		})

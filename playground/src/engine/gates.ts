@@ -57,6 +57,31 @@ export function listComponents(projectDir: string): string[] {
     .sort();
 }
 
+/** The components whose `design.json` declares a web application; an unreadable one is skipped. */
+export function listWebApplications(projectDir: string): string[] {
+  return listComponents(projectDir).filter((name) => {
+    try {
+      const design = JSON.parse(readFileSync(join(projectDir, "specs/design/components", name, "design.json"), "utf8")) as { type?: unknown };
+      return design.type === "web-application";
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** `/prototype` needs a design with a web application, and a named component must be one. */
+export function prototypeGate(projectDir: string, component?: string): GateResult {
+  if (!existsSync(join(projectDir, "specs/design/design.cell"))) {
+    return blocked("specs/design/design.cell is missing — run the design phase first");
+  }
+  const apps = listWebApplications(projectDir);
+  if (apps.length === 0) return blocked("the design has no web-application: there is nothing to prototype");
+  if (component !== undefined && !apps.includes(component)) {
+    return blocked(`${component} is not a web-application of this design (web-applications: ${apps.join(", ")})`);
+  }
+  return ok;
+}
+
 /**
  * Key-flow files under specs/design/flows/ — one `.md` per flow, regular
  * files only, non-blank (an empty placeholder is not a flow). The single

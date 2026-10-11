@@ -78,6 +78,21 @@ func parseValidatesRefs(body string) []int {
 	return issueRefs(validatesRefRE, body)
 }
 
+// advancesRefRE matches `Advances #N` — a coding cycle's reference to the
+// version's build issue when it finished some of its items and not all. Like
+// `Validates`, it is a word GitHub does not treat as a closing keyword: the
+// build issue stays open for the next cycle, and the items already done are
+// ticked in its body. It admits the merge, so a cycle that shipped one feature
+// lands it without waiting for the rest, and it is kept out of the Resolves
+// list for the same reason as `Validates`.
+var advancesRefRE = regexp.MustCompile(`(?i)(^|[^/\w])advance[sd]?\s*:?\s*#(\d+)\b`)
+
+// parseAdvancesRefs returns every issue number a pull-request body claims to
+// ADVANCE, in first-seen order, deduplicated.
+func parseAdvancesRefs(body string) []int {
+	return issueRefs(advancesRefRE, body)
+}
+
 // issueRefs is the shared extraction behind both parses: every capture group 2,
 // as a positive int, first-seen order, deduplicated. The regexes differ; what
 // they yield does not, and two copies of the dedupe would be two chances for the

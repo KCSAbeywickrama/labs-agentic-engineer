@@ -184,10 +184,6 @@ func validationView(verdict string, issue int) gen.RunValidation {
 // empty screen and very different bugs, so a projection that could not be told
 // the difference would have to guess.
 func CycleView(c *delivery.RunCycle, recording gen.RunCycleViewRecording) gen.RunCycleView {
-	resolves := make([]int64, 0, len(c.Resolves))
-	for _, n := range c.Resolves {
-		resolves = append(resolves, int64(n))
-	}
 	return gen.RunCycleView{
 		ID:           c.ID,
 		Kind:         gen.RunCycleViewKind(c.Kind),
@@ -197,7 +193,8 @@ func CycleView(c *delivery.RunCycle, recording gen.RunCycleViewRecording) gen.Ru
 		PrNumber:     int64(c.PRNumber),
 		PrURL:        c.PRURL,
 		PrDraft:      c.PRDraft,
-		Resolves:     resolves,
+		Resolves:     issueNumbersView(c.Resolves),
+		Advances:     issueNumbersView(c.Advances),
 		MergeSha:     c.MergeSHA,
 		MergeVerdict: gen.RunCycleViewMergeVerdict(c.MergeVerdict),
 		MergeReason:  c.MergeReason,
@@ -256,4 +253,14 @@ func failureView(row *delivery.MilestoneRun) *gen.RunFailure {
 		ResetAt:     f.ResetAt,
 		WorkflowID:  delivery.MilestoneRunWorkflowID(row.Kind, row.OrgID, row.ProjectID, row.MilestoneNumber),
 	}
+}
+
+// issueNumbersView is a recorded issue list on the wire: never null, so a
+// reader of an empty set needs no nil check.
+func issueNumbersView(ns delivery.IssueNumbers) []int64 {
+	out := make([]int64, 0, len(ns))
+	for _, n := range ns {
+		out = append(out, int64(n))
+	}
+	return out
 }

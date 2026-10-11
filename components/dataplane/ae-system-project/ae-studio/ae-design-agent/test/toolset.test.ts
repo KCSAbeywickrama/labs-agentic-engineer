@@ -27,13 +27,13 @@ import assert from "node:assert/strict";
 import { FileBundle } from "@aep/agent-stream";
 import { buildFileToolSet, buildRegisterDraftTools } from "../src/agents/main/tools/files.js";
 import { buildTaskPlanTools } from "../src/agents/main/tools/task-plan.js";
-import { TaskPlan } from "../src/agents/main/task-plan-accumulator.js";
+import { BuildPlan } from "../src/agents/main/task-plan-accumulator.js";
 import { instructions, buildInstructions, taskPlanInstructions, buildTaskPlanInstructions } from "../src/agents/main/prompt.js";
 import { testSkillSource } from "./skill-source.js";
 
 const SKILLS = testSkillSource([{ name: "task-planning", description: "plan tasks", content: "one task per component" }]);
 const bundle = () => new FileBundle({});
-const plan = () => new TaskPlan({});
+const plan = () => new BuildPlan({});
 
 test("files tool set (no skills) is the file tools + the UI tools", () => {
   assert.deepEqual(Object.keys(buildFileToolSet(bundle()).tools), [
@@ -63,35 +63,32 @@ test("files tool set with skills adds only the skill loader", () => {
   ]);
 });
 
-test("task-plan tool set registers planTask+updateTask and NO file tools", () => {
+test("task-plan tool set registers planBuild and NO file tools", () => {
   const keys = Object.keys(buildTaskPlanTools(plan()));
-  assert.deepEqual(keys, ["planTask", "updateTask"]);
+  assert.deepEqual(keys, ["planBuild"]);
   for (const fileTool of ["addFile", "editFile", "removeFile"]) {
     assert.equal(keys.includes(fileTool), false, `${fileTool} must not be in the task-plan set`);
   }
 });
 
 test("task-plan tool set with skills shares the same skill loader", () => {
-  assert.deepEqual(Object.keys(buildTaskPlanTools(plan(), SKILLS)), ["planTask", "updateTask", "loadSkill"]);
+  assert.deepEqual(Object.keys(buildTaskPlanTools(plan(), SKILLS)), ["planBuild", "loadSkill"]);
 });
 
 test("files instructions are unchanged; task-plan instructions are a distinct mission", () => {
   assert.equal(buildInstructions(), instructions); // today's prompt, byte-identical
   assert.ok(buildTaskPlanInstructions().startsWith(taskPlanInstructions));
-  assert.match(taskPlanInstructions, /planTask/);
+  assert.match(taskPlanInstructions, /planBuild/);
   // #373 layer charter: the skill POINTER rides the plan instruction (the BFF's
   // PlanInstruction), not this system prompt — the prompt fixes invariants only.
   assert.doesNotMatch(taskPlanInstructions, /task-planning skill/);
   assert.doesNotMatch(taskPlanInstructions, /editFile/); // the plan turn does not edit files
 });
 
-test("planTask carries the Task's feature through to the accumulator (B3)", async () => {
-  const p = new TaskPlan({ "specs/design/components/api/design.json": '{"name":"api"}\n' });
-  const planTask = buildTaskPlanTools(p).planTask!;
-  const out = await planTask.execute!(
-    { component: "api", title: "Approvals in the API", dependsOn: [], rationale: "r", feature: "F2" },
-    {} as never,
-  );
-  assert.equal((out as { feature?: string }).feature, "F2");
-  assert.equal(p.plannedTasks()[0]!.feature, "F2");
+test("planBuild records the checklist in the accumulator", async () => {
+  const p = new BuildPlan({ "specs/design/components/api/design.json": '{"name":"api"}\n' }, { tag: "v1", features: [{ id: "F2" }] });
+  const planBuild = buildTaskPlanTools(p).planBuild!;
+  const out = await planBuild.execute!({ items: [{ item: "F2", components: ["api"], note: "Approvals." }] }, {} as never);
+  assert.equal((out as { ok: boolean }).ok, true);
+  assert.equal(p.plan()?.[0]?.item, "F2");
 });

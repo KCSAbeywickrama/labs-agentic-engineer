@@ -6274,6 +6274,17 @@ components:
         LEARNED FROM WEBHOOKS — the agent derives its own branch identity — so they stay empty on a
         cycle whose agent died before opening a pull request.
       properties:
+        advances:
+          description: >-
+            The version's build issue this cycle's pull request advanced
+            (`Advances #N`): it finished some of the build's items, not all, so
+            the merge lands them and the issue stays open with those items
+            ticked. Kept apart from `resolves`, which the merge closes. Empty
+            until a pull request is seen.
+          items:
+            format: int64
+            type: integer
+          type: array
         agentReason:
           description: >-
             Why this cycle's agent stopped without opening a pull request, as the

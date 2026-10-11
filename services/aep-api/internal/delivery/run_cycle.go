@@ -52,6 +52,15 @@ const (
 // column's shape is declared once rather than spelled out at each field.
 type IssueNumbers []int
 
+// CycleWork is what the merge policy found a cycle's pull request worked: the
+// issues it resolves (the merge closes them) and the build issue it advances
+// (the merge lands part of it). A struct rather than two issue lists side by
+// side, so a writer cannot record one set in the other's column.
+type CycleWork struct {
+	Resolves []int
+	Advances []int
+}
+
 // RunCycle is one dispatch within a MilestoneRun: the platform hands the
 // coding agent a milestone reference, the agent opens one PR, and the PR
 // squash-merges. A run is a sequence of these — one row per dispatch — and the
@@ -113,6 +122,16 @@ type RunCycle struct {
 	// boundary read the supervisor dispatches on returns COUNTS, so nothing else
 	// in the system can attribute a closed issue to the cycle that closed it.
 	Resolves IssueNumbers `gorm:"type:jsonb;serializer:json" json:"resolves,omitempty"`
+
+	// Advances is the merge policy's ADVANCED set: the version's build issue
+	// this cycle's pull request finished some items of (`Advances #N`). The
+	// merge lands them and leaves the issue open, its done items ticked.
+	//
+	// It is kept apart from Resolves because Resolves is what the merge CLOSES,
+	// and its readers render it so: folding the build issue in would show a
+	// half-built version's issue as finished. Without it, a cycle merged on
+	// `Advances #N` alone would record that it worked nothing.
+	Advances IssueNumbers `gorm:"type:jsonb;serializer:json" json:"advances,omitempty"`
 
 	// ValidationVerdict is what THIS validation attempt concluded, derived from the
 	// report at this cycle's own MergeSHA. Empty on every other kind, and until the

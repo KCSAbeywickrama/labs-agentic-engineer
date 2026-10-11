@@ -125,7 +125,7 @@ var greeterRepo = map[string]projects.Repository{"greeter": {Owner: "acme-gh", R
 // is logged; the same turnId again reattaches; the path must name the
 // project's own repository.
 func TestTurnsRelay_DrainsAfterCallerLeavesAndReattaches(t *testing.T) {
-	sock := turnstest.New(t, turnstest.Script{Events: []string{`{"type":"task-op","op":"plan","output":{"ok":true}}`}, Hold: 200 * time.Millisecond})
+	sock := turnstest.New(t, turnstest.Script{Events: []string{`{"type":"task-op","op":"build","output":{"ok":true}}`}, Hold: 200 * time.Millisecond})
 	h := newHarness(t, withTurnSocket(sock), withProjects(greeterRepo))
 	m := h.m2m() // AE-only, X-Impersonate-Org: the pod's org
 
@@ -165,9 +165,8 @@ func TestTurnsRelay_DrainsAfterCallerLeavesAndReattaches(t *testing.T) {
 }
 
 // TestTurnsRelay_BodyCapIsTheAgents: start-repo-turn takes what the
-// agent's Turn socket takes (4 MiB), not the group's 1 MiB default. A re-plan's
-// taskContext carries the open Tasks' bodies, and a 413 here is permanent to
-// aep-api, which would fail the version's plan outright.
+// agent's Turn socket takes (4 MiB), not the group's 1 MiB default. A 413 here
+// is permanent to aep-api, which would fail the turn outright.
 func TestTurnsRelay_BodyCapIsTheAgents(t *testing.T) {
 	sock := turnstest.New(t, turnstest.Script{})
 	h := newHarness(t, withTurnSocket(sock), withProjects(greeterRepo))
@@ -317,10 +316,10 @@ func planRequest(turnID, at string) string {
 	}
 	return `{"turnId":"` + turnID + `","project":"greeter","kind":"plan",` + pin +
 		`"credit":{"userId":"u1","name":"Ann","email":"ann@x"},` +
-		`"scope":{"tag":"v1","stories":[{"id":"F1.1","title":"Sign in","covered":false},{"id":"F2.3","covered":true}],` +
+		`"scope":{"tag":"v1",` +
 		`"features":[{"id":"F1","name":"Accounts"},{"id":"F2","needs":["F1"]}],` +
-		`"productWide":[{"id":"P1","text":"Audit every write","appliesTo":["all"]},{"id":"P2","appliesTo":["F1"]}]},` +
-		`"taskContext":[{"path":"tasks/1.md","body":"open"}]}`
+		`"productWide":[{"id":"P1","text":"Audit every write","appliesTo":["all"]},{"id":"P2","appliesTo":["F1"]}],` +
+		`"heldBack":["F2.3"]}}`
 }
 
 // relayedRequest decodes the one body the Turn socket received.
@@ -407,8 +406,8 @@ func TestTurnsRelay_PlanAtRefusals(t *testing.T) {
 		{"unknown sha", planRequest(id, strings.Repeat("ab", 20)), 404, "ref_not_found"},
 		{"a start turn with at", start, 400, "validation_failed"},
 		{"at neither a tag nor a sha", planRequest(id, "main"), 400, "validation_failed"},
-		{"a numbered story", strings.Replace(planRequest(id, "tags/v1"), `"id":"F1.1"`, `"number":1`, 1), 400, "validation_failed"},
-		{"a story id off the pattern", strings.Replace(planRequest(id, "tags/v1"), `"F1.1"`, `"1.1"`, 1), 400, "validation_failed"},
+		{"a held-back story off the pattern", strings.Replace(planRequest(id, "tags/v1"), `"F2.3"`, `"2.3"`, 1), 400, "validation_failed"},
+		{"a scope carrying stories", strings.Replace(planRequest(id, "tags/v1"), `"tag":"v1",`, `"tag":"v1","stories":[],`, 1), 400, "validation_failed"},
 		{"a feature id off the pattern", strings.Replace(planRequest(id, "tags/v1"), `"id":"F1","name"`, `"id":"f1","name"`, 1), 400, "validation_failed"},
 		{"an appliesTo off the pattern", strings.Replace(planRequest(id, "tags/v1"), `["all"]`, `["everything"]`, 1), 400, "validation_failed"},
 		{"an unknown scope field", strings.Replace(planRequest(id, "tags/v1"), `"tag":"v1",`, `"tag":"v1","x":1,`, 1), 400, "validation_failed"},

@@ -35,7 +35,6 @@
  */
 
 import type {
-  PlanContextFile,
   PlanScope,
   PrototypeFeedback,
   Toolset,
@@ -137,14 +136,14 @@ const HEADLESS_NOTE =
 
 /**
  * The plan-turn directive. Per the layer charter it carries ONLY the skill
- * pointer, the bundle paths and the existing-Tasks fence — the planning
- * invariants live once in the task-plan system prompt, the mechanics once in
- * the task-planning skill.
+ * pointer and the bundle paths — the planning invariants live once in the
+ * task-plan system prompt, the mechanics once in the task-planning skill.
  */
 const PLAN_INSTRUCTION =
-  'Plan the implementation Tasks for this project. Load the task-planning skill and follow it. The design is under specs/design/ and the requirements under specs/requirements/. When a "Milestone scope" section lists in-scope stories, cover every story marked NEEDS TASKS and leave COVERED stories\' Tasks untouched. Existing open Tasks (if any) are listed at the end of this message for reference — add Tasks ONLY for work they do not cover, and do not recreate or update the listed Tasks in this turn.';
+  'Plan the build for this version. Load the task-planning skill and follow it. The design is under specs/design/ and the requirements under specs/requirements/. Write the checklist with planBuild, from the "Version scope" section below.';
 
-const PLAN_CONTEXT_HEADER = "\n\n## Existing open Tasks in this version (reference)\n";
+/** A plan turn without a scope, or with one that names no features. */
+const WHOLE_SPEC_SCOPE = '\n\n## Version scope\n\nThis version names no features: the checklist is one item, "spec", for the whole design.\n';
 
 /**
  * Commands whose token is NOT the skill they load (#579).
@@ -436,9 +435,9 @@ function specBody(turn: Exclude<TurnSpec, { kind: "plan" }>): string {
   }
 }
 
-/** The plan turn: directive, milestone scope, then the existing-Task renders. */
+/** The plan turn: directive, then what the version carries. */
 function planBody(turn: Extract<TurnSpec, { kind: "plan" }>): string {
-  return PLAN_INSTRUCTION + scopeBlock(turn.scope) + planContext(turn.taskContext);
+  return PLAN_INSTRUCTION + scopeBlock(turn.scope);
 }
 
 function idea(raw: string | undefined): string {
@@ -454,62 +453,35 @@ function references(paths: string[] | undefined): string {
 
 
 /**
- * The milestone's story coverage. COVERED stories already have Tasks, so the
- * planner must leave them alone — this block is what makes a delta pass a delta
- * rather than a re-plan.
+ * What the version carries: its features in ID order with what each is built
+ * after, the product-wide items the Foundation item builds, and the stories it
+ * holds back. The platform computed it from the tag's annotation; the planner
+ * orders and annotates it, and never adds to it.
  */
 function scopeBlock(scope: PlanScope | undefined): string {
-  if (!scope || scope.stories.length === 0) return "";
-  const rows = scope.stories
-    .map((s) => {
-      const status = s.covered ? "COVERED" : "NEEDS TASKS";
-      return s.title ? `- Story ${s.id}: ${s.title} — ${status}` : `- Story ${s.id} — ${status}`;
-    })
-    .join("\n");
-  return (
-    `\n\n## Milestone scope (spec ${scope.tag})\n\n` +
-    "Plan Tasks so every story marked NEEDS TASKS below is covered. COVERED stories already have Tasks — leave them alone.\n\n" +
-    featureRows(scope) +
-    rows +
-    "\n"
-  );
-}
-
-/**
- * The features and product-wide items the version carries (B3): what the
- * planner cuts Tasks by. Empty for a scope that names none, which keeps a
- * story-only scope's block byte-identical.
- */
-function featureRows(scope: PlanScope): string {
-  let out = "";
-  if (scope.features?.length) {
-    const rows = scope.features.map((f) => {
-      const name = f.name ? ` ${f.name}` : "";
-      const needs = f.needs?.length ? ` — needs ${f.needs.join(", ")}` : "";
-      return `- ${f.id}${name}${needs}`;
-    });
-    out += "Features this version builds — one Task per feature per component that serves it:\n\n" + rows.join("\n") + "\n\n";
-  }
+  if (!scope?.features?.length) return WHOLE_SPEC_SCOPE;
+  const features = scope.features.map((f) => {
+    const name = f.name ? ` ${f.name}` : "";
+    const needs = f.needs?.length ? ` — needs ${f.needs.join(", ")}` : "";
+    return `- ${f.id}${name}${needs}`;
+  });
+  let out =
+    `\n\n## Version scope (spec ${scope.tag})\n\n` +
+    "Features this version builds:\n\n" +
+    features.join("\n") +
+    "\n";
   if (scope.productWide?.length) {
     const rows = scope.productWide.map((p) => {
       const text = p.text ? `: ${p.text}` : "";
       const applies = p.appliesTo?.length ? ` (applies to ${p.appliesTo.join(", ")})` : "";
       return `- ${p.id}${text}${applies}`;
     });
-    out += "Product-wide requirements this version carries — each component's foundation Task builds them:\n\n" + rows.join("\n") + "\n\n";
+    out += "\nProduct-wide requirements this version carries:\n\n" + rows.join("\n") + "\n";
   }
-  return out === "" ? "" : out + "Stories:\n\n";
-}
-
-/**
- * Existing-Task renders as deterministic sections, sorted by path so the same
- * inputs always produce the same prompt. They keep their historical
- * `tasks/<n>.md` names so the model's mental layout is unchanged.
- */
-function planContext(files: PlanContextFile[] | undefined): string {
-  if (!files?.length) return "";
-  const sorted = [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return PLAN_CONTEXT_HEADER + sorted.map((f) => `\n--- ${f.path} ---\n${f.body}\n`).join("");
+  if (scope.heldBack?.length) {
+    out += `\nStories held back (each needs a feature neither built nor carried): ${scope.heldBack.join(", ")}\n`;
+  }
+  return out;
 }
 
 // --- Derived turn properties -------------------------------------------------
@@ -620,7 +592,7 @@ export function eagerSkillsFor(turn: TurnSpec, scope?: TurnScope): string[] {
 
 
 /**
- * Which tool set the turn needs. Planning registers `planTask`/`updateTask` and
+ * Which tool set the turn needs. Planning registers `planBuild` and
  * NO file tools; everything else mutates the bundle. Derived rather than sent:
  * two ways to say it is two ways to disagree.
  */

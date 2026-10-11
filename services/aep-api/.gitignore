@@ -1,5 +1,6 @@
 /aep-api
 /default
+/build-plan
 
 # Internal (S2S) OpenAPI spec (`make openapi`) — build artifact, not committed.
 # The PUBLIC spec is committed at packages/contracts/api/v1/openapi.yaml.

@@ -66,8 +66,14 @@ type MilestoneSnapshot struct {
 	// Drain, not migrate — which is a property of that release, not of this
 	// struct, and worth re-checking before the next field lands here.
 	TaskWork int `json:"taskWork"`
-	Gates    int `json:"gates"`
-	Total    int `json:"total"`
+	// OpenBuildItems is how many checklist items the milestone's open build
+	// issues still hold. The no-progress rule counts them beside the working
+	// set: a cycle that ticks an item and leaves the build issue open has
+	// progressed. New, so it decodes to zero from older history, which keeps
+	// the rule as it was for a run in flight across the upgrade.
+	OpenBuildItems int `json:"openBuildItems"`
+	Gates          int `json:"gates"`
+	Total          int `json:"total"`
 	// ValidationRepairs is how many open issues carry `src/validation`: the
 	// repair work a failed verdict filed. It is not a working set and nothing is
 	// dispatched off it — it answers the ONE question the task run's bookend
@@ -165,9 +171,11 @@ func budgetRefusal(kind string, cyclesTotal, fixCycles, conflictCycles, ceiling 
 const maxUnreportedDispatches = 2
 
 // noProgress is the rule that stops a run looping forever on work it cannot
-// finish: a GREEN cycle that closed no issue and minted no platform issue has
-// left the milestone exactly as it found it, and the next cycle would be the
-// same dispatch against the same working set.
+// finish: a GREEN cycle that closed no issue, ticked no build item and minted
+// no platform issue has left the milestone exactly as it found it, and the
+// next cycle would be the same dispatch against the same working set. The
+// counts compared are progress units: the working set plus the open build
+// items (progressUnits).
 //
 // It is deliberately coarse — it compares working-set SIZES, not identities.
 // An adoption that lands one issue in the same cycle that closes another reads
@@ -176,9 +184,13 @@ const maxUnreportedDispatches = 2
 //
 // It applies only after a green cycle. A red or conflicted cycle mints work of
 // its own, and its budget (fix chain, conflict chain) is what bounds it.
-func noProgress(previous cycleResult, workBefore, workAfter int) bool {
-	return previous == cycleGreen && workAfter >= workBefore
+func noProgress(previous cycleResult, unitsBefore, unitsAfter int) bool {
+	return previous == cycleGreen && unitsAfter >= unitsBefore
 }
+
+// progressUnits is what the no-progress rule compares: the run's working set
+// and the build items it still holds.
+func progressUnits(work int, s MilestoneSnapshot) int { return work + s.OpenBuildItems }
 
 // redBuildAttempts is how many failed WorkflowRuns at one (component, commit)
 // make the component's build a VERDICT rather than a flake: the original

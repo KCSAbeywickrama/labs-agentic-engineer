@@ -26,6 +26,8 @@ import (
 	"go.temporal.io/sdk/temporal"
 
 	"github.com/wso2/aep/aep-api/internal/delivery"
+	"github.com/wso2/aep/aep-api/internal/platform/taskplan"
+	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
 // errNotConfigured is returned by an activity whose port was not wired. It is
@@ -429,13 +431,44 @@ func (a *Activities) PollMilestone(ctx context.Context, in MilestoneRef) (Milest
 	if counts == nil {
 		return MilestoneSnapshot{}, nil
 	}
+	items, err := a.openBuildItems(ctx, in, counts)
+	if err != nil {
+		return MilestoneSnapshot{}, sourceControlErr(err)
+	}
 	return MilestoneSnapshot{
 		DevWork:           counts.OpenDevWork(),
 		TaskWork:          counts.OpenTaskWork(),
 		Gates:             counts.OpenProvision,
 		Total:             counts.OpenTotal,
 		ValidationRepairs: counts.OpenValidationRepairs,
+		OpenBuildItems:    items,
 	}, nil
+}
+
+// openBuildItems is how many checklist items the version's open build issue
+// still holds. It costs a second read only when the counts show open planned
+// work, which is the only population a build issue belongs to.
+//
+// The build issue is the one the plan service minted under the version's
+// build dedupe key, not every development issue: another one in the milestone
+// (filed by hand, say) is not the version's checklist, and counting its task
+// list would let ticking it read as the build progressing.
+func (a *Activities) openBuildItems(ctx context.Context, in MilestoneRef, counts *sourcecontrol.MilestoneIssueCounts) (int, error) {
+	if counts.OpenDevelopment == 0 {
+		return 0, nil
+	}
+	issues, err := a.milestones.ListMilestoneIssues(ctx, in.OrgID, in.ProjectID, sourcecontrol.MilestoneIssuesFilter{Number: in.MilestoneNumber, State: "open"})
+	if err != nil {
+		return 0, err
+	}
+	build := sourcecontrol.DedupeLabel(delivery.DedupeKeyBuildIssue(in.ProjectID, in.MilestoneNumber))
+	n := 0
+	for _, issue := range issues {
+		if delivery.HasLabel(issue.Labels, build) {
+			n += taskplan.UncheckedItems(issue.Body)
+		}
+	}
+	return n, nil
 }
 
 // CloseMilestone closes the settled version's milestone. Display only, and

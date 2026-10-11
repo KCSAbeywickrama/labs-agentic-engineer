@@ -71,13 +71,15 @@ func keepKnownURL(pr delivery.CyclePullRequest, cycle *delivery.RunCycle) delive
 }
 
 // noteCycleMergeDecision records what the merge policy decided about the open
-// cycle's pull request — the matched issue set, and the verdict when it did not
-// merge.
+// cycle's pull request — the matched issue set, the advanced build issue, and
+// the verdict when it did not merge.
 //
 // This is the cycle's only record of WHAT IT WORKED. The merge closes the
-// matched issues, and the boundary read the supervisor dispatches on returns
-// counts, so an unrecorded matched set is unrecoverable the moment the merge
-// lands.
+// matched issues and ticks the advanced one's items, and the boundary read the
+// supervisor dispatches on returns counts, so an unrecorded set is
+// unrecoverable the moment the merge lands. The two stay apart: the matched
+// set is what the merge closed, and a reader of it must not see a half-built
+// version's build issue as finished.
 func (e *Events) noteCycleMergeDecision(ctx context.Context, run *delivery.MilestoneRun, decision mergeDecision, asOf time.Time) {
 	cycle := e.cycleAsOf(ctx, run, asOf)
 	if cycle == nil {
@@ -87,21 +89,23 @@ func (e *Events) noteCycleMergeDecision(ctx context.Context, run *delivery.Miles
 	if !decision.Merge {
 		verdict = delivery.CycleMergeDeclined
 	}
-	if err := e.p.Cycles.NoteMergeDecision(ctx, cycle.ID, decision.Matched, verdict, decision.Reason); err != nil {
+	worked := delivery.CycleWork{Resolves: decision.Matched, Advances: decision.Advanced}
+	if err := e.p.Cycles.NoteMergeDecision(ctx, cycle.ID, worked, verdict, decision.Reason); err != nil {
 		slog.WarnContext(ctx, "eventcore: note cycle merge decision failed",
 			"cycle", cycle.ID, "verdict", verdict, "error", err)
 	}
 }
 
 // noteCycleMergeRefused records the HOST's refusal on a pull request the policy
-// had already approved. The matched set is left alone: the policy's decision
-// still stands, and the next cycle is the one that rebases.
+// had already approved. The matched and advanced sets are left alone: the
+// policy's decision still stands, and the next cycle is the one that rebases.
 func (e *Events) noteCycleMergeRefused(ctx context.Context, run *delivery.MilestoneRun, reason string) {
 	cycle := e.openCycle(ctx, run)
 	if cycle == nil {
 		return
 	}
-	if err := e.p.Cycles.NoteMergeDecision(ctx, cycle.ID, cycle.Resolves, delivery.CycleMergeRefused, reason); err != nil {
+	worked := delivery.CycleWork{Resolves: cycle.Resolves, Advances: cycle.Advances}
+	if err := e.p.Cycles.NoteMergeDecision(ctx, cycle.ID, worked, delivery.CycleMergeRefused, reason); err != nil {
 		slog.WarnContext(ctx, "eventcore: note cycle merge refusal failed",
 			"cycle", cycle.ID, "error", err)
 	}

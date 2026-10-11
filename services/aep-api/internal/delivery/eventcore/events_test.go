@@ -184,6 +184,29 @@ func TestPullRequestOpened_MergesWhenItResolvesMilestoneWork(t *testing.T) {
 	}
 }
 
+// A cycle that finished some of the build's items and not all merges on
+// `Advances #N` alone, and records the build issue as what it worked — apart
+// from the resolved set, which is what the merge closed and the build issue is
+// not.
+func TestPullRequestOpened_RecordsTheAdvancedBuildIssueOnTheCycle(t *testing.T) {
+	h := newHarness(t, aRun("run-1", 7, delivery.RunStateRunning))
+	h.cycles.latest = aCycle("cycle-1", "run-1")
+	h.issues.withWork(7, 10)
+
+	if err := h.deliver(t, "pull_request", prBody("opened", "aep/m7-c1", "Advances #10", 42, false, false, "")); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if len(h.merger.merged) != 1 || h.merger.merged[0] != 42 {
+		t.Fatalf("an advancing PR must be squash-merged, got %v", h.merger.merged)
+	}
+	if len(h.cycles.decisions) != 1 || h.cycles.decisions[0] != "cycle-1::[] advances [10]" {
+		t.Fatalf("the cycle must record the advanced build issue and resolve nothing, got %v", h.cycles.decisions)
+	}
+	if got := h.cycles.latest; len(got.Resolves) != 0 || len(got.Advances) != 1 || got.Advances[0] != 10 {
+		t.Fatalf("cycle resolves %v advances %v, want none resolved and #10 advanced", got.Resolves, got.Advances)
+	}
+}
+
 // The validation cycle's pull request must merge too, and this asserts it through
 // the REAL fetch rather than against a hand-built issue list. A policy that
 // accepts the validation task is not enough on its own: the fetch used to narrow

@@ -29,8 +29,8 @@
  *    referential rules (every `testUsers[].role` names a declared role,
  *    `coldStartRole` likewise, thunder scopes tokens) are equally inexpressible
  *    standalone, and are likewise applied separately on both sides.
- *  - `planTaskJsonSchema` / `updateTaskJsonSchema` — the plan-turn tool inputs
- *    the BFF plan tap acts on; vendored by phase 2.
+ *  - `buildPlanJsonSchema` — the plan-turn tool input, published beside the
+ *    others so the contract has one rendering outside TypeScript.
  *
  * `scripts/generate-json-schema.ts` writes the checked-in artifacts from these;
  * `test/json-schema.test.ts` fails if any drifts from a fresh render.
@@ -40,7 +40,7 @@ import { z } from "zod";
 import { componentDesignSchema } from "./component-design-schema.js";
 import { securityDesignSchema } from "./security-design-schema.js";
 import { dependencyDesignSchema } from "./dependency-design-schema.js";
-import { planTaskInputSchema, updateTaskInputSchema } from "./task-tools-schema.js";
+import { buildPlanInputSchema } from "./task-tools-schema.js";
 import { agentAfmFrontMatterSchema } from "./agent-afm-schema.js";
 
 /** The `ComponentDesign` structural schema as JSON Schema (draft 2020-12). */
@@ -62,12 +62,7 @@ export function securityDesignJsonSchema(): Record<string, unknown> {
   return z.toJSONSchema(securityDesignSchema, { target: "draft-2020-12" }) as Record<string, unknown>
 }
 
-/** The `planTask` tool input as JSON Schema (draft 2020-12). */
-export function planTaskJsonSchema(): Record<string, unknown> {
-  return z.toJSONSchema(planTaskInputSchema, { target: "draft-2020-12" }) as Record<string, unknown>;
-}
-
-/** The `updateTask` tool input as JSON Schema (draft 2020-12). */
-export function updateTaskJsonSchema(): Record<string, unknown> {
-  return z.toJSONSchema(updateTaskInputSchema, { target: "draft-2020-12" }) as Record<string, unknown>;
+/** The `planBuild` tool input as JSON Schema (draft 2020-12). */
+export function buildPlanJsonSchema(): Record<string, unknown> {
+  return z.toJSONSchema(buildPlanInputSchema, { target: "draft-2020-12" }) as Record<string, unknown>;
 }

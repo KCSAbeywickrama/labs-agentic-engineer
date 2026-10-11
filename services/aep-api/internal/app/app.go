@@ -440,7 +440,7 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// asServiceIdentity. repoService/artifactStore/artifactSvcGit
 	// satisfy the task consumer ports directly.
 	taskReads := task.NewReads(issueService, repoService, executionRepo, milestoneRunRepo)
-	taskPlan := task.NewPlanService(repoRepo, artifactSvcGit, studioTools, issueService, deliveryIssues)
+	taskPlan := task.NewPlanService(repoRepo, artifactSvcGit, studioTools, deliveryIssues)
 
 	// Eagerly provision each org's skills repo on project creation.
 	projectService.SetSkillsProvisioner(skillSvc)
@@ -1264,9 +1264,6 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 		return nil, fmt.Errorf("assemble delivery domain: %w", err)
 	}
 	params.Deps.Delivery = deliveryHandlers
-	// A planned Task's prose body names the App Path the agent works in — the
-	// same component → appPath read the merged-PR build fan-out matches against.
-	taskPlan.SetComponentPaths(designComponents{store: artifactStore})
 	// Committed-truth write surface for a dependency's directory: the design
 	// service fetches/validates a contract and atomically commits it with the
 	// dependency.json that records it (clearing the needs-contract gate), and

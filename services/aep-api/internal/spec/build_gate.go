@@ -392,20 +392,6 @@ func notAStory(spec reqspec.Spec, id, verb string) string {
 	}
 }
 
-// componentStoryClaims maps each cell component to the stories its design.json
-// claims — the ONE claims read both the gate (coverage union) and
-// BuildScopeAtTag (per-component scope) consume, so they can never disagree on
-// where claims come from.
-func componentStoryClaims(facts *CellFacts, designFiles map[string]string) map[string][]string {
-	out := map[string][]string{}
-	for _, c := range facts.Components {
-		if stories := designJSONStories(designFiles["components/"+c.ID+"/design.json"]); len(stories) > 0 {
-			out[c.ID] = stories
-		}
-	}
-	return out
-}
-
 // designJSONStories reads the story IDs a component's design.json claims.
 // Malformed JSON or a missing field yields nothing — the design write-gates
 // own rejecting bad JSON; this reader only collects claims.

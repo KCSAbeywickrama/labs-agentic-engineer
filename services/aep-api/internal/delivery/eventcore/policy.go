@@ -63,6 +63,10 @@ type mergeDecision struct {
 	// deliberately NON-closing reference. Kept apart from Matched for the reason
 	// above; it admits the merge without claiming the issue was finished by it.
 	Validated []int
+	// Advanced is the build issue this pull request finished part of, matched
+	// from the NON-closing `Advances #N`. Kept apart from Matched for the same
+	// reason as Validated.
+	Advanced []int
 }
 
 // decideAutoMerge IS the merge policy: a pull request that REFERENCES at least
@@ -75,13 +79,20 @@ type mergeDecision struct {
 //     any ARMED issue in the milestone. This is the coding cycles' path: the
 //     merge closes the work, GitHub does it, and the matched list is also the
 //     cycle's record of what it finished.
+//
 //   - `Validates #N` on the milestone's `validation`-kind task. This is the
 //     validation cycle's path, and it exists because the platform owns that
 //     task's lifecycle: it reopens it for the next attempt and must close it even
 //     on an ending where no pull request merged at all. A closing keyword would
 //     put two owners on one issue.
 //
-// The second admission is SCOPED to a validation-kind issue on purpose. Without
+//   - `Advances #N` on the milestone's `development`-kind build issue. This is a
+//     coding cycle that finished some of the build's items and not all: the
+//     merge lands them, and the build issue stays open (its done items ticked)
+//     for the next cycle.
+//
+// The second admission is SCOPED to a validation-kind issue on purpose, and the
+// third to a development-kind issue for the same reason. Without
 // the scope, `Validates #N` would become a general-purpose way for any agent to
 // get a pull request merged while closing nothing — and the working set would
 // never empty, because the issues it claimed would still be open. A coding pull
@@ -112,12 +123,13 @@ type mergeDecision struct {
 // logic (approvals, checks, a human gate) arrives later BEHIND this function —
 // it is one named decision over facts precisely so that swapping it is a local
 // change with a local test, not a rewrite of the handler.
-func decideAutoMerge(resolves, validates []int, milestoneIssues []sourcecontrol.IssueInfo) mergeDecision {
-	if len(resolves) == 0 && len(validates) == 0 {
+func decideAutoMerge(resolves, validates, advances []int, milestoneIssues []sourcecontrol.IssueInfo) mergeDecision {
+	if len(resolves) == 0 && len(validates) == 0 && len(advances) == 0 {
 		return mergeDecision{Reason: "pull request references no issue"}
 	}
 	work := make(map[int]bool, len(milestoneIssues))
 	validation := make(map[int]bool, 1)
+	build := make(map[int]bool, 1)
 	for _, iss := range milestoneIssues {
 		if !delivery.HasLabel(iss.Labels, delivery.LabelAgentWork) {
 			continue
@@ -126,34 +138,33 @@ func decideAutoMerge(resolves, validates []int, milestoneIssues []sourcecontrol.
 		if delivery.IsValidationWork(iss.Labels) {
 			validation[iss.Number] = true
 		}
-	}
-	var matched, validated []int
-	for _, n := range resolves {
-		if work[n] {
-			matched = append(matched, n)
+		if delivery.HasLabel(iss.Labels, delivery.KindDevelopment) {
+			build[iss.Number] = true
 		}
 	}
-	for _, n := range validates {
-		if validation[n] {
-			validated = append(validated, n)
+	matched := keep(resolves, work)
+	validated := keep(validates, validation)
+	advanced := keep(advances, build)
+	switch {
+	case len(matched) > 0:
+		return mergeDecision{Merge: true, Reason: "resolves this run's work in its milestone", Matched: matched, Validated: validated, Advanced: advanced}
+	case len(advanced) > 0:
+		return mergeDecision{Merge: true, Reason: "advances this version's build issue", Validated: validated, Advanced: advanced}
+	case len(validated) > 0:
+		return mergeDecision{Merge: true, Reason: "validates this version's validation task", Validated: validated}
+	}
+	return mergeDecision{Reason: "no referenced issue is this run's work in this milestone"}
+}
+
+// keep is the refs that are members of the set, in order.
+func keep(refs []int, set map[int]bool) []int {
+	var out []int
+	for _, n := range refs {
+		if set[n] {
+			out = append(out, n)
 		}
 	}
-	if len(matched) == 0 && len(validated) == 0 {
-		return mergeDecision{Reason: "no referenced issue is this run's work in this milestone"}
-	}
-	if len(matched) == 0 {
-		return mergeDecision{
-			Merge:     true,
-			Reason:    "validates this version's validation task",
-			Validated: validated,
-		}
-	}
-	return mergeDecision{
-		Merge:     true,
-		Reason:    "resolves this run's work in its milestone",
-		Matched:   matched,
-		Validated: validated,
-	}
+	return out
 }
 
 // The path diff itself is delivery.DiffComponents in the domain root: the run

@@ -21,7 +21,7 @@ import { test } from "node:test";
 import { join } from "node:path";
 import { FIXTURES_DIR } from "../src/config.js";
 import type { SectionRunResult } from "../src/drivers/conversational.js";
-import { designChecks, isAcyclic } from "../src/scoring/structural.js";
+import { designChecks } from "../src/scoring/structural.js";
 
 // The committed design fixture is the reference bundle shape (design.cell root,
 // domain-model.md, flows/); every deterministic design check must pass on it,
@@ -33,29 +33,3 @@ test("designChecks: the lunch-coordinator design fixture passes every determinis
   assert.deepEqual(failed, []);
 });
 
-test("isAcyclic: linear provider chains pass", () => {
-  assert.ok(
-    isAcyclic([
-      { component: "webapp", dependsOn: ["api"] },
-      { component: "api", dependsOn: ["db"] },
-      { component: "db", dependsOn: [] },
-    ]),
-  );
-});
-
-test("isAcyclic: a cycle across components fails", () => {
-  assert.ok(
-    !isAcyclic([
-      { component: "a", dependsOn: ["b"] },
-      { component: "b", dependsOn: ["a"] },
-    ]),
-  );
-});
-
-test("isAcyclic: self-references are ignored (same-component task ordering)", () => {
-  assert.ok(isAcyclic([{ component: "a", dependsOn: ["a"] }]));
-});
-
-test("isAcyclic: empty plan is trivially acyclic", () => {
-  assert.ok(isAcyclic([]));
-});

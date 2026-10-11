@@ -125,7 +125,7 @@ func TestDecideAutoMerge(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := decideAutoMerge(c.resolves, c.validates, work)
+			got := decideAutoMerge(c.resolves, c.validates, nil, work)
 			if got.Merge != c.want {
 				t.Fatalf("Merge = %v (%s), want %v", got.Merge, got.Reason, c.want)
 			}
@@ -145,6 +145,48 @@ func TestDecideAutoMerge(t *testing.T) {
 // The two parses must never merge: a coding pull request's Resolves list is the
 // durable record of what that cycle finished (RunCycle.Resolves), so folding a
 // reference nothing closed into it would claim work that is still open.
+// A coding cycle that finished some of the build's items lands them through
+// the NON-closing `Advances #N`, scoped to the development-kind build issue.
+func TestDecideAutoMerge_Advances(t *testing.T) {
+	work := []sourcecontrol.IssueInfo{
+		{Number: 10, State: "open", Labels: []string{delivery.LabelAgentWork, delivery.KindDevelopment}},
+		{Number: 13, State: "open", Labels: []string{delivery.LabelAgentWork, delivery.KindBug, delivery.SrcBuild}},
+		{Number: 15, State: "open", Labels: []string{delivery.LabelAgentWork, delivery.KindValidation}},
+	}
+	for _, c := range []struct {
+		name               string
+		resolves, advances []int
+		want               bool
+		reason             string
+		matched, advanced  []int
+	}{
+		{"a partial build merges and closes nothing", nil, []int{10}, true, "advances this version's build issue", nil, []int{10}},
+		{"a bug resolved beside a partial build", []int{13}, []int{10}, true, "resolves this run's work in its milestone", []int{13}, []int{10}},
+		{"Advances on a bug is declined", nil, []int{13}, false, "no referenced issue is this run's work in this milestone", nil, nil},
+		{"Advances on the validation task is declined", nil, []int{15}, false, "no referenced issue is this run's work in this milestone", nil, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := decideAutoMerge(c.resolves, nil, c.advances, work)
+			if got.Merge != c.want || got.Reason != c.reason {
+				t.Fatalf("decision = %+v, want merge %v (%s)", got, c.want, c.reason)
+			}
+			if !reflect.DeepEqual(got.Matched, c.matched) || !reflect.DeepEqual(got.Advanced, c.advanced) {
+				t.Fatalf("Matched = %v, Advanced = %v; want %v, %v", got.Matched, got.Advanced, c.matched, c.advanced)
+			}
+		})
+	}
+}
+
+func TestParseAdvancesRefs(t *testing.T) {
+	body := "Resolves #13\nAdvances #10\nadvanced: #10\nSee owner/repo#11 and Advances#12"
+	if got := parseAdvancesRefs(body); !reflect.DeepEqual(got, []int{10, 12}) {
+		t.Fatalf("parseAdvancesRefs = %v, want [10 12]", got)
+	}
+	if got := parseResolvesRefs(body); !reflect.DeepEqual(got, []int{13}) {
+		t.Fatalf("an Advances reference leaked into Resolves: %v", got)
+	}
+}
+
 func TestParseValidatesRefs(t *testing.T) {
 	cases := []struct {
 		name      string

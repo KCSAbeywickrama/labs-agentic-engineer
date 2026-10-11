@@ -79,3 +79,18 @@ The playground's coding run now mirrors the milestone loop:
   the playground doesn't require a git repo. Whether the code exists is.
 - A project copied without its earlier per-issue status history behaves
   identically to one that always ran this way — there is nothing to migrate.
+
+## Amendment (2026-10-10): one build issue, ticked items
+
+A version is now one build issue whose body is an ordered checklist (the
+platform's `planBuild`, root ADR-0041 decision 4 as amended). Two decisions
+above change:
+
+- **Decision 2.** The order is the checklist's, not `dependsOn` edges: the
+  skill works bug issues first, then the build issue's items from the top, one
+  subagent per component of the item.
+- **Decision 3.** An item's done-ness is its tick. The skill ticks the item's
+  line in `issues/<n>.md` when its work is done, and a later run starts at the
+  first unticked item. The App Path rule still decides a hand-written bug
+  issue. The tick is the coding agent's record, as on GitHub, where the
+  platform also reads it for the run's progress; it is not a status field.

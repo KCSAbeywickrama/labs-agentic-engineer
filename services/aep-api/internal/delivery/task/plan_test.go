@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"testing"
 
@@ -35,7 +34,7 @@ import (
 
 // SERVICE tier for the plan path over the in-memory pod (aestudiotest.Fake):
 // the Plan turn runs in the org's AE Studio pod, aep-api states what to plan
-// and mints what the pod's task-op lines describe.
+// and mints the build issue the pod's last task-op line describes.
 
 type planVersions struct {
 	specTag string
@@ -77,11 +76,12 @@ func newPlanRig(t *testing.T, versions planVersions) *planRig {
 	}
 	issues := newFakeIssues()
 	row := &sourcecontrol.GitRepository{OrgID: "org1", ProjectID: "proj1", RepoURL: "https://github.com/acme/widgets", Status: "ready"}
-	svc := NewPlanService(fakeRepos{repo: row}, versions, pod, issues, issues.writer())
+	svc := NewPlanService(fakeRepos{repo: row}, versions, pod, issues.writer())
 	return &planRig{pod: pod, issues: issues, svc: svc}
 }
 
-// plan plans into milestone 7 and returns the one turn the pod saw.
+// plan plans into milestone 7 and returns the one turn the pod saw. The pod
+// answers with a one-item plan unless the test scripted another turn.
 func (r *planRig) plan(t *testing.T) aestudiotest.TurnCall {
 	t.Helper()
 	if err := r.svc.PlanIntoMilestone(context.Background(), "org1", "proj1", 7); err != nil {
@@ -94,10 +94,14 @@ func (r *planRig) plan(t *testing.T) aestudiotest.TurnCall {
 	return calls[0]
 }
 
+// scriptPlan makes every later turn answer with one ok planBuild of items.
+func (r *planRig) scriptPlan(items ...string) { r.pod.ScriptTurn(taskOp(buildOK(items...))) }
+
 // The Plan turn starts in the project's pod: kind plan, the project named,
 // a fresh UUID turn id per plan, and no credit (no run records a requester).
 func TestPlanMilestone_StartsAPlanTurnInThePod(t *testing.T) {
 	r := newPlanRig(t, planVersions{specTag: "v1"})
+	r.scriptPlan("spec")
 	call := r.plan(t)
 
 	if call.Ref != widgetsRef {
@@ -113,8 +117,8 @@ func TestPlanMilestone_StartsAPlanTurnInThePod(t *testing.T) {
 	if req.Credit != (aestudiotools.Credit{}) {
 		t.Errorf("credit = %+v, want none (the run records no requester)", req.Credit)
 	}
-	if req.Scope != nil || len(req.TaskContext) != 0 {
-		t.Errorf("scope/context = %+v/%+v, want none for a scope-less first pass", req.Scope, req.TaskContext)
+	if req.Scope == nil || req.Scope.Tag != "v1" || len(req.Scope.Features) != 0 {
+		t.Errorf("scope = %+v, want the version's tag and no features for a scope-less read", req.Scope)
 	}
 
 	// A second plan is a second turn: plan turn ids are never reused.
@@ -126,24 +130,62 @@ func TestPlanMilestone_StartsAPlanTurnInThePod(t *testing.T) {
 	}
 }
 
-// The pod's task-op lines are the plan: two planTask results mint two issues
-// in the milestone.
-func TestPlanMilestone_TwoTaskOpsMintTwoIssues(t *testing.T) {
-	r := newPlanRig(t, planVersions{specTag: "v1"})
-	r.pod.ScriptTurn(
-		taskOp(planOK("user-service", "Implement user-service", nil)),
-		keepAlive,
-		taskOp(planOK("order-service", "Implement order-service", []string{"user-service"})),
-	)
-	r.plan(t)
+// The turn states what the version carries, and the last ok planBuild becomes
+// ONE build issue: the checklist in order, the version's facts, the arming
+// label and the development kind, the milestone and the version's dedupe key,
+// all on the create call.
+func TestPlanMilestone_TheLastPlanIsOneBuildIssue(t *testing.T) {
+	r := newPlanRig(t, planVersions{specTag: "v2", scope: spec.BuildScope{
+		Tag:         "v2",
+		Features:    []spec.ScopeFeature{{ID: "F1", Name: "Claims"}, {ID: "F2", Name: "Approvals", Needs: []string{"F1"}}},
+		ProductWide: []spec.ScopeItem{{ID: "P1", Text: "Sign in ", AppliesTo: []string{"all"}}},
+		HeldBack:    []string{"F2.4"},
+	}})
+	r.pod.ScriptTurn(taskOp(buildOK("F1", "F2")), keepAlive, taskOp(buildOK("foundation", "F1", "F2")))
 
-	if len(r.issues.created) != 2 {
-		t.Fatalf("created %d issues, want 2", len(r.issues.created))
+	scope := r.plan(t).Request.Scope
+	if scope == nil || scope.Tag != "v2" || fmt.Sprint(scope.Features) != "[{F1 Claims []} {F2 Approvals [F1]}]" ||
+		fmt.Sprint(scope.ProductWide) != "[{P1 Sign in [all]}]" || fmt.Sprint(scope.HeldBack) != "[F2.4]" {
+		t.Fatalf("scope = %+v, want the version's features, product-wide items and held-back stories", scope)
 	}
-	for _, c := range r.issues.created {
-		if c.Milestone == nil || *c.Milestone != 7 {
-			t.Errorf("%q: milestone = %v, want 7", c.Title, c.Milestone)
-		}
+
+	if len(r.issues.created) != 1 {
+		t.Fatalf("created %d issues, want the one build issue", len(r.issues.created))
+	}
+	c := r.issues.created[0]
+	if c.Title != "Build v2" {
+		t.Errorf("title = %q", c.Title)
+	}
+	if c.Milestone == nil || *c.Milestone != 7 {
+		t.Errorf("milestone = %v, want 7", c.Milestone)
+	}
+	if fmt.Sprint(c.Labels) != fmt.Sprint([]string{delivery.LabelAgentWork, delivery.KindDevelopment}) {
+		t.Errorf("labels = %v", c.Labels)
+	}
+	if c.DedupeKey != delivery.DedupeKeyBuildIssue("proj1", 7) {
+		t.Errorf("dedupe key = %q", c.DedupeKey)
+	}
+	want := "Version `v2`: the spec is `specs/` at tag `v2`.\n\n" +
+		"- [ ] **foundation** Shared setup and product-wide requirements: `order-service`. Build foundation.\n" +
+		"- [ ] **F1** Claims: `order-service`. Build F1.\n" +
+		"- [ ] **F2** Approvals: `order-service`. Build F2.\n" +
+		"\nProduct-wide: P1\nHeld back: F2.4\n"
+	if c.Body != want {
+		t.Errorf("body:\n%s\nwant:\n%s", c.Body, want)
+	}
+}
+
+// A completed turn that never planned is a failed plan: a milestone with no
+// development issue would settle at once as delivered, having built nothing.
+func TestPlanMilestone_ACompletedTurnWithNoPlanIsAnError(t *testing.T) {
+	r := newPlanRig(t, planVersions{specTag: "v1"})
+	r.pod.ScriptTurn(keepAlive)
+
+	if err := r.svc.PlanIntoMilestone(context.Background(), "org1", "proj1", 7); !errors.Is(err, errNoBuildPlan) {
+		t.Fatalf("err = %v, want errNoBuildPlan", err)
+	}
+	if len(r.issues.created) != 0 {
+		t.Fatalf("created %d issues, want none", len(r.issues.created))
 	}
 }
 
@@ -169,112 +211,33 @@ func TestPlanMilestone_ATurnInProgressSurfaces(t *testing.T) {
 	}
 }
 
-// A turn the pod ends failed is a failed plan.
+// A turn the pod ends failed is a failed plan, and mints nothing even when it
+// had planned before failing.
 func TestPlanMilestone_AFailedTurnIsAnError(t *testing.T) {
 	r := newPlanRig(t, planVersions{specTag: "v1"})
-	r.pod.ScriptTurn(aestudiotools.TurnEvent{Type: aestudiotools.EventResult, Status: "failed", Code: "agent-error"})
+	r.pod.ScriptTurn(taskOp(buildOK("spec")), aestudiotools.TurnEvent{Type: aestudiotools.EventResult, Status: "failed", Code: "agent-error"})
 
 	if err := r.svc.PlanIntoMilestone(context.Background(), "org1", "proj1", 7); err == nil {
 		t.Fatal("a failed plan turn returned no error")
 	}
-}
-
-// A milestone plan reads its context from MILESTONE MEMBERSHIP, not a label
-// query: the version's own issues are the additive-only dedupe set (§6 plans
-// fresh from the new spec, so nothing carries over from the previous version),
-// and the version's gate and validation issues are not the planner's to touch.
-func TestPlanMilestone_ContextIsTheMilestonesOwnWork(t *testing.T) {
-	r := newPlanRig(t, planVersions{specTag: "v2"})
-
-	// The version's own milestone: one Task already planned (a re-plan or a
-	// crash re-run), one gate, one ledger-only human issue, and the version's
-	// validation task — which is ARMED like every other issue an agent works, so
-	// only the KIND test keeps it out of the planner's context set.
-	r.issues.seedInMilestone(sourcecontrol.IssueInfo{
-		Number: 201, Title: "Implement hello-world-api", Body: "Build the API.",
-		State: "open", Labels: []string{delivery.LabelAgentWork, delivery.KindDevelopment},
-	}, 7)
-	r.issues.seedInMilestone(sourcecontrol.IssueInfo{
-		Number: 202, Title: "Provision orders-db", Body: "Waiting on the drawer.",
-		State: "open", Labels: []string{delivery.KindProvision},
-	}, 7)
-	r.issues.seedInMilestone(sourcecontrol.IssueInfo{
-		Number: 203, Title: "Flaky checkout", Body: "Sometimes 500s.",
-		State: "open", Labels: nil,
-	}, 7)
-	r.issues.seedInMilestone(sourcecontrol.IssueInfo{
-		Number: 204, Title: "Validate hello-world against its validation criteria",
-		Body:  "Author e2e tests.",
-		State: "open", Labels: []string{delivery.LabelAgentWork, delivery.KindValidation},
-	}, 7)
-	// A bug the platform minted into this version IS the planner's context: a
-	// re-plan must be able to see it and must not re-propose it under a new
-	// title.
-	r.issues.seedInMilestone(sourcecontrol.IssueInfo{
-		Number: 205, Title: "Fix the failing build for hello-world-api", Body: "It went red.",
-		State: "open", Labels: []string{delivery.LabelAgentWork, delivery.KindBug, delivery.SrcBuild},
-	}, 7)
-	// A Task of the PREVIOUS version, in another milestone: superseded, and
-	// therefore not context for this one.
-	r.issues.seedInMilestone(sourcecontrol.IssueInfo{
-		Number: 199, Title: "Implement legacy-thing", Body: "Old.",
-		State: "open", Labels: []string{delivery.LabelAgentWork, delivery.KindDevelopment},
-	}, 6)
-
-	call := r.plan(t)
-	paths := make([]string, 0, len(call.Request.TaskContext))
-	for _, f := range call.Request.TaskContext {
-		paths = append(paths, f.Path)
-	}
-	if !slices.Equal(paths, []string{"tasks/201.md", "tasks/205.md"}) {
-		t.Errorf("plan context = %v, want exactly the milestone's own agent work, in path order", paths)
+	if len(r.issues.created) != 0 {
+		t.Fatalf("created %d issues, want none", len(r.issues.created))
 	}
 }
 
-// The plan path settles the run it armed on a failed plan, so a write the tap
-// could not land has to surface as an ERROR rather than a warning.
+// The plan path settles the run it armed on a failed plan, so a mint that did
+// not land has to surface as an ERROR rather than a warning.
 func TestPlanMilestone_WriteFailureIsAnError(t *testing.T) {
 	r := newPlanRig(t, planVersions{specTag: "v2"})
 	r.issues.failCreate = true
-	r.pod.ScriptTurn(taskOp(planOK("hello-world-api", "Implement hello-world-api", nil)))
+	r.scriptPlan("spec")
 
 	err := r.svc.PlanIntoMilestone(context.Background(), "org1", "proj1", 7)
 	if err == nil {
-		t.Fatal("a plan whose issue writes all failed must return an error")
+		t.Fatal("a plan whose build issue was not minted must return an error")
 	}
 	if !strings.Contains(err.Error(), "milestone 7") {
 		t.Errorf("error = %v, want it to name the milestone", err)
-	}
-}
-
-// The scope-native plan (#369): the turn carries the platform-computed
-// milestone scope with per-story coverage, and a created Task is stamped with
-// its component's claimed stories — zero LLM discretion on either.
-func TestPlanMilestone_DeltaScopeAndStamp(t *testing.T) {
-	r := newPlanRig(t, planVersions{specTag: "v2", scope: spec.BuildScope{
-		Tag: "v2", InScope: []string{"F1.1", "F1.2"},
-		StoryTitles:      map[string]string{"F1.1": "As a user, I want A.", "F1.2": "As a user, I want B."},
-		ComponentStories: map[string][]string{"svc": {"F1.1", "F1.2"}},
-	}})
-	r.pod.ScriptTurn(taskOp(`{"ok":true,"op":"plan","component":"svc","title":"Build svc","dependsOn":[],"origin":"spec-plan","rationale":"core"}`))
-
-	scope := r.plan(t).Request.Scope
-	if scope == nil {
-		t.Fatalf("turn carries no milestone scope")
-	}
-	if scope.Tag != "v2" {
-		t.Errorf("scope tag = %q, want v2", scope.Tag)
-	}
-	if want := (aestudiotools.PlanStory{ID: "F1.1", Title: "As a user, I want A.", Covered: false}); !slices.Contains(scope.Stories, want) {
-		t.Errorf("scope missing the uncovered story: %+v", scope.Stories)
-	}
-
-	created := r.issues.created
-	if len(created) != 1 {
-		t.Fatalf("created %d issues, want 1", len(created))
-	}
-	if got := delivery.ParseServesStories(created[0].Body); fmt.Sprint(got) != "[F1.1 F1.2]" {
-		t.Errorf("stamped stories = %v, want [F1.1 F1.2] (body: %q)", got, created[0].Body)
 	}
 }
 
@@ -284,7 +247,7 @@ func TestPlanMilestone_DeltaScopeAndStamp(t *testing.T) {
 func TestPlanIntoMilestone_AnUnknownVersionTagIsPermanent(t *testing.T) {
 	r := newPlanRig(t, planVersions{})
 	r.svc = NewPlanService(fakeRepos{repo: &sourcecontrol.GitRepository{OrgID: "org1", ProjectID: "proj1", RepoURL: "https://github.com/acme/widgets", Status: "ready"}},
-		planVersions{specTag: "v4"}, r.pod, r.issues, r.issues.writer())
+		planVersions{specTag: "v4"}, r.pod, r.issues.writer())
 	err := r.svc.PlanIntoMilestone(context.Background(), "org1", "proj1", 7)
 	if !errors.Is(err, sourcecontrol.ErrRefNotFound) || !sourcecontrol.IsPermanent(err) {
 		t.Fatalf("err = %v, want a permanent ErrRefNotFound", err)
@@ -296,18 +259,11 @@ func TestPlanIntoMilestone_AnUnknownVersionTagIsPermanent(t *testing.T) {
 
 // The plan turn reads the version it plans, not main's tip (B2): the turn
 // names the version's tag as the commit the planner reads, so an edit made to
-// the spec after the version was cut never reaches it. It pins the tag with
-// or without a story scope (a scope-less first pass still plans the version).
+// the spec after the version was cut never reaches it.
 func TestPlanIntoMilestone_ReadsTheVersionNotMain(t *testing.T) {
-	r := newPlanRig(t, planVersions{specTag: "v2"})
-	if req := r.plan(t).Request; req.At != "tags/v2" || req.Scope != nil {
-		t.Errorf("scope-less plan: at = %q, scope = %+v, want tags/v2 and no scope", req.At, req.Scope)
-	}
-
-	r = newPlanRig(t, planVersions{specTag: "v3", scope: spec.BuildScope{
-		Tag: "v3", InScope: []string{"F1.1"}, StoryTitles: map[string]string{"F1.1": "As a user, I want A."},
-	}})
+	r := newPlanRig(t, planVersions{specTag: "v3", scope: spec.BuildScope{Tag: "v3", Features: []spec.ScopeFeature{{ID: "F1"}}}})
+	r.scriptPlan("F1")
 	if req := r.plan(t).Request; req.At != "tags/v3" || req.Scope == nil || req.Scope.Tag != "v3" {
-		t.Errorf("scoped plan: at = %q, scope = %+v, want tags/v3 with the v3 scope", req.At, req.Scope)
+		t.Errorf("at = %q, scope = %+v, want tags/v3 with the v3 scope", req.At, req.Scope)
 	}
 }

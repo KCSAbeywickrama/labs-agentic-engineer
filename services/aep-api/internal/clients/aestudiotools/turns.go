@@ -56,24 +56,14 @@ const maxTurnLine = 16 << 20
 // Credit is who the turn's commits and records are credited to.
 type Credit struct{ UserID, Name, Email string }
 
-// PlanScope is the spec version a plan turn covers (Tag, its name) and which
-// of its stories already have Tasks.
+// PlanScope is what the spec version a plan turn plans carries (Tag, its
+// name): the features, each with the carried features it is built after; the
+// product-wide items; and the stories it holds back.
 type PlanScope struct {
-	Tag     string
-	Stories []PlanStory
-	// Features are the features the version carries, each with the carried
-	// features it is built after; ProductWide are the product-wide items that
-	// reach them.
+	Tag         string
 	Features    []PlanFeature
 	ProductWide []PlanItem
-}
-
-// PlanStory is one story of the milestone (ID like "F1.2"); Covered stories
-// already have Tasks and are left alone.
-type PlanStory struct {
-	ID      string
-	Title   string
-	Covered bool
+	HeldBack    []string
 }
 
 // PlanFeature is one feature a version carries.
@@ -88,9 +78,6 @@ type PlanItem struct {
 	AppliesTo []string
 }
 
-// PlanContextFile is one existing-Task render under its tasks/<n>.md name.
-type PlanContextFile struct{ Path, Body string }
-
 // TurnRequest starts one turn. TurnID (a UUID) makes it idempotent: the same
 // id reattaches to the running or finished turn. At, on a plan turn only, is
 // the commit the planner reads the repository at, as a git read's `at` names
@@ -100,7 +87,6 @@ type TurnRequest struct {
 	Credit                Credit
 	At                    string
 	Scope                 *PlanScope
-	TaskContext           []PlanContextFile
 	Text                  string
 }
 
@@ -164,19 +150,12 @@ func turnBody(req TurnRequest) (gen.TurnRequest, error) {
 	if req.Scope != nil {
 		b.Scope = planScopeBody(*req.Scope)
 	}
-	for _, f := range req.TaskContext {
-		b.TaskContext = append(b.TaskContext, gen.PlanContextFile{Path: f.Path, Body: f.Body})
-	}
 	return b, nil
 }
 
-// planScopeBody is the scope on the wire. Stories is never null: the
-// contract requires the array.
+// planScopeBody is the scope on the wire.
 func planScopeBody(sc PlanScope) gen.PlanScope {
-	out := gen.PlanScope{Tag: sc.Tag, Stories: make([]gen.PlanStory, 0, len(sc.Stories))}
-	for _, s := range sc.Stories {
-		out.Stories = append(out.Stories, gen.PlanStory{ID: s.ID, Title: s.Title, Covered: s.Covered})
-	}
+	out := gen.PlanScope{Tag: sc.Tag, HeldBack: sc.HeldBack}
 	for _, f := range sc.Features {
 		out.Features = append(out.Features, gen.PlanFeature{ID: f.ID, Name: f.Name, Needs: f.Needs})
 	}

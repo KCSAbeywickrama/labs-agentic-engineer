@@ -17,13 +17,11 @@
  */
 
 /**
- * Tasks-phase tests (docs/design/playground.md §14):
- *  - renderTaskContextFile ⇄ parseTaskContextFile round trip, byte-pinned
- *    against the Go `TaskContextFile.Render` fixture;
- *  - the dedupe key recipe pinned against Go `taskmeta.Key` vectors;
- *  - the plan fold via the REAL task-plan toolset (mock model) on the Turn
- *    socket: create + update-by-title, replan dedupe, and the not-completed
- *    do-not-commit fence.
+ * Tasks-phase tests: the issue file's round trip, and `tasks` end to end over
+ * the REAL task-plan toolset (mock model) on the Turn socket, with the
+ * `cmd/build-plan` runner injected: the selection is passed to it, its scope
+ * reaches the plan turn, the last ok planBuild becomes ONE build issue holding
+ * its render, and the version is recorded only then.
  */
 
 import { test } from "node:test";
@@ -31,58 +29,54 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseTaskContextFile } from "@aep/agent-stream";
 import { mockModel, type MockStep } from "@aep/ae-design-agent/shared/mock-model";
 import { tasksCommand } from "../src/commands.js";
-import { renderTaskContextFile, taskKey, titleSlug, FsIssueStore } from "../src/ports/issue-store.js";
+import type { BuildPlanRunner } from "../src/engine/build-plan.js";
+import { checklistDone, FsIssueStore, parseIssueFile, renderIssueFile } from "../src/ports/issue-store.js";
+import { loadProjectState } from "../src/state/project.js";
 
-// Byte-for-byte output of Go taskplan.TaskContextFile.Render for the same
-// data (generated from the Go renderer; regenerate if context_file.go changes).
-const GO_RENDER_FIXTURE =
-  '---\n' +
-  'issueNumber: 3\n' +
-  'component: "user-service"\n' +
-  'title: "Implement \\"auth\\": step 1"\n' +
-  'dependsOn: ["auth-service", "db"]\n' +
-  'origin: "spec-plan"\n' +
-  '---\n' +
-  '\n' +
-  '> **Rationale:** covers auth\n' +
-  '\n' +
-  'Scope text here.\n';
-
-test("renderTaskContextFile is byte-identical to the Go renderer and round-trips", () => {
-  const rendered = renderTaskContextFile({
-    issueNumber: 3,
-    component: "user-service",
-    title: 'Implement "auth": step 1',
-    dependsOn: ["auth-service", "db"],
-    body: "> **Rationale:** covers auth\n\nScope text here.",
-  });
-  assert.equal(rendered, GO_RENDER_FIXTURE);
-
-  const parsed = parseTaskContextFile("tasks/3.md", rendered);
-  assert.ok(parsed);
-  assert.equal(parsed.issueNumber, 3);
-  assert.equal(parsed.component, "user-service");
-  assert.equal(parsed.title, 'Implement "auth": step 1');
-  assert.deepEqual(parsed.dependsOn, ["auth-service", "db"]);
-  assert.match(parsed.body, /Scope text here\./);
+test("an issue file round-trips, and its checklist ticks are read", () => {
+  const body = "Version `v1`.\n\n- [x] **foundation** Shared setup: `api`.\n- [ ] **F1** Claims: `api`, `web`.\n";
+  const file = renderIssueFile({ issueNumber: 4, title: 'Build "v1"', version: "v1", body });
+  assert.equal(file, '---\nissueNumber: 4\ntitle: "Build \\"v1\\""\nversion: "v1"\n---\n\n' + body);
+  const issue = parseIssueFile("issues/4.md", 4, file)!;
+  assert.equal(issue.title, 'Build "v1"');
+  assert.equal(issue.version, "v1");
+  assert.equal(issue.body, body);
+  assert.deepEqual(issue.items, [
+    { item: "foundation", done: true },
+    { item: "F1", done: false },
+  ]);
+  assert.equal(checklistDone(issue), false);
+  assert.equal(parseIssueFile("issues/5.md", 5, "no frontmatter"), null);
+  const handWritten = parseIssueFile("issues/6.md", 6, "---\ntitle: Fix the login\n---\n\nIt 500s.\n")!;
+  assert.equal(handWritten.issueNumber, 6, "the number falls back to the file name");
+  assert.equal(handWritten.version, undefined);
 });
 
-test("taskKey + titleSlug are pinned to the Go taskmeta vectors", () => {
-  // Vectors generated from Go taskmeta.Key/TitleSlug.
-  assert.equal(taskKey("proj", "design-v5", "order-service", "Implement order-service"), "d50ee12432fa");
-  assert.equal(taskKey("todo-app", "local", "user-service", "Build user service"), "befc656b968c");
-  assert.equal(taskKey("p", "d", "t", "🚀"), "ff680200a578"); // empty-slug fallback path
-  assert.equal(titleSlug("café déjà 42"), "caf-d-j-42");
-  assert.equal(titleSlug("  Trim & collapse!! "), "trim-collapse");
+test("the checklist reader agrees with aep-api's build issue reader", () => {
+  // Byte-identical to the BuildIssue.Body() golden in
+  // services/aep-api/internal/platform/taskplan/build_issue_test.go: change both together.
+  const body =
+    "Version `v2`: the spec is `specs/` at tag `v2`.\n\n" +
+    "- [ ] **foundation** Shared setup and product-wide requirements: `hello-api`, `hello-webapp`. Sign-in on both.\n" +
+    "- [ ] **F1** Greeting page: `hello-api`, `hello-webapp`. The greeting.\n" +
+    "- [ ] **F3** Edit greeting: `hello-api`.\n" +
+    "\nProduct-wide: P1\nHeld back: F3.4\n";
+  const issue = parseIssueFile("issues/7.md", 7, renderIssueFile({ issueNumber: 7, title: "Build v2", version: "v2", body }))!;
+  assert.deepEqual(issue.items, [
+    { item: "foundation", done: false },
+    { item: "F1", done: false },
+    { item: "F3", done: false },
+  ]);
+  const unclosed = parseIssueFile("issues/8.md", 8, "---\ntitle: t\n---\n\n- [ ] **F1\n- [ ] **F2** x\n")!;
+  assert.deepEqual(unclosed.items, [{ item: "F2", done: false }], "an item never spans lines");
 });
 
-const VALID_DESIGN = (name: string): string =>
+const VALID_DESIGN = (name: string, type: string): string =>
   JSON.stringify({
     name,
-    type: "service",
+    type,
     version: "0.1.0",
     language: "go",
     buildpack: "docker",
@@ -97,81 +91,156 @@ function seedDesignedProject(): string {
   const dir = mkdtempSync(join(tmpdir(), "aep-play-tasks-"));
   mkdirSync(join(dir, "specs/requirements"), { recursive: true });
   writeFileSync(join(dir, "specs/requirements/prd.md"), "# R\n");
-  mkdirSync(join(dir, "specs/design/components/user-service"), { recursive: true });
-  mkdirSync(join(dir, "specs/design/components/web-frontend"), { recursive: true });
-  writeFileSync(join(dir, "specs/design/design.cell"), "title R\n\ncomponent user-service service\ncomponent web-frontend web-application\n");
-  writeFileSync(join(dir, "specs/design/components/user-service/design.json"), VALID_DESIGN("user-service"));
-  writeFileSync(join(dir, "specs/design/components/web-frontend/design.json"), VALID_DESIGN("web-frontend"));
+  for (const [name, type] of [["claims-api", "service"], ["claims-web", "web-application"]] as const) {
+    mkdirSync(join(dir, "specs/design/components", name), { recursive: true });
+    writeFileSync(join(dir, "specs/design/components", name, "design.json"), VALID_DESIGN(name, type));
+  }
+  writeFileSync(join(dir, "specs/design/design.cell"), "title R\n\ncomponent claims-api service\ncomponent claims-web web-application\n");
   return dir;
 }
 
 function tempSkills(): string {
   const dir = mkdtempSync(join(tmpdir(), "aep-play-skills-"));
   mkdirSync(join(dir, "task-planning"), { recursive: true });
-  writeFileSync(join(dir, "task-planning", "SKILL.md"), "---\nname: task-planning\ndescription: plan tasks\n---\n\nPlan.\n");
+  writeFileSync(join(dir, "task-planning", "SKILL.md"), "---\nname: task-planning\ndescription: plan the build\n---\n\nPlan.\n");
   return dir;
 }
 
-const planSteps = (component: string, title: string, body: string): MockStep[] => [
-  {
-    kind: "toolCall",
-    toolCallId: `p-${component}`,
-    toolName: "planTask",
-    input: { component, title, dependsOn: [], rationale: `covers ${component}` },
-  },
-  {
-    kind: "toolCall",
-    toolCallId: `u-${component}`,
-    toolName: "updateTask",
-    input: { ref: { title }, set: { body } },
-  },
-];
+const SCOPE = { tag: "v1", features: [{ id: "F1", name: "Claims" }, { id: "F2", name: "Approvals", needs: ["F1"] }] };
 
-test("plan fold: planTask + updateTask-by-title → issues/<n>.md; replan dedupes; refs to instruction-carried numbers are fenced", async () => {
+/** A `cmd/build-plan` stand-in: answers `scope` with SCOPE, `issue` with a body naming the items; records each call. */
+function fakeBuildPlan(calls: { args: string[]; stdin?: string }[], overrides: { scopeCode?: number; stderr?: string } = {}): BuildPlanRunner {
+  return async (args, stdin) => {
+    calls.push({ args, ...(stdin !== undefined ? { stdin } : {}) });
+    if (args[0] === "scope") {
+      if (overrides.scopeCode) return { code: overrides.scopeCode, stdout: "", stderr: overrides.stderr ?? "" };
+      const plan = { features: ["F1", "F2"], pulledIn: ["F1"], productWide: [], heldBack: [] };
+      return { code: 0, stdout: JSON.stringify({ plan, scope: SCOPE }), stderr: "" };
+    }
+    const { items } = JSON.parse(stdin ?? "{}") as { items: { item: string }[] };
+    const body = "Version `v1`.\n\n" + items.map((i) => `- [ ] **${i.item}** x: \`claims-api\`.`).join("\n") + "\n";
+    return { code: 0, stdout: JSON.stringify({ title: "Build v1", body }), stderr: "" };
+  };
+}
+
+const planBuild = (id: string, items: string[]): MockStep => ({
+  kind: "toolCall",
+  toolCallId: id,
+  toolName: "planBuild",
+  input: { items: items.map((item) => ({ item, components: ["claims-api"], note: `Build ${item}.` })) },
+});
+
+test("tasks: the selection's scope reaches the plan, its last ok planBuild becomes one build issue, and the version is recorded", async () => {
+  const projectDir = seedDesignedProject();
+  const skillsDir = tempSkills();
+  const calls: { args: string[]; stdin?: string }[] = [];
+  try {
+    const model = mockModel([
+      planBuild("p1", ["F2", "F1"]), // refused: F2 needs F1
+      planBuild("p2", ["F1", "F2"]),
+      planBuild("p3", ["foundation", "F1", "F2"]),
+      { kind: "text", text: "Planned." },
+    ]);
+    const outcome = await tasksCommand(projectDir, { model, skillsDir, silent: true, features: ["F2"], buildPlan: fakeBuildPlan(calls) });
+    assert.equal(outcome.ok, true, outcome.detail);
+
+    assert.deepEqual(calls[0]!.args.slice(0, 1), ["scope"]);
+    assert.ok(calls[0]!.args.join(" ").includes("--version v1 --features F2"), calls[0]!.args.join(" "));
+    // scope runs POST /build's gate over the design and the acceptance files; issue gates nothing.
+    const flag = (args: string[], name: string): string | undefined => args[args.indexOf(name) + 1];
+    assert.equal(flag(calls[0]!.args, "--design-dir"), join(projectDir, "specs", "design"));
+    assert.equal(flag(calls[0]!.args, "--acceptance-dir"), join(projectDir, "specs", "validation", "acceptance"));
+    assert.equal(calls[1]!.args.includes("--design-dir"), false, "issue takes no gate folders");
+    assert.deepEqual(JSON.parse(calls[1]!.stdin!).items.map((i: { item: string }) => i.item), ["foundation", "F1", "F2"], "the last ok plan is rendered");
+
+    const issues = new FsIssueStore(projectDir).list();
+    assert.equal(issues.length, 1, "one build issue");
+    assert.equal(issues[0]!.title, "Build v1");
+    assert.equal(issues[0]!.version, "v1");
+    assert.deepEqual(issues[0]!.items.map((i) => i.item), ["foundation", "F1", "F2"]);
+    assert.deepEqual(loadProjectState(projectDir, "p").versions, [{ tag: "v1", features: ["F1", "F2"], productWide: [] }]);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+    rmSync(skillsDir, { recursive: true, force: true });
+  }
+});
+
+test("tasks: a later version waits for the earlier one's checklist, then carries what was built", async () => {
+  const projectDir = seedDesignedProject();
+  const skillsDir = tempSkills();
+  const calls: { args: string[]; stdin?: string }[] = [];
+  try {
+    const first = mockModel([planBuild("p1", ["F1", "F2"]), { kind: "text", text: "ok" }]);
+    assert.equal((await tasksCommand(projectDir, { model: first, skillsDir, silent: true, buildPlan: fakeBuildPlan(calls) })).ok, true);
+
+    const waiting = await tasksCommand(projectDir, { model: mockModel([]), skillsDir, silent: true, buildPlan: fakeBuildPlan(calls) });
+    assert.equal(waiting.ok, false);
+    assert.match(waiting.detail ?? "", /issues\/1\.md \(Build v1\) still has unticked items/);
+
+    const file = join(projectDir, "issues/1.md");
+    writeFileSync(file, readFileSync(file, "utf8").replaceAll("- [ ]", "- [x]"));
+    calls.length = 0;
+    const second = mockModel([planBuild("p2", ["F1", "F2"]), { kind: "text", text: "ok" }]);
+    assert.equal((await tasksCommand(projectDir, { model: second, skillsDir, silent: true, features: ["F3"], buildPlan: fakeBuildPlan(calls) })).ok, true);
+    const args = calls[0]!.args.join(" ");
+    assert.ok(args.includes("--version v2") && args.includes("--built-features F1,F2"), args);
+    assert.equal(new FsIssueStore(projectDir).list().length, 2);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+    rmSync(skillsDir, { recursive: true, force: true });
+  }
+});
+
+test("tasks: a design POST /build's gate refuses never plans; the gate's findings are the refusal", async () => {
+  const projectDir = seedDesignedProject();
+  const skillsDir = tempSkills();
+  const calls: { args: string[]; stdin?: string }[] = [];
+  try {
+    const stderr =
+      "specs/design/design.cell: story F1.1 is in the requirements but no component's design.json lists it in `stories` — extend the design or drop the story\n" +
+      'specs/design/components/claims-web/prototype.tsx: component "claims-web" has prototype.tsx but no prototype.json — a prototype is both files; write the missing one or remove the other\n';
+    const refused = await tasksCommand(projectDir, {
+      model: mockModel([planBuild("p1", ["F1"]), { kind: "text", text: "ok" }]),
+      skillsDir,
+      silent: true,
+      buildPlan: fakeBuildPlan(calls, { scopeCode: 1, stderr }),
+    });
+    assert.equal(refused.ok, false);
+    assert.match(refused.detail ?? "", /^the build is refused: specs\/design\/design\.cell: story F1\.1 .*; specs\/design\/components\/claims-web\/prototype\.tsx: /);
+    assert.deepEqual(calls.map((c) => c.args[0]), ["scope"], "no plan turn and no issue render after a refusal");
+    assert.equal(existsSync(join(projectDir, "issues")), false, "no issue written");
+    assert.deepEqual(loadProjectState(projectDir, "p").versions, []);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+    rmSync(skillsDir, { recursive: true, force: true });
+  }
+});
+
+test("tasks: a refused selection, or a plan turn that never plans, writes nothing and records no version", async () => {
   const projectDir = seedDesignedProject();
   const skillsDir = tempSkills();
   try {
-    const first = mockModel([
-      ...planSteps("user-service", "Build user service", "## Scope\nimplement the API"),
-      ...planSteps("web-frontend", "Build web frontend", "## Scope\nimplement the UI"),
-      { kind: "text", text: "planned." },
-    ]);
-    const outcome = await tasksCommand(projectDir, { model: first, skillsDir, silent: true });
-    assert.equal(outcome.ok, true, outcome.detail);
-    assert.equal(outcome.fold?.created.length, 2);
+    const refused = await tasksCommand(projectDir, {
+      model: mockModel([]),
+      skillsDir,
+      silent: true,
+      features: ["F9"],
+      buildPlan: fakeBuildPlan([], { scopeCode: 1, stderr: "specs/requirements/prd.md: F9 is not a feature of the requirements\n" }),
+    });
+    assert.equal(refused.ok, false);
+    assert.match(refused.detail ?? "", /the build is refused: .*F9 is not a feature/);
 
-    const issue1 = readFileSync(join(projectDir, "issues/1.md"), "utf8");
-    assert.match(issue1, /component: "user-service"/);
-    assert.match(issue1, /> \*\*Rationale:\*\* covers user-service/);
-    assert.match(issue1, /## Scope/);
-    assert.match(issue1, /key: "[0-9a-f]{12}"/);
+    const silent = await tasksCommand(projectDir, {
+      model: mockModel([planBuild("p1", ["F2"]), { kind: "text", text: "I could not plan." }]),
+      skillsDir,
+      silent: true,
+      buildPlan: fakeBuildPlan([]),
+    });
+    assert.equal(silent.ok, false);
+    assert.match(silent.detail ?? "", /without a build plan/);
 
-    // Replan: the model re-plans an already-covered component (same title) and
-    // tries updateTask{issueNumber} on an instruction-carried task — the server
-    // rejects the issueNumber ref (UNKNOWN_REF, production parity), the
-    // duplicate planTask folds to a skip, and nothing new lands.
-    const second = mockModel([
-      {
-        kind: "toolCall",
-        toolCallId: "dup",
-        toolName: "planTask",
-        input: { component: "user-service", title: "Build user service", dependsOn: [], rationale: "dup" },
-      },
-      {
-        kind: "toolCall",
-        toolCallId: "fence",
-        toolName: "updateTask",
-        input: { ref: { issueNumber: 1 }, set: { body: "must not land" } },
-      },
-      { kind: "text", text: "replanned." },
-    ]);
-    const replan = await tasksCommand(projectDir, { model: second, skillsDir, silent: true });
-    assert.equal(replan.ok, true, replan.detail);
-    assert.equal(replan.fold?.created.length, 0);
-    // Server-side the duplicate planTask is REJECTED (DUPLICATE_TITLE never ok)
-    // or folds as a key-dedupe skip — either way no new file:
-    assert.ok(!existsSync(join(projectDir, "issues/3.md")), "no third issue after replan");
-    assert.ok(!readFileSync(join(projectDir, "issues/1.md"), "utf8").includes("must not land"), "fenced ref never written");
+    assert.equal(existsSync(join(projectDir, "issues")), false, "no issue written");
+    assert.deepEqual(loadProjectState(projectDir, "p").versions, []);
   } finally {
     rmSync(projectDir, { recursive: true, force: true });
     rmSync(skillsDir, { recursive: true, force: true });
@@ -179,84 +248,20 @@ test("plan fold: planTask + updateTask-by-title → issues/<n>.md; replan dedupe
 });
 
 test("safeAllocator never clobbers an existing issue file (copied project, fresh counter)", () => {
-  const projectDir = seedDesignedProject();
+  const projectDir = mkdtempSync(join(tmpdir(), "aep-play-alloc-"));
   try {
     mkdirSync(join(projectDir, "issues"), { recursive: true });
-    writeFileSync(join(projectDir, "issues", "1.md"), "existing\n");
-    writeFileSync(join(projectDir, "issues", "2.md"), "existing\n");
-    const store = new FsIssueStore(projectDir, "todo-app");
-    let counter = 1; // a project copied without .aep-playground state
-    const alloc = store.safeAllocator(
+    writeFileSync(join(projectDir, "issues/1.md"), "---\ntitle: hand-written\n---\n");
+    let counter = 1;
+    const store = new FsIssueStore(projectDir);
+    const allocate = store.safeAllocator(
       () => counter,
-      (advancedTo) => {
-        counter = advancedTo;
+      (n) => {
+        counter = n;
       },
     );
-    assert.equal(alloc(), 3, "skips past existing files");
-    assert.equal(counter, 4);
-    assert.equal(readFileSync(join(projectDir, "issues", "1.md"), "utf8"), "existing\n");
-  } finally {
-    rmSync(projectDir, { recursive: true, force: true });
-  }
-});
-
-test("a Plan turn that did not complete → the fold writes nothing (D14 do-not-commit)", () => {
-  const projectDir = seedDesignedProject();
-  try {
-    const store = new FsIssueStore(projectDir, "todo-app");
-    const outcome = store.fold(
-      {
-        completed: false, // a failed or severed turn
-        taskOps: [
-          {
-            op: "plan",
-            output: { ok: true, op: "plan", component: "user-service", title: "T", dependsOn: [], origin: "spec-plan", rationale: "r" },
-          },
-        ],
-      },
-      () => 1,
-    );
-    assert.equal(outcome.created.length, 0);
-    assert.ok(!existsSync(join(projectDir, "issues")), "no issues dir created");
-  } finally {
-    rmSync(projectDir, { recursive: true, force: true });
-  }
-});
-
-test("updateTask rename collision: only the rename is skipped (surfaced), dependsOn/body still land", () => {
-  const projectDir = seedDesignedProject();
-  try {
-    const store = new FsIssueStore(projectDir, "todo-app");
-    let n = 1;
-    const plan = (component: string, title: string) => ({
-      op: "plan",
-      output: { ok: true, op: "plan", component, title, dependsOn: [], origin: "spec-plan", rationale: "r" },
-    });
-    const outcome = store.fold(
-      {
-        completed: true,
-        taskOps: [
-          plan("user-service", "Task A"),
-          plan("webapp", "Task B"),
-          {
-            op: "update",
-            output: {
-              ok: true,
-              op: "update",
-              ref: { title: "Task B" },
-              set: { title: "Task A", dependsOn: ["user-service"], body: "revised scope" },
-            },
-          },
-        ],
-      },
-      () => n++,
-    );
-    assert.deepEqual(outcome.skippedRenames, ['#2 "Task B" → "Task A"']);
-    const issueB = store.list().find((i) => i.issueNumber === 2);
-    assert.ok(issueB, "issue 2 exists");
-    assert.equal(issueB.title, "Task B", "colliding rename did not apply");
-    assert.deepEqual(issueB.dependsOn, ["user-service"], "dependsOn from the same op landed");
-    assert.match(issueB.body, /revised scope/, "body from the same op landed");
+    assert.equal(allocate(), 2);
+    assert.equal(counter, 3);
   } finally {
     rmSync(projectDir, { recursive: true, force: true });
   }

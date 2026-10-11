@@ -18,11 +18,11 @@
 // (docs/design/tasks-github-native.md §1, §10.1). A Task IS a GitHub issue —
 // its labels, body (machine block + rationale + scope), open/closed state, and
 // linked PRs. This package reads Tasks live from GitHub joined with their
-// executions to compute derived status (reads.go), plans Tasks in the org's AE Studio
-// pod and executes its task-op stream against GitHub mid-flight (plan.go /
-// plan_tap.go), stamps command labels (commands.go), composes issue bodies over
-// the machine block (issue_compose.go), and handles issues.* webhooks — task
-// birth, block validation/repair, close/reopen, attention (events.go). It never
+// executions to compute derived status (reads.go), plans the version's build in
+// the org's AE Studio pod and mints its one build issue (plan.go /
+// plan_tap.go), stamps command labels (commands.go), and handles issues.*
+// webhooks — task birth, block validation/repair, close/reopen, attention
+// (events.go). It never
 // stores a Task status (that is derived) and never imports the platform-owned
 // execution half — the §1 split is a package boundary (arch-locked).
 package task

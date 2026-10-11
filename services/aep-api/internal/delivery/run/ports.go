@@ -147,6 +147,10 @@ type MilestoneReader interface {
 	// and total in a single GraphQL round trip. Never the REST milestone's
 	// open_issues field, which counts pull requests.
 	MilestoneIssueCounts(ctx context.Context, orgID, projectID string, number int) (*sourcecontrol.MilestoneIssueCounts, error)
+	// ListMilestoneIssues reads the milestone's issues with their bodies: the
+	// poll reads the build issue's checklist through it, and only when the
+	// counts show open planned work.
+	ListMilestoneIssues(ctx context.Context, orgID, projectID string, filter sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error)
 	// CloseMilestone closes a settled version's milestone. DISPLAY ONLY: no
 	// platform logic branches on milestone state, and a closed milestone still
 	// accepts new issues, which is what lets an incident adopt into an old

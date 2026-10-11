@@ -35,7 +35,7 @@ import { randomUUID } from "node:crypto";
 import { Server, type Document } from "@hocuspocus/server";
 import { readDocFile, setDocFile } from "@aep/collab-doc";
 import type { LanguageModel } from "ai";
-import { PLAN_TASK, UPDATE_TASK } from "@aep/agent-stream";
+import { PLAN_BUILD } from "@aep/agent-stream";
 import { mockModel } from "../src/shared/mock-model.js";
 import { frameLine, parseTurnRequest, resultOf, taskOpOf, type TaskOpFrame, type TurnSocketFrame } from "../src/edge/turn-socket.js";
 import { creditParameter } from "../src/collab/local-room.js";
@@ -78,16 +78,13 @@ async function until(cond: () => boolean, what: string, ms = 5_000): Promise<voi
 
 const withoutKeepAlives = (lines: string[]) => lines.map((l) => JSON.parse(l) as Record<string, unknown>).filter((f) => f.type !== "keep-alive");
 
-test("taskOpOf: only an ok planTask/updateTask result is a Task operation", () => {
-  const ok = { ok: true, op: "plan", component: "hello-api", title: "T" };
-  assert.deepEqual(taskOpOf({ type: "tool-result", toolName: "planTask", output: ok }), { op: "plan", output: ok });
-  const upd = { ok: true, op: "update", ref: { title: "T" }, set: { body: "b" } };
-  assert.deepEqual(taskOpOf({ type: "tool-result", toolName: "updateTask", output: upd }), { op: "update", output: upd });
-  assert.equal(taskOpOf({ type: "tool-result", toolName: "planTask", output: { ok: false, op: "plan", code: "UNKNOWN_COMPONENT" } }), null);
-  assert.equal(taskOpOf({ type: "tool-result", toolName: "loadSkill", output: { ok: true, op: "plan" } }), null);
-  assert.equal(taskOpOf({ type: "tool-call", toolName: "planTask", input: ok }), null);
-  assert.equal(taskOpOf({ type: "tool-result", toolName: "planTask", output: { ok: true, op: "add" } }), null);
-  assert.equal(taskOpOf("[DONE]"), null);
+test("taskOpOf: only an ok planBuild result is a build operation", () => {
+  const ok = { ok: true, op: "build", items: [{ item: "F1", components: ["hello-api"], note: "n" }] };
+  assert.deepEqual(taskOpOf({ type: "tool-result", toolName: "planBuild", output: ok }), { op: "build", output: ok });
+  assert.equal(taskOpOf({ type: "tool-result", toolName: "planBuild", output: { ok: false, op: "build", code: "MISSING_ITEM" } }), null);
+  assert.equal(taskOpOf({ type: "tool-result", toolName: "loadSkill", output: { ok: true, op: "build" } }), null);
+  assert.equal(taskOpOf({ type: "tool-call", toolName: "planBuild", input: ok }), null);
+  assert.equal(taskOpOf({ type: "tool-result", toolName: "planBuild", output: { ok: true, op: "add" } }), null);
 });
 
 test("the lines are the golden streams' lines, byte for byte", () => {
@@ -114,8 +111,7 @@ test("the golden task-op lines carry the tool output the agent projects (ok and 
     .filter((f): f is TaskOpFrame => f.type === "task-op");
   assert.equal(ops.length, 2);
   for (const frame of ops) {
-    const toolName = frame.op === "plan" ? PLAN_TASK : UPDATE_TASK;
-    assert.deepEqual(taskOpOf({ type: "tool-result", toolName, output: frame.output }), { op: frame.op, output: frame.output });
+    assert.deepEqual(taskOpOf({ type: "tool-result", toolName: PLAN_BUILD, output: frame.output }), { op: frame.op, output: frame.output });
   }
 });
 
@@ -130,24 +126,36 @@ test("parseTurnRequest refuses what the contract does not declare", () => {
     { ...ok, credit: { ...NOBODY, extra: "x" } },
     { ...ok, collab: {} },
     { ...ok, text: 1 },
-    { ...ok, scope: { tag: "v1", stories: [{ number: "1", covered: false }] } },
+    { ...ok, scope: { tag: 1 } },
+    { ...ok, scope: { tag: "v1", features: [{ name: "no id" }] } },
     { ...ok, taskContext: [{ path: "tasks/1.md" }] },
   ]) {
     assert.equal(typeof parseTurnRequest(bad), "string", JSON.stringify(bad));
   }
 });
 
-test("a Plan turn: two ok planTask results are two task-op lines, then result completed", () =>
+const PLAN_SCOPE = {
+  tag: "v1.0.0",
+  features: [{ id: "F1", name: "Greeting" }],
+  productWide: [{ id: "P1", text: "Every answer is JSON", appliesTo: ["all"] }],
+};
+
+test("a Plan turn: each ok planBuild result is a task-op line, a refused one is not, then result completed", () =>
   withEdge(
     {
       files: SEED_FILES,
       skillFiles: { "skills/task-planning/SKILL.md": TASK_PLANNING_MD },
       models: [
         mockModel([
-          { kind: "toolCall", toolCallId: "p1", toolName: "planTask", input: { component: "hello-api", title: "Build hello-api", dependsOn: [], rationale: "core." } },
-          { kind: "toolCall", toolCallId: "p2", toolName: "planTask", input: { component: "nope", title: "Ghost", dependsOn: [], rationale: "wrong." } },
+          { kind: "toolCall", toolCallId: "p1", toolName: "planBuild", input: { items: [{ item: "F1", components: ["hello-api"], note: "Say hello." }] } },
+          { kind: "toolCall", toolCallId: "p2", toolName: "planBuild", input: { items: [{ item: "F1", components: ["nope"], note: "Wrong." }] } },
           { kind: "toolCall", toolCallId: "s1", toolName: "loadSkill", input: { name: "task-planning" } },
-          { kind: "toolCall", toolCallId: "p3", toolName: "planTask", input: { component: "hello-api", title: "Test hello-api", dependsOn: [], rationale: "proof." } },
+          {
+            kind: "toolCall",
+            toolCallId: "p3",
+            toolName: "planBuild",
+            input: { items: [{ item: "foundation", components: ["hello-api"], note: "Set up." }, { item: "F1", components: ["hello-api"], note: "Say hello." }] },
+          },
           { kind: "text", text: "planned" },
         ]),
       ],
@@ -155,23 +163,19 @@ test("a Plan turn: two ok planTask results are two task-op lines, then result co
     },
     async (edge) => {
       const turnId = randomUUID();
-      const res = await postTurnSocket(edge.turnSocket, {
-        turnId,
-        project: PROJECT,
-        kind: "plan",
-        credit: NOBODY,
-        scope: { tag: "v1.0.0", stories: [{ id: "F1.1", title: "Say hello", covered: false }] },
-        taskContext: [{ path: "tasks/7.md", body: "# Existing Task seven" }],
-      });
+      const res = await postTurnSocket(edge.turnSocket, { turnId, project: PROJECT, kind: "plan", credit: NOBODY, scope: PLAN_SCOPE });
       assert.equal(res.status, 200);
       assert.equal(res.contentType, "application/x-ndjson");
       const frames = withoutKeepAlives(await res.rest());
       assert.deepEqual(frames.map((f) => [f.type, f.op ?? f.status]), [
-        ["task-op", "plan"],
-        ["task-op", "plan"],
+        ["task-op", "build"],
+        ["task-op", "build"],
         ["result", "completed"],
       ]);
-      assert.deepEqual(frames.map((f) => (f.output as { title?: string } | undefined)?.title), ["Build hello-api", "Test hello-api", undefined]);
+      assert.deepEqual(
+        frames.map((f) => (f.output as { items?: { item: string }[] } | undefined)?.items?.map((i) => i.item)),
+        [["F1"], ["foundation", "F1"], undefined],
+      );
       assert.equal((frames[0]!.output as { ok: boolean }).ok, true, "the whole ok result, as the plan tap decodes it");
       assert.deepEqual(frames[2], { type: "result", status: "completed" });
 
@@ -191,7 +195,7 @@ test("a Plan turn: two ok planTask results are two task-op lines, then result co
     },
   ));
 
-test("a Plan turn runs the task-plan toolset on the scope and the existing Tasks", async () => {
+test("a Plan turn runs the task-plan toolset on the version's scope", async () => {
   const model = mockModel([{ kind: "text", text: "nothing to plan" }]);
   await withEdge({ files: SEED_FILES, models: [model] }, async (edge) => {
     const res = await postTurnSocket(edge.turnSocket, {
@@ -199,25 +203,18 @@ test("a Plan turn runs the task-plan toolset on the scope and the existing Tasks
       project: PROJECT,
       kind: "plan",
       credit: ANN,
-      scope: {
-        tag: "v1.0.0",
-        stories: [{ id: "F1.1", title: "Say hello", covered: true }],
-        features: [{ id: "F1", name: "Greeting", needs: [] }],
-        productWide: [{ id: "P1", text: "Every answer is JSON", appliesTo: ["all"] }],
-      },
-      taskContext: [{ path: "tasks/7.md", body: "# Existing Task seven" }],
+      scope: { ...PLAN_SCOPE, heldBack: ["F1.4"] },
     });
     assert.deepEqual(withoutKeepAlives(await res.rest()), [{ type: "result", status: "completed" }]);
     const call0 = model.doStreamCalls[0]!;
     const tools = (call0.tools ?? []).map((t) => t.name);
-    assert.ok(tools.includes("planTask") && tools.includes("updateTask"));
+    assert.ok(tools.includes("planBuild"));
     assert.equal(tools.includes("addFile"), false);
     const prompt = JSON.stringify(call0.prompt);
-    assert.match(prompt, /Existing Task seven/);
     assert.match(prompt, /v1\.0\.0/);
-    assert.match(prompt, /Story F1\.1: Say hello/);
-    assert.match(prompt, /one Task per feature per component that serves it:\\n\\n- F1 Greeting/);
+    assert.match(prompt, /Features this version builds:\\n\\n- F1 Greeting/);
     assert.match(prompt, /- P1: Every answer is JSON \(applies to all\)/);
+    assert.match(prompt, /Stories held back[^:]*: F1\.4/);
     assert.deepEqual(edge.tools.lookups, [{ project: PROJECT }], "no at: the default-branch tip");
   });
 });

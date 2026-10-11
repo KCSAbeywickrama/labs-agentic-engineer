@@ -263,15 +263,6 @@ func (f *fakeIssues) EditIssueBody(_ context.Context, _, _ string, number int, b
 	return nil
 }
 
-func (f *fakeIssues) EditIssueTitle(_ context.Context, _, _ string, number int, title string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if i := f.byNumber[number]; i != nil {
-		i.Title = title
-	}
-	return nil
-}
-
 func (f *fakeIssues) AddLabels(_ context.Context, _, _ string, number int, labels []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

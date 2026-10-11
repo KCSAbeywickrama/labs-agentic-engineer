@@ -27,16 +27,18 @@ import { spawn } from "node:child_process";
 import { stdout as output } from "node:process";
 import { renderPart, renderSummary } from "./kit/render.js";
 import type { StreamPart, TurnScope } from "@aep/agent-stream";
-import { designGate, requirementsGate, tasksGate, type GateResult } from "./engine/gates.js";
+import { designGate, listWebApplications, prototypeGate, requirementsGate, tasksGate, type GateResult } from "./engine/gates.js";
+import { clearSavedFeedback, previewPrototype, savedFeedback } from "./engine/prototype.js";
 import { openSession, type OpenOptions, type PlaygroundSession } from "./engine/session.js";
 import { pendingQuestions, type PendingQuestions } from "./engine/questions.js";
-import { runSpecTurn, type SpecTurnResult } from "./engine/turn.js";
-import { runPlanTurn } from "./engine/plan-turn.js";
+import { runSpecTurn, type SpecTurnOptions, type SpecTurnResult } from "./engine/turn.js";
+import { lastBuildPlan, runPlanTurn } from "./engine/plan-turn.js";
+import { renderBuildIssue, selectBuild, type BuildPlanRunner, type Selection } from "./engine/build-plan.js";
 import { runCodingAgent } from "./engine/coding-run.js";
 import { deriveDesign, type DeriveOutcome } from "./engine/design-derive.js";
 import { renderLogView, resolveRunDir, type LogView } from "./engine/log-read.js";
 import { SKILLS_DIR } from "./engine/session.js";
-import { FsIssueStore, type FoldOutcome } from "./ports/issue-store.js";
+import { FsIssueStore, type Issue } from "./ports/issue-store.js";
 import { projectSlug } from "./ports/spec-workspace.js";
 import { loadProjectState, saveProjectState } from "./state/project.js";
 import { readIdea, writeDescriptor } from "./state/descriptor.js";
@@ -76,13 +78,19 @@ function gateFail(gate: GateResult): PhaseOutcome {
 }
 
 /** Run one spec turn inside a fresh session (open → turn → close). */
-async function runPhaseTurn(projectDir: string, instruction: string, opts: PhaseOptions): Promise<PhaseOutcome> {
+async function runPhaseTurn(
+  projectDir: string,
+  instruction: string,
+  opts: PhaseOptions,
+  turn: Pick<SpecTurnOptions, "prototypeFeedback"> = {},
+): Promise<PhaseOutcome> {
   // One-shot phase run — no human answers questions here, so the channel says
   // so explicitly (#373: posture is channel state, not skill prose).
   const session = await openSession(projectDir, { ...opts, headless: true });
   try {
     const onPart = onPartFor(opts);
     const result = await runSpecTurn(session, instruction, {
+      ...turn,
       ...(opts.scope ? { scope: opts.scope } : {}),
       ...(onPart ? { onPart } : {}),
     });
@@ -129,23 +137,102 @@ export async function designCommand(projectDir: string, opts: PhaseOptions): Pro
   return runPhaseTurn(projectDir, "/design", opts);
 }
 
+export interface PrototypeOptions extends PhaseOptions {
+  /** `--preview`: serve the review page instead of running a turn. */
+  preview?: boolean;
+  /** `--feedback`: send the review the preview saved as a revision turn. */
+  feedback?: boolean;
+  /** `--no-open`: the preview prints its URL instead of opening a browser. */
+  noOpen?: boolean;
+}
+
 /**
- * Phase 3 — tasks (§5 phase 3): a Plan turn on the Turn socket (a throwaway
- * conversation on the task-plan toolset); existing issues ride as its task
- * context (production channel); its task operations fold into
- * `issues/<n>.md` only when the turn completed.
+ * `play <dir> prototype [component]` — the console's `/prototype` line, with its
+ * review: `--preview` serves the review page, and `--feedback` sends the batch
+ * saved there as the console's Send all does, then clears it.
  */
-export async function tasksCommand(projectDir: string, opts: PhaseOptions): Promise<PhaseOutcome & { fold?: FoldOutcome }> {
+export async function prototypeCommand(projectDir: string, opts: PrototypeOptions, component?: string): Promise<PhaseOutcome> {
+  const gate = prototypeGate(projectDir, component);
+  if (!gate.ok) return gateFail(gate);
+  if (!opts.preview && !opts.feedback) return runPhaseTurn(projectDir, component ? `/prototype ${component}` : "/prototype", opts);
+
+  // A review is of one prototype: the named one, or the design's only one.
+  const apps = listWebApplications(projectDir);
+  const target = component ?? (apps.length === 1 ? apps[0] : undefined);
+  if (!target) return { ok: false, detail: `name the web-application to review (${apps.join(", ")})` };
+  if (opts.preview) {
+    const code = await previewPrototype(projectDir, target, { open: !opts.noOpen });
+    return code === 0 ? { ok: true } : { ok: false, detail: `the preview exited ${code}` };
+  }
+  const saved = savedFeedback(projectDir, target);
+  if (!saved.ok) return { ok: false, detail: saved.reason };
+  const outcome = await runPhaseTurn(projectDir, `/prototype ${target}`, opts, { prototypeFeedback: saved.feedback });
+  if (outcome.ok) clearSavedFeedback(saved.file);
+  return outcome;
+}
+
+export interface TasksOptions extends PhaseOptions {
+  /** `--features F1,F3`: the build's pick; none picks every feature that can be designed, as POST /build does. */
+  features?: string[];
+  /** `--product-wide P1`: the product-wide items picked. */
+  productWide?: string[];
+  /** Override the `cmd/build-plan` runner (tests). */
+  buildPlan?: BuildPlanRunner;
+}
+
+/**
+ * Phase 3 — tasks: the build click's plan half. The selection goes through
+ * POST /build's own code (`cmd/build-plan scope`, which refuses as it does:
+ * the selection, then the build gate over the requirements, design and
+ * acceptance files, so a design production would refuse never plans here),
+ * a Plan turn on the Turn socket plans the version's checklist, and its last
+ * ok `planBuild` becomes ONE build issue, `issues/<n>.md`, rendered by the plan
+ * service's own code (`cmd/build-plan issue`). The version is recorded only
+ * once its issue is written, as a tag's annotation records what it carries.
+ */
+export async function tasksCommand(projectDir: string, opts: TasksOptions): Promise<PhaseOutcome & { issue?: Issue }> {
   const gate = tasksGate(projectDir);
   if (!gate.ok) return gateFail(gate);
 
+  const store = new FsIssueStore(projectDir);
+  const unfinished = store.unfinishedBuilds();
+  if (unfinished.length > 0) {
+    const [first] = unfinished;
+    return {
+      ok: false,
+      detail: `${first!.file} (${first!.title}) still has unticked items — finish it with \`code\`, or delete the file to drop that version's work`,
+    };
+  }
+
   const session = await openSession(projectDir, opts);
   try {
-    const store = new FsIssueStore(projectDir, session.state.slug);
+    const built = session.state.versions;
+    const selection: Selection = {
+      version: `v${built.length + 1}`,
+      ...(opts.features?.length ? { features: opts.features } : {}),
+      ...(opts.productWide?.length ? { productWide: opts.productWide } : {}),
+      builtFeatures: [...new Set(built.flatMap((v) => v.features))],
+      builtProductWide: [...new Set(built.flatMap((v) => v.productWide))],
+    };
+    const selected = await selectBuild(projectDir, selection, opts.buildPlan);
+    if (!selected.ok) return { ok: false, detail: selected.detail };
+    if (!opts.silent) {
+      const { features, pulledIn, heldBack } = selected.plan;
+      output.write(`  ${selection.version} carries ${features.join(", ") || "the whole spec"}`);
+      output.write(pulledIn.length ? ` (pulled in: ${pulledIn.join(", ")})` : "");
+      output.write(heldBack.length ? `; held back: ${heldBack.join(", ")}\n` : "\n");
+    }
+
     const onPart = onPartFor(opts);
-    const result = await runPlanTurn(session, store.planContext(), onPart ? { onPart } : {});
-    const fold = store.fold(
-      result,
+    const result = await runPlanTurn(session, { scope: selected.scope, ...(onPart ? { onPart } : {}) });
+    if (result.error) return { ok: false, detail: result.error };
+    const plan = lastBuildPlan(result);
+    if (!plan) return { ok: false, detail: "the plan turn completed without a build plan" };
+
+    const rendered = await renderBuildIssue(projectDir, selection, plan.items, opts.buildPlan);
+    if (!rendered.ok) return { ok: false, detail: rendered.detail };
+    const issue = store.writeBuildIssue(
+      { title: rendered.title, version: selection.version, body: rendered.body },
       store.safeAllocator(
         () => session.state.nextIssueNumber,
         (advancedTo) => {
@@ -153,17 +240,10 @@ export async function tasksCommand(projectDir: string, opts: PhaseOptions): Prom
         },
       ),
     );
+    session.state.versions.push({ tag: selection.version, features: selected.plan.features, productWide: selected.plan.productWide });
     saveProjectState(projectDir, session.state);
-    if (!opts.silent) {
-      output.write("\n");
-      for (const i of fold.created) output.write(`  ＋ ${i.file} — ${i.component}: ${i.title}\n`);
-      for (const i of fold.updated) output.write(`  ± ${i.file} — ${i.component}: ${i.title}\n`);
-      for (const t of fold.skippedDuplicates) output.write(`  ↷ duplicate skipped: ${t}\n`);
-      for (const t of fold.skippedRenames) output.write(`  ↷ rename skipped (title already taken): ${t}\n`);
-      if (fold.created.length + fold.updated.length === 0) output.write("  (no issues written)\n");
-    }
-    if (result.error) return { ok: false, detail: result.error, fold };
-    return { ok: true, fold };
+    if (!opts.silent) output.write(`\n  ＋ ${issue.file} — ${issue.title}: ${issue.items.map((i) => i.item).join(" → ")}\n`);
+    return { ok: true, issue };
   } finally {
     await session.close();
   }
@@ -204,7 +284,7 @@ export async function codeCommand(
   opts: CodeOptions,
   confirmDir?: () => Promise<boolean>,
 ): Promise<PhaseOutcome> {
-  const store = new FsIssueStore(projectDir, projectSlug(projectDir));
+  const store = new FsIssueStore(projectDir);
   if (store.list().length === 0) return { ok: false, detail: "nothing to run — no issues yet (plan tasks first?)" };
 
   // First-run consent (§12): bypassPermissions writes THIS directory.

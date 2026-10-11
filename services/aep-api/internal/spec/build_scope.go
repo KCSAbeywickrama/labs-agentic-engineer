@@ -16,13 +16,12 @@
 
 package spec
 
-// build_scope.go — the STORY SCOPE of one build (spec-agent redesign #369). A
-// version tag snapshots the requirements + design, so the milestone is the
-// version's ledger and task planning covers the requirements' stories.
-// Computed here (the feature files declare the story set, read by reqspec;
-// each component's design.json claims the stories it serves) and consumed by
-// delivery/build (milestone identity) and delivery/task (delta planning + the
-// Serves-stories stamp).
+// build_scope.go — what one build carries (ADR-0041). A version tag snapshots
+// the requirements + design and its annotation names the selection, so the
+// milestone is the version's ledger and the plan turn orders what it carries.
+// Computed here (the feature files, read by reqspec, and the tag's annotation)
+// and consumed by delivery/build (milestone identity) and delivery/task (the
+// plan scope and the build issue).
 
 import (
 	"context"
@@ -30,31 +29,26 @@ import (
 	"slices"
 
 	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
+	"github.com/wso2/aep/aep-api/internal/platform/taskplan"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
 )
 
-// BuildScope is one tag's story scope. An empty InScope means the snapshot
-// carries no readable stories (legacy or gate-bypassed content); consumers
-// fall back to tag-scoped behavior.
+// BuildScope is what one tag carries. No Features means the snapshot carries
+// no readable stories (legacy or gate-bypassed content); the plan is then one
+// item for the whole spec.
 type BuildScope struct {
 	// Tag is the spec version this scope was computed at (e.g. "v3").
 	Tag string
-	// InScope is every story the version builds, by ID ("F2.3"), in ID order:
-	// the stories of the features its annotation names, but the held-back
-	// ones (B1). A version cut before builds were selections carried every
-	// story the requirements define.
-	InScope []string
-	// StoryTitles maps a story ID to its words (reqspec.Story.Text).
-	StoryTitles map[string]string
-	// ComponentStories maps a deployable component id to the stories its
-	// design.json claims (claims ∩ InScope), in ID order.
-	ComponentStories map[string][]string
-	// Features are the features the version carries, in ID order: the planner
-	// cuts one Task per feature per component (B3).
+	// Features are the features the version carries, in ID order: one item
+	// each of the build's checklist. A version cut before builds were
+	// selections carried every feature with stories.
 	Features []ScopeFeature
-	// ProductWide are the product-wide items the version carries, in ID order:
-	// each component's Foundation Task builds them.
+	// ProductWide are the product-wide items the version carries, in ID
+	// order: the build's Foundation item builds them.
 	ProductWide []ScopeItem
+	// HeldBack are the stories of carried features the version holds back
+	// (they wait on a feature it neither built nor carries), in ID order.
+	HeldBack []string
 }
 
 // ScopeFeature is one feature a version carries.
@@ -75,14 +69,26 @@ type ScopeItem struct {
 	AppliesTo []string
 }
 
+// Issue is the build issue this scope and the planner's checklist state.
+func (s BuildScope) Issue(items []taskplan.BuildPlanItem) taskplan.BuildIssue {
+	issue := taskplan.BuildIssue{Version: s.Tag, FeatureNames: map[string]string{}, HeldBack: s.HeldBack, Items: items}
+	for _, f := range s.Features {
+		issue.FeatureNames[f.ID] = f.Name
+	}
+	for _, it := range s.ProductWide {
+		issue.ProductWide = append(issue.ProductWide, it.ID)
+	}
+	return issue
+}
+
 // MilestoneTitle is the title of the milestone this scope claims — the tag,
 // so there is one milestone per spec version.
 func (s BuildScope) MilestoneTitle() string { return s.Tag }
 
-// BuildScopeAtTag computes the tag's story scope from the tagged snapshot. A
-// snapshot without a cell or readable stories yields an empty scope (the
-// legacy one-milestone-per-version behavior); the build gate normally makes
-// that impossible for freshly-cut tags.
+// BuildScopeAtTag computes what the tag carries from the tagged snapshot and
+// its annotation. A snapshot without a cell or readable stories yields an
+// empty scope (the legacy one-milestone-per-version behavior); the build gate
+// normally makes that impossible for freshly-cut tags.
 func (s *artifactService) BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (BuildScope, error) {
 	scope := BuildScope{Tag: tag}
 	// The same rule the save applies, for the same reason GetDesignAtTag applies
@@ -103,43 +109,60 @@ func (s *artifactService) BuildScopeAtTag(ctx context.Context, orgID, projectID,
 	if err != nil {
 		return scope, fmt.Errorf("read design at %s: %w", tag, err)
 	}
-	facts, err := parseCellFacts(designFiles[DesignRootFile])
-	if err != nil {
+	if _, err := parseCellFacts(designFiles[DesignRootFile]); err != nil {
 		return scope, nil
 	}
-	spec := reqspec.Parse(reqFiles)
-	stories := spec.Stories()
-	if len(stories) == 0 {
+	req := reqspec.Parse(reqFiles)
+	if len(req.Stories()) == 0 {
 		return scope, nil
 	}
 	plan, ok := s.versionScope(ctx, ref, tag)
 	if !ok {
-		plan = everything(spec)
+		plan = everything(req)
 	}
-	carried := storySet(spec, plan)
-	scope.Features, scope.ProductWide = scopeOf(spec, plan)
-	scope.StoryTitles = map[string]string{}
-	for _, st := range stories {
-		if !carried[st.ID] {
-			continue
-		}
-		scope.InScope = append(scope.InScope, st.ID)
-		scope.StoryTitles[st.ID] = st.Text
+	return scopeFor(tag, req, plan), nil
+}
+
+// PlanSelection is POST /build's selection without a repository: what a build
+// of pick carries over the requirements reqFiles (paths relative to
+// specs/requirements/, kept to what the tag's requirements bundle holds) after
+// the versions that built `built`, and the scope its plan turn sees, or the
+// refusal POST /build answers. A nil pick is every feature that can be
+// designed. The playground runs it through cmd/build-plan; an open external
+// dependency or an out-of-date design, which need the repository's records,
+// refuse nothing here.
+func PlanSelection(tag string, reqFiles map[string]string, built reqspec.Built, pick *reqspec.Pick) (reqspec.BuildPlan, BuildScope, error) {
+	req := reqspec.Parse(requirementsBundle.of(reqFiles))
+	plan, err := planVersion(req, built, pick, nil)
+	if err != nil {
+		return plan, BuildScope{Tag: tag}, err
 	}
-	scope.ComponentStories = map[string][]string{}
-	for id, claims := range componentStoryClaims(facts, designFiles) {
-		var served []string
-		for _, sid := range claims {
-			if _, ok := scope.StoryTitles[sid]; ok {
-				served = append(served, sid)
-			}
-		}
-		if len(served) > 0 {
-			slices.SortFunc(served, reqspec.CompareIDs)
-			scope.ComponentStories[id] = slices.Compact(served)
-		}
+	return plan, scopeFor(tag, req, plan), nil
+}
+
+// GatedSelection is PlanSelection behind POST /build's hard gate: the
+// selection, then the spec gate SaveSpec runs before it cuts a tag (the
+// requirements' own rules, the design layout gate, the build gate and the
+// acceptance tags) over the three bundles as on-disk folders, each keyed
+// relative to its folder and kept to what the tag's bundle would hold. The
+// selection's refusals and the gate's failures come back as ONE
+// *SpecValidationError, as POST /build answers them.
+func GatedSelection(tag string, reqFiles, designFiles, acceptanceFiles map[string]string, built reqspec.Built, pick *reqspec.Pick) (reqspec.BuildPlan, BuildScope, error) {
+	reqFiles = requirementsBundle.of(reqFiles)
+	req := reqspec.Parse(reqFiles)
+	plan, planErr := planVersion(req, built, pick, nil)
+	if err := gateVersion(req, plan, planErr, reqFiles, designBundle.of(designFiles), acceptanceBundle.of(acceptanceFiles)); err != nil {
+		return plan, BuildScope{Tag: tag}, err
 	}
-	return scope, nil
+	return plan, scopeFor(tag, req, plan), nil
+}
+
+// scopeFor is what plan carries, as the plan turn and the build issue name it.
+func scopeFor(tag string, req reqspec.Spec, plan reqspec.BuildPlan) BuildScope {
+	scope := BuildScope{Tag: tag, HeldBack: slices.Clone(plan.HeldBack)}
+	scope.Features, scope.ProductWide = scopeOf(req, plan)
+	slices.SortFunc(scope.HeldBack, reqspec.CompareIDs)
+	return scope
 }
 
 // everything is the plan of a version cut before builds were selections: it
