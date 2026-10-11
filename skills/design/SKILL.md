@@ -124,8 +124,14 @@ the files that do not depend on each other as parallel calls.
      it lacks is refused.
    - An external dependency is also its own definition,
      `specs/design/dependencies/<name>/dependency.json`, written before the
-     component that references it (`architecture` owns the shape). Its
-     contract and its assumptions wait for step 7.
+     component that references it (`architecture` owns the shape). In this
+     step, `dependency.json` says only what the dependency is: its `name`,
+     and in `resource` its `name`, its `description`, and the `provider`
+     when the requirements name one (else `suggestions`). Write no
+     `contract`, `config` or `provenance`, no contract file and no
+     `assumptions.md`, and do not `web_search` for its interface: step 7
+     does them, when the components show what they call.
+     `{ "name": "slack", "resource": { "name": "slack", "description": "Posts the round's messages to the team's channel.", "provider": "Slack" } }`
 3. **Data model** — `specs/design/domain-model.md`: an H1 title, one or two
    sentences of intro, then exactly ONE mermaid `erDiagram` (entities, key
    fields, relations). The prototype's records and the API schemas come from
@@ -167,11 +173,17 @@ the files that do not depend on each other as parallel calls.
    step 4 wrote no security.json at all. No gate refuses a role that is one
    handle short — the build's mock walk is what catches it, as a hidden screen
    — so this pass is where it is cheap.
-7. **Dependencies** (`architecture`) — for each external dependency, now that
-   the components show what they call: its contract and config keys when its
-   provider is chosen (`architecture`'s steps 3 and 4), then `assumptions.md`
-   beside them, the facts about the service that the design relies on and
-   nothing confirms.
+7. **Dependencies** (`architecture`) — after the grants pass and before the
+   flows, for each external dependency, now that the components show what
+   they call: first `declare_plan` the files of this step. When its
+   provider is chosen, climb `architecture`'s contract ladder (step 3: search
+   for the published document first, then derive it from the provider's
+   reference) and derive its config keys (step 4). Edit its `dependency.json`
+   to add `contract`, `config` and `provenance`, and write the contract file
+   when you derive it. Then write `assumptions.md` beside them: the facts
+   about the service that the design relies on and nothing confirms. Only a
+   dependency with no provider, or one whose ladder found no documentation,
+   goes to **Needs your input** without a contract.
 8. **Flows** — only when a flow is worth writing (see **Flows**, below). A
    design with one component, or with no journey across components, has none.
 9. **Acceptance tests** (`acceptance-criteria`) — LAST, because they come from
@@ -357,7 +369,10 @@ it. When no comment is left to act on, say so and stop.
 4. **Regenerate from there down, in that order.** Read each later artifact
    again. Change it only where a comment asks, or where an earlier change
    makes it wrong. Write a file only when it changes: edit it, and keep its
-   ids, keys and names. Apply a prototype comment with the `prototype` skill
+   ids, keys and names. When you change one part of a file, keep every other
+   part as it is. Use `editFile` for a local change. A whole-file rewrite
+   (`removeFile`, then `addFile`) must carry the whole file: each section,
+   list and diagram that you do not change, as it was. Apply a prototype comment with the `prototype` skill
    in this run, together with the contract change that it needs. Write the
    acceptance tests last: rewrite each feature file whose scenarios the
    changes make wrong.
@@ -385,8 +400,10 @@ it. When no comment is left to act on, say so and stop.
    the turn gives, `revision` to the revision of this run, and `reply` to one
    line that tells what you did, in the words of the reader: `Renamed
    totalAmountCents to totalCents in the data model, the contract and the
-   prototype.` A declined comment is also addressed: its reply tells which
-   requirement it conflicts with. The revision of this run is the highest
+   prototype.` The reply names no revision ("addressed in revision 3"): the
+   `revision` field holds it, and the console shows each file's own revision.
+   A declined comment is also addressed: its reply tells which requirement it
+   conflicts with. The revision of this run is the highest
    `revision` in the file plus one, or 2 when no comment has one (the first
    Design run is revision 1). All the comments of one run get the same
    revision. Keep the `question` and the `answer` of a comment that you

@@ -372,9 +372,20 @@ provider's developer reference), `assumed` (you wrote it from less, under the
 user's authorization — `contract.accepted` is that record, and the platform
 writes it, never you).
 
-Work each one in order. In a design run, steps 1, 2 and 5 come with the
-component that uses the dependency, and steps 3 and 4 come in the design's
-Dependencies step, when the components show what they call:
+Work each one in order. A design run does them in two passes:
+
+- **With the component that uses it** (the design's Architecture step):
+  steps 1, 2 and 5. The `dependency.json` of this pass says only what the
+  dependency is: `name`, and `resource.name`, `resource.description`, and
+  `resource.provider` or `suggestions`. No `web_search`, no `contract`, no
+  `config`, no `provenance`, no contract file, no `assumptions.md`.
+- **In the design's Dependencies step**, when the components show what they
+  call: steps 3 and 4 for a dependency with a provider. Edit its
+  `dependency.json` to add what they find, write the contract file when you
+  derive it, then write `assumptions.md` (**What the design assumes about a
+  dependency**, below).
+
+The steps:
 
 1. **Reuse first.** Call `list_external_resources`. It lists the resources
    the ORGANIZATION registered — never one another project defined for
@@ -391,8 +402,8 @@ Dependencies step, when the components show what they call:
 2. **The PRD names the service, or nobody has.** The user chooses providers;
    you never do. Two outcomes, never a `status`:
    - **The requirements' decisions name a service for this capability**
-     ("Payments: Stripe") → write `resource.provider` and go on to the
-     contract (step 3). An org or platform skill that mandates a vendor
+     ("Payments: Stripe") → write `resource.provider`. Its contract is
+     step 3. An org or platform skill that mandates a vendor
      counts the same way. Nothing else does: "the requirement implies it",
      "this one is popular", "there is only one real option" are guesses, and
      a guess is the user's to make.
@@ -520,7 +531,7 @@ naming the dependency file they moved to.
 
 The design-generate turn runs in the chat panel, so your turn text is what the
 user watches live. **Narrate each dependency decision in one plain-prose line as
-you settle it**, before moving to the next:
+you settle it** in the Dependencies step, before moving to the next:
 
 - resolved → `✓ <capability>: using <choice>` (say `, document fetched at
   save` when you pointed at a published one, `, interface derived from docs`
