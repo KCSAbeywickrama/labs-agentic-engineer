@@ -79,6 +79,8 @@ let label: string | null = null;
 const F1_PATH = "specs/requirements/features/F1-submit-expenses.md";
 /** Whether F1 has been designed: only a designed feature's open questions are the Design card's. */
 let designedFrom: Record<string, string> = {};
+/** The features the spec is ahead of the design for (the workspace works it out from the live documents). */
+let outOfDate: string[] = [];
 vi.mock("../../spec/useSpecWorkspace", () => ({
   useSpecWorkspace: () => ({
     model: {
@@ -88,7 +90,7 @@ vi.mock("../../spec/useSpecWorkspace", () => ({
       refetch: vi.fn(),
     },
     lines: readSpecLines(doc),
-    workspace: { design: { label, toDesign: label ? ["F1"] : [], outOfDate: [] } },
+    workspace: { design: { label, toDesign: label ? ["F1"] : [], outOfDate } },
   }),
 }));
 
@@ -127,7 +129,7 @@ function renderCard(search = "") {
       return (
         <>
           <header aria-label="Card actions">
-            <DesignActions projectName="acme-expenses" />
+            <DesignActions projectName="acme-expenses" art={art} />
           </header>
           <DesignWorkspace projectName="acme-expenses" art={art} review={review} />
         </>
@@ -169,6 +171,7 @@ beforeEach(() => {
   seed(FILES);
   label = null;
   designedFrom = {};
+  outOfDate = [];
   revisions = {};
   send.mockReset();
   send.mockResolvedValue(true);
@@ -258,8 +261,22 @@ describe("the Overview's one primary", () => {
     for (const name of ["Architecture", "Data model", "Technical decisions"]) {
       fireEvent.click(screen.getByRole("checkbox", { name: `Checked: ${name}` }));
     }
-    await waitFor(() => expect(primaries()).toEqual(["Build v1", "Build v1"]));
-    expect(within(screen.getByRole("banner", { name: "Card actions" })).getByRole("button", { name: "Build v1" })).toHaveClass("MuiButton-contained");
+    // One primary per screen: the Overview's own Build, the header's outlined beside it.
+    await waitFor(() => expect(primaries()).toEqual(["Build v1"]));
+    const header = () => within(screen.getByRole("banner", { name: "Card actions" })).getByRole("button", { name: "Build v1" });
+    expect(header()).toHaveClass("MuiButton-outlined");
+  });
+
+  it("makes the header's Build the primary on a file once every file is checked", async () => {
+    const router = renderCard();
+    await screen.findByRole("region", { name: "For technical review" });
+    for (const name of ["Architecture", "Data model", "Technical decisions"]) {
+      fireEvent.click(screen.getByRole("checkbox", { name: `Checked: ${name}` }));
+    }
+    await act(() => router.navigate({ to: "/projects/$projectName/design", params: { projectName: "acme-expenses" }, search: { art: "decisions" } }));
+    const header = within(screen.getByRole("banner", { name: "Card actions" })).getByRole("button", { name: "Build v1" });
+    await waitFor(() => expect(header).toHaveClass("MuiButton-contained"));
+    expect(primaries()).toEqual(["Build v1"]);
   });
 
   it("is Address comments while a comment waits, which sends them all, then starts the turn", async () => {
@@ -338,6 +355,21 @@ describe("questions waiting on the user", () => {
     expect(readDocFile(doc, F1_PATH)).not.toContain("Can a claim mix currencies?");
   });
 
+  it("says the answer changed the feature, not a Spec edit, once its question is answered here", async () => {
+    setDocFile(doc, F1_PATH, "# Submit expenses\n\n## Open Questions\n\n1. Can a claim mix currencies?\n   - No, one currency per claim.\n", "test");
+    // A basis of its own: an answer an earlier test gave here was to a design F1 no longer has.
+    designedFrom = { F1: "designed again since" };
+    // The workspace reads the feature as out of date once the answer edits its file; here, from the start.
+    label = "Update design · 1 feature";
+    outOfDate = ["F1"];
+    renderCard();
+    expect(await screen.findByText("You changed Submit expenses in Spec since it was designed.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Answer 1 question" }));
+    const panel = await screen.findByRole("dialog", { name: "Questions for you" });
+    fireEvent.click(within(panel).getByRole("button", { name: "No, one currency per claim." }));
+    expect(await screen.findByText("Your answer changed Submit expenses: update the design.")).toBeInTheDocument();
+  });
+
   it("does not ask an undesigned feature's open questions, or a question already answered", async () => {
     setDocFile(doc, F1_PATH, "# Submit expenses\n\n## Open Questions\n\n1. Can a claim mix currencies?\n", "test");
     setDocFile(doc, DESIGN_REVIEW_PATH, asked("addressed").replace('"status":"addressed"', '"status":"addressed","reply":"Done.","answer":"Minor unit."'), "test");
@@ -375,7 +407,9 @@ describe("the Comments item", () => {
     renderCard("?art=comments");
     const group = await screen.findByRole("region", { name: "Technical decisions" });
     expect(within(group).getByRole("link", { name: "Technical decisions" })).toHaveAttribute("href", "/projects/acme-expenses/design?art=decisions");
-    expect(group).toHaveTextContent("✓ Addressed in revision 2: Totals never round.");
+    // The comment's own revision is not shown: the file's title line numbers its revisions.
+    expect(group).toHaveTextContent("✓ Addressed: Totals never round.");
+    expect(group).not.toHaveTextContent(/revision/i);
     fireEvent.click(within(group).getByRole("button", { name: "Reopen" }));
     await waitFor(() => expect(review().artifacts[0]?.comments?.[0]?.status).toBe("reopened"));
     expect(screen.getByRole("navigation", { name: "Design" })).toHaveTextContent("Comments1 pending");

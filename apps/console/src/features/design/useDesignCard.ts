@@ -31,6 +31,7 @@ import { blockingDependencies } from "./model/artifacts";
 import { artifactHashes, designItems, DESIGN_FILE_PREFIXES, reviewLists, type DesignItem, type ReviewList } from "./model/designFiles";
 import type { DesignQuestion } from "./model/questions";
 import { answerComment, changedSinceChecked, commentsOn, isChecked, isWaiting, primaryAction, waitingComments, type Primary } from "./model/review";
+import { noteAnsweredHere } from "./useAnsweredHere";
 import { useDesignModel } from "./useDesignModel";
 import { useDesignQuestions } from "./useDesignQuestions";
 import { useDesignReview, type DesignReviewActions } from "./useDesignReview";
@@ -96,14 +97,19 @@ export function useDesignCard(projectName: string): DesignCard {
   const questions = useDesignQuestions(projectName);
   const revisions = useSpecState(projectName).data?.artifactRevisions ?? NO_REVISIONS;
   const toDesign = spec.workspace?.design.label != null;
+  const designedFrom = spec.model.data?.design.designedFrom;
   const answer = useCallback(
     (question: DesignQuestion, text: string): boolean => {
       if (!text.trim()) return false;
-      if (question.kind === "feature") return doc !== null && answerOpenQuestion(doc, question.path, question.question, text);
+      if (question.kind === "feature") {
+        if (doc === null || !answerOpenQuestion(doc, question.path, question.question, text)) return false;
+        noteAnsweredHere(projectName, question.featureId, designedFrom?.[question.featureId]);
+        return true;
+      }
       review.change((r) => answerComment(r, question.key, text));
       return review.ready;
     },
-    [doc, review],
+    [doc, review, projectName, designedFrom],
   );
 
   const card = useMemo(() => {

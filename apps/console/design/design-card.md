@@ -69,7 +69,9 @@ collapses) and
 **💬 N**, a popover with the file's threads (`CommentThreads`) and a text box.
 A draft shows **Pending**, with Edit and Delete for its author; a sent one is
 with the agent; an addressed one carries the agent's one-line reply ("✓
-Addressed in revision 2: …") with **Reopen**, which puts it in the next batch.
+Addressed: …") with **Reopen**, which puts it in the next batch. The thread
+names no revision: the comment's `revision` counts differently from the
+title line's, so only the title line numbers the file's revisions.
 A comment the agent found ambiguous shows "Agent asks: …" and, once
 answered, the answer.
 A prototype comment names the screen and elements it was made on. Acceptance
@@ -86,7 +88,11 @@ only said in the chat (`model/questions.ts`, `useDesignQuestions`):
   a call only the user can make). Answering is an edit of the file
   (`answerOpenQuestion`, which the spec card's blocking box uses too): the
   entry leaves, the answer lands in Decisions. The feature's design is then
-  out of date, and Update design is the next primary.
+  out of date, and Update design is the next primary. The Overview's note
+  says why: "Your answer changed Place an order: update the design" when
+  every out-of-date feature was answered on this card, in this browser, and
+  not designed since (`useAnsweredHere`); otherwise, and after a reload,
+  "You changed Place an order in Spec since it was designed".
 - **The agent's question on an ambiguous comment**: `question` on the
   review comment, which the agent leaves `sent`. The user's `answer` reopens
   it (`answerComment`), so Address comments sends it and the agent acts on it
@@ -110,8 +116,9 @@ comments while any comment waits (a draft or a reopened one), Design while
 the spec is ahead of the design (the "Update design" or "Design N features"
 note at the top of the Overview, which an answered feature question brings
 up), Build once every checkable file is checked, otherwise Open on the first
-unchecked row. The card's header keeps only Build, in the same state. Before
-anything is designed the card's body offers Design.
+unchecked row. The card's header keeps only Build: the primary when Build
+is, except on the Overview, whose own Build carries it there (one primary per
+screen). Before anything is designed the card's body offers Design.
 
 **Address comments** (`useDesignTurns`) marks every waiting comment `sent`
 with `sentAt` in one write, then sends the bare `/address-comments`

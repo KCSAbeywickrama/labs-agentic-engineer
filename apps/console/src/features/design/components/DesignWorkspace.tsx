@@ -26,6 +26,7 @@ import { useChatPanel } from "../../shell/chatPanel";
 import { PHONE } from "../../shell/layout";
 import { useSpecWorkspace } from "../../spec/useSpecWorkspace";
 import { openPane } from "../model/artifacts";
+import { outOfDateByAnswers, useAnsweredHere } from "../useAnsweredHere";
 import { useDesignCard } from "../useDesignCard";
 import { useDesignModel } from "../useDesignModel";
 import { useDesignTurns } from "../useDesignTurns";
@@ -68,11 +69,16 @@ function Note({ children }: { children: ReactNode }) {
   );
 }
 
-/** The design card's header: Build alone, in the same state as the Overview's, once something is designed. */
-export function DesignActions({ projectName }: { projectName: string }) {
+/**
+ * The design card's header: Build alone, once something is designed. It is
+ * the primary when Build is, except on the Overview, whose own Build carries
+ * it there (one primary per screen).
+ */
+export function DesignActions({ projectName, art }: { projectName: string; art?: string | undefined }) {
   const card = useDesignCard(projectName);
   if (card.items.length === 0) return null;
-  return <BuildButton projectName={projectName} size="small" variant={card.primary?.kind === "build" ? "contained" : "outlined"} />;
+  const onOverview = openPane(card.items, card.blocking, art).kind === "overview";
+  return <BuildButton projectName={projectName} size="small" variant={!onOverview && card.primary?.kind === "build" ? "contained" : "outlined"} />;
 }
 
 /**
@@ -84,6 +90,7 @@ export function DesignWorkspace({ projectName, art, review }: { projectName: str
   const { model: spec, workspace } = useSpecWorkspace(projectName);
   const card = useDesignCard(projectName);
   const turns = useDesignTurns(projectName);
+  const answeredHere = useAnsweredHere(projectName);
   const navigate = useNavigate();
   const chatPanel = useChatPanel();
 
@@ -183,9 +190,11 @@ export function DesignWorkspace({ projectName, art, review }: { projectName: str
               {label && !model.running && (
                 <Note>
                   <Typography variant="body2">
-                    {outOfDate.length > 0
-                      ? `You changed ${names(outOfDate, featureName)} in Spec since it was designed.`
-                      : `${names(workspace.design.toDesign, featureName)} ${workspace.design.toDesign.length === 1 ? "isn't" : "aren't"} designed yet.`}
+                    {outOfDate.length === 0
+                      ? `${names(workspace.design.toDesign, featureName)} ${workspace.design.toDesign.length === 1 ? "isn't" : "aren't"} designed yet.`
+                      : outOfDateByAnswers(outOfDate, answeredHere, spec.data.design.designedFrom)
+                        ? `Your ${outOfDate.length === 1 ? "answer" : "answers"} changed ${names(outOfDate, featureName)}: update the design.`
+                        : `You changed ${names(outOfDate, featureName)} in Spec since it was designed.`}
                   </Typography>
                   <Button size="small" variant={card.primary?.kind === "design" ? "contained" : "outlined"} disabled={!turns.ready} onClick={() => turns.design()}>
                     {label}

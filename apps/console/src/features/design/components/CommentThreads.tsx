@@ -145,7 +145,7 @@ function Thread({ comment: c, place, actions }: { comment: ReviewComment; place:
           </Typography>
           <Typography variant="body2" sx={{ flex: 1, minWidth: 200 }}>
             <Box component="span" sx={{ color: "success.main", fontWeight: 600 }}>
-              ✓ Addressed{c.revision ? ` in revision ${c.revision}` : ""}:
+              ✓ Addressed:
             </Box>{" "}
             {c.reply}
           </Typography>

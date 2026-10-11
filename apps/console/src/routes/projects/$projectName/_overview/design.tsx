@@ -39,7 +39,7 @@ function DesignRoute() {
   const { projectName } = Route.useParams();
   const { art, review } = Route.useSearch();
   return (
-    <CardOverlay card="design" fill actions={<DesignActions projectName={projectName} />}>
+    <CardOverlay card="design" fill actions={<DesignActions projectName={projectName} art={art} />}>
       <DesignWorkspace projectName={projectName} art={art} review={review} />
     </CardOverlay>
   );
