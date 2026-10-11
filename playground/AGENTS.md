@@ -137,7 +137,7 @@ reads.
 ### Spec-side skills
 
 The coding run does not mirror a skill whose audience is design only. Tune it
-with `requirements`, `design`, `prototype` or `tasks`. Load a skill that has no
+with `requirements`, `interview`, `design`, `prototype` or `tasks`. Load a skill that has no
 verb with `pnpm play <dir> chat "/<skill> <message>"`.
 
 `prototype` writes each web-application's `prototype.json` and `prototype.tsx`.

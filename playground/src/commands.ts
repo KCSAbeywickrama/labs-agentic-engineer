@@ -27,7 +27,7 @@ import { spawn } from "node:child_process";
 import { stdout as output } from "node:process";
 import { renderPart, renderSummary } from "./kit/render.js";
 import type { StreamPart, TurnScope } from "@aep/agent-stream";
-import { designGate, listWebApplications, prototypeGate, requirementsGate, tasksGate, type GateResult } from "./engine/gates.js";
+import { designGate, interviewGate, listWebApplications, prototypeGate, requirementsGate, tasksGate, type GateResult } from "./engine/gates.js";
 import { clearSavedFeedback, previewPrototype, savedFeedback } from "./engine/prototype.js";
 import { openSession, type OpenOptions, type PlaygroundSession } from "./engine/session.js";
 import { pendingQuestions, type PendingQuestions } from "./engine/questions.js";
@@ -128,6 +128,17 @@ export async function requirementsCommand(
 
   // `/start` resolves the idea from the descriptor (the project lookup reads it).
   return runPhaseTurn(projectDir, "/start", opts);
+}
+
+/**
+ * The headless twin of chat's `/interview F<n>`: one feature's stories, on
+ * stated assumptions, after the product pass wrote its stub. Refuses a feature
+ * the requirements do not have.
+ */
+export async function interviewCommand(projectDir: string, opts: PhaseOptions, feature: string): Promise<PhaseOutcome> {
+  const gate = interviewGate(projectDir, feature);
+  if (!gate.ok) return gateFail(gate);
+  return runPhaseTurn(projectDir, `/interview ${feature}`, opts);
 }
 
 /** Phase 2 — design, derived from the current requirements (§5 phase 2). */

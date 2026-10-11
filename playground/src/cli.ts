@@ -22,7 +22,7 @@
  *   pnpm play                                → print usage help (bare invocation)
  *   pnpm play menu                           → project picker → phase menu
  *   pnpm play <dir>                          → chat home (slash commands run phases; /menu for the dashboard)
- *   pnpm play <dir> requirements|design|chat → run one phase; exit code = result
+ *   pnpm play <dir> requirements|interview|design|chat → run one phase; exit code = result
  *   pnpm play <dir> prototype [component]    → `/prototype`; --preview reviews, --feedback revises
  *   pnpm play <dir> tasks|code|check|undo    → later steps of the impl plan
  *
@@ -47,6 +47,7 @@ import {
   designCommand,
   prototypeCommand,
   requirementsCommand,
+  interviewCommand,
   tasksCommand,
   undoCommand,
   type CodeOptions,
@@ -72,6 +73,7 @@ import type { WireOptions } from "./engine/wire/session.js";
 
 const COMMANDS = new Set([
   "requirements",
+  "interview",
   "design",
   "prototype",
   "tasks",
@@ -103,6 +105,7 @@ function printUsage(): void {
       "  pnpm play menu                            pick a project, then the phase menu",
       "  pnpm play <dir>                           open <dir> in chat (created if missing; /menu for the dashboard)",
       "  pnpm play <dir> requirements|design       generate or refine the spec",
+      "  pnpm play <dir> interview F<n>            write one feature's stories (headless /interview)",
       "  pnpm play <dir> prototype [component]     generate or revise the web-application prototypes",
       "  pnpm play <dir> prototype [c] --preview   review one in the browser; Save feedback keeps the comments",
       "  pnpm play <dir> prototype [c] --feedback  send the saved comments as a revision turn",
@@ -212,6 +215,13 @@ async function runHeadless(
   switch (command) {
     case "requirements":
       outcome = await requirementsCommand(projectDir, opts, process.stdin.isTTY ? askIdea : undefined);
+      break;
+    case "interview":
+      if (!commandArg) {
+        output.write("usage: play <dir> interview F<n>\n");
+        return 1;
+      }
+      outcome = await interviewCommand(projectDir, opts, commandArg);
       break;
     case "design":
       outcome = await designCommand(projectDir, opts);

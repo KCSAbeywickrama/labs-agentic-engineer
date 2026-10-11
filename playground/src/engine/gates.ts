@@ -40,6 +40,14 @@ export function requirementsGate(): GateResult {
   return ok; // phase 1 has no precondition — the idea prompt seeds it
 }
 
+/** `interview F<n>` needs that feature's file, which the product pass writes. */
+export function interviewGate(projectDir: string, feature: string): GateResult {
+  if (!/^F\d+$/.test(feature)) return blocked(`name the feature to interview (F1, F2, …), not "${feature}"`);
+  const dir = join(projectDir, "specs/requirements/features");
+  const found = existsSync(dir) && readdirSync(dir).some((f) => f.startsWith(`${feature}-`) && f.endsWith(".md"));
+  return found ? ok : blocked(`specs/requirements/features has no ${feature} — run the requirements phase first`);
+}
+
 export function designGate(projectDir: string): GateResult {
   const file = join(projectDir, "specs/requirements/prd.md");
   if (!existsSync(file)) return blocked("specs/requirements/prd.md is missing — run the requirements phase first");
