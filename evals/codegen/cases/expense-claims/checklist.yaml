@@ -10,7 +10,6 @@
 #  - The UI has no way to assign employees to a manager, so no item can show a claim in the Approval queue, open Review claim, approve a claim, or reject a claim with a reason (F2.1, F2.2, F2.3 and flows review-queue, approve-claim, reject-claim). Items a person could add by hand if the assignment exists: open a pending claim from the queue, Approve, check the status as Employee; Reject with reason 'Not a reimbursable business expense' and check the reason on the Claim detail.
 #  - Approved claims depend on manager approval, which cannot be set up from an empty database, so Finance items needing approved claims are not written: viewing approved rows and the Approved/Not yet exported counts, Export to payroll, the CSV download, claims marked Exported (batch id), the Export button disabled afterwards so no claim is exported twice, a new row in Export history, and an Employee seeing Approved or Rejected status with a rejection reason (F1.2, F3.1, F3.2, F3.3, flow export-payroll).
 #  - Role reach: only a few refusal items are written (Employee on the Approval queue, Manager on My claims, Finance on the Approval queue). Other pairs (for example Employee on Approved claims or Export history, Manager on Approved claims, Finance on My claims) are refused on the same grounds and could be added the same way. Account, Settings and Signed out load no data operation and are reachable by all roles.
-#  - The prototype's Settings screen has a switch 'Email me a daily digest', which conflicts with the PRD decision that the product sends no email or notifications. The walk only checks that the screen loads and saves.
 #  - The PRD says the Manager sees only claims from employees assigned to them, but nothing in the UI sets that assignment (domain-model managerId has no screen).
 #  - Story F1.3 (edit/withdraw while pending) is marked assumed, and the prototype draws the claim's fields on Claim detail as read-only Detail; editing is done only through the form reached by the Edit button.
 #  - The prototype's Signed out screen has a Sign in button, but WIRED-MODE AUTH says there is no sign-in page; the sign-out item follows the wired-mode behaviour instead.
@@ -84,8 +83,8 @@ items:
     role: Employee
     screen: My claims
     flow: Settings
-    steps: Open the user menu and choose settings. Click 'Save settings'.
-    expect: The Settings screen shows a switch 'Email me a daily digest'. After clicking Save settings the app arrives on My claims.
+    steps: Open the user menu and choose settings.
+    expect: The Settings screen says 'Nothing to set up' and that the app sends no email or notifications; it offers no email or digest option.
     weight: 1
   - id: manager-lands-on-queue
     role: Manager

@@ -550,17 +550,14 @@ function Account() {
 }
 
 function Settings() {
-  const navigate = useNav();
   return (
     <Shell>
       <Heading id="heading.settings" text="Settings" />
-      <Form
-        id="form.settings"
-        onSubmit={() => navigate.go("screen.my-claims")}
-        actions={<Button id="btn.save-settings" label="Save settings" emphasis="primary" submit />}
-      >
-        <Field id="field.digest" name="digest" label="Email me a daily digest" type="switch" defaultValue="off" />
-      </Form>
+      <EmptyState
+        id="empty.settings"
+        title="Nothing to set up"
+        text="Expense Claims sends no email or notifications: open the app to see where each claim stands."
+      />
     </Shell>
   );
 }
