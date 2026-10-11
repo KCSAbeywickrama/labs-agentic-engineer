@@ -1,6 +1,6 @@
 Feature: Catalogue search
 
-  @story-1
+  @story-F1.1
   Rule: A member can find titles by title, author or subject
 
     Scenario: Searching by author
@@ -19,7 +19,7 @@ Feature: Catalogue search
       When Mia the member searches for "zzzxqv"
       Then the results are empty
 
-  @story-2
+  @story-F1.2
   Rule: A member sees whether a title has available copies
 
     Scenario: A title with a free copy

@@ -1,6 +1,6 @@
 Feature: Catalogue management
 
-  @story-8
+  @story-F5.1
   Rule: Only a librarian may add, edit and remove titles
 
     Scenario: Adding a title
@@ -24,7 +24,7 @@ Feature: Catalogue management
       When she tries to add a title
       Then the catalogue has no new title
 
-  @story-9
+  @story-F5.2
   Rule: Only a librarian may add, edit and withdraw copies
 
     Scenario: Adding a copy makes it available

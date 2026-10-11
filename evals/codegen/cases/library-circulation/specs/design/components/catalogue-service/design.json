@@ -11,6 +11,6 @@
     { "kind": "platform-resource", "name": "catalogue-db", "resourceType": "postgres-cnpg", "description": "Stores titles and copies." }
   ],
   "description": "Owns the catalogue: titles and their physical copies (status available, on-loan, on-hold, withdrawn), with title search and per-title availability counts, persisted in its own Postgres. Deployed separately because the requirements make the catalogue its own service; only the circulation API calls it, over the intranet. It does not know about members, loans, holds or fees, and does no sign-in handling itself.",
-  "stories": [1, 2, 8, 9],
+  "stories": ["F1.1", "F1.2", "F5.1", "F5.2"],
   "skillsPinned": ["openapi-conventions", "ballerina"]
 }

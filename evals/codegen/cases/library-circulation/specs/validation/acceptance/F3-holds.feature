@@ -1,6 +1,6 @@
 Feature: Holds
 
-  @story-4
+  @story-F3.1
   Rule: A member may place a hold only on a title with no available copy
 
     Scenario: Placing a hold
@@ -20,7 +20,7 @@ Feature: Holds
       When she tries to place another hold on it
       Then Mia has exactly one hold on that title
 
-  @story-5
+  @story-F3.2
   Rule: A member may cancel only their own hold
 
     Scenario: Cancelling a hold
@@ -34,7 +34,7 @@ Feature: Holds
       When Mia the member tries to cancel Dan's hold
       Then Dan's hold is still waiting
 
-  @story-13
+  @story-F3.3
   Rule: Only a librarian may view and work the holds queue
 
     Scenario: Viewing the queue in order

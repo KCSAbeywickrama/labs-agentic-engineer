@@ -1,6 +1,6 @@
 Feature: Late fees
 
-  @story-12
+  @story-F4.2
   Rule: A late return computes a fee automatically and an on-time return does not
 
     Scenario: Returning 4 days late
@@ -14,7 +14,7 @@ Feature: Late fees
       When Lena the librarian checks the copy in
       Then Mia has no fee for that loan
 
-  @story-7
+  @story-F4.1
   Rule: A member sees only their own fees
 
     Scenario: Viewing fees
@@ -28,7 +28,7 @@ Feature: Late fees
       When Mia the member opens her fees
       Then no fee of 2.00 is listed
 
-  @story-7 @story-12
+  @story-F4.1 @story-F4.2
   Rule: Only a librarian may mark a fee paid
 
     Scenario: Marking a fee paid

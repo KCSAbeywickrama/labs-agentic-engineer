@@ -8,11 +8,11 @@
 
 # Planner gaps — what the walk cannot cover, and where the PRD and the prototype disagree:
 #  - Check-out takes a free-text member name, and the spec gives no way to tie it to the test member's identity, so no item expects a librarian-created loan to appear under My loans for a signed-in Member.
-#  - Late returns cannot be produced from an empty database (the due date is 14 days after checkout and the tester cannot change dates), so no item covers a computed late fee (story 12), a fee row, the unpaid-fees warning, the borrowing block while fees are unpaid, or the Mark paid action; only the empty Fees and My fees screens are covered. A tester could add these by hand if a late loan can be arranged.
-#  - Story 9 says copies can be edited, but the prototype draws only Add copy, Check out and Withdraw on copies, so there is no edit-copy item.
-#  - Story 8 and story 9 removal of a title that has copies or loans: the API can return a conflict, but the spec does not describe the message, so no item covers it.
+#  - Late returns cannot be produced from an empty database (the due date is 14 days after checkout and the tester cannot change dates), so no item covers a computed late fee (F4.2), a fee row, the unpaid-fees warning, the borrowing block while fees are unpaid, or the Mark paid action; only the empty Fees and My fees screens are covered. A tester could add these by hand if a late loan can be arranged.
+#  - Story F5.2 says copies can be edited, but the prototype draws only Add copy, Check out and Withdraw on copies, so there is no edit-copy item.
+#  - Story F5.1 and story F5.2 removal of a title that has copies or loans: the API can return a conflict, but the spec does not describe the message, so no item covers it.
 #  - The Member role holds catalogue read, so it is not refused the Titles list or Catalogue; the Librarian also holds it, so no refusal item exists for the Librarian on Catalogue or Title detail. Each screen of the other role that needs an unheld scope has a refusal item.
-#  - The prototype's Account and Settings screens (including an email digest switch, which conflicts with the PRD's 'no notifications') belong to no flow or story, so they are not covered.
+#  - The prototype's Account and Settings screens belong to no flow or story, so they are not covered.
 #  - The loan limit of 5 active loans and the one hold per title rule are only covered for the hold (button not usable); the loan limit has no UI behaviour described and is left out.
 #  - Loans, holds and fees visible to a second member (test-member-2) cannot be separated from the first, because identity is chosen by role only, so no item checks that a member sees only their own records.
 
@@ -27,259 +27,259 @@ items:
   - id: add-title-required-fields
     role: Librarian
     screen: Titles
-    flow: Add titles (story 8)
+    flow: Add titles (F5.1)
     steps: Click Add title. Leave Title and Author empty, enter Subject 'Test', and submit.
     expect: The title is not added; the form indicates that title name and author are required, and the list stays empty.
     weight: 1
   - id: add-title-dune
     role: Librarian
     screen: Titles
-    flow: Add titles (story 8)
+    flow: Add titles (F5.1)
     steps: Click Add title. Enter Title 'Dune', Author 'Frank Herbert', Subject 'Science fiction', ISBN '9780441013593' and submit.
     expect: The Titles list shows a Dune row by Frank Herbert, subject Science fiction, with 0 available.
     weight: 2
   - id: add-title-emma
     role: Librarian
     screen: Titles
-    flow: Add titles (story 8)
+    flow: Add titles (F5.1)
     steps: Click Add title. Enter Title 'Emma', Author 'Jane Austen', Subject 'Classic' and submit.
     expect: The list shows both Dune and Emma; Emma shows 0 available.
     weight: 1
   - id: add-title-1984
     role: Librarian
     screen: Titles
-    flow: Add titles (story 8)
+    flow: Add titles (F5.1)
     steps: Click Add title. Enter Title '1984', Author 'George Orwell', Subject 'Dystopian fiction' and submit.
     expect: The list also shows a 1984 row by George Orwell with 0 available.
     weight: 1
   - id: add-title-scratch
     role: Librarian
     screen: Titles
-    flow: Add titles (story 8)
+    flow: Add titles (F5.1)
     steps: Click Add title. Enter Title 'Scratch Book', Author 'Temp Author' and submit.
     expect: The list shows a Scratch Book row.
     weight: 1
   - id: edit-title-emma
     role: Librarian
     screen: Titles
-    flow: Edit a title (story 8)
+    flow: Edit a title (F5.1)
     steps: On the Emma row choose Edit. Change Subject to 'Romance' and save.
     expect: The Emma row now shows subject Romance; its author and title are unchanged.
     weight: 2
   - id: remove-title-scratch
     role: Librarian
     screen: Titles
-    flow: Remove a title (story 8)
+    flow: Remove a title (F5.1)
     steps: On the Scratch Book row choose Remove.
     expect: The Scratch Book row is gone; Dune, Emma and 1984 remain.
     weight: 2
   - id: librarian-opens-manage-title
     role: Librarian
     screen: Manage title
-    flow: Manage copies (story 9)
+    flow: Manage copies (F5.2)
     steps: Click the Dune row.
     expect: The Manage title screen for Dune opens showing author Frank Herbert, subject Science fiction, Available copies 0, and an empty Copies section ('No copies') with an Add copy button.
     weight: 1
   - id: add-copy-dune-1
     role: Librarian
     screen: Manage title
-    flow: Manage copies (story 9)
+    flow: Manage copies (F5.2)
     steps: Click Add copy, enter Barcode 'D-1001' and submit.
     expect: The Copies list shows D-1001 with status available and Available copies shows 1.
     weight: 2
   - id: add-copy-dune-2
     role: Librarian
     screen: Manage title
-    flow: Manage copies (story 9)
+    flow: Manage copies (F5.2)
     steps: Click Add copy, enter Barcode 'D-1002' and submit.
     expect: The Copies list shows D-1001 and D-1002, both available; Available copies shows 2.
     weight: 1
   - id: withdraw-copy-dune-2
     role: Librarian
     screen: Manage title
-    flow: Withdraw a copy (story 9)
+    flow: Withdraw a copy (F5.2)
     steps: On the D-1002 row choose Withdraw.
     expect: D-1002 shows status withdrawn and Available copies shows 1; D-1001 remains available.
     weight: 2
   - id: add-copy-emma
     role: Librarian
     screen: Manage title
-    flow: Manage copies (story 9)
+    flow: Manage copies (F5.2)
     steps: Use the Titles breadcrumb to return to Titles, open the Emma row, click Add copy, enter Barcode 'E-2001' and submit.
     expect: Emma's copies list shows E-2001 as available and Available copies shows 1.
     weight: 1
   - id: check-out-dune
     role: Librarian
     screen: Loans
-    flow: Check out (story 10)
+    flow: Check out (F2.3)
     steps: Go to Titles via the breadcrumb, open Dune, on the D-1001 row choose Check out, enter Member name 'Mia Alvarez' and submit.
     expect: The Loans screen opens with a Dune loan for Mia Alvarez, status Active, with a due date 14 days after the checkout date.
     weight: 2
   - id: check-out-unavailable-copy
     role: Librarian
     screen: Manage title
-    flow: Check out (story 10)
+    flow: Check out (F2.3)
     steps: Go to Titles, open Dune and look at the Check out action on the D-1001 and D-1002 rows.
     expect: Check out cannot be used for D-1001 (now on loan) or D-1002 (withdrawn); only an available copy can be checked out. Available copies shows 0.
     weight: 1
   - id: librarian-views-fees-empty
     role: Librarian
     screen: Fees
-    flow: Fees (stories 11, 12)
+    flow: Fees (F2.4, F4.2)
     steps: Use the Fees navigation entry.
     expect: The Fees screen loads with an empty state ('No fees') and no error.
     weight: 1
   - id: member-lands-on-catalogue
     role: Member
     screen: Catalogue
-    flow: Member entry / search (story 1)
+    flow: Member entry / search (F1.1)
     steps: Look at the screen the app opens on.
     expect: The Catalogue screen opens with a search box, listing Dune, Emma and 1984 with their author, subject and available counts, and no Scratch Book.
     weight: 1
   - id: search-by-title
     role: Member
     screen: Catalogue
-    flow: Search the catalogue (story 1)
+    flow: Search the catalogue (F1.1)
     steps: Type 'Dune' in the Search box.
     expect: Only the Dune row is listed.
     weight: 2
   - id: search-by-author
     role: Member
     screen: Catalogue
-    flow: Search the catalogue (story 1)
+    flow: Search the catalogue (F1.1)
     steps: Clear the box and type 'Orwell'.
     expect: Only the 1984 row is listed.
     weight: 1
   - id: search-by-subject
     role: Member
     screen: Catalogue
-    flow: Search the catalogue (story 1)
+    flow: Search the catalogue (F1.1)
     steps: Clear the box and type 'Romance'.
     expect: Only the Emma row is listed.
     weight: 1
   - id: search-no-match
     role: Member
     screen: Catalogue
-    flow: Search the catalogue (story 1)
+    flow: Search the catalogue (F1.1)
     steps: Clear the box and type 'zzzz'.
     expect: No rows are listed and the 'No titles match' empty state is shown.
     weight: 1
   - id: title-unavailable-detail
     role: Member
     screen: Title detail
-    flow: Check availability (story 2)
+    flow: Check availability (F1.2)
     steps: Clear the search box and click the Dune row.
     expect: Title detail for Dune shows author Frank Herbert, ISBN 9780441013593 and Available copies 0; Borrow cannot be used and Place a hold can be used.
     weight: 2
   - id: title-available-detail
     role: Member
     screen: Title detail
-    flow: Check availability (story 2)
+    flow: Check availability (F1.2)
     steps: Use the Catalogue breadcrumb, then click the Emma row.
     expect: Title detail for Emma shows Available copies 1; Borrow can be used and Place a hold cannot.
     weight: 1
   - id: borrow-emma
     role: Member
     screen: My loans
-    flow: Borrow (story 3)
+    flow: Borrow (F2.1)
     steps: On Emma's Title detail click Borrow.
     expect: My loans opens listing Emma with a checked-out date, a due date 14 days later and status Active.
     weight: 2
   - id: member-views-loans
     role: Member
     screen: My loans
-    flow: View loans (story 6)
+    flow: View loans (F2.2)
     steps: Click My fees, then click My loans in the navigation.
     expect: My loans lists the Emma loan with its due date and status Active. The Dune loan made by the librarian for 'Mia Alvarez' is not required to appear.
     weight: 2
   - id: borrowed-title-unavailable
     role: Member
     screen: Title detail
-    flow: Borrow (story 3)
+    flow: Borrow (F2.1)
     steps: Go to Catalogue and open Emma.
     expect: Emma shows Available copies 0, Borrow cannot be used and Place a hold can be used.
     weight: 1
   - id: place-hold-dune
     role: Member
     screen: My holds
-    flow: Place a hold (story 4)
+    flow: Place a hold (F3.1)
     steps: Go to Catalogue, open Dune and click Place a hold.
     expect: My holds opens listing Dune with status waiting and position 1.
     weight: 2
   - id: second-hold-blocked
     role: Member
     screen: Title detail
-    flow: Place a hold (story 4)
+    flow: Place a hold (F3.1)
     steps: Go to Catalogue and open Dune again.
     expect: "A second hold on Dune cannot be placed: Place a hold cannot be used."
     weight: 1
   - id: cancel-own-hold
     role: Member
     screen: My holds
-    flow: Cancel a hold (story 5)
+    flow: Cancel a hold (F3.2)
     steps: Open My holds and on the Dune row choose Cancel.
     expect: The Dune hold disappears from My holds, leaving the 'No holds' empty state.
     weight: 2
   - id: place-hold-dune-again
     role: Member
     screen: My holds
-    flow: Place a hold (story 4)
+    flow: Place a hold (F3.1)
     steps: Go to Catalogue, open Dune and click Place a hold.
     expect: My holds lists Dune with status waiting.
     weight: 1
   - id: place-hold-1984
     role: Member
     screen: My holds
-    flow: Place a hold (story 4)
+    flow: Place a hold (F3.1)
     steps: Go to Catalogue, open 1984 and click Place a hold.
     expect: My holds lists both Dune and 1984 with status waiting.
     weight: 1
   - id: member-views-fees-empty
     role: Member
     screen: My fees
-    flow: View fees (story 7)
+    flow: View fees (F4.1)
     steps: Click My fees in the navigation.
     expect: My fees loads with the 'No fees' empty state and no unpaid-fees warning.
     weight: 1
   - id: librarian-views-holds-queue
     role: Librarian
     screen: Holds queue
-    flow: Holds queue (story 13)
+    flow: Holds queue (F3.3)
     steps: Open Holds queue from the navigation.
     expect: The queue lists the waiting holds on Dune and on 1984, with position and status waiting, each with a Cancel action.
     weight: 2
   - id: filter-holds-queue-by-title
     role: Librarian
     screen: Holds queue
-    flow: Holds queue (story 13)
+    flow: Holds queue (F3.3)
     steps: Set the Title filter to Dune.
     expect: Only the Dune hold is listed; the 1984 hold is not.
     weight: 1
   - id: librarian-cancels-hold
     role: Librarian
     screen: Holds queue
-    flow: Holds queue (story 13)
+    flow: Holds queue (F3.3)
     steps: Clear the Title filter, then on the 1984 hold choose Cancel.
     expect: The 1984 hold is no longer listed; the Dune hold remains.
     weight: 2
   - id: check-in-on-time
     role: Librarian
     screen: Loans
-    flow: Check in (stories 11, 12)
+    flow: Check in (F2.4, F4.2)
     steps: Open Loans, on the Dune loan choose Check in and read the dialog, then confirm Check in.
     expect: The dialog says the return is on time and no fee will be created. After confirming, the Dune loan shows status Returned and no longer offers Check in.
     weight: 2
   - id: check-in-offers-hold
     role: Librarian
     screen: Holds queue
-    flow: Check in (story 11)
+    flow: Check in (F2.4)
     steps: Open Holds queue.
     expect: The Dune hold now shows status ready, since the returned copy went to the waiting member.
     weight: 2
   - id: member-sees-ready-hold
     role: Member
     screen: My holds
-    flow: Hold ready (story 11)
+    flow: Hold ready (F2.4)
     steps: Open My holds.
     expect: Dune is listed with status ready; the cancelled 1984 hold is not listed.
     weight: 1

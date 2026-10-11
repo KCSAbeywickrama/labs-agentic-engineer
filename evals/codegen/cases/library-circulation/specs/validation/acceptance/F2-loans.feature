@@ -1,6 +1,6 @@
 Feature: Loans
 
-  @story-3
+  @story-F2.1
   Rule: A member may borrow an available copy, within limits
 
     Scenario: Borrowing an available copy
@@ -27,7 +27,7 @@ Feature: Loans
       When she tries to borrow an available title
       Then Mia has no loan for that title
 
-  @story-6
+  @story-F2.2
   Rule: A member sees only their own loans, with due dates
 
     Scenario: Viewing current loans
@@ -41,7 +41,7 @@ Feature: Loans
       When Mia the member opens her loans
       Then "Dune" is not listed
 
-  @story-10
+  @story-F2.3
   Rule: Only a librarian may check a copy out to a member
 
     Scenario: Checking a copy out
@@ -55,7 +55,7 @@ Feature: Loans
       When Mia the member tries to check the copy out to Dan
       Then Dan has no loan for it
 
-  @story-11
+  @story-F2.4
   Rule: Only a librarian may check a copy in
 
     Scenario: Returning a copy with no holds

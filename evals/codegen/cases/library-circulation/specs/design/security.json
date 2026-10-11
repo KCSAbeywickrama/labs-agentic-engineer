@@ -53,14 +53,14 @@
     {
       "name": "Member",
       "description": "Searches the catalogue, borrows, places holds and sees their own loans and fees.",
-      "stories": [1, 2, 3, 4, 5, 6, 7],
+      "stories": ["F1.1", "F1.2", "F2.1", "F2.2", "F3.1", "F3.2", "F4.1"],
       "grants": ["catalogue:read", "loans:read", "loans:borrow", "holds:read", "holds:place", "holds:cancel", "fees:read"],
       "assignTo": ["Library Members"]
     },
     {
       "name": "Librarian",
       "description": "Manages titles and copies, checks items out and in, and works the holds queue and fees.",
-      "stories": [8, 9, 10, 11, 12, 13],
+      "stories": ["F2.3", "F2.4", "F3.3", "F4.2", "F5.1", "F5.2"],
       "grants": ["catalogue:read", "catalogue:manage", "loans:read-all", "loans:checkout", "loans:checkin", "holds:read-all", "holds:manage", "fees:read-all", "fees:manage"],
       "assignTo": ["Librarians"]
     }
