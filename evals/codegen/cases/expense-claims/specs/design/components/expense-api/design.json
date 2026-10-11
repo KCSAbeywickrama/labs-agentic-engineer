@@ -12,6 +12,6 @@
     { "kind": "platform-resource", "name": "user-auth", "resourceType": "thunder-app" }
   ],
   "description": "Owns expense claims, employee/manager relationships, and payroll export batches. Exposes claim submission, edit and withdrawal for employees, team-scoped approval/rejection for managers, and approved-claim export for finance. Does not send email or store any file attachments — no object storage dependency.",
-  "stories": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+  "stories": ["F1.1", "F1.2", "F1.3", "F2.1", "F2.2", "F2.3", "F3.1", "F3.2", "F3.3"],
   "skillsPinned": ["openapi-conventions", "ballerina", "api-management", "thunder-authentication"]
 }

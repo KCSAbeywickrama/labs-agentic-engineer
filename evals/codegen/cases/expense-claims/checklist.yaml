@@ -7,12 +7,12 @@
 # extras.mustNot entries ({id, description}) cap the band at review when violated.
 
 # Planner gaps — what the walk cannot cover, and where the PRD and the prototype disagree:
-#  - The UI has no way to assign employees to a manager, so no item can show a claim in the Approval queue, open Review claim, approve a claim, or reject a claim with a reason (stories 4, 5, 6 and flows review-queue, approve-claim, reject-claim). Items a person could add by hand if the assignment exists: open a pending claim from the queue, Approve, check the status as Employee; Reject with reason 'Not a reimbursable business expense' and check the reason on the Claim detail.
-#  - Approved claims depend on manager approval, which cannot be set up from an empty database, so Finance items needing approved claims are not written: viewing approved rows and the Approved/Not yet exported counts, Export to payroll, the CSV download, claims marked Exported (batch id), the Export button disabled afterwards so no claim is exported twice, a new row in Export history, and an Employee seeing Approved or Rejected status with a rejection reason (stories 2, 7, 8, 9, flow export-payroll).
+#  - The UI has no way to assign employees to a manager, so no item can show a claim in the Approval queue, open Review claim, approve a claim, or reject a claim with a reason (F2.1, F2.2, F2.3 and flows review-queue, approve-claim, reject-claim). Items a person could add by hand if the assignment exists: open a pending claim from the queue, Approve, check the status as Employee; Reject with reason 'Not a reimbursable business expense' and check the reason on the Claim detail.
+#  - Approved claims depend on manager approval, which cannot be set up from an empty database, so Finance items needing approved claims are not written: viewing approved rows and the Approved/Not yet exported counts, Export to payroll, the CSV download, claims marked Exported (batch id), the Export button disabled afterwards so no claim is exported twice, a new row in Export history, and an Employee seeing Approved or Rejected status with a rejection reason (F1.2, F3.1, F3.2, F3.3, flow export-payroll).
 #  - Role reach: only a few refusal items are written (Employee on the Approval queue, Manager on My claims, Finance on the Approval queue). Other pairs (for example Employee on Approved claims or Export history, Manager on Approved claims, Finance on My claims) are refused on the same grounds and could be added the same way. Account, Settings and Signed out load no data operation and are reachable by all roles.
 #  - The prototype's Settings screen has a switch 'Email me a daily digest', which conflicts with the PRD decision that the product sends no email or notifications. The walk only checks that the screen loads and saves.
 #  - The PRD says the Manager sees only claims from employees assigned to them, but nothing in the UI sets that assignment (domain-model managerId has no screen).
-#  - The PRD story 3 (edit/withdraw while pending) is marked assumed, and the prototype draws the claim's fields on Claim detail as read-only Detail; editing is done only through the form reached by the Edit button.
+#  - Story F1.3 (edit/withdraw while pending) is marked assumed, and the prototype draws the claim's fields on Claim detail as read-only Detail; editing is done only through the form reached by the Edit button.
 #  - The prototype's Signed out screen has a Sign in button, but WIRED-MODE AUTH says there is no sign-in page; the sign-out item follows the wired-mode behaviour instead.
 #  - The spec does not say what message the validation errors show for an empty claim form beyond the prototype's validation state, so only the blocked save is checked.
 
@@ -20,56 +20,56 @@ items:
   - id: employee-lands-on-my-claims
     role: Employee
     screen: My claims
-    flow: Track claims (story 2)
+    flow: Track claims (F1.2)
     steps: Look at the screen the app opens on. Nothing has been submitted yet.
     expect: The My claims screen is shown with a New claim button, an Awaiting review count of 0, an Approved count of 0, and an empty state 'No claims yet' with a New claim button.
     weight: 1
   - id: employee-submit-validation
     role: Employee
     screen: Submit / edit claim
-    flow: Submit a claim (story 1)
+    flow: Submit a claim (F1.1)
     steps: Click 'New claim'. On the claim form leave Amount, Date, Category and Description empty and click 'Save claim'.
     expect: "The form is not accepted: the tester stays on the claim form with the empty required fields flagged, and no claim is added. Going back to My claims through the 'My claims' breadcrumb still shows 'No claims yet'."
     weight: 1
   - id: employee-submits-claim
     role: Employee
     screen: My claims
-    flow: Submit a claim (story 1)
+    flow: Submit a claim (F1.1)
     steps: From My claims click 'New claim'. Enter Amount 148.20, Date 2026-01-10, Category Travel, Description 'Taxi to client site'. Click 'Save claim'.
     expect: The app returns to My claims. A new row with Category Travel, Amount $148.20 and status Pending is listed, the Claims count is 1, and Awaiting review shows 1.
     weight: 2
   - id: employee-submits-second-claim
     role: Employee
     screen: My claims
-    flow: Submit a claim (story 1)
+    flow: Submit a claim (F1.1)
     steps: Click 'New claim'. Enter Amount 62.00, Date 2026-01-05, Category Meals, Description 'Client lunch'. Click 'Save claim'.
     expect: "My claims lists two rows: Travel $148.20 and Meals $62.00, both Pending, and Awaiting review shows 2."
     weight: 1
   - id: employee-views-claim-detail
     role: Employee
     screen: Claim detail
-    flow: Track claims (story 2)
+    flow: Track claims (F1.2)
     steps: On My claims click the Travel $148.20 row.
     expect: The Claim detail screen shows Category Travel, Amount $148.20, Date 2026-01-10, Description 'Taxi to client site' and Status Pending, with Edit and Withdraw buttons and a breadcrumb back to My claims.
     weight: 2
   - id: employee-edits-pending-claim
     role: Employee
     screen: My claims
-    flow: Edit or withdraw a pending claim (story 3)
+    flow: Edit or withdraw a pending claim (F1.3)
     steps: On the detail of the Travel $148.20 claim click 'Edit'. Check the form is pre-filled with the claim's values. Change Amount to 150.00 and Description to 'Taxi to client site (return trip)'. Click 'Save claim'. Then open that claim's row again.
     expect: The edit form was pre-filled with 148.20, 2026-01-10, Travel and the original description. After saving, My claims shows the Travel row with $150.00 and status Pending, and the detail shows the new amount and description.
     weight: 2
   - id: employee-withdraws-pending-claim
     role: Employee
     screen: My claims
-    flow: Edit or withdraw a pending claim (story 3)
+    flow: Edit or withdraw a pending claim (F1.3)
     steps: On My claims open the Meals $62.00 claim and click 'Withdraw'.
     expect: The app returns to My claims. The Meals $62.00 row now shows status Withdrawn and Awaiting review shows 1.
     weight: 2
   - id: employee-withdrawn-claim-not-editable
     role: Employee
     screen: Claim detail
-    flow: Edit or withdraw a pending claim (story 3)
+    flow: Edit or withdraw a pending claim (F1.3)
     steps: On My claims open the Withdrawn Meals $62.00 claim.
     expect: The detail shows Status Withdrawn and offers no Edit or Withdraw button.
     weight: 1
@@ -90,14 +90,14 @@ items:
   - id: manager-lands-on-queue
     role: Manager
     screen: Approval queue
-    flow: See claims pending my approval (story 4)
+    flow: See claims pending my approval (F2.1)
     steps: Look at the screen the app opens on.
     expect: The Approval queue screen is shown with an 'Awaiting you' count, a Pending claims section, and either rows or the empty state 'Nothing to review'. No crash or blank page.
     weight: 1
   - id: manager-queue-empty-state
     role: Manager
     screen: Approval queue
-    flow: See claims pending my approval (story 4)
+    flow: See claims pending my approval (F2.1)
     steps: On the Approval queue read the list.
     expect: Without any employee assigned to this manager, the Pending claims list is empty with the message 'Nothing to review' and Awaiting you reads 0. Claims from the Employee's submissions are not required to appear.
     weight: 1
@@ -111,21 +111,21 @@ items:
   - id: finance-lands-on-approved-claims
     role: FinanceReviewer
     screen: Approved claims
-    flow: View all approved claims (story 7)
+    flow: View all approved claims (F3.1)
     steps: Look at the screen the app opens on.
     expect: The Approved claims screen is shown with an Approved count, a 'Not yet exported' count and an 'Export to payroll' button.
     weight: 1
   - id: finance-approved-empty-state
     role: FinanceReviewer
     screen: Approved claims
-    flow: View all approved claims (story 7)
+    flow: View all approved claims (F3.1)
     steps: On Approved claims read the list and try to click 'Export to payroll'.
     expect: No approved claims exist, so the list shows 'No approved claims', both counts read 0, and no export can be made.
     weight: 1
   - id: finance-export-history-empty
     role: FinanceReviewer
     screen: Export history
-    flow: Export approved claims to payroll (stories 8, 9)
+    flow: Export approved claims to payroll (F3.2, F3.3)
     steps: Use the navigation to open 'Export history'.
     expect: The Export history screen shows a Past exports section with the empty state 'No exports yet'.
     weight: 1

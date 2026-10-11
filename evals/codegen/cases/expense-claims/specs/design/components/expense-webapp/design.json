@@ -12,6 +12,6 @@
     { "kind": "platform-resource", "name": "user-auth", "resourceType": "thunder-app" }
   ],
   "description": "Single-page app for Employees, Managers and Finance to submit, review and export expense claims. Presents role-specific screens (my claims, approval queue, approved-claims export) and holds no business logic of its own — all reads and writes go through expense-api.",
-  "stories": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+  "stories": ["F1.1", "F1.2", "F1.3", "F2.1", "F2.2", "F2.3", "F3.1", "F3.2", "F3.3"],
   "skillsPinned": ["react-webapp", "oxygen-ui-design-system", "thunder-authentication"]
 }
