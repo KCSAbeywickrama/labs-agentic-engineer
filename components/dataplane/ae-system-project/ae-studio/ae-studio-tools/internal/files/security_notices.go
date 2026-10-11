@@ -31,9 +31,9 @@ import (
 const designPrefix = "specs/design/"
 
 // allowedDesignExts are the file extensions the design bundle holds:
-// markdown, YAML (OpenAPI), JSON (design.json, security.json, projections),
-// the design.cell DSL and the wireframes DSL.
-var allowedDesignExts = []string{".md", ".yaml", ".yml", ".json", ".cell", ".dsl"}
+// markdown, YAML (OpenAPI), JSON (design.json, security.json, projections)
+// and the design.cell DSL.
+var allowedDesignExts = []string{".md", ".yaml", ".yml", ".json", ".cell"}
 
 // Warning codes of the security design's coverage notices. They name a
 // channel entry; the securityspec message key names a sentence.

@@ -144,15 +144,13 @@ func TestBuildGate_DeployableComponentDemandsArtifactsAndEnrichment(t *testing.T
 	}
 }
 
-// A web-application's type-mandated artifact is its prototype, both halves. A
-// design made before the prototype carries wireframes.dsl instead, which no
-// longer counts (L6): it is refused as having no prototype, never crashes the
-// gate, and a design carrying both passes on the prototype.
+// A web-application's type-mandated artifact is its prototype, both halves: a
+// half missing or blank is refused with the step that writes it, and the whole
+// prototype passes.
 func TestBuildGate_WebAppNeedsItsPrototype(t *testing.T) {
 	const (
-		manifest   = "components/lunch-web/prototype.json"
-		source     = "components/lunch-web/prototype.tsx"
-		wireframes = "components/lunch-web/wireframes.dsl"
+		manifest = "components/lunch-web/prototype.json"
+		source   = "components/lunch-web/prototype.tsx"
 	)
 	for _, tc := range []struct {
 		name     string
@@ -161,8 +159,6 @@ func TestBuildGate_WebAppNeedsItsPrototype(t *testing.T) {
 		wantPath string
 		wantMsg  string
 	}{
-		{name: "only wireframes.dsl", drop: []string{manifest, source}, add: map[string]string{wireframes: "screen home\n"},
-			wantPath: manifest, wantMsg: "lunch-web has no prototype yet: run Design"},
 		{name: "no design for the app at all", drop: []string{manifest, source},
 			wantPath: manifest, wantMsg: "lunch-web has no prototype yet: run Design"},
 		{name: "no prototype.tsx", drop: []string{source},
@@ -171,7 +167,7 @@ func TestBuildGate_WebAppNeedsItsPrototype(t *testing.T) {
 			wantPath: manifest, wantMsg: "lunch-web's prototype has no manifest (prototype.json): run Design again"},
 		{name: "blank prototype.tsx", add: map[string]string{source: "  \n"},
 			wantPath: source, wantMsg: "lunch-web's prototype has no screens (prototype.tsx): run Design again"},
-		{name: "prototype and wireframes.dsl", add: map[string]string{wireframes: "screen home\n"}},
+		{name: "the whole prototype"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			files := completeDesignFiles()

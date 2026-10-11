@@ -218,9 +218,9 @@ func validateBuildGate(reqFiles, designFiles map[string]string, inScope map[stri
 // sound is the save gate's job (prototypeFileErrors); this asks only that both
 // are there.
 //
-// A design made before the prototype carries wireframes.dsl instead. It is not
-// read and it does not count (decision L6): such a project is refused here like
-// one with no design for the app, and running Design writes the prototype.
+// A design made before the prototype carries wireframes.dsl instead. The design
+// bundle does not read `.dsl` (decision L6), so such a project is refused here
+// like one with no design for the app, and running Design writes the prototype.
 func missingPrototype(component string, designFiles map[string]string) []FileValidationError {
 	manifest, source := prototypespec.ManifestPath(component), prototypespec.SourcePath(component)
 	hasManifest := strings.TrimSpace(designFiles[manifest]) != ""

@@ -258,13 +258,10 @@ var allowedRequirementExts = []string{".md", ".excalidraw", ".dsl"}
 // JSON is the post-#70 component `design.json` (structured facts, save-gated
 // against the published schema) plus the FE-derived `*.gen.json` projections;
 // `.cell` is the project-level cell-diagram DSL (design.cell) that drives the
-// live architecture diagram; `.dsl` is the per-component wireframes DSL
-// (wireframes.dsl) a design made before the prototype carries — no gate
-// requires it any more, but it is still accepted so such a project's bundle stays
-// valid; `.tsx` is a web-application's prototype source (prototype.tsx, beside
+// live architecture diagram; `.tsx` is a web-application's prototype source (prototype.tsx, beside
 // its prototype.json), which the save gate checks, the build gate requires and
 // a revision turn reads back.
-var allowedDesignExts = []string{".md", ".yaml", ".yml", ".json", ".cell", ".dsl", ".tsx"}
+var allowedDesignExts = []string{".md", ".yaml", ".yml", ".json", ".cell", ".tsx"}
 
 func hasAllowedDesignExt(name string) bool {
 	lower := strings.ToLower(name)
