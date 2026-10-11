@@ -178,11 +178,11 @@ them rather than inferring structure from prose:
 the account cluster in the header, the app's navigation in the **sidebar**,
 the routed page in `AppShell.Main`, and a `Footer`. A generated app never
 moves navigation into the header, never drops the sidebar, and never invents a
-second shell: the wireframes are drawn against this shell too (`wireframes`
-draws a brand-only `navbar` and a `sidebar` on every screen), so the
-wireframe, the running app and the sample line up one to one. What the
+second shell: the prototype's `<AppShell>` is the same shape (the brand and
+the user menu in the header, the navigation in a side rail), so the
+prototype, the running app and the sample line up one to one. What the
 sample's sidebar shows for its console — organisations, projects, analytics —
-becomes the wireframe's `sidebar` items for this app; the categories, icons
+becomes the prototype's `nav` entries for this app; the categories, icons
 and footer items (Settings, Help) keep the sample's arrangement.
 
 **Known defects in the sample.** It is vendored verbatim so a refresh stays a
@@ -198,7 +198,7 @@ wiring, not this platform's — take the structure and not the code:
 `main.tsx` (its `HashRouter`, `window.__APP_RUNTIME_CONFIG__` and theme
 picker; ours is the Setup snippet above, with `BrowserRouter` and one theme),
 `mock-data/` (this platform's mock is `react-webapp`'s `mock/` with msw),
-and the org/project `Header.Switchers` selects, which a wireframe has to draw
+and the org/project `Header.Switchers` selects, which a prototype has to show
 before they exist. `references/app-structure.md` carries the excerpts already
 adjusted to this platform.
 
@@ -353,47 +353,48 @@ specifies. "Install no other library" above is about UI and styling.
 | Date/time entry | `DatePickers.DatePicker`, `DatePickers.DateTimePicker` |
 | A chart | `@wso2/oxygen-ui-charts-react` |
 
-## Implementing a wireframe with Oxygen
+## Implementing a prototype with Oxygen
 
 For the coding run only: this is what the BUILT application's pages are made
-of. The `/prototype` flow's review renderer draws none of this shell (no
-`Header`, `UserMenu`, `ColorSchemeToggle` or `Footer`): it draws only the
-prototype's own components and the navigation a screen names (the prototype
-skill's **What the reviewer sees**). A design turn reads this skill for how an
-Oxygen screen is composed, and never cites this table as what a reviewer is
-shown.
+of. The prototype's review renderer draws none of this shell (no `Header`
+toggle, `ColorSchemeToggle` or `Footer`): it draws only the kit's own
+components (the prototype skill's **What the reviewer sees**). A design turn
+reads this skill for how an Oxygen screen is composed, and never cites this
+table as what a reviewer is shown.
 
-`wireframes/references/implementing.md` says what each DSL line must become;
-this is what it becomes here. Every row names the exact component and its
-props, and what to do when the DSL carries more than the component holds —
-each was checked against a rendered screen, so follow the row rather than
-improvising around the component:
+`react-webapp`'s `references/prototype.md` says what each kit component in
+`prototype.tsx` must become; this is what it becomes here. Every row names the
+exact component and its props, and what to do when the kit component carries
+more than the Oxygen one holds. Follow the row rather than improvising around
+the component, and print each component's props with `scripts/props.mjs`
+before you use it. Never import the kit itself:
 
-| DSL | Oxygen |
+| Kit | Oxygen |
 |---|---|
-| a `screen` with no `navbar`/`sidebar` — an app-owned sign-in, the one screen the wireframes skill draws without chrome | the sample's `GateLayout` (`Layout.Content` + `ParticleBackground`), the form inside it; every signed-in screen is under `AppLayout` |
-| `navbar "Brand"` + `sidebar "A -> S \| B \| C -> T"` | the sample's `AppLayout`, on every screen of a role: `Header` with `Header.Toggle`, `Header.Brand` > `Header.BrandTitle` (the brand), `Header.Spacer`, `Header.Actions` (`ColorSchemeToggle`, `UserMenu`) in `AppShell.Navbar`; one `Sidebar.Item id link={<Link to="…" />}` per sidebar item in `AppShell.Sidebar`, grouped with `Sidebar.Category` as the sample groups its own, `activeItem` from the route; a `Footer` in `AppShell.Footer`. A link the wireframe put in the `navbar` still goes in the sidebar — the header never carries navigation |
-| `row` + `heading` + `right` + `button`(s) at the top of a screen | one `PageTitle`: the heading in `PageTitle.Header`, the buttons in `PageTitle.Actions`. Never a `Stack` around `PageTitle` — it squeezes the button until its label wraps onto two lines |
-| `heading` elsewhere | `Typography variant="h6"` (section title) |
-| `text`, `link`, `breadcrumb` | `Typography`, `Link component={RouterLink} to="…"`, `AppBreadcrumbs` |
-| `card "Label \| Value \| Caption"` | `Card` > `CardContent` > `Typography variant="overline"` (label), `Typography variant="h4"` (value), `Typography variant="caption" color="text.secondary"` (caption). `StatCard` holds only `label` + `value` (+ `icon`): use it for a two-part `card "Label \| Value"`, and never park the caption outside it |
-| `card "Title"` with nested children | `Card` > `CardHeader title="Title"` + `CardContent` holding the children |
-| `table "A \| B \| C" [-> S]` + `row` lines | `ListingTable.Container` > `ListingTable` > `.Head` / `.Body` / `.Row` / `.Cell` with exactly those columns; `-> S` makes each `ListingTable.Row clickable onClick={() => navigate(…)}`; with no rows, `ListingTable.EmptyState` in one full-width row of `.Body`, under `.Head`. The head and each control drawn with the table stay on the page when it is empty. **Every drawn column is built.** A column the list response does not carry is filled from **one** request to whichever other list operation of the contract supplies it — a name column from the entity list joined on id, a count column from the child list filtered once and grouped; two missing columns may need two such requests, one per list, never one per row. Only a column no list operation can supply is omitted, with a line in your report |
-| `select "Label: Value"` | `TextField select label="Label"` with a `MenuItem` per option and `Value` preselected — never a bare `Select`: its `label` prop renders nothing without `FormControl` + `InputLabel`, so the control shows no label at all |
-| `select "Active only"` (one filter, no `Label:`) | `FormControlLabel control={<Switch />} label="Active only"` — the DSL string is the visible label, and a select whose only choice is on/off is a switch |
-| `input "Label"` | `TextField label="Label"`; a label naming a date → `TextField type="date" label="Label" slotProps={{ inputLabel: { shrink: true } }}` |
-| `textarea`, `search`, `checkbox`, `radio`, `toggle` | `TextField multiline`, `SearchBar`, `FormControlLabel` + `Checkbox`, `RadioGroup`, `FormControlLabel` + `Switch` — inside `Form.Section` / `Form.Stack` |
-| `button "X" primary` / `danger` / other | `Button variant="contained"` / `Button variant="outlined" color="error"` / `Button variant="outlined"`; a `row` of buttons after `right` at the foot of a form is `Stack direction="row" justifyContent="flex-end" spacing={2}` |
-| `badge "X" variant` | `Chip label="X" color=… size="small"` |
-| `list`, `tabs`, `progress`, `avatar`, `chart`, `image` | `List`, `Tabs`, `LinearProgress`, `Avatar`, a charts-react chart, `ColorSchemeImage` |
-| `row`, `split N/M` | `Stack direction="row"` / `Grid` with `size={{ md: N }}` and `size={{ md: M }}` |
-| a `variant` (`danger`, `success`, …) | the palette's matching status color: `color="error"`, `"success"`, `"warning"`, `"info"` |
-
-The `row` lines under a `table`, the stat `card`s and the `select`s are the
-demo data the reviewer compares the screen against. Do not retype them:
-`node "${AEP_SKILLS_DIR:-.claude/skills}/wireframes/scripts/seed.mjs" <wireframes.dsl>` prints
-them per screen as JSON; mock handlers serve those rows, and every stat value
-derives from them, so the numbers agree with the table by construction.
+| `<AppShell nav user account settings signOut menu>` | the sample's `AppLayout`, around every signed-in screen: `Header` with `Header.Toggle`, `Header.Brand` > `Header.BrandTitle` (the manifest's `name`), `Header.Spacer`, `Header.Actions` (`ColorSchemeToggle`, `UserMenu` with Account, Settings, the `menu` entries and `UserMenu.Logout`) in `AppShell.Navbar`; one `Sidebar.Item id link={<Link to="…" />}` per `nav` entry in `AppShell.Sidebar`, grouped with `Sidebar.Category` as the sample groups its own, `activeItem` from the route; a `Footer` in `AppShell.Footer`. The header never carries navigation |
+| a bare `<Screen>` (no shell) | the sample's `GateLayout` (`Layout.Content` + `ParticleBackground`), only for a screen the app owns outside sign-in; every signed-in screen is under `AppLayout` |
+| `<Heading text actions>` | one `PageTitle` inside `PageContent`: the text in `PageTitle.Header`, the `actions` buttons in `PageTitle.Actions`. Never a `Stack` around `PageTitle` — it squeezes the button until its label wraps onto two lines. `<Breadcrumbs>` above it is `AppBreadcrumbs` |
+| `<Section title count subtitle actions>` | `Card` > `CardHeader title="Title (count)" subheader="subtitle" action={…the buttons}` + `CardContent` holding the children |
+| `<Stat label value hint icon tone>` | `Card` > `CardContent` > `Typography variant="overline"` (label), `Typography variant="h4"` (value), `Typography variant="caption" color="text.secondary"` (hint). `StatCard` holds only `label` + `value` (+ `icon`): use it only for a Stat with no `hint`, and never put the hint outside it. The `icon` is the same lucide name from `@wso2/oxygen-ui-icons-react` |
+| `<StatGroup>` | `Grid container spacing={2}` with one `Grid size={{ xs: 12, md: 12 / n }}` per Stat, so the tiles have one width |
+| `<Table columns rows empty>` | `ListingTable.Container` > `ListingTable` > `.Head` / `.Body` / `.Row` / `.Cell` with exactly those columns; a row with `to` is `ListingTable.Row clickable onClick={() => navigate(…)}`; a `kind: "status"` cell is a `Chip`; row `actions` go in `ListingTable.RowActions`; with no rows, `ListingTable.EmptyState` in one full-width row of `.Body`, under `.Head`. The head and each control above the table stay on the page when it is empty |
+| `<Filters>` | `ListingTable.Toolbar` with `SearchBar` for a text filter and `TextField select` for a choice |
+| `<Form>` + `<Field type="text\|number\|textarea">` | `Form.Section` / `Form.Stack` with `TextField label="Label"` (`type="number"`, `multiline`), `required`, `error` + `helperText` from the Field's `error` |
+| `<Field type="date">` | `TextField type="date" label="Label" slotProps={{ inputLabel: { shrink: true } }}` |
+| `<Field type="select">` | `TextField select label="Label"` with a `MenuItem` per option — never a bare `Select`: its `label` prop renders nothing without `FormControl` + `InputLabel`, so the control shows no label at all |
+| `<Field type="switch">` | `FormControlLabel control={<Switch />} label="Label"` |
+| `<ValidationSummary>` | `Alert severity="error"` above the form's buttons, one line per field error |
+| `<Button emphasis>` | `primary` → `Button variant="contained"`; `danger` → `Button variant="outlined" color="error"`; other → `Button variant="outlined"`; the buttons at the foot of a form are `Stack direction="row" justifyContent="flex-end" spacing={2}` |
+| `<Link>` | `Link component={RouterLink} to="…"` |
+| `<Badge text tone>` | `Chip label="text" color=… size="small"` |
+| `<Alert tone title text>` | `Alert severity=…` with `AlertTitle` for the title |
+| `<EmptyState>` | `ListingTable.EmptyState` in a table; elsewhere the sample's `pages/EmptyComponentList.tsx` composition |
+| `<Detail fields>` | the detail page of `pages/ProjectOverview.tsx`: a `Grid` of label (`Typography variant="caption" color="text.secondary"`) and value (`Typography`) pairs |
+| `<Tabs>`, `<Stepper>` | `Tabs` + `Tab`; `Form.Wizard` |
+| `<Timeline>` | `List` with one `ListItemText primary=… secondary=…` per entry |
+| `<Dialog>`, `<Drawer>` | `Dialog` + `DialogTitle` + `DialogContent` + `DialogActions`; `Drawer anchor="right"` |
+| `<Stack>`, `<Grid>`, `<Split>` | `Stack`; `Grid`; `Grid` with two `size={{ md: … }}` columns |
+| a `tone` (`error`, `success`, …) | the palette's matching status color: `color="error"`, `"success"`, `"warning"`, `"info"` |
 
 ## Pitfalls
 
@@ -402,8 +403,8 @@ derives from them, so the numbers agree with the table by construction.
 | `npm install` fails with `ERESOLVE` on `react` | Oxygen's peer dependency is an exact React version and the scaffold installed a newer one | Run `scripts/setup.mjs` (Setup) — it pins `react`/`react-dom` to that exact version; never `--force` or `--legacy-peer-deps` past it |
 | A header button wraps onto two lines | The button sits in a `Stack` beside `PageTitle`, which takes the width | Put it in `PageTitle.Actions` |
 | A select shows its value but no label | `label` on a bare `Select` needs `FormControl` + `InputLabel` to render | `TextField select label="…"` |
-| A stat card's caption sits outside the card | `StatCard` has no caption slot and discards children | `Card` > `CardContent` > three `Typography`s (the wireframe table) |
-| A list screen fires one request per row | A column the list endpoint does not return, filled from the detail endpoint | Fill it from one bulk request to another list operation (join on id, or filter + group), as the wireframe table says |
+| A stat card's caption sits outside the card | `StatCard` has no caption slot and discards children | `Card` > `CardContent` > three `Typography`s (the prototype table) |
+| A list screen fires one request per row | A column the list endpoint does not return, filled from the detail endpoint | Fill it from one bulk request to another list operation (join on id, or filter + group), as `react-webapp`'s `references/prototype.md` says |
 | A drawn column is missing from the page | The list endpoint lacks it and the agent dropped it | Drop a column only when no list operation of the contract can supply it, and say so in your report; a joinable entity list or a filterable child list supplies it in one request |
 | Components render in stock Material blue, not the Oxygen theme | `OxygenUIThemeProvider` missing, or not outermost in `main.tsx` | Wrap the root exactly as Setup shows; Verify fails on this |
 | Theme applies to some components and not others; console warns about multiple Emotion/MUI instances | `@mui/material` or `@emotion/*` installed beside Oxygen's bundled copy, or imported directly | Remove them from `package.json` and every import; import from `@wso2/oxygen-ui` only |
@@ -429,10 +430,10 @@ derives from them, so the numbers agree with the table by construction.
   `scripts/props.mjs` for this screen
 - About to wrap `PageTitle` in a `Stack` to place a button beside it, use a
   bare `Select` with a `label`, or put a caption under a `StatCard` — each is
-  a row in the wireframe table above, with the component that fits
+  a row in the prototype table above, with the component that fits
 - About to put navigation in the header, drop the sidebar, or lay a page out
   in a way `sample/src/` does not — the sample app is the structure, and the
-  wireframe was drawn against it
+  prototype's shell has its shape
 - About to satisfy a brand-color requirement by styling components instead of
   deriving a theme — or about to ignore one because no stock theme matches
 - About to ask which theme or colors to use — that is settled in Brand colors,

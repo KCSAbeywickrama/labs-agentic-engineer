@@ -276,10 +276,10 @@ issue that you finished, the next run works it again.
 
 Add these parts to the PR when they apply:
 
-- For a web application: the `Screens:` and `Flows:` lists of its issue. Tick
-  each item from the walk report. Put each open `[ ]` line next to its item.
-  The `references/implementing.md` file of the `wireframes` skill shows the
-  format.
+- For a web application: the `Screens:` and `Flows:` lists of its issue, with
+  the prototype's screen names. Tick each item from the walk report. Put each
+  open `[ ]` line next to its item. The `references/prototype.md` file of the
+  `react-webapp` skill shows the format.
 - For each spec change: the file, the change, and the gap that it closes.
 - For a component that is not green: use `--draft` and the title prefix
   `[build-failed]`. List `Resolves #N` only for the completed issues. Add an

@@ -100,41 +100,46 @@ physically cannot land it (e.g. a migration must merge before feature code).
 
 After planning, write every planned Task's full body via `updateTask` before
 the turn ends — `## Scope` (the concrete work, citing the component's
-design.json and its openapi.yaml/wireframes.dsl), `## Acceptance` (what done
+design.json and its openapi.yaml or prototype), `## Acceptance` (what done
 means, at work altitude — the validation oracle owns product acceptance), and
 `## References` (the spec paths the coding agent reads). A Task without a body
 is unfinished planning.
 
-For a `web-application` component the wireframe is the screen contract, so
-its Task always carries two more things: the path
-`specs/design/components/<name>/wireframes.dsl` under `## References`, and a
-`Screens:` line under `## Scope` naming every `screen` in that file the Task
-covers (`Screens: RiskQueue, MyRisks, NewRisk, …`). Names only — the elements
-live in the DSL, and listing them in the issue would go stale the moment the
-wireframe is edited. The coding agent's `wireframes` skill turns the names
-into pages.
+For a `web-application` component the prototype that the reviewer approved is
+the screen contract. Its manifest,
+`specs/design/components/<name>/prototype.json`, lists the screens, the roles
+and the flows. `prototype.tsx` beside it holds what each screen shows. Its
+Task always carries three more things:
+
+- Both paths under `## References`.
+- A `Screens:` line under `## Scope` that names every manifest screen the Task
+  covers, as the screen's `name` and its `id`:
+  `Screens: My claims (screen.my-claims), New expense (screen.new-claim), …`.
+  Write the names and ids only. The content of a screen is in
+  `prototype.tsx`, and a copy in the issue goes stale when the prototype
+  changes. The coding agent's `react-webapp` skill tells how a screen becomes
+  a page.
+- A `Flows:` checklist under `## Scope` (see below).
 
 **Map the stories to the flows, and check the mapping yourself.** You hold
-both the story list and the wireframe, so you are the one place the two can be
+both the story list and the manifest, so you are the one place the two can be
 compared — the designer's coverage pass is not one you inherit on trust. Read
-the `flow` blocks and write a **`Flows:` checklist** under `## Scope` — one
-item per flow, numbered `Flow 1`, `Flow 2`, …, carrying the flow's name, its
-`role`, the stories it walks, and its `description` line from the DSL. (`F1`
-alone is a feature's ID, so a flow is never numbered that way.)
+the manifest's `flows` and write the **`Flows:` checklist**: one item for each
+flow that walks a screen the Task covers, numbered `Flow 1`, `Flow 2`, … in
+manifest order, with the flow's name, its role, its stories and its walk.
+(`F1` alone is a feature's ID, so a flow is never numbered that way.)
 
 ```markdown
 Flows:
 
-- [ ] **Flow 1 · Submit an expense**
-  An employee files a claim and tracks its approval.
+- [ ] **Flow 1 · Submit an expense claim** (`flow.submit-claim`)
   Persona: Employee
   Stories: F1.1, F1.2, F1.4
-  Walk: MyClaims → NewClaim → ClaimDetail
-- [ ] **Flow 2 · Approve a claim**
-  A manager works the pending queue and decides a claim.
+  Walk: My claims → New expense → Claim detail
+- [ ] **Flow 2 · Approve a team member's claim** (`flow.approve-team-claim`)
   Persona: Manager
   Stories: F2.1, F2.2
-  Walk: ApprovalQueue → ClaimReview
+  Walk: Team approvals → Review team claim
 
 No flow: F1.3 (sign-in — platform SSO owns the page), F3.1 (nightly export
 job, no view).
@@ -142,17 +147,14 @@ job, no view).
 
 One labelled line each:
 
-- **`Flow 1 ·` + the flow's name**, numbered in the order the DSL declares them —
-  the number is how a reviewer names one exact journey.
-- **The flow's `description`** from the DSL, straight under the title,
-  unlabelled: it is prose, and it says what the journey is before the facts
-  about it.
-- **`Persona:`** — the flow's `role`. Write `Persona: any` for a role-less
-  journey rather than dropping the line.
-- **`Stories:`** — the story IDs this journey walks.
-- **`Walk:`** — the flow's screens in walkthrough order, entry screen first.
-  Names and arrows only, no commentary. A screen in two flows appears in
-  both; that is the DSL's shape, not a mistake.
+- **`Flow 1 ·` + the flow's `name`**, then its `id` in backticks. The number is
+  how a reviewer names one exact journey.
+- **`Persona:`** — the `name` of the role that the flow's `roleId` names.
+- **`Stories:`** — the story IDs this journey walks. The manifest does not
+  record them: read each story and find the flow that walks it.
+- **`Walk:`** — the `name` of each screen in the flow's `screenIds`, in that
+  order. Names and arrows only, no commentary. A screen in two flows appears
+  in both; that is the manifest's shape, not a mistake.
 
 **Leave every box unchecked.** The issue states what must be walked; the
 coding agent ticks the same list in its PR body. Re-planning rewrites this

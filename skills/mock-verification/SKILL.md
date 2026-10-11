@@ -1,6 +1,6 @@
 ---
 name: mock-verification
-description: "Smoke-walk a `web-application` in a real browser once it builds clean — stand it up in mock mode, walk every flow its wireframes draw, fix each failure where you find it, post progress item by item. Required for every change to a webapp component. Judging a DEPLOYED system is the `validation-task` skill's job instead."
+description: "Smoke-walk a `web-application` in a real browser once it builds clean — stand it up in mock mode, walk every flow of its prototype, fix each failure where you find it, post progress item by item. Required for every change to a webapp component. Judging a DEPLOYED system is the `validation-task` skill's job instead."
 metadata:
   aep:
     kind: platform
@@ -10,7 +10,7 @@ metadata:
 # Mock verification
 
 A clean build says the code is well formed and nothing about what the screens
-do: a route the wireframe draws and the router never registered, a button wired
+do: a screen the prototype shows and the router never registered, a button wired
 to nothing, a form that flips a row and sends no request. So you open the app
 and use it. Mock mode stands it up on this machine with no cluster, no sibling
 service and no IDP. You verify and repair in one pass.
@@ -26,14 +26,23 @@ built it.
 
 ### The map
 
-`specs/design/components/<component>/wireframes.dsl`, under the project root —
-your working directory, one level above the App Path you edit in. A `flow`
-block is the unit: one role and the screens that role walks, entry screen
-first. Walk every flow under its role (`?role=<name>`) by clicking from its
-entry screen; a screen in no flow is reached at its route. **The DSL is your
-only map**: you open a source file to repair, never to learn a route. A
-component with no `wireframes.dsl` gives you its registered routes instead, one
-flow per role.
+The component's prototype, in `specs/design/components/<component>/` under
+the project root — your working directory, one level above the App Path you
+edit in:
+
+- `prototype.json`, the manifest: its `flows` are the unit. A flow is one role
+  (`roleId`) and the screens that role walks (`screenIds`), entry screen
+  first. Its `screens` give each screen's `name` and the roles that reach it.
+- `prototype.tsx`: what each screen shows. The component for a screen id in
+  `defineApp({ screens })` has the screen's controls and, as `to` or
+  `useNav().go(…)`, where each one leads.
+
+Walk every flow under its role (`?role=<roleId>`) by clicking from its entry
+screen. Reach a screen in no flow (the account and settings screens) the way
+a user does, from the user menu or the navigation. The signed-out screen is
+not a screen of the app: it is the Session item below. **The prototype is your
+only map**: you open the app's source to repair, never to learn a route. The
+prototype is the review's copy, not the app's code: never edit it.
 
 ### Per screen
 
@@ -43,14 +52,14 @@ smoke.
 
 | | Question | Evidence |
 |---|---|---|
-| **Reach** | Did the arrow that names this screen bring you here, and does every `->` it draws land where it says? | the target's snapshot |
-| **Act** | Does every drawn control change something visible when used? A create is in the next list as that list opens, with no filter changed by hand; a filter narrows; a toggle flips a row. | the snapshot after the action |
+| **Reach** | Did the control that leads to this screen bring you here, and does every `to` on it land where it says? | the target's snapshot |
+| **Act** | Does every control the prototype shows change something visible when used? A create is in the next list as that list opens, with no filter changed by hand; a filter narrows; a toggle flips a row. | the snapshot after the action |
 | **Request** | Did a change leave the page as the request the contract declares, with the status it declares? A row that flips and sends nothing is the one defect a build cannot see. | `agent-browser network requests` |
 
 ### Once per app
 
 - **Roles** (`mock/authz/roles.gen.ts` exists): each flow's entry screen under its own
-  role (`?role=<name>`), and once under a role the DSL gives no flow there.
+  role (`?role=<name>`), and once under a role whose `roleIds` do not include it.
   Both directions are defects. Then three more, which the scope model makes
   walkable and which no build can see:
   - **Every role, and the no-role visitor.** Walk `?role=<name>` for each role
@@ -78,13 +87,13 @@ smoke.
   screen and the handle. It is a design defect, not a code one: do not widen a
   mock handler or a route guard to make it pass.
 - **Session** (an auth dependency): `?auth=out` on one entry screen runs the
-  app's own guard and `signIn()` brings you back; then **Sign out** where the
-  wireframe draws it leaves the screen through `signOut()`. The mock signs the
+  app's own guard and `signIn()` brings you back; then **Sign out** in the user
+  menu leaves the screen through `signOut()`. The mock signs the
   next load in again, so the session being gone is outside; the click leaving
   the page is not.
-- **Probes**: submit one form empty; open one detail route with an id that does
-  not exist. The wireframe draws the happy path; these are the two states it
-  implies.
+- **Probes**: submit one form empty, and expect the errors that the
+  prototype's `state.validation-error` shows; open one detail route with an id
+  that does not exist.
 - **Short window**: reload ONE screen that has a primary action low on the page
   at `agent-browser set viewport 1280 600`, and click that action. A layout that
   only works on a tall window is a layout most laptops do not have, and the way
@@ -114,8 +123,9 @@ Every item ends in exactly one:
   handle, so `Forbidden` is something you walk and see.
 
 An unreachable screen is **open**, naming the navigation that failed, never
-**done** read off the source. A fix does not remove or hide what the wireframe
-draws. If the app cannot fill a drawn element, the item is **open**.
+**done** read off the source. A fix does not remove or hide what the prototype
+shows. If the app cannot fill an element the prototype shows, the item is
+**open**.
 
 ## Progress
 
@@ -124,7 +134,7 @@ other: the plan once, one line per item as it settles, the close once.
 
 ```text
 Mock verification: <component> — <N> items
-1. <Screen> (<role>): <its controls>; -> <the screens its arrows name>
+1. <Screen> (<role>): <its controls>; -> <the screens its `to`s name>
 2. <Screen>: ...
 <N-4>. Roles
 <N-3>. Session

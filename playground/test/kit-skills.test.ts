@@ -60,18 +60,12 @@ test("loadRepoSkills reads the committed repo-root skill library", () => {
   // The library's reference files ride along (agentskills.io structure).
   const oas = skills.find((s) => s.name === "openapi-conventions")!;
   assert.ok(oas.references?.["references/wso2-rest-api-design-guidelines.md"]);
-  // `wireframes` is split by audience: the body carries only the DSL both
-  // readers share, and each audience's depth rides along as a reference —
-  // the worked example for the design agent, the build rules for the coding
-  // agent. Loading the skill must bring both, or one audience gets a body
-  // that points at a file it does not have.
-  const wf = skills.find((s) => s.name === "wireframes")!;
-  assert.match(wf.content, /## The DSL/);
-  assert.match(
-    wf.references?.["references/authoring.md"] ?? "",
-    /Worked example — risk register/,
-  );
-  assert.ok(wf.references?.["references/implementing.md"]);
+  // `react-webapp`'s body points the coding agent at the prototype's build
+  // rules, which ride along as a reference: loading the skill must bring the
+  // file its body names.
+  const web = skills.find((s) => s.name === "react-webapp")!;
+  assert.match(web.content, /references\/prototype\.md/);
+  assert.match(web.references?.["references/prototype.md"] ?? "", /# Building from the prototype/);
 });
 
 test("loadRepoSkills reads references/*.md into the skill's references map", () => {

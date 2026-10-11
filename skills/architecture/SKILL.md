@@ -42,13 +42,13 @@ component's build actually needs as a `skillsPinned` array **inside that
 component's `specs/design/components/<name>/design.json`** — use the exact
 catalog names, e.g. a Ballerina API service →
 `["openapi-conventions", "ballerina"]` (a Go one → `["openapi-conventions",
-"go"]`); a web-application → `["wireframes", "react-webapp", <design system>]`,
+"go"]`); a web-application → `["react-webapp", <design system>]`,
 where `<design system>` is the skill name in the **UI design system** section of
 the Organization defaults block in your instructions. A web app's UI toolkit is
 a settled organization decision, so pin it on **every** web-application rather
 than leaving it to a description to trigger — and read the name from that
 section every time instead of remembering one, because it differs per
-organization. If that section is absent or empty, pin only the two stack skills.
+organization. If that section is absent or empty, pin only `react-webapp`.
 Never substitute a design system the organization defaults do not name.
 
 **Pin the design system; do not consult it.** A design system is built against,

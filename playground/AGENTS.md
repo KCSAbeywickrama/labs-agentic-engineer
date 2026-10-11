@@ -63,7 +63,7 @@ your skill does not need. Keep two components or more: two is the minimum that
 exercises the working-set selection and the subagent fan-out.
 
 A `web-application` adds a mock-verification round. A subagent starts the app in
-mock mode and walks each wireframe flow with `agent-browser`. No fixture makes
+mock mode and walks each prototype flow with `agent-browser`. No fixture makes
 this round short: a web-app run can take 40 minutes. In `--host` mode, the walk
 binds a localhost port and drives a real browser on your machine. A killed run
 can leave a `vite` process on the port. The next run then fails on
