@@ -484,8 +484,8 @@ is the landing screen:
 
 ```ts
 export const SCREEN_ROUTES: readonly ScreenRoute[] = [
-  { key: "my-claims", label: "My Claims",    path: "/claims/mine", loads: "GET /me/claims" },
-  { key: "submit",    label: "Submit Claim", path: "/claims/new",  loads: "POST /me/claims" },
+  { key: "my-claims", label: "My claims",    path: "/claims/mine", loads: "GET /me/claims" },
+  { key: "submit",    label: "Submit claim", path: "/claims/new",  loads: "POST /me/claims" },
   { key: "approvals", label: "Approvals",    path: "/approvals",   loads: "GET /claims" },
 ];
 ```

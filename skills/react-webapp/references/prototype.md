@@ -61,8 +61,8 @@ organization's design system, generated API clients and real requests.
   same difference comes from the operation gate (`<Can op={…}>`), never from a
   role name.
 - **The app shell's screens.** The `<AppShell>` gives every role an account
-  screen, a settings screen and Sign out. Account and Settings are routes,
-  reached from the user menu. Sign out is an action: with an auth dependency
+  screen and Sign out, and a settings screen only when the prototype has one.
+  Account and Settings are routes, reached from the user menu. Sign out is an action: with an auth dependency
   it calls `signOut()`, and the identity provider shows what comes next. The
   prototype's signed-out screen therefore is not a route of the app.
 - **`/forbidden` and `NoAccess` are platform views.** No prototype draws them.
@@ -87,7 +87,7 @@ element, in that order, with that literal content:
 
 | Kit | Build |
 |---|---|
-| `<AppShell>` | the design system's app shell. The brand is the manifest's `name`. Its `nav` entries are the side navigation, ONE rail for all roles, each entry in `<Can op={…}>`. Its user menu has Account, Settings, the `menu` entries and Sign out (outside the `Can`) |
+| `<AppShell>` | the design system's app shell. The brand is the manifest's `name`. Its `nav` entries are the side navigation, ONE rail for all roles, each entry in `<Can op={…}>`. Its user menu has Account, Settings (only when the prototype has a settings screen), the `menu` entries and Sign out (outside the `Can`) |
 | `<Heading text actions>` | the page title, with its `actions` as the page's buttons |
 | `<Section title count subtitle actions>` | a titled part of the page, with its count, its subtitle and its own action buttons |
 | `<Stat label value hint icon tone>` in a `<StatGroup>` | a row of stat tiles of one width: that label, the value bound to live data, that hint |
@@ -109,9 +109,13 @@ list, filtered one time and grouped. Never send one request per row. Never
 drop the column while a list operation can supply it. If no list operation
 can supply it, that is a contract gap: report it.
 
-**Labels are copy.** "Awaiting you" and "Submit claim" appear on the page as
-written. Change a label only when it is incorrect for the data that the API
-returns, and say so in the PR.
+**Labels are copy.** Use the prototype's text exactly as it is written, letter
+case included: the screen titles (the `Heading` text), the navigation entries
+(the `nav` labels), the back links (the target screen's `name`), the buttons,
+the column headers and the field labels. The prototype writes them in
+sentence case, and the app does too: "My claims" stays "My claims", never
+"My Claims", and "Submit claim" stays "Submit claim". Change a label only when
+it is incorrect for the data that the API returns, and say so in the PR.
 
 **Build the display states.** The manifest's `states` and the screen's
 branches on `useDisplayState()` show what each state looks like:
