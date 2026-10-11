@@ -53,7 +53,9 @@ A `/v1` turn body (`src/edge/turn-input.ts`) carries the instruction and,
 optionally, `scope` (the feature or the design review the user was looking
 at), an aim (`anchor` + `intent`) and, JSON only, `prototypeFeedback`. A
 review batch rides only a `/prototype` turn (bare or naming the batch's
-component) that runs in the Room, never with an aim. The retired `target` is
+component), never with an aim, and only in the Room or when the host saves
+the turn's edits itself (`TurnStarterDeps.callerSavesEdits`, set by the
+playground; the pod never sets it). The retired `target` is
 `400` in both body forms. The pod composes the scope into the instruction
 after the snapshot read and journals scope and batch on the message.
 
@@ -91,7 +93,7 @@ request: a closed tab does not stop it. Watchers attach to its replay buffer.
 `TurnDesk` is the only turn lock: one running turn per scope. A project is
 one scope for browser, kickoff and Plan turns alike, so a Plan blocks chat on
 that project and a chat blocks planning. A plan read against a design that is
-changing underneath it would plan the wrong Tasks.
+changing underneath it would plan the wrong build.
 
 - A busy scope answers `409 turn_in_progress` with `activeTurnId`: in the
   `TurnConflict` body on `/v1`, and on the Turn socket, where `aep-api` reads

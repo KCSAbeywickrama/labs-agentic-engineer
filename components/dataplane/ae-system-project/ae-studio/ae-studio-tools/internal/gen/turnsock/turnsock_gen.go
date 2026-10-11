@@ -19,13 +19,13 @@ import (
 
 // Defines values for KeepAliveFrameType.
 const (
-	KeepAlive KeepAliveFrameType = "keep-alive"
+	KeepAliveFrameTypeKeepAlive KeepAliveFrameType = "keep-alive"
 )
 
 // Valid indicates whether the value is a known member of the KeepAliveFrameType enum.
 func (e KeepAliveFrameType) Valid() bool {
 	switch e {
-	case KeepAlive:
+	case KeepAliveFrameTypeKeepAlive:
 		return true
 	default:
 		return false
@@ -34,16 +34,16 @@ func (e KeepAliveFrameType) Valid() bool {
 
 // Defines values for ResultFrameStatus.
 const (
-	Completed ResultFrameStatus = "completed"
-	Failed    ResultFrameStatus = "failed"
+	ResultFrameStatusCompleted ResultFrameStatus = "completed"
+	ResultFrameStatusFailed    ResultFrameStatus = "failed"
 )
 
 // Valid indicates whether the value is a known member of the ResultFrameStatus enum.
 func (e ResultFrameStatus) Valid() bool {
 	switch e {
-	case Completed:
+	case ResultFrameStatusCompleted:
 		return true
-	case Failed:
+	case ResultFrameStatusFailed:
 		return true
 	default:
 		return false
@@ -52,13 +52,13 @@ func (e ResultFrameStatus) Valid() bool {
 
 // Defines values for ResultFrameType.
 const (
-	Result ResultFrameType = "result"
+	ResultFrameTypeResult ResultFrameType = "result"
 )
 
 // Valid indicates whether the value is a known member of the ResultFrameType enum.
 func (e ResultFrameType) Valid() bool {
 	switch e {
-	case Result:
+	case ResultFrameTypeResult:
 		return true
 	default:
 		return false
@@ -67,16 +67,13 @@ func (e ResultFrameType) Valid() bool {
 
 // Defines values for TaskOpFrameOp.
 const (
-	TaskOpFrameOpPlan   TaskOpFrameOp = "plan"
-	TaskOpFrameOpUpdate TaskOpFrameOp = "update"
+	TaskOpFrameOpBuild TaskOpFrameOp = "build"
 )
 
 // Valid indicates whether the value is a known member of the TaskOpFrameOp enum.
 func (e TaskOpFrameOp) Valid() bool {
 	switch e {
-	case TaskOpFrameOpPlan:
-		return true
-	case TaskOpFrameOpUpdate:
+	case TaskOpFrameOpBuild:
 		return true
 	default:
 		return false
@@ -85,13 +82,13 @@ func (e TaskOpFrameOp) Valid() bool {
 
 // Defines values for TaskOpFrameType.
 const (
-	TaskOp TaskOpFrameType = "task-op"
+	TaskOpFrameTypeTaskOp TaskOpFrameType = "task-op"
 )
 
 // Valid indicates whether the value is a known member of the TaskOpFrameType enum.
 func (e TaskOpFrameType) Valid() bool {
 	switch e {
-	case TaskOp:
+	case TaskOpFrameTypeTaskOp:
 		return true
 	default:
 		return false
@@ -139,12 +136,6 @@ type KeepAliveFrame struct {
 // KeepAliveFrameType defines model for KeepAliveFrame.Type.
 type KeepAliveFrameType string
 
-// PlanContextFile One existing-Task render under its tasks/<n>.md name.
-type PlanContextFile struct {
-	Body string `json:"body"`
-	Path string `json:"path"`
-}
-
 // PlanFeature defines model for PlanFeature.
 type PlanFeature struct {
 	ID   string `json:"id"`
@@ -162,29 +153,19 @@ type PlanItem struct {
 	Text      string   `json:"text,omitempty"`
 }
 
-// PlanScope The spec version a plan turn covers, its stories and which of them already have Tasks, the features it carries and its product-wide items.
+// PlanScope What the spec version a plan turn plans carries, from its tag's annotation, the features, the product-wide items and the stories it holds back.
 type PlanScope struct {
-	// Features The features the version carries, in ID order, each with the carried features it is built after; the planner cuts one Task per feature per component.
+	// Features The features the version carries, in ID order, each with the carried features it is built after; each is one item of the build's checklist.
 	Features []PlanFeature `json:"features,omitempty"`
 
-	// ProductWide The product-wide items the version carries, in ID order; each component's Foundation Task builds them.
-	ProductWide []PlanItem `json:"productWide,omitempty"`
+	// HeldBack The stories of carried features the version holds back, in ID order; each needs a feature neither built nor carried.
+	HeldBack []string `json:"heldBack,omitempty"`
 
-	// Stories Each story the version builds, in ID order.
-	Stories []PlanStory `json:"stories"`
+	// ProductWide The product-wide items the version carries, in ID order; the build's Foundation item builds them.
+	ProductWide []PlanItem `json:"productWide,omitempty"`
 
 	// Tag The version's tag name, describing the version to the planner. Not the pin and not checked against it; the turn's `at` is.
 	Tag string `json:"tag"`
-}
-
-// PlanStory defines model for PlanStory.
-type PlanStory struct {
-	// Covered The story already has Tasks, the planner leaves it alone.
-	Covered bool `json:"covered"`
-
-	// ID The story's ID, F<feature>.<story>.
-	ID    string `json:"id"`
-	Title string `json:"title,omitempty"`
 }
 
 // Problem defines model for Problem.
@@ -213,11 +194,11 @@ type ResultFrameStatus string
 // ResultFrameType defines model for ResultFrame.Type.
 type ResultFrameType string
 
-// TaskOpFrame One line of the turn stream, a Task operation the agent produced.
+// TaskOpFrame One line of the turn stream, the build plan the agent produced.
 type TaskOpFrame struct {
 	Op TaskOpFrameOp `json:"op"`
 
-	// Output The operation's payload, as the plan or update tool emitted it.
+	// Output The operation's payload, as the planBuild tool emitted it.
 	Output map[string]interface{} `json:"output"`
 	Type   TaskOpFrameType        `json:"type"`
 }
@@ -256,11 +237,8 @@ type TurnRequest struct {
 	// Project Project name (DNS-label slug)
 	Project string `json:"project"`
 
-	// Scope The spec version a plan turn covers, its stories and which of them already have Tasks, the features it carries and its product-wide items.
+	// Scope What the spec version a plan turn plans carries, from its tag's annotation, the features, the product-wide items and the stories it holds back.
 	Scope PlanScope `json:"scope,omitempty"`
-
-	// TaskContext The existing-Task renders of a plan turn. Platform state, not repository files.
-	TaskContext []PlanContextFile `json:"taskContext,omitempty"`
 
 	// Text The free text of the turn (the project idea of a start turn).
 	Text   string             `json:"text,omitempty"`

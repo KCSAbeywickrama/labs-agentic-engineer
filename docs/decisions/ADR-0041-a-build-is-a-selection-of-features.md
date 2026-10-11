@@ -49,3 +49,22 @@ built, and say when a later version broke an earlier one.
   that do not need it.
 - Versions cut before selections name nothing they built; they validate the
   whole oracle and count as building nothing.
+
+## Amendment (2026-10-10): one build issue, worked feature by feature
+
+Decision 4 is replaced. **A build is one issue**: its body is an ordered
+checklist, an optional Foundation item (the shared setup and the carried P
+items), then one item per carried feature, each after the features it needs.
+The plan turn writes it with one tool, `planBuild`, which refuses an item the
+version does not carry, a carried feature left out, and a feature before one
+it needs; the plan tap mints the issue (`Build <version>`, dedupe key
+`DedupeKeyBuildIssue`) once the turn completes. The coding run works the
+items in order, one subagent per component of an item, one commit per item
+(`(#N <item>)`), and ticks each item's line when it is pushed. A cycle that
+finishes some items lands them with `Advances #N`, a non-closing reference
+the merge policy admits for the build issue; the run's no-progress rule counts
+the unticked items, so the next cycle continues. Consequences: the plan scope
+carries no stories or coverage, the Serves-stories stamp and per-task
+dependency links are gone, and an item's stories are read from its feature
+file. The full decision, with its context and alternatives, is
+[ADR-0050](ADR-0050-a-version-builds-as-one-issue-with-an-ordered-checklist.md).

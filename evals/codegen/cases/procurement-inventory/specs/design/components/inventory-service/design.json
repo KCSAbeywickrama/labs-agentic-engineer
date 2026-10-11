@@ -7,10 +7,8 @@
   "appPath": "inventory-service",
   "entrypoint": "deployment/service",
   "exposure": "intranet",
-  "dependencies": [
-    { "kind": "platform-resource", "name": "inventory-db", "resourceType": "postgres-cnpg", "description": "Stores items, on-hand levels and the append-only stock ledger." }
-  ],
-  "description": "Owns stock and the item catalogue: items (added and edited here, starting with 0 on hand), on-hand levels and the append-only stock ledger, persisted in its dedicated inventory-db. Deployed separately because the requirements keep stock in its own service that only the procurement API calls. Receipts are idempotent by reference and write ledger entries atomically with the level change. Does not know about requests, users or approvals.",
-  "stories": [1, 2, 7, 8, 9, 10, 11, 12],
+  "dependencies": [],
+  "description": "Owns items, stock levels and the append-only stock ledger (P1, P3). Deployed separately because the requirements require stock to live in its own service that only the procurement API calls; it is intranet-only and the web app never reaches it. Stock level is always the sum of ledger entries; it never edits a level directly. Persistence is held in-service until a database resource is available in the organization catalog. It does NOT hold requests, approvals, receipts or user identity; the procurement API passes the acting user's id for ledger entries.",
+  "stories": ["F1.1", "F1.2", "F1.3", "F1.4", "F1.5", "F1.6", "F5.1", "F5.2", "F5.3", "F5.4", "F5.5", "F4.4", "F6.1", "F6.2", "F6.3"],
   "skillsPinned": ["openapi-conventions", "ballerina"]
 }

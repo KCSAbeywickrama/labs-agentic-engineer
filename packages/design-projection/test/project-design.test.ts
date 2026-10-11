@@ -50,7 +50,8 @@ const BUNDLE: Record<string, string> = {
     dependencies: [{ kind: "component", name: "expense-api" }],
     description: "The webapp.",
   }),
-  "specs/design/components/expense-webapp/wireframes.dsl": "screen A\n",
+  "specs/design/components/expense-webapp/prototype.json": "{}\n",
+  "specs/design/components/expense-webapp/prototype.tsx": "export default null;\n",
 };
 
 test("projects the bundle into the cell-diagram-compatible design json", () => {
@@ -77,7 +78,19 @@ test("projects the bundle into the cell-diagram-compatible design json", () => {
   assert.deepEqual(web.skillsPinned, []); // no skillsPinned authored for this component
   assert.equal(web.services, undefined); // webapps expose no services
   assert.deepEqual(web.connections, [{ id: "http://expense-api", type: "http", onPlatform: true }]);
-  assert.equal(web.artifacts.wireframes, "specs/design/components/expense-webapp/wireframes.dsl");
+  assert.equal(web.artifacts.prototype, "specs/design/components/expense-webapp/prototype.json");
+  assert.equal(web.artifacts.prototypeSource, "specs/design/components/expense-webapp/prototype.tsx");
+  assert.equal(web.artifacts.wireframes, undefined);
+});
+
+test("a design written before the prototype still projects its wireframes", () => {
+  const dj = buildProjectDesign("legacy", {
+    "specs/design/components/web/design.json": JSON.stringify({ name: "web", type: "web-application" }),
+    "specs/design/components/web/wireframes.dsl": "screen A\n",
+  });
+  const web = dj.components.find((c) => c.id === "web")!;
+  assert.equal(web.artifacts.wireframes, "specs/design/components/web/wireframes.dsl");
+  assert.equal(web.artifacts.prototype, undefined);
 });
 
 

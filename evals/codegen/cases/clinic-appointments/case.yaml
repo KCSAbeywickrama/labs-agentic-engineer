@@ -7,7 +7,7 @@ description: "Clinic appointments: doctors publish their availability as time
   no file uploads or object storage, no scheduled or background jobs, no
   external integrations or AI features."
 source:
-  project: clinic-appointments
+  project: ev-clinic-appointments
   snapshot: current
-  savedAt: 2026-10-04T11:43:10.952Z
+  savedAt: 2026-10-11T13:08:43.591Z
 tags: []

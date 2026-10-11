@@ -28,7 +28,12 @@ package spec
 //     between requirements and design);
 //   - every deployable component is ENRICHED (its design.json moved off the
 //     scaffold placeholder, a language decided) and carries its type-mandated
-//     artifact (service → openapi.yaml, web-application → wireframes.dsl);
+//     artifact (service → openapi.yaml);
+//   - a web-application's prototype (prototype.json + prototype.tsx, the UI
+//     contract the coding run builds against) is not required yet, but one that
+//     is present is whole, sound, and current with the design: both files,
+//     each passing the save gate's rules, and every role it offers a role of
+//     specs/design/security.json when that file exists;
 //   - a design with END-USER SIGN-IN carries specs/design/security.json, it parses,
 //     and every story its roles cite is a real story. The platform creates
 //     the roles and test users that file declares when the tag is built, so a
@@ -45,6 +50,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/wso2/aep/aep-api/internal/platform/prototypespec"
 	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
 	"github.com/wso2/aep/aep-api/internal/platform/securityspec"
 )
@@ -194,22 +200,75 @@ func validateBuildGate(reqFiles, designFiles map[string]string, inScope map[stri
 				Message: fmt.Sprintf("component %q has no language decided — set it from the organization Tech stack default, the requirements, or the platform default", c.ID),
 			})
 		}
-		var artifact string
 		switch componentType {
 		case "service":
-			artifact = "openapi.yaml"
-		case "web-application":
-			artifact = "wireframes.dsl"
-		}
-		if artifact != "" {
-			artifactPath := "components/" + c.ID + "/" + artifact
+			artifactPath := "components/" + c.ID + "/openapi.yaml"
 			if strings.TrimSpace(designFiles[artifactPath]) == "" {
 				errs = append(errs, FileValidationError{
 					Path: artifactPath, Code: codeMissingComponentArtifact,
-					Message: fmt.Sprintf("component %q (%s) needs %s", c.ID, componentType, artifact),
+					Message: fmt.Sprintf("component %q (%s) needs openapi.yaml", c.ID, componentType),
 				})
 			}
+		case "web-application":
+			errs = append(errs, prototypeBuildErrors(designFiles, c.ID)...)
 		}
+	}
+	return errs
+}
+
+// prototypeBuildErrors judges a web-application's prototype at build time. No
+// prototype passes: it is not mandatory yet. A present one is the contract the
+// coding run builds the UI against, so it must be whole (half a prototype
+// renders nothing), pass the save gate's rules, and be current with the
+// design: every role it offers is a role security.json declares, the roles the
+// platform provisions and the built app gates on.
+func prototypeBuildErrors(designFiles map[string]string, component string) []FileValidationError {
+	manifestKey := prototypespec.ManifestPath(component)
+	sourceKey := prototypespec.SourcePath(component)
+	hasManifest := strings.TrimSpace(designFiles[manifestKey]) != ""
+	hasSource := strings.TrimSpace(designFiles[sourceKey]) != ""
+	switch {
+	case !hasManifest && !hasSource:
+		return nil
+	case !hasManifest || !hasSource:
+		missing, present := "prototype.json", "prototype.tsx"
+		path := manifestKey
+		if hasManifest {
+			missing, present, path = "prototype.tsx", "prototype.json", sourceKey
+		}
+		return []FileValidationError{{
+			Path: path, Code: codeMissingComponentArtifact,
+			Message: fmt.Sprintf("component %q has %s but no %s — a prototype is both files; write the missing one or remove the other", component, present, missing),
+		}}
+	}
+
+	manifest, errs := componentPrototypeErrors(designFiles, component)
+	if manifest == nil {
+		return errs
+	}
+	raw := designFiles[securityspec.BundleKey]
+	if strings.TrimSpace(raw) == "" {
+		return errs
+	}
+	doc, err := securityspec.Parse([]byte(raw))
+	if err != nil {
+		return errs // validateRolesDocument reports the document itself
+	}
+	declared := make(map[string]bool, len(doc.Roles))
+	names := make([]string, 0, len(doc.Roles))
+	for _, role := range doc.Roles {
+		declared[role.Name] = true
+		names = append(names, role.Name)
+	}
+	for i, role := range manifest.Roles {
+		if declared[role.ID] {
+			continue
+		}
+		errs = append(errs, FileValidationError{
+			Path: manifestKey, Code: prototypespec.CodeUnknownReference,
+			Message: fmt.Sprintf("roles[%d].id: role %q is not a role in security.json — copy a role name from it verbatim (%s)",
+				i, role.ID, strings.Join(names, ", ")),
+		})
 	}
 	return errs
 }
@@ -331,20 +390,6 @@ func notAStory(spec reqspec.Spec, id, verb string) string {
 	default:
 		return c.Describe(id) + "; " + verb + " a real story or drop it"
 	}
-}
-
-// componentStoryClaims maps each cell component to the stories its design.json
-// claims — the ONE claims read both the gate (coverage union) and
-// BuildScopeAtTag (per-component scope) consume, so they can never disagree on
-// where claims come from.
-func componentStoryClaims(facts *CellFacts, designFiles map[string]string) map[string][]string {
-	out := map[string][]string{}
-	for _, c := range facts.Components {
-		if stories := designJSONStories(designFiles["components/"+c.ID+"/design.json"]); len(stories) > 0 {
-			out[c.ID] = stories
-		}
-	}
-	return out
 }
 
 // designJSONStories reads the story IDs a component's design.json claims.

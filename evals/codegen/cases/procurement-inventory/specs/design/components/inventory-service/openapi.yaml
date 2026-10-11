@@ -2,175 +2,165 @@ openapi: 3.0.3
 info:
   title: Inventory Service
   version: 0.1.0
-  description: Items, stock levels and the stock ledger. Called only by the procurement API.
+  description: Items, stock levels and the append-only stock ledger. Called only by the procurement API.
 servers:
   - url: /
 paths:
   /items:
     get:
       operationId: listItems
-      summary: List catalogue items
+      summary: List items with current stock
       parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
+        - { name: q, in: query, schema: { type: string }, description: Search by name or SKU }
+        - { name: ids, in: query, schema: { type: array, items: { type: string } }, style: form, explode: false, description: Restrict to these item ids }
+        - { name: includeInactive, in: query, schema: { type: boolean, default: false } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
       responses:
         '200':
-          description: A page of items.
+          description: Items page
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ItemPage'
-        '400':
-          $ref: '#/components/responses/BadRequest'
+                type: object
+                required: [count, data]
+                properties:
+                  count: { type: integer, description: total matching items }
+                  next: { type: string, nullable: true, description: relative URI of the next page }
+                  previous: { type: string, nullable: true, description: relative URI of the previous page }
+                  data: { type: array, items: { $ref: '#/components/schemas/Item' } }
     post:
       operationId: createItem
-      summary: Add a catalogue item with 0 on hand
+      summary: Create an item at zero stock
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/ItemInput'
+            schema: { $ref: '#/components/schemas/ItemCreate' }
       responses:
         '201':
-          description: The new item.
+          description: Item created
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Item'
-        '400':
-          $ref: '#/components/responses/BadRequest'
+              schema: { $ref: '#/components/schemas/Item' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /items/{itemId}:
+    parameters:
+      - { name: itemId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getItem
+      summary: Get one item with current stock
+      responses:
+        '200':
+          description: The item
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Item' }
+        '404': { $ref: '#/components/responses/NotFound' }
     patch:
       operationId: updateItem
-      summary: Edit an item's name, unit, unit price or reorder level
-      parameters:
-        - $ref: '#/components/parameters/ItemId'
+      summary: Edit an item; the SKU never changes
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/ItemUpdate'
+            schema: { $ref: '#/components/schemas/ItemUpdate' }
       responses:
         '200':
-          description: The updated item.
+          description: Updated item
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Item'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /stock-levels:
-    get:
-      operationId: listStockLevels
-      summary: List every item's stock level
-      parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-      responses:
-        '200':
-          description: A page of stock levels.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StockLevelPage'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-  /low-stock-items:
-    get:
-      operationId: listLowStockItems
-      summary: List items whose on-hand quantity is below their reorder level
-      parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-      responses:
-        '200':
-          description: A page of low-stock levels.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StockLevelPage'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-  /items/{itemId}/ledger-entries:
+              schema: { $ref: '#/components/schemas/Item' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /ledger-entries:
     get:
       operationId: listLedgerEntries
-      summary: List an item's ledger entries, newest first
+      summary: List ledger entries, newest first
       parameters:
-        - $ref: '#/components/parameters/ItemId'
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
+        - { name: itemId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
       responses:
         '200':
-          description: A page of ledger entries.
+          description: Ledger page
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LedgerEntryPage'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /stock-movements:
+                type: object
+                required: [count, data]
+                properties:
+                  count: { type: integer, description: total matching entries }
+                  next: { type: string, nullable: true, description: relative URI of the next page }
+                  previous: { type: string, nullable: true, description: relative URI of the previous page }
+                  data: { type: array, items: { $ref: '#/components/schemas/LedgerEntry' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
     post:
-      operationId: recordStockMovement
-      summary: Record a stock receipt, raising stock and writing ledger entries atomically
+      operationId: appendLedgerEntries
+      summary: Append ledger entries atomically; each changes its item's stock
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/StockMovementInput'
+              type: object
+              required: [entries]
+              properties:
+                entries:
+                  type: array
+                  minItems: 1
+                  items: { $ref: '#/components/schemas/LedgerEntryInput' }
       responses:
         '201':
-          description: Ledger entries written.
+          description: Entries appended
           content:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/LedgerEntry'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: A movement with this reference was already recorded.
+                items: { $ref: '#/components/schemas/LedgerEntry' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /low-stock:
+    get:
+      operationId: listLowStock
+      summary: Active items strictly below their reorder level
+      parameters:
+        - { name: sort, in: query, schema: { type: string, enum: [shortfall, name], default: shortfall } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: Low-stock items
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                required: [count, data]
+                properties:
+                  count: { type: integer, description: total matching items }
+                  next: { type: string, nullable: true, description: relative URI of the next page }
+                  previous: { type: string, nullable: true, description: relative URI of the previous page }
+                  data: { type: array, items: { $ref: '#/components/schemas/LowStockItem' } }
 components:
-  parameters:
-    Limit:
-      name: limit
-      in: query
-      schema: { type: integer, default: 20, maximum: 100 }
-    Offset:
-      name: offset
-      in: query
-      schema: { type: integer, default: 0 }
-    ItemId:
-      name: itemId
-      in: path
-      required: true
-      schema: { type: string }
   responses:
     BadRequest:
-      description: The request is malformed.
+      description: Invalid input
       content:
         application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
+          schema: { $ref: '#/components/schemas/Error' }
     NotFound:
-      description: The resource does not exist.
+      description: No such item
       content:
         application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: SKU already exists
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
   schemas:
     Error:
       type: object
@@ -182,85 +172,58 @@ components:
         moreInfo: { type: string, description: URI to documentation }
     Item:
       type: object
-      required: [id, sku, name, unit, unitPrice, reorderLevel]
+      required: [id, sku, name, unitOfMeasure, reorderLevel, unitPriceCents, active, stockQuantity]
       properties:
         id: { type: string }
         sku: { type: string }
         name: { type: string }
-        unit: { type: string }
-        unitPrice: { type: number, description: price per unit }
-        reorderLevel: { type: integer, description: low stock when on-hand is below this }
-    ItemInput:
+        unitOfMeasure: { type: string }
+        reorderLevel: { type: integer }
+        unitPriceCents: { type: integer, description: price in cents of the company currency }
+        active: { type: boolean }
+        stockQuantity: { type: integer, description: sum of the item's ledger entries }
+    ItemCreate:
       type: object
-      required: [name, unit, unitPrice, reorderLevel]
+      required: [sku, name, unitOfMeasure, reorderLevel, unitPriceCents]
       properties:
+        sku: { type: string }
         name: { type: string }
-        unit: { type: string }
-        unitPrice: { type: number, description: price per unit }
-        reorderLevel: { type: integer, minimum: 0, description: low stock when on-hand is below this }
+        unitOfMeasure: { type: string }
+        reorderLevel: { type: integer, minimum: 0 }
+        unitPriceCents: { type: integer, minimum: 0 }
     ItemUpdate:
       type: object
       properties:
         name: { type: string }
-        unit: { type: string }
-        unitPrice: { type: number, description: price per unit }
-        reorderLevel: { type: integer, minimum: 0, description: low stock when on-hand is below this }
-    StockLevel:
+        unitOfMeasure: { type: string }
+        reorderLevel: { type: integer, minimum: 0 }
+        unitPriceCents: { type: integer, minimum: 0 }
+        active: { type: boolean }
+    LowStockItem:
+      allOf:
+        - $ref: '#/components/schemas/Item'
+        - type: object
+          required: [shortfall]
+          properties:
+            shortfall: { type: integer, description: reorder level minus current stock }
+    LedgerEntryInput:
       type: object
-      required: [itemId, sku, name, onHand, reorderLevel]
+      required: [itemId, quantityChange, actorId, actorName, sourceType, sourceId]
       properties:
         itemId: { type: string }
-        sku: { type: string }
-        name: { type: string }
-        onHand: { type: integer }
-        reorderLevel: { type: integer }
+        quantityChange: { type: integer, description: signed; positive raises stock }
+        actorId: { type: string, description: user id supplied by the procurement API }
+        actorName: { type: string }
+        sourceType: { type: string, enum: [receipt] }
+        sourceId: { type: string }
+        requestId: { type: string }
     LedgerEntry:
-      type: object
-      required: [id, itemId, quantityChange, balanceAfter, reason, createdAt]
-      properties:
-        id: { type: string }
-        itemId: { type: string }
-        quantityChange: { type: integer, description: signed change; positive raises stock }
-        balanceAfter: { type: integer, description: on-hand quantity after this entry }
-        reason: { type: string, description: e.g. goods-receipt }
-        reference: { type: string, description: receipt id that caused the change }
-        createdBy: { type: string }
-        createdAt: { type: string, format: date-time }
-    StockMovementInput:
-      type: object
-      required: [reference, createdBy, lines]
-      properties:
-        reference: { type: string, description: unique receipt id making the call idempotent }
-        createdBy: { type: string }
-        lines:
-          type: array
-          items:
-            type: object
-            required: [itemId, quantity]
-            properties:
-              itemId: { type: string }
-              quantity: { type: integer, minimum: 1, description: units received }
-    ItemPage:
-      type: object
-      required: [count, data]
-      properties:
-        count: { type: integer }
-        next: { type: string, nullable: true }
-        previous: { type: string, nullable: true }
-        data: { type: array, items: { $ref: '#/components/schemas/Item' } }
-    StockLevelPage:
-      type: object
-      required: [count, data]
-      properties:
-        count: { type: integer }
-        next: { type: string, nullable: true }
-        previous: { type: string, nullable: true }
-        data: { type: array, items: { $ref: '#/components/schemas/StockLevel' } }
-    LedgerEntryPage:
-      type: object
-      required: [count, data]
-      properties:
-        count: { type: integer }
-        next: { type: string, nullable: true }
-        previous: { type: string, nullable: true }
-        data: { type: array, items: { $ref: '#/components/schemas/LedgerEntry' } }
+      allOf:
+        - $ref: '#/components/schemas/LedgerEntryInput'
+        - type: object
+          required: [id, itemName, resultingQuantity, createdAt]
+          properties:
+            id: { type: string }
+            itemName: { type: string }
+            resultingQuantity: { type: integer, description: stock level after this entry }
+            createdAt: { type: string, format: date-time }

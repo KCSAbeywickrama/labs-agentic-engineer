@@ -309,15 +309,8 @@ func TestBuildScopeAtTag(t *testing.T) {
 	if scope.MilestoneTitle() != "v1" {
 		t.Errorf("MilestoneTitle() = %q, want the tag", scope.MilestoneTitle())
 	}
-	if fmt.Sprint(scope.InScope) != "[F1.1 F1.2 F2.1]" {
-		t.Errorf("inScope = %v", scope.InScope)
-	}
-	if scope.StoryTitles["F1.1"] != "As a user, I want A, so that a." || scope.StoryTitles["F2.1"] == "" {
-		t.Errorf("story titles = %v", scope.StoryTitles)
-	}
-	// Claims are put in ID order.
-	if fmt.Sprint(scope.ComponentStories["svc"]) != "[F1.1 F1.2]" || fmt.Sprint(scope.ComponentStories["notify-svc"]) != "[F2.1]" {
-		t.Errorf("componentStories = %v", scope.ComponentStories)
+	if len(scope.HeldBack) != 0 {
+		t.Errorf("heldBack = %v, want none", scope.HeldBack)
 	}
 	// A version cut without a pick carries every feature with stories (B3).
 	if fmt.Sprint(scope.Features) != "[{F1 Core []} {F2 Notify []}]" {
@@ -600,8 +593,8 @@ func TestSaveSpec_ABuildIsASelection(t *testing.T) {
 		t.Fatalf("pick F1: %v", err)
 	}
 	scope, err := r.svc.BuildScopeAtTag(ctx, r.org, r.proj, v1.Tag)
-	if err != nil || fmt.Sprint(scope.InScope) != "[F1.1]" {
-		t.Fatalf("v1 scope = %v (%v), want F1's story only", scope.InScope, err)
+	if err != nil || fmt.Sprint(scope.Features) != "[{F1 Core []}]" {
+		t.Fatalf("v1 scope = %v (%v), want F1 only", scope.Features, err)
 	}
 
 	// Same tree, a new pick: F2 needs F1, which v1 built, so F2 alone.
@@ -613,8 +606,8 @@ func TestSaveSpec_ABuildIsASelection(t *testing.T) {
 		t.Fatalf("a new pick on the same tree reused %s: %+v", v1.Tag, v2)
 	}
 	scope, _ = r.svc.BuildScopeAtTag(ctx, r.org, r.proj, v2.Tag)
-	if fmt.Sprint(scope.InScope) != "[F2.1]" {
-		t.Fatalf("v2 scope = %v, want F2's story only", scope.InScope)
+	if fmt.Sprint(scope.Features) != "[{F2 Notify []}]" {
+		t.Fatalf("v2 scope = %v, want F2 only", scope.Features)
 	}
 
 	// What each version built, oldest first, with each feature's lines as the

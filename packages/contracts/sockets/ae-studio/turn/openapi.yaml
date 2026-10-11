@@ -122,12 +122,6 @@ components:
           pattern: ^[0-9a-f]{40}$
         scope:
           $ref: '#/components/schemas/PlanScope'
-        taskContext:
-          type: array
-          description: The existing-Task renders of a plan turn. Platform state,
-            not repository files.
-          items:
-            $ref: '#/components/schemas/PlanContextFile'
         text:
           type: string
           description: The free text of the turn (the project idea of a start turn).
@@ -149,12 +143,11 @@ components:
     PlanScope:
       type: object
       additionalProperties: false
-      description: The spec version a plan turn covers, its stories and which
-        of them already have Tasks, the features it carries and its
-        product-wide items.
+      description: What the spec version a plan turn plans carries, from its
+        tag's annotation, the features, the product-wide items and the stories
+        it holds back.
       required:
       - tag
-      - stories
       properties:
         tag:
           type: string
@@ -162,40 +155,26 @@ components:
             planner. Not the pin and not checked against it; the turn's `at`
             is.
           pattern: ^[A-Za-z0-9._/-]{1,200}$
-        stories:
-          type: array
-          description: Each story the version builds, in ID order.
-          items:
-            $ref: '#/components/schemas/PlanStory'
         features:
           type: array
           description: The features the version carries, in ID order, each
-            with the carried features it is built after; the planner cuts one
-            Task per feature per component.
+            with the carried features it is built after; each is one item of
+            the build's checklist.
           items:
             $ref: '#/components/schemas/PlanFeature'
         productWide:
           type: array
           description: The product-wide items the version carries, in ID
-            order; each component's Foundation Task builds them.
+            order; the build's Foundation item builds them.
           items:
             $ref: '#/components/schemas/PlanItem'
-    PlanStory:
-      type: object
-      additionalProperties: false
-      required:
-      - id
-      - covered
-      properties:
-        id:
-          type: string
-          description: The story's ID, F<feature>.<story>.
-          pattern: ^F[0-9]+\.[0-9]+$
-        title:
-          type: string
-        covered:
-          type: boolean
-          description: The story already has Tasks, the planner leaves it alone.
+        heldBack:
+          type: array
+          description: The stories of carried features the version holds back,
+            in ID order; each needs a feature neither built nor carried.
+          items:
+            type: string
+            pattern: ^F[0-9]+\.[0-9]+$
     PlanFeature:
       type: object
       additionalProperties: false
@@ -233,18 +212,6 @@ components:
           items:
             type: string
             pattern: ^(F[0-9]+|all)$
-    PlanContextFile:
-      type: object
-      additionalProperties: false
-      description: One existing-Task render under its tasks/<n>.md name.
-      required:
-      - path
-      - body
-      properties:
-        path:
-          type: string
-        body:
-          type: string
     TurnInProgress:
       type: object
       additionalProperties: false
@@ -263,7 +230,7 @@ components:
     TaskOpFrame:
       type: object
       additionalProperties: false
-      description: One line of the turn stream, a Task operation the agent produced.
+      description: One line of the turn stream, the build plan the agent produced.
       required:
       - type
       - op
@@ -276,12 +243,11 @@ components:
         op:
           type: string
           enum:
-          - plan
-          - update
+          - build
         output:
           type: object
           additionalProperties: true
-          description: The operation's payload, as the plan or update tool emitted it.
+          description: The operation's payload, as the planBuild tool emitted it.
     KeepAliveFrame:
       type: object
       additionalProperties: false

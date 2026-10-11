@@ -138,8 +138,8 @@ func (a eventcoreCycles) NotePullRequest(ctx context.Context, cycleID string, pr
 	return err
 }
 
-func (a eventcoreCycles) NoteMergeDecision(ctx context.Context, cycleID string, resolves []int, verdict, reason string) error {
-	_, err := a.cycles.NoteMergeDecision(ctx, cycleID, resolves, verdict, reason)
+func (a eventcoreCycles) NoteMergeDecision(ctx context.Context, cycleID string, worked delivery.CycleWork, verdict, reason string) error {
+	_, err := a.cycles.NoteMergeDecision(ctx, cycleID, worked, verdict, reason)
 	return err
 }
 

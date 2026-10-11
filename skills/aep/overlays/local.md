@@ -42,16 +42,18 @@ so what you tune here applies to a real run.
 <!-- replace-section: ### The set -->
 
 The working set is the `issues/<n>.md` files. Each file has YAML frontmatter
-(`issueNumber`, `component`, `title`, `dependsOn`, `origin`), a
-`> **Rationale:**` line, and the scope.
+(`issueNumber`, `title`, and `version` for the build issue) and the body. The
+build issue is the file with `version`; its items are its
+`- [ ] **<item>** …` lines. A file without `version` is a bug issue that a
+person wrote.
 
-There is no status field. Do not add one. An issue is done when the App Paths
-of its components already satisfy its Scope. Read each path from its
-`design.json`, and look at the files. `dependsOn` names the components that
-the component uses at runtime. It is not a build order.
+There is no status field. Do not add one. A ticked item (`- [x]`) is done:
+skip it. A bug issue is done when the App Paths that it names already satisfy
+it: look at the files.
 
-Work the issues in ascending number. Get the working set again before each
-wave.
+Work the bug issues first, in ascending number. Then work the items of the
+build issue, from the top. Get the working set again before you start the
+next issue or item.
 
 <!-- drop-section: ### Establish branch identity -->
 
@@ -73,7 +75,7 @@ wave.
 <!-- /replace-text -->
 
 <!-- replace-text -->
-   A restart finds the done issues from `(#N)`, so push after each issue.
+   A restart finds the done items from `(#N <item>)`, so push after each item.
 <!-- with -->
    Do not push, and do not add a remote. The commit only helps the developer
    see the changes. Do it only in a repository:
@@ -81,13 +83,27 @@ wave.
    If the project is not a repository, only edit the files.
 <!-- /replace-text -->
 
+<!-- replace-text -->
+3. Tick the item in the build issue, after the push:
+   ```bash
+   gh issue view <number> --json body -q .body > /tmp/build-issue.md
+   # change only `- [ ] **<item>**` to `- [x] **<item>**`
+   gh issue edit <number> --body-file /tmp/build-issue.md
+   ```
+   The platform counts the ticks as the progress of the run.
+<!-- with -->
+3. Tick the item in `issues/<n>.md`: change only `- [ ] **<item>**` to
+   `- [x] **<item>**`. The tick is the record that the item is done: a later
+   run starts at the first item that is not ticked.
+<!-- /replace-text -->
+
 <!-- drop-section: ### The status line -->
 
 <!-- replace-text -->
-4. The data that you resolved: the `## Component <its name>` block of a
+5. The data that you resolved: the `## Component <its name>` block of a
    "Platform-resolved dependencies" comment, and each `org-service` contract
    (pasted, as a path, or "undocumented").
-5. Its issue's status line: the `gh issue comment` command with its issue
+6. Its issue's status line: the `gh issue comment` command with its issue
    number, and the rule in The status line.
    That command is the only `gh` it may run.
 <!-- with -->
@@ -95,12 +111,14 @@ wave.
 
 <!-- replace-section: ### The record -->
 
-There is no PR and no status field. For each issue that you touched, finished
-or not, add a dated note to the `## Progress` section of its issue file. Write
-what you built and how you verified it. If the work is not finished, write what
-you tried and the diagnostic (see Green in the component contract). Record
-each spec change in the note of the issue whose gap it closes. Do not change
-other parts of the file: the frontmatter belongs to the planner.
+There is no PR and no status field. The ticks of the build issue are the
+record of its items. For each item and each bug issue that you touched,
+finished or not, add a dated note to the `## Progress` section of its issue
+file, starting with the item. Write what you built and how you verified it. If
+the work is not finished, write what you tried and the diagnostic (see Green
+in the component contract). Record each spec change in the note of the item
+whose gap it closes. Do not change other parts of the file: the frontmatter
+and the checklist lines belong to the planner, except for the tick.
 
 <!-- drop-section: ### Be idempotent -->
 
@@ -116,6 +134,7 @@ the code uses its own default for `<DEP_NAME>_URL`.
 
 - Do not add a git remote, run `git push`, or run a `gh` command.
 - Do not renumber, delete or rewrite issue files, and do not add a status
-  field. Write only the `## Progress` section of an issue that you touched.
+  field. Write only the ticks of the build issue and the `## Progress` section
+  of an issue that you touched.
 - Do not delete or rewrite `.aep-playground/` (the state folder of the
   playground).

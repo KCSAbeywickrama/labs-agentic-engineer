@@ -29,8 +29,9 @@ import (
 	"github.com/wso2/aep/aep-api/internal/spec"
 )
 
-// Input kinds carried on ProvisionInput.Kind. external-config is derived from
-// the design; the others still originate in request inputs.
+// Input kinds carried on ProvisionInput.Kind. external-config and
+// platform-resource are derived from the design; org-service still originates
+// in request inputs.
 const (
 	buildKindExternalConfig = "external-config"
 	buildKindPlatformResrc  = "platform-resource"
@@ -99,10 +100,11 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 		noTarget = fmt.Errorf("%w: %w", dependencies.ErrProvisionPermanent, envErr)
 	}
 
-	// Mint gates only when the drawer carried inputs. A not-ready dependency is
-	// always surfaced in the build drawer, so a build with no inputs needs no new
-	// gate — and a pure re-build must not churn a fresh gate for every already-ready
-	// dep. Existing gates are still reconciled by settleReadyGates below, so an
+	// Mint gates only when the build carried inputs. The build derives an input
+	// for every platform resource not yet provisioned or in flight
+	// (build.InputsCoordinator.BuildProvisionInputs), so a build with no inputs
+	// needs no new gate — and a pure re-build must not churn a fresh gate for
+	// every already-ready dep. Existing gates are still reconciled by settleReadyGates below, so an
 	// orphaned gate self-heals on ANY later build, drawer or not (issue #164).
 	// gateByDep carries the `provision` gate issue number the mint step KNOWS for
 	// each dep — captured from the CreateIssue result, not re-looked-up via GitHub's
@@ -184,8 +186,8 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 
 	// Reconcile every provision gate whose dep is NOT in inputs. EnsureProvisionIssues
 	// re-mints an OPEN gate for each platform-resource dep in the design,
-	// but the inputs loop only admits a run for the drawer subset. A dep whose OC
-	// binding is already Ready is deliberately skipped by build preflight, so it
+	// but the inputs loop only admits a run for the not-yet-handled subset. A dep whose OC
+	// binding is already Ready is deliberately left out of the build inputs, so it
 	// lands here with a fresh gate and no run — deriving `pending` forever and
 	// stranding every consumer coding task (issue #164). Settle it: admit+complete a
 	// provision run so its gate derives `deployed`, without re-authoring the resource.
@@ -200,7 +202,7 @@ func (s *Service) ProvisionForBuild(ctx context.Context, orgID, ocOrgID, project
 }
 
 // settleReadyGates reconciles provision gates for deps that are already Ready in
-// OpenChoreo but are NOT in the build drawer inputs (issue #164). For each such
+// OpenChoreo but are NOT in the build inputs (issue #164). For each such
 // dep it admits+completes a provision run so the freshly-minted gate derives
 // `deployed` instead of stranding consumers on a run-less `pending` gate. It
 // re-authors NOTHING — the resource is already Ready. Best-effort: a design read
@@ -228,7 +230,7 @@ func (s *Service) settleReadyGates(ctx context.Context, orgID, projectID, env st
 			}
 			seen[name] = true
 			// Only an already-Ready dep is settled here. A not-Ready dep is driven by
-			// its own drawer input (or is genuinely un-actionable) — leave it alone.
+			// its own build input (or is genuinely un-actionable) — leave it alone.
 			st, _, serr := s.bindingStatus(ctx, orgID, projectID, dep.Name, env)
 			if serr != nil {
 				slog.WarnContext(ctx, "provisioning: settle read binding failed", "dependency", dep.Name, "error", serr)

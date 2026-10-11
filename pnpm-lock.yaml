@@ -1087,6 +1087,15 @@ importers:
       '@clack/prompts':
         specifier: ^1.6.0
         version: 1.7.0
+      '@wso2/prototype-cli':
+        specifier: workspace:*
+        version: link:../packages/prototype-cli
+      '@wso2/prototype-kit':
+        specifier: workspace:*
+        version: link:../packages/prototype-kit
+      '@wso2/prototype-theme-oxygen':
+        specifier: workspace:*
+        version: link:../packages/prototype-theme-oxygen
       ai:
         specifier: ^7.0.2
         version: 7.0.22(zod@4.6.2)

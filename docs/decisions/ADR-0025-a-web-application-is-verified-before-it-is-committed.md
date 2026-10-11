@@ -239,3 +239,15 @@ measurement standing, since it is now the shape the pod is actually asked to
 hold. Raising the limit was rejected: it buys a slower leak, and the walk is the
 longer of a web-application's two dispatches, so the cost is wall clock inside
 one cycle rather than a second cycle.
+
+## Amendment 2026-10-11 — the walk's map is `prototype.json`
+
+The prototype replaced `wireframes.dsl` as a web-application's UI contract
+([ADR-0042, amendment 2026-10-11](ADR-0042-a-prototype-is-react-on-a-fixed-kit-in-a-sandbox.md)).
+Where this ADR says the walk and its checklist come from `wireframes.dsl`, read
+the component's `prototype.json`: its flows (one role and the screens that role
+walks) set what the walk covers, and `prototype.tsx` shows what each screen
+holds. A build issue's item gets a mock walk of the prototype flows of that
+item and of earlier items: a cycle's regressions land in shared chrome, so a
+walk also covers flows an earlier item built (ADR-0050). The rest stands: the
+checklist is written before the browser opens, and a line gets three attempts.

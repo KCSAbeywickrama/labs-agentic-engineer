@@ -242,8 +242,9 @@ type loop struct {
 	// lastResult is what the previous cycle produced — it selects the next
 	// cycle's kind and feeds the no-progress rule.
 	lastResult cycleResult
-	// workBefore is the working-set size when the previous cycle was dispatched.
-	workBefore int
+	// unitsBefore is the progress units (progressUnits) when the previous
+	// cycle was dispatched.
+	unitsBefore int
 
 	// prNumber / mergeSHA are the current cycle's landing, read from the cycle
 	// record rather than from the signal that announced it.
@@ -423,7 +424,8 @@ func (l *loop) work(ctx workflow.Context, ends bookends) (RunResult, error) {
 			continue
 		}
 
-		if noProgress(l.lastResult, l.workBefore, work) {
+		units := progressUnits(work, snap)
+		if noProgress(l.lastResult, l.unitsBefore, units) {
 			return l.settle(ctx, delivery.RunStateFailed, delivery.RunReasonNoProgress)
 		}
 
@@ -445,7 +447,7 @@ func (l *loop) work(ctx workflow.Context, ends bookends) (RunResult, error) {
 			return l.settle(ctx, delivery.RunStateFailed, reason)
 		}
 
-		l.workBefore = work
+		l.unitsBefore = units
 		res, err := l.runCycle(ctx, kind, noAnchorIssue)
 		if err != nil {
 			return l.result(), err

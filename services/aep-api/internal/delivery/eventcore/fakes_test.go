@@ -182,12 +182,16 @@ func (f *fakeCycles) NotePullRequest(_ context.Context, id string, pr delivery.C
 	return nil
 }
 
-func (f *fakeCycles) NoteMergeDecision(_ context.Context, id string, resolves []int, verdict, reason string) error {
+func (f *fakeCycles) NoteMergeDecision(_ context.Context, id string, worked delivery.CycleWork, verdict, reason string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.decisions = append(f.decisions, fmt.Sprintf("%s:%s:%v", id, verdict, resolves))
+	f.decisions = append(f.decisions, fmt.Sprintf("%s:%s:%v", id, verdict, worked.Resolves))
+	if len(worked.Advances) > 0 {
+		f.decisions[len(f.decisions)-1] += fmt.Sprintf(" advances %v", worked.Advances)
+	}
 	if f.latest != nil && f.latest.ID == id && f.latest.EndedAt == nil {
-		f.latest.Resolves = delivery.IssueNumbers(resolves)
+		f.latest.Resolves = delivery.IssueNumbers(worked.Resolves)
+		f.latest.Advances = delivery.IssueNumbers(worked.Advances)
 		f.latest.MergeVerdict, f.latest.MergeReason = verdict, reason
 	}
 	return nil

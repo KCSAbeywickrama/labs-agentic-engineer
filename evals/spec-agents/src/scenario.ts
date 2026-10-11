@@ -83,14 +83,14 @@ const tasksScenarioSchema = z.object({
   name: z.string().regex(/^[a-z0-9-]+$/),
   fixture: z.string().min(1),
   /**
-   * The milestone scope the platform would send for the version (aep-api
-   * `planScopeFor`): its stories, features and product-wide items. Absent →
-   * a scope-less plan of the whole design.
+   * What the platform would say the version carries (aep-api
+   * `planScopeFor`): its features, product-wide items and held-back stories.
+   * Absent → a scope-less plan of the whole design.
    */
   scope: z
     .object({
       tag: z.string().min(1),
-      stories: z.array(z.object({ id: z.string(), title: z.string().optional(), covered: z.boolean() })),
+      heldBack: z.array(z.string()).optional(),
       features: z
         .array(z.object({ id: z.string(), name: z.string().optional(), needs: z.array(z.string()).optional() }))
         .optional(),

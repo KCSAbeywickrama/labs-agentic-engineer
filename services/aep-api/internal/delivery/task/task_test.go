@@ -22,52 +22,9 @@ import (
 	"testing"
 	"time"
 
-	"strings"
-
 	"github.com/wso2/aep/aep-api/internal/contracts/taskmeta"
 	"github.com/wso2/aep/aep-api/internal/delivery"
 )
-
-// ---- issue body prose ------------------------------------------------------
-
-// A Task body is a brief for the agent: what to build, where, and which issues
-// come first. Nothing parses it, so the test pins what a READER needs, not a
-// round-trip.
-func TestComposeTaskBody_ProseWithResolvedAndUnresolvedDependencies(t *testing.T) {
-	planned := plannedTask{
-		Component: "order-service",
-		Feature:   "F2",
-		AppPath:   "src/order-service",
-		Rationale: "core of the plan",
-		Body:      "## Scope\nWrite it.",
-	}
-	brief := taskBrief{FeatureName: "Approvals", ProductWide: []string{"P1", "P3"}}
-	body := composeTaskBody(planned, brief, []taskLink{{Number: 12}, {Name: "`cart-service`"}})
-	for _, want := range []string{
-		"core of the plan",
-		"**Component:** `order-service`",
-		"**Feature:** F2 Approvals",
-		"**Product-wide:** P1, P3",
-		"**App Path:** `src/order-service`",
-		"Depends on #12",
-		"Depends on the `cart-service` task",
-		"## Scope",
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body missing %q:\n%s", want, body)
-		}
-	}
-	if strings.Contains(body, "aep:task/v1") {
-		t.Errorf("a Task body must carry no machine block:\n%s", body)
-	}
-}
-
-// An empty plan renders an empty body rather than a skeleton of blank headings.
-func TestComposeTaskBody_EmptyFactsRenderNothing(t *testing.T) {
-	if got := composeTaskBody(plannedTask{}, taskBrief{}, nil); got != "" {
-		t.Errorf("empty plannedTask rendered %q, want an empty body", got)
-	}
-}
 
 // ---- reads -----------------------------------------------------------------
 

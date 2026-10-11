@@ -139,7 +139,7 @@ func TestCreateIssueDedup_DifferentKeyCreatesNew(t *testing.T) {
 // after a fix files a new issue.
 func TestCreateIssueDedup_ClosedKeyDoesNotBlock(t *testing.T) {
 	gh := &fakeGitHub{
-		issues:  []IssueInfo{{Number: 1, State: "closed", Labels: []string{dedupeLabelFor("sre-rca/service1")}}},
+		issues:  []IssueInfo{{Number: 1, State: "closed", Labels: []string{DedupeLabel("sre-rca/service1")}}},
 		nextNum: 1,
 	}
 	svc := newDedupService(gh)

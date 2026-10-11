@@ -35,8 +35,10 @@
 import {
   FileBundle,
   applyToolCall,
+  isPrototypePath,
   startAndStreamTurn,
   TurnRefusedError,
+  type PrototypeFeedback,
   type StreamPart,
   type TurnScope,
   type TurnStartBody,
@@ -60,6 +62,8 @@ export interface SpecTurnOptions {
   scope?: TurnScope;
   /** Live rendering hook; every streamed part passes through it. */
   onPart?: (part: StreamPart) => void;
+  /** A review batch on one prototype; the instruction is its `/prototype` line. */
+  prototypeFeedback?: PrototypeFeedback;
 }
 
 export interface SpecTurnResult {
@@ -105,7 +109,11 @@ export async function runSpecTurn(session: TurnSession, instruction: string, opt
   const { projectDir, ws, state } = session;
   const before = ws.readSpecFiles();
 
-  const body: TurnStartBody = { instruction, ...(opts.scope ? { scope: opts.scope } : {}) };
+  const body: TurnStartBody = {
+    instruction,
+    ...(opts.scope ? { scope: opts.scope } : {}),
+    ...(opts.prototypeFeedback ? { prototypeFeedback: opts.prototypeFeedback } : {}),
+  };
 
   const parts: StreamPart[] = [];
   const toolCalls: StreamPart[] = [];
@@ -135,10 +143,33 @@ export async function runSpecTurn(session: TurnSession, instruction: string, opt
   // one last-write-wins note; the files themselves are refreshed on disk live.
   const derived = new Map<string, DerivedNote>();
 
+  // A prototype write waits for its result. The design agent draws the pair
+  // before the write lands and refuses one whose screens fail to render; that
+  // check runs only there, so the fold here would accept what it refused. Its
+  // writes are made one at a time in call order, so applying them as their
+  // results arrive keeps the bundle in step.
+  const heldPrototypeWrites = new Map<string, { part: StreamPart; path: string }>();
+
   const foldToolCall = (part: StreamPart): void => {
     toolCalls.push(part);
     const input = part.input as { path?: unknown } | undefined;
     const path = typeof input?.path === "string" ? input.path : undefined;
+    if (path && isPrototypePath(path) && part.toolCallId) {
+      heldPrototypeWrites.set(part.toolCallId, { part, path });
+      return;
+    }
+    applyFold(part, path);
+  };
+
+  const foldToolResult = (part: StreamPart): void => {
+    const held = part.toolCallId ? heldPrototypeWrites.get(part.toolCallId) : undefined;
+    if (!held || !part.toolCallId) return;
+    heldPrototypeWrites.delete(part.toolCallId);
+    if ((part.output as { ok?: unknown } | undefined)?.ok !== true) return;
+    applyFold(held.part, held.path);
+  };
+
+  const applyFold = (part: StreamPart, path: string | undefined): void => {
     applyToolCall(bundle, part);
     if (!path) return;
     // A rejected op (INVALID_YAML, ALREADY_EXISTS, …) leaves the bundle
@@ -165,6 +196,7 @@ export async function runSpecTurn(session: TurnSession, instruction: string, opt
       parts.push(part);
       opts.onPart?.(part);
       if (part.type === "tool-call") foldToolCall(part);
+      if (part.type === "tool-result") foldToolResult(part);
       if (part.type === "error") streamError = String(part.error ?? "stream error");
       streamError = failureOf(part) ?? streamError;
     }

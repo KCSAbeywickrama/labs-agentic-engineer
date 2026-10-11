@@ -8,6 +8,10 @@
     "prototype": "./dist/bin.js"
   },
   "exports": {
+    "./feedback": {
+      "types": "./dist/feedback.d.ts",
+      "default": "./dist/feedback.js"
+    },
     "./package.json": "./package.json"
   },
   "files": ["dist", "templates"],

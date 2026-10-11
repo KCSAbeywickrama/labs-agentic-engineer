@@ -38,7 +38,7 @@ compile error, not a runtime surprise.
   - `sockets/ae-studio/{files,mcp,turn}/openapi.yaml` — one spec per Unix
     socket inside the AE Studio pod.
 - Artifacts the agents produce are JSON Schema under `packages/contracts/schemas/`
-  (`component-design`, `plan-task`, `update-task`), consumed by `@aep/agent-stream`
+  (`component-design`, `build-plan` and more), consumed by `@aep/agent-stream`
   and the design views.
 - Both sides of every boundary listed above are generated from its spec, and
   generated clients/servers are never hand-edited. Whether they are committed
@@ -165,8 +165,9 @@ console, annotates, and Send all returns the requests as a typed
 ## How a version gets built
 
 A spec version is cut as a `v<N>` tag and executed as **one supervised run over
-one GitHub milestone**: the run mints prose issues into it as its first phase, one coding agent
-works the whole milestone per cycle — verifying every web application it builds
+one GitHub milestone**: the run mints one build issue into it as its first phase (an ordered
+checklist, Foundation and then one item per feature), one coding agent
+works the whole milestone per cycle, item by item — verifying every web application it builds
 in a browser before committing it — its pull request auto-merges, the merge
 fans out to a build per changed component, the supervisor then **reconciles the
 version**: every component the design declares whose newest green build is not
@@ -176,8 +177,9 @@ decisions and their costs are
 [ADR-0011](decisions/ADR-0011-milestone-is-the-unit-of-execution.md),
 [ADR-0017](decisions/ADR-0017-the-platform-owns-deploy.md),
 [ADR-0018](decisions/ADR-0018-planning-is-a-run-phase.md),
-[ADR-0024](decisions/ADR-0024-cancel-reaches-the-planning-phase.md) and
-[ADR-0026](decisions/ADR-0026-deploy-reconciles-the-version.md); the
+[ADR-0024](decisions/ADR-0024-cancel-reaches-the-planning-phase.md),
+[ADR-0026](decisions/ADR-0026-deploy-reconciles-the-version.md) and
+[ADR-0050](decisions/ADR-0050-a-version-builds-as-one-issue-with-an-ordered-checklist.md); the
 mechanism is
 [`internal/delivery/README.md`](../services/aep-api/internal/delivery/README.md).
 
@@ -194,7 +196,7 @@ on where a feed is kept).
 rather than after a deployment. Once a `web-application` builds clean the cycle
 dispatches one more agent for it: it stands the app up in mock mode — MSW
 answering `/api`, a substituted auth module, no cluster and no sibling service —
-walks every screen the component's wireframes name, and repairs each failure the
+walks every flow the component's prototype names, and repairs each failure the
 moment it finds it, clearing the line by clicking it again rather than by the
 edit compiling. It reports one verdict per user story. Running the walk before
 the commit is what makes one pull request carry the build *and* its fixes. It is distinct

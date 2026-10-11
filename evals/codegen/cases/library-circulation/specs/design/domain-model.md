@@ -1,56 +1,55 @@
-# Library Circulation — Domain Model
+# Domain model
 
-Titles and copies belong to the catalogue service; loans, holds and fees belong to the circulation API. Members are identified by the signed-in subject, not stored as a profile.
+Titles and copies belong to the catalogue service; loans, holds and fees belong to the circulation API. Members are the signed-in people and are identified by their sign-in subject, so there is no member table.
 
 ```mermaid
 erDiagram
     TITLE ||--o{ COPY : has
     TITLE ||--o{ HOLD : "queued on"
-    COPY ||--o{ LOAN : "lent as"
+    COPY ||--o{ LOAN : "lent in"
     LOAN ||--o| FEE : "may incur"
-    MEMBER ||--o{ LOAN : borrows
-    MEMBER ||--o{ HOLD : places
-    MEMBER ||--o{ FEE : owes
+    HOLD }o--o| COPY : "ready with"
 
     TITLE {
         string id PK
         string name
         string author
         string subject
-        string isbn
     }
     COPY {
         string id PK
         string titleId FK
         string barcode
-        string status "available | on-loan | on-hold | withdrawn"
+        string status "available, on-loan, on-hold-shelf, withdrawn"
     }
     LOAN {
         string id PK
         string copyId FK
-        string titleId FK
-        string memberId FK
-        date checkedOutAt
-        date dueDate
-        date returnedAt
+        string memberId
+        date checkedOutOn
+        date dueOn
+        date returnedOn
+        int renewals
     }
     HOLD {
         string id PK
         string titleId FK
-        string memberId FK
+        string memberId
         datetime placedAt
-        string status "waiting | ready | fulfilled | cancelled"
+        string status "active, ready, fulfilled, cancelled"
+        string copyId FK
+        date readyUntil
     }
     FEE {
         string id PK
         string loanId FK
-        string memberId FK
-        decimal amount
-        string status "unpaid | paid"
-    }
-    MEMBER {
-        string id PK "identity subject"
+        string memberId
+        int daysLate
+        int amountCents
+        string status "unpaid, settled, waived"
     }
 ```
 
-Title and Copy live in the catalogue service; Loan, Hold and Fee in the circulation API. A loan's due date is checkout plus 14 days; a late return creates a Fee of 0.25 per day overdue (both assumed in the PRD). Loans store `copyId`/`titleId` as references into the catalogue.
+- A loan is overdue when it is open and `dueOn` is past; this is derived on read.
+- Fee amount is 25 minor units per day late, capped at 1000 per loan.
+- A hold's queue position is derived from `placedAt` among active holds on the title.

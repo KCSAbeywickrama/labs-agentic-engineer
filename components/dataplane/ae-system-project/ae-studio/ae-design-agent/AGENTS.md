@@ -49,10 +49,11 @@ instruction prefix.
 (the loop stays generic); callers never send a tool set. `files` (the default)
 is the file-mutation set (`src/agents/main/tools/files.ts`) over a
 `FileBundle`. `kind: "plan"` selects `task-plan` (`tools/task-plan.ts`:
-`planTask`/`updateTask` over a per-turn `TaskPlan` accumulator, no file tools;
-`files` is read-only context). Register chat merges `draftExternalResource` onto
-the files set on the marketplace route. `execute()` validates and accumulates
-only: aep-api's plan tap performs the issue writes off the stream. The plan
+`planBuild` over a per-turn `BuildPlan` accumulator checked against the turn's
+plan scope, no file tools; `files` is read-only context). Register chat merges
+`draftExternalResource` onto the files set on the marketplace route.
+`execute()` validates and accumulates only: aep-api's plan tap writes the build
+issue from the last ok `planBuild` when the turn completes. The plan
 tool contract and its JSON Schemas live in `@aep/agent-stream`; the planner
 side is in [`design/task-planner-contract-parity.md`](design/task-planner-contract-parity.md).
 

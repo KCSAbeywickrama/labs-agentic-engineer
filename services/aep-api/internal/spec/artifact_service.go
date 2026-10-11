@@ -28,7 +28,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strings"
 
 	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
 	"github.com/wso2/aep/aep-api/internal/sourcecontrol"
@@ -143,10 +142,11 @@ type ArtifactService interface {
 	// suggestion — covering the whole specs/ tree. Validation failure returns
 	// *SpecValidationError (422).
 	SaveSpec(ctx context.Context, orgID, projectID string, req SaveRequest) (*SpecSaveResult, error)
-	// BuildScopeAtTag computes the tag's story scope (#369): the PRD's story
-	// set + titles, and per-component claims from each design.json's
-	// `stories`. Consumed by delivery/build (milestone identity) and
-	// delivery/task (delta planning + the Serves-stories stamp).
+	// BuildScopeAtTag computes what the tag carries (ADR-0041): its features
+	// with their build order, its product-wide items and its held-back stories,
+	// read from the tagged requirements and the tag's annotation. Consumed by
+	// delivery/build (milestone identity) and delivery/task (the plan turn's
+	// scope and the build issue).
 	BuildScopeAtTag(ctx context.Context, orgID, projectID, tag string) (BuildScope, error)
 
 	// Versions.
@@ -252,31 +252,15 @@ var allowedRequirementExts = []string{".md", ".excalidraw", ".dsl"}
 // against the published schema) plus the FE-derived `*.gen.json` projections;
 // `.cell` is the project-level cell-diagram DSL (design.cell) that drives the
 // live architecture diagram; `.dsl` is the per-component wireframes DSL
-// (wireframes.dsl) — the build gate demands it for deployable
-// web-applications, so it must ride the bundle the gate reads; `.tsx` is a
-// web-application's prototype source (prototype.tsx, beside its prototype.json),
-// which the save gate checks and a revision turn reads back.
+// (wireframes.dsl) of designs written before the prototype replaced it, kept
+// so those projects still read and save; `.tsx` is a web-application's
+// prototype source (prototype.tsx, beside its prototype.json), which the save
+// and build gates check and a revision turn reads back.
 var allowedDesignExts = []string{".md", ".yaml", ".yml", ".json", ".cell", ".dsl", ".tsx"}
 
-func hasAllowedDesignExt(name string) bool {
-	lower := strings.ToLower(name)
-	for _, ext := range allowedDesignExts {
-		if strings.HasSuffix(lower, ext) {
-			return true
-		}
-	}
-	return false
-}
+func hasAllowedDesignExt(name string) bool { return hasExt(name, allowedDesignExts) }
 
-func hasAllowedRequirementExt(name string) bool {
-	lower := strings.ToLower(name)
-	for _, ext := range allowedRequirementExts {
-		if strings.HasSuffix(lower, ext) {
-			return true
-		}
-	}
-	return false
-}
+func hasAllowedRequirementExt(name string) bool { return hasExt(name, allowedRequirementExts) }
 
 // ----- Reads (GitHub-at-HEAD / at-tag) -----
 

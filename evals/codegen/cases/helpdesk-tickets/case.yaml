@@ -7,7 +7,7 @@ description: "Internal IT help desk: employees raise support tickets, support
   service. No email or notifications, no file uploads or object storage, no
   scheduled or background jobs, no external integrations or AI features."
 source:
-  project: helpdesk-tickets
+  project: ev-helpdesk-tickets
   snapshot: current
-  savedAt: 2026-10-04T11:42:47.195Z
+  savedAt: 2026-10-11T13:08:06.347Z
 tags: []

@@ -96,9 +96,9 @@ type CycleStore interface {
 	Latest(ctx context.Context, orgID, runID string) (*delivery.RunCycle, error)
 	// NotePullRequest records the pull request the agent actually opened.
 	NotePullRequest(ctx context.Context, cycleID string, pr delivery.CyclePullRequest) error
-	// NoteMergeDecision records the merge policy's matched issue set and, when
-	// the pull request did not merge, the verdict and its reason.
-	NoteMergeDecision(ctx context.Context, cycleID string, resolves []int, verdict, reason string) error
+	// NoteMergeDecision records the merge policy's matched and advanced issue
+	// sets and, when the pull request did not merge, the verdict and its reason.
+	NoteMergeDecision(ctx context.Context, cycleID string, worked delivery.CycleWork, verdict, reason string) error
 	// FinishCycle closes the cycle and records the merge SHA it landed.
 	FinishCycle(ctx context.Context, cycleID, mergeSHA string) error
 }

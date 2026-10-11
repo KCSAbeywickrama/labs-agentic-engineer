@@ -36,6 +36,7 @@ import {
   FileBundle,
   isErrorToolOutput,
   isQuestionTool,
+  type PlanScope,
   type StreamPart,
   type Surface,
   type Toolset,
@@ -50,7 +51,7 @@ import { buildFileToolSet, buildRegisterDraftTools } from "../agents/main/tools/
 import { tapWrites, type WriteLedger } from "../agents/main/tools/write-ledger.js";
 import { buildWebSearchTools } from "../agents/main/tools/web-search.js";
 import { buildTaskPlanTools } from "../agents/main/tools/task-plan.js";
-import { TaskPlan } from "../agents/main/task-plan-accumulator.js";
+import { BuildPlan } from "../agents/main/task-plan-accumulator.js";
 import { buildInstructions, buildTaskPlanInstructions, buildPrompt, buildEagerSkillsBlock } from "../agents/main/prompt.js";
 import type { SkillSource } from "../agents/main/skill-source.js";
 import type { UnreadableReference } from "./attachments.js";
@@ -172,9 +173,11 @@ export interface RunConversationTurnInput {
   /**
    * Which tool set to register (tasks-github-native §9.3). Default/absent →
    * `files` (today's file-mutation tools, byte-identical). `task-plan` →
-   * `planTask`/`updateTask` over a read-only snapshot, no file tools.
+   * `planBuild` over a read-only snapshot, no file tools.
    */
   toolset?: Toolset;
+  /** A `task-plan` turn: what the version carries, which `planBuild` is checked against. */
+  planScope?: PlanScope;
   /**
    * The MCP transport for this turn (the tools socket's fetch). Present →
    * `tools/list` is fetched (best-effort) and merged into the tool set as
@@ -276,8 +279,8 @@ export async function runConversationTurn(input: RunConversationTurnInput): Prom
     let writes: WriteLedger | undefined;
     if (toolset === "task-plan") {
       // Read-only context: `files` mutates nothing; the accumulator validates
-      // planTask/updateTask against it (known components + existing Tasks).
-      tools = buildTaskPlanTools(new TaskPlan(input.files), skills);
+      // planBuild against it and the scope (known components, carried items).
+      tools = buildTaskPlanTools(new BuildPlan(input.files, input.planScope), skills);
       instructions = buildTaskPlanInstructions(skills, input.surface);
     } else {
       bundle = input.collabPeer ? new DocFileBundle(input.collabPeer, input.files) : new FileBundle(input.files);

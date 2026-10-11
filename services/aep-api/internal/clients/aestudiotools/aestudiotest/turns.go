@@ -63,10 +63,8 @@ func validTurn(req aestudiotools.TurnRequest) error {
 	if !scopeTagPattern.MatchString(sc.Tag) {
 		return podRefusal(OpStartTurn, "scope.tag is not a tag name")
 	}
-	for _, s := range sc.Stories {
-		if !storyIDPattern.MatchString(s.ID) {
-			return podRefusal(OpStartTurn, "scope.stories[].id must be F<n>.<m>")
-		}
+	if !allMatch(storyIDPattern, sc.HeldBack) {
+		return podRefusal(OpStartTurn, "scope.heldBack[] must be F<n>.<m>")
 	}
 	for _, f := range sc.Features {
 		if !featureIDPattern.MatchString(f.ID) || !allMatch(featureIDPattern, f.Needs) {

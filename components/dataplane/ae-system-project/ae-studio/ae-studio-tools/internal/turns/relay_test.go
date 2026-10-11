@@ -173,7 +173,7 @@ func TestRelay_PassesTheResultsResetTimeThrough(t *testing.T) {
 
 func TestRelay_CallerLeavesTurnStillDrainedAndLogged(t *testing.T) {
 	sock := turnstest.New(t, turnstest.Script{
-		Events: []string{`{"type":"task-op","op":"plan","output":{"ok":true}}`},
+		Events: []string{`{"type":"task-op","op":"build","output":{"ok":true}}`},
 		Hold:   300 * time.Millisecond,
 	})
 	h := newRelayHarness(t, sock.Path())
@@ -207,7 +207,7 @@ func TestRelay_FailedResultIsLoggedAsFailed(t *testing.T) {
 func TestRelay_StreamCutBeforeResult(t *testing.T) {
 	sock := turnstest.ServeHandler(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = io.WriteString(w, `{"type":"task-op","op":"plan","output":{}}`+"\n")
+		_, _ = io.WriteString(w, `{"type":"task-op","op":"build","output":{}}`+"\n")
 		// The agent goes away with no result frame.
 	}))
 	h := newRelayHarness(t, sock)

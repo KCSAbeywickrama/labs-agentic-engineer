@@ -2626,6 +2626,9 @@ type RunCycleStartupWait struct {
 
 // RunCycleView One dispatch within a run. Branch, pull request (number and URL) and merge SHA are LEARNED FROM WEBHOOKS — the agent derives its own branch identity — so they stay empty on a cycle whose agent died before opening a pull request.
 type RunCycleView struct {
+	// Advances The version's build issue this cycle's pull request advanced (`Advances #N`): it finished some of the build's items, not all, so the merge lands them and the issue stays open with those items ticked. Kept apart from `resolves`, which the merge closes. Empty until a pull request is seen.
+	Advances []int64 `json:"advances,omitempty"`
+
 	// AgentReason Why this cycle's agent stopped without opening a pull request, as the platform's pod-truth watcher classified it — `timed_out` (the run deadline), `agent_failed[:<reason>]` (a non-zero exit or a killed container), `startup_failed:<reason>: <message>` (the runner never started: image pull, scheduling, a secret that had not materialised, or `not_applied`, a Job the platform never applied for the attempt; the cycle's Job is then suspended, so its pod cannot start later, and the run settles `agent-start-failed`) or `job_not_found` (the runner's workload disappeared). Absent on every cycle that opened a pull request: there the pull request is the outcome.
 	AgentReason string `json:"agentReason,omitempty"`
 

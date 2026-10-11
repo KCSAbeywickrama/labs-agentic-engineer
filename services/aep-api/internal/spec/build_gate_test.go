@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wso2/aep/aep-api/internal/platform/prototypespec"
 	"github.com/wso2/aep/aep-api/internal/platform/reqspec"
 )
 
@@ -73,7 +74,6 @@ func completeDesignFiles() map[string]string {
 		"components/lunch-api/design.json":       enriched("lunch-api", "service", "F1.1", "F1.2", "F1.4"),
 		"components/lunch-api/openapi.yaml":      "openapi: 3.0.3\n",
 		"components/lunch-web/design.json":       enriched("lunch-web", "web-application", "F1.1", "F1.2"),
-		"components/lunch-web/wireframes.dsl":    "screen home\n",
 		"components/slack-notifier/design.json":  enriched("slack-notifier", "service", "F2.1"),
 		"components/slack-notifier/openapi.yaml": "openapi: 3.0.3\n",
 	}
@@ -139,6 +139,73 @@ func TestBuildGate_DeployableComponentDemandsArtifactsAndEnrichment(t *testing.T
 	}
 	if !strings.Contains(codes, "UNENRICHED_COMPONENT") {
 		t.Errorf("want UNENRICHED_COMPONENT for scaffold-placeholder lunch-web, got %+v", errs)
+	}
+}
+
+// lunchWebPrototype is a sound prototype for lunch-web whose one role is the
+// rolesDoc's "Member".
+func lunchWebPrototype(files map[string]string, roleID string) map[string]string {
+	files[prototypespec.ManifestPath("lunch-web")] = strings.ReplaceAll(validPrototypeManifest, `"user"`, `"`+roleID+`"`)
+	files[prototypespec.SourcePath("lunch-web")] = validPrototypeSource
+	return files
+}
+
+// A prototype is not mandatory yet: a web-application without one builds.
+func TestBuildGate_WebApplicationWithoutAPrototypePasses(t *testing.T) {
+	if errs := gateErrors(t, completeDesignFiles()); len(errs) != 0 {
+		t.Fatalf("a web-application with no prototype must pass, got %+v", errs)
+	}
+}
+
+func TestBuildGate_SoundPrototypePasses(t *testing.T) {
+	files := signInDesignFiles()
+	files["security.json"] = rolesDoc("F1.1", "F1.2")
+	if errs := gateErrors(t, lunchWebPrototype(files, "Member")); len(errs) != 0 {
+		t.Fatalf("a sound, current prototype must pass, got %+v", errs)
+	}
+}
+
+// Half a prototype renders nothing: whichever file is missing is named.
+func TestBuildGate_HalfAPrototypeFails(t *testing.T) {
+	for _, drop := range []string{prototypespec.ManifestPath("lunch-web"), prototypespec.SourcePath("lunch-web")} {
+		files := lunchWebPrototype(completeDesignFiles(), "user")
+		delete(files, drop)
+		errs := gateErrors(t, files)
+		if len(errs) != 1 || errs[0].Code != codeMissingComponentArtifact || errs[0].Path != drop {
+			t.Errorf("dropping %s: want one %s row naming it, got %+v", drop, codeMissingComponentArtifact, errs)
+		}
+	}
+}
+
+func TestBuildGate_InvalidPrototypeFails(t *testing.T) {
+	files := lunchWebPrototype(completeDesignFiles(), "user")
+	key := prototypespec.ManifestPath("lunch-web")
+	files[key] = strings.Replace(files[key], `"entryScreen": "home"`, `"entryScreen": "nowhere"`, 1)
+	errs := gateErrors(t, files)
+	if len(errs) != 1 || errs[0].Code != prototypespec.CodeUnknownReference || errs[0].Path != key {
+		t.Fatalf("want one %s row on the manifest, got %+v", prototypespec.CodeUnknownReference, errs)
+	}
+}
+
+// A prototype is current with the design: a role security.json does not
+// declare is one the platform never provisions and the app never gates on.
+func TestBuildGate_PrototypeRoleUnknownToSecurityFails(t *testing.T) {
+	files := signInDesignFiles()
+	files["security.json"] = rolesDoc("F1.1", "F1.2")
+	errs := gateErrors(t, lunchWebPrototype(files, "member"))
+	if len(errs) != 1 || errs[0].Code != prototypespec.CodeUnknownReference ||
+		errs[0].Path != prototypespec.ManifestPath("lunch-web") {
+		t.Fatalf("want one %s row on the manifest, got %+v", prototypespec.CodeUnknownReference, errs)
+	}
+	assertContains(t, errs[0].Message, `role "member" is not a role in security.json`)
+	assertContains(t, errs[0].Message, "Member")
+}
+
+// Without security.json the roles come from the PRD's actors: nothing to
+// cross-check.
+func TestBuildGate_PrototypeRolesUncheckedWithoutSecurity(t *testing.T) {
+	if errs := gateErrors(t, lunchWebPrototype(completeDesignFiles(), "anyone")); len(errs) != 0 {
+		t.Fatalf("want a clean gate, got %+v", errs)
 	}
 }
 

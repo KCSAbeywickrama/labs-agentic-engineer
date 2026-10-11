@@ -64,6 +64,10 @@ func (s *scriptedMilestones) MilestoneIssueCounts(context.Context, string, strin
 	return &sourcecontrol.MilestoneIssueCounts{}, nil
 }
 
+func (s *scriptedMilestones) ListMilestoneIssues(context.Context, string, string, sourcecontrol.MilestoneIssuesFilter) ([]sourcecontrol.IssueInfo, error) {
+	return nil, nil
+}
+
 func (s *scriptedMilestones) CloseMilestone(context.Context, string, string, int) error { return nil }
 
 func (s *scriptedMilestones) count() int {

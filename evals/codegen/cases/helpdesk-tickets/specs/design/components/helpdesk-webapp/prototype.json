@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 3,
+  "name": "IT Help Desk",
+  "entryScreen": "screen.my-tickets",
+  "roles": [
+    { "id": "Employee", "name": "Employee" },
+    { "id": "Support Agent", "name": "Support Agent" },
+    { "id": "Team Lead", "name": "Team Lead" }
+  ],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.validation-error", "name": "Validation errors" },
+    { "id": "state.failed", "name": "Help desk unavailable" }
+  ],
+  "screens": [
+    { "id": "screen.my-tickets", "name": "My tickets", "roleIds": ["Employee"] },
+    { "id": "screen.new-ticket", "name": "Raise a ticket", "roleIds": ["Employee"] },
+    { "id": "screen.my-ticket", "name": "My ticket", "roleIds": ["Employee"] },
+    { "id": "screen.queue", "name": "Queue", "roleIds": ["Support Agent", "Team Lead"] },
+    { "id": "screen.ticket", "name": "Ticket", "roleIds": ["Support Agent", "Team Lead"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["Employee", "Support Agent", "Team Lead"] },
+    { "id": "screen.settings", "name": "Settings", "roleIds": ["Employee", "Support Agent", "Team Lead"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Employee", "Support Agent", "Team Lead"] }
+  ],
+  "flows": [
+    { "id": "flow.raise-ticket", "name": "Raise and track a ticket", "roleId": "Employee",
+      "screenIds": ["screen.my-tickets", "screen.new-ticket", "screen.my-ticket"] },
+    { "id": "flow.reopen-ticket", "name": "Reopen a resolved ticket", "roleId": "Employee",
+      "screenIds": ["screen.my-tickets", "screen.my-ticket"] },
+    { "id": "flow.handle-ticket", "name": "Triage, work and resolve a ticket", "roleId": "Support Agent",
+      "screenIds": ["screen.queue", "screen.ticket"] },
+    { "id": "flow.assign-ticket", "name": "Assign a ticket to an agent", "roleId": "Team Lead",
+      "screenIds": ["screen.queue", "screen.ticket"] },
+    { "id": "flow.monitor-queue", "name": "Monitor the queue and SLA breaches", "roleId": "Team Lead",
+      "screenIds": ["screen.queue"] }
+  ]
+}

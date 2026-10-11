@@ -130,13 +130,6 @@ func (a *Adapter) EditIssueBody(ctx context.Context, ref RepoRef, number int, bo
 	})
 }
 
-// EditIssueTitle replaces the issue title.
-func (a *Adapter) EditIssueTitle(ctx context.Context, ref RepoRef, number int, title string) error {
-	return a.writeIssue(ctx, ref, "set-issue-title", func(ctx context.Context, c *gen.Client, org string, auth gen.RequestEditorFn) (*http.Response, error) {
-		return c.SetIssueTitle(ctx, ref.Owner, ref.Repo, number, &gen.SetIssueTitleParams{XImpersonateOrg: org}, gen.IssueTitleRequest{Title: title}, auth)
-	})
-}
-
 // AddIssueLabels adds labels to the issue.
 func (a *Adapter) AddIssueLabels(ctx context.Context, ref RepoRef, number int, labels []string) error {
 	return a.writeIssue(ctx, ref, "add-issue-labels", func(ctx context.Context, c *gen.Client, org string, auth gen.RequestEditorFn) (*http.Response, error) {

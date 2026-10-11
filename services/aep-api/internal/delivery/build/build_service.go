@@ -143,9 +143,11 @@ type BuildInputItem struct {
 	// external-spec: the pasted OpenAPI content, or a URL to fetch it from.
 	SpecContent string `json:"specContent,omitempty"`
 	SpecURL     string `json:"specUrl,omitempty"`
-	// platform-resource: the provisioning params (mixed scalar types).
+	// Request parameters are ignored for platform-resource: the server derives
+	// each resource's approved provision, parameters included, from the design.
 	Parameters map[string]any `json:"parameters,omitempty"`
-	// platform-resource / org-service: the user's approval.
+	// org-service: the user's approval. Ignored for platform-resource (the
+	// click is the consent).
 	Approved bool `json:"approved,omitempty"`
 }
 
@@ -283,12 +285,9 @@ func (s *Service) Run(ctx context.Context, orgID, projectID string, inputs []Bui
 		if len(fails) > 0 {
 			return "", fails, nil
 		}
-		prov, pfails, perr := s.coord.BuildProvisionInputs(ctx, orgID, projectID, inputs)
+		prov, perr := s.coord.BuildProvisionInputs(ctx, orgID, projectID, inputs)
 		if perr != nil {
 			return "", nil, &EdgeError{Status: 502, Message: "prepare inputs: " + perr.Error(), Err: perr}
-		}
-		if len(pfails) > 0 {
-			return "", pfails, nil
 		}
 		provInputs = prov
 	}

@@ -2,318 +2,498 @@
 # list, in this order, from an empty database. HAND-EDITABLE — fix, reorder,
 # reweight or delete items freely; only an explicit replan re-derives it.
 
-# role: one of Requester, Approver, Warehouse Clerk, no role, signed out
+# role: one of Requester, Approver, WarehouseClerk, no role, signed out
 # weight: default 1. extras.mustCover items are walked and scored like items;
 # extras.mustNot entries ({id, description}) cap the band at review when violated.
 
-# Planner gaps — what the walk cannot cover, and where the PRD and the wireframes disagree:
-#  - Own-request approval refusal (assumed rule) cannot be walked: the Approver role has no grant to submit requests, so no request exists that an approver both raised and could approve (story 6 own-request case; purchase-approval flow).
-#  - Nothing in the wireframes lets a Requester see rejection reasons: MyRequestDetail draws only 'Decision: approved by an approver' as text, so the rejected-request detail and entered reason are not checked.
-#  - Per-user isolation of 'My requests' (test-requester vs test-requester-2) cannot be established since the role switch uses a single Requester identity; requester-own-requests-only is weak evidence only.
-#  - The PRD lists 'edit an item' and the Requester 'status of my requests' filter tabs, but the DSL tabs/ledger/receipt behaviour is partly stated by example only; 'Partially received' vs 'Received' tab membership for the 319.50 order depends on whether the pens line must also be received, which the spec leaves open (an order stays open until fully received), so the final status after receiving only the paper line is not asserted.
-#  - The 319.50 order's pens line is never received in this checklist; a person could add an item receiving 2 pens to the ReceivingQueue flow to verify the order becomes Received and pens stock rises to 2.
+# Planner gaps — what the walk cannot cover, and where the PRD and the prototype disagree:
+#  - Approval limits are set by configuration with no screen, so the approver pending list items assume the default 5000.00 limit; per-username overrides cannot be walked.
+#  - The rule that an approver cannot approve or reject their own request cannot be walked: no test role is both Requester and Approver, so no such request can be created.
+#  - The Service unavailable display state needs a backend failure and cannot be brought about through the UI.
+#  - The validation states for editing an item (negative unit price) and for a request edit (quantity below 1) are drawn only as display states and the spec does not state their behaviour, so no items cover them.
+#  - Each role has one refusal item rather than one per screen it lacks a grant for (Approver also lacks Low stock, My requests, Goods to receive and Stock ledger; Requester also lacks Goods to receive and Stock ledger; Warehouse clerk also lacks Pending approvals).
+#  - The prototype's Signed out screen with its Sign in button is not reachable in wired mode, since sign-out goes to the no-access state, so no item walks it.
+#  - Request status labels in the prototype (for example 'pending') differ from the PRD's 'pending approval'; the checklist avoids exact status labels where the spec is silent.
+#  - Request ids are not known to the tester in advance, so items identify requests by their total and justification.
+#  - Whether a request above one approver's limit would show for a second approver with a higher limit cannot be walked because limits come only from configuration.
+#  - Home summary counts (awaiting approval, approved, low-stock, orders to receive) have no item of their own because the PRD states no expected figures.
 
 items:
-  - id: clerk-lands-on-receiving-queue
-    role: Warehouse Clerk
-    screen: ReceivingQueue
-    flow: Receive goods
-    steps: Look at the landing screen and its sidebar.
-    expect: The Receiving queue (Approved orders) shows with an empty list and a sensible empty state. The sidebar offers Receiving, Stock levels, Low stock, Manage catalogue and Sign out.
-    weight: 1
-  - id: clerk-empty-catalogue
-    role: Warehouse Clerk
-    screen: ManageCatalogue
-    flow: Manage catalogue
-    steps: Click 'Manage catalogue' in the sidebar.
-    expect: The Manage catalogue screen loads with the heading, search box and 'Add item' button, and an empty table without a crash.
-    weight: 1
-  - id: clerk-adds-pens
-    role: Warehouse Clerk
-    screen: ManageCatalogue
-    flow: Add catalogue item (story 11)
-    steps: Click 'Add item'. Note the text saying a new item starts with 0 in stock. Enter Name 'Ballpoint pens', Unit 'box', Unit price 4.50, Reorder level 10. Click 'Save item'.
-    expect: The form shows that a new item starts with 0 in stock. After saving, you arrive on Manage catalogue and a row 'Ballpoint pens | box | 4.50 | 10' is listed with a SKU assigned.
-    weight: 2
-  - id: clerk-adds-paper
-    role: Warehouse Clerk
-    screen: ManageCatalogue
-    flow: Add catalogue item (story 11)
-    steps: Click 'Add item'. Enter Name 'A4 paper', Unit 'ream', Unit price 6.20, Reorder level 15. Click 'Save item'.
-    expect: You arrive on Manage catalogue and both 'Ballpoint pens' and 'A4 paper' (ream, 6.20, 15) are listed.
-    weight: 2
-  - id: clerk-cancel-item-form
-    role: Warehouse Clerk
-    screen: ManageCatalogue
-    flow: Add catalogue item
-    steps: Click 'Add item', type Name 'Discarded item' into the form, then click 'Cancel'.
-    expect: The form is left and no 'Discarded item' row appears in the Manage catalogue list.
-    weight: 1
-  - id: clerk-searches-catalogue
-    role: Warehouse Clerk
-    screen: ManageCatalogue
-    flow: Manage catalogue
-    steps: On Manage catalogue type 'paper' into 'Search items'. Then clear the search.
-    expect: While 'paper' is entered only 'A4 paper' is listed; after clearing, both items are listed again.
-    weight: 1
-  - id: clerk-edits-pens
-    role: Warehouse Clerk
-    screen: ManageCatalogue
-    flow: Edit catalogue item (story 12)
-    steps: Click the 'Ballpoint pens' row. Check the form shows the current values. Change Unit price to 4.75 and Reorder level to 12. Click 'Save item'.
-    expect: The form opened with the existing name, unit, price and reorder level. After saving, you arrive on Manage catalogue and the pens row shows unit price 4.75 and reorder level 12.
-    weight: 2
-  - id: requester-lands-on-catalogue
-    role: Requester
-    screen: Catalogue
-    flow: Browse and request
-    steps: Look at the landing screen and its sidebar.
-    expect: The Catalogue screen shows with a search box and 'New request' button. The sidebar offers Catalogue, My requests and Sign out.
-    weight: 1
-  - id: requester-browses-catalogue
-    role: Requester
-    screen: Catalogue
-    flow: Browse catalogue (story 1)
-    steps: Read the item table. Type 'pens' into 'Search items', then clear it.
-    expect: The table lists 'Ballpoint pens' (box, 4.75) and 'A4 paper' (ream, 6.20) with SKUs. Searching 'pens' leaves only the pens row; clearing restores both.
-    weight: 2
-  - id: requester-my-requests-empty
-    role: Requester
-    screen: MyRequests
-    flow: Request status (story 3)
-    steps: Click 'My requests' in the sidebar.
-    expect: My requests shows tabs All, Pending, Approved, Rejected, Received and an empty list with a sensible empty state.
-    weight: 1
-  - id: requester-submits-small-request
-    role: Requester
-    screen: MyRequests
-    flow: Raise purchase request (story 2)
-    steps: Click 'Catalogue', then 'New request'. Select Item 'A4 paper', Quantity 10, click 'Add line'. Check the lines table and Total value. Click 'Submit request'.
-    expect: The line 'A4 paper | 10 | 6.20 | 62.00' appears and Total value shows 62.00. After submitting you arrive on My requests, where a new request with total 62.00 and status Pending is listed.
-    weight: 2
-  - id: requester-submits-multi-line-request
-    role: Requester
-    screen: MyRequests
-    flow: Raise purchase request (story 2)
-    steps: Click 'New request' via the Catalogue. Add line Item 'A4 paper' Quantity 50, then add line Item 'Ballpoint pens' Quantity 2. Click 'Submit request'.
-    expect: Lines show 310.00 and 9.50; Total value shows 319.50. After submitting, My requests lists a Pending request with total 319.50.
-    weight: 2
-  - id: requester-submits-large-request
-    role: Requester
-    screen: MyRequests
-    flow: Raise purchase request (story 2)
-    steps: Open New request. Add line Item 'A4 paper' Quantity 1000. Click 'Submit request'.
-    expect: Total value shows 6200.00 and, after submitting, My requests lists a Pending request with total 6200.00.
-    weight: 1
-  - id: requester-cancels-new-request
-    role: Requester
-    screen: Catalogue
-    flow: Raise purchase request
-    steps: Open New request from the Catalogue, add line Item 'Ballpoint pens' Quantity 1, then click 'Cancel'.
-    expect: The request form is left and no new request with total 4.75 appears in My requests.
-    weight: 1
-  - id: requester-pending-tab
-    role: Requester
-    screen: MyRequests
-    flow: Request status (story 3)
-    steps: Open My requests and click the 'Pending' tab, then the 'Approved' tab.
-    expect: Pending lists the three pending requests (62.00, 319.50, 6200.00); Approved lists nothing yet.
-    weight: 1
-  - id: approver-lands-on-queue
+  - id: approver-lands-home
     role: Approver
-    screen: ApprovalQueue
-    flow: Approval queue
-    steps: Look at the landing screen and its sidebar.
-    expect: The Pending requests screen shows with an 'Approval limit 5000.00' card. The sidebar offers Approvals and Sign out.
+    screen: Home
+    flow: Approver entry
+    steps: Look at the screen the app opens on.
+    expect: The Home screen opens with a welcome heading for the signed-in user and a way to reach pending requests and decisions. No error, no blank page.
     weight: 1
-  - id: approver-sees-pending
+  - id: approver-pending-empty
     role: Approver
-    screen: ApprovalQueue
-    flow: Approval queue (story 4)
-    steps: Read the table of pending requests.
-    expect: The three requests raised by the requester (totals 62.00, 319.50, 6200.00) are listed with requester and raised date.
-    weight: 2
-  - id: approver-reviews-request
-    role: Approver
-    screen: ReviewRequest
-    flow: Approval queue (story 4)
-    steps: Click the 62.00 request row.
-    expect: Review screen shows line 'A4 paper | 10 | 6.20 | 62.00', Total value 62.00, a Reason textarea, and Reject and Approve buttons. No 'Exceeds approval limit' warning is shown.
+    screen: Pending approvals
+    flow: Approve or reject a request
+    steps: Use the navigation to open Pending approvals.
+    expect: The Pending approvals screen loads with an empty list showing the 'Nothing to approve' empty state, since no request has been raised yet.
     weight: 1
-  - id: approver-approves-small-request
+  - id: approver-decisions-empty
     role: Approver
-    screen: ApprovalQueue
-    flow: Approve within limit (story 5)
-    steps: On the 62.00 request review screen, click 'Approve'.
-    expect: You arrive on the Pending requests queue and the 62.00 request is no longer listed.
+    screen: My decisions
+    flow: Approve or reject a request
+    steps: Use the navigation to open My decisions.
+    expect: The My decisions screen loads with the empty state 'No decisions yet'.
+    weight: 1
+  - id: clerk-lands-home
+    role: WarehouseClerk
+    screen: Home
+    flow: Warehouse clerk entry
+    steps: Look at the screen the app opens on.
+    expect: The Home screen opens with a welcome heading and ways to reach Receive goods, Catalogue and stock, and Stock ledger. No error, no blank page.
+    weight: 1
+  - id: clerk-receiving-empty
+    role: WarehouseClerk
+    screen: Goods to receive
+    flow: Receive goods and check the ledger
+    steps: From Home press 'Receive goods'.
+    expect: The Goods to receive screen shows the empty state 'Nothing to receive' because no request has been approved yet.
+    weight: 1
+  - id: clerk-ledger-empty
+    role: WarehouseClerk
+    screen: Stock ledger
+    flow: Receive goods and check the ledger
+    steps: Use the navigation to open Stock ledger.
+    expect: The Stock ledger screen shows the empty state 'No ledger entries'.
+    weight: 1
+  - id: clerk-low-stock-empty
+    role: WarehouseClerk
+    screen: Low stock
+    flow: Low-stock view
+    steps: Use the navigation to open Low stock.
+    expect: The Low stock screen shows the empty state 'Nothing is running low'.
+    weight: 1
+  - id: clerk-catalogue-empty
+    role: WarehouseClerk
+    screen: Catalogue and stock
+    flow: Maintain the catalogue
+    steps: Use the navigation to open Catalogue and stock.
+    expect: The Catalogue and stock screen loads with an 'Add item' button and an empty item list reading 'No items found'.
+    weight: 1
+  - id: clerk-add-item-validation
+    role: WarehouseClerk
+    screen: Catalogue and stock
+    flow: Maintain the catalogue
+    steps: Press 'Add item'. Leave every field blank and press the dialog's 'Add item' button.
+    expect: The item is not created; the required fields are flagged and the list still has no items.
+    weight: 1
+  - id: clerk-add-item-paper
+    role: WarehouseClerk
+    screen: Catalogue and stock
+    flow: Maintain the catalogue
+    steps: Press 'Add item'. Enter SKU PAP-A4, Name 'A4 Paper', Unit of measure ream, Reorder level 20, Unit price 4.50. Press the dialog's 'Add item' button.
+    expect: The dialog closes and a row for PAP-A4 'A4 Paper' appears with unit ream, unit price $4.50, stock 0 and reorder level 20.
     weight: 2
-  - id: approver-approves-multi-line
-    role: Approver
-    screen: ApprovalQueue
-    flow: Approve within limit (story 5)
-    steps: Open the 319.50 request and click 'Approve'.
-    expect: You arrive on the queue and the 319.50 request is no longer listed.
+  - id: clerk-add-item-toner
+    role: WarehouseClerk
+    screen: Catalogue and stock
+    flow: Maintain the catalogue
+    steps: Press 'Add item'. Enter SKU TON-BK, Name 'Printer Toner', Unit of measure box, Reorder level 5, Unit price 62.00. Press the dialog's 'Add item' button.
+    expect: A row for TON-BK 'Printer Toner' appears with unit price $62.00, stock 0 and reorder level 5.
+    weight: 1
+  - id: clerk-add-item-binder
+    role: WarehouseClerk
+    screen: Catalogue and stock
+    flow: Maintain the catalogue
+    steps: Press 'Add item'. Enter SKU BND-OLD, Name 'Old Binder', Unit of measure each, Reorder level 0, Unit price 3.00. Press the dialog's 'Add item' button.
+    expect: A row for BND-OLD 'Old Binder' appears with unit price $3.00 and stock 0.
+    weight: 1
+  - id: clerk-add-item-duplicate-sku
+    role: WarehouseClerk
+    screen: Catalogue and stock
+    flow: Maintain the catalogue
+    steps: Press 'Add item'. Enter SKU PAP-A4, Name 'Other Paper', Unit of measure ream, Reorder level 5, Unit price 1.00. Press the dialog's 'Add item' button.
+    expect: "The item is not added: the catalogue still has exactly one PAP-A4 row (the SKU is unique)."
+    weight: 1
+  - id: clerk-search-catalogue
+    role: WarehouseClerk
+    screen: Catalogue and stock
+    flow: Maintain the catalogue
+    steps: In 'Search by name or SKU' type 'toner'. Then clear the field.
+    expect: While 'toner' is typed only the Printer Toner row is listed; after clearing, all three items are listed again.
+    weight: 1
+  - id: clerk-edit-item
+    role: WarehouseClerk
+    screen: Item and its ledger
+    flow: Maintain the catalogue
+    steps: In the catalogue press the A4 Paper row. In Edit item set Reorder level to 25 (leave the other fields) and press 'Save changes'.
+    expect: The Item and its ledger screen shows the A4 Paper stock card with reorder level 25 and unit price $4.50; the SKU is shown as not changeable.
     weight: 2
-  - id: approver-large-request-refused
-    role: Approver
-    screen: ReviewRequest
-    flow: Approval limit (story 6)
-    steps: Open the 6200.00 request. Note the warning, then click 'Approve'.
-    expect: "The screen shows Total value 6200.00 above the limit of 5000 and an 'Exceeds approval limit' warning. The approval is refused: the request is not approved and stays pending in the queue."
-    weight: 2
-  - id: approver-rejects-large-request
-    role: Approver
-    screen: ApprovalQueue
-    flow: Reject request (story 5)
-    steps: Open the 6200.00 request, enter Reason 'Over budget, split the order', click 'Reject'.
-    expect: You arrive on the queue and the 6200.00 request is no longer listed.
-    weight: 2
-  - id: requester-sees-decisions
+  - id: clerk-item-ledger-empty
+    role: WarehouseClerk
+    screen: Item and its ledger
+    flow: Maintain the catalogue
+    steps: On the A4 Paper item screen look at the Ledger section.
+    expect: The Ledger section shows the empty state 'No ledger entries' because nothing has been received yet.
+    weight: 1
+  - id: clerk-deactivate-binder
+    role: WarehouseClerk
+    screen: Catalogue and stock
+    flow: Maintain the catalogue
+    steps: Use the breadcrumb 'Catalogue and stock' to go back. On the Old Binder row press 'Deactivate'.
+    expect: The Old Binder row now shows an Inactive status and its row action changes to 'Reactivate'. The item is still listed.
+    weight: 1
+  - id: clerk-low-stock-list
+    role: WarehouseClerk
+    screen: Low stock
+    flow: Low-stock view
+    steps: Use the navigation to open Low stock. Leave Sort by on its first value.
+    expect: A4 Paper (stock 0, reorder level 25, shortfall 25) is listed before Printer Toner (stock 0, reorder level 5, shortfall 5). Old Binder is not listed. No request action is offered.
+    weight: 1
+  - id: clerk-low-stock-sort-name
+    role: WarehouseClerk
+    screen: Low stock
+    flow: Low-stock view
+    steps: Set Sort by to Name.
+    expect: The list shows A4 Paper first, then Printer Toner.
+    weight: 1
+  - id: clerk-account
+    role: WarehouseClerk
+    screen: Account
+    flow: Account
+    steps: Open the user menu in the shell and choose the account entry.
+    expect: The Account screen shows the signed-in user's name and email.
+    weight: 1
+  - id: clerk-settings
+    role: WarehouseClerk
+    screen: Home
+    flow: Settings
+    steps: Open the user menu and choose settings. Switch 'Compact tables' on and press 'Save settings'.
+    expect: The Settings screen shows the Compact tables switch; after saving the app arrives on Home without error.
+    weight: 1
+  - id: requester-lands-home
     role: Requester
-    screen: MyRequests
-    flow: Request status (story 3)
-    steps: Open My requests. Check the All, Approved and Rejected tabs.
-    expect: Approved lists the 62.00 and 319.50 requests with status Approved; Rejected lists the 6200.00 request with status Rejected; All lists all three.
-    weight: 2
-  - id: requester-request-detail
+    screen: Home
+    flow: Requester entry
+    steps: Look at the screen the app opens on.
+    expect: The Home screen opens with a welcome heading, summary cards for awaiting approval, approved and low-stock items, and buttons 'New purchase request', 'My requests' and 'See low stock'.
+    weight: 1
+  - id: requester-requests-empty
     role: Requester
-    screen: MyRequestDetail
-    flow: Request status (story 3)
-    steps: On My requests click the 319.50 request row.
-    expect: Request detail shows an Approved badge, lines 'A4 paper | 50 | 0' and 'Ballpoint pens | 2 | 0' (ordered / received), and the decision text.
+    screen: My requests
+    flow: Raise and submit a purchase request
+    steps: From Home press 'My requests'.
+    expect: The My requests screen shows the empty state 'No requests yet' with a 'New request' button.
     weight: 1
-  - id: clerk-sees-approved-orders
-    role: Warehouse Clerk
-    screen: ReceivingQueue
-    flow: Receive goods (story 7)
-    steps: Click 'Receiving' in the sidebar and read the table.
-    expect: The 62.00 and 319.50 orders are listed with status Approved; the rejected 6200.00 request is not listed.
-    weight: 1
-  - id: clerk-stock-initially-zero
-    role: Warehouse Clerk
-    screen: StockLevels
-    flow: Stock levels
-    steps: Click 'Stock levels' in the sidebar. Type 'pens' into 'Search items', then clear it.
-    expect: Both items are listed with On hand 0 and their reorder levels (pens 12, paper 15). Search narrows to the pens row and clearing restores both.
-    weight: 1
-  - id: clerk-low-stock-initial
-    role: Warehouse Clerk
-    screen: LowStock
-    flow: Low stock (story 10)
-    steps: Click 'Low stock' in the sidebar.
-    expect: Both items (on hand 0, below their reorder levels) are listed with on hand and reorder level.
-    weight: 2
-  - id: clerk-receives-partial
-    role: Warehouse Clerk
-    screen: ReceivingQueue
-    flow: Receive goods (story 7)
-    steps: Open Receiving, click the 319.50 order. Read the table, enter 'Quantity received now' 20, click 'Confirm receipt'.
-    expect: The screen showed A4 paper ordered 50, received so far 0, outstanding 50. After confirming you arrive on the Receiving queue and the 319.50 order is shown as Partially received.
-    weight: 2
-  - id: clerk-receipt-cancel
-    role: Warehouse Clerk
-    screen: ReceivingQueue
-    flow: Receive goods
-    steps: Open the 319.50 order, enter 5, click 'Cancel'.
-    expect: "You return from the receiving screen and nothing is received: reopening the order still shows 20 received so far for A4 paper."
-    weight: 1
-  - id: clerk-over-receipt-refused
-    role: Warehouse Clerk
-    screen: ReceiveGoods
-    flow: Receive goods (story 7)
-    steps: Open the 319.50 order (outstanding A4 paper 30). Enter 'Quantity received now' 31 and click 'Confirm receipt'.
-    expect: The receipt is refused; the received-so-far figure for A4 paper stays 20.
-    weight: 1
-  - id: clerk-receives-remaining
-    role: Warehouse Clerk
-    screen: ReceivingQueue
-    flow: Receive goods (story 7)
-    steps: Open the 319.50 order, check outstanding is 30, enter 30, click 'Confirm receipt'.
-    expect: Outstanding showed 30. After confirming, the order no longer awaits goods (fully received for A4 paper).
-    weight: 1
-  - id: clerk-stock-after-receipt
-    role: Warehouse Clerk
-    screen: StockLevels
-    flow: Stock levels (story 7)
-    steps: Click 'Stock levels' in the sidebar.
-    expect: A4 paper shows On hand 50 with reorder level 15; Ballpoint pens remains 0.
-    weight: 2
-  - id: clerk-views-ledger
-    role: Warehouse Clerk
-    screen: ItemLedger
-    flow: Ledger (stories 8, 9)
-    steps: On Stock levels click the 'A4 paper' row.
-    expect: Breadcrumb 'Stock levels / A4 paper'; the ledger lists two entries with changes +20 (balance 20) and +30 (balance 50), reason goods receipt, each with a receipt reference.
-    weight: 2
-  - id: clerk-low-stock-after-receipt
-    role: Warehouse Clerk
-    screen: LowStock
-    flow: Low stock (story 10)
-    steps: Click 'Low stock' in the sidebar, then click the 'Ballpoint pens' row.
-    expect: Only 'Ballpoint pens' (on hand 0, reorder level 12) is listed; A4 paper (50 vs 15) is not. Clicking the row opens its ledger, which has no entries.
-    weight: 1
-  - id: requester-sees-received
+  - id: requester-catalogue-browse
     role: Requester
-    screen: MyRequestDetail
-    flow: Request status (story 3)
-    steps: Open My requests; check the Received tab, then open the 319.50 request.
-    expect: The request detail shows A4 paper ordered 50, received 50. The status is shown consistently in the list and the Received tab (the pens line was not received).
+    screen: Catalogue and stock
+    flow: Raise and submit a purchase request
+    steps: Use the navigation to open Catalogue and stock.
+    expect: A4 Paper and Printer Toner are listed with unit, unit price and stock; Old Binder (deactivated) is not listed. No Add item button is shown.
     weight: 1
-  - id: requester-own-requests-only
+  - id: requester-catalogue-search
     role: Requester
-    screen: MyRequests
-    flow: Request status
-    steps: Open My requests.
-    expect: Only requests raised by this requester are listed (the three raised earlier).
+    screen: Catalogue and stock
+    flow: Raise and submit a purchase request
+    steps: In 'Search by name or SKU' type 'PAP'. Then clear the field.
+    expect: With 'PAP' typed only A4 Paper is listed; after clearing both active items are listed.
     weight: 1
-  - id: requester-refused-approval-queue
+  - id: requester-new-request-validation
     role: Requester
-    screen: ApprovalQueue
-    flow: Role reach
-    steps: Open the address the Approval Queue had in approver-lands-on-queue.
-    expect: The Approval queue is not shown; the requester is refused or sent to a no-access state.
+    screen: New purchase request
+    flow: Raise and submit a purchase request
+    steps: From the catalogue press 'Request' on the A4 Paper row. On the New purchase request screen press 'Remove' on the line, then press 'Submit for approval' with nothing added.
+    expect: No request is created and the screen stays on New purchase request with no lines.
+    weight: 1
+  - id: requester-submit-request-paper
+    role: Requester
+    screen: Request detail
+    flow: Raise and submit a purchase request
+    steps: On the New purchase request screen (open it from the catalogue via 'Request' on A4 Paper if needed), with the A4 Paper line quantity 1 shown, choose Item 'A4 Paper', Quantity 9 and press 'Add line'. Enter Justification 'Office restock' and press 'Submit for approval'.
+    expect: The Request detail screen opens showing two A4 Paper lines (1 and 9), total $45.00, justification 'Office restock', and a pending status.
+    weight: 2
+  - id: requester-submit-request-remove-line
+    role: Requester
+    screen: Request detail
+    flow: Raise and submit a purchase request
+    steps: Use the breadcrumb 'My requests', then press 'New request'. Choose Item 'A4 Paper', Quantity 7, 'Add line'. Choose Item 'Printer Toner', Quantity 1, 'Add line'. Press 'Remove' on the Printer Toner line. Enter Justification 'Desk upgrade' and press 'Submit for approval'.
+    expect: The Request detail screen shows only the A4 Paper line (7), total $31.50, justification 'Desk upgrade', pending status.
+    weight: 1
+  - id: requester-low-stock-list
+    role: Requester
+    screen: Low stock
+    flow: Reorder a low-stock item
+    steps: Use the navigation to open Low stock.
+    expect: A4 Paper and Printer Toner are listed with stock, reorder level and shortfall; each row offers 'Request this item'.
+    weight: 1
+  - id: requester-reorder-low-stock-draft
+    role: Requester
+    screen: Request detail
+    flow: Reorder a low-stock item
+    steps: On Low stock press 'Request this item' on the Printer Toner row. On the New purchase request screen press 'Save as draft'.
+    expect: The Request detail screen opens showing a Printer Toner line of quantity 1, total $62.00, and a draft status, with 'Submit for approval', 'Edit request' and 'Withdraw' available.
+    weight: 2
+  - id: requester-edit-draft
+    role: Requester
+    screen: Request detail
+    flow: Raise and submit a purchase request
+    steps: On the draft Printer Toner request press 'Edit request'. Set Justification 'Printer ran out' and Printer Toner quantity 3. Press 'Save changes'.
+    expect: The request shows quantity 3, total $186.00, justification 'Printer ran out' and is still a draft.
+    weight: 1
+  - id: requester-submit-draft
+    role: Requester
+    screen: Request detail
+    flow: Raise and submit a purchase request
+    steps: On that request press 'Submit for approval'.
+    expect: The status becomes pending and the Submitted field shows a date.
+    weight: 1
+  - id: requester-submit-small-request
+    role: Requester
+    screen: Request detail
+    flow: Raise and submit a purchase request
+    steps: Open 'My requests', press 'New request'. Choose Item 'A4 Paper', Quantity 1, 'Add line' (remove any other preset lines). Enter Justification 'Spare ream' and press 'Submit for approval'.
+    expect: The Request detail screen shows an A4 Paper line of 1, total $4.50 and a pending status.
+    weight: 1
+  - id: requester-edit-pending
+    role: Requester
+    screen: Request detail
+    flow: Raise and submit a purchase request
+    steps: On the 'Spare ream' request press 'Edit request', set A4 Paper quantity to 2 and press 'Save changes'.
+    expect: The request shows quantity 2, total $9.00, and returns to draft status (the dialog notes that editing a pending request returns it to draft).
+    weight: 1
+  - id: requester-withdraw
+    role: Requester
+    screen: Request detail
+    flow: Raise and submit a purchase request
+    steps: On the same request press 'Withdraw'.
+    expect: The request now shows a withdrawn status and no longer offers submit, edit or withdraw actions.
+    weight: 1
+  - id: requester-submit-over-limit
+    role: Requester
+    screen: Request detail
+    flow: Raise and submit a purchase request
+    steps: Open 'My requests', press 'New request'. Choose Item 'Printer Toner', Quantity 90, 'Add line' (remove any other preset lines). Enter Justification 'Annual toner stock' and press 'Submit for approval'.
+    expect: The Request detail screen shows a Printer Toner line of 90, total $5,580.00 and a pending status.
+    weight: 1
+  - id: requester-requests-list
+    role: Requester
+    screen: My requests
+    flow: Raise and submit a purchase request
+    steps: Use the breadcrumb 'My requests'.
+    expect: "All the requests raised so far are listed newest first with items, total and status: the $5,580.00 request (pending) first, then the withdrawn $9.00 request, the $186.00 request (pending), the $31.50 request (pending), and the $45.00 request (pending)."
+    weight: 1
+  - id: requester-open-request
+    role: Requester
+    screen: Request detail
+    flow: Raise and submit a purchase request
+    steps: In the list press the $45.00 request row.
+    expect: The Request detail screen shows its lines, total $45.00, status pending, requester and justification 'Office restock'.
+    weight: 1
+  - id: approver-pending-list
+    role: Approver
+    screen: Pending approvals
+    flow: Approve or reject a request
+    steps: Use the navigation to open Pending approvals.
+    expect: "The pending requests within the approval limit are listed with requester, items, total and submitted date: the $45.00, $31.50 and $186.00 requests. The $5,580.00 request and the withdrawn request are not listed."
+    weight: 1
+  - id: approver-open-request
+    role: Approver
+    screen: Approval detail
+    flow: Approve or reject a request
+    steps: Press the $45.00 row.
+    expect: The Approval detail screen shows requester, justification 'Office restock', total $45.00, status pending and the lines with quantities, unit prices and line totals, with Approve and Reject buttons.
+    weight: 1
+  - id: approver-approve
+    role: Approver
+    screen: My decisions
+    flow: Approve or reject a request
+    steps: On the $45.00 request press 'Approve'.
+    expect: The app arrives on My decisions and the $45.00 request is listed as Approved.
+    weight: 2
+  - id: approver-reject-blank-reason
+    role: Approver
+    screen: Approval detail
+    flow: Approve or reject a request
+    steps: Go back to Pending approvals and open the $31.50 request. Press 'Reject', leave Reason blank and press 'Reject request'.
+    expect: The request is not rejected; the Reason field is flagged as required and the request is still pending.
+    weight: 1
+  - id: approver-reject
+    role: Approver
+    screen: My decisions
+    flow: Approve or reject a request
+    steps: In the same Reject dialog enter Reason 'Over budget' and press 'Reject request'.
+    expect: The app arrives on My decisions and the $31.50 request is listed as Rejected with the reason 'Over budget'.
+    weight: 2
+  - id: approver-approve-second
+    role: Approver
+    screen: My decisions
+    flow: Approve or reject a request
+    steps: Open Pending approvals, open the $186.00 request and press 'Approve'.
+    expect: My decisions lists the $186.00 request as Approved.
+    weight: 1
+  - id: approver-decisions-list
+    role: Approver
+    screen: My decisions
+    flow: Approve or reject a request
+    steps: Look at the My decisions list.
+    expect: "It lists the three decided requests: $45.00 Approved, $31.50 Rejected with reason 'Over budget', $186.00 Approved. The $5,580.00 request is not listed."
+    weight: 1
+  - id: approver-pending-after
+    role: Approver
+    screen: Pending approvals
+    flow: Approve or reject a request
+    steps: Open Pending approvals again.
+    expect: The decided requests are gone from the list; the $5,580.00 request is still not shown (above the approval limit).
     weight: 1
   - id: approver-refused-catalogue
     role: Approver
-    screen: Catalogue
+    screen: Catalogue and stock
     flow: Role reach
-    steps: Open the address the Catalogue had in requester-lands-on-catalogue.
-    expect: The Catalogue is not shown; the approver is refused or sent to a no-access state.
+    steps: Open the address the Catalogue and stock screen had in clerk-catalogue-empty.
+    expect: "The Approver is refused that screen: no catalogue items or stock levels are shown."
     weight: 1
-  - id: approver-refused-receiving
-    role: Approver
-    screen: ReceivingQueue
-    flow: Role reach
-    steps: Open the address the Receiving Queue had in clerk-lands-on-receiving-queue.
-    expect: The Receiving queue is not shown; the approver is refused or sent to a no-access state.
+  - id: requester-sees-approved
+    role: Requester
+    screen: Request detail
+    flow: Raise and submit a purchase request
+    steps: Open My requests and press the $45.00 request row.
+    expect: The request shows status approved with a notice 'Approved by' the approver.
     weight: 1
-  - id: clerk-refused-approval-queue
-    role: Warehouse Clerk
-    screen: ApprovalQueue
+  - id: requester-sees-rejected
+    role: Requester
+    screen: Request detail
+    flow: Raise and submit a purchase request
+    steps: Go back to My requests and press the $31.50 request row.
+    expect: The request shows status rejected with a notice 'Rejected by' the approver, giving the reason 'Over budget'. No edit, submit or withdraw actions are offered.
+    weight: 1
+  - id: requester-refused-approvals
+    role: Requester
+    screen: Pending approvals
     flow: Role reach
-    steps: Open the address the Approval Queue had in approver-lands-on-queue.
-    expect: The Approval queue is not shown; the clerk is refused or sent to a no-access state.
+    steps: Open the address Pending approvals had in approver-pending-list.
+    expect: "The Requester is refused that screen: no pending requests of other people are shown."
+    weight: 1
+  - id: clerk-receiving-list
+    role: WarehouseClerk
+    screen: Goods to receive
+    flow: Receive goods and check the ledger
+    steps: Use the navigation to open Goods to receive.
+    expect: "The two approved requests are listed with requester, items and outstanding quantity: the A4 Paper request (outstanding 10) and the Printer Toner request (outstanding 3). Pending, rejected and withdrawn requests are not listed."
+    weight: 1
+  - id: clerk-open-order
+    role: WarehouseClerk
+    screen: Receive goods
+    flow: Receive goods and check the ledger
+    steps: Press the A4 Paper request row (outstanding 10).
+    expect: The Receive goods screen shows the A4 Paper lines with ordered, received and outstanding quantities (outstanding 10 in total), a 'Record a receipt' form, and an empty receipt history reading 'No receipts yet'.
+    weight: 1
+  - id: clerk-receive-over-delivery
+    role: WarehouseClerk
+    screen: Receive goods
+    flow: Receive goods and check the ledger
+    steps: In the receipt form enter 11 on the first A4 Paper line (more than is outstanding on it) and press 'Save receipt'.
+    expect: "The receipt is not saved: an error says the received quantity cannot exceed the outstanding quantity, and the receipt history stays empty."
+    weight: 1
+  - id: clerk-receive-partial
+    role: WarehouseClerk
+    screen: Receive goods
+    flow: Receive goods and check the ledger
+    steps: Enter quantity 4 on the first A4 Paper line (0 on any other) and press 'Save receipt'.
+    expect: The received quantity rises by 4, outstanding drops by 4 (6 left), the receipt appears in the history by this clerk, and the request is not yet fully received.
+    weight: 2
+  - id: clerk-receive-complete
+    role: WarehouseClerk
+    screen: Receive goods
+    flow: Receive goods and check the ledger
+    steps: Enter the remaining outstanding quantities on the A4 Paper lines (6 in total) and press 'Save receipt'.
+    expect: Every line shows nothing outstanding, a 'Fully received' notice appears, and the receipt history lists two receipts.
+    weight: 1
+  - id: clerk-receiving-after
+    role: WarehouseClerk
+    screen: Goods to receive
+    flow: Receive goods and check the ledger
+    steps: Use the breadcrumb 'Goods to receive'.
+    expect: The fully received A4 Paper request is no longer listed; the Printer Toner request (outstanding 3) still is.
+    weight: 1
+  - id: clerk-ledger-entries
+    role: WarehouseClerk
+    screen: Stock ledger
+    flow: Receive goods and check the ledger
+    steps: Open the Stock ledger from the navigation.
+    expect: The ledger lists newest first an entry +6 A4 Paper with resulting stock 10 and one +4 with resulting stock 4, each with the clerk and a receipt reference.
+    weight: 1
+  - id: clerk-ledger-filter-item
+    role: WarehouseClerk
+    screen: Stock ledger
+    flow: Receive goods and check the ledger
+    steps: Set the Item filter to 'Printer Toner'. Then set it back to 'A4 Paper'.
+    expect: With Printer Toner no entries are shown (empty state); with A4 Paper both entries are shown.
+    weight: 1
+  - id: clerk-ledger-filter-date
+    role: WarehouseClerk
+    screen: Stock ledger
+    flow: Receive goods and check the ledger
+    steps: Set Item to 'All items' and From date to 2099-01-01.
+    expect: No entries are listed (all entries are earlier than that date).
+    weight: 1
+  - id: clerk-catalogue-stock-updated
+    role: WarehouseClerk
+    screen: Catalogue and stock
+    flow: Maintain the catalogue
+    steps: Open Catalogue and stock.
+    expect: A4 Paper shows stock 10 (reorder level 25, status Low stock); Printer Toner still shows stock 0.
+    weight: 1
+  - id: clerk-item-ledger-entries
+    role: WarehouseClerk
+    screen: Item and its ledger
+    flow: Maintain the catalogue
+    steps: Press the A4 Paper row.
+    expect: Current stock 10 is shown and the Ledger section lists the +4 (resulting 4) and +6 (resulting 10) entries with the clerk and receipt.
+    weight: 1
+  - id: clerk-reactivate-item
+    role: WarehouseClerk
+    screen: Item and its ledger
+    flow: Maintain the catalogue
+    steps: Use the breadcrumb to go back, press the Old Binder row, then press 'Reactivate item'.
+    expect: The button changes to 'Deactivate item', and in the catalogue the Old Binder row shows Active status (not Inactive).
+    weight: 1
+  - id: clerk-low-stock-after
+    role: WarehouseClerk
+    screen: Low stock
+    flow: Low-stock view
+    steps: Open Low stock.
+    expect: A4 Paper now shows stock 10 and shortfall 15, listed first; Printer Toner (shortfall 5) is below it.
+    weight: 1
+  - id: requester-sees-received
+    role: Requester
+    screen: Request detail
+    flow: Raise and submit a purchase request
+    steps: Open My requests and press the $45.00 request row.
+    expect: The request shows status received and the received quantities equal the ordered quantities.
+    weight: 1
+  - id: clerk-refused-requests
+    role: WarehouseClerk
+    screen: My requests
+    flow: Role reach
+    steps: Open the address My requests had in requester-requests-list.
+    expect: "The Warehouse clerk is refused that screen: no purchase requests are shown."
     weight: 1
   - id: no-role-no-access
     role: no role
-    screen: Catalogue
+    screen: No access
     flow: Role reach
-    steps: Look at the landing page.
-    expect: A no-access page is shown instead of the app; no catalogue, requests or stock data appear.
+    steps: Look at the page the app shows.
+    expect: A no-access page is shown instead of the app; no procurement data appears.
     weight: 1
   - id: signed-out-guard
     role: signed out
-    screen: Catalogue
+    screen: Home
     flow: Role reach
     steps: Load the app signed out and wait for it to settle.
-    expect: The address loses auth=out and the app reloads into a session through the sign-in guard, with no blank page or crash.
+    expect: The app's guard brings it back through sign-in into a session without a crash or blank page.
     weight: 1
-  - id: requester-signs-out
+  - id: requester-sign-out
     role: Requester
-    screen: Catalogue
+    screen: No access
     flow: Sign out
-    steps: Click 'Sign out' in the sidebar.
-    expect: The app goes to the root and shows its no-access state; the requester's screens and data are gone and no sign-in form appears.
+    steps: Open the user menu and choose sign out.
+    expect: The Requester's screens and data are gone and the app shows its no-access state; no sign-in form appears.
     weight: 1
 extras:
   mustCover: []

@@ -322,12 +322,6 @@ func (c *Client) EditIssueBody(ctx context.Context, owner, repo string, number i
 	return c.doJSON(ctx, http.MethodPatch, url, map[string]string{"body": body}, nil, http.StatusOK)
 }
 
-// EditIssueTitle replaces the issue title (PATCH /issues/{number}).
-func (c *Client) EditIssueTitle(ctx context.Context, owner, repo string, number int, title string) error {
-	url := fmt.Sprintf(c.apiBase+"/repos/%s/%s/issues/%d", owner, repo, number)
-	return c.doJSON(ctx, http.MethodPatch, url, map[string]string{"title": title}, nil, http.StatusOK)
-}
-
 // ReopenIssue sets the issue state back to open. It names no state_reason:
 // GitHub drops the closed reason itself on reopen. Reopening an open issue is
 // a 200 no-op, so callers need no read-before-write.

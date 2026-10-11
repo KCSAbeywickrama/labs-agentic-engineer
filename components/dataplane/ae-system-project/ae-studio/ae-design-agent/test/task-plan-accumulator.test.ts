@@ -18,215 +18,103 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { TaskPlan } from "../src/agents/main/task-plan-accumulator.js";
+import type { PlanScope } from "@aep/agent-stream";
+import { BuildPlan } from "../src/agents/main/task-plan-accumulator.js";
 
-/** A design snapshot with three components (no existing Tasks). */
+/** A design snapshot with two components. */
 const DESIGN: Record<string, string> = {
   "specs/requirements/prd.md": "# reqs\n",
   "specs/design/design.cell": "title design\n",
-  "specs/design/components/order-service/design.json": '{"name":"order-service"}\n',
-  "specs/design/components/user-service/design.json": '{"name":"user-service"}\n',
-  "specs/design/components/catalog/design.json": '{"name":"catalog"}\n',
+  "specs/design/components/claims-api/design.json": '{"name":"claims-api"}\n',
+  "specs/design/components/claims-web/design.json": '{"name":"claims-web"}\n',
 };
 
-/** DESIGN + one existing open Task (issue 7) for user-service. */
-const WITH_EXISTING: Record<string, string> = {
-  ...DESIGN,
-  "tasks/7.md":
-    "---\nissueNumber: 7\ncomponent: user-service\ntitle: Build user-service\n" +
-    "dependsOn: []\norigin: spec-plan\nderivedStatus: pending\n---\n## Scope\nusers.\n",
+/** F2 needs F1, and F1 is listed after F2 by ID to prove the order is by need. */
+const SCOPE: PlanScope = {
+  tag: "v1",
+  features: [{ id: "F1", name: "Claims" }, { id: "F2", name: "Approvals", needs: ["F1"] }, { id: "F3", name: "Export" }],
+  productWide: [{ id: "P1", text: "Sign in", appliesTo: ["all"] }],
 };
 
-test("planTask records a known component and normalizes the default origin", () => {
-  const plan = new TaskPlan(DESIGN);
-  const res = plan.planTask({ component: "order-service", title: "Build order-service", dependsOn: ["user-service"], rationale: "the core." });
+const item = (name: string, components = ["claims-api", "claims-web"], note = `Build ${name}.`) => ({ item: name, components, note });
+
+test("an ordered checklist of every carried feature is accepted and normalized", () => {
+  const plan = new BuildPlan(DESIGN, SCOPE);
+  const res = plan.planBuild({
+    items: [item("foundation"), item("F1", [" claims-api ", "claims-api"]), item("F2"), item("F3", ["claims-web"], "  Export to CSV.  ")],
+  });
   assert.equal(res.ok, true);
   if (res.ok) {
-    assert.equal(res.origin, "spec-plan"); // defaulted
-    assert.deepEqual(res.dependsOn, ["user-service"]);
+    assert.equal(res.op, "build");
+    assert.deepEqual(res.items[1]!.components, ["claims-api"], "trimmed and de-duplicated");
+    assert.equal(res.items[3]!.note, "Export to CSV.");
   }
-  assert.equal(plan.plannedTasks().length, 1);
+  assert.equal(plan.plan()?.length, 4);
 });
 
-test("planTask rejects an unknown component with the known set", () => {
-  const res = new TaskPlan(DESIGN).planTask({ component: "billing", title: "x", dependsOn: [], rationale: "y" });
-  assert.equal(res.ok, false);
-  if (!res.ok) {
-    assert.equal(res.code, "UNKNOWN_COMPONENT");
-    assert.deepEqual(res.knownComponents, ["catalog", "order-service", "user-service"]);
-  }
-});
-
-test("planTask rejects a dependsOn naming an unknown component", () => {
-  const res = new TaskPlan(DESIGN).planTask({ component: "order-service", title: "x", dependsOn: ["nope"], rationale: "y" });
-  assert.equal(res.ok, false);
-  if (!res.ok) assert.equal(res.code, "UNKNOWN_COMPONENT");
-});
-
-test("planTask rejects a duplicate title (case-insensitive) against a planned Task", () => {
-  const plan = new TaskPlan(DESIGN);
-  plan.planTask({ component: "order-service", title: "Build It", dependsOn: [], rationale: "a" });
-  const res = plan.planTask({ component: "catalog", title: "  build it ", dependsOn: [], rationale: "b" });
-  assert.equal(res.ok, false);
-  if (!res.ok) {
-    assert.equal(res.code, "DUPLICATE_TITLE");
-    assert.deepEqual(res.takenTitles, ["Build It"]);
-  }
-});
-
-test("planTask rejects a title duplicating an existing Task", () => {
-  const res = new TaskPlan(WITH_EXISTING).planTask({ component: "order-service", title: "build user-service", dependsOn: [], rationale: "a" });
-  assert.equal(res.ok, false);
-  if (!res.ok) assert.equal(res.code, "DUPLICATE_TITLE");
-});
-
-test("planTask rejects a dependency cycle across planned Tasks", () => {
-  const plan = new TaskPlan(DESIGN);
-  plan.planTask({ component: "order-service", title: "A", dependsOn: ["user-service"], rationale: "a" });
-  const res = plan.planTask({ component: "user-service", title: "B", dependsOn: ["order-service"], rationale: "b" });
-  assert.equal(res.ok, false);
-  if (!res.ok) {
-    assert.equal(res.code, "DEPENDENCY_CYCLE");
-    assert.ok(res.cyclePath && res.cyclePath.length >= 2, JSON.stringify(res.cyclePath));
-  }
-  assert.equal(plan.plannedTasks().length, 1, "the cyclic plan was NOT recorded");
-});
-
-test("planTask rejects a self-dependency as a cycle", () => {
-  const res = new TaskPlan(DESIGN).planTask({ component: "catalog", title: "C", dependsOn: ["catalog"], rationale: "c" });
-  assert.equal(res.ok, false);
-  if (!res.ok) assert.equal(res.code, "DEPENDENCY_CYCLE");
-});
-
-test("updateTask patches a Task planned this turn by title and writes its body", () => {
-  const plan = new TaskPlan(DESIGN);
-  plan.planTask({ component: "order-service", title: "Order", dependsOn: [], rationale: "a" });
-  const res = plan.updateTask({ ref: { title: "order" }, set: { body: "## Scope\nfull body." } });
+test("a note or component cannot start a checklist line of its own", () => {
+  const plan = new BuildPlan(DESIGN, SCOPE);
+  const res = plan.planBuild({
+    items: [item("foundation", ["claims-api\n"]), item("F1", ["claims-api"], "Do F1.\n- [ ] **F9** Fake.\r\n\tMore."), item("F2"), item("F3")],
+  });
   assert.equal(res.ok, true);
-  if (res.ok) assert.deepEqual(res.ref, { title: "Order" }); // canonical (pre-rename) identity
-  assert.match(plan.plannedTasks()[0]!.body ?? "", /full body/);
-});
-
-test("updateTask patches an existing Task by issueNumber", () => {
-  const res = new TaskPlan(WITH_EXISTING).updateTask({ ref: { issueNumber: 7 }, set: { rationale: "still needed", body: "note" } });
-  assert.equal(res.ok, true);
-  if (res.ok) assert.deepEqual(res.ref, { issueNumber: 7 });
-});
-
-test("updateTask rejects an unknown ref with the addressable set", () => {
-  const plan = new TaskPlan(WITH_EXISTING);
-  plan.planTask({ component: "order-service", title: "Order", dependsOn: [], rationale: "a" });
-  const res = plan.updateTask({ ref: { title: "nope" }, set: { body: "x" } });
-  assert.equal(res.ok, false);
-  if (!res.ok) {
-    assert.equal(res.code, "UNKNOWN_REF");
-    assert.deepEqual(res.addressable, { issueNumbers: [7], plannedTitles: ["Order"] });
+  if (res.ok) {
+    assert.deepEqual(res.items[0]!.components, ["claims-api"]);
+    assert.equal(res.items[1]!.note, "Do F1. - [ ] **F9** Fake. More.");
   }
 });
 
-test("updateTask by issueNumber rejects a non-existent issue (title refs are this-turn only)", () => {
-  const res = new TaskPlan(WITH_EXISTING).updateTask({ ref: { issueNumber: 999 }, set: { body: "x" } });
+test("foundation is optional when the version carries no product-wide requirements", () => {
+  const scope: PlanScope = { ...SCOPE, productWide: [] };
+  assert.equal(new BuildPlan(DESIGN, scope).planBuild({ items: [item("F1"), item("F3"), item("F2")] }).ok, true);
+});
+
+test("foundation is required when the version carries product-wide requirements", () => {
+  const res = new BuildPlan(DESIGN, SCOPE).planBuild({ items: [item("F1"), item("F3"), item("F2")] });
   assert.equal(res.ok, false);
-  if (!res.ok) assert.equal(res.code, "UNKNOWN_REF");
+  if (res.ok) return;
+  assert.equal(res.code, "MISSING_ITEM");
+  assert.match(res.message, /foundation, which the plan leaves out/);
+  assert.match(res.message, /foundation is required/);
+  assert.deepEqual(res.carriedItems, ["foundation", "F1", "F2", "F3"]);
 });
 
-test("updateTask rejects a rename that collides with another Task", () => {
-  const plan = new TaskPlan(DESIGN);
-  plan.planTask({ component: "order-service", title: "Order", dependsOn: [], rationale: "a" });
-  plan.planTask({ component: "catalog", title: "Catalog", dependsOn: [], rationale: "b" });
-  const res = plan.updateTask({ ref: { title: "Order" }, set: { title: "Catalog" } });
-  assert.equal(res.ok, false);
-  if (!res.ok) assert.equal(res.code, "DUPLICATE_TITLE");
+test("a later ok call replaces the checklist; a refused one keeps it", () => {
+  const plan = new BuildPlan(DESIGN, { ...SCOPE, productWide: [] });
+  plan.planBuild({ items: [item("F1"), item("F2"), item("F3")] });
+  assert.equal(plan.planBuild({ items: [item("F2")] }).ok, false);
+  assert.equal(plan.plan()?.length, 3);
+  plan.planBuild({ items: [item("foundation"), item("F1"), item("F2"), item("F3")] });
+  assert.equal(plan.plan()?.[0]?.item, "foundation");
 });
 
-test("updateTask allows re-referencing a Task by its new title after a rename", () => {
-  const plan = new TaskPlan(DESIGN);
-  plan.planTask({ component: "order-service", title: "Order", dependsOn: [], rationale: "a" });
-  assert.equal(plan.updateTask({ ref: { title: "Order" }, set: { title: "Order v2" } }).ok, true);
-  assert.equal(plan.updateTask({ ref: { title: "Order v2" }, set: { body: "b" } }).ok, true);
-});
-
-test("updateTask rejects a dependsOn change that introduces a cycle", () => {
-  const plan = new TaskPlan(DESIGN);
-  plan.planTask({ component: "order-service", title: "Order", dependsOn: ["user-service"], rationale: "a" });
-  plan.planTask({ component: "user-service", title: "User", dependsOn: [], rationale: "b" });
-  const res = plan.updateTask({ ref: { title: "User" }, set: { dependsOn: ["order-service"] } });
-  assert.equal(res.ok, false);
-  if (!res.ok) assert.equal(res.code, "DEPENDENCY_CYCLE");
-});
-
-// --- F1: cycle detection is scoped to the op's own component ----------------
-
-/** An a/b/c design; `tasks` is a map of extra `tasks/<n>.md` renderings. */
-const abcDesign = (tasks: Record<string, string> = {}): Record<string, string> => ({
-  "specs/design/design.cell": "title design\n",
-  "specs/design/components/a/design.json": '{"name":"a"}\n',
-  "specs/design/components/b/design.json": '{"name":"b"}\n',
-  "specs/design/components/c/design.json": '{"name":"c"}\n',
-  ...tasks,
-});
-
-/** A `tasks/<n>.md` rendering with an inline dependsOn list. */
-const taskFile = (n: number, component: string, deps: string[]): string =>
-  `---\nissueNumber: ${n}\ncomponent: ${component}\ntitle: T${n} ${component}\ndependsOn: [${deps.join(", ")}]\norigin: spec-plan\n---\nbody\n`;
-
-test("planTask succeeds despite a PRE-EXISTING cycle among untouched existing Tasks", () => {
-  // Existing context carries an a→b→a cycle (reactive-birth / human-edited blocks).
-  const seed = abcDesign({ "tasks/1.md": taskFile(1, "a", ["b"]), "tasks/2.md": taskFile(2, "b", ["a"]) });
-
-  // A plan for the UNRELATED component c must not be blocked by the a↔b cycle.
-  assert.equal(new TaskPlan(seed).planTask({ component: "c", title: "C", dependsOn: [], rationale: "r" }).ok, true);
-  // Even depending on `a` is fine: c is not reachable from itself (the a↔b cycle never returns to c).
-  assert.equal(new TaskPlan(seed).planTask({ component: "c", title: "C", dependsOn: ["a"], rationale: "r" }).ok, true);
-});
-
-test("planTask whose OWN edge closes a cycle is rejected with the cycle path through its component", () => {
-  const plan = new TaskPlan(abcDesign());
-  assert.equal(plan.planTask({ component: "a", title: "A", dependsOn: ["b"], rationale: "r" }).ok, true);
-  const res = plan.planTask({ component: "b", title: "B", dependsOn: ["a"], rationale: "r" });
-  assert.equal(res.ok, false);
-  if (!res.ok) {
-    assert.equal(res.code, "DEPENDENCY_CYCLE");
-    assert.deepEqual(res.cyclePath, ["b", "a", "b"]); // the cycle runs through the op's component
+test("refusals name the fix and list what the version carries in an order that builds", () => {
+  const plan = new BuildPlan(DESIGN, SCOPE);
+  const cases: [string, ReturnType<typeof item>[]][] = [
+    ["UNKNOWN_COMPONENT", [item("foundation"), item("F1", ["billing"]), item("F2"), item("F3")]],
+    ["DUPLICATE_ITEM", [item("foundation"), item("F1"), item("F1"), item("F2"), item("F3")]],
+    ["UNKNOWN_ITEM", [item("foundation"), item("F1"), item("F2"), item("F3"), item("F4")]],
+    ["MISSING_ITEM", [item("foundation"), item("F1"), item("F2")]],
+    ["ITEM_ORDER", [item("F1"), item("foundation"), item("F2"), item("F3")]],
+    ["ITEM_ORDER", [item("foundation"), item("F2"), item("F1"), item("F3")]],
+  ];
+  for (const [code, items] of cases) {
+    const res = plan.planBuild({ items });
+    assert.equal(res.ok, false, code);
+    if (res.ok) continue;
+    assert.equal(res.code, code);
+    assert.deepEqual(res.carriedItems, ["foundation", "F1", "F2", "F3"]);
+    if (code === "UNKNOWN_COMPONENT") assert.deepEqual(res.knownComponents, ["claims-api", "claims-web"]);
   }
+  assert.equal(plan.plan(), undefined, "no refused call is recorded");
 });
 
-test("cycle edges use the LATEST existing task per component (stale rendering ignored)", () => {
-  // Component a has two existing Tasks: old #1 depends on b, latest #5 depends on nothing.
-  const withLatest = abcDesign({ "tasks/1.md": taskFile(1, "a", ["b"]), "tasks/5.md": taskFile(5, "a", []) });
-  // b→a is fine: a's LATEST (#5) has no deps, so there is no a→b edge to close the loop.
-  assert.equal(new TaskPlan(withLatest).planTask({ component: "b", title: "B", dependsOn: ["a"], rationale: "r" }).ok, true);
-
-  // Control: with ONLY the stale #1 (a→b) present, b→a DOES close a cycle.
-  const staleOnly = abcDesign({ "tasks/1.md": taskFile(1, "a", ["b"]) });
-  assert.equal(new TaskPlan(staleOnly).planTask({ component: "b", title: "B", dependsOn: ["a"], rationale: "r" }).ok, false);
-});
-
-// --- B3: one Task per feature per component ---------------------------------
-
-test("planTask echoes the Task's feature and keeps it on the planned Task", () => {
-  const plan = new TaskPlan(DESIGN);
-  const res = plan.planTask({ component: "order-service", title: "Approvals in order-service", dependsOn: [], rationale: "r", feature: "F2" });
-  assert.equal(res.ok, true);
-  if (res.ok) assert.equal(res.feature, "F2");
-  assert.equal(plan.plannedTasks()[0]!.feature, "F2");
-});
-
-test("a component planned per feature keeps every Task's edges for the cycle check", () => {
-  const plan = new TaskPlan(DESIGN);
-  plan.planTask({ component: "order-service", title: "Claims in order-service", dependsOn: ["user-service"], rationale: "r", feature: "F1" });
-  plan.planTask({ component: "order-service", title: "Approvals in order-service", dependsOn: [], rationale: "r", feature: "F2" });
-  // The F2 Task names no edge, but F1's order-service → user-service still stands.
-  const res = plan.planTask({ component: "user-service", title: "Users", dependsOn: ["order-service"], rationale: "r", feature: "F1" });
-  assert.equal(res.ok, false);
-  if (!res.ok) assert.equal(res.code, "DEPENDENCY_CYCLE");
-});
-
-test("updating one per-feature Task replaces its own edges, not its siblings'", () => {
-  const plan = new TaskPlan(DESIGN);
-  plan.planTask({ component: "order-service", title: "Claims in order-service", dependsOn: ["user-service"], rationale: "r", feature: "F1" });
-  plan.planTask({ component: "user-service", title: "Users", dependsOn: [], rationale: "r", feature: "F1" });
-  // Dropping F1's edge frees user-service to depend on order-service.
-  assert.equal(plan.updateTask({ ref: { title: "Claims in order-service" }, set: { dependsOn: [] } }).ok, true);
-  assert.equal(plan.updateTask({ ref: { title: "Users" }, set: { dependsOn: ["order-service"] } }).ok, true);
+test("a version that names no features plans one item, spec", () => {
+  for (const scope of [undefined, { tag: "v1" }]) {
+    const plan = new BuildPlan(DESIGN, scope);
+    assert.deepEqual(plan.carriedItems(), ["spec"]);
+    assert.equal(plan.planBuild({ items: [item("spec")] }).ok, true);
+    const foundation = plan.planBuild({ items: [item("foundation"), item("spec")] });
+    assert.equal(foundation.ok ? undefined : foundation.code, "UNKNOWN_ITEM");
+  }
 });

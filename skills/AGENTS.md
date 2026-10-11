@@ -37,7 +37,8 @@ agent's `test/prototype-skill.test.ts` fails when it is stale.
 | --- | --- |
 | a tool's `--help` | that tool's verbs and flags |
 | `authorization-model` | the access invariants |
-| `aep/references/component-contract.md` | what every component obeys; the one file a fan-out subagent reads |
+| `aep/references/component-contract.md` | what every component obeys; the contract every fan-out subagent reads |
+| `prototype/references/implementing.md` | what a web application's screens must be, for the coding run; a web application's subagent also reads it |
 | `aep/SKILL.md` | the coding run: git, gh, issues, PRs |
 | `validation-task` | the validation run |
 | a stack skill | one stack's layout, Dockerfile, libraries, verify, pitfalls |

@@ -45,7 +45,7 @@ import { formatEvent } from "@aep/progress-view";
 const renderEvent = (e: Parameters<typeof formatEvent>[0]): string => formatEvent(e).text;
 /** The lead agent's own event — `lead` is a literal on the wire, not an id. */
 const lead = <T extends Record<string, unknown>>(rest: T) => ({ agentId: "lead", ...rest });
-import { renderTaskContextFile } from "../src/ports/issue-store.js";
+import { renderIssueFile } from "../src/ports/issue-store.js";
 import { takeUndoSnapshot, restoreUndoSnapshot, listUndoSnapshots } from "../src/state/undo.js";
 import { codeCommand } from "../src/commands.js";
 
@@ -54,13 +54,7 @@ function tempProject(): string {
   mkdirSync(join(dir, "issues"), { recursive: true });
   writeFileSync(
     join(dir, "issues", "3.md"),
-    renderTaskContextFile({
-      issueNumber: 3,
-      component: "user-service",
-      title: "Implement the user service",
-      dependsOn: ["auth-service"],
-      body: "scope",
-    }),
+    renderIssueFile({ issueNumber: 3, title: "Build v1", version: "v1", body: "- [ ] **F1** Users: `user-service`.\n" }),
   );
   return dir;
 }

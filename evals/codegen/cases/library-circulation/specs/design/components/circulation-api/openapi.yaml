@@ -2,6 +2,7 @@ openapi: 3.0.3
 info:
   title: Circulation API
   version: 0.1.0
+  description: The only API the web app calls. Fronts the catalogue and owns loans, holds and fees.
 servers:
   - url: /
 security:
@@ -9,22 +10,26 @@ security:
 paths:
   /titles:
     get:
-      operationId: listTitles
-      summary: Search titles with availability
-      security:
-        - oauth2: [catalogue:read]
+      operationId: searchTitles
+      summary: Search titles by title, author or subject
       parameters:
-        - { name: q, in: query, schema: { type: string }, description: Matches name, author or subject }
-        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
-        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: q, in: query, schema: { type: string }, description: Matches title, author or subject }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: A page of titles
+          description: A page of titles with availability
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/TitlePage' }
-        '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
+              schema:
+                type: object
+                required: [count, data]
+                properties:
+                  count: { type: integer }
+                  next: { type: string, nullable: true }
+                  previous: { type: string, nullable: true }
+                  data: { type: array, items: { $ref: '#/components/schemas/Title' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
     post:
       operationId: createTitle
       summary: Add a title
@@ -41,24 +46,22 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Title' }
-        '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /titles/{titleId}:
     parameters:
       - { name: titleId, in: path, required: true, schema: { type: string } }
     get:
       operationId: getTitle
-      summary: Get a title
-      security:
-        - oauth2: [catalogue:read]
+      summary: A title with its available copy count
       responses:
         '200':
           description: The title
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Title' }
-        '401': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
     put:
       operationId: updateTitle
       summary: Edit a title
@@ -75,38 +78,39 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Title' }
-        '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
     delete:
       operationId: deleteTitle
-      summary: Remove a title
+      summary: Remove a title that has no copies on loan
       security:
         - oauth2: [catalogue:manage]
       responses:
-        '204': { description: Removed }
-        '401': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
+        '204':
+          description: Removed
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /titles/{titleId}/copies:
     parameters:
       - { name: titleId, in: path, required: true, schema: { type: string } }
     get:
-      operationId: listCopies
-      summary: List copies of a title
+      operationId: listTitleCopies
+      summary: Copies of a title with their status
       security:
         - oauth2: [catalogue:manage]
       parameters:
-        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
-        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
           description: A page of copies
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CopyPage' }
-        '401': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
     post:
       operationId: createCopy
       summary: Add a copy to a title
@@ -123,15 +127,33 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Copy' }
-        '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /copies:
+    get:
+      operationId: findCopies
+      summary: Find copies by barcode
+      security:
+        - oauth2: [catalogue:manage]
+      parameters:
+        - { name: barcode, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of copies
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CopyPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /copies/{copyId}:
     parameters:
       - { name: copyId, in: path, required: true, schema: { type: string } }
-    put:
+    patch:
       operationId: updateCopy
-      summary: Edit a copy or withdraw it
+      summary: Edit a copy's barcode or withdraw it
       security:
         - oauth2: [catalogue:manage]
       requestBody:
@@ -145,230 +167,297 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Copy' }
-        '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
-  /me/loans:
-    get:
-      operationId: listMyLoans
-      summary: The caller's loans
-      security:
-        - oauth2: [loans:read]
-      parameters:
-        - { name: active, in: query, schema: { type: boolean }, description: Only loans not yet returned }
-        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
-        - { name: offset, in: query, schema: { type: integer, default: 0 } }
-      responses:
-        '200':
-          description: A page of the caller's loans
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/LoanPage' }
-        '401': { $ref: '#/components/responses/Error' }
-    post:
-      operationId: borrowTitle
-      summary: Borrow an available copy of a title for the caller
-      security:
-        - oauth2: [loans:borrow]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/TitleRef' }
-      responses:
-        '201':
-          description: Loan created with its due date
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Loan' }
-        '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
-  /me/holds:
-    get:
-      operationId: listMyHolds
-      summary: The caller's holds
-      security:
-        - oauth2: [holds:read]
-      parameters:
-        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
-        - { name: offset, in: query, schema: { type: integer, default: 0 } }
-      responses:
-        '200':
-          description: A page of the caller's holds
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/HoldPage' }
-        '401': { $ref: '#/components/responses/Error' }
-    post:
-      operationId: placeHold
-      summary: Place a hold for the caller on a title with no available copy
-      security:
-        - oauth2: [holds:place]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/TitleRef' }
-      responses:
-        '201':
-          description: Hold queued
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Hold' }
-        '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
-  /me/holds/{holdId}:
-    parameters:
-      - { name: holdId, in: path, required: true, schema: { type: string } }
-    delete:
-      operationId: cancelMyHold
-      summary: Cancel the caller's hold
-      security:
-        - oauth2: [holds:cancel]
-      responses:
-        '204': { description: Cancelled }
-        '401': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
-  /me/fees:
-    get:
-      operationId: listMyFees
-      summary: The caller's fees
-      security:
-        - oauth2: [fees:read]
-      parameters:
-        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
-        - { name: offset, in: query, schema: { type: integer, default: 0 } }
-      responses:
-        '200':
-          description: A page of the caller's fees
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/FeePage' }
-        '401': { $ref: '#/components/responses/Error' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /loans:
     get:
       operationId: listLoans
-      summary: Every loan
+      summary: Every loan, filterable by member, status or overdue
       security:
         - oauth2: [loans:read-all]
       parameters:
         - { name: memberId, in: query, schema: { type: string } }
-        - { name: copyId, in: query, schema: { type: string } }
-        - { name: active, in: query, schema: { type: boolean }, description: Only loans not yet returned }
-        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
-        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: status, in: query, schema: { type: string, enum: [open, returned] } }
+        - { name: overdue, in: query, schema: { type: boolean } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
           description: A page of loans
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LoanPage' }
-        '401': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
     post:
       operationId: checkOutCopy
-      summary: Check a copy out to any member
+      summary: Check out a copy to a member
       security:
-        - oauth2: [loans:checkout]
+        - oauth2: [loans:manage]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/CheckoutRequest' }
+            schema: { $ref: '#/components/schemas/CheckOutInput' }
       responses:
         '201':
-          description: Loan created with its due date
+          description: Loan created with a due date
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Loan' }
-        '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /loans/{loanId}/return:
-    parameters:
-      - { name: loanId, in: path, required: true, schema: { type: string } }
     post:
-      operationId: checkInLoan
-      summary: Check in a loan; a late return creates a fee
+      operationId: returnLoan
+      summary: Check in a copy; a late return creates a fee
       security:
-        - oauth2: [loans:checkin]
+        - oauth2: [loans:manage]
+      parameters:
+        - { name: loanId, in: path, required: true, schema: { type: string } }
       responses:
         '200':
-          description: Loan closed
+          description: Closed loan, including its fee when late
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Loan' }
-        '401': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /loans/{loanId}/renew:
+    post:
+      operationId: renewLoan
+      summary: Renew a loan once
+      security:
+        - oauth2: [loans:manage]
+      parameters:
+        - { name: loanId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Loan with extended due date
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /me/loans:
+    get:
+      operationId: listMyLoans
+      summary: The caller's loans, current or past
+      security:
+        - oauth2: [loans:read]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [open, returned] } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of the caller's loans
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /holds:
     get:
       operationId: listHolds
-      summary: Every hold, optionally for one title
+      summary: Every hold, oldest first, filterable by title or status
       security:
         - oauth2: [holds:read-all]
       parameters:
         - { name: titleId, in: query, schema: { type: string } }
-        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
-        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: status, in: query, schema: { type: string, enum: [active, ready, fulfilled, cancelled] } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: A page of holds in queue order
+          description: A page of holds
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HoldPage' }
-        '401': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /holds/{holdId}:
     parameters:
       - { name: holdId, in: path, required: true, schema: { type: string } }
     delete:
       operationId: cancelHold
-      summary: Cancel any hold
+      summary: Cancel any hold on a member's behalf
       security:
         - oauth2: [holds:manage]
       responses:
-        '204': { description: Cancelled }
-        '401': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
+        '204':
+          description: Cancelled
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /holds/{holdId}/ready:
+    post:
+      operationId: markHoldReady
+      summary: Assign a returned copy to the first hold in the queue
+      security:
+        - oauth2: [holds:manage]
+      parameters:
+        - { name: holdId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [copyId]
+              properties:
+                copyId: { type: string }
+      responses:
+        '200':
+          description: Hold ready for pickup for 7 days
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hold' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /holds/{holdId}/fulfil:
+    post:
+      operationId: fulfilHold
+      summary: Check out the held copy to the member
+      security:
+        - oauth2: [holds:manage]
+      parameters:
+        - { name: holdId, in: path, required: true, schema: { type: string } }
+      responses:
+        '201':
+          description: Loan created and hold fulfilled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /me/holds:
+    get:
+      operationId: listMyHolds
+      summary: The caller's holds with queue position
+      security:
+        - oauth2: [holds:read]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of the caller's holds
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HoldPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: placeMyHold
+      summary: Place a hold for the caller on a title
+      security:
+        - oauth2: [holds:place]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [titleId]
+              properties:
+                titleId: { type: string }
+      responses:
+        '201':
+          description: Hold placed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hold' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /me/holds/{holdId}:
+    delete:
+      operationId: cancelMyHold
+      summary: Cancel the caller's own hold
+      security:
+        - oauth2: [holds:place]
+      parameters:
+        - { name: holdId, in: path, required: true, schema: { type: string } }
+      responses:
+        '204':
+          description: Cancelled
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /fees:
     get:
       operationId: listFees
-      summary: Every fee
+      summary: Every member's fees, filterable by member and status
       security:
         - oauth2: [fees:read-all]
       parameters:
         - { name: memberId, in: query, schema: { type: string } }
-        - { name: status, in: query, schema: { type: string, enum: [unpaid, paid] } }
-        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
-        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: status, in: query, schema: { type: string, enum: [unpaid, settled, waived] } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: A page of fees
+          description: A page of fees with the unpaid balance of the matching fees
           content:
             application/json:
               schema: { $ref: '#/components/schemas/FeePage' }
-        '401': { $ref: '#/components/responses/Error' }
-  /fees/{feeId}/pay:
-    parameters:
-      - { name: feeId, in: path, required: true, schema: { type: string } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /fees/{feeId}/payment:
     post:
-      operationId: markFeePaid
-      summary: Mark any fee paid
+      operationId: recordFeePayment
+      summary: Record a payment that settles a fee
       security:
         - oauth2: [fees:manage]
+      parameters:
+        - { name: feeId, in: path, required: true, schema: { type: string } }
       responses:
         '200':
-          description: Fee paid
+          description: Fee settled
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Fee' }
-        '401': { $ref: '#/components/responses/Error' }
-        '404': { $ref: '#/components/responses/Error' }
-        '409': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /fees/{feeId}/waive:
+    post:
+      operationId: waiveFee
+      summary: Waive a fee
+      security:
+        - oauth2: [fees:manage]
+      parameters:
+        - { name: feeId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Fee waived
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Fee' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /me/fees:
+    get:
+      operationId: listMyFees
+      summary: The caller's fees and unpaid balance
+      security:
+        - oauth2: [fees:read]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of the caller's fees with their unpaid balance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FeePage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 components:
   securitySchemes:
     oauth2:
@@ -378,24 +467,38 @@ components:
           authorizationUrl: /oauth2/authorize
           tokenUrl: /oauth2/token
           scopes:
-            catalogue:read: Search and view titles with availability
             catalogue:manage: Manage titles and copies
-            loans:read: The caller's own loans
-            loans:borrow: Borrow a copy for the caller
-            loans:read-all: Every loan
-            loans:checkout: Check a copy out to any member
-            loans:checkin: Check a copy in
-            holds:read: The caller's own holds
-            holds:place: Place a hold for the caller
-            holds:cancel: Cancel the caller's own hold
-            holds:read-all: Every hold
-            holds:manage: Cancel any hold
-            fees:read: The caller's own fees
-            fees:read-all: Every fee
-            fees:manage: Mark any fee paid
+            loans:read: See own loans
+            loans:read-all: See every loan
+            loans:manage: Check out, check in and renew loans
+            holds:read: See own holds
+            holds:place: Place and cancel own holds
+            holds:read-all: See every hold
+            holds:manage: Mark ready, fulfil and cancel any hold
+            fees:read: See own fees
+            fees:read-all: See every member's fees
+            fees:manage: Record payments and waive fees
+  parameters:
+    Limit: { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 }, description: Page size }
+    Offset: { name: offset, in: query, schema: { type: integer, default: 0 }, description: Items to skip }
   responses:
-    Error:
-      description: Error response
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing, invalid or insufficient credentials
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Not found, or not the caller's
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Refused by a business rule or the current state
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -408,9 +511,6 @@ components:
         message: { type: string, description: short human-readable label }
         description: { type: string, description: detailed explanation }
         moreInfo: { type: string, description: URI to documentation }
-    CopyStatus:
-      type: string
-      enum: [available, on-loan, on-hold, withdrawn]
     TitleInput:
       type: object
       required: [name, author]
@@ -418,14 +518,14 @@ components:
         name: { type: string }
         author: { type: string }
         subject: { type: string }
-        isbn: { type: string }
     Title:
       allOf:
         - $ref: '#/components/schemas/TitleInput'
         - type: object
-          required: [id, availableCopies]
+          required: [id, copyCount, availableCopies]
           properties:
             id: { type: string }
+            copyCount: { type: integer, description: Copies not withdrawn }
             availableCopies: { type: integer, description: Copies with status available }
     CopyInput:
       type: object
@@ -436,94 +536,94 @@ components:
       type: object
       properties:
         barcode: { type: string }
-        status: { $ref: '#/components/schemas/CopyStatus' }
+        status: { type: string, enum: [withdrawn], description: Only withdrawing is allowed by hand }
     Copy:
       type: object
-      required: [id, titleId, barcode, status]
+      required: [id, titleId, titleName, barcode, status]
       properties:
         id: { type: string }
         titleId: { type: string }
+        titleName: { type: string }
         barcode: { type: string }
-        status: { $ref: '#/components/schemas/CopyStatus' }
-    TitleRef:
-      type: object
-      required: [titleId]
-      properties:
-        titleId: { type: string }
-    CheckoutRequest:
-      type: object
-      required: [copyId, memberId]
-      properties:
-        copyId: { type: string }
-        memberId: { type: string }
-    Loan:
-      type: object
-      required: [id, titleId, copyId, memberId, checkedOutAt, dueDate]
-      properties:
-        id: { type: string }
-        titleId: { type: string }
-        copyId: { type: string }
-        memberId: { type: string }
-        checkedOutAt: { type: string, format: date }
-        dueDate: { type: string, format: date, description: Checkout date plus 14 days }
-        returnedAt: { type: string, format: date, nullable: true }
-        feeAmount: { type: number, description: Late fee created at return; 0 when on time }
-    Hold:
-      type: object
-      required: [id, titleId, memberId, placedAt, status]
-      properties:
-        id: { type: string }
-        titleId: { type: string }
-        memberId: { type: string }
-        placedAt: { type: string, format: date-time }
-        status: { type: string, enum: [waiting, ready, fulfilled, cancelled] }
-        position: { type: integer, description: 1-based place in the title's queue }
-    Fee:
-      type: object
-      required: [id, loanId, memberId, amount, status]
-      properties:
-        id: { type: string }
-        loanId: { type: string }
-        memberId: { type: string }
-        amount: { type: number, description: Fee in the library's currency }
-        status: { type: string, enum: [unpaid, paid] }
-    TitlePage:
-      type: object
-      required: [count, data]
-      properties:
-        count: { type: integer, description: total matching items }
-        next: { type: string, nullable: true }
-        previous: { type: string, nullable: true }
-        data: { type: array, items: { $ref: '#/components/schemas/Title' } }
+        status: { type: string, enum: [available, on-loan, on-hold-shelf, withdrawn] }
     CopyPage:
       type: object
       required: [count, data]
       properties:
-        count: { type: integer, description: total matching items }
+        count: { type: integer }
         next: { type: string, nullable: true }
         previous: { type: string, nullable: true }
         data: { type: array, items: { $ref: '#/components/schemas/Copy' } }
+    CheckOutInput:
+      type: object
+      required: [barcode, memberId]
+      properties:
+        barcode: { type: string, description: Barcode of the copy }
+        memberId: { type: string, description: Member's sign-in username }
+    Loan:
+      type: object
+      required: [id, copyId, barcode, titleId, titleName, memberId, checkedOutOn, dueOn, status, overdue, renewals]
+      properties:
+        id: { type: string }
+        copyId: { type: string }
+        barcode: { type: string }
+        titleId: { type: string }
+        titleName: { type: string }
+        memberId: { type: string }
+        checkedOutOn: { type: string, format: date }
+        dueOn: { type: string, format: date }
+        returnedOn: { type: string, format: date, nullable: true }
+        status: { type: string, enum: [open, returned] }
+        overdue: { type: boolean, description: Open and past its due date, derived on read }
+        renewals: { type: integer }
+        fee: { allOf: [ { $ref: '#/components/schemas/Fee' } ], nullable: true, description: Present when returned late }
     LoanPage:
       type: object
       required: [count, data]
       properties:
-        count: { type: integer, description: total matching items }
+        count: { type: integer }
         next: { type: string, nullable: true }
         previous: { type: string, nullable: true }
         data: { type: array, items: { $ref: '#/components/schemas/Loan' } }
+    Hold:
+      type: object
+      required: [id, titleId, titleName, memberId, placedAt, status]
+      properties:
+        id: { type: string }
+        titleId: { type: string }
+        titleName: { type: string }
+        memberId: { type: string }
+        placedAt: { type: string, format: date-time }
+        status: { type: string, enum: [active, ready, fulfilled, cancelled] }
+        position: { type: integer, nullable: true, description: 1-based queue position while active }
+        copyId: { type: string, nullable: true }
+        barcode: { type: string, nullable: true, description: Barcode of the copy held, when ready }
+        readyUntil: { type: string, format: date, nullable: true }
     HoldPage:
       type: object
       required: [count, data]
       properties:
-        count: { type: integer, description: total matching items }
+        count: { type: integer }
         next: { type: string, nullable: true }
         previous: { type: string, nullable: true }
         data: { type: array, items: { $ref: '#/components/schemas/Hold' } }
+    Fee:
+      type: object
+      required: [id, loanId, titleName, memberId, daysLate, amountCents, status]
+      properties:
+        id: { type: string }
+        loanId: { type: string }
+        titleName: { type: string }
+        memberId: { type: string }
+        daysLate: { type: integer }
+        amountCents: { type: integer, description: Amount in minor currency units }
+        status: { type: string, enum: [unpaid, settled, waived] }
     FeePage:
       type: object
-      required: [count, data]
+      required: [count, unpaidBalanceCents, data]
       properties:
-        count: { type: integer, description: total matching items }
+        count: { type: integer }
+        unpaidBalanceCents: { type: integer, description: Sum of unpaid fees across the matching set, in minor units }
         next: { type: string, nullable: true }
         previous: { type: string, nullable: true }
         data: { type: array, items: { $ref: '#/components/schemas/Fee' } }

@@ -1,13 +1,16 @@
 ---
 name: prototype
-description: "Load for the /prototype flow: generate the prototype (prototype.json + prototype.tsx) of every web-application a finished design declares, as a clickable, checked app the reviewer can use before anything is built."
+description: "Load for the /prototype flow: generate the prototype (prototype.json + prototype.tsx) of every web-application a finished design declares, as a clickable, checked app the reviewer can use before anything is built. A coding run that builds a web-application reads its references/implementing.md."
 metadata:
   aep:
     kind: platform
-    audience: [design]
+    audience: [design, coding]
 ---
 
 # Prototype
+
+A coding run that builds a web-application reads `references/implementing.md`.
+The rest of this file is how the design agent writes a prototype.
 
 A prototype is the reviewable picture of a `web-application` before it is
 built: its screens, navigation, roles, flows and display states, filled with
@@ -30,21 +33,25 @@ Read these before writing anything:
   prototype role's `id` is a role's `name` from it, **copied verbatim** (same
   case, same spelling), and its `name` is a short human label for that role.
   Include exactly the roles that use this application. Without the file, take
-  the roles from the PRD's actors and give them short kebab-case ids.
+  the roles from the actors in `specs/requirements/prd.md` and give them short
+  kebab-case ids.
 - The API each web-application reads: the `openapi.yaml` of every component
   listed under `dependencies` (`kind: component`) in its `design.json`, and
   its own when it has one. Screens show what these operations return and
   collect what they accept.
-- `specs/requirements/prd.md`: the numbered **User Stories**, the coverage
-  oracle. Every story gets at least one screen. Set a story aside only when
-  the product gives it no view (sign-in through the platform's SSO, a backend
-  job, a machine-facing endpoint) and name it in your closing.
+- `specs/requirements/features/F<n>-*.md`: the numbered **User Stories**
+  (`F<n>.<m>`), the coverage oracle. Every story gets at least one screen.
+  Set a story aside only when the product gives it no view (sign-in through
+  the platform's SSO, a backend job, a machine-facing endpoint) and name it in
+  your closing.
+- `specs/requirements/product-wide.md`: the requirements that span features.
+  They constrain every screen they touch.
 - `specs/design/flows/*.md`: the key flows. Every flow a web-application's
   users walk becomes a `flows` entry of its prototype, one role's walk through
   its screens in order.
-- `specs/design/components/<component>/wireframes.dsl`, when it exists: the
-  earlier sketch of the screens. It is a hint for layout and screen names, not
-  a constraint; the PRD, flows and API decide what the screens hold.
+- A sketch or mockup the user attached: the layout brief. Refine it; do not
+  reinvent it. Where it and the stories disagree, the stories' scope wins and
+  the sketch's layout intent survives inside it.
 - `specs/design/components/<component>/prototype.json` and `prototype.tsx` if
   they already exist: you are revising them, not starting over (see **Stable
   ids**).

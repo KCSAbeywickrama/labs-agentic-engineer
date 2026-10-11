@@ -40,6 +40,14 @@ export function requirementsGate(): GateResult {
   return ok; // phase 1 has no precondition — the idea prompt seeds it
 }
 
+/** `interview F<n>` needs that feature's file, which the product pass writes. */
+export function interviewGate(projectDir: string, feature: string): GateResult {
+  if (!/^F\d+$/.test(feature)) return blocked(`name the feature to interview (F1, F2, …), not "${feature}"`);
+  const dir = join(projectDir, "specs/requirements/features");
+  const found = existsSync(dir) && readdirSync(dir).some((f) => f.startsWith(`${feature}-`) && f.endsWith(".md"));
+  return found ? ok : blocked(`specs/requirements/features has no ${feature} — run the requirements phase first`);
+}
+
 export function designGate(projectDir: string): GateResult {
   const file = join(projectDir, "specs/requirements/prd.md");
   if (!existsSync(file)) return blocked("specs/requirements/prd.md is missing — run the requirements phase first");
@@ -47,7 +55,7 @@ export function designGate(projectDir: string): GateResult {
   return ok;
 }
 
-/** Component names with a design dir (what justifies a Task). */
+/** Component names with a design dir. */
 export function listComponents(projectDir: string): string[] {
   const dir = join(projectDir, "specs/design/components");
   if (!existsSync(dir)) return [];
@@ -55,6 +63,31 @@ export function listComponents(projectDir: string): string[] {
     .filter((e) => e.isDirectory())
     .map((e) => e.name)
     .sort();
+}
+
+/** The components whose `design.json` declares a web application; an unreadable one is skipped. */
+export function listWebApplications(projectDir: string): string[] {
+  return listComponents(projectDir).filter((name) => {
+    try {
+      const design = JSON.parse(readFileSync(join(projectDir, "specs/design/components", name, "design.json"), "utf8")) as { type?: unknown };
+      return design.type === "web-application";
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** `/prototype` needs a design with a web application, and a named component must be one. */
+export function prototypeGate(projectDir: string, component?: string): GateResult {
+  if (!existsSync(join(projectDir, "specs/design/design.cell"))) {
+    return blocked("specs/design/design.cell is missing — run the design phase first");
+  }
+  const apps = listWebApplications(projectDir);
+  if (apps.length === 0) return blocked("the design has no web-application: there is nothing to prototype");
+  if (component !== undefined && !apps.includes(component)) {
+    return blocked(`${component} is not a web-application of this design (web-applications: ${apps.join(", ")})`);
+  }
+  return ok;
 }
 
 /**

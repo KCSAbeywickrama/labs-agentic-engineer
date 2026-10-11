@@ -134,7 +134,7 @@ func (l *loop) fillMilestone(ctx workflow.Context) (settled bool, res RunResult,
 		// The milestone is already filled — the click reopened exactly the issues
 		// the cancel closed, marker and all, and CONFIRMED against the milestone
 		// that it holds planned work at all. Re-planning here would mint nothing
-		// (every title slug is already in the milestone) and the run would then
+		// (the build issue is already in the milestone) and the run would then
 		// settle an unbuilt version as delivered. See RunInput.Rebuild, and the
 		// cancel branch below for the one case this reads slightly generously.
 		workflow.GetLogger(ctx).Info("rebuilding an unchanged version — its milestone is already filled, not re-planning",

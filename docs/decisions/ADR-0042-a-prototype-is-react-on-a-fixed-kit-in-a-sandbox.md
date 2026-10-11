@@ -121,3 +121,23 @@ Where this ADR says "the agents service", read the org's `ae-design-agent`:
   (`packages/contracts/api/ae-design-agent/v1/openapi.yaml`) carries the shape.
 - The Go save gate is unchanged and stays in aep-api: it runs when a build cuts
   the version (`internal/spec/save_gate.go`).
+
+## Amendment 2026-10-11 — the prototype is the UI contract Build reads
+
+The prototype replaces `wireframes.dsl` as a web-application's UI contract.
+It is what Build and the coding run read:
+
+- `/design` no longer writes wireframes; `/prototype` is its own flow after it.
+  The `wireframes` skill is retired, and the `prototype` skill is
+  `[design, coding]`: the coding run builds against
+  `references/implementing.md`.
+- The build gate (`services/aep-api/internal/spec/build_gate.go`) no longer asks
+  a web-application for `wireframes.dsl`. It validates a prototype that is
+  present: the prototype must be whole (both files), pass the save gate's
+  rules, and offer only roles that `specs/design/security.json` declares when
+  that file exists.
+- A web-application without a prototype is built from its `design.json`, the
+  stories and the `openapi.yaml` of the components it depends on.
+- Projects that carry only wireframes are not migrated. The `.dsl` write gate,
+  the console's wireframe viewer and `@aep/excalidraw-dsl` stay so those
+  projects still open.

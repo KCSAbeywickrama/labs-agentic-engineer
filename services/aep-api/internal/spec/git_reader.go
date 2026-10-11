@@ -84,6 +84,33 @@ var (
 	}
 )
 
+// of keeps the files (keyed relative to the bundle's prefix) that a read of
+// bundle b would return: the pod's extension filter, then the layout rule.
+func (b artifactBundle) of(files map[string]string) map[string]string {
+	out := make(map[string]string, len(files))
+	for rel, content := range files {
+		if hasExt(rel, b.filter.Exts) && b.keep(rel) {
+			out[rel] = content
+		}
+	}
+	return out
+}
+
+// hasExt reports whether name ends in one of exts, ignoring case; no exts
+// admits every name, as the pod's filter does.
+func hasExt(name string, exts []string) bool {
+	if len(exts) == 0 {
+		return true
+	}
+	lower := strings.ToLower(name)
+	for _, ext := range exts {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
+	return false
+}
+
 // readBundleAt reads bundle b at `at` (the branch tip when empty, a
 // "tags/<name>" ref, or a 40-hex commit sha), returning path→content keyed
 // RELATIVE to the bundle's prefix. One ReadBundle call.

@@ -27,7 +27,7 @@ its file under `specs/requirements/features/` — its User Stories are the spine
 scenarios are about, and the product-wide items that apply to it.
 
 **Do not read** the design bundle (`design.cell`, `domain-model.md`, `flows/`),
-`openapi.yaml`, wireframes, or any source code. The specification must be
+`openapi.yaml`, the prototype, or any source code. The specification must be
 independent of the work it will grade.
 
 ## Output — Gherkin under `specs/validation/acceptance/`
@@ -222,7 +222,7 @@ open question belongs in the conversation; the files stay on-shape.
 
 ## Do not
 
-- Do not read the design bundle, `openapi.yaml`, wireframes, or source code.
+- Do not read the design bundle, `openapi.yaml`, the prototype, or source code.
 - Do not write step definitions, test code, or a runner — this skill produces
   `.feature` files and nothing else.
 - Do not invent scope, screens, endpoints, or features the requirement lacks.

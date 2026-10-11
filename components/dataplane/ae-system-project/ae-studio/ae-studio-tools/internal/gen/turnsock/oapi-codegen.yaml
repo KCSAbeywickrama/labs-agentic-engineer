@@ -7,6 +7,9 @@ generate:
   models: true
 compatibility:
   preserve-original-operation-id-casing-in-embedded-spec: true
+  # Enum constants carry their type name whether or not two enums share a
+  # value, so removing one value never renames another enum's constants.
+  always-prefix-enum-values: true
 output: internal/gen/turnsock/turnsock_gen.go
 output-options:
   skip-prune: true

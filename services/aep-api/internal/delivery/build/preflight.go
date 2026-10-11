@@ -307,21 +307,35 @@ func (s *PreflightService) externalItems(ctx context.Context, orgID, projectID, 
 }
 
 func (s *PreflightService) platformResourceItems(ctx context.Context, orgID, projectID, componentName string, d spec.Dependency) ([]PreflightItem, error) {
-	ready, err := s.status.Ready(ctx, orgID, projectID, d.Name)
+	item, err := pendingPlatformResource(ctx, s.status, orgID, projectID, componentName, d)
+	if err != nil || item == nil {
+		return nil, err
+	}
+	return []PreflightItem{*item}, nil
+}
+
+// pendingPlatformResource is the one decision about a platform-resource
+// dependency that preflight reports and the build provisions
+// (InputsCoordinator.BuildProvisionInputs): nil when the dependency is already
+// provisioned or in flight (ProvisionStatusReader), otherwise the item carrying
+// the design-authored resourceType and parameters. Sharing it keeps what the
+// Start build dialog shows and what the click provisions the same set.
+func pendingPlatformResource(ctx context.Context, status ProvisionStatusReader, orgID, projectID, componentName string, d spec.Dependency) (*PreflightItem, error) {
+	ready, err := status.Ready(ctx, orgID, projectID, d.Name)
 	if err != nil {
 		return nil, err
 	}
 	if ready {
 		return nil, nil
 	}
-	return []PreflightItem{{
+	return &PreflightItem{
 		Kind:         "platform-resource",
 		Component:    componentName,
 		Dependency:   d.Name,
 		Description:  d.Description,
 		ResourceType: d.ResourceType,
 		Parameters:   d.Parameters,
-	}}, nil
+	}, nil
 }
 
 func orgServiceItems(componentName string, d spec.Dependency) []PreflightItem {

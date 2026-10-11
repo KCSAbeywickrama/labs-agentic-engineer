@@ -106,9 +106,6 @@ type IssueOps interface {
 	// Used by the tech-lead detail phase to write the LLM-authored body
 	// after the placeholder issue was created.
 	EditIssueBody(ctx context.Context, ref RepoRef, number int, body string) error
-	// EditIssueTitle replaces the issue title via PATCH /issues/{number}.
-	// Used by the plan tap when a planned Task is renamed (updateTask).
-	EditIssueTitle(ctx context.Context, ref RepoRef, number int, title string) error
 	// AddIssueLabels adds labels to an existing issue (merges with current;
 	// adding a present label is a no-op). Used to stamp aep:status/* projection
 	// and aep:attention flags.

@@ -233,7 +233,9 @@ navigation carries a change forward. Say that in the comment you write here,
 because the reset cuts both ways: it is what makes a verification run
 repeatable, and it is also why a row created a moment ago can vanish if the run
 leaves the app mid-scenario. Seed enough rows that a table, its empty state and
-its pagination are all reachable.
+its pagination are all reachable. The seed rows are the records in the
+prototype's `prototype.tsx`, mapped onto the schema: the reviewer saw those
+rows, so mock mode shows them.
 
 **Write NO scope check here.** Whether an operation may be called at all is
 `mock/authz/gateway.ts`'s answer, read from the contract, exactly as it is the API

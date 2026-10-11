@@ -171,11 +171,11 @@ func resultStatus(line []byte) (string, bool) {
 		Type   turnsock.ResultFrameType
 		Status turnsock.ResultFrameStatus
 	}
-	if json.Unmarshal(line, &f) != nil || f.Type != turnsock.Result {
+	if json.Unmarshal(line, &f) != nil || f.Type != turnsock.ResultFrameTypeResult {
 		return "", false
 	}
-	if f.Status != turnsock.Completed {
-		return string(turnsock.Failed), true
+	if f.Status != turnsock.ResultFrameStatusCompleted {
+		return string(turnsock.ResultFrameStatusFailed), true
 	}
 	return string(f.Status), true
 }

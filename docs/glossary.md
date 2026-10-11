@@ -469,6 +469,32 @@ being built — a build that gave up leaves its plan open, and only another buil
 may continue it. A **validation** run has none at all. A run settles when its own
 working set is empty; the verdict is a separate run's answer about the version.
 
+### Build issue
+The one `development` issue a version's plan mints into its milestone, titled
+`Build <version>` (ADR-0050). Its body is an ordered checklist of **items**
+plus the version's facts (`Product-wide:`, `Held back:`), and nothing the
+specs already say. The plan turn writes the checklist with `planBuild`; the
+plan tap mints the issue when the turn completes, with dedupe key
+`build:<project>:<milestone>`. It closes when a pull request `Resolves` it
+with every item ticked. It replaces the per-feature-per-component Tasks of
+ADR-0041 decision 4.
+
+### Item
+One line of a build issue's checklist: `foundation` (shared setup and the
+carried product-wide items), a carried feature (`F2`), or `spec` for a version
+that carries no features. The coding agent works items in order, one wave of
+build subagents per item (one per component it names), one commit per item
+ending `(#<issue> <item>)`. A tick (`- [x]`) is the item's done-ness: the run's
+no-progress rule counts the unticked items (`OpenBuildItems`), and a restart
+skips items whose commit is on the branch.
+
+### Advances
+`Advances #N` in a pull request body: a coding cycle finished some items of
+the build issue and not all. The merge policy admits it only for the
+milestone's build issue, and GitHub does not treat it as a closing keyword,
+so the issue stays open for the next cycle. The coding counterpart of
+`Validates #N`.
+
 ### Halted issue
 Work a FAILED run could not finish, stamped `aep:halted` with a comment naming
 the terminal reason. The reconcile sweep skips it, which is what makes a budget
@@ -639,6 +665,21 @@ aep-api's rule that a spec (requirements + design) is authoritative only once it
 committed to git `main`. An agent turn's file edits land in the Room; the Room's
 committer commits them to `main`. The git commit — not any draft buffer — is the
 source of truth.
+
+## Design
+
+### Prototype (UI contract)
+A web application's `prototype.json` (roles, display states, screens with the
+roles that reach each, flows per role) and `prototype.tsx` (each screen on
+`@wso2/prototype-kit`), written by `/prototype` after `/design` (ADR-0042). It
+replaced `wireframes.dsl` as what Build reads: the coding agent builds one
+route per manifest screen, the shell screens included, each kit element as a
+real element and each display state as a condition on its screen's route
+(`skills/prototype/references/implementing.md`), and the mock walk follows its
+flows. Fidelity is structure, not pixels. A web application without a
+prototype is built from its `design.json`, the stories and `openapi.yaml`. The
+build gate validates a prototype that is present. The console calls it the
+**Prototype** (`apps/console/design/lexicon.md`).
 
 ## Skills
 
