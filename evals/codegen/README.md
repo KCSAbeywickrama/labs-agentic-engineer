@@ -101,6 +101,7 @@ the bands. Flag → env var → default:
 | `CODEGEN_EVAL_CODING_TIMEOUT_MINUTES` (90), `CODEGEN_EVAL_WIRE_TIMEOUT_MINUTES` (20), `CODEGEN_EVAL_WALK_TIMEOUT_MINUTES` (30) | phase ceilings; a case's `timeoutMinutes` overrides the coding one |
 | `CODEGEN_EVAL_PLANNER_MODEL`, `CODEGEN_EVAL_WALKER_MODEL`, `CODEGEN_EVAL_JUDGE_MODEL` | the harness's agents (default `claude-sonnet-5-5`) |
 | `CODEGEN_EVAL_WALK_MAX_TURNS` | the walker's turn budget |
+| `CODEGEN_EVAL_ENV_FILE` | the credential file (default `deployments/.env`); a git worktree points it at the main checkout's |
 | `CODEGEN_EVAL_STAGE_ROOT` | where attempts are staged (must stay under `$HOME`: Colima shares nothing else) |
 
 ## Reading results
