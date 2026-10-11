@@ -24,7 +24,7 @@ section (`## Progress`, `## Mock verification`), otherwise the oldest undo
 snapshot that is — copies it to `cases/<name>/` without the compiled renderings
 (`*.excalidraw`, `*.gen.json`, which code generation never reads), and asks a planner (read-only
 tools) to derive `checklist.yaml` from the specs: one item per user-visible
-behaviour in the wireframe flows and PRD stories, each walkable from an empty
+behaviour in the prototype's flows and display states and the user stories, each walkable from an empty
 database, under a role `wire --role` accepts. A project with no
 `web-application` component is refused: `wire` is the only target.
 

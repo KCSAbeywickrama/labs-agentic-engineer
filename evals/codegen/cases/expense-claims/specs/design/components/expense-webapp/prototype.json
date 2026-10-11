@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 3,
+  "name": "Expense Claims",
+  "entryScreen": "screen.my-claims",
+  "roles": [
+    { "id": "Employee", "name": "Employee" },
+    { "id": "Manager", "name": "Manager" },
+    { "id": "FinanceReviewer", "name": "Finance" }
+  ],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.validation-error", "name": "Validation errors" },
+    { "id": "state.failed", "name": "Request failed" },
+    { "id": "state.delayed", "name": "Export in progress" }
+  ],
+  "screens": [
+    { "id": "screen.my-claims", "name": "My claims", "roleIds": ["Employee"] },
+    { "id": "screen.new-claim", "name": "New claim", "roleIds": ["Employee"] },
+    { "id": "screen.claim-detail", "name": "Claim detail", "roleIds": ["Employee"] },
+    { "id": "screen.approvals", "name": "Approval queue", "roleIds": ["Manager"] },
+    { "id": "screen.claim-review", "name": "Review claim", "roleIds": ["Manager"] },
+    { "id": "screen.approved", "name": "Approved claims", "roleIds": ["FinanceReviewer"] },
+    { "id": "screen.export-history", "name": "Export history", "roleIds": ["FinanceReviewer"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["Employee", "Manager", "FinanceReviewer"] },
+    { "id": "screen.settings", "name": "Settings", "roleIds": ["Employee", "Manager", "FinanceReviewer"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Employee", "Manager", "FinanceReviewer"] }
+  ],
+  "flows": [
+    { "id": "flow.my-claims", "name": "Submit and track a claim", "roleId": "Employee",
+      "screenIds": ["screen.my-claims", "screen.new-claim", "screen.claim-detail"] },
+    { "id": "flow.approvals", "name": "Approve or reject a team claim", "roleId": "Manager",
+      "screenIds": ["screen.approvals", "screen.claim-review"] },
+    { "id": "flow.payroll-export", "name": "Export approved claims to payroll", "roleId": "FinanceReviewer",
+      "screenIds": ["screen.approved", "screen.export-history"] }
+  ]
+}

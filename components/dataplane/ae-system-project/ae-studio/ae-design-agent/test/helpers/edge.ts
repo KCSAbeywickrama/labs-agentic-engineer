@@ -74,6 +74,8 @@ export interface EdgeOptions {
   missingRefs?: string[];
   /** The starter's `headless` (no one answers questions in this run). */
   headless?: boolean;
+  /** The starter's `callerSavesEdits` (the playground saves a roomless turn's edits). */
+  callerSavesEdits?: boolean;
   /** Replaces the local IdP's key set (an unreachable IdP). */
   jwks?: JWTVerifyGetKey;
 }
@@ -157,6 +159,7 @@ export async function startEdge(opts: EdgeOptions = {}): Promise<Edge> {
     surface: "console",
     orgId: ORG_ID,
     ...(opts.headless ? { headless: true } : {}),
+    ...(opts.callerSavesEdits ? { callerSavesEdits: true } : {}),
   });
   const cfg = loadPodConfig({
     AE_ORG_ID: ORG_ID,

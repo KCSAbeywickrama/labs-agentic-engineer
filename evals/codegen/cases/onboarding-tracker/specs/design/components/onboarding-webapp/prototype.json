@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 3,
+  "name": "Onboarding Tracker",
+  "entryScreen": "screen.dashboard",
+  "roles": [
+    { "id": "HRCoordinator", "name": "HR Coordinator" },
+    { "id": "ITStaff", "name": "IT Staff" },
+    { "id": "FacilitiesStaff", "name": "Facilities Staff" },
+    { "id": "Admin", "name": "Admin" }
+  ],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.validation-error", "name": "Validation errors" },
+    { "id": "state.failed", "name": "Onboarding service failed" }
+  ],
+  "screens": [
+    { "id": "screen.dashboard", "name": "Active onboardings", "roleIds": ["HRCoordinator"] },
+    { "id": "screen.new-onboarding", "name": "New onboarding", "roleIds": ["HRCoordinator"] },
+    { "id": "screen.onboarding-detail", "name": "Onboarding detail", "roleIds": ["HRCoordinator"] },
+    { "id": "screen.add-task", "name": "Add task", "roleIds": ["HRCoordinator"] },
+    { "id": "screen.hr-tasks", "name": "HR tasks", "roleIds": ["HRCoordinator"] },
+    { "id": "screen.it-tasks", "name": "IT tasks", "roleIds": ["ITStaff"] },
+    { "id": "screen.facilities-tasks", "name": "Facilities tasks", "roleIds": ["FacilitiesStaff"] },
+    { "id": "screen.templates", "name": "Task templates", "roleIds": ["Admin"] },
+    { "id": "screen.edit-template", "name": "Task template", "roleIds": ["Admin"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["HRCoordinator", "ITStaff", "FacilitiesStaff", "Admin"] },
+    { "id": "screen.settings", "name": "Settings", "roleIds": ["HRCoordinator", "ITStaff", "FacilitiesStaff", "Admin"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["HRCoordinator", "ITStaff", "FacilitiesStaff", "Admin"] }
+  ],
+  "flows": [
+    { "id": "flow.manage-onboarding", "name": "Manage onboarding", "roleId": "HRCoordinator",
+      "screenIds": ["screen.dashboard", "screen.new-onboarding", "screen.onboarding-detail", "screen.add-task", "screen.hr-tasks"] },
+    { "id": "flow.it-queue", "name": "IT task queue", "roleId": "ITStaff", "screenIds": ["screen.it-tasks"] },
+    { "id": "flow.facilities-queue", "name": "Facilities task queue", "roleId": "FacilitiesStaff", "screenIds": ["screen.facilities-tasks"] },
+    { "id": "flow.templates", "name": "Template management", "roleId": "Admin", "screenIds": ["screen.templates", "screen.edit-template"] }
+  ]
+}

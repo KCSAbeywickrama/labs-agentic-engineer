@@ -175,6 +175,12 @@ export interface TurnStarterDeps {
    * bundle over the snapshot (nothing persists).
    */
   room?: JoinRoom;
+  /**
+   * The caller saves a roomless turn's edits itself, by folding its stream
+   * into its own store (the playground's project folder). The pod never sets
+   * it: there, only the Room's committer saves.
+   */
+  callerSavesEdits?: boolean;
   /** Who reads the turns' prose (`console` in the pod; absent in a local run). */
   surface?: Surface;
   /** The pod's org, named on provider log lines. */
@@ -256,9 +262,9 @@ export class TurnStarter {
   /** Start a browser turn in the project's current thread; resolves to its turn id. */
   async startProjectTurn(req: { project: string; conversationId: string; input: TurnInput; credit: Credit }): Promise<string> {
     const conn = this.admissible(req.input);
-    // Only the Room's committer saves a revision: a batch on a roomless turn
-    // would be applied to a throwaway bundle and read as done.
-    if (req.input.prototypeFeedback && !this.deps.room) throw feedbackNeedsRoom();
+    // A revision must be saved: a batch on a roomless turn whose caller does
+    // not save its edits would be applied to a throwaway bundle and read as done.
+    if (req.input.prototypeFeedback && !this.deps.room && !this.deps.callerSavesEdits) throw feedbackNeedsRoom();
     const lookup = await this.lookup(req.project);
     const { spec, flow } = turnSpecFor(req.input.instruction, lookup, req.input.prototypeFeedback);
     const material = await this.material(req.input, spec, () => this.projectDirs(req.project, lookup), conn);

@@ -541,11 +541,12 @@ test("rewalk: numbering takes the next free rewalk-<n> and stages under a short,
 
 // --- prompts ----------------------------------------------------------------
 
-test("prompts: planner and walker both carry the wired-mode auth semantics; the planner the DSL-controls rule", () => {
+test("prompts: planner and walker both carry the wired-mode auth semantics; the planner the prototype-controls rule", () => {
   const planner = plannerPrompt(["Employee"]);
   assert.ok(planner.includes(WIRED_AUTH_SEMANTICS));
   assert.match(planner, /READ-ONLY/);
-  assert.match(planner, /the DSL wins for the walk/);
+  assert.match(planner, /the prototype wins for the walk/);
+  assert.doesNotMatch(planner, /wireframes\.dsl —/, "the walk is derived from the prototype, not the wireframes");
   const walker = walkerPrompt({ baseUrl: "http://localhost:5173/", roles: ["Employee"], items: [], mustNot: [] });
   assert.ok(walker.includes(WIRED_AUTH_SEMANTICS));
 });

@@ -151,7 +151,7 @@ export type { Equal } from "./type-equal.js";
 // --- The fold surface --------------------------------------------------------
 export { FileBundle, lf, FRONTMATTER_RE } from "./bundle.js";
 export type { PlannedWrite, WritePlan } from "./bundle.js";
-export { writeWithRenderCheck } from "./prototype-gate.js";
+export { isPrototypePath, writeWithRenderCheck } from "./prototype-gate.js";
 export type { FileWrite, PrototypeFileTexts, PrototypeRenderCheck } from "./prototype-gate.js";
 export { toChange, applyToolCall, isFileMutationTool, opForTool, readToolInputPath } from "./change.js";
 

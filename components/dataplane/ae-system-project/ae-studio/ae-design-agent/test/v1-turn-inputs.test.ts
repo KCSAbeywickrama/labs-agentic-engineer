@@ -316,6 +316,22 @@ test("a /prototype Room turn carries the review batch into the brief and the jou
   }
 });
 
+test("a roomless /prototype turn takes a review batch when its caller saves the edits (the playground)", async () => {
+  const model = mockModel([{ kind: "text", text: "ok" }]);
+  const edge = await startEdge({ models: [model], callerSavesEdits: true });
+  try {
+    const tok = await edge.token();
+    const res = await startTurn(edge, tok, { instruction: "/prototype expense-web", prototypeFeedback: BATCH });
+    assert.equal(res.status, 202, await res.clone().text());
+    const { turnId } = (await res.json()) as { turnId: string };
+    await streamOf(edge, tok, turnId);
+    const stored = await edge.store.get(edge.threads.current(PROJECT).conversationId);
+    assert.deepEqual(stored!.turns[0]?.prototypeFeedback, BATCH);
+  } finally {
+    await edge.close();
+  }
+});
+
 test("a review batch rides only a bare or same-component /prototype Room turn, never with an aim, and JSON only", async () => {
   const anchor = { file: "specs/requirements/prd.md", nodes: [{ name: "Goals", kind: "heading" }] };
   const room = await startEdge({ room: fakeRoom });

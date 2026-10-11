@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 3,
+  "name": "Clinic",
+  "entryScreen": "screen.account",
+  "roles": [
+    { "id": "Patient", "name": "Patient" },
+    { "id": "Doctor", "name": "Doctor" },
+    { "id": "Receptionist", "name": "Receptionist" }
+  ],
+  "states": [
+    { "id": "state.default", "name": "Default" },
+    { "id": "state.empty", "name": "Nothing to show" },
+    { "id": "state.validation-error", "name": "Validation errors" },
+    { "id": "state.conflict", "name": "Slot taken or inside 2-hour cutoff" },
+    { "id": "state.failed", "name": "Clinic service failed" }
+  ],
+  "screens": [
+    { "id": "screen.my-appointments", "name": "My appointments", "roleIds": ["Patient"] },
+    { "id": "screen.browse-slots", "name": "Available slots", "roleIds": ["Patient"] },
+    { "id": "screen.reschedule", "name": "Reschedule appointment", "roleIds": ["Patient"] },
+    { "id": "screen.schedule", "name": "My day", "roleIds": ["Doctor"] },
+    { "id": "screen.my-slots", "name": "My slots", "roleIds": ["Doctor"] },
+    { "id": "screen.publish-slots", "name": "Publish slots", "roleIds": ["Doctor"] },
+    { "id": "screen.visit-note", "name": "Visit note", "roleIds": ["Doctor"] },
+    { "id": "screen.front-desk", "name": "Front desk", "roleIds": ["Receptionist"] },
+    { "id": "screen.book-for-patient", "name": "Book for patient", "roleIds": ["Receptionist"] },
+    { "id": "screen.account", "name": "Account", "roleIds": ["Patient", "Doctor", "Receptionist"] },
+    { "id": "screen.settings", "name": "Settings", "roleIds": ["Patient", "Doctor", "Receptionist"] },
+    { "id": "screen.signed-out", "name": "Signed out", "roleIds": ["Patient", "Doctor", "Receptionist"] }
+  ],
+  "flows": [
+    { "id": "flow.my-appointments", "name": "My appointments", "roleId": "Patient",
+      "screenIds": ["screen.my-appointments", "screen.browse-slots", "screen.reschedule"] },
+    { "id": "flow.my-day", "name": "My day", "roleId": "Doctor",
+      "screenIds": ["screen.schedule", "screen.visit-note", "screen.my-slots", "screen.publish-slots"] },
+    { "id": "flow.front-desk", "name": "Front desk", "roleId": "Receptionist",
+      "screenIds": ["screen.front-desk", "screen.book-for-patient"] }
+  ]
+}

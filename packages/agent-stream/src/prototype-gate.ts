@@ -74,6 +74,14 @@ export type FileWrite = { op: "add"; path: string; content: string } | { op: "ed
 
 const PROTOTYPE_PATH = /^specs\/design\/components\/[^/]+\/prototype\.(json|tsx)$/;
 
+/**
+ * True for either file of a web-application's prototype pair. A write to one is
+ * the write a client fold cannot judge: the render check runs only in the host.
+ */
+export function isPrototypePath(path: string): boolean {
+  return PROTOTYPE_PATH.test(path);
+}
+
 /** Same move as every other gate: a refused write created nothing to edit. */
 const REMEDY =
   "The write was refused and the file is unchanged. Fix every finding and retry: an editFile for a local " +
