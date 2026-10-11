@@ -10,7 +10,7 @@
 #  - Self-approval refusal (a requester cannot approve their own request) cannot be walked: no test identity holds both Requester and Approver, so no item exists; a person could add one by hand if such a user exists.
 #  - Requests are scoped to the caller (a Requester sees only their own), but only one Requester identity is available by role switch, so isolation between two requesters is not checked.
 #  - Beyond the Requester and Approver refusals listed, the Warehouse Clerk's grants (read-all requests) reach the Approval queue and Approval detail screens, and the Requester's grants reach the Manage catalogue screen load, so no refusal items were written for those.
-#  - The Account and Settings screens are in no flow and were not walked; the Settings screen offers an email notifications switch although the PRD puts notifications out of scope.
+#  - The Account and Settings screens are in no flow and were not walked.
 #  - The prototype shows the item catalogue as read-only for Requesters and edits only item name, unit, price and reorder level; the PRD and prototype agree, but SKU and On hand are not editable anywhere.
 #  - The prototype raises and receives single-line requests only, while the API allows several lines per request; multi-line behaviour is not covered.
 #  - Reject requires a reason in the prototype; the API treats it as optional, so a reject without reason is not tested.

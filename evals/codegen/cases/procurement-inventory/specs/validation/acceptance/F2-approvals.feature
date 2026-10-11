@@ -1,6 +1,6 @@
 Feature: Approvals
 
-  @story-4
+  @story-F2.1
   Rule: An approver can see pending requests
 
     Scenario: Pending request appears in the queue
@@ -8,7 +8,7 @@ Feature: Approvals
       When Alan the approver opens the approval queue
       Then Rita's request is listed as pending
 
-  @story-5
+  @story-F2.2
   Rule: An approver can approve or reject a pending request whose total is within the approval limit of 5000
 
     Scenario: Approving within the limit
@@ -21,7 +21,7 @@ Feature: Approvals
       When Alan rejects it with the reason "Not budgeted"
       Then the request shows as rejected
 
-  @story-6
+  @story-F2.3
   Rule: No approver can approve a request whose total is above 5000
 
     @negative
@@ -30,7 +30,7 @@ Feature: Approvals
       When Alan the approver tries to approve it
       Then the request is still pending
 
-  @story-5
+  @story-F2.2
   Rule: An approver cannot approve their own request
 
     @negative

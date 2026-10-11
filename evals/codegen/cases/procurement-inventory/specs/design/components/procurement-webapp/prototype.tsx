@@ -20,7 +20,7 @@ import { useState, type ReactNode } from "react";
 import {
   Alert, AppShell, Breadcrumbs, Button, Detail, Dialog, EmptyState, Field, Form,
   Heading, Screen, Section, Stat, StatGroup, Table, ValidationSummary, defineApp,
-  useCollection, useDisplayState, useNav, useParams, useRole, useValue,
+  useCollection, useDisplayState, useNav, useParams, useRole,
 } from "@wso2/prototype-kit";
 
 interface Item {
@@ -625,18 +625,14 @@ function Account() {
 }
 
 function Settings() {
-  const role = useRole();
-  const navigate = useNav();
   return (
     <Shell>
       <Heading id="heading.settings" text="Settings" />
-      <Form
-        id="form.settings"
-        onSubmit={() => navigate.go(roleHome(role))}
-        actions={<Button id="btn.save-settings" label="Save settings" emphasis="primary" submit />}
-      >
-        <Field id="field.email-notifications" label="Email me when a request I follow changes" type="switch" defaultValue="on" />
-      </Form>
+      <EmptyState
+        id="empty.settings"
+        title="Nothing to set up"
+        text="Procurement and Stock sends no email or notifications: open the app to see where each request stands."
+      />
     </Shell>
   );
 }

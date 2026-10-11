@@ -1,6 +1,6 @@
 Feature: Purchase requests
 
-  @story-1
+  @story-F1.1
   Rule: A requester can browse the catalogue
 
     Scenario: Browsing the catalogue
@@ -8,7 +8,7 @@ Feature: Purchase requests
       When she opens the catalogue
       Then she sees catalogue items with their names and unit prices
 
-  @story-2
+  @story-F1.2
   Rule: A purchase request holds catalogue items with quantities and starts pending
 
     Scenario: Raising a request
@@ -23,7 +23,7 @@ Feature: Purchase requests
       When she tries to raise a request with no items
       Then her list of requests has no new request
 
-  @story-3
+  @story-F1.3
   Rule: A requester sees the status of only their own requests
 
     Scenario: Following a request

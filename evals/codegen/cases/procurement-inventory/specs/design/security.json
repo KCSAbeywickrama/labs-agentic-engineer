@@ -48,21 +48,21 @@
     {
       "name": "Requester",
       "description": "Browses the catalogue and raises and follows their own purchase requests.",
-      "stories": [1, 2, 3],
+      "stories": ["F1.1", "F1.2", "F1.3"],
       "grants": ["catalogue:read", "requests:read", "requests:submit"],
       "assignTo": ["Requesters"]
     },
     {
       "name": "Approver",
       "description": "Reviews pending requests and approves or rejects them within the approval limit.",
-      "stories": [4, 5, 6],
+      "stories": ["F2.1", "F2.2", "F2.3"],
       "grants": ["requests:read-all", "requests:approve", "requests:reject"],
       "assignTo": ["Approvers"]
     },
     {
       "name": "Warehouse Clerk",
       "description": "Receives goods against approved orders, views stock, ledger and low-stock items, and manages the item catalogue.",
-      "stories": [7, 8, 9, 10, 11, 12],
+      "stories": ["F3.1", "F3.2", "F3.3", "F3.4", "F4.1", "F4.2"],
       "grants": ["requests:read-all", "receipts:create", "stock:read", "catalogue:read", "catalogue:manage"],
       "assignTo": ["Warehouse Clerks"]
     }

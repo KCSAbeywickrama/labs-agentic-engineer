@@ -1,6 +1,6 @@
 Feature: Catalogue management
 
-  @story-11
+  @story-F4.1
   Rule: A warehouse clerk can add items, which start with 0 in stock
 
     Scenario: Adding an item
@@ -15,7 +15,7 @@ Feature: Catalogue management
       When she tries to add an item named uniquely for this run
       Then the catalogue has no new item
 
-  @story-12
+  @story-F4.2
   Rule: A warehouse clerk can edit an item's name, unit, unit price and reorder level
 
     Scenario: Editing the unit price and reorder level

@@ -11,6 +11,6 @@
     { "kind": "platform-resource", "name": "inventory-db", "resourceType": "postgres-cnpg", "description": "Stores items, on-hand levels and the append-only stock ledger." }
   ],
   "description": "Owns stock and the item catalogue: items (added and edited here, starting with 0 on hand), on-hand levels and the append-only stock ledger, persisted in its dedicated inventory-db. Deployed separately because the requirements keep stock in its own service that only the procurement API calls. Receipts are idempotent by reference and write ledger entries atomically with the level change. Does not know about requests, users or approvals.",
-  "stories": [1, 2, 7, 8, 9, 10, 11, 12],
+  "stories": ["F1.1", "F1.2", "F3.1", "F3.2", "F3.3", "F3.4", "F4.1", "F4.2"],
   "skillsPinned": ["openapi-conventions", "ballerina"]
 }
