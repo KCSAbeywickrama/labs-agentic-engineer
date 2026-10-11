@@ -31,7 +31,7 @@ import {
 } from "y-prosemirror";
 import type * as Y from "yjs";
 import type { Node as ProseMirrorNode } from "prosemirror-model";
-import { AgentInsertion } from "./agent-mark.js";
+import { AGENT_INSERTION, AgentInsertion } from "./agent-mark.js";
 
 // AgentInsertion rides in the ONE shared schema (console editor, seeding,
 // committer serialization, agent diff application) — its markdown render is
@@ -40,6 +40,19 @@ const extensions = [StarterKit, AgentInsertion];
 
 const manager = new MarkdownManager({ extensions });
 const schema = getSchema(extensions);
+
+/**
+ * Whether text directly inside a node of this type may carry the
+ * agentInsertion mark. A code block allows no marks, and a Y structure the
+ * schema rejects is not merely unrendered: y-prosemirror, reading it with
+ * this schema (the console's editor and line index do on every update),
+ * deletes the whole rejected block from the shared doc.
+ */
+export function allowsAgentInsertion(nodeName: string): boolean {
+  const type = schema.nodes[nodeName];
+  const mark = schema.marks[AGENT_INSERTION];
+  return type !== undefined && mark !== undefined && type.allowsMarkType(mark);
+}
 
 /** Parse markdown into a ProseMirror Node (the diff-apply input, #86 ph6). */
 export function markdownToNode(markdown: string): ProseMirrorNode {
