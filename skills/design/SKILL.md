@@ -58,14 +58,14 @@ declined for now; leave it alone.
 ## Reference documents ground the design
 
 The kickoff may have attached reference documents — and for design, the ones
-that matter most are the user's own sketches: a drawn wireframe, a form
+that matter most are the user's own sketches: a drawn screen sketch, a form
 screenshot, a mockup image. They are attached to this conversation natively
 (images and PDFs) or in your workspace files (text). When any exist:
 
-- **A user-drawn wireframe sketch is the layout brief.** `wireframes.dsl`
-  follows what the user drew — screen structure, navigation, the controls
-  they placed — refined, not reinvented. Look at the image before writing a
-  single screen.
+- **A user-drawn screen sketch is the layout brief of the prototype.** The
+  `/prototype` flow reads it after the design. In `/design` it confirms which
+  screens and fields the design must serve: look at the image before you
+  write the flows and the operations.
 - A form document (paper form, PDF) is the field inventory: the screens that
   digitize it carry its fields and sections.
 - Where a sketch and the PRD disagree, the PRD's scope wins, but the sketch's
@@ -154,19 +154,20 @@ turn — apply them directly, and load one only if you find you do not have it.
 5. **Security design** (`security-design`) — `specs/design/security.json` when
    the design has sign-in or roles.
 6. **Per-component artifacts** — every `service` gets `openapi.yaml`
-   (`openapi-conventions`); every `web-application` gets `wireframes.dsl`
-   (`wireframes`); every `ai-agent` gets `agent.afm.md` (`agent-building`).
+   (`openapi-conventions`); every `ai-agent` gets `agent.afm.md`
+   (`agent-building`). A `web-application` gets no screen artifact here: the
+   `/prototype` flow writes its screens after the design.
 7. **Grants pass** (`security-design`) — re-read `specs/design/security.json`
-   now that the screens and the operations exist. Step 5 wrote each role's
-   `grants` against a design it could only intend; the operations the screens
-   in each role's flow load are decidable only here. Walk each flow, open the
-   contract behind each screen, and make sure the role holds the handle of the
-   operation each screen loads. Make sure also that each field the screen
-   draws (a column, a value, a name in a select or a list) comes from that
-   operation, or from one list operation that each role loading the screen
-   may call. A field that no operation gives is a gap in the contract, and the
+   now that the operations exist. Step 5 wrote each role's `grants` against
+   a design it could only intend; the operations each role's flow calls are
+   decidable only here. Walk each flow in `specs/design/flows/*.md`, open the
+   `openapi.yaml` behind each step, and make sure the role holds the handle of
+   the operation each step loads. Make sure also that each field the step
+   shows the user (a column, a value, a name in a select or a list) comes from
+   that operation, or from one list operation that each role in the flow may
+   call. A field that no operation gives is a gap in the contract, and the
    build cannot change the contract: add the field now to the response of the
-   operation that the screen loads (a name next to its id). Do not widen a
+   operation that the step loads (a name next to its id). Do not widen a
    scope to close the gap. The service fills a name from its own records,
    never from a name that the client sends. Re-emit a file only if it
    changes. Skip
@@ -213,6 +214,7 @@ listing only the dependencies still unresolved, each as a link to its
 definition (`[<name>](aep://spec/specs/design/dependencies/<name>/dependency.json)`,
 the `architecture` skill's closing form) followed by the one thing you need,
 so the user opens it with a click; and
-a one-line pointer to `specs/design/`. The dependency narration during the
+a one-line pointer to `specs/design/`, with `/prototype` as the next step when
+the design has a `web-application`. The dependency narration during the
 turn (the `architecture` skill owns its format) already carried the
 play-by-play.

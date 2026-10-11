@@ -220,15 +220,16 @@ const FLOW_SUPPORTING_SKILLS: Record<string, string[]> = {
   // than read. Inlined, the same bytes sit INSIDE the marked prompt, cached from
   // the first step and again on the next turn.
   //
-  // Three of them are conditional (a project with no `web-application` never
-  // writes a wireframes.dsl), but which components exist is decided DURING the
-  // turn — there is nothing to condition on when the prompt is composed, and a
-  // cached read costs a tenth of a re-prefill. Org-authored design skills stay
+  // Two of them are conditional (a design with no sign-in writes no
+  // security.json, one with no `ai-agent` needs no agent-building), but which
+  // components exist is decided DURING the turn — there is nothing to
+  // condition on when the prompt is composed, and a cached read costs a tenth
+  // of a re-prefill. Org-authored design skills stay
   // lazy: this map is flow wording and cannot know a given org's catalog.
   //
   // `acceptance-criteria` writes the Gherkin features a validation run drives
   // (ADR-0029), authored from the PRD alone.
-  design: ["grilling", "cell-design", "architecture", "security-design", "openapi-conventions", "wireframes", "agent-building", "acceptance-criteria"],
+  design: ["grilling", "cell-design", "architecture", "security-design", "openapi-conventions", "agent-building", "acceptance-criteria"],
   // `/prototype` derives from the finished design, so it reads what that design
   // wrote: the cell, the roles and the API. The design-system skill says how an
   // Oxygen screen is composed from the kit's components; the kit itself is in
@@ -252,8 +253,9 @@ const FLOW_BRIEFS: Record<string, string> = {
   prototype:
     "Generate the prototype of each web-application the design declares. The design is the input: read " +
     "specs/design/design.cell for the web-application components, the roles in specs/design/security.json, " +
-    "each web-application's API (the openapi.yaml of every component it depends on), the numbered user " +
-    "stories in specs/requirements/prd.md, and the key flows in specs/design/flows/*.md. Cover them: every " +
+    "each web-application's API (the openapi.yaml of every component it depends on), the user stories in " +
+    "specs/requirements/features/F<n>-*.md, the product-wide requirements in specs/requirements/product-wide.md, " +
+    "and the key flows in specs/design/flows/*.md. Cover them: every " +
     "design flow a web-application's users walk becomes a flow of its prototype, and every user story gets at " +
     "least one screen, unless the product gives it no view (a platform sign-in, a backend job, a machine-facing " +
     "endpoint); name any story you set aside in your closing. Per web-application write " +
@@ -424,7 +426,7 @@ function specBody(turn: Exclude<TurnSpec, { kind: "plan" }>): string {
       const withText = scoped ? `${base}\n\n${scoped}` : base;
       // Reference documents ride flows the same way they ride start turns:
       // a flow generates artifacts, and an attached sketch IS the brief for
-      // wireframes. No documents → byte-identical to a plain flow turn.
+      // the prototype. No documents → byte-identical to a plain flow turn.
       return withText + references(turn.references);
     }
     case "start":

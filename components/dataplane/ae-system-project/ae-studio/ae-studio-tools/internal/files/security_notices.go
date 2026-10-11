@@ -32,7 +32,8 @@ const designPrefix = "specs/design/"
 
 // allowedDesignExts are the file extensions the design bundle holds:
 // markdown, YAML (OpenAPI), JSON (design.json, security.json, projections),
-// the design.cell DSL and the wireframes DSL.
+// the design.cell DSL and the wireframes DSL of designs written before the
+// prototype replaced it.
 var allowedDesignExts = []string{".md", ".yaml", ".yml", ".json", ".cell", ".dsl"}
 
 // Warning codes of the security design's coverage notices. They name a
@@ -70,9 +71,9 @@ type treeReader interface {
 // notices for the tree this apply LANDS: "declared, used nowhere",
 // "unreachable by any role", and the INFO note that an assignTo group is one
 // the directory already holds. A coverage fact is a statement about
-// security.json read against design.cell, the wireframes and the component
-// specs together, and any of those may be untouched by this batch, so the
-// committed tree is read for the ones the batch does not carry.
+// security.json read against design.cell and the component specs together,
+// and any of those may be untouched by this batch, so the committed tree is
+// read for the ones the batch does not carry.
 //
 // It costs those reads, so it runs only when the batch touches specs/design/
 // AND the landed tree has a security.json.

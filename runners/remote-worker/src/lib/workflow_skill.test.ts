@@ -88,6 +88,8 @@ const PLATFORM_ONLY = [
   // subagent are both overlaid away.
   "### The status line",
   "gh issue comment",
+  // The tick is a body edit on GitHub, and a file edit locally.
+  "gh issue edit <number> --body-file",
   // The invocation, not the words: local mode names `git push` too, in the
   // deny-list line that forbids it.
   "git push -u origin HEAD",
@@ -102,7 +104,7 @@ const LOCAL_ONLY = [
   "`## Progress`",
   ".aep-playground",
   "no git remote, no GitHub, and no PR",
-  "dependsOn",
+  "Tick the item in `issues/<n>.md`",
 ];
 
 test("github mode carries the platform procedure and none of the local one", () => {
@@ -167,7 +169,8 @@ for (const rule of [
   // whole issue — a wait on the whole wave held one run's walk 13m36s past its
   // builder's report while the lead sat blocked on the sibling service.
   "Each subagent wakes you with its report when it finishes.",
-  "Only the commit waits for the whole issue",
+  "Only the commit waits for the whole item",
+  "Work one bug or conflict issue, or one item of the build issue, at a time.",
   // A subagent that backgrounds its own build reports "clean" while the command
   // runs on, and the run ends with it orphaned (probe 2's `sleep`, stopped at
   // session end).
@@ -263,7 +266,7 @@ for (const [file, rules] of Object.entries(REFERENCE_RULES)) {
 test("mock-verification walks and repairs a line at a time", () => {
   const skill = fs.readFileSync(path.join(LIBRARY, "mock-verification", "SKILL.md"), "utf8");
   for (const rule of [
-    // The flow is the unit and the DSL the only map: the plan is settled from
+    // The flow is the unit and the manifest the only map: the plan is settled from
     // it before the browser opens, so an unreached screen is a visible gap.
     "## What you verify",
     "## 1 · Stand it up",

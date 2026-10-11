@@ -13,5 +13,5 @@
   ],
   "description": "Single-page app for Employees, Managers and Finance to submit, review and export expense claims. Presents role-specific screens (my claims, approval queue, approved-claims export) and holds no business logic of its own — all reads and writes go through expense-api.",
   "stories": [1, 2, 3, 4, 5, 6, 7, 8, 9],
-  "skillsPinned": ["wireframes", "react-webapp", "oxygen-ui-design-system", "thunder-authentication"]
+  "skillsPinned": ["react-webapp", "oxygen-ui-design-system", "thunder-authentication"]
 }

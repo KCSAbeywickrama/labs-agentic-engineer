@@ -74,6 +74,10 @@ test("/prototype loads its skill and the brief, and trailing component names fol
   // The brief names what to read and what to write.
   assert.match(bare, /specs\/design\/design\.cell/);
   assert.match(bare, /specs\/design\/security\.json/);
+  // Stories live in the feature files, product-wide requirements beside them.
+  assert.match(bare, /specs\/requirements\/features\/F<n>-\*\.md/);
+  assert.match(bare, /specs\/requirements\/product-wide\.md/);
+  assert.doesNotMatch(bare, /prd\.md/);
   assert.match(bare, /specs\/design\/components\/<component>\/prototype\.json/);
   assert.match(bare, /manifest\) first and then prototype\.tsx/);
   assert.match(bare, /Spec sources live under specs\//);
@@ -368,7 +372,7 @@ test("eager skills are derived from the flow, not supplied by the caller", () =>
  */
 test("the instructed skill is always inlined, whatever the flow", () => {
   assert.deepEqual(eagerSkillsFor({ kind: "plan" }), ["task-planning"]);
-  assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: "wireframes" }), ["wireframes"]);
+  assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: "acceptance-criteria" }), ["acceptance-criteria"]);
   // Resolution runs through the SkillSource, so an org-authored flow inlines too;
   // a name that resolves to nothing is skipped downstream, not here.
   assert.deepEqual(eagerSkillsFor({ kind: "flow", skill: "their-own-skill" }), ["their-own-skill"]);
@@ -407,7 +411,6 @@ test("the design flow inlines its whole lineup, in lineup order", () => {
     "architecture",
     "security-design",
     "openapi-conventions",
-    "wireframes",
     "agent-building",
     "acceptance-criteria",
   ]);

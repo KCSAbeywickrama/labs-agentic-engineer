@@ -11,7 +11,7 @@ metadata:
 One page, so the design skills and the coding skills stop restating it. Each
 rule names the measurement or the incident behind it and the ADR that holds the
 argument. Nothing here is a procedure: `security-design`, `openapi-conventions`,
-`wireframes`, `thunder-authentication`, `react-webapp` and `api-management` say
+`prototype`, `thunder-authentication`, `react-webapp` and `api-management` say
 what to write; this page says what must stay true whatever they write.
 
 ## The invariants
@@ -136,5 +136,5 @@ what to write; this page says what must stay true whatever they write.
 | which handles exist, which roles hold them, who holds a role | `security.json` (`security-design`) | Thunder at Build; `gen-authz.mjs` |
 | which handle an operation needs | `openapi.yaml` `security` (`openapi-conventions`) | the gateway trait; the build gate; `gen-authz.mjs`; the mock gateway |
 | which rows an operation reaches | the operation's path (`openapi-conventions`) | the generated handler |
-| which screens exist and which role's flow walks them | `wireframes.dsl` (`wireframes`) | the walk (`mock-verification`) |
+| which screens exist and which role reaches them | `prototype.json` (`prototype`) | the walk (`mock-verification`) |
 | which operation a screen loads | `src/authz/screens.ts` (`thunder-authentication`) | `RequireOperation`, `Can`, the rail, the landing redirect |
