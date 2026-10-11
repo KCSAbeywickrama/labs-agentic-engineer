@@ -1,6 +1,7 @@
 # ADR-0040 — A design goes out of date per feature
 
-**Status:** Accepted · 2026-10-01 · Amended 2026-10-07 (the pod reports what a design run covered)
+**Status:** Accepted · 2026-10-01 · Amended 2026-10-07 (the pod reports what a design run covered) ·
+Amended 2026-10-11 (a design run's basis is read where it ended)
 **Related:** [ADR-0039](ADR-0039-requirements-are-features-with-stable-ids.md),
 [ADR-0041](ADR-0041-a-build-is-a-selection-of-features.md)
 
@@ -46,3 +47,26 @@ usage (`record-turn-usage`), and aep-api's turn ledger keeps them with the
 turn's base commit (`agent_turns.summary`, `services/aep-api/internal/spec/design_runs.go`).
 A bare `/design` reports none, which still means every feature designable at
 that commit.
+
+## Amendment 2026-10-11 — a design run's basis is read where it ended
+
+A design run now edits requirements while it runs: the gap check writes
+`*assumed*` lines and open questions
+([ADR-0050](ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md)),
+and Address comments can edit them too. Read at the commit the run started
+from, every feature the run touched was out of date as soon as the run
+finished. Decision 3 now reads as follows.
+
+- **A feature's basis is read where the run that designed it ended.** As a
+  design or Address comments run ends, the pod asks the Room for a forced
+  save, reads the project's head and reports it with the turn's usage
+  (`endRef`). The ledger keeps it as `end_ref`. A run with no end recorded is
+  read at its base commit. The run's own edits are therefore part of what it
+  designed, and only a later edit makes the feature out of date.
+- **Which features a run covered** is still read at its start for a bare
+  `/design` (every feature designable at the commit it read) and from its
+  line for `/design F1 F2`. An Address comments run counts as a design run
+  only for the features its own requirement edits reached. Every other feature
+  keeps its earlier basis, so an edit made before that run still shows as out
+  of date.
+- The status poll's coarse `designOutdated` flag follows the same rule.

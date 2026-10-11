@@ -125,11 +125,13 @@ The one TS definition of a reviewer's requests: `FeedbackRequest`,
 `prototypeHash` (SHA-256 of manifest, NUL, source). The hash is plain
 JavaScript and synchronous: Web Crypto's `crypto.subtle` exists only in secure
 contexts, and a console served over plain HTTP must still name a revision. The
-CLI, `@aep/agent-stream`, the console and the design agent's turn-input checks
-(`ae-design-agent/src/edge/turn-input.ts`) import it; the design agent's
-contract (`api/ae-design-agent/v1/openapi.yaml`) mirrors the limits. The table
-`test/fixtures/feedback-cases.json` holds them together: the kit, agent-stream
-and the design agent (`test/v1-turn-inputs.test.ts`) all assert it.
+CLI, the console and `@aep/agent-stream` import it. In AEP a comment never
+rides a turn: the console writes each queued comment as a draft in
+`specs/design/review.json` (ADR-0051), whose schema takes its text and id
+limits from here, and a prototype's Checked hash is `prototypeHash`. The
+design agent no longer validates a feedback batch (`prototypeFeedback` is
+retired). The table `test/fixtures/feedback-cases.json` pins the shape and the
+limits in the kit's own tests.
 
 The review's comment queue is headless here too (`queue.ts`), so the console
 and the CLI host keep it alike and only draw their own UI: `FeedbackQueue`

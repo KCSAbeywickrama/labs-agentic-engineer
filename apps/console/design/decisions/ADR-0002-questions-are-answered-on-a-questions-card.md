@@ -1,6 +1,8 @@
 # ADR-0002 — The agent's questions are answered on a Questions card; the chat points to it
 
-**Status:** Accepted · 2026-10-06
+**Status:** Accepted · 2026-10-06 · Amended 2026-10-11 by
+[ADR-0005](ADR-0005-the-design-card-reviews-the-designs-files.md) (a design
+run's questions are answered on the Design card)
 **Supersedes:** point 4 ("a single `QuestionCard` renders one question
 compactly or several as a form") of console
 [ADR-0012](https://github.com/wso2/labs-agentic-engineer/blob/classic-console/apps/console/design/decisions/ADR-0012-agent-hitl-tool-call-question-cards.md)
@@ -67,3 +69,15 @@ answered and finds Send only after scrolling past all of it.
   which empties the card.
 - User messages in the chat log now keep their turn's scope, read from the
   history's `scope`; the feature scope carries only the feature's ID.
+
+## Amendment 2026-10-11 — a design run asks no form
+
+A design run does not stop to ask, and does not ask its questions in the
+chat
+([root ADR-0050](../../../../docs/decisions/ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md)).
+Its questions are stored where their answers go: a feature file's open
+questions, or the agent's question on a review comment. They are answered on
+the Design card ([ADR-0005](ADR-0005-the-design-card-reviews-the-designs-files.md)),
+and the chat only points there. The Questions card still answers what the
+agent asks with `ask_question` and `ask_questions`, as in an interview. Read the Rejected entry's
+"the agent also asks from design and prototype turns" as history.

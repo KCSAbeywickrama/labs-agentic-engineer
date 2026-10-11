@@ -2,7 +2,10 @@
 
 **Status:** Accepted · 2026-10-03 · Superseded in part by
 [ADR-0002](ADR-0002-the-revision-lands-in-the-open-review.md): Send no
-longer closes the overlay.
+longer closes the overlay; and by
+[ADR-0005](ADR-0005-the-design-card-reviews-the-designs-files.md)
+(2026-10-11): the Prototype tab and route, Make prototype, Send all with
+`prototypeFeedback`, and the tab's reviewed dot.
 **Related:** [repo ADR-0042](../../../../docs/decisions/ADR-0042-a-prototype-is-react-on-a-fixed-kit-in-a-sandbox.md)
 (the kit, the frame, the Oxygen theme). Spec: #860.
 
@@ -54,3 +57,20 @@ listens, so feedback has to reach the same conversation as everything else.
   elements by id: the labels the frame shows are not part of the batch.
 - The "reviewed" dot is per browser: a browser that never looked at an
   existing prototype shows the dot.
+
+## Superseded in part 2026-10-11
+
+By [ADR-0005](ADR-0005-the-design-card-reviews-the-designs-files.md) and
+[root ADR-0050](../../../../docs/decisions/ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md):
+
+- **Point 1:** the overlay stands. It opens from the prototype's item on the
+  Design card (`design?art=prototype-<c>&review=<c>`). The Prototype tab, the
+  `/prototype` route and Make prototype are gone: Design makes the prototype.
+- **Point 3:** the queue stays, but each queued comment is a Pending draft on
+  the prototype in `specs/design/review.json`. Address comments on the Design
+  card's Overview sends it with every other waiting comment. Send all, the
+  `/prototype <component>` turn and `prototypeFeedback` are retired.
+- **Point 4:** the Open prototype note stays and opens the prototype's item.
+  The reviewed dot went with the tab; the file's Checked replaces it.
+
+Point 2 (the kit's frame and reducer) stands.

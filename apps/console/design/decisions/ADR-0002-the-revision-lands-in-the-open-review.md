@@ -1,6 +1,8 @@
 # ADR-0002 — Send keeps the prototype review open; the revision lands in it
 
-**Status:** Accepted · 2026-10-06
+**Status:** Accepted · 2026-10-06 · points 1 and 4 superseded 2026-10-11 by
+[ADR-0005](ADR-0005-the-design-card-reviews-the-designs-files.md) (there is no
+Send)
 **Supersedes:** [ADR-0001](ADR-0001-prototype-review-is-a-full-screen-overlay.md)
 on "the overlay closes on success" (Send closes the overlay and opens the chat).
 Spec: #885 (#889).
@@ -45,3 +47,14 @@ asking each time, and queueing a second turn automatically.
   mid-turn forgets the held batch.
 - The chat panel still opens on Send, behind the review; there is no
   scroll-to-turn yet, so What changed opens the chat at its latest turn.
+
+## Superseded in part 2026-10-11
+
+[ADR-0005](ADR-0005-the-design-card-reviews-the-designs-files.md) removes
+Send from the review. Comments are drafts in `specs/design/review.json`, sent
+by Address comments on the Design card's Overview. So point 1 (the held batch
+and the disabled Send) and point 4 (the sent batch put back with Retry) no
+longer apply. Points 2 and 3 stand, for any design run that may rewrite the
+prototype (Design or Address comments). The review shows the last ready
+revision while the run works, and swaps in the new one in place when the run
+ends. The review's session now lives in a page-wide store, not in the tab.

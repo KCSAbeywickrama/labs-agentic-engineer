@@ -538,6 +538,8 @@ a property of the *document*, not of any conversation. An ordinary one gates not
 and build proceed with it outstanding; a **blocking question** (below) is the exception. An
 entry marked *deferred* is one the user has declined for now, which tells the agent to stop
 raising it.
+A design run's gap check writes one for a call only the user can make; a designed
+feature's open questions are answered on the Design card.
 _Avoid_: interview question (the agent's live request for the user's input, which is a
 mechanism for closing an open question, not the thing itself).
 
@@ -642,13 +644,10 @@ _Avoid_: open question (the ordinary kind, which gates nothing).
 **Assumed line**:
 A line closed by `*assumed*`: one the agent decided because the user has not answered
 it. The tag is the user's review; it comes off when they confirm or change the line.
-_Avoid_: proposal, draft line (there are no proposals; edits land directly).
-
-**Design review**:
-The design card: one catalog of what a design yields — prototype, flows, roles, data
-model, architecture, contracts, security, acceptance — each tagged business or
-technical, filtered All · Business · Technical.
-_Avoid_: design approval (nothing is approved; designs go out of date per feature).
+The gap check writes them into a feature's Decisions, and a technical decision
+carries the same tag.
+_Avoid_: proposal, draft line (there are no proposals; edits land directly), agent
+decision.
 
 **Basis (of a feature)**:
 What a feature's design reads: its file's lines by their words, then the product-wide
@@ -669,3 +668,66 @@ this one. It gets its own repair issue, labelled `regression`. One that failed t
 too is *still failing*; one absent there is a plain failure.
 _Avoid_: recurrence (a later attempt of the same version meeting the same failure).
 
+## Design review (`specs/design/review.json`, `apps/console`)
+
+The loop is Design → Address comments → Build (ADR-0050); the review state is one file in
+the spec repo (ADR-0051). The console's words for each term are in
+`apps/console/design/lexicon.md`.
+
+**Design review**:
+The Design card: the files a design run generates, in the order it makes them, each
+reviewed like a file in a pull request (ticked Checked and commented on from its title
+line), with the comments sent together by Address comments. Nothing is approved: Build is
+the only decision, and nothing on the review blocks it.
+_Avoid_: design approval, sign-off.
+
+**Gap check**:
+The first step of a design run. The agent walks each actor's work from an empty database
+to find what the built product must do that no requirement says, and closes each hole:
+with an assumed line in the feature, with a technical decision, or with an open question.
+_Avoid_: review, validation (both judge what exists; this finds what is missing).
+
+**Technical decision**:
+A line in `specs/design/decisions.md`: a choice the design made between real options that
+only an engineer would notice. It is tagged with the artifact it shapes and the features it
+serves, and stays `*assumed*` until the user confirms it. A choice a product user would
+notice is a requirement instead. A fact about an outside service is that dependency's
+assumption (`assumptions.md`).
+_Avoid_: ADR, design note.
+
+**Prototype**:
+The clickable mock of one web application: React on the prototype kit, made by Design
+and reviewed on the Design card. Build implements it as the app's screen brief and never
+imports or copies it.
+_Avoid_: wireframe (retired), mockup.
+
+**Checked**:
+A reviewer's tick on one design file, stored as the file's content hash when ticked, so a
+new revision unticks it. Like GitHub's Viewed, it records that someone looked, not that the
+file is right, and it gates nothing. One tick per file, shared by everyone.
+_Avoid_: approved, accepted, reviewed.
+
+**Review comment**:
+A comment on one design file in `review.json` (on a prototype, also its screen and
+elements). A **draft** (Pending in the console) waits for Address comments; **sent** is
+with the agent; **addressed** carries the agent's one-line reply and the revision;
+**reopened** goes back in the next batch. On an ambiguous comment the agent writes a
+**question** and leaves it sent; the user's **answer** reopens it.
+_Avoid_: feedback (the retired prototype batch), annotation, pin.
+
+**Address comments**:
+The design run that takes every waiting comment at once (`/address-comments`, a branch of
+the design skill). It starts at the earliest file any comment touches, regenerates
+downward in generation order, and replies to each comment. It is the only way a comment
+reaches the agent.
+_Avoid_: Send to agent, revise, feedback turn.
+
+**Revision (of a design file)**:
+How many completed agent turns changed the file (`artifactRevisions`); the run that makes
+it writes revision 1. Shown on the file's title line, and named in the agent's replies.
+_Avoid_: version (a spec version is a build's tag).
+
+**Wireframes** — _retired_:
+`wireframes.dsl`, the per-web-application sketch Design drew and Build read until the
+prototype replaced it (ADR-0050). It is neither written, read nor accepted.
+_Avoid_: wireframe for a prototype.

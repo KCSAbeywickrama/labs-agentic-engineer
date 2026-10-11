@@ -66,3 +66,21 @@ static stages and the `INVALID_PROTOTYPE` code with its `findings` are in
 Each child runs with a 384 MiB heap cap (`RENDER_HEAP_MB` in the kit), and that
 memory counts against the pod container's 1 Gi limit, so the pod runs one check
 at a time (`MAX_RENDER_CHECKS`, [pod-memory-bounds.md](./pod-memory-bounds.md)).
+
+Before the render, `checkPrototypeFiles` type-checks `prototype.tsx` in the pod's
+own process (the kit's type stage, `TYPE_ERROR`). A write that leaves a renamed
+field at one stale use is refused with `INVALID_PROTOTYPE` and the line to fix,
+instead of landing a prototype that draws `$NaN`. Address comments runs make
+exactly that edit. The compiler and its declarations stay resident after the
+first check (pod-memory-bounds.md).
+
+## The design lineup and the org's design system
+
+`/design` and `/address-comments` resolve to the `design` skill (the second as
+a `COMMAND_FLOWS` branch with its own brief), so both inline the same lineup,
+byte for byte, and share the cached prefix. A design turn and a `/prototype`
+turn need the organization's design system, and the lineup holds a place for it
+(`DESIGN_SYSTEM` in `FLOW_SUPPORTING_SKILLS`). `eagerSkillsFor` fills that place
+with the skill named on the first line of the `## UI design system` section of
+the `organization` skill (`orgDesignSystem`). When the organization names none,
+nothing is inlined there. No design system skill is hard-coded.

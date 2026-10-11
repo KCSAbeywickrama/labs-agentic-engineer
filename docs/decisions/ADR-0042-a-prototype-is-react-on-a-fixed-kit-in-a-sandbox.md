@@ -1,6 +1,9 @@
 # ADR-0042 — A prototype is React on a fixed kit, run in a sandbox
 
-**Status:** Accepted · 2026-10-02 · Amended 2026-10-07 (the agent's gate runs in the org's AE Studio)
+**Status:** Accepted · 2026-10-02 · Amended 2026-10-07 (the agent's gate runs in the org's AE Studio) ·
+Amended 2026-10-11 by [ADR-0050](ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md)
+(Design makes the prototype and Build reads it; review comments live in
+`specs/design/review.json`, not on a `/prototype` turn)
 **Supersedes:** the json-render prototype decision, "ADR-0035 — The prototype
 is a json-render spec over a closed catalog", which exists only on the unmerged
 v2 branch `feat/813-prototype-json-render` (on main, ADR-0035 is the agent
@@ -122,3 +125,26 @@ Where this ADR says "the agents service", read the org's `ae-design-agent`:
   (`packages/contracts/api/ae-design-agent/v1/openapi.yaml`) carries the shape.
 - The Go save gate is unchanged and stays in aep-api: it runs when a build cuts
   the version (`internal/spec/save_gate.go`).
+
+## Amendment 2026-10-11 — Design makes it, Build reads it, comments live in the review file
+
+[ADR-0050](ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md)
+and [ADR-0051](ADR-0051-a-designs-review-state-is-a-file-in-the-spec-repo.md)
+change three consequences above:
+
+- **The prototype is no longer optional.** A design run writes it after the
+  data model and the roles. The wireframes are retired, and the prototype is
+  what Build reads. The build gate now requires a web application's
+  `prototype.json` and `prototype.tsx`. Read "the build gate, which is
+  unchanged" and "The prototype stays optional beside wireframes" as
+  superseded.
+- **No feedback rides a turn.** The review's comments are drafts in
+  `specs/design/review.json`, sent by Address comments. The typed
+  `prototypeFeedback` on a `/prototype` turn is retired, together with its
+  validation in `ae-design-agent` (the 2026-10-07 amendment's second bullet):
+  a turn body that still carries it is refused as an unknown field.
+- **`@wso2/prototype-kit/feedback` keeps one definition** of a comment's
+  shape, its limits and the revision hash. The CLI, the console and
+  `@aep/agent-stream` import it: the review file takes its text and id limits
+  from it, and a prototype's Checked hash is its `prototypeHash`. The design
+  agent and its contract no longer mirror it.

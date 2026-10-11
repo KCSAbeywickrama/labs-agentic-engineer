@@ -680,3 +680,21 @@ from this array is rejected outright when invoked, so the runner lists the whole
 mirror, not just the pins. Membership grants a name and a description in the
 model's catalog — **not** the body, which arrives on invocation. This is why a
 pin additionally appends its body to the system prompt.
+
+## Design review
+
+The loop is Design → Address comments → Build
+([ADR-0050](decisions/ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md)),
+and its review state is one spec file, `specs/design/review.json`
+([ADR-0051](decisions/ADR-0051-a-designs-review-state-is-a-file-in-the-spec-repo.md)).
+The domain terms live in [`CONTEXT.md`](../CONTEXT.md) § Design review: **Design
+review**, **Gap check**, **Technical decision**, **Prototype**, **Checked**,
+**Review comment**, **Address comments**, **Revision**.
+
+### `wireframes.dsl` — retired
+The per-web-application screen sketch that Design drew and Build read. It is
+replaced by the prototype (`prototype.json` + `prototype.tsx`), which is now
+the build's screen brief and the build gate's mandated artifact for a web
+application. Design no longer writes it, the `wireframes` skill is deleted,
+and the gate neither reads nor accepts it. A project designed with wireframes
+has to be designed again before it can build.

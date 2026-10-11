@@ -45,7 +45,7 @@ in the org's AE Studio pod ([turn-runtime](../../../../components/dataplane/ae-s
 | `DescriptorWriter` | offers | `projects` — stamps `specs/.agentic-engineer.toml` into a repo at project create |
 | `KickoffService.Kickoff` | offers | `projects` (create) · `spec/files` (references upload) — fires the project's opening `/start` turn in the org's AE Studio pod |
 | `aestudiotools.Turns` · `aestudiotools.References` | needs | `clients/aestudiotools` — the org pod's `/internal/v1` turns (kickoff) and reference store (the references upload, a pass-through) |
-| `TurnRepository.Newest` · `NewestCompletedFlow` · `SumUsageByProject` | offers | `projects` — the status poll's `spec.agent` (has the project run a turn, and did the newest fail), the build gate's design baseline, Settings → Usage |
+| `TurnRepository.Newest` · `CompletedFlows` · `SumUsageByProject` | offers | `projects` — the status poll's `spec.agent` (has the project run a turn, and did the newest fail), its `designOutdated` baseline (the newest design runs, read where each ended), Settings → Usage. Inside this domain the same repository is the artifact service's `DesignLedger` (`DesignRuns`, `ArtifactRevisions`): the build gate's staleness input and the spec state's `designedFrom` and `artifactRevisions` |
 | `TurnRepository.RecordFinished` | offers | `edge` — `record-turn-usage`, the pod's finished turns |
 | Turn and tag reads | offers | delivery/build (SpecTagger, validation criteria) |
 

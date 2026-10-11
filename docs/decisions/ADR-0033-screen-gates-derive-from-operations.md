@@ -1,6 +1,8 @@
 # ADR-0033 — A screen's gate is the scope of the operation it loads
 
-**Status:** Accepted · 2026-09-16
+**Status:** Accepted · 2026-09-16 · points 4 and 7 amended 2026-10-11 by
+[ADR-0050](ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md)
+(the prototype replaces the wireframes)
 **Amends:** [ADR-0030](ADR-0030-scopes-are-the-authorization-authority-for-a-generated-app.md)
 point 1 ("which operation every screen reaches" is no longer authored) and
 [ADR-0031](ADR-0031-reach-is-the-path.md) point 6 (the screen reachability
@@ -139,3 +141,23 @@ that is the type check's to catch: `gen` runs before `tsc` in `build`, the
 union changes, and the stale `loads` is a compile error. A stale committed
 `operations.gen.ts` is the same hazard the previous generator had and the same
 cure: `gen` before `tsc`, always.
+
+## Amendment 2026-10-11 — the prototype replaces the wireframes
+
+Design writes a prototype for each web application instead of
+`wireframes.dsl`
+([ADR-0050](ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md)).
+The decision stands: a screen's gate is the scope of the operation it loads.
+Two points change:
+
+- **Point 4.** A screen shown before sign-in is one that a requirement opens
+  to a visitor who is not signed in. The prototype draws every screen under a
+  role, so `thunder-authentication` takes `public: true` from the story, not
+  from the manifest. `screens.ts` is written from the prototype: one row per
+  screen that is a route, in the order of the `<AppShell>` navigation.
+- **Point 7.** The `wireframes` skill is retired. `prototype` owns which
+  screens exist and which role's flow walks them. The design's grants pass
+  (`security-design`) walks each role's flows in `prototype.json` and grants
+  the operation each screen loads.
+
+The console no longer reads wireframes for anything.

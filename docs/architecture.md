@@ -38,8 +38,8 @@ compile error, not a runtime surprise.
   - `sockets/ae-studio/{files,mcp,turn}/openapi.yaml` — one spec per Unix
     socket inside the AE Studio pod.
 - Artifacts the agents produce are JSON Schema under `packages/contracts/schemas/`
-  (`component-design`, `plan-task`, `update-task`), consumed by `@aep/agent-stream`
-  and the design views.
+  (`component-design`, `design-review`, `plan-task`, `update-task` and others),
+  consumed by `@aep/agent-stream` and the design views.
 - Both sides of every boundary listed above are generated from its spec, and
   generated clients/servers are never hand-edited. Whether they are committed
   differs by consumer: Go codegen is **committed** (aep-api's `internal/gen/`,
@@ -108,6 +108,28 @@ replays it and runs the sweeps
 Inside the pod the containers talk over Unix sockets, and the mount is the
 gate. Resources, routes, env and converge:
 [`ae-studio/design/README.md`](../components/dataplane/ae-system-project/ae-studio/design/README.md).
+
+## The design loop
+
+Design → Address comments → Build
+([ADR-0050](decisions/ADR-0050-design-is-a-review-loop-and-build-reads-the-prototype.md)).
+A `/design` run writes the whole design in generation order. It starts with a
+gap check, which closes holes as `*assumed*` requirement lines, technical
+decisions in `specs/design/decisions.md`, or open questions. Then come the
+architecture, the data model, roles and permissions, one artifact per component
+(a web application's prototype, a service's `openapi.yaml`, an agent's
+`agent.afm.md`), the dependencies, the flows, and the acceptance tests last.
+The user reviews each file on the console's Design card: Checked, comments and
+answers live in `specs/design/review.json`
+([ADR-0051](decisions/ADR-0051-a-designs-review-state-is-a-file-in-the-spec-repo.md)).
+`/address-comments` revises the files those comments touch, starting at the
+earliest. Build reads a web application's prototype as its screen brief, and
+the build gate requires one. Review items never block Build. aep-api numbers
+each file's revisions from the finished-turn ledger, and reads each designed
+feature's basis at the commit its design run ended. Detail:
+[`skills/design`](../skills/design/SKILL.md),
+[console Design card](../apps/console/design/design-card.md),
+[`internal/spec`](../services/aep-api/internal/spec/README.md).
 
 ## Codegen pipeline
 
@@ -199,7 +221,7 @@ on where a feed is kept).
 rather than after a deployment. Once a `web-application` builds clean the cycle
 dispatches one more agent for it: it stands the app up in mock mode — MSW
 answering `/api`, a substituted auth module, no cluster and no sibling service —
-walks every screen the component's wireframes name, and repairs each failure the
+walks every flow of the component's prototype, and repairs each failure the
 moment it finds it, clearing the line by clicking it again rather than by the
 edit compiling. It reports one verdict per user story. Running the walk before
 the commit is what makes one pull request carry the build *and* its fixes. It is distinct
