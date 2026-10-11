@@ -137,12 +137,6 @@ type Seam struct {
 // Wiring order is load-bearing: several constructors read the value a prior
 // one produced; the comments call out the couplings.
 
-// designRunsConsidered bounds how far back the build gate looks for the run
-// that designed each feature. A feature last designed further back than this
-// many design runs is treated as never designed: the coverage check still
-// reports it if its stories are unclaimed.
-const designRunsConsidered = 50
-
 func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	var err error
 	if err := openchoreo.ValidateResourceLabels(seam.ResourceLabels); err != nil {
@@ -463,24 +457,13 @@ func Assemble(cfg config.Config, in Infra, seam Seam) (*App, error) {
 	// …and the status poll reports whether it is still running, which is the
 	// one thing the git-derived spec fields cannot say.
 	projectService.SetSpecTurnSource(turnRepo)
-	// The build gate's staleness input (#575, per feature since E1): the
-	// completed design runs, latest-finished first — the commit each read and
-	// the features it named. A build whose feature has moved past its design is
-	// refused with the rest of the gate's conditions — the one refusal that is
-	// about the design being WRONG rather than incomplete.
-	artifactSvcGit.SetDesignRunsResolver(func(ctx context.Context, orgID, projectID string) ([]spec.DesignRun, error) {
-		turns, err := turnRepo.CompletedFlows(ctx, orgID, projectID, spec.FlowDesign, designRunsConsidered)
-		if err != nil {
-			return nil, err
-		}
-		runs := make([]spec.DesignRun, 0, len(turns))
-		for _, t := range turns {
-			// A design turn's Summary holds the feature IDs the pod reported
-			// for it; none means every feature designable at its commit.
-			runs = append(runs, spec.DesignRun{BaseRef: t.BaseRef, Features: spec.DesignedFeatures(t.Summary)})
-		}
-		return runs, nil
-	})
+	// The build gate's staleness input (#575, per feature since E1, L30): the
+	// completed design runs, latest-finished first — the commit each read, the
+	// commit it left, and the features it designed. A build whose feature has
+	// moved past its design is refused with the rest of the gate's conditions
+	// — the one refusal that is about the design being WRONG rather than
+	// incomplete. The same ledger numbers each design artifact's revisions.
+	artifactSvcGit.SetDesignLedger(turnRepo)
 
 	// The Task-keyed log endpoint (issue number → newest execution by default,
 	// executionId query pins one for history browsing). (The runner skills-pull

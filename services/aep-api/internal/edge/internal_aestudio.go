@@ -326,7 +326,8 @@ func storableTurnRecord(r igen.AEStudioTurnRecord) error {
 			return errors.New("token counts must not be negative")
 		}
 	}
-	texts := []string{r.Project, r.Flow, r.Code, r.BaseRef, r.SkillsRef, r.Model, r.ModelHost}
+	texts := []string{r.Project, r.Flow, r.Code, r.BaseRef, r.EndRef, r.SkillsRef, r.Model, r.ModelHost}
+	texts = append(texts, r.ChangedPaths...)
 	if r.Author != nil {
 		texts = append(texts, r.Author.ID, r.Author.Name)
 	}
@@ -353,6 +354,8 @@ func toTurnRecord(r igen.AEStudioTurnRecord) spec.TurnRecord {
 		BaseRef:        r.BaseRef,
 		SkillsRef:      r.SkillsRef,
 		DesignFeatures: r.DesignFeatures,
+		EndRef:         r.EndRef,
+		ChangedPaths:   r.ChangedPaths,
 		StartedAt:      r.StartedAt,
 		FinishedAt:     r.FinishedAt,
 		ModelHost:      r.ModelHost,

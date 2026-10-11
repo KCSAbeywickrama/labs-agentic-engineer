@@ -362,6 +362,28 @@ components:
             type: string
             pattern: '^F[0-9]+$'
             maxLength: 16
+        endRef:
+          type: string
+          maxLength: 64
+          description: |-
+            The commit a `design` or `address-comments` turn's Room work was
+            saved at when it finished: the turn forces a Room flush, then reads
+            the project's head. Absent when the flush did not land, and on
+            every other flow. Same schema as aep-api's
+            AEStudioTurnRecord.endRef.
+        changedPaths:
+          type: array
+          maxItems: 200
+          description: |-
+            The project files the turn changed: what its own writes left
+            different from what it started with, repo-relative, sorted; at most
+            the first 200. Absent when it changed nothing. Same schema as
+            aep-api's AEStudioTurnRecord.changedPaths, so a record off it is
+            refused here (400 invalid_request) and never queued.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 512
     TurnRecordAuthor:
       type: object
       additionalProperties: false

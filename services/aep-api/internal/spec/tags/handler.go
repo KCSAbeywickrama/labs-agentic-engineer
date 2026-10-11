@@ -107,7 +107,11 @@ func (h *Handler) GetSpecState(ctx context.Context, request gen.GetSpecStateRequ
 			return nil, apierr.WithCause(apierr.Internal("internal error"), err)
 		}
 	}
-	out := gen.SpecState{DesignedFrom: st.DesignedFrom, Documents: make([]gen.SourceDocument, 0, len(st.Documents))}
+	out := gen.SpecState{
+		DesignedFrom:      st.DesignedFrom,
+		ArtifactRevisions: st.ArtifactRevisions,
+		Documents:         make([]gen.SourceDocument, 0, len(st.Documents)),
+	}
 	for _, name := range st.Documents {
 		// Coverage (what each page says and where it landed) is S5's.
 		out.Documents = append(out.Documents, gen.SourceDocument{ID: name, Title: name, Rows: []gen.SourceDocumentRow{}})

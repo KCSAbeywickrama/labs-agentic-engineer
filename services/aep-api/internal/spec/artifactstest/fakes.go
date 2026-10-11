@@ -151,6 +151,5 @@ func (f *FakeArtifactService) ComponentCountAtTag(ctx context.Context, orgID, pr
 	return f.ComponentCountAtTagFunc(ctx, orgID, projectID, tag)
 }
 
-// SetDesignRunsResolver is wiring, not behaviour — the fakes ignore it.
-func (f *FakeArtifactService) SetDesignRunsResolver(func(ctx context.Context, orgID, projectID string) ([]spec.DesignRun, error)) {
-}
+// SetDesignLedger is wiring, not behaviour — the fakes ignore it.
+func (f *FakeArtifactService) SetDesignLedger(spec.DesignLedger) {}

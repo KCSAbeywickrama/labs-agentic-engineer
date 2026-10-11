@@ -81,6 +81,11 @@ type TurnRecord struct {
 	// F2`); none means every feature designable at BaseRef. Stored for a
 	// design turn only (designSummary); ignored on any other flow.
 	DesignFeatures []string
+	// EndRef is the commit a design run's Room work was saved at when it
+	// finished; "" when unknown (AgentTurn.EndRef).
+	EndRef string
+	// ChangedPaths are the project files the turn changed (AgentTurn.ChangedPaths).
+	ChangedPaths []string
 }
 
 // TurnRepository is the finished-turn ledger. Lookups miss with (nil, nil),
@@ -94,21 +99,15 @@ type TurnRepository interface {
 	// caller has checked each record's project belongs to org.
 	RecordFinished(ctx context.Context, org string, recs []TurnRecord) error
 
-	// NewestCompletedFlow returns the project's most recent COMPLETED turn of
-	// one flow ("design", "start", …), or (nil, nil) when it has run none.
-	//
-	// The status read's staleness check (#575) asks for the newest successful
-	// design run so it can read the requirements as that run saw them. Scoped
-	// to completed because a failed turn never reconciled anything: treating
-	// one as the baseline would clear a staleness warning on the strength of
-	// work that did not land.
-	NewestCompletedFlow(ctx context.Context, orgID, projectID, flow string) (*AgentTurn, error)
-
 	// CompletedFlows returns up to `limit` of the project's COMPLETED turns of
-	// one flow, the latest-finished first (finished_at; created_at for a row
-	// with none). The build gate reads the design runs this way to find, per
-	// feature, the run whose design of it landed last (E1).
-	CompletedFlows(ctx context.Context, orgID, projectID, flow string, limit int) ([]AgentTurn, error)
+	// the given flows, the latest-finished first (finished_at; created_at for
+	// a row with none). The build gate reads the design runs this way to
+	// find, per feature, the run whose design of it landed last (E1).
+	CompletedFlows(ctx context.Context, orgID, projectID string, flows []string, limit int) ([]AgentTurn, error)
+
+	// DesignLedger: the design runs and the artifacts' revisions, as the
+	// artifact service reads them.
+	DesignLedger
 
 	// Newest returns the project's most recent turn row across every
 	// conversation, or (nil, nil) when nothing has ever run.
@@ -153,12 +152,13 @@ func (r *turnRepository) RecordFinished(ctx context.Context, org string, recs []
 // ledgerRow is rec as org's agent_turns row, its cost stamped at the rate in
 // force now and frozen there (#291): null when unpriceable (no stamper, no
 // (host, model) rate). created_at is the turn's start, as it was for a row the
-// in-process engine admitted: Newest and NewestCompletedFlow order by it, so
-// a batch's order or a late delivery never makes an older turn the newest.
+// in-process engine admitted: Newest orders by it, so a batch's order or a
+// late delivery never makes an older turn the newest.
 // It is clamped to now: the start is the pod's clock, and a pod running ahead
 // would otherwise pin its row as Newest (the kickoff guard, spec.agent) until
 // real time caught up. started_at keeps the pod's own value. Summary holds a
-// design turn's feature IDs (designSummary) and is empty for any other turn.
+// design turn's feature IDs (designSummary) and is empty for any other turn;
+// EndRef and ChangedPaths are stored as the pod reported them.
 func (r *turnRepository) ledgerRow(org string, rec TurnRecord) AgentTurn {
 	finished := rec.FinishedAt
 	created := rec.StartedAt
@@ -178,6 +178,8 @@ func (r *turnRepository) ledgerRow(org string, rec TurnRecord) AgentTurn {
 		Reason:              rec.Reason,
 		Code:                rec.Code,
 		Summary:             designSummary(rec.Flow, rec.DesignFeatures),
+		EndRef:              rec.EndRef,
+		ChangedPaths:        rec.ChangedPaths,
 		AuthorID:            rec.AuthorID,
 		AuthorDisplayName:   rec.AuthorName,
 		InputTokens:         rec.Usage.InputTokens,
@@ -224,34 +226,15 @@ func (r *turnRepository) Newest(ctx context.Context, orgID, projectID string) (*
 	return &t, nil
 }
 
-// NewestCompletedFlow reads one row off the (org_id, project_id) index,
-// narrowed by the indexed `flow` column: the run that finished last, ordered
-// as CompletedFlows orders them, so both name the same newest run.
-func (r *turnRepository) NewestCompletedFlow(ctx context.Context, orgID, projectID, flow string) (*AgentTurn, error) {
-	var t AgentTurn
-	err := r.db.WithContext(ctx).
-		Where("org_id = ? AND project_id = ? AND flow = ? AND status = ?",
-			orgID, projectID, flow, turnStatusCompleted).
-		Order("COALESCE(finished_at, created_at) DESC").
-		First(&t).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &t, nil
-}
-
-// CompletedFlows reads the completed runs of one flow off the
+// CompletedFlows reads the completed runs of the flows off the
 // (org_id, project_id) index and orders them by when each finished: two runs
 // can overlap, and the one that finished last wrote last. Rows the in-process
 // engine wrote have no finished_at and fall back to created_at.
-func (r *turnRepository) CompletedFlows(ctx context.Context, orgID, projectID, flow string, limit int) ([]AgentTurn, error) {
+func (r *turnRepository) CompletedFlows(ctx context.Context, orgID, projectID string, flows []string, limit int) ([]AgentTurn, error) {
 	var turns []AgentTurn
 	err := r.db.WithContext(ctx).
-		Where("org_id = ? AND project_id = ? AND flow = ? AND status = ?",
-			orgID, projectID, flow, turnStatusCompleted).
+		Where("org_id = ? AND project_id = ? AND flow IN ? AND status = ?",
+			orgID, projectID, flows, turnStatusCompleted).
 		Order("COALESCE(finished_at, created_at) DESC").
 		Limit(limit).
 		Find(&turns).Error
@@ -325,4 +308,38 @@ func usageRowsToMap(rows []usageByProjectRow) map[string]contracts.StampedUsage 
 		out[row.ProjectID] = contracts.StampedUsage{Tokens: u, CostUsd: row.CostUsd, Host: row.Host}
 	}
 	return out
+}
+
+// DesignRuns reads the latest-finished designRunsConsidered completed design
+// runs (DesignRunFlows). A design turn's Summary holds the feature IDs the pod
+// reported for it; none means every feature designable at its commit.
+func (r *turnRepository) DesignRuns(ctx context.Context, orgID, projectID string) ([]DesignRun, error) {
+	turns, err := r.CompletedFlows(ctx, orgID, projectID, DesignRunFlows, designRunsConsidered)
+	if err != nil {
+		return nil, err
+	}
+	runs := make([]DesignRun, 0, len(turns))
+	for _, t := range turns {
+		runs = append(runs, DesignRun{Flow: t.Flow, BaseRef: t.BaseRef, EndRef: t.EndRef, Features: DesignedFeatures(t.Summary)})
+	}
+	return runs, nil
+}
+
+// ArtifactRevisions reads the changed paths of the project's completed turns
+// that reported any, and counts them per design artifact (artifactRevisions).
+func (r *turnRepository) ArtifactRevisions(ctx context.Context, orgID, projectID string) (map[string]int, error) {
+	var turns []AgentTurn
+	err := r.db.WithContext(ctx).
+		Select("changed_paths").
+		Where("org_id = ? AND project_id = ? AND status = ? AND changed_paths IS NOT NULL",
+			orgID, projectID, turnStatusCompleted).
+		Find(&turns).Error
+	if err != nil {
+		return nil, err
+	}
+	changed := make([][]string, 0, len(turns))
+	for _, t := range turns {
+		changed = append(changed, t.ChangedPaths)
+	}
+	return artifactRevisions(changed), nil
 }

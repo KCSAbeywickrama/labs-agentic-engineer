@@ -7738,6 +7738,15 @@ components:
             lines by their words, then the product-wide items that reach it (reqspec.Basis, held to
             the shared fixture's basis.json). A feature no design run covered is absent.
           type: object
+        artifactRevisions:
+          additionalProperties:
+            type: integer
+            minimum: 1
+          description: Each design artifact a run has changed, keyed as specs/design/review.json
+            keys it (repo-relative; a prototype by its prototype.json), and its revision number
+            — how many completed agent turns changed it, so the design run that first writes it
+            makes revision 1. An artifact no run has changed is absent. Display only.
+          type: object
         documents:
           description: The source documents the user attached, by name.
           items:
@@ -7745,6 +7754,7 @@ components:
           type: array
       required:
       - designedFrom
+      - artifactRevisions
       - documents
       type: object
     SourceDocument:

@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/wso2/aep/aep-api/internal/gen"
 
@@ -111,19 +112,30 @@ type bindingsReader interface {
 // no record of.
 type specTurnRows interface {
 	Newest(ctx context.Context, orgID, projectID string) (*spec.AgentTurn, error)
-	// NewestCompletedFlow finds the newest successful run of one flow — the
-	// staleness check (#575) needs the last DESIGN run, so it can read the
-	// requirements as that run saw them.
-	NewestCompletedFlow(ctx context.Context, orgID, projectID, flow string) (*spec.AgentTurn, error)
+	// CompletedFlows lists the newest successful runs of the flows, the
+	// latest-finished first — the staleness check (#575) needs the last
+	// DESIGN run and the Address comments runs since, so it can read the
+	// requirements as they left them.
+	CompletedFlows(ctx context.Context, orgID, projectID string, flows []string, limit int) ([]spec.AgentTurn, error)
 }
+
+// designRunsWalked bounds the design runs the staleness check reads: the last
+// design run and the Address comments runs after it. A project with no design
+// run among them reads as not behind, like one that has never designed.
+const designRunsWalked = 10
 
 // designOutdated answers whether the requirements have moved since the design
 // was last derived from them.
 //
 // nowFingerprint is the requirements as they stand; the baseline is the same
-// reduction taken at the commit the newest successful design run read. No
-// design run on record means there is nothing for the design to be behind —
-// including the ordinary case of a project that has never designed at all.
+// reduction taken at the commit the newest successful design run LEFT (its
+// EndRef, L30; its BaseRef for a run that recorded none), so the run's own
+// requirement edits are not a move. An Address comments run after it moves the
+// baseline to where it left the requirements, but only when it started from
+// the baseline: its own edits are not a move either, while an edit made before
+// it still is. No design run on record means there is nothing for the design
+// to be behind — including the ordinary case of a project that has never
+// designed at all.
 //
 // A baseline that cannot be read is reported as an ERROR rather than as
 // "unchanged". The two failures are not symmetric: a spurious warning costs one
@@ -136,27 +148,66 @@ func (s *Service) designOutdated(ctx context.Context, orgName, projectName, nowF
 	if s.specTurns == nil {
 		return false, nil
 	}
-	// Only a full design re-derivation (spec.FlowDesign) reconciles the design
-	// with the requirements: a targeted edit to one document leaves the SET
-	// inconsistent, so clearing the staleness flag on one would drop the
-	// warning while the problem stood.
-	lastDesign, err := s.specTurns.NewestCompletedFlow(ctx, orgName, projectName, spec.FlowDesign)
+	// Only a design run reconciles the design with the requirements as a
+	// whole: an Address comments run only answers for its own edits.
+	runs, err := s.specTurns.CompletedFlows(ctx, orgName, projectName, spec.DesignRunFlows, designRunsWalked)
 	if err != nil {
-		return false, fmt.Errorf("newest design turn: %w", err)
+		return false, fmt.Errorf("newest design runs: %w", err)
 	}
-	if lastDesign == nil || lastDesign.BaseRef == "" {
+	last := slices.IndexFunc(runs, func(t spec.AgentTurn) bool { return t.Flow != spec.FlowAddressComments })
+	if last < 0 {
 		return false, nil
 	}
-	was, err := s.artifactSvc.RequirementsFingerprintAt(ctx, orgName, projectName, lastDesign.BaseRef)
-	if err != nil {
-		if baseCommitRefused(err) {
-			slog.WarnContext(ctx, "project status: the last design run's commit is unreadable; staleness unchecked",
-				"org", orgName, "project", projectName, "base", lastDesign.BaseRef, "error", err)
-			return false, nil
-		}
-		return false, fmt.Errorf("requirements at the last design run's base: %w", err)
+	design := runs[last]
+	at := design.EndRef
+	if at == "" {
+		at = design.BaseRef
 	}
-	return was != nowFingerprint, nil
+	baseline, ok, err := s.requirementsFingerprintAt(ctx, orgName, projectName, at)
+	if !ok || err != nil {
+		return false, err
+	}
+	// The Address comments runs since, oldest first.
+	for i := last - 1; i >= 0; i-- {
+		run := runs[i]
+		if run.EndRef == "" {
+			continue
+		}
+		from, ok, err := s.requirementsFingerprintAt(ctx, orgName, projectName, run.BaseRef)
+		if err != nil {
+			return false, err
+		}
+		if !ok || from != baseline {
+			continue
+		}
+		to, ok, err := s.requirementsFingerprintAt(ctx, orgName, projectName, run.EndRef)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			baseline = to
+		}
+	}
+	return baseline != nowFingerprint, nil
+}
+
+// requirementsFingerprintAt is the requirements' fingerprint at a design run's
+// commit; ok is false for a commit the pod refuses or no longer has
+// (baseCommitRefused), which is skipped with a warning.
+func (s *Service) requirementsFingerprintAt(ctx context.Context, orgName, projectName, at string) (string, bool, error) {
+	if at == "" {
+		return "", false, nil
+	}
+	fp, err := s.artifactSvc.RequirementsFingerprintAt(ctx, orgName, projectName, at)
+	if err == nil {
+		return fp, true, nil
+	}
+	if baseCommitRefused(err) {
+		slog.WarnContext(ctx, "project status: a design run's commit is unreadable; staleness unchecked",
+			"org", orgName, "project", projectName, "commit", at, "error", err)
+		return "", false, nil
+	}
+	return "", false, fmt.Errorf("requirements at a design run's commit: %w", err)
 }
 
 // baseCommitRefused is a read of the design baseline that names a commit the

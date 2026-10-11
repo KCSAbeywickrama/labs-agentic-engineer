@@ -32,11 +32,14 @@ feature. Decisions: ADR-0039, ADR-0040, ADR-0041. Terms: `CONTEXT.md`
 acceptance at one commit and refuses the tag on: requirement ID problems;
 designs or roles citing a feature instead of its stories, or stale stories; an
 acceptance file missing a carried story's tag; a feature out of date
-(`staleFeatures`: its basis now vs at its last design run, from
-`CompletedFlows`); a pick it cannot carry (`build_selection.go`). A design
+(`staleFeatures`: its basis now vs as its last design run left it, from
+`DesignRuns`); a pick it cannot carry (`build_selection.go`). A design
 run's scope is the feature IDs its ledger row's `Summary` holds ("F1 F2",
 from the pod's `designFeatures`; empty = every designable feature), read by
-`DesignedFeatures`; `Summary` holds nothing else for a design turn. The tag's
+`DesignedFeatures`; `Summary` holds nothing else for a design turn. Its basis
+is read at its `end_ref`, the commit its Room work was saved at as it
+finished, so its own requirement edits are not a change since (L30); an
+Address comments run designs the features its own edits reached. The tag's
 annotation records the plan (`scopeBody` / `parseScope`).
 
 - `BuildScopeAtTag` — the stories, features, P items and component claims a

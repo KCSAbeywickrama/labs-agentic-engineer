@@ -3162,6 +3162,9 @@ type SpecStageUnavailableReason string
 
 // SpecState defines model for SpecState.
 type SpecState struct {
+	// ArtifactRevisions Each design artifact a run has changed, keyed as specs/design/review.json keys it (repo-relative; a prototype by its prototype.json), and its revision number — how many completed agent turns changed it, so the design run that first writes it makes revision 1. An artifact no run has changed is absent. Display only.
+	ArtifactRevisions map[string]int `json:"artifactRevisions"`
+
 	// DesignedFrom Each designed feature by ID, and the basis its last design read — its file's lines by their words, then the product-wide items that reach it (reqspec.Basis, held to the shared fixture's basis.json). A feature no design run covered is absent.
 	DesignedFrom map[string]string `json:"designedFrom"`
 

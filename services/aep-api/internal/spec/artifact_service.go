@@ -186,13 +186,13 @@ type ArtifactService interface {
 	// because equal-by-accident is the failure that ships a stale design.
 	RequirementsFingerprintAt(ctx context.Context, orgID, projectID, at string) (string, error)
 
-	// SetDesignRunsResolver wires the build gate's staleness input (#575, E1):
-	// the project's completed design runs, newest first — the commit each read
-	// and the features it designed. On the interface because the composition
-	// root has to reach it, and it cannot be a constructor argument — the turn
-	// store it reads from is built after this service. nil is a documented
-	// no-op: the gate keeps working without it.
-	SetDesignRunsResolver(f func(ctx context.Context, orgID, projectID string) ([]DesignRun, error))
+	// SetDesignLedger wires the finished-turn ledger as the design reads it
+	// (DesignLedger): the build gate's and the spec state's staleness input
+	// (#575, E1, L30) and the artifacts' revisions (L18). On the interface
+	// because the composition root has to reach it, and it cannot be a
+	// constructor argument — the turn store is built after this service. nil
+	// is a documented no-op: the gate keeps working without it.
+	SetDesignLedger(l DesignLedger)
 	// ComponentCountAtTag counts the design components at a spec tag — the
 	// deploy stage's denominator. Local-only; unknown tag errors.
 	ComponentCountAtTag(ctx context.Context, orgID, projectID, tag string) (int, error)
@@ -204,31 +204,38 @@ type artifactService struct {
 	// refs lists the reference documents the user attached (the pod's
 	// store, outside git).
 	refs sourcecontrol.ReferenceListOps
-	// designRuns lists the project's completed design runs, newest first. The
-	// build gate needs them to refuse a feature whose requirements have moved
-	// past its design (#575, per feature since E1).
+	// ledger reads the project's completed design runs, newest first, and its
+	// artifacts' revisions. The build gate needs the runs to refuse a feature
+	// whose requirements have moved past its design (#575, per feature since
+	// E1).
 	//
-	// A function rather than a port because it is one fact, and optional
-	// because the gate must keep working without it: a service assembled with
-	// no resolver simply does not run the staleness check, which is the
-	// pre-#575 behaviour rather than a build that can never start.
-	designRuns func(ctx context.Context, orgID, projectID string) ([]DesignRun, error)
+	// Optional because the gate must keep working without it: a service
+	// assembled with no ledger simply does not run the staleness check, which
+	// is the pre-#575 behaviour rather than a build that can never start.
+	ledger DesignLedger
 }
 
-// DesignRun is one completed design run: the commit it read the project at,
-// and the features it designed — nil when it named none, which means every
-// feature that was designable at that commit.
+// DesignRun is one completed run that designed features: a `/design` run, or
+// an Address comments run (Flow FlowAddressComments; any other Flow, "" too,
+// is a design run). BaseRef is the commit it read the project at and EndRef
+// the commit its Room work was saved at when it finished ("" when unknown).
+//
+// A design run designed Features, or, when it named none (nil), every feature
+// designable at BaseRef. An Address comments run designed the features its own
+// requirement edits reached: those whose basis differs between BaseRef and
+// EndRef; with no EndRef, none.
 type DesignRun struct {
+	Flow     string
 	BaseRef  string
+	EndRef   string
 	Features []string
 }
 
-// SetDesignRunsResolver wires the staleness check's input (#575). Wired at
-// the composition root from the agent-turn store; nil is a documented no-op.
-func (s *artifactService) SetDesignRunsResolver(
-	f func(ctx context.Context, orgID, projectID string) ([]DesignRun, error),
-) {
-	s.designRuns = f
+// SetDesignLedger wires the staleness check's input (#575) and the
+// artifacts' revisions. Wired at the composition root from the agent-turn
+// store; nil is a documented no-op.
+func (s *artifactService) SetDesignLedger(l DesignLedger) {
+	s.ledger = l
 }
 
 // NewArtifactService builds the ArtifactService. `repo` resolves the

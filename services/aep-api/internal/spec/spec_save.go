@@ -136,8 +136,8 @@ func (s *artifactService) SaveSpec(ctx context.Context, orgID, projectID string,
 	// feature builds.
 	spec := reqspec.Parse(reqFiles)
 	unavailable := map[string]string{}
-	if s.designRuns != nil {
-		if runs, rerr := s.designRuns(ctx, orgID, projectID); rerr == nil {
+	if s.ledger != nil {
+		if runs, rerr := s.ledger.DesignRuns(ctx, orgID, projectID); rerr == nil {
 			for id, why := range s.staleFeatures(ctx, ref, projectID, runs, reqFiles) {
 				unavailable[id] = why
 			}
@@ -287,14 +287,16 @@ func validateSpecBundles(reqFiles, designFiles, acceptanceFiles map[string]strin
 //
 // A feature's design is made from its file and the product-wide items that
 // reach it (reqspec.Basis). The run that designed it is the newest completed
-// design run that covered it — one that named it (`/design F1 F2`), or a bare
-// `/design`, which covered every feature designable at the commit it read.
-// When the feature's basis then and now differ, its design is out of date. A
-// feature no run has designed is not out of date: it has no design, which the
-// coverage check reports.
+// design run that covered it — one that named it (`/design F1 F2`), a bare
+// `/design`, which covered every feature designable at the commit it read, or
+// an Address comments run whose own requirement edits reached it
+// (DesignRun). When the feature's basis as that run left it and now differ,
+// its design is out of date. A feature no run has designed is not out of
+// date: it has no design, which the coverage check reports.
 //
-// Nothing is stored to answer this: every commit is a permanent snapshot and
-// every agent turn records the commit it read the project at.
+// Nothing is stored to answer this but commits: every commit is a permanent
+// snapshot, and every design run records the commit it read the project at
+// and the one its work was saved at.
 //
 // Empty when the resolver is unwired or no design run is on record. A run
 // whose commit is unreadable is skipped: a build refused because an old commit
@@ -333,27 +335,62 @@ func (s *artifactService) staleFeatures(
 	return stale
 }
 
-// designedFrom is the requirements the newest run that designed a feature
-// read, or nil when no readable run designed it.
+// designedFrom is the requirements as the newest run that designed a feature
+// left them, or nil when no readable run designed it.
 func designedFrom(runs []DesignRun, featureID string, filesAt func(commit string) map[string]string) map[string]string {
 	for _, run := range runs {
-		if run.Features != nil {
-			if !slices.Contains(run.Features, featureID) {
-				continue
-			}
-			if files := filesAt(run.BaseRef); files != nil {
-				return files
-			}
-			continue
+		if files := run.designed(featureID, filesAt); files != nil {
+			return files
 		}
-		files := filesAt(run.BaseRef)
-		if files == nil {
-			continue
+	}
+	return nil
+}
+
+// designed is the requirements as run left them when it designed featureID,
+// or nil when it did not design it or cannot be read (L30). A run's basis is
+// its END: the gap check's assumed lines and questions, and Address comments'
+// edits, are part of what the run designed, so they never read as out of
+// date. A run whose end is unknown or unreadable falls back to its start,
+// as every run did before the end was recorded. Which features a design run
+// covered is still read at its start.
+func (run DesignRun) designed(featureID string, filesAt func(commit string) map[string]string) map[string]string {
+	var end map[string]string
+	if run.EndRef != "" {
+		end = filesAt(run.EndRef)
+	}
+	if run.Flow == FlowAddressComments {
+		if end == nil {
+			return nil
 		}
-		for _, f := range reqspec.Parse(files).Features {
-			if f.ID == featureID && f.Designable() {
-				return files
-			}
+		start := filesAt(run.BaseRef)
+		if start == nil || reqspec.Basis(end, featureID) == "" || reqspec.Basis(start, featureID) == reqspec.Basis(end, featureID) {
+			return nil
+		}
+		return end
+	}
+	if run.Features != nil {
+		if !slices.Contains(run.Features, featureID) {
+			return nil
+		}
+		if end != nil {
+			return end
+		}
+		return filesAt(run.BaseRef)
+	}
+	start := filesAt(run.BaseRef)
+	if end == nil {
+		end = start
+	}
+	scope := start
+	if scope == nil {
+		scope = end
+	}
+	if scope == nil {
+		return nil
+	}
+	for _, f := range reqspec.Parse(scope).Features {
+		if f.ID == featureID && f.Designable() {
+			return end
 		}
 	}
 	return nil
